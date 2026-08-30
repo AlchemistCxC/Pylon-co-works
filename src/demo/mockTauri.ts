@@ -1,12 +1,13 @@
 /**
- * mockTauri — 浏览器模式假 Tauri 后端（静态演示全景）。
+ * mockTauri — 浏览器模式 Tauri transport 适配器。
  *
  * 机制：@tauri-apps/api 的 invoke/transformCallback/listen 全部经
  * window.__TAURI_INTERNALS__（invoke）/__TAURI_EVENT_PLUGIN_INTERNALS__（unlisten）。
  * 浏览器无真实后端 → 安装假 globals → 现有全部 invoke 调用点零改动拿到 mock 数据。
  *
- * 纪律：仅静态数据，不做事件流模拟（pylon:* listen 在浏览器被 IS_TAURI 守卫锁着）。
- * 诚实保留：browser_start/CDP 组与未知命令 reject（走现有「待后端」/错误分支，不冒充成功）。
+ * 浏览器相关命令使用内存态标签模型，并让 Browser Sheet 以真实 iframe 加载页面；
+ * 这不是桌面 WebView 的替身，UI 会明确标记 preview；开发代理可在同源
+ * iframe 中转发有限的页面观察/交互，无法代理的页面仍会返回 preview_only。
  *
  * 安装时序（关键）：env.ts 的 IS_TAURI 是模块级 const（探测 __TAURI_INTERNALS__ 存在性），
  * 首次求值即冻结——必须在 main.tsx body（静态 import 全部求值后）安装，绝不能在 env.ts
@@ -32,6 +33,263 @@ let mockGitBranch = 'demo'
 let mockGitHistory = buildGitHistory()
 let mockAgentConfigRevision = 1
 
+interface MockBrowserTab {
+  id: number
+  url: string
+  title: string | null
+  history: string[]
+  historyIndex: number
+}
+
+interface MockBrowserSnapshot {
+  instanceId: number
+  phase: 'idle' | 'starting' | 'ready' | 'error'
+  url: string | null
+  title: string | null
+  error: string | null
+  zoomPercent: number
+  activeTabId: number | null
+  tabs: Array<{ id: number; url: string; title: string | null }>
+  visible: boolean
+  runtime: 'iframe-preview'
+}
+
+let mockBrowserTabs: MockBrowserTab[] = []
+let mockBrowserActiveTabId: number | null = null
+let mockBrowserNextTabId = 0
+let mockBrowserZoomPercent = 90
+let mockBrowserVisible = true
+
+function browserUrl(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) throw new Error('url 必须是非空字符串')
+  const value = raw.trim()
+  let parsed: URL
+  try { parsed = new URL(value) } catch { throw new Error(`URL 非法：${value}`) }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:' && value !== 'about:blank') {
+    throw new Error('仅允许 http/https（about:blank 仅用于新标签）')
+  }
+  return value
+}
+
+function browserTitle(url: string): string | null {
+  if (url === 'about:blank') return null
+  try {
+    const host = new URL(url).hostname
+    if (host === 'example.com') return 'Example Domain'
+    if (host === 'developer.mozilla.org') return 'MDN Web Docs'
+    if (host === 'tauri.app') return 'Tauri'
+    return host
+  } catch { return null }
+}
+
+function mockBrowserSnapshot(): MockBrowserSnapshot {
+  const active = mockBrowserActiveTabId === null
+    ? undefined
+    : mockBrowserTabs.find(tab => tab.id === mockBrowserActiveTabId)
+  return {
+    instanceId: active?.id ?? 0,
+    phase: active ? 'ready' : 'idle',
+    url: active?.url ?? null,
+    title: active?.title ?? null,
+    error: null,
+    zoomPercent: mockBrowserZoomPercent,
+    activeTabId: active?.id ?? null,
+    tabs: mockBrowserTabs.map(tab => ({ id: tab.id, url: tab.url, title: tab.title })),
+    visible: mockBrowserVisible,
+    runtime: 'iframe-preview',
+  }
+}
+
+/**
+ * 浏览器预览没有 Tauri event plugin；把同一份状态投影成 DOM 事件，
+ * 让 Browser Sheet 与 Agent 命令共享一条可观察的状态流。Node/测试环境
+ * 没有 window 时保持纯内存命令语义，不产生副作用。
+ */
+function emitMockBrowserStatus(): void {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return
+  window.dispatchEvent(new CustomEvent('pylon:browser-status', { detail: mockBrowserSnapshot() }))
+}
+
+function createMockBrowserTab(rawUrl = 'about:blank'): MockBrowserTab {
+  const url = browserUrl(rawUrl)
+  const tab: MockBrowserTab = {
+    id: ++mockBrowserNextTabId,
+    url,
+    title: browserTitle(url),
+    history: [url],
+    historyIndex: 0,
+  }
+  mockBrowserTabs = [...mockBrowserTabs, tab]
+  mockBrowserActiveTabId = tab.id
+  return tab
+}
+
+function activeMockBrowserTab(): MockBrowserTab {
+  const tab = mockBrowserTabs.find(value => value.id === mockBrowserActiveTabId)
+  if (!tab) throw new Error('浏览器未启动')
+  return tab
+}
+
+function mockBrowserStart(): MockBrowserSnapshot {
+  if (mockBrowserTabs.length === 0) createMockBrowserTab('https://example.com')
+  return mockBrowserSnapshot()
+}
+
+function mockBrowserNavigate(rawUrl: unknown): MockBrowserSnapshot {
+  const tab = activeMockBrowserTab()
+  const url = browserUrl(rawUrl)
+  tab.history = [...tab.history.slice(0, tab.historyIndex + 1), url]
+  tab.historyIndex = tab.history.length - 1
+  tab.url = url
+  tab.title = browserTitle(url)
+  return mockBrowserSnapshot()
+}
+
+function mockBrowserMoveHistory(delta: -1 | 1): MockBrowserSnapshot {
+  const tab = activeMockBrowserTab()
+  const next = Math.min(tab.history.length - 1, Math.max(0, tab.historyIndex + delta))
+  tab.historyIndex = next
+  tab.url = tab.history[next]
+  tab.title = browserTitle(tab.url)
+  return mockBrowserSnapshot()
+}
+
+function previewFrameDocument(): Document | null {
+  if (typeof document === 'undefined') return null
+  const frame = document.querySelector<HTMLIFrameElement>('.browser-preview-frame')
+  if (!frame) return null
+  try { return frame.contentDocument }
+  catch { return null }
+}
+
+function previewElementLabel(element: Element): string {
+  return (element.textContent || element.getAttribute('aria-label') || (element as HTMLInputElement).value || '')
+    .trim()
+    .slice(0, 240)
+}
+
+function previewSameDocument(rawHref: string, destination: URL, current: URL): boolean {
+  return rawHref.startsWith('#') || (
+    destination.origin === current.origin
+    && destination.pathname === current.pathname
+    && destination.search === current.search
+    && Boolean(destination.hash)
+  )
+}
+
+function mockBrowserClick(selector: unknown, text: unknown): Record<string, unknown> {
+  const tab = activeMockBrowserTab()
+  const frameDocument = previewFrameDocument()
+  if (!frameDocument) return { ok: false, code: 'preview_only', message: '开发预览页面尚未加载或不允许 DOM 访问。' }
+  const needle = typeof text === 'string' ? text.trim().toLowerCase() : ''
+  let element: Element | null = null
+  if (typeof selector === 'string' && selector.trim()) {
+    try { element = frameDocument.querySelector(selector) }
+    catch { return { ok: false, code: 'invalid_selector' } }
+  }
+  if (!element && needle) {
+    const candidates = Array.from(frameDocument.querySelectorAll('a,button,[role="button"],input,textarea,[contenteditable="true"]'))
+    element = candidates.find(value => previewElementLabel(value).toLowerCase().includes(needle)) ?? null
+  }
+  if (!element) return { ok: false, code: 'element_not_found' }
+
+  element.scrollIntoView({ block: 'center', inline: 'nearest' })
+  if (element.matches('a[href]')) {
+    const anchor = element as HTMLAnchorElement
+    let destination: URL
+    try { destination = new URL(anchor.href, tab.url) }
+    catch { return { ok: false, code: 'invalid_link' } }
+    const current = new URL(tab.url)
+    const rawHref = (anchor.getAttribute('href') || '').trim()
+    if (!previewSameDocument(rawHref, destination, current) && /^https?:$/i.test(destination.protocol) && !anchor.hasAttribute('download')) {
+      if ((anchor.getAttribute('target') || '').toLowerCase() === '_self') {
+        const browser = mockBrowserNavigate(destination.href)
+        return { ok: true, tag: 'a', text: previewElementLabel(anchor), href: destination.href, navigated: true, browser }
+      }
+      const opened = createMockBrowserTab(destination.href)
+      return { ok: true, tag: 'a', text: previewElementLabel(anchor), href: destination.href, openedTab: true, browser: mockBrowserSnapshot(), opened: opened.id }
+    }
+  }
+  ;(element as HTMLElement).click()
+  return { ok: true, tag: element.tagName.toLowerCase(), text: previewElementLabel(element), openedTab: false }
+}
+
+function mockBrowserType(text: unknown, selector: unknown): Record<string, unknown> {
+  if (typeof text !== 'string' || !text) return { ok: false, code: 'text_empty' }
+  const frameDocument = previewFrameDocument()
+  if (!frameDocument) return { ok: false, code: 'preview_only', message: '开发预览页面尚未加载或不允许 DOM 访问。' }
+  let element: Element | null = null
+  if (typeof selector === 'string' && selector.trim()) {
+    try { element = frameDocument.querySelector(selector) }
+    catch { return { ok: false, code: 'invalid_selector' } }
+  }
+  element ??= frameDocument.activeElement
+  const editable = element as HTMLElement | null
+  if (!element || (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement) && !editable?.isContentEditable)) {
+    return { ok: false, code: 'input_not_found' }
+  }
+  if (editable?.isContentEditable) element.textContent = text
+  else {
+    const input = element as HTMLInputElement | HTMLTextAreaElement
+    input.value = text
+  }
+  element.dispatchEvent(new Event('input', { bubbles: true }))
+  element.dispatchEvent(new Event('change', { bubbles: true }))
+  return { ok: true }
+}
+
+function mockBrowserPress(key: unknown): Record<string, unknown> {
+  if (typeof key !== 'string' || !key.trim()) return { ok: false, code: 'key_empty' }
+  const frameDocument = previewFrameDocument()
+  if (!frameDocument) return { ok: false, code: 'preview_only', message: '开发预览页面尚未加载或不允许 DOM 访问。' }
+  const target = frameDocument.activeElement || frameDocument.body
+  if (!target) return { ok: false, code: 'document_not_ready' }
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+  target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }))
+  return { ok: true, key }
+}
+
+function mockBrowserScroll(deltaX: unknown, deltaY: unknown): Record<string, unknown> {
+  const frame = typeof document === 'undefined' ? null : document.querySelector<HTMLIFrameElement>('.browser-preview-frame')
+  const window = frame?.contentWindow
+  if (!window) return { ok: false, code: 'preview_only', message: '开发预览页面尚未加载或不允许 DOM 访问。' }
+  const x = typeof deltaX === 'number' && Number.isFinite(deltaX) ? Math.trunc(deltaX) : 0
+  const y = typeof deltaY === 'number' && Number.isFinite(deltaY) ? Math.trunc(deltaY) : 600
+  window.scrollBy(x, y)
+  return { ok: true, scrollX: window.scrollX, scrollY: window.scrollY }
+}
+
+function mockBrowserPageSnapshot(): Record<string, unknown> {
+  const tab = activeMockBrowserTab()
+  const frameDocument = previewFrameDocument()
+  if (frameDocument) {
+    const current = frameDocument.defaultView?.location.href || tab.url
+    const links = Array.from(frameDocument.querySelectorAll<HTMLAnchorElement>('a[href]')).slice(0, 100).map((element, index) => ({
+      index,
+      text: previewElementLabel(element),
+      href: element.href,
+      target: element.getAttribute('target') || null,
+    }))
+    return {
+      runtime: 'iframe-preview', tabId: tab.id, url: current,
+      title: frameDocument.title || tab.title, text: (frameDocument.body?.innerText || '').slice(0, 20000),
+      links,
+    }
+  }
+  const links = tab.url === 'https://example.com'
+    ? [{ text: 'More information...', href: 'https://iana.org/domains/example', target: '_blank' }]
+    : []
+  return {
+    runtime: 'iframe-preview',
+    tabId: tab.id,
+    url: tab.url,
+    title: tab.title,
+    text: tab.url === 'https://example.com' ? 'Example Domain\nThis domain is for use in illustrative examples in documents.' : '',
+    links,
+    note: '开发预览中的 iframe；跨域页面在代理不可用时仅提供状态预览。',
+  }
+}
+
 function mockGitOperation(summary: string) {
   return {
     summary,
@@ -39,7 +297,7 @@ function mockGitOperation(summary: string) {
   }
 }
 
-/** 纯命令路由（node 可测，无 window）。未知命令 reject（含 browser_start/CDP 组）。 */
+/** 纯命令路由（node 可测，无 window）。 */
 export async function mockInvokeCommand(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (cmd) {
     case 'list_agents': return buildDemoAgents()
@@ -117,6 +375,97 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
       return { applied: true, revision: `demo-config-${mockAgentConfigRevision}` }
     }
     case 'reload_gateway': return null
+    // Browser Sheet：有状态 preview transport。页面本身由 BrowserSheet 的 iframe 加载，
+    // 这里只负责让地址、标签、缩放和 Agent 命令在开发模式下保持一致。
+    case 'browser_status': return mockBrowserSnapshot()
+    case 'browser_start': {
+      const snapshot = mockBrowserStart()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_new_tab': {
+      createMockBrowserTab()
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_open_tab': {
+      createMockBrowserTab(browserUrl(args.url))
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_select_tab': {
+      const tabId = typeof args.tabId === 'number' ? args.tabId : Number(args.tabId)
+      if (!Number.isInteger(tabId) || !mockBrowserTabs.some(tab => tab.id === tabId)) throw new Error(`浏览器标签不存在：${String(args.tabId)}`)
+      mockBrowserActiveTabId = tabId
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_close_tab': {
+      const tabId = typeof args.tabId === 'number' ? args.tabId : Number(args.tabId)
+      const index = mockBrowserTabs.findIndex(tab => tab.id === tabId)
+      if (index < 0) throw new Error(`浏览器标签不存在：${String(args.tabId)}`)
+      const wasActive = mockBrowserActiveTabId === tabId
+      mockBrowserTabs = mockBrowserTabs.filter(tab => tab.id !== tabId)
+      if (wasActive) mockBrowserActiveTabId = mockBrowserTabs[Math.min(index, mockBrowserTabs.length - 1)]?.id ?? null
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_navigate': {
+      const snapshot = mockBrowserNavigate(args.url)
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_back': {
+      const snapshot = mockBrowserMoveHistory(-1)
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_forward': {
+      const snapshot = mockBrowserMoveHistory(1)
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_reload': {
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_set_zoom': {
+      const zoom = typeof args.zoomPercent === 'number' ? args.zoomPercent : Number(args.zoomPercent)
+      if (!Number.isInteger(zoom) || zoom < 50 || zoom > 200) throw new Error('浏览器缩放必须在 50%–200% 之间')
+      mockBrowserZoomPercent = zoom
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_set_bounds': return null
+    case 'browser_set_visible': {
+      mockBrowserVisible = args.visible !== false
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
+    case 'browser_snapshot': return mockBrowserPageSnapshot()
+    case 'browser_click': {
+      const result = mockBrowserClick(args.selector, args.text)
+      emitMockBrowserStatus()
+      return result
+    }
+    case 'browser_type': return mockBrowserType(args.text, args.selector)
+    case 'browser_press': return mockBrowserPress(args.key)
+    case 'browser_scroll': return mockBrowserScroll(args.deltaX, args.deltaY)
+    case 'browser_close': {
+      mockBrowserTabs = []
+      mockBrowserActiveTabId = null
+      mockBrowserVisible = true
+      const snapshot = mockBrowserSnapshot()
+      emitMockBrowserStatus()
+      return snapshot
+    }
     case 'list_persisted_sessions': return buildSessionSummaries()
     case 'startup_diagnostics': return buildStartupDiagnostics()
     case 'list_runtime_logs': return buildRuntimeLogs()

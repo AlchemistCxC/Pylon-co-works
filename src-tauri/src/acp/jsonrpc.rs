@@ -143,6 +143,7 @@ pub enum PromptWaitOutcome {
 ///   不设整轮绝对墙钟。一个回合可以包含任意多个分析、思考和工具步骤，
 ///   每个步骤都必须分别获得完整的超时窗口。
 /// 任一判死后进入 cancel + settle（与旧路径一致）。
+#[allow(dead_code)]
 pub async fn wait_prompt_with_cancel<F, Fut>(
     rx: &mut oneshot::Receiver<RawMessage>,
     cancel_settle_timeout: std::time::Duration,
@@ -154,6 +155,38 @@ pub async fn wait_prompt_with_cancel<F, Fut>(
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<(), String>>,
+{
+    wait_prompt_with_recovery(
+        rx,
+        cancel_settle_timeout,
+        idle_timeout,
+        first_token_timeout,
+        last_activity,
+        cancel,
+        || async {},
+    )
+    .await
+}
+
+/// Variant of [`wait_prompt_with_cancel`] that can force-clean a wedged child
+/// after cancellation failed to settle.  The recovery callback is deliberately
+/// supplied by the caller so the generic ACP layer does not know about any
+/// provider-specific process policy.  Non-Hermes callers continue to use the
+/// wrapper above and therefore retain the historical behavior.
+pub async fn wait_prompt_with_recovery<F, Fut, K, KF>(
+    rx: &mut oneshot::Receiver<RawMessage>,
+    cancel_settle_timeout: std::time::Duration,
+    idle_timeout: std::time::Duration,
+    first_token_timeout: std::time::Duration,
+    last_activity: impl Fn() -> Option<std::time::Instant>,
+    cancel: F,
+    force_kill: K,
+) -> PromptWaitOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+    K: FnOnce() -> KF,
+    KF: Future<Output = ()>,
 {
     let start = std::time::Instant::now();
     // 轮询粒度：取待判定的最小非零超时的一小段，既及时又不忙转。
@@ -179,6 +212,14 @@ where
                 Ok(Ok(raw)) => Some(raw),
                 Ok(Err(_)) | Err(_) => None,
             };
+            if response.is_none() {
+                // A provider can acknowledge neither session/cancel nor the
+                // pending prompt (the Hermes/MSYS deadlock observed on
+                // Windows).  Give the provider-specific owner one chance to
+                // terminate its process tree so the next ACP generation can
+                // reconnect instead of leaving a wedged child behind.
+                force_kill().await;
+            }
             // fire_reason 用于日志（多少秒后因何截断）；对外文案仍是统一超时语义。
             tracing::warn!(
                 "ACP: prompt truncated ({:?}) after {}s",

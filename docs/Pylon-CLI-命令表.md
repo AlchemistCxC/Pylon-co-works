@@ -79,7 +79,7 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 显式别名：`ps`、`logs`、`kill`、`compact`、`model`、`new`、`export`、`clear`、`mode`。第一段还支持无歧义前缀，例如 `sess list`。
 
-## 3. 内置插件命令（50 个）
+## 3. 内置插件命令（65 个）
 
 以下命令均已注册 `execute`，通过 `pylon-cli command exec <id> --args '{...}'` 调用。外置插件新增可执行命令后会自动出现在 `command list`，无需修改 CLI 壳。
 
@@ -138,6 +138,33 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 ### 3.6 Skin（11 个）
 
 `skin.schema`、`skin.inspect`、`skin.draft.create`、`skin.draft.patch`、`skin.validate`、`skin.preview`、`skin.preview.patch`、`skin.inspect-computed`、`skin.capture`、`skin.rollback`、`skin.commit`。
+
+### 3.7 Browser Sheet（16 个）
+
+Browser Sheet 的 Agent 控制面复用同一个 `pylon_cli` 工具和 Command Registry。桌面端命令
+实际操作嵌入式 WebView2；浏览器开发预览会明确返回 `iframe-preview`，不把预览伪装成
+桌面会话。
+
+| Command ID | 参数 | 行为 |
+|:--|:--|:--|
+| `browser.ensure` | `url?` | 打开/聚焦 Browser Sheet，等待会话就绪（可选导航） |
+| `browser.status` | — | 读取会话、活动标签和地址 |
+| `browser.navigate` | `url` | 当前标签导航 |
+| `browser.open-tab` | `url` | 新建并激活指定 URL 的内部标签 |
+| `browser.new-tab` | — | 新建空白内部标签 |
+| `browser.select-tab` / `browser.close-tab` | `tabId` | 切换或关闭标签 |
+| `browser.back` / `browser.forward` / `browser.reload` | — | 导航历史控制 |
+| `browser.snapshot` | — | 读取正文摘要和可见链接（不含 cookie/storage） |
+| `browser.click` | `selector` 或 `text` | 点击页面元素 |
+| `browser.type` | `text`、`selector?` | 写入输入控件 |
+| `browser.press` | `key` | 派发键盘按键 |
+| `browser.scroll` | `deltaX?`、`deltaY?` | 滚动页面 |
+| `browser.zoom` | `zoomPercent` | 设置 Browser Sheet 缩放 |
+
+`browser.click` 命中普通 HTTP(S) 链接时会直接返回 `openedTab: true` 并创建内部标签，
+避免 Agent 的非信任 click 事件被浏览器弹窗策略吞掉。开发浏览器通过 Vite 的
+真实网页代理提供同源 iframe 桥接；无法代理或被页面策略阻断时会返回 `preview_only`。
+桌面 WebView2 仍是完整操作面。
 
 ## 4. 常用示例
 

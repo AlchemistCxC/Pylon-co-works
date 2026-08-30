@@ -479,3 +479,109 @@
   }
   .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { padding-left:var(--pylon-terminal-touch-target,44px); }
 }
+
+/* Classic AgentSheet title rail: keep a continuous track, but add a small
+   horizontal rhythm so adjacent labels do not collapse into one text band. */
+.app[data-interface-mode="terminal-like"] .sheet-tab-strip {
+  gap:var(--ui-space-1);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab {
+  width:auto;
+  min-width:116px;
+  max-width:220px;
+  border-right:0;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {
+  width:max-content;
+  min-width:136px;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-kind-mark {
+  border-radius:50%;
+  border-color:color-mix(in srgb,var(--titlebar-text-resolved) 42%,transparent);
+  background:transparent;
+  box-shadow:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] .sheet-tab-kind-mark {
+  border-color:color-mix(in srgb,var(--titlebar-text-resolved) 42%,transparent);
+  background:transparent;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active .sheet-tab-kind-mark {
+  border-color:var(--accent);
+  background:var(--accent);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active {
+  background:transparent;
+  box-shadow:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active::after {
+  content:'';
+  position:absolute;
+  left:var(--ui-space-2);
+  right:var(--ui-space-2);
+  bottom:0;
+  height:var(--line-width-2);
+  background:var(--accent);
+  pointer-events:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab:hover {
+  background:color-mix(in srgb,var(--bg-hover) 62%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-focus {
+  padding:0 var(--ui-control-compact) 0 var(--ui-space-3);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-close {
+  position:absolute;
+  top:50%;
+  right:var(--ui-space-1);
+  width:var(--ui-control-compact);
+  height:var(--ui-control-compact);
+  margin:0;
+  flex:0 0 auto;
+  transform:translateY(-50%);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active:not(:hover):not(:focus-within) .sheet-tab-close {
+  visibility:hidden;
+  opacity:0;
+}
+.app[data-interface-mode="terminal-like"] .workspace-titlebar-launchers {
+  margin-left:var(--ui-space-1);
+  padding-left:var(--ui-space-1);
+  border-left:1px solid color-mix(in srgb,var(--border) 72%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .workspace-window-controls {
+  padding-left:var(--ui-space-1);
+  border-left:1px solid color-mix(in srgb,var(--border) 72%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .workspace-window-controls > .titlebar-window-btn-start {
+  margin-left:var(--ui-space-2);
+  box-shadow:inset 1px 0 0 color-mix(in srgb,var(--border) 72%,transparent);
+}
+
+/* Keep the large touch target when the pointer is coarse; only the visual
+   placement changes in the desktop treatment above. */
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="terminal-like"] .sheet-tab-close {
+    top:50%;
+    right:0;
+    width:var(--pylon-terminal-touch-target,44px);
+    min-width:var(--pylon-terminal-touch-target,44px);
+    height:var(--pylon-terminal-touch-target,44px);
+    min-height:var(--pylon-terminal-touch-target,44px);
+    transform:translateY(-50%);
+    visibility:visible;
+    opacity:1;
+  }
+}
+
+@media (max-width:760px) {
+  .app[data-interface-mode="terminal-like"] .sheet-tab {
+    min-width:112px;
+    max-width:200px;
+  }
+  .app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {
+    min-width:124px;
+  }
+  .app[data-interface-mode="terminal-like"] .sheet-tab-focus {
+    padding:0 var(--ui-control-compact) 0 var(--ui-space-2);
+  }
+}

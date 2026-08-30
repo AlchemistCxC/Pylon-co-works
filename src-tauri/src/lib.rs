@@ -21,6 +21,7 @@ mod gateway;
 mod gateway_cmds;
 mod git;
 mod hermes;
+mod hermes_runtime;
 mod lifecycle;
 mod logs_cmds;
 mod mcp;
@@ -856,9 +857,11 @@ pub fn run() {
                 crate::gateway_cmds::gateway_instance_start, crate::gateway_cmds::gateway_instance_stop,
                 crate::gateway_cmds::gateway_instance_restart,
                 crate::gateway_cmds::gateway_instance_set_credentials,
-                crate::browser_cmds::browser_start, crate::browser_cmds::browser_new_tab, crate::browser_cmds::browser_select_tab, crate::browser_cmds::browser_close_tab, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
+                crate::browser_cmds::browser_start, crate::browser_cmds::browser_new_tab, crate::browser_cmds::browser_open_tab, crate::browser_cmds::browser_select_tab, crate::browser_cmds::browser_close_tab, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
                 crate::browser_cmds::browser_back, crate::browser_cmds::browser_forward, crate::browser_cmds::browser_reload,
-                crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
+                crate::browser_cmds::browser_snapshot, crate::browser_cmds::browser_click, crate::browser_cmds::browser_type,
+                crate::browser_cmds::browser_press, crate::browser_cmds::browser_scroll,
+                 crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_visible, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])

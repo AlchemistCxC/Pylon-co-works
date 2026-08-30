@@ -10,6 +10,7 @@ import { lazy } from 'react'
 import { BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS } from '../core/file/builtinFileWorkbench.ts'
 import { createBuiltinFileCommandDefinitions } from '../core/file/builtinFileCommands.ts'
 import { createBuiltinWorkspaceCommandDefinitions } from '../core/sheet/builtinWorkspaceCommands.ts'
+import { createBuiltinBrowserCommandDefinitions } from '../core/browser/builtinBrowserCommands.ts'
 
 const ChatSessionsPanel = lazy(() => import('../../components/sidebar/ChatSessionsPanel.tsx'))
 const WorkspacesPanel = lazy(() => import('../../components/sidebar/WorkspacesPanel.tsx'))
@@ -34,7 +35,7 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         component: WorkspacesPanel,
       })
       for (const contribution of BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS) context.fileWorkbench.register(contribution)
-      for (const command of [...createBuiltinFileCommandDefinitions(), ...createBuiltinWorkspaceCommandDefinitions()]) {
+      for (const command of [...createBuiltinFileCommandDefinitions(), ...createBuiltinWorkspaceCommandDefinitions(), ...createBuiltinBrowserCommandDefinitions()]) {
         context.commands.register(command, { contributionId: `${BUILTIN_PYLON_WORKSPACE_ID}.${command.id}`, layer: 'feature', priority: command.priority })
       }
       context.contextPanel.register({

@@ -326,3 +326,66 @@
   .sidebar-action,
   .profile-edit { min-width:44px; min-height:44px; }
 }
+
+/* Classic AgentSheet session actions use the same quiet, square controls as
+   the rest of the terminal rail. Keep them discoverable on hover/focus, but
+   do not let browser-default button chrome become a second visual layer. */
+.app[data-interface-mode="terminal-like"] .session-actions {
+  display:flex;
+  align-items:center;
+  gap:2px;
+  margin-left:auto;
+}
+.app[data-interface-mode="terminal-like"] .session-item:has(> .session-action),
+.app[data-interface-mode="terminal-like"] .session-item:has(.session-actions) {
+  gap:4px;
+}
+.app[data-interface-mode="terminal-like"] .session-item > .session-action,
+.app[data-interface-mode="terminal-like"] .session-actions > .session-action {
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:22px;
+  min-width:18px;
+  padding:0;
+  border:1px solid transparent;
+  border-radius:0;
+  background:transparent;
+  color:var(--text-dim);
+  opacity:0;
+  cursor:pointer;
+  transition:opacity var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.app[data-interface-mode="terminal-like"] .session-meta {
+  white-space:nowrap;
+}
+.app[data-interface-mode="terminal-like"] .session-item:hover > .session-action,
+.app[data-interface-mode="terminal-like"] .session-item:focus-within > .session-action,
+.app[data-interface-mode="terminal-like"] .session-item:hover .session-actions > .session-action,
+.app[data-interface-mode="terminal-like"] .session-item:focus-within .session-actions > .session-action {
+  opacity:.62;
+}
+.app[data-interface-mode="terminal-like"] .session-item > .session-action:hover,
+.app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover,
+.app[data-interface-mode="terminal-like"] .session-item > .session-action:focus-visible,
+.app[data-interface-mode="terminal-like"] .session-actions > .session-action:focus-visible {
+  opacity:1;
+  color:var(--text);
+  border-color:color-mix(in srgb,var(--border) 76%,var(--accent));
+  background:color-mix(in srgb,var(--bg-hover) 72%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .session-item > .session-action.danger:hover,
+.app[data-interface-mode="terminal-like"] .session-actions > .session-action.danger:hover {
+  color:var(--state-danger,var(--danger));
+  border-color:color-mix(in srgb,var(--state-danger,var(--danger)) 45%,var(--border));
+  background:color-mix(in srgb,var(--state-danger,var(--danger)) 8%,transparent);
+}
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="terminal-like"] .session-item > .session-action,
+  .app[data-interface-mode="terminal-like"] .session-actions > .session-action {
+    width:30px;
+    height:30px;
+    min-width:30px;
+    opacity:.82;
+  }
+}

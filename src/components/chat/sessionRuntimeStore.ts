@@ -11,7 +11,15 @@ import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import type { ContentBlock, OptionalChatEventIdentity } from '../../infrastructure/acp/chatContracts.ts'
 import type { AgentContextKey } from '../../agentContext.ts'
 import { toAgentContextKey } from '../../agentContext.ts'
-import type { GenerationPhase } from '../../domains/workbench/generationFooterContracts.ts'
+import type {
+  GenerationActivitySnapshot,
+  GenerationPhase,
+} from '../../domains/workbench/generationFooterContracts.ts'
+import {
+  legacyPhaseFromActivity,
+  reduceGenerationActivity,
+  type GenerationActivityEvent,
+} from '../../domains/activity/generationStateMachine.ts'
 
 /**
  * sessionRuntimeStore — Chat 会话运行时状态（阶段 2：Chat 状态收敛）。
@@ -46,6 +54,8 @@ export interface SourceChatRuntime {
   generationStart?: number
   lastActivityAt?: number
   generationPhase?: GenerationPhase
+  /** 活动轴：工具集合与恢复上下文；generationPhase 保留为兼容投影。 */
+  generationActivity?: GenerationActivitySnapshot
   /** 接线层在 user 事件后写入（依赖主题域 spinner 预设） */
   generationFrames: string[]
   cancelState: CancelState
@@ -104,6 +114,7 @@ export function createSourceChatRuntime(source: string): SourceChatRuntime {
     generationStart: undefined,
     lastActivityAt: undefined,
     generationPhase: undefined,
+    generationActivity: undefined,
     generationFrames: [],
     cancelState: createCancelState(source),
     replayToolIds: [],
@@ -122,6 +133,27 @@ export function clearChatSource(state: ChatRuntimeState, key: AgentContextKey): 
 
 function nowTime(now: number): string {
   return new Date(now).toLocaleTimeString()
+}
+
+const TERMINAL_TOOL_STATUSES = new Set([
+  'completed', 'complete', 'finished', 'done', 'success', 'succeeded',
+  'failed', 'failure', 'error', 'cancelled', 'canceled', 'cancel',
+  'killed', 'timeout', 'aborted', 'terminated',
+])
+
+function isTerminalToolStatus(status: string | undefined): boolean {
+  return status !== undefined && TERMINAL_TOOL_STATUSES.has(status.trim().toLowerCase())
+}
+
+function toolActivityEventForUpdate(
+  toolId: string,
+  status: string | undefined,
+  at: number,
+  name = '?',
+): GenerationActivityEvent {
+  return isTerminalToolStatus(status)
+    ? { type: 'tool-end', id: toolId, at }
+    : { type: 'tool-start', id: toolId, name, at }
 }
 
 function appendMessage(runtime: SourceChatRuntime, message: Message, seq: number): SourceChatRuntime {
@@ -274,9 +306,24 @@ export function applyChatEvent(
   }
 
   const current = state[key] ?? createSourceChatRuntime(source)
-  const touch = (runtime: SourceChatRuntime, phase: GenerationPhase, replay = false): SourceChatRuntime => replay
-    ? runtime
-    : { ...runtime, lastActivityAt: now, generationPhase: phase }
+  const phaseEvent = (phase: GenerationPhase): GenerationActivityEvent => phase.kind === 'tool'
+    ? { type: 'tool-start', id: `legacy:${phase.name}`, name: phase.name, at: now }
+    : { type: phase.kind, at: now }
+  const touch = (
+    runtime: SourceChatRuntime,
+    phase: GenerationPhase,
+    replay = false,
+    activityEvent?: GenerationActivityEvent,
+  ): SourceChatRuntime => {
+    if (replay) return runtime
+    const activity = reduceGenerationActivity(runtime.generationActivity, activityEvent ?? phaseEvent(phase))
+    return {
+      ...runtime,
+      lastActivityAt: now,
+      generationActivity: activity,
+      generationPhase: legacyPhaseFromActivity(activity) ?? phase,
+    }
+  }
 
   switch (event.type) {
     case 'user':
@@ -311,12 +358,14 @@ export function applyChatEvent(
         ],
       }
       if (!replay) {
+        const activity = reduceGenerationActivity(current.generationActivity, { type: 'start', at: now })
         runtime = {
           ...runtime,
           generating: true,
           generationStart: now,
           lastActivityAt: now,
-          generationPhase: { kind: 'thinking' },
+          generationActivity: activity,
+          generationPhase: legacyPhaseFromActivity(activity) ?? { kind: 'thinking' },
           cancelState: { source, status: 'generating' },
         }
       }
@@ -351,6 +400,9 @@ export function applyChatEvent(
       const hasInFlight = messages.some(message => message.clientMsgId !== undefined || message.running)
         || current.streamingText.length > 0
         || current.streamingThinking.length > 0
+      const activity = hasInFlight
+        ? current.generationActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: now })
+        : undefined
       return {
         ...state,
         [key]: {
@@ -358,7 +410,10 @@ export function applyChatEvent(
           messages,
           generating: hasInFlight,
           generationStart: hasInFlight ? current.generationStart : undefined,
-          generationPhase: hasInFlight ? current.generationPhase ?? { kind: 'thinking' } : undefined,
+          generationActivity: activity,
+          generationPhase: hasInFlight
+            ? legacyPhaseFromActivity(activity) ?? current.generationPhase ?? { kind: 'thinking' }
+            : undefined,
           cancelState: hasInFlight ? current.cancelState : createCancelState(source),
         },
       }
@@ -461,6 +516,8 @@ export function applyChatEvent(
         : -1
       const existingTool = existingToolIndex >= 0 ? target[existingToolIndex] : undefined
       if (existingTool) {
+        const activityToolId = toolId ?? `legacy:${event.title || existingTool.toolName || '?'}`
+        const activityToolName = event.title || existingTool.toolName || '?'
         return {
           ...state,
           [key]: touch(updateMessageAt(current, existingToolIndex, message => ({
@@ -475,7 +532,9 @@ export function applyChatEvent(
             // EVT-04：raw 字段不丢——re-dispatch 以新 rawInput 覆盖，缺失保留旧值
             rawInput: event.rawInput !== undefined ? event.rawInput : message.rawInput,
             clientGeneration: event.clientGeneration ?? message.clientGeneration,
-          })), { kind: 'tool', name: event.title || existingTool.toolName || '?' }, replay),
+          })), { kind: 'tool', name: activityToolName }, replay, {
+            type: 'tool-start', id: activityToolId, name: activityToolName, at: now,
+          }),
         }
       }
       if (replay) {
@@ -505,7 +564,9 @@ export function applyChatEvent(
         running: true,
         externalIdentity: toolId ? { toolCallId: toolId } : undefined,
       }, seq)
-      return { ...state, [key]: touch(runtime, { kind: 'tool', name: title }, replay) }
+      return { ...state, [key]: touch(runtime, { kind: 'tool', name: title }, replay, {
+        type: 'tool-start', id: toolId ?? `legacy:${title}`, name: title, at: now,
+      }) }
     }
 
     case 'tool-call-update': {
@@ -544,7 +605,7 @@ export function applyChatEvent(
             clientGeneration: event.clientGeneration,
             running: false,
             externalIdentity: { toolCallId: toolId },
-          }, seq), { kind: 'tool', name: '?' }, replay),
+          }, seq), { kind: 'tool', name: '?' }, replay, toolActivityEventForUpdate(toolId, event.status, now)),
         }
       }
       const existingTool = target[toolIndex]
@@ -561,7 +622,12 @@ export function applyChatEvent(
           rawOutput: event.rawOutput !== undefined ? event.rawOutput : message.rawOutput,
           clientGeneration: event.clientGeneration ?? message.clientGeneration,
           running: false,
-        })), { kind: 'tool', name: existingTool.toolName || '?' }, replay),
+        })), { kind: 'tool', name: existingTool.toolName || '?' }, replay, toolActivityEventForUpdate(
+          toolId,
+          event.status,
+          now,
+          existingTool.toolName,
+        )),
       }
     }
 
@@ -594,6 +660,7 @@ export function applyChatEvent(
         ...runtime,
         generating: false,
         generationStart: undefined,
+        generationActivity: undefined,
         generationPhase: undefined,
         cancelState: terminationScope === 'live' && current.cancelState.status === 'canceling'
           ? { ...current.cancelState, status: 'cancelled' }
@@ -643,6 +710,7 @@ export function applyChatEvent(
         ...runtime,
         generating: false,
         generationStart: undefined,
+        generationActivity: undefined,
         generationPhase: undefined,
         ...(terminationScope === 'live' ? {
           lastSummary: {
@@ -669,6 +737,7 @@ export function applyChatEvent(
         cancelState: applyCancelEvent(source, { kind: 'success' }, current.cancelState),
         generating: false,
         generationStart: undefined,
+        generationActivity: undefined,
         generationPhase: undefined,
         lastSummary: {
           elapsedMs: now - (current.generationStart ?? now),

@@ -4,6 +4,7 @@ import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventE
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
+import { reduceGenerationActivity } from '../../domains/activity/generationStateMachine.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
@@ -19,7 +20,7 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
   subscribe(listener: (event: unknown) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
   chatController?: () => Pick<ChatControllerHandle,
-    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'rejectOptimisticUser'
+    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'getGenerationActivity' | 'rejectOptimisticUser'
     | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
 }
 
@@ -233,6 +234,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationStart: generating ? controller.getStartTime(targetSource) : 0,
       lastTokenAt: controller.getLastActivityAt(targetSource),
       generationPhase: controller.getGenerationPhase(targetSource),
+      // Legacy controllers may not expose the activity axis. Write this
+      // field explicitly so a missing getter clears stale context from a
+      // previous session instead of leaving an old tool label behind.
+      generationActivity: controller.getGenerationActivity?.(targetSource),
       thinkingStart: controller.getThinkingStart(targetSource),
       tokenCount: controller.getTokenCount(targetSource),
       summary: controller.getSummary(targetSource) ?? null,
@@ -280,6 +285,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationStart: now,
       lastTokenAt: now,
       generationPhase: { kind: 'thinking' },
+      generationActivity: reduceGenerationActivity(undefined, { type: 'start', at: now }),
       summary: null,
     })
   }
@@ -302,9 +308,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         && message.identity.interactionId === clientMessageId)),
     }
     runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
+    const existingActivity = runtime.getSnapshot().generationActivity
     updateRuntimeState({
       generating: remaining.length > 0 || document.messages.some(message => message.running),
       generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
+      generationActivity: remaining.length > 0
+        ? existingActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: Date.now() })
+        : undefined,
     })
   }
 
@@ -391,7 +401,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         status: loading ? 'loading' : 'idle', error: null,
         ...(source && chatController()?.getGenerating(source)
           ? {}
-          : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, thinkingStart: undefined, summary: null }),
+          : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, summary: null }),
       })
       if (source) syncSourceRuntime(source)
       if (!session || !ownerKey) return

@@ -65,19 +65,19 @@ export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribu
   {
     id: 'builtin.presentation.terminal-classic',
     label: '终端经典',
-    description: '紧凑命令记录流、等宽正文、CLI 输入和克制的工具状态。',
+    description: '紧凑命令记录流、可读正文、CLI 输入和克制的工具状态。',
     family: 'terminal',
     order: 100,
     tokens: {
-      msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'mono',
+      msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'system',
       msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', inputBg: 'rgba(0,0,0,0.02)',
       inputBorderColor: '', inputFocusBorder: 'rgba(0,0,0,0.22)', inputRadius: 0, inputFocusRingWidth: 0,
       ccVariant: 'terminal',
-      assistantDot: false, toolIndicator: '●', toolIndicatorGlow: 0,
+      assistantDot: false, toolIndicator: '●', toolIndicatorRun: 'circle', toolIndicatorOk: 'circle', toolIndicatorErr: 'circle', toolIndicatorGlow: 0,
       toolConnectorMode: 'none', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
       cliHintMode: 'compact', footerLayout: 'free',
     },
-    assets: { promptGlyph: '❯', runningGlyph: '●', completedGlyph: '✓', failedGlyph: '!' },
+    assets: { promptGlyph: '❯', runningGlyph: '●', completedGlyph: '●', failedGlyph: '●' },
   },
   {
     id: 'builtin.presentation.terminal-modern',

@@ -27,7 +27,10 @@
 #   protocol_version: 1        # H3 initialize 协议版本（默认 1）
 #   client_info: {...}         # H4 initialize clientInfo（默认 {"name":"Pylon","version":"0.1.0"}）
 #   prompt_timeout_secs: 300   # H5 单步闲置超时（默认 300，不限制整轮回合）
-#   cancel_settle_timeout_secs: 30  # H6 cancel 后等待 settle 超时（默认 30）
+#   idle_timeout_secs: 300     # R-t5 活动后的闲置窗口；Hermes/Windows 未声明时由 Pylon
+#                              # 内建兼容层收紧为 12s，活动/心跳会自动续命
+#   first_token_timeout_secs: 300 # R-t5 首 token 窗口；Hermes/Windows 保留 prompt 超时预算
+#   cancel_settle_timeout_secs: 30  # H6 cancel 后等待 settle；Hermes/Windows 未声明时 5s
 #   rpc_timeout_secs: 30       # H8/H9 通用 RPC 超时（默认 30）
 #   max_attachments: 8         # H10 附件数上限（默认 8）
 #   max_attachment_bytes: 10485760  # H11 单附件上限（默认 10MB）
@@ -59,12 +62,16 @@ agents:
     # 用绝对路径（非纯名称）：避免 Pylon 进程继承的 HERMES_HOME 环境变量
     # （Hermes 启动器设的 profile 目录）污染 detect_hermes_home → 嵌套 profiles\<name>。
     hermes_profile: <HERMES_PROFILE_PATH>
-    # 方案 I：Hermes 专用单步闲置超时（默认 300s；实测 Hermes+opencode.ai 首 token
-    # 延迟可达 ~92s，90s 会误杀——留 2 倍余量设 180s）。Hermes 无 provider/401/
-    # 错误 profile 时通常在 session/new 即失败（方案 I 已让该错误即时可见），
-    # 不必靠超时兜底。Peri 保持默认 300s。
+    # Windows 下 Hermes 未显式声明 idle_timeout_secs 时，Pylon 兼容层默认使用
+    # 12s 的“无活动”窗口（工具/思考/文本活动会续命），并保留这里的
+    # prompt_timeout_secs 作为首 token 预算；如某个模型首 token 很慢，可显式设置
+    # acp.idle_timeout_secs / first_token_timeout_secs 覆盖。
     acp:
       prompt_timeout_secs: 180
+    # 可选：覆盖 Hermes 内部并发工具批次的秒级兜底（默认 30；0/负数表示禁用，
+    # 由 Hermes 自己解释）。该环境变量只注入 Hermes 子进程，不影响其他 Agent。
+    # env:
+    #   HERMES_CONCURRENT_TOOL_TIMEOUT_S: "30"
     # legacy 顶层布尔（= acp.set_model_api: set_model）。显式化等价写法：
     # acp:
     #   set_model_api: set_model        # Hermes 切 model 走 unstable session/set_model

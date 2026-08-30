@@ -359,8 +359,10 @@ mod transport;
 pub(crate) mod wire_trace;
 #[cfg(test)]
 pub(crate) use jsonrpc::drain_pending;
+#[cfg(test)]
+pub(crate) use jsonrpc::wait_prompt_with_cancel;
 pub(crate) use jsonrpc::{
-    remove_pending_from, wait_prompt_with_cancel, Pending, PreparedRpc, PromptWaitOutcome,
+    remove_pending_from, wait_prompt_with_recovery, Pending, PreparedRpc, PromptWaitOutcome,
     PENDING_SHARDS,
 };
 #[cfg(test)]
@@ -742,6 +744,13 @@ impl AcpClient {
                     )
                     .into());
                 }
+                // Hermes on Windows executes local tools through Git Bash.  Resolve and
+                // preflight the bundled runtime before spawning the ACP child; the helper is
+                // a no-op for every other provider/transport and never mutates Pylon's
+                // process-wide environment.
+                let hermes_runtime = crate::hermes_runtime::prepare(agent)
+                    .await
+                    .map_err(|error| AgentConnectFailure::preflight(error.code, error.message))?;
                 let mut cmd = Command::new(&agent.exe);
                 cmd.args(agent.command_args())
                     .stdin(Stdio::piped())
@@ -752,6 +761,9 @@ impl AcpClient {
                 }
                 for (k, v) in &agent.env {
                     cmd.env(k, v);
+                }
+                if let Some(selection) = hermes_runtime.as_ref() {
+                    crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
                 }
                 // hermes_profile（方案 G 演进）：注入 HERMES_HOME=<profile 目录>，
                 // 确保 Hermes 使用指定 profile 的 provider/密钥（见 hermes.rs doc）。
@@ -828,7 +840,7 @@ impl AcpClient {
 
                 let mut client = AcpClient {
                     child,
-                    protocol: agent.protocol().clone(),
+                    protocol: crate::hermes_runtime::effective_protocol(agent),
                     agent_capabilities: None,
                     write_tx,
                     writer_task: Some(writer_task),
@@ -1353,6 +1365,32 @@ mod tests {
             }
             other => panic!("unexpected outcome: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_callback_runs_only_when_cancel_does_not_settle() {
+        let (_tx, mut rx) = oneshot::channel();
+        let force_called = Arc::new(AtomicBool::new(false));
+        let force_called_for_task = force_called.clone();
+
+        let outcome = wait_prompt_with_recovery(
+            &mut rx,
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(5),
+            || None,
+            || async { Ok(()) },
+            move || async move {
+                force_called_for_task.store(true, Ordering::SeqCst);
+            },
+        )
+        .await;
+
+        assert!(force_called.load(Ordering::SeqCst));
+        assert!(matches!(
+            outcome,
+            PromptWaitOutcome::CancelledAfterTimeout { response: None, .. }
+        ));
     }
 
     #[tokio::test]

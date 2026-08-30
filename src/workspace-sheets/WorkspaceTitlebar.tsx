@@ -120,7 +120,7 @@ export default function WorkspaceTitlebar({
           {chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}
         </button>}
         <button type="button" onClick={onToggleSettings} title="设置" aria-label="切换设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}</button>
-        <button type="button" className="titlebar-window-btn" onClick={onMinimize} title="最小化" aria-label="最小化">{chromeStyle === 'icons' ? <Minus size={14} aria-hidden="true" /> : '─'}</button>
+        <button type="button" className="titlebar-window-btn titlebar-window-btn-start" onClick={onMinimize} title="最小化" aria-label="最小化">{chromeStyle === 'icons' ? <Minus size={14} aria-hidden="true" /> : '─'}</button>
         <button type="button" className="titlebar-window-btn" onClick={onToggleFullscreen} title="最大化或还原" aria-label="最大化或还原">{chromeStyle === 'icons' ? <Square size={12} aria-hidden="true" /> : '□'}</button>
         <button type="button" className="titlebar-window-btn close" onClick={onCloseWindow} title="关闭" aria-label="关闭窗口">{chromeStyle === 'icons' ? <X size={15} aria-hidden="true" /> : '×'}</button>
       </div>

@@ -10,14 +10,17 @@ import type {
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 import { createWorkbenchHostPort } from './workbenchHostPort.ts'
 import type { WorkbenchHostPort, WorkbenchMountInput } from './workbenchContracts.ts'
+import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidServices.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
+import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 
 export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort, activation }: SolidWorkbenchMountInput & { activation?: RendererActivationSnapshot }): SolidWorkbenchLifecycle {
   let destroyed = false
   let paused = false
   const [input, setInput] = createSignal<SolidWorkbenchInput>(normalizeWorkbenchMountInput(initialInput))
-  const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())
+  const initialRuntimeSnapshot = services.runtime.getSnapshot()
+  const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(initialRuntimeSnapshot)
   const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
   const [pausedSignal, setPausedSignal] = createSignal(false)
   const ownsHostPort = providedHostPort === undefined && services.hostPort === undefined
@@ -32,6 +35,20 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     sessionId: initialInput.sessionId,
   })
   const listeners = new Map<'ready' | 'error' | 'request-action', Set<(payload: unknown) => void>>()
+  // Runtime facts stay lossless and latest-wins. Only the snapshot consumed by
+  // the Solid tree is paced, so a dense token burst cannot trigger a render
+  // storm while canonical/replay consumers continue to see every event.
+  const streamingDisplay = createStreamingDisplayScheduler(snapshot => {
+    if (!destroyed && !paused) setRuntimeSnapshot(snapshot)
+  })
+  const publishRuntimeSnapshot = (snapshot: WorkbenchRuntimeSnapshot) => {
+    // Preview fixtures intentionally remain deterministic; production mounts
+    // use the same scheduler with the normal latest-wins cadence.
+    if (input().preview) streamingDisplay.flush(snapshot)
+    else streamingDisplay.push(snapshot)
+  }
+  if (initialInput.preview) streamingDisplay.flush(initialRuntimeSnapshot)
+  else streamingDisplay.push(initialRuntimeSnapshot)
   let ready = false
   let lastError: unknown
   const emit = (event: 'ready' | 'error' | 'request-action', payload: unknown) => {
@@ -39,7 +56,11 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
   }
 
   const unsubscribeRuntime = services.runtime.subscribe(() => {
-    if (!destroyed && !paused) setRuntimeSnapshot(services.runtime.getSnapshot())
+    if (destroyed) return
+    const snapshot = services.runtime.getSnapshot()
+    // Keep the scheduler's target current even while paused; resume() will
+    // flush this latest snapshot in one deterministic publication.
+    publishRuntimeSnapshot(snapshot)
   })
   const unsubscribeAppearance = services.appearance.subscribe(() => {
     if (!destroyed && !paused) setAppearanceSnapshot(services.appearance.getSnapshot())
@@ -81,18 +102,20 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     pause() {
       if (destroyed || paused) return
       paused = true
+      streamingDisplay.pause()
       setPausedSignal(true)
     },
     resume() {
       if (destroyed || !paused) return
       paused = false
-      setRuntimeSnapshot(services.runtime.getSnapshot())
+      streamingDisplay.resume(services.runtime.getSnapshot())
       setAppearanceSnapshot(services.appearance.getSnapshot())
       setPausedSignal(false)
     },
     destroy() {
       if (destroyed) return
       destroyed = true
+      streamingDisplay.dispose()
       unsubscribeRuntime()
       unsubscribeAppearance()
       dispose()

@@ -791,6 +791,14 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();
     let idle_timeout_secs = protocol.idle_timeout();
     let first_token_timeout_secs = protocol.first_token_timeout();
+    // Only the Hermes/Windows runtime owns the force-recovery path.  The
+    // generic ACP transport keeps its historical cancel-only behavior for
+    // Peri and custom agents.
+    let hermes_force_recovery = state
+        .agent_for_runtime(runtime)
+        .is_some_and(|agent| crate::hermes_runtime::should_apply(&agent));
+    let runtime_for_recovery = runtime.clone();
+    let expected_generation = flow.generation;
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
     // 用作"闲置超时"判据：活动即续命，只有持续无输出才截。
     let source_for_liveness = source.to_string();
@@ -800,7 +808,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             .get(&source_for_liveness)
             .and_then(|s| s.last_activity)
     };
-    let result = acp::wait_prompt_with_cancel(
+    let result = acp::wait_prompt_with_recovery(
         &mut rx,
         Duration::from_secs(cancel_settle_timeout_secs),
         Duration::from_secs(idle_timeout_secs),
@@ -814,6 +822,38 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                 .cancel_session(&peri_id_for_cancel)
                 .await
                 .map_err(|e| e.to_string())
+        },
+        move || async move {
+            if !hermes_force_recovery {
+                return;
+            }
+            // Take the same ACP lock used by client replacement before checking
+            // generation. Replacement updates the generation while holding this
+            // lock, so checking only before locking would leave a race in which
+            // a reconnect wins between the read and the kill.
+            let mut acp = runtime_for_recovery.acp.lock().await;
+            let current_generation = runtime_for_recovery
+                .client_generation
+                .load(Ordering::Acquire);
+            if current_generation != expected_generation {
+                tracing::debug!(
+                    expected_generation,
+                    current_generation,
+                    "skip Hermes force recovery for stale prompt generation"
+                );
+                return;
+            }
+            if acp.is_crashed() {
+                return;
+            }
+            if let Err(error) = acp.kill() {
+                tracing::warn!("Hermes force recovery could not kill ACP child: {error}");
+            } else {
+                tracing::warn!(
+                    expected_generation,
+                    "Hermes ACP child force-killed after cancel did not settle"
+                );
+            }
         },
     )
     .await;

@@ -37,10 +37,18 @@
 .term-user code { font-family:var(--mono); font-size:inherit; }
 
 .term-assistant { position:relative; padding:var(--ui-space-1) 0; white-space:normal; }
-.term-plain-text { white-space:pre-wrap; line-height:1.28; }
-.term-row-user, .term-row-assistant, .term-row-reasoning {
+.term-plain-text { white-space:pre-wrap; line-height:inherit; }
+.term-row-user, .term-row-assistant {
   min-width:0;
   font-family:var(--msg-font,var(--chat-font,var(--mono)));
+  color:var(--msg-text,var(--chat-text-color,var(--text)));
+  line-height:var(--msg-line-height,var(--chat-line-height,1.35));
+}
+.term-row-reasoning {
+  min-width:0;
+  /* Thought is machine-side annotation: keep it on the chat/terminal rail,
+     independently of the selectable Markdown body font. */
+  font-family:var(--chat-font,var(--mono));
   color:var(--msg-text,var(--chat-text-color,var(--text)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }
@@ -211,10 +219,16 @@
 }
 
 .term-tool { min-width:0; padding:var(--ui-space-1) 0; position:relative; }
-/* 连续 Tool 连接线（真实 DOM 元素，ChatView 渲染 + 测量写 top/height）：
-   绝对定位相对 .term；left 对齐指示器中心（.term padding-left 24px + 字符中心 0.3em）。
-   层叠（z-index 参与最近 stacking context）：线(1) 在 body 背景之上（展开不被截断），
-   .term-tool-head(2) 在线之上（指示器覆盖线）。颜色由 ToolConnector 组件 inline 写入。 */
+/* Solid 的连接线统一挂在这一层，避免每个行节点自行推断 offset parent。
+   layer 与 .term 共用一个 containing block；线(1) 在内容背景之上，
+   .term-tool-head(2) 在线之上，让指示器自然覆盖连接点。 */
+.term-tool-connector-layer {
+  position:absolute;
+  inset:0;
+  z-index:1;
+  overflow:visible;
+  pointer-events:none;
+}
 .term-tool-connector {
   position:absolute;
   left:calc(var(--ui-space-6, 24px) + 0.3em - 1px);
@@ -237,7 +251,7 @@
 .term-tool-connector--settle { animation:tool-connector-settle 360ms ease-out 1 both; }
 .term-tool-connector--flash { animation:tool-connector-flash 320ms ease-out 1 both; }
 /* failed Tool 的 connector 与错误指示物同步弱化：保留错误色，但降低线的清晰度。 */
-.term-tool-connector[data-tool-state="failed"] { filter:blur(0.65px); }
+.term-tool-connector[data-connector-mode="follow"][data-tool-state="failed"] { filter:blur(0.65px); }
 @keyframes tool-connector-breathe { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
 @keyframes tool-connector-pulse { 0%,100% { opacity:0.42; } 50% { opacity:0.86; } }
 @keyframes tool-connector-settle { 0% { opacity:0.25; transform:scaleY(0.72); } 60% { opacity:1; transform:scaleY(1.04); } 100% { opacity:1; transform:scaleY(1); } }
@@ -439,6 +453,7 @@
 .term-spinner { padding:var(--ui-space-2) 0; display:flex; align-items:center; gap:var(--ui-space-2); font-size:var(--spinner-size, var(--font-size-md)); color:var(--spinner-color,var(--text-dim)); }
 .spinner-frame { color:inherit; font-size:1.15em; min-width:1.15em; text-align:center; display:inline-block; }
 .spinner-verb { color:inherit; font-weight:500; opacity:0.85; white-space:nowrap; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.spinner-context { color:var(--text-dim); opacity:0.68; font-size:0.9em; white-space:nowrap; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .spinner-glimmer { color:inherit; transition:color 110ms linear, text-shadow 110ms linear; }
 .spinner-glimmer-edge { color:color-mix(in srgb, currentColor 70%, var(--spinner-glimmer-color,var(--accent)) 30%); }
 .spinner-glimmer-core { color:var(--spinner-glimmer-color,var(--accent)); text-shadow:0 0 0.5em color-mix(in srgb, var(--spinner-glimmer-color,var(--accent)) 55%, transparent); }
@@ -1859,4 +1874,77 @@
    renderer contributes an inline visual state. */
 .app[data-interface-mode="terminal-like"] .term-assistant .copy-btn:focus-visible {
   opacity:1 !important;
+}
+
+/* ── Terminal-like alignment pass ──
+   Keep the reading column and the action spine distinct, but make their
+   shared marker column deterministic.  Semantic content can use its own
+   max-width; only the left-hand anchor is shared. */
+.app[data-interface-mode="terminal-like"] {
+  /* Keep the marker close to its label while retaining one shared action
+     spine for Thought, tools and assistant markers. */
+  --agent-marker-col: calc(var(--chat-font-size, 15px) * 1.25);
+}
+.app[data-interface-mode="terminal-like"] .term {
+  --dot-col-width: var(--agent-marker-col);
+}
+.app[data-interface-mode="terminal-like"] .term-reasoning {
+  padding-left: var(--agent-marker-col);
+}
+.app[data-interface-mode="terminal-like"] .term-reasoning-head {
+  min-height: calc(var(--chat-font-size, 15px) * var(--chat-line-height, 1.4));
+}
+.app[data-interface-mode="terminal-like"] .term-tool-head > .term-tool-indicator,
+.app[data-interface-mode="terminal-like"] .term-assistant.has-dot > .term-assistant-dot,
+.app[data-interface-mode="terminal-like"] .term-assistant.has-dot > .term-assistant-dot-img {
+  flex-basis: var(--agent-marker-col);
+  width: var(--agent-marker-col);
+}
+.app[data-interface-mode="terminal-like"] .term-assistant.has-dot > .term-assistant-dot-img {
+  height: var(--agent-marker-col);
+}
+.app[data-interface-mode="terminal-like"] .term-tool-body {
+  margin-left: var(--agent-marker-col);
+}
+
+/* ── Terminal-like block cadence ──
+   Keep semantic turns breathable while letting the tool chain read as one
+   continuous sentence.  Solid's message list wraps each message in an
+   extra row container, so the wrapper receives the inter-row space; this
+   keeps that space inside the measured row instead of changing the layout
+   structure. */
+.app[data-interface-mode="terminal-like"] .term {
+  --chat-row-gap: 8px;
+  --chat-tool-gap: 4px;
+  --chat-activity-gap: 6px;
+}
+.app[data-interface-mode="terminal-like"] .plain-message-list__row + .plain-message-list__row {
+  padding-block-start: var(--chat-row-gap);
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activities {
+  margin-top: var(--chat-activity-gap);
+}
+
+/* ── Terminal-like type roles ──
+   The presentation profile supplies a readable default for human prose while
+   the existing font pickers remain the source of truth for both columns.
+   Prefixes/markers are machine labels, so they stay aligned to the mono rail. */
+.app[data-interface-mode="terminal-like"] :is(
+  .term-user-prefix,
+  .term-user-name,
+  .term-user-tag
+) {
+  font-family:var(--mono);
+}
+.app[data-interface-mode="terminal-like"] :is(
+  .term-row-tool,
+  .term-tool,
+  .term-tool-head
+) {
+  /* Tool names and status are machine annotations: follow the selectable
+     code/path font, independently of the prose and Thought choices. */
+  font-family:var(--mono);
+}
+.app[data-interface-mode="terminal-like"] .term-row-reasoning {
+  font-family:var(--chat-font,var(--mono));
 }

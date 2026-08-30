@@ -1031,7 +1031,7 @@ operation inspect / logs / cancel
 event log
 ```
 
-内置第一方插件当前注册 50 个可执行 Command，覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格/渲染器、插件设置、主题/配置预检和完整 Skin 闭环。运行时事实以以下命令为准：
+内置第一方插件当前注册 65 个可执行 Command，覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格/渲染器、插件设置、主题/配置预检、完整 Skin 闭环和 Browser Sheet 控制面。运行时事实以以下命令为准：
 
 ```powershell
 pylon-cli command list --executable true --json

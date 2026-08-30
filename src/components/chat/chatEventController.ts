@@ -22,6 +22,7 @@ import { reportRuntimeError } from '../../runtimeError'
 import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRuntimeState, type SourceChatRuntime } from './sessionRuntimeStore.ts'
 import type { Message } from './messageTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
+import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import { createHorizontalSubscription } from './horizontalSubscription.ts'
 import { extractTouchedPath } from '../../infrastructure/acp/touchedFiles.ts'
@@ -100,6 +101,8 @@ export interface ChatControllerHandle {
   getLastActivityAt: (source: string) => number | undefined
   /** source-scoped 生成阶段；避免工具/思考阶段在切换后退化。 */
   getGenerationPhase: (source: string) => GenerationPhase | undefined
+  /** 新活动轴；旧调用方可不实现，缺失时回退 generationPhase。 */
+  getGenerationActivity?: (source: string) => GenerationActivitySnapshot | undefined
   /** 会话切换时恢复该 source 的完成态 footer。 */
   getSummary: (source: string) => GenerationSummary | undefined
   /** G1：重试注册失败的 listener，返回是否有新成功项（报告 8.5） */
@@ -1475,6 +1478,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     getGenerating: (source) => runtimeAt(source)?.generating ?? false,
     getLastActivityAt: (source) => runtimeAt(source)?.lastActivityAt,
     getGenerationPhase: (source) => runtimeAt(source)?.generationPhase,
+    getGenerationActivity: (source) => runtimeAt(source)?.generationActivity,
     getSummary: (source) => {
       const summary = runtimeAt(source)?.lastSummary
       return summary ? { ...summary, completedFrame: '' } : undefined

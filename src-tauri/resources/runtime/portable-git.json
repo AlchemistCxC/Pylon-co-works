@@ -1,0 +1,10 @@
+{
+  "runtime": "PortableGit",
+  "version": "2.54.0.windows.1",
+  "platform": "win64",
+  "asset": "PortableGit-2.54.0-64-bit.7z.exe",
+  "url": "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/PortableGit-2.54.0-64-bit.7z.exe",
+  "sha256": "bea006a6cc69673f27b1647e84ab3a68e912fbc175ab6320c5987e012897f311",
+  "license": "GPL-2.0-or-later (Git) plus the licenses shipped in the PortableGit distribution",
+  "source": "https://gitforwindows.org/"
+}

@@ -30,6 +30,7 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
     generationStart: generation.generationStart, lastTokenAt: generation.lastTokenAt,
     tokenCount: generation.tokenCount, summary: generation.summary,
     generationPhase: generation.generationPhase,
+    generationActivity: generation.generationActivity,
     thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
     availableModels: Object.freeze([]), activeModel: document?.session.model ?? '',
     availableModes: Object.freeze([]), activeMode: document?.session.mode ?? '',

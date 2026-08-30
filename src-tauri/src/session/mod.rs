@@ -191,7 +191,7 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
     ) -> crate::agent_config::AcpProtocolConfig {
         self.agent_for_runtime(runtime)
-            .map(|agent| agent.protocol().clone())
+            .map(|agent| crate::hermes_runtime::effective_protocol(&agent))
             .unwrap_or_default()
     }
 

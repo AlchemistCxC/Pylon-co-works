@@ -65,12 +65,26 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
     const pending = text.slice(committedText.length)
     const split = splitStreamingMarkdownBlocks(pending)
     for (const block of split.stableBlocks) {
-      tailRow.update(block)
+      // The splitter includes the blank-line delimiter in each stable block
+      // so `committedText` remains lossless.  That delimiter is structural,
+      // though—not content that should become an extra `pre-wrap` line inside
+      // the row.  The shared `.term-p + .term-p` cadence below represents the
+      // separator; strip it from the visible stable text to keep streaming
+      // geometry identical to the completed Markdown path.
+      tailRow.update(trimStableBlockDelimiter(block))
       stableRows.push(tailRow)
       committedText += block
       tailRow = createStreamingBlockRow(nextId++, '')
     }
-    tailRow.update(split.unstable)
+    // Consecutive blank lines are intentionally collapsed by the splitter
+    // rather than becoming empty renderer rows.  If the remaining tail starts
+    // with another delimiter, drop that structural prefix as well; otherwise
+    // `pre-wrap` would re-introduce an extra empty line after the CSS paragraph
+    // cadence has already represented the boundary.
+    const unstableText = split.stableBlocks.length > 0
+      ? trimStreamingDelimiterStart(split.unstable)
+      : split.unstable
+    tailRow.update(unstableText)
     if (final && split.unstable.length > 0) {
       stableRows.push(tailRow)
       committedText += split.unstable
@@ -90,6 +104,18 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
     streaming={props.streaming}
     inline={props.inline}
   />}</For>
+}
+
+function trimStableBlockDelimiter(block: string): string {
+  // A stable block is emitted only after at least one blank line.  Consume all
+  // trailing line terminators/indent-only lines from the rendered fragment;
+  // the canonical text remains untouched in `committedText` above.  Supporting
+  // CRLF here keeps the visual result independent of provider line endings.
+  return block.replace(/(?:\r?\n[\t ]*)+$/u, '')
+}
+
+function trimStreamingDelimiterStart(text: string): string {
+  return text.replace(/^(?:\r?\n[\t ]*)+/u, '')
 }
 
 function createStreamingBlockRow(id: number, initialText: string): StreamingBlockRow {

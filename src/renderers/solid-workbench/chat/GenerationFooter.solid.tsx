@@ -1,5 +1,17 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { resolveActivityLine } from '../../../domains/activity/activityLine.ts'
+import {
+  legacyPhaseFromActivity,
+  resolveGenerationIndicatorContext,
+  resolveGenerationIndicatorCopy,
+} from '../../../domains/activity/generationStateMachine.ts'
+import {
+  chooseGenerationIndicatorVerb,
+  createGenerationIndicatorCopyMachine,
+  generationIndicatorCopyDueAt,
+  generationIndicatorCopyText,
+  type GenerationIndicatorCopyEvent,
+} from '../../../domains/activity/generationIndicatorCopyMachine.ts'
 import { resolveSpinnerMarker } from '../../../components/chat/spinnerFrames.ts'
 import { glimmerIntensity, resolveActivity, resolveFrame, resolveGlimmer, resolveStallProgress } from '../../../components/chat/spinnerMachine.ts'
 import { nextTokenCatchUp } from '../../../components/chat/tokenCatchUp.ts'
@@ -8,13 +20,13 @@ import {
   browserWorkbenchClock,
   type GenerationFooterInput,
   type GenerationFooterLifecycle,
+  type GenerationLiveness,
   type WorkbenchClock,
 } from '../../../domains/workbench/generationFooterContracts.ts'
 
 const GLIMMER_CYCLE_MS = 4600
 const HOT_TICK_MS = 120
 const SLOW_TICK_MS = 1000
-const MIN_VERB_DISPLAY_MS = 1200
 
 export interface SolidGenerationFooterProps extends GenerationFooterInput {
   /** ChatView usage is intentionally hidden until the product surface is redesigned. */
@@ -28,14 +40,40 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   const clock = () => props.clock ?? browserWorkbenchClock
   const [now, setNow] = createSignal(clock().now())
   const [displayedTokens, setDisplayedTokens] = createSignal(0)
-  const [displayedVerb, setDisplayedVerb] = createSignal('')
   const [paused, setPaused] = createSignal(false)
+  const configuredVerbs = () => {
+    const verbs = props.appearance.verbs.map(value => value.trim()).filter(Boolean)
+    return verbs.length > 0 ? verbs : ['思考中']
+  }
+  const verbSignature = createMemo(() => `${props.appearance.verbSet}\u0000${configuredVerbs().join('\u0001')}`)
+  const copyMachine = createGenerationIndicatorCopyMachine()
+  let generationSerial = 0
+  let initialGenerationId = ''
+  let initialPresetVerb = ''
+  if (props.running) {
+    initialGenerationId = `generation-${++generationSerial}`
+    initialPresetVerb = chooseGenerationIndicatorVerb(configuredVerbs(), props.random ?? Math.random)
+    copyMachine.dispatch({
+      type: 'start',
+      generationId: initialGenerationId,
+      text: initialPresetVerb,
+      at: clock().now(),
+    })
+  }
+  const [selectedPresetVerb, setSelectedPresetVerb] = createSignal(initialPresetVerb)
+  const [currentGenerationId, setCurrentGenerationId] = createSignal(initialGenerationId)
+  const [displayedVerb, setDisplayedVerb] = createSignal(generationIndicatorCopyText(copyMachine.getState()))
   let hotTimer: unknown | null = null
   let slowTimer: unknown | null = null
   let verbTimer: unknown | null = null
   let destroyed = false
-  let lastVerbShownAt = 0
   let observedStartTime = props.startTime
+  let observedGenerationRunning = props.running
+  let observedGenerationStartTime = props.startTime
+  let observedVerbSignature = verbSignature()
+  let observedCopyPrimary: string | undefined
+  let observedCopyLiveness: GenerationLiveness | undefined
+  let observedContextSignature = ''
   let effectiveStartTime = normalizeGenerationStart(props.startTime, clock().now())
 
   const clearHotTimer = () => {
@@ -49,6 +87,25 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   const clearVerbTimer = () => {
     if (verbTimer !== null) clock().clearTimeout(verbTimer)
     verbTimer = null
+  }
+  const scheduleCopyTimer = () => {
+    clearVerbTimer()
+    const state = copyMachine.getState()
+    const dueAt = generationIndicatorCopyDueAt(state)
+    if (dueAt === undefined || destroyed || paused() || !props.running) return
+    const generationId = state.status === 'pending' ? state.generationId : ''
+    verbTimer = clock().setTimeout(() => {
+      verbTimer = null
+      if (destroyed || paused() || !generationId) return
+      dispatchCopy({ type: 'tick', generationId, at: clock().now() })
+    }, Math.max(0, dueAt - clock().now()))
+  }
+  const dispatchCopy = (event: GenerationIndicatorCopyEvent) => {
+    const previous = copyMachine.getState()
+    const next = copyMachine.dispatch(event)
+    if (next === previous) return
+    setDisplayedVerb(generationIndicatorCopyText(next))
+    scheduleCopyTimer()
   }
   const syncTimers = () => {
     clearHotTimer()
@@ -74,6 +131,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
       setPaused(false)
       setNow(clock().now())
       syncTimers()
+      scheduleCopyTimer()
     },
     destroy() {
       if (destroyed) return
@@ -87,6 +145,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   onMount(() => {
     setNow(clock().now())
     syncTimers()
+    scheduleCopyTimer()
     props.onLifecycleReady?.(lifecycle)
   })
   onCleanup(() => lifecycle.destroy())
@@ -109,46 +168,107 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     else if (displayedTokens() > real) setDisplayedTokens(real)
   })
 
-  const fallbackVerb = createMemo(() => {
-    const verbs = props.appearance.verbs.length > 0 ? props.appearance.verbs : ['思考中']
-    const randomValue = Math.max(0, Math.min(0.999999, (props.random ?? Math.random)()))
-    return verbs[Math.floor(randomValue * verbs.length)] ?? verbs[0]!
-  })
+  const fallbackVerb = () => selectedPresetVerb() || configuredVerbs()[0]!
   const idleMs = () => props.running
     ? Math.max(0, now() - (props.lastTokenAt ?? props.startTime))
     : 0
   const line = createMemo(() => resolveActivityLine({
     activeTaskContent: props.activeTaskContent,
-    toolTitle: props.phase?.kind === 'tool' ? props.phase.name : undefined,
-    phase: props.phase?.kind,
+    toolTitle: (props.activity?.activeTools.at(-1)?.name ?? (props.phase?.kind === 'tool' ? props.phase.name : undefined)),
+    phase: (legacyPhaseFromActivity(props.activity) ?? props.phase)?.kind,
     thinkingStart: props.thinkingStart,
     now: now(),
     fallbackVerb: fallbackVerb(),
   }))
-  const activity = () => line().stallSuppressed ? 'active' : resolveActivity(idleMs())
-  const desiredVerb = () => {
-    if (!props.running) return ''
-    if (activity() === 'waiting') return '等待响应'
-    if (activity() === 'stalled') return '仍在等待后端响应'
-    return props.appearance.verbSet === 'cc' && !props.activeTaskContent
-      ? fallbackVerb()
-      : line().activity
-  }
+  const indicatorContext = createMemo(() => resolveGenerationIndicatorContext({
+    activity: props.activity,
+    phase: props.phase,
+    activeTaskContent: props.activeTaskContent,
+  }))
+  const activity = () => indicatorContext().kind === 'tooling' || line().stallSuppressed
+    ? 'active'
+    : resolveActivity(idleMs())
+  const copy = createMemo(() => resolveGenerationIndicatorCopy({
+    running: props.running,
+    liveness: activity(),
+    presetVerb: fallbackVerb(),
+    context: indicatorContext(),
+  }))
+  const secondaryContext = () => copy().secondary
 
+  // 生成生命周期只在 running 由 false→true 或 startTime 变化时开启新 generation。
+  // generation id 不暴露给协议，专门用于阻断旧定时器回写新回合。
   createEffect(() => {
-    const next = desiredVerb()
-    clearVerbTimer()
-    const elapsed = clock().now() - lastVerbShownAt
-    if (!displayedVerb() || elapsed >= MIN_VERB_DISPLAY_MS) {
-      lastVerbShownAt = clock().now()
-      setDisplayedVerb(next)
-      return
+    const running = props.running
+    const startTime = props.startTime
+    const previousRunning = observedGenerationRunning
+    const previousStartTime = observedGenerationStartTime
+    const startsNewGeneration = running && (
+      !previousRunning || startTime !== previousStartTime || !currentGenerationId()
+    )
+
+    observedGenerationRunning = running
+    observedGenerationStartTime = startTime
+
+    if (startsNewGeneration) {
+      const id = `generation-${++generationSerial}`
+      const preset = chooseGenerationIndicatorVerb(configuredVerbs(), props.random ?? Math.random)
+      effectiveStartTime = normalizeGenerationStart(startTime, clock().now())
+      setCurrentGenerationId(id)
+      setSelectedPresetVerb(preset)
+      observedCopyPrimary = undefined
+      observedCopyLiveness = undefined
+      observedContextSignature = ''
+      dispatchCopy({ type: 'start', generationId: id, text: preset, at: clock().now() })
+    } else if (!running && previousRunning) {
+      const id = currentGenerationId()
+      if (id) dispatchCopy({ type: 'finish', generationId: id, at: clock().now() })
+      setCurrentGenerationId('')
+      setSelectedPresetVerb('')
     }
-    verbTimer = clock().setTimeout(() => {
-      lastVerbShownAt = clock().now()
-      setDisplayedVerb(next)
-      verbTimer = null
-    }, MIN_VERB_DISPLAY_MS - elapsed)
+  })
+
+  // 设置变化只重新选择一次 preset；同一回合内保留仍然有效的当前词，
+  // 避免用户调整其它外观项时主文案无意义地跳变。
+  createEffect(() => {
+    const signature = verbSignature()
+    const previousSignature = observedVerbSignature
+    observedVerbSignature = signature
+    if (signature === previousSignature || !props.running) return
+    const id = currentGenerationId()
+    if (!id) return
+    const candidates = configuredVerbs()
+    const current = selectedPresetVerb()
+    const next = candidates.includes(current)
+      ? current
+      : chooseGenerationIndicatorVerb(candidates, props.random ?? Math.random)
+    if (next === current) return
+    setSelectedPresetVerb(next)
+    // waiting/stalled 时主文案由 liveness 提示占用；先只更新候选词，
+    // 待恢复 active 的 liveness-change 再按最短展示时间切入新词。
+    if (activity() !== 'active') return
+    dispatchCopy({ type: 'preset-change', generationId: id, text: next, at: clock().now() })
+  })
+
+  // 主文案只监听 liveness；工具/阶段切换通过 context-change 走独立通道，
+  // 不会重置最短展示计时。
+  createEffect(() => {
+    const running = props.running
+    const id = currentGenerationId()
+    const context = indicatorContext()
+    const liveness = activity()
+    const primary = copy().primary
+    const contextSignature = `${context.kind ?? ''}\u0000${context.label ?? ''}\u0000${context.toolNames.join('\u0001')}`
+
+    if (contextSignature !== observedContextSignature) {
+      observedContextSignature = contextSignature
+      if (running && id) dispatchCopy({ type: 'context-change', generationId: id, at: clock().now() })
+    }
+    if (!running || !id) return
+    if (primary === observedCopyPrimary && liveness === observedCopyLiveness) return
+    observedCopyPrimary = primary
+    observedCopyLiveness = liveness
+    dispatchCopy({ type: 'liveness-change', generationId: id, liveness, text: primary, at: clock().now() })
   })
 
   const elapsedMs = () => Math.max(0, now() - effectiveStartTime)
@@ -183,7 +303,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
         <div
           class="term-spinner"
           data-activity={activity()}
-          data-phase={props.appearance.framePreset === 'cc' ? undefined : props.phase?.kind || 'idle'}
+          data-phase={props.appearance.framePreset === 'cc' ? undefined : (legacyPhaseFromActivity(props.activity) ?? props.phase)?.kind || 'idle'}
           style={{ '--stall-progress': stallProgress().toFixed(3) }}
         >
           <span class="spinner-frame" style={{ color: props.appearance.color || undefined, 'font-size': `${props.appearance.size}px` }}>
@@ -196,9 +316,12 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
             reducedMotion={props.reducedMotion === true}
             color={props.appearance.color}
           />
+          <Show when={secondaryContext()}>
+            {secondary => <span class="spinner-context" title={secondary()}>{secondary()}</span>}
+          </Show>
           <span class="spinner-meta">(
             <span>{formatElapsed(elapsedMs())}</span>
-            <Show when={props.phase?.kind === 'thinking' && props.thinkingStart != null}>
+            <Show when={(legacyPhaseFromActivity(props.activity) ?? props.phase)?.kind === 'thinking' && props.thinkingStart != null}>
               <span> · </span><span>思考 {formatElapsed(Math.max(0, now() - (props.thinkingStart ?? now())))}</span>
             </Show>
             <Show when={props.showTokenCount === true && props.tokenCount > 0}>

@@ -50,7 +50,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/fonts/*"
+      "resources/fonts/*",
+      "resources/runtime"
     ],
     "windows": {
       "webviewInstallMode": {

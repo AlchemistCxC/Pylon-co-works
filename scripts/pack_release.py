@@ -13,6 +13,7 @@
       data/                    # 空目录，触发 portable 模式
       tools/install-webview2.bat
       tools/MicrosoftEdgeWebview2Setup.exe   # 受控 release 资源，默认必须存在
+      resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
     release/pylon-<version>-win64.zip
     release/pylon-<version>-win64.zip.sha256
     release/pylon-<version>-win64.manifest.json
@@ -38,6 +39,8 @@ REPO_DIR = SCRIPT_DIR.parent
 SRC_TAURI_DIR = REPO_DIR / "src-tauri"
 RELEASE_DIR = SRC_TAURI_DIR / "target" / "release"
 TEMPLATE_DIR = REPO_DIR / "resources" / "release"
+HERMES_RUNTIME_DIR = SRC_TAURI_DIR / "resources" / "runtime"
+HERMES_RUNTIME_TREE = HERMES_RUNTIME_DIR / "git"
 OUT_ROOT = REPO_DIR / "release"
 
 EXE_NAME = "pylon.exe"
@@ -104,6 +107,19 @@ def is_text_file(path: Path) -> bool:
     return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".json", ".md"}
 
 
+def is_hermes_runtime_payload(rel_path: str) -> bool:
+    """Return whether *rel_path* belongs to the upstream vendor tree.
+
+    The release audit's secret/absolute-path rules are for Pylon-authored
+    configuration and documentation. PortableGit ships thousands of upstream
+    docs and scripts containing harmless example paths and words such as
+    ``token``; scanning those files creates false positives and does not add
+    useful protection. Keep the structural/forbidden-name checks for the tree,
+    but restrict content scanning to our own runtime metadata and README.
+    """
+    return rel_path.replace("\\", "/").startswith("resources/runtime/git/")
+
+
 def scan_text_file(rel_path: str, text: str) -> None:
     for line_no, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
@@ -139,6 +155,33 @@ def reject_forbidden(rel_path: str) -> None:
         or posix.startswith("node_modules/")
     ):
         raise PackError(f"包内出现禁止路径: {rel_path}")
+
+
+def hermes_runtime_is_complete(root: Path) -> bool:
+    """Return whether a complete PortableGit tree is ready for packaging."""
+    bash_candidates = [root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"]
+    if not any(path.is_file() for path in bash_candidates):
+        return False
+    usr_bin = root / "usr" / "bin"
+    required = ("true.exe", "cat.exe", "mktemp.exe", "mv.exe", "awk.exe", "grep.exe")
+    if any(not (usr_bin / name).is_file() for name in required):
+        return False
+    return any(
+        path.is_file()
+        for path in (root / "usr" / "bin" / "msys-2.0.dll", root / "bin" / "msys-2.0.dll")
+    )
+
+
+def append_tree_files(
+    files: list[tuple[Path, str]],
+    source_root: Path,
+    package_root: str,
+) -> None:
+    for root, _dirs, names in os.walk(source_root):
+        for name in names:
+            full = Path(root) / name
+            rel = full.relative_to(source_root).as_posix()
+            files.append((full, f"{package_root.rstrip('/')}/{rel}"))
 
 
 def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Path, str]]:
@@ -180,6 +223,34 @@ def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Pat
                 files.append((full, rel))
     else:
         print("warn: release resources 目录不存在，仅打包 exe")
+
+    # The Tauri resource copier normally places the runtime under
+    # target/release/resources.  Keep a repository fallback for `--no-bundle`
+    # layouts where that copy is skipped, while still requiring a complete
+    # tree so a release can never silently omit Hermes' Bash dependency.
+    packaged_runtime = RELEASE_DIR / "resources" / "runtime" / "git"
+    runtime_source = packaged_runtime if hermes_runtime_is_complete(packaged_runtime) else HERMES_RUNTIME_TREE
+    if not hermes_runtime_is_complete(runtime_source):
+        raise PackError(
+            "缺少完整的 Hermes PortableGit 运行时（resources/runtime/git）。"
+            "请先运行 npm run prepare:hermes-runtime，再重新构建/打包。"
+        )
+    existing_paths = {rel for _src, rel in files}
+    for runtime_rel in ["resources/runtime/portable-git.json", "resources/runtime/README.txt"]:
+        source = HERMES_RUNTIME_DIR / Path(runtime_rel).name
+        if runtime_rel not in existing_paths and source.is_file():
+            files.append((source, runtime_rel))
+            existing_paths.add(runtime_rel)
+    # Add the binary tree only when Tauri did not already copy a *complete*
+    # tree.  A partial target/release/resources copy must not shadow the
+    # repository fallback.
+    if not hermes_runtime_is_complete(packaged_runtime):
+        files = [
+            (source, rel)
+            for source, rel in files
+            if not rel.startswith("resources/runtime/git/")
+        ]
+        append_tree_files(files, runtime_source, "resources/runtime/git")
 
     for template_name in ["agents.example.yaml", "README.txt"]:
         src = TEMPLATE_DIR / template_name
@@ -243,7 +314,7 @@ def audit_staging(staging_root: Path, top_dir: str) -> None:
             full = Path(root) / name
             rel = full.relative_to(staging_root).as_posix()
             reject_forbidden(rel)
-            if is_text_file(full):
+            if is_text_file(full) and not is_hermes_runtime_payload(rel):
                 scan_text_file(rel, full.read_text(encoding="utf-8", errors="strict"))
 
 
@@ -350,7 +421,7 @@ def verify_zip(zip_path: Path) -> None:
             if info.is_dir():
                 continue
             rel = info.filename[len(prefix):]
-            if is_text_file(Path(rel)):
+            if is_text_file(Path(rel)) and not is_hermes_runtime_payload(rel):
                 text = zf.read(info).decode("utf-8", errors="strict")
                 scan_text_file(rel, text)
 

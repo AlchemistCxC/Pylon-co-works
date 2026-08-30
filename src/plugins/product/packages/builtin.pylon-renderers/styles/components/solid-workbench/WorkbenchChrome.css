@@ -47,6 +47,124 @@
 /* 消息流区已消费 .chat-view{flex:1}（ChatView.css L6），此处仅保证可收缩下限 */
 .solid-workbench-chat {
   min-height: 0;
+  /* The visible scrollbar is rendered by the rail below. Keep this element
+     as the real scroll container so wheel, keyboard and touch scrolling stay
+     native while the visual track can host Solid controls. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.solid-agent-workbench .solid-workbench-chat::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── 聊天滚动轨道 ──
+   轨道本身就是右侧滚动条：端点按钮、滑块和中间轨道连续铺开，
+   不再呈现为悬浮在原生 scrollbar 旁边的两个控件。 */
+.solid-workbench-chat-shell {
+  --scroll-action-rail-width: 20px;
+  --scroll-action-end-size: 22px;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.solid-workbench-chat-shell > .solid-workbench-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.solid-workbench-scroll-rail {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 6;
+  display: flex;
+  width: var(--scroll-action-rail-width);
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: stretch;
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 82%, transparent);
+  pointer-events: none;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn {
+  position: relative;
+  inset: auto;
+  display: grid;
+  width: 100%;
+  height: var(--scroll-action-end-size);
+  flex: 0 0 var(--scroll-action-end-size);
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 92%, transparent);
+  opacity: .72;
+  mix-blend-mode: normal;
+  cursor: pointer;
+  pointer-events: auto;
+  font: 600 11px/1 var(--mono);
+  transition: color 120ms ease, opacity 120ms ease, background-color 120ms ease;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-panel, var(--bg-panel, transparent)));
+  opacity: 1;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.solid-agent-workbench .solid-workbench-scroll-track {
+  position: relative;
+  width: calc(100% - 4px);
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-inline: 2px;
+  background: color-mix(in srgb, var(--border) 12%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+}
+.solid-agent-workbench .solid-workbench-scroll-track:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: -2px;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  left: 4px;
+  min-height: 0;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--border-focus) 72%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-dim) 72%, var(--surface-panel, var(--bg-panel, transparent)));
+  cursor: grab;
+  pointer-events: auto;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb:hover,
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-dragging='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 72%, var(--surface-panel, var(--bg-panel, transparent)));
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-scrollable='false'] {
+  visibility: hidden;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-dragging='true'] {
+  cursor: grabbing;
+}
+@media (max-width: 640px) {
+  .solid-workbench-chat-shell {
+    --scroll-action-rail-width: 24px;
+    --scroll-action-end-size: 24px;
+  }
+  .solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn {
+    width: 100%;
+    height: var(--scroll-action-end-size);
+    flex-basis: var(--scroll-action-end-size);
+  }
 }
 
 /* document surface 区块最小间距体系（过渡态：裸 div 直排 → 有节奏的分区） */

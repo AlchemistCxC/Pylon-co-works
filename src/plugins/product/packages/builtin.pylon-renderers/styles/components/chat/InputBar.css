@@ -249,3 +249,13 @@
     transition:none !important;
   }
 }
+
+/* Terminal prompt is a fixed gutter, so changing the glyph or font does not
+   move the textarea's reading start. */
+.app[data-interface-mode="terminal-like"] .input-bar.cli-mode .cli-prefix {
+  box-sizing:border-box;
+  width:1.4em;
+  flex:0 0 1.4em;
+  padding-inline:0;
+  text-align:left;
+}

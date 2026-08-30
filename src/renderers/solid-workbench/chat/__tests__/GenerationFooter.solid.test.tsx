@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createFakeWorkbenchClock } from '../../../../domains/workbench/fakeWorkbenchClock.ts'
 import type { SpinnerAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
@@ -117,6 +118,51 @@ describe('SolidGenerationFooter', () => {
       appearance={APPEARANCE} clock={taskClock} random={() => 0}
     />)
     expect(task.container.textContent).toContain('正在执行 focused tests')
+  })
+
+  it('有 phase 时仍显示配置的预设主文案，而不是被固定阶段文案吞掉', () => {
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={0} startTime={0} lastTokenAt={0} summary={null}
+      phase={{ kind: 'thinking' }}
+      appearance={{ ...APPEARANCE, verbs: ['博大精深'] }}
+      clock={createFakeWorkbenchClock(0)} random={() => 0}
+    />)
+    expect(result.container.querySelector('.spinner-verb')?.textContent).toContain('博大精深')
+    expect(result.container.querySelector('.spinner-context')?.textContent).toContain('思考')
+  })
+
+  it('回合重启时重新选择 preset，且 waiting 恢复不会立即跳词', async () => {
+    const clock = createFakeWorkbenchClock(0)
+    const [running, setRunning] = createSignal(false)
+    const [startTime, setStartTime] = createSignal(0)
+    const [lastTokenAt, setLastTokenAt] = createSignal(0)
+    const result = render(() => <SolidGenerationFooter
+      running={running()} tokenCount={0} startTime={startTime()} lastTokenAt={lastTokenAt()} summary={null}
+      phase={{ kind: 'thinking' }} appearance={{ ...APPEARANCE, verbs: ['博大精深', '大道至简'] }}
+      clock={clock} random={() => 0}
+    />)
+
+    setRunning(true)
+    await waitFor(() => expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('博大精深'))
+    clock.advance(3_240)
+    await waitFor(() => expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('等待响应'))
+
+    setLastTokenAt(clock.now())
+    await waitFor(() => expect((result.container.querySelector('.term-spinner') as HTMLElement).dataset.activity).toBe('active'))
+    // active 恢复后仍先保留 waiting 文案；定时器到期才回到 preset。
+    expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('等待响应')
+    // waiting 实际在最近一次 120ms tick（约 3,120ms）切入，
+    // 所以从当前 3,240ms 到截止点还剩 1,080ms。
+    clock.advance(1_079)
+    expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('等待响应')
+    clock.advance(1)
+    await waitFor(() => expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('博大精深'))
+
+    setRunning(false)
+    await waitFor(() => expect(result.container.querySelector('.term-spinner')).toBeNull())
+    setStartTime(5_000)
+    setRunning(true)
+    await waitFor(() => expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('博大精深'))
   })
 
   it('reduced-motion 固定首帧且禁用 glimmer', () => {

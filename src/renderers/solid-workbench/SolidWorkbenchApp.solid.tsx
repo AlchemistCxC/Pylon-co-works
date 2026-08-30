@@ -1,18 +1,20 @@
 import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
-import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.ts'
+import { buildChatRowDescriptors, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchExtensionNode, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
 import { coalesceAdjacentDisplayTextParts, isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
+import { INSTANT_LOCK_MS, SMOOTH_LOCK_MS } from '../../components/chat/scrollFollowState.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
-import { SolidToolConnector } from './chat/ToolConnector.solid.tsx'
+import { SolidToolConnectorLayer, type SolidToolConnectorEdge, type ToolConnectorAppearance } from './chat/ToolConnector.solid.tsx'
 import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
 import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
@@ -78,9 +80,36 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const [searchQuery] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-query', '')
   const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
   let bottomAnchor: HTMLDivElement | undefined
+  let chatViewport: HTMLDivElement | undefined
+  let scrollRailTrack: HTMLDivElement | undefined
+  let stopScrollRailDrag: (() => void) | undefined
+  const [scrollRailMetrics, setScrollRailMetrics] = createSignal({
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+    trackHeight: 0,
+  })
   let followedSessionId: string | null | undefined
+  // Programmatic scrolls emit the same `scroll` events as user input. Keep
+  // those feedback events from briefly flipping the follow state while a
+  // button animation is in flight, and invalidate any already queued
+  // auto-follow microtask when the user chooses an explicit endpoint.
+  let followLockUntil = 0
+  let scrollActionRevision = 0
+  const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const beginScrollAction = (nextFollowBottom: boolean, behavior: ScrollBehavior) => {
+    scrollActionRevision += 1
+    followLockUntil = now() + (behavior === 'smooth' ? SMOOTH_LOCK_MS : INSTANT_LOCK_MS)
+    setFollowBottom(nextFollowBottom)
+  }
   onCleanup(() => {
     bottomAnchor = undefined
+    chatViewport = undefined
+    scrollRailTrack = undefined
+    stopScrollRailDrag?.()
+    stopScrollRailDrag = undefined
+    followLockUntil = 0
+    scrollActionRevision += 1
     connectorPort.destroy()
   })
   const document = () => snapshot().document
@@ -118,6 +147,194 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const activityPlacement = createMemo(() => selectActivityTimelinePlacement(
     snapshot().messages.some(message => message.role === 'tool') ? undefined : document(),
   ))
+  const connectorEdges = createMemo<readonly SolidToolConnectorEdge[]>(() => mergeToolConnectorEdges(
+    buildLegacyToolConnectorEdges(descriptors(), appearance()),
+    buildCanonicalToolConnectorEdges(activityPlacement(), document(), props.context),
+  ))
+
+  const scrollRailThumb = createMemo(() => {
+    const metrics = scrollRailMetrics()
+    const maxScroll = Math.max(0, metrics.scrollHeight - metrics.clientHeight)
+    const trackHeight = Math.max(0, metrics.trackHeight)
+    if (trackHeight <= 0 || maxScroll <= 0 || metrics.scrollHeight <= 0) {
+      return { visible: false, height: trackHeight, offset: 0, maxScroll }
+    }
+    const height = Math.min(
+      trackHeight,
+      Math.max(28, trackHeight * metrics.clientHeight / metrics.scrollHeight),
+    )
+    const travel = Math.max(0, trackHeight - height)
+    const progress = Math.min(1, Math.max(0, metrics.scrollTop / maxScroll))
+    return { visible: true, height, offset: travel * progress, maxScroll }
+  })
+
+  const syncScrollRail = (viewport = chatViewport) => {
+    if (!viewport) return
+    const trackHeight = scrollRailTrack?.getBoundingClientRect().height ?? 0
+    const next = {
+      scrollTop: Math.max(0, viewport.scrollTop),
+      scrollHeight: Math.max(0, viewport.scrollHeight),
+      clientHeight: Math.max(0, viewport.clientHeight),
+      trackHeight: Math.max(0, trackHeight),
+    }
+    setScrollRailMetrics(previous => (
+      previous.scrollTop === next.scrollTop
+      && previous.scrollHeight === next.scrollHeight
+      && previous.clientHeight === next.clientHeight
+      && previous.trackHeight === next.trackHeight
+        ? previous
+        : next
+    ))
+  }
+
+  const updateBottomFollow = (viewport: HTMLDivElement) => {
+    syncScrollRail(viewport)
+    if (now() < followLockUntil) return
+    const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
+    setFollowBottom(distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX)
+  }
+
+  const eventElement = (event?: Event) => {
+    const current = event?.currentTarget
+    if (current instanceof HTMLElement) return current
+    const target = event?.target
+    return target instanceof HTMLElement ? target : undefined
+  }
+
+  const viewportFromAction = (event?: Event) => {
+    const target = eventElement(event)
+    const shell = target?.closest<HTMLElement>('.solid-workbench-chat-shell')
+    return shell?.querySelector<HTMLDivElement>('.chat-view') ?? chatViewport
+  }
+
+  const scrollViewportToBottom = (viewport: HTMLDivElement, behavior: ScrollBehavior) => {
+    const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    if (typeof viewport.scrollTo === 'function') {
+      viewport.scrollTo({ top, behavior })
+    } else {
+      viewport.scrollTop = top
+    }
+    syncScrollRail(viewport)
+  }
+
+  const stopScrollRailPointerDrag = () => {
+    stopScrollRailDrag?.()
+    stopScrollRailDrag = undefined
+  }
+
+  const beginScrollRailThumbDrag = (event: PointerEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const viewport = viewportFromAction(event)
+    const thumb = eventElement(event)?.closest<HTMLElement>('.solid-workbench-scroll-thumb')
+    const track = thumb?.closest<HTMLElement>('.solid-workbench-scroll-track')
+    if (!viewport || !(thumb instanceof HTMLElement) || !track) return
+
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    const trackHeight = track.getBoundingClientRect().height
+    const thumbHeight = thumb.getBoundingClientRect().height
+    const travel = Math.max(1, trackHeight - thumbHeight)
+    if (maxScroll <= 0 || trackHeight <= 0) return
+
+    stopScrollRailPointerDrag()
+    thumb.dataset.dragging = 'true'
+    const startY = event.clientY
+    const startScrollTop = viewport.scrollTop
+    const pointerId = event.pointerId
+    const move = (next: PointerEvent) => {
+      if (next.pointerId !== pointerId) return
+      const progress = (next.clientY - startY) / travel
+      viewport.scrollTop = Math.min(maxScroll, Math.max(0, startScrollTop + progress * maxScroll))
+      syncScrollRail(viewport)
+    }
+    const stop = (next?: PointerEvent) => {
+      if (next && next.pointerId !== pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      if (thumb.dataset.dragging === 'true') delete thumb.dataset.dragging
+      if (stopScrollRailDrag === stop) stopScrollRailDrag = undefined
+    }
+    stopScrollRailDrag = stop
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+
+  const seekScrollRailTrack = (event: MouseEvent | PointerEvent) => {
+    const targetElement = eventElement(event)
+    if (targetElement?.closest('.solid-workbench-scroll-thumb')) return
+    event.preventDefault()
+    const viewport = viewportFromAction(event)
+    const track = targetElement?.closest<HTMLElement>('.solid-workbench-scroll-track')
+    if (!viewport || !(track instanceof HTMLElement)) return
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    const trackRect = track.getBoundingClientRect()
+    const thumbHeight = scrollRailThumb().height
+    const travel = Math.max(1, trackRect.height - thumbHeight)
+    if (maxScroll <= 0 || trackRect.height <= 0) return
+    const targetScrollTop = Math.min(
+      travel,
+      Math.max(0, event.clientY - trackRect.top - thumbHeight / 2),
+    )
+    viewport.scrollTop = targetScrollTop / travel * maxScroll
+    syncScrollRail(viewport)
+  }
+
+  const handleScrollRailKeyDown = (event: KeyboardEvent) => {
+    const viewport = viewportFromAction(event)
+    if (!viewport) return
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    if (maxScroll <= 0) return
+    const page = Math.max(48, viewport.clientHeight * 0.9)
+    let target: number | undefined
+    switch (event.key) {
+      case 'ArrowUp':
+        target = viewport.scrollTop - 48
+        break
+      case 'ArrowDown':
+        target = viewport.scrollTop + 48
+        break
+      case 'PageUp':
+        target = viewport.scrollTop - page
+        break
+      case 'PageDown':
+        target = viewport.scrollTop + page
+        break
+      case 'Home':
+        target = 0
+        break
+      case 'End':
+        target = maxScroll
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    viewport.scrollTop = Math.min(maxScroll, Math.max(0, target))
+    syncScrollRail(viewport)
+  }
+
+  const queueBottomFollow = () => {
+    const revision = scrollActionRevision
+    queueMicrotask(() => {
+      if (revision !== scrollActionRevision || !followBottom()) return
+      if (chatViewport) scrollViewportToBottom(chatViewport, 'auto')
+    })
+  }
+
+  const scrollToTop = (event?: Event) => {
+    const viewport = viewportFromAction(event)
+    if (!viewport) return
+    const behavior = props.context.input().reducedMotion ? 'auto' : 'smooth'
+    beginScrollAction(false, behavior)
+    if (typeof viewport.scrollTo === 'function') {
+      viewport.scrollTo({ top: 0, behavior })
+    } else {
+      viewport.scrollTop = 0
+    }
+  }
+
   createEffect(() => messageListPort()?.setItems(items()))
   createEffect(() => {
     const matchCount = searchMatches().length
@@ -136,26 +353,39 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const id = sessionId()
     if (id === followedSessionId) return
     followedSessionId = id
+    followLockUntil = 0
+    scrollActionRevision += 1
     setFollowBottom(true)
   })
   createEffect(() => {
     sessionId()
     snapshot()
+    queueMicrotask(() => syncScrollRail())
     if (!followBottom()) return
-    queueMicrotask(() => bottomAnchor?.scrollIntoView?.({ behavior: 'auto', block: 'end' }))
+    queueBottomFollow()
   })
 
-  const updateBottomFollow = (viewport: HTMLDivElement) => {
-    const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
-    setFollowBottom(distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX)
-  }
-
-  const resumeBottomFollow = () => {
-    setFollowBottom(true)
-    bottomAnchor?.scrollIntoView?.({
-      behavior: props.context.input().reducedMotion ? 'auto' : 'smooth',
-      block: 'end',
+  onMount(() => {
+    const sync = () => syncScrollRail()
+    queueMicrotask(sync)
+    if (typeof window !== 'undefined') window.addEventListener('resize', sync)
+    let observer: ResizeObserver | undefined
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(sync)
+      if (scrollRailTrack) observer.observe(scrollRailTrack)
+      if (chatViewport) observer.observe(chatViewport)
+    }
+    onCleanup(() => {
+      if (typeof window !== 'undefined') window.removeEventListener('resize', sync)
+      observer?.disconnect()
     })
+  })
+
+  const resumeBottomFollow = (event?: Event) => {
+    const behavior = props.context.input().reducedMotion ? 'auto' : 'smooth'
+    beginScrollAction(true, behavior)
+    const viewport = viewportFromAction(event)
+    if (viewport) scrollViewportToBottom(viewport, behavior)
   }
 
   return (
@@ -188,79 +418,127 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
           context={props.context}
         />}
       >
-        <div class="chat-view solid-workbench-chat" onScroll={event => updateBottomFollow(event.currentTarget)}>
-          <div class="term">
-            <CanonicalActivityList
-              activities={activityPlacement().leading}
-              document={document()}
-              context={props.context}
-              connectorPort={connectorPort}
-            />
-            <PlainMessageList
-              initialItems={items()}
-              renderItem={item => <WorkbenchRow
-                descriptor={item.descriptor}
-                messages={viewMessages()}
-                appearance={appearance()}
-                connectorPort={connectorPort}
+        <div class="solid-workbench-chat-shell">
+          <div
+            ref={node => { chatViewport = node }}
+            class="chat-view solid-workbench-chat"
+            onScroll={event => updateBottomFollow(event.currentTarget)}
+          >
+            <div class="term">
+              <SolidToolConnectorLayer edges={connectorEdges()} layoutPort={connectorPort} />
+              <CanonicalActivityList
+                activities={activityPlacement().leading}
+                document={document()}
                 context={props.context}
-              >
-                <CanonicalActivityList
-                  activities={activityPlacement().afterMessage.get(item.descriptor.renderMessage.message.id) ?? []}
-                  document={document()}
-                  context={props.context}
+                connectorPort={connectorPort}
+              />
+              <PlainMessageList
+                initialItems={items()}
+                renderItem={item => <WorkbenchRow
+                  descriptor={item.descriptor}
+                  appearance={appearance()}
                   connectorPort={connectorPort}
-                />
-              </WorkbenchRow>}
-              onPortReady={port => {
-                setMessageListPort(() => port)
-                port.setItems(items())
-              }}
-              onContentResize={() => {
-                if (!followBottom()) return
-                queueMicrotask(() => bottomAnchor?.scrollIntoView?.({ behavior: 'auto', block: 'end' }))
-              }}
+                  context={props.context}
+                >
+                  <CanonicalActivityList
+                    activities={activityPlacement().afterMessage.get(item.descriptor.renderMessage.message.id) ?? []}
+                    document={document()}
+                    context={props.context}
+                    connectorPort={connectorPort}
+                  />
+                </WorkbenchRow>}
+                onPortReady={port => {
+                  setMessageListPort(() => port)
+                  port.setItems(items())
+                }}
+                onContentResize={() => {
+                  syncScrollRail()
+                  if (!followBottom()) return
+                  queueBottomFollow()
+                }}
+              />
+              <Show when={snapshot().streamingThinking}>
+                {text => <div class="term-row term-row-reasoning" data-render-type="reasoning">
+                  <ReasoningBlock text={text()} running />
+                </div>}
+              </Show>
+              <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
+              <Show when={snapshot().streamingText}>
+                {text => <div class="term-row term-row-assistant" data-render-type="assistant">
+                  <AssistantContent text={text()} appearance={appearance()} streaming />
+                </div>}
+              </Show>
+              <SolidGenerationFooter
+                running={snapshot().generating}
+                tokenCount={canonicalTokenCount(document()?.session.usage, snapshot().tokenCount)}
+                startTime={snapshot().generationStart}
+                lastTokenAt={snapshot().lastTokenAt}
+                summary={snapshot().summary}
+                phase={snapshot().generationPhase}
+                activity={snapshot().generationActivity}
+                thinkingStart={snapshot().thinkingStart}
+                activeTaskContent={snapshot().tasks.find(task => task.status === 'in_progress')?.content}
+                appearance={appearance().spinner}
+                reducedMotion={props.context.input().reducedMotion}
+                onStop={props.context.input().preview ? undefined : () => {
+                  const sessionId = props.context.input().sessionId
+                  if (sessionId) void props.context.commands.cancel(sessionId)
+                }}
+              />
+            </div>
+            <WorkbenchContentSlot
+              nodeId={`${props.context.input().sessionId ?? 'none'}:plan`}
+              kind="content.plan"
+              payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }}
+              context={props.context}
+              fallback={<SolidPlanGoalContent payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }} />}
             />
-            <Show when={snapshot().streamingThinking}>
-              {text => <div class="term-row term-row-reasoning" data-render-type="reasoning">
-                <ReasoningBlock text={text()} running />
-              </div>}
-            </Show>
-            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
-            <Show when={snapshot().streamingText}>
-              {text => <div class="term-row term-row-assistant" data-render-type="assistant">
-                <AssistantContent text={text()} appearance={appearance()} streaming />
-              </div>}
-            </Show>
-            <SolidGenerationFooter
-              running={snapshot().generating}
-              tokenCount={canonicalTokenCount(document()?.session.usage, snapshot().tokenCount)}
-              startTime={snapshot().generationStart}
-              lastTokenAt={snapshot().lastTokenAt}
-              summary={snapshot().summary}
-              phase={snapshot().generationPhase}
-              thinkingStart={snapshot().thinkingStart}
-              activeTaskContent={snapshot().tasks.find(task => task.status === 'in_progress')?.content}
-              appearance={appearance().spinner}
-              reducedMotion={props.context.input().reducedMotion}
-              onStop={props.context.input().preview ? undefined : () => {
-                const sessionId = props.context.input().sessionId
-                if (sessionId) void props.context.commands.cancel(sessionId)
-              }}
-            />
+            <div ref={bottomAnchor} class="solid-workbench-bottom-anchor" aria-hidden="true" />
           </div>
-          <WorkbenchContentSlot
-            nodeId={`${props.context.input().sessionId ?? 'none'}:plan`}
-            kind="content.plan"
-            payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }}
-            context={props.context}
-            fallback={<SolidPlanGoalContent payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }} />}
-          />
-          <div ref={bottomAnchor} class="solid-workbench-bottom-anchor" aria-hidden="true" />
+          <div class="solid-workbench-scroll-rail" role="group" aria-label="聊天滚动导航">
+            <button
+              type="button"
+              class="scroll-rail-btn scroll-top-btn"
+              data-scroll-action="top"
+              aria-label="回到顶部"
+              title="回到顶部"
+              onClick={scrollToTop}
+            >▲</button>
+            <div
+              ref={node => { scrollRailTrack = node }}
+              class="solid-workbench-scroll-track"
+              role="scrollbar"
+              aria-label="聊天滚动位置"
+              aria-orientation="vertical"
+              aria-valuemin="0"
+              aria-valuemax={scrollRailThumb().maxScroll}
+              aria-valuenow={Math.round(scrollRailMetrics().scrollTop)}
+              tabIndex="0"
+              onPointerDown={seekScrollRailTrack}
+              onClick={seekScrollRailTrack}
+              onKeyDown={handleScrollRailKeyDown}
+            >
+              <div
+                class="solid-workbench-scroll-thumb"
+                data-scrollable={scrollRailThumb().visible ? 'true' : 'false'}
+                aria-hidden="true"
+                style={{
+                  height: `${scrollRailThumb().height}px`,
+                  transform: `translateY(${scrollRailThumb().offset}px)`,
+                }}
+                onPointerDown={beginScrollRailThumbDrag}
+              />
+            </div>
+            <button
+              type="button"
+              class="scroll-rail-btn scroll-bottom-btn"
+              data-scroll-action="bottom"
+              aria-label="回到底部"
+              title="回到底部"
+              onClick={resumeBottomFollow}
+            >▼</button>
+          </div>
         </div>
-        <Show when={!followBottom()}>
-          <button type="button" class="scroll-bottom-btn" aria-label="回到底部" title="回到底部" onClick={resumeBottomFollow}>▼</button>
-        </Show>
         <Show when={appearance().showPet}>
           <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
         </Show>
@@ -456,24 +734,6 @@ function CanonicalActivitySlot(props: {
   let observer: MutationObserver | undefined
   const toolSnapshot = () => props.activity.kind === 'tool' ? toolInvocationSnapshot(props.document, props.activity.id) : null
   const kind = () => activityRenderKind(props.activity, props.context)
-  const connectorAppearance = () => {
-    const host = props.context.appearanceSnapshot()
-    const resolved = props.context.hostPort?.appearance.resolve?.({
-      // Connector is owned by the C04 generic lifecycle seam even when a
-      // specialized tool kind falls back to the generic base Slot.
-      kind: 'tool.generic',
-      suiteId: props.context.activation?.suite.value.id ?? '',
-      slotId: 'builtin.solid.content.base',
-    })
-    return {
-      toolConnectorMode: resolved?.connectorMode === 'none' ? 'none' : host.toolConnectorMode,
-      toolConnectorColor: host.toolConnectorColor,
-      toolConnectorStyle: typeof resolved?.connectorStyle === 'string' ? resolved.connectorStyle : host.toolConnectorStyle,
-      toolConnectorWidth: typeof resolved?.connectorWidth === 'number' ? resolved.connectorWidth : host.toolConnectorWidth,
-      toolConnectorOpacity: typeof resolved?.connectorOpacity === 'number' ? resolved.connectorOpacity : host.toolConnectorOpacity,
-    }
-  }
-
   createEffect(() => {
     unregisterTool()
     unregisterTool = () => {}
@@ -496,17 +756,6 @@ function CanonicalActivitySlot(props: {
   })
 
   return <>
-    <Show when={toolSnapshot()?.parentToolCallId}>
-      {parentId => <SolidToolConnector
-        connectorKey={`${parentId()}->${props.activity.id}`}
-        fromMessageId={parentId()}
-        toMessageId={props.activity.id}
-        status={toolConnectorTone(props.activity.status)}
-        visualState={normalizeToolVisualState(props.activity.status)}
-        appearance={connectorAppearance()}
-        layoutPort={props.connectorPort}
-      />}
-    </Show>
     <div
       ref={root}
       class={`solid-workbench-activity-slot term-row ${props.activity.kind === 'tool' ? 'term-row-tool' : 'term-row-activity'}`}
@@ -545,6 +794,103 @@ function toolConnectorTone(status: string): 'ok' | 'err' | 'run' {
   return 'run'
 }
 
+function buildLegacyToolConnectorEdges(
+  descriptors: readonly MessageListItem['descriptor'][],
+  appearance: WorkbenchAppearanceSnapshot,
+): SolidToolConnectorEdge[] {
+  const edges: SolidToolConnectorEdge[] = []
+  const connectorAppearance = pickToolConnectorAppearance(appearance)
+  for (let index = 1; index < descriptors.length; index += 1) {
+    const current = descriptors[index]
+    const previous = descriptors[index - 1]
+    if (!current?.showConnector || !previous) continue
+    if (!isToolRenderMessage(current.renderMessage) || !isToolRenderMessage(previous.renderMessage)) continue
+    edges.push({
+      key: `${previous.renderMessage.message.id}->${current.renderMessage.message.id}`,
+      fromMessageId: previous.renderMessage.message.id,
+      toMessageId: current.renderMessage.message.id,
+      status: current.connectorStatus ?? 'run',
+      visualState: normalizeToolVisualState(current.connectorVisualState),
+      appearance: connectorAppearance,
+    })
+  }
+  return edges
+}
+
+function buildCanonicalToolConnectorEdges(
+  placement: ActivityTimelinePlacement,
+  document: WorkbenchDocument | undefined,
+  context: SolidWorkbenchContextValue,
+): SolidToolConnectorEdge[] {
+  if (!document) return []
+  const activities = new Map(document.activities.map(activity => [activity.id, activity]))
+  const connectorAppearance = resolveSolidToolConnectorAppearance(context)
+  const segments: readonly (readonly WorkbenchActivityNode[])[] = [
+    placement.leading,
+    ...placement.afterMessage.values(),
+  ]
+  const edges: SolidToolConnectorEdge[] = []
+  for (const segment of segments) {
+    const sources = deriveCanonicalToolConnectorSources(segment)
+    for (const activity of segment) {
+      const sourceId = sources.get(activity.id)
+      if (!sourceId) continue
+      const source = activities.get(sourceId)
+      edges.push({
+        key: `${sourceId}->${activity.id}`,
+        fromMessageId: sourceId,
+        toMessageId: activity.id,
+        status: toolConnectorTone(source?.status ?? activity.status),
+        visualState: normalizeToolVisualState(source?.status ?? activity.status),
+        appearance: connectorAppearance,
+      })
+    }
+  }
+  return edges
+}
+
+function mergeToolConnectorEdges(
+  ...groups: readonly (readonly SolidToolConnectorEdge[])[]
+): SolidToolConnectorEdge[] {
+  const merged = new Map<string, SolidToolConnectorEdge>()
+  for (const group of groups) {
+    for (const edge of group) {
+      // Legacy message rows are the authoritative representation when both
+      // pipelines expose the same edge; do not register it twice.
+      if (!merged.has(edge.key)) merged.set(edge.key, edge)
+    }
+  }
+  return [...merged.values()]
+}
+
+function pickToolConnectorAppearance(appearance: WorkbenchAppearanceSnapshot): ToolConnectorAppearance {
+  return {
+    toolConnectorMode: appearance.toolConnectorMode,
+    toolConnectorColor: appearance.toolConnectorColor,
+    toolConnectorStyle: appearance.toolConnectorStyle,
+    toolConnectorWidth: appearance.toolConnectorWidth,
+    toolConnectorOpacity: appearance.toolConnectorOpacity,
+  }
+}
+
+function resolveSolidToolConnectorAppearance(context: SolidWorkbenchContextValue): ToolConnectorAppearance {
+  const host = context.appearanceSnapshot()
+  const resolved = context.hostPort?.appearance.resolve?.({
+    // Connector is owned by the generic lifecycle seam even when a
+    // specialized tool kind falls back to the generic base Slot.
+    kind: 'tool.generic',
+    suiteId: context.activation?.suite.value.id ?? '',
+    slotId: 'builtin.solid.content.base',
+  })
+  return {
+    toolConnectorMode: resolved?.connectorMode === 'none' ? 'none' : host.toolConnectorMode,
+    toolConnectorColor: host.toolConnectorColor,
+    toolConnectorStyle: typeof resolved?.connectorStyle === 'string' ? resolved.connectorStyle : host.toolConnectorStyle,
+    toolConnectorWidth: typeof resolved?.connectorWidth === 'number' ? resolved.connectorWidth : host.toolConnectorWidth,
+    toolConnectorOpacity: typeof resolved?.connectorOpacity === 'number' ? resolved.connectorOpacity : host.toolConnectorOpacity,
+  }
+}
+
 function CanonicalActivityList(props: {
   activities: readonly WorkbenchActivityNode[]
   document: WorkbenchDocument | undefined
@@ -578,6 +924,42 @@ function CanonicalActivityList(props: {
       />}</For>
     </div>}
   </Show>
+}
+
+/**
+ * Derive incoming edges for one canonical activity segment.
+ *
+ * Canonical activities are rendered outside the legacy Message descriptor
+ * pipeline, so `showConnector` is not available here.  Preserve explicit
+ * parent edges and fill the missing flat-chain case by linking adjacent tool
+ * nodes in the same segment.  Any non-tool activity is a hard boundary: it
+ * starts a new visual chain rather than implying a relationship across it.
+ */
+function deriveCanonicalToolConnectorSources(
+  activities: readonly WorkbenchActivityNode[],
+): ReadonlyMap<string, string> {
+  const sources = new Map<string, string>()
+  let previousToolId: string | undefined
+
+  for (const activity of activities) {
+    if (activity.kind !== 'tool') {
+      previousToolId = undefined
+      continue
+    }
+
+    const parentId = activity.parentToolCallId
+    if (parentId && parentId !== activity.id) {
+      // Keep semantic parentage intact even when the parent is rendered in a
+      // different activity segment; the layout port will hide an orphan edge
+      // until both anchors are present.
+      sources.set(activity.id, parentId)
+    } else if (!parentId && previousToolId) {
+      sources.set(activity.id, previousToolId)
+    }
+    previousToolId = activity.id
+  }
+
+  return sources
 }
 
 interface StableActivityRow {
@@ -742,20 +1124,13 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
 }
 function WorkbenchRow(props: {
   descriptor: MessageListItem['descriptor']
-  messages: readonly Message[]
   appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
   context: SolidWorkbenchContextValue
   children?: import('solid-js').JSX.Element
 }) {
   const current = () => props.descriptor.renderMessage
-  const previousTool = () => {
-    if (!props.descriptor.showConnector) return undefined
-    const index = props.messages.findIndex(message => message.id === current().message.id)
-    return index > 0 ? props.messages[index - 1] : undefined
-  }
   const visualState = () => normalizeToolVisualState(props.descriptor.toolVisualState)
-  const connectorVisualState = () => normalizeToolVisualState(props.descriptor.connectorVisualState)
   // message.* Slots own row framing. Reasoning is a content.* contract and must
   // stay inside the reasoning row, where WorkbenchMessageContent supplies its
   // normalized payload (text/state/duration or redaction reason).
@@ -770,17 +1145,6 @@ function WorkbenchRow(props: {
   }
   return (
     <>
-      <Show when={props.descriptor.showConnector && previousTool()}>
-        {previous => <SolidToolConnector
-          connectorKey={`${previous().id}->${current().message.id}`}
-          fromMessageId={previous().id}
-          toMessageId={current().message.id}
-          status={props.descriptor.connectorStatus ?? 'run'}
-          visualState={connectorVisualState()}
-          appearance={props.appearance}
-          layoutPort={props.connectorPort}
-        />}
-      </Show>
       <Switch>
         <Match when={current().type === 'tool_call' || current().type === 'tool_result'}>
           <div class="term-row term-row-tool" data-render-type={current().type}>

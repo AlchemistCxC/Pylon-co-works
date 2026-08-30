@@ -5,6 +5,30 @@ export type GenerationPhase =
   | { kind: 'tool'; name: string }
   | { kind: 'responding' }
 
+/** 生成器对后端活性的三档判断；活动轴与主文案状态机共享此类型。 */
+export type GenerationLiveness = 'active' | 'waiting' | 'stalled'
+
+/**
+ * 生成期间的活动上下文。
+ *
+ * `GenerationPhase` 是旧的单值兼容投影；这里不把工具、阶段和文案
+ * 混在一起。工具可同时存在，Footer 再根据本快照选择要展示的上下文。
+ */
+export type GenerationActivityKind = 'thinking' | 'tooling' | 'responding'
+
+export interface GenerationToolActivity {
+  readonly id: string
+  readonly name: string
+  readonly startedAt?: number
+}
+
+export interface GenerationActivitySnapshot {
+  readonly kind: GenerationActivityKind
+  readonly activeTools: readonly GenerationToolActivity[]
+  /** 工具全部结束后应恢复的非工具活动。 */
+  readonly resumeKind?: Exclude<GenerationActivityKind, 'tooling'>
+}
+
 export interface GenerationSummary {
   elapsedMs: number
   tokenCount: number
@@ -19,6 +43,8 @@ export interface GenerationFooterInput {
   lastTokenAt?: number
   summary: GenerationSummary | null
   phase?: GenerationPhase
+  /** 新的活动上下文；缺失时由 Footer 从旧 phase 推导。 */
+  activity?: GenerationActivitySnapshot
   thinkingStart?: number
   activeTaskContent?: string
   appearance: SpinnerAppearanceSnapshot

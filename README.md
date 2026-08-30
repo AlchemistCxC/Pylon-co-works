@@ -42,6 +42,24 @@ npm run tauri dev
 
 浏览器预览使用内置 mock 消息，适合检查终端风格、消息间距、工具卡和响应式布局；它不会模拟真实 ACP 生命周期。
 
+### 2.3 Windows/Hermes 的自带 Git 运行时
+
+Windows 便携版会在 `resources/runtime/git/` 内携带一份完整的 Git for Windows
+PortableGit。使用 Hermes 时不需要在目标电脑另外安装 Git、Bash，也不需要修改系统
+`PATH`。Pylon 只会在 `provider=hermes` 且使用 Windows subprocess ACP transport 的
+子进程上选择这份运行时，并把 Bash 路径和兼容环境变量限制在该子进程内；其他 Agent
+不会继承这套路径或环境。
+
+源码仓库不提交 PortableGit 二进制树。构建 Windows 便携版前运行
+`python scripts/prepare_hermes_runtime.py`（`npm run release:portable` 会自动运行），
+脚本会按 `src-tauri/resources/runtime/portable-git.json` 中的版本、下载地址和
+SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应直接失败，不能生成一个
+看似可用但无法启动 Hermes 的包。
+
+便携版的文件组成、构建命令、审计步骤和分发前检查见
+[Pylon-发行包清单](docs/Pylon-发行包清单.md)；解压后的首次运行说明见
+`resources/release/README.txt`。
+
 ## 3. 第一次使用
 
 1. 打开“设置 → Agent”，新增或编辑 Agent runtime。填写启动命令、参数和必要的环境变量。
@@ -146,6 +164,20 @@ npx vitest run src/domains/theme
 
 提交前至少运行 `npm run lint`、相关区域测试和 `npm run build`。改动渲染器时再运行 `npm run check:solid`；改动 Rust/Tauri 时再运行 `npm run check:rust`。
 
+### 10.1 Windows 便携版发布
+
+便携版发布流程会准备自带的 Hermes PortableGit、构建 Tauri 主程序和 Agent 检测器，
+再生成 ZIP、SHA-256 校验文件和内容 manifest：
+
+```bash
+npm run release:portable
+```
+
+默认流程要求把 Microsoft WebView2 Evergreen Bootstrapper 放在
+`resources/release/tools/MicrosoftEdgeWebview2Setup.exe`。如果分发渠道另行提供
+WebView2，可显式使用 `python scripts/pack_release.py --without-webview2`，并在交付
+说明中保留联网安装步骤。不要手工从包中删除 `resources/runtime/git`。
+
 ## 11. 代码地图
 
 ```text
@@ -181,7 +213,7 @@ shared/                              前后端共享协议和类型
 - [插件设置选项贡献](docs/Pylon-插件设置选项贡献.md)
 - [项目架构参考](docs/Pylon-项目架构参考.md)
 - [插件化拓扑全图](docs/Pylon-插件化前后端拓扑全图.md)
-- [发行包内容记录](docs/releases/RELEASES.md)
+- [发行包清单](docs/Pylon-发行包清单.md)
 
 ## License
 
