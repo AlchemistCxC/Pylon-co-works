@@ -16,7 +16,7 @@
 | --- | --- | --- | --- | --- | --- |
 | [P1](#p1-流式输出节奏) | 流式输出节奏 | **首片完成** | 2026-08-31 | [流式渲染节奏施工书](Pylon-流式渲染节奏施工书.md)；`npm.cmd run check:solid` | 用真实 trace 校准速率参数 |
 | [P2](#p2) | terminal-like 块间距统一 | **待验收** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)；`mountSolidWorkbench` 混排回归 | 在真实窗口完成一次最终视觉验收 |
-| [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **待调查** | — | [问题清单第 3 项](Pylon-下一阶段问题清单.md#3-本机-acp-agent-运行时探测) | 盘点发现、启动、握手证据 |
+| [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml` | 评审三段状态模型并补 DTO/设置页契约 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **待调查** | — | [问题清单第 4 项](Pylon-下一阶段问题清单.md#4-连续同种工具调用聚合) | 确认 activity projection 分组边界 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **待调查** | — | [问题清单第 5 项](Pylon-下一阶段问题清单.md#5-mcpskill插件设置管理) | 盘点 schema、存储和权限边界 |
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **待调查** | — | [问题清单第 6 项](Pylon-下一阶段问题清单.md#6-全局设置页面重组) | 盘点注册表、旧键迁移和搜索索引 |
@@ -51,7 +51,14 @@
 <a id="p3"></a>
 ### P3 · 本机 ACP Agent 运行时探测
 
-当前未建立本台账要求的三段能力证据，保持 `待调查`。
+已完成三段能力证据盘点并建立独立的 [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)。共享 catalog、受控发现和版本探针分别提供发现/可启动证据；`test_agent_candidate` 与 `test_agent_connection` 通过 `AcpClient::connect_with_generation` 提供隔离 ACP 握手证据。当前进入 `施工中`，下一步评审三段状态模型。
+
+核验记录（2026-08-31）：
+
+- 状态：`施工中`
+- 证据：`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml -- --nocapture`（16 项通过）；`src-tauri/pylon-core/src/agent_detection.rs`、`src-tauri/src/lifecycle/connection_test.rs`、`src-tauri/src/acp/mod.rs`。
+- 结论：发现、可启动、ACP 握手已有分离入口和预算；Windows 子孙清理测试原断言为误报，已改为读取退出码后通过。当前 DTO 仍缺独立 `startability` 字段，属于后续 Slice B。
+- 下一步：评审并实现三段状态模型，保持现有隔离验证和脱敏诊断边界。
 
 <a id="p4"></a>
 ### P4 · 连续同种工具调用聚合

@@ -1371,7 +1371,7 @@ mod tests {
     async fn managed_probe_cleanup_kills_descendant_processes() {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
         let root = fixture_root("probe-tree");
@@ -1400,11 +1400,23 @@ mod tests {
             .unwrap();
 
         child.kill_and_wait().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if !handle.is_null() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            if handle.is_null() {
+                break;
+            }
+            let mut exit_code = 0u32;
+            let queried = unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0;
             unsafe { CloseHandle(handle) };
-            panic!("version probe descendant {pid} survived cleanup");
+            const STILL_ACTIVE: u32 = 259;
+            if queried && exit_code != STILL_ACTIVE {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("version probe descendant {pid} survived cleanup");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         std::fs::remove_dir_all(root).unwrap();
     }
