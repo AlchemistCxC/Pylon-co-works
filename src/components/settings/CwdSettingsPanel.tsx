@@ -25,11 +25,27 @@ function parseList(value: string): string[] {
 function ListPreview({ value, onChange, empty }: { value: string; onChange: (value: string) => void; empty: string }) {
   const items = parseList(value)
   if (items.length === 0) return <span className="cwd-tag-empty">{empty}</span>
-  return <div className="cwd-tag-list">{items.map(item => (
-    <button key={item} type="button" className="cwd-tag" title={`移除 ${item}`} onClick={() => onChange(items.filter(candidate => candidate !== item).join(', '))}>
+  return <div className="cwd-tag-list" role="list">{items.map(item => (
+    <button key={item} type="button" role="listitem" className="cwd-tag" title={`移除 ${item}`} onClick={() => onChange(items.filter(candidate => candidate !== item).join(', '))}>
       <span>{item}</span><X size={11} aria-hidden="true" />
     </button>
   ))}</div>
+}
+
+function StructuredIdField({ label, value, onChange, placeholder, empty }: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  empty: string
+}) {
+  const items = parseList(value)
+  return <>
+    <input className="settings-control" aria-label={`${label}（逗号分隔）`} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} />
+    <small>可输入多个 id（逗号分隔），下面的标签可单独移除。</small>
+    <ListPreview value={value} onChange={onChange} empty={empty} />
+    {items.length > 0 && <span className="set-hint" aria-live="polite">已选择 {items.length} 项</span>}
+  </>
 }
 
 export default function CwdSettingsPanel({ workspace, onClose, showHeader = true }: { workspace: Workspace; onClose: () => void; showHeader?: boolean }) {
@@ -149,14 +165,12 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
         </div>
         <label className="sess-field">
           <span>Skills（逗号分隔）</span>
-          <input className="settings-control" aria-label="Skills（逗号分隔）" value={skills} onChange={e => setSkills(e.target.value)} placeholder="code-review, trpg-master" />
-          <ListPreview value={skills} onChange={setSkills} empty="尚未指定 Skill" />
+          <StructuredIdField label="Skills" value={skills} onChange={setSkills} placeholder="code-review, trpg-master" empty="尚未指定 Skill" />
         </label>
 
         <label className="sess-field">
           <span>Hook 插件（逗号分隔）</span>
-          <input className="settings-control" aria-label="Hook 插件（逗号分隔）" value={hookPluginIds} onChange={event => setHookPluginIds(event.target.value)} placeholder="plugin.workspace-hooks" />
-          <ListPreview value={hookPluginIds} onChange={setHookPluginIds} empty="尚未指定 Hook" />
+          <StructuredIdField label="Hook 插件" value={hookPluginIds} onChange={setHookPluginIds} placeholder="plugin.workspace-hooks" empty="尚未指定 Hook" />
         </label>
 
         <div className="sess-field">

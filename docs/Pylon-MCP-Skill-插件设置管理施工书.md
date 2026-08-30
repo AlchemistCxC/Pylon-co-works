@@ -1,6 +1,6 @@
 # Pylon MCP、Skill、插件设置管理施工书
 
-> 状态：施工中（调查完成，Slice A 完成）
+> 状态：施工中（调查完成，Slice A/B 完成）
 > 对应问题：[P5 · MCP、Skill、插件设置管理](Pylon-问题台账.md#p5)
 > 范围：Workspace 能力选择、Agent 级 MCP 配置、API 1.0 插件包与插件设置命名空间
 
@@ -41,12 +41,17 @@
 - 新增 `CapabilityOption` 与 `buildCapabilityOptions`，统一 MCP/Skill/Hook plugin 的来源、启用、可用性和诊断字段。
 - `CwdSettingsPanel` 的 MCP 选择使用该 DTO；持久化但当前 Agent 已不再暴露的 id 保留为 unavailable，用户可取消选择，不会静默丢失。
 
-### Slice B：结构化设置 UI（下一步）
+### Slice B：结构化设置 UI
 
 - 用可添加/删除的 tag/list 控件替代逗号文本；MCP 显示 transport、来源和不可用原因，Skill/Hook 显示 registry 状态。
 - 保持“仅新会话生效”提示；保存前显示去重结果和悬挂引用，不自动改变已有 session 快照。
 
-### Slice C：贡献与权限契约
+### Slice B（已完成）
+
+- Skills、Hook 使用结构化标签预览和单项移除入口，保留旧逗号输入作为兼容编辑方式并显示已选数量。
+- MCP 选择展示 transport、来源和 unavailable 诊断；悬挂引用仍可取消，不会被读取过程静默删除。
+
+### Slice C：贡献与权限契约（下一步）
 
 - 评估 API 1.1 manifest 的 Skill/MCP contribution schema、版本/来源和用户授权边界；API 1.0 不接受未定义字段。
 - 明确 MCP 凭据引用/secret store 方案，继续禁止日志、诊断和 renderer 读取明文值。
