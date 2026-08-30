@@ -114,7 +114,8 @@ function normalizeHermesInput(name: string, value: unknown): unknown {
 }
 
 function firstString(...values: unknown[]): string | undefined {
-  return values.find(value => typeof value === 'string' && value.trim().length > 0) as string | undefined
+  const value = values.find(item => typeof item === 'string' && item.trim().length > 0)
+  return typeof value === 'string' ? value.trim() : undefined
 }
 
 function isGroupedReplay(update: Record<string, unknown> | undefined): boolean {
