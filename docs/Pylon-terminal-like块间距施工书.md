@@ -1,6 +1,6 @@
 # Pylon terminal-like 块间距统一施工书
 
-> 状态：施工中（Slice A 完成，Slice B 待验收）
+> 状态：待验收（Slice A/B 完成，Slice C 回归证据已补）
 > 对应问题：[P2 · terminal-like 块间距统一](Pylon-问题台账.md#p2)
 > 范围：AgentSheet Solid Workbench 与共用 ChatView 的 terminal-like 表现层
 
@@ -36,8 +36,8 @@
 
 ### Slice C：回归与观察
 
-- 增加 CSS contract/DOM 几何断言，覆盖 terminal-like 与非 terminal-like 预设。
-- 开发诊断记录实际使用的间距 token 和来源（row、activity 或 legacy term），不向用户展示。
+- 已增加 CSS contract 断言，覆盖 terminal-like 与非 terminal-like 预设、预设外边距清理和唯一间距来源；`mountSolidWorkbench` 已复核混排及流式/完成态回归。
+- 真实窗口的像素边界仍留作最终验收；开发诊断可继续记录实际使用的间距 token 和来源（row、activity 或 legacy term），不向用户展示。
 
 ## 5. 兼容性、性能与回滚
 
