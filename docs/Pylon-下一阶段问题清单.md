@@ -12,7 +12,7 @@
 | 2 | [🧪 待验收](Pylon-问题台账.md#p2) | 在真实窗口完成一次最终视觉验收 |
 | 3 | [🔧 施工中](Pylon-问题台账.md#p3) | 验收暂跳过；转入 P4 activity projection 分组边界盘点 |
 | 4 | [🔧 施工中](Pylon-问题台账.md#p4) | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
-| 5 | [🔧 施工中](Pylon-问题台账.md#p5) | 实现 CapabilityOption DTO 与 unavailable 诊断 |
+| 5 | [🔧 施工中](Pylon-问题台账.md#p5) | 实现结构化 Skills/Hook/MCP 设置 UI |
 | 6 | [⏳ 待调查](Pylon-问题台账.md#p6) | 先盘点设置注册表和旧键迁移 |
 | 7 | [⏳ 待调查](Pylon-问题台账.md#p7) | 先确认空态创建命令边界 |
 | 8 | [⏳ 待调查](Pylon-问题台账.md#p8) | 先盘点语言插件与 Git facade seam |

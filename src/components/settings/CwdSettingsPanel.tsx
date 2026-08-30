@@ -14,6 +14,7 @@ import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
 import { reportRuntimeError } from '../../runtimeError'
 import type { Workspace } from '../../workspaceEntities'
 import { isAbsolutePath } from '../../workspaceEntities'
+import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
 
 interface McpOption { id?: string; name?: string; transport?: string; enabled?: boolean; disabled?: boolean }
 
@@ -67,6 +68,15 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
     || parseList(hookPluginIds).join('\u0000') !== workspace.hookPluginIds.join('\u0000')
     || [...mcpIds].sort().join('\u0000') !== [...workspace.mcpServerIds].sort().join('\u0000')
   ), [hookPluginIds, mcpIds, name, rootPath, skills, workspace])
+
+  const mcpCapabilities = useMemo(() => buildCapabilityOptions(
+    'mcp',
+    mcpOptions.flatMap(option => {
+      const id = option.id ?? option.name ?? ''
+      return id ? [{ id, label: option.name ?? id, source: 'agent' }] : []
+    }),
+    [...mcpIds],
+  ), [mcpIds, mcpOptions])
 
   const pickRootPath = async () => {
     try {
@@ -166,9 +176,9 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
             </button>
           </div>
         )}
-        {mcpOptions.map(option => {
-          const key = option.id ?? option.name ?? ''
-          const checked = mcpIds.has(key)
+        {mcpCapabilities.map(option => {
+          const key = option.id
+          const checked = option.enabled
           return (
             <label key={key} className="cwd-check">
               <input type="checkbox" checked={checked} onChange={e => {
@@ -177,7 +187,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
                 else next.delete(key)
                 setMcpIds(next)
               }} />
-              <span>{option.name || option.id}（{option.transport}）</span>
+              <span>{option.label}（{mcpOptions.find(candidate => (candidate.id ?? candidate.name) === key)?.transport ?? '不可用'}）{option.available ? '' : ` · ${option.diagnostic}`}</span>
             </label>
           )
         })}
