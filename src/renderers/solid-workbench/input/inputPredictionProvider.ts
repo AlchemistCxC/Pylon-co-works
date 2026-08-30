@@ -5,6 +5,8 @@ export interface InputPredictionRequest {
   readonly generation?: number
   readonly draft: string
   readonly history: readonly string[]
+  /** Canonical bounded conversation transcript (assistant + user turns). */
+  readonly messages?: readonly { role: 'user' | 'assistant'; content: string }[]
   readonly signal: AbortSignal
 }
 
@@ -28,6 +30,7 @@ export interface PredictionHttpPayload {
   readonly generation?: number
   readonly draft: string
   readonly history: readonly string[]
+  readonly messages?: readonly { role: 'user' | 'assistant'; content: string }[]
 }
 
 /**
@@ -53,6 +56,25 @@ export function boundPredictionHistory(
   }
   selected.reverse()
   return selected
+}
+
+export function boundPredictionMessages(
+  messages: readonly { role: 'user' | 'assistant'; content: string }[],
+  options: Pick<HttpPredictionProviderOptions, 'maxHistoryItems' | 'maxHistoryChars'> = {},
+): readonly { role: 'user' | 'assistant'; content: string }[] {
+  const maxItems = Math.max(0, Math.floor(options.maxHistoryItems ?? 24))
+  const maxChars = Math.max(0, Math.floor(options.maxHistoryChars ?? 6_000))
+  const selected: { role: 'user' | 'assistant'; content: string }[] = []
+  let chars = 0
+  for (let index = messages.length - 1; index >= 0 && selected.length < maxItems; index -= 1) {
+    const item = messages[index]
+    const content = item?.content?.trim()
+    if (!content) continue
+    if (chars + content.length > maxChars) continue
+    selected.push({ role: item.role, content })
+    chars += content.length
+  }
+  return selected.reverse()
 }
 
 function extractPredictionPayload(value: unknown): string | null {
@@ -86,6 +108,7 @@ export function createHttpPredictionProvider(options: HttpPredictionProviderOpti
         ...(input.generation === undefined ? {} : { generation: input.generation }),
         draft: input.draft,
         history: boundPredictionHistory(input.history, options),
+        ...(input.messages ? { messages: input.messages } : {}),
       }
       const response = await request(endpoint, {
         method: 'POST',

@@ -14,6 +14,7 @@ import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbench
 import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidServices.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
+import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
 
 export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort, activation }: SolidWorkbenchMountInput & { activation?: RendererActivationSnapshot }): SolidWorkbenchLifecycle {
   let destroyed = false
@@ -75,7 +76,10 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     sessionUi: services.sessionUi,
     commands: services.commands,
     hostPort,
-    predictionProvider: services.predictionProvider ?? hostPort.predictionProvider,
+    predictionProvider: createPredictionRouter({
+      forkProvider: services.predictionProvider ?? hostPort.predictionProvider,
+      standaloneProvider: createStandalonePredictionProvider(),
+    }),
     paused: pausedSignal,
     reportRendererError(error) {
       const payload = {

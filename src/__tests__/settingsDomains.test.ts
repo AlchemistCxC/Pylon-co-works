@@ -30,7 +30,7 @@ const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
   // 工作区
   'window', 'pet', 'history', 'backup',
   // Agent 与连接
-  'agent', 'session', 'gateway',
+  'agent', 'session', 'gateway', 'prediction',
   // 插件
   'pluginManager',
 ]
@@ -45,7 +45,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(SETTINGS_DOMAINS.map(d => d.sections)).toEqual([
       ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'],
       ['window', 'pet', 'history', 'backup'],
-      ['agent', 'session', 'gateway'],
+      ['agent', 'session', 'gateway', 'prediction'],
       ['pluginManager'],
     ])
   })
@@ -74,6 +74,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(domainOfSection('history')).toBe('workspace')
     expect(domainOfSection('agent')).toBe('agents-connections')
     expect(domainOfSection('gateway')).toBe('agents-connections')
+    expect(domainOfSection('prediction')).toBe('agents-connections')
     expect(domainOfSection('pluginManager')).toBe('plugins')
   })
 

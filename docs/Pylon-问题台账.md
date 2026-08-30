@@ -22,7 +22,7 @@
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索/注册表探针回归；`npm.cmd run check:solid` | 后续仅需在真实插件/渲染器包上运行探针并处理实际诊断 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 真实窗口验收暂跳过 |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 真实插件包 E2E 与大仓性能验收暂跳过 |
-| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；36 项输入预测/宿主接线测试；`npm.cmd run check:solid` | 用真实 endpoint 做端到端与大库性能验证；ACP 独立 RPC 就绪后再接入 |
+| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；双路径 router；独立 OpenAI-compatible provider；`inputPredictionSettings.test.ts`；`npm.cmd run check:solid` | 真实 endpoint 与窗口体验验证按验收阶段处理 |
 | [P11](#p11-思考块折叠态与助手消息间距) | 思考块折叠态与助手消息间距 | **首片完成** | 2026-08-31 | `ChatView.css` terminal-like collapsed reasoning cadence；主题 contract | 暂跳过真实窗口验收 |
 | [P12](#p12-filesheet-发送指令) | FileSheet 发送指令不可用 | **首片完成** | 2026-08-31 | `prompt.rs` camelCase IPC 注解；`DispatchBar` owner resolver；2 项 owner 测试；typed client 回归 | 实机 invoke 验收后置 |
 | [P13](#p13-生成指示器时间与星芒停滞) | 生成指示器时间与星芒停滞 | **首片完成** | 2026-08-31 | `GenerationFooter.solid.tsx` 120ms repaint cap；高间隔配置测试 | 真实窗口检查 reduced-motion 体验 |
@@ -154,7 +154,8 @@
 - 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice C 验证。
 - Slice B 已完成：`inputPredictionProvider.ts` 提供可选 provider、400ms 防抖、15 秒冷却、AbortController、输出过滤和 session/generation 迟到结果丢弃；provider 失败回退本地历史。
 - Slice C 首片已完成：新增 `createHttpPredictionProvider`，支持本地 sidecar 或远端 HTTP endpoint，统一解析 `suggestion`/`prediction`/`text` 响应；请求上下文按 24 条、6000 字符上限裁剪，避免 SQLite 大库放大网络负载；provider 已从 `WorkbenchHostPort`/`SolidWorkbenchServices` 传递到 `SolidInputBar`。当前 ACP facade 尚无独立预测 RPC，因此没有伪造 `assist.prediction` 事件作为 provider 请求。
-- 核验：`inputPredictionProvider.test.ts` 覆盖历史裁剪、HTTP 请求/响应、异常回退和取消；`workbenchHostPort.test.ts` 覆盖宿主接线；`npm.cmd run check:solid` 通过。下一步用真实 endpoint 做端到端与大库性能验证，ACP 独立 RPC 就绪后再接入。
+- Slice D 已完成：新增独立预测设置（Base URL、API Key、模型、endpoint、推理等级、采样/惩罚/seed/stop、上下文上限、超时、自定义 headers）及设置页；`createPredictionRouter` 提供自动、仅 ACP Fork、仅独立模型、关闭四种路径，独立 provider 不依赖 ACP session；canonical 用户+助手消息按条数/字符上限送入模型，API key 不进入 ACP 或 renderer wire。
+- 核验：`inputPredictionProvider.test.ts`、`inputPredictionSettings.test.ts` 覆盖历史/消息裁剪、OpenAI 请求体与响应解析、模式路由和异常边界；`settingsDomains.test.ts` 覆盖输入预测设置入口；`npm.cmd run check:solid` 通过。真实 endpoint 与窗口体验验证按验收阶段处理。
 
 <a id="p11"></a>
 ### P11 · 思考块折叠态与助手消息间距

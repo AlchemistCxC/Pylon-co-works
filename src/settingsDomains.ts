@@ -35,6 +35,7 @@ export type SettingsSectionId =
   | 'agent'
   | 'session'
   | 'gateway'
+  | 'prediction'
   | 'pluginManager'
 
 export interface SettingsIntent {
@@ -54,7 +55,7 @@ export interface SettingsDomain {
 export const SETTINGS_DOMAINS: readonly SettingsDomain[] = [
   { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'] },
   { id: 'workspace', label: '工作区', sections: ['window', 'pet', 'history', 'backup'] },
-  { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway'] },
+  { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway', 'prediction'] },
   { id: 'plugins', label: '插件', sections: ['pluginManager'] },
 ] as const
 
@@ -85,6 +86,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   agent: 'Agent',
   session: '会话',
   gateway: 'Gateway',
+  prediction: '输入预测',
   pluginManager: '插件管理',
 }
 

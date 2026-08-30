@@ -12,6 +12,7 @@ import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
 import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from './inputPredictionState.ts'
 import { createPredictionScheduler, type InputPredictionProvider } from './inputPredictionProvider.ts'
+import { loadInputPredictionSettings } from '../../../domains/inputPrediction/inputPredictionSettings.ts'
 
 export interface QueuedWorkbenchMessage {
   id: number
@@ -68,6 +69,13 @@ export function SolidInputBar(props: SolidInputBarProps) {
       .map(message => message.content)
       .filter((value): value is string => typeof value === 'string')
   })
+  const durableMessages = createMemo(() => {
+    const document = runtime().document
+    if (!document || document.sessionId !== sessionId()) return [] as readonly { role: 'user' | 'assistant'; content: string }[]
+    return document.messages
+      .filter(message => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string')
+      .map(message => ({ role: message.role as 'user' | 'assistant', content: message.content as string }))
+  })
   const prediction = createMemo<PredictionCandidate | null>(() => {
     const value = draft()
     if (suggestionList().length > 0 || runtime().generating || attachments().length > 0) return null
@@ -77,7 +85,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
       return dismissedPrediction() === key ? null : { text: historyCompletion, source: 'history' }
     }
     if (value) return null
-    const llm = runtime().document?.sessionId === sessionId()
+    const predictionMode = loadInputPredictionSettings().mode
+    if (predictionMode === 'off') return null
+    const llm = predictionMode === 'standalone' ? undefined : runtime().document?.sessionId === sessionId()
       ? runtime().document?.assist.prediction?.placeholder?.trim()
       : undefined
     const valueFromProvider = llm || providerPrediction()
@@ -99,8 +109,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
     }
     const generation = runtime().generation
     const historyValues = mergeHistory(durableHistory(), history())
+    const messages = durableMessages()
     setProviderPrediction(null)
-    scheduler.schedule({ sessionId: id, generation, draft: value, history: historyValues }, result => {
+    scheduler.schedule({ sessionId: id, generation, draft: value, history: historyValues, messages }, result => {
       if (sessionId() !== id || runtime().generation !== generation || draft() !== '') return
       const normalized = result?.trim()
       setProviderPrediction(normalized || null)

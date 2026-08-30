@@ -36,6 +36,13 @@
 - provider 失败静默回退本地历史与运行时候选，迟到结果不会复活旧会话 ghost text。
 - provider 输出统一经过单行/长度/元话语过滤（如 `done`、`Let me…`、Markdown fenced text），避免把模型自述展示为用户补全。
 
+## Slice C（已完成）
+
+- `createHttpPredictionProvider` 保留为通用 sidecar seam；独立 provider 使用可配置的 OpenAI-compatible Chat Completions，不依赖 ACP agent 或服务端 session。
+- `createPredictionRouter` 提供 `auto`、`fork`、`standalone`、`off` 四种来源策略。自动模式只选择一条可用路径，不对一次输入做双重计费 fallback。
+- 设置页提供 Base URL、API Key、模型、endpoint、推理等级、temperature/top-p、最大输出、频率/存在惩罚、seed、stop、系统提示词、历史开关与上下文上限、超时、自定义 headers。
+- 独立请求上下文从 canonical transcript 构建，用户/助手消息均按条数和字符数裁剪；API key 只在独立 provider 请求头中使用。
+
 ## 后续
 
-Slice C 接入真实本地/远端 provider 并做大库性能验证；当前 ACP facade 尚无独立预测 RPC，因此先由上层注入 provider，不能把 `assist.prediction` 事件冒充 provider 请求。
+真实 endpoint 与窗口体验验证按验收阶段处理；不把 `assist.prediction` 事件冒充 provider 请求。

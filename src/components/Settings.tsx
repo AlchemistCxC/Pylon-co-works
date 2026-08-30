@@ -28,6 +28,7 @@ import WindowPanel from './settings/WindowPanel'
 import ConfigBackupPanel from './settings/ConfigBackupPanel'
 import HistoryRetention from './settings/HistoryRetention'
 import GatewayRiskPanel from './settings/GatewayRiskPanel'
+import InputPredictionSettingsPanel from './settings/InputPredictionSettingsPanel'
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
@@ -649,6 +650,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
       case 'gateway':
         // I13-W5：Gateway 风险 consumer——真实实例/凭据状态 + 备份边界提示（不伪装备份加密）
         return <GatewayRiskPanel />
+      case 'prediction':
+        return <InputPredictionSettingsPanel />
       case 'pluginManager':
         // M12：插件管理页（列表只读 core；signed/dev 停用；本地包安装；日志）
         return <PluginManager />
