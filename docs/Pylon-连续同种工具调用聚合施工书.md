@@ -1,6 +1,6 @@
 # Pylon 连续同种工具调用聚合施工书
 
-> 状态：施工中（调查完成，待实现 Slice A）
+> 状态：施工中（调查完成，Slice A 完成）
 > 对应问题：[P4 · 连续同种工具调用聚合](Pylon-问题台账.md#p4)
 > 范围：Workbench activity projection、工具卡展示、活动排序与展开状态
 
@@ -28,12 +28,17 @@
 
 ## 4. 实施切片
 
-### Slice A：纯分组 seam（下一步）
+### Slice A：纯分组 seam
 
 - 定义稳定 `toolKey`、segment 边界和 parent 边界。
 - 编写 `groupAdjacentToolActivities` 及 property/fixture 测试：同类相邻合组、异类/插入消息/不同 parent 断组、单次字段完整保留、回放顺序稳定。
 
-### Slice B：组级展示
+### Slice A（已完成）
+
+- 新增 `src/domains/workbench/activityGrouping.ts` 纯函数：按 normalized identity（canonicalName → toolKindWire → providerName → title）分组，仅处理已排序 segment；非 tool、key 或 parent 变化均断组。
+- 分组只引用原始 activity 节点，保留每次调用的输入、输出、错误和生命周期；测试覆盖同类合组、硬边界、身份优先级及 mixed 状态。
+
+### Slice B：组级展示（下一步）
 
 - 在 `CanonicalActivityList` 增加组行；组行显示工具名、调用次数和状态摘要。
 - 组展开显示既有 `SolidToolInvocationCard`，单次折叠逻辑保持不变；连接线仍以单次节点 id 注册。
