@@ -5,6 +5,7 @@ import { keymap } from '@codemirror/view'
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
+import { resolveFileLanguageProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
 
 // Language metadata is sizeable (it enumerates every CodeMirror language) and
 // is only needed once an editor is opened.  Keep it out of the initial shell
@@ -56,6 +57,7 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
     const parent = hostRef.current
     if (!parent) return
     const language = new Compartment()
+    const languageAbort = new AbortController()
     let disposed = false
 
     const view = new EditorView({
@@ -94,21 +96,35 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
     })
     viewRef.current = view
 
-    void loadLanguageData().then(languages => {
-      if (disposed || viewRef.current !== view) return
+    const loadLanguage = async () => {
+      const provider = resolveFileLanguageProvider(path)
+      if (provider) {
+        try {
+          const support = await provider.load(path, languageAbort.signal)
+          if (support && !disposed && viewRef.current === view) {
+            view.dispatch({ effects: language.reconfigure(support) })
+            return
+          }
+        } catch {
+          // Provider failure/abort falls through to the built-in language data.
+        }
+      }
+      const languages = await loadLanguageData()
+      if (disposed || viewRef.current !== view || languageAbort.signal.aborted) return
       const description = LanguageDescription.matchFilename(languages, path)
       if (!description) return
-      return description.load().then(support => {
-        if (!disposed && viewRef.current === view) {
-          view.dispatch({ effects: language.reconfigure(support) })
-        }
-      })
-    }).catch(() => {
+      const support = await description.load()
+      if (!disposed && viewRef.current === view && !languageAbort.signal.aborted) {
+        view.dispatch({ effects: language.reconfigure(support) })
+      }
+    }
+    void loadLanguage().catch(() => {
       // 未安装/加载失败的语言按 CodeMirror 纯文本模式继续编辑。
     })
 
     return () => {
       disposed = true
+      languageAbort.abort()
       viewRef.current = null
       view.destroy()
     }

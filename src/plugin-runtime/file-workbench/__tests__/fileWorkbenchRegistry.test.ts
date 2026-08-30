@@ -3,6 +3,8 @@ import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { PluginScope } from '../../pluginScope.ts'
 import { FileWorkbenchRegistry } from '../fileWorkbenchRegistry.ts'
 import { createPluginFileWorkbenchApi } from '../pluginFileWorkbenchApi.ts'
+import { resolveFileLanguageProvider } from '../fileWorkbenchResolver.ts'
+import { getFileWorkbenchRegistry } from '../../runtimeServices.ts'
 
 const Component = () => null
 const activity = (id: string) => ({ kind: 'activity' as const, id, label: id, description: id, order: 1, icon: 'files' as const, renderKind: 'first-party-react' as const, component: Component })
@@ -31,5 +33,21 @@ describe('FileWorkbenchRegistry lifecycle', () => {
     commit.register(activity('next.activity'), { contributionId: 'next.activity' })
     commit.commit()
     expect(registry.getSnapshot().entries.map(entry => entry.contributionId)).toEqual(['next.activity'])
+  })
+
+  it('language-provider 按路径匹配与 priority 选择，不暴露 EditorView', () => {
+    const registry = getFileWorkbenchRegistry()
+    const identity = createPluginIdentity('test.language', 'one')
+    const registration = registry.register(identity, {
+      kind: 'language-provider', id: 'test.language.ts', priority: 10, fallback: false,
+      provider: {
+        id: 'test.language.ts', priority: 10,
+        canHandle: path => path.endsWith('.ts'),
+        load: async () => null,
+      },
+    })
+    expect(resolveFileLanguageProvider('src/main.ts')?.id).toBe('test.language.ts')
+    expect(resolveFileLanguageProvider('README.md')).toBeNull()
+    registration.dispose()
   })
 })

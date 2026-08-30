@@ -11,9 +11,9 @@
 
 开放受控的语言能力贡献 seam（语言识别、高亮，后续可选补全/格式化），不让插件直接持有 EditorView；保持内置语言为 fallback。继续保留现有 Git provider 边界，并针对大仓扫描、取消和迟到响应做性能验证。
 
-## Slice A（待施工）
+## Slice A：language-provider seam（首片完成）
 
-新增 `language-provider` 类型的 File Workbench contribution：以稳定语言 id、文件名/扩展名匹配和异步 `load` 返回 CodeMirror `LanguageSupport`；宿主按 priority 选择并在 editor compartment 中安装，加载失败回退内置/纯文本。插件不得注入任意 DOM 或替换 Git provider。
+已新增 `language-provider` 类型的 File Workbench contribution：以稳定语言 id、文件名/扩展名匹配和异步 `load` 返回 CodeMirror `LanguageSupport`；宿主按 priority 选择并在 editor compartment 中安装，加载失败回退内置/纯文本。插件不得注入任意 DOM 或替换 Git provider。tab 销毁时通过 `AbortController` 取消未完成加载，迟到结果被丢弃。
 
 ## 兼容性、性能预算与可观察性
 
@@ -21,6 +21,13 @@
 - 语言包只在打开文件后加载；首屏不得引入插件语言包。单次加载应可取消或在 tab 销毁后丢弃结果。
 - provider id、匹配语言、加载失败和回退路径进入诊断日志；Git 继续沿用 source generation guard。
 
+## 证据
+
+- `src/plugin-runtime/file-workbench/fileWorkbenchTypes.ts`：`FileLanguageProvider` 契约。
+- `src/plugin-runtime/file-workbench/fileWorkbenchResolver.ts`：按匹配与 priority 选择 provider。
+- `src/sheets/file/FileCodeEditor.tsx`：provider 加载、abort 与内置 fallback。
+- `src/plugin-runtime/file-workbench/__tests__/fileWorkbenchRegistry.test.ts`：注册生命周期和路径选择回归；`npm.cmd run check:solid`。
+
 ## 验收边界
 
-首片只验 language-provider seam + 内置 fallback 和取消/迟到响应；Git 功能保持现有测试矩阵，不因语言插件工作重写 Git facade。
+首片已验 language-provider seam + 内置 fallback 和取消/迟到响应；Git 功能保持现有测试矩阵，不因语言插件工作重写 Git facade。后续可在真实插件包中补充补全/格式化实现。

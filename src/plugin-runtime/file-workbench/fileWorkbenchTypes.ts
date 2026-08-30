@@ -5,6 +5,7 @@ import type { WorkspaceSearchResult } from '../../infrastructure/tauri/workspace
 import type { GitCommit, GitOperationResult, GitStatusWithBranch } from '../../infrastructure/tauri/gitContracts.ts'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileTabRecord } from '../../sheets/file/fileSheetState.ts'
+import type { LanguageSupport } from '@codemirror/language'
 
 export interface FileProvider {
   id: string
@@ -13,6 +14,13 @@ export interface FileProvider {
   readText(target: WorkspaceTarget, relativePath: string, signal?: AbortSignal): Promise<WorkspaceTextPreview | null>
   writeText?(target: WorkspaceTarget, input: { relativePath: string; content: string; expectedBaseline?: string | null; force?: boolean }, signal?: AbortSignal): Promise<WorkspaceTextPreview | null>
   search?(target: WorkspaceTarget, query: string, signal?: AbortSignal): Promise<WorkspaceSearchResult[]>
+}
+
+export interface FileLanguageProvider {
+  id: string
+  priority: number
+  canHandle(path: string): boolean
+  load(path: string, signal?: AbortSignal): Promise<LanguageSupport | null>
 }
 
 export interface GitProvider {
@@ -88,5 +96,6 @@ export type FileViewRendererDefinition = FileViewRendererBase & (
 export type FileWorkbenchContribution =
   | FileActivityContribution
   | ({ kind: 'file-provider'; provider: FileProvider; id: string; priority: number; fallback: boolean })
+  | ({ kind: 'language-provider'; provider: FileLanguageProvider; id: string; priority: number; fallback: boolean })
   | ({ kind: 'git-provider'; provider: GitProvider; id: string; priority: number; fallback: boolean })
   | FileViewRendererDefinition
