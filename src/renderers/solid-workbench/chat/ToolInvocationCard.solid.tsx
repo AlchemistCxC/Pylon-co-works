@@ -56,7 +56,16 @@ export function SolidToolInvocationCard(props: {
     if (canonicalDisplay && canonicalDisplay === displayName().trim().toLowerCase()) return ''
     return wireName.toLowerCase() !== displayName().trim().toLowerCase() ? wireName : ''
   }
-  const summary = () => renderModel().summary
+  const summary = () => {
+    // Keep generic cards collapsed/quiet (their input remains in the body).
+    // The compact header summary is reserved for Hermes' command-like tools,
+    // where hiding the command used to make `terminal` look unparsed.
+    const wireName = props.snapshot.name?.trim().toLowerCase()
+    return props.snapshot.kind === 'execute'
+      && (wireName === 'terminal' || wireName === 'process' || wireName === 'execute_code')
+      ? renderModel().summary
+      : ''
+  }
   const collapse = createCollapsiblePresenter({
     defaultOpen: () => !booleanSetting(props.appearance, 'defaultCollapsed', true),
     resetKey: () => props.snapshot.id,
