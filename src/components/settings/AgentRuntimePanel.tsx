@@ -11,7 +11,7 @@ import { useIdentityStore, type AgentEntry } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { selectAcpRuntimeDetectorIds, type AgentDetectionDiagnostic, type AgentRuntimeCandidate, type AgentRuntimeDetectorMetadata } from '../../domains/agent/agentDetector.ts'
+import { selectAcpRuntimeDetectorIds, type AgentDetectionDiagnostic, type AgentRuntimeCandidate, type AgentRuntimeDetectorMetadata, type AgentStartability } from '../../domains/agent/agentDetector.ts'
 import {
   candidateImportMode,
   candidateValidationDetails,
@@ -121,6 +121,12 @@ function candidateProtocolLabel(validation: AgentCandidateValidationState | unde
   if (validation?.status === 'ok') return '可用'
   if (validation?.status === 'failed') return '失败'
   return '未验证'
+}
+
+function candidateStartabilityLabel(startability: AgentStartability | undefined): string {
+  if (startability === 'verified') return '可启动'
+  if (startability === 'failed') return '启动失败'
+  return '未探测'
 }
 
 function activationLabel(state: AgentEntry['configActivationState']): string {
@@ -629,10 +635,10 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
           return <div className="agent-candidate-option" key={candidate.candidateId}>
           <button type="button" className={`agent-candidate-row ${selected ? 'active' : ''}`} aria-expanded={selected} onClick={() => setSelectedCandidateId(candidate.candidateId)}>
             <span><strong>{candidate.name}</strong><small>{candidate.provider}</small></span>
-            <span>{candidate.alreadyImportedAgentId ? `已导入 · ${candidate.alreadyImportedAgentId}` : `${candidate.identityConfidence} · ${candidateProtocolLabel(validation)}`}</span>
+            <span>{candidate.alreadyImportedAgentId ? `已导入 · ${candidate.alreadyImportedAgentId}` : `${candidate.identityConfidence} · ${candidateStartabilityLabel(candidate.startability)} · ${candidateProtocolLabel(validation)}`}</span>
           </button>
           {selected && <div className="agent-runtime-card">
-          <div className="set-hint"><strong>{candidate.name}</strong> · 身份可信度：{candidate.identityConfidence} · ACP：{candidateProtocolLabel(validation)} · {candidate.alreadyImportedAgentId ? `已导入为 ${candidate.alreadyImportedAgentId}` : '尚未导入'}</div>
+          <div className="set-hint"><strong>{candidate.name}</strong> · 身份可信度：{candidate.identityConfidence} · 启动：{candidateStartabilityLabel(candidate.startability)} · ACP：{candidateProtocolLabel(validation)} · {candidate.alreadyImportedAgentId ? `已导入为 ${candidate.alreadyImportedAgentId}` : '尚未导入'}</div>
           <div className="agent-runtime-edit">
             <input className="set-input" value={discoveredDraft.id} onChange={event => updateCandidateDraft(candidate, { id: event.target.value })} aria-label={`${candidate.name} Agent id`} />
             <input className="set-input" value={discoveredDraft.name} onChange={event => updateCandidateDraft(candidate, { name: event.target.value })} aria-label={`${candidate.name} Agent name`} />

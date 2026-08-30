@@ -1,6 +1,6 @@
 # Pylon 本机 ACP Agent 运行时探测施工书
 
-> 状态：施工中（调查完成，Slice A 完成）
+> 状态：施工中（调查完成，Slice A/B 完成）
 > 对应问题：[P3 · 本机 ACP Agent 运行时探测](Pylon-问题台账.md#p3)
 > 范围：共享 Agent Catalog、pylon-core 探测器、Tauri 设置入口和隔离 ACP 验证
 
@@ -32,15 +32,21 @@
 - 复核共享 catalog、受控搜索边界、版本探针预算和隔离 ACP 验证入口。
 - 保留字段值脱敏、候选数量上限和总时间预算。
 
-### Slice B：三段状态模型（下一步）
+### Slice B：三段状态模型
 
-- 评估是否为候选增加明确的可启动状态，避免 UI 只能从 warning 推断。
-- 定义发现成功、启动失败、握手失败和握手成功的稳定状态转换与导入门禁。
+- 为候选增加明确的 `startability`（`not_tested` / `verified` / `failed`），避免 UI 只能从 warning 推断。
+- 定义稳定状态转换：候选出现即 `discovered`；version probe 成功进入 `startability=verified`，spawn/等待/超时失败进入 `startability=failed`；ACP 隔离验证另行把 `protocolAvailability` 置为 `verified` 或 `failed`，不会覆盖启动证据。
+- 导入门禁继续由隔离 ACP 验证结果控制：握手成功可直接导入；握手失败时仅高/精确身份置信候选允许显式“未验证导入”；发现或启动失败本身不伪造握手成功。
+
+### Slice B（已完成）
+
+- Rust `AgentRuntimeCandidate` 和 `pylon-detect --json` 已输出 `startability`；版本探针的 spawn、等待、非零退出、空输出及超时均明确为 `failed`，预算耗尽为 `not_tested`。
+- 前端 DTO 归一化兼容旧 payload（缺字段按 `not_tested`），设置页同时展示身份、启动和 ACP 三段状态。
 - 保持现有 `test_agent_candidate` 隔离语义，不启动或替换当前 active runtime。
 
-### Slice C：观察与回归
+### Slice C：观察与回归（下一步）
 
-- 为三段状态补齐 DTO、Tauri/CLI 输出和设置页显示契约。
+- 为三段状态补齐更细的 DTO/CLI 错误契约和设置页回归快照。
 - 覆盖 PATH、已知目录、launcher、版本超时、spawn 失败、initialize 失败和成功握手；诊断不得泄露配置值或凭据。
 
 ## 5. 兼容性、性能与回滚
