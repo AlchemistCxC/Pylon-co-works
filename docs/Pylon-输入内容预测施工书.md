@@ -34,7 +34,8 @@
 - `inputPredictionProvider.ts` 提供可插拔 `InputPredictionProvider` 与调度器；输入组件通过可选 `predictionProvider` 接入，不把模型调用写死在 UI。
 - 调度器默认 400ms 防抖、15 秒冷却；新草稿、附件、生成状态、会话或 generation 变化会取消在途请求。
 - provider 失败静默回退本地历史与运行时候选，迟到结果不会复活旧会话 ghost text。
+- provider 输出统一经过单行/长度/元话语过滤（如 `done`、`Let me…`、Markdown fenced text），避免把模型自述展示为用户补全。
 
 ## 后续
 
-Slice C 接入真实本地/远端 provider 并做大库性能验证；不得复用消息流 `assist.prediction` 事件冒充输入框预测。
+Slice C 接入真实本地/远端 provider 并做大库性能验证；当前 ACP facade 尚无独立预测 RPC，因此先由上层注入 provider，不能把 `assist.prediction` 事件冒充 provider 请求。

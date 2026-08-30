@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPredictionRateLimiter, findHistoryCompletion, mergeHistory } from '../inputPredictionState.ts'
+import { createPredictionRateLimiter, findHistoryCompletion, mergeHistory, normalizePredictionText } from '../inputPredictionState.ts'
 
 describe('input prediction state', () => {
   it('chooses the newest history message that extends the prefix', () => {
@@ -19,5 +19,11 @@ describe('input prediction state', () => {
     expect(limiter.canRequest(10_999)).toBe(false)
     expect(limiter.canRequest(11_000)).toBe(true)
   })
-})
 
+  it('filters meta, multiline and oversized provider output', () => {
+    expect(normalizePredictionText('继续修复')).toBe('继续修复')
+    expect(normalizePredictionText('Let me continue')).toBeNull()
+    expect(normalizePredictionText('第一句\n第二句')).toBeNull()
+    expect(normalizePredictionText('x'.repeat(121))).toBeNull()
+  })
+})

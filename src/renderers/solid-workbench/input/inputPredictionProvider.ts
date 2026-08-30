@@ -1,4 +1,4 @@
-import { createPredictionRateLimiter, type PredictionRateLimiter } from './inputPredictionState.ts'
+import { createPredictionRateLimiter, normalizePredictionText, type PredictionRateLimiter } from './inputPredictionState.ts'
 
 export interface InputPredictionRequest {
   readonly sessionId: string
@@ -56,7 +56,7 @@ export function createPredictionScheduler(
         const nextController = new AbortController()
         controller = nextController
         void provider.predict({ ...request, signal: nextController.signal }).then(value => {
-          if (!disposed && current === sequence && !nextController.signal.aborted) onResult(value)
+          if (!disposed && current === sequence && !nextController.signal.aborted) onResult(normalizePredictionText(value))
         }).catch(() => {
           // Provider failures are intentionally silent; the local history path remains available.
         }).finally(() => {
@@ -72,4 +72,3 @@ export function createPredictionScheduler(
     },
   }
 }
-

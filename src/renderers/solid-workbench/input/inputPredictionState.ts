@@ -15,6 +15,15 @@ export function findHistoryCompletion(prefix: string, history: readonly string[]
   return null
 }
 
+/** Keep provider output suitable for a single-line ghost suggestion. */
+export function normalizePredictionText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  if (!text || text.length > 120 || text.includes('\n') || text.includes('```')) return null
+  if (/^(done|silence|nothing found|let me\b|i['’]?ll\b|here['’]?s\b)/i.test(text)) return null
+  return text
+}
+
 /** Merge durable (SQLite projected) and session-local history without duplicates. */
 export function mergeHistory(...sources: readonly (readonly string[])[]): readonly string[] {
   const seen = new Set<string>()
@@ -45,4 +54,3 @@ export function createPredictionRateLimiter(cooldownMs = 15_000, clock: () => nu
     reset() { lastRequest = -Infinity },
   }
 }
-
