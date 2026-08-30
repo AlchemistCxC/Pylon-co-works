@@ -17,7 +17,7 @@
 
 ## 3. 设计契约
 
-1. `--chat-row-gap` 表示不同语义块之间的间距；`--chat-tool-gap` 表示相邻工具块之间的紧凑间距；活动区使用独立的 `--chat-activity-gap`。
+1. 保留当前默认状态已经验证过的块类型间距配方；施工目标是让这组间距 token 由 terminal-like 骨架统一提供，并覆盖该 mode 下所有 Presentation Profile。不同块类型仍可使用不同 token，不能因“统一”而合并成一个数值。
 2. 每个相邻块只允许一个间距来源：Solid 优先由 row wrapper 提供，ChatView 旧路径由 `.term-row + .term-row` 提供；禁止父子两层重复叠加。
 3. 流式和完成态使用同一消息行变量。Markdown 稳定块提交不能在 `pre-wrap` 文本中重复插入结构性空行。
 4. 用户、思考、助手和工具的左侧 marker 共用同一列宽；本施工书只规定间距，不改变 marker glyph 或 connector 协议。
