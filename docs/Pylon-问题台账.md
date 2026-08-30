@@ -19,7 +19,7 @@
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
-| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签完整性回归；`npm.cmd run check:solid` | 进入 Slice C：字段贡献注册表审计 |
+| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **待调查** | — | [问题清单第 7 项](Pylon-下一阶段问题清单.md#7-agentsheet-空态与创建会话形态) | 确认空态创建命令边界 |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **待调查** | — | [问题清单第 8 项](Pylon-下一阶段问题清单.md#8-filesheet-语言插件与-git) | 盘点语言插件和 Git facade seam |
 | [P9](#p9-输入内容预测) | 输入内容预测 | **待调查** | — | [问题清单第 9 项](Pylon-下一阶段问题清单.md#9-输入内容预测) | 定义预测状态机和隐私策略 |
@@ -100,8 +100,9 @@
 - 证据：`src/settingsDomains.ts`；`src/components/Settings.tsx`；`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`；`src/__tests__/settingsDomains.test.ts`；`src/__tests__/settingsDomainNav.test.tsx`。
 - 命令：`npm.cmd test -- --run src/__tests__/settingsDomains.test.ts src/__tests__/settingsDomainNav.test.tsx --pool=forks --maxWorkers=2`（26 项通过）；`npm.cmd run check:solid`。
 - Slice B 已完成：重复的是跨作用域标签，已改为带作用域的 canonical label，并增加可见字段标签唯一性守卫；未改变持久化 key。
-- 未确认：renderer/plugin 字段贡献是否全部接入同一注册表、旧设置字段的进一步清理。
-- 下一步：按施工书 Slice C 审计字段贡献注册表和失效入口。
+- Slice C 已完成：插件设置页注册表投影到全局速搜，选择项保留 `pluginPageId` 并直达贡献页；opaque 页面不伪造字段级锚点。
+- 未确认：renderer/plugin 贡献是否需要更细的统一注册表完整性探针、旧设置字段的进一步清理。
+- 下一步：按施工书 Slice D 清理失效入口并补齐注册表完整性探针。
 
 <a id="p7"></a>
 ### P7 · Agentsheet 空态与创建会话形态

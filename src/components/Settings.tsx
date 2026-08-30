@@ -407,10 +407,16 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
       void rendererRegistrySnapshot.revision
     try {
       const snapshot = getRendererRegistry().snapshot()
-      return [...buildSettingsSearchIndex(), ...projectRendererSettingsCatalog(snapshot).searchItems]
-    } catch { return buildSettingsSearchIndex() }
-  }, [quickSearchOpen, rendererRegistrySnapshot.revision])
+      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages), ...projectRendererSettingsCatalog(snapshot).searchItems]
+    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages) }
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+    if (item.pluginPageId) {
+      setActiveDomain('plugins')
+      setActiveSection('pluginManager')
+      setActivePluginPageId(item.pluginPageId)
+      return
+    }
     if (item.rendererRoute) {
       setRendererCategoryId(item.rendererRoute.categoryId)
       setRendererObjectKey(item.rendererRoute.objectKey)

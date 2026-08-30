@@ -221,7 +221,7 @@ export interface SettingsSearchItem {
   readonly label: string         // 字段名
   readonly section: SettingsSectionId
   readonly advanced: boolean     // D2-A：advanced 命中带徽标
-  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry'
+  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry' | 'plugin-page'
   /** B3：唯一 DOM 锚（链A=`field:${key}`；链B entry 无唯一锚时回退文本匹配） */
   readonly anchor?: string
   /** Renderer catalog route; kept optional so theme/plugin search stays stable. */
@@ -231,9 +231,14 @@ export interface SettingsSearchItem {
     readonly groupId: string
     readonly fieldKey: string
   }
+  /** Plugin settings page route; page owns its internal fields. */
+  readonly pluginPageId?: string
 }
 
-export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[]): readonly SettingsSearchItem[] {
+export function buildSettingsSearchIndex(
+  rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[],
+  pluginPages?: readonly { contributionId: string; value: { label: string; description?: string } }[],
+): readonly SettingsSearchItem[] {
   const items: SettingsSearchItem[] = []
   // 链A：THEME_FIELD_DEFS 按 zone 过滤
   for (const key of THEME_FIELD_KEYS) {
@@ -260,6 +265,18 @@ export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { i
       section: 'renderers',
       advanced: false,
       kind: 'renderer-entry',
+    })
+  }
+  // Plugin pages own their internal schema, so index the page itself rather
+  // than pretending opaque fields have host-side anchors.
+  for (const entry of pluginPages ?? []) {
+    items.push({
+      path: '插件 › 插件管理',
+      label: entry.value.label,
+      section: 'pluginManager',
+      advanced: false,
+      kind: 'plugin-page',
+      pluginPageId: entry.contributionId,
     })
   }
   return items

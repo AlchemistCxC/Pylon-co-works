@@ -19,6 +19,7 @@ import {
   PAGE_OWNED_SECTIONS,
   isPageOwnedSection,
   normalizeSettingsIntent,
+  buildSettingsSearchIndex,
 } from '../settingsDomains'
 import { ZONES } from '../themeFieldDefs'
 
@@ -122,6 +123,22 @@ describe('P6 Slice A 设置意图归一化', () => {
   it('未知入口回退到全局设置，不进入空白页', () => {
     expect(normalizeSettingsIntent({ domain: 'missing', section: 'missing' })).toEqual({
       domain: 'appearance', section: 'global',
+    })
+  })
+})
+
+describe('P6 Slice C 贡献注册表搜索投影', () => {
+  it('插件设置页进入全局速搜，并保留可恢复的 page id', () => {
+    const item = buildSettingsSearchIndex(undefined, [{
+      contributionId: 'plugin.example.settings',
+      value: { label: '示例插件设置', description: '说明' },
+    }]).find(candidate => candidate.pluginPageId === 'plugin.example.settings')
+    expect(item).toMatchObject({
+      path: '插件 › 插件管理',
+      label: '示例插件设置',
+      section: 'pluginManager',
+      kind: 'plugin-page',
+      pluginPageId: 'plugin.example.settings',
     })
   })
 })
