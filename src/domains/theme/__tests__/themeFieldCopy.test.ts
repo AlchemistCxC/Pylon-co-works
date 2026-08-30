@@ -30,6 +30,17 @@ describe('主题设置展示文案契约', () => {
     }
   })
 
+  it('可见主题字段使用唯一 canonical 标签，作用域写入名称而非靠重复上下文猜测', () => {
+    const labels = new Map<string, string>()
+    for (const [key, field] of Object.entries(THEME_FIELD_DEFS)) {
+      const def = field as ThemeFieldDef
+      if (def.hidden) continue
+      const previous = labels.get(def.label)
+      expect(previous, `${key} 与 ${previous ?? '未知字段'} 共享重复标签“${def.label}”`).toBeUndefined()
+      labels.set(def.label, key)
+    }
+  })
+
   it('关键枚举保留稳定值，并为每个值提供人类可读名称', () => {
     const expectedOptions = {
       ccStyle: ['wave', 'bar', 'ring', 'numeric'],
