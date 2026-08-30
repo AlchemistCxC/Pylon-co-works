@@ -20,7 +20,7 @@
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
-| [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **待调查** | — | [问题清单第 7 项](Pylon-下一阶段问题清单.md#7-agentsheet-空态与创建会话形态) | 确认空态创建命令边界 |
+| [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **待调查** | — | [问题清单第 8 项](Pylon-下一阶段问题清单.md#8-filesheet-语言插件与-git) | 盘点语言插件和 Git facade seam |
 | [P9](#p9-输入内容预测) | 输入内容预测 | **待调查** | — | [问题清单第 9 项](Pylon-下一阶段问题清单.md#9-输入内容预测) | 定义预测状态机和隐私策略 |
 
@@ -107,7 +107,14 @@
 <a id="p7"></a>
 ### P7 · Agentsheet 空态与创建会话形态
 
-当前未完成命令边界和创建行为核验，保持 `待调查`。
+**结论：首片完成。** 现有空态已满足创建命令和失败恢复边界：工作区模式阻止无工作区提交，单/多工作区预选稳定，创建中冻结输入，失败保留草稿并恢复焦点；terminal-like 预设提供无圆角、无阴影样式。
+
+核验记录（2026-08-31）：
+
+- 状态：`首片完成`
+- 证据：[Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`；`WorkbenchChrome.css`。
+- 未确认：真实窗口中不同终端预设的最终像素宽高与视觉密度（按用户指示暂不验收）。
+- 下一步：转入 P8，盘点 Filesheet 语言插件和 Git facade seam。
 
 <a id="p8"></a>
 ### P8 · Filesheet 语言插件与 Git
