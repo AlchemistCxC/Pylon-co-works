@@ -22,7 +22,7 @@
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
-| [P9](#p9-输入内容预测) | 输入内容预测 | **待施工书** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`InputBar.solid.tsx`；`sessionUiStore`；`assist.prediction` 事件 | 建立输入预测纯状态机 Slice A |
+| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`InputBar.solid.tsx`；28 项输入台测试；`npm.cmd run check:solid` | Slice B：接入受控 provider/请求调度，保持 15 秒冷却 |
 
 ## 核验记录
 
@@ -132,7 +132,19 @@
 <a id="p9"></a>
 ### P9 · 输入内容预测
 
-已完成现状盘点并建立 [输入内容预测施工书](Pylon-输入内容预测施工书.md)。确认现有 `assist.prediction` 只是在消息流显示预测卡，不是输入框 ghost text；草稿/历史/队列按 session 隔离。下一步进入不接模型的纯状态机 Slice A，先锁定失效、接受和隐私边界。
+**结论：首片完成。** Slice A 已落地：
+
+- `inputPredictionState.ts` 提供历史合并、前缀匹配和 Claude-like 15 秒 LLM 请求冷却器。
+- `InputBar.solid.tsx` 将 SQLite canonical 用户消息投影与 session-local history 合并，显示灰色 ghost 后缀；Tab/右箭头接受、Esc 忽略，接受不写 `input-history`。
+- 空草稿沿用 `assist.prediction.placeholder`，生成中、附件和 slash 命令建议时隐藏；空 Enter 可接受并发送。
+
+核验记录（2026-08-31）：
+
+- 状态：`首片完成`
+- 证据：`src/renderers/solid-workbench/input/inputPredictionState.ts`；`InputBar.solid.tsx`；`InputBar.solid.test.tsx`；`inputPredictionState.test.ts`
+- 命令：`npm.cmd exec vitest run src/renderers/solid-workbench/input/__tests__/InputBar.solid.test.tsx src/renderers/solid-workbench/input/__tests__/inputPredictionState.test.ts`（28 项通过）；`npm.cmd run check:solid`
+- 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice B。
+- 下一步：接入受控 provider seam，复用冷却器与 session/generation 迟到结果门控。
 
 ## 状态变更模板
 

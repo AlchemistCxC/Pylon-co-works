@@ -10,6 +10,7 @@ import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCo
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
+import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from './inputPredictionState.ts'
 
 export interface QueuedWorkbenchMessage {
   id: number
@@ -37,6 +38,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [sendError, setSendError] = createSessionUiSignal(workbench.sessionUi, sessionId, 'input-error', '')
   const [commandIndex, setCommandIndex] = createSignal(0)
   const [queueSendingSessions, setQueueSendingSessions] = createSignal<ReadonlySet<string>>(new Set())
+  const [dismissedPrediction, setDismissedPrediction] = createSignal<string | null>(null)
   let textarea: HTMLTextAreaElement | undefined
   let composing = false
   let historyDraft = ''
@@ -53,6 +55,30 @@ export function SolidInputBar(props: SolidInputBarProps) {
     return filterCommandSuggestions(draft(), source)
   })
   const suggestionList = () => suggestions() ?? []
+  const durableHistory = createMemo(() => {
+    const document = runtime().document
+    if (!document || document.sessionId !== sessionId()) return [] as readonly string[]
+    return document.messages
+      .filter(message => message.role === 'user')
+      .map(message => message.content)
+      .filter((value): value is string => typeof value === 'string')
+  })
+  const prediction = createMemo<PredictionCandidate | null>(() => {
+    const value = draft()
+    if (suggestionList().length > 0 || runtime().generating || attachments().length > 0) return null
+    const historyCompletion = findHistoryCompletion(value, mergeHistory(durableHistory(), history()))
+    if (historyCompletion) {
+      const key = `history:${value}:${historyCompletion}`
+      return dismissedPrediction() === key ? null : { text: historyCompletion, source: 'history' }
+    }
+    if (value) return null
+    const llm = runtime().document?.sessionId === sessionId()
+      ? runtime().document?.assist.prediction?.placeholder?.trim()
+      : undefined
+    if (!llm) return null
+    const key = `llm:${llm}`
+    return dismissedPrediction() === key ? null : { text: llm, source: 'llm' }
+  })
   const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
   // 与 React 中控一致：external 表示布局偏好；只有对应外置 send 实际可见时，
   // ControlCenter 才传 externalSend=true。外置 send 被隐藏时必须恢复内置发送按钮。
@@ -321,6 +347,31 @@ export function SolidInputBar(props: SolidInputBarProps) {
         return
       }
     }
+    const currentPrediction = prediction()
+    const atEnd = !textarea || (textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length)
+    if (currentPrediction && (event.key === 'Tab' || (event.key === 'ArrowRight' && atEnd))) {
+      event.preventDefault()
+      setDraft(currentPrediction.text)
+      setDismissedPrediction(null)
+      setHistoryIndex(-1)
+      textarea?.focus()
+      return
+    }
+    if (currentPrediction && event.key === 'Escape') {
+      event.preventDefault()
+      setDismissedPrediction(currentPrediction.source === 'history'
+        ? `history:${draft()}:${currentPrediction.text}`
+        : `llm:${currentPrediction.text}`)
+      return
+    }
+    if (currentPrediction && currentPrediction.source === 'llm'
+      && !draft() && event.key === 'Enter' && !event.shiftKey && !composing) {
+      event.preventDefault()
+      setDraft(currentPrediction.text)
+      setDismissedPrediction(null)
+      void sendText(currentPrediction.text)
+      return
+    }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       const direction = event.key === 'ArrowUp' ? 'up' : 'down'
       if (!canBrowseHistory(direction)) return
@@ -435,22 +486,30 @@ export function SolidInputBar(props: SolidInputBarProps) {
         <Show when={inputVariant() !== 'cli' && !props.externalAttach}>
           <button type="button" class="input-btn attach" disabled={props.disabled} onClick={() => void attach()} aria-label="添加附件">＋</button>
         </Show>
-        <textarea
-          ref={textarea}
-          class="input-textarea"
-          value={draft()}
-          onInput={event => {
-            setDraft(event.currentTarget.value)
-            setCommandIndex(0)
-            if (historyIndex() >= 0) setHistoryIndex(-1)
-          }}
-          onKeyDown={onKeyDown}
-          onCompositionStart={() => { composing = true }}
-          onCompositionEnd={() => { composing = false }}
-          placeholder={placeholder()}
-          rows={1}
-          disabled={props.disabled}
-        />
+        <div class="input-editor-stack">
+          <Show when={prediction()}>{candidate => (
+            <div class="input-ghost-suggestion" aria-hidden="true">
+              <span class="input-ghost-prefix">{draft()}</span><span>{candidate().text.slice(draft().length)}</span>
+            </div>
+          )}</Show>
+          <textarea
+            ref={textarea}
+            class="input-textarea"
+            value={draft()}
+            onInput={event => {
+              setDraft(event.currentTarget.value)
+              setDismissedPrediction(null)
+              setCommandIndex(0)
+              if (historyIndex() >= 0) setHistoryIndex(-1)
+            }}
+            onKeyDown={onKeyDown}
+            onCompositionStart={() => { composing = true }}
+            onCompositionEnd={() => { composing = false }}
+            placeholder={prediction() ? '' : placeholder()}
+            rows={1}
+            disabled={props.disabled}
+          />
+        </div>
         <Show when={inputVariant() !== 'cli' && inlineSubmit()}>
           <button
             type="button"
