@@ -15,7 +15,7 @@
 | 编号 | 问题 | 当前状态 | 最近核验 | 证据 / 施工书 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
 | [P1](#p1-流式输出节奏) | 流式输出节奏 | **首片完成** | 2026-08-31 | [流式渲染节奏施工书](Pylon-流式渲染节奏施工书.md)；`npm.cmd run check:solid` | 用真实 trace 校准速率参数 |
-| [P2](#p2) | terminal-like 块间距统一 | **待施工** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md) | 评审施工书并实现窄 seam |
+| [P2](#p2) | terminal-like 块间距统一 | **施工中** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts) | 完成混排几何验收并补回归证据 |
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **待调查** | — | [问题清单第 3 项](Pylon-下一阶段问题清单.md#3-本机-acp-agent-运行时探测) | 盘点发现、启动、握手证据 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **待调查** | — | [问题清单第 4 项](Pylon-下一阶段问题清单.md#4-连续同种工具调用聚合) | 确认 activity projection 分组边界 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **待调查** | — | [问题清单第 5 项](Pylon-下一阶段问题清单.md#5-mcpskill插件设置管理) | 盘点 schema、存储和权限边界 |
@@ -40,7 +40,7 @@
 <a id="p2"></a>
 ### P2 · terminal-like 块间距统一
 
-调查已完成并建立了独立的 [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)，但尚未完成施工书中的几何验收和专门回归证据，当前为 `待施工`。现有局部 CSS 变量仅作为调查证据，不计入完成状态。
+调查已完成并建立了独立的 [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)。现有 terminal-like CSS 已提供唯一 cadence token seam，并新增 [spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)（3 项通过）；尚未完成混排 DOM 几何验收，当前为 `施工中`。
 
 <a id="p3"></a>
 ### P3 · 本机 ACP Agent 运行时探测

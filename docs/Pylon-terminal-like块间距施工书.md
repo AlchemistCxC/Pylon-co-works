@@ -1,7 +1,7 @@
 # Pylon terminal-like 块间距统一施工书
 
-> 状态：待施工（调查完成）  
-> 对应问题：[P2 · terminal-like 块间距统一](Pylon-问题台账.md#p2)  
+> 状态：施工中（Slice A 完成，Slice B 待验收）
+> 对应问题：[P2 · terminal-like 块间距统一](Pylon-问题台账.md#p2)
 > 范围：AgentSheet Solid Workbench 与共用 ChatView 的 terminal-like 表现层
 
 ## 1. 施工目标
@@ -50,4 +50,3 @@
 - terminal-like 下不同语义块和连续工具的间距分别稳定，且每个相邻块只计算一次。
 - 默认及自定义行高下，流式/完成态的正文行高与边界高度一致（允许亚像素舍入误差）。
 - 非 terminal-like 预设行为不变；Solid boundary、皮肤 contract、架构检查和相关前端测试通过。
-
