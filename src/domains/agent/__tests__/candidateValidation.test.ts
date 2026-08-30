@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   candidateImportMode,
   candidateValidationDetails,
+  normalizeAgentCandidateValidationResult,
   type AgentCandidateValidationState,
 } from '../candidateValidation.ts'
 import type { AgentRuntimeCandidate } from '../agentDetector.ts'
@@ -76,5 +77,33 @@ describe('Agent 候选导入门禁', () => {
       status: 'failed',
       result: { ok: false, agentId: 'test', durationMs: 15_000, error: { code: 'agent_connection_timeout', message: 'timeout', action: 'open-runtime-log', stage: 'timeout', exitCode: null, stderr: null } },
     })).toMatchObject({ duration: '15.0s', stage: '总超时', exitCode: '未提供', stderr: '未捕获到 stderr' })
+  })
+
+  it('保留能力协商阶段与可重试/远端摘要字段', () => {
+    const result = normalizeAgentCandidateValidationResult({
+      ok: false,
+      agentId: 'fixture',
+      durationMs: 42.8,
+      error: {
+        code: 'agent_capability_invalid',
+        message: 'capability shape invalid',
+        action: 'open-runtime-log',
+        stage: 'capability',
+        retryable: false,
+        ioKind: null,
+        remoteCode: -32001,
+        remoteDataSummary: 'object(1 keys)',
+      },
+    }, 'fallback')
+    expect(result).toMatchObject({
+      durationMs: 42,
+      error: {
+        stage: 'capability',
+        retryable: false,
+        remoteCode: -32001,
+        remoteDataSummary: 'object(1 keys)',
+      },
+    })
+    expect(candidateValidationDetails({ status: 'failed', result })).toMatchObject({ stage: '能力协商' })
   })
 })

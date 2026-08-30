@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | 1 | [✅ 首片完成](Pylon-问题台账.md#p1) | 基于真实 trace 调整速率参数 |
 | 2 | [🧪 待验收](Pylon-问题台账.md#p2) | 在真实窗口完成一次最终视觉验收 |
-| 3 | [🔧 施工中](Pylon-问题台账.md#p3) | 补齐 Slice C 的细粒度错误 DTO 与设置页回归契约 |
-| 4 | [⏳ 待调查](Pylon-问题台账.md#p4) | 先确认 activity projection 的分组边界 |
+| 3 | [🔧 施工中](Pylon-问题台账.md#p3) | 验收暂跳过；转入 P4 activity projection 分组边界盘点 |
+| 4 | [🔧 施工中](Pylon-问题台账.md#p4) | 盘点 activity projection 分组键、连续性边界和过时测试 |
 | 5 | [⏳ 待调查](Pylon-问题台账.md#p5) | 先盘点 schema、存储和权限边界 |
 | 6 | [⏳ 待调查](Pylon-问题台账.md#p6) | 先盘点设置注册表和旧键迁移 |
 | 7 | [⏳ 待调查](Pylon-问题台账.md#p7) | 先确认空态创建命令边界 |

@@ -7,7 +7,7 @@
 import type { AgentEntry } from '../../identityStore'
 import type { AgentStatusPayload } from '../../components/settings/agentTypes'
 import { normalizeAgentDetectionReport, type AgentDetectionReport } from '../../domains/agent/agentDetector.ts'
-import type { AgentCandidateValidationResult } from '../../domains/agent/candidateValidation.ts'
+import { normalizeAgentCandidateValidationResult, type AgentCandidateValidationResult } from '../../domains/agent/candidateValidation.ts'
 import type { DurableSessionOwner } from '../../domains/session/owner.ts'
 
 export interface ClientTransport {
@@ -171,11 +171,11 @@ export function createAgentClient(transport: ClientTransport) {
     },
     /** 施工文档 §4.5：隔离连接测试（不改 active/runtime）。 */
     testAgentConnection: (agentId: string): Promise<AgentConnectionTestResult> =>
-      transport.invoke('test_agent_connection', { agentId }) as Promise<AgentConnectionTestResult>,
+      transport.invoke('test_agent_connection', { agentId }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
     detectAgentRuntimes: (detectorIds: readonly string[]): Promise<AgentDetectionReport> =>
       transport.invoke('detect_agent_runtimes', { detectorIds }).then(normalizeAgentDetectionReport),
     testAgentCandidate: (agentId: string, agent: { name: string; provider: string; transport: string; exe: string; args: string[] }): Promise<AgentConnectionTestResult> =>
-      transport.invoke('test_agent_candidate', { agentId, agent }) as Promise<AgentConnectionTestResult>,
+      transport.invoke('test_agent_candidate', { agentId, agent }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
     /** OBS-01/02 读取端：当前 active agent 的 ACP wire 记录快照（脱敏、有界）。 */
     wireTraceSnapshot: (): Promise<unknown> => transport.invoke('acp_wire_trace_snapshot'),
   }

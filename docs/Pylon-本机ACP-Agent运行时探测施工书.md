@@ -1,6 +1,6 @@
 # Pylon 本机 ACP Agent 运行时探测施工书
 
-> 状态：施工中（调查完成，Slice A/B 完成）
+> 状态：施工中（调查完成，Slice A/B/C 完成）
 > 对应问题：[P3 · 本机 ACP Agent 运行时探测](Pylon-问题台账.md#p3)
 > 范围：共享 Agent Catalog、pylon-core 探测器、Tauri 设置入口和隔离 ACP 验证
 
@@ -44,10 +44,15 @@
 - 前端 DTO 归一化兼容旧 payload（缺字段按 `not_tested`），设置页同时展示身份、启动和 ACP 三段状态。
 - 保持现有 `test_agent_candidate` 隔离语义，不启动或替换当前 active runtime。
 
-### Slice C：观察与回归（下一步）
+### Slice C：观察与回归
 
-- 为三段状态补齐更细的 DTO/CLI 错误契约和设置页回归快照。
+- 为三段状态补齐更细的 DTO/CLI 错误契约和设置页回归快照：前端保留 capability 阶段、retryable、IO 类型及脱敏远端摘要，typed client 在边界归一化异常 payload。
 - 覆盖 PATH、已知目录、launcher、版本超时、spawn 失败、initialize 失败和成功握手；诊断不得泄露配置值或凭据。
+
+### Slice C（已完成）
+
+- `candidateValidation` DTO 已覆盖 preflight/spawn/initialize/capability/timeout 五阶段，并保留 `retryable`、`ioKind`、`remoteCode` 和 `remoteDataSummary`。
+- typed client 对 `test_agent_connection` / `test_agent_candidate` 统一归一化结果；设置页显示能力协商阶段，回归测试覆盖脱敏远端摘要。
 
 ## 5. 兼容性、性能与回滚
 
