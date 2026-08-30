@@ -42,7 +42,7 @@ import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
@@ -107,6 +107,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   initialSection?: string
   initialAgentId?: string
 }) {
+  const initialIntent = normalizeSettingsIntent({ domain: initialDomain, section: initialSection, agentId: initialAgentId })
   const settingsRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const restoreFocusRef = useRef<HTMLElement | null>(null)
@@ -178,10 +179,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   const [activeDomain, setActiveDomain] = useState<SettingsDomainId>(
-    (initialDomain as SettingsDomainId) || 'appearance',
+    initialIntent.domain,
   )
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(
-    initialSection && initialSection in SETTINGS_SECTION_LABELS ? initialSection as SettingsSectionId : 'global',
+    initialIntent.section,
   )
   const settingsPageRegistry = getPluginSettingsPageRegistry()
   const pluginSettingsPages = useSyncExternalStore(
@@ -196,7 +197,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => rendererRegistry.snapshot(),
   )
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
-    initialSection && !(initialSection in SETTINGS_SECTION_LABELS) ? initialSection : null,
+    initialIntent.pluginPageId ?? null,
   )
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
@@ -218,14 +219,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     const onOpenSettings = (event: Event) => {
       const detail = (event as CustomEvent<{ domain?: string; section?: string; agentId?: string }>).detail
       if (!detail) return
-      if (detail.domain) setActiveDomain(detail.domain as SettingsDomainId)
-      if (detail.section && detail.section in SETTINGS_SECTION_LABELS) {
-        setActivePluginPageId(null)
-        setActiveSection(detail.section as SettingsSectionId)
-      } else if (detail.section) {
-        setActiveDomain('plugins')
-        setActivePluginPageId(detail.section)
-      }
+      const intent = normalizeSettingsIntent(detail)
+      setActiveDomain(intent.domain)
+      setActiveSection(intent.section)
+      setActivePluginPageId(intent.pluginPageId ?? null)
     }
     window.addEventListener('pylon:open-settings', onOpenSettings)
     return () => window.removeEventListener('pylon:open-settings', onOpenSettings)

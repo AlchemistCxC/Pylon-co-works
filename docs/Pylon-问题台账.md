@@ -19,7 +19,7 @@
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
-| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **待调查** | — | [问题清单第 6 项](Pylon-下一阶段问题清单.md#6-全局设置页面重组) | 盘点注册表、旧键迁移和搜索索引 |
+| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航回归；`npm.cmd run check:solid` | 进入 Slice B：重复标签/字段贡献审计 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **待调查** | — | [问题清单第 7 项](Pylon-下一阶段问题清单.md#7-agentsheet-空态与创建会话形态) | 确认空态创建命令边界 |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **待调查** | — | [问题清单第 8 项](Pylon-下一阶段问题清单.md#8-filesheet-语言插件与-git) | 盘点语言插件和 Git facade seam |
 | [P9](#p9-输入内容预测) | 输入内容预测 | **待调查** | — | [问题清单第 9 项](Pylon-下一阶段问题清单.md#9-输入内容预测) | 定义预测状态机和隐私策略 |
@@ -87,7 +87,20 @@
 <a id="p6"></a>
 ### P6 · 全局设置页面重组
 
-已进入调查：下一步盘点设置注册表、旧键迁移和搜索索引。
+**结论：首片完成。** Slice A 已建立设置意图归一化边界：
+
+- `normalizeSettingsIntent` 以 `settingsDomains` 为唯一 canonical registry，校正 section 所属 domain；
+- 兼容 `renderer/suite`、`renderer/catalog` 及常见旧 section 别名，不把导航兼容逻辑混入主题持久化迁移；
+- 未知普通入口回退到“外观 › 全局”，插件贡献页保留 `pluginPageId` 并挂载到“插件 › 插件管理”；
+- 内部 Renderer Suite 入口已改发 canonical `appearance/renderers` 事件。
+
+核验记录（2026-08-31）：
+
+- 状态：`首片完成`
+- 证据：`src/settingsDomains.ts`；`src/components/Settings.tsx`；`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`；`src/__tests__/settingsDomains.test.ts`；`src/__tests__/settingsDomainNav.test.tsx`。
+- 命令：`npm.cmd test -- --run src/__tests__/settingsDomains.test.ts src/__tests__/settingsDomainNav.test.tsx --pool=forks --maxWorkers=2`（26 项通过）；`npm.cmd run check:solid`。
+- 未确认：重复标签与字段贡献的完整审计、旧设置字段的进一步清理。
+- 下一步：按施工书 Slice B 建立 canonical label/alias 审计，再更新本台账。
 
 <a id="p7"></a>
 ### P7 · Agentsheet 空态与创建会话形态

@@ -18,6 +18,7 @@ import {
   SECTION_OWNERS,
   PAGE_OWNED_SECTIONS,
   isPageOwnedSection,
+  normalizeSettingsIntent,
 } from '../settingsDomains'
 import { ZONES } from '../themeFieldDefs'
 
@@ -93,6 +94,35 @@ describe('ISSUE-13 W1 搜索路径', () => {
     for (const domain of SETTINGS_DOMAINS) {
       expect(SETTINGS_DOMAIN_BY_ID[domain.id]).toBe(domain)
     }
+  })
+})
+
+describe('P6 Slice A 设置意图归一化', () => {
+  it('旧 renderer/suite 深链落到外观 › 渲染器', () => {
+    expect(normalizeSettingsIntent({ domain: 'renderer', section: 'suite' })).toEqual({
+      domain: 'appearance', section: 'renderers',
+    })
+  })
+
+  it('旧 section 别名映射到 canonical section，并以 section 归属校正 domain', () => {
+    expect(normalizeSettingsIntent({ domain: 'workspace', section: 'conversation' })).toEqual({
+      domain: 'appearance', section: 'chat',
+    })
+    expect(normalizeSettingsIntent({ domain: 'wrong', section: 'gateway' })).toEqual({
+      domain: 'agents-connections', section: 'gateway',
+    })
+  })
+
+  it('插件贡献页保留 page id，同时使用插件管理作为宿主 section', () => {
+    expect(normalizeSettingsIntent({ domain: 'plugins', section: 'plugin.example.settings', agentId: 'peri' })).toEqual({
+      domain: 'plugins', section: 'pluginManager', pluginPageId: 'plugin.example.settings', agentId: 'peri',
+    })
+  })
+
+  it('未知入口回退到全局设置，不进入空白页', () => {
+    expect(normalizeSettingsIntent({ domain: 'missing', section: 'missing' })).toEqual({
+      domain: 'appearance', section: 'global',
+    })
   })
 })
 

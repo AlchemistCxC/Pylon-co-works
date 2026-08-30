@@ -379,7 +379,9 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       setFailure({ suiteId: 'builtin.solid', phase: 'resolve', message: error instanceof Error ? error.message : String(error) }); setFatal(true)
     }
   }
-  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain: 'renderer', section: 'suite' } }))
+  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
+    detail: { domain: 'appearance', section: 'renderers' },
+  }))
   const openDiagnostics = () => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))
   const openFallbackMedia = (part: ImageContentPart) => {
     const host = hostPortRef.current
