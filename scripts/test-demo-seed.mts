@@ -90,7 +90,7 @@ for (const entry of buildGitStatus()) {
 {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(app, /import \{ seedDemo \} from '\.\/demo\/seed'/, 'App 必须接 seedDemo')
-  assert.match(app, /if \(IS_TAURI\) return/, 'seed effect 必须 Tauri 守卫')
+  assert.match(app, /if \(IS_TAURI && !isBrowserMockRuntime\(\)\) return/, 'seed effect 必须真实 Tauri 守卫')
   assert.match(app, /demoSeededRef\.current/, 'seed 必须幂等 ref')
   assert.match(app, /seedDemo\(setActiveSession/, 'seed 必须传 setActiveSession（写回持久化）')
   const seedEffect = app.slice(app.indexOf('demoSeededRef'))

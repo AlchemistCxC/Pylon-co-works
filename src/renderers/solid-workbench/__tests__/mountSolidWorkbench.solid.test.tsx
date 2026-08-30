@@ -133,6 +133,7 @@ describe('mountSolidWorkbench', () => {
 
   it('用户离开底部后不抢滚动，并可一键恢复自动跟随', async () => {
     const scrollIntoView = vi.fn()
+    const scrollTo = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: scrollIntoView,
@@ -143,6 +144,7 @@ describe('mountSolidWorkbench', () => {
       scrollTop: { value: 100, writable: true, configurable: true },
       scrollHeight: { value: 1_000, configurable: true },
       clientHeight: { value: 300, configurable: true },
+      scrollTo: { value: scrollTo, configurable: true },
     })
 
     fireEvent.scroll(viewport)
@@ -154,12 +156,15 @@ describe('mountSolidWorkbench', () => {
     expect(scrollIntoView).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' })
-    expect(screen.queryByRole('button', { name: '回到底部' })).toBeNull()
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+    // The rail action remains available as an explicit endpoint control after
+    // follow mode is restored; subsequent output should auto-follow again.
+    expect(screen.getByRole('button', { name: '回到底部' })).toBeTruthy()
 
     scrollIntoView.mockClear()
+    scrollTo.mockClear()
     services.runtime.update({ streamingText: '恢复跟随后继续输出' })
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' }))
   })
 
   it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
@@ -600,7 +605,7 @@ describe('mountSolidWorkbench', () => {
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
       command: 'createSession',
-      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目' } }],
+      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目', attachments: [] }, mode: 'auto', model: 'deepseek-v4-flash', reasoningLevel: 'balanced' }],
     }))
   })
 

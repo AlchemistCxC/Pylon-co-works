@@ -34,7 +34,7 @@ const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-
 assert.match(source, /beforeClose/, '关闭入口应统一经过 dirty 丢弃确认')
 assert.match(source, /session-settings-section/, '会话设置应按信息层级分区')
 assert.match(source, /session-settings-danger/, '删除操作应位于独立危险区域')
-assert.match(source, /details className="session-settings-advanced"/, '未接入能力应折叠展示')
+assert.equal(source.includes('session-settings-advanced'), false, '未接入能力区已从精简表单移除')
 assert.match(source, /disabled=\{!dirty\}/, '未修改时保存按钮应禁用')
 assert.match(source, /aria-describedby="session-settings-description"/, 'Dialog 应提供可访问的说明关联')
 assert.match(css, /\.session-settings-footer/, '应有独立 sticky footer 样式')

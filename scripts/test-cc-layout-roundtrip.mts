@@ -54,7 +54,7 @@ assert.match(store, /updateCcPlacement:\s*\(id, partial\) =>[\s\S]*?ccLayout:\s*
 assert.match(store, /resetCcLayout:\s*\(\) => set\(state => \(\{[\s\S]*?ccLayout:\s*cloneCcLayout\(DEFAULT_CC_LAYOUT\)/)
 assert.match(reducer, /function setGlobalPresetReducer\([\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
 assert.match(reducer, /function applyCustomPresetReducer\([\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
-assert.equal(controlCenter.includes('const layout = useStore(s => s.ccLayout)'), true)
+assert.match(controlCenter, /layout:\s*s\.ccLayout/, 'ControlCenter 必须订阅 ccLayout')
 assert.equal(controlCenter.includes('useStore.getState().ccLayout'), true)
 assert.equal(controlCenter.includes('updateCcPlacement(id, {'), true)
 

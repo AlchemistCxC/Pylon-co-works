@@ -30,7 +30,7 @@ assert.match(css, /\.term-tool-connector-style--dotted/, '必须支持 dotted co
 assert.match(css, /\.term-tool-connector-style--pulse/, '必须支持 pulse connector')
 assert.match(css, /\.term-tool-connector--pulse \{ animation:tool-connector-pulse 1\.8s ease-in-out infinite; \}/)
 assert.match(css, /\.term-tool-connector--settle \{ animation:tool-connector-settle 360ms ease-out 1 both; \}/)
-assert.match(css, /\.term-tool-connector\[data-tool-state="failed"\] \{ filter:blur\(0\.65px\); \}/, 'failed connector 必须同步错误指示物的模糊表现')
+assert.match(css, /\.term-tool-connector\[data-connector-mode="follow"\]\[data-tool-state="failed"\] \{ filter:blur\(0\.65px\); \}/, 'failed connector 必须同步错误指示物的模糊表现')
 assert.match(css, /\.term-tool-connector--flash \{ animation:tool-connector-flash 320ms ease-out 1 both; \}/)
 assert.match(css, /\.term-tool-connector--static \{ animation:none; \}/)
 assert.match(css, /@media \(prefers-reduced-motion:reduce\)[\s\S]*?\.term-tool-connector--breathe,[\s\S]*?\.term-tool-connector--flash \{ animation:none; filter:none; \}/)

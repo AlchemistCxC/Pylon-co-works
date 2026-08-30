@@ -57,12 +57,12 @@ const consumed = new Set<string>()
 const consumedWithFallback = new Set<string>()
 for (const f of cssFiles) {
   const s = read(f)
-  for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) consumed.add(m[1])
+  for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)\s*(?=[,)])/g)) consumed.add(m[1])
   for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)\s*,/g)) consumedWithFallback.add(m[1])
 }
 for (const f of tsxFiles) {
   const s = read(f)
-  for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) consumed.add(m[1])
+  for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)\s*(?=[,)])/g)) consumed.add(m[1])
   for (const m of s.matchAll(/var\((--[a-zA-Z0-9-]+)\s*,/g)) consumedWithFallback.add(m[1])
 }
 const declared = new Set<string>()

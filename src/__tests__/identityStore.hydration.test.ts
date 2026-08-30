@@ -14,7 +14,7 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
-vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 
 import { flushIdentityBackend, IDENTITY_CACHE_META_KEY, useIdentityStore } from '../identityStore'
 import { PROFILE_STORAGE_KEY } from '../profilePersistence'

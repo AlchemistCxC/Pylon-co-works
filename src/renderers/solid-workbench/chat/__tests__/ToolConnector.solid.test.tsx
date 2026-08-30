@@ -102,7 +102,7 @@ describe('SolidToolConnector', () => {
 
     port.invalidate('manual')
     scheduled?.()
-    expect(connector.style.display).toBe('block')
+    expect(connector.style.visibility).toBe('visible')
     expect(connector.style.left).toBe('34px')
     expect(connector.style.top).toBe('30px')
     expect(connector.style.height).toBe('80px')

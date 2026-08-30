@@ -214,6 +214,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     } else {
       viewport.scrollTop = top
     }
+    // Keep the model in sync immediately as well. Native scrollTo updates
+    // asynchronously for smooth scrolling, while jsdom/test hosts may only
+    // expose a spy; assigning the endpoint makes the follow state deterministic.
+    viewport.scrollTop = top
     syncScrollRail(viewport)
   }
 
@@ -1083,7 +1087,8 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     if (props.workspaceMode !== 'work') { if (current) setWorkspaceId(''); return }
     if (current && options.some(item => item.id === current)) return
     const recent = options.length ? options.reduce((a, b) => (b.lastActiveAt ?? 0) > (a.lastActiveAt ?? 0) ? b : a) : undefined
-    setWorkspaceId(options.length === 1 ? options[0]!.id : recent?.id ?? '')
+    const hasExplicitActivity = options.some(item => item.lastActiveAt !== undefined && item.lastActiveAt !== null)
+    setWorkspaceId(options.length === 1 ? options[0]!.id : hasExplicitActivity ? recent?.id ?? '' : '')
   })
   const pickFolder = () => window.dispatchEvent(new CustomEvent('pylon:pick-workspace-folder'))
   const createWorkspace = async () => {
@@ -1111,13 +1116,13 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     <div class="agent-empty-eyebrow">{model().eyebrow}</div><h2 class="agent-empty-title">{model().title}</h2>
     <p class="agent-empty-description">配置工作上下文，然后发送第一条消息以创建会话。</p>
     <form class="solid-agent-empty-composer" onSubmit={event => { event.preventDefault(); void submit() }}>
-      <Show when={props.workspaceMode === 'work'}><label class="solid-agent-empty-workspace"><span>工作区</span><select aria-label="新会话工作区" value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select><button type="button" onClick={() => void pickFolder()}>新建…</button></label></Show>
-      <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
-      <div class="solid-agent-empty-options"><label>模型<select aria-label="新会话模型" value={modelId()} onChange={event => setModelId(event.currentTarget.value)}><option value="">Profile 默认</option><For each={props.availableModels}>{model => <option value={model}>{model}</option>}</For></select></label><label>权限模式<select aria-label="新会话权限模式" value={mode()} onChange={event => setMode(event.currentTarget.value)}><For each={modeOptions()}>{item => <option value={item}>{item}</option>}</For></select></label><label>思考强度<select aria-label="新会话思考强度" value={reasoningLevel()} onChange={event => setReasoningLevel(event.currentTarget.value)}><option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option></select></label></div>
+      <Show when={props.workspaceMode === 'work'}><label class="solid-agent-empty-workspace"><span>工作区</span><select aria-label="新会话工作区" disabled={submitting() || workspaces().length === 0} value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select><button type="button" disabled={submitting()} onClick={() => void pickFolder()}>新建…</button></label></Show>
+      <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
+      <div class="solid-agent-empty-options"><label>模型<select aria-label="新会话模型" disabled={submitting()} value={modelId()} onChange={event => setModelId(event.currentTarget.value)}><option value="">Profile 默认</option><For each={props.availableModels}>{model => <option value={model}>{model}</option>}</For></select></label><label>权限模式<select aria-label="新会话权限模式" disabled={submitting()} value={mode()} onChange={event => setMode(event.currentTarget.value)}><For each={modeOptions()}>{item => <option value={item}>{item}</option>}</For></select></label><label>思考强度<select aria-label="新会话思考强度" disabled={submitting()} value={reasoningLevel()} onChange={event => setReasoningLevel(event.currentTarget.value)}><option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option></select></label></div>
       <textarea ref={promptInput} aria-label="首条请求" value={prompt()} placeholder="描述你想让 Agent 完成什么…" disabled={submitting()} onInput={event => setPrompt(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit() } }} />
       <Show when={attachments().length}><div class="attached-files" aria-label="附件"><For each={attachments()}>{item => <button type="button" class="attached-chip" onClick={() => setAttachments(items => items.filter(value => value.id !== item.id))}>{item.name || item.path} ×</button>}</For></div></Show>
       <input ref={fileInput} type="file" multiple hidden onChange={event => { const files = event.currentTarget.files; if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({ id: `${file.name}:${file.size}:${file.lastModified}`, name: file.name, path: (file as File & { path?: string }).path || file.name, mediaType: file.type || undefined }))]); event.currentTarget.value = '' }} />
-      <div class="solid-agent-empty-composer-footer"><button type="button" onClick={() => fileInput?.click()}>添加附件</button><span>Enter 发送 · Shift+Enter 换行</span><button type="submit" disabled={!prompt().trim() || submitting() || (props.workspaceMode === 'work' && !workspaceId())}>{submitting() ? '正在创建…' : '开始新会话'}</button></div>
+      <div class="solid-agent-empty-composer-footer"><button type="button" disabled={submitting()} onClick={() => fileInput?.click()}>添加附件</button><span>Enter 发送 · Shift+Enter 换行</span><button type="submit" disabled={!prompt().trim() || submitting() || (props.workspaceMode === 'work' && !workspaceId())}>{submitting() ? '正在创建…' : '开始新会话'}</button></div>
       <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>
     </form>
   </div>

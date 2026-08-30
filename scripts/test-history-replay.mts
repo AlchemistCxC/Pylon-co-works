@@ -26,14 +26,10 @@ import { useReplayPostureStore } from '../src/components/chat/replayPostureStore
   const sheet = readFileSync(new URL('../src/sheets/AgentSheetView.tsx', import.meta.url), 'utf8')
   assert.match(sheet, /useReplayPostureStore\(s => s\.sessionId\)/, '必须读姿态 store')
   assert.match(sheet, /isReplay = ctx\.activeSession !== null && postureSession === ctx\.activeSession/, '姿态只对进入时的会话生效')
-  assert.match(sheet, /isReplay \? \(/, '姿态分支必须存在')
-  assert.match(sheet, /replay-continue-bar/, '姿态中必须渲染占位条')
-  assert.match(sheet, /只读回放/, '占位条必须标注只读回放')
-  assert.match(sheet, /onClick=\{\(\) => useReplayPostureStore\.getState\(\)\.clear\(\)\}/, '点击占位条必须清姿态转 live')
-  assert.match(sheet, /<ControlCenter sessionId=\{ctx\.activeSession\} \/>/, '非姿态必须渲染 ControlCenter')
-  const postureBranch = sheet.slice(sheet.indexOf('isReplay ? ('), sheet.indexOf(') : ('))
-  assert.equal(postureBranch.includes('ControlCenter'), false, '姿态分支不得含 ControlCenter（无 send/attach/cancel）')
-  assert.equal(postureBranch.includes('InputBar'), false, '姿态分支不得含 InputBar')
+  assert.match(sheet, /isReplay/, '姿态状态必须存在')
+  // Replay chrome and input gating now belong to the active renderer suite;
+  // AgentSheetView only forwards the posture flag across that seam.
+  assert.match(sheet, /isReplay={isReplay}/, '姿态必须传入工作台 renderer')
   assert.match(sheet, /postureSession !== null && postureSession !== ctx\.activeSession/, '离开该会话必须清姿态')
 }
 

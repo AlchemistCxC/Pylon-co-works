@@ -74,7 +74,7 @@
   resize:none; outline:none; min-height:var(--input-min-height,56px); max-height:240px;
 }
 /* 输入焦点由插入光标表达；不要因为输入而改变整栏边框或投射焦点光环。 */
-.input-textarea:focus { border-color:var(--input-border-color,var(--border)); box-shadow:none; }
+.input-textarea:focus { border-color:var(--input-border-color,var(--border)); box-shadow:0 0 0 var(--input-focus-ring-width,0px) var(--input-focus-border,var(--border-focus)); }
 .input-textarea::placeholder { color:var(--input-placeholder,var(--text-placeholder)); }
 
 .input-bar.input-variant-compact .input-row { gap:5px; }

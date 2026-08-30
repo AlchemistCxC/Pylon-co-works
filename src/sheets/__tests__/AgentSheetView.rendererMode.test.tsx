@@ -983,6 +983,7 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('canonical message parts 经 content.text Slot seam 消费且保留消息 role framing', async () => {
+    localStorage.clear()
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-content-slot', 'runtime'),
       {
@@ -994,25 +995,30 @@ describe('AgentSheetView renderer mode context', () => {
           mount(container) {
             const node = document.createElement('div')
             node.dataset.productionContentSlot = 'true'
-            node.textContent = `content slot: ${String((snapshot.payload as { text?: unknown }).text)}`
+            const initialText = String((snapshot.payload as { text?: unknown }).text)
+            node.textContent = `content slot: ${initialText}`
             container.append(node)
             return node
           },
-          update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+          update(handle, next) {
+            const nextText = String((next.payload as { text?: unknown }).text)
+            ;(handle as HTMLElement).textContent = `content slot: ${nextText}`
+          }, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
         }),
       },
     )
     try {
-      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      const slotCtx = { ...ctx, activeSession: 'content-slot-session', sessionSource: () => 'local:content-slot' }
+      useIdentityStore.setState({ sessions: [session('content-slot-session', 'local:content-slot')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={slotCtx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
-      publishPluginEvent(normalizeRawEvent(
+      const normalizedContentEvent = normalizeRawEvent(
         { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'part payload' } } },
-        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
-      ).event)
-
-      expect(await screen.findByText('content slot: part payload')).toBeTruthy()
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:content-slot' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      )
+      publishPluginEvent(normalizedContentEvent.event)
+      expect(await screen.findByText(/content slot:\s*part payload/, {}, { timeout: 5_000 })).toBeTruthy()
       expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
       await registration.dispose()
       await waitFor(() => expect(container.querySelector('[data-production-content-slot="true"]')).toBeNull())

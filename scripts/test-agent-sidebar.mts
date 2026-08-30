@@ -20,7 +20,7 @@ assert.equal(sidebar.includes('.group-header'), false, '组件内不得再引用
 
 // 2. 平铺 + 按 lastActiveAt 倒序
 assert.match(sidebar, /\.sort\(\(a, b\) => \(b\.lastActiveAt \|\| 0\) - \(a\.lastActiveAt \|\| 0\)\)/, '必须按 lastActiveAt 倒序')
-assert.match(sidebar, /\.filter\(s => s\.profileId === activeProfileId && s\.agentId === activeAgent\)/, '必须按当前 profile 与当前 agent 过滤')
+assert.match(sidebar, /\.filter\(s => s\.profileId === activeProfileId && s\.agentId === activeAgent && !s\.archivedAt\)/, '必须按当前 profile、agent 过滤并排除已归档')
 
 // 3. 运行点：读 liveGeneratingSources（periId 存在不再等于 running）
 assert.match(sidebar, /liveGeneratingSources = useRuntimeStore\(s => s\.liveGeneratingSources \?\? NO_GENERATING_SOURCES\)/, '必须读 liveGeneratingSources（稳定引用）')

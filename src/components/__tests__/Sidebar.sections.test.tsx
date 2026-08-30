@@ -65,19 +65,24 @@ describe('AgentSheet 左栏双分区', () => {
     })
   })
 
-  it('工作/聊天互斥切换，两个 contribution 都能直接新建会话', async () => {
+  it('工作/聊天互斥切换，两个 contribution 都派发宿主新建事件', async () => {
     const { rerender } = render(<Sidebar ctx={ctx} state={{ sidebarMode: 'work' }} />)
+
+    const events: CustomEvent[] = []
+    const onNewSession = (event: Event) => events.push(event as CustomEvent)
+    window.addEventListener('pylon:new-session', onNewSession)
 
     const work = await screen.findByRole('region', { name: '工作会话' })
     expect(useIdentityStore.getState().sessions).toHaveLength(0)
     fireEvent.click(within(work).getByRole('button', { name: '在 Pylon 中新建会话' }))
-    expect(useIdentityStore.getState().sessions).toHaveLength(1)
-    expect(useIdentityStore.getState().sessions[0]?.workspaceId).toBe('workspace-1')
+    expect(events[0]?.detail).toEqual({ workspaceId: 'workspace-1' })
+    expect(useIdentityStore.getState().sessions).toHaveLength(0)
 
     rerender(<Sidebar ctx={ctx} state={{ sidebarMode: 'chat' }} />)
     const chat = await screen.findByRole('region', { name: '聊天会话' })
     fireEvent.click(within(chat).getByRole('button', { name: '新建聊天会话' }))
-    expect(useIdentityStore.getState().sessions).toHaveLength(2)
-    expect(useIdentityStore.getState().sessions[1]?.workspaceId).toBeUndefined()
+    expect(events[1]?.detail).toBeNull()
+    expect(useIdentityStore.getState().sessions).toHaveLength(0)
+    window.removeEventListener('pylon:new-session', onNewSession)
   })
 })

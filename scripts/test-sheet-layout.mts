@@ -26,7 +26,7 @@ assert.equal(agentSheet.includes("import Sidebar"), false, 'AgentSheetView 不�
 assert.equal(agentSheet.includes('<Sidebar'), false, 'AgentSheetView 不得再渲染 Sidebar')
 assert.match(agentSheet, /export default function AgentSheetView\(\{ sheet, ctx \}: \{ sheet: SheetRecord; ctx: SheetContext \}\)/, 'AgentSheetView props 收敛为 { sheet, ctx }')
 assert.match(agentSheet, /workspaceMode=\{workspaceMode\}/, 'AgentSheetView 必须把 Workspace state mode 传给 ChatView renderer context')
-assert.match(agentSheet, /sessionId=\{ctx\.activeSession\}/, 'AgentSheetView 主区读 ctx.activeSession')
+assert.match(agentSheet, /activeSessionId: ctx\.activeSession|activeSessionId=\{ctx\.activeSession\}/, 'AgentSheetView 主区读 ctx.activeSession')
 
 // 3. Sidebar 经 ctx + workspace state 注入：会话行为读 ctx，模式读 state
 assert.match(sidebar, /export default function Sidebar\(\{ ctx, state, sheet \}/, 'Sidebar 必须经 ctx/state/sheet 注入')
