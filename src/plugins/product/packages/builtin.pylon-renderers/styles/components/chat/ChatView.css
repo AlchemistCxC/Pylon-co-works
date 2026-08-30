@@ -1918,6 +1918,12 @@
   --chat-tool-gap: 4px;
   --chat-activity-gap: 6px;
 }
+/* Presentation profiles may contribute bubble/Claude margins.  Clear those
+   outer margins at the terminal-like boundary so the adjacent-row rules
+   below remain the only source of inter-block cadence. */
+.app[data-interface-mode="terminal-like"] .term-row {
+  margin-block-end: 0;
+}
 .app[data-interface-mode="terminal-like"] .plain-message-list__row + .plain-message-list__row {
   padding-block-start: var(--chat-row-gap);
 }

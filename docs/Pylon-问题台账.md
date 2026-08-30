@@ -15,7 +15,7 @@
 | 编号 | 问题 | 当前状态 | 最近核验 | 证据 / 施工书 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
 | [P1](#p1-流式输出节奏) | 流式输出节奏 | **首片完成** | 2026-08-31 | [流式渲染节奏施工书](Pylon-流式渲染节奏施工书.md)；`npm.cmd run check:solid` | 用真实 trace 校准速率参数 |
-| [P2](#p2) | terminal-like 块间距统一 | **施工中** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts) | 完成跨预设验收并补回归证据 |
+| [P2](#p2) | terminal-like 块间距统一 | **待验收** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)；`mountSolidWorkbench` 混排回归 | 在真实窗口完成一次最终视觉验收 |
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **待调查** | — | [问题清单第 3 项](Pylon-下一阶段问题清单.md#3-本机-acp-agent-运行时探测) | 盘点发现、启动、握手证据 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **待调查** | — | [问题清单第 4 项](Pylon-下一阶段问题清单.md#4-连续同种工具调用聚合) | 确认 activity projection 分组边界 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **待调查** | — | [问题清单第 5 项](Pylon-下一阶段问题清单.md#5-mcpskill插件设置管理) | 盘点 schema、存储和权限边界 |
@@ -34,13 +34,19 @@
 - `src/renderers/solid-workbench/streamingDisplayScheduler.ts` 提供 latest-wins、Unicode grapheme 增量、更新速率上限、终态 flush、暂停/恢复和销毁清理。
 - `src/renderers/solid-workbench/mountSolidWorkbench.solid.tsx` 只在 Solid 消费边界接入调度器；runtime/canonical 仍接收完整快照。
 - `npm.cmd run check:solid` 已通过：Solid 边界、Workbench 皮肤 contract、product contribution boundary、A17 渲染器架构门禁均通过。
-
-全量 `npm.cmd test` 在当前工作树仍有 34 项失败（含 identity hydration、设置导航、空态创建和 legacy runner 等），因此这里仅依据施工书规定的 Solid/架构门禁确认首片，不把全量测试误记为通过；后续提交应单独处理这些回归。
+- 全量 `npm.cmd test -- --run --pool=forks --maxWorkers=2` 已复核通过：430 个文件、2653 项测试；legacy runner 4/4 通过。
 
 <a id="p2"></a>
 ### P2 · terminal-like 块间距统一
 
-调查已完成并建立了独立的 [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)。现有 terminal-like CSS 已提供统一的 cadence token set，并新增 [spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)（3 项通过）；尚未完成跨预设和混排 DOM 几何验收，当前为 `施工中`。
+调查已完成并建立了独立的 [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)。terminal-like 骨架现在提供唯一的 cadence token set，并清除 bubble/Claude 预设遗留的 row 外边距，避免跨预设叠加空白；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts) 已覆盖 5 项（含四个非 GUI 预设归类和唯一间距来源），`mountSolidWorkbench` 混排/流式回归通过，当前进入 `待验收`。
+
+核验记录（2026-08-31）：
+
+- 状态：`待验收`
+- 证据：`npm.cmd test -- --run src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts src/plugins/core/renderer/__tests__/builtinPresentationProfiles.test.ts src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx --pool=forks --maxWorkers=2`（77 项通过）；全量 `npm.cmd test -- --run --pool=forks --maxWorkers=2`（430 文件、2653 项通过）；`npm.cmd run check:solid`。
+- 结论：四个非 GUI 内置预设均解析为 terminal-like；不同块类型继续使用独立 token，预设外边距不再叠加；Solid 混排与流式/完成态回归通过。尚未在真实窗口读取最终像素边界。
+- 下一步：在真实窗口完成一次 terminal-classic、terminal-modern 和自定义行高的最终视觉验收。
 
 <a id="p3"></a>
 ### P3 · 本机 ACP Agent 运行时探测
