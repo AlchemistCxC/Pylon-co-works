@@ -114,7 +114,10 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     hotTimer = clock().setInterval(() => {
       setNow(clock().now())
       setDisplayedTokens(previous => nextTokenCatchUp(previous, props.tokenCount))
-    }, Math.max(40, Math.min(1000, props.appearance.intervalMs || HOT_TICK_MS)))
+    // `intervalMs` controls frame phase speed, not the UI clock. Keep the
+    // repaint cadence bounded so a 1s frame preset cannot make elapsed time
+    // and the spark marker look frozen.
+    }, Math.max(40, Math.min(HOT_TICK_MS, props.appearance.intervalMs || HOT_TICK_MS)))
     slowTimer = clock().setInterval(() => setNow(clock().now()), SLOW_TICK_MS)
   }
 
@@ -258,7 +261,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     const context = indicatorContext()
     const liveness = activity()
     const primary = copy().primary
-    const contextSignature = `${context.kind ?? ''}\u0000${context.label ?? ''}\u0000${context.toolNames.join('\u0001')}`
+    const contextSignature = `${context.kind ?? ''}\u0000${context.label ?? ''}\u0000${[...context.toolNames].sort().join('\u0001')}`
 
     if (contextSignature !== observedContextSignature) {
       observedContextSignature = contextSignature

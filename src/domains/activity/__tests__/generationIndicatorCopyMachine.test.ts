@@ -46,20 +46,19 @@ describe('generation indicator copy machine', () => {
     expect(state).toMatchObject({ status: 'showing', text: '大道至简', shownAt: 1_200 })
   })
 
-  it('waiting/stalled 立即抢占，恢复 active 遵守最短展示时间', () => {
+  it('waiting/stalled 遵守最短展示时间，恢复 active 不会造成抖动', () => {
     let state = reduceGenerationIndicatorCopy(undefined, {
       type: 'start', generationId: 'g-1', text: '博大精深', at: 0,
     }, MIN_DISPLAY_MS)
     state = reduceGenerationIndicatorCopy(state, {
       type: 'liveness-change', generationId: 'g-1', liveness: 'waiting', text: '等待响应', at: 300,
     }, MIN_DISPLAY_MS)
-    expect(state).toMatchObject({ status: 'showing', text: '等待响应', shownAt: 300 })
+    expect(state).toMatchObject({ status: 'pending', text: '博大精深', nextText: '等待响应', dueAt: 1_200 })
 
     state = reduceGenerationIndicatorCopy(state, {
       type: 'liveness-change', generationId: 'g-1', liveness: 'active', text: '博大精深', at: 500,
     }, MIN_DISPLAY_MS)
-    expect(state.status).toBe('pending')
-    if (state.status === 'pending') expect(state.dueAt).toBe(1_500)
+    expect(state).toMatchObject({ status: 'showing', text: '博大精深', shownAt: 0 })
   })
 
   it('完成后旧回合的延迟事件不能唤醒新回合', () => {

@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, createSignal, onCleanup, type JSX } from 'solid-js'
+import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
@@ -180,6 +180,21 @@ export function ReasoningBlock(props: {
     'max-height': `${props.maxHeight ?? 320}px`,
     'border-color': props.borderColor ?? 'color-mix(in srgb, var(--border) 72%, transparent)',
   })
+  let bodyElement: HTMLDivElement | undefined
+  let followBottom = true
+  const onBodyScroll = () => {
+    if (!bodyElement) return
+    followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
+  }
+  createEffect(() => {
+    const text = props.text
+    const running = props.running
+    const open = collapse.open()
+    if (!text || !running || !open || !bodyElement || !followBottom) return
+    queueMicrotask(() => {
+      if (bodyElement && followBottom) bodyElement.scrollTop = bodyElement.scrollHeight
+    })
+  })
 
   return (
     <div
@@ -203,7 +218,7 @@ export function ReasoningBlock(props: {
         </button>
         <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
           {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
-          <div class="term-reasoning-body" style={bodyStyle()}>
+          <div class="term-reasoning-body" ref={element => { bodyElement = element }} onScroll={onBodyScroll} style={bodyStyle()}>
             <MarkdownContent text={props.text} streaming={props.running} />
           </div>
         </SolidCollapsibleRegion>

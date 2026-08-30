@@ -4,7 +4,7 @@
 
 ## 使用规则
 
-1. 每条问题使用固定编号（P1–P9），编号不因排序或拆分改变。
+1. 每条问题使用固定编号（P1–P16，允许小数子项如 P13.1），编号不因排序或拆分改变。
 2. 状态只能使用下列词汇：`待调查`、`待施工书`、`待施工`、`施工中`、`待验收`、`首片完成`、`完成`、`阻塞`。
 3. `首片完成`表示对应施工书的首片完成定义已满足；后续调参或扩展不回退该状态，除非发现回归。
 4. 每次状态变化必须同时记录日期、证据路径/命令和下一步；没有证据不得标记为完成。
@@ -23,6 +23,13 @@
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
 | [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；32 项输入预测测试；`npm.cmd run check:solid` | Slice C：接入真实模型 provider 并验证大库性能 |
+| [P11](#p11-思考块折叠态与助手消息间距) | 思考块折叠态与助手消息间距 | **首片完成** | 2026-08-31 | `ChatView.css` terminal-like collapsed reasoning cadence；主题 contract | 暂跳过真实窗口验收 |
+| [P12](#p12-filesheet-发送指令) | FileSheet 发送指令不可用 | **首片完成** | 2026-08-31 | `prompt.rs` camelCase IPC 注解；`DispatchBar` owner resolver；2 项 owner 测试；typed client 回归 | 实机 invoke 验收后置 |
+| [P13](#p13-生成指示器时间与星芒停滞) | 生成指示器时间与星芒停滞 | **首片完成** | 2026-08-31 | `GenerationFooter.solid.tsx` 120ms repaint cap；高间隔配置测试 | 真实窗口检查 reduced-motion 体验 |
+| [P13.1](#p131-生成指示器文案疯狂刷新) | 生成指示器文案疯狂刷新 | **首片完成** | 2026-08-31 | `generationIndicatorCopyMachine` 最短驻留保护；copy machine 回归 | 真实 trace 校准 waiting 阈值 |
+| [P14](#p14-展开思考块自动滚动) | 展开思考块不自动滚动 | **首片完成** | 2026-08-31 | `ReasoningBlock` 内部 follow-bottom；展开态流式状态回归 | 真实窗口检查用户上滚后的跟随边界 |
+| [P15](#p15-流式结束闪动) | 流式结束闪动 | **首片完成** | 2026-08-31 | `useScrollFollow` 流式更新改 auto scroll，避免 smooth 动画叠加 | 真实窗口检查终态切换观感 |
+| [P16](#p16-hermes-terminal-类型与参数外漏) | Hermes terminal 类型/参数解析 | **施工中** | 2026-08-31 | `toolResolution.ts`；`toolPresentation.test.ts` Hermes terminal/嵌入参数覆盖 | 继续补齐 provider wire fixture 与其他 execute 类型核验 |
 
 ## 核验记录
 
@@ -145,6 +152,41 @@
 - 命令：`npm.cmd exec vitest run src/renderers/solid-workbench/input/__tests__/InputBar.solid.test.tsx src/renderers/solid-workbench/input/__tests__/inputPredictionState.test.ts`（28 项通过）；`npm.cmd run check:solid`
 - 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice B。
 - Slice B 已完成：`inputPredictionProvider.ts` 提供可选 provider、400ms 防抖、15 秒冷却、AbortController、输出过滤和 session/generation 迟到结果丢弃；provider 失败回退本地历史。下一步进入 Slice C 的真实模型适配与性能验证（当前 ACP facade 尚无独立预测 RPC）。
+
+<a id="p11"></a>
+### P11 · 思考块折叠态与助手消息间距
+
+终端样式下折叠思考块只保留标题行，清除其内部垂直 padding，助手行间距继续由统一 `chat-row-gap` 提供，避免 padding 与 row cadence 叠加。真实窗口验收后置。
+
+<a id="p12"></a>
+### P12 · FileSheet 发送指令
+
+代码核验确认 Tauri command 已显式声明 `rename_all = "camelCase"`，前端 `agentId/profileId/sessionPrompt` 命名与 IPC 契约一致；实测不可用的可复现缺口是同一 source 多会话时 `DispatchBar` 仅按 source 匹配并拒绝发送。现已传递 `targetSessionId`，按绑定会话精确解析 owner，source-only 歧义仍安全拒绝。
+
+<a id="p13"></a>
+### P13 · 生成指示器时间与星芒停滞
+
+`GenerationFooter` 将重绘 tick 上限固定为 120ms，`spinnerIntervalMs` 只控制帧相位速度，不再把时间更新降到 1fps；reduced-motion 仍按设计固定静态帧。
+
+<a id="p131"></a>
+### P13.1 · 生成指示器文案疯狂刷新
+
+文案状态机在 waiting/stalled 抢占时也遵守最短驻留时间，避免 liveness 在阈值附近震荡导致主文案疯狂切换；tool 名称集合签名改为排序后比较，消除顺序抖动。
+
+<a id="p14"></a>
+### P14 · 展开思考块自动滚动
+
+展开且仍在流式生成时，`ReasoningBlock` 内部滚动容器自动跟随底部；用户上滚超过 24px 后暂停跟随，回到底部后恢复。
+
+<a id="p15"></a>
+### P15 · 流式结束闪动
+
+聊天外层滚动跟随在 token/终态更新时改用 `behavior: auto`，保留用户主动回底按钮的 smooth 行为，避免每个流式 tick 叠加平滑动画。
+
+<a id="p16"></a>
+### P16 · Hermes terminal 类型与参数外漏
+
+现有 `toolResolution` 已按 wire kind 优先、provider 字典、标题内嵌参数和 alias 兜底解析 Hermes `terminal`/`terminal: command`，并有 74 项工具渲染回归通过。本轮未发现可复现缺陷，继续补齐真实 provider wire fixture 后再决定是否改变类型映射。
 
 ## 状态变更模板
 

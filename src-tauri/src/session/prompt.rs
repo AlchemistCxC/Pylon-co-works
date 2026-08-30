@@ -130,7 +130,7 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
     send_channel_terminal(state, runtime, &ctx.source, crate::event_names::SESSION_ERROR, error_payload);
     Ok(())
 }
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 // clippy 2026-08-02：8 参含 2 个 Tauri 注入（state/window）+ 6 个业务参数（source/content/
 // persona/session_prompt/attachments/mcp_servers），send_message 为 IPC 契约签名不可折叠。
 // OWNER-02（§5.8）：新增 agent_id 显式路由（9 参，含 3 个 Tauri 注入 + 6 业务参数）。
@@ -169,7 +169,7 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
 /// 推送（A3 跳过广播）。其余语义与 send_message 完全一致；旧命令 send_message
 /// 保留为非流式兼容路径（无 Channel 参数）。
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,

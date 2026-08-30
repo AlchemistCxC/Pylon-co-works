@@ -164,7 +164,7 @@ function transitionToText(
   if (previous.status === 'pending') {
     // 抢占提示（waiting/stalled）立即显示；普通更新沿用首次显示的截止时间，
     // 不会因每次活动上下文变化而把“最短展示时间”不断往后推。
-    if (immediate || now >= previous.dueAt) return showing(generationId, nextText, now)
+    if ((immediate && now >= previous.shownAt + minDisplayMs) || now >= previous.dueAt) return showing(generationId, nextText, now)
     if (nextText === previous.text) {
       // 目标又回到当前可见词时取消 pending，但保留原 shownAt，避免
       // “A→B→A” 在短时间内重启计时或留下一个无意义的 timer。
@@ -175,7 +175,10 @@ function transitionToText(
   }
 
   if (nextText === previous.text) return previous
-  if (immediate) return showing(generationId, nextText, now)
+  // Waiting/stalled are urgent, but still obey the same minimum dwell time;
+  // sparse tokens oscillating around the waiting threshold must not churn the
+  // primary copy every tick.
+  if (immediate && now >= previous.shownAt + minDisplayMs) return showing(generationId, nextText, now)
 
   const dueAt = Math.max(previous.shownAt + minDisplayMs, now)
   if (now >= dueAt) return showing(generationId, nextText, now)

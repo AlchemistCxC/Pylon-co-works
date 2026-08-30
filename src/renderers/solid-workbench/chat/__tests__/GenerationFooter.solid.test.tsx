@@ -84,6 +84,18 @@ describe('SolidGenerationFooter', () => {
     await waitFor(() => expect(result.container.textContent).toContain('仍在等待后端响应'))
   })
 
+  it('高帧间隔配置不会把时间与星芒更新降到 1fps', () => {
+    const clock = createFakeWorkbenchClock(0)
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={0} startTime={0} lastTokenAt={0} summary={null}
+      appearance={{ ...APPEARANCE, intervalMs: 1000 }} clock={clock} random={() => 0}
+    />)
+    clock.advance(120)
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(0s)')
+    clock.advance(880)
+    expect(result.container.querySelector('.spinner-frame')?.textContent).toBe('/')
+  })
+
   it('默认隐藏 ChatView token 用量', () => {
     const result = render(() => <SolidGenerationFooter
       running tokenCount={1234} startTime={10_000} lastTokenAt={10_000} summary={null}

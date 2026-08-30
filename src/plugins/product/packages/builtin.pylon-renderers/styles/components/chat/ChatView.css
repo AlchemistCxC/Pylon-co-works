@@ -1954,3 +1954,8 @@
 .app[data-interface-mode="terminal-like"] .term-row-reasoning {
   font-family:var(--chat-font,var(--mono));
 }
+/* Collapsed thought rows are a label-only rail; remove their inner vertical
+   padding so the shared row cadence is not counted twice before the answer. */
+.app[data-interface-mode="terminal-like"] .term-row-reasoning:has(.term-collapse[data-open="false"]) .term-reasoning {
+  padding-block:0;
+}
