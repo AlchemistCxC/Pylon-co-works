@@ -10,6 +10,7 @@ import { getCommandRegistry } from '../../../../plugin-runtime/runtimeServices.t
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
 import { createWorkbenchEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../../domains/workbench/workbenchProjector.ts'
+import type { InputPredictionProvider } from '../inputPredictionProvider.ts'
 
 const modelCommand = getCommandRegistry().register(
   createPluginIdentity('test.solid-input', 'solid-input-test'),
@@ -24,7 +25,7 @@ afterEach(() => {
 })
 afterAll(() => { void modelCommand.dispose() })
 
-function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer') {
+function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ sessionId, generating: false, streamingText: '', streamingThinking: '' })
   const theme = structuredClone(DEFAULTS)
@@ -55,7 +56,7 @@ function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' =
     })
     return (
       <SolidWorkbenchContext.Provider value={context}>
-        <SolidInputBar />
+        <SolidInputBar predictionProvider={predictionProvider} />
       </SolidWorkbenchContext.Provider>
     )
   })
@@ -487,5 +488,14 @@ describe('SolidInputBar', () => {
     expect(await screen.findByText('做')).toBeTruthy()
     fireEvent.keyDown(textarea, { key: 'ArrowRight' })
     expect(textarea.value).toBe('继续做')
+  })
+
+  it('可选 provider 在空草稿时低频请求并显示模型 ghost text', async () => {
+    const provider: InputPredictionProvider = { predict: vi.fn(async () => '模型建议继续') }
+    const { textarea } = renderInput('session-a', 'composer', provider)
+    expect(await screen.findByText('模型建议继续', {}, { timeout: 1_500 })).toBeTruthy()
+    expect(provider.predict).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(textarea, { key: 'Tab' })
+    expect(textarea.value).toBe('模型建议继续')
   })
 })

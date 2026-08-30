@@ -11,6 +11,7 @@ import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
 import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from './inputPredictionState.ts'
+import { createPredictionScheduler, type InputPredictionProvider } from './inputPredictionProvider.ts'
 
 export interface QueuedWorkbenchMessage {
   id: number
@@ -23,6 +24,8 @@ export interface SolidInputBarProps {
   externalSend?: boolean
   externalAttach?: boolean
   disabled?: boolean
+  /** Optional LLM provider; requests are debounced, cancellable and rate limited. */
+  predictionProvider?: InputPredictionProvider
 }
 
 export function SolidInputBar(props: SolidInputBarProps) {
@@ -39,6 +42,8 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [commandIndex, setCommandIndex] = createSignal(0)
   const [queueSendingSessions, setQueueSendingSessions] = createSignal<ReadonlySet<string>>(new Set())
   const [dismissedPrediction, setDismissedPrediction] = createSignal<string | null>(null)
+  const [providerPrediction, setProviderPrediction] = createSignal<string | null>(null)
+  const predictionScheduler = props.predictionProvider ? createPredictionScheduler(props.predictionProvider) : null
   let textarea: HTMLTextAreaElement | undefined
   let composing = false
   let historyDraft = ''
@@ -75,10 +80,33 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const llm = runtime().document?.sessionId === sessionId()
       ? runtime().document?.assist.prediction?.placeholder?.trim()
       : undefined
-    if (!llm) return null
-    const key = `llm:${llm}`
-    return dismissedPrediction() === key ? null : { text: llm, source: 'llm' }
+    const valueFromProvider = llm || providerPrediction()
+    if (!valueFromProvider) return null
+    const key = `llm:${valueFromProvider}`
+    return dismissedPrediction() === key ? null : { text: valueFromProvider, source: 'llm' }
   })
+  createEffect(() => {
+    const scheduler = predictionScheduler
+    const id = sessionId()
+    const value = draft()
+    const generating = runtime().generating
+    const hasCommands = suggestionList().length > 0
+    const hasAttachments = attachments().length > 0
+    if (!scheduler || !id || value || generating || hasCommands || hasAttachments) {
+      scheduler?.cancel()
+      setProviderPrediction(null)
+      return
+    }
+    const generation = runtime().generation
+    const historyValues = mergeHistory(durableHistory(), history())
+    setProviderPrediction(null)
+    scheduler.schedule({ sessionId: id, generation, draft: value, history: historyValues }, result => {
+      if (sessionId() !== id || runtime().generation !== generation || draft() !== '') return
+      const normalized = result?.trim()
+      setProviderPrediction(normalized || null)
+    })
+  })
+  onCleanup(() => predictionScheduler?.dispose())
   const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
   // 与 React 中控一致：external 表示布局偏好；只有对应外置 send 实际可见时，
   // ControlCenter 才传 externalSend=true。外置 send 被隐藏时必须恢复内置发送按钮。

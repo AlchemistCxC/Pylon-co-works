@@ -29,6 +29,12 @@
 - 预测请求带 session generation 与 AbortSignal，迟到结果丢弃；日志只记录耗时、来源和结果码，不记录正文。
 - 预测 UI 使用 `aria-live="polite"`，不抢焦点；屏幕阅读器可读取来源和接受键。
 
+## Slice B（已完成）
+
+- `inputPredictionProvider.ts` 提供可插拔 `InputPredictionProvider` 与调度器；输入组件通过可选 `predictionProvider` 接入，不把模型调用写死在 UI。
+- 调度器默认 400ms 防抖、15 秒冷却；新草稿、附件、生成状态、会话或 generation 变化会取消在途请求。
+- provider 失败静默回退本地历史与运行时候选，迟到结果不会复活旧会话 ghost text。
+
 ## 后续
 
-Slice B 再接入本地/远端 provider，Slice C 做真实模型和性能验证；不得复用消息流 `assist.prediction` 事件冒充输入框预测。
+Slice C 接入真实本地/远端 provider 并做大库性能验证；不得复用消息流 `assist.prediction` 事件冒充输入框预测。

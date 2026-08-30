@@ -22,7 +22,7 @@
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
-| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`InputBar.solid.tsx`；28 项输入台测试；`npm.cmd run check:solid` | Slice B：接入受控 provider/请求调度，保持 15 秒冷却 |
+| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；31 项输入预测测试；`npm.cmd run check:solid` | Slice C：接入真实模型 provider 并验证大库性能 |
 
 ## 核验记录
 
@@ -144,7 +144,7 @@
 - 证据：`src/renderers/solid-workbench/input/inputPredictionState.ts`；`InputBar.solid.tsx`；`InputBar.solid.test.tsx`；`inputPredictionState.test.ts`
 - 命令：`npm.cmd exec vitest run src/renderers/solid-workbench/input/__tests__/InputBar.solid.test.tsx src/renderers/solid-workbench/input/__tests__/inputPredictionState.test.ts`（28 项通过）；`npm.cmd run check:solid`
 - 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice B。
-- 下一步：接入受控 provider seam，复用冷却器与 session/generation 迟到结果门控。
+- Slice B 已完成：`inputPredictionProvider.ts` 提供可选 provider、400ms 防抖、15 秒冷却、AbortController 和 session/generation 迟到结果丢弃；provider 失败回退本地历史。下一步进入 Slice C 的真实模型适配与性能验证。
 
 ## 状态变更模板
 
