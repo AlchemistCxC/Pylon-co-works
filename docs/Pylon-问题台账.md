@@ -19,7 +19,7 @@
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
-| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
+| [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索/注册表探针回归；`npm.cmd run check:solid` | 后续仅需在真实插件/渲染器包上运行探针并处理实际诊断 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
 | [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；36 项输入预测/宿主接线测试；`npm.cmd run check:solid` | 用真实 endpoint 做端到端与大库性能验证；ACP 独立 RPC 就绪后再接入 |
@@ -108,8 +108,9 @@
 - 命令：`npm.cmd test -- --run src/__tests__/settingsDomains.test.ts src/__tests__/settingsDomainNav.test.tsx --pool=forks --maxWorkers=2`（26 项通过）；`npm.cmd run check:solid`。
 - Slice B 已完成：重复的是跨作用域标签，已改为带作用域的 canonical label，并增加可见字段标签唯一性守卫；未改变持久化 key。
 - Slice C 已完成：插件设置页注册表投影到全局速搜，选择项保留 `pluginPageId` 并直达贡献页；opaque 页面不伪造字段级锚点。
-- 未确认：renderer/plugin 贡献是否需要更细的统一注册表完整性探针、旧设置字段的进一步清理。
-- 下一步：按施工书 Slice D 清理失效入口并补齐注册表完整性探针。
+- Slice D 已完成：`probeSettingsRegistries` 对带 settings schema 的 renderer suite/slot/kind 及 plugin settings page 做 canonical catalog/search 索引完整性、重复贡献和空标识探针；失效入口仍统一经 `normalizeSettingsIntent` 回退，不再保留新的直达旧路由。
+- 核验：`rendererSettingsCatalog.test.ts` 覆盖未知 placement 回退及 renderer/plugin 注册表探针；`npm.cmd exec vitest run src/components/settings/__tests__/rendererSettingsCatalog.test.ts --pool=forks --maxWorkers=2`（2 项通过）；`npm.cmd run check:solid`。
+- 下一步：在真实插件/渲染器包加载后运行探针，按实际诊断清理遗留入口。
 
 <a id="p7"></a>
 ### P7 · Agentsheet 空态与创建会话形态

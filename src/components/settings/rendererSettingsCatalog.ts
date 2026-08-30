@@ -1,7 +1,7 @@
 import { RENDERER_SETTINGS_CATEGORIES, resolveRendererSettingsPlacement } from '../../domains/rendererContent/rendererSettingsPlacement.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RendererSettingsPlacement, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
+import { buildSettingsSearchIndex, RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
 import type { SettingsSearchItem } from '../../settingsDomains.ts'
 
 export type RendererSettingsNamespace = 'kind' | 'suite' | 'slot'
@@ -35,6 +35,61 @@ export interface RendererSettingsCatalogProjection {
   readonly entries: readonly RendererSettingsCatalogEntry[]
   readonly categories: readonly RendererSettingsCatalogCategory[]
   readonly searchItems: readonly SettingsSearchItem[]
+}
+
+export interface SettingsRegistryProbeIssue {
+  readonly code: 'renderer_settings_unindexed' | 'renderer_settings_duplicate' | 'plugin_settings_unindexed' | 'plugin_settings_duplicate' | 'plugin_settings_invalid'
+  readonly id: string
+  readonly message: string
+}
+
+/**
+ * Development/diagnostic probe for settings contributions. It checks that
+ * every renderer object carrying a schema and every plugin settings page is
+ * represented by the canonical search/navigation projection. The probe is
+ * pure so hosts can run it on registry snapshots without changing state.
+ */
+export function probeSettingsRegistries(
+  rendererSnapshot: RendererRegistrySnapshot,
+  pluginPages: readonly { contributionId: string; value: { label?: string } }[],
+  activeSuiteId?: string,
+): readonly SettingsRegistryProbeIssue[] {
+  const issues: SettingsRegistryProbeIssue[] = []
+  const catalog = buildRendererSettingsCatalog(rendererSnapshot, activeSuiteId)
+  const catalogKeys = new Set(catalog.map(rendererSettingsEntryKey))
+  const seenRendererKeys = new Set<string>()
+  const rendererSources = [
+    ...rendererSnapshot.rendererSuites.map(entry => ({ namespace: 'suite' as const, id: entry.value.id, settings: entry.value.settings })),
+    ...rendererSnapshot.rendererSlots.map(entry => ({ namespace: 'slot' as const, id: entry.value.id, settings: entry.value.settings })),
+    ...rendererSnapshot.renderKinds.map(entry => ({ namespace: 'kind' as const, id: entry.value.id, settings: entry.value.settings })),
+  ]
+  for (const source of rendererSources) {
+    if (!source.settings) continue
+    const key = rendererSettingsEntryKey(source)
+    if (seenRendererKeys.has(key)) {
+      issues.push({ code: 'renderer_settings_duplicate', id: key, message: `Renderer settings route 重复：${key}` })
+      continue
+    }
+    seenRendererKeys.add(key)
+    if (!catalogKeys.has(key)) issues.push({ code: 'renderer_settings_unindexed', id: key, message: `Renderer settings 未进入 canonical catalog：${key}` })
+  }
+
+  const pluginSearchIds = new Set(buildSettingsSearchIndex(undefined, pluginPages).filter(item => item.pluginPageId).map(item => item.pluginPageId!))
+  const seenPluginIds = new Set<string>()
+  for (const page of pluginPages) {
+    const id = page.contributionId.trim()
+    if (!id || !page.value.label?.trim()) {
+      issues.push({ code: 'plugin_settings_invalid', id: page.contributionId, message: 'Plugin settings page 必须有非空 contributionId 和 label' })
+      continue
+    }
+    if (seenPluginIds.has(id)) {
+      issues.push({ code: 'plugin_settings_duplicate', id, message: `Plugin settings contribution 重复：${id}` })
+      continue
+    }
+    seenPluginIds.add(id)
+    if (!pluginSearchIds.has(id)) issues.push({ code: 'plugin_settings_unindexed', id, message: `Plugin settings 未进入 canonical search index：${id}` })
+  }
+  return Object.freeze(issues)
 }
 
 function fieldCount(schema: RendererSettingsSchema): number {

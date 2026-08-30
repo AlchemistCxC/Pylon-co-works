@@ -47,5 +47,5 @@
 
 ## 后续切片
 
-- Slice D：清理已失效的入口测试，并为 renderer/plugin 贡献补齐统一注册表完整性探针。
+- Slice D 已完成：`rendererSettingsCatalog.ts` 提供 `probeSettingsRegistries`，对 renderer suite/slot/kind 与 plugin settings page 检查 canonical catalog/search 索引覆盖、重复贡献和空标识；未知 placement 继续回退到“插件扩展”，不会从设置导航消失。真实插件包加载后的运行诊断留作后续验收。
 - 每个切片完成后更新问题台账和下一阶段清单；验收按用户指示暂不执行。
