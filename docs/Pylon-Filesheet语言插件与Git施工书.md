@@ -26,7 +26,8 @@
 - `src/plugin-runtime/file-workbench/fileWorkbenchTypes.ts`：`FileLanguageProvider` 契约。
 - `src/plugin-runtime/file-workbench/fileWorkbenchResolver.ts`：按匹配与 priority 选择 provider。
 - `src/sheets/file/FileCodeEditor.tsx`：provider 加载、abort 与内置 fallback。
-- `src/plugin-runtime/file-workbench/__tests__/fileWorkbenchRegistry.test.ts`：注册生命周期和路径选择回归；`npm.cmd run check:solid`。
+- `src/plugin-runtime/file-workbench/__tests__/fileWorkbenchRegistry.test.ts`、`src/sheets/file/__tests__/gitPanelAcceptance.test.tsx`、`gitPanelMutations.test.tsx`、`FileCodeEditor.test.tsx`：注册生命周期、语言加载边界、Git 操作和编辑器回归共 19 项通过；`npm.cmd run check:solid`。
+- 本轮未发现过时测试；Git 的 source generation、冲突保存和 mutation busy guard 仍对应真实行为，保留现有断言。
 
 ## 验收边界
 
