@@ -1,6 +1,6 @@
 # Pylon MCP、Skill、插件设置管理施工书
 
-> 状态：施工中（调查完成，Slice A/B/C 完成）
+> 状态：首片完成（Slice A/B/C 完成；真实配置验收后置）
 > 对应问题：[P5 · MCP、Skill、插件设置管理](Pylon-问题台账.md#p5)
 > 范围：Workspace 能力选择、Agent 级 MCP 配置、API 1.0 插件包与插件设置命名空间
 

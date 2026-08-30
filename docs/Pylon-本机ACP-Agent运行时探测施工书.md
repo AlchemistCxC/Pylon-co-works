@@ -1,6 +1,6 @@
 # Pylon 本机 ACP Agent 运行时探测施工书
 
-> 状态：施工中（调查完成，Slice A/B/C 完成）
+> 状态：首片完成（Slice A/B/C 完成；真实运行时验收后置）
 > 对应问题：[P3 · 本机 ACP Agent 运行时探测](Pylon-问题台账.md#p3)
 > 范围：共享 Agent Catalog、pylon-core 探测器、Tauri 设置入口和隔离 ACP 验证
 

@@ -16,9 +16,9 @@
 | --- | --- | --- | --- | --- | --- |
 | [P1](#p1-流式输出节奏) | 流式输出节奏 | **首片完成** | 2026-08-31 | [流式渲染节奏施工书](Pylon-流式渲染节奏施工书.md)；`npm.cmd run check:solid` | 用真实 trace 校准速率参数 |
 | [P2](#p2) | terminal-like 块间距统一 | **待验收** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)；`mountSolidWorkbench` 混排回归 | 在真实窗口完成一次最终视觉验收 |
-| [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
-| [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
-| [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
+| [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **首片完成** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 真实运行时验收暂跳过 |
+| [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **首片完成** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 真实窗口聚合观感验收暂跳过 |
+| [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **首片完成** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 真实 MCP/Skill/Hook 配置验收暂跳过 |
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索/注册表探针回归；`npm.cmd run check:solid` | 后续仅需在真实插件/渲染器包上运行探针并处理实际诊断 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
@@ -58,38 +58,38 @@
 <a id="p3"></a>
 ### P3 · 本机 ACP Agent 运行时探测
 
-已完成三段能力证据盘点并建立独立的 [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)。共享 catalog、受控发现和版本探针分别提供发现/可启动证据；`test_agent_candidate` 与 `test_agent_connection` 通过 `AcpClient::connect_with_generation` 提供隔离 ACP 握手证据。Slice A/B/C 已完成，当前按用户指示跳过验收并转入 P4。
+已完成三段能力证据盘点并建立独立的 [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)。共享 catalog、受控发现和版本探针分别提供发现/可启动证据；`test_agent_candidate` 与 `test_agent_connection` 通过 `AcpClient::connect_with_generation` 提供隔离 ACP 握手证据。Slice A/B/C 已完成，真实运行时验收按用户指示后置。
 
 核验记录（2026-08-31）：
 
-- 状态：`施工中`
+- 状态：`首片完成`
 - 证据：`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml -- --nocapture`（16 项通过）；`src-tauri/pylon-core/src/agent_detection.rs`、`src-tauri/src/lifecycle/connection_test.rs`、`src-tauri/src/acp/mod.rs`。
 - 结论：发现、可启动、ACP 握手已有分离入口和预算；Windows 子孙清理测试原断言为误报，已改为读取退出码后通过；候选 DTO 已增加独立 `startability` 字段并在设置页显示。
-- 下一步：P3 验收暂按用户指示跳过，转入 P4 activity projection 分组边界盘点。
+- 下一步：真实 ACP Agent 运行时验收暂按用户指示跳过。
 
 <a id="p4"></a>
 ### P4 · 连续同种工具调用聚合
 
-已完成现状盘点并建立 [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)。结论：当前 activity 以 `toolCallId` 独立保留，尚无组级派生视图；连续性应按 `selectActivityDisplayOrder` 后的消息锚点 segment、normalized tool key 和 parent 边界判定。
+已完成现状盘点并建立 [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)。activity 事实仍以 `toolCallId` 独立保留，组级派生视图已按 `selectActivityDisplayOrder` 后的消息锚点 segment、normalized tool key 和 parent 边界实现。
 
 核验记录（2026-08-31）：
 
-- 状态：`施工中`
+- 状态：`首片完成`
 - 证据：`workbenchProjector.ts` 的 `reduceTool` / `selectActivityDisplayOrder` / `toolInvocationSnapshot`；`SolidWorkbenchApp.solid.tsx` 的 `CanonicalActivityList`；`SolidToolInvocationCard` 单次折叠 presenter；activity/tool projection 回归测试。
 - 结论：未发现应删除的过时测试；现有测试锁定 identity、终态幂等、父子关系和三路径 parity，不能用“数组相邻”替代展示序列。
-- 下一步：P4 验收暂按用户指示跳过，转入 P5 schema、存储和权限边界盘点。
+- 下一步：真实窗口聚合观感验收暂按用户指示跳过。
 
 <a id="p5"></a>
 ### P5 · MCP、Skill、插件设置管理
 
-已完成 schema、存储和权限边界盘点并建立 [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)。结论：MCP 是 Agent 级事实、Workspace 只存选择引用；Skill/Hook 目前是字符串快照；插件包和私有设置已有 API 1.0、PluginScope 与 64 KiB 命名空间隔离，但缺少统一能力选项 DTO。
+已完成 schema、存储和权限边界盘点并建立 [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)。结论：MCP 是 Agent 级事实、Workspace 只存选择引用；Skill/Hook 保留字符串快照并通过统一能力选项 DTO 展示；插件包和私有设置已有 API 1.0、PluginScope 与 64 KiB 命名空间隔离。
 
 核验记录（2026-08-31）：
 
-- 状态：`施工中`
+- 状态：`首片完成`
 - 证据：`src-tauri/src/mcp.rs`（transport/数量/敏感字段校验）；`src-tauri/src/lifecycle/mcp.rs`（写序锁与原子持久化）；`src/components/settings/CwdSettingsPanel.tsx`（逗号输入与 MCP 勾选）；`src/workspaceEntities.ts`（Workspace 数组字段）；`src/plugin-runtime/packageManifest.ts`、`PackageInstallationService`、`PluginScope`、`PluginSettingsStore`。
-- 结论：未发现应删除的过时测试；现有 MCP 持久化、schema、插件生命周期和 namespace 安全测试仍覆盖真实边界。当前体验缺口集中在逗号文本、悬挂引用不可见和 Skill 无 registry。
-- 下一步：P5 验收暂按用户指示跳过，转入 P6 设置注册表与旧键迁移盘点，保持旧存储字段和新会话快照语义。
+- 结论：未发现应删除的过时测试；现有 MCP 持久化、schema、插件生命周期和 namespace 安全测试仍覆盖真实边界。逗号输入保留为兼容回退，结构化标签和悬挂引用诊断已落地；Skill registry/凭据引用属于后续 API 1.1 范围。
+- 下一步：真实 MCP/Skill/Hook 配置验收暂按用户指示跳过。
 
 <a id="p6"></a>
 ### P6 · 全局设置页面重组

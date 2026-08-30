@@ -1,6 +1,6 @@
 # Pylon 连续同种工具调用聚合施工书
 
-> 状态：施工中（调查完成，Slice A/B/C 完成）
+> 状态：首片完成（Slice A/B/C 完成；真实窗口验收后置）
 > 对应问题：[P4 · 连续同种工具调用聚合](Pylon-问题台账.md#p4)
 > 范围：Workbench activity projection、工具卡展示、活动排序与展开状态
 
