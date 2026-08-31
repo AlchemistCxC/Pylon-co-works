@@ -19,6 +19,8 @@ export interface ContextPanelSettingsContribution {
   readonly description?: string
   /** Optional canonical Settings section; defaults to the right-rail section. */
   readonly section?: 'right' | 'pluginManager'
+  /** Existing PluginSettingsPage contribution to open when selected. */
+  readonly pageId?: string
 }
 
 export interface ContextPanelContributionProps {

@@ -155,6 +155,11 @@ describe('P6 Slice C 贡献注册表搜索投影', () => {
       kind: 'context-panel',
       contextPanelId: 'plugin.context.files',
     })
+    const linked = buildSettingsSearchIndex(undefined, undefined, [{
+      contributionId: 'plugin.context.files',
+      value: { label: '文件面板', settings: { id: 'files-settings', label: '文件面板设置', pageId: 'plugin.context.files.settings' } },
+    }]).find(candidate => candidate.pluginPageId === 'plugin.context.files.settings')
+    expect(linked?.kind).toBe('plugin-page')
   })
 })
 

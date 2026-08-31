@@ -295,8 +295,8 @@ export function buildSettingsSearchIndex(
       label: settings.label || entry.value.label || entry.contributionId,
       section: settings.section === 'pluginManager' ? 'pluginManager' : 'right',
       advanced: false,
-      kind: 'context-panel',
-      contextPanelId: entry.contributionId,
+      kind: settings.pageId ? 'plugin-page' : 'context-panel',
+      ...(settings.pageId ? { pluginPageId: settings.pageId } : { contextPanelId: entry.contributionId }),
     })
   }
   return items
