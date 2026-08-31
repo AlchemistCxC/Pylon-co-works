@@ -9,7 +9,7 @@ import { resolveSheetRender } from './sheetRegistry.tsx'
 import { activateAgentSheet } from './activateAgentSheet'
 import SheetHost from './SheetHost'
 import SheetSidebarSlot from './SheetSidebarSlot'
-import SheetRightSlot from './SheetRightSlot'
+import RightRailHost from '../components/right-panel/RightRailHost.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
@@ -147,6 +147,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
         {persistWarning}
         {overviewEntry ? <overviewEntry.component sheet={VIRTUAL_OVERVIEW_SHEET} ctx={ctx} state={overviewEntry.deserialize(undefined)} /> : <EmptySheetHost />}
+        <RightRailHost sheet={null} ctx={ctx} activeAgent={activeAgent} />
       </div>
     )
   }
@@ -176,7 +177,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
           </div>
         )
       })}
-      <SheetRightSlot sheet={activeSheet} ctx={ctx} />
+      <RightRailHost sheet={activeSheet} ctx={ctx} activeAgent={activeAgent} />
       {/* G5（FE-AUD-006）：Browser 与 Agent/File 一样固定在稳定位置保活。
           活动态用 display:contents 进入主舞台，非活动态只隐藏 DOM；真正 close
           （从 sheets 移除）才卸载并触发 browser_close，避免标签/页面状态丢失。 */}
