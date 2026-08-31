@@ -799,6 +799,11 @@
   /* Keep the same fixed gutter and natural marker size as the assistant marker. */
   justify-content: flex-start;
   text-align: left;
+  /* Tool labels use the mono face, but the glyph itself must match the
+     preview/chat rail.  Mono fonts commonly draw ●/✱ noticeably smaller. */
+  font-family: var(--chat-font, var(--mono));
+  font-size: var(--chat-font-size, var(--font-size-lg));
+  line-height: var(--chat-line-height, 1.35);
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {

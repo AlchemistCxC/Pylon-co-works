@@ -132,6 +132,26 @@ describe('SolidGenerationFooter', () => {
     expect(task.container.textContent).toContain('正在执行 focused tests')
   })
 
+  it('工具流式更新只刷新类型集合，参数变化不会闪动次级文案', async () => {
+    const clock = createFakeWorkbenchClock(0)
+    const [activity, setActivity] = createSignal({
+      kind: 'tooling' as const,
+      activeTools: [{ id: 'terminal-1', name: 'terminal: git status --short' }],
+    })
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={0} startTime={0} lastTokenAt={0} summary={null}
+      activity={activity()} appearance={APPEARANCE} clock={clock} random={() => 0}
+    />)
+    const context = result.container.querySelector('.spinner-context')
+    expect(context).toHaveTextContent('正在调用 terminal')
+    setActivity({
+      kind: 'tooling',
+      activeTools: [{ id: 'terminal-1', name: 'terminal: git diff --stat' }],
+    })
+    await waitFor(() => expect(result.container.querySelector('.spinner-context')).toHaveTextContent('正在调用 terminal'))
+    expect(result.container.querySelector('.spinner-context')).not.toHaveTextContent('git')
+  })
+
   it('有 phase 时仍显示配置的预设主文案，而不是被固定阶段文案吞掉', () => {
     const result = render(() => <SolidGenerationFooter
       running tokenCount={0} startTime={0} lastTokenAt={0} summary={null}

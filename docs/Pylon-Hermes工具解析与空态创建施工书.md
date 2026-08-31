@@ -5,6 +5,7 @@
 - P17：Hermes `skill_view` 内容/工具卡不应落入 unknown，工具指示器与浏览器预览沿用同一聊天字号契约。
 - P18：Hermes 的 `search`/`search_files` 标题和结果应归一为 search 语义。
 - P19：空态首条消息提交后，在会话创建 RPC 返回前显示乐观用户消息；失败时撤销投影并保留草稿。
+- P20：工具运行期间，生成指示器次级文案只显示工具类型；流式参数与并行工具顺序变化不得造成文案集合闪动，聊天指示器 glyph 与设置预览保持同字号契约。
 
 ## 事实证据
 
@@ -22,12 +23,14 @@ Hermes `acp_adapter.tools` 的真实构造结果：
 4. 搜索结果兼容 Hermes 的 `matches/files + path/line/content`，统一为 `search-result` ContentPart。
 5. 乐观空态只在本地 UI 投影，创建失败立即回滚；不写入持久化 transcript。
 6. 指示器显式继承聊天 rail 字号/行高，避免 renderer slot 与设置预览出现缩放漂移。
+7. 工具活动标题在进入 Footer 前剥离命令/查询参数，并对并行工具类型集合排序去重；主文案状态机不因次级上下文变化重置驻留计时。
 
 ## 回归与观察
 
 - `hermesNormalizer.test.ts`：title-only、snake_case、content wrapper、completion identity。
 - `searchLinkClassification.test.ts`：Hermes path-based search matches。
 - `mountSolidWorkbench.solid.test.tsx`：创建中状态与失败恢复。
+- `generationStateMachine.test.ts`、`GenerationFooter.solid.test.tsx`：工具类型集合稳定化与参数变更不闪动。
 - `npm.cmd run check:solid`：边界、主题和渲染器架构门禁。
 
 真实 Hermes ACP 窗口验收仍可在后续阶段使用同一组 trace 复核；本片不改变 ACP server 或工具执行逻辑。

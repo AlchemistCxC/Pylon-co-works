@@ -34,6 +34,21 @@ export interface ActivityLine {
   durationMs?: number
 }
 
+/**
+ * Tool activity is a secondary status cue, not an argument inspector. Providers
+ * frequently put the command/query in the title (for example
+ * `terminal: git status`); keep only the stable type in the live indicator so
+ * streaming updates cannot make the status line churn with changing params.
+ */
+export function normalizeToolActivityLabel(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const colon = trimmed.search(/[:\uFF1A]/)
+  const open = trimmed.search(/[\(\uFF08]/)
+  const boundary = colon > 0 ? colon : open > 0 ? open : -1
+  return (boundary > 0 ? trimmed.slice(0, boundary) : trimmed).trim() || undefined
+}
+
 /** 随机动词回退集（与现有 spinner 动词集同源语义，消费方可覆盖） */
 export const FALLBACK_ACTIVITY_VERBS = ['思考中', '正在思考', '整理思路', '推演中', '规划中'] as const
 
@@ -48,9 +63,10 @@ export function resolveActivityLine(input: ActivityInput): ActivityLine {
   }
   // tool 阶段：stall 计时归零（D29）
   if (input.phase === 'tool') {
+    const toolLabel = normalizeToolActivityLabel(input.toolTitle)
     return {
       verb: '正在调用',
-      activity: input.toolTitle ? `正在调用 ${input.toolTitle} …` : '正在调用工具 …',
+      activity: toolLabel ? `正在调用 ${toolLabel} …` : '正在调用工具 …',
       stallSuppressed: true,
     }
   }

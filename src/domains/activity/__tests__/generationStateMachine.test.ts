@@ -51,4 +51,30 @@ describe('generation activity state machine', () => {
     )
     expect(reduceGenerationActivity(state, { type: 'tool-end', id: 'missing', at: 20 })).toBe(state)
   })
+
+  it('工具活动只保留类型，不把流式变化的参数带进次级文案', () => {
+    let state = reduceGenerationActivity(undefined, { type: 'start', at: 0 })
+    state = reduceGenerationActivity(state, { type: 'tool-start', id: 'terminal-1', name: 'terminal: git status --short', at: 10 })
+    state = reduceGenerationActivity(state, { type: 'tool-start', id: 'terminal-2', name: 'terminal: git diff --stat', at: 20 })
+    expect(state?.activeTools.map(tool => tool.name)).toEqual(['terminal', 'terminal'])
+    const context = resolveGenerationIndicatorContext({ activity: state })
+    expect(context.label).toBe('正在调用 terminal')
+    expect(context.label).not.toContain('git')
+  })
+
+  it('并行工具顺序变化不会改变类型集合文案', () => {
+    const first = resolveGenerationIndicatorContext({ activity: {
+      kind: 'tooling', activeTools: [
+        { id: 'a', name: 'search: TODO' }, { id: 'b', name: 'terminal: git status' },
+      ],
+    } })
+    const second = resolveGenerationIndicatorContext({ activity: {
+      kind: 'tooling', activeTools: [
+        { id: 'b', name: 'terminal: git diff' }, { id: 'a', name: 'search: src' },
+      ],
+    } })
+    expect(second.label).toBe(first.label)
+    expect(second.label).not.toContain('TODO')
+    expect(second.label).not.toContain('git')
+  })
 })

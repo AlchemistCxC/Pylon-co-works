@@ -16,7 +16,7 @@ describe('chat indicator alignment contract', () => {
     expect(chatCss).toContain('.term-assistant.has-dot > .term-assistant-dot')
     expect(chatCss).toContain('.term-tool-head > .term-tool-indicator')
     expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--chat-font,var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size,var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height,1\.35\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;[^}]*font-family\s*:\s*var\(--chat-font, var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size, var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height, 1\.35\)\s*;/s)
     expect(chatCss).not.toMatch(/\.app\[data-interface-mode="terminal-like"\][^{}]*\{[^}]*scale\s*:/s)
   })
 

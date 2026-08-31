@@ -5,6 +5,7 @@ import type {
   GenerationPhase,
   GenerationToolActivity,
 } from '../workbench/generationFooterContracts.ts'
+import { normalizeToolActivityLabel } from './activityLine.ts'
 
 // 保留旧模块的类型导出，兼容现有消费者；定义本身属于 Footer contract。
 export type { GenerationLiveness } from '../workbench/generationFooterContracts.ts'
@@ -31,7 +32,7 @@ function snapshot(
 }
 
 function normalizedTool(event: Extract<GenerationActivityEvent, { type: 'tool-start' }>): GenerationToolActivity {
-  const name = event.name.trim() || '?'
+  const name = normalizeToolActivityLabel(event.name) || '?'
   // 缺少协议 toolCallId 时仍给本轮一个稳定的本地键，避免所有无 id 工具互相覆盖。
   const id = event.id.trim() || `local:${name}:${event.at}`
   return { id, name, startedAt: event.at }
@@ -117,7 +118,12 @@ export function resolveGenerationIndicatorContext(input: {
   const tools = input.activity?.activeTools ?? (
     phase?.kind === 'tool' ? [{ id: 'legacy', name: phase.name }] : []
   )
-  const toolNames = tools.map(tool => tool.name)
+  // Keep the secondary indicator stable: titles often contain changing
+  // command/query arguments, and parallel calls can arrive in a different
+  // order on every stream tick. Display a sorted set of type labels only.
+  const toolNames = [...new Set(tools
+    .map(tool => normalizeToolActivityLabel(tool.name) || '?')
+    .filter(Boolean))].sort((left, right) => left.localeCompare(right))
   const task = input.activeTaskContent?.trim()
   if (task) return {
     kind: input.activity?.kind ?? phaseKind(phase),
@@ -125,12 +131,9 @@ export function resolveGenerationIndicatorContext(input: {
     toolNames,
   }
   if (toolNames.length > 0) {
-    const last = toolNames.at(-1) || '?'
     return {
       kind: 'tooling',
-      label: toolNames.length > 1
-        ? `正在调用 ${last} +${toolNames.length - 1}`
-        : `正在调用 ${last}`,
+      label: `正在调用 ${toolNames.join('、')}`,
       toolNames,
     }
   }

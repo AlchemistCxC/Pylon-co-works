@@ -4,7 +4,7 @@
 
 ## 使用规则
 
-1. 每条问题使用固定编号（P1–P19，允许小数子项如 P13.1），编号不因排序或拆分改变。
+1. 每条问题使用固定编号（P1–P20，允许小数子项如 P13.1），编号不因排序或拆分改变。
 2. 状态只能使用下列词汇：`待调查`、`待施工书`、`待施工`、`施工中`、`待验收`、`首片完成`、`完成`、`阻塞`。
 3. `首片完成`表示对应施工书的首片完成定义已满足；后续调参或扩展不回退该状态，除非发现回归。
 4. 每次状态变化必须同时记录日期、证据路径/命令和下一步；没有证据不得标记为完成。
@@ -33,6 +33,7 @@
 | [P17](#p17-hermes-skill-view-与工具指示器尺寸) | Hermes skill view 渲染与工具指示器尺寸 | **首片完成** | 2026-08-31 | [Hermes 工具解析与空态创建施工书](Pylon-Hermes工具解析与空态创建施工书.md)；`hermesNormalizer.test.ts`；`ChatView.css` | 真实 Hermes 窗口复核 skill 卡与预览像素一致性 |
 | [P18](#p18-hermes-search-归一化) | Hermes search 解析为 unknown | **首片完成** | 2026-08-31 | Hermes title-only wire sample；`searchLinkClassification.test.ts`；agent catalog aliases | 真实 search_files/session_search trace 复核结果卡 |
 | [P19](#p19-空态创建会话乐观渲染) | 空态创建会话采用乐观渲染 | **首片完成** | 2026-08-31 | `SolidWorkbenchApp.solid.tsx` optimistic projection；mount 空态创建/失败回归 | 真实窗口复核创建延迟与切换无闪动 |
+| [P20](#p20-生成指示器次级文案与文案闪动) | 生成指示器次级文案过长、文案集合闪动 | **首片完成** | 2026-08-31 | `generationStateMachine.ts` 工具类型集合归一；`activityLine.ts` 参数剥离；`ChatView.css` 指示器字体契约；activity/Footer 回归 | 真实流式 trace 复核工具集合切换观感 |
 
 ## 核验记录
 
@@ -225,6 +226,17 @@ Hermes ACP start 更新只提供人类标题，不提供机器工具名；normal
 证据：`SolidWorkbenchApp.solid.tsx`；`mountSolidWorkbench.solid.test.tsx` 创建中/失败恢复回归。
 
 状态：首片完成。真实窗口复核长延迟和切换观感后置。
+
+<a id="p20"></a>
+### P20 · 生成指示器次级文案与文案闪动
+
+工具运行时，生成指示器次级文案现在只显示正在运行的工具类型；`terminal: git status`、`search: pattern` 等参数不会进入文案。并行工具按排序后的去重类型集合生成标签，工具事件顺序和流式参数更新不再造成无意义的次级文案跳变。
+
+同时，工具活动状态机在入口处剥离标题参数，React/Solid 两条 Footer 路径共享同一归一规则；terminal-like 聊天中的工具指示器改用聊天 rail 字体和字号，避免 mono 字体字形导致圆点比设置预览偏小。
+
+证据：`generationStateMachine.test.ts`、`GenerationFooter.solid.test.tsx`、`chatIndicatorAlignment.test.ts`；`npm.cmd run check:solid`。
+
+状态：首片完成。真实流式 trace 与窗口像素验收后置。
 
 ## 状态变更模板
 
