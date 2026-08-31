@@ -239,3 +239,19 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 - `npm.cmd run check:solid` 及全部 Solid/Renderer architecture guards 通过；
 - interaction kind、workbench mount、smoke 回归：3 个文件、60 tests 全部通过。
+
+## ANSI 渲染路径统一（2026-08-31）
+
+清理 `SolidToolCard` 中遗留的第二套 ANSI 实现。此前工具执行输出仍在卡片内部重复执行 `Anser → sanitizeHtml → innerHTML`，而内建 `content.ansi` 已使用结构化的 `SolidAnsiBlock`。现在两条 Solid 渲染入口统一为同一个 ANSI adapter：
+
+- `SolidToolCard` 移除 `anser` 与 `htmlSanitizer` 依赖，execute 输出直接挂载 `SolidAnsiBlock`；
+- `SolidAnsiBlock` 保留 `.term-ansi` 兼容样式类，同时提供 `.term-ansi-block` 结构化测试 seam；
+- 空 execute 输出继续走普通 `<pre><code>` fallback，避免为无文本输出创建空 ANSI surface；
+- 更新工具卡片回归测试，验证结构化 block、文本内容和控制序列注入不会重新出现。
+
+这样 ANSI 的解析、控制序列剥离、颜色白名单和可访问文本只需在一个 module 中维护，避免 framework-specific HTML facade 再次分叉。
+
+验证：
+
+- `npx.cmd vitest run src/renderers/solid-workbench/chat/__tests__/ToolDiffTask.solid.test.tsx src/renderers/solid-workbench/chat/__tests__/TextBlocks.solid.test.tsx`：2 个文件、15 tests 通过；
+- 全量 lint、TypeScript 检查与 `git diff --check` 在提交前执行。

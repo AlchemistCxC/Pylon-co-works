@@ -44,19 +44,20 @@ describe('SolidToolCard', () => {
     expect(failed.container.querySelector('.term-tool')?.getAttribute('data-tool-state')).toBe('failed')
   })
 
-  it('展开 execute 输出时渲染经过 sanitizer 的 ANSI HTML', async () => {
+  it('展开 execute 输出时复用结构化 ANSI block 并安全渲染', async () => {
     const result = render(() => <SolidToolCard
       message={toolMessage({
         id: 'ansi', toolKind: 'execute', toolStatus: 'completed',
-        toolOutput: '\u001b[32mPASS\u001b[0m build', toolOutputLines: 1,
+        toolOutput: '\u001b[32mPASS\u001b[0m build <script>bad</script>', toolOutputLines: 1,
       })}
       appearance={TOOL_APPEARANCE}
     />)
 
     await fireEvent.click(result.getByRole('button'))
-    expect(result.container.querySelector('.term-ansi')).not.toBeNull()
-    expect(result.container.querySelector('.term-ansi')?.textContent).toContain('PASS build')
-    expect(result.container.querySelector('.term-ansi script')).toBeNull()
+    expect(result.container.querySelector('.term-ansi-block')).not.toBeNull()
+    expect(result.container.querySelector('.term-ansi-block')?.textContent).toContain('PASS build')
+    expect(result.container.querySelector('.term-ansi-block script')).toBeNull()
+    expect(result.container.querySelector('.term-ansi-block')?.textContent).toContain('<script>bad</script>')
   })
 
   it('edit tool 复用结构化 diff payload', async () => {
