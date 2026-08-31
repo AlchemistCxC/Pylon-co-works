@@ -47,11 +47,11 @@ import { useReplayPostureStore } from '../src/components/chat/replayPostureStore
   assert.match(view, /disabled=\{!entry\.periId\}/, '无 periId 不得回放')
 }
 
-// 4. ChatView 仅扩大 mode-aware renderer context；回放 load 仍复用现成 lifecycle。
+// 4. Agent Workbench 负责 mode-aware renderer context；回放 load 复用现成 lifecycle。
 {
-  const chat = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-  assert.match(chat, /workspaceMode\?: 'work' \| 'chat'/, 'ChatView 必须接收 mode-aware renderer context')
-  assert.match(chat, /rendererContext/, 'ChatView 必须构造 renderer context')
+  const workbench = readFileSync(new URL('../src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx', import.meta.url), 'utf8')
+  assert.match(workbench, /workspaceMode/, 'Agent Workbench 必须接收 mode-aware renderer context')
+  assert.match(workbench, /rendererContext|WorkbenchMountInput/, 'Agent Workbench 必须构造 renderer context')
   const lifecycle = readFileSync(new URL('../src/components/chat/useSessionLifecycle.ts', import.meta.url), 'utf8')
   const attachIdx = lifecycle.indexOf('attachChatEventController(')
   const loadIdx = lifecycle.indexOf('loadPersistedSession(')

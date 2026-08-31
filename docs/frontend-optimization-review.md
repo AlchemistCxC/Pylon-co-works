@@ -21,7 +21,7 @@
 
 涉及：
 
-- `src/components/chat/ChatView.tsx`
+- `src/components/chat/ChatView.tsx`（历史 React 入口，2026-08-31 已删除）
 - `src/components/chat/sessionRuntimeStore.ts`
 - `src/components/chat/useChatRuntimeSnapshot.ts`
 - `src/components/chat/GenerationFooter.tsx`
@@ -258,7 +258,7 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 ## ChatView React 兼容逻辑收紧（2026-08-31）
 
-本轮审查确认 `ChatView.tsx` 仍由 `core.renderer.react` 动态加载，属于兼容 Renderer Engine 入口，暂不删除或整体迁移。先处理两个无行为收益的参数/依赖问题：
+本节记录早期审查时对 `ChatView.tsx` 的兼容性收紧；当时它仍由 `core.renderer.react` 动态加载，故先处理无行为收益的参数/依赖问题。该入口随后已在“旧 React 消息渲染器完整下线”任务中删除，本节不再代表当前架构：
 
 - `AssistantContent` 删除未使用的 `isStreaming` 参数，`StreamingAssistantText` 不再传递死参数；
 - `ReasoningBlock` 删除从未读取的 `startedAt` 参数，流式思考不再创建无效的本地时间状态；
@@ -267,3 +267,21 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 这保持现有 React fallback 的视觉和生命周期行为不变，同时减少误导性的 interface 和 lint 豁免，为后续拆分 `MessageRendererHost`、消息列表和生成状态栏保留清晰 seam。
 
 随后修复 `CodeBlock` 的异步高亮 stale-result 窗口：代码或语言变化时立即清空旧高亮，并用 language+code key 校验异步结果，防止旧 grammar 的 HTML 在新代码上短暂显示。高亮状态同时移除未使用的 `lang` 字段，保留纯文本 fallback。
+
+## 旧 React 消息渲染器完整下线（2026-08-31）
+
+在确认生产 Agent 工作台、消息列表、推理块、工具卡片及生命周期桥接均由 Solid Renderer Suite 承载后，本轮完成最后的去 React 化：旧 `ChatView.tsx`、`core.renderer.react` 内建 renderer 及其专属测试/指标 facade 已删除，内建 registry 只注册 `core.renderer.solid`。应用框架和插件契约中的必要 React 类型仍保留，但不再存在第二套内建消息渲染运行时。
+
+同步完成：
+
+- 移除旧 `presentation.renderer.list/set` 命令及运行时 renderer 选择状态；历史持久化字段 `messageRendererId` 仅用于迁移，并将 `core.renderer.react` 映射到 `builtin.solid`，不再恢复 React runtime。
+- CSS/排版证据、renderer registry、lifecycle 与 legacy 结构守卫统一改为 Solid 工作台入口；历史回放断言改读 `AgentRendererSuiteWorkbench`。
+- 删除只服务 React ChatView 的测试脚本，保留 Solid 共享的 `ChatView.css`（其中包含 `term-*` 视觉契约）。
+
+验证：
+
+- `npm.cmd run lint`
+- `npx.cmd tsc --noEmit --pretty false`
+- renderer registry、preference migration、typography、lifecycle 定向 Vitest（25 tests）
+- `npm.cmd run test:legacy`：除 `test-thought-block-visual.mts` 的过时源码 token（已同步修正）外，其余守卫通过；修正后该脚本单独通过。
+- `git diff --check`

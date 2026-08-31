@@ -66,17 +66,6 @@ afterAll(async () => {
   if (active) await getPluginRuntime().deactivate(active.key)
 })
 
-vi.mock('../../components/chat/ChatView.tsx', () => ({
-  default: (props: { sessionId: string | null; workspaceKind?: string; workspaceMode?: string; agentId?: string }) => (
-    <div
-      data-testid="chat-view-props"
-      data-session={props.sessionId ?? ''}
-      data-workspace-kind={props.workspaceKind ?? ''}
-      data-workspace-mode={props.workspaceMode ?? ''}
-      data-agent={props.agentId ?? ''}
-    />
-  ),
-}))
 vi.mock('../../components/ControlCenter.tsx', () => ({ default: () => null }))
 vi.mock('../../components/PetCompanion.tsx', () => ({ default: () => null }))
 

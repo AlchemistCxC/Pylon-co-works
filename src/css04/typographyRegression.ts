@@ -3,14 +3,13 @@
  * smoke，确认无全局 heading 污染）。
  *
  * CSS-02 把 Markdown heading 层级规则全部限定在 `.term-assistant` 内（ChatView.css:201-206，
- * 双 renderer 仅输出 term-h1~term-h6 类、无裸 heading 选择器）；CSS-03 将聊天字号 fallback
+ * Solid renderer 仅输出 term-h1~term-h6 类、无裸 heading 选择器）；CSS-03 将聊天字号 fallback
  * 统一为 px contract。CSS-04 以「源码级 scoping lock + renderer 源码锁 + jsdom DOM smoke」
  * 回归该契约，防止后续改动破坏防污染边界：
  *   - 源码锁：ChatView.css 中任何 `.term-h{n}` 规则必须位于 `.term-assistant` 后代作用域
  *     （无裸全局选择器）；聊天 CSS 无 `\d+pt` 字号引用（CSS-03 回归门）。
- *   - renderer 源码锁：React（ChatView.tsx h1-h6 components 映射）与 Solid
- *     （MarkdownContent.solid.tsx headingClass 派生）的 class 输出仍在（CR-325 消化；
- *     Solid 侧另配真实 DOM renderer 测试 MarkdownContent.solid.test.tsx）。
+ *   - renderer 源码锁：Solid（MarkdownContent.solid.tsx headingClass 派生）的 class 输出仍在
+ *     （CR-325 消化；另配真实 DOM renderer 测试 MarkdownContent.solid.test.tsx）。
  *   - DOM smoke：真实 ChatView.css 经样式表加载（jsdom CSSOM 解析）后，`.term-h{n}` 规则
  *     全部保持 `.term-assistant` scoping 且 h1~h6 六条齐备。
  *

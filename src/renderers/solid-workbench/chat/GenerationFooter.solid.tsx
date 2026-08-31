@@ -29,7 +29,7 @@ const HOT_TICK_MS = 120
 const SLOW_TICK_MS = 1000
 
 export interface SolidGenerationFooterProps extends GenerationFooterInput {
-  /** ChatView usage is intentionally hidden until the product surface is redesigned. */
+  /** Token usage remains intentionally hidden until the product surface is redesigned. */
   showTokenCount?: boolean
   clock?: WorkbenchClock
   random?: () => number

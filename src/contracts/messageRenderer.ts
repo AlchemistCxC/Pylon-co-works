@@ -1,13 +1,14 @@
 /**
  * 消息渲染契约（施工方案书 v3 §M4）：renderer.message 扩展点。
  *
- * 第一版契约以「类型 + 宿主可查询」为准，不改变 React/Solid 组件内部实现：
+ * 契约以「类型 + 宿主可查询」为准；内建消息 surface 统一由 Solid 提供，
+ * `react` kind 仅作为第三方扩展/历史 manifest 的兼容类型，不代表内建运行时：
  * - MessageRenderer 是渲染器的可查询能力面（facade）；
  * - RenderSurface 是 mount/update/destroy/on 的命令式桥（M8 渲染管线落地后启用）；
  * - 契约层不 import React/Solid，也不 import components/，保证 contracts 纯净。
  *
  * 规则：
- * - core 渲染器插件只做 facade，主 shell 仍直接消费现有组件（旧导出保留）；
+ * - core 渲染器插件只做 facade，主 shell 通过统一 Renderer Suite 消费 Solid surface；
  * - 签名插件生态统一 Web Components（M11），届时新增 kind='webcomponent' 实现。
  */
 
@@ -70,7 +71,7 @@ export interface MessageRenderProps {
   toolVisualState?: unknown
 }
 
-/** renderTool 的语义 props（React/Solid 的 ToolCard 消费面差异由 facade 桥接）。 */
+/** renderTool 的语义 props（第三方 renderer 的消费面差异由 facade 桥接）。 */
 export interface ToolRenderProps {
   message?: unknown
   model?: unknown
@@ -88,7 +89,7 @@ export interface ReasoningRenderProps {
 
 /**
  * 消息渲染器能力面：每个 renderer.message 贡献的 impl 实现本接口。
- * core.renderer.react / core.renderer.solid 为内置 facade；
+ * core.renderer.solid 为内置 facade；
  * render* 返回绑定到该渲染器的 RenderSurface。
  */
 export interface MessageRenderer {

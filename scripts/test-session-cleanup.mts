@@ -6,8 +6,7 @@ import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 
 // 阶段 2 收敛：clearChatSourceRefs/sessionCleanup 已删除（controller.pruneSources 取代）。
-// 接线断言：ChatView 统一走 controller.pruneSources，controller 内部按 sessions source 集合清理。
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+// 接线断言：生命周期 hook 统一走 controller.pruneSources，controller 内部按 sessions source 集合清理。
 const lifecycleHook = readFileSync(new URL('../src/components/chat/useSessionLifecycle.ts', import.meta.url), 'utf8')
 const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 assert.match(lifecycleHook, /pruneSources\(activeSources\)/, 'hook 必须调用统一 source 清理入口')

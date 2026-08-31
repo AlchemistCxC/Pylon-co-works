@@ -32,9 +32,4 @@ assert.match(agentPanel, /import MessageSearchBar/, 'Agent 搜索必须复用 Me
 const filePanel = readFileSync(new URL('../src/components/right-panel/FileContextPanel.tsx', import.meta.url), 'utf8')
 assert.match(filePanel, /useWorkspaceStore\(s => s\.touchedFiles\)/, 'File 右栏必须反查 touchedFiles')
 
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.match(chatView, /useMessageSearch\(sessionId, messages\)/, '搜索定位 hook 仍在 ChatView')
-assert.match(chatView, /searchMatches\[searchIndex\]\?\.id/, '活动命中高亮必须保留')
-assert.equal(chatView.includes('<MessageSearchBar'), false, '搜索 UI 只能在右栏贡献中')
-
 console.log('context panel 贡献宿主守卫通过')

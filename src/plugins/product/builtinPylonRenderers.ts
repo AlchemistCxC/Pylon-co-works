@@ -1,5 +1,4 @@
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
-import { createCoreReactRendererPluginDefinition } from '../core/renderer/reactRenderer.ts'
 import { createCoreSolidRendererPluginDefinition } from '../core/renderer/solidRenderer.ts'
 import { createBuiltinRendererContentPluginDefinitions } from '../core/renderer/builtinRenderContent.ts'
 import { createBuiltinToolRendererPluginDefinition } from '../core/renderer/builtinToolRenderers.ts'
@@ -17,7 +16,6 @@ import { BUILTIN_INTERFACE_MODES } from '../core/interfaceMode/builtinInterfaceM
 import { createBuiltinSolidContentSlot, createBuiltinSolidRendererSuite } from '../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 const rendererDefinitions = Object.freeze([
-  createCoreReactRendererPluginDefinition(),
   createCoreSolidRendererPluginDefinition(),
   ...createBuiltinRendererContentPluginDefinitions(),
   createBuiltinToolRendererPluginDefinition(),

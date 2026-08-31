@@ -17,7 +17,7 @@ describe('terminal-like 块间距 contract', () => {
     expect(chatCss).toMatch(/\.term-plain-text\s*\{[^}]*line-height:inherit/)
   })
 
-  it('keeps the legacy ChatView row/tool cadence available for non-Solid consumers', () => {
+  it('keeps the shared row/tool cadence available to the Solid workbench', () => {
     expect(chatCss).toMatch(/\.term-row \+ \.term-row\s*\{[^}]*margin-top:\s*var\(--chat-row-gap/)
     expect(chatCss).toMatch(/\.term-row-tool \+ \.term-row-tool\s*\{[^}]*margin-top:\s*var\(--chat-tool-gap/)
   })

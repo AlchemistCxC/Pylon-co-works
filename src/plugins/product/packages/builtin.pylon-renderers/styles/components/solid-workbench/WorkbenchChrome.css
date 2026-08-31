@@ -2,7 +2,7 @@
  *
  * 证据基线：references/solid-chrome-gap-audit.md —— .main.renderer-suite-workbench
  * 缺 main-body 等价几何，22 个壳层类零定义。本文件只覆盖布局骨架必需类；
- * 消息流/输入栏/卡片复用 React 的 term-* / input-* 类名，由既有 ChatView.css/InputBar.css
+ * 消息流/输入栏/卡片复用共享的 term-* / input-* 类名，由既有 ChatView.css/InputBar.css
  * 与 .app[data-interface-mode] 分档皮肤自动生效，此处不重复。
  *
  * 几何规格对齐 React 同位结构：

@@ -54,15 +54,12 @@ async function installTestRenderer(id: string, priority = 1000, canRender = true
 }
 
 describe('v2 Message Renderer Registry', () => {
-  it('core react/solid 由统一 renderer registry 持有', () => {
-    expect(resolveMessageRendererIds()).toEqual(['core.renderer.react', 'core.renderer.solid'])
-    expect(resolveDefaultMessageRenderer()?.rendererId).toBe('core.renderer.react')
+  it('core solid 由统一 renderer registry 持有', () => {
+    expect(resolveMessageRendererIds()).toEqual(['core.renderer.solid'])
+    expect(resolveDefaultMessageRenderer()?.rendererId).toBe('core.renderer.solid')
   })
 
   it('core renderer 贡献完整能力面', () => {
-    const react = resolveMessageRenderer('core.renderer.react')
-    expect(react?.kind).toBe('react')
-    expect(react?.renderMessage({ renderMessage: {} }).rendererId).toBe('core.renderer.react')
     expect(resolveMessageRenderer('core.renderer.solid')?.kind).toBe('solid')
   })
 
@@ -74,7 +71,7 @@ describe('v2 Message Renderer Registry', () => {
 
     await deactivatePluginInstance(selected)
     temporaryInstances.splice(temporaryInstances.indexOf(selected), 1)
-    expect(resolveDefaultMessageRenderer()?.rendererId).toBe('core.renderer.react')
+    expect(resolveDefaultMessageRenderer()?.rendererId).toBe('core.renderer.solid')
     expect(resolveActiveMessageRenderers().map(renderer => renderer.rendererId)).toEqual(resolveMessageRendererIds())
 
     await deactivatePluginInstance(incapable)

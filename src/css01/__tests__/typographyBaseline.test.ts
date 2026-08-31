@@ -5,9 +5,9 @@
  * 就位 + px contract fallback 消除）。
  *
  * 覆盖：聊天字号 px contract 解析（def 单一真值表 unit=px；非 px 分支 null）；
- * heading DOM/class contract（CSS-02 后 React/Solid 双 renderer 均输出 term-h1~term-h6）；
+ * heading DOM/class contract（CSS-02 后 Solid renderer 输出 term-h1~term-h6）；
  * 结构性常量（HEADING_CLASS_CONTRACT_IN_PLACE=true、PX_CONTRACT_FALLBACK_SAFE=true、
- * fallback=15px）；证据登记（file:line / fallback / 完整 h1-h6 规则 + 双 renderer class contract）；
+ * fallback=15px）；证据登记（file:line / fallback / 完整 h1-h6 规则 + Solid renderer class contract）；
  * 工件组装；DOM computed style 采样（.term/h1-h6 相对 body 比例；缺元素 → null 防御）。
  * 只读取证，不修改任何 CSS（视觉改动属 CSS-02/03）。
  */
@@ -39,15 +39,12 @@ describe('resolveChatFontSizeContract（px contract）', () => {
 })
 
 describe('headingDomContract（renderer DOM/class contract）', () => {
-  it('React 与 Solid 双 renderer：h1-h6 原生标签 + term-h1~term-h6 class contract（CSS-02 起）+ 源码证据', () => {
-    for (const renderer of ['react', 'solid'] as const) {
-      const dom = headingDomContract(renderer)
-      expect(dom).toHaveLength(6)
-      expect(dom.map(level => level.tag)).toEqual(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-      // CSS-02：双 renderer 均输出 term-h1~term-h6（class contract 就位）
-      expect(dom.map(level => level.className)).toEqual(['term-h1', 'term-h2', 'term-h3', 'term-h4', 'term-h5', 'term-h6'])
-      expect(dom[0].source).toBe(TYPOGRAPHY_EVIDENCE.renderers[renderer].file)
-    }
+  it('Solid renderer：h1-h6 原生标签 + term-h1~term-h6 class contract（CSS-02 起）+ 源码证据', () => {
+    const dom = headingDomContract('solid')
+    expect(dom).toHaveLength(6)
+    expect(dom.map(level => level.tag)).toEqual(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+    expect(dom.map(level => level.className)).toEqual(['term-h1', 'term-h2', 'term-h3', 'term-h4', 'term-h5', 'term-h6'])
+    expect(dom[0].source).toBe(TYPOGRAPHY_EVIDENCE.renderers.solid.file)
   })
 })
 
@@ -57,14 +54,12 @@ describe('结构性常量与证据登记', () => {
     expect(PX_CONTRACT_FALLBACK_SAFE).toBe(true) // CSS-03 翻转
   })
 
-  it('证据登记：.term fallback=15px / --chat-font-size / 完整 h1-h6 规则 + 双 renderer class contract', () => {
+  it('证据登记：.term fallback=15px / --chat-font-size / 完整 h1-h6 规则 + Solid renderer class contract', () => {
     expect(TYPOGRAPHY_EVIDENCE.termRule.fontSizeFallback).toBe('15px')
     expect(TYPOGRAPHY_EVIDENCE.termRule.cssVar).toBe('--chat-font-size')
     expect(TYPOGRAPHY_EVIDENCE.termRule.file).toBe('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css:8')
     expect(TYPOGRAPHY_EVIDENCE.headingCss.rules).toEqual(['.term-h1', '.term-h2', '.term-h3', '.term-h4', '.term-h5', '.term-h6'])
-    expect(TYPOGRAPHY_EVIDENCE.renderers.react.headingDom).toBe('h1-h6 输出 class term-h1~term-h6')
     expect(TYPOGRAPHY_EVIDENCE.renderers.solid.headingDom).toBe('h1-h6 输出 class term-h1~term-h6')
-    expect(TYPOGRAPHY_EVIDENCE.renderers.react.file).toBe('src/components/chat/ChatView.tsx:284-302')
     expect(TYPOGRAPHY_EVIDENCE.renderers.solid.file).toBe('src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx:65-69')
   })
 
@@ -87,7 +82,7 @@ describe('结构性常量与证据登记', () => {
 })
 
 describe('buildTypographyBaselineArtifact（工件组装）', () => {
-  it('schemaVersion/evidence/px contract/双 renderer DOM contract/无 DOM 测量时为 null', () => {
+  it('schemaVersion/evidence/px contract/Solid renderer DOM contract/无 DOM 测量时为 null', () => {
     const artifact = buildTypographyBaselineArtifact({ phase: 'baseline', theme: { chatFontSize: 15 } })
     expect(artifact.tool).toBe('css01-typography-baseline')
     expect(artifact.schemaVersion).toBe(1)
@@ -96,9 +91,7 @@ describe('buildTypographyBaselineArtifact（工件组装）', () => {
     expect(artifact.pxContractFallbackSafe).toBe(true) // CSS-03 翻转
     expect(artifact.fallbackTermFontPx).toBe(15)
     expect(artifact.chatFontSize).toMatchObject({ unit: 'px', cssVarValue: '15px', px: 15 })
-    expect(artifact.rendererHeadingDom.react).toHaveLength(6)
     expect(artifact.rendererHeadingDom.solid).toHaveLength(6)
-    expect(artifact.rendererHeadingDom.react[0]).toMatchObject({ tag: 'h1', className: 'term-h1' })
     expect(artifact.measurement).toBeNull()
   })
 })

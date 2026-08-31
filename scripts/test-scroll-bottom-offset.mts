@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const agentSheet = readFileSync(new URL('../src/sheets/AgentSheetView.tsx', import.meta.url), 'utf8')
-const chat = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
 const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
 const controlCenterCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', import.meta.url), 'utf8')
@@ -13,7 +12,6 @@ const petCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pyl
 assert.equal(agentSheet.includes('AgentRendererSuiteWorkbench'), true)
 assert.equal(agentSheet.includes('activeSessionId: ctx.activeSession'), true)
 assert.equal(agentSheet.includes('workspaceMode'), true)
-assert.equal(chat.includes('rightOpen?: boolean; rightWidth?: number'), false)
 assert.equal(css.includes('right:calc(8px + var(--right-panel-inset, 0px))'), true)
 assert.equal(controlCenter.includes('--cc-right-inset'), false)
 assert.equal(controlCenterCss.includes('var(--right-panel-inset, 0px)'), true)

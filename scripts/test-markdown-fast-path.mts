@@ -4,7 +4,7 @@ import { isPlainTextContent } from '../src/components/chat/markdownFastPath.ts'
 const plainSamples = [
   '普通文本，不包含 Markdown 结构。',
   '第一行\n第二行',
-  '路径 src/components/chat/ChatView.tsx 保持原样。',
+  '路径 src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx 保持原样。',
 ]
 for (const sample of plainSamples) assert.equal(isPlainTextContent(sample), true, sample)
 

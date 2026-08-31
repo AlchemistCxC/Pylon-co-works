@@ -7,7 +7,6 @@ import { readFileSync } from 'node:fs'
 import { resolveConnectorColor } from '../src/domains/tool/toolPresentation.ts'
 
 const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 const connectorHook = readFileSync(new URL('../src/components/chat/useToolConnectors.ts', import.meta.url), 'utf8')
 const pipeline = readFileSync(new URL('../src/components/chat/chatRowPipeline.ts', import.meta.url), 'utf8')
 const connector = readFileSync(new URL('../src/components/chat/ToolConnector.tsx', import.meta.url), 'utf8')
@@ -22,18 +21,11 @@ assert.equal(resolveConnectorColor('follow', 'err', { toolOk: '#a', toolRun: '#b
 
 // ── 线色跟随连续调用中的上一个 Tool 状态（编排在 chatRowPipeline 纯模块）──
 assert.match(pipeline, /const previousConnectorStatus = hasPreviousTool\s*\? resolveRowToolConnectorStatus\(previous\.message\)/, '必须由上一个工具消息直接解析连接线状态')
-assert.match(chatView, /<ToolConnector[\s\S]*?status=\{desc\.connectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(desc\.connectorVisualState\)\}/, '线色和动画必须使用上一个工具的解析状态')
 assert.match(pipeline, /function resolveRowToolVisualState[\s\S]*?if \(!message \|\| message\.role !== 'tool'\) return undefined[\s\S]*?return normalizeToolStatus\(message\.toolStatus\)/, '状态动画必须兼容真实 tool-* id 与浏览器 mock id')
 assert.match(pipeline, /return resolveToolPresentationState\(message\.toolStatus, message\.toolOutput !== undefined\)\.tone/, '连接线状态必须兼容无 tool- 前缀的 mock/真实消息 id（B2 唯一 API）')
 assert.match(connector, /resolveConnectorColor\(connectorMode, status, \{ toolOk, toolRun, toolErr \}, connectorColor\)/, '连接线组件必须用状态色')
 
-// ── 真实 DOM 连接线元素（ChatView 消费描述符）──
-assert.match(chatView, /desc\.showConnector && <ToolConnector/, '仅前一行也是 tool 时渲染连接线')
-assert.match(chatView, /React\.Fragment key=\{desc\.key\}/, '行与连接线共享稳定 key')
-
 // ── 测量：展开的工具仍保持连接 ──
-assert.doesNotMatch(chatView, /previousRow\.querySelector\('\.term-tool-body'\) !== null/, '展开 body 不应截断连接线')
-assert.doesNotMatch(chatView, /connector\.style\.display = 'none'/, '展开 body 不应隐藏连接线')
 assert.match(connectorHook, /connector\.style\.display = 'block'/, '连接线始终保持显示')
 assert.match(connectorHook, /connector\.previousElementSibling/, '上一行 = 连接线前兄弟')
 assert.match(connectorHook, /const connectorParent = connector\.offsetParent as HTMLElement \| null/, '连接线必须相对自身实际定位父级测量')

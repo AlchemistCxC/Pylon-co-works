@@ -8,7 +8,7 @@
  *   1. 源码锁：ChatView.css 中任何 `.term-h{n}` 规则必须被 `.term-assistant` 限定（无裸
  *      全局选择器 → 其他 Sheet 原生 h1-h6 不会被聊天层级规则污染）。
  *   2. CSS-03 回归门：聊天 CSS 无 `\d+pt` 字号引用（px contract 保持）。
- *   3. renderer 源码锁（CR-325 消化）：React/Solid 双 renderer 的 heading class 输出仍在
+ *   3. renderer 源码锁（CR-325 消化）：Solid renderer 的 heading class 输出仍在
  *      （与 css01 headingDomContract 不同源，可直接捕获 renderer 映射被删的回归；
  *      Solid 侧另配真实 DOM renderer 测试 MarkdownContent.solid.test.tsx）。
  *   4. DOM smoke：真实 ChatView.css 经样式表加载（jsdom CSSOM 解析 267 条规则）后，
@@ -19,7 +19,6 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import chatViewTsx from '../../components/chat/ChatView.tsx?raw'
 import markdownSolidSource from '../../renderers/solid-workbench/chat/MarkdownContent.solid.tsx?raw'
 import {
   CHAT_VIEW_CSS,
@@ -45,12 +44,6 @@ describe('源码锁：heading 规则作用域（§5.15 step 5 防污染）', () 
 })
 
 describe('renderer 源码锁（CR-325 消化：捕获 renderer class 输出回归）', () => {
-  it('React renderer（ChatView.tsx）h1-h6 components 映射仍在', () => {
-    for (const level of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']) {
-      expect(chatViewTsx).toContain(`<${level} className="term-${level}"`)
-    }
-  })
-
   it('Solid renderer（MarkdownContent.solid.tsx）headingClass 派生仍在', () => {
     expect(markdownSolidSource).toContain('/^h[1-6]$/')
     expect(markdownSolidSource).toContain('term-${tagName}')

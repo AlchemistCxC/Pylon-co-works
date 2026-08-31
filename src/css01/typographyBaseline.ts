@@ -1,7 +1,7 @@
 /**
  * CSS-01：P6 Markdown typography computed style 基线（方案书任务表 CSS-01，§5.15 step 1-2）。
  *
- * 目的：以实际主题 preset 与两套 renderer（React/Solid）的最终 DOM/class 为准，登记当前
+ * 目的：以实际主题 preset 与 Solid renderer 的最终 DOM/class 为准，登记当前
  * typography 基线（P6 已证实四事实），为 CSS-02（heading class/renderer contract）与
  * CSS-03（px 最小修复）提供验收基准。只读取证，不修改任何 CSS（视觉改动属 CSS-02/03）。
  *
@@ -12,9 +12,8 @@
  *   - h1-h6 原无完整 renderer class contract：`.term-h2/.term-h3`（ChatView.css:198-199）
  *     原无任何 renderer 输出该 class——规则永不命中（P6 已证实）。
  *   - Solid renderer 原直接输出原生 h1-h6（MarkdownContent.solid.tsx:65-66 Dynamic）。
- *   - React renderer（react-markdown components 原仅覆写 code/a/blockquote/table，
- *     ChatView.tsx:284-294）亦未映射 heading class。
- *   CSS-02 后：React/Solid 双 renderer 均输出 `term-h1~term-h6`，ChatView.css 以
+ *   - 旧 React renderer 已删除；当前唯一内建 renderer 为 Solid。
+ *   CSS-02 后：Solid renderer 输出 `term-h1~term-h6`，ChatView.css 以
  *   `.term-assistant .term-h{n}` 限定层级规则（§5.15 step 3/5），contract 就位。
  *   CSS-03 后：ChatView.css:8 fallback `15pt`→`15px`——15pt=20px 风险消除，
  *   PX_CONTRACT_FALLBACK_SAFE 翻转为 true。
@@ -41,14 +40,9 @@ export const TYPOGRAPHY_EVIDENCE = {
     file: 'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css:198-206',
     rules: ['.term-h1', '.term-h2', '.term-h3', '.term-h4', '.term-h5', '.term-h6'],
     note: 'CSS-02 后：.term-assistant 内完整 h1-h6 层级规则（§5.15 建议比例；h2=1.1em/h3=1em 600 '
-      + '沿用既有设计），React/Solid 双 renderer 均输出 term-h1~term-h6——规则命中。',
+      + '沿用既有设计），Solid renderer 输出 term-h1~term-h6——规则命中。',
   },
   renderers: {
-    react: {
-      file: 'src/components/chat/ChatView.tsx:284-302',
-      headingDom: 'h1-h6 输出 class term-h1~term-h6',
-      note: 'react-markdown components 补 h1-h6 映射（className=term-h{n}），与 code/a/blockquote/table 同组。',
-    },
     solid: {
       file: 'src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx:65-69',
       headingDom: 'h1-h6 输出 class term-h1~term-h6',
@@ -103,7 +97,7 @@ export function resolveChatFontSizeContract(
 // heading 渲染 DOM/class contract（renderer 源码为真值）
 // ============================================================================
 
-export type TypographyRenderer = 'react' | 'solid'
+export type TypographyRenderer = 'solid'
 
 export interface HeadingLevelDom {
   level: 1 | 2 | 3 | 4 | 5 | 6
@@ -115,10 +109,9 @@ export interface HeadingLevelDom {
   source: string
 }
 
-/** CSS-02：heading 渲染 DOM/class contract——以 renderer 源码为真值登记输出形态。
- * CSS-02 后两 renderer 均输出 `term-h1~term-h6`（React=ChatView.tsx h1-h6 components 映射；
- * Solid=MarkdownContent.solid.tsx headingClass 派生），配合 ChatView.css 限定 .term-assistant
- * 内的层级规则；HEADING_CLASS_CONTRACT_IN_PLACE 已翻转为 true。 */
+/** CSS-02：heading 渲染 DOM/class contract——以 Solid renderer 源码为真值登记输出形态。
+ * `MarkdownContent.solid.tsx` 派生 `term-h1~term-h6`，配合 ChatView.css 限定
+ * `.term-assistant` 内的层级规则；HEADING_CLASS_CONTRACT_IN_PLACE 已翻转为 true。 */
 export function headingDomContract(renderer: TypographyRenderer): HeadingLevelDom[] {
   const levels = [1, 2, 3, 4, 5, 6] as const
   const source = TYPOGRAPHY_EVIDENCE.renderers[renderer].file
@@ -224,7 +217,7 @@ export function buildTypographyBaselineArtifact(input: {
     headingScaleUpperBounds: HEADING_SCALE_UPPER_BOUNDS,
     fallbackTermFontPx: 15,
     chatFontSize: resolveChatFontSizeContract(input.theme),
-    rendererHeadingDom: { react: headingDomContract('react'), solid: headingDomContract('solid') },
+    rendererHeadingDom: { solid: headingDomContract('solid') },
     measurement: input.measurement ?? null,
   }
 }
