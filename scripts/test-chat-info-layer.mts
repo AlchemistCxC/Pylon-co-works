@@ -18,7 +18,9 @@ assert.equal(tsx.includes("running ? 'Thinking…' : `Thought for ${characterCou
 assert.equal(tsx.includes('∴ Thinking…'), false)
 assert.equal(tsx.includes('formatThoughtDuration'), true)
 assert.equal(tsx.includes('thoughtDurationMs'), true)
-assert.equal(tsx.includes('startedAt={msg.thoughtStartedAt}'), true)
+// ReasoningBlock no longer accepts a dead startedAt prop; duration is supplied
+// by the canonical thoughtDurationMs field when a completed block is rendered.
+assert.equal(tsx.includes('startedAt={msg.thoughtStartedAt}'), false)
 assert.equal(tsx.includes('aria-expanded={open}'), true)
 assert.equal(tsx.includes('aria-controls={bodyId}'), true)
 assert.equal(tsx.includes('useReducedMotion()'), true)

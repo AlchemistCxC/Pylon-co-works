@@ -463,7 +463,6 @@ export function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRe
       {renderMessage.type === 'reasoning' && <ReasoningBlock
         text={msg.content}
         running={msg.running === true}
-        startedAt={msg.thoughtStartedAt}
         durationMs={msg.thoughtDurationMs}
         redacted={msg.redacted === true}
         redactedReason={msg.redactedReason}
@@ -498,7 +497,7 @@ function areMessageRowPropsEqual(
 
 const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
 
-export function AssistantContent({ text }: { text: string; isStreaming?: boolean }) {
+export function AssistantContent({ text }: { text: string }) {
   recordRender('AssistantContent.render')
   recordRender('markdown.parse')
   const [copied, setCopied] = useState(false)
@@ -568,42 +567,48 @@ export function AssistantContent({ text }: { text: string; isStreaming?: boolean
 
 function StreamingAssistantText({ text }: { text: string }) {
   recordRender('streamingText.render')
-  return <AssistantContent text={text} isStreaming />
+  return <AssistantContent text={text} />
 }
 
 function StreamingThinking({ text }: { text: string }) {
   recordRender('streamingThinking.render')
-  const [startedAt] = useState(() => Date.now())
-  return <ReasoningBlock text={text} running startedAt={startedAt} />
+  return <ReasoningBlock text={text} running />
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
   recordRender('CodeBlock.render')
   const lines = code.split('\n')
   const isMultiLine = lines.length > 1
-  const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
+  const highlightKey = `${language || 'text'}\u0000${code}`
+  const [highlighted, setHighlighted] = useState<{ html: string; key: string } | null>(null)
 
   useEffect(() => {
+    // A CodeBlock instance is reused while a stream grows or changes language.
+    // Invalidate the previous result immediately; otherwise the old HTML can
+    // remain visible for one or more renders while the new grammar loads.
+    setHighlighted(null)
     if (!isMultiLine) return
     let cancelled = false
     const lang = language || 'text'
     recordRender('highlightCode.call')
     recordMeasuredAsync('CodeBlock.highlight', highlightCode(lang, code)).then(html => {
-      if (html && !cancelled) setHighlighted({ html, lang })
+      if (html && !cancelled) setHighlighted({ html, key: highlightKey })
     }).catch(error => {
       // 2026-08-02：失败不再完全静默——高亮库加载失败回退纯文本渲染（renderLines fallback），
       // 至少留一条日志便于排查；不弹横幅（单块降级不应打断用户）。
       if (!cancelled) console.warn('code highlight failed, falling back to plain text:', error)
     })
     return () => { cancelled = true }
-  }, [language, code, isMultiLine])
+  }, [language, code, highlightKey, isMultiLine])
+
+  const currentHighlight = highlighted?.key === highlightKey ? highlighted : null
 
   // 高亮 HTML 的逐行清洗是高亮结果的纯函数：只在 highlight 落地/变化时重算。
   // 必须在 early return 之前调用——流式输出时同一实例 code 从单行变多行，
   // 条件性调用会改变 hook 数导致 "Rendered more hooks than during the previous render"。
-  const sanitizedLines = useMemo(() => highlighted
-    ? highlighted.html.split('\n').map(html => sanitizeHtml(html || '&nbsp;'))
-    : null, [highlighted])
+  const sanitizedLines = useMemo(() => currentHighlight
+    ? currentHighlight.html.split('\n').map(html => sanitizeHtml(html || '&nbsp;'))
+    : null, [currentHighlight])
 
   // 单行 → 内联代码风格（无 gutter）
   if (!isMultiLine) {
@@ -613,7 +618,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   // 多行 → │ gutter 风格（对齐 Peri TUI code_block_lines）
   // 将 starry-night 输出的 HTML 按 \n 拆行，每行包 gutter
   const renderLines = () => {
-    if (!highlighted || !sanitizedLines) {
+    if (!currentHighlight || !sanitizedLines) {
       return lines.map((line, i) => (
         <div key={i} className="term-code-line">
           <span className="term-code-gutter">│ </span>
@@ -636,7 +641,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   )
 }
 
-function ReasoningBlock({ text, running, durationMs, redacted, redactedReason }: { text: string; running: boolean; startedAt?: number; durationMs?: number; redacted?: boolean; redactedReason?: string }) {
+function ReasoningBlock({ text, running, durationMs, redacted, redactedReason }: { text: string; running: boolean; durationMs?: number; redacted?: boolean; redactedReason?: string }) {
   recordRender('ReasoningBlock.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
@@ -728,7 +733,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const outputHtml = useMemo(() => {
     if (!model.outputText || !isExecute) return ''
     return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(model.outputText)))
-  }, [model.outputText, model.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [model.outputText, isExecute])
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state} data-kind={model.kind}
       data-status-label={model.statusLabel}

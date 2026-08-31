@@ -254,4 +254,16 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 验证：
 
 - `npx.cmd vitest run src/renderers/solid-workbench/chat/__tests__/ToolDiffTask.solid.test.tsx src/renderers/solid-workbench/chat/__tests__/TextBlocks.solid.test.tsx`：2 个文件、15 tests 通过；
-- 全量 lint、TypeScript 检查与 `git diff --check` 在提交前执行。
+- 全量 lint、TypeScript 检查、ChatView 结构守卫与 `git diff --check` 均通过；React MessageRow/renderer host 13 tests、Solid ReasoningStates/MessageRow 15 tests 通过。
+
+## ChatView React 兼容逻辑收紧（2026-08-31）
+
+本轮审查确认 `ChatView.tsx` 仍由 `core.renderer.react` 动态加载，属于兼容 Renderer Engine 入口，暂不删除或整体迁移。先处理两个无行为收益的参数/依赖问题：
+
+- `AssistantContent` 删除未使用的 `isStreaming` 参数，`StreamingAssistantText` 不再传递死参数；
+- `ReasoningBlock` 删除从未读取的 `startedAt` 参数，流式思考不再创建无效的本地时间状态；
+- React fallback `ToolCard` 的 ANSI memo 依赖改为 `[model.outputText, isExecute]`，移除 `react-hooks/exhaustive-deps` 豁免，并使依赖表达式与实际读取值一致。
+
+这保持现有 React fallback 的视觉和生命周期行为不变，同时减少误导性的 interface 和 lint 豁免，为后续拆分 `MessageRendererHost`、消息列表和生成状态栏保留清晰 seam。
+
+随后修复 `CodeBlock` 的异步高亮 stale-result 窗口：代码或语言变化时立即清空旧高亮，并用 language+code key 校验异步结果，防止旧 grammar 的 HTML 在新代码上短暂显示。高亮状态同时移除未使用的 `lang` 字段，保留纯文本 fallback。
