@@ -619,11 +619,18 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
-    expect(emptyState).toHaveTextContent('准备开始')
+    expect(emptyState).toHaveAttribute('data-control-center', 'production')
+    expect(screen.getByRole('img', { name: 'Pylon Agent' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
-    expect(screen.getByRole('textbox', { name: '首条请求' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '开始新会话' })).toBeDisabled()
-    expect(host.querySelector('.control-center')).toBeNull()
+    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeTruthy()
+    expect(screen.queryByLabelText('输入快捷键提示')).toBeNull()
+    expect(host.querySelector('.control-center')).toBe(emptyState)
+    expect(host.querySelectorAll('.input-textarea')).toHaveLength(1)
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, replayReadonly: false })
+    await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).toBeTruthy())
+    expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.firstElementChild).toBe(root)
   })
 
@@ -636,12 +643,13 @@ describe('mountSolidWorkbench', () => {
 
     const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
     expect(workspace).toHaveValue('workspace-a')
-    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '检查当前项目' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    const prompt = screen.getByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '检查当前项目' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
       command: 'createSession',
-      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目', attachments: [] }, mode: 'auto', model: 'deepseek-v4-flash', reasoningLevel: 'balanced' }],
+      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目', attachments: [] }, mode: 'auto', model: 'deepseek-v4-flash', reasoningLevel: 'medium' }],
     }))
   })
 
@@ -676,16 +684,14 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '执行耗时任务' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     const emptyState = screen.getByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByRole('status', { name: '正在创建会话' })).toHaveTextContent('执行耗时任务')
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(prompt).toBeDisabled()
-    expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
 
     finishCreation?.({ sessionId: 'created-session' })
     await waitFor(() => expect(emptyState).toHaveAttribute('aria-busy', 'false'))
@@ -698,11 +704,9 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '保留这份任务描述' } })
-    const submit = screen.getByRole('button', { name: '开始新会话' })
-    submit.focus()
-    fireEvent.click(submit)
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 暂时不可用')
     expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()

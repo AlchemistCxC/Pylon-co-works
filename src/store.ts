@@ -24,7 +24,7 @@ import {
 import type { Profile } from './identityStore'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
-import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
+import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, recordPayload, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 
 export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
@@ -261,7 +261,12 @@ export const useStore = create<ThemeState>()(persist(
   },
   applyCustomPreset: (id) => {
     const preset = get().customPresets.find(item => item.id === id)
-    if (!preset) return
+    // D-fix：查不到预设必须可见地报告（此前静默 return——持久化引用漂移时
+    // 表现为"切换了但什么都没发生"）。
+    if (!preset) {
+      reportRuntimeError('应用自定义预设', new Error(`自定义预设不存在：${id}`))
+      return
+    }
     const bundle = normalizePresetBundle(preset.bundle) ?? adaptLegacyThemePreset({
       id: preset.id,
       name: preset.name,
@@ -269,6 +274,9 @@ export const useStore = create<ThemeState>()(persist(
       createdAt: preset.createdAt,
       updatedAt: preset.updatedAt,
     })
+    // 主题 payload 单一真值：bundle 里的保存态 delta（免疫 appliedPreset 引用
+    // 与列表 id 的漂移），回退用 preset.theme 本体。
+    const themePayload = (recordPayload(bundle.contributions['builtin.theme']?.payload)) as Record<string, unknown>
     const beforeTheme = Object.fromEntries([
       ...THEME_SETTING_KEYS.map(key => [key, get()[key]] as const),
       ['appliedPreset', get().appliedPreset],
@@ -280,7 +288,15 @@ export const useStore = create<ThemeState>()(persist(
     const beforeRenderer = rendererStore.getSnapshot()
     const registry = createFirstPartyPresetProviderRegistry({
       captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
-      applyTheme: () => set(state => applyCustomPresetReducer(state, id) ?? {}),
+      applyTheme: () => set(state => {
+        const patch = applyCustomPresetReducer(state, id, themePayload)
+        // D-fix：reducer 落空（查不到保存态）必须可见，禁止 ?? {} 静默吞掉。
+        if (!patch) {
+          reportRuntimeError('应用自定义预设', new Error(`自定义预设主题缺失：${id}`))
+          return {}
+        }
+        return patch
+      }),
       restoreTheme: () => set(beforeTheme),
       capturePresentation: () => ({
         activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,

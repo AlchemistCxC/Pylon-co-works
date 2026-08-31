@@ -29,7 +29,6 @@ export function SolidControlCenter() {
   const [reasoningLevel, setReasoningLevel] = createSignal('medium')
   const [mode, setMode] = createSignal('')
   const [submitting, setSubmitting] = createSignal(false)
-  const [optimisticPrompt, setOptimisticPrompt] = createSignal<string>()
   const [submitError, setSubmitError] = createSignal('')
   const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
   const emptyWorkspaces = () => input().availableWorkspaces ?? []
@@ -68,7 +67,7 @@ export function SolidControlCenter() {
   const createEmptySession = async (text: string, attachments: readonly WorkbenchAttachment[]) => {
     if (input().workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return false }
     if (submitting()) return false
-    setSubmitting(true); setSubmitError(''); setOptimisticPrompt(text)
+    setSubmitting(true); setSubmitError('')
     try {
       const created = await workbench.commands.createSession({
         ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
@@ -78,21 +77,14 @@ export function SolidControlCenter() {
         initialPrompt: { text, attachments },
       })
       if (!created.sessionId) throw new Error('会话创建未返回有效标识')
-      setOptimisticPrompt()
       return true
     } catch (error) {
-      setOptimisticPrompt(); setSubmitError(error instanceof Error ? error.message : String(error)); return false
+      setSubmitError(error instanceof Error ? error.message : String(error)); return false
     } finally { setSubmitting(false) }
   }
   const emptyComposer = createMemo(() => !input().sessionId ? {
     onSubmit: createEmptySession,
     submitting,
-    submitLabel: () => submitting() ? '正在创建…' : '开始新会话',
-    before: <>
-      <Show when={optimisticPrompt()}>{text => <div class="solid-agent-empty-optimistic" role="status" aria-label="正在创建会话"><div class="solid-agent-empty-optimistic-user"><span class="term-user-prefix">❯</span><span>{text()}</span></div><div class="solid-agent-empty-optimistic-status" aria-live="polite">正在创建会话…</div></div>}</Show>
-      <Show when={input().workspaceMode === 'work'}><div class="solid-agent-empty-context-row"><span class="solid-agent-empty-context-icon" aria-hidden="true">▣</span><label class="solid-agent-empty-workspace"><span class="sr-only">工作区</span><select aria-label="新会话工作区" disabled={submitting() || emptyWorkspaces().length === 0} value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{emptyWorkspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select></label><button class="solid-agent-empty-context-create" type="button" disabled={submitting()} onClick={pickFolder}>新建工作区</button></div></Show>
-      <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
-    </>,
     after: <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>,
   } : undefined)
   let stopDragging: (() => void) | undefined
@@ -121,8 +113,11 @@ export function SolidControlCenter() {
   })
   const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
   const externalAttach = () => externalButtonMode() && !appearance().ccHidden.includes('attach')
+  const hiddenWidgetIds = () => input().sessionId
+    ? appearance().ccHidden
+    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]
   const visibilityContext = () => ({
-    hidden: appearance().ccHidden,
+    hidden: hiddenWidgetIds(),
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
     ccStyle: appearance().ccStyle,
@@ -135,7 +130,7 @@ export function SolidControlCenter() {
     footerLayout: appearance().footerLayout,
     hintMode: appearance().cliHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: appearance().ccHidden,
+      hiddenIds: hiddenWidgetIds(),
       inputMode: appearance().inputMode,
       ccStyle: appearance().ccStyle,
       submitButtonMode: appearance().inputSubmitButtonMode,
@@ -156,9 +151,30 @@ export function SolidControlCenter() {
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
         </span>
       case 'workspace':
-        return <span class="cc-info-chip cc-workspace-chip" title={input().workspacePath ?? input().workspaceLabel ?? '当前会话没有工作目录'}>
+        return <Show when={!input().sessionId} fallback={<span class="cc-info-chip cc-workspace-chip" title={input().workspacePath ?? input().workspaceLabel ?? '当前会话没有工作目录'}>
           <span aria-hidden="true">▣</span><span>{input().workspaceLabel ?? '无工作目录'}</span>
-        </span>
+        </span>}>
+          <div class="cc-empty-workspace-control">
+            <label class="cc-empty-workspace-select">
+              <span aria-hidden="true">▣</span>
+              <select
+                aria-label="新会话工作区"
+                disabled={submitting() || emptyWorkspaces().length === 0}
+                value={workspaceId()}
+                onChange={event => setWorkspaceId(event.currentTarget.value)}
+              >
+                <option value="">{input().workspaceMode === 'work' ? '选择工作区…' : '不使用工作区'}</option>
+                <For each={emptyWorkspaces()}>{item => <option value={item.id}>{item.label} · {item.path}</option>}</For>
+              </select>
+            </label>
+            <button type="button" class="cc-empty-workspace-create" disabled={submitting()} onClick={pickFolder} aria-label="新建工作区">＋</button>
+            <Show when={workspaceDraft()}>{draft => <div class="cc-empty-workspace-popover">
+              <input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} />
+              <code title={draft().path}>{draft().path}</code>
+              <button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建</button>
+            </div>}</Show>
+          </div>
+        </Show>
       case 'activity':
         return <span class="cc-info-chip cc-activity-chip" data-running={runtime().generating ? 'true' : 'false'} role="status" aria-live="polite">
           <span aria-hidden="true">{runtime().generating ? '◌' : '●'}</span><span>{runtime().generating ? '生成中' : '就绪'}</span>
@@ -293,7 +309,7 @@ export function SolidControlCenter() {
     </div>
   )}</For>
 
-  const commandHint = () => appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
+  const commandHint = () => input().sessionId && appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
     ? <div class="cc-command-hint" aria-label="输入快捷键提示">
       <span class="cc-command-hint-key">/: 命令</span>
       <span class="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
@@ -304,6 +320,9 @@ export function SolidControlCenter() {
   return <div
     class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${!input().sessionId ? ' is-empty' : ''}`}
     data-control-center="production"
+    role={!input().sessionId ? 'region' : undefined}
+    aria-label={!input().sessionId ? 'Agent 工作台空态' : undefined}
+    aria-busy={!input().sessionId ? submitting() : undefined}
     style={{
       '--cc-height': `${appearance().ccHeight}px`,
       '--cc-min-height': `${minHeight()}px`,

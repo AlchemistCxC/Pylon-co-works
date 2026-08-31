@@ -230,6 +230,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
         setDraft('')
         setAttachments([])
       }
+      if (!ok) queueMicrotask(() => textarea?.focus())
       return ok
     }
     if (!id) return false
@@ -484,7 +485,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
       class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}${emptyState() ? ' input-empty' : ''}`}
       data-expanded="false"
     >
-      <Show when={inputVariant() !== 'cli' && !emptyState()}>
+      <Show when={inputVariant() !== 'cli'}>
         <div class="input-composer-meta" aria-hidden="true">
           <span class="input-composer-kind"><span class="input-composer-glyph">{inputVariant() === 'command' ? '⌘' : '✦'}</span>{inputVariant() === 'command' ? '命令与消息' : '新消息'}</span>
           <span class="input-composer-shortcut">↵ Enter 发送 · Shift+Enter 换行</span>
@@ -565,7 +566,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
       <Show when={emptyState()?.before}>{content => <div class="input-empty-before">{content()}</div>}</Show>
       <div class="input-row">
         <Show when={inputVariant() === 'cli'}><span class="cli-prefix">❯</span></Show>
-        <Show when={inputVariant() !== 'cli' && !props.externalAttach && !emptyState()}>
+        <Show when={(inputVariant() !== 'cli' || Boolean(emptyState())) && !props.externalAttach}>
           <button type="button" class="input-btn attach" disabled={isDisabled()} onClick={() => void attach()} aria-label="添加附件">＋</button>
         </Show>
         <div class="input-editor-stack">
@@ -577,7 +578,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
           <textarea
             ref={textarea}
             class="input-textarea"
-            aria-label={emptyState() ? '首条请求' : '消息输入'}
+            aria-label="消息输入"
             value={draft()}
             onInput={event => {
               setDraft(event.currentTarget.value)
@@ -599,15 +600,12 @@ export function SolidInputBar(props: SolidInputBarProps) {
             disabled={isDisabled()}
             class={`input-btn ${runtime().generating ? 'stop' : 'send'}`}
             onClick={() => void (runtime().generating ? cancel() : send())}
-            aria-label={emptyState() ? '开始新会话' : (runtime().generating ? '停止生成' : '发送消息')}
+            aria-label={runtime().generating ? '停止生成' : '发送消息'}
           >
             {runtime().generating ? '■' : '↑'}
           </button>
         </Show>
       </div>
-      <Show when={emptyState() && inputVariant() === 'cli'}>
-        <button type="button" class="input-empty-cli-submit" disabled={!draft().trim() || isDisabled()} onClick={() => void send()} aria-label="开始新会话">开始新会话</button>
-      </Show>
       <Show when={emptyState()?.after}>{content => <div class="input-empty-after">{content()}</div>}</Show>
       <input
         ref={fileInput}

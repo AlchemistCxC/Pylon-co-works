@@ -32,9 +32,6 @@ import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/ch
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
-import type { WorkbenchAttachment } from '../../domains/workbench/workbenchCommandFacade.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
-import { useIdentityStore } from '../../identityStore.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 
@@ -412,10 +409,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       </Show>
       <Show
         when={props.context.input().sessionId}
-        fallback={<WorkbenchEmptyState
-          status={snapshot().status}
-          workspaceMode={props.context.input().workspaceMode ?? 'work'}
-        />}
+        fallback={<div class="solid-workbench-empty-space">
+          <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+        </div>}
       >
         <div class="solid-workbench-chat-shell">
           <div
@@ -1000,102 +996,23 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
   }
 }
 
-function LegacyWorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; availableModes: readonly string[]; activeMode: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
+/** Brand-only empty-state layer. The control center remains the sole input
+ * surface; this block provides recognition without duplicating instructions,
+ * context rows, or creation controls. */
+function WorkbenchEmptyBrand(props: { workspaceMode: 'work' | 'chat' }) {
   const model = () => selectAgentEmptyState(props.workspaceMode)
-  const workspaces = () => props.context.input().availableWorkspaces ?? []
-  const profileModel = props.activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
-  const [workspaceId, setWorkspaceId] = createSignal('')
-  const [prompt, setPrompt] = createSignal('')
-  const [modelId, setModelId] = createSignal(profileModel)
-  const [reasoningLevel, setReasoningLevel] = createSignal('balanced')
-  const modeOptions = () => props.availableModes.length > 0 ? props.availableModes : ['default', 'edit', 'auto', 'bypass']
-  const [mode, setMode] = createSignal(props.activeMode || modeOptions()[0] || 'default')
-  const [attachments, setAttachments] = createSignal<readonly WorkbenchAttachment[]>([])
-  const [submitting, setSubmitting] = createSignal(false)
-  // Keep a local projection visible while the host is still creating the
-  // session.  Session creation can involve ACP process startup, so waiting
-  // for `input().sessionId` made the empty state appear frozen after submit.
-  const [optimisticPrompt, setOptimisticPrompt] = createSignal<string>()
-  const [submitError, setSubmitError] = createSignal('')
-  const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
-  let promptInput: HTMLTextAreaElement | undefined
-  let fileInput: HTMLInputElement | undefined
-  onMount(() => {
-    const onNewSession = (event: Event) => {
-      const id = (event as CustomEvent<{ workspaceId?: string }>).detail?.workspaceId
-      if (props.workspaceMode === 'work' && id) setWorkspaceId(id)
-      setPrompt(''); setAttachments([]); setSubmitError('')
-      queueMicrotask(() => promptInput?.focus())
-    }
-    window.addEventListener('pylon:new-session', onNewSession)
-    onCleanup(() => window.removeEventListener('pylon:new-session', onNewSession))
-    const onFolderPicked = (event: Event) => {
-      const path = (event as CustomEvent<{ path?: string }>).detail?.path
-      if (path) setWorkspaceDraft({ name: path.split(/[\\\\/]/).filter(Boolean).at(-1) || '新工作区', path })
-    }
-    window.addEventListener('pylon:workspace-folder-picked', onFolderPicked)
-    onCleanup(() => window.removeEventListener('pylon:workspace-folder-picked', onFolderPicked))
-  })
-  createEffect(() => {
-    const options = workspaces(); const current = workspaceId()
-    if (props.workspaceMode !== 'work') { if (current) setWorkspaceId(''); return }
-    if (current && options.some(item => item.id === current)) return
-    const recent = options.length ? options.reduce((a, b) => (b.lastActiveAt ?? 0) > (a.lastActiveAt ?? 0) ? b : a) : undefined
-    const hasExplicitActivity = options.some(item => item.lastActiveAt !== undefined && item.lastActiveAt !== null)
-    setWorkspaceId(options.length === 1 ? options[0]!.id : hasExplicitActivity ? recent?.id ?? '' : '')
-  })
-  const pickFolder = () => window.dispatchEvent(new CustomEvent('pylon:pick-workspace-folder'))
-  const createWorkspace = async () => {
-    const draft = workspaceDraft(); if (!draft?.name.trim() || !draft.path) return
-    try { const workspace = await useWorkspaceEntityStore.getState().createWorkspace(draft.name.trim(), draft.path); setWorkspaceId(workspace.id); setWorkspaceDraft(); setSubmitError('') }
-    catch (error) { setSubmitError(error instanceof Error ? error.message : '创建工作区失败') }
-  }
-  const submit = async () => {
-    const text = prompt().trim(); if (!text || submitting()) return
-    if (props.workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return }
-    setSubmitting(true); setSubmitError('')
-    setOptimisticPrompt(text)
-    try {
-      const created = await props.context.commands.createSession({
-        ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
-        ...(modelId().trim() ? { model: modelId().trim() } : {}), reasoningLevel: reasoningLevel(), mode: mode(),
-        initialPrompt: { text, attachments: attachments() },
-      })
-      if (!created.sessionId) throw new Error('会话创建未返回有效标识')
-      setPrompt(''); setAttachments([])
-    } catch (error) {
-      setOptimisticPrompt()
-      setSubmitError(error instanceof Error ? error.message : String(error)); queueMicrotask(() => promptInput?.focus())
-    }
-    finally { setSubmitting(false) }
-  }
-  return <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态" aria-busy={submitting()}>
-    <div class="agent-empty-brand" aria-hidden="true"><svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64"><path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" /><circle class="pylon-mark-node" cx="32" cy="21.215" r="4" /><circle class="pylon-mark-node" cx="20" cy="42" r="4" /><circle class="pylon-mark-node" cx="44" cy="42" r="4" /><path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" /></svg></div>
-    <div class="agent-empty-eyebrow">{model().eyebrow}</div><h2 class="agent-empty-title">{model().title}</h2>
-    <p class="agent-empty-description">{model().description}</p>
-    <Show when={optimisticPrompt()}><div class="solid-agent-empty-optimistic" role="status" aria-label="正在创建会话">
-      <div class="solid-agent-empty-optimistic-user"><span class="term-user-prefix">❯</span><span>{optimisticPrompt()}</span></div>
-      <div class="solid-agent-empty-optimistic-status" aria-live="polite">正在创建会话…</div>
-    </div></Show>
-    <form class="solid-agent-empty-composer" data-busy={submitting() ? 'true' : 'false'} onSubmit={event => { event.preventDefault(); void submit() }}>
-      <Show when={props.workspaceMode === 'work'}><div class="solid-agent-empty-context-row"><span class="solid-agent-empty-context-icon" aria-hidden="true">▣</span><label class="solid-agent-empty-workspace"><span class="sr-only">工作区</span><select aria-label="新会话工作区" disabled={submitting() || workspaces().length === 0} value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select></label><button class="solid-agent-empty-context-create" type="button" disabled={submitting()} onClick={() => void pickFolder()}>新建工作区</button></div></Show>
-      <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
-      <textarea ref={promptInput} aria-label="首条请求" value={prompt()} placeholder="描述你想让 Agent 完成什么…" disabled={submitting()} onInput={event => setPrompt(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit() } }} />
-      <div class="solid-agent-empty-options"><label>模型<select aria-label="新会话模型" disabled={submitting()} value={modelId()} onChange={event => setModelId(event.currentTarget.value)}><option value="">Profile 默认</option><For each={props.availableModels}>{model => <option value={model}>{model}</option>}</For></select></label><label>权限模式<select aria-label="新会话权限模式" disabled={submitting()} value={mode()} onChange={event => setMode(event.currentTarget.value)}><For each={modeOptions()}>{item => <option value={item}>{item}</option>}</For></select></label><label>思考强度<select aria-label="新会话思考强度" disabled={submitting()} value={reasoningLevel()} onChange={event => setReasoningLevel(event.currentTarget.value)}><option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option></select></label></div>
-      <Show when={attachments().length}><div class="attached-files" aria-label="附件"><For each={attachments()}>{item => <button type="button" class="attached-chip" onClick={() => setAttachments(items => items.filter(value => value.id !== item.id))}>{item.name || item.path} ×</button>}</For></div></Show>
-      <input ref={fileInput} type="file" multiple hidden onChange={event => { const files = event.currentTarget.files; if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({ id: `${file.name}:${file.size}:${file.lastModified}`, name: file.name, path: (file as File & { path?: string }).path || file.name, mediaType: file.type || undefined }))]); event.currentTarget.value = '' }} />
-      <div class="solid-agent-empty-composer-footer"><button type="button" disabled={submitting()} onClick={() => fileInput?.click()}>添加附件</button><span>Enter 发送 · Shift+Enter 换行</span><button type="submit" disabled={!prompt().trim() || submitting() || (props.workspaceMode === 'work' && !workspaceId())}>{submitting() ? '正在创建…' : '开始新会话'}</button></div>
-      <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>
-    </form>
-  </div>
-}
-void LegacyWorkbenchEmptyState
-function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'chat' }) {
-  const model = () => selectAgentEmptyState(props.workspaceMode)
-  return <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态">
-    <div class="agent-empty-brand" aria-hidden="true"><svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64"><path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" /><circle class="pylon-mark-node" cx="32" cy="21.215" r="4" /><circle class="pylon-mark-node" cx="20" cy="42" r="4" /><circle class="pylon-mark-node" cx="44" cy="42" r="4" /><path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" /></svg></div>
-    <div class="agent-empty-eyebrow">{model().eyebrow}</div><h2 class="agent-empty-title">{model().title}</h2>
-    <p class="agent-empty-description">{model().description}</p>
+  return <div class="agent-empty-state solid-workbench-empty-brand" role="img" aria-label="Pylon Agent">
+    <div class="agent-empty-brand" aria-hidden="true">
+      <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">
+        <path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" />
+        <circle class="pylon-mark-node" cx="32" cy="21.215" r="4" />
+        <circle class="pylon-mark-node" cx="20" cy="42" r="4" />
+        <circle class="pylon-mark-node" cx="44" cy="42" r="4" />
+        <path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" />
+      </svg>
+    </div>
+    <div class="agent-empty-eyebrow">{model().eyebrow}</div>
+    <h2 class="agent-empty-title">{model().title}</h2>
   </div>
 }
 

@@ -40,6 +40,7 @@
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
 | [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | `SolidInputBar` 单实例空态/中控宿主；空态附加层与过渡样式；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度、动效与命中区 |
 | [P26](#p26-titlebar-与右侧栏插件平台) | Titlebar 与右侧栏插件平台 | **首片完成** | 2026-09-01 | `titlebarRegistry.ts`、`rightRailStore.ts`、Titlebar 三类菜单、ContextPanel scope 扩展；`cmd /c npm run build` | 完成全局 RightRailHost、拖拽分隔器、背景图策略与插件 API 迁移 |
+| [P27](#p27-空态与中控区视觉交互一致性) | 空态与中控区视觉/交互一致性回归 | **施工中** | 2026-09-01 | 用户对比图；`SolidControlCenter`/`SolidInputBar` 当前实现 | 先收敛为中控区原样，再补参数附加动作与平滑归位 |
 
 ## 未完成动作（2026-09-01）
 
@@ -331,6 +332,23 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 追加修正（2026-09-01）：右上角“右侧栏 / 界面 / 设置”改为纯文字触发器，移除图标按钮外观；对应菜单改为直角、紧凑列表，接近 VS Code 菜单语言；原生窗口控制按钮保持原样。
 
 追加修正（2026-09-01）：空态与正常中控区现在共用一个 `SolidInputBar` 实例，空态品牌区不再承载第二个 textarea。工作区、附件和乐观提示作为空态附加层挂载；模型/权限模式直接复用中控区 widget，Hermes ACP 思考强度（`none|minimal|low|medium|high|xhigh|max|ultra`）显示为模型后的全角括号。创建成功后由 `is-empty` 状态切换到中控区位置，空态不复用中控区背景。自动化证据：`npm.cmd run check:solid`。
+
+<a id="p27"></a>
+### P27 · 空态与中控区视觉/交互一致性回归
+
+用户对比图确认上一片仍存在结构偏差：空态额外绘制了工作区行、创建按钮、提示文本和独立的视觉层，导致与正常中控区（输入行在上、状态 widget 在下）不一致；空态还错误保留了多条快捷键/发送提示。正确目标是同一个中控区外观和布局，仅在空态增加可选的工作区、附件动作，并在发送时将模型、模式、思考强度和工作区一次性应用到新会话；发送后中控区平滑归位，不能出现第二套 Composer。
+
+本轮已完成并记录以下问题闭环：
+
+- 删除空态独立 Composer、创建新会话按钮和多条命令/快捷键提示；保留轻量品牌标识（Pylon mark + 工作区/聊天标题），空态交互仍只由同一个生产中控区承载。
+- 空态与会话态共用同一个 `SolidControlCenter`、`SolidInputBar` 和 textarea DOM；切换 session 只改变位置/可见 widget，不再挂载第二套输入栏。
+- Model、Mode 继续使用中控 widget；思考等级沿用 Hermes ACP 的 `none|minimal|low|medium|high|xhigh|max|ultra`，显示为 `model（reasoning）`。
+- 工作区选择与新建动作收进状态 widget，附件继续使用输入栏动作；发送时 `model/reasoningLevel/mode/workspaceId/attachments` 一次性传入 `createSession`。
+- 空态隐藏 session/activity/usage/tasks 等运行中信息和 CLI command hint；创建失败保留草稿并把焦点交回同一个 textarea。
+
+证据：`SolidWorkbenchApp.solid.tsx` 空态仅渲染 `.solid-workbench-empty-space`；`ControlCenter.solid.tsx` 的 `data-control-center="production"` 节点在 session 切换前后保持同一实例；`mountSolidWorkbench.solid.test.tsx` 覆盖无第二 textarea、无“开始新会话”按钮、参数透传、失败恢复。`npm.cmd run check:solid` 与该测试文件 56 项均通过。
+
+状态：✅ 首片完成。真实窗口仅需后置确认不同预设下的垂直居中和归位动效，不再改变结构契约。
 
 <a id="p26"></a>
 ### P26 · Titlebar 与右侧栏插件平台

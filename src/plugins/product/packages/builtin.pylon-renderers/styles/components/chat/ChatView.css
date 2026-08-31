@@ -717,12 +717,17 @@
   text-align: left;
   margin: 0;
 }
-/* Rich Solid tool cards and the settings preview share the same marker
-   contract.  Explicitly inherit the chat rail typography so a slot-local
-   renderer cannot silently shrink the glyph relative to the preview. */
-.solid-tool-invocation .term-tool-indicator {
-  font-size: inherit;
-  line-height: inherit;
+/* ── 指示器字号契约（全部 interface-mode / message-layout 通用）──
+   工具指示器与助手标记必须以同一字体、同一字号渲染。两个 DOM 链路
+   （工具卡槽位渲染器 vs 消息行）此前各自继承字体链，槽位渲染器的局部
+   字号覆盖会静默缩小工具指示器（真实应用与浏览器开发模式表现不一致的
+   根因）。显式钉到 chat rail 字体变量后，任何局部覆盖都不再影响标记
+   本身的 em 换算；字形像素大小 = 同字形 × 同字号 × 同字体 → 恒等。
+   （terminal-like 模式的同款钉定见下方 :729 区块与 P1 对齐测试。） */
+.term-assistant.has-dot > .term-assistant-dot,
+.term-tool-indicator {
+  font-family: var(--chat-font, var(--mono));
+  font-size: var(--chat-font-size, var(--font-size-lg));
 }
 /* Terminal-like 的 marker 以 ChatView 字号解析固定列；隔离 content kind 的字号/字体覆盖，
    避免 canonical Tool 的 1.6em 与助手 marker 在不同上下文中换算成不同像素宽度。 */

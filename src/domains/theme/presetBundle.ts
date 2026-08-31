@@ -272,7 +272,8 @@ export function createPresetBundle(input: {
   })
 }
 
-function recordPayload(value: PresetJsonValue | undefined): Readonly<Record<string, PresetJsonValue>> {
+/** Read a contribution payload as a record (empty when absent/malformed). */
+export function recordPayload(value: PresetJsonValue | undefined): Readonly<Record<string, PresetJsonValue>> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Readonly<Record<string, PresetJsonValue>> : {}
 }
 

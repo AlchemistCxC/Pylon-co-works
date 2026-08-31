@@ -54,8 +54,8 @@ describe('Solid 工作台壳层样式契约', () => {
     const replay = extractBlock(chromeCss, '.solid-workbench-replay-overlay')
     expect(replay).toContain('position:absolute')
     expect(replay).toMatch(/z-index/)
-    const empty = extractBlock(chromeCss, '.solid-workbench-empty')
-    expect(empty).toMatch(/align-items:center|place-items:center/)
+    const empty = extractBlock(chromeCss, '.solid-workbench-empty-space')
+    expect(empty).toContain('flex:1')
   })
 
   it('C14 session surfaces consume layout/density/warning tokens and retain keyboard focus visibility', () => {
