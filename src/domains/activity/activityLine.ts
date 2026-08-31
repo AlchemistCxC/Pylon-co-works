@@ -44,7 +44,7 @@ export function normalizeToolActivityLabel(value: string | undefined): string | 
   const trimmed = value?.trim()
   if (!trimmed) return undefined
   const colon = trimmed.search(/[:\uFF1A]/)
-  const open = trimmed.search(/[\(\uFF08]/)
+  const open = trimmed.search(/[(\uFF08]/)
   const boundary = colon > 0 ? colon : open > 0 ? open : -1
   return (boundary > 0 ? trimmed.slice(0, boundary) : trimmed).trim() || undefined
 }

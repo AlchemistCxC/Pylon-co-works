@@ -152,6 +152,23 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 后续可在同一 seam 上继续抽离 wire ingress adapter、replay/load transaction coordinator，再评估是否收窄 `ChatControllerHandle`；每片保持可回滚并以现有 interface tests 作为护栏。
 
+## 非巨型文件技术债扫描（2026-08-31）
+
+本轮排除巨型文件，扫描 lint blocker、effect 依赖契约、deprecated adapter 与测试双轨。扫描报告：`%TEMP%/architecture-review-prism-debt-20260831.html`。
+
+已处理：
+
+- `src/domains/activity/activityLine.ts`：修复 `normalizeToolActivityLabel` 正则字符类中的无效转义，恢复全量 ESLint 通过。
+- `src/sheets/browser/BrowserSheetView.tsx`：visibility/status effects 补齐 `ctx.isActive` 依赖，避免 Sheet 活跃态变化时原生 WebView 同步使用过期闭包。
+
+待治理台账：
+
+- 14 处 `react-hooks/exhaustive-deps` 豁免：多数有稳定 ref/setter 理由，但需要统一记录读取值、稳定性证明和失效条件，并按 FileTabView/InputBar/SheetLayout 补行为测试。
+- `commandRegistry`、`rendererRegistry`、File target/provider、workspace adapter 等 deprecated compatibility adapter：先盘点生产 caller 与测试-only caller，再设 sunset 条件，禁止在 caller 未清零前删除。
+- `test:legacy` 与 Vitest 双轨：按脚本建立迁移映射和删除日期，避免继续扩大排除列表。
+
+验证：`npm.cmd run lint`、browser 4 files/10 tests、activity 4 files/33 tests、`git diff --check` 均通过。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：

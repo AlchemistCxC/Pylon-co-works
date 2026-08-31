@@ -114,7 +114,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
       .setVisible(isSheetActive)
       .catch(error => reportRuntimeError('切换浏览器可见性', error))
-  }, [browserPreview, browserRuntimeAvailable, isSheetActive, snapshot.phase])
+  }, [browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive, snapshot.phase])
 
   useEffect(() => {
     if (!browserRuntimeAvailable) return
@@ -162,7 +162,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
       void status.then(stop => stop()).catch(() => {})
       void page.then(stop => stop()).catch(() => {})
     }
-  }, [applySnapshot, browserPreview, browserRuntimeAvailable, isSheetActive])
+  }, [applySnapshot, browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive])
 
   useEffect(() => {
     const element = viewportRef.current
