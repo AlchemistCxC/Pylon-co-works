@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEventHandler } from 'react'
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
@@ -9,10 +9,13 @@ import { selectAgentStatus } from '../components/settings/agentTypes'
 import { Menu, Minus, PanelRight, PanelsTopLeft, Plus, RotateCcw, Settings, Square, Terminal, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
-import { getContextPanelRegistry, getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore } from '../rightRailStore.ts'
 import { activateInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
+import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
+import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
+import type { TitlebarContext } from '../plugin-runtime/titlebar/titlebarTypes.ts'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -77,6 +80,7 @@ export default function WorkspaceTitlebar({
   const menuRef = useRef<HTMLDivElement>(null)
   const contextPanelRegistry = getContextPanelRegistry()
   const interfaceModeRegistry = getInterfaceModeRegistry()
+  const titlebarRegistry = getTitlebarRegistry()
   const panelSnapshot = useSyncExternalStore(
     listener => contextPanelRegistry.subscribe(listener),
     () => contextPanelRegistry.getSnapshot(),
@@ -87,6 +91,21 @@ export default function WorkspaceTitlebar({
     () => interfaceModeRegistry.getSnapshot(),
     () => interfaceModeRegistry.getSnapshot(),
   )
+  const titlebarSnapshot = useSyncExternalStore(
+    listener => titlebarRegistry.subscribe(listener),
+    () => titlebarRegistry.getSnapshot(),
+    () => titlebarRegistry.getSnapshot(),
+  )
+  const titlebarContext: TitlebarContext = {
+    interfaceMode,
+    workspaceKind: activeSheetKind,
+    sheetId: activeSheetId,
+    settingsOpen,
+  }
+  const contributedActions = titlebarSnapshot.entries.filter(entry => {
+    if (entry.value.slot !== 'app-actions') return false
+    try { return entry.value.when?.(titlebarContext) ?? true } catch { return false }
+  })
   const availablePanels = selectAvailableContextPanels(panelSnapshot.entries, {
     workspaceKind: activeSheetKind,
     sheetId: activeSheetId,
@@ -169,6 +188,14 @@ export default function WorkspaceTitlebar({
             <button type="button" onClick={() => setOpenMenu(value => value === 'settings' ? null : 'settings')} title="设置" aria-label="设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}<span className="workspace-titlebar-entry-label">设置</span></button>
             {openMenu === 'settings' && <div className="workspace-menu workspace-menu-chrome" role="menu"><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { setOpenMenu(null); onToggleSettings() }}>全局设置</button></div>}
           </div>
+          {contributedActions.map(entry => {
+            const contribution = entry.value
+            if (contribution.renderKind === 'isolated-surface') {
+              return <IsolatedPluginSurface key={entry.contributionId} surfaceId={contribution.surfaceId} className="workspace-titlebar-plugin-action" input={{ titlebarContext }} />
+            }
+            const Contribution = contribution.component
+            return <PluginContributionBoundary key={entry.contributionId} contributionId={entry.contributionId}><Suspense fallback={null}><Contribution context={titlebarContext} /></Suspense></PluginContributionBoundary>
+          })}
         </div>
         <span className="workspace-window-controls-divider" aria-hidden="true" />
         <div className="workspace-window-native-controls" aria-label="窗口控制">

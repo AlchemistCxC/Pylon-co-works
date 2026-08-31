@@ -4,6 +4,33 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 export const RIGHT_RAIL_MIN_WIDTH = 220
 export const RIGHT_RAIL_MAX_WIDTH = 560
 export const RIGHT_RAIL_DEFAULT_WIDTH = 320
+const LEGACY_RIGHT_RAIL_KEY = 'pylon-right-rail'
+const LEGACY_THEME_KEY = 'pylon-theme'
+const LEGACY_WORKSPACE_KEY = 'pylon-workspace-sheets'
+
+function readLegacyWidth(): number {
+  try {
+    const oldRail = localStorage.getItem(LEGACY_RIGHT_RAIL_KEY)
+    if (oldRail) {
+      const parsed = JSON.parse(oldRail) as { state?: { width?: unknown } }
+      if (typeof parsed.state?.width === 'number') return clampRightRailWidth(parsed.state.width)
+    }
+    const theme = localStorage.getItem(LEGACY_THEME_KEY)
+    if (theme) {
+      const parsed = JSON.parse(theme) as { state?: { rightWidth?: unknown } }
+      if (typeof parsed.state?.rightWidth === 'number') return clampRightRailWidth(parsed.state.rightWidth)
+    }
+  } catch { /* storage unavailable or malformed legacy data */ }
+  return RIGHT_RAIL_DEFAULT_WIDTH
+}
+
+function readLegacyCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
+    const parsed = raw ? JSON.parse(raw) as { layout?: { rightPanelCollapsed?: unknown } } : null
+    return typeof parsed?.layout?.rightPanelCollapsed === 'boolean' ? parsed.layout.rightPanelCollapsed : false
+  } catch { return false }
+}
 
 export type RightRailBackgroundSizing = 'fit' | 'fill' | 'stretch'
 
@@ -37,8 +64,8 @@ export const useRightRailStore = create<RightRailState>()(persist(
   (set) => ({
     // Preserve the v2 layout default while the legacy SheetRightSlot adapter
     // is still active. The migration phase may choose to default this to true.
-    collapsed: false,
-    width: RIGHT_RAIL_DEFAULT_WIDTH,
+    collapsed: readLegacyCollapsed(),
+    width: readLegacyWidth(),
     activePanelId: null,
     background: null,
     setCollapsed: collapsed => set({ collapsed }),
@@ -47,8 +74,8 @@ export const useRightRailStore = create<RightRailState>()(persist(
     setBackground: background => set({ background }),
   }),
   {
-    name: 'pylon-right-rail',
-    version: 1,
+    name: 'pylon-workspace-layout-v3',
+    version: 3,
     storage: createJSONStorage(() => ({
       getItem: key => localStorage.getItem(key),
       setItem: (key, value) => localStorage.setItem(key, value),
@@ -59,8 +86,8 @@ export const useRightRailStore = create<RightRailState>()(persist(
         ? (persisted as { state?: Record<string, unknown> }).state
         : undefined
       return {
-        collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : false,
-        width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : RIGHT_RAIL_DEFAULT_WIDTH),
+        collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : readLegacyCollapsed(),
+        width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : readLegacyWidth()),
         activePanelId: typeof state?.activePanelId === 'string' ? state.activePanelId : null,
         background: state?.background && typeof state.background === 'object' ? state.background as RightRailBackgroundPresentation : null,
       }

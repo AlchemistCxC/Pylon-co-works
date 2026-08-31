@@ -50,6 +50,7 @@
 .workspace-window-native-controls { display:flex; align-items:stretch; flex-shrink:0; }
 .workspace-titlebar-menu-anchor { position:relative; display:flex; align-items:stretch; }
 .workspace-titlebar-menu-anchor > button { display:flex; align-items:center; justify-content:center; gap:4px; min-width:38px; padding:0 8px; }
+.workspace-titlebar-plugin-action { display:flex; align-items:center; min-width:0; }
 .workspace-titlebar-entry-label { font-size:var(--font-size-2xs); white-space:nowrap; }
 .workspace-menu-chrome { top:calc(100% + 4px); right:0; min-width:180px; }
 .workspace-menu-heading { padding:6px 10px 5px; color:var(--text-dim); font-size:var(--font-size-2xs); font-weight:700; letter-spacing:.08em; }
