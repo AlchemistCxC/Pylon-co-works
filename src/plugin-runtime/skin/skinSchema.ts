@@ -27,7 +27,7 @@ import type {
  * - workspace：SheetLayout 工作区容器（.layout）
  * - sidebar：SheetSidebarSlot 容器
  * - main：SheetHost 活动 sheet 主区容器
- * - right：SheetRightSlot 容器
+ * - right：应用级 RightRailHost 容器
  * - dialog：App 级对话框容器（Settings/Profile/Session 等，保留边界）
  */
 export const SKIN_SURFACES = Object.freeze([

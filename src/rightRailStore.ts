@@ -89,8 +89,8 @@ export function clampRightRailWidth(width: number): number {
 /** Application-level right rail state. It intentionally lives outside Sheet state. */
 export const useRightRailStore = create<RightRailState>()(persist(
   (set) => ({
-    // Preserve the v2 layout default while the legacy SheetRightSlot adapter
-    // is still active. The migration phase may choose to default this to true.
+    // Preserve the v2 layout default so existing workspaces keep the rail open
+    // after the v3 migration.
     collapsed: readLegacyCollapsed(),
     leftRailWidth: readLegacyLeftWidth(),
     leftRailCollapsed: readLegacyLeftCollapsed(),
