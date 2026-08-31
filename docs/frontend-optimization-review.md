@@ -127,3 +127,27 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 - 未跟踪的 `tmp*` 调试测试（`src/components/__tests__/tmpSettingsPresetRepro.test.tsx`、`src/domains/theme/__tests__/tmpCustomPresetRepro.test.ts`、`src/renderers/solid-workbench/chat/__tests__/tmpMarkdownCases.solid.test.tsx`、`src/renderers/solid-workbench/chat/__tests__/tmpMarkdownInspect.solid.test.tsx`）含复现代码/`console.log`；其中最后一个会使 `npm.cmd run check:solid` 因未使用 import 失败。本轮未删除或修改，以保护未知来源的工作树资产。
 
 工作树中另有既存的文档删除、`issue.md`、`InputBar.css` 及 agent workbench 修改；均保留原样。
+
+## 架构深化施工记录（2026-08-31）
+
+首个巨型文件拆分 slice 已完成，目标是 `src/components/chat/chatEventController.ts`。
+
+### Chat replay coordinator seam
+
+新增 `src/components/chat/chatReplayCoordinator.ts`，集中承载 controller 中与 React refs、Tauri listener 和持久化无关的 replay/listener 规则：
+
+- replay/live 增量按外部 identity reconciliation；无 identity 的 live 增量保守保留；
+- 并行 listener 注册使用 `allSettled`，成功项保留、失败项可重试；
+- canonical event 与 ChatEvent 的表示关系判断；
+- 缓存、live、canonical 顺序合并及缺失消息定位插入；
+- rendered source 判定和 replay persona 前缀清理。
+
+`chatEventController.ts` 仅通过该 seam 调用实现，并继续 re-export `mergeReplayMessages` 与 `settleListeners`，因此现有测试和外部调用路径无需迁移。此次没有引入新的宽 facade/interface，也没有改变 runtime reducer、canonical journal 或 load generation lock 语义。
+
+### 验证
+
+- `npx.cmd tsc --noEmit --pretty false`
+- replay/listener/controller 定向回归：6 个文件、53 tests 全部通过
+- `git diff --check`
+
+后续可在同一 seam 上继续抽离 wire ingress adapter、replay/load transaction coordinator，再评估是否收窄 `ChatControllerHandle`；每片保持可回滚并以现有 interface tests 作为护栏。
