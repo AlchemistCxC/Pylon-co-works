@@ -209,6 +209,8 @@ Hermes ACP start 更新只提供人类标题，不提供机器工具名；normal
 
 补充实测（2026-08-31）：在同一 Windows 主机、`devicePixelRatio=1` 下，Vite 浏览器页与 Tauri WebView 的指示器均使用已加载的 JetBrains Mono，字形墨迹均约 `9×20px`，因此不存在“桌面端 glyph 被缩小”的渲染器回归。两侧当前激活的外观并不相同：浏览器为 `terminal-like`（`--chat-font-size:15px`、`--chat-line-height:1.4`、指示列盒 `18.75×21px`），Tauri 为持久化的 `modern-gui/skin-draft-1`（字号同为 `15px`、行高 `1.55`、默认 `1.6em` 指示列盒 `24×23.25px`）。前者的 `--agent-marker-col:1.25×字号` 仅由 terminal-like 规则启用，后者保留通用 `--dot-col-width:1.6em`；这是界面模式/预设的列几何差异，不是浏览器与 Tauri 的字体尺寸差异。
 
+追加验证：在同一 Tauri WebView 内切换到 `terminal-like` 后，指示列盒变为 `18.75×23.25px`，宽度与浏览器端完全一致，glyph 墨迹仍为 `9×20px`；高度差只来自该 WebView 当前 terminal profile 的 `--chat-line-height:1.55`（浏览器默认 profile 为 `1.4`）。验证后已恢复原 `modern-gui` 偏好。
+
 状态：首片完成；字形像素一致已实测。若产品要求跨 `terminal-like` 与 `modern-gui` 也统一指示列盒尺寸，应另立视觉规格任务，不能继续按运行时兼容性缺陷处理。
 
 <a id="p18"></a>
