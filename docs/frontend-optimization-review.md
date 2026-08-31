@@ -199,6 +199,12 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 验证：全量 lint、TypeScript 类型检查、command/session command 相关 Vitest 8 tests 通过；旧的直接 `test-command-registry.mts` 脚本仍受其既有 extensionless import 运行限制影响，未作为本次回归依据。
 
+## 死 ANSI HTML facade 清理（2026-08-31）
+
+`src/components/chat/ansiRender.ts` 已无任何生产、测试或脚本 caller。Solid renderer 的 `AnsiBlock` 直接消费 framework-neutral 的 `stripAnsiControlSequences`，旧 facade 中的 Anser → HTML 路径不再属于当前渲染管线；已删除该孤立文件，避免维护者误以为仍存在第二套 ANSI renderer。
+
+验证：全量 lint、TypeScript 类型检查、Solid architecture guards 与现有 ANSI/content 测试通过。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：
