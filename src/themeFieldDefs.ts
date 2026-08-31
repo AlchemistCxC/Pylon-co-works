@@ -298,7 +298,8 @@ export const THEME_FIELD_DEFS = {
   rightBg: { ...C('right', '右栏背景色'), default: 'rgba(0,0,0,0.02)', group: "外观", semanticRole: 'surface.panel', semanticSource: true },
   rightBgImage: { ...T('right', '右栏背景图'), default: '', control: 'bgImage', group: "外观" },
   // W2-12：宽度经 App 计算 rightInset inline 应用，不注入 cssVar
-  rightWidth: { ...N('right', '右栏宽度', 200, 400), default: 260, group: "外观", unit: 'px', noCssVar: true },
+  // 已迁移到应用级 rightRailStore；保留字段仅供旧主题读取，不再在设置页渲染。
+  rightWidth: { ...N('right', '右栏宽度', 200, 400), default: 260, group: "外观", unit: 'px', noCssVar: true, hidden: true, hint: '已迁移到标题栏右侧栏的拖拽布局' },
   rightTransparency: { ...N('right', '右栏背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
   rightBlur: { ...N('right', '右栏模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
 

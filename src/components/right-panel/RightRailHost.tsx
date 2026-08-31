@@ -4,6 +4,8 @@ import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts
 import { selectAvailableContextPanels } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from '../../rightRailStore.ts'
 import ContextPanelHost from './ContextPanelHost.tsx'
+import { useStore } from '../../store.ts'
+import { createBackgroundPresentation } from '../../backgroundImage.ts'
 
 const registry = getContextPanelRegistry()
 const subscribe = (listener: () => void) => registry.subscribe(listener)
@@ -19,7 +21,10 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   const collapsed = useRightRailStore(state => state.collapsed)
   const width = useRightRailStore(state => state.width)
   const activePanelId = useRightRailStore(state => state.activePanelId)
+  const backgroundImage = useStore(state => state.rightBgImage)
+  const background = useRightRailStore(state => state.background)
   const setWidth = useRightRailStore(state => state.setWidth)
+  const setBackground = useRightRailStore(state => state.setBackground)
   const [dragWidth, setDragWidth] = useState<number | null>(null)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const panelSnapshot = useSyncExternalStore(subscribe, snapshot, snapshot)
@@ -31,6 +36,12 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   }
   const entries = useMemo(() => selectAvailableContextPanels(panelSnapshot.entries, shellContext), [panelSnapshot, sheet?.kind, sheet?.id, ctx.activeSession, activeAgent])
   const effectivePanelId = entries.some(entry => entry.contributionId === activePanelId) ? activePanelId : entries[0]?.contributionId
+
+  useEffect(() => {
+    if (!backgroundImage) return
+    if (background?.src === backgroundImage) return
+    setBackground(createBackgroundPresentation(backgroundImage, width, background?.sizing ?? 'fill'))
+  }, [backgroundImage, background?.src, background?.sizing, setBackground, width])
 
   useEffect(() => {
     if (!dragRef.current) return
@@ -59,7 +70,7 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   const renderedWidth = dragWidth ?? width
   const maxWidth = Math.min(RIGHT_RAIL_MAX_WIDTH, Math.max(RIGHT_RAIL_MIN_WIDTH, window.innerWidth - 360))
   return (
-    <div className="right-rail-host" style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px` } as CSSProperties}>
+    <div className="right-rail-host" data-background-sizing={background?.sizing ?? 'fill'} style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px`, '--right-bg-image': background?.src ? `url(${JSON.stringify(background.src)})` : 'var(--right-bg-image, none)' } as CSSProperties}>
       <div
         className="right-rail-resize-handle"
         role="separator"

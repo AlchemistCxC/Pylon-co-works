@@ -336,10 +336,11 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 - `ContextPanelContribution` 增加 global/contextual scope、placement、图标和宽度能力字段；旧 Sheet 条件筛选仍兼容。
 - Titlebar 的右侧栏、界面、设置入口改为三个独立菜单：右栏选择面板，界面选择注册表模式，设置暂只提供“全局设置”。
 - 新增 `RightRailHost`，右栏壳已从 `SheetRightSlot` 移到 `SheetLayout` 应用布局层；支持指针拖拽和键盘方向/Home/End 调整宽度，旧 `SheetRightSlot` 仅保留兼容导出。
+- 右栏背景记录导入时的 `baseWidth` 与 `fit/fill/stretch` 策略；右栏宽度字段在主题设置中隐藏，仅保留旧配置读取兼容。
 
 核验：`cmd /c npm run build`（TypeScript 与 Vite 构建通过）。
 
-下一步：补充布局 v3 迁移和背景图 fit/fill/stretch 实现，并把插件设置贡献投影到全局设置页；随后删除 `SheetRightSlot` 兼容层。
+下一步：补充布局 v3 迁移和插件设置贡献投影到全局设置页；随后删除 `SheetRightSlot` 兼容层。
 
 ## 状态变更模板
 
