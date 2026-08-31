@@ -347,7 +347,9 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 
 `SheetRightSlot.tsx` 已删除；`RightRailHost` 是唯一右栏宿主，旧布局字段仍仅在命令/迁移读取边界保留。
 
-下一步：补充未关联右栏设置的专属页面宿主，并清理旧布局字段的写入路径。
+旧布局字段的写入路径已收口：Titlebar、RightRailHost、ContextPanelHost 和内置布局命令均只写 v3 store；workspaceStore setter 仅保留旧测试/迁移兼容。
+
+下一步：补充未关联右栏设置的专属页面宿主，并清理旧布局字段的公开读取路径。
 
 ## 状态变更模板
 

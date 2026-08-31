@@ -1,5 +1,4 @@
 import { Suspense, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from 'react'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
@@ -42,7 +41,6 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
         onEvent={(event, detail) => {
           if (event === 'host:collapse') {
             useRightRailStore.getState().setCollapsed(true)
-            useWorkspaceStore.getState().setRightPanelCollapsed(true)
           }
           if (event === 'host:select-session' && (typeof detail === 'string' || detail === null)) ctx.selectSession(detail)
         }}
@@ -63,7 +61,6 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
         </div>
         <button type="button" className="context-panel-collapse" onClick={() => {
           useRightRailStore.getState().setCollapsed(true)
-          useWorkspaceStore.getState().setRightPanelCollapsed(true)
         }} aria-label="收起右栏">»</button>
       </div>
       <div className="context-panel-body">

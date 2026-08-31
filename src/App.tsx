@@ -379,7 +379,7 @@ export default function App() {
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
-        onToggleRightPanel={() => { if (rightPanelEnabled) useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed) }}
+        onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
         onToggleSettings={() => setShowSettings(value => !value)}
         settingsOpen={settingsOpen}
         interfaceMode={interfaceMode}
