@@ -33,6 +33,7 @@
 | 23 | [✅ 首片完成](Pylon-问题台账.md#p23) | 真实窗口复核异步内容高度变化后的底部跟随 |
 | 24 | [✅ 首片完成](Pylon-问题台账.md#p24) | 第三方 Suite 实机复核 generation-only 更新 |
 | 25 | [✅ 首片完成](Pylon-问题台账.md#p25) | 真实窗口复核空态 Composer 与窗口控制 |
+| 26 | [✅ 首片完成](Pylon-问题台账.md#p26) | 完成全局 RightRailHost、拖拽分隔器、背景图策略与插件 API 迁移 |
 
 > 本表中的“首片完成”表示对应施工书的完成定义已满足，不等同于后续体验调参全部结束。
 >
@@ -91,6 +92,13 @@
 - **现状**：尚无完整的 Claude Code 风格输入预测体验，预测与实际发送/编辑状态的边界需要定义。
 - **目标**：借鉴其低打扰的预测提示，支持接受/拒绝、编辑后失效、隐私与本地/远端策略可控。
 - **调查入口**：输入台状态机、assist prediction 事件、键盘交互和模型/缓存策略。
+
+## 26. Titlebar 与右侧栏插件平台
+
+- **现状**：Titlebar 应用入口与 Sheet 右栏仍由宿主硬编码，右栏生命周期跟随 active Sheet，设置里的宽度字段仍属于主题域。
+- **目标**：以 Reactive Registry 驱动 Titlebar slot、右栏面板、设置贡献和界面模式；窗口控制、布局持久化和安全边界仍由宿主掌握。右栏脱离 Sheet 绑定并支持拖拽宽度及背景图策略。
+- **当前切片**：已建立 `TitlebarRegistry` / `PluginTitlebarApi`、应用级 `useRightRailStore`，并将三个入口改为独立菜单；ContextPanel 已增加 global/contextual scope 与宽度能力字段。
+- **下一步**：迁移到全局 `RightRailHost`，实现分隔器交互、布局 v3 迁移、背景图 fit/fill/stretch 和设置页贡献投影。
 
 ## 进入施工的共同门槛
 

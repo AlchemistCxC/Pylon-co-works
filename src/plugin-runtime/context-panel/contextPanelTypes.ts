@@ -3,10 +3,15 @@ import type { RegistryEntry } from '../registry/types.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 
 export interface ContextPanelContributionContext {
-  readonly workspaceKind: string
-  readonly sheetId: string
+  readonly workspaceKind?: string
+  readonly sheetId: string | null
   readonly activeSessionId: string | null
+  readonly activeAgent?: string
 }
+
+/** Context supplied by the application shell. A panel may be global (no Sheet)
+ * or contextual (filtered by workspaceKind/sheetId). */
+export type ShellContext = ContextPanelContributionContext
 
 export interface ContextPanelContributionProps {
   readonly sheet: SheetRecord
@@ -15,9 +20,15 @@ export interface ContextPanelContributionProps {
 
 interface ContextPanelContributionBase {
   readonly id: string
-  readonly workspaceKind: string
+  readonly workspaceKind?: string
   readonly label: string
+  readonly icon?: string
   readonly order?: number
+  readonly scope?: 'global' | 'contextual'
+  readonly placement?: 'right-rail' | 'right-dock' | 'overlay'
+  readonly minWidth?: number
+  readonly maxWidth?: number
+  readonly defaultWidth?: number
   readonly when?: (context: ContextPanelContributionContext) => boolean
 }
 

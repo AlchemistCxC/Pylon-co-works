@@ -39,6 +39,8 @@ import { createPluginSessionCreationApi, type PluginSessionCreationApi } from '.
 import type { SessionCreationRegistryTransaction } from './session-creation/sessionCreationRegistry.ts'
 import { createPluginInterfaceModeApi, type PluginInterfaceModeApi } from './interface-mode/pluginInterfaceModeApi.ts'
 import type { InterfaceModeContribution } from './interface-mode/interfaceModeTypes.ts'
+import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/pluginTitlebarApi.ts'
+import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
 
 export interface PluginActivationTransactions {
   readonly application: PluginApplicationRegistryTransaction
@@ -57,6 +59,7 @@ export interface PluginActivationTransactions {
   readonly fonts: RegistryTransaction<FontContribution>
   readonly sessionCreation: SessionCreationRegistryTransaction
   readonly interfaceModes: RegistryTransaction<InterfaceModeContribution>
+  readonly titlebar: RegistryTransaction<TitlebarContribution>
 }
 
 export interface BuiltinPluginActivationContext {
@@ -80,6 +83,7 @@ export interface BuiltinPluginActivationContext {
   readonly fonts: PluginFontApi
   readonly sessionCreation: PluginSessionCreationApi
   readonly interfaceModes: PluginInterfaceModeApi
+  readonly titlebar: PluginTitlebarApi
 }
 
 export type PluginActivationContextFactory = (
@@ -134,6 +138,12 @@ export function createPluginActivationContext(
       identity,
       scope,
       transactions?.interfaceModes,
+    ),
+    titlebar: createPluginTitlebarApi(
+      registries.titlebarRegistry,
+      identity,
+      scope,
+      transactions?.titlebar,
     ),
   }
 }

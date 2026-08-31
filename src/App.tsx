@@ -359,6 +359,8 @@ export default function App() {
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}
         activeAgent={activeAgent}
+        activeSheetKind={activeSheet?.kind}
+        activeSessionId={activeSession}
         sidebarCollapsed={sidebarCollapsed}
         sidebarEnabled={sidebarEnabled}
         sidebarExpandedTrack={sidebarExpandedTrack}

@@ -47,6 +47,7 @@ export class PluginContributionTransaction {
       fonts: registries.fontContributionRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       sessionCreation: registries.sessionCreationRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       interfaceModes: registries.interfaceModeRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      titlebar: registries.titlebarRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
     }
   }
 

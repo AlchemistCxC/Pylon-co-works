@@ -1,9 +1,9 @@
-import { useWorkspaceStore } from '../workspaceStore'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import ContextPanelHost from '../components/right-panel/ContextPanelHost.tsx'
 import { getContextPanelRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { useSyncExternalStore } from 'react'
 import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { useRightRailStore } from '../rightRailStore.ts'
 
 const contextPanelRegistry = getContextPanelRegistry()
 const subscribeContextPanels = (listener: () => void) => contextPanelRegistry.subscribe(listener)
@@ -17,7 +17,8 @@ const getContextPanelSnapshot = () => contextPanelRegistry.getSnapshot()
  * W2-12 退役前暂留。
  */
 export default function SheetRightSlot({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  const rightPanelCollapsed = useWorkspaceStore(s => s.rightPanelCollapsed)
+  const rightPanelCollapsed = useRightRailStore(s => s.collapsed)
+  const activePanelId = useRightRailStore(s => s.activePanelId)
   const snapshot = useSyncExternalStore(
     subscribeContextPanels,
     getContextPanelSnapshot,
@@ -29,5 +30,5 @@ export default function SheetRightSlot({ sheet, ctx }: { sheet: SheetRecord; ctx
     activeSessionId: ctx.activeSession,
   }).length > 0
   if (!enabled || rightPanelCollapsed) return null
-  return <ContextPanelHost sheet={sheet} ctx={ctx} />
+  return <ContextPanelHost sheet={sheet} ctx={ctx} activePanelId={activePanelId} />
 }

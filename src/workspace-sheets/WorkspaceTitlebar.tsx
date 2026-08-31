@@ -1,4 +1,4 @@
-import { type MouseEventHandler } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
@@ -9,11 +9,17 @@ import { selectAgentStatus } from '../components/settings/agentTypes'
 import { Menu, Minus, PanelRight, PanelsTopLeft, Plus, RotateCcw, Settings, Square, Terminal, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import { getContextPanelRegistry, getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { useRightRailStore } from '../rightRailStore.ts'
+import { activateInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
   activeSheetId: string | null
   activeAgent: string
+  activeSheetKind?: string
+  activeSessionId?: string | null
   sidebarCollapsed: boolean
   /** active Sheet 是否有 workspace 或 sheet 左栏；无左栏时按钮禁用。 */
   sidebarEnabled: boolean
@@ -44,10 +50,11 @@ export default function WorkspaceTitlebar({
   sheets,
   activeSheetId,
   activeAgent,
+  activeSheetKind,
+  activeSessionId = null,
   sidebarCollapsed,
   sidebarEnabled,
   sidebarExpandedTrack = sidebarEnabled,
-  rightPanelEnabled = true,
   canReopenSheet,
   onToggleSidebar,
   onFocusSheet,
@@ -55,12 +62,9 @@ export default function WorkspaceTitlebar({
   menuActions,
   onOpenSheet,
   onReopenSheet,
-  onToggleRightPanel,
   onToggleSettings,
   interfaceMode = 'terminal-like',
   chromeStyle = interfaceMode === 'modern-gui' ? 'icons' : 'glyphs',
-  quickSwitchLabel,
-  onToggleInterfaceMode,
   onMinimize,
   onToggleFullscreen,
   onCloseWindow,
@@ -69,6 +73,36 @@ export default function WorkspaceTitlebar({
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
+  const [openMenu, setOpenMenu] = useState<'right-panel' | 'interface' | 'settings' | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const contextPanelRegistry = getContextPanelRegistry()
+  const interfaceModeRegistry = getInterfaceModeRegistry()
+  const panelSnapshot = useSyncExternalStore(
+    listener => contextPanelRegistry.subscribe(listener),
+    () => contextPanelRegistry.getSnapshot(),
+    () => contextPanelRegistry.getSnapshot(),
+  )
+  const modeSnapshot = useSyncExternalStore(
+    listener => interfaceModeRegistry.subscribe(listener),
+    () => interfaceModeRegistry.getSnapshot(),
+    () => interfaceModeRegistry.getSnapshot(),
+  )
+  const availablePanels = selectAvailableContextPanels(panelSnapshot.entries, {
+    workspaceKind: activeSheetKind,
+    sheetId: activeSheetId,
+    activeSessionId,
+    activeAgent,
+  })
+  useEffect(() => {
+    if (!openMenu) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpenMenu(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenMenu(null) }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
+  }, [openMenu])
   const sidebarVisiblyOpen = sidebarExpandedTrack && !sidebarCollapsed
   const sidebarToggleLabel = !sidebarEnabled
     ? '当前 Sheet 无侧栏'
@@ -112,15 +146,29 @@ export default function WorkspaceTitlebar({
         <div className="workspace-titlebar-drag" data-tauri-drag-region />
       </div>
 
-      <div className="workspace-window-controls">
+      <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
-          <button type="button" onClick={onToggleRightPanel} disabled={!rightPanelEnabled} title={rightPanelEnabled ? '右栏' : '当前 Sheet 无右栏'} aria-label={rightPanelEnabled ? '切换右栏' : '当前 Sheet 无右栏'}>{chromeStyle === 'icons' ? <PanelRight size={15} aria-hidden="true" /> : '☷'}</button>
-          {onToggleInterfaceMode && <button type="button" className="interface-mode-quick-toggle" onClick={onToggleInterfaceMode}
-          title={`切换到 ${quickSwitchLabel ?? (interfaceMode === 'modern-gui' ? 'Terminal-like' : '现代 GUI')}`}
-          aria-label={`切换到 ${quickSwitchLabel ?? (interfaceMode === 'modern-gui' ? 'Terminal-like' : '现代 GUI')}`}>
-            {chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}
-          </button>}
-          <button type="button" onClick={onToggleSettings} title="设置" aria-label="切换设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}</button>
+          <div className="workspace-titlebar-menu-anchor">
+            <button type="button" onClick={() => setOpenMenu(value => value === 'right-panel' ? null : 'right-panel')} disabled={availablePanels.length === 0} title={availablePanels.length > 0 ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏">{chromeStyle === 'icons' ? <PanelRight size={15} aria-hidden="true" /> : '☷'}<span className="workspace-titlebar-entry-label">右侧栏</span></button>
+            {openMenu === 'right-panel' && <div className="workspace-menu workspace-menu-chrome" role="menu">
+              <div className="workspace-menu-heading">右侧栏</div>
+              {availablePanels.length === 0 && <div className="workspace-menu-empty">当前没有可用面板</div>}
+              {availablePanels.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={useRightRailStore.getState().activePanelId === entry.contributionId} onClick={() => { useRightRailStore.getState().setActivePanel(entry.contributionId); useRightRailStore.getState().setCollapsed(false); setOpenMenu(null) }}>{entry.value.label}</button>)}
+              <span className="workspace-menu-separator" />
+              <button type="button" role="menuitem" onClick={() => { useRightRailStore.getState().setCollapsed(true); setOpenMenu(null) }}>收起右侧栏</button>
+            </div>}
+          </div>
+          <div className="workspace-titlebar-menu-anchor">
+            <button type="button" onClick={() => setOpenMenu(value => value === 'interface' ? null : 'interface')} title="界面模式" aria-label="界面模式">{chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}<span className="workspace-titlebar-entry-label">界面</span></button>
+            {openMenu === 'interface' && <div className="workspace-menu workspace-menu-chrome" role="menu">
+              <div className="workspace-menu-heading">界面模式</div>
+              {modeSnapshot.entries.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={entry.value.id === interfaceMode} onClick={() => { try { const ok = activateInterfaceMode(entry.value.id); if (ok) setOpenMenu(null) } catch { /* activation failure is reported by the transaction */ } }}>{entry.value.label}{entry.value.id === interfaceMode ? '  ✓' : ''}</button>)}
+            </div>}
+          </div>
+          <div className="workspace-titlebar-menu-anchor">
+            <button type="button" onClick={() => setOpenMenu(value => value === 'settings' ? null : 'settings')} title="设置" aria-label="设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}<span className="workspace-titlebar-entry-label">设置</span></button>
+            {openMenu === 'settings' && <div className="workspace-menu workspace-menu-chrome" role="menu"><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { setOpenMenu(null); onToggleSettings() }}>全局设置</button></div>}
+          </div>
         </div>
         <span className="workspace-window-controls-divider" aria-hidden="true" />
         <div className="workspace-window-native-controls" aria-label="窗口控制">

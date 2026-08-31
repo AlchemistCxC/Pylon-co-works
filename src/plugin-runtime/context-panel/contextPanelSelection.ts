@@ -12,7 +12,9 @@ export function selectAvailableContextPanels(
   context: ContextPanelContributionContext,
 ): readonly ContextPanelRegistryEntry[] {
   return entries.filter(entry => {
-    if (entry.value.workspaceKind !== context.workspaceKind) return false
+    const scope = entry.value.scope ?? 'contextual'
+    if (scope === 'contextual' && entry.value.workspaceKind !== context.workspaceKind) return false
+    if (scope === 'global' && entry.value.workspaceKind && entry.value.workspaceKind !== context.workspaceKind) return false
     try {
       return entry.value.when?.(context) ?? true
     } catch (error) {

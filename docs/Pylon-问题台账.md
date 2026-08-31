@@ -39,6 +39,7 @@
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
 | [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | 双层 context/composer 布局；统一 native window control group；64 项相关回归；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度与命中区 |
+| [P26](#p26-titlebar-与右侧栏插件平台) | Titlebar 与右侧栏插件平台 | **首片完成** | 2026-09-01 | `titlebarRegistry.ts`、`rightRailStore.ts`、Titlebar 三类菜单、ContextPanel scope 扩展；`cmd /c npm run build` | 完成全局 RightRailHost、拖拽分隔器、背景图策略与插件 API 迁移 |
 
 ## 未完成动作（2026-09-01）
 
@@ -324,6 +325,21 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 证据：`SolidWorkbenchApp.solid.tsx`、`WorkbenchChrome.css`、`WorkspaceTitlebar.tsx`、相关挂载与标题栏回归；64 项定向测试和 `npm.cmd run check:solid` 通过。
 
 状态：首片完成。真实窗口复核不同预设下的密度、命中区与视觉一致性后置。
+
+<a id="p26"></a>
+### P26 · Titlebar 与右侧栏插件平台
+
+**结论：首片完成。** 已建立方案 B 的第一片平台边界，保持旧 Sheet 右栏适配链路可回退：
+
+- 新增 `TitlebarRegistry` 与 `PluginTitlebarApi`，插件可以按 slot、优先级和条件贡献标题栏控件；宿主仍保留窗口控制与拖拽区所有权。
+- 新增应用级 `useRightRailStore`，集中维护右栏折叠、宽度、active panel 和背景图显示元数据；宽度统一限制在 `220–560px`，默认 `320px`。
+- `ContextPanelContribution` 增加 global/contextual scope、placement、图标和宽度能力字段；旧 Sheet 条件筛选仍兼容。
+- Titlebar 的右侧栏、界面、设置入口改为三个独立菜单：右栏选择面板，界面选择注册表模式，设置暂只提供“全局设置”。
+- 现有 `SheetRightSlot`/`ContextPanelHost` 已接入新右栏状态作为兼容适配，尚未完成全局宿主迁移和拖拽分隔器。
+
+核验：`cmd /c npm run build`（TypeScript 与 Vite 构建通过）。
+
+下一步：将右栏壳移到应用级 `RightRailHost`，补充分隔器键盘/指针交互、布局 v3 迁移、背景图 fit/fill/stretch 实现，并把插件设置贡献投影到全局设置页。
 
 ## 状态变更模板
 
