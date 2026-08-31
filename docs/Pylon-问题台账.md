@@ -36,6 +36,7 @@
 | [P20](#p20-生成指示器次级文案与文案闪动) | 生成指示器次级文案过长、文案集合闪动 | **首片完成** | 2026-08-31 | `generationStateMachine.ts` 工具类型集合归一；`activityLine.ts` 参数剥离；`ChatView.css` 指示器字体契约；activity/Footer 回归 | 真实流式 trace 复核工具集合切换观感 |
 | [P21](#p21-流式终态重绑与状态源一致性) | 流式终态重绑与状态源一致性 | **首片完成** | 2026-09-01 | `workbenchSessionBindingKey` 幂等绑定 seam；`agentWorkbenchSession.test.ts` 同身份元数据回归；定向测试 | 真实终态 trace 复核无重挂载 |
 | [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
+| [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 
 ## 核验记录
 
@@ -278,6 +279,17 @@ canonical document 投影与 legacy generation metadata 可能在同一终态事
 证据：`src/renderers/solid-workbench/streamingDisplayScheduler.ts`；`streamingDisplayScheduler.test.ts`（终态 metadata 合并、会话切换同步）；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts --pool=forks --maxWorkers=2`（2 项通过）。
 
 状态：首片完成。真实终态 trace 复核单次视觉提交后置。
+
+<a id="p23"></a>
+### P23 · 异步内容高度变化时的底部跟随
+
+流式 reasoning/assistant 行与异步 Markdown、代码高亮、图片内容位于 `PlainMessageList` 之外；仅观察消息列表行高无法覆盖这些内容的后续布局变化，用户贴底时可能留下未显示的新内容。
+
+Workbench 外层 `.term` 现在纳入 `ResizeObserver`。尺寸变化只在 sticky 状态下排队一次 `queueBottomFollow()`；用户主动上滚后 `followBottom=false`，观察回调仅更新滚动轨道，不夺回用户位置。
+
+证据：`src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`；`mountSolidWorkbench.solid.test.tsx` sticky/用户上滚/异步尺寸回归；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx --pool=forks --maxWorkers=2`（56 项通过）。
+
+状态：首片完成。真实窗口复核图片、高亮和字体加载后的跟随边界后置。
 
 ## 状态变更模板
 

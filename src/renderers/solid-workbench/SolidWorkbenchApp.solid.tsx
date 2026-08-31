@@ -71,6 +71,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
   let bottomAnchor: HTMLDivElement | undefined
   let chatViewport: HTMLDivElement | undefined
+  let chatContent: HTMLDivElement | undefined
   let scrollRailTrack: HTMLDivElement | undefined
   let stopScrollRailDrag: (() => void) | undefined
   const [scrollRailMetrics, setScrollRailMetrics] = createSignal({
@@ -95,6 +96,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   onCleanup(() => {
     bottomAnchor = undefined
     chatViewport = undefined
+    chatContent = undefined
     scrollRailTrack = undefined
     stopScrollRailDrag?.()
     stopScrollRailDrag = undefined
@@ -360,7 +362,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
 
   onMount(() => {
-    const sync = () => syncScrollRail()
+    const sync = () => {
+      syncScrollRail()
+      if (followBottom()) queueBottomFollow()
+    }
     queueMicrotask(sync)
     if (typeof window !== 'undefined') window.addEventListener('resize', sync)
     let observer: ResizeObserver | undefined
@@ -368,6 +373,11 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       observer = new ResizeObserver(sync)
       if (scrollRailTrack) observer.observe(scrollRailTrack)
       if (chatViewport) observer.observe(chatViewport)
+      // Streaming text, reasoning blocks, async Markdown/highlighting and
+      // image loads live outside PlainMessageList. Observe the content rail
+      // itself so those height changes follow the bottom while sticky, without
+      // taking scroll ownership from a user who has scrolled up.
+      if (chatContent) observer.observe(chatContent)
     }
     onCleanup(() => {
       if (typeof window !== 'undefined') window.removeEventListener('resize', sync)
@@ -418,7 +428,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             class="chat-view solid-workbench-chat"
             onScroll={event => updateBottomFollow(event.currentTarget)}
           >
-            <div class="term">
+            <div ref={node => { chatContent = node }} class="term">
               <SolidToolConnectorLayer edges={connectorEdges()} layoutPort={connectorPort} />
               <CanonicalActivityList
                 activities={activityPlacement().leading}

@@ -167,6 +167,42 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' }))
   })
 
+  it('流式正文异步改变高度时，sticky 状态继续跟随底部', async () => {
+    const previousResizeObserver = globalThis.ResizeObserver
+    class MockResizeObserver {
+      static instances: MockResizeObserver[] = []
+      readonly observed = new Set<Element>()
+      constructor(private readonly callback: ResizeObserverCallback) { MockResizeObserver.instances.push(this) }
+      observe(element: Element) { this.observed.add(element) }
+      unobserve(element: Element) { this.observed.delete(element) }
+      disconnect() { this.observed.clear() }
+      trigger() { this.callback([], this as unknown as ResizeObserver) }
+    }
+    globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+    try {
+      const scrollTo = vi.fn()
+      const { host, services } = mountPreview()
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      Object.defineProperties(viewport, {
+        scrollTop: { value: 700, writable: true, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+        clientHeight: { value: 300, configurable: true },
+        scrollTo: { value: scrollTo, configurable: true },
+      })
+      await Promise.resolve()
+      scrollTo.mockClear()
+
+      const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
+      expect(contentObserver).toBeTruthy()
+      contentObserver!.trigger()
+      await Promise.resolve()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      services.runtime.destroy()
+    } finally {
+      globalThis.ResizeObserver = previousResizeObserver
+    }
+  })
+
   it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
