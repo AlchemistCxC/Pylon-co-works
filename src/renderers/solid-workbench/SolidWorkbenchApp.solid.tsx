@@ -4,10 +4,9 @@ import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
-import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchExtensionNode, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
+import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
 import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'
-import { coalesceAdjacentDisplayTextParts, isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
-import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
+import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
 import { INSTANT_LOCK_MS, SMOOTH_LOCK_MS } from '../../components/chat/scrollFollowState.ts'
@@ -20,30 +19,16 @@ import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
 import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
-import { MarkdownContent } from './chat/MarkdownContent.solid.tsx'
-import { SolidCodeBlock } from './chat/CodeBlock.solid.tsx'
-import { SolidAnsiBlock } from './chat/AnsiBlock.solid.tsx'
-import { SolidFileReferenceCard } from './chat/content/FileReference.solid.tsx'
-import { SolidMediaBlock } from './chat/content/MediaBlock.solid.tsx'
-import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from './mediaAssetAdapter.ts'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
 import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
-import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
-import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/DiffDiagnosticContent.solid.tsx'
-import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
+import { SolidProcessActivity } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
-import { SolidExtensionContentCard } from './chat/content/ExtensionContentCard.solid.tsx'
-import { SolidUnknownContent } from './chat/content/UnknownContent.solid.tsx'
-import { isStructuredContentKind, SolidStructuredContent } from './chat/content/StructuredContent.solid.tsx'
-import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
-import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
-import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
@@ -51,6 +36,7 @@ import { capitalizeToolName } from '../../components/chat/toolPresentationModel.
 import type { WorkbenchAttachment } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../identityStore.ts'
+import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -1412,149 +1398,6 @@ function contentRenderKind(part: ContentPart): string {
   if (part.kind === 'diagnostic-lsp') return 'diagnostic.lsp'
   return part.kind.includes('.') ? part.kind : `content.${part.kind}`
 }
-
-function renderBuiltinContentPart(
-  part: ContentPart,
-  inline: boolean,
-  context: SolidWorkbenchContextValue,
-  streaming = false,
-) {
-  if (part.kind === 'text' || part.kind === 'markdown') {
-    return <MarkdownContent text={part.text} inline={inline} streaming={streaming} />
-  }
-  if (part.kind === 'code') return <SolidCodeBlock code={part.text} language={part.language} />
-  if (part.kind === 'ansi') return <SolidAnsiBlock text={part.text} reducedMotion={context.input().reducedMotion} />
-  if (part.kind === 'file-reference' || part.kind === 'file-selection' || part.kind === 'document' || part.kind === 'resource') {
-    const host = context.hostPort
-    const sessionId = context.input().sessionId
-    return <SolidFileReferenceCard part={part} actions={{
-      canOpen: Boolean(sessionId && host?.capabilities.has('resourceOpen')),
-      canReveal: Boolean(sessionId && host?.capabilities.has('resourceReveal')),
-      canCopy: Boolean(sessionId && host?.capabilities.has('clipboardWrite')),
-      open: target => { if (host && sessionId) void host.commands.openResource(sessionId, target) },
-      reveal: target => { if (host && sessionId) void host.commands.revealResource(sessionId, target) },
-      copyPath: path => { if (host && sessionId) void host.commands.copy(sessionId, path) },
-    }} />
-  }
-  if (part.kind === 'image' || part.kind === 'audio' || part.kind === 'video') {
-    const host = context.hostPort
-    const sessionId = context.input().sessionId
-    const canOpenExternal = Boolean(sessionId && host?.capabilities.has('resourceOpen'))
-    return <SolidMediaBlock
-      part={part}
-      resolverOptions={BUILTIN_MEDIA_RESOLVER_OPTIONS}
-      onOpenExternal={canOpenExternal && host && sessionId
-        ? url => { void host.commands.openResource(sessionId, { uri: url }) }
-        : undefined}
-      onDownload={canOpenExternal && host && sessionId
-        ? mediaPart => { void host.commands.openResource(sessionId, { ...mediaPart, disposition: 'download' }) }
-        : undefined}
-    />
-  }
-  if (part.kind === 'search-result' || part.kind === 'link') {
-    const commands = fallbackRenderCommands(context)
-    return <SolidSearchOrLink part={part} actions={{
-      open: commands.canExecute?.('resource.open') ? url => { void commands.execute({ type: 'resource.open', payload: { uri: url } }) } : undefined,
-      copy: commands.canExecute?.('clipboard.write') ? text => { void commands.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
-    }} appearance={{ reducedMotion: context.input().reducedMotion }} />
-  }
-  if (part.kind === 'diff') {
-    const snapshot = isValidDiffContentInput(part) ? diffSnapshotFromPart(part) : null
-    return snapshot
-      ? <SolidDiffContent snapshot={snapshot} nodeId={`fallback:${snapshot.path ?? snapshot.oldPath ?? 'diff'}`}
-          appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }}
-          commands={fallbackRenderCommands(context)} />
-      : <pre class="solid-content-unknown" data-content-kind="diff">Invalid content.diff payload</pre>
-  }
-  if (part.kind === 'diagnostic-lsp') {
-    return isValidLspDiagnosticContentInput(part)
-      ? <SolidLspDiagnosticContent diagnostic={part as LspDiagnosticContentPart}
-          appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }}
-          commands={fallbackRenderCommands(context)} />
-      : <pre class="solid-content-unknown" data-content-kind="diagnostic-lsp">Invalid diagnostic.lsp payload</pre>
-  }
-  if (part.kind === 'terminal') {
-    const commands = fallbackRenderCommands(context)
-    return <SolidTerminalBlock part={part} appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }} actions={{
-      copy: commands.canExecute?.('clipboard.write')
-        ? text => { void commands.execute({ type: 'clipboard.write', payload: { text } }) }
-        : undefined,
-    }} />
-  }
-  if (part.kind === 'log') {
-    return <SolidLogBlock part={part} appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }} />
-  }
-  if (part.kind === 'memory' || part.kind === 'skill' || part.kind === 'mcp-resource' || part.kind === 'artifact') {
-    return <SolidExtensionContentCard
-      kind={`content.${part.kind}`}
-      payload={part}
-      appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }}
-      commands={fallbackRenderCommands(context)}
-    />
-  }
-  const structuredKind = part.kind.includes('.') ? part.kind : `content.${part.kind}`
-  if (isStructuredContentKind(structuredKind)) {
-    return <SolidStructuredContent kind={structuredKind} payload={part} commands={fallbackRenderCommands(context)}
-      renderPart={nested => renderBuiltinContentPart(nested, inline, context, false)} />
-  }
-  if (part.kind === 'unknown') {
-    return <SolidUnknownContent part={part} commands={fallbackRenderCommands(context)} />
-  }
-  const summary = `Unsupported content kind: ${part.kind}`
-  return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>
-}
-
-function renderExtensionFallback(extension: WorkbenchExtensionNode, context: SolidWorkbenchContextValue) {
-  const provenance = <div class="solid-extension-provenance">
-    <small>{extension.source.provider} · {extension.source.sourceId}</small>
-    <small>{extension.provenance.origin} · {extension.provenance.trust}</small>
-  </div>
-  if (extension.kind === 'system.hook' && isValidHookSurfaceInput(extension.payload)) {
-    return <section class="solid-extension-fallback" data-extension-kind={extension.kind}>
-      {provenance}
-      <SolidExtensionContentCard
-        kind="system.hook"
-        payload={extension.payload}
-        appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }}
-        commands={fallbackRenderCommands(context)}
-      />
-    </section>
-  }
-  const fallback = extension.fallback.length > 0
-    ? extension.fallback
-    : [{ kind: 'unknown', originalType: extension.kind, summary: `Unsupported extension: ${extension.kind}`, raw: {}, truncated: false }] as const
-  return <section class="solid-extension-fallback" role="note" aria-label={`扩展事件：${extension.kind}`} data-extension-kind={extension.kind}>
-    <strong>{extension.kind}</strong>
-    {provenance}
-    <For each={coalesceAdjacentDisplayTextParts(fallback)}>{part => renderBuiltinContentPart(part, false, context)}</For>
-  </section>
-}
-
-function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderCommandPort {
-  const sessionId = context.input().sessionId
-  const capabilities = context.hostPort?.capabilities
-  return {
-    canExecute: type => Boolean(sessionId && capabilities && canExecuteRendererSemanticCommand(type, capabilities)),
-    execute: command => {
-      const host = context.hostPort
-      if (!host) return Promise.resolve()
-      return executeRendererSemanticCommand({
-        command,
-        host,
-        mountInput: normalizeWorkbenchMountInput(context.input()),
-      })
-    },
-  }
-}
-
-function sessionSurfaceAppearance(context: SolidWorkbenchContextValue, kind: string) {
-  return context.hostPort?.appearance.resolve?.({
-    kind,
-    suiteId: context.activation?.suite.value.id ?? 'builtin.solid',
-    slotId: 'builtin.solid.content.base',
-  }) ?? { ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }
-}
-
 
 function normalizeToolVisualState(value: string | undefined) {
   switch (value) {

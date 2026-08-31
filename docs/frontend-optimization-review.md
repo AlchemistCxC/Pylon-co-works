@@ -151,3 +151,19 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 - `git diff --check`
 
 后续可在同一 seam 上继续抽离 wire ingress adapter、replay/load transaction coordinator，再评估是否收窄 `ChatControllerHandle`；每片保持可回滚并以现有 interface tests 作为护栏。
+
+### Solid built-in content renderer seam
+
+第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：
+
+- `ContentPart` 到 Markdown、code、ANSI、file、media、search/link、diff、LSP、terminal/log、extension、structured/unknown renderer 的分派；
+- Renderer semantic command 到 Workbench Host Port 的命令适配；
+- extension fallback 和 session surface appearance resolution。
+
+`SolidWorkbenchApp` 继续拥有工作台编排、Slot candidate 选择、消息/活动布局和滚动状态；本片只移动既有 fallback implementation，没有改变 Renderer Slot kind、payload、命令 capability 判定或 fallback 顺序。这样新增/修正 content kind 时不再需要进入工作台根 module，提升 renderer 规则的 locality，同时避免建立新的宽 interface。
+
+验证：
+
+- `npm.cmd run check:solid`：TypeScript 与四项 Solid/Renderer architecture guards 全部通过；
+- Solid mount、smoke、suite completeness：3 个文件、64 tests 全部通过；
+- 定向 ESLint 与 `git diff --check`。
