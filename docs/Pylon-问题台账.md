@@ -69,7 +69,14 @@
 - 状态：`首片完成`
 - 证据：`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml -- --nocapture`（16 项通过）；`src-tauri/pylon-core/src/agent_detection.rs`、`src-tauri/src/lifecycle/connection_test.rs`、`src-tauri/src/acp/mod.rs`。
 - 结论：发现、可启动、ACP 握手已有分离入口和预算；Windows 子孙清理测试原断言为误报，已改为读取退出码后通过；候选 DTO 已增加独立 `startability` 字段并在设置页显示。
-- 下一步：真实 ACP Agent 运行时验收暂按用户指示跳过。
+- 追加实测：在 Windows 主机上以 `PYLON_AGENTS_CONFIG=<项目>\\agents.yaml` 指向生效配置运行
+  `cargo test --manifest-path src-tauri/Cargo.toml hermes_connect_idle --lib -- --ignored --nocapture`，
+  Hermes ACP `initialize` 与 5 秒 idle 连接均通过；便携 Bash 选择、Hermes `HERMES_HOME` 注入和
+  子进程存活链路成立。未设置 `PYLON_AGENTS_CONFIG` 时，cargo 测试会回退到编译期嵌入的
+  `agents.example.yaml` 占位模板，可能因占位 profile 导致 `ACP connection closed`；这是测试配置
+  前提不足，不是运行时 Bash 回归。
+- 下一步：完整 prompt 往返仍按需执行（会调用模型 API）；发布包验收时再从实际 `resources/runtime/git`
+  目录启动一次 Hermes 与一个非 Hermes Agent。
 
 <a id="p4"></a>
 ### P4 · 连续同种工具调用聚合
