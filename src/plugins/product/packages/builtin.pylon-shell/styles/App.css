@@ -211,6 +211,14 @@
   .workspace-window-controls-divider { margin-inline:0; }
 }
 
+/* VS Code-like chrome menus: keep these menus square even after the shared
+   workspace-menu defaults are applied later in the stylesheet. */
+.workspace-titlebar .workspace-menu-chrome {
+  border-radius: 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,.24);
+}
+.workspace-titlebar .workspace-menu-chrome button { border-radius: 0; }
+
 .sheet-launcher-overlay {
   position:fixed; inset:0; z-index:70; background:color-mix(in srgb,var(--text) 42%,transparent);
   backdrop-filter:blur(4px); animation:sheet-launcher-in 100ms ease-out;
