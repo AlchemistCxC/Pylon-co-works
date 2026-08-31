@@ -142,6 +142,20 @@ describe('P6 Slice C 贡献注册表搜索投影', () => {
       pluginPageId: 'plugin.example.settings',
     })
   })
+
+  it('右栏插件可贡献设置入口并归入外观 › 右栏', () => {
+    const item = buildSettingsSearchIndex(undefined, undefined, [{
+      contributionId: 'plugin.context.files',
+      value: { label: '文件面板', settings: { id: 'files-settings', label: '文件面板设置', section: 'right' } },
+    }]).find(candidate => candidate.contextPanelId === 'plugin.context.files')
+    expect(item).toMatchObject({
+      path: '外观 › 右栏',
+      label: '文件面板设置',
+      section: 'right',
+      kind: 'context-panel',
+      contextPanelId: 'plugin.context.files',
+    })
+  })
 })
 
 describe('ISSUE-13 W1 字段归属派生', () => {

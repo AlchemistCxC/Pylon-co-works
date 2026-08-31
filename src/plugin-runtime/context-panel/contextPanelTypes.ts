@@ -13,6 +13,14 @@ export interface ContextPanelContributionContext {
  * or contextual (filtered by workspaceKind/sheetId). */
 export type ShellContext = ContextPanelContributionContext
 
+export interface ContextPanelSettingsContribution {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+  /** Optional canonical Settings section; defaults to the right-rail section. */
+  readonly section?: 'right' | 'pluginManager'
+}
+
 export interface ContextPanelContributionProps {
   readonly sheet: SheetRecord
   readonly ctx: SheetContext
@@ -29,6 +37,7 @@ interface ContextPanelContributionBase {
   readonly minWidth?: number
   readonly maxWidth?: number
   readonly defaultWidth?: number
+  readonly settings?: ContextPanelSettingsContribution
   readonly when?: (context: ContextPanelContributionContext) => boolean
 }
 

@@ -17,6 +17,7 @@
 
 import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from './themeFieldDefs'
 import type { ZoneName } from './themeFieldDefs'
+import type { ContextPanelSettingsContribution } from './plugin-runtime/context-panel/contextPanelTypes.ts'
 
 export type SettingsDomainId = 'appearance' | 'workspace' | 'agents-connections' | 'plugins'
 
@@ -223,7 +224,7 @@ export interface SettingsSearchItem {
   readonly label: string         // 字段名
   readonly section: SettingsSectionId
   readonly advanced: boolean     // D2-A：advanced 命中带徽标
-  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry' | 'plugin-page'
+  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry' | 'plugin-page' | 'context-panel'
   /** B3：唯一 DOM 锚（链A=`field:${key}`；链B entry 无唯一锚时回退文本匹配） */
   readonly anchor?: string
   /** Renderer catalog route; kept optional so theme/plugin search stays stable. */
@@ -235,11 +236,13 @@ export interface SettingsSearchItem {
   }
   /** Plugin settings page route; page owns its internal fields. */
   readonly pluginPageId?: string
+  readonly contextPanelId?: string
 }
 
 export function buildSettingsSearchIndex(
   rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[],
   pluginPages?: readonly { contributionId: string; value: { label?: string; description?: string } }[],
+  contextPanels?: readonly { contributionId: string; value: { label?: string; settings?: ContextPanelSettingsContribution } }[],
 ): readonly SettingsSearchItem[] {
   const items: SettingsSearchItem[] = []
   // 链A：THEME_FIELD_DEFS 按 zone 过滤
@@ -279,6 +282,21 @@ export function buildSettingsSearchIndex(
       advanced: false,
       kind: 'plugin-page',
       pluginPageId: entry.contributionId,
+    })
+  }
+  // Context-panel contributions may expose a small settings surface without
+  // owning the global Settings page. Index the contribution as a navigable
+  // right-rail item; the host can later resolve the id to its panel settings.
+  for (const entry of contextPanels ?? []) {
+    const settings = entry.value.settings
+    if (!settings) continue
+    items.push({
+      path: `外观 › ${settings.section === 'pluginManager' ? '插件管理' : '右栏'}`,
+      label: settings.label || entry.value.label || entry.contributionId,
+      section: settings.section === 'pluginManager' ? 'pluginManager' : 'right',
+      advanced: false,
+      kind: 'context-panel',
+      contextPanelId: entry.contributionId,
     })
   }
   return items

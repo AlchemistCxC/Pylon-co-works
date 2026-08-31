@@ -41,7 +41,7 @@ import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
@@ -190,6 +190,12 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     listener => settingsPageRegistry.subscribe(listener),
     () => settingsPageRegistry.getSnapshot(),
     () => settingsPageRegistry.getSnapshot(),
+  ).entries
+  const contextPanelRegistry = getContextPanelRegistry()
+  const contextPanelEntries = useSyncExternalStore(
+    listener => contextPanelRegistry.subscribe(listener),
+    () => contextPanelRegistry.getSnapshot(),
+    () => contextPanelRegistry.getSnapshot(),
   ).entries
   const rendererRegistry = getRendererRegistry()
   const rendererRegistrySnapshot = useSyncExternalStore(
@@ -408,10 +414,16 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
       void rendererRegistrySnapshot.revision
     try {
       const snapshot = getRendererRegistry().snapshot()
-      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages), ...projectRendererSettingsCatalog(snapshot).searchItems]
-    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages) }
-  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages])
+      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries), ...projectRendererSettingsCatalog(snapshot).searchItems]
+    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries) }
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages, contextPanelEntries])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+    if (item.contextPanelId) {
+      setActiveDomain('appearance')
+      setActiveSection('right')
+      setActivePluginPageId(null)
+      return
+    }
     if (item.pluginPageId) {
       setActiveDomain('plugins')
       setActiveSection('pluginManager')
