@@ -270,6 +270,9 @@ pub(crate) struct AppStateHandles {
     /// Production setup readiness barrier 后必为 Some；Option 仅保留测试构造兼容与
     /// 防御性诊断。dispatcher 对有 durable owner 的事件必须先 append 再发布。
     pub(crate) event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
+    /// ACP session-level snapshots (commands/mode) share the message DB and
+    /// are persisted when providers update them asynchronously.
+    pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
 }
 
 /// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
@@ -324,6 +327,7 @@ impl AppStateHandles {
             gateway: state.gateway.clone(),
             approval_mode: state.approval_mode.clone(),
             event_service: state.event_service.clone(),
+            message_service: state.message_service.clone(),
         }
     }
 

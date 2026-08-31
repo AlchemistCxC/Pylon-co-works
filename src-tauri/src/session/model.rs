@@ -46,7 +46,7 @@ pub(crate) struct SessionInfo {
     pub(crate) last_response_round: u64,
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
     pub(crate) last_response_text: String,
-    /// 会话级可恢复状态快照（wire key -> JSON）：usage/commands 及未来状态量统一放这里。
+    /// 会话级可恢复状态快照（wire key -> JSON）：usage/commands/mode 及未来状态量统一放这里。
     pub(crate) snapshots: HashMap<String, serde_json::Value>,
 }
 

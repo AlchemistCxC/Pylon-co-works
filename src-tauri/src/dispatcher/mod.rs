@@ -156,6 +156,37 @@ fn apply_update_event(
                 }
             }
         }
+        Some(crate::acp::SessionUpdateVariant::AvailableCommandsUpdate) => {
+            if let Some(commands) = update
+                .get("availableCommands")
+                .or_else(|| update.get("commands"))
+            {
+                session
+                    .snapshots
+                    .insert("commands".to_string(), commands.clone());
+            }
+        }
+        Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate) => {
+            let mode = update
+                .get("currentModeId")
+                .or_else(|| update.get("modeId"))
+                .or_else(|| update.get("mode"))
+                .and_then(value_as_string);
+            if let Some(mode) = mode {
+                let changed = session.mode.as_deref() != Some(mode.as_str());
+                // Keep the asynchronously advertised mode in the durable snapshot as
+                // well as the typed field; session/load restores snapshots before the
+                // response is rebuilt, so this survives agents that only emit updates
+                // after session/new or session/load.
+                session
+                    .snapshots
+                    .insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+                session.mode = Some(mode.clone());
+                if changed && !is_replay {
+                    pet_events.push(PetEvent::ModeChanged(mode));
+                }
+            }
+        }
         _ => {}
     }
     pet_events
@@ -340,6 +371,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     mapping_ready: &tokio::sync::Notify,
     agent_id: &str,
     event_service: Option<&Arc<crate::session::EventService>>,
+    message_service: Option<&Arc<crate::session::MessageService>>,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -447,6 +479,10 @@ async fn handle_session_update<R: tauri::Runtime>(
     let mut pet_events: Vec<PetEvent> = Vec::new();
     let mut user_echo: Option<String> = None; // replay user_message_chunk 文本，锁外 emit
     let mut is_user_chunk = false;
+    let mut session_state_to_persist: Option<(
+        crate::session::DurableSessionOwner,
+        serde_json::Value,
+    )> = None;
     let durable_owner;
     {
         let Ok(mut items) = sessions.lock() else {
@@ -539,6 +575,29 @@ async fn handle_session_update<R: tauri::Runtime>(
                 return true;
             }
             pet_events.extend(apply_update_event(session, update, variant, is_replay));
+            // Agents may advertise commands or mode changes asynchronously after
+            // session/new or session/load. Persist the merged session snapshot so
+            // a later reload retains those capabilities.
+            if !is_replay
+                && matches!(
+                    variant,
+                    Some(
+                        crate::acp::SessionUpdateVariant::AvailableCommandsUpdate
+                            | crate::acp::SessionUpdateVariant::CurrentModeUpdate
+                    )
+                )
+            {
+                if let Some(owner) = durable_owner.clone() {
+                    let snapshot = serde_json::Value::Object(
+                        session
+                            .snapshots
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect(),
+                    );
+                    session_state_to_persist = Some((owner, snapshot));
+                }
+            }
             // 原 :417-433
         }
     }
@@ -595,6 +654,21 @@ async fn handle_session_update<R: tauri::Runtime>(
     } else {
         None
     };
+    if let (Some((owner, snapshot)), Some(message_service)) =
+        (session_state_to_persist, message_service)
+    {
+        if let Err(error) = message_service
+            .set_session_state(owner, Some(peri_id.clone()), snapshot)
+            .await
+        {
+            tracing::warn!(
+                agent_id,
+                source,
+                error = %error,
+                "ACP session state snapshot persistence failed"
+            );
+        }
+    }
     for event in pet_events {
         let _ = pet.lock().map(|mut p| event.apply(&mut p));
     }
@@ -678,6 +752,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let approval_mode = handles.approval_mode.clone();
     let event_service_slot = handles.event_service.clone();
     let event_service = event_service_slot.lock().ok().and_then(|slot| slot.clone());
+    let message_service_slot = handles.message_service.clone();
+    let message_service = handles
+        .message_service
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
     let pending_permissions = runtime.pending_permissions.clone();
     let agent_id = handles
         .runtimes
@@ -724,6 +804,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let runtime_for_reconnect = runtime_for_reconnect.clone();
             let reconnect_epoch = reconnect_epoch.clone();
             let event_service_slot = event_service_slot.clone();
+            let message_service_slot = message_service_slot.clone();
             move |reason: String| {
                 let agent_runtime = agent_runtime.clone();
                 let pet = pet.clone();
@@ -737,6 +818,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 let runtime_for_reconnect = runtime_for_reconnect.clone();
                 let reconnect_epoch = reconnect_epoch.clone();
                 let event_service_slot = event_service_slot.clone();
+                let message_service_slot = message_service_slot.clone();
                 async move {
                     // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
                     let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -756,7 +838,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         runtime_logs: runtime_logs.clone(),
                         gateway: gateway.clone(),
                         approval_mode: approval_mode.clone(),
-                        event_service: event_service_slot,
+                        event_service: event_service_slot.clone(),
+                        message_service: message_service_slot.clone(),
                     };
                     emit_event(
                         &window,
@@ -1039,6 +1122,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &runtime_for_reconnect.mapping_ready,
                 &agent_id,
                 event_service.as_ref(),
+                message_service.as_ref(),
                 payload,
             )
             .await
@@ -1223,6 +1307,87 @@ mod tests {
                 "{label}: live event must still emit pet events"
             );
         }
+    }
+
+    #[test]
+    fn asynchronous_commands_and_mode_updates_refresh_session_state() {
+        let mut session = crate::session::SessionInfo::new(
+            "peri-async".to_string(),
+            String::new(),
+            "cwd".to_string(),
+            true,
+            1,
+        );
+        let commands = serde_json::json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [{"name": "compact", "description": "Compact context"}],
+        });
+        let events = apply_update_event(
+            &mut session,
+            &commands,
+            Some(crate::acp::SessionUpdateVariant::AvailableCommandsUpdate),
+            false,
+        );
+        assert!(
+            events.is_empty(),
+            "command advertisement is not a pet event"
+        );
+        assert_eq!(
+            session.snapshots["commands"][0]["name"],
+            serde_json::json!("compact")
+        );
+
+        let mode = serde_json::json!({
+            "sessionUpdate": "current_mode_update",
+            "currentModeId": "high",
+        });
+        let events = apply_update_event(
+            &mut session,
+            &mode,
+            Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate),
+            false,
+        );
+        assert_eq!(session.mode.as_deref(), Some("high"));
+        assert!(matches!(events.as_slice(), [PetEvent::ModeChanged(value)] if value == "high"));
+
+        // Replay restores the same state but never emits pet side effects.
+        let replay_commands = serde_json::json!({
+            "sessionUpdate": "available_commands_update",
+            "commands": [{"name": "reload"}],
+        });
+        let replay_events = apply_update_event(
+            &mut session,
+            &replay_commands,
+            Some(crate::acp::SessionUpdateVariant::AvailableCommandsUpdate),
+            true,
+        );
+        assert!(replay_events.is_empty());
+        assert_eq!(
+            session.snapshots["commands"][0]["name"],
+            serde_json::json!("reload")
+        );
+
+        let replay_mode = serde_json::json!({
+            "sessionUpdate": "current_mode_update",
+            "modeId": "balanced",
+        });
+        let replay_mode_events = apply_update_event(
+            &mut session,
+            &replay_mode,
+            Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate),
+            true,
+        );
+        assert!(replay_mode_events.is_empty());
+        assert_eq!(session.mode.as_deref(), Some("balanced"));
+
+        let mut restored = serde_json::json!({});
+        let mut snapshot_only = session.clone();
+        snapshot_only.mode = None;
+        crate::session::restore_session_state(&snapshot_only, &mut restored);
+        assert_eq!(
+            restored["modes"]["currentModeId"],
+            serde_json::json!("balanced")
+        );
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。

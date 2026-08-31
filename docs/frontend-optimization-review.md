@@ -285,3 +285,25 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 - renderer registry、preference migration、typography、lifecycle 定向 Vitest（25 tests）
 - `npm.cmd run test:legacy`：除 `test-thought-block-visual.mts` 的过时源码 token（已同步修正）外，其余守卫通过；修正后该脚本单独通过。
 - `git diff --check`
+
+## pi-acp 互操作性研究与动态 session state 持久化（2026-08-31）
+
+研究 `F:\Hermes\profiles\riccati\workspace\research\pi-acp`（HEAD `d1cffc0`，v0.0.33）后，采纳其对 ACP 互操作性最有价值且风险可控的部分：
+
+- 低层 `turn_end`/`agent_end` 不提前结束 prompt，等待 `agent_settled` 作为最终结算边界；
+- 思考增量统一映射为 `agent_thought_chunk`，工具状态保持 pending → in_progress → completed/failed 的单调推进；
+- `session/new`/`session/load` 返回后异步发送 `available_commands_update`，动态模式通过 `current_mode_update` 通知；
+- 工具输出携带 ACP terminal content/metadata，并在工具结束时按真实 before/after 生成结构化 diff；
+- 相对工具路径按 session cwd 解析，stderr 持续 drain，spawn/非 JSON 前导错误类型化，session/delete 保持幂等。
+
+Pylon 已有官方 ACP schema 构造器、MCP 字段策略、wire trace/correlation context、pending RPC 分片锁、超时结算、Windows 进程树清理、replay/canonical journal、provider normalizer 与 SQLite durable owner/session state，因此没有照搬 pi-acp 的“每 session 一个 Pi RPC 子进程 + sidecar JSON 映射”架构。
+
+本轮落地动态 session 能力更新：
+
+- `SessionUpdateVariant` 新增 `available_commands_update` 与 `current_mode_update` typed 分支；
+- dispatcher 将异步命令列表写入 `SessionInfo.snapshots["commands"]`，将当前模式同时更新到 `SessionInfo.mode` 与快照 `snapshots["mode"]`，live 模式变更继续产生 `PetEvent::ModeChanged`；
+- live 更新在 canonical event ingest 后通过 `MessageService::set_session_state` 按 durable owner 合并写入 SQLite，避免重载 session 丢失 agent 后置能力声明；
+- replay 更新仅恢复 session 状态，不触发宠物感知，也不再次写入持久化状态；
+- 新增 Rust 回归测试覆盖命令/模式更新与 replay 感知隔离。
+
+验证：`cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、前端 lint/TypeScript、legacy runner、定向 Vitest 与 `git diff --check`。

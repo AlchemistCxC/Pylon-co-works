@@ -1052,6 +1052,14 @@ mod tests {
             SessionUpdateVariant::from_str("config_option_update"),
             Some(SessionUpdateVariant::ConfigOptionUpdate)
         );
+        assert_eq!(
+            SessionUpdateVariant::from_str("available_commands_update"),
+            Some(SessionUpdateVariant::AvailableCommandsUpdate)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("current_mode_update"),
+            Some(SessionUpdateVariant::CurrentModeUpdate)
+        );
         assert_eq!(SessionUpdateVariant::from_str("unknown_variant"), None);
     }
 
