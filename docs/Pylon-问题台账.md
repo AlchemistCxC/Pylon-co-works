@@ -339,12 +339,13 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 - Titlebar 宿主开始消费 `TitlebarRegistry` 的 `app-actions` slot；第三方 React/隔离 surface 可在不接管窗口控制的前提下贡献应用操作。
 - `ContextPanelContribution.settings` 已接入设置速搜投影，右栏插件可声明自己的全局设置入口，Settings 主组件无需按插件硬编码分支。
 - 右栏设置贡献可选关联已有 `PluginSettingsPage`（`pageId`）；关联时速搜直接打开插件设置宿主，未关联时落到“外观 › 右栏”公共区。
+- 左右栏布局字段已统一进入 `pylon-workspace-layout-v3`：`leftRailWidth/leftRailCollapsed` 与右栏状态共享同一持久化快照；旧工作区/主题字段仅作迁移源，内置布局命令同步写入新源。
 - 新增 `RightRailHost`，右栏壳已从 `SheetRightSlot` 移到 `SheetLayout` 应用布局层；支持指针拖拽和键盘方向/Home/End 调整宽度，旧 `SheetRightSlot` 仅保留兼容导出。
 - 右栏背景记录导入时的 `baseWidth` 与 `fit/fill/stretch` 策略；右栏宽度字段在主题设置中隐藏，仅保留旧配置读取兼容。
 
 核验：`cmd /c npm run build`（TypeScript 与 Vite 构建通过）。
 
-下一步：补充布局 v3 迁移和未关联右栏设置的专属页面宿主；随后删除 `SheetRightSlot` 兼容层。
+下一步：补充未关联右栏设置的专属页面宿主；随后删除 `SheetRightSlot` 兼容层并清理旧布局字段。
 
 ## 状态变更模板
 

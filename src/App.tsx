@@ -53,6 +53,7 @@ import { usePresentationPreferenceStore } from './domains/presentation/presentat
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
+import { useRightRailStore } from './rightRailStore.ts'
 
 // 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
 const Settings = lazy(() => import('./components/Settings'))
@@ -129,11 +130,11 @@ export default function App() {
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
   // W1-03（F2-B）：折叠/宽度状态迁入 workspaceStore（预设不覆盖布局），App 只读
-  const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
+  const sidebarWidth = useRightRailStore(s => s.leftRailWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
   const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
-  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
+  const sidebarCollapsed = useRightRailStore(s => s.leftRailCollapsed)
   const activeSidebarMode = activeSheet ? resolveSheetRender(activeSheet.kind)?.sidebarMode : undefined
   // workspace / sheet 两类左栏都消费 workspaceStore.sidebarCollapsed，因此所有带左栏的
   // Sheet 共用 TitleBar 最左端入口；none 才禁用。
@@ -366,7 +367,7 @@ export default function App() {
         sidebarExpandedTrack={sidebarExpandedTrack}
         rightPanelEnabled={rightPanelEnabled}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
-        onToggleSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(!sidebarCollapsed)}
+        onToggleSidebar={() => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
         onCloseSheet={id => { void closeWorkspace(id) }}
         menuActions={{

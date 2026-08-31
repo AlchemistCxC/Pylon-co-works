@@ -4,6 +4,9 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 export const RIGHT_RAIL_MIN_WIDTH = 220
 export const RIGHT_RAIL_MAX_WIDTH = 560
 export const RIGHT_RAIL_DEFAULT_WIDTH = 320
+export const LEFT_RAIL_MIN_WIDTH = 160
+export const LEFT_RAIL_MAX_WIDTH = 520
+export const LEFT_RAIL_DEFAULT_WIDTH = 250
 const LEGACY_RIGHT_RAIL_KEY = 'pylon-right-rail'
 const LEGACY_THEME_KEY = 'pylon-theme'
 const LEGACY_WORKSPACE_KEY = 'pylon-workspace-sheets'
@@ -32,6 +35,26 @@ function readLegacyCollapsed(): boolean {
   } catch { return false }
 }
 
+function readLegacyLeftWidth(): number {
+  try {
+    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
+    const parsed = raw ? JSON.parse(raw) as { layout?: { sidebarWidth?: unknown } } : null
+    if (typeof parsed?.layout?.sidebarWidth === 'number') return Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(parsed.layout.sidebarWidth)))
+    const theme = localStorage.getItem(LEGACY_THEME_KEY)
+    const themeParsed = theme ? JSON.parse(theme) as { state?: { sidebarWidth?: unknown } } : null
+    if (typeof themeParsed?.state?.sidebarWidth === 'number') return Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(themeParsed.state.sidebarWidth)))
+  } catch { /* storage unavailable or malformed legacy data */ }
+  return LEFT_RAIL_DEFAULT_WIDTH
+}
+
+function readLegacyLeftCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
+    const parsed = raw ? JSON.parse(raw) as { layout?: { sidebarCollapsed?: unknown } } : null
+    return typeof parsed?.layout?.sidebarCollapsed === 'boolean' ? parsed.layout.sidebarCollapsed : false
+  } catch { return false }
+}
+
 export type RightRailBackgroundSizing = 'fit' | 'fill' | 'stretch'
 
 export interface RightRailBackgroundPresentation {
@@ -44,11 +67,15 @@ export interface RightRailBackgroundPresentation {
 }
 
 interface RightRailState {
+  leftRailWidth: number
+  leftRailCollapsed: boolean
   collapsed: boolean
   width: number
   activePanelId: string | null
   background: RightRailBackgroundPresentation | null
   setCollapsed: (collapsed: boolean) => void
+  setLeftRailWidth: (width: number) => void
+  setLeftRailCollapsed: (collapsed: boolean) => void
   setWidth: (width: number) => void
   setActivePanel: (panelId: string | null) => void
   setBackground: (background: RightRailBackgroundPresentation | null) => void
@@ -65,10 +92,14 @@ export const useRightRailStore = create<RightRailState>()(persist(
     // Preserve the v2 layout default while the legacy SheetRightSlot adapter
     // is still active. The migration phase may choose to default this to true.
     collapsed: readLegacyCollapsed(),
+    leftRailWidth: readLegacyLeftWidth(),
+    leftRailCollapsed: readLegacyLeftCollapsed(),
     width: readLegacyWidth(),
     activePanelId: null,
     background: null,
     setCollapsed: collapsed => set({ collapsed }),
+    setLeftRailWidth: width => set({ leftRailWidth: Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(width))) }),
+    setLeftRailCollapsed: leftRailCollapsed => set({ leftRailCollapsed }),
     setWidth: width => set({ width: clampRightRailWidth(width) }),
     setActivePanel: activePanelId => set({ activePanelId }),
     setBackground: background => set({ background }),
@@ -87,6 +118,8 @@ export const useRightRailStore = create<RightRailState>()(persist(
         : undefined
       return {
         collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : readLegacyCollapsed(),
+        leftRailWidth: typeof state?.leftRailWidth === 'number' ? Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(state.leftRailWidth))) : readLegacyLeftWidth(),
+        leftRailCollapsed: typeof state?.leftRailCollapsed === 'boolean' ? state.leftRailCollapsed : readLegacyLeftCollapsed(),
         width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : readLegacyWidth()),
         activePanelId: typeof state?.activePanelId === 'string' ? state.activePanelId : null,
         background: state?.background && typeof state.background === 'object' ? state.background as RightRailBackgroundPresentation : null,
@@ -94,6 +127,8 @@ export const useRightRailStore = create<RightRailState>()(persist(
     },
     partialize: state => ({
       collapsed: state.collapsed,
+      leftRailWidth: state.leftRailWidth,
+      leftRailCollapsed: state.leftRailCollapsed,
       width: state.width,
       activePanelId: state.activePanelId,
       background: state.background,

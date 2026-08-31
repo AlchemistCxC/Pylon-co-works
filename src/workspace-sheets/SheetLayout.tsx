@@ -13,6 +13,7 @@ import RightRailHost from '../components/right-panel/RightRailHost.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
+import { useRightRailStore } from '../rightRailStore.ts'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
@@ -62,7 +63,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const activeSheetId = useWorkspaceStore(s => s.workspaceSheets.activeSheetId)
   const activeSheet = sheets.find(sheet => sheet.id === activeSheetId)
   // 左栏是统一应用布局；切换任何 Sheet 都保持同一折叠状态。
-  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
+  const sidebarCollapsed = useRightRailStore(s => s.leftRailCollapsed)
 
   const identityActiveAgent = useIdentityStore(s => s.activeAgent)
   const sheetOwnerAgentId = activeSheet?.kind === 'agent' ? activeSheet.agentId : undefined
