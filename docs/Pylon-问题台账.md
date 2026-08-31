@@ -75,8 +75,16 @@
   子进程存活链路成立。未设置 `PYLON_AGENTS_CONFIG` 时，cargo 测试会回退到编译期嵌入的
   `agents.example.yaml` 占位模板，可能因占位 profile 导致 `ACP connection closed`；这是测试配置
   前提不足，不是运行时 Bash 回归。
-- 下一步：完整 prompt 往返仍按需执行（会调用模型 API）；发布包验收时再从实际 `resources/runtime/git`
-  目录启动一次 Hermes 与一个非 Hermes Agent。
+- 工具调用追加实测：同一生效配置下，ACP `session/new`、`session/set_mode(dont_ask)` 和
+  `session/prompt` 均成功，Hermes 已发出 `session/update` 的 `tool_call`（命令为
+  `$ printf TOOL_OK`）；但随后 stderr 停在 `Creating new local environment for task default...`，
+  75 秒内没有 `tool_call_update`、命令结果或 prompt 终态。独立调用 Hermes
+  `LocalEnvironment(...).execute('printf TOOL_OK')` 在同一便携 Bash 环境下约 1–2 秒成功，说明
+  Pylon ACP wire、Bash 预检和本地 shell 本身可用，当前阻塞点位于 Hermes ACP adapter 的工具环境
+  初始化/调度（与既有 OBS-03-F2 现象一致），不能把工具执行标记为已验收。
+- 下一步：不修改 Pylon 打包器；待 Hermes 侧修复/提供可复现的环境初始化诊断后，再复跑 ACP
+  `tool_call → tool_call_update → prompt response` 全链路，并在发布包中补 Hermes/非 Hermes 各一次
+  实机检查。
 
 <a id="p4"></a>
 ### P4 · 连续同种工具调用聚合
