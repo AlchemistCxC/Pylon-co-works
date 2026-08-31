@@ -16,9 +16,6 @@ export function resolveFallbackCommands(): readonly CommandSuggestion[] {
   return resolveCommandSetSuggestions([])
 }
 
-/** @deprecated 使用 resolveFallbackCommands 或 usePluginCommandSuggestions，避免模块导入期静态快照。 */
-export const FALLBACK_COMMANDS: readonly CommandSuggestion[] = Object.freeze(resolveFallbackCommands())
-
 export function usePluginCommandSuggestions(): readonly CommandSuggestion[] {
   const snapshot = useSyncExternalStore(
     subscribePluginCommands,

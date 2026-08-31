@@ -193,6 +193,12 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 验证：`npm.cmd run lint`、TypeScript 类型检查、组件/tauri 相关 13 个测试文件（52 tests）及 `git diff --check` 全部通过。
 
+## 死兼容导出清理（2026-08-31）
+
+`src/components/chat/commandRegistry.ts` 的 `FALLBACK_COMMANDS` 曾是导入期静态快照，但全仓库没有任何 caller；生产路径已经通过 `resolveFallbackCommands` / `usePluginCommandSuggestions` 从 command-set registry 动态解析。已删除该死导出，并同步移除 `builtinCommands.ts` 中过时的“双面同源”说明，避免维护者继续把静态快照当作可用 interface。
+
+验证：全量 lint、TypeScript 类型检查、command/session command 相关 Vitest 8 tests 通过；旧的直接 `test-command-registry.mts` 脚本仍受其既有 extensionless import 运行限制影响，未作为本次回归依据。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：
