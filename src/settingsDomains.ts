@@ -239,7 +239,7 @@ export interface SettingsSearchItem {
 
 export function buildSettingsSearchIndex(
   rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[],
-  pluginPages?: readonly { contributionId: string; value: { label: string; description?: string } }[],
+  pluginPages?: readonly { contributionId: string; value: { label?: string; description?: string } }[],
 ): readonly SettingsSearchItem[] {
   const items: SettingsSearchItem[] = []
   // 链A：THEME_FIELD_DEFS 按 zone 过滤
@@ -274,7 +274,7 @@ export function buildSettingsSearchIndex(
   for (const entry of pluginPages ?? []) {
     items.push({
       path: '插件 › 插件管理',
-      label: entry.value.label,
+      label: entry.value.label ?? entry.contributionId,
       section: 'pluginManager',
       advanced: false,
       kind: 'plugin-page',

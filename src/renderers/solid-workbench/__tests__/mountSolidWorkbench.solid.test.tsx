@@ -646,6 +646,7 @@ describe('mountSolidWorkbench', () => {
 
     const emptyState = screen.getByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status', { name: '正在创建会话' })).toHaveTextContent('执行耗时任务')
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(prompt).toBeDisabled()
     expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
@@ -668,6 +669,7 @@ describe('mountSolidWorkbench', () => {
     fireEvent.click(submit)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 暂时不可用')
+    expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()
     expect(prompt).toHaveValue('保留这份任务描述')
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-a')
     expect(prompt).toBeEnabled()

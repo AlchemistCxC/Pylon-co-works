@@ -56,22 +56,27 @@ export function normalizeHermesEvent(input: AgentWireEnvelope | unknown, context
 }
 
 function canonicalizeHermesTool(input: AgentWireEnvelope | unknown, update: Record<string, unknown> | undefined): AgentWireEnvelope | unknown {
-  if (!update || !['tool_call', 'tool_call_update'].includes(String(update.sessionUpdate)) || !isRecord(input)) return input
+  if (!update || !['tool_call', 'tool_call_update'].includes(String(update.sessionUpdate ?? update.session_update)) || !isRecord(input)) return input
 
   const meta = isRecord(update._meta) ? update._meta : undefined
   const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
-  const explicitName = firstString(pylon?.toolName, update.name, update.toolName, update.tool_name)
+  const explicitName = firstString(pylon?.toolName, pylon?.tool_name, update.name, update.toolName, update.tool_name, update.tool)
   const title = firstString(update.title)
   const parsedTitle = title ? splitToolTitle(title) : { name: '', summary: '' }
-  const parsedEntry = parsedTitle.name ? resolveToolSemantic('hermes', parsedTitle.name) : null
-  const name = explicitName || (parsedEntry ? parsedTitle.name : undefined)
+  // Hermes ACP's ToolCallStart intentionally exposes only a human title
+  // (the Python adapter has no machine-name field).  Recover the canonical
+  // name before handing the event to the generic ACP normalizer; otherwise
+  // every title-only call becomes `unknown` even though its wire kind is valid.
+  const parsedName = parsedTitle.name ? canonicalHermesToolName(parsedTitle.name) : undefined
+  const parsedEntry = parsedName ? resolveToolSemantic('hermes', parsedName) : null
+  const name = explicitName || (parsedEntry ? parsedName : undefined)
   if (!name) return input
 
   const nameEntry = resolveToolSemantic('hermes', name)
   const titlePrefixMatches = parsedTitle.summary.length > 0
-    && parsedTitle.name.trim().toLowerCase() === name.trim().toLowerCase()
+    && (parsedName ?? parsedTitle.name).trim().toLowerCase() === name.trim().toLowerCase()
   const embeddedSummary = titlePrefixMatches ? parsedTitle.summary : ''
-  const wireInput = update.input ?? update.rawInput ?? update.args ?? update.arguments ?? update.preview
+  const wireInput = update.input ?? update.rawInput ?? update.raw_input ?? update.args ?? update.arguments ?? update.parameters ?? update.preview
   const inputValue = wireInput !== undefined
     ? normalizeHermesInput(name, wireInput)
     : (embeddedSummary ? inputForEmbeddedSummary(name, embeddedSummary) : undefined)
@@ -84,7 +89,7 @@ function canonicalizeHermesTool(input: AgentWireEnvelope | unknown, update: Reco
     ...update,
     name,
     ...(displayTitle ? { title: displayTitle } : {}),
-    ...(inputValue !== undefined && update.input === undefined && update.rawInput === undefined
+    ...(inputValue !== undefined && update.input === undefined && update.rawInput === undefined && update.raw_input === undefined
       ? { input: inputValue } : {}),
     _meta: {
       ...meta,
@@ -102,6 +107,17 @@ function inputForEmbeddedSummary(name: string, summary: string): Record<string, 
   const normalized = name.trim().toLowerCase()
   if (normalized === 'terminal' || normalized === 'process') return { command: summary }
   if (normalized === 'execute_code') return { code: summary }
+  if (normalized === 'search_files') return { pattern: summary }
+  if (normalized === 'session_search') return { query: summary }
+  if (normalized === 'web_search') return { query: summary }
+  if (normalized === 'read_file') return { path: summary }
+  if (normalized === 'write_file' || normalized === 'patch') return { path: summary }
+  if (normalized === 'skill_view' || normalized === 'skill_manage') {
+    const separator = summary.indexOf('/')
+    return separator > 0
+      ? { name: summary.slice(0, separator).trim(), file_path: summary.slice(separator + 1).trim() || 'SKILL.md' }
+      : { name: summary }
+  }
   return undefined
 }
 
@@ -116,6 +132,30 @@ function normalizeHermesInput(name: string, value: unknown): unknown {
 function firstString(...values: unknown[]): string | undefined {
   const value = values.find(item => typeof item === 'string' && item.trim().length > 0)
   return typeof value === 'string' ? value.trim() : undefined
+}
+
+/** Map the labels emitted by Hermes' ACP title formatter back to machine names. */
+function canonicalHermesToolName(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase().replace(/[\u2010-\u2015\u2212]/g, '-').replace(/[\s-]+/g, '_')
+  const aliases: Record<string, string> = {
+    'skill_view': 'skill_view', skill: 'skill_view',
+    'skills_list': 'skills_list', skills: 'skills_list',
+    search: 'search_files', 'search_files': 'search_files', 'file_search': 'search_files',
+    'session_search': 'session_search',
+    'web_search': 'web_search',
+    read: 'read_file', 'read_file': 'read_file',
+    write: 'write_file', 'write_file': 'write_file',
+    edit: 'patch', patch: 'patch',
+    terminal: 'terminal', shell: 'terminal', bash: 'terminal',
+    process: 'process',
+    execute_code: 'execute_code', python: 'execute_code',
+    todo: 'todo', 'todo_list': 'todo',
+    'skill_manage': 'skill_manage',
+    'web_extract': 'web_extract', extract: 'web_extract',
+    memory: 'memory',
+    delegate: 'delegate_task', 'delegate_task': 'delegate_task',
+  }
+  return aliases[normalized]
 }
 
 function isGroupedReplay(update: Record<string, unknown> | undefined): boolean {

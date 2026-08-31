@@ -1132,6 +1132,10 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
   const [mode, setMode] = createSignal(props.activeMode || modeOptions()[0] || 'default')
   const [attachments, setAttachments] = createSignal<readonly WorkbenchAttachment[]>([])
   const [submitting, setSubmitting] = createSignal(false)
+  // Keep a local projection visible while the host is still creating the
+  // session.  Session creation can involve ACP process startup, so waiting
+  // for `input().sessionId` made the empty state appear frozen after submit.
+  const [optimisticPrompt, setOptimisticPrompt] = createSignal<string>()
   const [submitError, setSubmitError] = createSignal('')
   const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
   let promptInput: HTMLTextAreaElement | undefined
@@ -1170,6 +1174,7 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     const text = prompt().trim(); if (!text || submitting()) return
     if (props.workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return }
     setSubmitting(true); setSubmitError('')
+    setOptimisticPrompt(text)
     try {
       const created = await props.context.commands.createSession({
         ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
@@ -1178,13 +1183,20 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
       })
       if (!created.sessionId) throw new Error('会话创建未返回有效标识')
       setPrompt(''); setAttachments([])
-    } catch (error) { setSubmitError(error instanceof Error ? error.message : String(error)); queueMicrotask(() => promptInput?.focus()) }
+    } catch (error) {
+      setOptimisticPrompt()
+      setSubmitError(error instanceof Error ? error.message : String(error)); queueMicrotask(() => promptInput?.focus())
+    }
     finally { setSubmitting(false) }
   }
   return <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态" aria-busy={submitting()}>
     <div class="agent-empty-brand" aria-hidden="true"><svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64"><path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" /><circle class="pylon-mark-node" cx="32" cy="21.215" r="4" /><circle class="pylon-mark-node" cx="20" cy="42" r="4" /><circle class="pylon-mark-node" cx="44" cy="42" r="4" /><path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" /></svg></div>
     <div class="agent-empty-eyebrow">{model().eyebrow}</div><h2 class="agent-empty-title">{model().title}</h2>
     <p class="agent-empty-description">配置工作上下文，然后发送第一条消息以创建会话。</p>
+    <Show when={optimisticPrompt()}><div class="solid-agent-empty-optimistic" role="status" aria-label="正在创建会话">
+      <div class="solid-agent-empty-optimistic-user"><span class="term-user-prefix">❯</span><span>{optimisticPrompt()}</span></div>
+      <div class="solid-agent-empty-optimistic-status" aria-live="polite">正在创建会话…</div>
+    </div></Show>
     <form class="solid-agent-empty-composer" onSubmit={event => { event.preventDefault(); void submit() }}>
       <Show when={props.workspaceMode === 'work'}><label class="solid-agent-empty-workspace"><span>工作区</span><select aria-label="新会话工作区" disabled={submitting() || workspaces().length === 0} value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select><button type="button" disabled={submitting()} onClick={() => void pickFolder()}>新建…</button></label></Show>
       <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>

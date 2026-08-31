@@ -37,7 +37,8 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
 }
 
 function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {
-  const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined
+  const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate
+    : typeof update.session_update === 'string' ? update.session_update : undefined
   const diagnostics: ReturnType<typeof createDiagnostic>[] = []
   const content = update.content
   const blocks = content !== undefined ? content : typeof update.text === 'string' ? { type: 'text', text: update.text } : undefined
@@ -56,7 +57,11 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'tool_call_update': {
       const status = typeof update.status === 'string' ? update.status : 'in_progress'
       const type = status === 'completed' ? 'tool.completed' : status === 'failed' || status === 'error' ? 'tool.failed' : 'tool.progress'
-      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics: withToolNameDiagnostic(diagnostics, update, context) }
+      // Hermes completion updates intentionally omit the machine name; the
+      // projector merges them into the started card by toolCallId. Do not
+      // manufacture `unknown` here or a completion would overwrite the
+      // previously resolved skill/search identity.
+      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics }
     }
     case 'plan':
       // C08：entries 结构化收窄为五状态 PlanEntryV2（cancelled 不坍缩、未知状态保留 rawStatus），
@@ -91,18 +96,28 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
   const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
     ? pylonMeta.toolName.trim()
     : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
+  const hasMachineName = name !== 'unknown'
+  const updateKind = typeof update.sessionUpdate === 'string'
+    ? update.sessionUpdate
+    : typeof update.session_update === 'string' ? update.session_update : undefined
+  const omitMissingUpdateIdentity = updateKind === 'tool_call_update' && !hasMachineName
   const providerName = typeof update.name === 'string' && update.name.trim() ? update.name.trim() : name
   const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
   const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
     provider: context.provider,
     generation: context.toolGeneration,
   })
-  const normalizedInput = update.input !== undefined ? update.input : update.rawInput
+  const normalizedInput = update.input !== undefined ? update.input
+    : update.rawInput !== undefined ? update.rawInput
+      : update.raw_input !== undefined ? update.raw_input
+        : update.args !== undefined ? update.args
+          : update.arguments !== undefined ? update.arguments
+            : update.parameters
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
-    name: name,
-    providerName,
-    canonicalName: semantic?.name ?? resolution.canonicalName,
+    ...(!omitMissingUpdateIdentity ? { name } : {}),
+    ...(!omitMissingUpdateIdentity ? { providerName } : {}),
+    ...(!omitMissingUpdateIdentity ? { canonicalName: semantic?.name ?? resolution.canonicalName } : {}),
     kind: resolution.kind,
     action: resolution.action,
     semanticKind: `tool.${resolution.kind}`,
@@ -110,8 +125,8 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
     ...(typeof update.title === 'string' ? { title: update.title } : {}),
     ...(resolution.capabilities ? { capabilities: toJsonValue(resolution.capabilities) } : {}),
     ...(normalizedInput !== undefined ? { input: toJsonValue(normalizedInput) } : {}),
-    ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : {}),
-    ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : {}),
+    ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : update.raw_input !== undefined ? { rawInput: toJsonValue(update.raw_input) } : {}),
+    ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : update.raw_output !== undefined ? { rawOutput: toJsonValue(update.raw_output) } : {}),
     ...(Array.isArray(update.locations) ? { locations: toJsonValue(update.locations) } : {}),
     ...(update.progress !== undefined ? { progress: toJsonValue(update.progress) } : {}),
     ...(typeof update.durationMs === 'number' && Number.isFinite(update.durationMs) && update.durationMs >= 0

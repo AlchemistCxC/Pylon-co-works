@@ -4,7 +4,7 @@
 
 ## 使用规则
 
-1. 每条问题使用固定编号（P1–P16，允许小数子项如 P13.1），编号不因排序或拆分改变。
+1. 每条问题使用固定编号（P1–P19，允许小数子项如 P13.1），编号不因排序或拆分改变。
 2. 状态只能使用下列词汇：`待调查`、`待施工书`、`待施工`、`施工中`、`待验收`、`首片完成`、`完成`、`阻塞`。
 3. `首片完成`表示对应施工书的首片完成定义已满足；后续调参或扩展不回退该状态，除非发现回归。
 4. 每次状态变化必须同时记录日期、证据路径/命令和下一步；没有证据不得标记为完成。
@@ -30,6 +30,9 @@
 | [P14](#p14-展开思考块自动滚动) | 展开思考块不自动滚动 | **首片完成** | 2026-08-31 | `ReasoningBlock` 内部 follow-bottom；展开态流式状态回归 | 真实窗口检查用户上滚后的跟随边界 |
 | [P15](#p15-流式结束闪动) | 流式结束闪动 | **首片完成** | 2026-08-31 | `useScrollFollow` 流式更新改 auto scroll，避免 smooth 动画叠加 | 真实窗口检查终态切换观感 |
 | [P16](#p16-hermes-terminal-类型与参数外漏) | Hermes terminal 类型/参数解析 | **首片完成** | 2026-08-31 | `toolResolution.ts`；`toolPresentation.test.ts` Hermes terminal/嵌入参数覆盖 | 用真实 Hermes trace 复核未登记工具的 provider overlay |
+| [P17](#p17-hermes-skill-view-与工具指示器尺寸) | Hermes skill view 渲染与工具指示器尺寸 | **首片完成** | 2026-08-31 | [Hermes 工具解析与空态创建施工书](Pylon-Hermes工具解析与空态创建施工书.md)；`hermesNormalizer.test.ts`；`ChatView.css` | 真实 Hermes 窗口复核 skill 卡与预览像素一致性 |
+| [P18](#p18-hermes-search-归一化) | Hermes search 解析为 unknown | **首片完成** | 2026-08-31 | Hermes title-only wire sample；`searchLinkClassification.test.ts`；agent catalog aliases | 真实 search_files/session_search trace 复核结果卡 |
+| [P19](#p19-空态创建会话乐观渲染) | 空态创建会话采用乐观渲染 | **首片完成** | 2026-08-31 | `SolidWorkbenchApp.solid.tsx` optimistic projection；mount 空态创建/失败回归 | 真实窗口复核创建延迟与切换无闪动 |
 
 ## 核验记录
 
@@ -195,6 +198,33 @@ Hermes ACP 的 `terminal: command`、`execute_code: code` 标题与 `args`/`argu
 证据：`hermesNormalizer.test.ts` 与 `ToolInvocationCard.solid.test.tsx` 覆盖 terminal、execute_code、process 及 preview 参数；工具/归一化/Workbench 定向回归 80 项通过，`npm.cmd run check:solid` 通过，`git diff --check` 通过。
 
 状态：首片完成。后续仅需用真实 Hermes trace 复核未登记工具的 provider overlay，不再改变已稳定的 terminal/execute 解析路径。
+
+<a id="p17"></a>
+### P17 · Hermes skill view 与工具指示器尺寸
+
+Hermes ACP start 更新只提供人类标题，不提供机器工具名；normalizer 现在将 `skill view (...)` 归一为 `skill_view`，并从标题恢复 skill/file 输入。ACP 工具内容 wrapper 会在语义边界解包为 text/markdown 可渲染 part。工具指示器显式继承聊天 rail 的字号和行高，使实际卡片与设置预览共享尺寸契约。
+
+证据：`hermesNormalizer.test.ts` title-only、content wrapper、snake_case、completion identity 回归；`ChatView.css` `.solid-tool-invocation .term-tool-indicator`。
+
+状态：首片完成。真实窗口像素验收后置。
+
+<a id="p18"></a>
+### P18 · Hermes search 归一化
+
+`search: ...` 标题现在恢复为 Hermes `search_files`，`session search: ...` 保留 `session_search`；工具字典增加常见 human/qualified aliases。搜索结果归一化兼容 Hermes 的 `matches/files + path/line/content` 字段，映射为 provider-neutral `search-result`。
+
+证据：Hermes `build_tool_start/build_tool_complete` 实际构造样本；`searchLinkClassification.test.ts`；`shared/agent-catalog.json`。
+
+状态：首片完成。真实 Hermes search trace 复核后再调参。
+
+<a id="p19"></a>
+### P19 · 空态创建会话乐观渲染
+
+首条请求提交时先显示本地乐观用户消息和“正在创建会话…”状态，RPC 返回前保留原表单冻结语义；创建失败撤销乐观投影、保留草稿并恢复输入焦点。乐观投影不进入 canonical transcript 或持久化。
+
+证据：`SolidWorkbenchApp.solid.tsx`；`mountSolidWorkbench.solid.test.tsx` 创建中/失败恢复回归。
+
+状态：首片完成。真实窗口复核长延迟和切换观感后置。
 
 ## 状态变更模板
 

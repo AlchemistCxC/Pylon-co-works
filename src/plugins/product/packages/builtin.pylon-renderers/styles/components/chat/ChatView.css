@@ -740,6 +740,18 @@
   position: relative;
 }
 .term-tool + .term-tool { margin-top: var(--ui-space-1); }
+.solid-agent-empty-optimistic {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: 0 0 var(--ui-space-3);
+  padding: var(--ui-space-3) var(--ui-space-4);
+  border: var(--line-width-1) solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: var(--message-radius, 8px);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.solid-agent-empty-optimistic-user { display: flex; gap: var(--ui-space-2); align-items: baseline; white-space: pre-wrap; }
+.solid-agent-empty-optimistic-user .term-user-prefix { color: var(--accent); flex: 0 0 auto; }
+.solid-agent-empty-optimistic-status { color: var(--text-dim); font-size: .9em; }
 .term-tool-head {
   min-width: 0;
   min-height: 0;
@@ -760,6 +772,13 @@
   width: var(--dot-col-width, 1.6em);
   text-align: left;
   margin: 0;
+}
+/* Rich Solid tool cards and the settings preview share the same marker
+   contract.  Explicitly inherit the chat rail typography so a slot-local
+   renderer cannot silently shrink the glyph relative to the preview. */
+.solid-tool-invocation .term-tool-indicator {
+  font-size: inherit;
+  line-height: inherit;
 }
 /* Terminal-like 的 marker 以 ChatView 字号解析固定列；隔离 content kind 的字号/字体覆盖，
    避免 canonical Tool 的 1.6em 与助手 marker 在不同上下文中换算成不同像素宽度。 */
