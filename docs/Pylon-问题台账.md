@@ -4,7 +4,7 @@
 
 ## 使用规则
 
-1. 每条问题使用固定编号（P1–P20，允许小数子项如 P13.1），编号不因排序或拆分改变。
+1. 每条问题使用固定编号（P1–P24，允许小数子项如 P13.1），编号不因排序或拆分改变。
 2. 状态只能使用下列词汇：`待调查`、`待施工书`、`待施工`、`施工中`、`待验收`、`首片完成`、`完成`、`阻塞`。
 3. `首片完成`表示对应施工书的首片完成定义已满足；后续调参或扩展不回退该状态，除非发现回归。
 4. 每次状态变化必须同时记录日期、证据路径/命令和下一步；没有证据不得标记为完成。
@@ -38,6 +38,16 @@
 | [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
+
+## 未完成动作（2026-09-01）
+
+下面事项已经登记，但本轮没有做完，不能按“首片完成”理解为全部收尾：
+
+- **P2** 仍为 `待验收`：尚未在真实窗口完成 terminal-classic、terminal-modern 和自定义行高的最终像素验收。
+- **P1、P3–P24** 的真实窗口/真实 Agent trace、发布包复核或参数调优均按各条“下一步”后置，当前只完成代码与自动化回归证据。
+- 特别是 P21–P24 的终态单次提交、异步高度跟随和第三方 generation-only 更新，还没有真实 Tauri WebView/第三方 Suite 证据。
+
+后续只有补齐对应真实证据并更新本台账，才能将这些事项改为 `完成`；“首片完成”状态保持不变，表示首个施工切片已达到其完成定义。
 
 ## 核验记录
 
