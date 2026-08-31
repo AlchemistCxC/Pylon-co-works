@@ -33,6 +33,31 @@ describe('WorkbenchHostPort', () => {
     expect(createSolidWorkbenchServicesFromHostPort(host).predictionProvider).toBe(predictionProvider)
   })
 
+  it('notifies Solid services when a split generation reader changes alone', async () => {
+    const source = runtime()
+    const host = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    let generationListener: (() => void) | undefined
+    const splitHost = {
+      ...host,
+      document: { ...host.document, subscribe: () => () => {} },
+      generation: { ...host.generation, subscribe: (listener: () => void) => { generationListener = listener; return () => { generationListener = undefined } } },
+    } as typeof host
+    const runtimeServices = createSolidWorkbenchServicesFromHostPort(splitHost).runtime
+    const notified = vi.fn()
+    const unsubscribe = runtimeServices.subscribe(notified)
+    generationListener?.()
+    expect(notified).not.toHaveBeenCalled()
+    await Promise.resolve()
+    expect(notified).toHaveBeenCalledTimes(1)
+    unsubscribe()
+    source.destroy()
+  })
+
   it('exposes an immutable document reader and slice subscriptions', () => {
     const source = runtime()
     const host = createWorkbenchHostPort({

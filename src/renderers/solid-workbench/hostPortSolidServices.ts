@@ -47,7 +47,24 @@ function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
   }
   return {
     getSnapshot: () => runtimeSnapshot(host),
-    subscribe: listener => host.document.subscribe(listener),
+    subscribe: listener => {
+      // A Suite may expose document and generation as separate readers. Queue
+      // one notification per microtask so split updates converge to the latest
+      // combined snapshot without duplicate renders when both readers share a
+      // runtime implementation.
+      let queued = false
+      const notify = () => {
+        if (queued) return
+        queued = true
+        queueMicrotask(() => {
+          queued = false
+          listener()
+        })
+      }
+      const unsubscribeDocument = host.document.subscribe(notify)
+      const unsubscribeGeneration = host.generation.subscribe(notify)
+      return () => { unsubscribeDocument(); unsubscribeGeneration() }
+    },
     getSlice: name => slice(name) as never,
     subscribeSlice: (name, listener) => name === 'capabilities'
       ? host.capabilities.subscribe(listener)

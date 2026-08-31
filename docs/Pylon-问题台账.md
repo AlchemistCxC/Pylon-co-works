@@ -37,6 +37,7 @@
 | [P21](#p21-流式终态重绑与状态源一致性) | 流式终态重绑与状态源一致性 | **首片完成** | 2026-09-01 | `workbenchSessionBindingKey` 幂等绑定 seam；`agentWorkbenchSession.test.ts` 同身份元数据回归；定向测试 | 真实终态 trace 复核无重挂载 |
 | [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
+| [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
 
 ## 核验记录
 
@@ -290,6 +291,17 @@ Workbench 外层 `.term` 现在纳入 `ResizeObserver`。尺寸变化只在 stic
 证据：`src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`；`mountSolidWorkbench.solid.test.tsx` sticky/用户上滚/异步尺寸回归；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx --pool=forks --maxWorkers=2`（56 项通过）。
 
 状态：首片完成。真实窗口复核图片、高亮和字体加载后的跟随边界后置。
+
+<a id="p24"></a>
+### P24 · Host Port 生成态订阅一致性
+
+Host Port 契约允许 document reader 与 generation reader 分离，但 Solid services 原先只订阅 document；第三方 Suite 若只更新生成元数据，Footer 可能不会刷新。
+
+`createRuntime().subscribe` 现在同时订阅两个 reader，并在微任务边界合并通知。共享同一 Runtime 时不会产生重复渲染，分离 reader 时也能保证 generation-only 更新被消费；快照仍按一次读取同时合并 document 与 generation。
+
+证据：`src/renderers/solid-workbench/hostPortSolidServices.ts`；`workbenchHostPort.test.ts` split generation reader 回归；定向测试 14 项通过。
+
+状态：首片完成。第三方 Suite 实机复核 generation-only 更新后置。
 
 ## 状态变更模板
 
