@@ -182,6 +182,17 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 - AgentSheet renderer mode、composer visual contract、Solid workbench mount：3 个文件、95 tests 全部通过；
 - `git diff --check` 通过。
 
+## 类型逃逸清理（2026-08-31）
+
+从渲染器/运行时残留扫描中挑选了最低风险的一项：移除两个非必要的 `as any`。
+
+- `SettingsPreview.tsx` 的 `WebkitAppRegion` 改为明确的 `React.CSSProperties` 扩展类型，保留浏览器预览样式不变；
+- `infrastructure/tauri/env.ts` 的 Tauri 全局探测改用已有 `TauriWindow` 类型的 unknown cast，避免绕过类型系统。
+
+这两处均未改变运行时逻辑，只收窄了类型逃逸面。剩余 React effect 豁免仍按前一节台账保留，避免把有意的生命周期约束机械改坏。
+
+验证：`npm.cmd run lint`、TypeScript 类型检查、组件/tauri 相关 13 个测试文件（52 tests）及 `git diff --check` 全部通过。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：

@@ -108,7 +108,7 @@ function PreviewApp({ zone }: { zone: string }) {
 
   return (
     <div className="pv-app" style={{ pointerEvents: 'none' }}>
-      <div className="titlebar" style={{ ...z('global'), WebkitAppRegion: 'no-drag' } as any}>
+      <div className="titlebar" style={{ ...z('global'), WebkitAppRegion: 'no-drag' } as React.CSSProperties & { WebkitAppRegion?: string }}>
         <span className="titlebar-toggle">☰</span>
         <div className="titlebar-tabs">
           <button className="tab active">Peri</button>

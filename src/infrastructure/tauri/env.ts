@@ -9,7 +9,7 @@ export type TauriWindow = { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
 
 // typeof window 守卫：node（legacy 测试）/SSR 环境可安全 import 本模块
 export const IS_TAURI = typeof window !== 'undefined'
-  && (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined')
+  && (typeof (window as unknown as TauriWindow).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as unknown as TauriWindow).__TAURI__ !== 'undefined')
 
 /** Browser demo installs a transport-compatible fake Tauri global after this
  * module is evaluated. Keep callers able to distinguish that mock at runtime. */
