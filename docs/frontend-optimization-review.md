@@ -167,3 +167,14 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 - `npm.cmd run check:solid`：TypeScript 与四项 Solid/Renderer architecture guards 全部通过；
 - Solid mount、smoke、suite completeness：3 个文件、64 tests 全部通过；
 - 定向 ESLint 与 `git diff --check`。
+
+### Solid workbench projection support seam
+
+第三个拆分 slice 将 `SolidWorkbenchApp.solid.tsx` 中的纯投影/归一化规则移至 `solidWorkbenchProjectionSupport.ts`：canonical token 计数、activity 时间线放置、tool connector 父子来源推导、生命周期/交互 render kind 解析，以及 WorkbenchDocument 到 Solid Message 的转换。
+
+工作台组件仍负责状态与布局编排；新 module 不持有 Solid signal、Host Port 或 DOM 引用，只提供可独立验证的 projection rules。为保持现有调用契约，`interactionRenderKind` 继续从 `SolidWorkbenchApp.solid.tsx` re-export。该 seam 减少根 module 的 domain 规则耦合，并为后续 activity projection 测试提供窄 interface。
+
+验证：
+
+- `npm.cmd run check:solid` 及全部 Solid/Renderer architecture guards 通过；
+- interaction kind、workbench mount、smoke 回归：3 个文件、60 tests 全部通过。

@@ -4,7 +4,7 @@ import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
-import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
+import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
@@ -20,7 +20,6 @@ import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
-import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
 import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
@@ -37,6 +36,10 @@ import type { WorkbenchAttachment } from '../../domains/workbench/workbenchComma
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../identityStore.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
+import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
+
+// Compatibility export for the existing interaction kind contract/tests.
+export { interactionRenderKind } from './solidWorkbenchProjectionSupport.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -544,24 +547,6 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   )
 }
 
-function canonicalTokenCount(
-  usage: WorkbenchDocument['session']['usage'],
-  fallback: number,
-): number {
-  if (!usage) return fallback
-  if (usage.totalTokens !== undefined) return usage.totalTokens
-
-  const known = [
-    usage.inputTokens,
-    usage.outputTokens,
-    usage.reasoningTokens,
-  ].filter((value): value is number => value !== undefined)
-
-  return known.length > 0
-    ? known.reduce((total, value) => total + value, 0)
-    : fallback
-}
-
 function WorkbenchDocumentSurface(props: {
   document: WorkbenchDocument | undefined
   context: SolidWorkbenchContextValue
@@ -995,33 +980,6 @@ function CanonicalActivityGroup(props: {
  * nodes in the same segment.  Any non-tool activity is a hard boundary: it
  * starts a new visual chain rather than implying a relationship across it.
  */
-function deriveCanonicalToolConnectorSources(
-  activities: readonly WorkbenchActivityNode[],
-): ReadonlyMap<string, string> {
-  const sources = new Map<string, string>()
-  let previousToolId: string | undefined
-
-  for (const activity of activities) {
-    if (activity.kind !== 'tool') {
-      previousToolId = undefined
-      continue
-    }
-
-    const parentId = activity.parentToolCallId
-    if (parentId && parentId !== activity.id) {
-      // Keep semantic parentage intact even when the parent is rendered in a
-      // different activity segment; the layout port will hide an orphan edge
-      // until both anchors are present.
-      sources.set(activity.id, parentId)
-    } else if (!parentId && previousToolId) {
-      sources.set(activity.id, previousToolId)
-    }
-    previousToolId = activity.id
-  }
-
-  return sources
-}
-
 interface StableActivityRow {
   readonly key: string
   readonly activity: WorkbenchActivityNode
@@ -1035,75 +993,6 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
     get activity() { return current() },
     update: setCurrent,
   }
-}
-
-interface ActivityTimelinePlacement {
-  readonly leading: readonly WorkbenchActivityNode[]
-  readonly afterMessage: ReadonlyMap<string, readonly WorkbenchActivityNode[]>
-}
-
-function selectActivityTimelinePlacement(document: WorkbenchDocument | undefined): ActivityTimelinePlacement {
-  if (!document || document.activities.length === 0) {
-    return { leading: [], afterMessage: new Map() }
-  }
-  const leading: WorkbenchActivityNode[] = []
-  const afterMessage = new Map<string, WorkbenchActivityNode[]>()
-  for (const activity of selectActivityDisplayOrder(document)) {
-    let anchor: WorkbenchDocument['messages'][number] | undefined
-    for (const message of document.messages) {
-      if (message.sequence >= activity.sequence) continue
-      if (!anchor || message.sequence > anchor.sequence) anchor = message
-    }
-    if (!anchor) {
-      leading.push(activity)
-      continue
-    }
-    const anchored = afterMessage.get(anchor.id) ?? []
-    anchored.push(activity)
-    afterMessage.set(anchor.id, anchored)
-  }
-  return { leading, afterMessage }
-}
-
-function lifecycleRenderKind(state: LifecycleState): string | undefined {
-  if (state.suspended) return 'lifecycle.suspended'
-  if (state.retry) return 'lifecycle.retry'
-  if (state.rewind) return 'lifecycle.rewind'
-  if (state.compact) return 'lifecycle.compact'
-  if (state.lastRecovery) return 'lifecycle.recovered'
-  return undefined
-}
-
-export function interactionRenderKind(interaction: WorkbenchInteraction): string {
-  if (!interaction.request || typeof interaction.request !== 'object' || Array.isArray(interaction.request)) return 'interaction.questions'
-  switch ((interaction.request as Record<string, unknown>).kind) {
-    case 'approval': return 'interaction.approval'
-    case 'confirm': return 'interaction.confirm'
-    case 'permission':
-      return 'interaction.permission'
-    case 'oauth': return 'interaction.oauth'
-    case 'secret': return 'interaction.secret'
-    case 'sudo': return 'interaction.sudo'
-    case 'clarify':
-    case 'ask-question':
-    default: return 'interaction.questions'
-  }
-}
-
-function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message {
-  return {
-    id: message.id,
-    role: message.role === 'user' ? 'user' : message.role === 'reasoning' ? 'reasoning' : 'assistant',
-    sender: message.source.provider,
-    content: message.content,
-    time: message.time,
-    running: message.running,
-    thoughtStartedAt: message.thoughtStartedAtMs,
-    thoughtDurationMs: message.thoughtDurationMs,
-    redacted: message.redacted,
-    redactedReason: message.redactedReason,
-    semanticParts: message.parts,
-  } as Message & { semanticParts: readonly ContentPart[] }
 }
 
 function WorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; availableModes: readonly string[]; activeMode: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
