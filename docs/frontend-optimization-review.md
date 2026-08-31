@@ -205,6 +205,14 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 验证：全量 lint、TypeScript 类型检查、Solid architecture guards 与现有 ANSI/content 测试通过。
 
+## 命令 registry 测试迁移（2026-08-31）
+
+将已迁入 Vitest 兼容套件的 `scripts/test-command-registry.mts` 正式迁移为 `src/components/chat/__tests__/commandRegistry.test.ts`，覆盖 slash command 解析、动态 fallback suggestions、agent 上报命令归一化与前缀过滤。随后移除旧脚本，以及 `run-frontend-tests`、`legacy-runner`、`legacy-plugin-runtime-compat` 中对应的排除/动态登记。
+
+这样 command registry 的 interface test 不再依赖 extensionless import 的 Node 直接执行，也不会继续扩大 legacy/Vitest 双轨排除列表。
+
+验证：全量 lint、TypeScript 类型检查、legacy frontend runner、command registry/legacy compatibility 相关 Vitest 共 15 tests 通过。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：

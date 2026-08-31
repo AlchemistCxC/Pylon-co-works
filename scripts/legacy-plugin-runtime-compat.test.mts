@@ -9,7 +9,6 @@ import {
 import { getWorkspaceRegistryStore } from '../src/workspace-sheets/workspaceRegistry.ts'
 
 const legacyScripts = [
-  { name: 'test-command-registry.mts', load: () => import('./test-command-registry.mts') },
   { name: 'test-normalizer.mts', load: () => import('./test-normalizer.mts') },
   { name: 'test-session-runtime.mts', load: () => import('./test-session-runtime.mts') },
   { name: 'test-compact-transaction.mts', load: () => import('./test-compact-transaction.mts') },
