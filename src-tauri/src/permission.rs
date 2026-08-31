@@ -684,7 +684,7 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
                     tracing::warn!(
                         "权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）"
                     );
-                    resolved.then(|| TimeoutOutcome {
+                    resolved.then_some(TimeoutOutcome {
                         agent_id,
                         session_id,
                         request_id,

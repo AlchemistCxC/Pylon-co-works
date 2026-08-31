@@ -142,6 +142,7 @@ pub enum PromptWaitOutcome {
 /// - `prompt_timeout` 仅作为未单独配置 `idle_timeout` 时的单步闲置超时；
 ///   不设整轮绝对墙钟。一个回合可以包含任意多个分析、思考和工具步骤，
 ///   每个步骤都必须分别获得完整的超时窗口。
+///
 /// 任一判死后进入 cancel + settle（与旧路径一致）。
 #[allow(dead_code)]
 pub async fn wait_prompt_with_cancel<F, Fut>(

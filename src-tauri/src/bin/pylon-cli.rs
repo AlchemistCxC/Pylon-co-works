@@ -96,7 +96,7 @@ fn resolve_command(
                 .then_some((candidate.to_string(), parts.len()))
         })
         .collect::<Vec<_>>();
-    exact.sort_by(|left, right| right.1.cmp(&left.1));
+    exact.sort_by_key(|(_, matched_len)| std::cmp::Reverse(*matched_len));
     if let Some(value) = exact.first() {
         return Ok((value.0.clone(), value.1, Vec::new()));
     }

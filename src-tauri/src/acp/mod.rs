@@ -189,8 +189,10 @@ pub enum AcpError {
     RpcTimeout,
     #[error("RPC error: {0}")]
     Rpc(String),
+    /// AgentConnectFailure 字段多（String×5），Box 化把 AcpError/Result 体积压回
+    /// 小于 128B（clippy result_large_err）——RPC 准备等热路径不再搬运大 Err。
     #[error("{0}")]
-    Connect(AgentConnectFailure),
+    Connect(Box<AgentConnectFailure>),
     /// 其余操作错误（spawn/kill/序列化/参数/传输等）——Display 为原样消息。
     #[error("{0}")]
     Child(String),
@@ -283,7 +285,7 @@ impl From<String> for AcpError {
 
 impl From<AgentConnectFailure> for AcpError {
     fn from(failure: AgentConnectFailure) -> Self {
-        Self::Connect(failure)
+        Self::Connect(Box::new(failure))
     }
 }
 

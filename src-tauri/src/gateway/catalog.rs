@@ -172,7 +172,7 @@ mod tests {
             .expect("wechat 必须在 catalog");
         assert_eq!(wechat.availability, PlatformAvailability::NotInstalled);
         assert_eq!(
-            serde_json::to_value(&wechat.availability).unwrap(),
+            serde_json::to_value(wechat.availability).unwrap(),
             serde_json::json!("notInstalled")
         );
         assert!(!wechat.capabilities.deliver_text);

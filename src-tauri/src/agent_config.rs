@@ -1127,7 +1127,7 @@ fn replace_config_with_backup(
             .and_then(|extension| extension.to_str())
             .unwrap_or_default()
     ));
-    let backup_temp = match write_synced_temp(path, "bak-tmp", &current) {
+    let backup_temp = match write_synced_temp(path, "bak-tmp", current) {
         Ok(temp) => temp,
         Err(error) => {
             let _ = std::fs::remove_file(&candidate_temp);

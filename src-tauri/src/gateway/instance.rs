@@ -1042,7 +1042,6 @@ pub(crate) mod tests {
                     label: Some("新名字".into()),
                     enabled: Some(false),
                     auto_start: Some(false),
-                    ..Default::default()
                 },
             )
             .await

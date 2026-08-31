@@ -1417,6 +1417,7 @@ impl MsgRepo {
     /// - ByTime：created_at < cutoff（now - days 天，毫秒严格小于）；
     /// - ByCount：每 owner 按 sequence DESC 保留最新 count 条事件，其余为候选；
     /// - Permanent：无候选。
+    ///
     /// per_session.session_id 使用 owner_key（canonical 事件流按 owner 键控）。
     ///
     /// CR-003：now 由调用方单次取时传入——统计与删除共用同一 cutoff，避免边界事件

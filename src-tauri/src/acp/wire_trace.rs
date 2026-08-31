@@ -209,13 +209,7 @@ impl AcpWireHub {
             .records
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        order_snapshot(
-            records
-                .iter()
-                .cloned()
-                .map(|record| (*record).clone())
-                .collect(),
-        )
+        order_snapshot(records.iter().map(|record| (**record).clone()).collect())
     }
 }
 
@@ -240,15 +234,15 @@ fn build_record(
     let params = msg_val
         .get("params")
         .cloned()
-        .map(|value| sanitize_wire(value));
+        .map(sanitize_wire);
     let result = msg_val
         .get("result")
         .cloned()
-        .map(|value| sanitize_wire(value));
+        .map(sanitize_wire);
     let error = msg_val
         .get("error")
         .cloned()
-        .map(|value| sanitize_wire(value));
+        .map(sanitize_wire);
     // 远端会话 id：best-effort 从 params/result 提取的 sessionId（原 session_id）。
     let remote_session_id = extract_first_string(msg_val, &["sessionId", "session_id"]);
     // periId：session/update 事件中 Agent 上报的会话 id（与 remoteSessionId 同为
