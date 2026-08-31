@@ -370,62 +370,6 @@
 /* ── streaming cursor ── */
 .term-cursor { display:inline; color:var(--text-dim); font-style:italic; animation:blink 1.2s step-end infinite; }
 
-/* Modern GUI renderer surface. Terminal-like selectors above remain the frozen baseline. */
-.app[data-interface-mode="modern-gui"] .modern-agent-workbench {
-  overflow:hidden; border:1px solid color-mix(in srgb,var(--border) 86%,transparent); border-radius:16px;
-  background:color-mix(in srgb,var(--surface-canvas) 82%,transparent); box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent);
-}
-.app[data-interface-mode="modern-gui"] .modern-workbench-header {
-  display:flex; align-items:center; gap:10px; min-height:58px; padding:9px 14px; border-bottom:1px solid color-mix(in srgb,var(--border) 72%,transparent);
-  background:linear-gradient(100deg,color-mix(in srgb,var(--accent) 8%,var(--surface-panel)),color-mix(in srgb,var(--surface-panel) 72%,transparent));
-}
-.app[data-interface-mode="modern-gui"] .modern-workbench-mark { display:grid; place-items:center; width:34px; height:34px; border:1px solid color-mix(in srgb,var(--accent) 26%,var(--border)); border-radius:11px; color:var(--accent); background:color-mix(in srgb,var(--accent) 10%,transparent); box-shadow:0 7px 18px color-mix(in srgb,var(--accent) 12%,transparent); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-heading { display:grid; min-width:0; gap:2px; margin-right:auto; }
-.app[data-interface-mode="modern-gui"] .modern-workbench-heading small { color:var(--text-dim); font:700 9px/1 var(--mono); letter-spacing:.14em; }
-.app[data-interface-mode="modern-gui"] .modern-workbench-heading strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font:650 14px/1.3 var(--font); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-agent,
-.app[data-interface-mode="modern-gui"] .modern-workbench-status { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 9px; border:1px solid var(--border); border-radius:9px; color:var(--text-dim); background:color-mix(in srgb,var(--surface-raised) 76%,transparent); font:11px var(--font); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-status.status-connected { color:var(--success,#55b685); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-status:is(.status-error,.status-crashed) { color:var(--danger,#dc6372); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-action { display:grid; place-items:center; width:30px; height:30px; padding:0; border:1px solid transparent; border-radius:9px; color:var(--text-dim); background:transparent; cursor:pointer; }
-.app[data-interface-mode="modern-gui"] .modern-workbench-action:hover { color:var(--accent); border-color:var(--border); background:var(--bg-hover); }
-.app[data-interface-mode="modern-gui"] .modern-workbench-body { position:relative; min-height:0; padding:0; background:radial-gradient(circle at 72% 12%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 30%); }
-.app[data-interface-mode="modern-gui"] .modern-conversation-canvas { min-height:0; flex:1; display:flex; }
-.app[data-interface-mode="modern-gui"] .chat-view { scrollbar-gutter:stable; }
-.app[data-interface-mode="modern-gui"] .term { width:min(900px,100%); margin:0 auto; padding:24px clamp(20px,4vw,48px) 150px; font-family:var(--font); font-size:var(--chat-font-size,14px); line-height:1.58; }
-.app[data-interface-mode="modern-gui"] .term-row { position:relative; margin:0 0 12px; }
-.app[data-interface-mode="modern-gui"] .term-row-user,
-.app[data-interface-mode="modern-gui"] .term-row-assistant,
-.app[data-interface-mode="modern-gui"] .term-row-reasoning { width:auto; max-width:100%; padding:14px 16px; border:1px solid color-mix(in srgb,var(--border) 86%,transparent); border-radius:15px; background:color-mix(in srgb,var(--surface-panel) 78%,transparent); box-shadow:0 7px 24px color-mix(in srgb,var(--text) 4%,transparent); }
-.app[data-interface-mode="modern-gui"] .term-row-user { margin-left:clamp(28px,7vw,90px); border-color:color-mix(in srgb,var(--accent) 22%,var(--border)); background:color-mix(in srgb,var(--accent) 8%,var(--surface-panel)); }
-.app[data-interface-mode="modern-gui"] .term-user { align-items:flex-start; padding:0; }
-.app[data-interface-mode="modern-gui"] .term-user-avatar,
-.app[data-interface-mode="modern-gui"] .term-assistant-dot { display:grid; place-items:center; width:28px; height:28px; flex:0 0 28px; margin-right:10px; border:1px solid color-mix(in srgb,var(--accent) 24%,var(--border)); border-radius:9px; color:var(--accent); background:color-mix(in srgb,var(--accent) 9%,transparent); }
-.app[data-interface-mode="modern-gui"] .term-user-prefix { display:none; }
-.app[data-interface-mode="modern-gui"] .term-user-name { padding-top:4px; font:650 12px var(--font); }
-.app[data-interface-mode="modern-gui"] .term-user-content { padding-top:3px; }
-.app[data-interface-mode="modern-gui"] .term-assistant.has-dot { display:grid; grid-template-columns:28px minmax(0,1fr); column-gap:10px; }
-.app[data-interface-mode="modern-gui"] .term-assistant.has-dot .term-assistant-dot { grid-column:1; grid-row:1; margin:0; }
-.app[data-interface-mode="modern-gui"] .term-assistant.has-dot .term-assistant-body { grid-column:2; min-width:0; }
-.app[data-interface-mode="modern-gui"] .term-assistant .copy-btn { top:-6px; right:-7px; display:grid; place-items:center; width:28px; height:28px; padding:0; border-radius:9px; background:var(--surface-overlay); box-shadow:0 6px 16px rgba(0,0,0,.1); }
-.app[data-interface-mode="modern-gui"] .term-row-reasoning { border-style:dashed; background:color-mix(in srgb,var(--accent) 4%,var(--surface-panel)); }
-.app[data-interface-mode="modern-gui"] .term-reasoning { padding:0; }
-.app[data-interface-mode="modern-gui"] .term-reasoning-head { align-items:center; font-style:normal; }
-.app[data-interface-mode="modern-gui"] .term-reasoning-icon { color:var(--accent); }
-.app[data-interface-mode="modern-gui"] .term-reasoning-body { margin:10px 0 0 6px; padding-left:18px; }
-.app[data-interface-mode="modern-gui"] .term-row-tool { margin-left:0; }
-.app[data-interface-mode="modern-gui"] .term-tool { padding:0; overflow:hidden; border:1px solid color-mix(in srgb,var(--border) 88%,transparent); border-radius:12px; background:color-mix(in srgb,var(--surface-panel) 70%,transparent); }
-.app[data-interface-mode="modern-gui"] .term-tool-head { min-height:42px; align-items:center; gap:8px; padding:0 16px; }
-.app[data-interface-mode="modern-gui"] .term-tool-indicator { display:grid; place-items:center; width:25px; height:25px; flex:0 0 25px; border-radius:8px; background:color-mix(in srgb,currentColor 10%,transparent); }
-.app[data-interface-mode="modern-gui"] .term-tool-name { font:650 12px var(--font); }
-.app[data-interface-mode="modern-gui"] .term-tool-summary { font-size:11px; }
-.app[data-interface-mode="modern-gui"] .term-tool-body { padding:10px 12px 12px 45px; border-top:1px solid color-mix(in srgb,var(--border) 68%,transparent); background:color-mix(in srgb,var(--surface-canvas) 50%,transparent); font-size:12px; }
-.app[data-interface-mode="modern-gui"] .term-tool-connector[data-connector-mode="none"] { display:none; }
-.app[data-interface-mode="modern-gui"] .chat-empty { margin:auto; width:min(480px,calc(100% - 40px)); min-height:260px; flex:0 1 420px; border:1px dashed color-mix(in srgb,var(--accent) 32%,var(--border)); border-radius:20px; background:color-mix(in srgb,var(--surface-panel) 62%,transparent); }
-@media (max-width:720px) {
-  .app[data-interface-mode="modern-gui"] .modern-workbench-agent { display:none; }
-  .app[data-interface-mode="modern-gui"] .term { padding-inline:14px; }
-}
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
 .term-streaming { display:inline; }

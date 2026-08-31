@@ -169,6 +169,19 @@ Chat、SettingsPreview、ControlCenter、ToolConnector、GenerationFooter 目前
 
 验证：`npm.cmd run lint`、browser 4 files/10 tests、activity 4 files/33 tests、`git diff --check` 均通过。
 
+## Solid 化后的遗留 React renderer 清理（2026-08-31）
+
+扫描确认 `src/renderers/modern-workbench/ModernAgentWorkbench.tsx` 已无生产或测试 caller；当前 Agent 工作台入口为 `SolidWorkbenchApp`，该文件仅在旧拓扑图中留下节点。为避免继续让维护者误以为存在第二套 renderer，已删除该孤立 React renderer，并移除 `ChatView.css` 中仅服务其 DOM class 的 56 行 modern workbench 样式。
+
+同步更新拓扑图：`SolidWorkbenchApp` 标记为当前 renderer，删除 `ModernAgentWorkbench` 节点。应用 shell、插件隔离 surface 和 contracts 中必要的 React 仍保留；本次没有触碰应用框架或插件自带 React runtime。
+
+验证：
+
+- `npm.cmd run lint` 通过；
+- `npm.cmd run check:solid` 及 Renderer architecture guards 通过；
+- AgentSheet renderer mode、composer visual contract、Solid workbench mount：3 个文件、95 tests 全部通过；
+- `git diff --check` 通过。
+
 ### Solid built-in content renderer seam
 
 第二个巨型文件拆分 slice 已完成，目标是 `src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx`。新增 `solidBuiltinContentRenderer.solid.tsx`，将以下 implementation 收敛到 Renderer Engine 的内建内容 adapter：
