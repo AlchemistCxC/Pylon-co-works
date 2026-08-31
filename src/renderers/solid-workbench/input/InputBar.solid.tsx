@@ -1,4 +1,4 @@
-import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type JSX } from 'solid-js'
 import {
   resolveFallbackCommands,
   filterCommandSuggestions,
@@ -27,6 +27,20 @@ export interface SolidInputBarProps {
   disabled?: boolean
   /** Optional LLM provider; requests are debounced, cancellable and rate limited. */
   predictionProvider?: InputPredictionProvider
+  /** Empty-state configuration. The input DOM stays mounted while a session is created. */
+  empty?: {
+    before?: JSX.Element
+    after?: JSX.Element
+    onSubmit: (text: string, attachments: readonly WorkbenchAttachment[]) => Promise<boolean>
+    submitting?: Accessor<boolean>
+    submitLabel?: Accessor<string>
+  } | (() => {
+    before?: JSX.Element
+    after?: JSX.Element
+    onSubmit: (text: string, attachments: readonly WorkbenchAttachment[]) => Promise<boolean>
+    submitting?: Accessor<boolean>
+    submitLabel?: Accessor<string>
+  } | undefined)
 }
 
 export function SolidInputBar(props: SolidInputBarProps) {
@@ -50,6 +64,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
   let historyDraft = ''
   let autoQueueSessionId: string | null | undefined
   let autoQueueArmed = false
+  let fileInput: HTMLInputElement | undefined
+  const emptyState = () => typeof props.empty === 'function' ? props.empty() : props.empty
+  const isDisabled = () => Boolean(props.disabled || emptyState()?.submitting?.())
 
   const [commandRevision, setCommandRevision] = createSignal(0)
   const suggestions = createMemo(() => {
@@ -134,12 +151,21 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const unsubscribeCommands = subscribePluginCommands(() => setCommandRevision(value => value + 1))
     const sendFromWidget = () => void send()
     const attachFromWidget = () => void attach()
+    const resetEmptyDraft = () => {
+      if (!emptyState()) return
+      setDraft('')
+      setAttachments([])
+      setSendError('')
+      queueMicrotask(() => textarea?.focus())
+    }
     window.addEventListener('pylon:solid-input-send', sendFromWidget)
     window.addEventListener('pylon:solid-input-attach', attachFromWidget)
+    window.addEventListener('pylon:new-session', resetEmptyDraft)
     onCleanup(() => {
       unsubscribeCommands()
       window.removeEventListener('pylon:solid-input-send', sendFromWidget)
       window.removeEventListener('pylon:solid-input-attach', attachFromWidget)
+      window.removeEventListener('pylon:new-session', resetEmptyDraft)
     })
   })
 
@@ -194,10 +220,19 @@ export function SolidInputBar(props: SolidInputBarProps) {
     messageAttachments: readonly WorkbenchAttachment[] = attachments(),
     clearComposer = true,
   ): Promise<boolean> => {
-    if (props.disabled) return false
+    if (isDisabled()) return false
     const id = sessionId()
     const normalized = text.trim()
-    if (!id || !normalized) return false
+    if (!normalized) return false
+    if (!id && emptyState()) {
+      const ok = await emptyState()!.onSubmit(normalized, messageAttachments)
+      if (ok && clearComposer) {
+        setDraft('')
+        setAttachments([])
+      }
+      return ok
+    }
+    if (!id) return false
     const ui = workbench.sessionUi.capture(id)
     const shouldRunSlashCommand = normalized.startsWith('/') && suggestionList().length > 0
     let clearedDraft = false
@@ -292,7 +327,11 @@ export function SolidInputBar(props: SolidInputBarProps) {
   })
 
   const send = async () => {
-    if (props.disabled) return
+    if (isDisabled()) return
+    if (emptyState()) {
+      await sendText(draft())
+      return
+    }
     if (runtime().generating) {
       enqueue(draft())
       return
@@ -301,7 +340,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const cancel = async () => {
-    if (props.disabled) return
+    if (isDisabled()) return
     const id = sessionId()
     if (!id) return
     const ui = workbench.sessionUi.capture(id)
@@ -310,9 +349,12 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const attach = async () => {
-    if (props.disabled) return
+    if (isDisabled()) return
     const id = sessionId()
-    if (!id) return
+    if (!id) {
+      fileInput?.click()
+      return
+    }
     const ui = workbench.sessionUi.capture(id)
     try {
       const selected = await workbench.commands.attach(id)
@@ -439,10 +481,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
 
   return (
     <div
-      class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}`}
+      class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}${emptyState() ? ' input-empty' : ''}`}
       data-expanded="false"
     >
-      <Show when={inputVariant() !== 'cli'}>
+      <Show when={inputVariant() !== 'cli' && !emptyState()}>
         <div class="input-composer-meta" aria-hidden="true">
           <span class="input-composer-kind"><span class="input-composer-glyph">{inputVariant() === 'command' ? '⌘' : '✦'}</span>{inputVariant() === 'command' ? '命令与消息' : '新消息'}</span>
           <span class="input-composer-shortcut">↵ Enter 发送 · Shift+Enter 换行</span>
@@ -463,7 +505,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
           )}</For>
         </div>
       </Show>
-      <Show when={suggestionList().length > 0}>
+      <Show when={!emptyState() && suggestionList().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
           <For each={suggestionList()}>{(suggestion, index) => (
             <button
@@ -479,12 +521,12 @@ export function SolidInputBar(props: SolidInputBarProps) {
           )}</For>
         </div>
       </Show>
-      <Show when={appearance().inputShowHistoryHint && historyIndex() >= 0 && history().length > 0}>
+      <Show when={!emptyState() && appearance().inputShowHistoryHint && historyIndex() >= 0 && history().length > 0}>
         <div class="input-history-hint" aria-live="polite">
           历史记录 {historyIndex() + 1}/{history().length} · ↑/↓ 浏览 · Esc 返回草稿
         </div>
       </Show>
-      <Show when={queue().length > 0}>
+      <Show when={!emptyState() && queue().length > 0}>
         <div class="queued-message-list" aria-label="待发送消息">
           <div class="queued-message-title">待发送 · {queue().length}</div>
           <Index each={queue()}>{item => (
@@ -520,10 +562,11 @@ export function SolidInputBar(props: SolidInputBarProps) {
           <button type="button" class="queued-message-clear" onClick={() => setQueue([])}>清空队列</button>
         </div>
       </Show>
+      <Show when={emptyState()?.before}>{content => <div class="input-empty-before">{content()}</div>}</Show>
       <div class="input-row">
         <Show when={inputVariant() === 'cli'}><span class="cli-prefix">❯</span></Show>
-        <Show when={inputVariant() !== 'cli' && !props.externalAttach}>
-          <button type="button" class="input-btn attach" disabled={props.disabled} onClick={() => void attach()} aria-label="添加附件">＋</button>
+        <Show when={inputVariant() !== 'cli' && !props.externalAttach && !emptyState()}>
+          <button type="button" class="input-btn attach" disabled={isDisabled()} onClick={() => void attach()} aria-label="添加附件">＋</button>
         </Show>
         <div class="input-editor-stack">
           <Show when={prediction()}>{candidate => (
@@ -534,6 +577,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
           <textarea
             ref={textarea}
             class="input-textarea"
+            aria-label={emptyState() ? '首条请求' : '消息输入'}
             value={draft()}
             onInput={event => {
               setDraft(event.currentTarget.value)
@@ -544,23 +588,43 @@ export function SolidInputBar(props: SolidInputBarProps) {
             onKeyDown={onKeyDown}
             onCompositionStart={() => { composing = true }}
             onCompositionEnd={() => { composing = false }}
-            placeholder={prediction() ? '' : placeholder()}
+            placeholder={prediction() && !emptyState() ? '' : (emptyState() ? '描述你想让 Agent 完成什么…' : placeholder())}
             rows={1}
-            disabled={props.disabled}
+            disabled={isDisabled()}
           />
         </div>
         <Show when={inputVariant() !== 'cli' && inlineSubmit()}>
           <button
             type="button"
-            disabled={props.disabled}
+            disabled={isDisabled()}
             class={`input-btn ${runtime().generating ? 'stop' : 'send'}`}
             onClick={() => void (runtime().generating ? cancel() : send())}
-            aria-label={runtime().generating ? '停止生成' : '发送消息'}
+            aria-label={emptyState() ? '开始新会话' : (runtime().generating ? '停止生成' : '发送消息')}
           >
             {runtime().generating ? '■' : '↑'}
           </button>
         </Show>
       </div>
+      <Show when={emptyState() && inputVariant() === 'cli'}>
+        <button type="button" class="input-empty-cli-submit" disabled={!draft().trim() || isDisabled()} onClick={() => void send()} aria-label="开始新会话">开始新会话</button>
+      </Show>
+      <Show when={emptyState()?.after}>{content => <div class="input-empty-after">{content()}</div>}</Show>
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        hidden
+        onChange={event => {
+          const files = event.currentTarget.files
+          if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({
+            id: `${file.name}:${file.size}:${file.lastModified}`,
+            name: file.name,
+            path: (file as File & { path?: string }).path || file.name,
+            mediaType: file.type || undefined,
+          }))])
+          event.currentTarget.value = ''
+        }}
+      />
     </div>
   )
 }

@@ -38,7 +38,7 @@
 | [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
-| [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | 双层 context/composer 布局；统一 native window control group；64 项相关回归；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度与命中区 |
+| [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | `SolidInputBar` 单实例空态/中控宿主；空态附加层与过渡样式；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度、动效与命中区 |
 | [P26](#p26-titlebar-与右侧栏插件平台) | Titlebar 与右侧栏插件平台 | **首片完成** | 2026-09-01 | `titlebarRegistry.ts`、`rightRailStore.ts`、Titlebar 三类菜单、ContextPanel scope 扩展；`cmd /c npm run build` | 完成全局 RightRailHost、拖拽分隔器、背景图策略与插件 API 迁移 |
 
 ## 未完成动作（2026-09-01）
@@ -329,6 +329,8 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 追加修正（2026-09-01）：空态 Composer 宽度调整为最大 `760px`（外层承载 `840px`），输入区最小高度 `144px`，上下文/选项/底部操作栏形成连续表面；terminal-like 保留方形边界但不再透明到难以识别。创建、附件和失败恢复逻辑未改动。`npm.cmd run check:solid` 通过。
 
 追加修正（2026-09-01）：右上角“右侧栏 / 界面 / 设置”改为纯文字触发器，移除图标按钮外观；对应菜单改为直角、紧凑列表，接近 VS Code 菜单语言；原生窗口控制按钮保持原样。
+
+追加修正（2026-09-01）：空态与正常中控区现在共用一个 `SolidInputBar` 实例，空态品牌区不再承载第二个 textarea。工作区、附件和乐观提示作为空态附加层挂载；模型/权限模式直接复用中控区 widget，Hermes ACP 思考强度（`none|minimal|low|medium|high|xhigh|max|ultra`）显示为模型后的全角括号。创建成功后由 `is-empty` 状态切换到中控区位置，空态不复用中控区背景。自动化证据：`npm.cmd run check:solid`。
 
 <a id="p26"></a>
 ### P26 · Titlebar 与右侧栏插件平台

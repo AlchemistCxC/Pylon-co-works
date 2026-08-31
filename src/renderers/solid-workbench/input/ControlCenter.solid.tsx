@@ -7,6 +7,9 @@ import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSu
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
+import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
+import { useIdentityStore } from '../../../identityStore.ts'
+import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
@@ -21,6 +24,77 @@ export function SolidControlCenter() {
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
   const [selected, setSelected] = createSignal<CcWidgetId>()
+  const [workspaceId, setWorkspaceId] = createSignal('')
+  const [modelId, setModelId] = createSignal('')
+  const [reasoningLevel, setReasoningLevel] = createSignal('medium')
+  const [mode, setMode] = createSignal('')
+  const [submitting, setSubmitting] = createSignal(false)
+  const [optimisticPrompt, setOptimisticPrompt] = createSignal<string>()
+  const [submitError, setSubmitError] = createSignal('')
+  const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
+  const emptyWorkspaces = () => input().availableWorkspaces ?? []
+  const modeOptions = () => runtime().availableModes.length > 0 ? runtime().availableModes : ['default', 'edit', 'auto', 'bypass']
+  const profileModel = () => runtime().activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
+  createEffect(() => {
+    if (modelId() || !profileModel()) return
+    setModelId(profileModel())
+  })
+  createEffect(() => {
+    if (mode() || !runtime().activeMode) return
+    setMode(runtime().activeMode || modeOptions()[0] || 'default')
+  })
+  createEffect(() => {
+    const options = emptyWorkspaces(); const current = workspaceId()
+    if (input().workspaceMode !== 'work') { if (current) setWorkspaceId(''); return }
+    if (current && options.some(item => item.id === current)) return
+    const recent = options.length ? options.reduce((a, b) => (b.lastActiveAt ?? 0) > (a.lastActiveAt ?? 0) ? b : a) : undefined
+    const hasExplicitActivity = options.some(item => item.lastActiveAt !== undefined && item.lastActiveAt !== null)
+    setWorkspaceId(options.length === 1 ? options[0]!.id : hasExplicitActivity ? recent?.id ?? '' : '')
+  })
+  const pickFolder = () => window.dispatchEvent(new CustomEvent('pylon:pick-workspace-folder'))
+  onMount(() => {
+    const onFolderPicked = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path
+      if (path) setWorkspaceDraft({ name: path.split(/[\\\\/]/).filter(Boolean).at(-1) || '新工作区', path })
+    }
+    window.addEventListener('pylon:workspace-folder-picked', onFolderPicked)
+    onCleanup(() => window.removeEventListener('pylon:workspace-folder-picked', onFolderPicked))
+  })
+  const createWorkspace = async () => {
+    const draft = workspaceDraft(); if (!draft?.name.trim() || !draft.path) return
+    try { const workspace = await useWorkspaceEntityStore.getState().createWorkspace(draft.name.trim(), draft.path); setWorkspaceId(workspace.id); setWorkspaceDraft(); setSubmitError('') }
+    catch (error) { setSubmitError(error instanceof Error ? error.message : '创建工作区失败') }
+  }
+  const createEmptySession = async (text: string, attachments: readonly WorkbenchAttachment[]) => {
+    if (input().workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return false }
+    if (submitting()) return false
+    setSubmitting(true); setSubmitError(''); setOptimisticPrompt(text)
+    try {
+      const created = await workbench.commands.createSession({
+        ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
+        ...(modelId().trim() ? { model: modelId().trim() } : {}),
+        reasoningLevel: reasoningLevel(),
+        mode: mode() || modeOptions()[0] || 'default',
+        initialPrompt: { text, attachments },
+      })
+      if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+      setOptimisticPrompt()
+      return true
+    } catch (error) {
+      setOptimisticPrompt(); setSubmitError(error instanceof Error ? error.message : String(error)); return false
+    } finally { setSubmitting(false) }
+  }
+  const emptyComposer = createMemo(() => !input().sessionId ? {
+    onSubmit: createEmptySession,
+    submitting,
+    submitLabel: () => submitting() ? '正在创建…' : '开始新会话',
+    before: <>
+      <Show when={optimisticPrompt()}>{text => <div class="solid-agent-empty-optimistic" role="status" aria-label="正在创建会话"><div class="solid-agent-empty-optimistic-user"><span class="term-user-prefix">❯</span><span>{text()}</span></div><div class="solid-agent-empty-optimistic-status" aria-live="polite">正在创建会话…</div></div>}</Show>
+      <Show when={input().workspaceMode === 'work'}><div class="solid-agent-empty-context-row"><span class="solid-agent-empty-context-icon" aria-hidden="true">▣</span><label class="solid-agent-empty-workspace"><span class="sr-only">工作区</span><select aria-label="新会话工作区" disabled={submitting() || emptyWorkspaces().length === 0} value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{emptyWorkspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select></label><button class="solid-agent-empty-context-create" type="button" disabled={submitting()} onClick={pickFolder}>新建工作区</button></div></Show>
+      <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
+    </>,
+    after: <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>,
+  } : undefined)
   let stopDragging: (() => void) | undefined
   onCleanup(() => stopDragging?.())
   createEffect(() => {
@@ -40,7 +114,7 @@ export function SolidControlCenter() {
     window.addEventListener('keydown', onKeyDown)
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
-  const readonly = () => input().preview === true || input().replayReadonly === true
+  const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
   const externalButtonMode = () => isExternalSubmitMode({
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
@@ -76,7 +150,7 @@ export function SolidControlCenter() {
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
-        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} predictionProvider={workbench.predictionProvider} />
+        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
       case 'session':
         return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
@@ -101,9 +175,9 @@ export function SolidControlCenter() {
         </span>
       }
       case 'model':
-        return <SolidModelWidget />
+        return <SolidModelWidget draftValue={!input().sessionId ? modelId : undefined} onDraftChange={!input().sessionId ? setModelId : undefined} reasoningValue={reasoningLevel} onReasoningChange={setReasoningLevel} />
       case 'mode':
-        return <SolidModeWidget />
+        return <SolidModeWidget draftValue={!input().sessionId ? mode : undefined} onDraftChange={!input().sessionId ? setMode : undefined} />
       case 'send':
         return <SolidSendWidget disabled={readonly()} />
       case 'attach':
@@ -228,7 +302,7 @@ export function SolidControlCenter() {
     : null
 
   return <div
-    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}`}
+    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${!input().sessionId ? ' is-empty' : ''}`}
     data-control-center="production"
     style={{
       '--cc-height': `${appearance().ccHeight}px`,

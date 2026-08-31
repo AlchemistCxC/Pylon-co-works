@@ -308,6 +308,55 @@
   position: relative;
   flex-shrink: 0;
   margin-top: auto;
+  transition: margin-top 260ms ease, transform 260ms ease, opacity 180ms ease;
+}
+
+/* The empty composer is the same control-center input host. Only its
+   placement/surface changes; the textarea and draft state never remount. */
+.solid-workbench-control-center-slot.is-empty {
+  width: min(760px, calc(100% - 48px));
+  margin: 22px auto clamp(28px, 8vh, 96px);
+  flex: 0 0 auto;
+  background: transparent;
+}
+.solid-workbench-control-center-slot.is-empty .cc-bg,
+.solid-workbench-control-center-slot.is-empty .cc-footer-status,
+.solid-workbench-control-center-slot.is-empty .cc-edit-hdr,
+.solid-workbench-control-center-slot.is-empty .cc-edit-toolbar,
+.solid-workbench-control-center-slot.is-empty .cc-prop-panel { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='session'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='workspace'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='activity'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='ekg'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='pct'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tasks'] { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-body,
+.solid-workbench-control-center-slot.is-empty .cc-input-slot,
+.solid-workbench-control-center-slot.is-empty .cc-widget { width: 100%; }
+.solid-workbench-control-center-slot.is-empty .cc-body { padding: 0; }
+.solid-workbench-control-center-slot.is-empty .input-empty-before { display: grid; gap: var(--ui-space-2); }
+.solid-workbench-control-center-slot.is-empty .input-empty-after { display: grid; gap: var(--ui-space-2); }
+.solid-workbench-control-center-slot.is-empty .input-empty-cli-submit {
+  align-self: flex-end; min-height: 28px; padding: 0 var(--ui-space-3); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 0; background: transparent; font: inherit; cursor: pointer;
+}
+.solid-workbench-control-center-slot.is-empty .input-empty-cli-submit:hover { color: var(--text); border-color: var(--accent); }
+.solid-workbench:not([data-session-id]) .solid-workbench-empty {
+  flex: 0 0 auto;
+  margin-top: clamp(56px, 13vh, 150px);
+  margin-bottom: 0;
+}
+.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty {
+  animation: solid-empty-composer-enter 280ms ease both;
+}
+@keyframes solid-empty-composer-enter {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .solid-workbench-control-center-slot { transition: none; }
+  .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
 }
 
 /* 过渡态：pet 实体未迁移（React PetCompanion 待 P4），文字占位不展示假 UI */

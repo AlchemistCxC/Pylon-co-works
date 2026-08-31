@@ -414,12 +414,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
         when={props.context.input().sessionId}
         fallback={<WorkbenchEmptyState
           status={snapshot().status}
-          availableModels={snapshot().availableModels}
-          activeModel={snapshot().activeModel}
-          availableModes={snapshot().availableModes}
-          activeMode={snapshot().activeMode}
           workspaceMode={props.context.input().workspaceMode ?? 'work'}
-          context={props.context}
         />}
       >
         <div class="solid-workbench-chat-shell">
@@ -546,12 +541,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
         <Show when={appearance().showPet}>
           <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
         </Show>
-        <Show when={!props.context.input().replayReadonly}>
-          <SolidControlCenter />
-        </Show>
-        <Show when={props.context.input().replayReadonly}>
-          <div class="solid-workbench-replay-overlay" role="status">历史回放 · 只读</div>
-        </Show>
+      </Show>
+      <Show when={!props.context.input().replayReadonly}>
+        <SolidControlCenter />
+      </Show>
+      <Show when={props.context.input().replayReadonly && props.context.input().sessionId}>
+        <div class="solid-workbench-replay-overlay" role="status">历史回放 · 只读</div>
       </Show>
     </section>
   )
@@ -1005,7 +1000,7 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
   }
 }
 
-function WorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; availableModes: readonly string[]; activeMode: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
+function LegacyWorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; availableModes: readonly string[]; activeMode: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
   const model = () => selectAgentEmptyState(props.workspaceMode)
   const workspaces = () => props.context.input().availableWorkspaces ?? []
   const profileModel = props.activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
@@ -1094,6 +1089,16 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     </form>
   </div>
 }
+void LegacyWorkbenchEmptyState
+function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'chat' }) {
+  const model = () => selectAgentEmptyState(props.workspaceMode)
+  return <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态">
+    <div class="agent-empty-brand" aria-hidden="true"><svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64"><path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" /><circle class="pylon-mark-node" cx="32" cy="21.215" r="4" /><circle class="pylon-mark-node" cx="20" cy="42" r="4" /><circle class="pylon-mark-node" cx="44" cy="42" r="4" /><path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" /></svg></div>
+    <div class="agent-empty-eyebrow">{model().eyebrow}</div><h2 class="agent-empty-title">{model().title}</h2>
+    <p class="agent-empty-description">{model().description}</p>
+  </div>
+}
+
 function WorkbenchRow(props: {
   descriptor: MessageListItem['descriptor']
   appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never

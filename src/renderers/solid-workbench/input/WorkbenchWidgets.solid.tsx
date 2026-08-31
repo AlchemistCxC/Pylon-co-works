@@ -7,7 +7,7 @@ function nextValue(values: readonly string[], current: string): string {
   return values[(index + 1 + values.length) % values.length] ?? values[0] ?? current
 }
 
-export function SolidModelWidget() {
+export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; reasoningValue?: () => string; onReasoningChange?: (value: string) => void } = {}) {
   const workbench = useSolidWorkbench()
   const runtime = () => workbench.runtimeSnapshot()
   const appearance = () => workbench.appearanceSnapshot()
@@ -16,10 +16,12 @@ export function SolidModelWidget() {
   const models = () => runtime().availableModels.length > 0
     ? runtime().availableModels
     : ['deepseek-v4-flash', 'deepseek-v4-pro']
-  const model = () => runtime().activeModel || models()[0] || '未配置模型'
+  const model = () => props.draftValue?.() || runtime().activeModel || models()[0] || '未配置模型'
+  const displayModel = () => props.reasoningValue?.() ? `${model()}（${props.reasoningValue()}）` : model()
   const scale = () => appearance().ccScale.model ?? 100
   const choose = async (target: string) => {
     const sessionId = workbench.input().sessionId
+    if (!sessionId && props.onDraftChange) { props.onDraftChange(target); setOpen(false); return }
     if (!sessionId || target === model()) return
     const result = await workbench.commands.setModel(sessionId, target)
     if (!result.ok) setError(result.error || '模型切换失败')
@@ -40,9 +42,12 @@ export function SolidModelWidget() {
               aria-haspopup="listbox"
               aria-expanded={open()}
               onClick={() => setOpen(value => !value)}
-            >{model()} ▾</button>
+            >{displayModel()} ▾</button>
             <Show when={open()}>
               <div class="model-menu" role="listbox" aria-label="模型列表">
+                <Show when={props.reasoningValue && props.onReasoningChange}>
+                  <div class="model-menu-section" aria-label="思考强度"><span>思考强度</span><For each={['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']}>{effort => <button type="button" role="option" aria-selected={effort === props.reasoningValue?.()} class={`model-item${effort === props.reasoningValue?.() ? ' active' : ''}`} onClick={() => props.onReasoningChange?.(effort)}>{effort}</button>}</For></div>
+                </Show>
                 <For each={models()}>{item => (
                   <button
                     type="button"
@@ -62,16 +67,16 @@ export function SolidModelWidget() {
             title="点击切换模型"
             style={{ 'font-size': `${scale()}%` }}
             onClick={() => void choose(nextValue(models(), model()))}
-          >{model()}</button>
+          >{displayModel()}</button>
         </Show>
       }>
-        <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{model()}</span>
+        <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
       </Show>
     </div>
   )
 }
 
-export function SolidModeWidget() {
+export function SolidModeWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void } = {}) {
   const workbench = useSolidWorkbench()
   const runtime = () => workbench.runtimeSnapshot()
   const appearance = () => workbench.appearanceSnapshot()
@@ -79,10 +84,11 @@ export function SolidModeWidget() {
   const modes = () => runtime().availableModes.length > 0
     ? runtime().availableModes
     : ['default', 'edit', 'auto', 'bypass']
-  const mode = () => runtime().activeMode || modes()[0] || 'default'
+  const mode = () => props.draftValue?.() || runtime().activeMode || modes()[0] || 'default'
   const scale = () => appearance().ccScale.mode ?? 100
   const cycle = async () => {
     const sessionId = workbench.input().sessionId
+    if (!sessionId && props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
     if (!sessionId) return
     const result = await workbench.commands.setMode(sessionId, nextValue(modes(), mode()))
     if (!result.ok) setError(result.error || '权限模式切换失败')
@@ -107,6 +113,17 @@ export function SolidModeWidget() {
       </Show>
     </div>
   )
+}
+
+/** Session-create reasoning preference. It uses the same compact control language
+ * as the mode widget and remains available in the normal control center. */
+export function SolidReasoningWidget(props: { value: () => string; onChange: (value: string) => void }) {
+  return <label class="cc-reasoning-widget" title="思考强度">
+    <span class="cc-reasoning-label">思考</span>
+    <select aria-label="思考强度" value={props.value()} onChange={event => props.onChange(event.currentTarget.value)}>
+      <option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option>
+    </select>
+  </label>
 }
 
 export function SolidSendWidget(props: { disabled?: boolean } = {}) {
@@ -153,7 +170,7 @@ export function SolidAttachWidget(props: { disabled?: boolean } = {}) {
       type="button"
       class={className()}
       style={{ 'font-size': `${scale()}%` }}
-      disabled={props.disabled || !runtime().canAttach}
+      disabled={props.disabled || (Boolean(workbench.input().sessionId) && !runtime().canAttach)}
       title={title()}
       aria-label={runtime().promptImage ? '添加附件' : '附件（当前 Agent 不支持图片）'}
       onClick={() => window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))}
