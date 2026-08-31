@@ -84,6 +84,29 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('同一绑定身份的 Session 元数据更新不会重建流式文档', async () => {
+    let loads = 0
+    let liveEvent: ((event: WorkbenchEventEnvelope) => void) | undefined
+    const active = session()
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => { loads += 1; return [] },
+      subscribe: listener => { liveEvent = listener; return () => { liveEvent = undefined } },
+    })
+
+    await service.bind(active)
+    liveEvent?.(message(1, 'assistant', '流式内容'))
+    const before = service.runtime.getSnapshot().document
+
+    await service.bind({ ...active, name: '终态更新后的标题', autoName: '自动标题', lastReplyAt: 42, periId: 'remote-1', workspaceId: 'workspace-2', workdir: 'C:/workspace-2' })
+
+    expect(loads).toBe(1)
+    expect(service.runtime.getSnapshot().document).toBe(before)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([
+      expect.objectContaining({ role: 'assistant', content: '流式内容' }),
+    ])
+    service.destroy()
+  })
+
   it('在 ACP 发送完成前把用户消息乐观投影到当前文档', async () => {
     let finishSend: (() => void) | undefined
     const active = session()

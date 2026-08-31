@@ -34,6 +34,7 @@
 | [P18](#p18-hermes-search-归一化) | Hermes search 解析为 unknown | **首片完成** | 2026-08-31 | Hermes title-only wire sample；`searchLinkClassification.test.ts`；agent catalog aliases | 真实 search_files/session_search trace 复核结果卡 |
 | [P19](#p19-空态创建会话乐观渲染) | 空态创建会话采用乐观渲染 | **首片完成** | 2026-08-31 | `SolidWorkbenchApp.solid.tsx` optimistic projection；mount 空态创建/失败回归 | 真实窗口复核创建延迟与切换无闪动 |
 | [P20](#p20-生成指示器次级文案与文案闪动) | 生成指示器次级文案过长、文案集合闪动 | **首片完成** | 2026-08-31 | `generationStateMachine.ts` 工具类型集合归一；`activityLine.ts` 参数剥离；`ChatView.css` 指示器字体契约；activity/Footer 回归 | 真实流式 trace 复核工具集合切换观感 |
+| [P21](#p21-流式终态重绑与状态源一致性) | 流式终态重绑与状态源一致性 | **首片完成** | 2026-09-01 | `workbenchSessionBindingKey` 幂等绑定 seam；`agentWorkbenchSession.test.ts` 同身份元数据回归；定向测试 | 真实终态 trace 复核无重挂载 |
 
 ## 核验记录
 
@@ -254,6 +255,17 @@ Hermes ACP start 更新只提供人类标题，不提供机器工具名；normal
 证据：`generationStateMachine.test.ts`、`GenerationFooter.solid.test.tsx`、`chatIndicatorAlignment.test.ts`；`npm.cmd run check:solid`。
 
 状态：首片完成。真实流式 trace 与窗口像素验收后置。
+
+<a id="p21"></a>
+### P21 · 流式终态重绑与状态源一致性
+
+终态事件会更新 Session 的 `lastReplyAt`、自动标题或远端 `periId`，Zustand 因此产生新的 Session 对象。此前 Workbench 绑定 effect 依赖对象引用，且 canonical replay 完成后再次无条件 `bind`；`bind` 会替换整份 `WorkbenchDocument`，造成流式结束时整页闪动或内容短暂清空。
+
+本次在 `agentWorkbenchSession` 增加 `workbenchSessionBindingKey`：仅 `(session.id, source, agentId, profileId)` 定义文档绑定身份；普通展示元数据、workspace 路径和 remote `periId` 不再触发重绑。`bind` 对同一身份幂等，主 effect 改用稳定 key，生命周期刷新即使重复到达也不会重建活动文档。Workbench Runtime 继续作为 Solid Renderer 的显示事实源，legacy controller 仅提供 ACP 兼容运行时元数据。
+
+证据：`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`AgentRendererSuiteWorkbench.tsx`；`agentWorkbenchSession.test.ts` 同身份元数据回归；`npm.cmd test -- --run src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts --pool=forks --maxWorkers=2`（15 项通过）。
+
+状态：首片完成。真实终态 trace 复核是否保持单次挂载后置。
 
 ## 状态变更模板
 

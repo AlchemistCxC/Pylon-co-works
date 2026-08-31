@@ -215,7 +215,11 @@ GUI 创建、恢复和发送链路会把 `profileId` 送入 Rust runtime 的 `Se
 
 `session/load` 成功时携带 `replayMetadata`。`boundary.kind=session-load-response` 表示匹配的 load response 是收集终点；`observedCount` 与 1-based retained ordinals 描述实际窗口。超限保留最近 N 条并报告 `droppedCount`。前端遇到缺失/不自洽 metadata 时标成 `metadata-unavailable`，不会把 partial replay 当完整 snapshot；export 对 truncated replay 返回 `replay_truncated`。
 
-### 8.3 当前本地存储
+### 8.3 Workbench 绑定与流式稳定性 seam
+
+Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；`chatEventController` 保留为 ACP/legacy Adapter，向 Runtime 提供按 source 隔离的生成元数据，不拥有第二份渲染历史。Session metadata 更新（标题、`lastReplyAt`、`periId`、workspace 路径）不得被当作文档身份变化。`workbenchSessionBindingKey` 只由 `(session.id, source, agentId, profileId)` 构成，`agentWorkbenchSession.bind` 对同一 key 幂等；因此终态事件不会因 Zustand 产生新 Session 对象而替换整份文档。需要真正重载时，使用显式 session/reload token seam，而不是依赖对象引用。
+
+### 8.4 当前本地存储
 
 SQLite schema 当前包括：
 

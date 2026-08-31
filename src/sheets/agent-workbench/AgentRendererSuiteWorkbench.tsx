@@ -11,7 +11,7 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
-import { createAgentWorkbenchSessionRuntime } from './agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
 import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
 import ReactWorkbenchFatalFallback, { type WorkbenchFatalFailure } from './ReactWorkbenchFatalFallback.tsx'
 import type { ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
@@ -141,7 +141,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     return { setMessages: ignore, setStreamingText: ignore, setStreamingThinking: ignore, setGenerating: ignore, setGenerationPhase: ignore, setSummary: ignore, setLastTokenAt: ignore }
   }, [])
 
-  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, session])
+  const sessionBindingKey = workbenchSessionBindingKey(session)
+  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey])
   useEffect(() => {
     const pickWorkspaceFolder = async () => {
       const selected = await open({ directory: true, multiple: false, title: '选择工作区文件夹' })
@@ -460,7 +461,7 @@ function ActiveAgentSessionLifecycle(props: {
   const lifecycle = useSessionLifecycle(props.session?.id ?? null, props.sessions, props.setters, props.selectSession)
   useEffect(() => {
     if (props.session && lifecycle.canonicalRefresh?.sessionId === props.session.id) void props.sessionRuntime.bind(props.session)
-  }, [props.sessionRuntime, props.session, lifecycle.canonicalRefresh])
+  }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
   return lifecycle.recoveryFailure
     ? <div className="renderer-suite-recovery-banner" role="alert">会话恢复失败：{lifecycle.recoveryFailure.message}</div>
     : null

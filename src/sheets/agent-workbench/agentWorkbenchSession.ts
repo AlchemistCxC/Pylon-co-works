@@ -24,6 +24,22 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
     | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
 }
 
+/**
+ * Fields that define the Workbench binding. Presentation-only Session metadata
+ * (name, lastReplyAt, autoName, etc.) must not rebuild the live document.
+ * Workspace and remote binding metadata are updated through their own reload
+ * seams; they are not document identity and must not reset an active stream.
+ */
+export function workbenchSessionBindingKey(session: Session | undefined): string {
+  if (!session) return 'unbound'
+  return [
+    session.id,
+    session.source,
+    session.agentId,
+    session.profileId,
+  ].join('\u0000')
+}
+
 function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
   if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
   if (validateCanonicalEvent(row).length > 0) return []
@@ -169,6 +185,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const appearance = createZustandWorkbenchAppearanceStore()
   const sessionUi = createSessionUiStore()
   let boundSessionId: string | undefined
+  let boundSessionBindingKey: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
     rejectOptimisticUser: (targetSource, clientMessageId) => chatController()?.rejectOptimisticUser(targetSource, clientMessageId),
@@ -386,6 +403,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   return {
     runtime, appearance, sessionUi, commands,
     async bind(session: Session | undefined): Promise<void> {
+      const nextBindingKey = workbenchSessionBindingKey(session)
+      // Session objects are recreated for ordinary metadata updates (name,
+      // lastReplyAt, autoName) and when canonical replay completes. Rebinding
+      // in those cases replaces the whole document and looks like a page
+      // refresh. Keep this seam idempotent; explicit identity changes still
+      // pass through the normal reload path below. Workspace reloads use the
+      // dedicated lifecycle/reload-token seam instead of rebinding here.
+      if (boundSessionBindingKey === nextBindingKey) return
+      boundSessionBindingKey = nextBindingKey
       const nextGeneration = ++generation
       boundSessionId = session?.id
       source = session?.source
