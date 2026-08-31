@@ -108,6 +108,7 @@ export function createStreamingDisplayScheduler(
   let disposed = false
   let lastPublishedAt = Number.NEGATIVE_INFINITY
   let lastTickAt = now()
+  let terminalFlushQueued = false
 
   const clearTimer = () => {
     if (timer === undefined) return
@@ -146,8 +147,9 @@ export function createStreamingDisplayScheduler(
     lastTickAt = timestamp
 
     if (requiresImmediateFlush(displayed, target)) {
-      publishSnapshot(target, timestamp)
       clearTimer()
+      if (isTerminalTransition(displayed, target)) queueTerminalFlush()
+      else publishSnapshot(target, timestamp)
       return
     }
 
@@ -174,8 +176,9 @@ export function createStreamingDisplayScheduler(
     }
 
     if (requiresImmediateFlush(displayed, snapshot)) {
-      publishSnapshot(snapshot)
       clearTimer()
+      if (isTerminalTransition(displayed, snapshot)) queueTerminalFlush()
+      else publishSnapshot(snapshot)
       return
     }
 
@@ -202,6 +205,21 @@ export function createStreamingDisplayScheduler(
     publishSnapshot(target)
   }
 
+  // Canonical projection and legacy generation metadata can arrive back to
+  // back for one terminal event. Coalesce only terminal transitions within the
+  // current microtask; explicit flush() and structural session switches remain
+  // synchronous so a completed response is never visibly truncated.
+  function queueTerminalFlush(): void {
+    if (terminalFlushQueued || disposed) return
+    terminalFlushQueued = true
+    queueMicrotask(() => {
+      terminalFlushQueued = false
+      if (disposed || paused || target === undefined) return
+      clearTimer()
+      publishSnapshot(target)
+    })
+  }
+
   const pause = () => {
     if (disposed) return
     paused = true
@@ -224,6 +242,12 @@ export function createStreamingDisplayScheduler(
   }
 
   return { push, flush, pause, resume, dispose }
+}
+
+function isTerminalTransition(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
+  if (current.sessionId !== next.sessionId || current.ownerKey !== next.ownerKey) return false
+  if (next.summary !== null && next.summary !== current.summary) return true
+  return current.generating && !next.generating
 }
 
 function positiveFinite(value: number | undefined, fallback: number): number {

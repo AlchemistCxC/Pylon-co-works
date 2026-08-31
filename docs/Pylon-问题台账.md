@@ -35,6 +35,7 @@
 | [P19](#p19-空态创建会话乐观渲染) | 空态创建会话采用乐观渲染 | **首片完成** | 2026-08-31 | `SolidWorkbenchApp.solid.tsx` optimistic projection；mount 空态创建/失败回归 | 真实窗口复核创建延迟与切换无闪动 |
 | [P20](#p20-生成指示器次级文案与文案闪动) | 生成指示器次级文案过长、文案集合闪动 | **首片完成** | 2026-08-31 | `generationStateMachine.ts` 工具类型集合归一；`activityLine.ts` 参数剥离；`ChatView.css` 指示器字体契约；activity/Footer 回归 | 真实流式 trace 复核工具集合切换观感 |
 | [P21](#p21-流式终态重绑与状态源一致性) | 流式终态重绑与状态源一致性 | **首片完成** | 2026-09-01 | `workbenchSessionBindingKey` 幂等绑定 seam；`agentWorkbenchSession.test.ts` 同身份元数据回归；定向测试 | 真实终态 trace 复核无重挂载 |
+| [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
 
 ## 核验记录
 
@@ -266,6 +267,17 @@ Hermes ACP start 更新只提供人类标题，不提供机器工具名；normal
 证据：`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`AgentRendererSuiteWorkbench.tsx`；`agentWorkbenchSession.test.ts` 同身份元数据回归；`npm.cmd test -- --run src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts --pool=forks --maxWorkers=2`（15 项通过）。
 
 状态：首片完成。真实终态 trace 复核是否保持单次挂载后置。
+
+<a id="p22"></a>
+### P22 · 终态双发布与显示闪动
+
+canonical document 投影与 legacy generation metadata 可能在同一终态事件中连续到达。若每次都立即提交，Footer 会先看到文档终态、再看到 summary/生成态终态，造成一帧级闪动。
+
+`streamingDisplayScheduler` 现在仅对同一会话/owner 的终态 transition（summary 到达或 generating 从 true 变 false）做微任务级 latest-wins 合并；会话切换、owner/generation 变化和显式 `flush()` 仍保持同步。事实源、Workbench Runtime 和普通流式节奏不变，没有新增中央状态机。
+
+证据：`src/renderers/solid-workbench/streamingDisplayScheduler.ts`；`streamingDisplayScheduler.test.ts`（终态 metadata 合并、会话切换同步）；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts --pool=forks --maxWorkers=2`（2 项通过）。
+
+状态：首片完成。真实终态 trace 复核单次视觉提交后置。
 
 ## 状态变更模板
 
