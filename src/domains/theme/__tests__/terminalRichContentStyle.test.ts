@@ -19,5 +19,8 @@ describe('terminal-like rich content style contract', () => {
     expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-code-block\s*\{[^}]*border-left:/s)
     expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-search-results\s*\{[^}]*border:0 !important[^}]*background:transparent !important/s)
     expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-link-card\s*\{[^}]*grid-template-columns:[^}]*border:0 !important/s)
+    // The colored code-block rail replaces the per-line `│` gutter in the
+    // terminal-like preset, so nested code does not show two vertical lines.
+    expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-code-block \.term-code-gutter\s*\{[^}]*display:none/s)
   })
 })

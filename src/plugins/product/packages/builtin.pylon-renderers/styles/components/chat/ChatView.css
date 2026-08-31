@@ -1766,6 +1766,12 @@
   border-left:var(--line-width-1) solid color-mix(in srgb,var(--border-focus) 60%,transparent);
   background:transparent;
 }
+/* The colored block rail is the terminal-like gutter.  CodeBlock still emits
+   a textual `│` per line for the bordered/default presentation; hiding that
+   duplicate marker here leaves one continuous colored rail. */
+.app[data-interface-mode="terminal-like"] .term-code-block .term-code-gutter {
+  display:none;
+}
 @media (max-width:720px) {
   .app[data-interface-mode="terminal-like"] .solid-structured-head { flex-wrap:wrap; }
   .app[data-interface-mode="terminal-like"] .solid-structured-meta { width:100%; margin-left:0; justify-content:flex-start; }
