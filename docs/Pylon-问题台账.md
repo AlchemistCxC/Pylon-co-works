@@ -335,6 +335,7 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 - 新增应用级 `useRightRailStore`，集中维护右栏折叠、宽度、active panel 和背景图显示元数据；宽度统一限制在 `220–560px`，默认 `320px`。
 - `ContextPanelContribution` 增加 global/contextual scope、placement、图标和宽度能力字段；旧 Sheet 条件筛选仍兼容。
 - Titlebar 的右侧栏、界面、设置入口改为三个独立菜单：右栏选择面板，界面选择注册表模式，设置暂只提供“全局设置”。
+- `InterfaceModeContribution` 预留 `titlebarRecipeId`、`leftRailRecipeId`、`rightRailRecipeId` 与 capabilities 字段，当前内置模式行为保持不变。
 - 新增 `RightRailHost`，右栏壳已从 `SheetRightSlot` 移到 `SheetLayout` 应用布局层；支持指针拖拽和键盘方向/Home/End 调整宽度，旧 `SheetRightSlot` 仅保留兼容导出。
 - 右栏背景记录导入时的 `baseWidth` 与 `fit/fill/stretch` 策略；右栏宽度字段在主题设置中隐藏，仅保留旧配置读取兼容。
 
