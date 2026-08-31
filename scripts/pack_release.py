@@ -12,6 +12,7 @@
       portable.flag
       data/                    # 空目录，触发 portable 模式
       tools/install-webview2.bat
+      tools/repair-hermes-acp.bat/.ps1  # optional Hermes ACP stdin repair
       tools/MicrosoftEdgeWebview2Setup.exe   # 受控 release 资源，默认必须存在
       resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
     release/pylon-<version>-win64.zip
@@ -104,7 +105,7 @@ def resolve_version() -> str:
 # ── 文件审计 ──
 
 def is_text_file(path: Path) -> bool:
-    return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".json", ".md"}
+    return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".ps1", ".json", ".md"}
 
 
 def is_hermes_runtime_payload(rel_path: str) -> bool:
@@ -262,6 +263,15 @@ def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Pat
     if not bat_src.is_file():
         raise PackError(f"缺少 release 模板: {bat_src}")
     files.append((bat_src, "tools/install-webview2.bat"))
+
+    # Optional user repair helper for older source-based Hermes installs.  It
+    # is deliberately shipped as a script (never auto-executed): users choose
+    # check/repair/restore from the menu, and every edit receives a backup.
+    for repair_name in ("repair-hermes-acp.bat", "repair-hermes-acp.ps1"):
+        repair_src = TEMPLATE_DIR / "tools" / repair_name
+        if not repair_src.is_file():
+            raise PackError(f"缺少 release 模板: {repair_src}")
+        files.append((repair_src, f"tools/{repair_name}"))
 
     bootstrapper = TEMPLATE_DIR / "tools" / "MicrosoftEdgeWebview2Setup.exe"
     if without_webview2:

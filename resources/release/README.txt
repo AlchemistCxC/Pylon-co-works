@@ -21,6 +21,12 @@ scripts\prepare_hermes_runtime.py 按固定 SHA-256 准备。
 如需调整 Hermes 内部并发工具批次的兜底秒数，可在该 Agent 的 `env` 中设置
 `HERMES_CONCURRENT_TOOL_TIMEOUT_S`；未设置时为 30，且只作用于 Hermes 子进程。
 
+如果使用的 Hermes 版本尚未包含 ACP Bash 探针修复，可运行
+`tools\repair-hermes-acp.bat`，按菜单选择“检查”或“修复”。修复只针对可访问的
+Hermes 源码 `tools\environments\local.py`，会先生成时间戳备份；编译版 hermes.exe
+无法由该脚本直接修改，请升级到包含 Hermes 提交 `8f956812c` 的版本。脚本也支持
+命令行 `-Check`、`-Repair`、`-Restore` 以及 `-HermesRoot <源码目录>`。
+
 【数据目录】
 本包为便携模式：所有数据（会话、插件、MCP、宠物等）保存在本目录 data\ 下。
 删除 portable.flag 并移走 data\ 目录后启动，将回到系统 AppData 目录。
