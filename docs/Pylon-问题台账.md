@@ -38,6 +38,7 @@
 | [P22](#p22-终态双发布与显示闪动) | 终态双发布与显示闪动 | **首片完成** | 2026-09-01 | `streamingDisplayScheduler` 同 tick terminal coalescing；`streamingDisplayScheduler.test.ts`；`npm.cmd test -- --run src/renderers/solid-workbench/__tests__/streamingDisplayScheduler.test.ts` | 真实终态 trace 复核单次视觉提交 |
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
+| [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | 双层 context/composer 布局；统一 native window control group；64 项相关回归；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度与命中区 |
 
 ## 未完成动作（2026-09-01）
 
@@ -312,6 +313,17 @@ Host Port 契约允许 document reader 与 generation reader 分离，但 Solid 
 证据：`src/renderers/solid-workbench/hostPortSolidServices.ts`；`workbenchHostPort.test.ts` split generation reader 回归；定向测试 14 项通过。
 
 状态：首片完成。第三方 Suite 实机复核 generation-only 更新后置。
+
+<a id="p25"></a>
+### P25 · 空态 Composer 与窗口控制统一
+
+Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 workspace 作为顶部 context row，模型/权限/思考强度位于输入区下方的紧凑 toolbar；Chat 模式使用自身 description，不再显示 Work 文案。创建中继续冻结同一 Composer，失败保留草稿和焦点。
+
+标题栏右侧拆分为应用功能控制组与原生窗口控制组，中间使用统一分隔线；最小化/最大化/关闭统一图标盒、命中区和 focus 规则，预设只改变材质与圆角，不再在 glyph/icon 之间改变语义形状。
+
+证据：`SolidWorkbenchApp.solid.tsx`、`WorkbenchChrome.css`、`WorkspaceTitlebar.tsx`、相关挂载与标题栏回归；64 项定向测试和 `npm.cmd run check:solid` 通过。
+
+状态：首片完成。真实窗口复核不同预设下的密度、命中区与视觉一致性后置。
 
 ## 状态变更模板
 

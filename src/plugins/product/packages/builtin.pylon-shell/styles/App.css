@@ -46,6 +46,9 @@
 .workspace-titlebar-drag { min-width:18px; flex:1; -webkit-app-region:drag; }
 .workspace-titlebar-launchers,
 .workspace-window-controls { display:flex; align-items:stretch; flex-shrink:0; -webkit-app-region:no-drag; }
+.workspace-window-app-controls,
+.workspace-window-native-controls { display:flex; align-items:stretch; flex-shrink:0; }
+.workspace-window-controls-divider { width:1px; height:18px; margin:auto var(--ui-space-1); background:color-mix(in srgb,var(--border) 78%,transparent); }
 .workspace-titlebar-launchers { border-left:0; border-right:0; }
 .workspace-titlebar-icon,
 .workspace-window-controls button {
@@ -71,6 +74,7 @@
 /* Sheet Launcher 与恢复关闭项是 Workspace 导航入口，图标使用主题强调色。 */
 .workspace-window-controls { height:calc(var(--titlebar-h,44px) - var(--line-width-1)); }
 .workspace-window-controls button { width:38px; margin:var(--ui-space-1) 0; height:calc(var(--titlebar-h,44px) - var(--ui-space-2)); font-size:var(--font-size-md); }
+.workspace-window-native-controls button { display:grid; place-items:center; }
 .workspace-window-controls .close:hover { background:rgba(190,40,40,0.72); color:#fff; }
 
 .sheet-tab-region { position:relative; min-width:0; flex:1; display:flex; align-items:stretch; overflow:hidden; -webkit-app-region:no-drag; }
@@ -193,6 +197,7 @@
   }
   .workspace-window-controls,
   .app[data-interface-mode="modern-gui"] .workspace-window-controls { padding-inline:0; }
+  .workspace-window-controls-divider { margin-inline:0; }
 }
 
 .sheet-launcher-overlay {
@@ -396,6 +401,7 @@
 .app[data-interface-mode="modern-gui"] .workspace-window-controls button:hover { transform:translateY(-1px); }
 .app[data-interface-mode="modern-gui"] .workspace-sidebar-toggle { flex-basis:34px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls { height:44px; padding:0 4px; }
+.app[data-interface-mode="modern-gui"] .workspace-window-controls-divider { height:22px; margin-inline:3px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls .close:hover { border-radius:10px; }
 .app[data-interface-mode="modern-gui"] .workspace-launcher-separator { height:16px; opacity:.55; }
 .app[data-interface-mode="modern-gui"] .sheet-tab-region { height:36px; align-items:center; }
@@ -550,11 +556,11 @@
 }
 .app[data-interface-mode="terminal-like"] .workspace-window-controls {
   padding-left:var(--ui-space-1);
-  border-left:1px solid color-mix(in srgb,var(--border) 72%,transparent);
+  border-left:0;
 }
-.app[data-interface-mode="terminal-like"] .workspace-window-controls > .titlebar-window-btn-start {
-  margin-left:var(--ui-space-2);
-  box-shadow:inset 1px 0 0 color-mix(in srgb,var(--border) 72%,transparent);
+.app[data-interface-mode="terminal-like"] .workspace-window-native-controls > .titlebar-window-btn-start {
+  margin-left:0;
+  box-shadow:none;
 }
 
 /* Keep the large touch target when the pointer is coarse; only the visual

@@ -113,16 +113,21 @@ export default function WorkspaceTitlebar({
       </div>
 
       <div className="workspace-window-controls">
-        <button type="button" onClick={onToggleRightPanel} disabled={!rightPanelEnabled} title={rightPanelEnabled ? '右栏' : '当前 Sheet 无右栏'} aria-label={rightPanelEnabled ? '切换右栏' : '当前 Sheet 无右栏'}>{chromeStyle === 'icons' ? <PanelRight size={15} aria-hidden="true" /> : '☷'}</button>
-        {onToggleInterfaceMode && <button type="button" className="interface-mode-quick-toggle" onClick={onToggleInterfaceMode}
+        <div className="workspace-window-app-controls">
+          <button type="button" onClick={onToggleRightPanel} disabled={!rightPanelEnabled} title={rightPanelEnabled ? '右栏' : '当前 Sheet 无右栏'} aria-label={rightPanelEnabled ? '切换右栏' : '当前 Sheet 无右栏'}>{chromeStyle === 'icons' ? <PanelRight size={15} aria-hidden="true" /> : '☷'}</button>
+          {onToggleInterfaceMode && <button type="button" className="interface-mode-quick-toggle" onClick={onToggleInterfaceMode}
           title={`切换到 ${quickSwitchLabel ?? (interfaceMode === 'modern-gui' ? 'Terminal-like' : '现代 GUI')}`}
           aria-label={`切换到 ${quickSwitchLabel ?? (interfaceMode === 'modern-gui' ? 'Terminal-like' : '现代 GUI')}`}>
-          {chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}
-        </button>}
-        <button type="button" onClick={onToggleSettings} title="设置" aria-label="切换设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}</button>
-        <button type="button" className="titlebar-window-btn titlebar-window-btn-start" onClick={onMinimize} title="最小化" aria-label="最小化">{chromeStyle === 'icons' ? <Minus size={14} aria-hidden="true" /> : '─'}</button>
-        <button type="button" className="titlebar-window-btn" onClick={onToggleFullscreen} title="最大化或还原" aria-label="最大化或还原">{chromeStyle === 'icons' ? <Square size={12} aria-hidden="true" /> : '□'}</button>
-        <button type="button" className="titlebar-window-btn close" onClick={onCloseWindow} title="关闭" aria-label="关闭窗口">{chromeStyle === 'icons' ? <X size={15} aria-hidden="true" /> : '×'}</button>
+            {chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}
+          </button>}
+          <button type="button" onClick={onToggleSettings} title="设置" aria-label="切换设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}</button>
+        </div>
+        <span className="workspace-window-controls-divider" aria-hidden="true" />
+        <div className="workspace-window-native-controls" aria-label="窗口控制">
+          <button type="button" className="titlebar-window-btn titlebar-window-btn-start" onClick={onMinimize} title="最小化" aria-label="最小化"><Minus size={14} aria-hidden="true" /></button>
+          <button type="button" className="titlebar-window-btn" onClick={onToggleFullscreen} title="最大化或还原" aria-label="最大化或还原"><Square size={12} aria-hidden="true" /></button>
+          <button type="button" className="titlebar-window-btn close" onClick={onCloseWindow} title="关闭" aria-label="关闭窗口"><X size={15} aria-hidden="true" /></button>
+        </div>
       </div>
     </header>
   )
