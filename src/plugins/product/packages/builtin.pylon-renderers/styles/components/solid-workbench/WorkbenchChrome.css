@@ -335,7 +335,7 @@
   flex: 1;
   align-items: center;
   align-self: center;
-  width: min(960px, calc(100% - 48px));
+  width: min(840px, calc(100% - 48px));
   box-sizing: border-box;
   padding-inline: 12px;
   margin: auto;
@@ -345,7 +345,7 @@
   display: grid;
   gap: var(--ui-space-2);
   width: 100%;
-  max-width: 900px;
+  max-width: 760px;
   margin-top: var(--ui-space-6);
   padding: var(--ui-space-3) var(--ui-space-4) var(--ui-space-2);
   text-align: left;
@@ -376,7 +376,7 @@
 .solid-agent-empty-new-workspace { display:flex; align-items:center; gap:var(--ui-space-2); padding:var(--ui-space-2); border:1px dashed var(--border); color:var(--text-dim); font-size:var(--font-size-xs); }
 .solid-agent-empty-new-workspace input { min-width:0; flex:1; border:1px solid var(--border); background:var(--surface-panel); color:var(--text); padding:4px 6px; }
 .solid-agent-empty-new-workspace code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.solid-agent-empty-optimistic { width:100%; max-width:900px; margin-top:var(--ui-space-4); padding:var(--ui-space-2) var(--ui-space-3); border-inline-start:3px solid var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent); }
+.solid-agent-empty-optimistic { width:100%; max-width:760px; margin-top:var(--ui-space-4); padding:var(--ui-space-2) var(--ui-space-3); border-inline-start:3px solid var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent); }
 
 @media (max-width: 560px) {
   .solid-agent-empty-context-row, .solid-agent-empty-options { align-items: stretch; flex-direction: column; }

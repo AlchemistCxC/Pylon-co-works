@@ -6,7 +6,7 @@ import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 import { selectAgentStatus } from '../components/settings/agentTypes'
-import { Menu, Minus, PanelRight, PanelsTopLeft, Plus, RotateCcw, Settings, Square, Terminal, X } from 'lucide-react'
+import { Menu, Minus, Plus, RotateCcw, Square, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -168,7 +168,7 @@ export default function WorkspaceTitlebar({
       <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'right-panel' ? null : 'right-panel')} disabled={availablePanels.length === 0} title={availablePanels.length > 0 ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏">{chromeStyle === 'icons' ? <PanelRight size={15} aria-hidden="true" /> : '☷'}<span className="workspace-titlebar-entry-label">右侧栏</span></button>
+            <button type="button" onClick={() => setOpenMenu(value => value === 'right-panel' ? null : 'right-panel')} disabled={availablePanels.length === 0} title={availablePanels.length > 0 ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
             {openMenu === 'right-panel' && <div className="workspace-menu workspace-menu-chrome" role="menu">
               <div className="workspace-menu-heading">右侧栏</div>
               {availablePanels.length === 0 && <div className="workspace-menu-empty">当前没有可用面板</div>}
@@ -178,14 +178,14 @@ export default function WorkspaceTitlebar({
             </div>}
           </div>
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'interface' ? null : 'interface')} title="界面模式" aria-label="界面模式">{chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}<span className="workspace-titlebar-entry-label">界面</span></button>
+            <button type="button" onClick={() => setOpenMenu(value => value === 'interface' ? null : 'interface')} title="界面模式" aria-label="界面模式"><span className="workspace-titlebar-entry-label">界面</span></button>
             {openMenu === 'interface' && <div className="workspace-menu workspace-menu-chrome" role="menu">
               <div className="workspace-menu-heading">界面模式</div>
               {modeSnapshot.entries.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={entry.value.id === interfaceMode} onClick={() => { try { const ok = activateInterfaceMode(entry.value.id); if (ok) setOpenMenu(null) } catch { /* activation failure is reported by the transaction */ } }}>{entry.value.label}{entry.value.id === interfaceMode ? '  ✓' : ''}</button>)}
             </div>}
           </div>
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'settings' ? null : 'settings')} title="设置" aria-label="设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}<span className="workspace-titlebar-entry-label">设置</span></button>
+            <button type="button" onClick={() => setOpenMenu(value => value === 'settings' ? null : 'settings')} title="设置" aria-label="设置"><span className="workspace-titlebar-entry-label">设置</span></button>
             {openMenu === 'settings' && <div className="workspace-menu workspace-menu-chrome" role="menu"><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { setOpenMenu(null); onToggleSettings() }}>全局设置</button></div>}
           </div>
           {contributedActions.map(entry => {
