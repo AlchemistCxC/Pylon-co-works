@@ -45,3 +45,5 @@ agents.yaml
 # codex binaries (local only)
 codex.exe
 codex-code-mode-host.exe
+
+dist-plugin-devkit/
