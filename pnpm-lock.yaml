@@ -80,9 +80,6 @@ importers:
       hast-util-to-html:
         specifier: ^9.0.5
         version: 9.0.5
-      immer:
-        specifier: ^11.1.15
-        version: 11.1.18
       lucide-react:
         specifier: ^1.26.0
         version: 1.38.0(react@19.2.8)
@@ -5002,7 +4999,8 @@ snapshots:
 
   ignore@7.0.7: {}
 
-  immer@11.1.18: {}
+  immer@11.1.18:
+    optional: true
 
   import-meta-resolve@4.2.0: {}
 
