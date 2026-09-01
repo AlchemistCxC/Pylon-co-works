@@ -24,6 +24,13 @@ export function consumeLegacyProfilePayload(): ProfilePersistenceState | undefin
   return payload
 }
 
+/** Test/HMR seam: clears completed stage memory after an application teardown. */
+export function resetHydrationCoordinator(): void {
+  if (inFlight) return
+  completedStages = []
+  pendingLegacy = undefined
+}
+
 /**
  * ISSUE-01 启动身份水合事务。
  *
