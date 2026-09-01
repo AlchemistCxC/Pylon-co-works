@@ -1,4 +1,4 @@
-import manifestSource from './pylon-plugin.json'
+import manifestSource from './pylon-plugin.json' with { type: 'json' }
 import { createBuiltinPylonToolsPlugin } from '../../builtinPylonTools.ts'
 import { defineFirstPartyProductPackage } from '../../firstPartyProductPackage.ts'
 

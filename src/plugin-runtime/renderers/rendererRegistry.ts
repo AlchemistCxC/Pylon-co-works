@@ -20,6 +20,17 @@ import { normalizeRendererSettingsPlacement, normalizeRendererSettingsSchema } f
 import type { RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
 import { validateRenderKindSettingsNamespace, validateRendererContributionGraph, validateRendererSlotContribution, validateRendererSuiteContribution } from './rendererSuiteValidation.ts'
 export type { RendererActivationSnapshot, RendererDiagnostic, RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
+export type {
+  CodeHighlighterDefinition,
+  ContentRendererDefinition,
+  MessageRendererDefinition,
+  RendererDefinitionBase,
+  RenderKindDefinition,
+  RenderNode,
+  RenderResolveContext,
+  ToolRendererDefinition,
+} from './rendererTypes.ts'
+export type { RendererApi } from './pluginRendererApi.ts'
 
 export interface RendererRegistryTransaction {
   registerRenderKind(definition: RenderKindDefinition): AsyncDisposable
