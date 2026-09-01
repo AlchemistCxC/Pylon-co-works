@@ -18,7 +18,7 @@ export const APPROVAL_MODE_STORAGE_KEY = 'pylon-approval-mode'
 type ApprovalModeStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 function defaultStorage(): ApprovalModeStorage | undefined {
-  return typeof localStorage === 'undefined' ? undefined : localStorage
+  try { return typeof localStorage === 'undefined' ? undefined : localStorage } catch { return undefined }
 }
 
 export function readPersistedApprovalMode(storage: ApprovalModeStorage = defaultStorage()!): ApprovalMode | null {
