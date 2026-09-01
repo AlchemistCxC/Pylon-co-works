@@ -118,7 +118,7 @@ describe('createSettingsSurface protocol', () => {
 
   it('ignores malformed host:input and renders an empty form without values', () => {
     const { bridge, listeners, container } = harness()
-    const surface = createSettingsSurface({ fields: [{ type: 'toggle', key: 'on', label: '开' }] })
+    const surface = createSettingsSurface({ id: 'malformed.page', fields: [{ type: 'toggle', key: 'on', label: '开' }] })
     const unmount = surface.mount(container, bridge)
     listeners.get('host:input')!.forEach(fn => fn(null))
     listeners.get('host:input')!.forEach(fn => fn({ values: 'not-an-object' }))

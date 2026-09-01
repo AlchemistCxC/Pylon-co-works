@@ -15,9 +15,9 @@ import type { PluginHookApi } from '../plugin-runtime/hooks/pluginHookApi.ts'
 import type { HookDefinition, HookInvocationResult, HookName } from '../plugin-runtime/hooks/hookTypes.ts'
 import type { PluginSessionsApi, PluginTurnsApi } from '../plugin-runtime/sessionData/pluginSessionDataApi.ts'
 import type { PluginSettingsApi } from '../plugin-runtime/settings/pluginSettingsApi.ts'
+import type { PluginSettingValue } from '../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { PluginUiApi } from '../plugin-runtime/ui/pluginUiApi.ts'
-import type { PluginUiSurface } from '../plugin-runtime/ui/pluginUiTypes.ts'
-import type { RegistryTransaction } from '../plugin-runtime/registry/types.ts'
+import type { PluginUiSurface, PluginUiUnmount } from '../plugin-runtime/ui/pluginUiTypes.ts'
 
 export interface MockContextOptions {
   pluginId?: string
@@ -56,16 +56,6 @@ export interface MockPluginActivationContext extends BuiltinPluginActivationCont
   readonly __scopeDispose: () => Promise<void>
 }
 
-function recordingTransaction<T>(): RegistryTransaction<T> {
-  return {
-    register: () => ({ dispose() { /* 记录式 mock：注册即生效 */ } }),
-    validate: () => {},
-    commit: () => {},
-    rollback: () => {},
-    revert: () => {},
-  } as never
-}
-
 /** 其余 13 个 API 面：任何方法调用都被记录，返回 undefined */
 function recordingApi<T extends object>(member: string, log: Array<{ member: string; method: string; args: unknown[] }>): T {
   return new Proxy({} as T, {
@@ -100,16 +90,18 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
   const turnMeta = new Map<string, Record<string, unknown>>()
   const turnCtx = new Map<string, Record<string, unknown>>()
   const turnKnown = new Set<string>()
-  const settingsValues: Record<string, unknown> = { ...(options.settingsValues ?? {}) }
+  const settingsValues: Record<string, PluginSettingValue> = {
+    ...(options.settingsValues as Record<string, PluginSettingValue> | undefined ?? {}),
+  }
   const settingsListeners = new Set<() => void>()
   const recorded: Array<{ member: string; method: string; args: unknown[] }> = []
   let settingsWrites = 0
 
   const commands: PluginCommandApi = {
-    register: (definition) => { commandBucket.push(definition); return undefined },
+    register: (definition: CommandDefinition) => { commandBucket.push(definition); return undefined },
   } as never
   const hooks: PluginHookApi = {
-    register: (hookName, definition) => { hookBucket.push({ hookName, definition }); return undefined },
+    register: (hookName: HookName, definition: HookDefinition) => { hookBucket.push({ hookName, definition }); return undefined },
   } as never
   const sessions: PluginSessionsApi = {
     getPluginMetadata: sessionId => ({ ...(sessionMeta.get(sessionId) ?? {}) }),
@@ -160,7 +152,7 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     },
   }
   const ui: PluginUiApi = {
-    registerSurface: surface => { surfaces.push(surface) },
+    registerSurface: (surface: PluginUiSurface) => { surfaces.push(surface) },
   } as never
 
   const context = {
@@ -244,7 +236,9 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
         const handlers = new Map<string, Set<(detail: unknown) => void>>()
         const bridge = {
           on(event: string, listener: (detail: unknown) => void): () => void {
-            handlers.get(event)?.add(listener) ?? handlers.set(event, new Set([listener]))
+            const bucket = handlers.get(event)
+            if (bucket) bucket.add(listener)
+            else handlers.set(event, new Set([listener]))
             return () => { handlers.get(event)?.delete(listener) }
           },
           emit(event: string, detail: unknown): void {
@@ -254,16 +248,20 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
           clear(): void { events.length = 0 },
         }
         const unmount = surface.mount(container, bridge)
-      // 与 PluginSettingsPageHost 同款回写：surface 的 settings:set/remove 直通设置存储
-      bridge.on('settings:set', detail => {
-        const payload = detail as { key?: string; value?: unknown }
-        if (typeof payload?.key === 'string') settings.setValue(payload.key, payload.value)
-      })
-      bridge.on('settings:remove', detail => {
-        if (typeof detail === 'string') settings.removeValue(detail)
-      })
-      // 与 PluginSettingsPageHost 一致：挂载后立即派发一次 host:input（当前持久化值）
-      bridge.emit('host:input', { pluginId, pageId: surfaceId, values: settingsValues })
+        const disposeSurface = (value: PluginUiUnmount): void => {
+          if (typeof value === 'function') void value()
+          else if (value && typeof value === 'object') void value.unmount()
+        }
+        // 与 PluginSettingsPageHost 同款回写：surface 的 settings:set/remove 直通设置存储
+        bridge.on('settings:set', detail => {
+          const payload = detail as { key?: string; value?: unknown }
+          if (typeof payload?.key === 'string') settings.setValue(payload.key, payload.value as PluginSettingValue)
+        })
+        bridge.on('settings:remove', detail => {
+          if (typeof detail === 'string') settings.removeValue(detail)
+        })
+        // 与 PluginSettingsPageHost 一致：挂载后立即派发一次 host:input（当前持久化值）
+        bridge.emit('host:input', { pluginId, pageId: surfaceId, values: settingsValues })
         return {
           container,
           events,
@@ -271,8 +269,8 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
             bridge.emit('host:input', { pluginId, pageId: surfaceId, values })
           },
           unmount(): void {
-            if (typeof unmount === 'function') unmount()
-            else if (unmount && typeof unmount === 'object' && typeof unmount.unmount === 'function') unmount.unmount()
+            if (unmount instanceof Promise) void unmount.then(disposeSurface)
+            else disposeSurface(unmount)
             container.replaceChildren()
           },
         }

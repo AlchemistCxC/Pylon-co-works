@@ -107,7 +107,7 @@ describe('createMockContext', () => {
     const module = definePlugin({
       async activate(context) {
         context.scope.listen(
-          { addEventListener() {}, removeEventListener() { disposed += 1 } },
+          { addEventListener() {}, removeEventListener() { disposed += 1 }, dispatchEvent() { return true } },
           'click',
           () => {},
         )
@@ -119,6 +119,24 @@ describe('createMockContext', () => {
     await ctx.__scopeDispose()
     expect(disposed).toBe(1)
     expect(ctx.scope.isDisposed).toBe(true)
+  })
+
+  it('异步 UI surface mount 的 disposer 也能通过测试 driver 回收', async () => {
+    const ctx = createMockContext()
+    let disposed = 0
+    const module = definePlugin({
+      activate(context) {
+        context.ui.registerSurface({
+          id: 'mock.a.async-surface',
+          mount: async () => ({ unmount() { disposed += 1 } }),
+        })
+      },
+    })
+    await module.activate(ctx)
+    const driver = ctx.__ui.mount('mock.a.async-surface')
+    driver.unmount()
+    await Promise.resolve()
+    expect(disposed).toBe(1)
   })
 
   it('未实现的 API 面以记录代理兜底（调用被记录而非崩溃）', async () => {
