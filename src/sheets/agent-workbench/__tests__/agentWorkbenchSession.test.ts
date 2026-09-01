@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import type { Session } from '../../../identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
@@ -23,6 +23,16 @@ function message(sequence: number, role: 'user' | 'assistant', text: string, ses
   })
 }
 
+function completedMessage(sequence: number, text: string, sessionId = 'local:a'): WorkbenchEventEnvelope {
+  return createWorkbenchEnvelope({
+    sessionId, sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
+    source: { provider: 'peri', sourceId: `completed-${sequence}` },
+    identity: { messageId: `completed-message-${sequence}` },
+    provenance: { origin: 'local-observed', trust: 'authoritative' },
+    event: { type: 'message.completed', role: 'assistant', parts: [{ kind: 'text', text }] },
+  })
+}
+
 function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<string, unknown> = {}) {
   const owner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
   return {
@@ -44,6 +54,35 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 }
 
 describe('Agent Workbench canonical session runtime', () => {
+  it('重启后 canonical 已完成消息仍显示完成态摘要', async () => {
+    const active = session('session-restored', 'local:restored')
+    const controller = {
+      subscribe: () => () => {},
+      getGenerating: () => false,
+      getStartTime: () => 0,
+      getLastActivityAt: () => undefined,
+      getGenerationPhase: () => undefined,
+      getGenerationActivity: () => undefined,
+      getThinkingStart: () => undefined,
+      getTokenCount: () => 12,
+      getSummary: () => undefined,
+      rejectOptimisticUser: () => {},
+    }
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [completedMessage(1, '已恢复完成', active.source)],
+      subscribe: () => () => {},
+      chatController: () => controller,
+    })
+
+    await service.bind(active)
+
+    expect(service.runtime.getSnapshot()).toMatchObject({
+      generating: false,
+      summary: { reason: 'done', elapsedMs: 0, tokenCount: 12 },
+    })
+    service.destroy()
+  })
+
   it('切换会话后从 source-scoped runtime 恢复生成指示器与迟滞时钟', async () => {
     const live = new Map([
       ['local:a', { generating: true, start: 1_000, last: 4_000 }],

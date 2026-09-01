@@ -687,6 +687,21 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
           : { status: 'ready', error: null })
         syncSourceRuntime(session.source)
+        // A restarted process has no in-memory controller summary, while the
+        // canonical document already contains the completed turn. Publish a
+        // display-only done summary so the footer remains in its terminal
+        // state instead of disappearing; this does not add a journal event.
+        const settled = runtime.getSnapshot()
+        if (!settled.generating && !settled.summary && (settled.document?.messages.length ?? 0) > 0) {
+          updateRuntimeState({
+            summary: {
+              elapsedMs: 0,
+              tokenCount: settled.tokenCount,
+              completedFrame: '',
+              reason: 'done',
+            },
+          })
+        }
       }).catch(error => {
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
         loading = false; buffered = []
