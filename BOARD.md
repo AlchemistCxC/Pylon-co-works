@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:10] [施工员B·工程师] SDK 修复完成：`635b5f22` 修复 testing harness 类型诊断、死代码、listener 注册表达式与异步 UI unmount 处理；补齐 SDK 测试夹具契约并新增 async mount/unmount 回归。`tsc -b` 全绿，SDK+plugin-runtime 245 项通过，lint 0 error（仅既有 3 条 warning）。并行 UI/Track-A WIP 未触碰。
+
 [2026-09-02 05:35] [施工员A·工程师] A-03 commit seam 收紧：`9087b0d1` 将 `CommitOutcome::Committed` 改为携带非空 `CanonicalEventRow`；EventService 意外返回空结果时转为显式 `Invalid` rejection，无法到达 Channel/Gateway/Pet adapters。dispatcher 定向 15 项通过，C0-COMMIT 类型约束加强，无 wire/API 变化。
 
 [2026-09-02 05:20] [施工员A·工程师] A-04 trace code 补强：`2e0f4eab` 为 session/load timeout、broadcast lag、notification stream close 增加 ACP typed replay failure；`replay_trace.error_code` 现在分别保留 `replay_timeout`、`replay_lag`、`replay_transport_error`（connection/write/RPC 既有 code 不变）。Display/wire/API 不变；定向 replay 9 项、persist 4 项及 Rust 全量 883 passed / 4 ignored。Track B 无需适配。
