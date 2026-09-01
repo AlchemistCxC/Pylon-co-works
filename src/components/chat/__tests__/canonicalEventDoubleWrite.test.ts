@@ -303,6 +303,22 @@ describe('canonical 双写（A1-c P2）', () => {
     handle.dispose()
   })
 
+  it('显式 runtime-local optimistic policy 不写 canonical sink', async () => {
+    const source = 'local:dw-optimistic-local'
+    useIdentityStore.setState({ sessions: [makeSession('s4-local', source)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+    handle.initSource(source, [])
+
+    handle.sendOptimisticUser(source, '本地回显', 'cid-local', { persistCanonical: false })
+    expect(sink.offers).toHaveLength(0)
+    expect(handle.getMessages(source).find(message => message.clientMsgId === 'cid-local')).toMatchObject({
+      role: 'user', content: '本地回显', clientMsgId: 'cid-local',
+    })
+    handle.dispose()
+  })
+
   it('error 终态 force 强刷', async () => {
     const source = 'local:dw-error'
     useIdentityStore.setState({ sessions: [makeSession('s5', source)] })
