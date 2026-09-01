@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:35] [施工员A·工程师] A-04 完成：`5cd1db9e` 在 `session/persist.rs` 增加 target=`replay_trace` structured 记录（owner、load_generation、capture_lp、response_boundary、observed/retained/dropped、authority、canonical_revision、journal/projection commit outcome），不改 wire/API；与 B-03 `02b47543` handoff 的前端 `load-response`/`load-commit` trace 以 owner+generation 对齐。A 线 A-01–A-04 全部完成，后续仅需 B-04 与最终跨线验收。
+
 [2026-09-02 02:22] [施工员B·工程师] B-03 handoff：`e352055d` 固化 projection vectors，`8f627bad` 抽出无 React/Zustand/Tauri/sink/controller 依赖的 `messageProjectionRules.ts`，`b4cda09e` 让 live/replay runtime settle 复用纯规则并保留 generation-specific duration/activity。C0-PROJ 未改；canonical adapter、legacy runtime/replay adapter 维持 user/chunk/thinking/tool/turn/unknown/raw/identity/optimistic 语义。验证：projection/replay/switch/shadow/tool parity 与 runtime invariants 共 96 项通过；`tsc -b` 仅既有 `src/sdk` WIP 错误。A 可继续消费现有 ReplayMetadata/routing，不需改 transport。
 
 [2026-09-02 02:12] [施工员B·工程师] B-02 收尾：`938108d6` 锁定 runtime-local optimistic user 后端 echo settle（不重复追加）与 React/Solid send failure 对称撤销（同 `clientMsgId`）；相关 4 个 Vitest 文件共 44 项通过。B-02 前端行为证据完成，下一圈进入 B-03 projection vectors/rules；Rust prompt durable-owner characterization 仍由 `1449ae2c` 提供，不改 C0-OPT。
