@@ -9,9 +9,9 @@ import { fileEditorView, replaceFileEditorValue, waitForFileEditor } from './cod
 // I08-A-FE-02：编辑器模式——CodeMirror 6 受控编辑、选区行号上报、dirty 感知的
 // touchVersion 重载（不静默覆盖用户编辑，冲突经 onExternalChange 上报）。
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
+const { invoke, highlightCode } = vi.hoisted(() => ({ invoke: vi.fn(), highlightCode: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode }))
 
 function readTextResult(content: string) {
   return { relativePath: 'src/a.ts', content, bytesRead: content.length, totalBytes: content.length, truncated: false }
@@ -36,6 +36,8 @@ describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
     resetStores()
     localStorage.clear()
     invoke.mockReset()
+    highlightCode.mockReset()
+    highlightCode.mockResolvedValue(null)
     invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
       if (cmd === 'read_workspace_text') {
         const content = args?.relativePath === 'other.ts' ? 'const other = 9' : 'const x = 1'
@@ -57,8 +59,58 @@ describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
 
   it('editing=false → 只读视图（无 CodeMirror）', async () => {
     renderEditor({ editing: false })
-    await screen.findByText('const x = 1')
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).not.toBeNull())
     expect(document.querySelector('.file-code-editor')).toBeNull()
+  })
+
+  it('编辑后退出仍重新应用只读语法高亮，并保持同一代码布局契约', async () => {
+    highlightCode.mockImplementation(async (_language: string, code: string) => `<span class="pl-k">const</span>${code.slice(5)}`)
+    const { rerender } = renderEditor({ editing: false })
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).not.toBeNull())
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-highlighted', 'true'))
+
+    rerender(<FileTabView source="ws-a" path="src/a.ts" context={{ agentId: 'agent-test', source: 'ws-a' }} onTruncated={vi.fn()} editing onContentChange={vi.fn()} />)
+    const editor = await waitForFileEditor('const x = 1')
+    replaceFileEditorValue(editor, 'const x = 2')
+    rerender(<FileTabView source="ws-a" path="src/a.ts" context={{ agentId: 'agent-test', source: 'ws-a' }} onTruncated={vi.fn()} />)
+
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-highlighted', 'true'))
+    expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-file-code-layout', 'shared')
+    expect(document.querySelector('.file-code-editor')).toBeNull()
+  })
+
+  it('退出编辑后高亮已完成时，迟到的保存回执不会把高亮清掉', async () => {
+    let highlightCalls = 0
+    let resolveExitHighlight: ((html: string) => void) | undefined
+    highlightCode.mockImplementation(async (_language: string, code: string) => {
+      highlightCalls += 1
+      if (highlightCalls === 1) return `<span class="pl-k">const</span>${code.slice(5)}`
+      if (highlightCalls === 2) return new Promise<string>(resolve => { resolveExitHighlight = resolve })
+      return `<span class="pl-k">const</span>${code.slice(5)}`
+    })
+
+    const { rerender } = renderEditor({ editing: false })
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-highlighted', 'true'))
+
+    rerender(<FileTabView source="ws-a" path="src/a.ts" context={{ agentId: 'agent-test', source: 'ws-a' }} onTruncated={vi.fn()} editing onContentChange={vi.fn()} />)
+    const editor = await waitForFileEditor('const x = 1')
+    replaceFileEditorValue(editor, 'const x = 2')
+    rerender(<FileTabView source="ws-a" path="src/a.ts" context={{ agentId: 'agent-test', source: 'ws-a' }} onTruncated={vi.fn()} />)
+    await waitFor(() => expect(highlightCalls).toBe(2))
+
+    await act(async () => {
+      resolveExitHighlight?.('<span class="pl-k">const</span> x = 2')
+    })
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-highlighted', 'true'))
+
+    rerender(<FileTabView
+      source="ws-a"
+      path="src/a.ts"
+      context={{ agentId: 'agent-test', source: 'ws-a' }}
+      onTruncated={vi.fn()}
+      saveReceipt={{ version: 1, expectedContent: 'const x = 2', persistedContent: 'const x = 2' }}
+    />)
+    await waitFor(() => expect(document.querySelector('.file-tab-code')).toHaveAttribute('data-highlighted', 'true'))
   })
 
   it('CodeMirror 选区 → onSelectionChange 报 1-based 行号区间', async () => {

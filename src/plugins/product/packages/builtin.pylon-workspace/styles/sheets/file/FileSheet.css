@@ -1094,3 +1094,103 @@
 }
 .app[data-interface-mode="modern-gui"] .file-activity-button,.app[data-interface-mode="modern-gui"] .file-tree-row,.app[data-interface-mode="modern-gui"] .file-tab,.app[data-interface-mode="modern-gui"] .file-tab-close{border-radius:8px}
 .app[data-interface-mode="modern-gui"] .file-editor{margin:8px 8px 8px 0;overflow:hidden;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 58%,transparent)}
+
+/*
+ * File code projection contract (issue38).
+ *
+ * Read-only code and CodeMirror are two renderers of the same file, so their
+ * first text baseline, line box and gutter must not change when edit mode is
+ * toggled. Keep the geometry in one token set and let both DOM trees consume
+ * it.  The token names intentionally stay local to FileSheet; theme authors
+ * can still override the editor font/line-height variables above.
+ */
+.file-tab-view,
+.file-code-editor {
+  --file-code-font-size: var(--editor-font-size, 13px);
+  --file-code-line-height: var(--editor-line-height, 1.5);
+  --file-code-top-padding: 10px;
+  --file-code-bottom-padding: 32px;
+  --file-code-gutter-width: 56px;
+  --file-code-line-inset: 16px;
+}
+
+.file-tab-view {
+  font-size: var(--file-code-font-size);
+  line-height: var(--file-code-line-height);
+}
+
+.file-tab-code {
+  display: flex;
+  min-height: 100%;
+  font-size: var(--file-code-font-size);
+  line-height: var(--file-code-line-height);
+}
+
+.file-tab-gutter {
+  box-sizing: border-box;
+  flex: 0 0 var(--file-code-gutter-width);
+  width: var(--file-code-gutter-width);
+  min-width: var(--file-code-gutter-width);
+  padding: var(--file-code-top-padding) 12px var(--file-code-bottom-padding) 8px;
+  font-size: inherit;
+  line-height: var(--file-code-line-height);
+}
+
+.file-tab-gutter-line {
+  height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  line-height: inherit;
+}
+
+.file-tab-pre {
+  box-sizing: border-box;
+  flex: 1 0 auto;
+  min-width: max-content;
+  margin: 0;
+  padding: var(--file-code-top-padding) 24px var(--file-code-bottom-padding) 0;
+  font: inherit;
+  line-height: inherit;
+}
+
+.file-tab-line {
+  display: block;
+  box-sizing: border-box;
+  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  padding: 0 var(--file-code-line-inset);
+  line-height: var(--file-code-line-height);
+}
+
+.file-code-editor {
+  font-size: var(--file-code-font-size);
+  line-height: var(--file-code-line-height);
+}
+
+.file-code-editor .cm-scroller {
+  font: var(--file-code-font-size)/var(--file-code-line-height) var(--mono);
+}
+
+.file-code-editor .cm-content {
+  padding: var(--file-code-top-padding) 0 var(--file-code-bottom-padding);
+  line-height: var(--file-code-line-height);
+}
+
+.file-code-editor .cm-line {
+  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  padding: 0 var(--file-code-line-inset);
+  line-height: var(--file-code-line-height);
+}
+
+.file-code-editor .cm-gutters {
+  box-sizing: border-box;
+  flex: 0 0 var(--file-code-gutter-width);
+  width: var(--file-code-gutter-width);
+  min-width: var(--file-code-gutter-width);
+  padding-top: var(--file-code-top-padding);
+  padding-bottom: var(--file-code-bottom-padding);
+  font-size: var(--file-code-font-size);
+  line-height: var(--file-code-line-height);
+}
+
+.file-code-editor .cm-lineNumbers .cm-gutterElement {
+  box-sizing: border-box;
+  line-height: var(--file-code-line-height);
+}

@@ -155,5 +155,5 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
     })
   }, [revealLine])
 
-  return <div ref={hostRef} className="file-code-editor" data-path={path} />
+  return <div ref={hostRef} className="file-code-editor" data-file-code-layout="shared" data-path={path} />
 }

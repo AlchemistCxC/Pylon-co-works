@@ -49,4 +49,46 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     fireEvent.click(reopen)
     expect(baseProps.onReopenSheet).toHaveBeenCalledOnce()
   })
+
+  it('右上角菜单入口提供互斥的 VS Code 式 menu 语义与稳定锚点', () => {
+    render(<WorkspaceTitlebar {...baseProps} />)
+    const settings = screen.getByRole('button', { name: '设置' })
+    const interfaceMode = screen.getByRole('button', { name: '界面模式' })
+
+    expect(settings).toHaveAttribute('aria-haspopup', 'menu')
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(settings)
+    const settingsMenu = screen.getByRole('menu')
+    expect(settingsMenu).toHaveAttribute('data-menu-kind', 'settings')
+    expect(settings).toHaveAttribute('aria-expanded', 'true')
+    expect(settings).toHaveAttribute('aria-controls', settingsMenu.id)
+
+    fireEvent.click(interfaceMode)
+    const interfaceMenu = screen.getByRole('menu')
+    expect(interfaceMenu).toHaveAttribute('data-menu-kind', 'interface')
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+    expect(interfaceMode).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.keyDown(interfaceMenu, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(interfaceMode).toHaveAttribute('aria-expanded', 'false')
+    expect(document.activeElement).toBe(interfaceMode)
+  })
+
+  it('菜单项点击或外部关闭后焦点回到对应触发按钮', () => {
+    render(<WorkspaceTitlebar {...baseProps} />)
+    const settings = screen.getByRole('button', { name: '设置' })
+
+    fireEvent.click(settings)
+    const menuItem = screen.getByRole('menuitem', { name: '全局设置' })
+    fireEvent.click(menuItem)
+    expect(baseProps.onToggleSettings).toHaveBeenCalledOnce()
+    expect(document.activeElement).toBe(settings)
+
+    fireEvent.click(settings)
+    expect(screen.getByRole('menu')).toBeTruthy()
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(settings)
+  })
 })

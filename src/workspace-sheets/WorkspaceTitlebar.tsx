@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type MouseEventHandler } from 'react'
+import { Suspense, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
@@ -49,6 +49,8 @@ interface WorkspaceTitlebarProps {
   settingsOpen?: boolean
 }
 
+type WorkspaceMenuKind = 'right-panel' | 'interface' | 'settings'
+
 export default function WorkspaceTitlebar({
   sheets,
   activeSheetId,
@@ -65,6 +67,7 @@ export default function WorkspaceTitlebar({
   menuActions,
   onOpenSheet,
   onReopenSheet,
+  rightPanelEnabled = true,
   onToggleSettings,
   interfaceMode = 'terminal-like',
   chromeStyle = interfaceMode === 'modern-gui' ? 'icons' : 'glyphs',
@@ -76,8 +79,11 @@ export default function WorkspaceTitlebar({
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
-  const [openMenu, setOpenMenu] = useState<'right-panel' | 'interface' | 'settings' | null>(null)
+  const [openMenu, setOpenMenu] = useState<WorkspaceMenuKind | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const previousOpenMenuRef = useRef<WorkspaceMenuKind | null>(null)
+  const titlebarId = useId().replace(/:/g, '')
   const contextPanelRegistry = getContextPanelRegistry()
   const interfaceModeRegistry = getInterfaceModeRegistry()
   const titlebarRegistry = getTitlebarRegistry()
@@ -112,12 +118,54 @@ export default function WorkspaceTitlebar({
     activeSessionId,
     activeAgent,
   })
+  const activePanelId = useRightRailStore(state => state.activePanelId)
+  const rightPanelAvailable = rightPanelEnabled !== false && availablePanels.length > 0
+  const menuId = (kind: WorkspaceMenuKind) => `${titlebarId}-menu-${kind}`
+  const toggleMenu = (kind: WorkspaceMenuKind, trigger: HTMLButtonElement) => {
+    menuTriggerRef.current = trigger
+    setOpenMenu(value => value === kind ? null : kind)
+  }
+  const closeMenu = () => setOpenMenu(null)
+  const menuItems = (menu: HTMLDivElement | null): HTMLButtonElement[] => menu
+    ? [...menu.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)')]
+    : []
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const menu = event.currentTarget
+    const items = menuItems(menu)
+    if (items.length === 0) return
+    event.preventDefault()
+    const current = items.indexOf(document.activeElement as HTMLButtonElement)
+    const next = event.key === 'Home' ? 0
+      : event.key === 'End' ? items.length - 1
+        : event.key === 'ArrowUp'
+          ? (current <= 0 ? items.length - 1 : current - 1)
+          : (current < 0 || current === items.length - 1 ? 0 : current + 1)
+    items[next]?.focus()
+  }
+  useEffect(() => {
+    const previousOpenMenu = previousOpenMenuRef.current
+    if (openMenu) {
+      const menu = document.getElementById(`${titlebarId}-menu-${openMenu}`)
+      const selected = menu?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+      ;(selected ?? menu?.querySelector<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)'))?.focus()
+    } else if (previousOpenMenu) {
+      const trigger = menuTriggerRef.current
+      if (trigger && document.contains(trigger)) trigger.focus()
+    }
+    previousOpenMenuRef.current = openMenu
+  }, [openMenu, titlebarId])
   useEffect(() => {
     if (!openMenu) return
     const onPointerDown = (event: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpenMenu(null)
     }
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenMenu(null) }
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setOpenMenu(null)
+      }
+    }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
@@ -168,25 +216,25 @@ export default function WorkspaceTitlebar({
       <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'right-panel' ? null : 'right-panel')} disabled={availablePanels.length === 0} title={availablePanels.length > 0 ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
-            {openMenu === 'right-panel' && <div className="workspace-menu workspace-menu-chrome" role="menu">
+            <button type="button" onClick={event => toggleMenu('right-panel', event.currentTarget)} disabled={!rightPanelAvailable} title={rightPanelAvailable ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏" aria-haspopup="menu" aria-expanded={openMenu === 'right-panel'} aria-controls={menuId('right-panel')} data-menu-trigger="right-panel"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
+            {openMenu === 'right-panel' && <div id={menuId('right-panel')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="right-panel" onKeyDown={handleMenuKeyDown}>
               <div className="workspace-menu-heading">右侧栏</div>
-              {availablePanels.length === 0 && <div className="workspace-menu-empty">当前没有可用面板</div>}
-              {availablePanels.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={useRightRailStore.getState().activePanelId === entry.contributionId} onClick={() => { useRightRailStore.getState().setActivePanel(entry.contributionId); useRightRailStore.getState().setCollapsed(false); setOpenMenu(null) }}>{entry.value.label}</button>)}
+              {!rightPanelAvailable && <div className="workspace-menu-empty">当前没有可用面板</div>}
+              {availablePanels.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={activePanelId === entry.contributionId} data-selected={activePanelId === entry.contributionId ? 'true' : undefined} onClick={() => { useRightRailStore.getState().setActivePanel(entry.contributionId); useRightRailStore.getState().setCollapsed(false); closeMenu() }}><span className="workspace-menu-check" aria-hidden="true">{activePanelId === entry.contributionId ? '✓' : ''}</span><span>{entry.value.label}</span></button>)}
               <span className="workspace-menu-separator" />
-              <button type="button" role="menuitem" onClick={() => { useRightRailStore.getState().setCollapsed(true); setOpenMenu(null) }}>收起右侧栏</button>
+              <button type="button" role="menuitem" onClick={() => { useRightRailStore.getState().setCollapsed(true); closeMenu() }}>收起右侧栏</button>
             </div>}
           </div>
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'interface' ? null : 'interface')} title="界面模式" aria-label="界面模式"><span className="workspace-titlebar-entry-label">界面</span></button>
-            {openMenu === 'interface' && <div className="workspace-menu workspace-menu-chrome" role="menu">
+            <button type="button" onClick={event => toggleMenu('interface', event.currentTarget)} title="界面模式" aria-label="界面模式" aria-haspopup="menu" aria-expanded={openMenu === 'interface'} aria-controls={menuId('interface')} data-menu-trigger="interface"><span className="workspace-titlebar-entry-label">界面</span></button>
+            {openMenu === 'interface' && <div id={menuId('interface')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="interface" onKeyDown={handleMenuKeyDown}>
               <div className="workspace-menu-heading">界面模式</div>
-              {modeSnapshot.entries.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={entry.value.id === interfaceMode} onClick={() => { try { const ok = activateInterfaceMode(entry.value.id); if (ok) setOpenMenu(null) } catch { /* activation failure is reported by the transaction */ } }}>{entry.value.label}{entry.value.id === interfaceMode ? '  ✓' : ''}</button>)}
+              {modeSnapshot.entries.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={entry.value.id === interfaceMode} data-selected={entry.value.id === interfaceMode ? 'true' : undefined} onClick={() => { try { const ok = activateInterfaceMode(entry.value.id); if (ok) closeMenu() } catch { /* activation failure is reported by the transaction */ } }}><span className="workspace-menu-check" aria-hidden="true">{entry.value.id === interfaceMode ? '✓' : ''}</span><span>{entry.value.label}</span></button>)}
             </div>}
           </div>
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={() => setOpenMenu(value => value === 'settings' ? null : 'settings')} title="设置" aria-label="设置"><span className="workspace-titlebar-entry-label">设置</span></button>
-            {openMenu === 'settings' && <div className="workspace-menu workspace-menu-chrome" role="menu"><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { setOpenMenu(null); onToggleSettings() }}>全局设置</button></div>}
+            <button type="button" onClick={event => toggleMenu('settings', event.currentTarget)} title="设置" aria-label="设置" aria-haspopup="menu" aria-expanded={openMenu === 'settings'} aria-controls={menuId('settings')} data-menu-trigger="settings"><span className="workspace-titlebar-entry-label">设置</span></button>
+            {openMenu === 'settings' && <div id={menuId('settings')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="settings" onKeyDown={handleMenuKeyDown}><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { closeMenu(); onToggleSettings() }}><span className="workspace-menu-check" aria-hidden="true" /><span>全局设置</span></button></div>}
           </div>
           {contributedActions.map(entry => {
             const contribution = entry.value

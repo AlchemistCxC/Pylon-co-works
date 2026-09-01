@@ -62,6 +62,11 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   const saveAnchorRef = useRef<number>(0)
   const saveReceiptRef = useRef<number>(0)
   const readViewRef = useRef<HTMLDivElement>(null)
+  // Read-only highlighting is an asynchronous projection. Keep its request
+  // identity separate from the file-read guard so toggling edit mode (or
+  // typing while editing) can invalidate stale markup without cancelling a
+  // still-valid file read.
+  const highlightRequestRef = useRef(0)
   // 编辑模式 ref：touchVersion 重载 effect 不依赖 editing（否则切编辑模式重跑 effect，
   // 退出编辑会 300ms 后 loadContent 静默覆盖未保存修改、重进编辑会误报冲突）
   const editingRef = useRef(false)
@@ -77,6 +82,34 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       const text = normalizeWorkspaceText(raw)
       return text ? { text: text.content, truncated: text.truncated } : null
     })
+
+  const invalidateHighlight = () => {
+    highlightRequestRef.current += 1
+    setHighlighted(null)
+  }
+
+  const requestHighlight = (requestPath: string, text: string) => {
+    const requestId = ++highlightRequestRef.current
+    const lang = languageFromPath(requestPath)
+    // Markdown has its own renderer, and unknown/plain text has no grammar;
+    // avoid leaving a stale highlighted projection visible for either path.
+    if (lang === 'markdown' || lang === 'text') {
+      setHighlighted(null)
+      return
+    }
+    setHighlighted(null)
+    void highlightCode(lang, text).then(html => {
+      if (
+        requestId !== highlightRequestRef.current
+        || requestPath !== path
+        || editingRef.current
+      ) return
+      if (html) setHighlighted({ html, lang })
+    }).catch(() => {
+      // Plain-text rendering remains the safe fallback when a provider or
+      // grammar cannot be loaded (including offline/Tauri asset failures).
+    })
+  }
 
   const loadContent = (showChanged: boolean) => {
     if (!target || !targetKey || !provider || !path) return
@@ -103,11 +136,12 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       diskRef.current = loaded.text
       onTruncated(loaded.truncated)
       onContentReady?.(loaded.text)
-      const lang = languageFromPath(requestPath)
-      setHighlighted(null)
-      highlightCode(lang, loaded.text).then(html => {
-        if (html && isCurrentSourceRequest(requestContext.current, token) && requestPath === path) setHighlighted({ html, lang })
-      }).catch(() => {})
+      // Keep highlighting tied to the same guarded file snapshot. The helper
+      // also owns edit-mode invalidation so leaving the editor rehydrates the
+      // read-only projection for the current (possibly unsaved) text.
+      if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) {
+        requestHighlight(requestPath, loaded.text)
+      }
     }).catch(err => {
       if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) {
         setLoading(false)
@@ -143,7 +177,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   useEffect(() => {
     requestContext.current = advanceSourceContext(requestContext.current, targetKey)
     setContent('')
-    setHighlighted(null)
+    invalidateHighlight()
     setError('')
     setLoading(false)
     setChangedLines([])
@@ -156,6 +190,26 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKey, path, provider])
+
+  const isMarkdown = useMemo(() => /\.(md|markdown)$/i.test(path), [path])
+
+  // Entering edit mode hides the read-only projection; leaving it must build a
+  // fresh projection from the editor's current value instead of waiting for a
+  // disk reload (which would discard unsaved edits).
+  const previousEditingRef = useRef(editing === true)
+  useEffect(() => {
+    const wasEditing = previousEditingRef.current
+    const isEditing = editing === true
+    previousEditingRef.current = isEditing
+    if (isEditing) {
+      invalidateHighlight()
+      return
+    }
+    if (wasEditing && content && path && !isMarkdown) requestHighlight(path, content)
+    // `content` is intentionally included: an edit can be committed between
+    // the mode toggle and this effect's flush; the latest value wins.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, path, isMarkdown])
 
   // W2-09：版本戳变化 → 300ms debounce；编辑中改走探测（不静默覆盖），只读保持重拉。
   // 依赖不含 editing（否则切编辑模式重跑 effect → 退出编辑静默覆盖未保存修改、重进编辑误报冲突）；
@@ -189,10 +243,20 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     if (hasNewerEdits) return
     contentRef.current = saveReceipt.persistedContent
     setContent(saveReceipt.persistedContent)
-    setHighlighted(null)
-  }, [saveReceipt])
+    // A save receipt can arrive after leaving edit mode. Re-project the
+    // persisted snapshot instead of clearing the read-only markup and leaving
+    // the file unhighlighted until a later reload.
+    if (editing === true) {
+      invalidateHighlight()
+    } else {
+      requestHighlight(path, saveReceipt.persistedContent)
+    }
+    // `saveReceipt.version` is the event identity; editing/path are included
+    // so the projection uses the current renderer when a receipt crosses a
+    // mode or file transition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveReceipt, editing, path])
 
-  const isMarkdown = useMemo(() => /\.(md|markdown)$/i.test(path), [path])
   // The editor branch does not consume line arrays.  Avoid splitting a large
   // buffer while CodeMirror owns the edit surface; materialise rows only for
   // the read-only projection.
@@ -224,8 +288,11 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
           value={content}
           revealLine={revealLine}
           onChange={value => {
+            // Keep the dirty/snapshot ref in lockstep with CodeMirror's input;
+            // a save receipt may arrive before React flushes the state effect.
+            contentRef.current = value
             setContent(value)
-            setHighlighted(null)
+            invalidateHighlight()
             onContentChange?.(value)
           }}
           onSelectionChange={onSelectionChange}
@@ -244,7 +311,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
           </Suspense>
         </div>
       ) : (
-        <div className="file-tab-code" data-lang={highlighted?.lang ?? languageFromPath(path)} data-highlighted={highlighted ? 'true' : 'false'}>
+        <div className="file-tab-code" data-file-code-layout="shared" data-lang={highlighted?.lang ?? languageFromPath(path)} data-highlighted={highlighted ? 'true' : 'false'}>
           <div className="file-tab-gutter">
             {codeLines.map((_, index) => <div key={index} className="file-tab-gutter-line">{index + 1}</div>)}
           </div>

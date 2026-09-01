@@ -211,13 +211,91 @@
   .workspace-window-controls-divider { margin-inline:0; }
 }
 
-/* VS Code-like chrome menus: keep these menus square even after the shared
-   workspace-menu defaults are applied later in the stylesheet. */
+/* Titlebar menus intentionally follow the compact VS Code menu grammar.  The
+   titlebar entries are text triggers, while the popup uses a fixed check
+   column, dense rows, semantic surface/state tokens, and no capsule corners.
+   Keep this selector after the shared .workspace-menu rules above so plugin
+   contributions cannot accidentally re-introduce the relaxed card treatment. */
 .workspace-titlebar .workspace-menu-chrome {
+  --workspace-menu-item-height: 28px;
+  --workspace-menu-check-width: 16px;
+  top: calc(100% + 1px);
+  right: 0;
+  min-width: 196px;
+  max-width: min(320px, calc(100vw - 8px));
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--stroke-strong);
   border-radius: 0;
-  box-shadow: 0 8px 24px rgba(0,0,0,.24);
+  color: var(--text);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(20px) saturate(1.08);
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
 }
-.workspace-titlebar .workspace-menu-chrome button { border-radius: 0; }
+.workspace-titlebar .workspace-menu-chrome .workspace-menu-heading {
+  min-height: var(--workspace-menu-item-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 3px;
+  color: var(--text-dim);
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.workspace-titlebar .workspace-menu-chrome button {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--workspace-menu-check-width) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--workspace-menu-item-height);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+.workspace-titlebar .workspace-menu-chrome button:hover:not(:disabled),
+.workspace-titlebar .workspace-menu-chrome button[data-selected="true"] {
+  color: var(--text);
+  background: var(--state-hover-bg);
+}
+.workspace-titlebar .workspace-menu-chrome button[data-selected="true"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--state-selected-bg);
+}
+.workspace-titlebar .workspace-menu-chrome button:focus-visible {
+  outline: 1px solid var(--state-focus-ring);
+  outline-offset: -1px;
+}
+.workspace-titlebar .workspace-menu-chrome .workspace-menu-check {
+  width: var(--workspace-menu-check-width);
+  color: var(--accent);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1;
+}
+.workspace-titlebar .workspace-menu-chrome .workspace-menu-separator {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--stroke-subtle);
+}
+.workspace-titlebar .workspace-menu-chrome .workspace-menu-empty {
+  min-height: var(--workspace-menu-item-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  color: var(--text-dim);
+}
 
 .sheet-launcher-overlay {
   position:fixed; inset:0; z-index:70; background:color-mix(in srgb,var(--text) 42%,transparent);
