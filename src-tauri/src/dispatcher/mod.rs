@@ -786,7 +786,13 @@ async fn handle_session_update<R: tauri::Runtime>(
     // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
     let input = routing_input;
     let decision = routing_decision;
-    let committed_event = match routing::commit_live_event(&input, decision, event_service).await {
+    let committed_event = match routing::commit_live_event(
+        &input,
+        decision,
+        event_service,
+    )
+    .await
+    {
         routing::CommitOutcome::Skipped => None,
         routing::CommitOutcome::MissingService => {
             tracing::error!(
