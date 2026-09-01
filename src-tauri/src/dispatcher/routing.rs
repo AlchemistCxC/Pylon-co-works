@@ -70,8 +70,7 @@ pub(crate) fn decide(input: &RoutingInput) -> RoutingDecision {
         collect_response: is_live && input.variant == Some(SessionUpdateVariant::AgentMessageChunk),
         apply_pet: is_live,
         persist_canonical: is_live && input.owner.is_some() && !is_user_chunk,
-        publish: is_live && !is_user_chunk
-            || is_replay && !suppressed_during_load && !is_user_chunk,
+        publish: (is_live || is_replay && !suppressed_during_load) && !is_user_chunk,
     }
 }
 
