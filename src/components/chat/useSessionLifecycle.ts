@@ -8,7 +8,7 @@ import { createSessionClient, type ReplayMetadata } from '../../infrastructure/a
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
 import { isCurrentLoadGeneration, nextLoadGeneration } from './replayState'
-import { recordChatReplayTrace, safeContentEvidence } from './chatReplayTrace'
+import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from './chatReplayTrace'
 import { clearMessageStorage, messageStorageKey, parseMessageSnapshot } from './messagePersistence'
 import { sessionContext, toAgentContextKey } from '../../agentContext'
 import { attachChatEventController, bindChatControllerRefs, getChatController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
@@ -246,7 +246,12 @@ export function useSessionLifecycle(
         isCurrent: () => sessionRef.current === s.source && processedReloadRef.current === reloadToken,
       })
       const loadGeneration = coordinator.currentGeneration(s.source) ?? 0
-      recordChatReplayTrace({ kind: 'load-start', ownerSessionId: s.id, source: s.source, generation: loadGeneration, ...safeContentEvidence(cached) })
+      recordChatReplayTrace({
+        kind: 'load-start', ownerSessionId: s.id, source: s.source, generation: loadGeneration,
+        contract: CHAT_REPLAY_TRACE_CONTRACT, owner: ownerKey, loadGeneration,
+        captureLp: 'active-replay-registry',
+        ...safeContentEvidence(cached),
+      })
       void pending.then(outcome => {
         if (!outcome) return
         void getHookRuntime().invoke('session.loaded', { session: s, source: s.source }, s.hooks.length > 0 ? s.hooks : undefined)
@@ -256,6 +261,16 @@ export function useSessionLifecycle(
           ownerSessionId: s.id,
           source: s.source,
           generation: loadGeneration,
+          contract: CHAT_REPLAY_TRACE_CONTRACT,
+          owner: ownerKey,
+          loadGeneration,
+          captureLp: 'active-replay-registry',
+          responseBoundary: outcome.replayMetadata.boundary.kind,
+          observedCount: outcome.replayMetadata.boundary.observedCount,
+          retainedCount: outcome.replayCount,
+          droppedCount: outcome.replayMetadata.droppedCount,
+          authority: outcome.authority,
+          canonicalRevision: outcome.canonicalRevision,
           detail: {
             replayCount: outcome.replayCount,
             replayComplete: outcome.replayMetadata.complete,
@@ -267,7 +282,20 @@ export function useSessionLifecycle(
             canonicalRevision: outcome.canonicalRevision,
           },
         })
-        recordChatReplayTrace({ kind: 'load-commit', ownerSessionId: s.id, source: s.source, generation: loadGeneration, detail: { commit: outcome.commit, authority: outcome.authority, canonicalRevision: outcome.canonicalRevision }, ...safeContentEvidence(outcome.messages) })
+        recordChatReplayTrace({
+          kind: 'load-commit', ownerSessionId: s.id, source: s.source, generation: loadGeneration,
+          contract: CHAT_REPLAY_TRACE_CONTRACT, owner: ownerKey, loadGeneration,
+          captureLp: 'active-replay-registry',
+          responseBoundary: outcome.replayMetadata.boundary.kind,
+          observedCount: outcome.replayMetadata.boundary.observedCount,
+          retainedCount: outcome.replayCount,
+          droppedCount: outcome.replayMetadata.droppedCount,
+          authority: outcome.authority,
+          canonicalRevision: outcome.canonicalRevision,
+          commitOutcome: outcome.commit,
+          detail: { commit: outcome.commit, authority: outcome.authority, canonicalRevision: outcome.canonicalRevision },
+          ...safeContentEvidence(outcome.messages),
+        })
         if (sessionRef.current === s.source) {
           setReplayIntegrity(outcome.replayMetadata.complete ? null : { sessionId: s.id, metadata: outcome.replayMetadata })
           setMessages(outcome.messages)
@@ -286,6 +314,14 @@ export function useSessionLifecycle(
       }).catch(error => {
         if (coordinator.currentGeneration(s.source) !== loadGeneration) return
         if (sessionRef.current !== s.source) return
+        recordChatReplayTrace({
+          kind: 'load-error', ownerSessionId: s.id, source: s.source, generation: loadGeneration,
+          contract: CHAT_REPLAY_TRACE_CONTRACT, owner: ownerKey, loadGeneration,
+          captureLp: 'active-replay-registry', responseBoundary: 'not-observed',
+          observedCount: 0, retainedCount: 0, droppedCount: 0,
+          authority: 'none', canonicalRevision: 0, commitOutcome: 'load-error',
+          errorCode: replayErrorCode(error),
+        })
         reportRuntimeError('恢复会话', error)
         setRecoveryFailure({
           sessionId: s.id,

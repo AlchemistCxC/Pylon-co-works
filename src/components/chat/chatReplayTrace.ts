@@ -2,7 +2,27 @@ import type { Message } from './messageTypes'
 
 export const CHAT_REPLAY_TRACE_FLAG = 'pylon-chat-replay-trace'
 export const CHAT_REPLAY_TRACE_KEY = 'pylon-chat-replay-trace-jsonl'
+export const CHAT_REPLAY_TRACE_CONTRACT = 'C0-v1.0-20260902'
 const MAX_TRACE_LINES = 500
+
+/**
+ * Fields shared with the Kernel `replay_trace` structured record.  They stay
+ * optional because `load-start` is emitted before the response boundary and
+ * failure traces do not have a commit outcome.
+ */
+export interface ReplayTraceContractFields {
+  owner?: string
+  loadGeneration?: number
+  captureLp?: string | null
+  responseBoundary?: string
+  observedCount?: number
+  retainedCount?: number
+  droppedCount?: number
+  authority?: string
+  canonicalRevision?: number
+  commitOutcome?: string
+  errorCode?: string
+}
 
 export interface ChatReplayTraceEvent {
   at: number
@@ -15,6 +35,19 @@ export interface ChatReplayTraceEvent {
   messageCount?: number
   contentLength?: number
   contentHash?: string
+  /** C0-v1.0 cross-line fields; names mirror backend replay_trace semantics. */
+  contract?: typeof CHAT_REPLAY_TRACE_CONTRACT
+  owner?: ReplayTraceContractFields['owner']
+  loadGeneration?: ReplayTraceContractFields['loadGeneration']
+  captureLp?: ReplayTraceContractFields['captureLp']
+  responseBoundary?: ReplayTraceContractFields['responseBoundary']
+  observedCount?: ReplayTraceContractFields['observedCount']
+  retainedCount?: ReplayTraceContractFields['retainedCount']
+  droppedCount?: ReplayTraceContractFields['droppedCount']
+  authority?: ReplayTraceContractFields['authority']
+  canonicalRevision?: ReplayTraceContractFields['canonicalRevision']
+  commitOutcome?: ReplayTraceContractFields['commitOutcome']
+  errorCode?: ReplayTraceContractFields['errorCode']
   detail?: Record<string, string | number | boolean | null>
 }
 
@@ -64,4 +97,17 @@ export function readChatReplayTrace(): ChatReplayTraceEvent[] {
   } catch {
     return []
   }
+}
+
+/**
+ * Keep replay failures machine-readable without copying provider error text
+ * into the trace.  Existing structured codes pass through; unknown errors use
+ * one stable fallback understood by the cross-line contract tests.
+ */
+export function replayErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === 'string' && /^[a-z0-9][a-z0-9_.-]*$/.test(code)) return code
+  }
+  return 'replay_load_failed'
 }

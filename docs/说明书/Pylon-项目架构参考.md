@@ -185,7 +185,7 @@ sequenceDiagram
   WebView->>WebView: ordered projection + plugin event（不二次 append）
 ```
 
-当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取，WebView 以 owner cursor 消费 committed row 并从同一 journal 补 gap。完整 replay 在空 journal 时经同一 normalize/append transaction 逐行导入；已有 partial rows 时，缺失的 replay 事件会先迁移为带回放锚点的 canonical 行，再追加一个 `history.snapshot` 兼容 checkpoint。旧行不覆盖、未匹配证据不丢失，仍只有一个 journal 与 sequence authority；snapshot 不再是用户或 Agent transcript 的唯一持久化来源。
+当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取，WebView 以 owner cursor 消费 committed row 并从同一 journal 补 gap。`canonical_events` 是重启后的历史权威：已有 authoritative local rows 时 local journal wins，replay 只作为诊断/完整性证据，不覆盖、补齐或重排本地事实。仅在空 journal（或既定幂等的 unverified import 分支）且 replay response 完整时，才允许经同一 normalize/append transaction 导入；partial/truncated replay 必须保持 `complete=false`，不得伪装完整 snapshot，也不得通过 `history.snapshot` reconciliation 合成第二历史源。
 
 ### 8.2 当前恢复路径
 
@@ -201,10 +201,10 @@ sequenceDiagram
   UI->>Rust: load_persisted_session(owner, periId)
   Rust->>Agent: session/load(periId)
   Agent-->>Rust: replay events + response boundary
-  Rust->>EventDB: complete + empty 时 normalize + append(expectedRevision=0)
+  Rust->>EventDB: empty + complete replay 时 normalize + append(expectedRevision=0)
   EventDB-->>Rust: canonicalRevision + import status
   Rust->>StateDB: get_session_state(profileId, agentId, source)
-  Rust-->>UI: replay snapshot + completeness boundary + saved state
+  Rust-->>UI: replay metadata/boundary + saved state
   UI->>UI: seed cursor + 合并/选择 projection
 ```
 
@@ -215,6 +215,8 @@ GUI 创建、恢复和发送链路会把 `profileId` 送入 Rust runtime 的 `Se
 `session/load` 失败时不会自动创建 remote session，也不会改写原 binding。该 owner 转入 detached/send-blocked，UI 让用户明确选择：按原 owner/binding 重试，或创建具有新 local `id/source` 的独立 Session 分叉。分叉继续走既有 `new_session` seam，canonical journal 仍是唯一 durable history。
 
 `session/load` 成功时携带 `replayMetadata`。`boundary.kind=session-load-response` 表示匹配的 load response 是收集终点；`observedCount` 与 1-based retained ordinals 描述实际窗口。超限保留最近 N 条并报告 `droppedCount`。前端遇到缺失/不自洽 metadata 时标成 `metadata-unavailable`，不会把 partial replay 当完整 snapshot；export 对 truncated replay 返回 `replay_truncated`。
+
+前后端 replay trace 使用 `C0-v1.0-20260902` 字段对账：`owner`、`loadGeneration`、`captureLp`、`responseBoundary`、`observedCount`、`retainedCount`、`droppedCount`、`authority`、`canonicalRevision` 与 `commitOutcome`。Rust `replay_trace` 记录 transport/journal 结果，前端 `load-response`/`load-commit` 记录 projection 结果；两侧以 owner + generation 配对。无匹配 response 的 timeout/EOF/RPC/取消只记录显式失败 code，不能把已收集的部分 batch 宣称 complete。
 
 ### 8.3 Workbench 绑定与流式稳定性 seam
 
@@ -355,7 +357,7 @@ stateDiagram-v2
 
 | 优先级 | 风险 | 主要位置 |
 |---|---|---|
-| P0（已修复） | live/prompt、无损入口、cursor、empty-journal import 与 partial-journal snapshot reconciliation 已收口；load race committed rows 按 sequence 补应用 | session/persist.rs、event_repo.rs、messageProjection、chatEventController |
+| P0（已修复） | live/prompt、无损入口、cursor 与 empty-journal import 已收口；local-authoritative precedence 与 partial replay `complete=false` 边界保持可见，load race committed rows 按 sequence 补应用 | session/persist.rs、event_repo.rs、messageProjection、chatEventController |
 | P1（已修复） | `deleted_sessions` 曾以裸 session/source 为主键且删除 wire 误用 metadata id；v12 改为 owner_key 主键并让 begin/finalize 统一使用 Session.source | session/msg_repo/、event_repo.rs、removeSessionTransaction.ts |
 | P0（已修复） | DB services 曾异步初始化，首次 unavailable 可演变为永久失败；现由 setup readiness barrier 串行打开并一次安装 | `src-tauri/src/session/persistence_bootstrap.rs`、`src-tauri/src/lib.rs` |
 | P0（已修复） | Tauri Identity 读取失败曾回退 localStorage 并可反向覆盖较新 SQLite；现为带 revision cache + degraded-readonly，权威重读清失败 pending | identityStore.ts、userDataRepository.ts |
