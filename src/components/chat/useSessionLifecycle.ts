@@ -7,7 +7,7 @@ import { reportRuntimeError } from '../../runtimeError'
 import { createSessionClient, type ReplayMetadata } from '../../infrastructure/acp/sessionClient'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
-import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages } from './replayState'
+import { isCurrentLoadGeneration, nextLoadGeneration } from './replayState'
 import { recordChatReplayTrace, safeContentEvidence } from './chatReplayTrace'
 import { clearMessageStorage, messageStorageKey, parseMessageSnapshot } from './messagePersistence'
 import { sessionContext, toAgentContextKey } from '../../agentContext'
@@ -22,6 +22,7 @@ import type { Message } from './messageTypes'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
 import { runSessionPreflight } from '../../plugins/core/sessionCreation/sessionPreflight.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
+import { ReplayLoadCoordinator } from './chatReplayCoordinator.ts'
 
 export interface ChatSessionSetters {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
@@ -56,7 +57,7 @@ function recoveryErrorMessage(error: unknown): string {
  *
  * A1-c P4：Tauri 下首屏占位改读 SQLite canonical_events 投影，不再读写
  * localStorage 消息快照，也不再走 migrateLegacyMessages（旧历史废弃）。
- * UI 权威仍为 agent session/load replay；canonical 投影只是占位。
+ * canonical journal 是重启后的历史权威；仅在无本地权威且 replay 完整时使用 replay fallback。
  */
 export function useSessionLifecycle(
   sessionId: string | null,
@@ -74,6 +75,7 @@ export function useSessionLifecycle(
   // CWD-03：已处理的 reload 令牌（同会话 rootPath 变更原地重载；令牌递增即重跑）。
   const processedReloadRef = useRef<number | undefined>(undefined)
   const controllerHandleRef = useRef<ChatControllerHandle | null>(null)
+  const replayCoordinatorRef = useRef<ReplayLoadCoordinator | null>(null)
   const [recoveryFailure, setRecoveryFailure] = useState<SessionRecoveryFailure | null>(null)
   const [replayIntegrity, setReplayIntegrity] = useState<SessionReplayIntegrity | null>(null)
   const [canonicalRefresh, setCanonicalRefresh] = useState<{ sessionId: string; revision: number } | null>(null)
@@ -121,6 +123,7 @@ export function useSessionLifecycle(
       controllerHandleRef.current = attachChatEventController(controllerRefs)
       registerChatController(controllerHandleRef.current)
     }
+    replayCoordinatorRef.current = new ReplayLoadCoordinator(controllerHandleRef.current!)
     return () => {
       // G0：卸载不 dispose（应用级保活，后台事件继续处理）；只解绑 handle 引用
       controllerHandleRef.current = null
@@ -226,68 +229,51 @@ export function useSessionLifecycle(
     }
 
     const startPersistedLoad = (cached: Message[]) => {
-      const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
-      loadGenerationRef.current[s.source] = loadGeneration
-      recordChatReplayTrace({ kind: 'load-start', ownerSessionId: s.id, source: s.source, generation: loadGeneration, ...safeContentEvidence(cached) })
-      const lockGeneration = controllerHandleRef.current?.beginLoadLock(s.source)
+      const coordinator = replayCoordinatorRef.current
+      const controller = controllerHandleRef.current
+      if (!coordinator || !controller) return
       const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
       // OWNER-02：load_persisted_session 目标 owner = session.agentId（从 Session 读取）。
       // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
       void getHookRuntime().invoke('session.loading', { session: s, source: s.source }, s.hooks.length > 0 ? s.hooks : undefined)
-      sessionClient.loadPersistedSession({ owner: { profileId: s.profileId, agentId: s.agentId, localSessionId: s.source }, periId: s.periId, cwd: s.workdir || undefined, workspaceId: s.workspaceId || undefined }).then(async loadResult => {
+      const pending = coordinator.load({
+        source: s.source,
+        ownerKey,
+        cached,
+        load: () => sessionClient.loadPersistedSession({ owner: { profileId: s.profileId, agentId: s.agentId, localSessionId: s.source }, periId: s.periId, cwd: s.workdir || undefined, workspaceId: s.workspaceId || undefined }),
+        loadCanonical: () => tauriCanonicalEventRepository().loadAll(ownerKey),
+        projectCanonical: rows => projectMessagesFromCanonical(rows),
+        isCurrent: () => sessionRef.current === s.source && processedReloadRef.current === reloadToken,
+      })
+      const loadGeneration = coordinator.currentGeneration(s.source) ?? 0
+      recordChatReplayTrace({ kind: 'load-start', ownerSessionId: s.id, source: s.source, generation: loadGeneration, ...safeContentEvidence(cached) })
+      void pending.then(outcome => {
+        if (!outcome) return
         void getHookRuntime().invoke('session.loaded', { session: s, source: s.source }, s.hooks.length > 0 ? s.hooks : undefined)
-        const res = sessionResponseObject(loadResult.response)
-        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) {
-          if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
-          return
-        }
-        const replay = loadResult.replay
-        const replayMetadata = loadResult.replayMetadata
-        const canonicalRows = await tauriCanonicalEventRepository().loadAll(ownerKey)
-        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) {
-          if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
-          return
-        }
-        const observedCanonicalRevision = canonicalRows.reduce((max, row) => Math.max(max, row.sequence), 0)
-        controllerHandleRef.current?.seedCanonicalCursor?.(ownerKey, observedCanonicalRevision)
-        const projectionRows = loadResult.authority === 'local-journal'
-          ? canonicalRows.filter(row => row.provenance?.origin === 'local-observed' && row.provenance.trust === 'authoritative')
-          : canonicalRows
+        const res = sessionResponseObject(outcome.response)
         recordChatReplayTrace({
           kind: 'load-response',
           ownerSessionId: s.id,
           source: s.source,
           generation: loadGeneration,
           detail: {
-            replayCount: replay.length,
-            replayComplete: replayMetadata.complete,
-            replayTruncated: replayMetadata.truncated,
-            replayDroppedCount: replayMetadata.droppedCount,
-            replayBoundary: replayMetadata.boundary.kind,
-            replayObservedCount: replayMetadata.boundary.observedCount,
-            replayJournalStatus: loadResult.replayJournalStatus,
-            canonicalRevision: loadResult.canonicalRevision,
-            observedCanonicalRevision,
+            replayCount: outcome.replayCount,
+            replayComplete: outcome.replayMetadata.complete,
+            replayTruncated: outcome.replayMetadata.truncated,
+            replayDroppedCount: outcome.replayMetadata.droppedCount,
+            replayBoundary: outcome.replayMetadata.boundary.kind,
+            replayObservedCount: outcome.replayMetadata.boundary.observedCount,
+            replayJournalStatus: outcome.replayJournalStatus,
+            canonicalRevision: outcome.canonicalRevision,
           },
         })
-        const replayFallbackAllowed = replayMetadata.complete && loadResult.authority !== 'local-journal'
-        const resolved = controllerHandleRef.current && lockGeneration !== undefined && projectionRows.length > 0
-          ? controllerHandleRef.current.commitCanonicalProjection(
-              s.source,
-              lockGeneration,
-              projectMessagesFromCanonical(projectionRows),
-              observedCanonicalRevision,
-            )
-            : controllerHandleRef.current && lockGeneration !== undefined && replayFallbackAllowed
-            ? controllerHandleRef.current.commitReplaySnapshot(s.source, lockGeneration, replay)
-            : resolveLoadedMessages({ loadSucceeded: true, cached, replayed: [] })
-        recordChatReplayTrace({ kind: 'load-commit', ownerSessionId: s.id, source: s.source, generation: loadGeneration, ...safeContentEvidence(resolved) })
+        recordChatReplayTrace({ kind: 'load-commit', ownerSessionId: s.id, source: s.source, generation: loadGeneration, detail: { commit: outcome.commit, authority: outcome.authority, canonicalRevision: outcome.canonicalRevision }, ...safeContentEvidence(outcome.messages) })
         if (sessionRef.current === s.source) {
-          setReplayIntegrity(replayMetadata.complete ? null : { sessionId: s.id, metadata: replayMetadata })
-          setMessages(resolved)
-          setSummary(controllerHandleRef.current?.getSummary(s.source) ?? (resolved.length > 0 ? {
+          setReplayIntegrity(outcome.replayMetadata.complete ? null : { sessionId: s.id, metadata: outcome.replayMetadata })
+          setMessages(outcome.messages)
+          setSummary(controller.getSummary(s.source) ?? (outcome.messages.length > 0 ? {
             elapsedMs: 0,
-            tokenCount: controllerHandleRef.current?.getTokenCount(s.source) ?? 0,
+            tokenCount: controller.getTokenCount(s.source),
             completedFrame: '',
             reason: 'done',
           } : null))
@@ -296,11 +282,9 @@ export function useSessionLifecycle(
         // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
         // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
         useRuntimeStore.getState().setBindingGeneration(context, useRuntimeStore.getState().agentStatuses[s.agentId]?.generation)
-        setCanonicalRefresh({ sessionId: s.id, revision: observedCanonicalRevision })
-        if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
+        setCanonicalRefresh({ sessionId: s.id, revision: outcome.canonicalRevision })
       }).catch(error => {
-        if (lockGeneration !== undefined) controllerHandleRef.current?.abortSessionLoad(s.source, lockGeneration)
-        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
+        if (coordinator.currentGeneration(s.source) !== loadGeneration) return
         if (sessionRef.current !== s.source) return
         reportRuntimeError('恢复会话', error)
         setRecoveryFailure({

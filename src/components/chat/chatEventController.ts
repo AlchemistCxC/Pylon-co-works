@@ -85,6 +85,8 @@ export interface ChatControllerHandle {
   commitReplaySnapshot: (source: string, generation: number, replay: unknown[]) => Message[]
   /** Kernel journal 已导入/对账 replay 后，以同一 journal 的有效投影原子提交。 */
   commitCanonicalProjection: (source: string, generation: number, messages: Message[], canonicalRevision: number) => Message[]
+  /** replay 不完整且无 canonical rows 时，保留当前 runtime 并排空 load 缓冲。 */
+  commitPreservedRuntime: (source: string, generation: number) => Message[]
   /** B1：Channel 流式帧入口——按 event 路由到与广播监听共用的处理体。 */
   handleStreamFrame: (frame: { event: string; payload: unknown }) => Promise<void>
   abortSessionLoad: (source: string, generation: number) => void
@@ -808,6 +810,29 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     return runtimeState[key]?.messages ?? messages
   }
 
+  const commitPreservedRuntime = (source: string, generation: number): Message[] => {
+    const key = runtimeKey(source)
+    const existing = key ? runtimeState[key] : undefined
+    const transaction = loadTransactions.get(source)
+    if (!key || !existing || !transaction || transaction.generation !== generation || loadGenerations.get(source) !== generation) return []
+
+    // No authoritative snapshot was available. Keep the current runtime intact,
+    // then drain only legacy live events that have no committed canonical
+    // counterpart. This is the same reconciliation rule as canonical commit and
+    // prevents a truncated response from silently losing in-flight output.
+    loadTransactions.delete(source)
+    if (transaction.bufferedCanonicalEvents.length > 0) {
+      const consumedCanonical = new Set<number>()
+      for (const event of transaction.bufferedLiveEvents) {
+        if (isRepresentedByCanonical(event, transaction.bufferedCanonicalEvents, consumedCanonical)) continue
+        dispatch(event, true)
+      }
+    } else {
+      for (const event of transaction.bufferedLiveEvents) dispatch(event, true)
+    }
+    return runtimeState[key]?.messages ?? existing.messages
+  }
+
   const clearReplay = (source: string) => {
     // replay 已由 load_persisted_session command 收集并在 commitReplaySnapshot 原子提交。
     // 这里清理任何兼容旧路径残留，不再把 replay buffer 当权威历史。
@@ -1266,6 +1291,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     initSource,
     commitReplaySnapshot,
     commitCanonicalProjection,
+    commitPreservedRuntime,
     handleStreamFrame: async frame => {
       // B1：channel 帧 payload 与对应广播事件载荷同构；处理体逐字共用。
       const event = { payload: frame.payload as never }
