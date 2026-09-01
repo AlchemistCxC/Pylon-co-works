@@ -50,6 +50,18 @@ fn replay_journal_commit_outcome(status: &str) -> &'static str {
     }
 }
 
+fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
+    match error {
+        crate::acp::AcpError::ConnectionClosed => "connection_closed",
+        crate::acp::AcpError::WriteTimeout => "write_timeout",
+        crate::acp::AcpError::RpcTimeout => "rpc_timeout",
+        crate::acp::AcpError::ReplayLoadInProgress => "replay_load_in_progress",
+        crate::acp::AcpError::Rpc(_) => "rpc_error",
+        crate::acp::AcpError::Connect(_) => "connect_error",
+        crate::acp::AcpError::Child(_) => "transport_error",
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
@@ -257,6 +269,29 @@ pub(crate) async fn load_persisted_session(
             .map_err(|error| PylonError::from(error.to_string()))
         }
         Err(error) => {
+            // Failure paths still emit a bounded trace.  Collection counters are
+            // explicitly zero because the collector does not claim a complete
+            // batch when timeout/EOF/RPC error prevents observing the boundary.
+            let owner_key = owner
+                .key()
+                .unwrap_or_else(|_| "<invalid-owner>".to_string());
+            tracing::warn!(
+                target: "replay_trace",
+                owner = %owner_key,
+                load_generation = generation,
+                capture_lp = "active-replay-registry",
+                response_boundary = "not-observed",
+                observed_count = 0_u64,
+                retained_count = 0_u64,
+                dropped_count = 0_u64,
+                authority = "none",
+                canonical_revision = 0_i64,
+                journal_status = "load-error",
+                commit_outcome = "load-error",
+                projection_commit = "not-started",
+                error_code = replay_load_error_code(&error),
+                "session/load replay trace"
+            );
             restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
             Err(PylonError::from(error))
         }
@@ -284,7 +319,7 @@ pub(crate) async fn list_persisted_sessions(
 
 #[cfg(test)]
 mod tests {
-    use super::replay_journal_commit_outcome;
+    use super::{replay_journal_commit_outcome, replay_load_error_code};
 
     #[test]
     fn replay_trace_journal_outcome_is_machine_readable() {
@@ -305,5 +340,19 @@ mod tests {
             "incomplete-preserved-runtime"
         );
         assert_eq!(replay_journal_commit_outcome("empty"), "empty");
+    }
+
+    #[test]
+    fn replay_trace_error_code_does_not_include_remote_error_text() {
+        assert_eq!(
+            replay_load_error_code(&crate::acp::AcpError::Rpc(
+                "{\"message\":\"secret\"}".to_string()
+            )),
+            "rpc_error"
+        );
+        assert_eq!(
+            replay_load_error_code(&crate::acp::AcpError::ConnectionClosed),
+            "connection_closed"
+        );
     }
 }
