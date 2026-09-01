@@ -107,7 +107,21 @@ pub(crate) async fn load_persisted_session(
         crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
     )?;
     // A-02：锁内原子建立 replay capture，等待在锁外进行——回放最长 30s，不阻塞其他命令。
-    let handles = runtime.acp.lock().await.begin_replay_capture(&peri_id)?;
+    // 若同 owner 已有 load，拒绝新请求并撤销本次临时 slot，避免失败请求覆盖
+    // 首个 load 的绑定/状态（ReplayLoadInProgress 是无副作用的拒绝路径）。
+    let handles = match runtime.acp.lock().await.begin_replay_capture(&peri_id) {
+        Ok(handles) => handles,
+        Err(error) => {
+            restore_previous_slot(
+                &runtime,
+                &source,
+                &peri_id,
+                generation,
+                previous.clone(),
+            )?;
+            return Err(error.into());
+        }
+    };
     let load_result = crate::acp::load_session_with_replay(
         handles,
         &peri_id,
