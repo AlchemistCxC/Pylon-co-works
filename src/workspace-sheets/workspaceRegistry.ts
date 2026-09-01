@@ -216,6 +216,13 @@ export class WorkspaceRegistryStore {
     return this.snapshot
   }
 
+  /** Clears entries and subscriptions for HMR/test teardown. */
+  dispose(): void {
+    this.entries.clear()
+    this.listeners.clear()
+    this.publish()
+  }
+
   private publish(): void {
     this.revision += 1
     const entries = [...this.entries.values()].sort((a, b) => (
@@ -244,7 +251,12 @@ export class WorkspaceRegistryStore {
   }
 }
 
-const store = new WorkspaceRegistryStore()
+let store = new WorkspaceRegistryStore()
+
+/** RuntimeServices composition root may replace the compatibility owner. */
+export function setWorkspaceRegistryStore(next: WorkspaceRegistryStore): void {
+  store = next
+}
 
 export function getWorkspaceRegistryStore(): WorkspaceRegistryStore {
   return store

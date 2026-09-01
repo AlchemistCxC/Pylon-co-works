@@ -18,7 +18,7 @@ import { SessionCreationRegistry } from './session-creation/sessionCreationRegis
 import { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts'
 import { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
 import {
-  getWorkspaceRegistryStore,
+  setWorkspaceRegistryStore,
   WorkspaceRegistryStore,
 } from '../workspace-sheets/workspaceRegistry.ts'
 import type { RuntimeRegistries } from './pluginHostServices.ts'
@@ -35,7 +35,8 @@ export interface CreateRuntimeServicesOptions {
 }
 
 export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}): RuntimeServices {
-  return Object.freeze({
+  const workspaceRegistry = options.workspaceRegistry ?? new WorkspaceRegistryStore()
+  const services = Object.freeze({
     registryHub: new RegistryHub(),
     commandRegistry: new CommandRegistry(),
     eventBus: new PluginEventBus(),
@@ -57,15 +58,16 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
     sessionCreationRegistry: new SessionCreationRegistry(),
     interfaceModeRegistry: new InterfaceModeRegistry(),
     titlebarRegistry: new TitlebarRegistry(),
-    workspaceRegistry: options.workspaceRegistry ?? new WorkspaceRegistryStore(),
+    workspaceRegistry,
   })
+  if (!options.workspaceRegistry) setWorkspaceRegistryStore(workspaceRegistry)
+  return services
 }
 
 type PluginDisableHandler = (pluginId: string) => void | Promise<void>
 
 let pluginDisableHandler: PluginDisableHandler | undefined
 const runtimeServices = createRuntimeServices({
-  workspaceRegistry: getWorkspaceRegistryStore(),
   hookRuntime: new HookRuntime(undefined, {
     onDisablePlugin: pluginId => {
       if (!pluginDisableHandler) throw new Error('Plugin Runtime disable handler is not bound')
