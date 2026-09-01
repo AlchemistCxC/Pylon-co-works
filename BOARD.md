@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 05:05] [施工员A·工程师] 最终复验：`cargo test --manifest-path src-tauri/Cargo.toml --lib --no-fail-fast` 当前共享工作树 883 passed / 4 ignored；A-owned ACP/dispatcher/session 定向仍全绿。并行 B 的新增测试使全量计数较先前记录增加 1，未引入失败。
+
 [2026-09-02 04:45] [施工员A·工程师] A-02 rejection edge：`1c38f7d1` 保证临时 slot 回滚失败时仍返回原 `replay_load_in_progress`，并单独记录 rollback error；不改变正常回滚。`session::persist` 定向 4 项继续通过。
 
 [2026-09-02 04:25] [施工员A·工程师] A-02 rejection hardening：`6b496620` 修复同 owner 并发 `replay_load_in_progress` 后临时 session slot 未回滚的问题；拒绝路径现在保留首个 load 的绑定/状态并继续依赖 capture RAII 清理。`session::persist` 定向 4 项通过；Track B 无需适配。
