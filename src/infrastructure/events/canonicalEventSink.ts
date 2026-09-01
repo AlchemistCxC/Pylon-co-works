@@ -109,7 +109,6 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
           // DEL-04：owner 已 tombstone——停用整 owner（不 reseed、不再重试）。
           discardedOwners.add(ownerKey)
           states.delete(ownerKey)
-          scheduler.discard(ownerKey)
         }
         throw error
       }

@@ -102,6 +102,41 @@ describe('canonicalEventPersistScheduler', () => {
     expect(persist).toHaveBeenNthCalledWith(2, 'o1', ['b'], 5)
   })
 
+  it('在飞写期间 discard：随后失败不再上报或留下 drain failure', async () => {
+    let rejectFirst!: (error: unknown) => void
+    const persist = vi.fn(() => new Promise<number>((_resolve, reject) => {
+      rejectFirst = reject
+    }))
+    const onError = vi.fn()
+    const scheduler = createCanonicalEventPersistScheduler({ persist, onError })
+
+    scheduler.markDirty('o1', ['late'], true)
+    expect(persist).toHaveBeenCalledTimes(1)
+    scheduler.discard('o1')
+    rejectFirst(new CanonicalEventRepositoryError('event_session_deleted', '会话已删除（tombstone）'))
+    await flushMicrotasks()
+
+    expect(onError).not.toHaveBeenCalled()
+    expect(scheduler.hasDirty('o1')).toBe(false)
+    await expect(scheduler.flushAllAsync()).resolves.toBeUndefined()
+  })
+
+  it('在飞写期间 discard：真实持久化错误仍保持可见', async () => {
+    let rejectFirst!: (error: unknown) => void
+    const persist = vi.fn(() => new Promise<number>((_resolve, reject) => {
+      rejectFirst = reject
+    }))
+    const onError = vi.fn()
+    const scheduler = createCanonicalEventPersistScheduler({ persist, onError })
+
+    scheduler.markDirty('o1', ['must-report'], true)
+    scheduler.discard('o1')
+    rejectFirst(new Error('database unavailable'))
+    await flushMicrotasks()
+
+    expect(onError).toHaveBeenCalledWith('o1', expect.any(Error))
+  })
+
   it('写失败不丢内存事件：保留 dirty + onError 可见上报，下次 flush 重试', async () => {
     const persist = vi.fn()
       .mockRejectedValueOnce(new Error('db unavailable'))

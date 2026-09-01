@@ -70,6 +70,13 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
         ownerKey: sessionDurableOwnerKey(s),
       }),
       refreshSessionsBackend,
+      // tombstone 成功后立即封住在途 canonical 写；revision 刷新可能仍在等待。
+      markSessionDeleting: sessionId => {
+        const target = sessions.find(session => session.id === sessionId)
+        if (target) {
+          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+        }
+      },
       markSessionDeleted: id => {
         const target = sessions.find(s => s.id === id)
         if (target) {

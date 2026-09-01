@@ -7,10 +7,10 @@
  * - 失败不丢内存事件：普通失败恢复 dirty（下次 flush 重试）并经 onError 可见上报；
  * - revision conflict 由 sink 重新播种并替换 dirty 批次，不丢事件；真正终态失败
  *   仅 event_invalid / event_session_deleted。
- * - discard(ownerKey)：会话被 prune 时丢弃未落盘事件（DEL-04 后端 tombstone gate
- *   兜底迟到写；前端 discard 仍负责本地未落盘清理）。
+ * - discard(ownerKey)：会话被 prune 时丢弃未落盘事件，并使已在途写入的结果失效
+ *   （DEL-04 后端 tombstone gate 兜底迟到写；前端 discard 仍负责本地清理）。
  */
-import { CanonicalEventRepositoryError } from './canonicalEventRepository'
+import { asCanonicalEventRepositoryError, CanonicalEventRepositoryError } from './canonicalEventRepository'
 
 export interface CanonicalEventPersistSchedulerOptions {
   debounceMs?: number
@@ -67,8 +67,18 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
     const promise = (async () => {
       try {
         const revision = await persist(ownerKey, pending, expectedRevision)
-        revisions.set(ownerKey, revision)
+        // discard() may run while the append is in flight.  Its result is no
+        // longer a valid baseline for this owner, even when the backend write
+        // itself eventually succeeds.
+        if (!discarded.has(ownerKey)) revisions.set(ownerKey, revision)
       } catch (error) {
+        // An explicit discard makes the backend tombstone response an expected
+        // outcome.  Keep other persistence failures visible even if the owner
+        // was removed, so a real database problem is never silently hidden.
+        if (
+          discarded.has(ownerKey)
+          && asCanonicalEventRepositoryError(error).code === 'event_session_deleted'
+        ) return
         failures.set(ownerKey, error)
         if (isTerminalEventError(error)) {
           // 终态失败：同批与 revision 基准均失效，丢弃（调用方重新播种）。
@@ -85,7 +95,10 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
         // 仅在飞期间有更新的批次（引用与本次不同）时立即续写（latest wins）——
         // 失败恢复的同批次不触发自动重试（避免失败热点下无界重试循环）。
         const current = dirty.get(ownerKey)
-        if (current !== undefined && current !== pending && !timers.has(ownerKey)) {
+        if (!discarded.has(ownerKey)
+          && current !== undefined
+          && current !== pending
+          && !timers.has(ownerKey)) {
           persistNow(ownerKey)
         }
       }

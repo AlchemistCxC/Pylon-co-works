@@ -187,6 +187,29 @@ describe('canonicalEventSink', () => {
     sink.dispose()
   })
 
+  it('明确 discard 后在飞写收到 tombstone：不再上报预期删除竞态', async () => {
+    const fake = fakeRepository()
+    fake.revision.mockResolvedValue(0)
+    let rejectAppend!: (error: unknown) => void
+    fake.append.mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectAppend = reject
+    }))
+    const onError = vi.fn()
+    const sink = createCanonicalEventSink({ repository: fake.repository, onError })
+
+    sink.offer(context, rawUser('in-flight'), true)
+    await flushMicrotasks() // seed 完成并启动 append
+    expect(fake.append).toHaveBeenCalledTimes(1)
+
+    // 删除事务已写入 tombstone，同时取消本地未落盘 owner；append 仍可能在飞。
+    sink.discard(OWNER_KEY)
+    rejectAppend(new CanonicalEventRepositoryError('event_session_deleted', '会话已删除（tombstone）'))
+    await flushMicrotasks()
+
+    expect(onError).not.toHaveBeenCalled()
+    sink.dispose()
+  })
+
   it('discard：未落盘事件丢弃，之后同 owner offer 不重新播种/不写', async () => {
     const fake = fakeRepository()
     fake.revision.mockResolvedValue(0)

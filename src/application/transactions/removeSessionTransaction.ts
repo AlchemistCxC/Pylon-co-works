@@ -27,6 +27,12 @@ export interface RemoveSessionDeps {
   deleteSessionLocal: (session: Session) => Promise<unknown>
   /** user_session_delete 会直接推进后端 sessions revision；删除后刷新前端 baseline。 */
   refreshSessionsBackend?: () => Promise<void>
+  /**
+   * tombstone 提交成功后的即时 canonical 闸门。必须在任何异步 revision 刷新前
+   * 取消在途写，避免删除竞态把 event_session_deleted 当成用户错误；可选以兼容
+   * 只关心最终清理的测试/调用方。
+   */
+  markSessionDeleting?: (sessionId: string) => void
   /** DEL-04（§5.13）：删除终态——主动 cancel/mark deleted（清调度器 timer/dirty/revision 并
    *  拒绝该 session 的迟到写）；dispose() 只清 dirty 不是删除语义，必须显式调用 */
   markSessionDeleted: (sessionId: string) => void
@@ -49,6 +55,9 @@ export async function removeSessionTransaction(id: string, deps: RemoveSessionDe
     deps.reportError('删除会话记录', error)
     return { ok: false, kind: 'transport', message: error instanceof Error ? error.message : '删除会话失败', cause: error }
   }
+  // tombstone 已由后端原子提交；先封住 canonical 在途写，再等待 sessions
+  // revision 刷新。最终 markSessionDeleted 仍在下方执行，兼容未提供即时钩子的调用方。
+  deps.markSessionDeleting?.(id)
   // 删除命令已经直接修改后端 sessions envelope。先刷新 repository baseline，
   // 再执行 removeSession 的完整快照同步，避免使用删除前 revision 自致冲突。
   if (deps.refreshSessionsBackend) {

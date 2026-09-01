@@ -78,6 +78,13 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
         ownerKey: sessionDurableOwnerKey(s),
       }),
       refreshSessionsBackend,
+      // tombstone 成功后立即封住在途 canonical 写；revision 刷新可能仍在等待。
+      markSessionDeleting: id => {
+        const target = useIdentityStore.getState().sessions.find(item => item.id === id)
+        if (target) {
+          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+        }
+      },
       // DEL-04（§5.13）删除终态：丢弃 canonical 未落盘事件（不复活；messages 表已停写）
       markSessionDeleted: id => {
         const target = useIdentityStore.getState().sessions.find(item => item.id === id)

@@ -17,6 +17,34 @@ use crate::session::{extract_tool_file_name, value_as_string, SessionInfo};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
+/// Canonical ingest failure policy for a live ACP update.
+///
+/// A `SessionDeleted` result is an expected outcome when a delete transaction
+/// wins the race with an update that was already in the ACP inbox. The
+/// tombstone gate must still reject the event (so the session cannot be
+/// resurrected), but reporting that expected rejection at error level creates
+/// a misleading user-facing runtime error. Keep it at debug level while
+/// retaining error-level visibility for actual persistence failures.
+fn log_canonical_ingest_error(error: &crate::session::EventError, agent_id: &str, source: &str) {
+    if matches!(error, crate::session::EventError::SessionDeleted(_)) {
+        tracing::debug!(
+            code = error.code(),
+            agent_id,
+            source,
+            error = %error,
+            "late ACP update ignored for deleted session"
+        );
+    } else {
+        tracing::error!(
+            code = error.code(),
+            agent_id,
+            source,
+            error = %error,
+            "canonical ingest failed; event was not published"
+        );
+    }
+}
+
 /// C11/O7：一条 session/update 事件需要施加到宠物的感知事件。
 /// 按收集顺序产出，调用方在 sessions 锁外逐条应用——收集顺序 = 应用顺序。
 /// G3 §2.2.1：agent_message_chunk 的 FirstChunk/CodeSeen 与 apply_update_event 产出
@@ -737,13 +765,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             {
                 Ok(result) => result.events.into_iter().next(),
                 Err(error) => {
-                    tracing::error!(
-                        code = error.code(),
-                        agent_id,
-                        source,
-                        error = %error,
-                        "canonical ingest failed; event was not published"
-                    );
+                    log_canonical_ingest_error(&error, agent_id, &source);
                     return true;
                 }
             }
@@ -1301,6 +1323,50 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tracing_subscriber::layer::Layer as _;
+
+    #[test]
+    fn deleted_session_ingest_failure_is_not_logged_as_user_error() {
+        // The tombstone gate remains authoritative; only the presentation of
+        // its expected late-write rejection changes from error to debug.
+        let logs = crate::runtime_log::RuntimeLogHub::new(16);
+        let dispatch = tracing::Dispatch::new(
+            crate::runtime_log::RuntimeLogLayer::with_hub(logs.clone()).with_subscriber(
+                tracing_subscriber::fmt()
+                    .with_max_level(tracing::Level::TRACE)
+                    .finish(),
+            ),
+        );
+        let _guard = tracing::dispatcher::set_default(&dispatch);
+
+        log_canonical_ingest_error(
+            &crate::session::EventError::SessionDeleted("owner tombstone".to_string()),
+            "agent",
+            "local:session",
+        );
+        log_canonical_ingest_error(
+            &crate::session::EventError::Unavailable("database unavailable".to_string()),
+            "agent",
+            "local:session",
+        );
+
+        let entries = logs.list(&crate::runtime_log::RuntimeLogQuery::default());
+        assert!(
+            entries.iter().all(|entry| !entry
+                .message
+                .contains("late ACP update ignored for deleted session")),
+            "deleted-session race must stay below the runtime-log visibility threshold"
+        );
+        assert!(
+            entries.iter().any(|entry| {
+                entry.level == "error"
+                    && entry
+                        .message
+                        .contains("canonical ingest failed; event was not published")
+            }),
+            "non-tombstone ingest failures must remain visible at error level"
+        );
+    }
 
     /// 验收回归 D3：replay 的 user 消息 persona 前缀剥离（基于分隔符）。
     #[test]

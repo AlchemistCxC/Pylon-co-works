@@ -44,6 +44,26 @@ describe('removeSessionTransaction（DEL-03 本地优先）', () => {
     expect(calls).toEqual(['delete:s1@peri', 'markDeleted:s1', 'remove:s1', 'clear:s1', 'close:local:x@peri', 'finalize:s1@local:x'])
   })
 
+  it('tombstone 后先封住 canonical 写，再等待 revision 刷新', async () => {
+    const { deps, calls } = createDeps()
+    let releaseRefresh!: () => void
+    let signalRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>(resolve => { signalRefreshStarted = resolve })
+    deps.markSessionDeleting = id => { calls.push(`markDeleting:${id}`) }
+    deps.refreshSessionsBackend = async () => {
+      calls.push('refresh:start')
+      signalRefreshStarted()
+      await new Promise<void>(resolve => { releaseRefresh = resolve })
+      calls.push('refresh:end')
+    }
+    const transaction = removeSessionTransaction('s1', deps)
+    // 让删除事务运行到 refresh await，确认即时闸门已先执行。
+    await refreshStarted
+    expect(calls.slice(0, 3)).toEqual(['delete:s1@peri', 'markDeleting:s1', 'refresh:start'])
+    releaseRefresh()
+    await expect(transaction).resolves.toEqual({ ok: true, value: 's1' })
+  })
+
   it('本地删除失败：不 remove/clear，不 close/finalize（本地会话保留可重试），返回 transport', async () => {
     const { deps, calls } = createDeps({
       deleteSessionLocal: async () => { throw new Error('user_session_delete failed') },
