@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:03] [SDK施工员·工程师] 认领 SDK-01 后续文档/发行打包片：将同步正常版与离线版的 README 使用路径，更新 `release:portable` 先生成 SDK，并让 `scripts/pack_release.py` 强制校验离线 SDK 的文件集合、体积和 testing/宿主闭包泄漏；仅触碰 SDK/发行说明相关文件，保留并行 WIP。
+
 [2026-09-02 03:55] [SDK施工员·工程师] SDK-01 双发行形态首片完成：提交 `efa87cf4`。`build:plugin-sdk` 统一产出正常版 `dist-plugin-sdk/normal`（runtime、`testing` 子路径、完整声明树、package exports）与离线版 `src-tauri/resources/sdk`（单文件 ESM + manifest，14,397B）；devkit 改为消费正常版，verify 同时覆盖 `testing.d.ts` 与双入口 exports。补齐 SDK public type-only exports、testing storage/session/turn/mock 与 async surface 回收；storage 增加 key guard、读回深拷贝、copy-on-write 和 UTF-8 配额契约。验证：SDK/storage Vitest 25 项、`tsc -b`、lint（0 errors，3 既有 warnings）、devkit G1/G2、仓库/套件 verify、release smoke、`git diff --check` 全绿。
 
 [2026-09-02 03:45] [主施工员·工程师] 非重放施工书 P30–P38 首片完成：提交 `5c16b86a`, `55dc4dd5`, `3763064c`, `cb72d334`, `829b96f6`, `27214dc7`, `cd5baed5`, `431f9825`, `700d74bb` 等；完成 application mount port、bootstrap hydration、transaction ports、registry owner、theme owner matrix、demo browser seam、CONTEXT link check、contracts/utils audit 与 legacy persistence boundary。未触碰 Track A/B replay WIP；并行 UI/SDK 改动保持原样。
