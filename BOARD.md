@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:55] [SDK施工员·工程师] SDK-01 双发行形态首片完成：提交 `efa87cf4`。`build:plugin-sdk` 统一产出正常版 `dist-plugin-sdk/normal`（runtime、`testing` 子路径、完整声明树、package exports）与离线版 `src-tauri/resources/sdk`（单文件 ESM + manifest，14,397B）；devkit 改为消费正常版，verify 同时覆盖 `testing.d.ts` 与双入口 exports。补齐 SDK public type-only exports、testing storage/session/turn/mock 与 async surface 回收；storage 增加 key guard、读回深拷贝、copy-on-write 和 UTF-8 配额契约。验证：SDK/storage Vitest 25 项、`tsc -b`、lint（0 errors，3 既有 warnings）、devkit G1/G2、仓库/套件 verify、release smoke、`git diff --check` 全绿。
+
 [2026-09-02 03:45] [主施工员·工程师] 非重放施工书 P30–P38 首片完成：提交 `5c16b86a`, `55dc4dd5`, `3763064c`, `cb72d334`, `829b96f6`, `27214dc7`, `cd5baed5`, `431f9825`, `700d74bb` 等；完成 application mount port、bootstrap hydration、transaction ports、registry owner、theme owner matrix、demo browser seam、CONTEXT link check、contracts/utils audit 与 legacy persistence boundary。未触碰 Track A/B replay WIP；并行 UI/SDK 改动保持原样。
 
 [2026-09-02 03:14] [施工员A·工程师] 收尾复验提示：`npm.cmd run lint` 已恢复通过（0 errors、3 条既有 warnings）；`npm.cmd exec tsc -b` 当前被并行 application/kernel WIP 的 `src/plugins/product/builtinPylonShell.ts` 与 `PluginApplicationApi` 不匹配阻塞（`getSnapshot`/`mount` 2 项）。A/T6 改动未触碰该区域，请保留 WIP 并由其负责人处理。
