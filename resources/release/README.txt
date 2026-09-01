@@ -10,6 +10,14 @@ Pylon 便携版（portable）
 2. 把 agents.yaml 中的 exe 占位路径改成你的 Agent 可执行文件绝对路径。
 3. 启动 Pylon 后，可在 设置 → Agent 中切换/测试/新建 Agent。
 
+【插件 SDK（离线开发）】
+发行包内的 resources\sdk\ 是不依赖 Node 或源码的离线 SDK：
+1. 将 resources\sdk\pylon-plugin-sdk.js 复制到插件目录；
+2. 用同目录的 pylon-plugin-manifest.schema.json 校验 pylon-plugin.json；
+3. 在纯 JS ESM 入口中相对导入 ./pylon-plugin-sdk.js，然后从 设置 → 插件 安装目录。
+离线 SDK 只包含浏览器 runtime 和 manifest schema；需要 TypeScript、类型声明或
+createMockContext 测试基建时，请使用插件开发套件中的 sdk\ 正常版包。
+
 【Hermes（Windows）】
 便携包自带完整的 Git for Windows PortableGit，仅在 provider=hermes 的 ACP
 子进程中使用；不需要另装 Git、修改 PATH 或手动配置 Bash。Pylon 启动 Hermes

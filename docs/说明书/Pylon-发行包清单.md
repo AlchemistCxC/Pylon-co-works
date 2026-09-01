@@ -15,6 +15,7 @@
 - `agents.example.yaml` 和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
 - Hermes 所需的完整 Git for Windows PortableGit 树；
+- 离线插件 SDK（单文件 ESM + manifest schema，不含 testing harness）；
 - WebView2 安装引导（或明确声明由分发渠道另行提供）；
 - 包外的 SHA-256 文件和 manifest。
 
@@ -37,8 +38,8 @@
 | `resources/runtime/git/**` | 必须（Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe` |
 | `resources/runtime/portable-git.json` | 必须 | PortableGit 版本、来源和 SHA-256 元数据 |
 | `resources/runtime/README.txt` | 必须 | 运行时用途、许可和准备方式说明 |
-| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 插件开发 SDK（单文件 ESM）：发行包内无构建插件开发的 import 目标 |
-| `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema |
+| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `npm run build:plugin-sdk` 生成 |
+| `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema；与离线 SDK 一起发布 |
 | `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |
@@ -86,10 +87,11 @@ npm run release:portable
 `release:portable` 依次完成：
 
 1. 下载/校验并准备 PortableGit；
-2. 构建前端；
-3. 构建 Tauri release（不生成安装器）；
-4. 构建 `pylon-detect.exe`；
-5. 收集文件、审计、压缩并核对 manifest。
+2. 生成正常版与离线版 SDK（正常版留在构建目录，离线版由 Tauri 复制到 release resources）；
+3. 构建前端；
+4. 构建 Tauri release（不生成安装器）；
+5. 构建 `pylon-detect.exe`；
+6. 收集文件、审计、压缩并核对 manifest。打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
 
 如果分发渠道不携带 WebView2 bootstrapper，可在完成前端、Tauri 和 detector 构建后
 显式降级打包：
@@ -113,6 +115,8 @@ python scripts/pack_release.py --without-webview2
 - [ ] `python scripts/prepare_hermes_runtime.py` 成功，且运行时校验通过。
 - [ ] `resources/runtime/git/bin/bash.exe`、`usr/bin/msys-2.0.dll` 和关键命令均存在。
 - [ ] `portable-git.json` 的 URL、版本和 SHA-256 与本次树一致。
+- [ ] `resources/sdk/pylon-plugin-sdk.js` 与 manifest schema 存在，且 runtime 不含 `testing.js`、`PluginScope` 或 `createMockContext`。
+- [ ] 离线 SDK bundle 不超过 64 KiB；正常版 package（含 `./testing` 类型入口）在插件开发套件中可独立导入。
 - [ ] `agents.yaml`、`.env`、密钥和本机绝对路径没有被放入待打包目录。
 
 ### 打包后

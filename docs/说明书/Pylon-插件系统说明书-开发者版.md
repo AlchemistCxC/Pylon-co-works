@@ -832,7 +832,7 @@ await ctx.__scopeDispose()                                 // 真实 Scope 回�
 
 语义：`__commands.execute` / `__hooks.dispatch`（按 priority 排序的 pipeline 归约）/
 `__ui.mount`（挂载即派发 host:input，settings:set 回写 settings 存储，与
-PluginSettingsPageHost 同款）/ `__settings` / sessions·turns 为内存 Map；
+PluginSettingsPageHost 同款）/ `__settings` / `__storage` / sessions·turns 为内存实现；
 其余 13 个 API 面为记录式 Proxy（调用被记录、返回 undefined）——覆盖不到的
 行为用真实宿主或集成测试验证。插件测试文件 import 此子路径，生产 bundle
 不会包含它。
@@ -858,11 +858,21 @@ context.storage.clear()
 - minor 版本只做加法（新增可选 context 成员）；破坏性变更加 major 并要求重写。
 - `api: "1.0"` 的插件不得引用 1.1 成员（如 `storage`）——宿主仅在 1.1 契约下保证其存在。
 
-#### 6.11.4 发行包内开发（无源码环境）
+#### 6.11.4 SDK 发行形态
 
-发行包自带 `resources/sdk/pylon-plugin-sdk.js`（单文件 ESM，由 `npm run build:plugin-sdk`
-从 `src/sdk/index.ts` 构建并经 tauri resources 打包）。**不装 Node、不碰源码仓库**
-也能写插件：
+SDK 由 `npm run build:plugin-sdk` 从同一源码同时生成两种形态：
+
+- **正常版**：`dist-plugin-sdk/normal/`，包含 `pylon-plugin-sdk.js`、
+  `testing.js`、完整 `types/` 声明树和 `package.json` exports。将其复制进插件
+  开发套件后，TypeScript/Node 项目可从 `@pylon/plugin-sdk` 与
+  `@pylon/plugin-sdk/testing` 获得 runtime、类型和测试基建。
+- **离线版**：发行包的 `resources/sdk/`，只有单文件浏览器 ESM 与
+  `pylon-plugin-manifest.schema.json`，不依赖 Node、源码或 testing harness。
+
+#### 6.11.5 发行包内开发（无源码环境）
+
+发行包自带 `resources/sdk/pylon-plugin-sdk.js`（单文件 ESM，经 Tauri resources
+打包）。**不装 Node、不碰源码仓库**也能写插件：
 
 1. 建插件目录，把发行包 `resources/sdk/pylon-plugin-sdk.js` 复制进去；
 2. 写 `pylon-plugin.json`（用随包的 `pylon-plugin-manifest.schema.json` 做编辑器校验）；
@@ -881,9 +891,9 @@ export default definePlugin({
    ESM 相对导入按入口文件自身解析——无需任何打包器。
 
 边界：纯 JS 路径没有类型检查（SDK API 表见本章各节与 starter 示例）；
-TS 作者仍走源码仓库的 tsconfig paths，或等待 SDK 以 npm 包形式发布。
-打包脚本对 SDK bundle 有 64KB 体积守卫——超限说明 `src/sdk` 泄漏了宿主
-运行时依赖，构建会直接失败。
+需要类型声明或 `createMockContext` 时使用正常版 SDK（插件开发套件的 `sdk/`）。
+打包脚本对离线 runtime 有 64KB 体积守卫，并拒绝 testing/宿主运行时闭包；超限或
+依赖泄漏说明 `src/sdk` 边界被破坏，构建会直接失败。
 
 ---
 

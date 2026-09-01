@@ -14,7 +14,7 @@
     "prepare:hermes-runtime": "python scripts/prepare_hermes_runtime.py",
     "build:plugin-sdk": "node scripts/build-plugin-sdk.mjs",
     "pack:portable": "python scripts/pack_release.py",
-    "release:portable": "npm run build && npm run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && npm run pack:portable",
+    "release:portable": "npm run prepare:hermes-runtime && npm run build:plugin-sdk && npm run build && npm run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && npm run pack:portable",
     "test": "vitest run",
     "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts",
     "test:unit": "vitest run src/domains src/infrastructure --passWithNoTests",

@@ -28,6 +28,7 @@ const required = [
   'starter/no-build/index.js',
   'starter/typescript/dist/index.js',
   'docs/Pylon-插件系统说明书-开发者版.md',
+  'docs/Pylon-发行包清单.md',
   'README.md',
 ]
 for (const rel of required) check(`结构 ${rel}`, existsSync(join(kitRoot, rel)))

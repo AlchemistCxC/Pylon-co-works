@@ -115,6 +115,12 @@ Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结
 
 开发插件请从 `@pylon/plugin-sdk`（`src/sdk/`）入手：`definePlugin` 定义生命周期，全量宿主契约类型 + `createSettingsSurface` 等纯函数 helper 都从 SDK 引用，打包时经路径别名内联进插件 bundle。可运行的起步示例见 `examples/web-plugins/hello-starter`（manifest + SDK 入口 + scoped styles + 构建脚本，装进“设置 → 插件”即可跑）。
 
+SDK 由同一源码提供两种发行形态：运行 `npm run build:plugin-sdk` 生成正常版
+`dist-plugin-sdk/normal/`（`@pylon/plugin-sdk`、`@pylon/plugin-sdk/testing`、完整类型树，
+供 TypeScript/Node 构建工具消费）；Windows 发行包内的
+`resources/sdk/` 是离线版（单文件浏览器 ESM + manifest schema，不需要 Node 或源码）。
+插件开发套件会直接携带正常版，纯 JS 插件则复制离线版 runtime 后使用相对 import。
+
 用户向导：[Pylon-插件系统说明书-用户版](docs/说明书/Pylon-插件系统说明书-用户版.md)
 
 开发者契约：[Pylon-插件系统说明书-开发者版](docs/说明书/Pylon-插件系统说明书-开发者版.md)（SDK 用法见其 §6.11）
@@ -156,6 +162,7 @@ npm run check:frontend      # lint、覆盖率、构建与生产排除检查
 npm run check:solid         # Solid 工作台边界与契约检查
 npm run check:rust          # Rust 单元测试与构建
 npm run check:all           # 前端、Rust、Solid 全量检查
+npm run build:plugin-sdk    # 生成正常版与离线版 SDK
 npm run release:portable    # 构建 Tauri 便携版
 ```
 
@@ -173,8 +180,8 @@ npx vitest run src/domains/theme
 
 ### 10.1 Windows 便携版发布
 
-便携版发布流程会准备自带的 Hermes PortableGit、构建 Tauri 主程序和 Agent 检测器，
-再生成 ZIP、SHA-256 校验文件和内容 manifest：
+便携版发布流程会先生成离线 SDK，再准备自带的 Hermes PortableGit、构建 Tauri 主程序
+和 Agent 检测器，最后生成 ZIP、SHA-256 校验文件和内容 manifest：
 
 ```bash
 npm run release:portable

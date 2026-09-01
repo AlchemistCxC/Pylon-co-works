@@ -1,11 +1,11 @@
 /**
- * pack-plugin-devkit.mjs — 组装离线插件开发套件（部署包）。
+ * pack-plugin-devkit.mjs — 组装插件开发套件（正常 SDK 包 + 离线 starter）。
  *
  * 目标：拿到套件的人只需 部署-解压-阅读 README 就能开始插件开发，
  * 不需要 prism-desktop 源码仓库。
  *
  * 产物 dist-plugin-devkit/pylon-plugin-devkit/：
- * - sdk/                 @pylon/plugin-sdk 本地包（运行时 ESM + 类型树 + testing + schema）
+ * - sdk/                 @pylon/plugin-sdk 正常版本地包（runtime + testing + 类型树 + schema）
  * - starter/no-build/    纯 JS 无构建起步插件（零工具链）
  * - starter/typescript/  TS + esbuild 起步插件（含预构建 dist）
  * - docs/                开发者版/用户版说明书 + CLI 命令表 + 设置选项贡献
@@ -90,6 +90,7 @@ for (const doc of [
   'docs/说明书/Pylon-插件系统说明书-开发者版.md',
   'docs/说明书/Pylon-插件系统说明书-用户版.md',
   'docs/说明书/Pylon-CLI-命令表.md',
+  'docs/说明书/Pylon-发行包清单.md',
   'docs/Pylon-插件设置选项贡献.md',
 ]) {
   cpSync(join(repoRoot, doc), join(docsOut, doc.split('/').pop()))

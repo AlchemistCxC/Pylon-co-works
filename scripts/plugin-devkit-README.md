@@ -1,9 +1,20 @@
-# Pylon 插件开发套件（离线包）
+# Pylon 插件开发套件（正常版 + 离线版）
 
-不动源码仓库、不装构建工具链，也能从零写出并安装一个 Pylon 插件。
-本套件自包含：SDK、起步示例、说明书、自检脚本都在包内。
+同一套 SDK 源码提供两种使用路径：TypeScript/Node 构建使用正常版包，
+无 Node、无源码环境使用离线版单文件 runtime。本套件自包含正常版 SDK、
+离线 starter、说明书和自检脚本，解压后即可开始插件开发。
 
 前置条件：一台已安装 **Pylon ≥ 1.4.1** 的机器（插件最终在 Pylon 里启用和验证）。
+
+## 两套 SDK
+
+| 形态 | 适用场景 | 入口 |
+| --- | --- | --- |
+| 正常版 | TypeScript/Node 构建、编辑器类型检查、单元测试 | `sdk/package.json`：`@pylon/plugin-sdk` 与 `@pylon/plugin-sdk/testing` |
+| 离线版 | 发行包内纯 JS 开发，不安装 Node 或构建工具 | Pylon 安装目录 `resources/sdk/pylon-plugin-sdk.js`，相对 import |
+
+正常版和离线版由仓库的 `npm run build:plugin-sdk` 同时生成，运行时 helper
+共享同一源码；离线版刻意不包含 testing harness、类型声明或宿主运行时闭包。
 
 ## 30 秒路径（纯 JS，零工具链）
 
@@ -17,7 +28,7 @@
 ## TypeScript 路径（starter/typescript）
 
 - 需要自备 Node ≥ 18；
-- `src/index.ts` 用 `import ... from '@pylon/plugin-sdk'`（类型由 `sdk/types/` 提供）；
+- `src/index.ts` 用 `import ... from '@pylon/plugin-sdk'`；`sdk/package.json` 的 `exports` 自动提供 runtime 与类型；
 - `npm install`（装 esbuild）→ `npm run build` → 安装 `dist/` 所在目录；
 - 不想装 esbuild 也行：包内 `dist/index.js` 是预构建产物，直接安装即可。
 
@@ -27,16 +38,18 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `sdk/pylon-plugin-sdk.js` | SDK 运行时（单文件 ESM；无构建路径的直接 import 目标） |
-| `sdk/testing.js` | 测试基建（`createMockContext` 等，见 §6.11.1） |
+| `sdk/package.json` | 正常版 npm-compatible 包清单（`.` 与 `./testing` exports） |
+| `sdk/pylon-plugin-sdk.js` | 正常版 SDK runtime（Node/TS 构建时由 bundler 消费） |
+| `sdk/testing.js` | 正常版测试基建（`createMockContext` 等，见 §6.11.1） |
 | `sdk/types/` | 完整类型声明树（TS 作者编辑器补全） |
+| `sdk/types/sdk/testing.d.ts` | `@pylon/plugin-sdk/testing` 的入口声明 |
 | `sdk/pylon-plugin-manifest.schema.json` | `pylon-plugin.json` 校验/补全 schema |
 | `starter/no-build/` | 纯 JS 起步插件 |
 | `starter/typescript/` | TS + esbuild 起步插件（含预构建产物） |
 | `docs/` | 开发者版 / 用户版说明书、CLI 命令表、设置选项贡献 |
 | `verify.mjs` | 自检：结构完整性 + SDK 导出 + 类型探针（需 Node ≥ 18） |
 
-自检：`node verify.mjs`（可选；通过会打印 PASS 清单）。
+自检：`node verify.mjs`（可选；通过会打印 PASS 清单，包含两个 exports 入口和声明树检查）。
 
 ## 测试你的插件（可选，需要 Node）
 
@@ -65,4 +78,5 @@ await ctx.__commands.execute('your.command.id', { /* args */ })
 - 样式：选择器以插件前缀类名限定，颜色间距用宿主语义 token（§6.4.2）；
 - 只安装来源可信的插件——插件是本机受信代码，宿主不做恶意代码沙箱。
 
-完整契约（16 章）见 `docs/Pylon-插件系统说明书-开发者版.md`；SDK 用法集中在 §6.11。
+完整契约（16 章）见 `docs/Pylon-插件系统说明书-开发者版.md`；SDK 用法集中在 §6.11，
+离线发行包目录与打包验收见 `docs/Pylon-发行包清单.md`。
