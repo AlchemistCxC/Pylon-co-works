@@ -96,6 +96,27 @@ fn apply_update_event(
     variant: Option<crate::acp::SessionUpdateVariant>,
     is_replay: bool,
 ) -> Vec<PetEvent> {
+    apply_update_event_with_pet_policy(session, update, variant, !is_replay)
+}
+
+/// Kernel-routed variant of [`apply_update_event`].  The typed decision is the
+/// only source of live/replay Pet policy on the dispatcher path; the boolean
+/// wrapper above remains for focused characterization tests and legacy callers.
+fn apply_update_event_routed(
+    session: &mut crate::session::SessionInfo,
+    update: &serde_json::Value,
+    variant: Option<crate::acp::SessionUpdateVariant>,
+    decision: routing::RoutingDecision,
+) -> Vec<PetEvent> {
+    apply_update_event_with_pet_policy(session, update, variant, decision.apply_pet)
+}
+
+fn apply_update_event_with_pet_policy(
+    session: &mut crate::session::SessionInfo,
+    update: &serde_json::Value,
+    variant: Option<crate::acp::SessionUpdateVariant>,
+    apply_pet: bool,
+) -> Vec<PetEvent> {
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
@@ -118,12 +139,12 @@ fn apply_update_event(
                 }
             }
             session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-            if !is_replay {
+            if apply_pet {
                 pet_events.push(PetEvent::UsageUpdate(session.tokens_total));
             }
         }
         Some(crate::acp::SessionUpdateVariant::ToolCall) => {
-            if !is_replay {
+            if apply_pet {
                 // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
                 let title = update.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let kind = crate::pet::ToolKind::classify(title);
@@ -137,7 +158,7 @@ fn apply_update_event(
             }
         }
         Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
-            if !is_replay {
+            if apply_pet {
                 match update.get("status").and_then(|v| v.as_str()) {
                     Some("completed") => pet_events.push(PetEvent::ToolSucceeded),
                     Some("failed") => pet_events.push(PetEvent::ToolFailed),
@@ -170,14 +191,14 @@ fn apply_update_event(
                         // model 为空必误判 changed（对齐 usage/tool 全部门控）。
                         let changed = session.model != model;
                         session.model = model.clone();
-                        if changed && !is_replay {
+                        if changed && apply_pet {
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
                     }
                     (Some("mode"), Some(mode)) => {
                         let changed = session.mode.as_deref() != Some(mode.as_str());
                         session.mode = Some(mode.clone());
-                        if changed && !is_replay {
+                        if changed && apply_pet {
                             // M5 感知：工作模式切换（C11：回放不推送）
                             pet_events.push(PetEvent::ModeChanged(mode));
                         }
@@ -212,7 +233,7 @@ fn apply_update_event(
                     .snapshots
                     .insert("mode".to_string(), serde_json::Value::String(mode.clone()));
                 session.mode = Some(mode.clone());
-                if changed && !is_replay {
+                if changed && apply_pet {
                     pet_events.push(PetEvent::ModeChanged(mode));
                 }
             }
@@ -718,7 +739,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             if !decision.mutate_session {
                 return true;
             }
-            pet_events.extend(apply_update_event(session, update, variant, is_replay));
+            pet_events.extend(apply_update_event_routed(session, update, variant, decision));
             // Agents may advertise commands or mode changes asynchronously after
             // session/new or session/load. Persist the merged session snapshot so
             // a later reload retains those capabilities.
