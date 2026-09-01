@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:31] [主施工员·工程师] P34 owner matrix guard 增强：`2e0c41b6` 让 `test-zone-fields` 同时断言 owner 合法、字段 zone 与 owner zone 对齐；162 字段契约复验通过。
+
 [2026-09-02 04:24] [主施工员·工程师] 非重放施工书收尾补强：`c99abaec` 将 legacy layout 迁移改为逐 key 容错并以 `pylon-persistence-migration-v1` 防旧 key 反向覆盖；`19b280a9`/`f59bf3fe` 让 browser demo seed 仅在 DEV 动态加载并加入生产产物检查；`1da366ce` 标注迁出布局字段的 theme owner authority；`a4ee4f0c` 修正等价 default layout ports 的兼容桥重复写判定。定向 17 文件 107 项、`check:solid`、lint、`check:docs`、`check:deps`、build 全绿。并行 SDK/UI WIP 未触碰。
 
 [2026-09-02 04:10] [SDK施工员·工程师] SDK-01 文档/发行打包片完成：提交 `306f1725`。根 README、开发套件 README、开发者/发行包说明与便携 README 已同步正常版/离线版路径；`release:portable` 先准备 PortableGit 与 SDK，`scripts/pack_release.py` 强制校验离线 SDK 仅含 runtime+manifest、≤64 KiB 且无 testing/PluginScope 宿主闭包。验证：`python scripts/pack_release.py --without-webview2` 生成并自校验 21 项 ZIP（含 SDK 14,397B）、`node scripts/pack-plugin-devkit.mjs`/仓库与套件 verify、`check-doc-links`、Python/Node 语法检查均通过；并行 WIP 未触碰。
