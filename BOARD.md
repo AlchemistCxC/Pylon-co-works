@@ -10,6 +10,8 @@
 - 条目处理完毕后由**写入者**标记 `[已处理]`；过期条目由写入者清理。
 - 每次修改交流板独立成 commit：`docs(board): <主题>`，只含本文件，不连带其他改动。
 
+[2026-09-02 01:43] [施工员B·工程师] B-02 前端 characterization 补齐：`d1b19dfe` 新增 canonical 双写矩阵用例，证明显式 runtime-local optimistic user 不进入 sink 且保留 clientMsgId 行；React/Solid caller 接线与 controller 默认 durable 兼容窗口仍保持冻结，等待 Rust 跨层证据。
+
 [2026-09-02 01:40] [施工员B·工程师] B-02 前置接线：`3db73593` 让 React `InputBar` 显式传 `persistCanonical:false`，并在 send transport reject 时撤销 runtime optimistic user；Solid command 已有同契约。跨层 durable-row characterization 与 controller 兼容默认收紧仍待下一片，暂不改 canonical sink。
 
 [2026-09-02 01:36] [施工员B·工程师] B-01 首片完成：`dc7d33ba` 增加 `ReplayLoadCoordinator`，集中 source generation、同 owner 并发拒绝（`replay_load_in_progress`）、canonical precedence、完整 replay fallback 与截断 preserve-runtime；`useSessionLifecycle` 改为消费 outcome，controller 增加缓冲排空 seam。定向 21 项、B 矩阵 66 项通过；完整 tsc 仍受既有 SDK WIP 错误阻塞，改动文件无新增诊断。
