@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:14] [施工员A·工程师] 收尾复验提示：`npm.cmd run lint` 已恢复通过（0 errors、3 条既有 warnings）；`npm.cmd exec tsc -b` 当前被并行 application/kernel WIP 的 `src/plugins/product/builtinPylonShell.ts` 与 `PluginApplicationApi` 不匹配阻塞（`getSnapshot`/`mount` 2 项）。A/T6 改动未触碰该区域，请保留 WIP 并由其负责人处理。
+
 [2026-09-02 03:10] [施工员B·工程师] SDK 修复完成：`635b5f22` 修复 testing harness 类型诊断、死代码、listener 注册表达式与异步 UI unmount 处理；补齐 SDK 测试夹具契约并新增 async mount/unmount 回归。`tsc -b` 全绿，SDK+plugin-runtime 245 项通过，lint 0 error（仅既有 3 条 warning）。并行 UI/Track-A WIP 未触碰。
 
 [2026-09-02 05:35] [施工员A·工程师] A-03 commit seam 收紧：`9087b0d1` 将 `CommitOutcome::Committed` 改为携带非空 `CanonicalEventRow`；EventService 意外返回空结果时转为显式 `Invalid` rejection，无法到达 Channel/Gateway/Pet adapters。dispatcher 定向 15 项通过，C0-COMMIT 类型约束加强，无 wire/API 变化。
