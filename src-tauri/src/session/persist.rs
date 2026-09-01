@@ -33,6 +33,21 @@ struct ReplayImport {
     trust: &'static str,
 }
 
+/// Stable, machine-readable journal outcome used by the replay trace.  The
+/// projection commit is performed by the frontend coordinator and is recorded
+/// in its paired `load-commit` trace; this value describes the backend journal
+/// stage only.
+fn replay_journal_commit_outcome(status: &str) -> &'static str {
+    match status {
+        "imported" => "recovery-import-committed",
+        "already-imported" | "already-present" => "recovery-import-already-present",
+        "local-authoritative" => "local-journal-wins",
+        "incomplete-not-imported" => "incomplete-preserved-runtime",
+        "empty" => "empty",
+        _ => "journal-observed",
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
@@ -194,6 +209,25 @@ pub(crate) async fn load_persisted_session(
                 }),
                 _ => None,
             };
+            // A-04/C0-FAIL：backend and frontend traces share owner + generation.
+            // The frontend's paired `load-commit` entry adds projection outcome;
+            // this entry records the transport capture and journal commit facts.
+            tracing::info!(
+                target: "replay_trace",
+                owner = %owner_key,
+                load_generation = generation,
+                capture_lp = "active-replay-registry",
+                response_boundary = replay.metadata.boundary.kind,
+                observed_count = replay.metadata.boundary.observed_count,
+                retained_count = replay.events.len() as u64,
+                dropped_count = replay.metadata.dropped_count,
+                authority,
+                canonical_revision,
+                journal_status = replay_journal_status,
+                commit_outcome = replay_journal_commit_outcome(replay_journal_status),
+                projection_commit = "deferred-to-frontend-coordinator",
+                "session/load replay trace"
+            );
             let diagnostics = if replay.metadata.complete {
                 Vec::new()
             } else {
@@ -244,4 +278,26 @@ pub(crate) async fn list_persisted_sessions(
         .await?;
     state.ensure_generation(&runtime, generation)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replay_journal_commit_outcome;
+
+    #[test]
+    fn replay_trace_journal_outcome_is_machine_readable() {
+        assert_eq!(
+            replay_journal_commit_outcome("imported"),
+            "recovery-import-committed"
+        );
+        assert_eq!(
+            replay_journal_commit_outcome("local-authoritative"),
+            "local-journal-wins"
+        );
+        assert_eq!(
+            replay_journal_commit_outcome("incomplete-not-imported"),
+            "incomplete-preserved-runtime"
+        );
+        assert_eq!(replay_journal_commit_outcome("empty"), "empty");
+    }
 }
