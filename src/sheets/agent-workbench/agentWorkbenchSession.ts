@@ -434,7 +434,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationActivity: controller.getGenerationActivity?.(targetSource),
       thinkingStart: controller.getThinkingStart(targetSource),
       tokenCount: controller.getTokenCount(targetSource),
-      summary: controller.getSummary(targetSource) ?? null,
+      // Keep the display-only restored terminal summary stable across later
+      // controller notifications that still have no in-memory summary.
+      summary: controllerSummary ?? (!generating && existingSummary?.reason === 'done' ? existingSummary : null),
     })
   }
 
