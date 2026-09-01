@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { render, waitFor } from '@testing-library/react'
+// @ts-expect-error Node built-ins are available in Vitest but intentionally absent from the browser tsconfig.
 import { execFileSync } from 'node:child_process'
+// @ts-expect-error Node built-ins are available in Vitest but intentionally absent from the browser tsconfig.
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { deactivatePluginInstance, type PluginInstance } from '../../pluginInstance.ts'

@@ -346,6 +346,13 @@ function isDisplayTextPart(part: ContentPart): part is TextContentPart {
   return part.kind === 'text' || part.kind === 'markdown'
 }
 
+function isReasoningTextPart(part: ContentPart): part is TextContentPart {
+  return part.kind === 'text'
+    || part.kind === 'markdown'
+    || part.kind === 'reasoning'
+    || part.kind === 'thinking'
+}
+
 /**
  * Streaming transports commonly emit one text part per delta. Those are wire
  * fragments, not semantic block boundaries: parsing each fragment as its own
@@ -363,6 +370,40 @@ export function coalesceAdjacentDisplayTextParts(parts: readonly ContentPart[]):
         ...previous,
         kind: previous.kind === 'markdown' || part.kind === 'markdown' ? 'markdown' : 'text',
         text: previous.text + part.text,
+      }
+      changed = true
+    } else {
+      merged.push(part)
+    }
+  }
+  return changed ? merged : parts
+}
+
+/**
+ * Reasoning deltas are wire fragments, not paragraph boundaries.  Unlike the
+ * general display-text helper this also accepts the protocol's `reasoning`
+ * and `thinking` text kinds, while deliberately keeping code/ANSI, media,
+ * tool and other rich parts as hard boundaries.
+ */
+export function coalesceAdjacentReasoningParts(parts: readonly ContentPart[]): readonly ContentPart[] {
+  if (parts.length < 2) return parts
+  const merged: ContentPart[] = []
+  let changed = false
+  for (const part of parts) {
+    const previous = merged.at(-1)
+    if (previous && isReasoningTextPart(previous) && isReasoningTextPart(part)) {
+      const kind = previous.kind === 'reasoning' || part.kind === 'reasoning'
+        ? 'reasoning'
+        : previous.kind === 'thinking' || part.kind === 'thinking'
+          ? 'thinking'
+          : previous.kind === 'markdown' || part.kind === 'markdown'
+            ? 'markdown'
+            : 'text'
+      const language = previous.language === part.language ? previous.language : undefined
+      merged[merged.length - 1] = {
+        kind,
+        text: previous.text + part.text,
+        ...(language !== undefined ? { language } : {}),
       }
       changed = true
     } else {

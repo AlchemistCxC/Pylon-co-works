@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   coalesceAdjacentDisplayTextParts,
+  coalesceAdjacentReasoningParts,
   createUnknownContentPart,
   parseContentPart,
   type ContentPart,
@@ -21,6 +22,25 @@ describe('ContentPart schema', () => {
       { kind: 'markdown', text: '连续正文' },
       code,
       { kind: 'markdown', text: '尾部正文' },
+    ])
+    expect(parts[1]).toBe(code)
+  })
+
+  it('coalesces reasoning text kinds without crossing rich-content boundaries', () => {
+    const code = { kind: 'code', text: 'const answer = 42', language: 'ts' } as const
+    const parts = coalesceAdjacentReasoningParts([
+      { kind: 'text', text: '先' },
+      { kind: 'reasoning', text: '思考' },
+      { kind: 'thinking', text: '再' },
+      code,
+      { kind: 'markdown', text: '后' },
+      { kind: 'text', text: '续' },
+    ])
+
+    expect(parts).toEqual([
+      { kind: 'reasoning', text: '先思考再' },
+      code,
+      { kind: 'markdown', text: '后续' },
     ])
     expect(parts[1]).toBe(code)
   })

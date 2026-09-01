@@ -5,7 +5,7 @@
  * 输出可丢弃的 WorkbenchDocument。它不读取时钟、store、registry 或 IO；live、
  * restart、recovery 只要喂给同一组 envelopes，就得到同一份 document。
  */
-import { coalesceAdjacentDisplayTextParts, createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, coalesceAdjacentReasoningParts, createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
 import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedError, type LifecycleState, type NormalizedError } from './lifecycle/lifecycleModel.ts'
 import { isActivityStatus } from './events/workbenchEventSchema.ts'
@@ -545,7 +545,8 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const parts = event.parts ?? []
   // C01：redacted 时正文不保留原文（D06——raw 不进入 projection），只保留安全占位。
   const redacted = event.type === 'reasoning.redacted'
-  const content = redacted ? '' : textFromParts(parts)
+  const reasoningParts = redacted ? parts : coalesceAdjacentReasoningParts(parts)
+  const content = redacted ? '' : textFromParts(reasoningParts)
   if (event.type === 'reasoning.completed' && content.length === 0) {
     return settleReasoningSegment(document, envelope)
   }
@@ -591,7 +592,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     ? {
         ...previous,
         content: redacted ? content : previous.content + content,
-        parts: redacted ? parts : [...previous.parts, ...parts],
+        parts: redacted ? parts : coalesceAdjacentReasoningParts([...previous.parts, ...reasoningParts]),
         identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous.identity,
         sequence: envelope.sequence,
         running: event.type === 'reasoning.delta',
@@ -603,7 +604,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         ...messageIdentityFor(envelope),
         role: 'reasoning',
         content,
-        parts,
+        parts: reasoningParts,
         identity: envelope.identity,
         source: envelope.source,
         sequence: envelope.sequence,

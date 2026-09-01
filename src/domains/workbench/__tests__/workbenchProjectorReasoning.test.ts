@@ -102,6 +102,19 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thoughts[0]!.thoughtDurationMs).toBe(2_000)
   })
 
+  it('keeps rich reasoning boundaries while coalescing adjacent text fragments', () => {
+    const document = reduce([
+      delta(1, 'thought-a', '前置', '1970-01-01T00:00:01.000Z'),
+      envelope(2, { type: 'reasoning.delta', parts: [{ kind: 'code', text: 'const answer = 42', language: 'ts' }] }, 'thought-b', '1970-01-01T00:00:02.000Z'),
+      delta(3, 'thought-c', '后置', '1970-01-01T00:00:03.000Z'),
+    ])
+
+    const thought = document.messages.find(message => message.role === 'reasoning')!
+    expect(thought.content).toBe('前置const answer = 42后置')
+    expect(thought.parts.map(part => part.kind)).toEqual(['text', 'code', 'text'])
+    expect(thought.parts[1]).toMatchObject({ kind: 'code', language: 'ts' })
+  })
+
   it('starts a new reasoning segment after the previous segment completed', () => {
     const document = reduce([
       delta(1, 'thought-a', '第一段', '1970-01-01T00:00:01.000Z'),
