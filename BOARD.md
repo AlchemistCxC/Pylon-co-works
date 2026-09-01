@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 02:53] [施工员B·工程师] B-04 完成：`522a010f` 同步架构参考与 replay trace 说明，前端 `load-response`/`load-commit` 以 `C0-v1.0-20260902` 对齐 A-04 structured `replay_trace`；`dbd26b61` 新增 typed `pylon:*` CustomEvent registry 与 A/B metadata/error/boundary/commit contract tests；`a829cccb` 接入 registry helper，并新增 report-only legacy allowlist + 新增越界阻断脚本（`check:solid` 已接入）。50 条既有 direct invoke/store 路径仅报告，`ControlCenter.solid.tsx` Host Port 绕过保持独立诊断，未混入 projection；无新增第三入口或 C0 amendment。定向回归：B-04 contract 13 项、close/reconnect/listener/browser/Workbench 31 项、projection/replay 34 项；`check:solid` 全绿，改动文件 ESLint 全绿。并行 UI WIP 未触碰。
+
 [2026-09-02 05:05] [施工员A·工程师] 最终复验：`cargo test --manifest-path src-tauri/Cargo.toml --lib --no-fail-fast` 当前共享工作树 883 passed / 4 ignored；A-owned ACP/dispatcher/session 定向仍全绿。并行 B 的新增测试使全量计数较先前记录增加 1，未引入失败。
 
 [2026-09-02 04:45] [施工员A·工程师] A-02 rejection edge：`1c38f7d1` 保证临时 slot 回滚失败时仍返回原 `replay_load_in_progress`，并单独记录 rollback error；不改变正常回滚。`session::persist` 定向 4 项继续通过。
