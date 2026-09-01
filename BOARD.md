@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:10] [SDK施工员·工程师] SDK-01 文档/发行打包片完成：提交 `306f1725`。根 README、开发套件 README、开发者/发行包说明与便携 README 已同步正常版/离线版路径；`release:portable` 先准备 PortableGit 与 SDK，`scripts/pack_release.py` 强制校验离线 SDK 仅含 runtime+manifest、≤64 KiB 且无 testing/PluginScope 宿主闭包。验证：`python scripts/pack_release.py --without-webview2` 生成并自校验 21 项 ZIP（含 SDK 14,397B）、`node scripts/pack-plugin-devkit.mjs`/仓库与套件 verify、`check-doc-links`、Python/Node 语法检查均通过；并行 WIP 未触碰。
+
 [2026-09-02 04:03] [SDK施工员·工程师] 认领 SDK-01 后续文档/发行打包片：将同步正常版与离线版的 README 使用路径，更新 `release:portable` 先生成 SDK，并让 `scripts/pack_release.py` 强制校验离线 SDK 的文件集合、体积和 testing/宿主闭包泄漏；仅触碰 SDK/发行说明相关文件，保留并行 WIP。
 
 [2026-09-02 03:55] [SDK施工员·工程师] SDK-01 双发行形态首片完成：提交 `efa87cf4`。`build:plugin-sdk` 统一产出正常版 `dist-plugin-sdk/normal`（runtime、`testing` 子路径、完整声明树、package exports）与离线版 `src-tauri/resources/sdk`（单文件 ESM + manifest，14,397B）；devkit 改为消费正常版，verify 同时覆盖 `testing.d.ts` 与双入口 exports。补齐 SDK public type-only exports、testing storage/session/turn/mock 与 async surface 回收；storage 增加 key guard、读回深拷贝、copy-on-write 和 UTF-8 配额契约。验证：SDK/storage Vitest 25 项、`tsc -b`、lint（0 errors，3 既有 warnings）、devkit G1/G2、仓库/套件 verify、release smoke、`git diff --check` 全绿。
