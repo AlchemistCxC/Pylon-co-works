@@ -824,6 +824,9 @@ async fn handle_session_update<R: tauri::Runtime>(
     if client_generation.load(Ordering::Acquire) != generation {
         return false; // 原 :437-439 语义：mutation 后本代已结束，主循环退出
     }
+    if !decision.publish {
+        return true;
+    }
     if let serde_json::Value::Object(ref mut map) = payload {
         map.insert(
             "source".to_string(),

@@ -234,6 +234,22 @@ mod tests {
     }
 
     #[test]
+    fn response_boundary_cannot_mutate_or_publish_as_an_update() {
+        let decision = decide(&input(
+            ReplayClassification::Boundary { request_id: 7 },
+            Some(SessionUpdateVariant::AgentMessageChunk),
+            true,
+            false,
+        ));
+        assert_eq!(decision.class, RoutingClass::Boundary);
+        assert!(!decision.mutate_session);
+        assert!(!decision.collect_response);
+        assert!(!decision.apply_pet);
+        assert!(!decision.persist_canonical);
+        assert!(!decision.publish);
+    }
+
+    #[test]
     fn chunk_effects_are_derived_only_for_live_agent_chunks() {
         let update = serde_json::json!({"content":{"text":"```rust"}});
         let live = decide(&input(
