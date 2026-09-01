@@ -1,4 +1,6 @@
 import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
+import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
+import { reportRuntimeError } from '../runtimeError.ts'
 
 export type PluginBootstrapStage = 'activate' | 'dependency' | 'user-packages' | 'mount'
 
@@ -33,8 +35,11 @@ export interface KernelBootstrapActions {
     activated: readonly string[]
     failed: readonly { pluginId: string; message: string }[]
   }>
-  mountApplication(applicationId: string): void
-  unmountApplication(): void
+  /** @deprecated Use applicationMount. Retained for compatibility during the migration window. */
+  mountApplication?: (applicationId: string) => void
+  /** @deprecated Use applicationMount. Retained for compatibility during the migration window. */
+  unmountApplication?: () => void
+  applicationMount?: ApplicationMountPort
   retryBuiltin(pluginId: string): Promise<BuiltinBootstrapResult>
 }
 
@@ -57,6 +62,18 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
   let snapshot = IDLE
   let operation: Promise<void> | undefined
   let safeModeActive = false
+  let mountedApplicationId: string | null = null
+
+  const mountApplication = (applicationId: string): void => {
+    const mount = actions.applicationMount?.mount ?? actions.mountApplication
+    if (!mount) throw new Error('Application mount port 未配置')
+    mount(applicationId)
+  }
+  const unmountApplication = (): void => {
+    const unmount = actions.applicationMount?.unmount ?? actions.unmountApplication
+    if (!unmount) throw new Error('Application mount port 未配置')
+    unmount()
+  }
 
   const publish = (next: KernelBootstrapState) => {
     snapshot = Object.freeze(next)
@@ -82,8 +99,12 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
       return
     }
     try {
-      actions.mountApplication(BUILTIN_PYLON_SHELL_ID)
+      if (mountedApplicationId !== BUILTIN_PYLON_SHELL_ID) {
+        mountApplication(BUILTIN_PYLON_SHELL_ID)
+        mountedApplicationId = BUILTIN_PYLON_SHELL_ID
+      }
     } catch (error) {
+      const detail = reportRuntimeError('挂载 Kernel 应用', error)
       publish({
         kind: 'degraded',
         activePluginIds,
@@ -93,7 +114,7 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
             pluginId: BUILTIN_PYLON_SHELL_ID,
             stage: 'mount',
             code: 'application_mount_failed',
-            message: messageOf(error),
+            message: detail.message,
             retryable: true,
           },
         ]),
@@ -185,7 +206,8 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
         safeModeActive = true
         publish({ kind: 'starting' })
         try {
-          actions.unmountApplication()
+          unmountApplication()
+          mountedApplicationId = null
           const builtins = await actions.bootstrapBuiltins('safe-mode')
           publish({ kind: 'safe-mode', skippedPluginIds: Object.freeze([...builtins.skippedPluginIds]) })
         } catch (error) {
@@ -277,7 +299,10 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
             return
           }
           if (builtins.activePluginIds.includes(BUILTIN_PYLON_SHELL_ID)) {
-            actions.mountApplication(BUILTIN_PYLON_SHELL_ID)
+            if (mountedApplicationId !== BUILTIN_PYLON_SHELL_ID) {
+              mountApplication(BUILTIN_PYLON_SHELL_ID)
+              mountedApplicationId = BUILTIN_PYLON_SHELL_ID
+            }
           }
           publish({
             kind: 'safe-mode',

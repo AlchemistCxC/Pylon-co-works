@@ -1,4 +1,4 @@
-import { applicationRuntime } from '../../kernel/applicationRuntimeServices.ts'
+import { applicationRuntime } from '../../application/applicationRuntimeServices.ts'
 import { createPluginActivationContext, type PluginActivationContextFactory } from '../pluginActivationContext.ts'
 import type { PluginHostServices } from '../pluginHostServices.ts'
 import { getPluginProcessClient } from '../process/processRuntimeServices.ts'

@@ -4,14 +4,17 @@ import {
   getPackageInstallationService,
   retryBuiltinPlugin,
 } from '../plugin-runtime/pluginCompositionRoot.ts'
-import { applicationRuntime } from './applicationRuntimeServices.ts'
+import { applicationRuntime } from '../application/applicationRuntimeServices.ts'
+import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
 import { createKernelBootstrap } from './kernelBootstrap.ts'
 
 export const kernelBootstrap = createKernelBootstrap({
   bootstrapBuiltins,
   retryBuiltin: retryBuiltinPlugin,
-  mountApplication: applicationId => applicationRuntime.mount(applicationId),
-  unmountApplication: () => applicationRuntime.unmount(),
+  applicationMount: {
+    mount: applicationId => applicationRuntime.mount(applicationId),
+    unmount: () => applicationRuntime.unmount(),
+  } satisfies ApplicationMountPort,
   initializeUserPackages: () => IS_TAURI
     ? getPackageInstallationService().emitActivationEvent('kernel.ready')
     : Promise.resolve({ activated: [], failed: [] }),

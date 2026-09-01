@@ -349,4 +349,24 @@ describe('Kernel bootstrap supervisor', () => {
       })]),
     })
   })
+
+  it('uses the injected application mount port once across idempotent starts', async () => {
+    const mount = vi.fn()
+    const unmount = vi.fn()
+    const bootstrap = createKernelBootstrap({
+      bootstrapBuiltins: vi.fn(async () => ({
+        activePluginIds: [BUILTIN_PYLON_SHELL_ID], failures: [], skippedPluginIds: [],
+      })),
+      initializeUserPackages: vi.fn(async () => ({ activated: [], failed: [] })),
+      applicationMount: { mount, unmount },
+      retryBuiltin: vi.fn(async () => ({ activePluginIds: [BUILTIN_PYLON_SHELL_ID], failures: [], skippedPluginIds: [] })),
+    })
+
+    await bootstrap.startNormal()
+    await bootstrap.startNormal()
+    expect(mount).toHaveBeenCalledOnce()
+
+    await bootstrap.startSafeMode()
+    expect(unmount).toHaveBeenCalledOnce()
+  })
 })

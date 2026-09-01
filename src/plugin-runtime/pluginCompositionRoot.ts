@@ -3,13 +3,13 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   applicationRuntime,
   requestApplicationSoftRemount,
-} from '../kernel/applicationRuntimeServices.ts'
+} from '../application/applicationRuntimeServices.ts'
 import { createPluginPackageClient, type PluginPackageClient } from '../infrastructure/plugins/pluginPackageClient.ts'
 import type { PluginProcessClient } from '../infrastructure/plugins/pluginProcessClient.ts'
 import { createSkinHostPorts } from '../infrastructure/skin/skinHostPorts.ts'
 import { getSkinRuntime } from '../infrastructure/skin/skinRuntimeServices.ts'
 import { createBuiltinProductPluginDefinitions } from '../plugins/product/builtinProductPlugins.ts'
-import { shouldExposeKernelAcceptanceControls } from '../kernel/kernelAcceptanceControls.ts'
+import { shouldExposeKernelAcceptanceControls } from '../application/acceptanceControls.ts'
 import { PackagePluginRuntimeService } from './packagePluginRuntime.ts'
 import { PackageInstallationService } from './packageInstallationService.ts'
 import { getPluginProcessClient as getRuntimePluginProcessClient } from './process/processRuntimeServices.ts'
