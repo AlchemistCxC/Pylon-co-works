@@ -29,7 +29,8 @@ export async function runSessionPreflight(
   const mcpServers = result.effects.flatMap(effect => {
     if (effect.kind !== ACP_NEW_SESSION_OPTIONS_EFFECT_KIND) return []
     const payload = record(effect.payload)
-    return Array.isArray(payload?.mcpServers) ? [...payload.mcpServers] : []
+    const mcpServers = payload?.mcpServers
+    return Array.isArray(mcpServers) ? [...mcpServers] : []
   })
   return Object.freeze({ ...result, mcpServers: Object.freeze(mcpServers) })
 }

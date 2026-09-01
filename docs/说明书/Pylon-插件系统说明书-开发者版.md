@@ -764,6 +764,55 @@ context.settings.registerOptions({
 
 完整协议见 [插件设置选项贡献](../Pylon-插件设置选项贡献.md)。
 
+### 6.11 插件 SDK（@pylon/plugin-sdk）
+
+插件作者不直接 import 宿主模块，统一从 SDK 引用宿主契约与 helpers：
+
+```ts
+import {
+  definePlugin,
+  createPluginLogger,
+  createSettingsSurface,
+  VISUAL_SEMANTIC_TOKENS,
+  type PluginActivationContext,
+  type CommandDefinition,
+} from '@pylon/plugin-sdk'
+```
+
+事实源为 `src/sdk/index.ts`；引用方式为路径别名（tsconfig `paths` 与 esbuild `--alias` 都指向 `src/sdk/index.ts`，见 §14）。SDK 的打包约束：
+
+- 类型一律 `export type` re-export（`PluginActivationContext`、`CommandDefinition`、`HookDefinition`、`PluginUiSurface`、`WorkspaceTypeDefinition`、renderer/settings/presentation/sessionCreation/process/scope 等），编译期消失；
+- 运行时值仅限常量表与纯函数，禁止 import 宿主运行时模块——SDK 可安全内联进插件 bundle，不会泄漏宿主代码。
+
+API：
+
+| 成员 | 用途 |
+|:--|:--|
+| `definePlugin(module)` | 生命周期定义的 checked 包装：缺 `activate` 或生命周期成员非函数立即报错 |
+| `validatePluginManifest(value)` | 解析并校验 `pylon-plugin.json`（等价宿主 parse，含已删除字段拒绝） |
+| `createPluginLogger(pluginId)` | 统一 `[pluginId]` 前缀、琥珀标签的 console 封装 |
+| `createSettingsSurface(definition)` | 声明式设置页（见下） |
+| `VISUAL_SEMANTIC_TOKENS` / `VISUAL_SEMANTIC_ROLE_TOKENS` | 宿主视觉语义 token 名（§6.4.2 纪律的唯一真值） |
+
+`createSettingsSurface` 把 §6.10 协议（`host:input` 进、`settings:set` 出）封装成字段清单，纯 DOM 渲染、样式消费语义 token，返回值直接交给 `context.settings.registerPage`：
+
+```ts
+context.ui.registerSurface(createSettingsSurface({
+  description: '示例设置',
+  fields: [
+    { type: 'text', key: 'greetingName', label: '问候名' },
+    { type: 'toggle', key: 'decorate', label: '装饰用户消息' },
+  ],
+  onChange: (key, value) => { /* 提交后回调（宿主持久化回流会再次触发渲染） */ },
+}))
+context.settings.registerPage({
+  id: 'example.settings-page', label: 'Example', order: 900,
+  renderKind: 'isolated-surface', surfaceId: '…',
+})
+```
+
+可运行的完整示例（manifest + SDK 入口 + scoped styles + 构建脚本）：`examples/web-plugins/hello-starter`。
+
 ---
 
 ## 7. Stylesheet 生命周期
@@ -1131,6 +1180,7 @@ npx esbuild src/index.ts \
   --bundle \
   --format=esm \
   --platform=browser \
+  --alias:@pylon/plugin-sdk=<仓库根>/src/sdk/index.ts \
   --outfile=dist/index.js
 ```
 

@@ -1,0 +1,50 @@
+/* starter.hello —— 选择器一律以插件前缀类名限定（说明书 §7 纪律），值消费宿主语义 token */
+.plugin-sdk-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 2px;
+  font-family: var(--type-interface-font, var(--mono, monospace));
+  font-size: var(--type-interface-sm, 12.5px);
+  color: var(--content-text, inherit);
+}
+
+.plugin-sdk-settings__description {
+  margin: 0 0 2px;
+  color: var(--content-muted, var(--dim, inherit));
+  font-size: var(--type-interface-xs, 11px);
+}
+
+.plugin-sdk-settings__field {
+  display: grid;
+  grid-template-columns: 160px minmax(160px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.plugin-sdk-settings__label {
+  color: var(--content-muted, var(--dim, inherit));
+}
+
+.plugin-sdk-settings__hint {
+  grid-column: 2;
+  font-size: var(--type-interface-xs, 11px);
+  color: var(--content-muted, var(--dim, inherit));
+}
+
+.plugin-sdk-settings input[type="text"],
+.plugin-sdk-settings input[type="number"],
+.plugin-sdk-settings select {
+  background: var(--surface-sunken, transparent);
+  border: 1px solid var(--stroke-default, currentColor);
+  border-radius: var(--ui-radius-sm, 3px);
+  padding: 4px 8px;
+  font: inherit;
+  color: inherit;
+}
+
+.plugin-sdk-settings input:focus-visible,
+.plugin-sdk-settings select:focus-visible {
+  outline: 1px solid var(--state-focus-ring, var(--accent, currentColor));
+  outline-offset: 2px;
+}

@@ -91,6 +91,9 @@ declare global {
   }
 }
 
-if (typeof window !== 'undefined' && import.meta.env.DEV) {
+// 非宿主构建环境（如插件 tsc 程序）可能没有 import.meta.env —— 缺省按非 DEV 处理
+const IS_DEV = typeof import.meta !== 'undefined'
+  && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV)
+if (typeof window !== 'undefined' && IS_DEV) {
   window.__pylonSettingProvenance = { last: lastSettingWriter, recent: recentSettingWrites }
 }
