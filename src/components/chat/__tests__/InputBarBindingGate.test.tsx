@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import InputBar from '../InputBar'
 import { useIdentityStore } from '../../../identityStore'
 import { useRuntimeStore } from '../../../runtimeStore'
@@ -16,6 +16,7 @@ import { createSheetState } from '../../../workspace-sheets/sheetState'
 import { resetStores } from '../../../test/resetStores'
 import { sessionContext, toAgentContextKey } from '../../../agentContext'
 import type { Session } from '../../../identityStore'
+import { registerChatController, type ChatControllerHandle } from '../chatEventController'
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
@@ -56,6 +57,7 @@ describe('InputBar Binding gate（OWNER-03）', () => {
     resetStores()
     invokeMock.mockReset()
     invokeMock.mockResolvedValue(undefined)
+    registerChatController(null)
   })
 
   it('冷启动状态缺失 → restoring：textarea/发送禁用 + owner 状态显示', () => {
@@ -166,5 +168,45 @@ describe('InputBar Binding gate：generation 失效（OWNER-04）', () => {
     // load-finished 自动 flush 同样受 sendText 层守卫：不得携带旧 remote id 发送
     window.dispatchEvent(new CustomEvent('pylon:load-finished', { detail: { source: SESSION.source } }))
     expect(invokeMock).not.toHaveBeenCalledWith('send_message', expect.anything())
+  })
+})
+
+describe('InputBar optimistic user settlement（C0-OPT）', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetStores()
+    invokeMock.mockReset()
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'send_message') throw new Error('transport failed')
+      return undefined
+    })
+    registerChatController(null)
+  })
+
+  it('显式 runtime-local optimistic user，并在 transport reject 时对称撤销', async () => {
+    seedAgentSheet()
+    useRuntimeStore.getState().setAgentStatus('peri', { agent: 'peri', agentId: 'peri', status: 'connected', generation: 1 })
+    useRuntimeStore.getState().setBindingGeneration(sessionContext({ agentId: 'peri', source: SESSION.source }), 1)
+    const optimistic = vi.fn()
+    const reject = vi.fn()
+    registerChatController({
+      isSendBlockedDuringLoad: () => false,
+      sendOptimisticUser: optimistic,
+      rejectOptimisticUser: reject,
+    } as unknown as ChatControllerHandle)
+
+    render(<InputBar sessionId="s1" />)
+    const textbox = screen.getByRole('textbox')
+    fireEvent.change(textbox, { target: { value: 'hello' } })
+    fireEvent.keyDown(textbox, { key: 'Enter' })
+
+    await waitFor(() => expect(optimistic).toHaveBeenCalledTimes(1))
+    const [source, content, clientMessageId, options] = optimistic.mock.calls[0]
+    expect({ source, content, options }).toEqual({
+      source: SESSION.source,
+      content: 'hello',
+      options: { persistCanonical: false },
+    })
+    await waitFor(() => expect(reject).toHaveBeenCalledWith(source, clientMessageId))
   })
 })
