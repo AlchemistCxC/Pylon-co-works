@@ -14,14 +14,12 @@
  * 用途：canonical 首屏占位 / restart recovery。仅依赖 domains + 类型，不落盘。
  */
 import type { Message } from '../../components/chat/messageTypes'
-import type { OptionalChatEventIdentity } from '../../infrastructure/acp/chatContracts'
 import type { EventProjector } from '../../contracts/eventProjector.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { getToolSummary } from '../tool/toolPresentation.ts'
-import { resolveChunkAppend } from './chunkMerge.ts'
 import { normalizeRawEvent } from './canonicalNormalizer.ts'
 import type { CanonicalConversationEvent } from './eventSchema.ts'
-import { toolFieldsFromCanonical } from './toolProjection.ts'
+import { projectCanonicalMessages, reconcileOptimisticUserEvents } from './messageProjectionRules.ts'
 
 export function listCanonicalMessageProjectors(): EventProjector[] {
   return getPluginServiceRegistry().list<EventProjector>('event-projector')
@@ -29,42 +27,6 @@ export function listCanonicalMessageProjectors(): EventProjector[] {
 
 function resolveActiveCanonicalMessageProjector(): EventProjector | undefined {
   return listCanonicalMessageProjectors()[0]
-}
-
-function textOf(event: CanonicalConversationEvent): string | undefined {
-  const payload = event.typedPayload as { text?: string } | undefined
-  return typeof payload?.text === 'string' ? payload.text : undefined
-}
-
-function identityOf(event: CanonicalConversationEvent): OptionalChatEventIdentity | undefined {
-  const identity = event.identity
-  if (!identity) return undefined
-  const mapped: OptionalChatEventIdentity = {}
-  if (identity.messageId !== undefined) mapped.messageId = identity.messageId
-  if (identity.turnId !== undefined) mapped.turnId = identity.turnId
-  if (identity.toolCallId !== undefined) mapped.toolCallId = identity.toolCallId
-  return Object.keys(mapped).length > 0 ? mapped : undefined
-}
-
-function timeOf(event: CanonicalConversationEvent): string {
-  const value = event.receivedAt ?? event.occurredAt
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleTimeString()
-}
-
-function settleAll(messages: Message[]): Message[] {
-  return messages.map(message => {
-    if (message.role === 'tool' && message.running) {
-      return { ...message, running: false, toolStatus: message.toolStatus || 'completed' }
-    }
-    return message.running ? { ...message, running: false } : message
-  })
-}
-
-function stringifyOutput(rawOutput: unknown): string {
-  if (typeof rawOutput === 'string') return rawOutput
-  const json = JSON.stringify(rawOutput, null, 2)
-  return json ?? ''
 }
 
 function eventProjectionKey(event: CanonicalConversationEvent): string {
@@ -102,40 +64,6 @@ function canonicalRecoveryAnchor(event: CanonicalConversationEvent): CanonicalCo
   }).event
 }
 
-function isOptimisticUserEvent(event: CanonicalConversationEvent): boolean {
-  if (event.eventType !== 'user.message' || !event.rawPayload || typeof event.rawPayload !== 'object') return false
-  const root = event.rawPayload as { update?: unknown; params?: { update?: unknown } }
-  const update = root.update ?? root.params?.update
-  if (!update || typeof update !== 'object') return false
-  const meta = (update as { _meta?: unknown })._meta
-  return Boolean(meta && typeof meta === 'object' && (meta as { pylonOptimisticUser?: unknown }).pylonOptimisticUser === true)
-}
-
-function userProjectionKey(event: CanonicalConversationEvent): string | undefined {
-  if (event.eventType !== 'user.message') return undefined
-  const text = (event.typedPayload as { text?: unknown } | undefined)?.text
-  return typeof text === 'string' ? text : undefined
-}
-
-/** Keep the optimistic row's original position and hide the later kernel echo. */
-function reconcileOptimisticUsers(events: readonly CanonicalConversationEvent[]): CanonicalConversationEvent[] {
-  const optimisticCounts = new Map<string, number>()
-  for (const event of events) {
-    if (!isOptimisticUserEvent(event)) continue
-    const key = userProjectionKey(event)
-    if (key !== undefined) optimisticCounts.set(key, (optimisticCounts.get(key) ?? 0) + 1)
-  }
-  return events.filter(event => {
-    if (isOptimisticUserEvent(event)) return true
-    const key = userProjectionKey(event)
-    if (key === undefined) return true
-    const count = optimisticCounts.get(key) ?? 0
-    if (count <= 0) return true
-    optimisticCounts.set(key, count - 1)
-    return false
-  })
-}
-
 /**
  * Resolve the single append-only journal into one effective projection stream.
  *
@@ -150,7 +78,7 @@ export function effectiveCanonicalProjectionEvents(
   events: readonly CanonicalConversationEvent[],
 ): CanonicalConversationEvent[] {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence)
-  const live = reconcileOptimisticUsers(sorted.filter(event => event.eventType !== 'history.snapshot'))
+  const live = reconcileOptimisticUserEvents(sorted.filter(event => event.eventType !== 'history.snapshot'))
   const recoveredEvents = live
     .filter(event => canonicalRecoveryMetadata(event))
     .sort((left, right) => {
@@ -185,161 +113,9 @@ export function effectiveCanonicalProjectionEvents(
 /** 内置投影实现（core.projector.canonicalMessage 与无插件回退共用）。 */
 export function projectMessagesFromCanonicalBuiltin(events: readonly CanonicalConversationEvent[]): Message[] {
   const sorted = effectiveCanonicalProjectionEvents(events)
-  let messages: Message[] = []
-  let seq = 0
-
-  for (const event of sorted) {
-    switch (event.eventType) {
-      case 'user.message': {
-        const text = textOf(event)
-        if (text === undefined) break
-        messages = settleAll(messages)
-        seq += 1
-        messages = [...messages, {
-          id: `user-${seq}`,
-          role: 'user',
-          sender: event.owner.localSessionId,
-          content: text,
-          time: timeOf(event),
-          agentId: event.owner.agentId,
-          running: false,
-          ...(identityOf(event) ? { externalIdentity: identityOf(event) } : {}),
-        }]
-        break
-      }
-
-      case 'assistant.text.delta':
-      case 'assistant.thinking.delta': {
-        const text = textOf(event)
-        if (text === undefined) break
-        const role = event.eventType === 'assistant.text.delta' ? 'assistant' : 'reasoning'
-        const last = messages[messages.length - 1]
-        const identity = identityOf(event)
-        // 三路径投影深等：与 replay reducer / live flush 共用同一 chunk 聚合判据。
-        // 同角色即同一段流（消息边界由 user/tool/turn 决定），identity 取最后出现者。
-        const append = resolveChunkAppend({
-          lastRole: last?.role,
-          incomingRole: role,
-          lastIdentity: last?.externalIdentity,
-          incomingIdentity: identity,
-        })
-        if (append.shouldAppend) {
-          messages = messages.map((message, index) => index === messages.length - 1
-            ? { ...message, content: message.content + text, ...(append.identity ? { externalIdentity: append.identity } : {}) }
-            : message)
-          break
-        }
-        seq += 1
-        messages = [...messages, {
-          id: `${role === 'assistant' ? 'msg' : 'thought'}-${seq}`,
-          role,
-          sender: 'peri',
-          content: text,
-          time: timeOf(event),
-          running: false,
-          agentId: event.owner.agentId,
-          ...(identityOf(event) ? { externalIdentity: identityOf(event) } : {}),
-        }]
-        break
-      }
-
-      case 'tool.call.started': {
-        const toolCallId = event.identity?.toolCallId
-        if (!toolCallId) break
-        const tool = toolFieldsFromCanonical(event)
-        const title = tool.title || '?'
-        const rawInput = tool.rawInput
-        const inputStr = getToolSummary(title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
-        const existing = messages.find(message => message.id === `tool-${toolCallId}`)
-        if (existing) {
-          messages = messages.map(message => message.id === existing.id ? {
-            ...message,
-            toolName: title,
-            sender: `tool:${title}`,
-            toolKind: tool.kind ?? message.toolKind,
-            toolInput: inputStr,
-            contentBlocks: tool.contentBlocks as Message['contentBlocks'],
-            rawInput,
-            clientGeneration: event.clientGeneration,
-          } : message)
-          break
-        }
-        messages = [...messages, {
-          id: `tool-${toolCallId}`,
-          role: 'tool',
-          sender: `tool:${title}`,
-          content: '',
-          time: timeOf(event),
-          agentId: event.owner.agentId,
-          toolName: title,
-          toolInput: inputStr,
-          toolKind: tool.kind,
-          contentBlocks: tool.contentBlocks as Message['contentBlocks'],
-          rawInput,
-          clientGeneration: event.clientGeneration,
-          running: true,
-          externalIdentity: { toolCallId },
-        }]
-        break
-      }
-
-      case 'tool.call.updated':
-      case 'tool.call.completed':
-      case 'tool.call.failed': {
-        const toolCallId = event.identity?.toolCallId
-        if (!toolCallId) break
-        const tool = toolFieldsFromCanonical(event)
-        const outputStr = stringifyOutput(tool.rawOutput)
-        const lines = outputStr ? outputStr.split(/\n/).filter((line: string) => line.trim()).length : 0
-        const existing = messages.find(message => message.id === `tool-${toolCallId}`)
-        if (!existing) {
-          // update 先到：与 reducer 一致，创建占位卡等待后续 started 补全
-          messages = [...messages, {
-            id: `tool-${toolCallId}`,
-            role: 'tool',
-            sender: 'tool:?',
-            content: '',
-            time: timeOf(event),
-            agentId: event.owner.agentId,
-            toolName: '?',
-            toolOutput: outputStr,
-            toolOutputLines: lines,
-            toolKind: tool.kind,
-            contentBlocks: tool.contentBlocks as Message['contentBlocks'],
-            toolStatus: tool.status,
-            rawOutput: tool.rawOutput,
-            clientGeneration: event.clientGeneration,
-            running: false,
-            externalIdentity: { toolCallId },
-          }]
-          break
-        }
-        messages = messages.map(message => message.id === existing.id ? {
-          ...message,
-          toolOutput: outputStr,
-          toolOutputLines: lines,
-          toolStatus: tool.status,
-          toolKind: tool.kind ?? message.toolKind,
-          contentBlocks: (tool.contentBlocks ?? message.contentBlocks) as Message['contentBlocks'],
-          rawOutput: tool.rawOutput !== undefined ? tool.rawOutput : message.rawOutput,
-          clientGeneration: event.clientGeneration,
-          running: false,
-        } : message)
-        break
-      }
-
-      case 'turn.completed':
-      case 'turn.failed': {
-        messages = settleAll(messages)
-        break
-      }
-
-      default:
-        break
-    }
-  }
-
-  return messages
+  return projectCanonicalMessages(sorted, {
+    toolInputSummary: (title, rawInput) => getToolSummary(title, rawInput),
+  })
 }
 
 /** 优先走 Plugin Service Registry 中的 projector，独立工具路径回退 builtin。 */
