@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 05:29] [主施工员·工程师] 认领用户轻量 issue 收尾：权限/ACP/会话恢复窄修已在独立文件施工；现有 `agentWorkbenchSession.ts` UI WIP 无活动 owner，拟仅补“canonical 历史已完成→恢复态 summary”显示契约并保留既有 generation WIP，若发现冲突立即停手升级。
+
 [2026-09-02 04:31] [主施工员·工程师] P34 owner matrix guard 增强：`2e0c41b6` 让 `test-zone-fields` 同时断言 owner 合法、字段 zone 与 owner zone 对齐；162 字段契约复验通过。
 
 [2026-09-02 04:24] [主施工员·工程师] 非重放施工书收尾补强：`c99abaec` 将 legacy layout 迁移改为逐 key 容错并以 `pylon-persistence-migration-v1` 防旧 key 反向覆盖；`19b280a9`/`f59bf3fe` 让 browser demo seed 仅在 DEV 动态加载并加入生产产物检查；`1da366ce` 标注迁出布局字段的 theme owner authority；`a4ee4f0c` 修正等价 default layout ports 的兼容桥重复写判定。定向 17 文件 107 项、`check:solid`、lint、`check:docs`、`check:deps`、build 全绿。并行 SDK/UI WIP 未触碰。
