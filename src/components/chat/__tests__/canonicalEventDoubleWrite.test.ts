@@ -340,6 +340,26 @@ describe('canonical 双写（A1-c P2）', () => {
     handle.dispose()
   })
 
+  it('runtime-local optimistic user 收到后端 echo 后确认且不重复追加', async () => {
+    const source = 'local:dw-optimistic-echo'
+    useIdentityStore.setState({ sessions: [makeSession('s4-echo', source)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+    handle.initSource(source, [])
+
+    handle.sendOptimisticUser(source, '后端确认', 'cid-echo', { persistCanonical: false })
+    fire('pylon:user', { source, content: '后端确认' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sink.offers).toHaveLength(0)
+    expect(handle.getMessages(source).filter(message => message.role === 'user')).toEqual([
+      expect.objectContaining({ role: 'user', content: '后端确认' }),
+    ])
+    expect(handle.getMessages(source).find(message => message.role === 'user')?.clientMsgId).toBeUndefined()
+    handle.dispose()
+  })
+
   it('error 终态 force 强刷', async () => {
     const source = 'local:dw-error'
     useIdentityStore.setState({ sessions: [makeSession('s5', source)] })

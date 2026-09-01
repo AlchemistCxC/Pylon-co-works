@@ -70,6 +70,30 @@ describe('Agent Workbench production commands', () => {
     expect(optimistic.mock.invocationCallOrder[0]).toBeLessThan(sendMessage.mock.invocationCallOrder[0])
   })
 
+  it('send 失败时按同一 clientMsgId 对称撤销 user 与 document optimistic rows', async () => {
+    const optimisticUser = vi.fn()
+    const rejectOptimisticUser = vi.fn()
+    const optimisticDocument = vi.fn()
+    const rejectOptimisticDocument = vi.fn()
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      sendMessage: vi.fn(async () => { throw new Error('transport failed') }),
+      optimisticUser,
+      rejectOptimisticUser,
+      optimisticDocument,
+      rejectOptimisticDocument,
+      nextClientMessageId: () => 'client-rejected',
+    })
+
+    await expect(commands.send(session.id, { text: '失败后撤销' })).resolves.toEqual({
+      status: 'rejected', messageId: 'client-rejected', error: 'transport failed',
+    })
+    expect(optimisticUser).toHaveBeenCalledWith('local:a', '失败后撤销', 'client-rejected', { persistCanonical: false })
+    expect(optimisticDocument).toHaveBeenCalledWith('local:a', '失败后撤销', 'client-rejected')
+    expect(rejectOptimisticUser).toHaveBeenCalledWith('local:a', 'client-rejected')
+    expect(rejectOptimisticDocument).toHaveBeenCalledWith('local:a', 'client-rejected')
+  })
+
   it('model/mode 命令只通过 Session owner 对应的既有 ACP seam', async () => {
     const setModel = vi.fn(async () => undefined)
     const setMode = vi.fn(async () => undefined)
