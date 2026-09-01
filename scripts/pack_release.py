@@ -185,7 +185,7 @@ def append_tree_files(
             files.append((full, f"{package_root.rstrip('/')}/{rel}"))
 
 
-def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Path, str]]:
+def collect_source_files(version: str, without_webview2: bool, with_runtime: bool = False) -> list[tuple[Path, str]]:
     """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
     exe_path = RELEASE_DIR / EXE_NAME
     if not exe_path.is_file():
@@ -225,39 +225,59 @@ def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Pat
     else:
         print("warn: release resources 目录不存在，仅打包 exe")
 
-    # The Tauri resource copier normally places the runtime under
-    # target/release/resources.  Keep a repository fallback for `--no-bundle`
-    # layouts where that copy is skipped, while still requiring a complete
-    # tree so a release can never silently omit Hermes' Bash dependency.
-    packaged_runtime = RELEASE_DIR / "resources" / "runtime" / "git"
-    runtime_source = packaged_runtime if hermes_runtime_is_complete(packaged_runtime) else HERMES_RUNTIME_TREE
-    if not hermes_runtime_is_complete(runtime_source):
-        raise PackError(
-            "缺少完整的 Hermes PortableGit 运行时（resources/runtime/git）。"
-            "请先运行 npm run prepare:hermes-runtime，再重新构建/打包。"
-        )
-    existing_paths = {rel for _src, rel in files}
-    for runtime_rel in ["resources/runtime/portable-git.json", "resources/runtime/README.txt"]:
-        source = HERMES_RUNTIME_DIR / Path(runtime_rel).name
-        if runtime_rel not in existing_paths and source.is_file():
-            files.append((source, runtime_rel))
-            existing_paths.add(runtime_rel)
-    # Add the binary tree only when Tauri did not already copy a *complete*
-    # tree.  A partial target/release/resources copy must not shadow the
-    # repository fallback.
-    if not hermes_runtime_is_complete(packaged_runtime):
+    # Hermes PortableGit runtime：默认排除（2026-08-31 用户决定——bash 已在标准路径
+    # C:\Program Files\Git，发行包不再内置完整运行时；--with-runtime 可恢复）。
+    if not with_runtime:
         files = [
             (source, rel)
             for source, rel in files
-            if not rel.startswith("resources/runtime/git/")
+            if not rel.startswith("resources/runtime/")
         ]
-        append_tree_files(files, runtime_source, "resources/runtime/git")
+
+    if with_runtime:
+        # The Tauri resource copier normally places the runtime under
+        # target/release/resources.  Keep a repository fallback for `--no-bundle`
+        # layouts where that copy is skipped, while still requiring a complete
+        # tree so a release can never silently omit Hermes' Bash dependency.
+        packaged_runtime = RELEASE_DIR / "resources" / "runtime" / "git"
+        runtime_source = packaged_runtime if hermes_runtime_is_complete(packaged_runtime) else HERMES_RUNTIME_TREE
+        if not hermes_runtime_is_complete(runtime_source):
+            raise PackError(
+                "缺少完整的 Hermes PortableGit 运行时（resources/runtime/git）。"
+                "请先运行 npm run prepare:hermes-runtime，再重新构建/打包。"
+            )
+        existing_paths = {rel for _src, rel in files}
+        for runtime_rel in ["resources/runtime/portable-git.json", "resources/runtime/README.txt"]:
+            source = HERMES_RUNTIME_DIR / Path(runtime_rel).name
+            if runtime_rel not in existing_paths and source.is_file():
+                files.append((source, runtime_rel))
+                existing_paths.add(runtime_rel)
+        # Add the binary tree only when Tauri did not already copy a *complete*
+        # tree.  A partial target/release/resources copy must not shadow the
+        # repository fallback.
+        if not hermes_runtime_is_complete(packaged_runtime):
+            files = [
+                (source, rel)
+                for source, rel in files
+                if not rel.startswith("resources/runtime/git/")
+            ]
+            append_tree_files(files, runtime_source, "resources/runtime/git")
 
     for template_name in ["agents.example.yaml", "README.txt"]:
         src = TEMPLATE_DIR / template_name
         if not src.is_file():
             raise PackError(f"缺少 release 模板: {src}")
         files.append((src, template_name))
+
+    # 发行包附带用户文档（2026-09-01 规则）：仓库根 README.md + docs/说明书/ 全量进入包内。
+    readme_src = REPO_DIR / "README.md"
+    if not readme_src.is_file():
+        raise PackError(f"缺少发行包 README: {readme_src}")
+    files.append((readme_src, "README.md"))
+    manual_dir = REPO_DIR / "docs" / "说明书"
+    if not manual_dir.is_dir():
+        raise PackError(f"缺少发行包说明书目录: {manual_dir}")
+    append_tree_files(files, manual_dir, "docs/说明书")
 
     bat_src = TEMPLATE_DIR / "tools" / "install-webview2.bat"
     if not bat_src.is_file():
@@ -463,6 +483,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="降级打包：不包含 WebView2 bootstrapper（manifest 记录 false）",
     )
     parser.add_argument(
+        "--with-runtime",
+        action="store_true",
+        help="包含 Hermes PortableGit 运行时（默认排除——bash 已在标准路径 C:\\Program Files\\Git，2026-08-31 决定）",
+    )
+    parser.add_argument(
         "--verify-only",
         metavar="ZIP",
         help="仅审计已存在的 release ZIP，不重新打包",
@@ -479,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
 
     version = resolve_version()
     top_dir = f"pylon-{version}-win64"
-    files = collect_source_files(version, args.without_webview2)
+    files = collect_source_files(version, args.without_webview2, args.with_runtime)
     webview2_bootstrapper = not args.without_webview2
 
     staging_root = build_staging(version, files)
