@@ -421,6 +421,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const controller = chatController()
     if (!controller) return
     const generating = controller.getGenerating(targetSource)
+    const controllerSummary = controller.getSummary(targetSource)
+    const existingSummary = runtime.getSnapshot().summary
     updateRuntimeState({
       generating,
       generationStart: generating ? controller.getStartTime(targetSource) : 0,
