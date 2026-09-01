@@ -803,7 +803,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             );
             return true;
         }
-        routing::CommitOutcome::Committed(event) => event,
+        routing::CommitOutcome::Committed(event) => Some(event),
         routing::CommitOutcome::Rejected(error) => {
             log_canonical_ingest_error(&error, agent_id, &source);
             return true;
