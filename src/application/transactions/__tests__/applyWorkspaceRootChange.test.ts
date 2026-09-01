@@ -64,6 +64,18 @@ beforeEach(() => {
 })
 
 describe('applyWorkspaceRootChange 冻结语义', () => {
+  it('接受注入式 workspace port，失败可观察且不触碰全局 store', async () => {
+    const updateWorkspace = vi.fn(async () => { throw new Error('injected failure') })
+    const reportError = vi.fn()
+    const result = await applyWorkspaceRootChange('ws-injected', 'C:/next', {
+      workspace: { updateWorkspace },
+      reportError,
+    })
+    expect(result).toEqual({ ok: false, reason: 'error', message: 'injected failure' })
+    expect(updateWorkspace).toHaveBeenCalledWith('ws-injected', { rootPath: 'C:/next' })
+    expect(reportError).toHaveBeenCalledWith('更新 Workspace 根目录', expect.any(Error))
+  })
+
   it('只更新 workspace rootPath；绑定会话 workdir 不变、不触发 reload', async () => {
     invokeMock.mockImplementation(() => Promise.resolve(workspaceUpdateShape))
 
