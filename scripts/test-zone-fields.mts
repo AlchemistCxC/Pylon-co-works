@@ -37,12 +37,15 @@ const illegalZones = mappedEntries.map(([zone]) => zone).filter(zone => !allowed
 const duplicateFields = new Set<string>()
 const seenFields = new Set<string>()
 const illegalFields = new Set<string>()
+const mismatchedOwners = new Set<string>()
 
 for (const [zone, fields] of mappedEntries) {
   assert.ok(Array.isArray(fields), `ZONE_FIELDS.${zone} 必须是字段数组`)
   for (const field of fields) {
     if (!themeFieldSet.has(field)) illegalFields.add(field)
     if (seenFields.has(field)) duplicateFields.add(field)
+    const owner = THEME_FIELD_OWNERS[field as keyof typeof THEME_FIELD_OWNERS]
+    if (owner && owner.zone !== zone) mismatchedOwners.add(`${field}(${zone} != ${owner.zone})`)
     seenFields.add(field)
   }
 }
@@ -64,6 +67,7 @@ const problems = [
   unexpectedMetaMappings.length ? `元字段不应映射: ${unexpectedMetaMappings.join(', ')}` : '',
   missingOwners.length ? `缺少 owner: ${missingOwners.join(', ')}` : '',
   illegalOwners.length ? `非法 owner: ${illegalOwners.join(', ')}` : '',
+  mismatchedOwners.size ? `owner zone 不一致: ${[...mismatchedOwners].join(', ')}` : '',
 ].filter(Boolean)
 
 assert.equal(problems.length, 0, `ZONE_FIELDS 一致性契约失败\n${problems.join('\n')}`)
