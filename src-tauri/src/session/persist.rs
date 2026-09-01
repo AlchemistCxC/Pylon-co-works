@@ -112,13 +112,19 @@ pub(crate) async fn load_persisted_session(
     let handles = match runtime.acp.lock().await.begin_replay_capture(&peri_id) {
         Ok(handles) => handles,
         Err(error) => {
-            restore_previous_slot(
+            if let Err(restore_error) = restore_previous_slot(
                 &runtime,
                 &source,
                 &peri_id,
                 generation,
                 previous.clone(),
-            )?;
+            ) {
+                tracing::error!(
+                    source,
+                    error = %restore_error,
+                    "failed to roll back rejected replay load slot"
+                );
+            }
             return Err(error.into());
         }
     };
