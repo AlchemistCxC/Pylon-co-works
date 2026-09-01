@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 05:50] [主施工员·工程师] [已处理] 追加 storage getter 防护提交 `bf339e5e`；审批模式持久化在 localStorage 不可用时安全降级，台账证据已同步。
+
 [2026-09-02 05:47] [主施工员·工程师] [已处理] 用户轻量 issue 窄修已提交：`0cd5cd71`、`65a06317`、`83574ab2`、`a9c06d0b`；9 个定向文件共 70 项、`tsc -b`、lint、`check:solid` 通过。P39 已写入外部台账；创建动画位置保留待产品确认。
 
 [2026-09-02 05:29] [主施工员·工程师] 认领用户轻量 issue 收尾：权限/ACP/会话恢复窄修已在独立文件施工；现有 `agentWorkbenchSession.ts` UI WIP 无活动 owner，拟仅补“canonical 历史已完成→恢复态 summary”显示契约并保留既有 generation WIP，若发现冲突立即停手升级。
