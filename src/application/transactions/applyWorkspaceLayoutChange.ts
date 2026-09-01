@@ -32,7 +32,9 @@ export function applyWorkspaceLayoutChange(
   const rail = ports.rightRail.getState()
   // The default workspace action retains the compatibility bridge to the rail;
   // injected ports are independent projections and therefore receive both writes.
-  const workspaceOwnsRailBridge = ports === defaults
+  // Compare the store identities rather than the wrapper object so callers can
+  // construct an equivalent ports object without reintroducing duplicate writes.
+  const workspaceOwnsRailBridge = ports.workspace === useWorkspaceStore && ports.rightRail === useRightRailStore
   const previous = {
     sidebarWidth: workspace.sidebarWidth,
     sidebarCollapsed: workspace.sidebarCollapsed,
