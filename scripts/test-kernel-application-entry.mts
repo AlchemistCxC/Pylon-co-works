@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 
 const main = readFileSync(new URL('../src/main.tsx', import.meta.url), 'utf8')
 const kernelRoot = readFileSync(new URL('../src/kernel/KernelRoot.tsx', import.meta.url), 'utf8')
-const runtime = readFileSync(new URL('../src/kernel/applicationRuntime.ts', import.meta.url), 'utf8')
+const runtime = readFileSync(new URL('../src/application/applicationRuntime.ts', import.meta.url), 'utf8')
 const bootstrap = readFileSync(new URL('../src/kernel/kernelBootstrap.ts', import.meta.url), 'utf8')
 const shellPlugin = readFileSync(new URL('../src/plugins/product/builtinPylonShell.ts', import.meta.url), 'utf8')
 
