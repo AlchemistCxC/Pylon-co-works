@@ -18,6 +18,10 @@ pub(crate) const SESSION_ERROR: &str = "pylon:error";
 pub(crate) const USER_ECHO: &str = "pylon:user";
 /// Unified interaction event envelope (provider/agent/session/request identity + payload).
 pub(crate) const INTERACTION: &str = "pylon:interaction";
+/// Interaction request rejected by the host (unsupported provider/method or malformed
+/// payload).  This is deliberately separate from `INTERACTION`: rejected requests must
+/// never enter the permission reducer as if they were actionable approvals.
+pub(crate) const INTERACTION_REJECTED: &str = "pylon:interaction-rejected";
 /// 运行日志实时推送（§4.7，RuntimeLogEntry 已脱敏）。
 pub(crate) const RUNTIME_LOG: &str = "pylon:runtime-log";
 /// 进程内广播伪通知：ACP stdout EOF（非 WebView 事件，dispatcher 主循环消费）。
@@ -50,6 +54,7 @@ mod tests {
             SESSION_ERROR,
             USER_ECHO,
             INTERACTION,
+            INTERACTION_REJECTED,
             RUNTIME_LOG,
             AGENT_CRASHED,
             BROWSER_STATUS,
@@ -72,6 +77,7 @@ mod tests {
             SESSION_ERROR,
             USER_ECHO,
             INTERACTION,
+            INTERACTION_REJECTED,
             RUNTIME_LOG,
             AGENT_CRASHED,
             BROWSER_STATUS,
@@ -101,6 +107,7 @@ mod tests {
             SESSION_ERROR,
             USER_ECHO,
             INTERACTION,
+            INTERACTION_REJECTED,
             RUNTIME_LOG,
             AGENT_CRASHED,
             BROWSER_STATUS,

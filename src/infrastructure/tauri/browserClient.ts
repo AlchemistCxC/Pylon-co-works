@@ -18,6 +18,8 @@ export function createBrowserClient(transport: ClientTransport) {
     forward: (): Promise<unknown> => transport.invoke('browser_forward'),
     reload: (): Promise<unknown> => transport.invoke('browser_reload'),
     snapshot: (): Promise<unknown> => transport.invoke('browser_snapshot'),
+    /** Explicit user/agent download action; URL is validated again by the host. */
+    download: (url: string, filename?: string): Promise<unknown> => transport.invoke('browser_download', { url, filename }),
     click: (input: { selector?: string, text?: string }): Promise<unknown> => transport.invoke('browser_click', input),
     type: (input: { text: string, selector?: string }): Promise<unknown> => transport.invoke('browser_type', input),
     press: (key: string): Promise<unknown> => transport.invoke('browser_press', { key }),

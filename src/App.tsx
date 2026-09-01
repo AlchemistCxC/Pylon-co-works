@@ -27,11 +27,13 @@ import { normalizeAgentStatus, type AgentStatusPayload } from './components/sett
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
+import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { seedDemo } from './demo/seed'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
+import InteractionRejectionNotice from './components/InteractionRejectionNotice'
 import ErrorCenter from './components/ErrorCenter'
 import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog'
 import {
@@ -246,6 +248,16 @@ export default function App() {
     }
   }, [])
 
+  // Unsupported/malformed ACP interactions have their own transport and notice;
+  // they must not be inserted into the permission reducer as actionable requests.
+  useEffect(() => {
+    if (!IS_TAURI) return
+    const controller = createInteractionRejectionController({
+      listen: (event, handler) => listen(event, handler),
+    })
+    return () => { void controller.dispose() }
+  }, [])
+
   // 窗口尺寸记忆：启动恢复上次尺寸，resize 防抖持久化（纯前端，不依赖后端）
   useEffect(() => {
     if (!IS_TAURI) return
@@ -419,6 +431,7 @@ export default function App() {
       </Suspense>
 
       <ErrorCenter />
+      <InteractionRejectionNotice />
       <SessionOwnerRecoveryDialog />
 
       {/* W1-03：布局段下移 SheetLayout（侧栏壳/主区/右栏壳 + profile 投影 effects） */}

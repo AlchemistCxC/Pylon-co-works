@@ -446,12 +446,60 @@ impl BrowserManager {
                 text: (element.innerText || element.getAttribute('aria-label') || '').trim().slice(0, 240),
                 href: element.href,
                 target: element.getAttribute('target') || null,
+                download: element.hasAttribute('download'),
+                downloadName: element.getAttribute('download') || null,
               })),
               scrollX: window.scrollX,
               scrollY: window.scrollY,
             }))()"#,
         )
         .await
+    }
+
+    /// Trigger a download only after an explicit caller action.  The host validates
+    /// the URL and derives a conservative filename; it never forwards cookies,
+    /// headers, or arbitrary JavaScript supplied by the caller.
+    pub(crate) async fn download(
+        &self,
+        url: &str,
+        filename: Option<String>,
+    ) -> Result<Value, String> {
+        let parsed = url::Url::parse(url).map_err(|e| format!("URL 非法: {e}"))?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err("下载仅允许 http/https URL".to_string());
+        }
+        let safe_name = filename
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| {
+                !name.is_empty() && !name.chars().any(|ch| matches!(ch, '/' | '\\' | '\0'))
+            })
+            .map(str::to_string)
+            .or_else(|| {
+                parsed
+                    .path_segments()
+                    .and_then(|segments| segments.last())
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.chars().take(160).collect::<String>())
+            })
+            .unwrap_or_else(|| "download".to_string());
+        let url_json = serde_json::to_string(url).map_err(|e| e.to_string())?;
+        let name_json = serde_json::to_string(&safe_name).map_err(|e| e.to_string())?;
+        self.eval_json(&format!(
+            r#"(() => {{
+              const url = {url_json};
+              const name = {name_json};
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = name;
+              anchor.rel = 'noopener';
+              anchor.style.display = 'none';
+              document.body.appendChild(anchor);
+              anchor.click();
+              anchor.remove();
+              return JSON.stringify({{ ok: true, url, filename: name, status: 'started' }});
+            }})()"#
+        )).await
     }
 
     /// 通过 CSS selector 或可见文本触发页面元素 click。

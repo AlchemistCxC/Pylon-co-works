@@ -37,6 +37,8 @@
 | `resources/runtime/git/**` | 必须（Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe` |
 | `resources/runtime/portable-git.json` | 必须 | PortableGit 版本、来源和 SHA-256 元数据 |
 | `resources/runtime/README.txt` | 必须 | 运行时用途、许可和准备方式说明 |
+| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 插件开发 SDK（单文件 ESM）：发行包内无构建插件开发的 import 目标 |
+| `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema |
 | `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |

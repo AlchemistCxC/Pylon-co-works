@@ -269,6 +269,8 @@ function mockBrowserPageSnapshot(): Record<string, unknown> {
       text: previewElementLabel(element),
       href: element.href,
       target: element.getAttribute('target') || null,
+      download: element.hasAttribute('download'),
+      downloadName: element.getAttribute('download') || null,
     }))
     return {
       runtime: 'iframe-preview', tabId: tab.id, url: current,
@@ -277,7 +279,7 @@ function mockBrowserPageSnapshot(): Record<string, unknown> {
     }
   }
   const links = tab.url === 'https://example.com'
-    ? [{ text: 'More information...', href: 'https://iana.org/domains/example', target: '_blank' }]
+    ? [{ text: 'More information...', href: 'https://iana.org/domains/example', target: '_blank', download: false, downloadName: null }]
     : []
   return {
     runtime: 'iframe-preview',
@@ -288,6 +290,24 @@ function mockBrowserPageSnapshot(): Record<string, unknown> {
     links,
     note: '开发预览中的 iframe；跨域页面在代理不可用时仅提供状态预览。',
   }
+}
+
+function mockBrowserDownload(rawUrl: unknown, rawFilename: unknown): Record<string, unknown> {
+  const url = browserUrl(rawUrl)
+  if (url === 'about:blank') throw new Error('下载仅允许 http/https URL')
+  const filename = typeof rawFilename === 'string' && rawFilename.trim()
+    ? rawFilename.trim().replace(/[\\/\0]/g, '')
+    : (new URL(url).pathname.split('/').filter(Boolean).at(-1) || 'download')
+  // Preview cannot guarantee cross-origin bytes, but it can faithfully exercise the
+  // explicit download gesture and expose the same result shape as the native host.
+  if (typeof document !== 'undefined') {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    anchor.click()
+  }
+  return { ok: true, url, filename, status: 'started', runtime: 'iframe-preview' }
 }
 
 function mockGitOperation(summary: string) {
@@ -450,6 +470,7 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
       return snapshot
     }
     case 'browser_snapshot': return mockBrowserPageSnapshot()
+    case 'browser_download': return mockBrowserDownload(args.url, args.filename)
     case 'browser_click': {
       const result = mockBrowserClick(args.selector, args.text)
       emitMockBrowserStatus()

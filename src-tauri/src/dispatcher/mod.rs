@@ -198,6 +198,69 @@ type SessionsLock = std::sync::Mutex<std::collections::HashMap<String, SessionIn
 type PermissionLock =
     std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>;
 
+/// Reject an interaction request at the protocol boundary.  Every rejection is both
+/// observable (a redacted Tauri event/runtime log) and, when the wire supplied an id,
+/// answered with a JSON-RPC error so the provider cannot wait until its own timeout.
+/// The helper intentionally accepts only summary fields; params are never emitted back
+/// to the UI because interaction payloads may contain commands, paths, or credentials.
+#[allow(clippy::too_many_arguments)]
+async fn reject_interaction_request<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    acp: &AcpLock,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    request_id: Option<crate::acp::RequestId>,
+    params: Option<&serde_json::Value>,
+    reason_code: &str,
+    rpc_code: i64,
+    message: &str,
+) {
+    let request_id_text = request_id.as_ref().map(ToString::to_string);
+    let response_sent = if let Some(id) = request_id {
+        let (write_tx, crashed) = {
+            let acp = acp.lock().await;
+            (acp.write_tx.clone(), acp.crashed.clone())
+        };
+        crate::permission::send_agent_error(write_tx, crashed, id, rpc_code, message).await
+    } else {
+        false
+    };
+    let session_id = params.and_then(|value| {
+        value.as_object().and_then(|object| {
+            object
+                .get("sessionId")
+                .or_else(|| object.get("session_id"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+    });
+    tracing::warn!(
+        provider,
+        agent_id,
+        method = ?method,
+        request_id = ?request_id_text,
+        reason_code,
+        response_sent,
+        "ACP interaction request rejected: {message}"
+    );
+    emit_event(
+        window,
+        crate::event_names::INTERACTION_REJECTED,
+        serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id_text,
+            "method": method,
+            "reasonCode": reason_code,
+            "message": message,
+            "rpcCode": rpc_code,
+            "responseSent": response_sent,
+        }),
+    );
+}
+
 /// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
 /// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
 pub(crate) fn resolve_agent_provider(
@@ -227,15 +290,35 @@ async fn handle_permission_request<R: tauri::Runtime>(
     params: Option<&serde_json::Value>,
 ) {
     let Some(adapter) = crate::protocol_adapter::get_protocol_adapter(provider) else {
-        tracing::warn!(
-            "interaction request 来自未注册 provider={provider} (agent={agent_id}, id={request_id})，已丢弃"
-        );
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "provider_unsupported",
+            -32601,
+            &format!("interaction provider unsupported: {provider}"),
+        )
+        .await;
         return;
     };
     if adapter.classify(method) != crate::protocol_adapter::InteractionClassification::Interaction {
-        tracing::warn!(
-            "provider={provider} 的 method={method:?} 非 interaction，已丢弃 (agent={agent_id}, id={request_id})"
-        );
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "method_unsupported",
+            -32601,
+            &format!("interaction method unsupported: {}", method.unwrap_or("<missing>")),
+        )
+        .await;
         return;
     }
     // C4：记录到达时 client_generation——应答时复核，客户端替换后
@@ -247,17 +330,17 @@ async fn handle_permission_request<R: tauri::Runtime>(
         // permission——**不伪造 optionId**（旧实现按拒绝兜底回 reject_once，OBS-03
         // 已证实协议缺陷），按 ACP 标准发 JSON-RPC error（-32602 Invalid params），
         // 让 agent 按标准错误处理。未挂起 pending，无需清理。
-        tracing::warn!("ACP request_permission 解析失败 (id={request_id})：protocol error，按 JSON-RPC error 应答");
-        // O9/G3 §2.2.2：锁内取 write_tx/crashed 克隆，锁外经 permission::send_agent_error
-        // 10s 超时发送（持锁 await 会阻塞 dispatcher 主循环，写超时期间事件积压可能 Lagged）。
-        let (write_tx, crashed) = {
-            let acp = acp.lock().await;
-            (acp.write_tx.clone(), acp.crashed.clone())
-        };
-        crate::permission::send_agent_error(
-            write_tx,
-            crashed,
-            request_id,
+        // O9/G3 §2.2.2：锁内只克隆发送句柄，锁外发送；同时发出独立拒绝事件，
+        // 让前端能解释“为什么没有弹出权限卡”。
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "invalid_params",
             -32602,
             "invalid params: permission request 解析失败",
         )
@@ -281,6 +364,19 @@ async fn handle_permission_request<R: tauri::Runtime>(
             tracing::error!(
                 "权限模式 {mode}：请求 options 为空（不应发生），跳过自动批准应答，不伪造 optionId"
             );
+            reject_interaction_request(
+                window,
+                acp,
+                provider,
+                agent_id,
+                method,
+                Some(request_id),
+                params,
+                "invalid_options",
+                -32602,
+                "invalid params: permission request options 为空",
+            )
+            .await;
             return;
         };
         // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
@@ -1086,9 +1182,60 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     .await;
                 } else {
                     // ACP-01：null/absent id 的 request_permission 是畸形协议请求——
-                    // 不静默当 0（不臆造 id 应答），记录后丢弃。
-                    tracing::warn!("ACP 收到无 id 的 request_permission（id null/absent，已丢弃）");
+                    // 不静默当 0（不臆造 id 应答），记录并发出不可提交的拒绝事件。
+                    let provider = agents
+                        .lock()
+                        .ok()
+                        .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    reject_interaction_request(
+                        &window,
+                        &acp,
+                        &provider,
+                        &agent_id,
+                        raw.method.as_deref(),
+                        None,
+                        raw.params.as_ref(),
+                        "missing_request_id",
+                        -32600,
+                        "invalid request: interaction request requires a JSON-RPC id",
+                    )
+                    .await;
                 }
+                continue;
+            }
+            // Providers may expose a new approval/question/oauth method before a
+            // dedicated AcpKind/adapter exists.  Do not silently drop an identified
+            // request: answer it with Method Not Found and surface a diagnostic event.
+            if raw.id.is_some()
+                && crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref())
+            {
+                let provider = agents
+                    .lock()
+                    .ok()
+                    .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
+                    .unwrap_or_else(|| "unknown".to_string());
+                let reason_code = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
+                    "method_unsupported"
+                } else {
+                    "provider_unsupported"
+                };
+                reject_interaction_request(
+                    &window,
+                    &acp,
+                    &provider,
+                    &agent_id,
+                    raw.method.as_deref(),
+                    raw.id,
+                    raw.params.as_ref(),
+                    reason_code,
+                    -32601,
+                    &format!(
+                        "interaction {} unsupported",
+                        raw.method.as_deref().unwrap_or("method")
+                    ),
+                )
+                .await;
                 continue;
             }
             if raw.kind != crate::acp::AcpKind::SessionUpdate {

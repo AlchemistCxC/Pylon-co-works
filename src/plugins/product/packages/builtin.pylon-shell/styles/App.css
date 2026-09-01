@@ -357,6 +357,23 @@
 .error-center-item strong { color: var(--tool-err, #be2828); flex-shrink: 0; }
 .error-center-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 
+/* Host-side ACP interaction rejection: explanatory, not actionable like the
+   permission modal (there is no response choice to present). */
+.interaction-rejection-notice {
+  position: fixed; top: calc(var(--titlebar-h,44px) + 10px); left: 50%; transform: translateX(-50%);
+  z-index: 190; display: flex; align-items: flex-start; gap: 12px;
+  width: min(520px, calc(100vw - 32px)); padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 58%, var(--border));
+  border-left: 3px solid var(--danger); border-radius: 0;
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel));
+  color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.2);
+}
+.interaction-rejection-copy { min-width: 0; display: grid; gap: 2px; }
+.interaction-rejection-copy strong { color: var(--danger); font-size: var(--font-size-sm); }
+.interaction-rejection-copy span { color: var(--text-dim); font-family: var(--mono); font-size: var(--font-size-2xs); overflow-wrap: anywhere; }
+.interaction-rejection-copy small { color: var(--text); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.interaction-rejection-notice > button { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 18px; line-height: 1; }
+
 /* FE-AUD-001：工作区写盘失败提示（SheetLayout 顶部） */
 .workspace-persist-warning {
   margin: 6px 12px;

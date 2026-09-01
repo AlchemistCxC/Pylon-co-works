@@ -163,6 +163,42 @@ fn normalize_provider(provider: &str) -> String {
     provider.trim().to_lowercase()
 }
 
+/// Conservative interaction-method probe used by the dispatcher for requests that
+/// are not part of the small, explicitly typed ACP enum yet.  ACP providers often
+/// add approval/question/oauth methods before the host has a dedicated adapter.  We
+/// must reject those requests explicitly (and answer their JSON-RPC id) without
+/// accidentally treating ordinary session methods as user interactions.
+pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
+    let Some(method) = method.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    if method == crate::acp::METHOD_SESSION_REQUEST_PERMISSION {
+        return true;
+    }
+    let normalized = method
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .collect::<String>();
+    let words = normalized.split_whitespace().collect::<Vec<_>>();
+    // `ask` is intentionally only accepted as a complete segment.  Matching a
+    // substring would classify unrelated methods such as `task/list`.
+    [
+        "permission",
+        "interaction",
+        "approval",
+        "approve",
+        "question",
+        "clarify",
+        "confirm",
+        "oauth",
+        "authorize",
+        "authorization",
+        "ask",
+    ]
+    .iter()
+    .any(|needle| words.iter().any(|word| word == needle))
+}
+
 /// 注册 provider 适配器（应用启动时；同 provider 重复注册覆盖）。
 pub(crate) fn register_protocol_adapter(adapter: AdapterRef) {
     let _ = registry()
@@ -254,6 +290,16 @@ mod tests {
             adapter.classify(None),
             InteractionClassification::NotInteraction
         );
+    }
+
+    #[test]
+    fn interaction_method_probe_is_conservative() {
+        assert!(looks_like_interaction_method(Some("session/request_permission")));
+        assert!(looks_like_interaction_method(Some("session/request_question")));
+        assert!(looks_like_interaction_method(Some("claude/oauth/authorize")));
+        assert!(!looks_like_interaction_method(Some("session/new")));
+        assert!(!looks_like_interaction_method(Some("task/list")));
+        assert!(!looks_like_interaction_method(None));
     }
 
     #[test]

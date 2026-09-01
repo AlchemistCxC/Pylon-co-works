@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare:hermes-runtime": "python scripts/prepare_hermes_runtime.py",
+    "build:plugin-sdk": "node scripts/build-plugin-sdk.mjs",
     "pack:portable": "python scripts/pack_release.py",
     "release:portable": "npm run build && npm run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && npm run pack:portable",
     "test": "vitest run",

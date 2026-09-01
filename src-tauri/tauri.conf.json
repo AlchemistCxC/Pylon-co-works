@@ -40,7 +40,9 @@
       "dangerousDisableAssetCspModification": false,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     },
     "withGlobalTauri": false
@@ -51,7 +53,8 @@
     ],
     "resources": [
       "resources/fonts/*",
-      "resources/runtime"
+      "resources/runtime",
+      "resources/sdk/*"
     ],
     "windows": {
       "webviewInstallMode": {

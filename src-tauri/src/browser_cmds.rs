@@ -123,6 +123,21 @@ pub(crate) async fn browser_snapshot(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
+/// Start an explicit download from the active Browser WebView.  The manager repeats
+/// URL/filename validation at the native boundary.
+#[tauri::command]
+pub(crate) async fn browser_download(
+    state: tauri::State<'_, AppState>,
+    url: String,
+    filename: Option<String>,
+) -> Result<serde_json::Value, PylonError> {
+    state
+        .browser
+        .download(&url, filename)
+        .await
+        .map_err(|e| PylonError::Protocol(e.to_string()))
+}
+
 #[tauri::command]
 pub(crate) async fn browser_click(
     state: tauri::State<'_, AppState>,
