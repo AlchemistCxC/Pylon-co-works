@@ -59,7 +59,8 @@ export function resolvePetVisualPose({
   if (machine === 'awake.distress') return 'distress'
 
   const latest = recentEvents.at(-1)
-  if (latest && POSE_BY_EVENT[latest]) return POSE_BY_EVENT[latest]
+  const pose = latest ? POSE_BY_EVENT[latest] : undefined
+  if (pose) return pose
   if (crafting) return 'craft-friend'
   if (machine === 'awake.interacting') return 'interact'
   return 'idle'

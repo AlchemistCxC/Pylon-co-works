@@ -12,11 +12,12 @@ export function isProcessActivitySnapshotInput(input: unknown): boolean {
     || input.semanticKind !== 'activity.process'
     || typeof input.status !== 'string' || !input.status.trim()) return false
   for (const key of ['title', 'parentId', 'processId', 'sessionId', 'reason'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    const v = input[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) return false
   }
   if (input.progress !== undefined && !isJsonValue(input.progress)) return false
   if (input.result !== undefined && !isJsonValue(input.result)) return false
-  if (input.parts !== undefined && (!Array.isArray(input.parts) || !input.parts.every(part => parseContentPart(part).ok))) return false
+  if (input.parts !== undefined && (!Array.isArray(input.parts) || !input.parts.every((part): boolean => parseContentPart(part).ok))) return false
   return true
 }
 
@@ -36,19 +37,22 @@ export function isSubagentActivitySnapshotInput(input: unknown): boolean {
     'title', 'parentId', 'sourceAgentId', 'description', 'startedAt', 'completedAt',
     'role', 'model', 'provider', 'goal',
   ] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    const v = input[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) return false
   }
   if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth) || input.depth < 0)) return false
   for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
     if (input[key] !== undefined && !isJsonValue(input[key])) return false
   }
   for (const key of ['parts', 'output'] as const) {
-    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+    const v = input[key]
+    if (v !== undefined && (!Array.isArray(v) || !v.every((part): boolean => parseContentPart(part).ok))) return false
   }
   if (input.metrics !== undefined && !isActivityMetrics(input.metrics)) return false
   if (input.execution !== undefined && (!isRecord(input.execution) || !isJsonValue(input.execution))) return false
   for (const key of ['tools', 'tasks'] as const) {
-    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(isJsonValue))) return false
+    const v = input[key]
+    if (v !== undefined && (!Array.isArray(v) || !v.every(isJsonValue))) return false
   }
   return true
 }
@@ -82,14 +86,16 @@ export function isWorkflowActivitySnapshotInput(input: unknown): boolean {
     || (input.semanticKind !== undefined && input.semanticKind !== `activity.${input.activityKind}`)
     || !isActivityStatus(input.status)) return false
   for (const key of ['title', 'parentId', 'sourceAgentId', 'description', 'startedAt', 'completedAt', 'role', 'model', 'provider', 'goal'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    const v = input[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) return false
   }
   if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth) || input.depth < 0)) return false
   for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
     if (input[key] !== undefined && !isJsonValue(input[key])) return false
   }
   for (const key of ['parts', 'output'] as const) {
-    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+    const v = input[key]
+    if (v !== undefined && (!Array.isArray(v) || !v.every((part): boolean => parseContentPart(part).ok))) return false
   }
   for (const key of ['killed', 'timeout'] as const) {
     if (input[key] !== undefined && typeof input[key] !== 'boolean') return false
@@ -97,7 +103,8 @@ export function isWorkflowActivitySnapshotInput(input: unknown): boolean {
   if (input.metrics !== undefined && !isActivityMetrics(input.metrics)) return false
   if (input.execution !== undefined && (!isRecord(input.execution) || !isJsonValue(input.execution))) return false
   for (const key of ['tools', 'tasks'] as const) {
-    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(isJsonValue))) return false
+    const v = input[key]
+    if (v !== undefined && (!Array.isArray(v) || !v.every(isJsonValue))) return false
   }
   return true
 }
@@ -243,10 +250,12 @@ export function isBackgroundTaskActivitySnapshotInput(input: unknown): boolean {
     || input.semanticKind !== 'activity.background-task'
     || !isActivityStatus(input.status)) return false
   for (const key of ['title', 'parentId', 'sessionId', 'reason'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    const v = input[key]
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) return false
   }
   for (const key of ['parts', 'output'] as const) {
-    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+    const v = input[key]
+    if (v !== undefined && (!Array.isArray(v) || !v.every((part): boolean => parseContentPart(part).ok))) return false
   }
   for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
     if (input[key] !== undefined && !isJsonValue(input[key])) return false

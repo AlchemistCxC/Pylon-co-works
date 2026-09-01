@@ -96,8 +96,10 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
 
 function toolPayload(update: Record<string, unknown>, parts: readonly unknown[], context: NormalizeContext): Record<string, JsonValue> {
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const pylonMeta = isRecord(meta?.pylon) ? meta.pylon : undefined
-  const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
+  const pylonCandidate = meta?.pylon
+  const claudeCandidate = meta?.claudeCode
+  const pylonMeta = isRecord(pylonCandidate) ? pylonCandidate : undefined
+  const claudeMeta = isRecord(claudeCandidate) ? claudeCandidate : undefined
   const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
     ? pylonMeta.toolName.trim()
     : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
@@ -150,7 +152,8 @@ function withToolNameDiagnostic(
   context: NormalizeContext,
 ): ReturnType<typeof createDiagnostic>[] {
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
+  const pylonCandidate = meta?.pylon
+  const pylon = isRecord(pylonCandidate) ? pylonCandidate : undefined
   const hasName = (typeof pylon?.toolName === 'string' && pylon.toolName.trim()) || (typeof update.name === 'string' && update.name.trim())
   return hasName ? diagnostics : [...diagnostics, createDiagnostic(context, update, 'tool.name.missing', 'tool_call is missing _meta.pylon.toolName; generic tool fallback used', ['_meta', 'pylon', 'toolName'], true)]
 }

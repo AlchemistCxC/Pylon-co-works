@@ -38,7 +38,7 @@ async function pickPluginDirectory(): Promise<string | null> {
 
 function cleanupResultMessage(result: PluginDeactivateResult): string {
   const errors = [result.deactivateError, ...result.scope.errors]
-    .filter(error => error !== undefined)
+    .filter((error): error is NonNullable<typeof error> => error !== undefined)
     .map(error => `${error.resourceId}: ${error.message}`)
   return errors.length > 0 ? errors.join('；') : `${result.scope.remaining} 个资源仍待清理`
 }
@@ -184,7 +184,7 @@ export default function PluginManager({
           {cleanupFailures.map(failure => (
             <span className="set-hint" key={failure.identity.key}>
               {[failure.cleanup?.deactivateError, ...(failure.cleanup?.scope.errors ?? [])]
-                .filter(error => error !== undefined)
+                .filter((error): error is NonNullable<typeof error> => error !== undefined)
                 .map(error => `${error.resourceId}: ${error.message}`)
                 .join('；') || `${failure.cleanup?.scope.remaining ?? 0} 个资源仍待清理`}
             </span>

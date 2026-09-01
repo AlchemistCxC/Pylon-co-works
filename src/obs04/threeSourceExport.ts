@@ -404,7 +404,8 @@ export async function collectReplaySection(
   if (identity.cwd) args.cwd = identity.cwd
   try {
     const result = await transport.invoke('load_persisted_session', args) as { response?: unknown; replay?: unknown } | null
-    const envelopes = Array.isArray(result?.replay) ? result.replay : []
+    const replay = result?.replay
+    const envelopes = Array.isArray(replay) ? replay : []
     const normalized = envelopes.map((raw, index) => normalizeRawEvent(raw, {
       owner: {
         profileId: identity.profileId ?? '',

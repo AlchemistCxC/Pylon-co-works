@@ -82,7 +82,8 @@ function extractPredictionPayload(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
   for (const key of ['suggestion', 'prediction', 'text']) {
-    if (typeof record[key] === 'string') return record[key]
+    const v = record[key]
+    if (typeof v === 'string') return v
   }
   const nested = record.data
   return nested && typeof nested === 'object'

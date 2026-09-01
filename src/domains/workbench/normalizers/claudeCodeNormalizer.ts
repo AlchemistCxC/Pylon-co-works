@@ -29,8 +29,10 @@ export function normalizeClaudeCodeEvent(input: AgentWireEnvelope | unknown, con
 function canonicalizeToolName(input: AgentWireEnvelope | unknown, update: Record<string, unknown> | undefined): AgentWireEnvelope | unknown {
   if (!update || !isRecord(input)) return input
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const claude = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
-  const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
+  const claudeCandidate = meta?.claudeCode
+  const pylonCandidate = meta?.pylon
+  const claude = isRecord(claudeCandidate) ? claudeCandidate : undefined
+  const pylon = isRecord(pylonCandidate) ? pylonCandidate : undefined
   if (typeof pylon?.toolName === 'string' || typeof claude?.toolName !== 'string' || !claude.toolName.trim()) return input
   const nextUpdate = { ...update, _meta: { ...meta, pylon: { ...(pylon ?? {}), toolName: claude.toolName.trim() } } }
   if (isRecord(input.params) && isRecord(input.params.update)) return { ...input, params: { ...input.params, update: nextUpdate } }

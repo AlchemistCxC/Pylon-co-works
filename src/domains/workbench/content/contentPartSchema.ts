@@ -18,6 +18,11 @@ import {
   type MediaSourceKind,
 } from './mediaContentValidation.ts'
 
+// 校验辅助：undefined 视为通过；仅接受非空字符串（保持原单行三连访问的语义）
+function isMissingOrNonEmptyString(v: unknown): boolean {
+  return v === undefined || (typeof v === 'string' && v.trim().length > 0)
+}
+
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue }
 
@@ -647,7 +652,7 @@ export function isValidTerminalContentInput(input: unknown): input is Omit<Termi
   if (input.command !== undefined && (typeof input.command !== 'string' || !input.command.trim())) return false
   if (input.command === undefined && input.streams.length === 0 && input.error === undefined) return false
   for (const key of ['processId', 'sessionId'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    if (!isMissingOrNonEmptyString(input[key])) return false
   }
   if (input.status !== undefined && !['queued', 'running', 'completed', 'failed', 'cancelled'].includes(String(input.status))) return false
   if (input.terminatedBy !== undefined && !['timeout', 'killed', 'signal'].includes(String(input.terminatedBy))) return false
@@ -663,7 +668,7 @@ export function isValidTerminalContentInput(input: unknown): input is Omit<Termi
 export function isValidLogContentInput(input: unknown): input is Omit<LogContentPart, 'kind'> | LogContentPart {
   if (!isRecord(input) || !Array.isArray(input.entries) || input.entries.length === 0) return false
   for (const key of ['source', 'processId', 'sessionId'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+    if (!isMissingOrNonEmptyString(input[key])) return false
   }
   if (input.truncation !== undefined && !isValidTerminalTruncation(input.truncation)) return false
   return input.entries.every(entry => isRecord(entry)
@@ -747,7 +752,7 @@ function isValidSearchResultEntry(input: unknown): input is SearchResultEntry {
 function isValidSearchResultLocation(input: unknown): input is SearchResultLocation {
   if (!isRecord(input)) return false
   for (const key of ['path', 'uri'] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== 'string' || input[key].trim().length === 0)) return false
+    if (!isMissingOrNonEmptyString(input[key])) return false
   }
   for (const key of ['line', 'column', 'endLine', 'endColumn'] as const) {
     if (input[key] !== undefined && (!Number.isInteger(input[key]) || Number(input[key]) < 0)) return false

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import SheetErrorBoundary from '../../workspace-sheets/SheetErrorBoundary'
 
-function Exploding(): React.ReactNode {
+function Exploding(): never {
   throw new Error('boom in sheet')
 }
 

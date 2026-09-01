@@ -5,7 +5,7 @@ import type { PluginProcessDescriptor, PluginProcessLogEntry } from '../infrastr
 import type { SheetRecord } from '../workspace-sheets/sheetTypes.ts'
 import type { AgentEntry, Session } from '../identityStore.ts'
 import type { AgentRuntimeCandidate } from '../domains/agent/agentDetector.ts'
-import cliManifest from '../../shared/pylon-cli-manifest.json' with { type: 'json' }
+import cliManifest from '../../shared/pylon-cli-manifest.json'
 
 export const PYLON_CLI_COMMANDS: readonly string[] = Object.freeze([...cliManifest.commands])
 export const CLI_ALIASES: Readonly<Record<string, string>> = Object.freeze({ ...cliManifest.aliases })

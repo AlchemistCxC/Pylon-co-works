@@ -470,7 +470,8 @@ function isValidRawMetadata(value: unknown): value is WorkbenchRawMetadata {
 }
 
 function requireString(value: Record<string, unknown>, key: string, issues: SchemaIssue[], path: readonly (string | number)[] = [key]): void {
-  if (typeof value[key] !== 'string' || value[key].length === 0) issues.push(schemaIssue(path, 'type.string', 'non-empty string', value[key]))
+  const v = value[key]
+  if (typeof v !== 'string' || v.length === 0) issues.push(schemaIssue(path, 'type.string', 'non-empty string', v))
 }
 
 function requirePositiveInteger(value: Record<string, unknown>, key: string, issues: SchemaIssue[]): void {
@@ -478,7 +479,8 @@ function requirePositiveInteger(value: Record<string, unknown>, key: string, iss
 }
 
 function requireIsoDate(value: Record<string, unknown>, key: string, issues: SchemaIssue[]): void {
-  if (typeof value[key] !== 'string' || Number.isNaN(Date.parse(value[key]))) issues.push(schemaIssue([key], 'date.iso', 'ISO date string', value[key]))
+  const v = value[key]
+  if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) issues.push(schemaIssue([key], 'date.iso', 'ISO date string', v))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

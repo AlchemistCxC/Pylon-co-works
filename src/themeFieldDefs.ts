@@ -408,7 +408,8 @@ export function normalizeThemeState<T extends Record<string, unknown>>(state: T)
     // 持久化 select 可能来自运行时插件候选项；水合时插件 Registry 尚未激活，
     // 不得因静态 options 暂时不包含该值就悄悄改回默认。Presentation Profile
     // 注册仍直接调用 normalizeThemeValue，继续使用严格静态校验。
-    if (def.type === 'select' && typeof next[key] === 'string' && next[key].trim()) continue
+    const v = next[key]
+    if (def.type === 'select' && typeof v === 'string' && v.trim()) continue
     next[key] = normalizeThemeValue(def, next[key])
   }
   return next as T

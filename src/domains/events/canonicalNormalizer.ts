@@ -86,7 +86,8 @@ function firstString(record: Record<string, unknown> | undefined, keys: readonly
 function extractUpdate(raw: unknown): { update?: Record<string, unknown> } {
   if (!isObject(raw)) return {}
   const params = isObject(raw.params) ? raw.params : undefined
-  if (isObject(params?.update)) return { update: params.update }
+  const paramsUpdate = params?.update
+  if (isObject(paramsUpdate)) return { update: paramsUpdate }
   if (isObject(raw.update)) return { update: raw.update }
   if (typeof raw.sessionUpdate === 'string') return { update: raw }
   if (typeof params?.sessionUpdate === 'string') return { update: params }

@@ -1,4 +1,4 @@
-import rawCatalog from '../../../shared/agent-catalog.json' with { type: 'json' }
+import rawCatalog from '../../../shared/agent-catalog.json'
 import type { InteractionKind } from '../activity/activity.ts'
 import type { ToolAction, ToolKind } from '../tool/toolKinds.ts'
 import type { ToolRegistryEntry } from '../tool/toolRegistry.ts'

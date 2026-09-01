@@ -37,6 +37,11 @@ import {
   type WorkbenchSemanticEvent,
 } from '../events/workbenchEventSchema.ts'
 import type { NormalizeContext, NormalizeDiagnostic } from './agentEventNormalizer.ts'
+// 校验辅助：undefined 视为通过；仅接受非空字符串（保持原单行三连访问的语义）
+function isMissingOrNonEmptyString(v: unknown): boolean {
+  return v === undefined || (typeof v === 'string' && v.trim().length > 0)
+}
+
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -50,7 +55,8 @@ const UTF8_DECODER = new TextDecoder()
 export function extractUpdate(input: unknown): Record<string, unknown> | undefined {
   if (!isRecord(input)) return undefined
   const params = isRecord(input.params) ? input.params : undefined
-  if (isRecord(params?.update)) return params.update
+  const paramsUpdate = params?.update
+  if (isRecord(paramsUpdate)) return paramsUpdate
   if (isRecord(input.update)) return input.update
   if (typeof input.sessionUpdate === 'string' || typeof input.session_update === 'string') return input
   if (typeof params?.sessionUpdate === 'string' || typeof params?.session_update === 'string') return params
@@ -66,7 +72,8 @@ export function identityFromUpdate(update: Record<string, unknown> | undefined):
   if (!update) return {}
   const content = isRecord(update.content) ? update.content : undefined
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
+  const claudeCandidate = meta?.claudeCode
+  const claudeMeta = isRecord(claudeCandidate) ? claudeCandidate : undefined
   const pick = (keys: readonly string[], records: readonly (Record<string, unknown> | undefined)[]): string | undefined => {
     for (const record of records) {
       for (const key of keys) {
@@ -612,7 +619,7 @@ function c15SafeUnknownFields(raw: Record<string, unknown>, known: readonly stri
 
 function c15HasInvalidKnownField(raw: Record<string, unknown>, kind: 'memory' | 'skill' | 'mcp-resource' | 'artifact'): boolean {
   for (const key of ['summary', 'status'] as const) {
-    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+    if (!isMissingOrNonEmptyString(raw[key])) return true
   }
   if ((kind === 'memory' || kind === 'skill' || kind === 'artifact') && raw.version !== undefined
     && !(typeof raw.version === 'string' && raw.version.trim()
@@ -624,7 +631,7 @@ function c15HasInvalidKnownField(raw: Record<string, unknown>, kind: 'memory' | 
   if (kind === 'skill' && raw.uri !== undefined && (typeof raw.uri !== 'string' || !raw.uri.trim())) return true
   if (kind === 'mcp-resource') {
     for (const key of ['tool', 'tool_name', 'title', 'mimeType', 'mime_type', 'summary', 'connectionState', 'connection_state', 'status'] as const) {
-      if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+      if (!isMissingOrNonEmptyString(raw[key])) return true
     }
   }
   if (kind === 'artifact') {
@@ -713,7 +720,7 @@ function hasUnknownRelatedFields(value: unknown): boolean {
 
 function hasInvalidKnownDiffField(raw: Record<string, unknown>, snapshot: NonNullable<ReturnType<typeof diffSnapshotFromPart>>): boolean {
   for (const key of ['oldPath', 'status'] as const) {
-    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+    if (!isMissingOrNonEmptyString(raw[key])) return true
   }
   for (const key of ['oldText', 'newText', 'unified'] as const) if (raw[key] !== undefined && typeof raw[key] !== 'string') return true
   for (const key of ['additions', 'deletions'] as const) {
@@ -728,7 +735,7 @@ function hasInvalidKnownDiffField(raw: Record<string, unknown>, snapshot: NonNul
 
 function hasInvalidKnownLspField(raw: Record<string, unknown>): boolean {
   for (const key of ['severity', 'source'] as const) {
-    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+    if (!isMissingOrNonEmptyString(raw[key])) return true
   }
   return raw.code !== undefined
     && !(typeof raw.code === 'string' || typeof raw.code === 'number' && Number.isFinite(raw.code))

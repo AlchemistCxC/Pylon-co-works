@@ -420,8 +420,9 @@ function ReactFallbackTool({ snapshot }: { snapshot: ToolInvocationSnapshot }) {
   const presentation = toolStatePresentation(normalizeToolStatus(snapshot.status ?? snapshot.result?.status), Boolean(snapshot.result))
   const progress = fallbackToolProgress(snapshot.progress)
   const duration = fallbackToolDuration(snapshot.result?.durationMs)
-  const parts = Array.isArray(snapshot.result?.parts)
-    ? snapshot.result.parts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object' && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
+  const resultParts = snapshot.result?.parts
+  const parts = Array.isArray(resultParts)
+    ? resultParts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object' && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
     : []
   return <section role="status" aria-label={`工具 fallback：${displayName}，${presentation.label}`}
     className="react-workbench-fatal-tool" data-tool-state={presentation.state}>

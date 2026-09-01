@@ -34,7 +34,7 @@ bindPluginDisableHandler(async pluginId => {
   const result = await pluginRuntime.disable(pluginId)
   if (result.complete) return
   const messages = [result.deactivateError, ...result.scope.errors]
-    .filter(error => error !== undefined)
+    .filter((error): error is NonNullable<typeof error> => error !== undefined)
     .map(error => `${error.resourceId}: ${error.message}`)
   throw new Error(`Plugin cleanup incomplete: ${pluginId}${messages.length > 0 ? ` (${messages.join('; ')})` : ''}`)
 })

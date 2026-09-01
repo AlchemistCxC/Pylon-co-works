@@ -59,7 +59,8 @@ function canonicalizeHermesTool(input: AgentWireEnvelope | unknown, update: Reco
   if (!update || !['tool_call', 'tool_call_update'].includes(String(update.sessionUpdate ?? update.session_update)) || !isRecord(input)) return input
 
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
+  const pylonCandidate = meta?.pylon
+  const pylon = isRecord(pylonCandidate) ? pylonCandidate : undefined
   const explicitName = firstString(pylon?.toolName, pylon?.tool_name, update.name, update.toolName, update.tool_name, update.tool)
   const title = firstString(update.title)
   const parsedTitle = title ? splitToolTitle(title) : { name: '', summary: '' }

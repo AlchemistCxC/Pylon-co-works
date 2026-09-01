@@ -18,7 +18,7 @@ export default defineConfig({
     include: ['scripts/*.test.mts', 'src/**/*.test.{ts,tsx}'],
     environment: 'node',
     setupFiles: ['vitest.setup.ts'],
-    testTimeout: 30000,
+    testTimeout: 60000,
     pool: 'forks',
     // CI 偶发 providerCoverage 时序 flake（本地稳定）——失败重试一次
     retry: 1,

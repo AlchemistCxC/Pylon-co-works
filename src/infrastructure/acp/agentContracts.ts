@@ -37,9 +37,12 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
   const connected = status?.status === 'connected'
   const capabilitiesKnown = isPlainObject(capabilities)
   const caps = isPlainObject(capabilities) ? capabilities : null
-  const session = isPlainObject(caps?.sessionCapabilities) ? caps.sessionCapabilities : null
-  const prompt = isPlainObject(caps?.promptCapabilities) ? caps.promptCapabilities : null
-  const mcp = isPlainObject(caps?.mcpCapabilities) ? caps.mcpCapabilities : null
+  const sessionCaps = caps?.sessionCapabilities
+  const promptCaps = caps?.promptCapabilities
+  const mcpCaps = caps?.mcpCapabilities
+  const session = isPlainObject(sessionCaps) ? sessionCaps : null
+  const prompt = isPlainObject(promptCaps) ? promptCaps : null
+  const mcp = isPlainObject(mcpCaps) ? mcpCaps : null
   const authMethods = caps?.authMethods
   return {
     connected,
