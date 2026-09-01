@@ -41,6 +41,7 @@ export function resetHydrationCoordinator(): void {
 export function hydrateIdentityAndWorkspace(legacy?: ProfilePersistenceState): Promise<HydrationResult> {
   if (inFlight) return inFlight
   const run = async (): Promise<HydrationResult> => {
+    if (legacy) pendingLegacy = undefined
     if (!completedStages.includes('profiles')) {
       await useIdentityStore.getState().hydrateProfiles(legacy ?? consumeLegacyProfilePayload())
       completedStages = [...completedStages, 'profiles']

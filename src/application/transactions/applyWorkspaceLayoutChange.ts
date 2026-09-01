@@ -30,6 +30,9 @@ export function applyWorkspaceLayoutChange(
 ): WorkspaceLayoutResult {
   const workspace = ports.workspace.getState()
   const rail = ports.rightRail.getState()
+  // The default workspace action retains the compatibility bridge to the rail;
+  // injected ports are independent projections and therefore receive both writes.
+  const workspaceOwnsRailBridge = ports === defaults
   const previous = {
     sidebarWidth: workspace.sidebarWidth,
     sidebarCollapsed: workspace.sidebarCollapsed,
@@ -41,15 +44,15 @@ export function applyWorkspaceLayoutChange(
   }
   try {
     if (patch.sidebarWidth !== undefined) {
-      rail.setLeftRailWidth(patch.sidebarWidth)
+      if (!workspaceOwnsRailBridge) rail.setLeftRailWidth(patch.sidebarWidth)
       workspace.setSidebarWidth(patch.sidebarWidth)
     }
     if (patch.sidebarCollapsed !== undefined) {
-      rail.setLeftRailCollapsed(patch.sidebarCollapsed)
+      if (!workspaceOwnsRailBridge) rail.setLeftRailCollapsed(patch.sidebarCollapsed)
       workspace.setSidebarCollapsed(patch.sidebarCollapsed)
     }
     if (patch.rightPanelCollapsed !== undefined) {
-      rail.setCollapsed(patch.rightPanelCollapsed)
+      if (!workspaceOwnsRailBridge) rail.setCollapsed(patch.rightPanelCollapsed)
       workspace.setRightPanelCollapsed(patch.rightPanelCollapsed)
     }
     if (patch.rightRailWidth !== undefined) rail.setWidth(patch.rightRailWidth)
@@ -57,10 +60,12 @@ export function applyWorkspaceLayoutChange(
     return { ok: true }
   } catch (error) {
     try {
-      rail.setWidth(previous.width)
-      rail.setLeftRailWidth(previous.leftRailWidth)
-      rail.setLeftRailCollapsed(previous.leftRailCollapsed)
-      rail.setCollapsed(previous.collapsed)
+      if (!workspaceOwnsRailBridge) {
+        rail.setWidth(previous.width)
+        rail.setLeftRailWidth(previous.leftRailWidth)
+        rail.setLeftRailCollapsed(previous.leftRailCollapsed)
+        rail.setCollapsed(previous.collapsed)
+      }
       workspace.setSidebarWidth(previous.sidebarWidth)
       workspace.setSidebarCollapsed(previous.sidebarCollapsed)
       workspace.setRightPanelCollapsed(previous.rightPanelCollapsed)
