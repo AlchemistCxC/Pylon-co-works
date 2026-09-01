@@ -1,0 +1,16 @@
+// 合并资源：应用图标 + comctl32 v6 manifest
+// 单 .o 单 link-arg —— MSVC link.exe 对多个 COFF 资源对象只取第一个（GNU ld 会合并），
+// 拆两个 .o 会导致 manifest 在 MSVC 链接时被丢弃（cargo test 0xc0000139）。
+1 ICON "icon.ico"
+
+1 24
+{
+  "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>"
+  "<assembly xmlns='urn:schemas-microsoft-com:asm.v1' manifestVersion='1.0'>"
+  "  <dependency>"
+  "    <dependentAssembly>"
+  "      <assemblyIdentity type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*' />"
+  "    </dependentAssembly>"
+  "  </dependency>"
+  "</assembly>"
+}

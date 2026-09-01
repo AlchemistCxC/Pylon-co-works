@@ -1,5 +1,5 @@
 fn main() {
-    // tauri-build 默认 manifest 与下方 test manifest 相同（均为 comctl32 v6 声明）。
+    // tauri-build 默认 manifest 与下方资源 manifest 相同（均为 comctl32 v6 声明）。
     // 关闭默认 manifest，统一由 embed_resource 全局注入——避免 bin 双 manifest
     // 冲突（GNU ld 报 ".rsrc merge failure: multiple non-default manifests"）。
     #[cfg(target_os = "windows")]
@@ -13,29 +13,29 @@ fn main() {
     tauri_build::try_build(attributes).expect("tauri-build failed");
 
     // Windows 所有 target（bin + lib 单元测试 harness）需要 comctl32 v6 manifest
-    // （TaskDialogIndirect 入口点）。注意：
-    // 1. 不能写 #[cfg(test)]——build script 编译时 test cfg 恒为 false，
-    //    原代码该条件从未生效，测试 exe 加载 5.82 版 comctl32 崩溃
-    //    (0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND)。
-    // 2. cargo 无 lib 单元测试专属 link 指令（link-arg-tests 只认显式 [[test]]），
-    //    用全局 rustc-link-arg 兜底；tauri 默认 manifest 已关闭（见上）。
-    //    注意：必须传 .o 而非 .a——gcc 把 .a 当库按符号提取，资源对象无符号会被跳过。
+    // （TaskDialogIndirect 入口点）。tauri-winres 在 windows-msvc 下优先探测 rc.exe
+    // （Windows SDK），本机未装 SDK 时 rc.exe 缺失 → tauri-winres 静默跳过资源嵌入
+    // （2026-09-01 实测 MSVC 产物 PE 无 RT_GROUP_ICON）。windres（MinGW，GNU binutils）
+    // 全程可用，生成 COFF 资源对象由 link.exe 链接。
+    //
+    // 注意：icon 与 manifest 必须合并为单个 .o 单个 rustc-link-arg——
+    // MSVC link.exe 对多个 COFF 资源对象只取第一个（GNU ld 会合并），拆开会让
+    // manifest 被丢弃（harness 加载 comctl32 5.82 崩溃 0xc0000139）。
     #[cfg(target_os = "windows")]
     {
         let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR set by cargo");
-        let obj = std::path::Path::new(&out_dir).join("windows-test-manifest.o");
         let windres = std::env::var("WINDRES").unwrap_or_else(|_| "windres".to_string());
+        let res_obj = std::path::Path::new(&out_dir).join("pylon-resources.o");
+        let res_rc = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.rc");
         let status = std::process::Command::new(&windres)
             .arg("--input")
-            .arg("tests/windows-test-manifest.rc")
+            .arg(&res_rc)
             .arg("--output")
-            .arg(&obj)
-            .arg("--include-dir")
-            .arg(&out_dir)
+            .arg(&res_obj)
             .arg("--output-format=coff")
             .status()
             .expect("windres failed to run");
-        assert!(status.success(), "windres failed to compile test manifest");
-        println!("cargo:rustc-link-arg={}", obj.display());
+        assert!(status.success(), "windres failed to compile resources (icon + manifest)");
+        println!("cargo:rustc-link-arg={}", res_obj.display());
     }
 }
