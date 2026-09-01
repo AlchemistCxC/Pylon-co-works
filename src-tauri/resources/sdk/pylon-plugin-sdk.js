@@ -174,6 +174,17 @@ var VISUAL_SEMANTIC_TOKENS = Object.freeze({
   })
 });
 
+// src/plugin-runtime/storage/pluginStorageContract.ts
+var PLUGIN_STORAGE_BUDGET_BYTES = 1024 * 1024;
+var PluginStorageError = class extends Error {
+  constructor(field, message) {
+    super(message);
+    this.field = field;
+    __publicField(this, "code", "plugin_storage_error");
+    this.name = "PluginStorageError";
+  }
+};
+
 // src/sdk/index.ts
 function definePlugin(module) {
   if (!module || typeof module.activate !== "function") {
@@ -299,11 +310,13 @@ function createSettingsSurface(definition) {
   };
 }
 export {
+  PLUGIN_STORAGE_BUDGET_BYTES,
   PYLON_PLUGIN_API_LATEST,
   PYLON_PLUGIN_API_MIN,
   PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_API_VERSION,
   PYLON_PLUGIN_MANIFEST_FILE,
+  PluginStorageError,
   VISUAL_SEMANTIC_ROLE_TOKENS,
   VISUAL_SEMANTIC_TOKENS,
   createPluginLogger,

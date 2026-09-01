@@ -1,10 +1,7 @@
 import type { PluginSettingValue } from './pluginSettingsTypes.ts'
+import { validatePluginKey } from './pluginKeyValidation.ts'
 
 const STORAGE_KEY = 'pylon-plugin-settings-v1'
-
-function validateKey(key: string): void {
-  if (!key || key !== key.trim() || key.includes('__proto__')) throw new Error(`插件设置 key 非法：${key}`)
-}
 
 function cloneValue(value: PluginSettingValue): PluginSettingValue {
   const json = JSON.stringify(value)
@@ -23,12 +20,12 @@ export class PluginSettingsStore {
   }
 
   get(pluginId: string, key: string): PluginSettingValue | undefined {
-    validateKey(key)
+    validatePluginKey(key, '插件设置')
     return this.getSnapshot(pluginId)[key]
   }
 
   set(pluginId: string, key: string, value: PluginSettingValue): void {
-    validateKey(key)
+    validatePluginKey(key, '插件设置')
     const next = Object.freeze({ ...this.getSnapshot(pluginId), [key]: cloneValue(value) })
     this.values = { ...this.values, [pluginId]: next }
     this.persist()
@@ -36,7 +33,7 @@ export class PluginSettingsStore {
   }
 
   remove(pluginId: string, key: string): void {
-    validateKey(key)
+    validatePluginKey(key, '插件设置')
     const current = this.getSnapshot(pluginId)
     if (!(key in current)) return
     const next = { ...current }

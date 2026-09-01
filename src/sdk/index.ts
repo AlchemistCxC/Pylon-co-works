@@ -40,6 +40,16 @@ export type {
   CommandRegisterOptions,
 } from '../plugin-runtime/commands/commandRegistry.ts'
 export type { PluginCommandApi as CommandApi } from '../plugin-runtime/commands/pluginCommandApi.ts'
+export type { PluginApplicationApi } from '../plugin-runtime/application/pluginApplicationApi.ts'
+export type { PluginWorkspaceApi } from '../plugin-runtime/workspaces/pluginWorkspaceApi.ts'
+export type { PluginServiceApi } from '../plugin-runtime/services/pluginServiceApi.ts'
+export type { PluginSidebarApi } from '../plugin-runtime/sidebar/pluginSidebarApi.ts'
+export type { PluginFileWorkbenchApi } from '../plugin-runtime/file-workbench/pluginFileWorkbenchApi.ts'
+export type { PluginContextPanelApi } from '../plugin-runtime/context-panel/pluginContextPanelApi.ts'
+export type { PluginFontApi } from '../plugin-runtime/fonts/pluginFontApi.ts'
+export type { PluginSessionCreationApi } from '../plugin-runtime/session-creation/pluginSessionCreationApi.ts'
+export type { PluginInterfaceModeApi } from '../plugin-runtime/interface-mode/pluginInterfaceModeApi.ts'
+export type { PluginTitlebarApi } from '../plugin-runtime/titlebar/pluginTitlebarApi.ts'
 export type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.ts'
 
 export type {
@@ -103,6 +113,7 @@ export {
   PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_MANIFEST_FILE,
 }
+export { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from '../plugin-runtime/storage/pluginStorageContract.ts'
 
 /** Gives plugin entry modules a checked, inference-friendly lifecycle definition. */
 export function definePlugin(module: PackagePluginModule): PackagePluginModule {

@@ -61,6 +61,25 @@ describe('createMockContext', () => {
     expect(ctx.turns.setPluginMetadata('t-missing', {})).toBe(false)
   })
 
+  it('storage 与 session 嵌套值按副本隔离', async () => {
+    const ctx = createMockContext({ storageValues: { cfg: { nested: ['x'] } } })
+    const storageValue = ctx.storage.getValue<{ nested: string[] }>('cfg')!
+    storageValue.nested.push('mutated')
+    expect(ctx.storage.getValue<{ nested: string[] }>('cfg')).toEqual({ nested: ['x'] })
+    expect(ctx.__storage.changeCount()).toBe(0)
+
+    ctx.sessions.setPluginMetadata('s1', { nested: { value: 1 } })
+    const metadata = ctx.sessions.getPluginMetadata('s1')
+    ;(metadata.nested as { value: number }).value = 2
+    expect(ctx.sessions.getPluginMetadata('s1')).toEqual({ nested: { value: 1 } })
+  })
+
+  it('未实现 API 调用可从 __recorded 读取', async () => {
+    const ctx = createMockContext()
+    ;(ctx as unknown as { fonts: { register(value: unknown): void } }).fonts.register({ family: 'mock' })
+    expect(ctx.__recorded).toEqual([{ member: 'fonts', method: 'register', args: [{ family: 'mock' }] }])
+  })
+
   it('settings 驱动隔离 surface；host:input 回流渲染、控件提交 settings:set', async () => {
     const ctx = createMockContext({ settingsValues: { greetingName: 'Pylon', decorate: true } })
     const module = definePlugin({
@@ -97,7 +116,7 @@ describe('createMockContext', () => {
     expect(driver.events.at(-1)).toEqual({ event: 'settings:set', detail: { key: 'decorate', value: true } })
     expect(ctx.__settings.values.decorate).toBe(true)
 
-    driver.unmount()
+    await driver.unmount()
     expect(driver.container.childElementCount).toBe(0)
   })
 
@@ -134,8 +153,7 @@ describe('createMockContext', () => {
     })
     await module.activate(ctx)
     const driver = ctx.__ui.mount('mock.a.async-surface')
-    driver.unmount()
-    await Promise.resolve()
+    await driver.unmount()
     expect(disposed).toBe(1)
   })
 

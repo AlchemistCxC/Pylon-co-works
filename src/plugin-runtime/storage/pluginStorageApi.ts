@@ -7,18 +7,11 @@
  */
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import type { PluginStorageApi } from './pluginStorageTypes.ts'
+import { validatePluginKey } from '../settings/pluginKeyValidation.ts'
+import { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from './pluginStorageContract.ts'
 
-export const PLUGIN_STORAGE_BUDGET_BYTES = 1024 * 1024
+export { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from './pluginStorageContract.ts'
 const STORE_KEY = 'pylon-plugin-storage'
-
-export class PluginStorageError extends Error {
-  readonly code = 'plugin_storage_error'
-
-  constructor(readonly field: string, message: string) {
-    super(message)
-    this.name = 'PluginStorageError'
-  }
-}
 
 type StorageTree = Record<string, Record<string, unknown>>
 
@@ -46,6 +39,31 @@ function persistTree(tree: StorageTree): void {
   }
 }
 
+function cloneValue(value: unknown, field: string): unknown {
+  try {
+    return structuredClone(value)
+  } catch (error) {
+    throw new PluginStorageError(
+      field,
+      `插件存储值必须可结构化克隆：${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+function serializedSize(value: unknown): number {
+  let serialized: string | undefined
+  try {
+    serialized = JSON.stringify(value)
+  } catch (error) {
+    throw new PluginStorageError(
+      'serialize',
+      `插件存储值必须可 JSON 序列化：${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (serialized === undefined) throw new PluginStorageError('serialize', '插件存储值必须可 JSON 序列化')
+  return new TextEncoder().encode(serialized).byteLength
+}
+
 export function createPluginStorageApi(identity: PluginIdentity): PluginStorageApi {
   const listeners = new Set<() => void>()
   const notify = (): void => { listeners.forEach(listener => listener()) }
@@ -57,13 +75,17 @@ export function createPluginStorageApi(identity: PluginIdentity): PluginStorageA
 
   return {
     getValue<T = unknown>(key: string): T | undefined {
-      return namespace()[key] as T | undefined
+      validatePluginKey(key, '插件存储')
+      const values = namespace()
+      if (!Object.hasOwn(values, key)) return undefined
+      return cloneValue(values[key], 'read') as T
     },
     setValue(key: string, value: unknown): void {
+      validatePluginKey(key, '插件存储')
       // 先在候选树上做预算检查，通过后才提交——超限不得留下半写入状态
       const tree = loadTree()
-      const candidate = { ...(tree[identity.pluginId] ?? {}), [key]: structuredClone(value) }
-      const size = JSON.stringify(candidate).length
+      const candidate = { ...(tree[identity.pluginId] ?? {}), [key]: cloneValue(value, 'value') }
+      const size = serializedSize(candidate)
       if (size > PLUGIN_STORAGE_BUDGET_BYTES) {
         throw new PluginStorageError(
           'quota',
@@ -76,16 +98,25 @@ export function createPluginStorageApi(identity: PluginIdentity): PluginStorageA
       notify()
     },
     removeValue(key: string): void {
-      delete namespace()[key]
-      persistTree(loadTree())
+      validatePluginKey(key, '插件存储')
+      const tree = loadTree()
+      const current = tree[identity.pluginId] ?? {}
+      if (!Object.hasOwn(current, key)) return
+      const candidate = { ...current }
+      delete candidate[key]
+      const next: StorageTree = { ...tree, [identity.pluginId]: candidate }
+      persistTree(next)
+      cache = next
       notify()
     },
     keys(): string[] {
       return Object.keys(namespace())
     },
     clear(): void {
-      loadTree()[identity.pluginId] = {}
-      persistTree(loadTree())
+      const tree = loadTree()
+      const next: StorageTree = { ...tree, [identity.pluginId]: {} }
+      persistTree(next)
+      cache = next
       notify()
     },
     subscribe(listener: () => void): () => void {

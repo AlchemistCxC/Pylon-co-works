@@ -14,9 +14,8 @@
  * 质量门（失败即退出非零）：
  * G1 SDK bundle 导出完整；G2 类型探针（严格模式消费者 tsc --noEmit 通过）。
  */
-import { build } from 'esbuild'
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -27,52 +26,12 @@ const sdkOut = join(kitRoot, 'sdk')
 rmSync(kitRoot, { recursive: true, force: true })
 mkdirSync(sdkOut, { recursive: true })
 
-// ── sdk：运行时 ESM + testing + schema ──
-await build({
-  entryPoints: [join(repoRoot, 'src', 'sdk', 'index.ts')],
-  bundle: true, format: 'esm', platform: 'browser', target: 'es2021',
-  outfile: join(sdkOut, 'pylon-plugin-sdk.js'), logLevel: 'silent',
+// ── sdk：构建脚本是唯一真源；devkit 只消费正常版 ──
+execFileSync(process.execPath, [join(repoRoot, 'scripts', 'build-plugin-sdk.mjs')], {
+  cwd: repoRoot,
+  stdio: 'inherit',
 })
-await build({
-  entryPoints: [join(repoRoot, 'src', 'sdk', 'testing.ts')],
-  bundle: true, format: 'esm', platform: 'browser', target: 'es2021',
-  outfile: join(sdkOut, 'testing.js'), logLevel: 'silent',
-})
-cpSync(join(repoRoot, 'shared', 'pylon-plugin-manifest.schema.json'), join(sdkOut, 'pylon-plugin-manifest.schema.json'))
-
-// ── sdk：类型声明树（.ts' → .js' specifiers 重写）──
-const typesOut = join(sdkOut, 'types')
-try {
-  execTsc([
-    'src/sdk/index.ts',
-    '--declaration', '--emitDeclarationOnly', '--allowImportingTsExtensions',
-    '--target', 'ES2021', '--lib', 'ES2022,DOM,DOM.Iterable',
-    '--module', 'ESNext', '--moduleResolution', 'bundler', '--skipLibCheck',
-    '--outDir', typesOut,
-  ])
-} catch {
-  // 闭包内宿主模块的严格模式告警会让 tsc 非零退出，但 .d.ts 已照常发射；
-  // 消费端 skipLibCheck 跳过这些库内噪音。发射失败（缺 index.d.ts）在下方硬校验。
-}
-const entryDts = join(typesOut, 'sdk', 'index.d.ts')
-if (!existsSync(entryDts)) {
-  console.error('[devkit] 类型树发射失败：未找到 sdk/index.d.ts')
-  process.exit(1)
-}
-rewriteTsSpecifiers(typesOut)
-
-writeFileSync(join(sdkOut, 'package.json'), JSON.stringify({
-  name: '@pylon/plugin-sdk',
-  version: '1.1.0',
-  type: 'module',
-  main: './pylon-plugin-sdk.js',
-  types: './types/sdk/index.d.ts',
-  exports: {
-    '.': { types: './types/sdk/index.d.ts', default: './pylon-plugin-sdk.js' },
-    './testing': { types: './types/sdk/testing.d.ts', default: './testing.js' },
-  },
-  sideEffects: false,
-}, null, 2))
+cpSync(join(repoRoot, 'dist-plugin-sdk', 'normal'), sdkOut, { recursive: true })
 
 // ── starter/no-build：零工具链 ──
 const noBuild = join(kitRoot, 'starter', 'no-build')
@@ -158,20 +117,4 @@ readdirSync(kitRoot).forEach(name => console.log('  ' + name))
 // ── helpers ──
 function execTsc(args) {
   execFileSync(process.execPath, [join(repoRoot, 'node_modules', 'typescript', 'lib', 'tsc.js'), ...args], { cwd: repoRoot, stdio: 'inherit' })
-}
-
-function rewriteTsSpecifiers(root) {
-  for (const entry of walk(root)) {
-    if (!entry.endsWith('.d.ts')) continue
-    const content = readFileSync(entry, 'utf8')
-    // d.ts 内部 .ts 说明符 → .js（消费端 bundler/node resolution 映射到 .d.ts）
-    writeFileSync(entry, content.replace(/(from\s+'[^']+)\.ts'/g, "$1.js'"), 'utf8')
-  }
-}
-function* walk(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, entry.name)
-    if (entry.isDirectory()) yield* walk(p)
-    else yield p
-  }
 }
