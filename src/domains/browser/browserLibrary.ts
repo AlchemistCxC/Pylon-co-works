@@ -75,13 +75,25 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 function finiteTime(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
+  const candidate = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() && /^\d+(?:\.\d+)?$/.test(value.trim())
+      ? Number(value.trim())
+      : NaN
+  return Number.isFinite(candidate) && candidate >= 0 && candidate <= Number.MAX_SAFE_INTEGER
+    ? candidate
+    : fallback
+}
+
+function normalizedUrl(value: unknown): string | undefined {
+  const url = nonEmptyString(value)
+  return url && isBrowserLibraryUrl(url) ? url : undefined
 }
 
 /** Restrict library entries to navigable web URLs; never persist javascript/data/file. */
 export function isBrowserLibraryUrl(value: string): boolean {
   try {
-    const url = new URL(value)
+    const url = new URL(value.trim())
     return url.protocol === 'http:' || url.protocol === 'https:'
   } catch {
     return false
@@ -98,7 +110,7 @@ function normalizeHistory(value: unknown): HistoryEntry[] {
   if (!Array.isArray(value)) return []
   return value.map((item, index) => {
     if (!isRecord(item)) return null
-    const url = nonEmptyString(item.url)
+    const url = normalizedUrl(item.url)
     if (!url || !isBrowserLibraryUrl(url)) return null
     const visitedAt = finiteTime(item.visitedAt ?? item.visited_at, Date.now() - index)
     return {
@@ -115,7 +127,7 @@ function normalizeBookmarks(value: unknown): BookmarkEntry[] {
   const seen = new Set<string>()
   return value.map((item, index) => {
     if (!isRecord(item)) return null
-    const url = nonEmptyString(item.url)
+    const url = normalizedUrl(item.url)
     if (!url || !isBrowserLibraryUrl(url)) return null
     if (seen.has(url)) return null
     seen.add(url)
@@ -133,7 +145,7 @@ function normalizeDownloads(value: unknown): DownloadEntry[] {
   if (!Array.isArray(value)) return []
   return value.map((item, index) => {
     if (!isRecord(item)) return null
-    const url = nonEmptyString(item.url)
+    const url = normalizedUrl(item.url)
     if (!url || !isBrowserLibraryUrl(url)) return null
     const startedAt = finiteTime(item.startedAt ?? item.started_at, Date.now() - index)
     const status: DownloadStatus = item.status === 'failed' ? 'failed' : 'started'
@@ -198,29 +210,31 @@ export function recordHistory(
   library: BrowserLibrary,
   entry: { url: string; title?: string; visitedAt?: number },
 ): BrowserLibrary {
-  if (!isBrowserLibraryUrl(entry.url)) return library
-  const visitedAt = entry.visitedAt ?? Date.now()
-  const existing = library.history.find(item => item.url === entry.url)
+  const url = normalizedUrl(entry.url)
+  if (!url) return library
+  const visitedAt = finiteTime(entry.visitedAt, Date.now())
+  const existing = library.history.find(item => item.url === url)
   const next: HistoryEntry = {
-    id: existing?.id ?? stableId('history', entry.url, visitedAt),
-    url: entry.url,
+    id: existing?.id ?? stableId('history', url, visitedAt),
+    url,
     ...(entry.title?.trim() || existing?.title ? { title: entry.title?.trim() || existing?.title } : {}),
     visitedAt,
   }
-  return { ...library, history: [next, ...library.history.filter(item => item.url !== entry.url)].slice(0, MAX_HISTORY_ENTRIES) }
+  return { ...library, history: [next, ...library.history.filter(item => item.url !== url)].slice(0, MAX_HISTORY_ENTRIES) }
 }
 
 export function toggleBookmark(
   library: BrowserLibrary,
   entry: { url: string; title?: string; createdAt?: number },
 ): { library: BrowserLibrary; bookmarked: boolean } {
-  if (!isBrowserLibraryUrl(entry.url)) return { library, bookmarked: false }
-  const existing = library.bookmarks.find(item => item.url === entry.url)
-  if (existing) return { library: { ...library, bookmarks: library.bookmarks.filter(item => item.url !== entry.url) }, bookmarked: false }
-  const createdAt = entry.createdAt ?? Date.now()
+  const url = normalizedUrl(entry.url)
+  if (!url) return { library, bookmarked: false }
+  const existing = library.bookmarks.find(item => item.url === url)
+  if (existing) return { library: { ...library, bookmarks: library.bookmarks.filter(item => item.url !== url) }, bookmarked: false }
+  const createdAt = finiteTime(entry.createdAt, Date.now())
   const bookmark: BookmarkEntry = {
-    id: stableId('bookmark', entry.url, createdAt),
-    url: entry.url,
+    id: stableId('bookmark', url, createdAt),
+    url,
     ...(entry.title?.trim() ? { title: entry.title.trim() } : {}),
     createdAt,
   }
@@ -231,13 +245,15 @@ export function recordDownload(
   library: BrowserLibrary,
   entry: { url: string; filename?: string; status?: DownloadStatus; error?: string; startedAt?: number },
 ): BrowserLibrary {
-  if (!isBrowserLibraryUrl(entry.url)) return library
-  const startedAt = entry.startedAt ?? Date.now()
+  const url = normalizedUrl(entry.url)
+  if (!url) return library
+  const startedAt = finiteTime(entry.startedAt, Date.now())
+  const status: DownloadStatus = entry.status === 'failed' ? 'failed' : 'started'
   const download: DownloadEntry = {
-    id: stableId('download', entry.url, startedAt),
-    url: entry.url,
+    id: stableId('download', url, startedAt),
+    url,
     ...(entry.filename?.trim() ? { filename: entry.filename.trim() } : {}),
-    status: entry.status ?? 'started',
+    status,
     ...(entry.error?.trim() ? { error: entry.error.trim() } : {}),
     startedAt,
   }
@@ -250,11 +266,12 @@ export function appendConsole(
 ): BrowserLibrary {
   const command = entry.command.trim()
   if (!command) return library
-  const at = entry.at ?? Date.now()
+  const at = finiteTime(entry.at, Date.now())
+  const level: ConsoleLevel = entry.level === 'error' ? 'error' : entry.level === 'success' ? 'success' : 'info'
   const item: ConsoleEntry = {
     id: stableId('console', command, at),
     at,
-    level: entry.level ?? 'info',
+    level,
     command,
     ...(entry.detail?.trim() ? { detail: entry.detail.trim() } : {}),
   }

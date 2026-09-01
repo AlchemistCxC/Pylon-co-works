@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { normalizeHermesEvent } from '../hermesNormalizer.ts'
 import { splitToolTitle } from '../../../tool/toolResolution.ts'
 import type { NormalizeContext } from '../agentEventNormalizer.ts'
+import hermesToolCallStart from './fixtures/hermes-tool-call-start.json'
+import hermesToolCallComplete from './fixtures/hermes-tool-call-complete.json'
+import hermesStructuredResults from './fixtures/hermes-structured-results.json'
 
 const context: NormalizeContext = {
   provider: 'hermes',
@@ -140,6 +143,73 @@ describe('Hermes normalizer', () => {
     })
   })
 
+  it('does not let null placeholder aliases hide populated Hermes fields', () => {
+    const result = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call', toolCallId: 'null-placeholder',
+      name: 'terminal', kind: 'execute',
+      rawInput: null, args: 'npm test',
+    } }, { ...context, replay: false })
+    expect(result.events[0].event).toMatchObject({
+      type: 'tool.started',
+      tool: { name: 'terminal', input: { command: 'npm test' }, rawInput: { command: 'npm test' } },
+    })
+
+    const completion = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call_update', toolCallId: 'null-output',
+      name: 'terminal', status: 'completed',
+      rawOutput: null, output: { stdout: 'ok', exit_code: 0 },
+    } }, { ...context, replay: false })
+    expect(completion.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      result: { stdout: 'ok', exit_code: 0 },
+      tool: { name: 'terminal', parts: [{ kind: 'terminal', streams: [{ stream: 'stdout', text: 'ok' }] }] },
+    })
+  })
+
+  it('accepts legacy updateType/eventType discriminators in bare and RPC-wrapped Hermes updates', () => {
+    const bare = normalizeHermesEvent({
+      updateType: 'tool_call_start',
+      tool_call_id: 'legacy-start',
+      title: 'terminal: pwd',
+      kind: 'execute',
+    }, { ...context, replay: false })
+    expect(bare.events[0].event).toMatchObject({
+      type: 'tool.started',
+      tool: { toolCallId: 'legacy-start', name: 'terminal', input: { command: 'pwd' } },
+    })
+
+    const wrapped = normalizeHermesEvent({ params: {
+      event_type: 'tool_call_update',
+      tool_call_id: 'legacy-complete',
+      name: 'terminal',
+      status: 'completed',
+      output: { stdout: 'done' },
+    } }, { ...context, replay: false })
+    expect(wrapped.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      tool: { toolCallId: 'legacy-complete', name: 'terminal' },
+    })
+  })
+
+  it('resolves qualified Hermes tool titles without promoting arbitrary prose', () => {
+    const qualified = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call', toolCallId: 'qualified-search',
+      title: 'hermes.tools.search_files: ACP', kind: 'search',
+    } }, { ...context, replay: false })
+    expect(qualified.events[0].event).toMatchObject({
+      type: 'tool.started', tool: { name: 'search_files', input: { pattern: 'ACP' } },
+    })
+
+    const prose = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call', toolCallId: 'prose-title',
+      title: 'please use skill: diagnose', kind: 'read',
+    } }, { ...context, replay: false })
+    expect(prose.events[0].event).toMatchObject({
+      type: 'tool.started', tool: { name: 'unknown' },
+    })
+    expect(prose.diagnostics.map(item => item.code)).toContain('tool.name.missing')
+  })
+
   it('promotes structured Hermes search/terminal/memory results and preserves canonical names', () => {
     const search = normalizeHermesEvent({ update: {
       session_update: 'tool_call_update', tool_call_id: 'search-1', status: 'completed',
@@ -183,5 +253,64 @@ describe('Hermes normalizer', () => {
       expect(result.events[0].event, name).toMatchObject({ type: 'tool.started', tool: { name, canonicalName: name } })
       expect(result.events[0].event).not.toMatchObject({ type: 'event.unknown' })
     }
+  })
+
+  it('normalizes the serialized Hermes ToolCallStart fixture without changing raw evidence', () => {
+    const result = normalizeHermesEvent(hermesToolCallStart, { ...context, replay: false })
+    expect(result.events[0]).toMatchObject({
+      event: {
+        type: 'tool.started',
+        tool: {
+          toolCallId: 'tc-hermes-terminal',
+          name: 'terminal',
+          providerName: 'terminal',
+          kind: 'execute',
+          input: { command: 'git status' },
+        },
+      },
+      raw: hermesToolCallStart,
+    })
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('keeps the real Hermes completion shape identifiable by call id when the bridge omits tool name', () => {
+    const result = normalizeHermesEvent(hermesToolCallComplete, { ...context, replay: false })
+    expect(result.events[0]).toMatchObject({
+      event: {
+        type: 'tool.completed',
+        tool: { toolCallId: 'tc-hermes-search', kind: 'search', parts: [{ kind: 'text', text: expect.stringContaining('Search results') }] },
+      },
+      raw: hermesToolCallComplete,
+    })
+    expect((result.events[0].event as { tool: Record<string, unknown> }).tool).not.toHaveProperty('name')
+  })
+
+  it('promotes Hermes JSON-prefix results and camelCase names to typed content parts', () => {
+    const search = normalizeHermesEvent(hermesStructuredResults.search, { ...context, replay: false })
+    expect(search.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      tool: {
+        name: 'search_files',
+        parts: [{ kind: 'search-result', total: 1, results: [{ source: 'src/app.ts', location: { line: 42 } }] }],
+      },
+    })
+
+    const skill = normalizeHermesEvent(hermesStructuredResults.skill, { ...context, replay: false })
+    expect(skill.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      tool: { name: 'skill_view', parts: [{ kind: 'skill', skillId: 'diagnose:SKILL.md', title: 'diagnose' }] },
+    })
+
+    const terminal = normalizeHermesEvent(hermesStructuredResults.terminal, { ...context, replay: false })
+    expect(terminal.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      tool: { name: 'terminal', input: { command: 'npm test' }, parts: [{ kind: 'terminal', exitCode: 0, durationMs: 12.5, truncation: { capturedBytes: 80, omittedBytes: 20 } }] },
+    })
+
+    const memory = normalizeHermesEvent(hermesStructuredResults.memory, { ...context, replay: false })
+    expect(memory.events[0].event).toMatchObject({
+      type: 'tool.completed',
+      tool: { name: 'memory', parts: [{ kind: 'memory', memoryId: 'project', summary: 'saved' }] },
+    })
   })
 })

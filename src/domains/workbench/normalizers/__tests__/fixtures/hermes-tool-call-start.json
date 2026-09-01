@@ -1,0 +1,23 @@
+{
+  "_meta": null,
+  "content": [
+    {
+      "_meta": null,
+      "content": {
+        "_meta": null,
+        "annotations": null,
+        "text": "$ git status",
+        "type": "text"
+      },
+      "type": "content"
+    }
+  ],
+  "kind": "execute",
+  "locations": [],
+  "rawInput": null,
+  "rawOutput": null,
+  "status": null,
+  "title": "terminal: git status",
+  "toolCallId": "tc-hermes-terminal",
+  "sessionUpdate": "tool_call"
+}

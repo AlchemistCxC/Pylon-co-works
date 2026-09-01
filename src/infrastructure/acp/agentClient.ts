@@ -35,9 +35,147 @@ export interface AgentConfigSnapshot {
   diagnostics: Array<{ agentId: string; code: string; field: string; message: string }>
 }
 
+export interface SupportedInteractionDescriptor {
+  method: string
+  aliases: string[]
+  kind: string
+  responseMethod: string
+}
+
+export type CatalogSetModelApi = 'config_option' | 'set_model' | 'none'
+
+export interface ProtocolCatalogBaseline {
+  provider: string
+  displayName: string
+  sessionUpdates: boolean
+  interactionEvents: boolean
+  permissionRequests: boolean
+  replay: boolean
+  responseMethods: string[]
+  interactionKinds: string[]
+  setModelApi: CatalogSetModelApi
+}
+
+export interface ProtocolAdapterProvider {
+  provider: string
+  displayName: string
+  catalogKnown: boolean
+  adapterRegistered: boolean
+  adapterMethods: string[]
+  responseMethods: string[]
+  interactionKinds: string[]
+  baseline?: ProtocolCatalogBaseline
+  configuredAgentIds: string[]
+}
+
+export interface ProtocolAdapterCatalog {
+  schemaVersion: number
+  recognizedMethods: string[]
+  supportedInteractions: SupportedInteractionDescriptor[]
+  providers: ProtocolAdapterProvider[]
+}
+
 function normalizeStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) return undefined
   return [...value]
+}
+
+function normalizeNonEmptyStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const next = item.trim()
+    if (!next || seen.has(next)) continue
+    seen.add(next)
+    result.push(next)
+  }
+  return result
+}
+
+function normalizeCatalogSetModelApi(value: unknown): CatalogSetModelApi {
+  return value === 'config_option' || value === 'set_model' || value === 'none'
+    ? value
+    : 'none'
+}
+
+function normalizeProtocolCatalogBaseline(value: unknown): ProtocolCatalogBaseline | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const provider = typeof record.provider === 'string' ? record.provider.trim() : ''
+  if (!provider) return undefined
+  return {
+    provider,
+    displayName: typeof record.displayName === 'string' && record.displayName.trim()
+      ? record.displayName.trim()
+      : provider,
+    sessionUpdates: record.sessionUpdates === true,
+    interactionEvents: record.interactionEvents === true,
+    permissionRequests: record.permissionRequests === true,
+    replay: record.replay === true,
+    responseMethods: normalizeNonEmptyStringArray(record.responseMethods),
+    interactionKinds: normalizeNonEmptyStringArray(record.interactionKinds),
+    setModelApi: normalizeCatalogSetModelApi(record.setModelApi),
+  }
+}
+
+/**
+ * Normalize the read-only protocol diagnostics projection.  The command is
+ * intentionally a support surface, so a partially upgraded host must degrade
+ * to an empty, inspectable catalog instead of taking the Agent settings page
+ * down with a shape error.
+ */
+export function normalizeProtocolAdapterCatalog(raw: unknown): ProtocolAdapterCatalog {
+  const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const schemaVersion = typeof record.schemaVersion === 'number'
+    && Number.isInteger(record.schemaVersion) && record.schemaVersion > 0
+    ? record.schemaVersion
+    : 1
+  const supportedInteractions = Array.isArray(record.supportedInteractions)
+    ? record.supportedInteractions.flatMap(item => {
+        if (!item || typeof item !== 'object') return []
+        const entry = item as Record<string, unknown>
+        const method = typeof entry.method === 'string' ? entry.method.trim() : ''
+        if (!method) return []
+        return [{
+          method,
+          aliases: normalizeNonEmptyStringArray(entry.aliases),
+          kind: typeof entry.kind === 'string' && entry.kind.trim() ? entry.kind.trim() : 'client-request',
+          responseMethod: typeof entry.responseMethod === 'string' && entry.responseMethod.trim()
+            ? entry.responseMethod.trim()
+            : 'json-rpc',
+        }]
+      })
+    : []
+  const providers = Array.isArray(record.providers)
+    ? record.providers.flatMap(item => {
+        if (!item || typeof item !== 'object') return []
+        const entry = item as Record<string, unknown>
+        const provider = typeof entry.provider === 'string' ? entry.provider.trim().toLowerCase() : ''
+        if (!provider) return []
+        const baseline = normalizeProtocolCatalogBaseline(entry.baseline)
+        return [{
+          provider,
+          displayName: typeof entry.displayName === 'string' && entry.displayName.trim()
+            ? entry.displayName.trim()
+            : baseline?.displayName ?? provider,
+          catalogKnown: entry.catalogKnown === true,
+          adapterRegistered: entry.adapterRegistered === true,
+          adapterMethods: normalizeNonEmptyStringArray(entry.adapterMethods),
+          responseMethods: normalizeNonEmptyStringArray(entry.responseMethods),
+          interactionKinds: normalizeNonEmptyStringArray(entry.interactionKinds),
+          ...(baseline ? { baseline } : {}),
+          configuredAgentIds: normalizeNonEmptyStringArray(entry.configuredAgentIds),
+        }]
+      })
+    : []
+  return {
+    schemaVersion,
+    recognizedMethods: normalizeNonEmptyStringArray(record.recognizedMethods),
+    supportedInteractions,
+    providers,
+  }
 }
 
 /** list_agents 宽容 normalize：非数组/损坏项过滤，空 id 丢弃 */
@@ -178,6 +316,9 @@ export function createAgentClient(transport: ClientTransport) {
       transport.invoke('test_agent_candidate', { agentId, agent }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
     /** OBS-01/02 读取端：当前 active agent 的 ACP wire 记录快照（脱敏、有界）。 */
     wireTraceSnapshot: (): Promise<unknown> => transport.invoke('acp_wire_trace_snapshot'),
+    /** 只读 ACP 能力目录：共享 baseline 与本次运行实际 adapter 注册状态分离。 */
+    protocolAdapterCatalog: (): Promise<ProtocolAdapterCatalog> =>
+      transport.invoke('protocol_adapter_catalog').then(normalizeProtocolAdapterCatalog),
   }
 }
 

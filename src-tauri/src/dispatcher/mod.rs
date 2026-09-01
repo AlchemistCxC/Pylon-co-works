@@ -342,7 +342,10 @@ async fn handle_permission_request<R: tauri::Runtime>(
             params,
             "invalid_params",
             -32602,
-            "invalid params: permission request 解析失败",
+            // Keep the stable diagnostic phrase used by the OBS-03 evidence
+            // surface while retaining the machine-readable invalid_params
+            // reason code and JSON-RPC -32602 response above.
+            "ACP request_permission 解析失败: invalid params",
         )
         .await;
         return;

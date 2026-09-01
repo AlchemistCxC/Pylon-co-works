@@ -801,6 +801,7 @@ pub fn run() {
                 crate::lifecycle::initialize_agents_config,
                 crate::lifecycle::test_agent_connection,
                 crate::lifecycle::test_agent_candidate,
+                crate::protocol_adapter::protocol_adapter_catalog,
                 crate::agent_detection::detect_agent_runtimes,
                 crate::permission::approve_tool_call, crate::permission::respond_interaction, crate::permission::set_approval_mode,
                 crate::permission::get_approval_mode, crate::permission::interaction_list,

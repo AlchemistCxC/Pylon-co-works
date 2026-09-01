@@ -107,7 +107,13 @@ function flattenAcpUpdate(update: Record<string, unknown>): Record<string, unkno
 
 /** Accept the spelling variants used by ACP SDKs and provider bridges. */
 function canonicalSessionUpdate(update: Record<string, unknown>): string | undefined {
-  const raw = update.sessionUpdate ?? update.session_update ?? update.updateType ?? update.update_type ?? update.type
+  const raw = update.sessionUpdate
+    ?? update.session_update
+    ?? update.updateType
+    ?? update.update_type
+    ?? update.eventType
+    ?? update.event_type
+    ?? update.type
   if (typeof raw !== 'string') return undefined
   const normalized = raw.trim().replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
   const aliases: Record<string, string> = {
@@ -290,11 +296,19 @@ function normalizedWireKey(key: string): string {
 }
 
 function wireField(record: Record<string, unknown>, keys: readonly string[]): unknown {
-  const wanted = new Set(keys.map(normalizedWireKey))
-  for (const [key, value] of Object.entries(record)) {
-    if (wanted.has(normalizedWireKey(key))) return value
+  // Alias order is semantic priority (`input` should win over a null
+  // `rawInput` placeholder emitted by Hermes/ACP serializers), not object
+  // insertion order. Keep an explicit null only as a last resort so callers
+  // can still distinguish an intentionally empty field from a missing one.
+  let explicitNull = false
+  for (const wantedKey of keys.map(normalizedWireKey)) {
+    const actual = Object.keys(record).find(key => normalizedWireKey(key) === wantedKey)
+    if (actual === undefined) continue
+    const value = record[actual]
+    if (value !== undefined && value !== null) return value
+    if (value === null) explicitNull = true
   }
-  return undefined
+  return explicitNull ? null : undefined
 }
 
 function hasWireField(record: Record<string, unknown>, keys: readonly string[]): boolean {

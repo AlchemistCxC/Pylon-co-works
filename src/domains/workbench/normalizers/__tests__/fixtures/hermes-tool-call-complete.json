@@ -1,0 +1,20 @@
+{
+  "_meta": null,
+  "content": [
+    {
+      "type": "content",
+      "content": {
+        "type": "text",
+        "text": "Search results\nFound 1 match; showing 1.\n\n- src/app.ts:42\n  ACP adapter"
+      }
+    }
+  ],
+  "kind": "search",
+  "locations": [],
+  "rawInput": null,
+  "rawOutput": null,
+  "status": "completed",
+  "title": null,
+  "toolCallId": "tc-hermes-search",
+  "sessionUpdate": "tool_call_update"
+}

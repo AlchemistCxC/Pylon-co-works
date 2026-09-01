@@ -428,7 +428,13 @@ function readParentToolUseId(update: Record<string, unknown> | undefined): strin
 }
 
 function canonicalUpdateKind(update: Record<string, unknown>): string | undefined {
-  const raw = update.sessionUpdate ?? update.session_update ?? update.updateType ?? update.update_type ?? update.type
+  const raw = update.sessionUpdate
+    ?? update.session_update
+    ?? update.updateType
+    ?? update.update_type
+    ?? update.eventType
+    ?? update.event_type
+    ?? update.type
   return typeof raw === 'string' ? canonicalType(raw) : undefined
 }
 

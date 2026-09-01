@@ -1,14 +1,17 @@
 //! Phase D（R2-WI03，交接 §7）：provider-scoped 协议适配器注册表。
 //!
 //! 最小垂直切片：interaction request/response 的 classify / normalize / respond。
-//! 当前只注册 Peri 适配器（wire 与既有 `parse_permission_request_with_generation` /
-//! `resolve_pending` 完全一致）；未注册 provider 由调用方明确返回 unsupported、
+//! 当前内置 Peri 与 Hermes 适配器（wire 与既有
+//! `parse_permission_request_with_generation` / `resolve_pending` 完全一致）；
+//! 未注册 provider 由调用方明确返回 unsupported、
 //! runtime-log 可观察，不生成 RPC（交接纪律：不生成未经实证的 Hermes/新 Agent response）。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use serde::Serialize;
 
 use crate::error::PylonError;
 use crate::permission::{
@@ -26,10 +29,90 @@ pub(crate) enum InteractionClassification {
     NotInteraction,
 }
 
+/// The ACP client-request methods understood by the protocol boundary.
+///
+/// These names are the canonical wire spellings.  A few providers emit the
+/// camelCase form; `looks_like_interaction_method` compares a compact key so
+/// both forms are observed.  Keeping the list in one place also means the
+/// diagnostics command and the dispatcher cannot silently drift apart.
+pub(crate) const SUPPORTED_ACP_CLIENT_REQUEST_METHODS: &[&str] = &[
+    "fs/write_text_file",
+    "fs/read_text_file",
+    "terminal/create",
+    "terminal/output",
+    "terminal/release",
+    "terminal/wait_for_exit",
+    "terminal/kill",
+    "elicitation/create",
+    "mcp/connect",
+    "mcp/message",
+    "mcp/disconnect",
+    "session/request_permission",
+    "session/request_question",
+    "session/request_input",
+    "session/request_user_input",
+];
+
+/// Read-only description of one ACP client request.  `responseMethod` is the
+/// JSON-RPC response channel (all current entries are ordinary request/response
+/// calls); it is intentionally explicit so a future notification-only method
+/// cannot be mistaken for an actionable interaction.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SupportedInteraction {
+    pub(crate) method: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) kind: String,
+    pub(crate) response_method: String,
+}
+
+/// Runtime adapter projection used by the diagnostics UI and support bundles.
+/// `baseline` is the shared catalog claim; `adapterRegistered` and
+/// `adapterMethods` are the actual process-local registry state.  The two are
+/// deliberately separate because a provider may be capable in practice even
+/// when its older shared catalog entry has not advertised that capability yet.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProtocolAdapterProvider {
+    pub(crate) provider: String,
+    pub(crate) display_name: String,
+    pub(crate) catalog_known: bool,
+    pub(crate) adapter_registered: bool,
+    pub(crate) adapter_methods: Vec<String>,
+    pub(crate) response_methods: Vec<String>,
+    pub(crate) interaction_kinds: Vec<String>,
+    pub(crate) baseline: Option<pylon_core::agent_catalog::CatalogProtocolProfile>,
+    pub(crate) configured_agent_ids: Vec<String>,
+}
+
+/// Complete, read-only protocol capability catalog.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProtocolAdapterCatalog {
+    pub(crate) schema_version: u32,
+    pub(crate) recognized_methods: Vec<String>,
+    pub(crate) supported_interactions: Vec<SupportedInteraction>,
+    pub(crate) providers: Vec<ProtocolAdapterProvider>,
+}
+
 /// provider-scoped 协议适配器（R2-WI03 最小垂直切片）。
 pub(crate) trait AgentProtocolAdapter: Send + Sync {
     /// 协议/实现类别（如 peri/hermes）。
     fn provider(&self) -> &'static str;
+    /// Canonical methods handled by this adapter.  The default keeps third-party
+    /// adapters source-compatible while allowing the diagnostics projection to
+    /// report precise coverage for built-in adapters.
+    fn interaction_methods(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// JSON-RPC response methods emitted by this adapter.
+    fn response_methods(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// User-facing interaction kinds handled by this adapter.
+    fn interaction_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// 按 ACP method 名分类 interaction 请求。
     fn classify(&self, method: Option<&str>) -> InteractionClassification;
     /// normalize interaction 请求参数 → 统一挂起数据；None = 解析失败（调用方按
@@ -61,6 +144,18 @@ pub(crate) struct RequestPermissionAdapter {
 impl AgentProtocolAdapter for RequestPermissionAdapter {
     fn provider(&self) -> &'static str {
         self.provider
+    }
+
+    fn interaction_methods(&self) -> &'static [&'static str] {
+        &[crate::acp::METHOD_SESSION_REQUEST_PERMISSION]
+    }
+
+    fn response_methods(&self) -> &'static [&'static str] {
+        &[crate::acp::METHOD_SESSION_REQUEST_PERMISSION]
+    }
+
+    fn interaction_kinds(&self) -> &'static [&'static str] {
+        &["approval"]
     }
 
     fn classify(&self, method: Option<&str>) -> InteractionClassification {
@@ -187,26 +282,17 @@ pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .map(|ch| ch.to_ascii_lowercase())
         .collect::<String>();
-    const ACP_CLIENT_REQUEST_METHODS: &[&str] = &[
-        "fswritetextfile",
-        "fsreadtextfile",
-        "terminalcreate",
-        "terminaloutput",
-        "terminalrelease",
-        "terminalwaitforexit",
-        "terminalkill",
-        "elicitationcreate",
-        "mcpconnect",
-        "mcpmessage",
-        "mcpdisconnect",
-        // Known provider extensions observed in the wild; these are not yet
-        // handled by a typed adapter but must not leave an agent waiting.
-        "sessionrequestpermission",
-        "sessionrequestquestion",
-        "sessionrequestinput",
-        "sessionrequestuserinput",
-    ];
-    if ACP_CLIENT_REQUEST_METHODS.iter().any(|candidate| *candidate == compact) {
+    if SUPPORTED_ACP_CLIENT_REQUEST_METHODS
+        .iter()
+        .map(|candidate| {
+            candidate
+                .chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .map(|ch| ch.to_ascii_lowercase())
+                .collect::<String>()
+        })
+        .any(|candidate| candidate == compact)
+    {
         return true;
     }
     let normalized = method
@@ -254,6 +340,212 @@ pub(crate) fn get_protocol_adapter(provider: &str) -> Option<AdapterRef> {
         .lock()
         .ok()
         .and_then(|adapters| adapters.get(&normalize_provider(provider)).cloned())
+}
+
+/// Stable list used by both the dispatcher probe and the diagnostics command.
+pub(crate) fn supported_interactions() -> Vec<SupportedInteraction> {
+    SUPPORTED_ACP_CLIENT_REQUEST_METHODS
+        .iter()
+        .map(|method| SupportedInteraction {
+            method: (*method).to_string(),
+            aliases: vec![camel_case_method(method)],
+            kind: if *method == crate::acp::METHOD_SESSION_REQUEST_PERMISSION {
+                "approval".to_string()
+            } else if method.starts_with("session/request_") {
+                "user-input".to_string()
+            } else {
+                "client-request".to_string()
+            },
+            response_method: "json-rpc".to_string(),
+        })
+        .collect()
+}
+
+fn camel_case_method(method: &str) -> String {
+    method
+        .split('/')
+        .map(|segment| {
+            let mut chars = segment.chars();
+            let Some(first) = chars.next() else {
+                return String::new();
+            };
+            let mut out = first.to_lowercase().collect::<String>();
+            let mut uppercase_next = false;
+            for ch in chars {
+                if ch == '_' || ch == '-' {
+                    uppercase_next = true;
+                } else if uppercase_next {
+                    out.extend(ch.to_uppercase());
+                    uppercase_next = false;
+                } else {
+                    out.push(ch);
+                }
+            }
+            out
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn dedup_sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    values.into_iter().collect::<BTreeSet<_>>().into_iter().collect()
+}
+
+/// Build the protocol catalog from the shared baseline, runtime registry, and
+/// configured agent providers.  This pure-ish seam accepts a borrowed map so it
+/// can be tested without creating a Tauri WebView or starting an ACP process.
+pub(crate) fn build_protocol_adapter_catalog(
+    configured_agents: Option<&HashMap<String, crate::agent_config::AgentDef>>,
+) -> Result<ProtocolAdapterCatalog, String> {
+    let baselines = pylon_core::agent_catalog::protocol_profiles()?;
+    let baseline_by_provider = baselines
+        .into_iter()
+        .map(|profile| (normalize_provider(&profile.provider), profile))
+        .collect::<BTreeMap<_, _>>();
+
+    let registered = registry()
+        .lock()
+        .map_err(|error| error.to_string())?
+        .values()
+        .map(|adapter| {
+            (
+                normalize_provider(adapter.provider()),
+                (
+                    adapter.provider().to_string(),
+                    adapter
+                        .interaction_methods()
+                        .iter()
+                        .map(|method| (*method).to_string())
+                        .collect::<Vec<_>>(),
+                    adapter
+                        .response_methods()
+                        .iter()
+                        .map(|method| (*method).to_string())
+                        .collect::<Vec<_>>(),
+                    adapter
+                        .interaction_kinds()
+                        .iter()
+                        .map(|kind| (*kind).to_string())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut configured_by_provider = BTreeMap::<String, Vec<String>>::new();
+    if let Some(agents) = configured_agents {
+        for (agent_id, agent) in agents {
+            let provider = agent
+                .provider
+                .as_deref()
+                .and_then(|value| (!value.trim().is_empty()).then(|| normalize_provider(value)))
+                .or_else(|| {
+                    std::path::Path::new(&agent.exe)
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .and_then(|stem| {
+                            pylon_core::agent_catalog::provider_for_executable_stem(stem)
+                                .ok()
+                                .flatten()
+                        })
+                        .map(|value| normalize_provider(&value))
+                });
+            if let Some(provider) = provider {
+                configured_by_provider
+                    .entry(provider)
+                    .or_default()
+                    .push(agent_id.clone());
+            }
+        }
+    }
+
+    let providers = baseline_by_provider
+        .keys()
+        .chain(registered.keys())
+        .chain(configured_by_provider.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let providers = providers
+        .into_iter()
+        .map(|provider| {
+            let baseline = baseline_by_provider.get(&provider).cloned();
+            let registered_entry = registered.get(&provider);
+            let adapter_methods = registered_entry
+                .map(|entry| dedup_sorted(entry.1.clone()))
+                .unwrap_or_default();
+            let adapter_response_methods = registered_entry
+                .map(|entry| dedup_sorted(entry.2.clone()))
+                .unwrap_or_default();
+            let adapter_kinds = registered_entry
+                .map(|entry| dedup_sorted(entry.3.clone()))
+                .unwrap_or_default();
+            let response_methods = dedup_sorted(
+                baseline
+                    .as_ref()
+                    .map(|profile| profile.response_methods.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(adapter_response_methods),
+            );
+            let interaction_kinds = dedup_sorted(
+                baseline
+                    .as_ref()
+                    .map(|profile| profile.interaction_kinds.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(adapter_kinds),
+            );
+            let display_name = baseline
+                .as_ref()
+                .map(|profile| profile.display_name.clone())
+                .or_else(|| registered_entry.map(|entry| entry.0.clone()))
+                .unwrap_or_else(|| provider.clone());
+            let configured_agent_ids = configured_by_provider
+                .get(&provider)
+                .cloned()
+                .unwrap_or_default();
+            ProtocolAdapterProvider {
+                provider,
+                display_name,
+                catalog_known: baseline.is_some(),
+                adapter_registered: registered_entry.is_some(),
+                adapter_methods,
+                response_methods,
+                interaction_kinds,
+                baseline,
+                configured_agent_ids,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let recognized_methods = dedup_sorted(
+        SUPPORTED_ACP_CLIENT_REQUEST_METHODS
+            .iter()
+            .map(|method| (*method).to_string())
+            .chain(
+                providers
+                    .iter()
+                    .flat_map(|provider| provider.adapter_methods.iter().cloned()),
+            ),
+    );
+    Ok(ProtocolAdapterCatalog {
+        schema_version: 1,
+        recognized_methods,
+        supported_interactions: supported_interactions(),
+        providers,
+    })
+}
+
+/// Read-only Tauri command; no secrets or raw interaction params are returned.
+#[tauri::command(rename_all = "camelCase")]
+pub(crate) fn protocol_adapter_catalog(
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<ProtocolAdapterCatalog, PylonError> {
+    let agents = state
+        .agents
+        .lock()
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+    build_protocol_adapter_catalog(Some(&agents)).map_err(PylonError::Protocol)
 }
 
 #[cfg(test)]
@@ -361,6 +653,67 @@ mod tests {
         assert!(!looks_like_interaction_method(Some("terminal/status")));
         assert!(!looks_like_interaction_method(Some("filesystem/list")));
         assert!(!looks_like_interaction_method(None));
+    }
+
+    #[test]
+    fn supported_interactions_has_canonical_and_camel_case_spellings() {
+        let interactions = supported_interactions();
+        let permission = interactions
+            .iter()
+            .find(|entry| entry.method == "session/request_permission")
+            .expect("permission request must be catalogued");
+        assert_eq!(permission.kind, "approval");
+        assert!(permission
+            .aliases
+            .iter()
+            .any(|alias| alias == "session/requestPermission"));
+        assert!(interactions
+            .iter()
+            .any(|entry| entry.method == "terminal/wait_for_exit"));
+    }
+
+    #[test]
+    fn protocol_catalog_separates_baseline_from_runtime_registration() {
+        // Hermes' shared baseline intentionally says permissionRequests=false,
+        // while the runtime registry has a proven request_permission adapter.
+        register_protocol_adapter(Arc::new(RequestPermissionAdapter { provider: "hermes" }));
+        let catalog = build_protocol_adapter_catalog(None).expect("catalog must build");
+        let hermes = catalog
+            .providers
+            .iter()
+            .find(|entry| entry.provider == "hermes")
+            .expect("hermes baseline must be present");
+        assert!(hermes.catalog_known);
+        assert!(hermes.adapter_registered);
+        assert_eq!(hermes.baseline.as_ref().map(|p| p.permission_requests), Some(false));
+        assert!(hermes
+            .adapter_methods
+            .iter()
+            .any(|method| method == "session/request_permission"));
+        assert!(catalog
+            .recognized_methods
+            .iter()
+            .any(|method| method == "fs/write_text_file"));
+    }
+
+    #[test]
+    fn protocol_catalog_adds_configured_unknown_provider_without_secrets() {
+        let mut agent = crate::test_utils::fake_acp_agent("custom", "print('x')");
+        agent.provider = Some("Acme-ACP".to_string());
+        let mut agents = HashMap::new();
+        agents.insert("custom-agent".to_string(), agent);
+        let catalog = build_protocol_adapter_catalog(Some(&agents)).expect("catalog must build");
+        let custom = catalog
+            .providers
+            .iter()
+            .find(|entry| entry.provider == "acme-acp")
+            .expect("configured provider must be visible");
+        assert!(!custom.catalog_known);
+        assert!(!custom.adapter_registered);
+        assert_eq!(custom.configured_agent_ids, vec!["custom-agent"]);
+        let serialized = serde_json::to_value(custom).expect("provider projection serializes");
+        assert!(serialized.get("exe").is_none(), "catalog must not expose executable paths");
+        assert!(serialized.get("env").is_none(), "catalog must not expose environment values");
     }
 
     #[test]

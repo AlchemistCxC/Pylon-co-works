@@ -55,7 +55,7 @@ export const CLAUDE_CODE_COVERAGE: readonly CoverageItemDraft[] = [
     firstClassFields: ['identity.toolCallId', 'tool.name', 'tool.semanticKind', 'tool.input', 'tool.parentToolCallId'],
     retainedOnlyFields: [],
     pylonAnchors: ['claudeCodeNormalizer(parentToolUseId→parentAgentId)', 'acpNormalizer(tool_call)', 'workbenchProjectorToolLifecycle'],
-    fixtures: ['claudeCodeNormalizer.test.ts', 'workbenchProjectorToolLifecycle.test.ts'], followUp: '' },
+    fixtures: ['claudeCodeNormalizer.test.ts', 'claude-acp-wire.json', 'workbenchProjectorToolLifecycle.test.ts'], followUp: '' },
   { id: 'cc-08', provider: 'claude-code', dictionarySection: '§二 L119', wireSymbol: 'tool_use 第二次出现(input 收齐)',
     semanticEvent: 'tool.progress', renderKind: '',
     status: 'normalized',

@@ -1,0 +1,32 @@
+{
+  "search": {
+    "session_update": "tool_call_update",
+    "tool_call_id": "tc-hermes-search-structured",
+    "name": "searchFiles",
+    "status": "completed",
+    "raw_output": "{\"matches\":[{\"path\":\"src/app.ts\",\"line_number\":42,\"content\":\"ACP adapter\"}],\"total_count\":1}\n\n[Hint: Results truncated.]"
+  },
+  "skill": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "tc-hermes-skill-structured",
+    "name": "skillView",
+    "status": "completed",
+    "rawOutput": "Result: {\"name\":\"diagnose\",\"file\":\"SKILL.md\",\"description\":\"Diagnostic workflow\"}\n[Hint: loaded]"
+  },
+  "terminal": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "tc-hermes-terminal-structured",
+    "name": "terminal",
+    "status": "completed",
+    "rawOutput": "{\"stdout\":\"ok\\n\",\"stderr\":\"\",\"exit_code\":\"0\",\"duration_ms\":\"12.5\",\"stdout_truncated\":true,\"stdout_bytes_total\":100,\"stdout_bytes_captured\":80,\"stdout_bytes_omitted\":20}",
+    "rawInput": "npm test"
+  },
+  "memory": {
+    "session_update": "tool_call_update",
+    "tool_call_id": "tc-hermes-memory-structured",
+    "name": "memory",
+    "status": "completed",
+    "args": {"target": "project"},
+    "result": {"ok": true, "message": "saved"}
+  }
+}

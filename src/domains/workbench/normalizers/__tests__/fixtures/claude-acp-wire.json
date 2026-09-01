@@ -1,0 +1,73 @@
+{
+  "start": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "cc-bash-1",
+    "status": "pending",
+    "title": "npm test",
+    "kind": "execute",
+    "rawInput": {"command": "npm test", "description": "Run the test suite"},
+    "_meta": {"claudeCode": {"toolName": "Bash", "parentToolUseId": "cc-parent-1"}}
+  },
+  "progress": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "cc-bash-1",
+    "status": "in_progress",
+    "rawInput": {"command": "npm test"},
+    "_meta": {"claudeCode": {"toolName": "Bash", "parentToolUseId": "cc-parent-1"}}
+  },
+  "complete": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "cc-bash-1",
+    "status": "completed",
+    "rawOutput": {"type": "bash_code_execution_result", "stdout": "all tests passed", "stderr": ""},
+    "content": [{"type": "content", "content": {"type": "text", "text": "all tests passed"}}],
+    "_meta": {"claudeCode": {"toolName": "Bash"}}
+  },
+  "write": {
+    "session_update": "tool_call",
+    "tool_call_id": "cc-write-1",
+    "title": "Write src/new.ts",
+    "kind": "edit",
+    "raw_input": {"file_path": "src/new.ts", "content": "export const ok = true"},
+    "content": [{"type": "diff", "path": "src/new.ts", "oldText": null, "newText": "export const ok = true"}],
+    "locations": [{"path": "src/new.ts"}],
+    "_meta": {"claude_code": {"tool_name": "Write"}}
+  },
+  "edit": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "cc-edit-1",
+    "title": "Edit src/app.ts",
+    "kind": "edit",
+    "rawInput": {"file_path": "src/app.ts", "old_string": "old", "new_string": "new"},
+    "content": [{"type": "diff", "path": "src/app.ts", "oldText": "old", "newText": "new"}],
+    "locations": [{"path": "src/app.ts"}],
+    "_meta": {"claudeCode": {"toolName": "Edit"}}
+  },
+  "agent": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "cc-agent-1",
+    "title": "Inspect the tests",
+    "kind": "think",
+    "rawInput": {"description": "Inspect the tests", "prompt": "Run the test suite"},
+    "_meta": {"claudeCode": {"toolName": "Task", "parentToolUseId": "cc-parent-1"}}
+  },
+  "web": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "cc-web-1",
+    "title": "\"ACP protocol\"",
+    "kind": "fetch",
+    "rawInput": {"query": "ACP protocol"},
+    "_meta": {"claudeCode": {"toolName": "WebSearch"}}
+  },
+  "message": {
+    "sessionUpdate": "agent_message_chunk",
+    "content": [
+      {"type": "content", "content": {"type": "image", "data": "AAAA", "mimeType": "image/png"}},
+      {"type": "content", "content": {"type": "resource_link", "uri": "file:///README.md", "name": "README.md", "mime_type": "text/markdown"}}
+    ]
+  },
+  "plan": {
+    "sessionUpdate": "plan",
+    "entries": [{"content": "Inspect ACP", "status": "completed", "priority": "medium"}, {"content": "Add fixtures", "status": "in_progress", "priority": "medium"}]
+  }
+}

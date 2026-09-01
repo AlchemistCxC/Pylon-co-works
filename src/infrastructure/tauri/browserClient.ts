@@ -18,7 +18,7 @@ export interface BrowserBounds {
 export function createBrowserClient(transport: ClientTransport) {
   return {
     status: (): Promise<unknown> => transport.invoke('browser_status'),
-    start: (bounds: Record<string, unknown>): Promise<unknown> => transport.invoke('browser_start', { bounds }),
+    start: (bounds: BrowserBounds): Promise<unknown> => transport.invoke('browser_start', { bounds }),
     newTab: (): Promise<unknown> => transport.invoke('browser_new_tab'),
     openTab: (url: string): Promise<unknown> => transport.invoke('browser_open_tab', { url }),
     selectTab: (tabId: number): Promise<unknown> => transport.invoke('browser_select_tab', { tabId }),

@@ -3,7 +3,7 @@
 //! The JSON document is the single provider baseline consumed by both Rust and
 //! TypeScript. Native code keeps process discovery behind a controlled
 //! projection; editable agents.yaml never supplies scan commands.
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -43,12 +43,30 @@ pub struct CatalogConfigEvidence {
     pub fields: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CatalogSetModelApi {
     ConfigOption,
     SetModel,
     None,
+}
+
+/// Public, read-only projection of the protocol portion of the shared Agent
+/// Catalog.  The on-disk document intentionally remains private so callers
+/// cannot accidentally depend on detection/tool presentation internals.
+/// Runtime protocol adapters enrich this baseline in the desktop crate.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogProtocolProfile {
+    pub provider: String,
+    pub display_name: String,
+    pub session_updates: bool,
+    pub interaction_events: bool,
+    pub permission_requests: bool,
+    pub replay: bool,
+    pub response_methods: Vec<String>,
+    pub interaction_kinds: Vec<String>,
+    pub set_model_api: CatalogSetModelApi,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -305,6 +323,29 @@ pub fn set_model_api_default(provider: &str) -> Result<Option<CatalogSetModelApi
         .map(|entry| entry.protocol_defaults.set_model_api))
 }
 
+/// Return the protocol baseline in stable shared-catalog order.
+///
+/// This is deliberately a projection rather than a direct reference to the
+/// deserialized document: the desktop runtime can safely merge its actual
+/// adapter registry without exposing the catalog's private schema types.
+pub fn protocol_profiles() -> Result<Vec<CatalogProtocolProfile>, String> {
+    Ok(catalog()?
+        .providers
+        .iter()
+        .map(|entry| CatalogProtocolProfile {
+            provider: entry.provider.clone(),
+            display_name: entry.display_name.clone(),
+            session_updates: entry.capabilities.session_updates,
+            interaction_events: entry.capabilities.interaction_events,
+            permission_requests: entry.capabilities.permission_requests,
+            replay: entry.capabilities.replay,
+            response_methods: entry.capabilities.response_methods.clone(),
+            interaction_kinds: entry.interaction_kinds.clone(),
+            set_model_api: entry.protocol_defaults.set_model_api,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +381,20 @@ mod tests {
             set_model_api_default("hermes").unwrap(),
             Some(CatalogSetModelApi::SetModel)
         );
+    }
+
+    #[test]
+    fn protocol_projection_is_serializable_and_keeps_catalog_order() {
+        let profiles = protocol_profiles().expect("protocol baseline must parse");
+        assert_eq!(
+            profiles.iter().map(|entry| entry.provider.as_str()).collect::<Vec<_>>(),
+            ["peri", "hermes", "claude-code"]
+        );
+        let hermes = profiles.iter().find(|entry| entry.provider == "hermes").unwrap();
+        assert!(!hermes.permission_requests);
+        assert_eq!(hermes.set_model_api, CatalogSetModelApi::SetModel);
+        let json = serde_json::to_value(&profiles).expect("projection must serialize");
+        assert_eq!(json[0]["displayName"], "Peri");
+        assert_eq!(json[1]["setModelApi"], "set_model");
     }
 }

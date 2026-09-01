@@ -58,13 +58,26 @@ export function extractUpdate(input: unknown): Record<string, unknown> | undefin
   const paramsUpdate = params?.update
   if (isRecord(paramsUpdate)) return paramsUpdate
   if (isRecord(input.update)) return input.update
-  if (typeof input.sessionUpdate === 'string' || typeof input.session_update === 'string') return input
-  if (typeof params?.sessionUpdate === 'string' || typeof params?.session_update === 'string') return params
+  // ACP SDKs have used all of these discriminator spellings. Keep extraction
+  // aligned with the canonicalizers so a valid bare update is not reported as
+  // a malformed envelope merely because it came from a snake_case/legacy
+  // bridge. `type` is intentionally included last: JSON-RPC wrappers may use
+  // it for unrelated metadata, while an update with an ACP payload is still
+  // safely handled by the normalizer's unknown-event fallback.
+  const updateKeys = ['sessionUpdate', 'session_update', 'updateType', 'update_type', 'eventType', 'event_type', 'type'] as const
+  if (updateKeys.some(key => typeof input[key] === 'string')) return input
+  if (params && updateKeys.some(key => typeof params[key] === 'string')) return params
   return undefined
 }
 
 export function wireKind(update: Record<string, unknown> | undefined): string {
-  const value = update?.sessionUpdate ?? update?.session_update ?? update?.type
+  const value = update?.sessionUpdate
+    ?? update?.session_update
+    ?? update?.updateType
+    ?? update?.update_type
+    ?? update?.eventType
+    ?? update?.event_type
+    ?? update?.type
   return typeof value === 'string' && value.trim() ? value : 'malformed'
 }
 
