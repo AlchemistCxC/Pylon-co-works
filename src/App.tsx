@@ -28,9 +28,8 @@ import { createAgentClient } from './infrastructure/acp/agentClient'
 import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
-import { seedDemo } from './demo/seed'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
-import { hydrateIdentityAndWorkspace } from './app/bootstrap/hydrateIdentityAndWorkspace'
+import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
 import InteractionRejectionNotice from './components/InteractionRejectionNotice'
@@ -190,7 +189,7 @@ export default function App() {
       // I14-W6：bootstrap 等待 identity hydration（Tauri 后端读回 / browser 本地）
       // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
       hydrateDomains: async () => {
-        await hydrateIdentityAndWorkspace()
+        await hydrateIdentityAndWorkspace(consumeLegacyProfilePayload())
       },
       fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => {
@@ -301,11 +300,13 @@ export default function App() {
     if (demoSeededRef.current) return
     demoSeededRef.current = true
     const demoParams = new URLSearchParams(window.location.search)
-    seedDemo(setActiveSession, {
-      withPermission: demoParams.get('demo-permission') === '1',
-      scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : import.meta.env.DEV ? 'visual' : 'standard',
-      reset: demoParams.get('demo-reset') === '1',
-    })
+    void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
+      runBrowserDemoSeed(setActiveSession, {
+        withPermission: demoParams.get('demo-permission') === '1',
+        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : import.meta.env.DEV ? 'visual' : 'standard',
+        reset: demoParams.get('demo-reset') === '1',
+      })
+    }).catch(error => reportRuntimeError('加载浏览器演示数据', error))
   }, [])
 
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))

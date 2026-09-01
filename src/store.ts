@@ -11,7 +11,7 @@ import { THEME_SETTING_KEYS } from './themeFieldDefs'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration'
 import { DEFAULTS } from './domains/theme/themeDefaults'
 import type { CustomPreset } from './customPresets'
-import { hydrateIdentityAndWorkspace } from './app/bootstrap/hydrateIdentityAndWorkspace'
+import { reportLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import {
   applyCustomPresetReducer,
   applyZonePresetReducer,
@@ -392,9 +392,8 @@ export const useStore = create<ThemeState>()(persist(
     legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0
       ? { profiles: legacy.profiles, activeProfileId: typeof legacy.activeProfileId === 'string' ? legacy.activeProfileId : legacy.profiles[0].id }
       : undefined
-  // I14-W6 CR-02：先 await profiles 水合再 sessions——sessions 本地回退的 normalize
-  // 依赖 get().profiles，未水合 profiles 会改写会话 profileId 并落盘（归属错误固化）
-  void hydrateIdentityAndWorkspace(legacyArg)
+  // P31：persist 只报告 legacy payload；跨域 hydration 唯一由 application bootstrap 触发。
+  reportLegacyProfilePayload(legacyArg)
 }}))
 
 function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts').PresetJsonValue {
