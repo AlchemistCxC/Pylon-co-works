@@ -1,5 +1,8 @@
 ﻿# Pylon
 
+[![CI](https://github.com/AlchemistCxC/Pylon-co-works/actions/workflows/ci.yml/badge.svg)](https://github.com/AlchemistCxC/Pylon-co-works/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AlchemistCxC/Pylon-co-works?sort=semver&label=release)](https://github.com/AlchemistCxC/Pylon-co-works/releases)
+
 Pylon 是一个基于 ACP（Agent Client Protocol）的桌面 Agent 工作台。它负责连接本地 Agent、管理会话和工作区，并把消息、思考、工具调用、文件和权限请求组织在同一个界面中。Pylon 不包含模型，也不绑定某一家 Agent；只要 Agent 能通过 ACP 接入，就可以使用同一套工作台。
 
 本文是当前版本的使用与开发说明。实现地图和扩展契约见 [`docs/`](docs/)；施工书、原型等内部过程资料不在本仓库（位置见团队内部指引），其中已落地的结论应回写到 docs 对应文档。

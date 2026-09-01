@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建发行包并发布
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # 项目锁 GNU；runner 自带 MSVC，强制 MSVC 保证可链接
+      - name: 使用 MSVC 工具链
+        run: rustup override set stable-x86_64-pc-windows-msvc
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # 完整便携链：前端 build + tauri --no-bundle + pylon-detect + pack_release.py
+      # 产物：release/pylon-<version>-win64.zip + .sha256 + .manifest.json
+      - name: 打包发行包
+        run: npm run release:portable
+
+      - name: 发布到 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/pylon-*-win64.zip
+            release/pylon-*-win64.zip.sha256
+            release/pylon-*-win64.manifest.json
+          generate_release_notes: true

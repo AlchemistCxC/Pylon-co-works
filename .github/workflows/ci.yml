@@ -12,21 +12,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
-      - name: 安装依赖
-        # react18/react-dom18 是故意 alias（npm:react@18 / npm:react-dom@18），供
-        # IsolatedPluginSurface 隔离插件同时跑 React 18/19 的测试。npm 对 alias 包的
-        # peer 解析有误报（react-dom18 的 react peer 被 dedup 到 root 的 react@19），
-        # 导致 npm ci 严格模式下 ERESOLVE。用 --legacy-peer-deps 跳过该假冲突——
-        # 不改任何依赖版本，勿删 alias。
-        run: npm ci --legacy-peer-deps
+      - name: 安装依赖（pnpm）
+        run: pnpm install --frozen-lockfile
 
       # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
-      # legacy 套件只经 vitest 跑一次（原 test:legacy 独立步骤移除，消除双跑）
       - name: 统一前端门禁（check:frontend）
         run: npm run check:frontend
 
@@ -36,18 +34,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
         with:
-          components: clippy
+          version: 11
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
-      - name: 安装依赖
-        # 同 frontend job：--legacy-peer-deps 跳过 react18/react-dom18 alias 的 npm peer 假冲突
-        run: npm ci --legacy-peer-deps
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # 项目 rust-toolchain.toml 锁定 GNU，但 CI runner 自带 MSVC 工具链；
+      # 强制 MSVC 避免 runner 上缺 MinGW 的链接失败（本工具链切换见 docs）。
+      - name: 使用 MSVC 工具链（CI runner 自带给定链接器）
+        run: rustup override set stable-x86_64-pc-windows-msvc
+
+      - name: 安装依赖（pnpm）
+        run: pnpm install --frozen-lockfile
 
       # tauri::generate_context! 编译期要求 ../dist 存在（frontendDist），先构建前端
       - name: 前端构建（tauri generate_context 前置）
