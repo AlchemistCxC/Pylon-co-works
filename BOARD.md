@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:24] [主施工员·工程师] 非重放施工书收尾补强：`c99abaec` 将 legacy layout 迁移改为逐 key 容错并以 `pylon-persistence-migration-v1` 防旧 key 反向覆盖；`19b280a9`/`f59bf3fe` 让 browser demo seed 仅在 DEV 动态加载并加入生产产物检查；`1da366ce` 标注迁出布局字段的 theme owner authority；`a4ee4f0c` 修正等价 default layout ports 的兼容桥重复写判定。定向 17 文件 107 项、`check:solid`、lint、`check:docs`、`check:deps`、build 全绿。并行 SDK/UI WIP 未触碰。
+
 [2026-09-02 04:10] [SDK施工员·工程师] SDK-01 文档/发行打包片完成：提交 `306f1725`。根 README、开发套件 README、开发者/发行包说明与便携 README 已同步正常版/离线版路径；`release:portable` 先准备 PortableGit 与 SDK，`scripts/pack_release.py` 强制校验离线 SDK 仅含 runtime+manifest、≤64 KiB 且无 testing/PluginScope 宿主闭包。验证：`python scripts/pack_release.py --without-webview2` 生成并自校验 21 项 ZIP（含 SDK 14,397B）、`node scripts/pack-plugin-devkit.mjs`/仓库与套件 verify、`check-doc-links`、Python/Node 语法检查均通过；并行 WIP 未触碰。
 
 [2026-09-02 04:03] [SDK施工员·工程师] 认领 SDK-01 后续文档/发行打包片：将同步正常版与离线版的 README 使用路径，更新 `release:portable` 先生成 SDK，并让 `scripts/pack_release.py` 强制校验离线 SDK 的文件集合、体积和 testing/宿主闭包泄漏；仅触碰 SDK/发行说明相关文件，保留并行 WIP。
