@@ -17,6 +17,8 @@ use crate::session::{extract_tool_file_name, value_as_string, SessionInfo};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
+mod routing;
+
 /// Canonical ingest failure policy for a live ACP update.
 ///
 /// A `SessionDeleted` result is an expected outcome when a delete transaction
@@ -593,10 +595,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     // Replay/live is decided once at the transport boundary and passed through
     // the Kernel seam. Provider `_meta.periReplay` is compatibility metadata,
     // never an authority for side-effect policy.
-    let is_replay = matches!(
-        classification,
-        crate::acp::ReplayClassification::Replay { .. }
-    );
+    let is_replay = routing::classification_is_replay(classification);
     // G3 §2.2.1 锁收敛：单一临界区取代原 mapping_is_current 预检（锁 2）、
     // received_round 读取（锁 3）、collect_response_chunk（锁 4）、mutation（锁 5）四段。
     // early return 语义逐一保持：stale → return true（保持主循环）；user_message_chunk
@@ -613,6 +612,8 @@ async fn handle_session_update<R: tauri::Runtime>(
         crate::session::DurableSessionOwner,
         serde_json::Value,
     )> = None;
+    let routing_input: routing::RoutingInput;
+    let routing_decision: routing::RoutingDecision;
     let durable_owner;
     {
         let Ok(mut items) = sessions.lock() else {
@@ -647,6 +648,22 @@ async fn handle_session_update<R: tauri::Runtime>(
                 return true;
             }
         };
+        let replay_loading = items
+            .get(&source)
+            .is_some_and(|session| session.replay_loading);
+        let input = routing::RoutingInput {
+            source: source.clone(),
+            remote_session_id: peri_id.clone(),
+            generation,
+            owner: durable_owner.clone(),
+            classification,
+            variant,
+            replay_loading,
+            payload: payload.clone(),
+        };
+        let decision = routing::decide(&input);
+        routing_input = input;
+        routing_decision = decision;
         // R-t5：任意被接受的 live ACP update 都刷新 liveness（活动即续命）。
         // 仅跳过回放事件（历史重放不是本回合的实时产出，不应当作活动信号）。
         if !is_replay {
@@ -654,24 +671,21 @@ async fn handle_session_update<R: tauri::Runtime>(
                 session.last_activity = Some(std::time::Instant::now());
             }
         }
-        if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) && !is_replay {
-            pet_events.push(PetEvent::FirstChunk); // 原 :366 on_first_chunk
-                                                   // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
-            if let Some(text) = update
-                .get("content")
-                .and_then(|c| c.get("text"))
-                .and_then(|v| v.as_str())
-            {
-                if text.contains("```") {
-                    pet_events.push(PetEvent::CodeSeen); // 原 :374 on_code_seen
-                }
-                // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
-                // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
-                // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
-                // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
+        if decision.collect_response {
+            let effects = routing::agent_message_chunk_effects(update, decision);
+            if effects.first_chunk {
+                pet_events.push(PetEvent::FirstChunk);
+            }
+            if effects.code_seen {
+                pet_events.push(PetEvent::CodeSeen);
+            }
+            // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
+            // 回合绑定与截断逻辑仍由 SessionInfo 持有；routing 只决定该 chunk
+            // 是否属于 live response，避免 replay 事件进入 live collector。
+            if let Some(text) = effects.text.as_deref() {
                 if let Some(session) = items.get_mut(&source) {
-                    let received_round = session.inject_round; // 原 :380-384（同锁读取）
-                    session.collect_response_chunk(text, received_round); // 原 :385-389
+                    let received_round = session.inject_round;
+                    session.collect_response_chunk(text, received_round);
                 }
             }
         }
@@ -701,7 +715,7 @@ async fn handle_session_update<R: tauri::Runtime>(
                 };
             }
         } else if let Some(session) = items.get_mut(&source) {
-            if is_replay && session.replay_loading {
+            if !decision.mutate_session {
                 return true;
             }
             pet_events.extend(apply_update_event(session, update, variant, is_replay));
@@ -747,36 +761,26 @@ async fn handle_session_update<R: tauri::Runtime>(
     if is_user_chunk {
         return true; // 原 :411 语义：user_message_chunk 不转发 emit_event_all
     }
-    // D1/D7：GUI owner 的 live ACP 更新必须先进入现有 canonical_events journal，
-    // 再向 WebView/gateway 发布。平台自动会话没有 UI Profile（owner=None），保持
-    // 既有平台转发，不用 active/default Profile 猜测并污染 GUI journal。
-    // replay 仍由 load response 原子路径处理；其统一 ingest/dedup 是后续切片。
-    let committed_event = if !is_replay {
-        if let Some(owner) = durable_owner {
-            let Some(event_service) = event_service else {
-                tracing::error!(
-                    code = "event_db_unavailable",
-                    agent_id,
-                    source,
-                    "canonical ingest unavailable after startup readiness barrier"
-                );
-                return true;
-            };
-            match event_service
-                .ingest_event(owner, Some(peri_id.clone()), generation, payload.clone())
-                .await
-            {
-                Ok(result) => result.events.into_iter().next(),
-                Err(error) => {
-                    log_canonical_ingest_error(&error, agent_id, &source);
-                    return true;
-                }
-            }
-        } else {
-            None
+    // D1/D7：Kernel routing 先完成 live canonical append，只有 committed result
+    // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
+    let input = routing_input;
+    let decision = routing_decision;
+    let committed_event = match routing::commit_live_event(&input, decision, event_service).await {
+        routing::CommitOutcome::Skipped => None,
+        routing::CommitOutcome::MissingService => {
+            tracing::error!(
+                code = "event_db_unavailable",
+                agent_id,
+                source,
+                "canonical ingest unavailable after startup readiness barrier"
+            );
+            return true;
         }
-    } else {
-        None
+        routing::CommitOutcome::Committed(event) => event,
+        routing::CommitOutcome::Rejected(error) => {
+            log_canonical_ingest_error(&error, agent_id, &source);
+            return true;
+        }
     };
     if let (Some((owner, snapshot)), Some(message_service)) =
         (session_state_to_persist, message_service)
