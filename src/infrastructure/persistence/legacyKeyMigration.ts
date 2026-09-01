@@ -8,6 +8,9 @@ export const PERSISTENCE_KEY_OWNERS = Object.freeze({
   'pylon-theme': { owner: 'theme', authority: 'localStorage', fallback: 'defaults', version: 4 },
 } as const)
 
+/** Written after the application bootstrap has committed all legacy migrations. */
+export const PERSISTENCE_MIGRATION_MARKER = 'pylon-persistence-migration-v1'
+
 export interface LegacyLayoutSnapshot {
   rightWidth?: number
   leftWidth?: number
@@ -22,27 +25,50 @@ const LEFT_MAX = 520
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(value)))
 
-/** Reads all legacy layout keys once, with deterministic precedence and malformed-data fallback. */
+function readJson(storage: Pick<Storage, 'getItem'>, key: string): unknown {
+  try {
+    const raw = storage.getItem(key)
+    return raw ? JSON.parse(raw) : undefined
+  } catch {
+    // A malformed key must not hide valid values from the other legacy owners.
+    return undefined
+  }
+}
+
+/** Reads all legacy layout keys once, with deterministic precedence and field-level fallback. */
 export function readLegacyLayoutSnapshot(storage: Pick<Storage, 'getItem'> | null = typeof localStorage === 'undefined' ? null : localStorage): LegacyLayoutSnapshot {
   if (!storage) return {}
+  // Once the marker is present, the versioned owners are authoritative.  Do
+  // not let a stale legacy key re-enter the state during a later HMR/module
+  // evaluation or after a partial storage restore.
   try {
-    const rail = storage.getItem('pylon-right-rail')
-    const railState = rail ? (JSON.parse(rail) as { state?: { width?: unknown } }).state : undefined
-    const workspace = storage.getItem('pylon-workspace-sheets')
-    const workspaceLayout = workspace ? (JSON.parse(workspace) as { layout?: Record<string, unknown> }).layout : undefined
-    const theme = storage.getItem('pylon-theme')
-    const themeState = theme ? (JSON.parse(theme) as { state?: Record<string, unknown> }).state : undefined
-    const rightWidth = finite(railState?.width) ? clamp(railState.width, RIGHT_MIN, RIGHT_MAX) : finite(themeState?.rightWidth) ? clamp(themeState.rightWidth, RIGHT_MIN, RIGHT_MAX) : undefined
-    const leftWidth = finite(workspaceLayout?.sidebarWidth) ? clamp(workspaceLayout.sidebarWidth, LEFT_MIN, LEFT_MAX) : finite(themeState?.sidebarWidth) ? clamp(themeState.sidebarWidth, LEFT_MIN, LEFT_MAX) : undefined
-    return {
-      ...(rightWidth === undefined ? {} : { rightWidth }),
-      ...(leftWidth === undefined ? {} : { leftWidth }),
-      ...(typeof workspaceLayout?.rightPanelCollapsed === 'boolean' ? { rightCollapsed: workspaceLayout.rightPanelCollapsed } : {}),
-      ...(typeof workspaceLayout?.sidebarCollapsed === 'boolean' ? { leftCollapsed: workspaceLayout.sidebarCollapsed } : {}),
-    }
-  } catch { return {} }
+    if (storage.getItem(PERSISTENCE_MIGRATION_MARKER) === '1') return {}
+  } catch { /* storage may be readable only through individual keys */ }
+
+  const railValue = readJson(storage, 'pylon-right-rail') as { state?: { width?: unknown } } | undefined
+  const workspaceValue = readJson(storage, 'pylon-workspace-sheets') as { layout?: Record<string, unknown> } | undefined
+  const themeValue = readJson(storage, 'pylon-theme') as { state?: Record<string, unknown> } | undefined
+  const railState = railValue?.state
+  const workspaceLayout = workspaceValue?.layout
+  const themeState = themeValue?.state
+  const rightWidth = finite(railState?.width)
+    ? clamp(railState.width, RIGHT_MIN, RIGHT_MAX)
+    : finite(themeState?.rightWidth)
+      ? clamp(themeState.rightWidth, RIGHT_MIN, RIGHT_MAX)
+      : undefined
+  const leftWidth = finite(workspaceLayout?.sidebarWidth)
+    ? clamp(workspaceLayout.sidebarWidth, LEFT_MIN, LEFT_MAX)
+    : finite(themeState?.sidebarWidth)
+      ? clamp(themeState.sidebarWidth, LEFT_MIN, LEFT_MAX)
+      : undefined
+  return {
+    ...(rightWidth === undefined ? {} : { rightWidth }),
+    ...(leftWidth === undefined ? {} : { leftWidth }),
+    ...(typeof workspaceLayout?.rightPanelCollapsed === 'boolean' ? { rightCollapsed: workspaceLayout.rightPanelCollapsed } : {}),
+    ...(typeof workspaceLayout?.sidebarCollapsed === 'boolean' ? { leftCollapsed: workspaceLayout.sidebarCollapsed } : {}),
+  }
 }
 
 export function markLegacyMigrationComplete(storage: Pick<Storage, 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage): void {
-  try { storage?.setItem('pylon-persistence-migration-v1', '1') } catch { /* best effort */ }
+  try { storage?.setItem(PERSISTENCE_MIGRATION_MARKER, '1') } catch { /* best effort */ }
 }
