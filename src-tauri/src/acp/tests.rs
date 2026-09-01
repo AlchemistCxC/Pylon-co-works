@@ -970,7 +970,7 @@ for line in sys.stdin:
             .await
             .expect("fake ACP replay agent must initialize");
         let (response, replay) = load_session_with_replay(
-            client.replay_handles(),
+            client.begin_replay_capture("fake-session-replay").expect("replay capture"),
             "fake-session-replay",
             ".",
             Vec::new(),
@@ -1063,7 +1063,7 @@ for line in sys.stdin:
             .await
             .expect("fake ACP replay cap agent must initialize");
         let (response, replay) = load_session_with_replay(
-            client.replay_handles(),
+            client.begin_replay_capture("target-cap").expect("replay capture"),
             "target-cap",
             ".",
             Vec::new(),
@@ -1536,7 +1536,7 @@ for line in sys.stdin:
             .await
             .expect("update isolation fake ACP must initialize");
         let (_response, replay) = load_session_with_replay(
-            client.replay_handles(),
+            client.begin_replay_capture("target-session").expect("replay capture"),
             "target-session",
             ".",
             Vec::new(),
@@ -1576,7 +1576,9 @@ sys.exit(0)
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             load_session_with_replay(
-                client.replay_handles(),
+                client
+                    .begin_replay_capture("fake-session-replay-eof")
+                    .expect("replay capture"),
                 "fake-session-replay-eof",
                 ".",
                 Vec::new(),
@@ -1587,6 +1589,10 @@ sys.exit(0)
         .expect("replay EOF must fail fast, not hang until the 30s timeout");
         assert!(matches!(result, Err(AcpError::ConnectionClosed)));
         assert!(client.is_crashed(), "EOF must mark the connection crashed");
+        assert!(
+            client.active_replay_requests.lock().unwrap().is_empty(),
+            "EOF 后不得残留 active replay registration"
+        );
     }
 
     #[tokio::test]

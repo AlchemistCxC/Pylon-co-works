@@ -1,34 +1,42 @@
 ﻿//! session/load 回放收集（R12/P3-5 拆分自 acp.rs；行为零变化）。
 //!
 //! 回放与响应均经 broadcast 收集（不注册 pending）：调用方在锁内经
-//! `AcpClient::replay_handles` 一次性提取句柄后释放锁，锁外交给
+//! `AcpClient::begin_replay_capture` 原子建立 capture 后释放锁，锁外交给
 //! [`load_session_with_replay`] 等待回放完成（超时/EOF/lag 均有界）。
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 
 use super::transport::send_line;
-use super::{AcpError, RawMessage, METHOD_SESSION_LOAD, NOTIF_SESSION_UPDATE};
+use super::{
+    AcpClient, AcpError, ClassifiedMessage, ReplayClassification, METHOD_SESSION_LOAD,
+    NOTIF_SESSION_UPDATE,
+};
 use crate::agent_config::McpServersMode;
 
-/// O3：锁外执行 session/load 回放所需的句柄（写通道 / id 计数器 / 崩溃标记 /
-/// 广播订阅 / G1-02 超时与收集上限）。调用方在锁内经 [`super::AcpClient::replay_handles`]
-/// 一次性提取，锁外交给 [`load_session_with_replay`] 等待回放完成。
-pub struct ReplayHandles {
+/// A transport-owned session/load capture. The receiver, request id, session
+/// binding and active registration are installed together by
+/// [`AcpClient::begin_replay_capture`].
+pub struct ReplayCapture {
     pub(crate) write_tx: mpsc::Sender<String>,
-    pub(crate) next_id: Arc<AtomicU64>,
+    pub(crate) request_id: u64,
+    pub(crate) session_id: String,
     pub(crate) crashed: Arc<AtomicBool>,
-    pub(crate) rx: broadcast::Receiver<RawMessage>,
+    pub(crate) rx: broadcast::Receiver<ClassifiedMessage>,
     /// G1-02：回放等待超时（缺省 30s，替代 H9 字面量）。
     pub(crate) rpc_timeout: std::time::Duration,
     /// G1-02：回放收集上限（缺省 10_000，替代 H12 字面量）。
     pub(crate) replay_max: usize,
-    /// Transport-level replay classification. The reader stamps every matching update while this
-    /// set contains the remote session id, independently of provider-private metadata.
-    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    /// RAII registration; dropping the capture clears the transport boundary.
+    _active_replay: ActiveReplayRegistration,
 }
+
+/// Compatibility name retained for callers that still refer to the old handle
+/// type; new code must construct captures through `begin_replay_capture`.
+#[allow(dead_code)]
+pub type ReplayHandles = ReplayCapture;
 
 struct ActiveReplayRegistration {
     request_id: u64,
@@ -36,19 +44,11 @@ struct ActiveReplayRegistration {
 }
 
 impl ActiveReplayRegistration {
-    fn register(
-        requests: Arc<Mutex<HashMap<u64, String>>>,
-        request_id: u64,
-        session_id: &str,
-    ) -> Result<Self, AcpError> {
-        requests
-            .lock()
-            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?
-            .insert(request_id, session_id.to_string());
-        Ok(Self {
+    fn registered(requests: Arc<Mutex<HashMap<u64, String>>>, request_id: u64) -> Self {
+        Self {
             request_id,
             requests,
-        })
+        }
     }
 }
 
@@ -87,50 +87,91 @@ pub(crate) struct ReplayBatch {
     pub(crate) metadata: ReplayMetadata,
 }
 
+impl AcpClient {
+    /// Atomically establish the replay capture linearization point. The active
+    /// registry mutex also serializes stdout classification, so no notification
+    /// can observe the receiver without its request/session binding (or vice
+    /// versa). Same-owner loads are rejected deterministically.
+    pub(crate) fn begin_replay_capture(&self, session_id: &str) -> Result<ReplayCapture, AcpError> {
+        if self.crashed.load(Ordering::Acquire) {
+            return Err(AcpError::ConnectionClosed);
+        }
+        let mut requests = self
+            .active_replay_requests
+            .lock()
+            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?;
+        if requests.values().any(|active| active == session_id) {
+            return Err(AcpError::ReplayLoadInProgress);
+        }
+        // Keep receiver creation under the same mutex as registration. The
+        // reader takes this lock before classifying each inbound message.
+        let rx = self.rx.resubscribe();
+        let request_id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        requests.insert(request_id, session_id.to_string());
+        drop(requests);
+        Ok(ReplayCapture {
+            write_tx: self.write_tx.clone(),
+            request_id,
+            session_id: session_id.to_string(),
+            crashed: self.crashed.clone(),
+            rx,
+            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            replay_max: self.protocol.replay_max(),
+            _active_replay: ActiveReplayRegistration::registered(
+                self.active_replay_requests.clone(),
+                request_id,
+            ),
+        })
+    }
+}
+
 /// Load a persisted session and collect every replay notification before the response.
 /// The reader publishes notifications before resolving the matching response, so
 /// observing the response on this broadcast receiver is the deterministic replay boundary.
 pub(crate) async fn load_session_with_replay(
-    handles: ReplayHandles,
+    capture: ReplayCapture,
     session_id: &str,
     cwd: &str,
     mcp_servers: Vec<serde_json::Value>,
     mode: McpServersMode,
 ) -> Result<(serde_json::Value, ReplayBatch), AcpError> {
+    if capture.session_id != session_id {
+        return Err(AcpError::Child(
+            "replay capture session binding mismatch".to_string(),
+        ));
+    }
     // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝
-    if handles.crashed.load(Ordering::Relaxed) {
+    if capture.crashed.load(Ordering::Relaxed) {
         return Err(AcpError::ConnectionClosed);
     }
-    // The receiver is created by `AcpClient::replay_handles` and moved into this
-    // collector. Keeping that ownership single prevents notifications emitted
-    // between handle creation and the first poll from being skipped by a later
-    // `resubscribe`.
-    let mut events = handles.rx;
-    // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
-    // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
-    // 依赖后删除；id 仅用于在广播流中匹配响应。
-    let params = super::protocol::load_params(session_id, cwd, mcp_servers, mode)?;
-    let (id, line) =
-        super::AcpClient::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
-    let _active_replay =
-        ActiveReplayRegistration::register(handles.active_replay_requests.clone(), id, session_id)?;
-    send_line(handles.write_tx, line, &handles.crashed).await?;
+    // The receiver is created by `begin_replay_capture` and moved into this
+    // collector; no downstream resubscription is allowed.
+    let mut events = capture.rx;
+    let params = super::protocol::load_params(&capture.session_id, cwd, mcp_servers, mode)?;
+    let line = serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": capture.request_id,
+        "method": METHOD_SESSION_LOAD,
+        "params": params,
+    }))
+    .map_err(|error| AcpError::Child(format!("serialize failed: {error}")))?;
+    send_line(capture.write_tx, line, &capture.crashed).await?;
 
-    let mut replay = VecDeque::with_capacity(handles.replay_max.min(10_000));
+    let mut replay = VecDeque::with_capacity(capture.replay_max.min(10_000));
     let mut observed_count = 0_u64;
     let mut dropped_count = 0_u64;
     // 总预算 deadline：无关 notification 不能把每轮 timeout 重新续满而无限挂起。
-    let deadline = tokio::time::Instant::now() + handles.rpc_timeout;
+    let deadline = tokio::time::Instant::now() + capture.rpc_timeout;
     loop {
         // 优化 3：每轮复检 crashed——EOF 仅广播 NOTIF_AGENT_CRASHED（非目标
         // session/update 被跳过），reader 先 store crashed 后广播（acp.rs:1154-1164），
         // 此处命中即可立即 ConnectionClosed，与 send_keep_rx/complete 的发送后复检
         // 一致，避免挂满 30s 假超时。
-        if handles.crashed.load(Ordering::Relaxed) {
+        if capture.crashed.load(Ordering::Relaxed) {
             return Err(AcpError::ConnectionClosed);
         }
-        let raw = match tokio::time::timeout_at(deadline, events.recv()).await {
-            Ok(Ok(raw)) => raw,
+        let message = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(message)) => message,
             Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
                 return Err(AcpError::Child(format!(
                     "session/load replay lagged by {count} messages"
@@ -144,17 +185,18 @@ pub(crate) async fn load_session_with_replay(
             Err(_) => {
                 return Err(AcpError::Child(format!(
                     "session/load replay timed out after {}s",
-                    handles.rpc_timeout.as_secs()
+                    capture.rpc_timeout.as_secs()
                 )));
             }
         };
-        if raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
-            && raw
-                .params
-                .as_ref()
-                .and_then(|params| params.get("sessionId"))
-                .and_then(|value| value.as_str())
-                == Some(session_id)
+        let ClassifiedMessage {
+            raw,
+            classification,
+        } = message;
+        if matches!(
+            classification,
+            ReplayClassification::Replay { request_id } if request_id == capture.request_id
+        ) && raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
         {
             if let Some(params) = raw.params {
                 observed_count = observed_count.saturating_add(1);
@@ -163,22 +205,25 @@ pub(crate) async fn load_session_with_replay(
                 // 达到上限后继续等待响应（不得 break 提前返回——响应缺失
                 // 会让调用方把 Null 当 session/load 结果，破坏会话配置）。
                 // G1-02：上限来自协议配置 replay_max（缺省 10_000）。
-                if handles.replay_max == 0 {
+                if capture.replay_max == 0 {
                     dropped_count = dropped_count.saturating_add(1);
                 } else {
-                    if replay.len() == handles.replay_max {
+                    if replay.len() == capture.replay_max {
                         replay.pop_front();
                         dropped_count = dropped_count.saturating_add(1);
                     }
                     replay.push_back(params);
                 }
                 if dropped_count == 1 {
-                    tracing::warn!("session/load replay 超过 {} 条，截断", handles.replay_max);
+                    tracing::warn!("session/load replay 超过 {} 条，截断", capture.replay_max);
                 }
             }
             continue;
         }
-        if raw.id != Some(super::RequestId::Number(id)) {
+        if !matches!(
+            classification,
+            ReplayClassification::Boundary { request_id } if request_id == capture.request_id
+        ) {
             continue;
         }
         if let Some(error) = raw.error {
@@ -209,34 +254,63 @@ pub(crate) async fn load_session_with_replay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::AcpKind;
+    use crate::acp::{AcpKind, RawMessage};
 
     fn test_handles(
         rpc_timeout: std::time::Duration,
         replay_max: usize,
     ) -> (
-        ReplayHandles,
+        ReplayCapture,
         mpsc::Receiver<String>,
-        broadcast::Sender<RawMessage>,
+        broadcast::Sender<ClassifiedMessage>,
         Arc<Mutex<HashMap<u64, String>>>,
     ) {
         let (write_tx, write_rx) = mpsc::channel(1);
         let (events_tx, events_rx) = broadcast::channel(64);
         let active = Arc::new(Mutex::new(HashMap::new()));
+        active
+            .lock()
+            .unwrap()
+            .insert(1, "target-session".to_string());
         (
-            ReplayHandles {
+            ReplayCapture {
                 write_tx,
-                next_id: Arc::new(AtomicU64::new(1)),
+                request_id: 1,
+                session_id: "target-session".to_string(),
                 crashed: Arc::new(AtomicBool::new(false)),
                 rx: events_rx,
                 rpc_timeout,
                 replay_max,
-                active_replay_requests: active.clone(),
+                _active_replay: ActiveReplayRegistration::registered(active.clone(), 1),
             },
             write_rx,
             events_tx,
             active,
         )
+    }
+
+    fn replay_message(raw: RawMessage) -> ClassifiedMessage {
+        let classification = if raw.kind == AcpKind::Response {
+            ReplayClassification::Boundary { request_id: 1 }
+        } else {
+            ReplayClassification::Replay { request_id: 1 }
+        };
+        ClassifiedMessage {
+            raw,
+            classification,
+        }
+    }
+
+    #[test]
+    fn same_owner_replay_load_is_rejected_or_serialized() {
+        let client = AcpClient::disconnected();
+        let first = client
+            .begin_replay_capture("same-owner")
+            .expect("first capture must start");
+        let second = client.begin_replay_capture("same-owner");
+        assert!(matches!(second, Err(AcpError::ReplayLoadInProgress)));
+        drop(first);
+        assert!(client.begin_replay_capture("same-owner").is_ok());
     }
 
     fn response(id: u64, error: Option<serde_json::Value>) -> RawMessage {
@@ -287,14 +361,14 @@ mod tests {
 
         let flooding = tokio::spawn(async move {
             for _ in 0..30 {
-                let _ = events_tx.send(RawMessage {
+                let _ = events_tx.send(ClassifiedMessage::live(RawMessage {
                     id: None,
                     method: Some("unrelated/noise".to_string()),
                     kind: AcpKind::OtherNotification,
                     result: None,
                     params: Some(serde_json::json!({})),
                     error: None,
-                });
+                }));
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         });
@@ -372,10 +446,10 @@ mod tests {
         ));
         write_rx.recv().await.expect("session/load request line");
         events_tx
-            .send(response(
+            .send(replay_message(response(
                 1,
                 Some(serde_json::json!({"code": -32000, "message": "load failed"})),
-            ))
+            )))
             .unwrap();
 
         let result = loading.await.expect("replay task join");
@@ -401,15 +475,25 @@ mod tests {
             McpServersMode::Always,
         ));
         write_rx.recv().await.expect("session/load request line");
-        events_tx.send(response(99, None)).unwrap();
         events_tx
-            .send(session_update(Some("other-session"), "other"))
+            .send(ClassifiedMessage::live(response(99, None)))
             .unwrap();
-        events_tx.send(session_update(None, "missing-id")).unwrap();
         events_tx
-            .send(session_update(Some("target-session"), "kept"))
+            .send(ClassifiedMessage::live(session_update(
+                Some("other-session"),
+                "other",
+            )))
             .unwrap();
-        events_tx.send(response(1, None)).unwrap();
+        events_tx
+            .send(ClassifiedMessage::live(session_update(None, "missing-id")))
+            .unwrap();
+        events_tx
+            .send(replay_message(session_update(
+                Some("target-session"),
+                "kept",
+            )))
+            .unwrap();
+        events_tx.send(replay_message(response(1, None))).unwrap();
 
         let (_result, batch) = loading
             .await
@@ -431,7 +515,10 @@ mod tests {
         // polled yet. A second subscription in the collector would start after
         // this notification and lose it.
         events_tx
-            .send(session_update(Some("target-session"), "pre-poll"))
+            .send(replay_message(session_update(
+                Some("target-session"),
+                "pre-poll",
+            )))
             .unwrap();
 
         let loading = tokio::spawn(load_session_with_replay(
@@ -442,7 +529,7 @@ mod tests {
             McpServersMode::Always,
         ));
         write_rx.recv().await.expect("session/load request line");
-        events_tx.send(response(1, None)).unwrap();
+        events_tx.send(replay_message(response(1, None))).unwrap();
 
         let (_result, batch) = loading
             .await
@@ -471,13 +558,13 @@ mod tests {
 
         for index in 0..COUNT {
             events_tx
-                .send(session_update(
+                .send(replay_message(session_update(
                     Some("target-session"),
                     &format!("rapid-{index}"),
-                ))
+                )))
                 .unwrap();
         }
-        events_tx.send(response(1, None)).unwrap();
+        events_tx.send(replay_message(response(1, None))).unwrap();
 
         let (_result, batch) = loading
             .await
@@ -509,12 +596,18 @@ mod tests {
         ));
         write_rx.recv().await.expect("session/load request line");
         events_tx
-            .send(session_update(Some("target-session"), "one"))
+            .send(replay_message(session_update(
+                Some("target-session"),
+                "one",
+            )))
             .unwrap();
         events_tx
-            .send(session_update(Some("target-session"), "two"))
+            .send(replay_message(session_update(
+                Some("target-session"),
+                "two",
+            )))
             .unwrap();
-        events_tx.send(response(1, None)).unwrap();
+        events_tx.send(replay_message(response(1, None))).unwrap();
 
         let (_result, batch) = loading
             .await

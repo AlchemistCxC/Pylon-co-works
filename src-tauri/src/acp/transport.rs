@@ -11,7 +11,9 @@ use tokio::sync::{broadcast, mpsc, watch};
 use super::jsonrpc::{drain_pending, Pending, PENDING_SHARDS};
 use super::request_id::RequestId;
 use super::wire_trace::{AcpWireHub, WireDirection};
-use super::{AcpError, AcpKind, RawMessage, NOTIF_AGENT_CRASHED};
+use super::{
+    AcpError, AcpKind, ClassifiedMessage, RawMessage, ReplayClassification, NOTIF_AGENT_CRASHED,
+};
 
 /// Broadcast channel capacity for ACP message fan-out.
 pub const BROADCAST_CAP: usize = 256;
@@ -103,14 +105,14 @@ pub(crate) fn fail_connection(
 /// Fan out one inbound message. Notifications first enter the Kernel's bounded
 /// single-consumer inbox; broadcast is retained only for replay/RPC observers.
 fn fanout_inbound(
-    notification_tx: &mpsc::Sender<RawMessage>,
-    tx: &broadcast::Sender<RawMessage>,
-    raw: RawMessage,
+    notification_tx: &mpsc::Sender<ClassifiedMessage>,
+    tx: &broadcast::Sender<ClassifiedMessage>,
+    message: ClassifiedMessage,
 ) {
-    if raw.kind != AcpKind::Response {
-        let _ = notification_tx.blocking_send(raw.clone());
+    if message.raw.kind != AcpKind::Response {
+        let _ = notification_tx.blocking_send(message.clone());
     }
-    let _ = tx.send(raw);
+    let _ = tx.send(message);
 }
 
 /// Tag notifications observed inside an active `session/load` request before they enter either
@@ -119,44 +121,47 @@ fn fanout_inbound(
 fn classify_active_replay_message(
     raw: &mut RawMessage,
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
-) {
+) -> ReplayClassification {
     if raw.kind == AcpKind::Response {
         if let Some(RequestId::Number(request_id)) = raw.id {
             if let Ok(mut requests) = active_replay_requests.lock() {
-                requests.remove(&request_id);
+                if requests.remove(&request_id).is_some() {
+                    return ReplayClassification::Boundary { request_id };
+                }
             }
         }
-        return;
+        return ReplayClassification::Live;
     }
     if raw.kind != AcpKind::SessionUpdate {
-        return;
+        return ReplayClassification::Live;
     }
     let Some(params) = raw
         .params
         .as_mut()
         .and_then(serde_json::Value::as_object_mut)
     else {
-        return;
+        return ReplayClassification::Live;
     };
     let Some(session_id) = params
         .get("sessionId")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
     else {
-        return;
+        return ReplayClassification::Live;
     };
-    let is_active = active_replay_requests
-        .lock()
-        .map(|requests| requests.values().any(|active| active == &session_id))
-        .unwrap_or(false);
-    if !is_active {
-        return;
-    }
+    let request_id = active_replay_requests.lock().ok().and_then(|requests| {
+        requests
+            .iter()
+            .find_map(|(request_id, active)| (active == &session_id).then_some(*request_id))
+    });
+    let Some(request_id) = request_id else {
+        return ReplayClassification::Live;
+    };
     let Some(update) = params
         .get_mut("update")
         .and_then(serde_json::Value::as_object_mut)
     else {
-        return;
+        return ReplayClassification::Live;
     };
     let meta = update
         .entry("_meta")
@@ -167,6 +172,7 @@ fn classify_active_replay_message(
     if let Some(meta) = meta.as_object_mut() {
         meta.insert("periReplay".to_string(), serde_json::Value::Bool(true));
     }
+    ReplayClassification::Replay { request_id }
 }
 
 /// G1-05：writer 任务启动（S3 拆分；R4 自 std 线程改 tokio 任务：
@@ -184,8 +190,8 @@ pub(crate) fn spawn_writer_task(
     crashed: &Arc<AtomicBool>,
     crashed_watch: &watch::Sender<bool>,
     pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    tx: &broadcast::Sender<RawMessage>,
-    notification_tx: mpsc::Sender<RawMessage>,
+    tx: &broadcast::Sender<ClassifiedMessage>,
+    notification_tx: mpsc::Sender<ClassifiedMessage>,
     write_timeout: u64,
     wire_trace: Option<Arc<AcpWireHub>>,
 ) -> tokio::task::JoinHandle<()> {
@@ -228,8 +234,10 @@ pub(crate) fn spawn_writer_task(
                         ),
                         error: None,
                     };
-                    let _ = writer_notification_tx.send(raw.clone()).await;
-                    let _ = writer_tx.send(raw);
+                    let _ = writer_notification_tx
+                        .send(ClassifiedMessage::live(raw.clone()))
+                        .await;
+                    let _ = writer_tx.send(ClassifiedMessage::live(raw));
                     break;
                 }
                 // 写超时：agent 存活但不读 stdin，reader 不会收到 EOF——
@@ -252,8 +260,10 @@ pub(crate) fn spawn_writer_task(
                         ),
                         error: None,
                     };
-                    let _ = writer_notification_tx.send(raw.clone()).await;
-                    let _ = writer_tx.send(raw);
+                    let _ = writer_notification_tx
+                        .send(ClassifiedMessage::live(raw.clone()))
+                        .await;
+                    let _ = writer_tx.send(ClassifiedMessage::live(raw));
                     break;
                 }
             }
@@ -428,8 +438,8 @@ pub(crate) fn spawn_stderr_reader(
 pub(crate) fn spawn_stdout_reader(
     stdout: std::io::BufReader<std::process::ChildStdout>,
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    tx: broadcast::Sender<RawMessage>,
-    notification_tx: mpsc::Sender<RawMessage>,
+    tx: broadcast::Sender<ClassifiedMessage>,
+    notification_tx: mpsc::Sender<ClassifiedMessage>,
     crashed: &Arc<AtomicBool>,
     crashed_watch: &watch::Sender<bool>,
     runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
@@ -495,10 +505,17 @@ pub(crate) fn spawn_stdout_reader(
                 params: msg_val.get("params").cloned(),
                 error: msg_val.get("error").cloned(),
             };
-            classify_active_replay_message(&mut raw, &active_replay_requests);
+            let classification = classify_active_replay_message(&mut raw, &active_replay_requests);
             // This reader is a dedicated OS thread, so a full Kernel inbox applies
             // transport backpressure without blocking Tokio.
-            fanout_inbound(&notification_tx_reader, &tx_clone, raw.clone());
+            fanout_inbound(
+                &notification_tx_reader,
+                &tx_clone,
+                ClassifiedMessage {
+                    raw: raw.clone(),
+                    classification,
+                },
+            );
             if raw.method.is_none() {
                 // ACP-01：pending 注册表只承载 Pylon 自生成 numeric id——仅 Number
                 // variant 结算；string-id 响应（inbound 请求 id）不命中 outbound pending。
@@ -526,7 +543,7 @@ pub(crate) fn spawn_stdout_reader(
                             fanout_inbound(
                                 &notification_tx_reader,
                                 &tx_clone,
-                                RawMessage {
+                                ClassifiedMessage::live(RawMessage {
                                     id: None,
                                     method: Some(NOTIF_AGENT_CRASHED.to_string()),
                                     kind: AcpKind::Crashed,
@@ -535,7 +552,7 @@ pub(crate) fn spawn_stdout_reader(
                                         "reason": CrashReason::PendingLockPoisoned.as_str()
                                     })),
                                     error: None,
-                                },
+                                }),
                             );
                             settled_with_reason = true;
                             break;
@@ -556,7 +573,7 @@ pub(crate) fn spawn_stdout_reader(
             fanout_inbound(
                 &notification_tx_reader,
                 &tx_clone,
-                RawMessage {
+                ClassifiedMessage::live(RawMessage {
                     id: None,
                     method: Some(NOTIF_AGENT_CRASHED.to_string()),
                     kind: AcpKind::Crashed,
@@ -564,7 +581,7 @@ pub(crate) fn spawn_stdout_reader(
                     // ISSUE-17 W1：EOF → stdout_closed（稳定 code）
                     params: Some(serde_json::json!({"reason": CrashReason::StdoutClosed.as_str()})),
                     error: None,
-                },
+                }),
             );
             if let Some(hub) = &stdout_logs {
                 hub.push(
@@ -606,7 +623,10 @@ mod tests {
             error: None,
         };
 
-        classify_active_replay_message(&mut raw, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut raw, &active),
+            ReplayClassification::Replay { request_id: 7 }
+        );
 
         assert_eq!(
             raw.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
@@ -633,7 +653,10 @@ mod tests {
             error: None,
         };
 
-        classify_active_replay_message(&mut raw, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut raw, &active),
+            ReplayClassification::Live
+        );
 
         assert!(raw.params.as_ref().unwrap()["update"]
             .get("_meta")
@@ -654,7 +677,10 @@ mod tests {
             params: None,
             error: None,
         };
-        classify_active_replay_message(&mut response, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut response, &active),
+            ReplayClassification::Boundary { request_id: 7 }
+        );
 
         let mut live = RawMessage {
             id: None,
@@ -667,7 +693,10 @@ mod tests {
             })),
             error: None,
         };
-        classify_active_replay_message(&mut live, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut live, &active),
+            ReplayClassification::Live
+        );
 
         assert!(active.lock().unwrap().is_empty());
         assert!(live.params.as_ref().unwrap()["update"]
@@ -690,7 +719,10 @@ mod tests {
             error: None,
         };
 
-        classify_active_replay_message(&mut unrelated, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut unrelated, &active),
+            ReplayClassification::Live
+        );
 
         assert_eq!(
             active.lock().unwrap().get(&7).map(String::as_str),
@@ -775,9 +807,154 @@ mod tests {
             error: Some(serde_json::json!({"code": -32000, "message": "load failed"})),
         };
 
-        classify_active_replay_message(&mut response, &active);
+        assert_eq!(
+            classify_active_replay_message(&mut response, &active),
+            ReplayClassification::Boundary { request_id: 7 }
+        );
 
         assert!(active.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn replay_capture_registration_window_is_classified_once() {
+        let active = Arc::new(Mutex::new(HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut update = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "window"}}
+            })),
+            error: None,
+        };
+
+        // Registration and receiver ownership share the active-registry fence;
+        // the notification receives one transport decision, not a second guess.
+        assert_eq!(
+            classify_active_replay_message(&mut update, &active),
+            ReplayClassification::Replay { request_id: 7 }
+        );
+        assert_eq!(
+            classify_active_replay_message(&mut update, &active),
+            ReplayClassification::Replay { request_id: 7 }
+        );
+        assert_eq!(active.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn replay_response_is_exclusive_boundary() {
+        let active = Arc::new(Mutex::new(HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut before = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "before"}}
+            })),
+            error: None,
+        };
+        let mut response = RawMessage {
+            id: Some(RequestId::Number(7)),
+            method: None,
+            kind: AcpKind::Response,
+            result: Some(serde_json::json!({"ok": true})),
+            params: None,
+            error: None,
+        };
+        let mut after = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "after"}}
+            })),
+            error: None,
+        };
+
+        assert_eq!(
+            classify_active_replay_message(&mut before, &active),
+            ReplayClassification::Replay { request_id: 7 }
+        );
+        assert_eq!(
+            classify_active_replay_message(&mut response, &active),
+            ReplayClassification::Boundary { request_id: 7 }
+        );
+        assert_eq!(
+            classify_active_replay_message(&mut after, &active),
+            ReplayClassification::Live
+        );
+    }
+
+    #[test]
+    fn concurrent_replay_loads_do_not_cross_classify() {
+        let active = Arc::new(Mutex::new(HashMap::from([
+            (7, "session-a".to_string()),
+            (8, "session-b".to_string()),
+        ])));
+        let update = |session_id: &str| RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": session_id,
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "chunk"}}
+            })),
+            error: None,
+        };
+        let mut a = update("session-a");
+        let mut b = update("session-b");
+
+        assert_eq!(
+            classify_active_replay_message(&mut a, &active),
+            ReplayClassification::Replay { request_id: 7 }
+        );
+        assert_eq!(
+            classify_active_replay_message(&mut b, &active),
+            ReplayClassification::Replay { request_id: 8 }
+        );
+    }
+
+    #[test]
+    fn peri_replay_metadata_is_not_authority() {
+        let active = Arc::new(Mutex::new(HashMap::new()));
+        let mut raw = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"text": "provider marker must not win"},
+                    "_meta": {"periReplay": true}
+                }
+            })),
+            error: None,
+        };
+
+        assert_eq!(
+            classify_active_replay_message(&mut raw, &active),
+            ReplayClassification::Live
+        );
+        assert_eq!(
+            raw.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
+            true,
+            "provider marker is preserved only as compatibility metadata"
+        );
     }
 
     #[test]
@@ -835,14 +1012,14 @@ mod tests {
                 fanout_inbound(
                     &notification_tx,
                     &broadcast_tx,
-                    RawMessage {
+                    ClassifiedMessage::live(RawMessage {
                         id: None,
                         method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
                         kind: AcpKind::SessionUpdate,
                         result: None,
                         params: Some(serde_json::json!({"index": index})),
                         error: None,
-                    },
+                    }),
                 );
             }
         });
@@ -851,7 +1028,7 @@ mod tests {
             let raw = notification_rx
                 .blocking_recv()
                 .expect("notification inbox must remain open");
-            assert_eq!(raw.params.as_ref().unwrap()["index"], expected);
+            assert_eq!(raw.raw.params.as_ref().unwrap()["index"], expected);
         }
         producer.join().expect("producer thread");
         assert!(matches!(
@@ -867,14 +1044,14 @@ mod tests {
         fanout_inbound(
             &notification_tx,
             &broadcast_tx,
-            RawMessage {
+            ClassifiedMessage::live(RawMessage {
                 id: Some(RequestId::Number(7)),
                 method: None,
                 kind: AcpKind::Response,
                 result: Some(serde_json::json!({"ok": true})),
                 params: None,
                 error: None,
-            },
+            }),
         );
 
         assert!(matches!(
@@ -882,7 +1059,7 @@ mod tests {
             Err(mpsc::error::TryRecvError::Empty)
         ));
         assert_eq!(
-            broadcast_rx.try_recv().unwrap().id,
+            broadcast_rx.try_recv().unwrap().raw.id,
             Some(RequestId::Number(7))
         );
     }

@@ -248,7 +248,15 @@ async fn probe_unknown_session_continuity(
         .map(|candidate| {
             let runtime = runtime.clone();
             async move {
-                let handles = runtime.acp.lock().await.replay_handles();
+                let handles = runtime
+                    .acp
+                    .lock()
+                    .await
+                    .begin_replay_capture(&candidate.peri_id);
+                let handles = match handles {
+                    Ok(handles) => handles,
+                    Err(error) => return (candidate, Ok(Err(error))),
+                };
                 let probe = tokio::time::timeout_at(
                     deadline,
                     crate::acp::load_session_with_replay(

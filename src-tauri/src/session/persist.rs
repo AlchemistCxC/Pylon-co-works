@@ -77,8 +77,8 @@ pub(crate) async fn load_persisted_session(
         true,
         crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
     )?;
-    // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
-    let handles = runtime.acp.lock().await.replay_handles();
+    // A-02：锁内原子建立 replay capture，等待在锁外进行——回放最长 30s，不阻塞其他命令。
+    let handles = runtime.acp.lock().await.begin_replay_capture(&peri_id)?;
     let load_result = crate::acp::load_session_with_replay(
         handles,
         &peri_id,

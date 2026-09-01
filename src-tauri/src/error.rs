@@ -49,6 +49,8 @@ pub enum PylonError {
     DatabaseIntegrity(String),
     #[error("session replay truncated; dropped {dropped_count} events")]
     ReplayTruncated { dropped_count: u64 },
+    #[error("replay load already in progress")]
+    ReplayLoadInProgress,
     #[error("{0}")]
     Workspace(String),
     #[error("Prism error: {0}")]
@@ -94,6 +96,7 @@ impl PylonError {
             Self::DatabaseSchemaInvalid(_) => "database_schema_invalid",
             Self::DatabaseIntegrity(_) => "database_integrity_failed",
             Self::ReplayTruncated { .. } => "replay_truncated",
+            Self::ReplayLoadInProgress => "replay_load_in_progress",
             Self::Workspace(_) => "workspace_error",
             Self::Prism(_) => "prism_error",
             Self::Git(_) => "git_error",
@@ -216,6 +219,10 @@ mod tests {
         assert_eq!(
             PylonError::ReplayTruncated { dropped_count: 3 }.code(),
             "replay_truncated"
+        );
+        assert_eq!(
+            PylonError::ReplayLoadInProgress.code(),
+            "replay_load_in_progress"
         );
         assert_eq!(PylonError::Workspace("x".into()).code(), "workspace_error");
         assert_eq!(PylonError::Prism("x".into()).code(), "prism_error");

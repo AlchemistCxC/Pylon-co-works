@@ -40,7 +40,7 @@ pub use protocol::{
     session_close_params, session_new_params, session_set_config_option_params,
     session_set_mode_params, session_set_model_params, SessionUpdateVariant,
 };
-pub use replay::ReplayHandles;
+pub use replay::{ReplayCapture, ReplayHandles};
 pub(crate) use replay::{load_session_with_replay, ReplayMetadata};
 pub(crate) use transport::{
     send_line, spawn_stderr_reader, spawn_stdout_reader, spawn_writer_task, CrashReason,

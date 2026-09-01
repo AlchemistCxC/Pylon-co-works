@@ -499,6 +499,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     agent_id: &str,
     event_service: Option<&Arc<crate::session::EventService>>,
     message_service: Option<&Arc<crate::session::MessageService>>,
+    classification: crate::acp::ReplayClassification,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -589,11 +590,13 @@ async fn handle_session_update<R: tauri::Runtime>(
         .get("sessionUpdate")
         .and_then(|v| v.as_str())
         .and_then(crate::acp::SessionUpdateVariant::from_str);
-    let is_replay = update
-        .get("_meta")
-        .and_then(|meta| meta.get("periReplay"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+    // Replay/live is decided once at the transport boundary and passed through
+    // the Kernel seam. Provider `_meta.periReplay` is compatibility metadata,
+    // never an authority for side-effect policy.
+    let is_replay = matches!(
+        classification,
+        crate::acp::ReplayClassification::Replay { .. }
+    );
     // G3 §2.2.1 锁收敛：单一临界区取代原 mapping_is_current 预检（锁 2）、
     // received_round 读取（锁 3）、collect_response_chunk（锁 4）、mutation（锁 5）四段。
     // early return 语义逐一保持：stale → return true（保持主循环）；user_message_chunk
@@ -1162,10 +1165,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 }
                 raw = notification_inbox.recv() => raw,
             };
-            let raw = match raw {
-                Some(raw) => raw,
+            let classified = match raw {
+                Some(classified) => classified,
                 None => break,
             };
+            let crate::acp::ClassifiedMessage {
+                raw,
+                classification,
+            } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
             }
@@ -1310,6 +1317,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &agent_id,
                 event_service.as_ref(),
                 message_service.as_ref(),
+                classification,
                 payload,
             )
             .await

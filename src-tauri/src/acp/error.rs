@@ -172,6 +172,9 @@ pub enum AcpError {
     WriteTimeout,
     #[error("RPC timeout after 30s")]
     RpcTimeout,
+    /// A replay load for the same remote session is already active.
+    #[error("replay_load_in_progress")]
+    ReplayLoadInProgress,
     #[error("RPC error: {0}")]
     Rpc(String),
     /// AgentConnectFailure 字段多（String×5），Box 化把 AcpError/Result 体积压回
@@ -282,6 +285,9 @@ impl From<AcpError> for String {
 
 impl From<AcpError> for crate::error::PylonError {
     fn from(error: AcpError) -> Self {
+        if matches!(&error, AcpError::ReplayLoadInProgress) {
+            return crate::error::PylonError::ReplayLoadInProgress;
+        }
         // R6e：保持既有 wire 语义——ACP 操作错误折叠为 protocol_error（code 不变）。
         crate::error::PylonError::Protocol(error.to_string())
     }

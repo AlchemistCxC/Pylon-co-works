@@ -12,7 +12,7 @@ pub struct AcpClient {
     child: ManagedChild,
     /// G1-02：per-agent 协议行为配置（connect_with_logs 从 agent.protocol() clone；
     /// disconnected() 用默认实例）。超时/限额/握手参数唯一读取点。
-    protocol: crate::agent_config::AcpProtocolConfig,
+    pub(crate) protocol: crate::agent_config::AcpProtocolConfig,
     /// P1（能力协商暴露）：initialize 握手返回的 agentCapabilities（原始 Value，
     /// 含 loadSession/promptCapabilities/sessionCapabilities/mcpCapabilities 及
     /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
@@ -23,17 +23,17 @@ pub struct AcpClient {
     /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
     /// 写入的旧任务（`disconnected()` 无运行时，为 None）。
     writer_task: Option<tokio::task::JoinHandle<()>>,
-    next_id: Arc<AtomicU64>,
+    pub(crate) next_id: Arc<AtomicU64>,
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// Broadcast channel for all received messages (responses + notifications).
-    pub rx: broadcast::Receiver<RawMessage>,
+    pub rx: broadcast::Receiver<ClassifiedMessage>,
     /// Lossless, single-consumer notification inbox for the Kernel dispatcher.
     /// The broadcast receiver remains a replay/observation fan-out and is not a
     /// durable-ingest source.
     notification_inbox: NotificationInbox,
     /// Remote session ids whose `session/load` response boundary has not been observed yet.
     /// The stdout reader uses this to classify replay before queueing notifications.
-    active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
     /// A7：EOF 崩溃信号独立 watch 通道（保留最新值，broadcast 洪泛 Lagged 丢消息
@@ -52,17 +52,17 @@ pub struct AcpClient {
 /// Receiver ownership and locking stay inside ACP; callers only learn ordered recv.
 #[derive(Clone)]
 pub(crate) struct NotificationInbox {
-    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<RawMessage>>>,
+    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
 }
 
 impl NotificationInbox {
-    fn new(rx: mpsc::Receiver<RawMessage>) -> Self {
+    fn new(rx: mpsc::Receiver<ClassifiedMessage>) -> Self {
         Self {
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
         }
     }
 
-    pub(crate) async fn recv(&self) -> Option<RawMessage> {
+    pub(crate) async fn recv(&self) -> Option<ClassifiedMessage> {
         self.rx.lock().await.recv().await
     }
 }
@@ -105,6 +105,31 @@ pub struct RawMessage {
     pub result: Option<serde_json::Value>,
     pub params: Option<serde_json::Value>,
     pub error: Option<serde_json::Value>,
+}
+
+/// Transport-owned classification produced once by the stdout reader and shared
+/// by the Kernel inbox and replay observer. `_meta.periReplay` remains only a
+/// compatibility projection of this decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReplayClassification {
+    Live,
+    Replay { request_id: u64 },
+    Boundary { request_id: u64 },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ClassifiedMessage {
+    pub(crate) raw: RawMessage,
+    pub(crate) classification: ReplayClassification,
+}
+
+impl ClassifiedMessage {
+    pub(crate) fn live(raw: RawMessage) -> Self {
+        Self {
+            raw,
+            classification: ReplayClassification::Live,
+        }
+    }
 }
 
 /// 一次 RPC 的同步准备阶段产物：id（用于清理 pending）、序列化行、写通道、响应接收器。
@@ -525,20 +550,6 @@ impl AcpClient {
                 format!("unsupported transport: {other}"),
             )
             .into()),
-        }
-    }
-
-    /// 提取锁外回放所需句柄。调用方应在锁内调用后立即释放锁，再以句柄等待。
-    /// G1-05：原独立 impl 块并入主块（S1 卫生，行为零变化）。
-    pub fn replay_handles(&self) -> ReplayHandles {
-        ReplayHandles {
-            write_tx: self.write_tx.clone(),
-            next_id: self.next_id.clone(),
-            crashed: self.crashed.clone(),
-            rx: self.rx.resubscribe(),
-            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
-            replay_max: self.protocol.replay_max(),
-            active_replay_requests: self.active_replay_requests.clone(),
         }
     }
 
