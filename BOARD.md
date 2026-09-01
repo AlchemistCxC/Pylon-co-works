@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:45] [施工员A·工程师] A-02 rejection edge：`1c38f7d1` 保证临时 slot 回滚失败时仍返回原 `replay_load_in_progress`，并单独记录 rollback error；不改变正常回滚。`session::persist` 定向 4 项继续通过。
+
 [2026-09-02 04:25] [施工员A·工程师] A-02 rejection hardening：`6b496620` 修复同 owner 并发 `replay_load_in_progress` 后临时 session slot 未回滚的问题；拒绝路径现在保留首个 load 的绑定/状态并继续依赖 capture RAII 清理。`session::persist` 定向 4 项通过；Track B 无需适配。
 
 [2026-09-02 04:05] [施工员A·工程师] A-04 trace 补强：`e6b393ca` 为 timeout/EOF/RPC error 路径补发 bounded `replay_trace`，计数与 boundary 明确为未观察/0，稳定 `error_code` 不含远端错误正文；`session::persist` 定向 4 项通过。A 线交付不变，Track B 仍无需改 typed client。
