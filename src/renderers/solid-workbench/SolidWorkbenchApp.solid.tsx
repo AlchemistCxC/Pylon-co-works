@@ -34,6 +34,7 @@ import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.t
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
+import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
 
 // Compatibility export for the existing interaction kind contract/tests.
 export { interactionRenderKind } from './solidWorkbenchProjectionSupport.ts'
@@ -555,6 +556,29 @@ function WorkbenchDocumentSurface(props: {
   sessionId: string | null
   reducedMotion: boolean
 }) {
+  /**
+   * `session.started` carries the ACP negotiation catalogue.  Those model /
+   * mode / reasoning entries are consumed by the control-center selectors and
+   * must not become a second, persistent config form below the conversation.
+   * A later ordinary `session.config-updated` event is intentionally kept
+   * visible when there was no startup negotiation; existing agents use that
+   * event for editable runtime settings and it must retain its editor.
+   *
+   * Keep this check on the projected timeline rather than guessing from the
+   * option id alone.  `id: "model"` is also a valid ordinary config option,
+   * and filtering it unconditionally regresses the normal config surface.
+   */
+  const hasSessionStartNegotiation = () => props.document?.timeline.some(entry => {
+    if (entry.kind !== 'session' || !entry.data || typeof entry.data !== 'object' || Array.isArray(entry.data)) return false
+    const event = entry.data as { type?: unknown; options?: unknown }
+    return event.type === 'session.started' && Array.isArray(event.options)
+  }) ?? false
+  const visibleConfigOptions = () => {
+    const options = props.document?.session.options ?? []
+    return hasSessionStartNegotiation()
+      ? options.filter(option => !isControlCenterConfigOption(option))
+      : options
+  }
   return (
     <Show when={props.document}>
       {document => (
@@ -650,14 +674,14 @@ function WorkbenchDocumentSurface(props: {
               )}</For>
             </div>
           </Show>
-          <Show when={(document().session.options?.length ?? 0) > 0}>
-            <div class="solid-workbench-config" data-config-count={document().session.options?.length ?? 0}>
+          <Show when={visibleConfigOptions().length > 0}>
+            <div class="solid-workbench-config" data-config-count={visibleConfigOptions().length}>
               <WorkbenchContentSlot
                 nodeId={`${props.sessionId ?? 'none'}:session:config`}
                 kind="session.config"
-                payload={{ options: document().session.options ?? [] }}
+                payload={{ options: visibleConfigOptions() }}
                 context={props.context}
-                fallback={<SolidSessionSurfaceCard kind="session.config" payload={{ options: document().session.options ?? [] }}
+                fallback={<SolidSessionSurfaceCard kind="session.config" payload={{ options: visibleConfigOptions() }}
                   appearance={sessionSurfaceAppearance(props.context, 'session.config')}
                   commands={fallbackRenderCommands(props.context)} />}
               />

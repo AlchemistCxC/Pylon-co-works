@@ -414,11 +414,27 @@ export function SolidControlCenter() {
     </div></div>
   }
 
-  const statusSlots = () => <For each={STATUS_SLOTS}>{slot => (
-    <div class={`cc-${slot}`} data-cc-slot={slot}>
-      <For each={idsForSlot(slot)}>{renderWidget}</For>
+  /**
+   * Render separators from the actual visible widget sequence.  The old CSS
+   * implementation used sibling/`:empty` pseudo selectors; an empty Solid
+   * slot can still contain a marker node, so that approach occasionally put a
+   * leading `·` in front of the first visible control (most noticeably before
+   * the model name).  A concrete separator has an unambiguous index and is
+   * also easier for themes to style consistently.
+   */
+  const statusSlots = () => <For each={STATUS_SLOTS}>{(slot, slotIndex) => {
+    const precedingCount = () => STATUS_SLOTS
+      .slice(0, slotIndex())
+      .reduce((count, previousSlot) => count + idsForSlot(previousSlot).length, 0)
+    return <div class={`cc-${slot}`} data-cc-slot={slot}>
+      <For each={idsForSlot(slot)}>{(id, index) => <span class="cc-status-entry" style={{ display: 'contents' }}>
+        <Show when={precedingCount() + index() > 0}>
+          <span class="cc-widget-separator" data-separator-index={precedingCount() + index()} aria-hidden="true">·</span>
+        </Show>
+        {renderWidget(id)}
+      </span>}</For>
     </div>
-  )}</For>
+  }}</For>
 
   const commandHint = () => input().sessionId && appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
     ? <div class="cc-command-hint" aria-label="输入快捷键提示">
@@ -431,6 +447,7 @@ export function SolidControlCenter() {
   return <div
     class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
+    data-creation-state={sessionEntering() ? 'entering' : submitting() ? 'creating' : undefined}
     role={!input().sessionId ? 'region' : undefined}
     aria-label={!input().sessionId ? 'Agent 工作台空态' : undefined}
     aria-busy={!input().sessionId ? submitting() : undefined}
@@ -469,6 +486,12 @@ export function SolidControlCenter() {
         <div class="cc-status-row">{statusSlots()}{commandHint()}</div>
       </>}
     </div>
+    <Show when={submitting() && !sessionEntering()}>
+      <div class="cc-creation-progress" data-creation-progress role="status" aria-label="正在创建会话">
+        <span class="cc-creation-progress-track" aria-hidden="true"><span class="cc-creation-progress-bar" /></span>
+        <span class="cc-creation-progress-label">正在建立会话…</span>
+      </div>
+    </Show>
     <Show when={appearance().ccEditMode && selected()}>{id => (
       <div class="cc-prop-panel" role="dialog" aria-label={`${WIDGET_LABELS[id()]} 属性`}>
         <div class="cc-prop-header"><span>{WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>

@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from 'solid-js'
+import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
   optionLabel,
@@ -27,6 +27,10 @@ export function SolidModelWidget(props: {
   const appearance = () => workbench.appearanceSnapshot()
   const [open, setOpen] = createSignal(false)
   const [error, setError] = createSignal('')
+  let root: HTMLDivElement | undefined
+  let trigger: HTMLButtonElement | undefined
+  let previousSessionId = workbench.input().sessionId
+  const menuId = `cc-model-menu-${createUniqueId()}`
   const modelEntries = () => resolveModelOptionEntries(runtime(), props.draftValue?.())
   const models = () => modelEntries().map(item => item.id)
   const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
@@ -34,28 +38,58 @@ export function SolidModelWidget(props: {
   const scale = () => appearance().ccScale.model ?? 100
   const reasoningEntries = () => resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
   const dropdown = () => props.forceDropdown === true || appearance().modelVariant === 'dropdown'
+  const close = (restoreFocus = false) => {
+    setOpen(false)
+    if (restoreFocus) queueMicrotask(() => trigger?.focus())
+  }
+  createEffect(() => {
+    const currentSessionId = workbench.input().sessionId
+    if (currentSessionId !== previousSessionId || !dropdown()) close()
+    previousSessionId = currentSessionId
+  })
+  onMount(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!open() || root?.contains(event.target as Node)) return
+      close()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!open() || event.key !== 'Escape') return
+      event.preventDefault()
+      close(true)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    onCleanup(() => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    })
+  })
   const choose = async (target: string) => {
     const sessionId = workbench.input().sessionId
     // A draft setter is an explicit empty-state (or transition-state) binding.
     // Prefer it even when the host has already published a session id: session
     // selection and renderer updates can arrive in the same tick, and sending
     // a live-session command here would race the create transaction.
-    if (props.onDraftChange) { props.onDraftChange(target); setOpen(false); return }
-    if (!sessionId || target === model()) return
+    if (props.onDraftChange) { props.onDraftChange(target); close(true); return }
+    if (!sessionId || target === model()) { close(true); return }
     const result = await workbench.commands.setModel(sessionId, target)
     if (!result.ok) setError(result.error || '模型切换失败')
     else setError('')
-    setOpen(false)
+    close(true)
   }
 
   return (
-    <div class="solid-model-widget">
+    <div ref={node => { root = node }} class="solid-model-widget">
       <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
       <Show when={dropdown()} fallback={
         <Show when={appearance().modelVariant === 'badge'} fallback={
           <Show when={appearance().modelVariant === 'minimal'} fallback={<ModelDropdown
+            menuId={menuId}
+            triggerRef={node => { trigger = node }}
+            rootRef={node => { root = node }}
             open={open}
             setOpen={setOpen}
+            close={close}
             scale={scale}
             displayModel={displayModel}
             model={model}
@@ -78,8 +112,12 @@ export function SolidModelWidget(props: {
         </Show>
       }>
         <ModelDropdown
+          menuId={menuId}
+          triggerRef={node => { trigger = node }}
+          rootRef={node => { root = node }}
           open={open}
           setOpen={setOpen}
+          close={close}
           scale={scale}
           displayModel={displayModel}
           model={model}
@@ -95,8 +133,12 @@ export function SolidModelWidget(props: {
 }
 
 function ModelDropdown(props: {
+  menuId: string
+  triggerRef: (node: HTMLButtonElement) => void
+  rootRef: (node: HTMLDivElement) => void
   open: () => boolean
   setOpen: (value: boolean | ((previous: boolean) => boolean)) => void
+  close: (restoreFocus?: boolean) => void
   scale: () => number
   displayModel: () => string
   model: () => string
@@ -106,17 +148,38 @@ function ModelDropdown(props: {
   onReasoningChange?: (value: string) => void
   choose: (value: string) => Promise<void>
 }) {
-  return <div class="cc-model-dropdown">
+  let menu: HTMLDivElement | undefined
+  createEffect(() => {
+    if (!props.open()) return
+    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
+  })
+  return <div ref={props.rootRef} class="cc-model-dropdown">
     <button
+      ref={props.triggerRef}
       type="button"
       class="model-tag"
       style={{ 'font-size': `${props.scale()}%` }}
       aria-haspopup="listbox"
       aria-expanded={props.open()}
+      aria-controls={props.menuId}
       onClick={() => props.setOpen(value => !value)}
     >{props.displayModel()} ▾</button>
     <Show when={props.open()}>
-      <div class="model-menu" role="listbox" aria-label="模型列表">
+      <div
+        ref={node => { menu = node }}
+        id={props.menuId}
+        class="model-menu"
+        data-popover="control-center"
+        role="listbox"
+        aria-label="模型列表"
+        tabIndex="-1"
+        onKeyDown={event => {
+          if (event.key !== 'Escape') return
+          event.preventDefault()
+          event.stopPropagation()
+          props.close(true)
+        }}
+      >
         <Show when={props.reasoningValue && props.onReasoningChange}>
           <div class="model-menu-section" role="group" aria-label="思考强度">
             <span>思考强度</span>
@@ -125,9 +188,10 @@ function ModelDropdown(props: {
               role="option"
               aria-selected={effort.id === props.reasoningValue?.()}
               class={`model-item${effort.id === props.reasoningValue?.() ? ' active' : ''}`}
+              tabIndex={-1}
               onClick={() => {
                 props.onReasoningChange?.(effort.id)
-                props.setOpen(false)
+                props.close(true)
               }}
             >{optionLabel('reasoning', effort.id, effort.label)}</button>}</For>
           </div>
@@ -138,6 +202,7 @@ function ModelDropdown(props: {
             role="option"
             aria-selected={item.id === props.model()}
             class={`model-item${item.id === props.model() ? ' active' : ''}`}
+            tabIndex={-1}
             onClick={() => void props.choose(item.id)}
           >{item.label || item.id}</button>
         )}</For>
@@ -156,12 +221,60 @@ export function SolidModeWidget(props: {
   const appearance = () => workbench.appearanceSnapshot()
   const [error, setError] = createSignal('')
   const [open, setOpen] = createSignal(false)
+  let root: HTMLDivElement | undefined
+  let trigger: HTMLButtonElement | undefined
+  let previousSessionId = workbench.input().sessionId
+  const menuId = `cc-mode-menu-${createUniqueId()}`
   const modeEntries = () => resolveModeOptionEntries(runtime(), props.draftValue?.())
   const modes = () => modeEntries().map(item => item.id)
   const mode = () => props.draftValue?.() || runtime().activeMode || modeEntries()[0]?.id || 'default'
   const scale = () => appearance().ccScale.mode ?? 100
   const dropdown = () => props.forceDropdown === true
   const displayMode = () => dropdown() ? optionLabel('mode', mode()) : mode()
+  const close = (restoreFocus = false) => {
+    setOpen(false)
+    if (restoreFocus) queueMicrotask(() => trigger?.focus())
+  }
+  createEffect(() => {
+    const currentSessionId = workbench.input().sessionId
+    if (currentSessionId !== previousSessionId || !dropdown()) close()
+    previousSessionId = currentSessionId
+  })
+  onMount(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!open() || root?.contains(event.target as Node)) return
+      close()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!open() || event.key !== 'Escape') return
+      event.preventDefault()
+      close(true)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    onCleanup(() => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    })
+  })
+  let menu: HTMLDivElement | undefined
+  createEffect(() => {
+    if (!open()) return
+    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
+  })
+  const chooseMode = async (target: string) => {
+    const sessionId = workbench.input().sessionId
+    if (props.onDraftChange) {
+      props.onDraftChange(target)
+      close(true)
+      return
+    }
+    if (!sessionId) { close(true); return }
+    const result = await workbench.commands.setMode(sessionId, target)
+    if (!result.ok) setError(result.error || '权限模式切换失败')
+    else setError('')
+    close(true)
+  }
   const cycle = async () => {
     const sessionId = workbench.input().sessionId
     if (props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
@@ -189,29 +302,41 @@ export function SolidModeWidget(props: {
           </button>
         </Show>
       }>
-        <div class="cc-mode-dropdown">
+        <div ref={node => { root = node }} class="cc-mode-dropdown">
           <button
+            ref={node => { trigger = node }}
             type="button"
             class="cc-mode-widget cc-mode-select"
             title="选择权限模式"
             style={{ 'font-size': `${scale()}%` }}
             aria-haspopup="listbox"
             aria-expanded={open()}
+            aria-controls={menuId}
             onClick={() => setOpen(value => !value)}
           ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ▾</button>
           <Show when={open()}>
-            <div class="mode-menu model-menu" role="listbox" aria-label="模式列表">
+            <div
+              ref={node => { menu = node }}
+              id={menuId}
+              class="mode-menu model-menu"
+              data-popover="control-center"
+              role="listbox"
+              aria-label="模式列表"
+              tabIndex="-1"
+              onKeyDown={event => {
+                if (event.key !== 'Escape') return
+                event.preventDefault()
+                event.stopPropagation()
+                close(true)
+              }}
+            >
               <For each={modeEntries()}>{item => <button
                 type="button"
                 role="option"
                 aria-selected={item.id === mode()}
                 class={`model-item${item.id === mode() ? ' active' : ''}`}
-                onClick={() => {
-                  const sessionId = workbench.input().sessionId
-                  if (props.onDraftChange) props.onDraftChange(item.id)
-                  else if (sessionId) void workbench.commands.setMode(sessionId, item.id)
-                  setOpen(false)
-                }}
+                tabIndex={-1}
+                onClick={() => { void chooseMode(item.id) }}
               >{optionLabel('mode', item.id, item.label)}</button>}</For>
             </div>
           </Show>

@@ -28,7 +28,9 @@
 .control-center:has(.command-palette) .cc-body,
 .control-center:has(.input-error) .cc-body,
 .control-center:has(.input-history-hint) .cc-body,
-.control-center:has(.queued-message-list) .cc-body {
+.control-center:has(.queued-message-list) .cc-body,
+.control-center:has(.model-menu) .cc-body,
+.control-center:has(.mode-menu) .cc-body {
   overflow: visible;
 }
 .cc-input-slot { display:flex; align-items:flex-end; min-width:0; min-height:0; }
@@ -67,6 +69,14 @@
 .cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
 .cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
   content:' · '; padding:0 7px; color:var(--text-dim); opacity:0.65;
+}
+.cc-widget-separator {
+  display:inline-block;
+  flex:0 0 auto;
+  padding-inline:var(--ui-space-2);
+  color:var(--text-dim);
+  opacity:.48;
+  user-select:none;
 }
 .cc-widget { position:relative; overflow:visible; display:flex; align-items:center; }
 /* 文字型控件（model/mode/send/attach）宽高随内容自适应 */

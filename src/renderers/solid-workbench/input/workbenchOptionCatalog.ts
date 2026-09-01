@@ -278,3 +278,15 @@ export function optionLabel(kind: WorkbenchOptionKind, id: string, fallback?: st
 export function isReasoningOption(option: SessionConfigOption): boolean {
   return optionKind(option) === 'reasoning'
 }
+
+/**
+ * Session-start model/mode/reasoning options are rendered by the control
+ * center.  Keeping them out of the chat document surface prevents the ACP
+ * negotiation response from becoming a second, persistent "配置 / 保存 /
+ * select" form below the conversation while preserving the normalized option
+ * facts for selectors and command validation.
+ */
+export function isControlCenterConfigOption(option: SessionConfigOption): boolean {
+  const kind = optionKind(option)
+  return kind === 'model' || kind === 'mode' || kind === 'reasoning'
+}

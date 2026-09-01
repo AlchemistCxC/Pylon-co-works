@@ -355,7 +355,60 @@
 .solid-workbench-control-center-slot.is-empty.is-session-entering {
   animation: solid-empty-composer-to-dock 360ms cubic-bezier(.22,.8,.24,1) both;
 }
-.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering) {
+.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) {
+  animation: solid-empty-create-pulse 900ms ease-in-out infinite alternate;
+}
+.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) .cc-body { opacity: .82; }
+.cc-creation-progress {
+  position: absolute;
+  right: 12px;
+  bottom: 5px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  pointer-events: none;
+  color: var(--text-dim);
+  font: 500 var(--font-size-2xs)/1 var(--mono);
+  letter-spacing: .02em;
+}
+.solid-workbench-control-center-slot.is-empty .cc-creation-progress {
+  right: auto;
+  left: 50%;
+  width: var(--cc-empty-content-width);
+  max-width: calc(100% - 24px);
+  transform: translateX(-50%);
+}
+.cc-creation-progress-track {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 2px;
+  flex: 0 0 56px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.cc-creation-progress-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -35%;
+  width: 35%;
+  background: var(--accent);
+  animation: solid-empty-create-progress 900ms ease-in-out infinite;
+}
+.cc-creation-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes solid-empty-create-pulse {
+  from { transform: translateY(-50%) scale(.998); opacity: .88; }
+  to { transform: translateY(-50%) scale(1); opacity: 1; }
+}
+@keyframes solid-empty-create-progress {
+  from { transform: translateX(0); }
+  to { transform: translateX(380%); }
+}
+.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering):not(.is-session-creating) {
   animation: solid-empty-composer-enter 280ms ease both;
 }
 @keyframes solid-empty-composer-enter {
@@ -377,6 +430,8 @@
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot { transition: none; }
   .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
+  .solid-workbench-control-center-slot.is-session-creating,
+  .cc-creation-progress-bar { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering
     :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
@@ -456,3 +511,144 @@
 .cc-empty-workspace-popover code { max-width: 160px; overflow: hidden; color: var(--text-dim); font-size: var(--font-size-2xs); text-overflow: ellipsis; white-space: nowrap; }
 .cc-empty-workspace-popover button { height: var(--ui-control-compact, 28px); padding: 0 var(--ui-space-2); color: var(--text); border: 1px solid var(--border); border-radius: 0; background: transparent; cursor: pointer; }
 .cc-empty-workspace-popover button:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Solid renders separators explicitly from the visible widget sequence.  The
+   legacy pseudo-element rules in ControlCenter.css remain for the React
+   fallback, but must not leak into this tree or create a duplicate/leading
+   `·` when an earlier slot is empty. */
+.solid-workbench-control-center-slot .cc-status-row .cc-widget + .cc-widget::before,
+.solid-workbench-control-center-slot .cc-footer-status-row .cc-widget + .cc-widget::before,
+.solid-workbench-control-center-slot .cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
+.solid-workbench-control-center-slot .cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
+  content: none !important;
+  padding: 0 !important;
+}
+
+/* ── Solid control-center selectors ──
+   Keep these menus in the same square, dense visual language as the terminal
+   titlebar.  StatusBar.css still supplies the legacy fallback defaults; the
+   scoped rules below are deliberately later and more specific for Solid. */
+.solid-workbench-control-center-slot :is(.cc-model-dropdown, .cc-mode-dropdown) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select) {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--ui-control-compact, 28px);
+  padding: 0 var(--ui-space-1);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text-dim);
+  background: transparent;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select):hover,
+.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select)[aria-expanded='true'] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  text-decoration: none;
+}
+.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.solid-workbench-control-center-slot .model-menu {
+  position: absolute;
+  right: auto;
+  bottom: calc(100% + 7px);
+  left: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 224px;
+  max-width: min(380px, calc(100vw - 24px));
+  max-height: min(420px, 60vh);
+  padding: 4px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--border-focus, var(--accent)) 58%, var(--border));
+  border-radius: 0;
+  color: var(--text);
+  background: var(--surface-overlay, var(--bg-panel));
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 28%, transparent);
+  animation: cc-popover-in 100ms ease-out both;
+}
+.solid-workbench-control-center-slot .cc-mode-dropdown .model-menu {
+  right: 0;
+  left: auto;
+}
+.solid-workbench-control-center-slot .model-menu-section {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+}
+.solid-workbench-control-center-slot .model-menu-section > span {
+  display: block;
+  padding: 3px 10px 4px;
+  color: var(--text-dim);
+  font: 700 var(--font-size-2xs)/1.2 var(--font);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.solid-workbench-control-center-slot .model-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 29px;
+  box-sizing: border-box;
+  gap: var(--ui-space-2);
+  padding: 5px 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dim);
+  background: transparent;
+  font: 500 var(--font-size-xs)/1.25 var(--font);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.solid-workbench-control-center-slot .model-item::after {
+  content: '✓';
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--accent);
+  opacity: 0;
+}
+.solid-workbench-control-center-slot .model-item[aria-selected='true'] {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.solid-workbench-control-center-slot .model-item[aria-selected='true']::after { opacity: 1; }
+.solid-workbench-control-center-slot .model-item:hover,
+.solid-workbench-control-center-slot .model-item:focus-visible {
+  color: var(--text);
+  outline: none;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-hover, transparent));
+}
+.solid-workbench-control-center-slot .model-item:focus-visible {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+@keyframes cc-popover-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .solid-workbench-control-center-slot .model-menu { animation: none; }
+}

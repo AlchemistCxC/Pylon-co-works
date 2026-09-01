@@ -38,7 +38,7 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
     onCleanup(() => {
       unsubscribeRuntime()
       unsubscribeAppearance()
-    })
+    });
     return <SolidWorkbenchContext.Provider value={context}>{view()}</SolidWorkbenchContext.Provider>
   })
   return services
@@ -73,6 +73,35 @@ describe('Solid Workbench widgets', () => {
     expect(screen.getByRole('option', { name: 'xhigh' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
     services.destroy()
+  })
+
+  it('模型/模式弹层支持 Escape 与外部点击关闭，并把焦点还给触发器', async () => {
+    renderWidget(() => <div>
+      <SolidModelWidget forceDropdown draftValue={() => 'deepseek-v4-flash'} onDraftChange={() => {}}
+        reasoningValue={() => 'medium'} onReasoningChange={() => {}} />
+      <SolidModeWidget forceDropdown draftValue={() => 'auto'} onDraftChange={() => {}} />
+    </div>);
+
+    const modelTrigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
+    fireEvent.click(modelTrigger)
+    const modelMenu = screen.getByRole('listbox', { name: '模型列表' })
+    expect(modelMenu).toHaveAttribute('data-popover', 'control-center')
+    fireEvent.keyDown(modelMenu, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull())
+    expect(modelTrigger).toHaveFocus()
+
+    fireEvent.click(modelTrigger)
+    expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
+    fireEvent.pointerDown(document.body)
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull())
+
+    const modeTrigger = screen.getByRole('button', { name: /全自动/ })
+    fireEvent.click(modeTrigger)
+    const modeMenu = screen.getByRole('listbox', { name: '模式列表' })
+    expect(modeMenu).toHaveAttribute('data-popover', 'control-center')
+    fireEvent.keyDown(modeMenu, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: '模式列表' })).toBeNull())
+    expect(modeTrigger).toHaveFocus()
   })
 
   it('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {

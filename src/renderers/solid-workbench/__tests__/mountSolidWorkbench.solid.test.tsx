@@ -598,6 +598,23 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
 
+  it('中控状态分隔符只出现在实际可见控件之间，不产生前导中点', async () => {
+    const { host } = mountPreview()
+    const row = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('.cc-status-row')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    const widgets = [...row.querySelectorAll('[data-widget-id]')]
+    const separators = [...row.querySelectorAll<HTMLElement>('.cc-widget-separator')]
+    expect(widgets.length).toBeGreaterThan(0)
+    expect(separators).toHaveLength(widgets.length - 1)
+    expect(row.querySelector('[data-separator-index="0"]')).toBeNull()
+    expect(separators.map(item => item.dataset.separatorIndex)).toEqual(
+      Array.from({ length: widgets.length - 1 }, (_, index) => String(index + 1)),
+    )
+  })
+
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {
     const { host, lifecycle } = mountPreview()
     const root = host.firstElementChild
@@ -741,6 +758,46 @@ describe('mountSolidWorkbench', () => {
 
     finishCreation?.({ sessionId: 'created-session' })
     await waitFor(() => expect(emptyState).toHaveAttribute('aria-busy', 'false'))
+  })
+
+  it('空态发送后在 ACP 尚未返回时立即暴露创建过渡层', async () => {
+    let finishCreation: ((value: { sessionId: string }) => void) | undefined
+    const { host, services, lifecycle } = mountPreview()
+    services.commands.setHandler('createSession', vi.fn(() => new Promise<{ sessionId: string }>(resolve => { finishCreation = resolve })))
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '立即进入过渡' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+    await waitFor(() => {
+      const center = host.querySelector('.control-center')
+      expect(center).toHaveAttribute('data-creation-state', 'creating')
+      expect(center?.querySelector('[data-creation-progress]')).not.toBeNull()
+    })
+    finishCreation?.({ sessionId: 'created-session' })
+  })
+
+  it('创建后不把模型/模式协商选项渲染成会话区配置卡，且弹层不会残留', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    const modelTrigger = await screen.findByRole('button', { name: /deepseek-v4-flash/ })
+    fireEvent.click(modelTrigger)
+    expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
+
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true, workspaceMode: 'chat' })
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      eventId: 'session-response-test', sessionId: 'created-session', sequence: 1,
+      recordedAt: '2026-09-01T00:00:00.000Z', source: { provider: 'acp', sourceId: 'response' },
+      identity: { runId: 'response' }, provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'session.started', status: 'ready', model: 'deepseek-v4-flash', mode: 'auto', options: [
+        { id: 'model', label: '模型', valueType: 'select', value: 'deepseek-v4-flash', editable: true, schema: { options: [{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }] } },
+        { id: 'mode', label: '模式', valueType: 'select', value: 'auto', editable: true, schema: { options: [{ id: 'auto', label: '全自动' }] } },
+      ] },
+    })]).document, { ownerKey: 'owner-preview', generation: 1, sessionId: 'created-session' })
+
+    await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).not.toBeNull())
+    expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull()
+    expect(host.querySelector('.solid-workbench-config')).toBeNull()
   })
 
   it('空态创建失败后保留草稿与工作区，并把焦点交还输入框', async () => {
