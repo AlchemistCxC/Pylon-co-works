@@ -80,12 +80,12 @@ describe('I09-A-FE-02 Browser 单一折叠状态（ctx.sidebarCollapsed）', () 
   })
 })
 
-describe('ISSUE-10 Browser 折叠态不泄漏文字/unavailable（T10-1 DOM 语义）', () => {
+describe('Browser 工具栏在展开/折叠态保持可用（历史/书签/下载/控制台）', () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  it('展开态：label 与 unavailable 文字正常渲染，标题/note 存在', () => {
+  it('展开态：label 与标题/note 正常渲染，工具不是 disabled 占位', () => {
     const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
     const items = container.querySelectorAll('.browser-tool-item')
     expect(items.length).toBe(4)
@@ -93,12 +93,13 @@ describe('ISSUE-10 Browser 折叠态不泄漏文字/unavailable（T10-1 DOM 语�
     expect(container.querySelector('.browser-sidebar-note')).toBeTruthy()
     items.forEach(item => {
       expect(item.querySelector('span')).toBeTruthy()
-      expect(item.querySelector('.browser-tool-unavailable')).toBeTruthy()
+      expect(item.querySelector('.browser-tool-unavailable')).toBeNull()
       expect(item.querySelector('svg')).toBeTruthy()
+      expect((item as HTMLButtonElement).disabled).toBe(false)
     })
   })
 
-  it('折叠态：不渲染 label/unavailable 文字，只保留图标；aria-label/title 保留', () => {
+  it('折叠态：不渲染 label 文字，只保留图标；aria-label/title 保留', () => {
     const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
     const items = container.querySelectorAll('.browser-tool-item')
     expect(items.length).toBe(4)
@@ -111,24 +112,24 @@ describe('ISSUE-10 Browser 折叠态不泄漏文字/unavailable（T10-1 DOM 语�
       expect(item.textContent).toBe('')
       expect(item.querySelector('.browser-tool-unavailable')).toBeNull()
     })
-    // disabled tool 的可访问名仍由 aria-label/title 承担
+    // 工具的可访问名仍由 aria-label/title 承担
     const history = container.querySelectorAll('.browser-tool-item')[0] as HTMLButtonElement
-    expect(history.disabled).toBe(true)
-    expect(history.getAttribute('aria-label')).toBe('历史（未实现）')
-    expect(history.title).toBe('历史（未实现）')
+    expect(history.disabled).toBe(false)
+    expect(history.getAttribute('aria-label')).toBe('历史')
+    expect(history.title).toBe('历史')
   })
 
   it('往返：展开→折叠→展开后文字恢复渲染', () => {
     const { container, rerender } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
     const first = container.querySelectorAll('.browser-tool-item')[0]
-    expect(first!.querySelector('.browser-tool-unavailable')).toBeTruthy()
+    expect(first!.querySelector('.browser-tool-unavailable')).toBeNull()
 
     rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
     expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
     expect((container.querySelectorAll('.browser-tool-item')[0]).textContent).toBe('')
 
     rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
-    expect(container.querySelector('.browser-tool-unavailable')).toBeTruthy()
+    expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
     expect(container.querySelector('.browser-sidebar-title')).toBeTruthy()
   })
 })

@@ -175,9 +175,51 @@ pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
     if method == crate::acp::METHOD_SESSION_REQUEST_PERMISSION {
         return true;
     }
+
+    // ACP's client-request surface contains interactions whose names do not
+    // carry words such as `permission` or `question` (filesystem, terminal,
+    // elicitation and MCP requests).  A provider may also serialize the same
+    // method using camelCase (`terminal/waitForExit`).  Compare a compact,
+    // separator/case-insensitive key against the official v1 client methods so
+    // these requests are rejected/observed instead of silently dropped.
+    let compact = method
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect::<String>();
+    const ACP_CLIENT_REQUEST_METHODS: &[&str] = &[
+        "fswritetextfile",
+        "fsreadtextfile",
+        "terminalcreate",
+        "terminaloutput",
+        "terminalrelease",
+        "terminalwaitforexit",
+        "terminalkill",
+        "elicitationcreate",
+        "mcpconnect",
+        "mcpmessage",
+        "mcpdisconnect",
+        // Known provider extensions observed in the wild; these are not yet
+        // handled by a typed adapter but must not leave an agent waiting.
+        "sessionrequestpermission",
+        "sessionrequestquestion",
+        "sessionrequestinput",
+        "sessionrequestuserinput",
+    ];
+    if ACP_CLIENT_REQUEST_METHODS.iter().any(|candidate| *candidate == compact) {
+        return true;
+    }
     let normalized = method
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .enumerate()
+        .flat_map(|(index, ch)| {
+            // Split camelCase before the keyword probe; otherwise
+            // `requestPermission` becomes one opaque word.
+            let boundary = index > 0 && ch.is_ascii_uppercase();
+            [if boundary { ' ' } else { '\0' }, if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' }]
+                .into_iter()
+                .filter(|value| *value != '\0')
+        })
         .collect::<String>();
     let words = normalized.split_whitespace().collect::<Vec<_>>();
     // `ask` is intentionally only accepted as a complete segment.  Matching a
@@ -297,8 +339,27 @@ mod tests {
         assert!(looks_like_interaction_method(Some("session/request_permission")));
         assert!(looks_like_interaction_method(Some("session/request_question")));
         assert!(looks_like_interaction_method(Some("claude/oauth/authorize")));
+        // ACP client-request methods are interactions too, even though their
+        // names do not contain the approval/question keywords.  Providers and
+        // SDKs also emit camelCase spellings in a few extension envelopes.
+        for method in [
+            "fs/write_text_file",
+            "fs/writeTextFile",
+            "fs/readTextFile",
+            "terminal/create",
+            "terminal/waitForExit",
+            "terminal/kill",
+            "elicitation/create",
+            "mcp/message",
+            "session/requestPermission",
+            "session/requestUserInput",
+        ] {
+            assert!(looks_like_interaction_method(Some(method)), "{method} should be observable as an interaction");
+        }
         assert!(!looks_like_interaction_method(Some("session/new")));
         assert!(!looks_like_interaction_method(Some("task/list")));
+        assert!(!looks_like_interaction_method(Some("terminal/status")));
+        assert!(!looks_like_interaction_method(Some("filesystem/list")));
         assert!(!looks_like_interaction_method(None));
     }
 

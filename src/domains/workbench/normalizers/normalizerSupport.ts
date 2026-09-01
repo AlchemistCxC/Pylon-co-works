@@ -72,8 +72,6 @@ export function identityFromUpdate(update: Record<string, unknown> | undefined):
   if (!update) return {}
   const content = isRecord(update.content) ? update.content : undefined
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const claudeCandidate = meta?.claudeCode
-  const claudeMeta = isRecord(claudeCandidate) ? claudeCandidate : undefined
   const pick = (keys: readonly string[], records: readonly (Record<string, unknown> | undefined)[]): string | undefined => {
     for (const record of records) {
       for (const key of keys) {
@@ -90,7 +88,12 @@ export function identityFromUpdate(update: Record<string, unknown> | undefined):
     ...(pick(['taskId', 'task_id'], [content, update, meta]) ? { taskId: pick(['taskId', 'task_id'], [content, update, meta]) } : {}),
     ...(pick(['runId', 'run_id'], [content, update, meta]) ? { runId: pick(['runId', 'run_id'], [content, update, meta]) } : {}),
     ...(pick(['interactionId', 'interaction_id', 'requestId', 'request_id'], [content, update, meta]) ? { interactionId: pick(['interactionId', 'interaction_id', 'requestId', 'request_id'], [content, update, meta]) } : {}),
-    ...(pick(['parentToolUseId', 'parent_tool_use_id'], [claudeMeta, meta]) ? { taskId: pick(['parentToolUseId', 'parent_tool_use_id'], [claudeMeta, meta]) } : {}),
+    // Claude's parentToolUseId describes the tool/agent edge, not the current
+    // event's task identity.  ClaudeCodeNormalizer promotes it to
+    // `source.parentAgentId` and `event.tool.parentToolUseId`; mapping it to
+    // identity.taskId here makes the child look like a new activity and can
+    // split/overwrite projector state.  Keep the shared ACP identity provider-
+    // neutral and never infer task ids from vendor metadata.
   }
   return identity
 }

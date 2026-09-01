@@ -36,4 +36,114 @@ describe('Claude Code normalizer', () => {
       parts: [{ kind: 'image', source: 'AAAA', mimeType: 'image/png' }],
     })
   })
+
+  it('accepts snake-case Claude metadata in nested ACP params and preserves the exact wire as raw evidence', () => {
+    const wire = {
+      params: {
+        session_id: 'claude-session',
+        update: {
+          session_update: 'tool_call',
+          tool_call_id: 'tool-snake',
+          message_id: 'message-snake',
+          title: '读取文件（本地化标题）',
+          kind: 'read',
+          raw_input: { file_path: 'README.md' },
+          _meta: {
+            claude_code: {
+              tool_name: 'Read',
+              parent_tool_use_id: 'parent-snake',
+            },
+          },
+        },
+      },
+    }
+    const result = normalizeClaudeCodeEvent(wire, context)
+    expect(result.events[0]).toMatchObject({
+      identity: { toolCallId: 'tool-snake', messageId: 'message-snake' },
+      source: { parentAgentId: 'parent-snake' },
+      event: {
+        type: 'tool.started',
+        tool: {
+          toolCallId: 'tool-snake',
+          name: 'Read',
+          parentToolUseId: 'parent-snake',
+          input: { file_path: 'README.md' },
+        },
+      },
+    })
+    expect(result.events[0].raw).toEqual(wire)
+  })
+
+  it('normalizes the actual Claude ACP image shape and direct structured content wrappers', () => {
+    const result = normalizeClaudeCodeEvent({
+      sessionUpdate: 'agent_message_chunk',
+      content: [
+        { type: 'content', content: { type: 'image', data: 'AAAA', mimeType: 'image/png' } },
+        { type: 'content', content: { type: 'resource_link', uri: 'file:///README.md', name: 'README.md', mimeType: 'text/markdown' } },
+      ],
+    }, context)
+    expect(result.events[0].event).toMatchObject({
+      type: 'message.delta',
+      parts: [
+        { kind: 'image', source: 'AAAA', sourceKind: 'base64', mimeType: 'image/png' },
+        { kind: 'resource', uri: 'file:///README.md', title: 'README.md', mimeType: 'text/markdown' },
+      ],
+    })
+  })
+
+  it('creates a cautious NotebookEdit diff only when its required fields are explicit', () => {
+    const result = normalizeClaudeCodeEvent({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'notebook-1',
+      _meta: { claudeCode: { toolName: 'NotebookEdit' } },
+      rawInput: {
+        notebook_path: 'analysis.ipynb',
+        new_source: 'print("ok")',
+        cell_id: 'cell-1',
+        edit_mode: 'replace',
+      },
+    }, context)
+    expect(result.events[0].event).toMatchObject({
+      type: 'tool.started',
+      tool: {
+        name: 'NotebookEdit',
+        parts: [{ kind: 'diff', path: 'analysis.ipynb', newText: 'print("ok")', status: 'replace' }],
+      },
+    })
+  })
+
+  it('maps a direct redacted_thinking update to reasoning.redacted without exposing its body', () => {
+    const result = normalizeClaudeCodeEvent({
+      session_update: 'redacted_thinking',
+      message_id: 'redacted-1',
+      reason: 'provider_policy',
+      text: 'secret reasoning must not be displayed',
+    }, context)
+    expect(result.events[0]).toMatchObject({
+      identity: { messageId: 'redacted-1' },
+      event: {
+        type: 'reasoning.redacted',
+        reason: 'provider_policy',
+        parts: [{ kind: 'redacted-reasoning', reason: 'provider_policy' }],
+      },
+    })
+    expect(JSON.stringify(result.events[0].event)).not.toContain('secret reasoning')
+    expect(result.events[0].raw).toEqual(expect.objectContaining({ text: 'secret reasoning must not be displayed' }))
+  })
+
+  it('does not promote a localized title to machine identity when Claude metadata is absent', () => {
+    const result = normalizeClaudeCodeEvent({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'title-only',
+      title: '读取文件 README.md',
+      kind: 'read',
+    }, context)
+    expect(result.events[0].event).toMatchObject({
+      type: 'tool.started',
+      tool: { name: 'unknown', kind: 'read' },
+    })
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'tool.name.missing' }),
+    ]))
+  })
 })

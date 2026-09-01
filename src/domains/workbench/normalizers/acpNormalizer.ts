@@ -36,16 +36,19 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
     }
   }
 
-  const normalized = semanticEventForUpdate(update, context)
-  const event = makeEnvelope(normalized.event, input, context, update, {}, identityFromUpdate(update))
+  // A few ACP bridges wrap tool fields in `toolCall`/`tool_call` while keeping the
+  // discriminator at the top level.  Flatten that transport envelope at the seam;
+  // raw input is still retained unchanged by makeEnvelope for diagnostics.
+  const effectiveUpdate = flattenAcpUpdate(update)
+  const normalized = semanticEventForUpdate(effectiveUpdate, context)
+  const event = makeEnvelope(normalized.event, input, context, update, {}, identityFromUpdate(effectiveUpdate))
   return { events: [event], diagnostics: normalized.diagnostics }
 }
 
 function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {
-  const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate
-    : typeof update.session_update === 'string' ? update.session_update : undefined
+  const sessionUpdate = canonicalSessionUpdate(update)
   const diagnostics: ReturnType<typeof createDiagnostic>[] = []
-  const content = update.content
+  const content = update.content ?? update.parts ?? update.blocks ?? update.output
   const blocks = content !== undefined ? content : typeof update.text === 'string' ? { type: 'text', text: update.text } : undefined
   const normalizedBlocks = blocks === undefined ? { parts: [], diagnostics: [] } : normalizeContentBlocks(blocks, context, update)
   diagnostics.push(...normalizedBlocks.diagnostics)
@@ -60,13 +63,14 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'tool_call':
       return { event: { type: 'tool.started', tool: toolPayload(update, normalizedBlocks.parts, context) }, diagnostics: withToolNameDiagnostic(diagnostics, update, context) }
     case 'tool_call_update': {
-      const status = typeof update.status === 'string' ? update.status : 'in_progress'
+      const status = stringField(wireField(update, ['status', 'state'])) ?? 'in_progress'
       const type = status === 'completed' ? 'tool.completed' : status === 'failed' || status === 'error' ? 'tool.failed' : 'tool.progress'
       // Hermes completion updates intentionally omit the machine name; the
       // projector merges them into the started card by toolCallId. Do not
       // manufacture `unknown` here or a completion would overwrite the
       // previously resolved skill/search identity.
-      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics }
+      const rawOutput = wireField(update, ['rawOutput', 'raw_output', 'output', 'result', 'toolResult', 'tool_result'])
+      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(rawOutput !== undefined ? { result: toJsonValue(rawOutput) } : {}) }, diagnostics }
     }
     case 'plan':
       // C08：entries 结构化收窄为五状态 PlanEntryV2（cancelled 不坍缩、未知状态保留 rawStatus），
@@ -83,7 +87,7 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'done':
       return { event: { type: 'session.completed', stopReason: typeof update.stopReason === 'string' ? update.stopReason : undefined }, diagnostics }
     case 'error': {
-      const message = typeof update.error === 'string' ? update.error : typeof update.message === 'string' ? update.message : 'provider reported an error'
+      const message = typeof update.error === 'string' ? update.error : typeof update.message === 'string' ? update.message : typeof update.errorMessage === 'string' ? update.errorMessage : 'provider reported an error'
       // The semantic code drives projector convergence. Provider-specific error
       // detail remains available in raw/normalizer diagnostics.
       return { event: { type: 'diagnostic.notice', level: 'error', message, code: 'provider.error' }, diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', message, ['error'], true)] }
@@ -94,6 +98,35 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
   }
 }
 
+function flattenAcpUpdate(update: Record<string, unknown>): Record<string, unknown> {
+  const nested = [update.toolCall, update.tool_call, update.toolCallUpdate, update.tool_call_update]
+    .find(isRecord)
+  if (!nested) return update
+  return { ...nested, ...update }
+}
+
+/** Accept the spelling variants used by ACP SDKs and provider bridges. */
+function canonicalSessionUpdate(update: Record<string, unknown>): string | undefined {
+  const raw = update.sessionUpdate ?? update.session_update ?? update.updateType ?? update.update_type ?? update.type
+  if (typeof raw !== 'string') return undefined
+  const normalized = raw.trim().replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
+  const aliases: Record<string, string> = {
+    assistant_message_chunk: 'agent_message_chunk',
+    message_chunk: 'agent_message_chunk',
+    thinking_chunk: 'agent_thought_chunk',
+    reasoning_chunk: 'agent_thought_chunk',
+    tool_call_start: 'tool_call',
+    tool_call_started: 'tool_call',
+    tool_call_progress: 'tool_call_update',
+    tool_call_completed: 'tool_call_update',
+    tool_call_result: 'tool_call_update',
+    usage: 'usage_update',
+    commands_update: 'available_commands_update',
+    config_update: 'config_option_update',
+  }
+  return aliases[normalized] ?? normalized
+}
+
 function toolPayload(update: Record<string, unknown>, parts: readonly unknown[], context: NormalizeContext): Record<string, JsonValue> {
   const meta = isRecord(update._meta) ? update._meta : undefined
   const pylonCandidate = meta?.pylon
@@ -102,24 +135,28 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
   const claudeMeta = isRecord(claudeCandidate) ? claudeCandidate : undefined
   const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
     ? pylonMeta.toolName.trim()
-    : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
+    : typeof pylonMeta?.tool_name === 'string' && pylonMeta.tool_name.trim()
+      ? pylonMeta.tool_name.trim()
+      : typeof update.name === 'string' && update.name.trim() ? update.name.trim()
+        : typeof update.toolName === 'string' && update.toolName.trim() ? update.toolName.trim() : 'unknown'
   const hasMachineName = name !== 'unknown'
-  const updateKind = typeof update.sessionUpdate === 'string'
-    ? update.sessionUpdate
-    : typeof update.session_update === 'string' ? update.session_update : undefined
+  const updateKind = canonicalSessionUpdate(update)
   const omitMissingUpdateIdentity = updateKind === 'tool_call_update' && !hasMachineName
-  const providerName = typeof update.name === 'string' && update.name.trim() ? update.name.trim() : name
+  const providerName = typeof update.name === 'string' && update.name.trim()
+    ? update.name.trim()
+    : typeof update.toolName === 'string' && update.toolName.trim() ? update.toolName.trim() : name
   const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
   const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
     provider: context.provider,
     generation: context.toolGeneration,
   })
-  const normalizedInput = update.input !== undefined ? update.input
-    : update.rawInput !== undefined ? update.rawInput
-      : update.raw_input !== undefined ? update.raw_input
-        : update.args !== undefined ? update.args
-          : update.arguments !== undefined ? update.arguments
-            : update.parameters
+  const normalizedInput = wireField(update, ['input', 'rawInput', 'raw_input', 'args', 'arguments', 'parameters', 'toolInput', 'tool_input'])
+  const rawInput = wireField(update, ['rawInput', 'raw_input', 'input', 'args', 'arguments', 'parameters'])
+  const rawOutput = wireField(update, ['rawOutput', 'raw_output', 'output', 'result', 'toolResult', 'tool_result'])
+  const locations = wireField(update, ['locations', 'location'])
+  const progress = wireField(update, ['progress', 'progressData', 'progress_data'])
+  const duration = wireField(update, ['durationMs', 'duration_ms', 'elapsedMs', 'elapsed_ms'])
+  const error = wireField(update, ['error', 'toolError', 'tool_error'])
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
     ...(!omitMissingUpdateIdentity ? { name } : {}),
@@ -129,18 +166,18 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
     action: resolution.action,
     semanticKind: `tool.${resolution.kind}`,
     provider: resolution.provider,
-    ...(typeof update.title === 'string' ? { title: update.title } : {}),
+    ...(typeof update.title === 'string' ? { title: update.title } : typeof update.label === 'string' ? { title: update.label } : {}),
     ...(resolution.capabilities ? { capabilities: toJsonValue(resolution.capabilities) } : {}),
     ...(normalizedInput !== undefined ? { input: toJsonValue(normalizedInput) } : {}),
-    ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : update.raw_input !== undefined ? { rawInput: toJsonValue(update.raw_input) } : {}),
-    ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : update.raw_output !== undefined ? { rawOutput: toJsonValue(update.raw_output) } : {}),
-    ...(Array.isArray(update.locations) ? { locations: toJsonValue(update.locations) } : {}),
-    ...(update.progress !== undefined ? { progress: toJsonValue(update.progress) } : {}),
-    ...(typeof update.durationMs === 'number' && Number.isFinite(update.durationMs) && update.durationMs >= 0
-      ? { durationMs: update.durationMs }
+    ...(rawInput !== undefined ? { rawInput: toJsonValue(rawInput) } : {}),
+    ...(rawOutput !== undefined ? { rawOutput: toJsonValue(rawOutput) } : {}),
+    ...(locations !== undefined ? { locations: toJsonValue(Array.isArray(locations) ? locations : [locations]) } : {}),
+    ...(progress !== undefined ? { progress: toJsonValue(progress) } : {}),
+    ...(typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
+      ? { durationMs: duration }
       : {}),
-    ...(update.error !== undefined ? { error: toJsonValue(update.error) } : {}),
-    ...(typeof update.status === 'string' ? { status: update.status } : {}),
+    ...(error !== undefined ? { error: toJsonValue(error) } : {}),
+    ...(typeof update.status === 'string' ? { status: update.status } : typeof update.state === 'string' ? { status: update.state } : {}),
     ...(parts.length > 0 ? { parts: toJsonValue(parts) } : {}),
     ...(typeof claudeMeta?.parentToolUseId === 'string' ? { parentToolUseId: claudeMeta.parentToolUseId } : {}),
   }

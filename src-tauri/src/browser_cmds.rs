@@ -4,7 +4,7 @@ use crate::browser::{BrowserBounds, BrowserSnapshot};
 use crate::error::PylonError;
 use crate::AppState;
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_start(
     state: tauri::State<'_, AppState>,
     bounds: BrowserBounds,
@@ -15,7 +15,7 @@ pub(crate) async fn browser_start(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_new_tab(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
@@ -27,7 +27,7 @@ pub(crate) async fn browser_new_tab(
 
 /// 创建并激活指定 URL 的内部标签。与点击 target=_blank 的路径共用同一 manager，
 /// 供 Agent 控制面在不模拟鼠标的情况下打开页面。
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_open_tab(
     state: tauri::State<'_, AppState>,
     url: String,
@@ -38,7 +38,7 @@ pub(crate) async fn browser_open_tab(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_select_tab(
     state: tauri::State<'_, AppState>,
     tab_id: u64,
@@ -49,7 +49,7 @@ pub(crate) async fn browser_select_tab(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_close_tab(
     state: tauri::State<'_, AppState>,
     tab_id: u64,
@@ -60,7 +60,7 @@ pub(crate) async fn browser_close_tab(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
@@ -70,7 +70,7 @@ pub(crate) async fn browser_status(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_navigate(
     state: tauri::State<'_, AppState>,
     url: String,
@@ -81,7 +81,7 @@ pub(crate) async fn browser_navigate(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_back(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
@@ -91,7 +91,7 @@ pub(crate) async fn browser_back(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_forward(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
@@ -101,7 +101,7 @@ pub(crate) async fn browser_forward(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_reload(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
@@ -112,7 +112,7 @@ pub(crate) async fn browser_reload(
 }
 
 /// 读取活动页面的有限文本/链接快照（不包含 cookie、存储或请求头）。
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_snapshot(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, PylonError> {
@@ -125,7 +125,7 @@ pub(crate) async fn browser_snapshot(
 
 /// Start an explicit download from the active Browser WebView.  The manager repeats
 /// URL/filename validation at the native boundary.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_download(
     state: tauri::State<'_, AppState>,
     url: String,
@@ -138,7 +138,7 @@ pub(crate) async fn browser_download(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_click(
     state: tauri::State<'_, AppState>,
     selector: Option<String>,
@@ -156,7 +156,7 @@ pub(crate) async fn browser_click(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_type(
     state: tauri::State<'_, AppState>,
     text: String,
@@ -172,7 +172,7 @@ pub(crate) async fn browser_type(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_press(
     state: tauri::State<'_, AppState>,
     key: String,
@@ -187,7 +187,7 @@ pub(crate) async fn browser_press(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_scroll(
     state: tauri::State<'_, AppState>,
     delta_x: Option<i32>,
@@ -200,7 +200,7 @@ pub(crate) async fn browser_scroll(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_set_zoom(
     state: tauri::State<'_, AppState>,
     zoom_percent: u16,
@@ -211,7 +211,7 @@ pub(crate) async fn browser_set_zoom(
         .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_set_bounds(
     state: tauri::State<'_, AppState>,
     bounds: BrowserBounds,
@@ -223,7 +223,7 @@ pub(crate) async fn browser_set_bounds(
 }
 
 /// 同步 Browser Sheet keep-alive 的原生 WebView 可见性。
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_set_visible(
     state: tauri::State<'_, AppState>,
     visible: bool,
@@ -235,7 +235,7 @@ pub(crate) async fn browser_set_visible(
 }
 
 /// 关 sheet=关进程：销毁子 WebView（WebView2 子进程树随之退出）。
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_close(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {

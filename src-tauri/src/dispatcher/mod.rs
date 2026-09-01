@@ -1207,18 +1207,36 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // Providers may expose a new approval/question/oauth method before a
             // dedicated AcpKind/adapter exists.  Do not silently drop an identified
             // request: answer it with Method Not Found and surface a diagnostic event.
-            if raw.id.is_some()
-                && crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref())
-            {
+            if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
                 let provider = agents
                     .lock()
                     .ok()
                     .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
                     .unwrap_or_else(|| "unknown".to_string());
-                let reason_code = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                    "method_unsupported"
+                // A request-shaped interaction without an id cannot receive a
+                // JSON-RPC response, but it is still surfaced as a malformed
+                // interaction so the UI/runtime log explains why no card can
+                // be acted on.  Do not silently drop official client requests.
+                let (reason_code, rpc_code, message) = if raw.id.is_none() {
+                    (
+                        "missing_request_id",
+                        -32600,
+                        "invalid request: interaction request requires a JSON-RPC id".to_string(),
+                    )
                 } else {
-                    "provider_unsupported"
+                    let reason = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
+                        "method_unsupported"
+                    } else {
+                        "provider_unsupported"
+                    };
+                    (
+                        reason,
+                        -32601,
+                        format!(
+                            "interaction {} unsupported",
+                            raw.method.as_deref().unwrap_or("method")
+                        ),
+                    )
                 };
                 reject_interaction_request(
                     &window,
@@ -1229,11 +1247,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     raw.id,
                     raw.params.as_ref(),
                     reason_code,
-                    -32601,
-                    &format!(
-                        "interaction {} unsupported",
-                        raw.method.as_deref().unwrap_or("method")
-                    ),
+                    rpc_code,
+                    &message,
                 )
                 .await;
                 continue;

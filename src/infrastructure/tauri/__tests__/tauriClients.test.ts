@@ -166,13 +166,15 @@ describe('normalizeStartupDiagnostics', () => {
 })
 
 describe('browserClient', () => {
-  it('tab/setZoom/setBounds/close payload 收口', async () => {
+  it('browser commands use the Rust command argument contract', async () => {
     const invoke = new FakeInvoke()
     invoke.register('browser_new_tab', () => null)
     invoke.register('browser_select_tab', () => null)
     invoke.register('browser_close_tab', () => null)
     invoke.register('browser_set_zoom', () => null)
     invoke.register('browser_set_bounds', () => null)
+    invoke.register('browser_scroll', () => null)
+    invoke.register('browser_download', () => ({ status: 'started' }))
     invoke.register('browser_close', () => null)
     const client = createBrowserClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
     await client.newTab()
@@ -180,13 +182,19 @@ describe('browserClient', () => {
     await client.closeTab(2)
     await client.setZoom(90)
     await client.setBounds({ x: 0, y: 0, width: 100, height: 100 })
+    await client.scroll({ deltaX: 4, deltaY: 120 })
+    await client.download('https://example.com/archive.zip', 'archive.zip')
+    await client.download('https://example.com/readme.txt')
     await client.close()
     expect(invoke.calls).toEqual([
       { cmd: 'browser_new_tab', args: {} },
       { cmd: 'browser_select_tab', args: { tabId: 2 } },
       { cmd: 'browser_close_tab', args: { tabId: 2 } },
       { cmd: 'browser_set_zoom', args: { zoomPercent: 90 } },
-      { cmd: 'browser_set_bounds', args: { x: 0, y: 0, width: 100, height: 100 } },
+      { cmd: 'browser_set_bounds', args: { bounds: { x: 0, y: 0, width: 100, height: 100 } } },
+      { cmd: 'browser_scroll', args: { deltaX: 4, deltaY: 120 } },
+      { cmd: 'browser_download', args: { url: 'https://example.com/archive.zip', filename: 'archive.zip' } },
+      { cmd: 'browser_download', args: { url: 'https://example.com/readme.txt' } },
       { cmd: 'browser_close', args: {} },
     ])
   })

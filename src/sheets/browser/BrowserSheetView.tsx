@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { Bookmark, ChevronLeft, ChevronRight, Clock3, Code2, Download, Globe2, Minus, Plus, RefreshCw, RotateCcw, Search, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Clock3, Code2, Download, Globe2, Minus, Plus, RefreshCw, RotateCcw, Search, X } from 'lucide-react'
 import { browserReducer, createBrowserState } from '../../domains/browser/browserState.ts'
+import {
+  appendConsole,
+  clearBrowserCollection,
+  isBrowserLibraryUrl,
+  loadBrowserLibrary,
+  recordDownload,
+  recordHistory,
+  saveBrowserLibrary,
+  toggleBookmark,
+  type BrowserLibrary,
+  type ConsoleEntry,
+} from '../../domains/browser/browserLibrary.ts'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { classifyBrowserStartError } from '../../infrastructure/tauri/browserContracts.ts'
@@ -36,16 +48,37 @@ interface BrowserTabSnapshot {
   title?: string | null
 }
 
+interface BrowserPageLink {
+  index?: number
+  text?: string
+  href?: string
+  target?: string | null
+  download?: boolean
+  downloadName?: string | null
+}
+
+interface BrowserPageSnapshot {
+  runtime?: string
+  tabId?: number
+  url?: string
+  title?: string | null
+  text?: string
+  links?: BrowserPageLink[]
+  [key: string]: unknown
+}
+
 const DEFAULT_ZOOM_PERCENT = 90
 const MIN_ZOOM_PERCENT = 50
 const MAX_ZOOM_PERCENT = 200
 const ZOOM_STEP = 10
-// FE-AUD-021：未实现工具 disabled 并标注 unavailable（不保留可点击无行为的假完成态）
+type BrowserToolId = 'history' | 'bookmarks' | 'downloads' | 'console'
+
+// Browser library tools are backed by the local library + explicit host commands.
 const TOOL_ITEMS = [
-  { id: 'history', label: '历史', icon: Clock3, available: false },
-  { id: 'bookmarks', label: '书签', icon: Bookmark, available: false },
-  { id: 'downloads', label: '下载', icon: Download, available: false },
-  { id: 'console', label: '控制台', icon: Code2, available: false },
+  { id: 'history', label: '历史', icon: Clock3 },
+  { id: 'bookmarks', label: '书签', icon: Bookmark },
+  { id: 'downloads', label: '下载', icon: Download },
+  { id: 'console', label: '控制台', icon: Code2 },
 ] as const
 
 export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
@@ -64,14 +97,46 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   // 原生子 WebView 是独立于 React DOM 的窗口，父节点 display:none 不会将其隐藏。
   // SheetLayout 对 keep-alive Browser 显式传 isActive=false；旧上下文省略时按 active 处理。
   const isSheetActive = ctx.isActive !== false
-  const [activeTool, setActiveTool] = useState<(typeof TOOL_ITEMS)[number]['id']>('history')
+  const [activeTool, setActiveTool] = useState<BrowserToolId | null>(null)
   const [address, setAddress] = useState('')
+  const [library, setLibrary] = useState<BrowserLibrary>(() => loadBrowserLibrary())
+  const libraryRef = useRef(library)
+  libraryRef.current = library
+  const [pageSnapshot, setPageSnapshot] = useState<BrowserPageSnapshot | null>(null)
+  // `browser_snapshot` is an expensive cross-process call.  Tool-panel effects
+  // can run more than once (React StrictMode, rapid panel changes, or a status
+  // replay), so keep one in-flight request and let concurrent callers share it.
+  const inspectPageInFlightRef = useRef<Promise<void> | null>(null)
+  const [downloadUrlInput, setDownloadUrlInput] = useState('')
+  const [consoleFilter, setConsoleFilter] = useState<'all' | ConsoleEntry['level']>('all')
   // 跨域 iframe 的页面自身导航无法被父文档读取；命令导航/刷新时递增 key，
   // 让预览重新回到 Browser 状态机记录的 URL，避免地址栏与画面脱节。
   const [previewRevision, setPreviewRevision] = useState(0)
   const viewportRef = useRef<HTMLDivElement>(null)
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
+
+  const updateLibrary = useCallback((updater: (current: BrowserLibrary) => BrowserLibrary) => {
+    setLibrary(current => {
+      const next = updater(current)
+      libraryRef.current = next
+      saveBrowserLibrary(next)
+      return next
+    })
+  }, [])
+
+  const logConsole = useCallback((command: string, level: ConsoleEntry['level'] = 'info', detail?: string) => {
+    updateLibrary(current => appendConsole(current, { command, level, detail }))
+  }, [updateLibrary])
+
+  const recordCurrentPage = useCallback((url: string | null | undefined, title?: string | null) => {
+    if (!url || url === 'about:blank' || !isBrowserLibraryUrl(url)) return
+    const previous = libraryRef.current.history[0]
+    // Page-load callbacks can arrive twice (URL then title).  Avoid moving an entry
+    // on every duplicate callback while still refreshing a changed title.
+    if (previous?.url === url && previous.title === (title?.trim() || previous.title)) return
+    updateLibrary(current => recordHistory(current, { url, title: title ?? undefined }))
+  }, [updateLibrary])
 
   const applySnapshot = useCallback((next: BrowserSnapshot) => {
     const normalized: BrowserSnapshot = {
@@ -88,7 +153,10 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     else if (normalized.phase === 'error') dispatch({ type: 'failed', error: normalized.error || '浏览器启动失败' })
     else if (normalized.error) dispatch({ type: 'failed', error: normalized.error })
     setAddress(normalized.url && normalized.url !== 'about:blank' ? normalized.url : '')
-  }, [browserPreview, isSheetActive])
+    if (normalized.url && normalized.url !== 'about:blank') {
+      recordCurrentPage(normalized.url, normalized.title)
+    }
+  }, [browserPreview, isSheetActive, recordCurrentPage])
 
   const syncBounds = useCallback(() => {
     const element = viewportRef.current
@@ -96,12 +164,10 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     const rect = element.getBoundingClientRect()
     if (rect.width < 1 || rect.height < 1) return
     void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setBounds({
-      bounds: {
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      },
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
     }).catch(error => reportRuntimeError('调整浏览器区域', error))
   }, [browserRuntimeAvailable, isSheetActive, snapshot.phase])
 
@@ -155,14 +221,17 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
         ...(payload.active ? { url: payload.url, title: payload.title } : {}),
         tabs: previous.tabs.map(tab => tab.id === payload.tabId ? { ...tab, url: payload.url, title: payload.title } : tab),
       }))
-      if (payload.active) setAddress(payload.url && payload.url !== 'about:blank' ? payload.url : '')
+      if (payload.active) {
+        setAddress(payload.url && payload.url !== 'about:blank' ? payload.url : '')
+        recordCurrentPage(payload.url, payload.title)
+      }
     })
     return () => {
       disposed = true
       void status.then(stop => stop()).catch(() => {})
       void page.then(stop => stop()).catch(() => {})
     }
-  }, [applySnapshot, browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive])
+  }, [applySnapshot, browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive, recordCurrentPage])
 
   useEffect(() => {
     const element = viewportRef.current
@@ -290,6 +359,73 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     }
   }
 
+  const inspectPage = useCallback(() => {
+    if (snapshot.phase !== 'ready') return Promise.resolve()
+    const inFlight = inspectPageInFlightRef.current
+    if (inFlight) return inFlight
+
+    const command = 'browser_snapshot'
+    const request = (async () => {
+      logConsole(command, 'info')
+      try {
+        const result = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).snapshot() as BrowserPageSnapshot
+        setPageSnapshot(result)
+        const detail = typeof result.text === 'string' ? `${result.url ?? ''} · ${result.text.length} chars · ${result.links?.length ?? 0} links` : String(result.url ?? '')
+        logConsole(command, 'success', detail)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logConsole(command, 'error', message)
+        reportRuntimeError('读取浏览器页面快照', error)
+      }
+    })()
+    inspectPageInFlightRef.current = request
+    void request.finally(() => {
+      if (inspectPageInFlightRef.current === request) inspectPageInFlightRef.current = null
+    })
+    return request
+  }, [logConsole, snapshot.phase])
+
+  const toggleCurrentBookmark = useCallback(() => {
+    const url = snapshot.url
+    if (!url || url === 'about:blank' || !isBrowserLibraryUrl(url)) return
+    const currentlyBookmarked = libraryRef.current.bookmarks.some(item => item.url === url)
+    updateLibrary(current => toggleBookmark(current, { url, title: snapshot.title ?? undefined }).library)
+    logConsole(currentlyBookmarked ? 'bookmark.remove' : 'bookmark.add', 'success', url)
+  }, [logConsole, snapshot.title, snapshot.url, updateLibrary])
+
+  const downloadUrl = useCallback(async (rawUrl: string, filename?: string) => {
+    const url = rawUrl.trim()
+    if (!isBrowserLibraryUrl(url)) {
+      logConsole('browser_download', 'error', '仅允许 http/https URL')
+      return
+    }
+    logConsole('browser_download', 'info', url)
+    try {
+      const result = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).download(url, filename) as Record<string, unknown>
+      const status = result?.status === 'failed' ? 'failed' : 'started'
+      const error = typeof result?.error === 'string' ? result.error : undefined
+      updateLibrary(current => recordDownload(current, { url, filename: typeof result?.filename === 'string' ? result.filename : filename, status, error }))
+      logConsole('browser_download', status === 'failed' ? 'error' : 'success', error || `${url}${filename ? ` → ${filename}` : ''}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      updateLibrary(current => recordDownload(current, { url, filename, status: 'failed', error: message }))
+      logConsole('browser_download', 'error', message)
+      reportRuntimeError('下载浏览器资源', error)
+    }
+  }, [logConsole, updateLibrary])
+
+  const chooseTool = useCallback((tool: BrowserToolId) => {
+    setActiveTool(current => current === tool ? null : tool)
+    // The activeTool effect below owns snapshot refresh. Keeping one trigger
+    // avoids issuing two browser_snapshot commands when opening Downloads or
+    // Console (the old callback + effect race was visible as duplicate log
+    // entries and unnecessary WebView work).
+  }, [])
+
+  useEffect(() => {
+    if ((activeTool === 'downloads' || activeTool === 'console') && snapshot.phase === 'ready') void inspectPage()
+  }, [activeTool, inspectPage, snapshot.phase])
+
   useEffect(() => () => {
     // Sheet 可能在 WebView 仍处于 starting/error（但已创建子视图）时卸载；
     // 只在 ready 清理会留下后台 WebView。browser_close 对 idle 也是幂等的，
@@ -313,18 +449,13 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
                 key={item.id}
                 type="button"
                 className={`browser-tool-item ${activeTool === item.id ? 'active' : ''}`}
-                onClick={() => setActiveTool(item.id)}
-                disabled={!item.available}
-                title={item.available ? item.label : `${item.label}（未实现）`}
-                aria-label={item.available ? item.label : `${item.label}（未实现）`}
+                onClick={() => chooseTool(item.id)}
+                title={item.label}
+                aria-label={item.label}
                 aria-pressed={activeTool === item.id}
               >
-                {/* ISSUE-10 W1：折叠态只保留图标；label/unavailable 文字不渲染（CSS 仅第二道防线） */}
                 <Icon size={18} aria-hidden="true" />
                 {!sidebarCollapsed && <span>{item.label}</span>}
-                {!sidebarCollapsed && !item.available && (
-                  <span className="browser-tool-unavailable">unavailable</span>
-                )}
               </button>
             )
           })}
@@ -365,6 +496,16 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
           <div className="browser-address-wrap"><Search size={14} /><input className="browser-address" value={address} onChange={event => setAddress(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void navigate() }} placeholder="输入网址…" aria-label="网址" /></div>
           <button
             type="button"
+            className={`browser-toolbar-button browser-bookmark-button ${library.bookmarks.some(item => item.url === snapshot.url) ? 'active' : ''}`}
+            onClick={toggleCurrentBookmark}
+            disabled={!snapshot.url || snapshot.url === 'about:blank'}
+            aria-label={library.bookmarks.some(item => item.url === snapshot.url) ? '移除当前页书签' : '添加当前页书签'}
+            title={library.bookmarks.some(item => item.url === snapshot.url) ? '移除书签' : '添加书签'}
+          >
+            {library.bookmarks.some(item => item.url === snapshot.url) ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+          </button>
+          <button
+            type="button"
             className="browser-zoom-toggle"
             onClick={() => setZoomSettingsOpen(open => !open)}
             aria-expanded={zoomSettingsOpen}
@@ -396,6 +537,22 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
             <button type="button" className="browser-zoom-reset" onClick={() => void setZoom(DEFAULT_ZOOM_PERCENT)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent === DEFAULT_ZOOM_PERCENT} aria-label="恢复默认缩放"><RotateCcw size={13} />默认 90%</button>
           </div>
         )}
+        {activeTool && (
+          <BrowserToolPanel
+            activeTool={activeTool}
+            library={library}
+            pageSnapshot={pageSnapshot}
+            consoleFilter={consoleFilter}
+            onConsoleFilterChange={setConsoleFilter}
+            onClose={() => setActiveTool(null)}
+            onClear={collection => updateLibrary(current => clearBrowserCollection(current, collection))}
+            onNavigate={url => void navigateTo(url)}
+            onDownload={downloadUrl}
+            onInspect={() => void inspectPage()}
+            downloadUrlInput={downloadUrlInput}
+            onDownloadUrlInputChange={setDownloadUrlInput}
+          />
+        )}
         <div ref={viewportRef} className="browser-viewport">
           {browserPreview && snapshot.phase === 'ready' && snapshot.url && snapshot.url !== 'about:blank' && (
             <iframe
@@ -418,6 +575,142 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
       </main>
     </div>
   )
+}
+
+interface BrowserToolPanelProps {
+  activeTool: BrowserToolId
+  library: BrowserLibrary
+  pageSnapshot: BrowserPageSnapshot | null
+  consoleFilter: 'all' | ConsoleEntry['level']
+  onConsoleFilterChange: (value: 'all' | ConsoleEntry['level']) => void
+  onClose: () => void
+  onClear: (collection: 'history' | 'bookmarks' | 'downloads' | 'console') => void
+  onNavigate: (url: string) => void
+  onDownload: (url: string, filename?: string) => void
+  onInspect: () => void
+  downloadUrlInput: string
+  onDownloadUrlInputChange: (value: string) => void
+}
+
+function BrowserToolPanel({
+  activeTool,
+  library,
+  pageSnapshot,
+  consoleFilter,
+  onConsoleFilterChange,
+  onClose,
+  onClear,
+  onNavigate,
+  onDownload,
+  onInspect,
+  downloadUrlInput,
+  onDownloadUrlInputChange,
+}: BrowserToolPanelProps) {
+  const labels: Record<BrowserToolId, string> = { history: '历史', bookmarks: '书签', downloads: '下载', console: '控制台' }
+  const clearable = activeTool
+  return (
+    <section className="browser-tool-panel" aria-label={`${labels[activeTool]}面板`}>
+      <header className="browser-tool-panel-head">
+        <strong>{labels[activeTool]}</strong>
+        <div className="browser-tool-panel-actions">
+          {activeTool === 'console' && <button type="button" className="browser-panel-action" onClick={onInspect}>刷新快照</button>}
+          <button type="button" className="browser-panel-action" onClick={() => onClear(clearable)} disabled={library[clearable].length === 0}>清空</button>
+          <button type="button" className="browser-panel-close" onClick={onClose} aria-label={`关闭${labels[activeTool]}面板`}><X size={14} /></button>
+        </div>
+      </header>
+
+      {activeTool === 'history' && (
+        <div className="browser-library-list">
+          {library.history.length === 0 && <p className="browser-library-empty">暂无浏览记录</p>}
+          {library.history.map(entry => (
+            <button key={entry.id} type="button" className="browser-library-item" onClick={() => onNavigate(entry.url)}>
+              <span className="browser-library-item-title">{entry.title || entry.url}</span>
+              <span className="browser-library-item-meta">{entry.url} · {formatBrowserTime(entry.visitedAt)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTool === 'bookmarks' && (
+        <div className="browser-library-list">
+          {library.bookmarks.length === 0 && <p className="browser-library-empty">暂无书签；点击地址栏旁的书签图标添加。</p>}
+          {library.bookmarks.map(entry => (
+            <button key={entry.id} type="button" className="browser-library-item" onClick={() => onNavigate(entry.url)}>
+              <span className="browser-library-item-title">{entry.title || entry.url}</span>
+              <span className="browser-library-item-meta">{entry.url} · {formatBrowserTime(entry.createdAt)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTool === 'downloads' && (
+        <div className="browser-download-panel">
+          <form className="browser-download-form" onSubmit={event => { event.preventDefault(); if (downloadUrlInput.trim()) { onDownload(downloadUrlInput); onDownloadUrlInputChange('') } }}>
+            <input
+              value={downloadUrlInput}
+              onChange={event => onDownloadUrlInputChange(event.target.value)}
+              placeholder="粘贴 http(s) 下载地址"
+              aria-label="下载地址"
+              inputMode="url"
+            />
+            <button type="submit" className="browser-panel-action" disabled={!downloadUrlInput.trim()}>开始</button>
+          </form>
+          {pageSnapshot?.links?.some(link => link.download && typeof link.href === 'string') && (
+            <div className="browser-discovered-downloads">
+              <span className="browser-library-caption">当前页面的下载链接</span>
+              {pageSnapshot.links.filter(link => link.download && typeof link.href === 'string').map((link, index) => (
+                <button key={`${link.href}-${index}`} type="button" className="browser-library-item" onClick={() => onDownload(link.href!, link.downloadName ?? undefined)}>
+                  <span className="browser-library-item-title">{link.text || link.downloadName || link.href}</span>
+                  <span className="browser-library-item-meta">{link.href}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="browser-library-list">
+            {library.downloads.length === 0 && <p className="browser-library-empty">暂无下载记录</p>}
+            {library.downloads.map(entry => (
+              <div key={entry.id} className="browser-library-item browser-download-entry">
+                <span className="browser-library-item-title">{entry.filename || entry.url}</span>
+                <span className="browser-library-item-meta" data-status={entry.status}>{entry.status === 'started' ? '已发起' : '失败'} · {entry.url} · {formatBrowserTime(entry.startedAt)}</span>
+                {entry.error && <span className="browser-library-item-error">{entry.error}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTool === 'console' && (
+        <div className="browser-console-panel">
+          <div className="browser-console-toolbar">
+            <label>级别
+              <select value={consoleFilter} onChange={event => onConsoleFilterChange(event.target.value as 'all' | ConsoleEntry['level'])} aria-label="控制台级别">
+                <option value="all">全部</option><option value="info">信息</option><option value="success">成功</option><option value="error">错误</option>
+              </select>
+            </label>
+            {pageSnapshot && <span className="browser-console-snapshot">快照：{pageSnapshot.links?.length ?? 0} links · {(pageSnapshot.text?.length ?? 0).toLocaleString()} chars</span>}
+          </div>
+          <div className="browser-console-list">
+            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).length === 0 && <p className="browser-library-empty">暂无操作记录</p>}
+            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).map(entry => (
+              <div key={entry.id} className="browser-console-entry" data-level={entry.level}>
+                <span className="browser-console-time">{formatBrowserTime(entry.at)}</span>
+                <code>{entry.command}</code>
+                {entry.detail && <span className="browser-console-detail">{entry.detail}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function formatBrowserTime(value: number): string {
+  try {
+    return new Date(value).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
 }
 
 function browserTabLabel(tab: BrowserTabSnapshot): string {

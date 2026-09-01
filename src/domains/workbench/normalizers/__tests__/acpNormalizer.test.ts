@@ -166,6 +166,23 @@ describe('ACP normalizer', () => {
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'tool.name.missing' })]))
   })
 
+  it('keeps Claude parentToolUseId out of identity.taskId (parent belongs to source/tool edge)', () => {
+    const result = normalizeAcpEvent({
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-tool',
+        _meta: { claudeCode: { parentToolUseId: 'parent-tool' } },
+        name: 'Bash',
+      },
+    }, { ...context, provider: 'claude-code' })
+
+    expect(result.events[0]?.identity).not.toHaveProperty('taskId', 'parent-tool')
+    expect(result.events[0]?.event).toMatchObject({
+      type: 'tool.started',
+      tool: { toolCallId: 'child-tool', parentToolUseId: 'parent-tool' },
+    })
+  })
+
   it('promotes only standard C14 wire fields into canonical usage/commands/config names', () => {
     const usage = normalizeAcpEvent({ update: {
       sessionUpdate: 'usage_update', used: 30, size: 200,

@@ -94,7 +94,7 @@ describe('Hermes normalizer', () => {
     })
   })
 
-  it('unwraps ACP content wrappers and preserves markdown tool output', () => {
+  it('unwraps ACP content wrappers and promotes skill output to a typed part', () => {
     const result = normalizeHermesEvent({
       sessionUpdate: 'tool_call_update', toolCallId: 'skill-output', status: 'completed',
       title: 'skill view (diagnose/SKILL.md)', kind: 'read',
@@ -102,7 +102,7 @@ describe('Hermes normalizer', () => {
     }, { ...context, replay: false })
     expect(result.events[0].event).toMatchObject({
       type: 'tool.completed',
-      tool: { name: 'skill_view', parts: [{ kind: 'text', text: '**loaded**' }] },
+      tool: { name: 'skill_view', parts: [{ kind: 'skill', skillId: 'diagnose:SKILL.md', title: 'diagnose', source: 'hermes' }] },
     })
   })
 
@@ -138,5 +138,50 @@ describe('Hermes normalizer', () => {
       type: 'tool.started',
       tool: { toolCallId: 'search-snake', name: 'search_files', input: { pattern: 'src' } },
     })
+  })
+
+  it('promotes structured Hermes search/terminal/memory results and preserves canonical names', () => {
+    const search = normalizeHermesEvent({ update: {
+      session_update: 'tool_call_update', tool_call_id: 'search-1', status: 'completed',
+      name: 'search_files', args: { pattern: 'TODO' },
+      raw_output: JSON.stringify({ files: [{ path: 'src/a.ts', line: 4, content: 'TODO here' }], total_count: 1 }),
+    } }, { ...context, replay: false })
+    expect(search.events[0].event).toMatchObject({
+      type: 'tool.completed', tool: {
+        name: 'search_files', input: { pattern: 'TODO' },
+        parts: [{ kind: 'search-result', query: 'TODO', results: [{ source: 'src/a.ts', location: { path: 'src/a.ts', line: 4 } }] }],
+      },
+    })
+
+    const terminal = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call_update', toolCallId: 'terminal-1', status: 'completed',
+      title: 'terminal: npm test', output: { stdout: 'ok', exit_code: 0 },
+    } }, { ...context, replay: false })
+    expect(terminal.events[0].event).toMatchObject({
+      type: 'tool.completed', tool: { name: 'terminal', input: { command: 'npm test' }, parts: [{ kind: 'terminal', command: 'npm test', streams: [{ stream: 'stdout', text: 'ok' }] }] },
+    })
+
+    const memory = normalizeHermesEvent({ update: {
+      sessionUpdate: 'tool_call_update', toolCallId: 'memory-1', status: 'completed',
+      name: 'memory', args: { action: 'save', target: 'project' },
+      result: { success: true, message: 'saved' },
+    } }, { ...context, replay: false })
+    expect(memory.events[0].event).toMatchObject({
+      type: 'tool.completed', tool: { name: 'memory', parts: [{ kind: 'memory', memoryId: 'project', title: 'project', source: 'hermes' }] },
+    })
+  })
+
+  it('keeps browser/delegation/integration title-only calls as identifiable generic tools', () => {
+    for (const [name, title, kind] of [
+      ['browser_snapshot', 'browser snapshot', 'read'],
+      ['delegate_task', 'delegate: inspect tests', 'execute'],
+      ['kanban_create', 'kanban_create: issue', 'execute'],
+    ] as const) {
+      const result = normalizeHermesEvent({ update: {
+        sessionUpdate: 'tool_call', toolCallId: name, title, kind,
+      } }, { ...context, replay: false })
+      expect(result.events[0].event, name).toMatchObject({ type: 'tool.started', tool: { name, canonicalName: name } })
+      expect(result.events[0].event).not.toMatchObject({ type: 'event.unknown' })
+    }
   })
 })
