@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { BUILTIN_WORKSPACE_TYPES } from '../../plugins/core/sheet/builtinWorkspacePlugins'
@@ -15,6 +15,8 @@ import {
   resolveWorkspace,
   subscribeWorkspaceRegistry,
 } from '../workspaceRegistry'
+import { createRuntimeServices } from '../../plugin-runtime/runtimeServices.ts'
+import { WorkspaceRegistryStore } from '../workspaceRegistry.ts'
 
 describe('Workspace Registry（阶段 6 首个切片）', () => {
   it('9 个内置 workspace 全量种子，描述符字段完整', () => {
@@ -108,5 +110,17 @@ describe('Workspace Registry（阶段 6 首个切片）', () => {
   it('重复注册同 kind 报错', () => {
     const owner = createPluginIdentity('test.workspace', 'duplicate-test')
     expect(() => registerWorkspace(owner, { ...BUILTIN_WORKSPACE_TYPES[0] })).toThrow('workspace 已注册')
+  })
+
+  it('RuntimeServices 可注入唯一 registry，并支持 dispose 清理', () => {
+    const registry = new WorkspaceRegistryStore()
+    const services = createRuntimeServices({ workspaceRegistry: registry })
+    expect(services.workspaceRegistry).toBe(registry)
+    const listener = vi.fn()
+    const unsubscribe = registry.subscribe(listener)
+    registry.dispose()
+    expect(registry.getSnapshot().entries).toEqual([])
+    unsubscribe()
+    expect(listener).not.toHaveBeenCalled()
   })
 })
