@@ -41,6 +41,8 @@ import { createPluginInterfaceModeApi, type PluginInterfaceModeApi } from './int
 import type { InterfaceModeContribution } from './interface-mode/interfaceModeTypes.ts'
 import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/pluginTitlebarApi.ts'
 import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
+import { createPluginStorageApi } from './storage/pluginStorageApi.ts'
+import type { PluginStorageApi } from './storage/pluginStorageTypes.ts'
 
 export interface PluginActivationTransactions {
   readonly application: PluginApplicationRegistryTransaction
@@ -84,6 +86,8 @@ export interface BuiltinPluginActivationContext {
   readonly sessionCreation: PluginSessionCreationApi
   readonly interfaceModes: PluginInterfaceModeApi
   readonly titlebar: PluginTitlebarApi
+  /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
+  readonly storage: PluginStorageApi
 }
 
 export type PluginActivationContextFactory = (
@@ -145,5 +149,6 @@ export function createPluginActivationContext(
       scope,
       transactions?.titlebar,
     ),
+    storage: createPluginStorageApi(identity),
   }
 }

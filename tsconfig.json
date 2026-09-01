@@ -19,7 +19,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@pylon/plugin-sdk": ["src/sdk/index.ts"]
+      "@pylon/plugin-sdk": ["src/sdk/index.ts"],
+      "@pylon/plugin-sdk/testing": ["src/sdk/testing.ts"]
     }
   },
   "include": ["src"],

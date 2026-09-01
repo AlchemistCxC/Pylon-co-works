@@ -1,7 +1,14 @@
 import type { BuiltinPluginDefinition } from './pluginRuntime.ts'
 import type { HotSwapMode } from './shadowUpdate.ts'
 
-export const PYLON_PLUGIN_API_VERSION = '1.0' as const
+export const PYLON_PLUGIN_API_MIN = '1.0' as const
+export const PYLON_PLUGIN_API_LATEST = '1.1' as const
+/** 宿主接受的全部 API 小版本（allowlist）：minor 只做加法且向后兼容，
+ *  1.0 插件在 1.1 宿主继续激活；未知更高版本拒绝并提示升级宿主。 */
+export const PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, PYLON_PLUGIN_API_LATEST] as const
+export type PylonPluginApiVersion = (typeof PYLON_PLUGIN_API_SUPPORTED)[number]
+/** @deprecated 语义是宿主接受的最低版本，改用 PYLON_PLUGIN_API_MIN */
+export const PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN
 export const PYLON_PLUGIN_MANIFEST_FILE = 'pylon-plugin.json' as const
 
 export class PluginManifestError extends Error {
@@ -21,7 +28,7 @@ export interface PylonPluginManifest {
   readonly id: string
   readonly name: string
   readonly version: string
-  readonly api: typeof PYLON_PLUGIN_API_VERSION
+  readonly api: PylonPluginApiVersion
   readonly kind: NonNullable<BuiltinPluginDefinition['kind']>
   readonly web: {
     readonly entry: string
@@ -48,6 +55,7 @@ const KINDS = new Set([
 const HOT_SWAP_MODES = new Set<HotSwapMode>([
   'parallel', 'exclusive', 'soft-remount', 'restart-required',
 ])
+const API_SUPPORTED_SET = new Set<string>(PYLON_PLUGIN_API_SUPPORTED)
 
 function record(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -85,8 +93,10 @@ export function parsePylonPluginManifest(source: string | unknown): PylonPluginM
   }
   if (typeof manifest.name !== 'string' || !manifest.name.trim()) throw new Error('pylon-plugin.json 缺少 name')
   if (typeof manifest.version !== 'string' || !manifest.version.trim()) throw new Error('pylon-plugin.json 缺少 version')
-  if (manifest.api !== PYLON_PLUGIN_API_VERSION) {
-    throw new Error(`pylon-plugin.json api 必须为 ${PYLON_PLUGIN_API_VERSION}`)
+  if (typeof manifest.api !== 'string' || !API_SUPPORTED_SET.has(manifest.api)) {
+    throw new Error(
+      `pylon-plugin.json api 仅支持 ${PYLON_PLUGIN_API_SUPPORTED.join('/')}（更高版本需升级宿主）`,
+    )
   }
   if (typeof manifest.kind !== 'string' || !KINDS.has(manifest.kind)) throw new Error('pylon-plugin.json kind 无效')
   const web = record(manifest.web, 'web')

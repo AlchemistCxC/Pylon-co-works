@@ -813,6 +813,51 @@ context.settings.registerPage({
 
 可运行的完整示例（manifest + SDK 入口 + scoped styles + 构建脚本）：`examples/web-plugins/hello-starter`。
 
+#### 6.11.1 测试基建（@pylon/plugin-sdk/testing）
+
+SDK 的 testing 子路径提供 `createMockContext(options?)`，让插件单测脱离真实宿主运行：
+
+```ts
+import { definePlugin } from '@pylon/plugin-sdk'
+import { createMockContext } from '@pylon/plugin-sdk/testing'
+
+const ctx = createMockContext({ pluginId: 'starter.hello' })
+await plugin.activate(ctx)
+await ctx.__commands.execute('starter.hello.ping', { name: 'Pylon' })
+const result = await ctx.__hooks.dispatch('message.user.beforeSend', event)
+const driver = ctx.__ui.mount('starter.hello.settings')   // 真实 DOM + 桥
+driver.hostInput({ greetingName: '新值' })
+await ctx.__scopeDispose()                                 // 真实 Scope 回收纪律
+```
+
+语义：`__commands.execute` / `__hooks.dispatch`（按 priority 排序的 pipeline 归约）/
+`__ui.mount`（挂载即派发 host:input，settings:set 回写 settings 存储，与
+PluginSettingsPageHost 同款）/ `__settings` / sessions·turns 为内存 Map；
+其余 13 个 API 面为记录式 Proxy（调用被记录、返回 undefined）——覆盖不到的
+行为用真实宿主或集成测试验证。插件测试文件 import 此子路径，生产 bundle
+不会包含它。
+
+#### 6.11.2 存储 API（API 1.1 新增）
+
+`context.storage`：按 pluginId 隔离的 KV 存储，值可 JSON 序列化；
+每插件 1 MiB 软配额，超限抛 `PluginStorageError`，不静默丢弃。
+与 settings 的分工：settings 是“设置页可编辑的用户偏好”，storage 是
+“插件私有运行状态”。
+
+```ts
+context.storage.setValue('lastQuery', { text: 'refactor', at: Date.now() })
+context.storage.getValue('lastQuery')
+context.storage.keys()
+context.storage.clear()
+```
+
+#### 6.11.3 API 版本策略
+
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1`（`PYLON_PLUGIN_API_SUPPORTED`）；
+  **1.0 插件在 1.1 宿主继续激活**，未知更高版本拒绝并提示升级宿主。
+- minor 版本只做加法（新增可选 context 成员）；破坏性变更加 major 并要求重写。
+- `api: "1.0"` 的插件不得引用 1.1 成员（如 `storage`）——宿主仅在 1.1 契约下保证其存在。
+
 ---
 
 ## 7. Stylesheet 生命周期
@@ -1249,6 +1294,7 @@ operation inspect
 - 第三方插件按产品决策视为完全可信本机代码；生命周期、依赖和 cleanup 隔离不是恶意代码安全沙箱。
 - CSS 没有 selector 沙箱。
 - 第一版入口应为单 JS bundle，不支持插件入口继续拆动态 chunk。
+- storage 为单窗口 localStorage 持久化（无跨端同步、无迁移框架）；Files/Resources 完整 API 仍缺。
 - UI Surface Registry、左右栏与插件设置页挂载点已完成；完整 AgentSheet Workbench 级替换仍是第一方实验边界，第三方当前从 message/content/tool renderer 粒度接入。
 - Host setting-option contribution 已开放；它只能增删改候选项，不能借此注册新的 Interface Mode 或接管宿主设置值。
 - 外置插件不应直接依赖 Pylon 内部 Zustand Store 或第一方 React 组件。

@@ -87,6 +87,7 @@ export default definePlugin({
     // 5) 隔离设置页：声明字段，SDK 负责渲染与 host:input / settings:set 协议
     context.ui.registerSurface(
       createSettingsSurface({
+        id: 'starter.hello.settings',
         description: 'Starter 示例：字段改动经 settings:set 持久化到插件命名空间。',
         fields: [
           { type: 'text', key: 'greetingName', label: '问候名', placeholder: 'Pylon' },

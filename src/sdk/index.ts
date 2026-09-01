@@ -9,6 +9,9 @@
  */
 import {
   parsePylonPluginManifest,
+  PYLON_PLUGIN_API_MIN,
+  PYLON_PLUGIN_API_LATEST,
+  PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_API_VERSION,
   PYLON_PLUGIN_MANIFEST_FILE,
   type PylonPluginManifest,
@@ -37,6 +40,7 @@ export type {
   CommandRegisterOptions,
 } from '../plugin-runtime/commands/commandRegistry.ts'
 export type { PluginCommandApi as CommandApi } from '../plugin-runtime/commands/pluginCommandApi.ts'
+export type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.ts'
 
 export type {
   HookName,
@@ -91,7 +95,14 @@ export type { FileWorkbenchContribution } from '../plugin-runtime/file-workbench
 
 // ── 运行时值 ──
 export { VISUAL_SEMANTIC_TOKENS, VISUAL_SEMANTIC_ROLE_TOKENS } from '../domains/theme/visualSemantics.ts'
-export { PYLON_PLUGIN_API_VERSION, PYLON_PLUGIN_MANIFEST_FILE }
+export {
+  PYLON_PLUGIN_API_MIN,
+  /** @deprecated 语义是最低接受版本，改用 PYLON_PLUGIN_API_MIN */
+  PYLON_PLUGIN_API_VERSION,
+  PYLON_PLUGIN_API_LATEST,
+  PYLON_PLUGIN_API_SUPPORTED,
+  PYLON_PLUGIN_MANIFEST_FILE,
+}
 
 /** Gives plugin entry modules a checked, inference-friendly lifecycle definition. */
 export function definePlugin(module: PackagePluginModule): PackagePluginModule {
@@ -139,6 +150,8 @@ export type SettingsSurfaceField =
 export type SettingsSurfaceValues = Readonly<Record<string, unknown>>
 
 export interface SettingsSurfaceDefinition {
+  /** surface id（须与 settings.registerPage 的 surfaceId 一致）。 */
+  id: string
   /** 控件清单（渲染顺序即声明顺序）。 */
   fields: readonly SettingsSurfaceField[]
   /** 顶部说明（可选）。 */
@@ -154,7 +167,7 @@ export interface SettingsSurfaceDefinition {
  */
 export function createSettingsSurface(definition: SettingsSurfaceDefinition): PluginUiSurface {
   return {
-    id: 'pylon.settings-surface',
+    id: definition.id,
     mount(container: HTMLElement, bridge: PluginUiEventBridge): PluginUiUnmount {
       let values: Record<string, unknown> = {}
       let disposed = false
