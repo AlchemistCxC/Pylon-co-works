@@ -20,6 +20,7 @@ import {
   reduceGenerationActivity,
   type GenerationActivityEvent,
 } from '../../domains/activity/generationStateMachine.ts'
+import { settleMessages as settleProjectedMessages } from '../../domains/events/messageProjectionRules.ts'
 
 /**
  * sessionRuntimeStore — Chat 会话运行时状态（阶段 2：Chat 状态收敛）。
@@ -195,18 +196,19 @@ function updateLastMessage(
  * U2-C：live/replay 统一 settle `messages`。
  */
 function settleMessages(runtime: SourceChatRuntime, completedAt: number): SourceChatRuntime {
-  return mapMessages(runtime, message => {
+  const settled = settleProjectedMessages(runtime.messages)
+  return mapMessages(runtime, (message, index) => {
+    const projected = settled[index] ?? message
     if (message.role === 'reasoning' && message.running) {
       return {
-        ...message,
+        ...projected,
         running: false,
         thoughtDurationMs: message.thoughtStartedAt ? Math.max(0, completedAt - message.thoughtStartedAt) : message.thoughtDurationMs,
       }
     }
-    if (message.role === 'tool' && message.running) {
-      return { ...message, running: false, toolStatus: message.toolStatus || 'completed' }
-    }
-    return { ...message, running: false }
+    // Runtime adapter keeps the historical explicit `running:false` shape even for
+    // messages that were already settled; the pure rule only changes active rows.
+    return { ...projected, running: false }
   })
 }
 
