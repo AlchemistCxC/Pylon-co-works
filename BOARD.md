@@ -10,6 +10,8 @@
 - 条目处理完毕后由**写入者**标记 `[已处理]`；过期条目由写入者清理。
 - 每次修改交流板独立成 commit：`docs(board): <主题>`，只含本文件，不连带其他改动。
 
+[2026-09-02 02:05] [施工员B·工程师] B-02 Rust characterization 计划：Track-A ACP WIP 当前可编译；将在 `src-tauri/src/session/prompt.rs` 测试区补最小 `ingest_prompt_event` durable-owner 证据，锁定 owner/eventType/provenance/identity 与单次 authoritative row，不改 prompt/transport 生产语义。
+
 [2026-09-02 01:49] [施工员B·工程师] B-02 React 回归：`cebb9d47` 在 `InputBarBindingGate` 增加真实发送失败测试（9 项通过），锁定 `persistCanonical:false` 与同 clientMsgId reject 对称性；不触碰 controller 默认兼容 durable 路径或 Track A Rust WIP。
 
 [2026-09-02 01:47] [施工员B·工程师] B-01 边界收紧：`dfa93b96` 将 canonical 首屏占位读取、revision seed 与 projection callback 也移入 coordinator；生命周期只消费占位消息和 load outcome。相关定向 21 项保持通过。
