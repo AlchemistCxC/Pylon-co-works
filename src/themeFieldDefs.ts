@@ -321,6 +321,11 @@ export const ZONE_FIELDS: Record<string, ThemeFieldKey[]> = ZONES.reduce((acc, z
   return acc
 }, {} as Record<string, ThemeFieldKey[]>)
 
+/** Machine-readable field owner matrix used by theme persistence and migrations. */
+export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone: string; readonly owner: 'theme' }>> = Object.freeze(
+  Object.fromEntries(THEME_FIELD_KEYS.map(key => [key, Object.freeze({ zone: THEME_FIELD_DEFS[key].zone, owner: 'theme' as const })])) as Record<ThemeFieldKey, { readonly zone: string; readonly owner: 'theme' }>,
+)
+
 /** cssVar 注入表：--xxx → 字段名（供 App.tsx 循环注入） */
 export const THEME_CSS_VAR_MAP: Readonly<Record<string, ThemeFieldKey>> = THEME_FIELD_KEYS.reduce((acc, key) => {
   const def = THEME_FIELD_DEFS[key]
