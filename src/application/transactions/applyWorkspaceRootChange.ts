@@ -5,19 +5,31 @@
  * 既有绑定会话保持各自创建时冻结的 cwd，不 close、不 reload、不改 workdir。
  */
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import { reportRuntimeError } from '../../runtimeError.ts'
 
 export type WorkspaceRootChangeResult =
   | { ok: true }
   | { ok: false; reason: 'error'; message: string }
 
+export interface WorkspaceRootStorePort {
+  updateWorkspace(workspaceId: string, partial: { rootPath: string }): void | Promise<void>
+}
+
+export interface WorkspaceRootTransactionPorts {
+  workspace: WorkspaceRootStorePort
+  reportError?: (action: string, error: unknown) => void
+}
+
 export async function applyWorkspaceRootChange(
   workspaceId: string,
   newRootPath: string,
+  ports?: WorkspaceRootTransactionPorts,
 ): Promise<WorkspaceRootChangeResult> {
   try {
-    await useWorkspaceEntityStore.getState().updateWorkspace(workspaceId, { rootPath: newRootPath })
+    await (ports?.workspace ?? useWorkspaceEntityStore.getState()).updateWorkspace(workspaceId, { rootPath: newRootPath })
     return { ok: true }
   } catch (error) {
+    ;(ports?.reportError ?? reportRuntimeError)('更新 Workspace 根目录', error)
     return { ok: false, reason: 'error', message: error instanceof Error ? error.message : String(error) }
   }
 }

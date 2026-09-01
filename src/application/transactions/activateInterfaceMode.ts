@@ -7,6 +7,18 @@ import type { InterfaceModeContribution } from '../../plugin-runtime/interface-m
 import { useStore } from '../../store.ts'
 import { validateRendererSuiteReferences } from '../../plugin-runtime/renderers/rendererSuiteReferences.ts'
 
+export interface InterfaceModeTransactionPorts {
+  readonly interfaceMode: Pick<typeof useInterfaceModeStore, 'getState'>
+  readonly presentation: Pick<typeof usePresentationPreferenceStore, 'getState'>
+  readonly theme: Pick<typeof useStore, 'getState'>
+}
+
+const defaultPorts = {
+  interfaceMode: useInterfaceModeStore,
+  presentation: usePresentationPreferenceStore,
+  theme: useStore,
+} satisfies InterfaceModeTransactionPorts
+
 export interface InterfaceModeSuiteChoice {
   readonly requestedSuiteId?: string
   readonly activeSuiteId?: string
@@ -43,15 +55,15 @@ export function interfaceModeIsUsable(mode: InterfaceModeContribution): boolean 
   return true
 }
 
-function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContribution): void {
+function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContribution, ports: InterfaceModeTransactionPorts): void {
   applyPresentationProfile(profile, {
-    setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
-    setActiveProfileId: profileId => usePresentationPreferenceStore.getState().setActiveProfileId(profileId),
+    setZoneField: (zone, patch, source) => ports.theme.getState().setZoneField(zone, patch, source),
+    setActiveProfileId: profileId => ports.presentation.getState().setActiveProfileId(profileId),
   })
-  useInterfaceModeStore.getState().rememberProfile(mode, profile.id)
+  ports.interfaceMode.getState().rememberProfile(mode, profile.id)
 }
 
-function resolveActivatableMode(mode: InterfaceMode): InterfaceModeContribution | undefined {
+function resolveActivatableMode(mode: InterfaceMode, ports: InterfaceModeTransactionPorts): InterfaceModeContribution | undefined {
   const modeContribution = resolveInterfaceMode(mode)
   if (!modeContribution || !interfaceModeIsUsable(modeContribution)) return undefined
   try {
@@ -65,51 +77,51 @@ function resolveActivatableMode(mode: InterfaceMode): InterfaceModeContribution 
     return undefined
   }
   if (modeContribution.workbench.renderKind === 'renderer-suite') {
-    const selectedSuiteId = usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode]
+    const selectedSuiteId = ports.presentation.getState().rendererSuiteIdByMode[mode]
     resolveInterfaceModeSuite(modeContribution, selectedSuiteId, getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value.id))
   }
   return modeContribution
 }
 
 /** 激活一个明确的 Profile；注册表引用未通过校验时保持偏好与主题不变。 */
-export function activatePresentationProfile(profileId: string): boolean {
+export function activatePresentationProfile(profileId: string, ports: InterfaceModeTransactionPorts = defaultPorts): boolean {
   const profile = getPresentationProfileRegistry().resolve(profileId)?.value
   if (!profile) return false
   const mode = presentationProfileInterfaceMode(profile)
-  if (!resolveActivatableMode(mode)) return false
-  applyModeProfile(mode, profile)
-  useInterfaceModeStore.getState().setInterfaceMode(mode)
+  if (!resolveActivatableMode(mode, ports)) return false
+  applyModeProfile(mode, profile, ports)
+  ports.interfaceMode.getState().setInterfaceMode(mode)
   return true
 }
 
-export function activateInterfaceMode(mode: InterfaceMode): boolean {
-  const modeContribution = resolveActivatableMode(mode)
+export function activateInterfaceMode(mode: InterfaceMode, ports: InterfaceModeTransactionPorts = defaultPorts): boolean {
+  const modeContribution = resolveActivatableMode(mode, ports)
   if (!modeContribution) return false
-  const state = useInterfaceModeStore.getState()
+  const state = ports.interfaceMode.getState()
   const profileId = state.profileByMode[mode] || modeContribution.defaultPresentationProfileId
   const registry = getPresentationProfileRegistry()
   const profile = registry.resolve(profileId)?.value
     ?? registry.getSnapshot().entries.find(entry => presentationProfileInterfaceMode(entry.value) === mode)?.value
   if (!profile) return false
-  applyModeProfile(mode, profile)
+  applyModeProfile(mode, profile, ports)
   state.setInterfaceMode(mode)
   return true
 }
 
 /** Reset the Theme Store, then restore the current mode's remembered/default Presentation Profile. */
-export function resetThemeForActiveInterfaceMode(): boolean {
-  const mode = useInterfaceModeStore.getState().interfaceMode
-  const modeContribution = resolveActivatableMode(mode)
+export function resetThemeForActiveInterfaceMode(ports: InterfaceModeTransactionPorts = defaultPorts): boolean {
+  const mode = ports.interfaceMode.getState().interfaceMode
+  const modeContribution = resolveActivatableMode(mode, ports)
   if (!modeContribution) return false
-  const state = useInterfaceModeStore.getState()
+  const state = ports.interfaceMode.getState()
   const profileId = state.profileByMode[mode] || modeContribution.defaultPresentationProfileId
   const registry = getPresentationProfileRegistry()
   const profile = registry.resolve(profileId)?.value
     ?? registry.getSnapshot().entries.find(entry => presentationProfileInterfaceMode(entry.value) === mode)?.value
   if (!profile) return false
 
-  useStore.getState().resetTheme()
-  applyModeProfile(mode, profile)
+  ports.theme.getState().resetTheme()
+  applyModeProfile(mode, profile, ports)
   return true
 }
 
