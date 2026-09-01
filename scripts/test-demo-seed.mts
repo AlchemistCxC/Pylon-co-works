@@ -90,6 +90,7 @@ for (const entry of buildGitStatus()) {
 {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(app, /browserDemoBootstrap/, 'App 必须通过 browser/mock bootstrap seam 接入 demo')
+  assert.match(app, /if \(!import\.meta\.env\.DEV\) return/, '生产构建必须在编译期移除 demo adapter 动态依赖')
   assert.match(app, /if \(IS_TAURI && !isBrowserMockRuntime\(\)\) return/, 'seed effect 必须真实 Tauri 守卫')
   assert.match(app, /demoSeededRef\.current/, 'seed 必须幂等 ref')
   assert.match(app, /runBrowserDemoSeed\(setActiveSession/, 'seed 必须传 setActiveSession（写回持久化）')

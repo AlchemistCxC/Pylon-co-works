@@ -296,6 +296,10 @@ export default function App() {
   // 幂等=seedDemo 内部（sessions 空才种会话）+ seededRef（StrictMode 双跑）。
   const demoSeededRef = useRef(false)
   useEffect(() => {
+    // Keep the browser/demo adapter out of production bundles.  Tauri
+    // production must not merely skip the seed at runtime; the dynamic
+    // import itself is development/mock-only.
+    if (!import.meta.env.DEV) return
     if (IS_TAURI && !isBrowserMockRuntime()) return
     if (demoSeededRef.current) return
     demoSeededRef.current = true
