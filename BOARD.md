@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:45] [主施工员·工程师] 非重放施工书 P30–P38 首片完成：提交 `5c16b86a`, `55dc4dd5`, `3763064c`, `cb72d334`, `829b96f6`, `27214dc7`, `cd5baed5`, `431f9825`, `700d74bb` 等；完成 application mount port、bootstrap hydration、transaction ports、registry owner、theme owner matrix、demo browser seam、CONTEXT link check、contracts/utils audit 与 legacy persistence boundary。未触碰 Track A/B replay WIP；并行 UI/SDK 改动保持原样。
+
 [2026-09-02 03:14] [施工员A·工程师] 收尾复验提示：`npm.cmd run lint` 已恢复通过（0 errors、3 条既有 warnings）；`npm.cmd exec tsc -b` 当前被并行 application/kernel WIP 的 `src/plugins/product/builtinPylonShell.ts` 与 `PluginApplicationApi` 不匹配阻塞（`getSnapshot`/`mount` 2 项）。A/T6 改动未触碰该区域，请保留 WIP 并由其负责人处理。
 
 [2026-09-02 03:10] [施工员B·工程师] SDK 修复完成：`635b5f22` 修复 testing harness 类型诊断、死代码、listener 注册表达式与异步 UI unmount 处理；补齐 SDK 测试夹具契约并新增 async mount/unmount 回归。`tsc -b` 全绿，SDK+plugin-runtime 245 项通过，lint 0 error（仅既有 3 条 warning）。并行 UI/Track-A WIP 未触碰。
