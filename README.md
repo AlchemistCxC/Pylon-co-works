@@ -113,9 +113,11 @@ Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结
 
 插件启用、停用、重新加载和卸载都在“设置 → 插件”完成。插件运行在宿主授予的 Scope 中；它们可以执行本机代码，因此只安装来源可信的插件。安装失败或激活异常时，Pylon 会保留已保存配置并进入降级/安全模式，而不是静默删除设置。
 
+开发插件请从 `@pylon/plugin-sdk`（`src/sdk/`）入手：`definePlugin` 定义生命周期，全量宿主契约类型 + `createSettingsSurface` 等纯函数 helper 都从 SDK 引用，打包时经路径别名内联进插件 bundle。可运行的起步示例见 `examples/web-plugins/hello-starter`（manifest + SDK 入口 + scoped styles + 构建脚本，装进“设置 → 插件”即可跑）。
+
 用户向导：[Pylon-插件系统说明书-用户版](docs/说明书/Pylon-插件系统说明书-用户版.md)
 
-开发者契约：[Pylon-插件系统说明书-开发者版](docs/说明书/Pylon-插件系统说明书-开发者版.md)
+开发者契约：[Pylon-插件系统说明书-开发者版](docs/说明书/Pylon-插件系统说明书-开发者版.md)（SDK 用法见其 §6.11）
 
 ## 8. CLI 与 Gateway
 
@@ -202,6 +204,8 @@ src/cli/                             pylon-cli 本机 IPC 服务端
 src/infrastructure/                  Tauri 客户端、canonical 事件仓库等适配器
 src/plugins/product/                 第一方插件、样式和注册表
 src/plugins/core/                    第一方插件使用的实现模块
+src/sdk/                             插件开发 SDK（@pylon/plugin-sdk 作者面）
+examples/web-plugins/                外置插件起步示例（SDK 用法活文档）
 src-tauri/src/agent_config/          agents.yaml 解析/校验/原子写/补丁 API
 src-tauri/src/acp/                   ACP 客户端（连接、JSON-RPC、传输、wire trace）
 src-tauri/src/session/               会话仓库（canonical 事件、SQLite 迁移、prompt 生命周期）
