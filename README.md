@@ -63,12 +63,12 @@ SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应
 ## 3. 第一次使用
 
 1. 打开“设置 → Agent”，新增或编辑 Agent runtime。填写启动命令、参数和必要的环境变量。
-2. 在左栏选择 Agent。聊天模式可以直接新建会话；工作区模式先选择一个工作区，再输入首条请求。
-3. 点击“开始新会话”。Pylon 会先创建本地会话，再向 Agent 建立 ACP session；首条请求发送失败时会回滚新建的会话。
+2. 在左栏选择 Agent。聊天模式不要求工作区；工作区模式需要先选择一个工作区（只有一个可用时会自动选中）。
+3. 在输入框直接输入首条请求发送。Pylon 会随首条请求创建本地会话并向 Agent 建立 ACP session；首条请求发送失败时会回滚新建的会话。
 4. 发送消息后，消息流会显示回复和工具活动。工具输出默认折叠，点击工具行可展开；长输出会限制在独立滚动区域内。
 5. 需要查看项目文件时，打开文件工作台。文件工作台使用当前会话的工作目录，不会自动切换到其他会话的目录。
 
-空态创建入口的行为：聊天模式不要求工作区；工作区模式没有可用工作区时提交按钮保持禁用，选择工作区后才允许创建。创建成功会自动选中新会话并发送首条请求。
+空态创建入口的行为：聊天模式不要求工作区；工作区模式没有可用工作区时无法提交（前端拦截，后端同样拒绝）。创建成功会自动选中新会话并发送首条请求。
 
 ## 4. 工作区、会话与数据
 
@@ -97,7 +97,7 @@ SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应
 
 Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结构由同一套消息契约提供，预设只改变字体、间距、颜色、指示器和表面表现。终端风格下，消息块共用固定左侧指示列，助手标记、思考块和工具标记保持同一条基线。
 
-设置修改即时生效，并按 Profile 保存。恢复默认值只影响当前设置范围；插件贡献的设置项由贡献者声明，宿主负责展示和持久化。
+设置修改即时生效，并持久保存在本地用户数据目录；恢复默认值只影响当前设置范围。呈现风格（Presentation Profile）是独立于主题字段的选择层，修改字体、颜色等字段不会切换当前 Profile；插件贡献的设置项由贡献者声明，宿主负责展示和持久化。
 
 ## 7. 插件
 
@@ -124,7 +124,7 @@ Gateway 是可选的消息转发层：外部平台的消息进入 Gateway 后映
 
 ### Agent 无法启动
 
-检查 Agent 可执行文件、参数、工作目录和权限；在“运行监控”查看启动 stderr。先用同样的命令在终端直接启动，确认 Agent 本身能运行。
+检查 Agent 可执行文件、参数、工作目录和权限；在运行日志 Sheet（或 Agent 设置面板的启动诊断）查看启动 stderr。先用同样的命令在终端直接启动，确认 Agent 本身能运行。
 
 ### 会话恢复失败
 
@@ -184,14 +184,19 @@ WebView2，可显式使用 `python scripts/pack_release.py --without-webview2`�
 
 ```text
 src/main.tsx                         应用入口与 bootstrap
+src/kernel/                          Kernel 壳：应用挂载、恢复、Safe Mode
+src/plugin-runtime/                  插件宿主：Runtime/Scope/注册表/包运行时与皮肤
 src/App.tsx                          产品壳、Sheet、生命周期
 src/domains/                         领域模型与状态同步（theme/workbench/presentation…）
 src/application/transactions/        跨领域应用事务
-src/components/chat/                 React 消息流、ACP 事件与会话生命周期
+src/host/renderer-suite/             Renderer Suite 宿主（prepare/stage/原子切换）
+src/components/chat/                 事件控制器、消息行管线与输入组件
 src/components/settings/             设置页面板（Agent/插件/渲染器/备份…）
 src/themeFieldRenderer.tsx           声明式主题字段渲染（defs 驱动）
-src/renderers/solid-workbench/       Solid 工作台与消息内容实现
-src/sheets/agent-workbench/          Renderer Suite 宿主与 Agent 工作台接线
+src/renderers/solid-workbench/       Solid 工作台与消息内容实现（builtin.solid suite）
+src/sheets/agent-workbench/          Agent 工作台 Sheet 与 Suite 宿主接线
+src/cli/                             pylon-cli 本机 IPC 服务端
+src/infrastructure/                  Tauri 客户端、canonical 事件仓库等适配器
 src/plugins/product/                 第一方插件、样式和注册表
 src/plugins/core/                    第一方插件使用的实现模块
 src-tauri/src/agent_config/          agents.yaml 解析/校验/原子写/补丁 API
