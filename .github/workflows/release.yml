@@ -26,9 +26,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
           components: clippy
 
-      # 项目锁 GNU；runner 自带 MSVC，强制 MSVC 保证可链接
+      # 项目锁 MSVC；runner 自带 MSVC，显式覆盖确保链接。
       - name: 使用 MSVC 工具链
         run: rustup override set stable-x86_64-pc-windows-msvc
 

@@ -43,13 +43,17 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # toolchain 显式指定：rust-toolchain.toml 的完整 toolchain 名会让 dtolnay
+      # 解析失败（"target tuple in channel name"）；MSVC 为 CI runner 自带工具链。
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
           components: clippy
 
-      # 项目 rust-toolchain.toml 锁定 GNU，但 CI runner 自带 MSVC 工具链；
-      # 强制 MSVC 避免 runner 上缺 MinGW 的链接失败（本工具链切换见 docs）。
-      - name: 使用 MSVC 工具链（CI runner 自带给定链接器）
+      # 项目 rust-toolchain.toml 锁定 MSVC，runner 自带 MSVC 工具链；
+      # 本机（开发）未装 Windows SDK（rc.exe 缺失），CI 同样不依赖 SDK。
+      - name: 使用 MSVC 工具链（CI runner 自带链接器）
         run: rustup override set stable-x86_64-pc-windows-msvc
 
       - name: 安装依赖（pnpm）

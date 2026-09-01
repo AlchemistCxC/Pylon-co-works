@@ -5,3 +5,7 @@ onlyBuiltDependencies:
   - esbuild
 publicHoistPattern:
   - '*'
+settings:
+  peerDependencyRules:
+    ignored:
+      - '@types/node'
