@@ -357,7 +357,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
 
   // F2：禁储环境安全存储（内存兜底，会话内可用）
   const storage = safeStorage()
-const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
+  const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
 
   // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
   const [density, setDensity] = useState<SettingsDensity>(() =>
@@ -410,8 +410,9 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
   // B2 边界修复：面板打开或 Renderer catalog 热更新时重建索引。
   // 不能只依赖 quickSearchOpen，否则插件热装卸后的字段要重新打开命令面板才可搜。
   const quickSearchItems = useMemo(() => {
+    // 显式引用依赖项：它们是缓存失效信号（B2），非数据来源——抑制 exhaustive-deps
     void quickSearchOpen
-      void rendererRegistrySnapshot.revision
+    void rendererRegistrySnapshot.revision
     try {
       const snapshot = getRendererRegistry().snapshot()
       return [...buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries), ...projectRendererSettingsCatalog(snapshot).searchItems]

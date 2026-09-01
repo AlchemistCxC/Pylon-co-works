@@ -26,6 +26,7 @@ import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, recordPayload, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
+import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
 export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
 export type { SessionConfig } from './runtimeStore'
@@ -123,7 +124,7 @@ type ThemeState = ThemeSettings & {
   /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
-  setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
+  setZoneField: (zone: string, partial: Partial<ThemeSettings>, source?: SettingWriteSource) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
   saveCustomPreset: (name: string, id?: string) => string
   applyCustomPreset: (id: string) => void
@@ -140,7 +141,12 @@ export const useStore = create<ThemeState>()(persist(
 
   customPresets: [],
 
-  setZoneField: (zone, partial) => set(state => setZoneFieldReducer(state, zone, partial)),
+  // D-trace：写入溯源——source 由调用方声明（用户编辑/呈现风格/界面模式…），
+  // 缺省 user-edit。记录在漏斗出口完成，reducer 保持纯函数。
+  setZoneField: (zone, partial, source = 'user-edit') => {
+    recordSettingWrites(source, zone, Object.keys(partial))
+    set(state => setZoneFieldReducer(state, zone, partial))
+  },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
     // D1：ccBgHeight 必须 ≥ ccHeight（背景不短于容器，与 setZoneField 漏斗同不变量）
@@ -192,7 +198,10 @@ export const useStore = create<ThemeState>()(persist(
     ...markZoneCustom(state, 'cc'),
   })),
 
-  resetTheme: () => set(structuredClone(DEFAULTS)),
+  resetTheme: () => {
+    recordSettingWrites('theme-reset', '*', Object.keys(DEFAULTS))
+    set(structuredClone(DEFAULTS))
+  },
 
   resetZone: (zone) => set(state => {
     const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
@@ -205,6 +214,7 @@ export const useStore = create<ThemeState>()(persist(
         })
         .map(field => [field, DEFAULTS[field]]),
     )
+    recordSettingWrites('zone-reset', zone, Object.keys(reset))
     return {
       ...reset,
       appliedPreset: { ...state.appliedPreset, [zone]: '' },
@@ -213,8 +223,14 @@ export const useStore = create<ThemeState>()(persist(
   }),
 
   // 六个预设动作：纯计算在 domains/theme/presetReducer.ts，此处只留 set(reducer(state, args)) 薄壳
-  applyZonePreset: (zone, presetName, presetTheme) => set(state => applyZonePresetReducer(state, zone, presetName, presetTheme)),
-  setGlobalPreset: (name, theme) => set(() => setGlobalPresetReducer(name, theme)),
+  applyZonePreset: (zone, presetName, presetTheme) => {
+    recordSettingWrites('zone-preset', zone, Object.keys(presetTheme))
+    set(state => applyZonePresetReducer(state, zone, presetName, presetTheme))
+  },
+  setGlobalPreset: (name, theme) => {
+    recordSettingWrites('global-preset', '*', Object.keys({ ...DEFAULTS, ...theme }))
+    set(() => setGlobalPresetReducer(name, theme))
+  },
   saveCustomPreset: (name, id) => {
     const state = get()
     const now = Date.now()
@@ -295,6 +311,7 @@ export const useStore = create<ThemeState>()(persist(
           reportRuntimeError('应用自定义预设', new Error(`自定义预设主题缺失：${id}`))
           return {}
         }
+        recordSettingWrites('custom-preset', id, Object.keys(patch))
         return patch
       }),
       restoreTheme: () => set(beforeTheme),

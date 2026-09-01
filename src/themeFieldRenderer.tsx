@@ -3,7 +3,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { ThemeSettings } from './store'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
-import { readCollapsed, writeCollapsed } from './components/settings/settingsChromeState.ts'
+import { readCollapsed, writeCollapsed, type CollapseMap } from './components/settings/settingsChromeState.ts'
 import { resolveBackgroundImage } from './backgroundImage'
 import { resolveSpinnerFrames } from './components/chat/spinnerFrames'
 import FontContributionPicker from './components/settings/FontContributionPicker.tsx'
@@ -13,6 +13,7 @@ import { resolvePluginSettingOptions } from './plugin-runtime/settings/pluginSet
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RegistryEntry } from './plugin-runtime/registry/types.ts'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './components/chat/toolIndicatorAssets.ts'
+import { lastSettingWriter, SETTING_WRITE_SOURCE_LABELS } from './domains/theme/settingProvenance.ts'
 
 /**
  * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）。
@@ -31,8 +32,8 @@ export interface RenderCtx {
   settingOptionEntries?: readonly RegistryEntry<PluginSettingOptionsContribution>[]
 }
 
-export function Row({ label, children, className = '', anchor }: { label: string; children: React.ReactNode; className?: string; anchor?: string }) {
-  return <div className={`set-row${className ? ` ${className}` : ''}`} data-search-anchor={anchor}><span className="set-row-label">{label}</span>{children}</div>
+export function Row({ label, children, className = '', anchor, dataProv }: { label: string; children: React.ReactNode; className?: string; anchor?: string; dataProv?: string }) {
+  return <div className={`set-row${className ? ` ${className}` : ''}`} data-search-anchor={anchor} data-prov={dataProv}><span className="set-row-label">{label}</span>{children}</div>
 }
 
 export function Slider({ value, onChange, min, max, step }: { value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
@@ -69,9 +70,17 @@ const collapseStorage: { get(k: string): string | null; set(k: string, v: string
   set: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 禁储静默 */ } },
 }
 
+// D-perf：折叠记忆读缓存。Group 数量 ~30，此前每次渲染每组各 JSON.parse 一次
+// localStorage（拖滑块/搜索逐键都全量重渲染）——写穿失效的单份缓存消除该开销。
+let collapseCache: CollapseMap | null = null
+function readCollapsedCached(): CollapseMap {
+  if (!collapseCache) collapseCache = readCollapsed(collapseStorage.get)
+  return collapseCache
+}
+
 function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: string; title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
   const collapseKey = zone ? `${zone}.${title}` : undefined
-  const rememberedCollapsed = collapseKey ? readCollapsed(collapseStorage.get)[collapseKey] : undefined
+  const rememberedCollapsed = collapseKey ? readCollapsedCached()[collapseKey] : undefined
   const [open, setOpen] = useState(rememberedCollapsed === undefined ? (defaultOpen ?? true) : !rememberedCollapsed)
   const visible = open || forceOpen === true
   return (
@@ -81,7 +90,8 @@ function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: strin
           const next = !visible
           setOpen(next)
           if (collapseKey) {
-            const map = { ...readCollapsed(collapseStorage.get), [collapseKey]: !next }
+            const map = { ...readCollapsedCached(), [collapseKey]: !next }
+            collapseCache = map
             writeCollapsed(map, collapseStorage.set)
           }
         }}>
@@ -266,12 +276,17 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
 function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
   const value = ctx.t[keyName]
   const atDefault = def.default !== undefined && Object.is(value, def.default)
+  // D-trace：字段行暴露最近写入贡献者（title + data 属性，无布局影响）。
+  const provenance = lastSettingWriter(keyName)
+  const provenanceTitle = provenance
+    ? `（最后写入：${SETTING_WRITE_SOURCE_LABELS[provenance.source]}）`
+    : ''
   return (
-    <Row label={def.label} anchor={`field:${keyName}`} className={def.control === 'fontPicker' ? 'font-setting-row' : ''}>
+    <Row label={def.label} anchor={`field:${keyName}`} className={def.control === 'fontPicker' ? 'font-setting-row' : ''} dataProv={provenance?.source}>
       <FieldControl def={def} ctx={ctx} keyName={keyName} />
       {def.default !== undefined && !atDefault && (
         <button type="button" className="set-field-reset" aria-label="恢复默认"
-          title={`恢复默认`} onClick={() => ctx.onChange({ [keyName]: def.default } as Partial<ThemeSettings>)}>↺</button>
+          title={`恢复默认${provenanceTitle}`} onClick={() => ctx.onChange({ [keyName]: def.default } as Partial<ThemeSettings>)}>↺</button>
       )}
       {def.hint && <div className="set-hint">{def.hint}</div>}
     </Row>
