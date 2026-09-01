@@ -4,7 +4,7 @@
 
 ## 使用规则
 
-1. 每条问题使用固定编号（P1–P24，允许小数子项如 P13.1），编号不因排序或拆分改变。
+1. 每条问题使用固定编号（P1–P28，允许小数子项如 P13.1），编号不因排序或拆分改变。
 2. 状态只能使用下列词汇：`待调查`、`待施工书`、`待施工`、`施工中`、`待验收`、`首片完成`、`完成`、`阻塞`。
 3. `首片完成`表示对应施工书的首片完成定义已满足；后续调参或扩展不回退该状态，除非发现回归。
 4. 每次状态变化必须同时记录日期、证据路径/命令和下一步；没有证据不得标记为完成。
@@ -39,8 +39,9 @@
 | [P23](#p23-异步内容高度变化时的底部跟随) | 异步内容高度变化时的底部跟随 | **首片完成** | 2026-09-01 | `.term` `ResizeObserver` sticky follow；`mountSolidWorkbench.solid.test.tsx`；56 项挂载回归 | 真实窗口复核图片/高亮加载后的跟随边界 |
 | [P24](#p24-host-port-生成态订阅一致性) | Host Port 生成态订阅一致性 | **首片完成** | 2026-09-01 | `hostPortSolidServices` 合并 document/generation 订阅；`workbenchHostPort.test.ts` split reader 回归 | 第三方 Suite 实机复核 generation-only 更新 |
 | [P25](#p25-空态-composer-与窗口控制统一) | 空态 Composer 与窗口控制统一 | **首片完成** | 2026-09-01 | `SolidInputBar` 单实例空态/中控宿主；空态附加层与过渡样式；`npm.cmd run check:solid` | 真实窗口复核不同预设下的密度、动效与命中区 |
-| [P26](#p26-titlebar-与右侧栏插件平台) | Titlebar 与右侧栏插件平台 | **首片完成** | 2026-09-01 | `titlebarRegistry.ts`、`rightRailStore.ts`、Titlebar 三类菜单、ContextPanel scope 扩展；`cmd /c npm run build` | 完成全局 RightRailHost、拖拽分隔器、背景图策略与插件 API 迁移 |
-| [P27](#p27-空态与中控区视觉交互一致性) | 空态与中控区视觉/交互一致性回归 | **施工中** | 2026-09-01 | 用户对比图；`SolidControlCenter`/`SolidInputBar` 当前实现 | 先收敛为中控区原样，再补参数附加动作与平滑归位 |
+| [P26](#p26-titlebar-与右侧栏插件平台) | Titlebar 与右侧栏插件平台 | **首片完成** | 2026-09-01 | `titlebarRegistry.ts`、`rightRailStore.ts`、`RightRailHost`、Titlebar 三类菜单、ContextPanel scope 扩展；`cmd /c npm run build` | 真实窗口/插件包复核；旧布局字段仅保留迁移读取边界 |
+| [P27](#p27-空态与中控区视觉交互一致性) | 空态与中控区视觉/交互一致性回归 | **首片完成** | 2026-09-01 | `SolidControlCenter`/`SolidInputBar` 单实例宿主；空态参数透传与失败恢复回归；`npm.cmd run check:solid` | 真实窗口后置确认垂直居中与归位动效 |
+| [P28](#p28-空态参数应用与-acp-初始化协商) | 空态参数应用与 ACP 初始化协商 | **首片完成** | 2026-09-01 | `agentWorkbenchSessionCreation.ts`；`session/create.rs`；fake ACP wire/`initial_option_tests`；`npm.cmd run check:solid` | 真实 Hermes trace 复核 model/mode/reasoning 能力协商 |
 
 ## 未完成动作（2026-09-01）
 
@@ -48,6 +49,9 @@
 
 - **P2** 仍为 `待验收`：尚未在真实窗口完成 terminal-classic、terminal-modern 和自定义行高的最终像素验收。
 - **P1、P3–P24** 的真实窗口/真实 Agent trace、发布包复核或参数调优均按各条“下一步”后置，当前只完成代码与自动化回归证据。
+- **P25** 仍需真实窗口复核不同预设下的 Composer 密度、动效和命中区；**P26** 仍需真实窗口/插件包复核，平台实现和旧字段写入收口已完成。
+- **P27** 仍需真实窗口确认空态垂直居中与归位动效；结构、共享 DOM 和参数透传已有自动化证据。
+- **P28** 仍需真实 Hermes trace 验证 model/mode/reasoning 的实际广告与 wire 顺序；当前 fake ACP 已证明未广告 reasoning 时安全跳过。
 - 特别是 P21–P24 的终态单次提交、异步高度跟随和第三方 generation-only 更新，还没有真实 Tauri WebView/第三方 Suite 证据。
 
 后续只有补齐对应真实证据并更新本台账，才能将这些事项改为 `完成`；“首片完成”状态保持不变，表示首个施工切片已达到其完成定义。
@@ -373,7 +377,18 @@ Agentsheet 空态调整为输入优先的双层 Composer：Work 模式的 worksp
 
 旧布局字段的写入路径已收口：Titlebar、RightRailHost、ContextPanelHost 和内置布局命令均只写 v3 store；workspaceStore setter 仅保留旧测试/迁移兼容。
 
-下一步：补充未关联右栏设置的专属页面宿主，并清理旧布局字段的公开读取路径。
+下一步：在真实窗口和插件包加载环境复核右栏宿主；旧布局字段的公开读取清理另列后续技术债。
+
+<a id="p28"></a>
+### P28 · 空态参数应用与 ACP 初始化协商
+
+空态发送现在把用户选择的 `model`、`mode`、`reasoningLevel` 和 `workspaceId` 作为一次创建请求的参数快照传入 Workbench session-create seam；创建成功后由 Rust 侧负责在同一代际内完成初始 ACP 协商，避免前端先显示已选值、后端却仍使用默认值。
+
+Rust 创建顺序固定为 `session/new → session/set_model → session/set_mode → session/set_config_option`（仅在对应能力被广告且值可用时发送）。模型切换使用 ACP 实际广告的 config option ID；reasoning 会从 `configOptions` 和 `config_options` 两种目录形状中识别可写选项，并校验请求值是否属于广告 choices。Hermes 当前只广告 model/mode，未广告 reasoning，因此不会伪造配置 ID，请求会安全跳过并记录诊断。
+
+证据：`src/sheets/agent-workbench/agentWorkbenchSessionCreation.ts`；`src-tauri/src/session/create.rs`；fake ACP wire 测试（`src-tauri/src/session/mod.rs`）与 `initial_option_tests`；`npm.cmd run check:solid`。自动化覆盖参数透传、请求顺序、snake_case 目录和未广告 reasoning 的跳过路径。
+
+状态：首片完成。真实窗口/真实 Hermes trace 验收后置，需确认不同 profile、mode 和未来 reasoning 广告下的最终显示与错误诊断。
 
 ## 状态变更模板
 

@@ -428,6 +428,7 @@ async fn apply_initial_session_options(
     if let Some(reasoning) = initial_reasoning.map(str::trim).filter(|value| !value.is_empty()) {
         let options = response
             .get("configOptions")
+            .or_else(|| response.get("config_options"))
             .and_then(serde_json::Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
@@ -802,6 +803,27 @@ mod initial_option_tests {
             None
         );
         assert_eq!(find_reasoning_option_id(&[], "high"), None);
+    }
+
+    #[test]
+    fn reasoning_option_accepts_snake_case_config_catalog() {
+        let response = json!({
+            "config_options": [{
+                "config_id": "thinking_level",
+                "label": "Thinking level",
+                "choices": [{"value": "low"}, {"value": "xhigh"}]
+            }]
+        });
+        let options = response
+            .get("configOptions")
+            .or_else(|| response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        assert_eq!(
+            find_reasoning_option_id(options, "xhigh").as_deref(),
+            Some("thinking_level")
+        );
     }
 
     #[test]

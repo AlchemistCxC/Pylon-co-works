@@ -33,8 +33,9 @@
 | 23 | [✅ 首片完成](Pylon-问题台账.md#p23) | 真实窗口复核异步内容高度变化后的底部跟随 |
 | 24 | [✅ 首片完成](Pylon-问题台账.md#p24) | 第三方 Suite 实机复核 generation-only 更新 |
 | 25 | [✅ 首片完成](Pylon-问题台账.md#p25) | 真实窗口复核空态 Composer 与窗口控制 |
-| 26 | [✅ 首片完成](Pylon-问题台账.md#p26) | 完成未关联右栏设置页面宿主，并清理旧布局字段写入路径 |
+| 26 | [✅ 首片完成](Pylon-问题台账.md#p26) | 真实窗口/插件包复核；旧布局字段写入已收口 |
 | 27 | [✅ 首片完成](Pylon-问题台账.md#p27) | 真实窗口后置确认垂直居中与归位动效；结构、参数透传和回归测试已闭环 |
+| 28 | [✅ 首片完成](Pylon-问题台账.md#p28) | 真实 Hermes trace 复核 model/mode/reasoning 广告与初始化 wire 顺序 |
 
 > 本表中的“首片完成”表示对应施工书的完成定义已满足，不等同于后续体验调参全部结束。
 >
@@ -98,8 +99,15 @@
 
 - **现状**：Titlebar 应用入口与 Sheet 右栏仍由宿主硬编码，右栏生命周期跟随 active Sheet，设置里的宽度字段仍属于主题域。
 - **目标**：以 Reactive Registry 驱动 Titlebar slot、右栏面板、设置贡献和界面模式；窗口控制、布局持久化和安全边界仍由宿主掌握。右栏脱离 Sheet 绑定并支持拖拽宽度及背景图策略。
-- **当前切片**：已建立 `TitlebarRegistry` / `PluginTitlebarApi`、应用级 `useRightRailStore`，并将三个入口改为独立菜单；ContextPanel 已增加 global/contextual scope 与宽度能力字段。
-- **下一步**：迁移到全局 `RightRailHost`，实现分隔器交互、布局 v3 迁移、背景图 fit/fill/stretch 和设置页贡献投影。
+- **当前切片**：已建立 `TitlebarRegistry` / `PluginTitlebarApi`、应用级 `useRightRailStore`，并将三个入口改为独立菜单；ContextPanel 已增加 global/contextual scope 与宽度能力字段。全局 `RightRailHost`、分隔器交互、布局 v3 迁移、背景图 fit/fill/stretch 和设置页贡献投影均已落地。
+- **下一步**：在真实窗口和插件包加载环境复核；旧布局字段只保留迁移读取兼容。
+
+## 28. 空态参数应用与 ACP 初始化协商
+
+- **现状**：空态需要让用户选择模型、模式、思考等级和工作区，并在发送时保证这些选择与新 ACP session 的实际状态一致；不同 ACP 实现对字段命名和可选配置目录形状并不统一。
+- **目标**：一次创建动作原子地透传空态参数，按 ACP 广告能力协商初始设置；未广告的能力安全跳过并提供可诊断证据，不伪造请求。
+- **当前切片**：前端参数快照、Rust `session/new` 后的有序设置调用、camelCase/snake_case 归一化和 fake ACP wire 回归已完成。
+- **下一步**：真实 Hermes trace 与窗口体验验收，特别是未来 reasoning config option 广告时的值映射。
 
 ## 进入施工的共同门槛
 
