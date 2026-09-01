@@ -173,20 +173,17 @@ pub(crate) async fn load_session_with_replay(
         let message = match tokio::time::timeout_at(deadline, events.recv()).await {
             Ok(Ok(message)) => message,
             Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
-                return Err(AcpError::Child(format!(
-                    "session/load replay lagged by {count} messages"
-                )));
+                return Err(AcpError::ReplayLagged {
+                    count: count as u64,
+                });
             }
             Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                return Err(AcpError::Child(
-                    "ACP notification stream closed during session/load".to_string(),
-                ));
+                return Err(AcpError::ReplayStreamClosed);
             }
             Err(_) => {
-                return Err(AcpError::Child(format!(
-                    "session/load replay timed out after {}s",
-                    capture.rpc_timeout.as_secs()
-                )));
+                return Err(AcpError::ReplayTimeout {
+                    seconds: capture.rpc_timeout.as_secs(),
+                });
             }
         };
         let ClassifiedMessage {
@@ -378,7 +375,7 @@ mod tests {
             .expect("总 deadline 不得被噪声广播续期")
             .expect("replay task join");
         assert!(
-            matches!(result, Err(AcpError::Child(ref message)) if message.contains("timed out")),
+            matches!(result, Err(AcpError::ReplayTimeout { .. })),
             "预期绝对 deadline timeout，实际: {result:?}"
         );
         flooding.abort();

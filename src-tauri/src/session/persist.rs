@@ -55,6 +55,9 @@ fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
         crate::acp::AcpError::ConnectionClosed => "connection_closed",
         crate::acp::AcpError::WriteTimeout => "write_timeout",
         crate::acp::AcpError::RpcTimeout => "rpc_timeout",
+        crate::acp::AcpError::ReplayTimeout { .. } => "replay_timeout",
+        crate::acp::AcpError::ReplayLagged { .. } => "replay_lag",
+        crate::acp::AcpError::ReplayStreamClosed => "replay_transport_error",
         crate::acp::AcpError::ReplayLoadInProgress => "replay_load_in_progress",
         crate::acp::AcpError::Rpc(_) => "rpc_error",
         crate::acp::AcpError::Connect(_) => "connect_error",
@@ -373,6 +376,18 @@ mod tests {
         assert_eq!(
             replay_load_error_code(&crate::acp::AcpError::ConnectionClosed),
             "connection_closed"
+        );
+        assert_eq!(
+            replay_load_error_code(&crate::acp::AcpError::ReplayTimeout { seconds: 30 }),
+            "replay_timeout"
+        );
+        assert_eq!(
+            replay_load_error_code(&crate::acp::AcpError::ReplayLagged { count: 7 }),
+            "replay_lag"
+        );
+        assert_eq!(
+            replay_load_error_code(&crate::acp::AcpError::ReplayStreamClosed),
+            "replay_transport_error"
         );
     }
 }

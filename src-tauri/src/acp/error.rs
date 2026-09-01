@@ -172,6 +172,20 @@ pub enum AcpError {
     WriteTimeout,
     #[error("RPC timeout after 30s")]
     RpcTimeout,
+    /// `session/load` did not observe its response boundary before the
+    /// absolute replay deadline.  This stays distinct from a generic child
+    /// transport error so replay traces can preserve the failure class.
+    #[error("session/load replay timed out after {seconds}s")]
+    ReplayTimeout { seconds: u64 },
+    /// The replay observer fell behind the bounded broadcast channel.  The
+    /// dropped count is retained for diagnostics while the error code remains
+    /// stable for callers.
+    #[error("session/load replay lagged by {count} messages")]
+    ReplayLagged { count: u64 },
+    /// The replay observer's notification stream closed before a response
+    /// boundary was observed.
+    #[error("ACP notification stream closed during session/load")]
+    ReplayStreamClosed,
     /// A replay load for the same remote session is already active.
     #[error("replay_load_in_progress")]
     ReplayLoadInProgress,
@@ -260,7 +274,13 @@ impl AcpError {
     pub(crate) fn is_retryable_transport_failure(&self) -> bool {
         matches!(
             self,
-            Self::ConnectionClosed | Self::WriteTimeout | Self::RpcTimeout | Self::Child(_)
+            Self::ConnectionClosed
+                | Self::WriteTimeout
+                | Self::RpcTimeout
+                | Self::ReplayTimeout { .. }
+                | Self::ReplayLagged { .. }
+                | Self::ReplayStreamClosed
+                | Self::Child(_)
         )
     }
 }
