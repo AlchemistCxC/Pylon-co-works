@@ -349,7 +349,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     // `pylon:user` 到达时按 clientMsgId 去重确认（见 chatEventController）。
     const clientMsgId = `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
     const controller = getChatController()
-    controller?.sendOptimisticUser(source, content, clientMsgId)
+    // C0-OPT: the optimistic echo is runtime-local; Rust prompt ingest owns
+    // the single authoritative durable user.message row.
+    controller?.sendOptimisticUser(source, content, clientMsgId, { persistCanonical: false })
     lastMsg.current = content
     recordHistory(content)
     setValue('')
@@ -364,8 +366,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
       }),
       onSuccess: () => {},
-      // 失败保留乐观用户消息（已渲染），错误由后端 pylon:error 或此处可见提示呈现
-      onError: error => setSendError(String(error)),
+      // C0-OPT: transport failure settles React exactly like the Solid command
+      // path; do not leave an unconfirmed optimistic row behind.
+      onError: error => {
+        controller?.rejectOptimisticUser(source, clientMsgId)
+        setSendError(String(error))
+      },
     })
     return sendError
   }
