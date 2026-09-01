@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 03:50] [施工员A·工程师] A-04 trace wording correction：backend `replay_trace.load_generation` 表示 ACP runtime/client generation，前端 `load-response`/`load-commit.generation` 表示 coordinator load generation；两者数值域不同。跨层关联键为 owner/source（并保留各自 generation 字段），不得将两种 generation 直接比较或互相覆盖。实现与 A-04 提交不变。
+
 [2026-09-02 03:35] [施工员A·工程师] A-04 完成：`5cd1db9e` 在 `session/persist.rs` 增加 target=`replay_trace` structured 记录（owner、load_generation、capture_lp、response_boundary、observed/retained/dropped、authority、canonical_revision、journal/projection commit outcome），不改 wire/API；与 B-03 `02b47543` handoff 的前端 `load-response`/`load-commit` trace 以 owner+generation 对齐。A 线 A-01–A-04 全部完成，后续仅需 B-04 与最终跨线验收。
 
 [2026-09-02 02:22] [施工员B·工程师] B-03 handoff：`e352055d` 固化 projection vectors，`8f627bad` 抽出无 React/Zustand/Tauri/sink/controller 依赖的 `messageProjectionRules.ts`，`b4cda09e` 让 live/replay runtime settle 复用纯规则并保留 generation-specific duration/activity。C0-PROJ 未改；canonical adapter、legacy runtime/replay adapter 维持 user/chunk/thinking/tool/turn/unknown/raw/identity/optimistic 语义。验证：projection/replay/switch/shadow/tool parity 与 runtime invariants 共 96 项通过；`tsc -b` 仅既有 `src/sdk` WIP 错误。A 可继续消费现有 ReplayMetadata/routing，不需改 transport。
