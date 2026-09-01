@@ -12,6 +12,13 @@ const errors = []
 if (combined.includes('Solid Workbench browser smoke')) errors.push('生产产物包含 browser smoke harness')
 if (combined.includes('Solid Workbench smoke')) errors.push('生产产物包含 Solid smoke renderer')
 if (files.some(name => /^solid-(?:smoke|chunk)-/.test(name))) errors.push('生产 assets 出现独立 Solid smoke chunk')
+// Browser/demo seeding is development-only.  The App guard is intentionally
+// compile-time (`import.meta.env.DEV`) so the production graph has no adapter
+// chunk or seed entry point, even though the browser mock remains available in
+// dev builds.
+if (files.some(name => /^browserDemoBootstrap-/.test(name)) || combined.includes('runBrowserDemoSeed')) {
+  errors.push('生产产物包含 browser demo seed adapter')
+}
 
 if (errors.length > 0) {
   console.error(`生产产物隔离检查失败：\n${errors.map(error => `- ${error}`).join('\n')}`)
