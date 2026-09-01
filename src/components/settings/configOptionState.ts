@@ -1,4 +1,11 @@
-import type { ConfigOption, ConfigOptionChoice } from '../../infrastructure/acp/chatContracts'
+import {
+  extractChoiceId,
+  extractChoiceLabel,
+  extractConfigOptionChoices,
+  extractConfigOptionId,
+  extractConfigOptionValue,
+  type ConfigOption,
+} from '../../infrastructure/acp/chatContracts'
 
 export interface NormalizedConfigOptionChoice {
   id: string
@@ -15,27 +22,25 @@ export interface NormalizedConfigOption {
 }
 
 function optionId(option: ConfigOption): string {
-  return String(option.id ?? option.key ?? option.name ?? 'unknown')
-}
-
-function choiceId(choice: ConfigOptionChoice): string {
-  return String(choice.id ?? choice.value ?? choice.name ?? choice.label ?? '')
+  return extractConfigOptionId(option) ?? 'unknown'
 }
 
 function optionChoices(option: ConfigOption): NormalizedConfigOptionChoice[] {
-  const choices = option.options ?? option.choices ?? option.values ?? option.available ?? []
-  return choices
-    .map(choice => ({ id: choiceId(choice), label: String(choice.name ?? choice.label ?? choice.value ?? choice.id ?? '') }))
-    .filter(choice => choice.id.length > 0)
+  return extractConfigOptionChoices(option)
+    .map(choice => {
+      const id = extractChoiceId(choice)
+      return id ? { id, label: extractChoiceLabel(choice, id) ?? id } : undefined
+    })
+    .filter((choice): choice is NormalizedConfigOptionChoice => Boolean(choice))
 }
 
 function optionType(option: ConfigOption, choices: NormalizedConfigOptionChoice[]): NormalizedConfigOption['type'] {
-  const type = String(option.type ?? '').toLowerCase()
+  const type = String(option.type ?? option.valueType ?? option.value_type ?? '').toLowerCase()
   if (type === 'boolean' || type === 'bool') return 'boolean'
   if (type === 'number' || type === 'integer' || type === 'float') return 'number'
   if (choices.length > 0 || type === 'select' || type === 'enum') return 'select'
   if (type === 'string' || type === 'text') return 'string'
-  const value = option.currentValue ?? option.value ?? option.current ?? option.selected
+  const value = extractConfigOptionValue(option)
   if (typeof value === 'boolean') return 'boolean'
   if (typeof value === 'number') return 'number'
   if (typeof value === 'string') return 'string'
@@ -44,11 +49,12 @@ function optionType(option: ConfigOption, choices: NormalizedConfigOptionChoice[
 
 export function normalizeConfigOption(option: ConfigOption): NormalizedConfigOption {
   const options = optionChoices(option)
+  const currentValue = extractConfigOptionValue(option)
   return {
     id: optionId(option),
-    label: String(option.name ?? option.id ?? option.key ?? '未命名选项'),
+    label: String(option.label ?? option.name ?? option.title ?? option.id ?? option.key ?? '未命名选项'),
     type: optionType(option, options),
-    currentValue: option.currentValue ?? option.value ?? option.current ?? option.selected ?? '',
+    currentValue: currentValue ?? '',
     options,
     raw: option,
   }

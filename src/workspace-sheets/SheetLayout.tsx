@@ -9,10 +9,11 @@ import { resolveSheetRender } from './sheetRegistry.tsx'
 import { activateAgentSheet } from './activateAgentSheet'
 import SheetHost from './SheetHost'
 import SheetSidebarSlot from './SheetSidebarSlot'
-import SheetRightSlot from './SheetRightSlot'
+import RightRailHost from '../components/right-panel/RightRailHost.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
+import { useRightRailStore } from '../rightRailStore.ts'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
@@ -41,10 +42,12 @@ function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): 
     openSessionSettings: props.onSessionSettings,
     // I09-A-FE-01（L1）：响应式订阅——原 getState() 快照在折叠变化后不触发重渲染（ctx 陈旧）
     sidebarCollapsed,
-    // 右栏由 SheetRightSlot 作为 .layout 的 flex sibling 占位，主区宽度已天然扣除；
+    // 右栏由应用级 RightRailHost 作为 .layout 的 flex sibling 占位，主区宽度已天然扣除；
     // renderer 再消费 rightInset 会二次挤压内容，并在折叠切换时产生异常跳宽。
     rightInset: 0,
     ccEditMode: useStore.getState().ccEditMode,
+    // active 主区的 context；非 active 的 keep-alive Sheet 会在下方显式覆盖为 false。
+    isActive: true,
     sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
     sessionBySource: source => useIdentityStore.getState().sessions.find(session => session.source === source),
   }
@@ -60,7 +63,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const activeSheetId = useWorkspaceStore(s => s.workspaceSheets.activeSheetId)
   const activeSheet = sheets.find(sheet => sheet.id === activeSheetId)
   // 左栏是统一应用布局；切换任何 Sheet 都保持同一折叠状态。
-  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
+  const sidebarCollapsed = useRightRailStore(s => s.leftRailCollapsed)
 
   const identityActiveAgent = useIdentityStore(s => s.activeAgent)
   const sheetOwnerAgentId = activeSheet?.kind === 'agent' ? activeSheet.agentId : undefined
@@ -145,6 +148,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
         {persistWarning}
         {overviewEntry ? <overviewEntry.component sheet={VIRTUAL_OVERVIEW_SHEET} ctx={ctx} state={overviewEntry.deserialize(undefined)} /> : <EmptySheetHost />}
+        <RightRailHost sheet={null} ctx={ctx} activeAgent={activeAgent} />
       </div>
     )
   }
@@ -153,7 +157,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
     <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
       {persistWarning}
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
-      {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && <SheetHost sheet={activeSheet} ctx={ctx} />}
+      {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && activeSheet.kind !== 'browser' && <SheetHost sheet={activeSheet} ctx={ctx} />}
       {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {
         const active = sheet.id === activeSheetId
         return (
@@ -174,20 +178,23 @@ export default function SheetLayout(props: SheetLayoutProps) {
           </div>
         )
       })}
-      <SheetRightSlot sheet={activeSheet} ctx={ctx} />
-      {/* G5（FE-AUD-006）：browser sheet 保活——非 active 时隐藏渲染（WebView 不销毁），
-          真正 close sheet（从 sheets 移除）才卸载触发 browser_close */}
-      {sheets.filter(sheet => sheet.kind === 'browser' && sheet.id !== activeSheetId).map(sheet => (
-        <div key={sheet.id} className="browser-keep-alive" style={{ display: 'none' }} aria-hidden="true">
-          {(() => {
-            const browserEntry = resolveSheetRender('browser')
-            const BrowserComponent = browserEntry?.component
-            return BrowserComponent && browserEntry
-              ? <BrowserComponent sheet={sheet} ctx={ctx} state={browserEntry.deserialize(sheet.state)} />
-              : null
-          })()}
-        </div>
-      ))}
+      <RightRailHost sheet={activeSheet} ctx={ctx} activeAgent={activeAgent} />
+      {/* G5（FE-AUD-006）：Browser 与 Agent/File 一样固定在稳定位置保活。
+          活动态用 display:contents 进入主舞台，非活动态只隐藏 DOM；真正 close
+          （从 sheets 移除）才卸载并触发 browser_close，避免标签/页面状态丢失。 */}
+      {sheets.filter(sheet => sheet.kind === 'browser').map(sheet => {
+        const active = sheet.id === activeSheetId
+        const browserEntry = resolveSheetRender('browser')
+        const BrowserComponent = browserEntry?.component
+        return (
+          <div key={sheet.id} data-sheet-id={sheet.id} className="browser-keep-alive"
+            aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
+            {BrowserComponent && browserEntry
+              ? <BrowserComponent sheet={sheet} ctx={{ ...ctx, isActive: active }} state={browserEntry.deserialize(sheet.state)} />
+              : null}
+          </div>
+        )
+      })}
     </div>
   )
 }

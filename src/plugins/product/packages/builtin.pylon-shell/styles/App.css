@@ -46,6 +46,19 @@
 .workspace-titlebar-drag { min-width:18px; flex:1; -webkit-app-region:drag; }
 .workspace-titlebar-launchers,
 .workspace-window-controls { display:flex; align-items:stretch; flex-shrink:0; -webkit-app-region:no-drag; }
+.workspace-window-app-controls,
+.workspace-window-native-controls { display:flex; align-items:stretch; flex-shrink:0; }
+.workspace-titlebar-menu-anchor { position:relative; display:flex; align-items:stretch; }
+.workspace-titlebar-menu-anchor > button { display:flex; align-items:center; justify-content:center; min-width:0; width:auto; padding:0 10px; border:0; border-radius:0; background:transparent; color:var(--titlebar-text-muted); font-size:var(--font-size-xs); font-weight:600; letter-spacing:.01em; }
+.workspace-titlebar-menu-anchor > button:hover,
+.workspace-titlebar-menu-anchor > button[aria-expanded="true"] { background:transparent; color:var(--titlebar-text-resolved); text-decoration:underline; text-underline-offset:4px; }
+.workspace-titlebar-plugin-action { display:flex; align-items:center; min-width:0; }
+.workspace-titlebar-entry-label { font-size:var(--font-size-2xs); white-space:nowrap; }
+.workspace-menu-chrome { top:calc(100% + 4px); right:0; min-width:180px; border-radius:0; box-shadow:0 10px 28px rgba(0,0,0,.22); backdrop-filter:blur(18px); }
+.workspace-menu-chrome button { border-radius:0; min-height:30px; padding:6px 10px; }
+.workspace-menu-heading { padding:6px 10px 5px; color:var(--text-dim); font-size:var(--font-size-2xs); font-weight:700; letter-spacing:.08em; }
+.workspace-menu-empty { padding:8px 10px; color:var(--text-dim); font-size:var(--font-size-xs); }
+.workspace-window-controls-divider { width:1px; height:18px; margin:auto var(--ui-space-1); background:color-mix(in srgb,var(--border) 78%,transparent); }
 .workspace-titlebar-launchers { border-left:0; border-right:0; }
 .workspace-titlebar-icon,
 .workspace-window-controls button {
@@ -71,6 +84,7 @@
 /* Sheet Launcher 与恢复关闭项是 Workspace 导航入口，图标使用主题强调色。 */
 .workspace-window-controls { height:calc(var(--titlebar-h,44px) - var(--line-width-1)); }
 .workspace-window-controls button { width:38px; margin:var(--ui-space-1) 0; height:calc(var(--titlebar-h,44px) - var(--ui-space-2)); font-size:var(--font-size-md); }
+.workspace-window-native-controls button { display:grid; place-items:center; }
 .workspace-window-controls .close:hover { background:rgba(190,40,40,0.72); color:#fff; }
 
 .sheet-tab-region { position:relative; min-width:0; flex:1; display:flex; align-items:stretch; overflow:hidden; -webkit-app-region:no-drag; }
@@ -140,6 +154,7 @@
   .workspace-titlebar-brand { display:none; }
   .workspace-titlebar-sidebar { justify-content:flex-start; }
   .workspace-window-controls button { width:34px; }
+  .workspace-titlebar-entry-label { display:inline; }
 }
 
 /* Q4/DF-05a：窄屏先释放标题栏左轨道，保留活动 tab、恢复入口和窗口控制。 */
@@ -193,7 +208,16 @@
   }
   .workspace-window-controls,
   .app[data-interface-mode="modern-gui"] .workspace-window-controls { padding-inline:0; }
+  .workspace-window-controls-divider { margin-inline:0; }
 }
+
+/* VS Code-like chrome menus: keep these menus square even after the shared
+   workspace-menu defaults are applied later in the stylesheet. */
+.workspace-titlebar .workspace-menu-chrome {
+  border-radius: 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,.24);
+}
+.workspace-titlebar .workspace-menu-chrome button { border-radius: 0; }
 
 .sheet-launcher-overlay {
   position:fixed; inset:0; z-index:70; background:color-mix(in srgb,var(--text) 42%,transparent);
@@ -257,6 +281,10 @@
 
 .layout { display:flex; flex:1; overflow:hidden; position:relative; }
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+.right-rail-host { position:relative; display:flex; flex:0 0 var(--right-rail-width,320px); width:var(--right-rail-width,320px); min-width:220px; max-width:560px; min-height:0; }
+.right-rail-host .context-panel { width:100%; min-width:0; }
+.right-rail-resize-handle { position:absolute; z-index:4; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; background:transparent; }
+.right-rail-resize-handle:hover, .right-rail-resize-handle:focus-visible { background:color-mix(in srgb,var(--accent) 62%,transparent); outline:none; }
 
 .main-body {
   flex: 1;
@@ -392,10 +420,15 @@
   display:grid; place-items:center; width:34px; height:34px; margin:auto 1px; border-radius:10px;
   transition:background 140ms ease,color 140ms ease,transform 140ms ease;
 }
+.app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button {
+  width:auto; min-width:0; border-radius:0; background:transparent; transform:none;
+}
+.app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button:hover { transform:none; }
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-icon:hover,
 .app[data-interface-mode="modern-gui"] .workspace-window-controls button:hover { transform:translateY(-1px); }
 .app[data-interface-mode="modern-gui"] .workspace-sidebar-toggle { flex-basis:34px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls { height:44px; padding:0 4px; }
+.app[data-interface-mode="modern-gui"] .workspace-window-controls-divider { height:22px; margin-inline:3px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls .close:hover { border-radius:10px; }
 .app[data-interface-mode="modern-gui"] .workspace-launcher-separator { height:16px; opacity:.55; }
 .app[data-interface-mode="modern-gui"] .sheet-tab-region { height:36px; align-items:center; }
@@ -478,4 +511,110 @@
     background:var(--titlebar-bg,var(--surface-panel));
   }
   .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { padding-left:var(--pylon-terminal-touch-target,44px); }
+}
+
+/* Classic AgentSheet title rail: keep a continuous track, but add a small
+   horizontal rhythm so adjacent labels do not collapse into one text band. */
+.app[data-interface-mode="terminal-like"] .sheet-tab-strip {
+  gap:var(--ui-space-1);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab {
+  width:auto;
+  min-width:116px;
+  max-width:220px;
+  border-right:0;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {
+  width:max-content;
+  min-width:136px;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-kind-mark {
+  border-radius:50%;
+  border-color:color-mix(in srgb,var(--titlebar-text-resolved) 42%,transparent);
+  background:transparent;
+  box-shadow:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] .sheet-tab-kind-mark {
+  border-color:color-mix(in srgb,var(--titlebar-text-resolved) 42%,transparent);
+  background:transparent;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active .sheet-tab-kind-mark {
+  border-color:var(--accent);
+  background:var(--accent);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active {
+  background:transparent;
+  box-shadow:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active::after {
+  content:'';
+  position:absolute;
+  left:var(--ui-space-2);
+  right:var(--ui-space-2);
+  bottom:0;
+  height:var(--line-width-2);
+  background:var(--accent);
+  pointer-events:none;
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab:hover {
+  background:color-mix(in srgb,var(--bg-hover) 62%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-focus {
+  padding:0 var(--ui-control-compact) 0 var(--ui-space-3);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab-close {
+  position:absolute;
+  top:50%;
+  right:var(--ui-space-1);
+  width:var(--ui-control-compact);
+  height:var(--ui-control-compact);
+  margin:0;
+  flex:0 0 auto;
+  transform:translateY(-50%);
+}
+.app[data-interface-mode="terminal-like"] .sheet-tab.active:not(:hover):not(:focus-within) .sheet-tab-close {
+  visibility:hidden;
+  opacity:0;
+}
+.app[data-interface-mode="terminal-like"] .workspace-titlebar-launchers {
+  margin-left:var(--ui-space-1);
+  padding-left:var(--ui-space-1);
+  border-left:1px solid color-mix(in srgb,var(--border) 72%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .workspace-window-controls {
+  padding-left:var(--ui-space-1);
+  border-left:0;
+}
+.app[data-interface-mode="terminal-like"] .workspace-window-native-controls > .titlebar-window-btn-start {
+  margin-left:0;
+  box-shadow:none;
+}
+
+/* Keep the large touch target when the pointer is coarse; only the visual
+   placement changes in the desktop treatment above. */
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="terminal-like"] .sheet-tab-close {
+    top:50%;
+    right:0;
+    width:var(--pylon-terminal-touch-target,44px);
+    min-width:var(--pylon-terminal-touch-target,44px);
+    height:var(--pylon-terminal-touch-target,44px);
+    min-height:var(--pylon-terminal-touch-target,44px);
+    transform:translateY(-50%);
+    visibility:visible;
+    opacity:1;
+  }
+}
+
+@media (max-width:760px) {
+  .app[data-interface-mode="terminal-like"] .sheet-tab {
+    min-width:112px;
+    max-width:200px;
+  }
+  .app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {
+    min-width:124px;
+  }
+  .app[data-interface-mode="terminal-like"] .sheet-tab-focus {
+    padding:0 var(--ui-control-compact) 0 var(--ui-space-2);
+  }
 }

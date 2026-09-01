@@ -1,6 +1,6 @@
 import type { AgentRuntimeCandidate } from './agentDetector.ts'
 
-export type AgentCandidateValidationStage = 'preflight' | 'spawn' | 'initialize' | 'timeout' | 'unknown'
+export type AgentCandidateValidationStage = 'preflight' | 'spawn' | 'initialize' | 'capability' | 'timeout' | 'unknown'
 
 export interface AgentCandidateValidationError {
   code: string
@@ -9,6 +9,10 @@ export interface AgentCandidateValidationError {
   stage?: AgentCandidateValidationStage
   exitCode?: number | null
   stderr?: string | null
+  retryable?: boolean
+  ioKind?: string | null
+  remoteCode?: number | null
+  remoteDataSummary?: string | null
 }
 
 export interface AgentCandidateValidationResult {
@@ -42,8 +46,38 @@ const STAGE_LABELS: Record<AgentCandidateValidationStage, string> = {
   preflight: '启动前检查',
   spawn: '启动进程',
   initialize: '初始化握手',
+  capability: '能力协商',
   timeout: '总超时',
   unknown: '未判定',
+}
+
+/** Normalize the native connection-test envelope at the typed client boundary. */
+export function normalizeAgentCandidateValidationResult(raw: unknown, fallbackAgentId = ''): AgentCandidateValidationResult {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const errorValue = value.error && typeof value.error === 'object' ? value.error as Record<string, unknown> : null
+  const rawStage = errorValue?.stage
+  const stage: AgentCandidateValidationStage = typeof rawStage === 'string'
+    && ['preflight', 'spawn', 'initialize', 'capability', 'timeout'].includes(rawStage)
+    ? rawStage as AgentCandidateValidationStage
+    : 'unknown'
+  const error = errorValue ? {
+    code: typeof errorValue.code === 'string' ? errorValue.code : 'agent_validation_failed',
+    message: typeof errorValue.message === 'string' ? errorValue.message : 'Agent ACP 验证失败',
+    action: typeof errorValue.action === 'string' ? errorValue.action : 'open-runtime-log',
+    stage,
+    exitCode: typeof errorValue.exitCode === 'number' ? errorValue.exitCode : null,
+    stderr: typeof errorValue.stderr === 'string' ? errorValue.stderr : null,
+    retryable: typeof errorValue.retryable === 'boolean' ? errorValue.retryable : undefined,
+    ioKind: typeof errorValue.ioKind === 'string' ? errorValue.ioKind : null,
+    remoteCode: typeof errorValue.remoteCode === 'number' ? errorValue.remoteCode : null,
+    remoteDataSummary: typeof errorValue.remoteDataSummary === 'string' ? errorValue.remoteDataSummary : null,
+  } : null
+  return {
+    ok: value.ok === true,
+    agentId: typeof value.agentId === 'string' ? value.agentId : fallbackAgentId,
+    durationMs: typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs >= 0 ? Math.floor(value.durationMs) : 0,
+    error,
+  }
 }
 
 function formatDuration(durationMs: number): string {

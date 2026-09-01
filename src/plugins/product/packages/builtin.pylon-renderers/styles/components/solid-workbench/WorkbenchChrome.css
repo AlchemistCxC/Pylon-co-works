@@ -2,7 +2,7 @@
  *
  * 证据基线：references/solid-chrome-gap-audit.md —— .main.renderer-suite-workbench
  * 缺 main-body 等价几何，22 个壳层类零定义。本文件只覆盖布局骨架必需类；
- * 消息流/输入栏/卡片复用 React 的 term-* / input-* 类名，由既有 ChatView.css/InputBar.css
+ * 消息流/输入栏/卡片复用共享的 term-* / input-* 类名，由既有 ChatView.css/InputBar.css
  * 与 .app[data-interface-mode] 分档皮肤自动生效，此处不重复。
  *
  * 几何规格对齐 React 同位结构：
@@ -47,12 +47,147 @@
 /* 消息流区已消费 .chat-view{flex:1}（ChatView.css L6），此处仅保证可收缩下限 */
 .solid-workbench-chat {
   min-height: 0;
+  /* The visible scrollbar is rendered by the rail below. Keep this element
+     as the real scroll container so wheel, keyboard and touch scrolling stay
+     native while the visual track can host Solid controls. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.solid-agent-workbench .solid-workbench-chat::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── 聊天滚动轨道 ──
+   轨道本身就是右侧滚动条：端点按钮、滑块和中间轨道连续铺开，
+   不再呈现为悬浮在原生 scrollbar 旁边的两个控件。 */
+.solid-workbench-chat-shell {
+  --scroll-action-rail-width: 20px;
+  --scroll-action-end-size: 22px;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.solid-workbench-chat-shell > .solid-workbench-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.solid-workbench-scroll-rail {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 6;
+  display: flex;
+  width: var(--scroll-action-rail-width);
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: stretch;
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 82%, transparent);
+  pointer-events: none;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn {
+  position: relative;
+  inset: auto;
+  display: grid;
+  width: 100%;
+  height: var(--scroll-action-end-size);
+  flex: 0 0 var(--scroll-action-end-size);
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 92%, transparent);
+  opacity: .72;
+  mix-blend-mode: normal;
+  cursor: pointer;
+  pointer-events: auto;
+  font: 600 11px/1 var(--mono);
+  transition: color 120ms ease, opacity 120ms ease, background-color 120ms ease;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-panel, var(--bg-panel, transparent)));
+  opacity: 1;
+}
+.solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.solid-agent-workbench .solid-workbench-scroll-track {
+  position: relative;
+  width: calc(100% - 4px);
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-inline: 2px;
+  background: color-mix(in srgb, var(--border) 12%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+}
+.solid-agent-workbench .solid-workbench-scroll-track:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: -2px;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  left: 4px;
+  min-height: 0;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--border-focus) 72%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-dim) 72%, var(--surface-panel, var(--bg-panel, transparent)));
+  cursor: grab;
+  pointer-events: auto;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb:hover,
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-dragging='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 72%, var(--surface-panel, var(--bg-panel, transparent)));
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-scrollable='false'] {
+  visibility: hidden;
+}
+.solid-agent-workbench .solid-workbench-scroll-thumb[data-dragging='true'] {
+  cursor: grabbing;
+}
+@media (max-width: 640px) {
+  .solid-workbench-chat-shell {
+    --scroll-action-rail-width: 24px;
+    --scroll-action-end-size: 24px;
+  }
+  .solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn {
+    width: 100%;
+    height: var(--scroll-action-end-size);
+    flex-basis: var(--scroll-action-end-size);
+  }
 }
 
 /* document surface 区块最小间距体系（过渡态：裸 div 直排 → 有节奏的分区） */
 .solid-workbench-timeline { margin: 8px 24px 0; }
 .solid-workbench-assist { margin: 8px 24px 0; }
 .solid-workbench-activities { margin: 8px 0 0; }
+.solid-workbench-activity-group { margin: 0 0 var(--chat-tool-gap, 5px); }
+.solid-workbench-activity-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+  width: 100%;
+  padding: var(--ui-space-1) 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.solid-workbench-activity-group-head:hover,
+.solid-workbench-activity-group-head:focus-visible { color: var(--text); }
+.solid-workbench-activity-group-items { display: grid; gap: var(--chat-tool-gap, 5px); }
 .solid-workbench-interactions { margin: 8px 24px 0; }
 .solid-workbench-extensions { margin: 8px 24px 0; }
 .solid-workbench-usage,
@@ -173,6 +308,80 @@
   position: relative;
   flex-shrink: 0;
   margin-top: auto;
+  transition: margin-top 260ms ease, transform 260ms ease, opacity 180ms ease;
+}
+
+/* Empty state keeps the production control-center geometry. The only changes
+   are a bounded content track and vertical placement: with no chat shell it
+   is centered in the available stage, then returns to the bottom dock once a
+   session exists. The input/status track intentionally does not span the
+   whole window; this keeps the empty surface visually balanced on wide panes. */
+.solid-workbench-control-center-slot.is-empty {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  width: 100%;
+  align-self: stretch;
+  margin: 0;
+  flex: 0 0 auto;
+  transform: translateY(-50%);
+  --cc-empty-content-width: min(720px, calc(100% - 32px));
+}
+.solid-workbench-control-center-slot.is-empty .cc-bg,
+.solid-workbench-control-center-slot.is-empty .cc-edit-hdr,
+.solid-workbench-control-center-slot.is-empty .cc-edit-toolbar,
+.solid-workbench-control-center-slot.is-empty .cc-prop-panel { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='session'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='activity'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='ekg'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='pct'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tasks'] { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-body {
+  box-sizing: border-box;
+  width: var(--cc-empty-content-width);
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
+  padding-inline: 0;
+}
+.solid-workbench-control-center-slot.is-empty .cc-input-slot,
+.solid-workbench-control-center-slot.is-empty .cc-status-row,
+.solid-workbench-control-center-slot.is-empty .cc-footer-status-row,
+.solid-workbench-control-center-slot.is-empty .cc-widget { width: 100%; }
+.solid-workbench-control-center-slot.is-empty .cc-widget.cc-natural { width: max-content !important; }
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='workspace'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='model'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='mode'] { max-width: 100%; }
+.solid-workbench-control-center-slot.is-empty.is-session-entering {
+  animation: solid-empty-composer-to-dock 360ms cubic-bezier(.22,.8,.24,1) both;
+}
+.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering) {
+  animation: solid-empty-composer-enter 280ms ease both;
+}
+@keyframes solid-empty-composer-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes solid-empty-composer-to-dock {
+  from { top: 50%; transform: translateY(-50%); }
+  to { top: calc(100% - var(--cc-height, 120px)); transform: translateY(0); }
+}
+/* The workspace/model/mode controls are creation-only affordances. Fade that
+   layer while the same control-center node travels to its session position;
+   the regular session widgets are then revealed by the existing render path. */
+.solid-workbench-control-center-slot.is-session-entering
+  :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .solid-workbench-control-center-slot { transition: none; }
+  .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
+  .solid-workbench-control-center-slot.is-session-entering { animation: none; }
+  .solid-workbench-control-center-slot.is-session-entering
+    :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+    transition: none;
+  }
 }
 
 /* 过渡态：pet 实体未迁移（React PetCompanion 待 P4），文字占位不展示假 UI */
@@ -195,53 +404,55 @@
   border-top: 1px solid var(--border);
 }
 
-/* 空态：居中承载 Solid 首条请求创建入口。 */
-.solid-workbench-empty {
+/* 空态消息流占位：不绘制第二套品牌/表单 UI，只为中控区提供居中空间。 */
+.solid-workbench-empty-space {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   flex: 1;
+}
+.solid-workbench-empty-brand {
+  position: absolute;
+  top: clamp(10%, 8vh, 18%);
+  left: 0;
+  right: 0;
+  padding: 0 var(--ui-space-4);
+  pointer-events: none;
+}
+.solid-workbench-empty-brand .agent-empty-lockup {
+  display: inline-flex;
   align-items: center;
-  align-self: center;
-  width: min(560px, calc(100% - 48px));
-  margin: auto;
-}
-
-.solid-agent-empty-composer {
-  display: grid;
   gap: var(--ui-space-2);
-  width: min(100%, 540px);
-  margin-top: var(--ui-space-5);
-  padding: var(--ui-space-3);
-  text-align: left;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: var(--ui-radius-lg, 16px);
-  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
-  box-shadow: 0 18px 52px color-mix(in srgb, var(--accent) 8%, transparent);
+  margin-bottom: var(--ui-space-2);
+  padding: 0 var(--ui-space-2);
+  color: var(--accent);
 }
-
-.solid-agent-empty-workspace { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--ui-space-2); color: var(--text-dim); font: 600 var(--font-size-xs) var(--font); }
-.solid-agent-empty-workspace select { min-width: 0; height: 34px; padding: 0 var(--ui-space-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--ui-radius-sm, 8px); background: var(--surface-panel); font: var(--font-size-sm) var(--font); }
-.solid-agent-empty-composer textarea { box-sizing: border-box; width: 100%; min-height: 86px; max-height: 220px; resize: vertical; padding: var(--ui-space-3); color: var(--text); border: 0; outline: 0; background: transparent; font: var(--font-size-md)/1.55 var(--font); }
-.solid-agent-empty-composer textarea::placeholder { color: var(--text-dim); }
-.solid-agent-empty-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3); color: var(--text-dim); font: var(--font-size-xs) var(--font); }
-.solid-agent-empty-composer-footer button { min-height: 34px; padding: 0 var(--ui-space-4); color: var(--surface-canvas, var(--bg)); border: 0; border-radius: var(--ui-radius-md, 10px); background: var(--accent); font: 650 var(--font-size-sm) var(--font); cursor: pointer; }
-.solid-agent-empty-composer-footer button:disabled { opacity: .45; cursor: default; }
-.solid-agent-empty-workspace select:focus-visible,
-.solid-agent-empty-composer textarea:focus-visible,
-.solid-agent-empty-composer-footer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.solid-workbench-empty-brand .agent-empty-brand {
+  width: 48px;
+  height: 48px;
+  margin: 0;
+}
+.solid-workbench-empty-brand .agent-empty-brand .pylon-mark { width: 44px; height: 44px; }
+.solid-workbench-empty-brand .agent-empty-wordmark {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font: 700 var(--font-size-sm)/1 var(--mono);
+  letter-spacing: .24em;
+}
+.solid-workbench-empty-brand .agent-empty-eyebrow { margin-bottom: var(--ui-space-1); }
+.solid-workbench-empty-brand .agent-empty-title { font-size: clamp(20px, 2.4vw, 28px); }
 .solid-agent-empty-error { color: var(--danger, #dc6372); font: var(--font-size-sm) var(--font); }
 
-@media (max-width: 560px) {
-  .solid-agent-empty-composer-footer { align-items: stretch; flex-direction: column; }
-  .solid-agent-empty-composer-footer button { width: 100%; }
-}
-
-/* Terminal-like empty state: square controls and a compact, quiet surface.
-   Modern GUI keeps its card treatment in its own presentation rules. */
-.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer,
-.app[data-interface-mode="terminal-like"] .solid-agent-empty-workspace select,
-.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer-footer button {
-  border-radius: 0;
-}
-.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer {
-  box-shadow: none;
-  background: transparent;
-}
+/* Empty-state workspace is a normal status widget, not a separate context
+   row. The creation affordance stays compact and the new-workspace editor
+   floats from the same widget so it does not change the control-center grid. */
+.cc-empty-workspace-control { position: relative; display: inline-flex; align-items: center; gap: var(--ui-space-1); min-width: 0; }
+.cc-empty-workspace-select { display: inline-flex; align-items: center; gap: var(--ui-space-1); min-width: 0; color: var(--text-dim); }
+.cc-empty-workspace-select select { min-width: 0; max-width: min(34vw, 240px); height: var(--ui-control-compact, 28px); padding: 0 var(--ui-space-1); color: var(--text); border: 1px solid color-mix(in srgb, var(--border) 86%, transparent); border-radius: 0; background: transparent; font: inherit; }
+.cc-empty-workspace-create { display: inline-grid; width: var(--ui-control-compact, 28px); height: var(--ui-control-compact, 28px); place-items: center; padding: 0; color: var(--text-dim); border: 1px solid var(--border); border-radius: 0; background: transparent; cursor: pointer; }
+.cc-empty-workspace-create:hover { color: var(--accent); border-color: var(--accent); }
+.cc-empty-workspace-popover { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 12; display: grid; grid-template-columns: minmax(120px, 1fr) auto auto; align-items: center; gap: var(--ui-space-1); width: min(420px, 72vw); padding: var(--ui-space-2); border: 1px solid var(--border); border-radius: 0; background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.cc-empty-workspace-popover input { min-width: 0; height: var(--ui-control-compact, 28px); padding: 0 var(--ui-space-1); color: var(--text); border: 1px solid var(--border); border-radius: 0; background: var(--input-bg, var(--bg-input)); }
+.cc-empty-workspace-popover code { max-width: 160px; overflow: hidden; color: var(--text-dim); font-size: var(--font-size-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.cc-empty-workspace-popover button { height: var(--ui-control-compact, 28px); padding: 0 var(--ui-space-2); color: var(--text); border: 1px solid var(--border); border-radius: 0; background: transparent; cursor: pointer; }
+.cc-empty-workspace-popover button:hover { color: var(--accent); border-color: var(--accent); }

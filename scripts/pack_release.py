@@ -12,7 +12,9 @@
       portable.flag
       data/                    # 空目录，触发 portable 模式
       tools/install-webview2.bat
+      tools/repair-hermes-acp.bat/.ps1  # optional Hermes ACP stdin repair
       tools/MicrosoftEdgeWebview2Setup.exe   # 受控 release 资源，默认必须存在
+      resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
     release/pylon-<version>-win64.zip
     release/pylon-<version>-win64.zip.sha256
     release/pylon-<version>-win64.manifest.json
@@ -38,6 +40,8 @@ REPO_DIR = SCRIPT_DIR.parent
 SRC_TAURI_DIR = REPO_DIR / "src-tauri"
 RELEASE_DIR = SRC_TAURI_DIR / "target" / "release"
 TEMPLATE_DIR = REPO_DIR / "resources" / "release"
+HERMES_RUNTIME_DIR = SRC_TAURI_DIR / "resources" / "runtime"
+HERMES_RUNTIME_TREE = HERMES_RUNTIME_DIR / "git"
 OUT_ROOT = REPO_DIR / "release"
 
 EXE_NAME = "pylon.exe"
@@ -101,7 +105,20 @@ def resolve_version() -> str:
 # ── 文件审计 ──
 
 def is_text_file(path: Path) -> bool:
-    return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".json", ".md"}
+    return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".ps1", ".json", ".md"}
+
+
+def is_hermes_runtime_payload(rel_path: str) -> bool:
+    """Return whether *rel_path* belongs to the upstream vendor tree.
+
+    The release audit's secret/absolute-path rules are for Pylon-authored
+    configuration and documentation. PortableGit ships thousands of upstream
+    docs and scripts containing harmless example paths and words such as
+    ``token``; scanning those files creates false positives and does not add
+    useful protection. Keep the structural/forbidden-name checks for the tree,
+    but restrict content scanning to our own runtime metadata and README.
+    """
+    return rel_path.replace("\\", "/").startswith("resources/runtime/git/")
 
 
 def scan_text_file(rel_path: str, text: str) -> None:
@@ -141,7 +158,34 @@ def reject_forbidden(rel_path: str) -> None:
         raise PackError(f"包内出现禁止路径: {rel_path}")
 
 
-def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Path, str]]:
+def hermes_runtime_is_complete(root: Path) -> bool:
+    """Return whether a complete PortableGit tree is ready for packaging."""
+    bash_candidates = [root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"]
+    if not any(path.is_file() for path in bash_candidates):
+        return False
+    usr_bin = root / "usr" / "bin"
+    required = ("true.exe", "cat.exe", "mktemp.exe", "mv.exe", "awk.exe", "grep.exe")
+    if any(not (usr_bin / name).is_file() for name in required):
+        return False
+    return any(
+        path.is_file()
+        for path in (root / "usr" / "bin" / "msys-2.0.dll", root / "bin" / "msys-2.0.dll")
+    )
+
+
+def append_tree_files(
+    files: list[tuple[Path, str]],
+    source_root: Path,
+    package_root: str,
+) -> None:
+    for root, _dirs, names in os.walk(source_root):
+        for name in names:
+            full = Path(root) / name
+            rel = full.relative_to(source_root).as_posix()
+            files.append((full, f"{package_root.rstrip('/')}/{rel}"))
+
+
+def collect_source_files(version: str, without_webview2: bool, with_runtime: bool = False) -> list[tuple[Path, str]]:
     """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
     exe_path = RELEASE_DIR / EXE_NAME
     if not exe_path.is_file():
@@ -181,16 +225,73 @@ def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Pat
     else:
         print("warn: release resources 目录不存在，仅打包 exe")
 
+    # Hermes PortableGit runtime：默认排除（2026-08-31 用户决定——bash 已在标准路径
+    # C:\Program Files\Git，发行包不再内置完整运行时；--with-runtime 可恢复）。
+    if not with_runtime:
+        files = [
+            (source, rel)
+            for source, rel in files
+            if not rel.startswith("resources/runtime/")
+        ]
+
+    if with_runtime:
+        # The Tauri resource copier normally places the runtime under
+        # target/release/resources.  Keep a repository fallback for `--no-bundle`
+        # layouts where that copy is skipped, while still requiring a complete
+        # tree so a release can never silently omit Hermes' Bash dependency.
+        packaged_runtime = RELEASE_DIR / "resources" / "runtime" / "git"
+        runtime_source = packaged_runtime if hermes_runtime_is_complete(packaged_runtime) else HERMES_RUNTIME_TREE
+        if not hermes_runtime_is_complete(runtime_source):
+            raise PackError(
+                "缺少完整的 Hermes PortableGit 运行时（resources/runtime/git）。"
+                "请先运行 npm run prepare:hermes-runtime，再重新构建/打包。"
+            )
+        existing_paths = {rel for _src, rel in files}
+        for runtime_rel in ["resources/runtime/portable-git.json", "resources/runtime/README.txt"]:
+            source = HERMES_RUNTIME_DIR / Path(runtime_rel).name
+            if runtime_rel not in existing_paths and source.is_file():
+                files.append((source, runtime_rel))
+                existing_paths.add(runtime_rel)
+        # Add the binary tree only when Tauri did not already copy a *complete*
+        # tree.  A partial target/release/resources copy must not shadow the
+        # repository fallback.
+        if not hermes_runtime_is_complete(packaged_runtime):
+            files = [
+                (source, rel)
+                for source, rel in files
+                if not rel.startswith("resources/runtime/git/")
+            ]
+            append_tree_files(files, runtime_source, "resources/runtime/git")
+
     for template_name in ["agents.example.yaml", "README.txt"]:
         src = TEMPLATE_DIR / template_name
         if not src.is_file():
             raise PackError(f"缺少 release 模板: {src}")
         files.append((src, template_name))
 
+    # 发行包附带用户文档（2026-09-01 规则）：仓库根 README.md + docs/说明书/ 全量进入包内。
+    readme_src = REPO_DIR / "README.md"
+    if not readme_src.is_file():
+        raise PackError(f"缺少发行包 README: {readme_src}")
+    files.append((readme_src, "README.md"))
+    manual_dir = REPO_DIR / "docs" / "说明书"
+    if not manual_dir.is_dir():
+        raise PackError(f"缺少发行包说明书目录: {manual_dir}")
+    append_tree_files(files, manual_dir, "docs/说明书")
+
     bat_src = TEMPLATE_DIR / "tools" / "install-webview2.bat"
     if not bat_src.is_file():
         raise PackError(f"缺少 release 模板: {bat_src}")
     files.append((bat_src, "tools/install-webview2.bat"))
+
+    # Optional user repair helper for older source-based Hermes installs.  It
+    # is deliberately shipped as a script (never auto-executed): users choose
+    # check/repair/restore from the menu, and every edit receives a backup.
+    for repair_name in ("repair-hermes-acp.bat", "repair-hermes-acp.ps1"):
+        repair_src = TEMPLATE_DIR / "tools" / repair_name
+        if not repair_src.is_file():
+            raise PackError(f"缺少 release 模板: {repair_src}")
+        files.append((repair_src, f"tools/{repair_name}"))
 
     bootstrapper = TEMPLATE_DIR / "tools" / "MicrosoftEdgeWebview2Setup.exe"
     if without_webview2:
@@ -243,7 +344,7 @@ def audit_staging(staging_root: Path, top_dir: str) -> None:
             full = Path(root) / name
             rel = full.relative_to(staging_root).as_posix()
             reject_forbidden(rel)
-            if is_text_file(full):
+            if is_text_file(full) and not is_hermes_runtime_payload(rel):
                 scan_text_file(rel, full.read_text(encoding="utf-8", errors="strict"))
 
 
@@ -350,7 +451,7 @@ def verify_zip(zip_path: Path) -> None:
             if info.is_dir():
                 continue
             rel = info.filename[len(prefix):]
-            if is_text_file(Path(rel)):
+            if is_text_file(Path(rel)) and not is_hermes_runtime_payload(rel):
                 text = zf.read(info).decode("utf-8", errors="strict")
                 scan_text_file(rel, text)
 
@@ -382,6 +483,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="降级打包：不包含 WebView2 bootstrapper（manifest 记录 false）",
     )
     parser.add_argument(
+        "--with-runtime",
+        action="store_true",
+        help="包含 Hermes PortableGit 运行时（默认排除——bash 已在标准路径 C:\\Program Files\\Git，2026-08-31 决定）",
+    )
+    parser.add_argument(
         "--verify-only",
         metavar="ZIP",
         help="仅审计已存在的 release ZIP，不重新打包",
@@ -398,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
 
     version = resolve_version()
     top_dir = f"pylon-{version}-win64"
-    files = collect_source_files(version, args.without_webview2)
+    files = collect_source_files(version, args.without_webview2, args.with_runtime)
     webview2_bootstrapper = not args.without_webview2
 
     staging_root = build_staging(version, files)

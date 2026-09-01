@@ -1,9 +1,10 @@
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
-import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
+import { reduceGenerationActivity } from '../../domains/activity/generationStateMachine.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
@@ -13,14 +14,39 @@ import { getChatController, type ChatControllerHandle } from '../../components/c
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
+import {
+  extractChoiceId,
+  extractChoiceLabel,
+  extractConfigOptionId,
+  extractModeConfig,
+  extractModelConfig,
+  sessionResponseObject,
+  type SessionResponseObject,
+} from '../../infrastructure/acp/chatContracts.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
   chatController?: () => Pick<ChatControllerHandle,
-    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'rejectOptimisticUser'
+    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'getGenerationActivity' | 'rejectOptimisticUser'
     | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
+}
+
+/**
+ * Fields that define the Workbench binding. Presentation-only Session metadata
+ * (name, lastReplyAt, autoName, etc.) must not rebuild the live document.
+ * Workspace and remote binding metadata are updated through their own reload
+ * seams; they are not document identity and must not reset an active stream.
+ */
+export function workbenchSessionBindingKey(session: Session | undefined): string {
+  if (!session) return 'unbound'
+  return [
+    session.id,
+    session.source,
+    session.agentId,
+    session.profileId,
+  ].join('\u0000')
 }
 
 function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
@@ -64,6 +90,165 @@ function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[]
   if (canonical !== undefined) return canonical
   const migrated = migrateWorkbenchEnvelope(value)
   return migrated.ok ? [migrated.value] : []
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function responseChoice(value: unknown, kind?: 'model' | 'mode'): { id: string; label: string } | undefined {
+  const id = extractChoiceId(value, kind)
+  if (!id) return undefined
+  return { id, label: extractChoiceLabel(value, id) ?? id }
+}
+
+function toJsonValue(value: unknown, depth = 0): JsonValue | undefined {
+  if (depth > 8) return undefined
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (Array.isArray(value)) {
+    const items = value.map(item => toJsonValue(item, depth + 1)).filter((item): item is JsonValue => item !== undefined)
+    return items
+  }
+  if (isRecord(value)) {
+    const result: Record<string, JsonValue> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const json = toJsonValue(item, depth + 1)
+      if (json !== undefined) result[key] = json
+    }
+    return result
+  }
+  return undefined
+}
+
+function responseChoiceList(value: unknown): readonly { id: string; label: string }[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const choices: Array<{ id: string; label: string }> = []
+  for (const item of value) {
+    const choice = responseChoice(item)
+    if (!choice || seen.has(choice.id.toLowerCase())) continue
+    seen.add(choice.id.toLowerCase())
+    choices.push(choice)
+  }
+  return choices
+}
+
+function syntheticSessionOption(
+  kind: 'model' | 'mode',
+  response: SessionResponseObject,
+): Record<string, JsonValue> | undefined {
+  const state = kind === 'model' ? response.models : response.modes
+  if (!state) return undefined
+  // Keep the discriminant on the original response instead of indexing the
+  // `SessionModels | SessionModes` union through a conditional state variable;
+  // this also makes the two wire shapes explicit for future schema additions.
+  const rawChoices = kind === 'model'
+    ? response.models?.availableModels ?? response.models?.available_models
+    : response.modes?.availableModes ?? response.modes?.available_modes
+  const choices = responseChoiceList(rawChoices)
+  const current = kind === 'model'
+    ? extractModelConfig(response.configOptions, response).model
+    : extractModeConfig(response).mode
+  if (!current && choices.length === 0) return undefined
+  const schema: Record<string, JsonValue> = {
+    options: choices.map(choice => ({ id: choice.id, label: choice.label })),
+  }
+  return {
+    id: kind,
+    label: kind === 'model' ? '模型' : '模式',
+    valueType: 'select',
+    editable: true,
+    ...(current ? { value: current } : {}),
+    schema,
+  }
+}
+
+function optionId(value: unknown): string | undefined {
+  return extractConfigOptionId(value)
+}
+
+function mergeSessionResponseOptions(response: SessionResponseObject): readonly JsonValue[] {
+  const options: JsonValue[] = (Array.isArray(response.configOptions)
+    ? response.configOptions
+    : Array.isArray(response.config_options) ? response.config_options : [])
+    .map(item => toJsonValue(item))
+    .filter((item): item is JsonValue => item !== undefined)
+  for (const synthetic of [syntheticSessionOption('model', response), syntheticSessionOption('mode', response)]) {
+    if (!synthetic) continue
+    const syntheticId = String(synthetic.id).toLowerCase()
+    const index = options.findIndex(item => optionId(item)?.toLowerCase() === syntheticId)
+    if (index < 0) {
+      options.push(synthetic)
+      continue
+    }
+    const existing = options[index]
+    if (!isRecord(existing)) continue
+    const merged: Record<string, JsonValue> = { ...existing }
+    // Preserve provider metadata, but ensure the standard models/modes state
+    // supplies choices/current value when the provider's config option omitted
+    // them.  This gives every renderer one canonical selector surface.
+    if (!('value' in merged) && 'value' in synthetic) merged.value = synthetic.value!
+    if (!('valueType' in merged) && 'valueType' in synthetic) merged.valueType = synthetic.valueType!
+    if (!('schema' in merged) && 'schema' in synthetic) merged.schema = synthetic.schema!
+    options[index] = merged
+  }
+  return Object.freeze(options)
+}
+
+function responseProjectionKey(response: SessionResponseObject): string {
+  try {
+    return JSON.stringify({
+      models: response.models,
+      modes: response.modes,
+      configOptions: response.configOptions ?? response.config_options,
+    })
+  } catch {
+    return String(response)
+  }
+}
+
+function shortHash(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function sessionResponseEnvelope(
+  sessionId: string,
+  provider: string,
+  response: SessionResponseObject,
+  sequence: number,
+): WorkbenchEventEnvelope {
+  const model = extractModelConfig(response.configOptions, response).model
+  const mode = extractModeConfig(response).mode
+  const options = mergeSessionResponseOptions(response)
+  const fingerprint = shortHash(responseProjectionKey(response))
+  return createWorkbenchEnvelope({
+    eventId: `session-response:${sessionId}:${fingerprint}`,
+    sessionId,
+    sequence: Math.max(1, sequence),
+    recordedAt: new Date().toISOString(),
+    source: { provider: provider || 'acp', sourceId: `session-response:${fingerprint}` },
+    identity: { runId: `session-response:${fingerprint}` },
+    provenance: {
+      origin: 'local-observed',
+      trust: 'authoritative',
+      provider: provider || 'acp',
+      orderConfidence: 'observed',
+      synthetic: { reason: 'session-new-response' },
+    },
+    event: {
+      type: 'session.started',
+      status: 'ready',
+      ...(model ? { model } : {}),
+      ...(mode ? { mode } : {}),
+      ...(options.length > 0 ? { options } : {}),
+    },
+  })
 }
 
 /** Browser/demo compatibility bridge. The visual seed predates the Workbench
@@ -168,6 +353,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const appearance = createZustandWorkbenchAppearanceStore()
   const sessionUi = createSessionUiStore()
   let boundSessionId: string | undefined
+  let boundProvider = 'acp'
+  let boundSessionBindingKey: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
     rejectOptimisticUser: (targetSource, clientMessageId) => chatController()?.rejectOptimisticUser(targetSource, clientMessageId),
@@ -212,6 +399,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let malformedCount = 0
   let destroyed = false
   let unsubscribeSourceRuntime = () => {}
+  /** Responses from the atomic empty-state create transaction can arrive
+   * before React has rebound the Workbench to the newly-added local Session.
+   * Keep them keyed by local Session.id until that bind completes. */
+  const pendingSessionResponses = new Map<string, SessionResponseObject[]>()
+  const appliedSessionResponseKeys = new Map<string, Set<string>>()
+  const transientSequenceBySource = new Map<string, number>()
   const pendingOptimisticBySource = new Map<string, Array<{
     clientMessageId: string
     content: string
@@ -233,6 +426,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationStart: generating ? controller.getStartTime(targetSource) : 0,
       lastTokenAt: controller.getLastActivityAt(targetSource),
       generationPhase: controller.getGenerationPhase(targetSource),
+      // Legacy controllers may not expose the activity axis. Write this
+      // field explicitly so a missing getter clears stale context from a
+      // previous session instead of leaving an old tool label behind.
+      generationActivity: controller.getGenerationActivity?.(targetSource),
       thinkingStart: controller.getThinkingStart(targetSource),
       tokenCount: controller.getTokenCount(targetSource),
       summary: controller.getSummary(targetSource) ?? null,
@@ -280,6 +477,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationStart: now,
       lastTokenAt: now,
       generationPhase: { kind: 'thinking' },
+      generationActivity: reduceGenerationActivity(undefined, { type: 'start', at: now }),
       summary: null,
     })
   }
@@ -302,9 +500,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         && message.identity.interactionId === clientMessageId)),
     }
     runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
+    const existingActivity = runtime.getSnapshot().generationActivity
     updateRuntimeState({
       generating: remaining.length > 0 || document.messages.some(message => message.running),
       generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
+      generationActivity: remaining.length > 0
+        ? existingActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: Date.now() })
+        : undefined,
     })
   }
 
@@ -325,6 +527,41 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
     else pendingOptimisticBySource.delete(targetSource)
     return document
+  }
+
+  const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string): void => {
+    if (destroyed || !boundSessionId || !source || targetSessionId !== boundSessionId) return
+    const key = responseProjectionKey(response)
+    const applied = appliedSessionResponseKeys.get(targetSessionId) ?? new Set<string>()
+    if (applied.has(key)) return
+    applied.add(key)
+    appliedSessionResponseKeys.set(targetSessionId, applied)
+
+    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(source)
+    const bufferedMax = buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
+    const previousTransient = transientSequenceBySource.get(source) ?? 0
+    const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
+    transientSequenceBySource.set(source, sequence)
+    const envelope = sessionResponseEnvelope(source, boundProvider, response, sequence)
+    if (loading) {
+      buffered.push(envelope)
+      return
+    }
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
+  }
+
+  const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
+    if (destroyed) return
+    const normalized = sessionResponseObject(response)
+    const target = targetSessionId?.trim() || boundSessionId
+    if (!target) return
+    if (boundSessionId && (target === boundSessionId || target === source)) {
+      enqueueSessionResponse(normalized, boundSessionId)
+      return
+    }
+    const pending = pendingSessionResponses.get(target) ?? []
+    pending.push(normalized)
+    pendingSessionResponses.set(target, pending)
   }
 
   const confirmPendingFromEnvelope = (envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope => {
@@ -375,9 +612,27 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
 
   return {
     runtime, appearance, sessionUi, commands,
+    /**
+     * Project the response of the atomic `new_session` command into the same
+     * disposable Workbench document used by canonical/live events.  This is a
+     * transient bridge: it never appends to SQLite or the canonical journal.
+     * The optional local Session.id lets callers publish before React's bind
+     * effect runs; the response is buffered and consumed by bind().
+     */
+    applySessionResponse,
     async bind(session: Session | undefined): Promise<void> {
+      const nextBindingKey = workbenchSessionBindingKey(session)
+      // Session objects are recreated for ordinary metadata updates (name,
+      // lastReplyAt, autoName) and when canonical replay completes. Rebinding
+      // in those cases replaces the whole document and looks like a page
+      // refresh. Keep this seam idempotent; explicit identity changes still
+      // pass through the normal reload path below. Workspace reloads use the
+      // dedicated lifecycle/reload-token seam instead of rebinding here.
+      if (boundSessionBindingKey === nextBindingKey) return
+      boundSessionBindingKey = nextBindingKey
       const nextGeneration = ++generation
       boundSessionId = session?.id
+      boundProvider = session?.agentId || 'acp'
       source = session?.source
       followSourceRuntime(source)
       ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
@@ -387,11 +642,20 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
         ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, sessionId: session?.id ?? null,
       })
+      if (session) {
+        const pendingResponses = [
+          ...(pendingSessionResponses.get(session.id) ?? []),
+          ...(pendingSessionResponses.get(session.source) ?? []),
+        ]
+        pendingSessionResponses.delete(session.id)
+        pendingSessionResponses.delete(session.source)
+        for (const response of pendingResponses) enqueueSessionResponse(response, session.id)
+      }
       updateRuntimeState({
         status: loading ? 'loading' : 'idle', error: null,
         ...(source && chatController()?.getGenerating(source)
           ? {}
-          : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, thinkingStart: undefined, summary: null }),
+          : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, summary: null }),
       })
       if (source) syncSourceRuntime(source)
       if (!session || !ownerKey) return
@@ -432,6 +696,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     destroy() {
       if (destroyed) return
       destroyed = true; unsubscribeSourceRuntime(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
     },
   }
 }

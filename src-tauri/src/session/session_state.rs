@@ -84,7 +84,14 @@ fn restore_mode(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("modes").is_some() {
         return;
     }
-    if let Some(mode) = &session.mode {
+    let mode = session.mode.clone().or_else(|| {
+        session
+            .snapshots
+            .get("mode")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    });
+    if let Some(mode) = mode {
         if let Some(obj) = response.as_object_mut() {
             obj.insert(
                 "modes".to_string(),

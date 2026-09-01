@@ -47,7 +47,7 @@ export interface SheetInput {
   state?: unknown
 }
 
-// ── W1-02：SheetContext（§1.4.1 定稿，12 字段）——只含「sheet 无法自己获得、必须由布局层给」的东西 ──
+// ── W1-02：SheetContext（布局上下文）——只含「sheet 无法自己获得、必须由布局层给」的东西 ──
 
 export interface SheetContext {
   // sheet 间导航（F1-D 联动的公开面）
@@ -64,6 +64,12 @@ export interface SheetContext {
   sidebarCollapsed: boolean
   rightInset: number
   ccEditMode: boolean
+  /**
+   * 当前 Sheet 是否位于活动主区。原生子 WebView 不受父 DOM 的 display:none
+   * 影响，因此 Browser Sheet 用这个只读标记同步 show/hide；旧调用方省略时
+   * 按活动态处理，保持第三方/测试上下文兼容。
+   */
+  isActive?: boolean
   // source 解析（identity sessionId ↔ ACP source 唯一换算口，禁止 sheet 自写 find）
   sessionSource: (sessionId: string | null) => string | null
   sessionBySource: (source: string) => Session | undefined

@@ -35,6 +35,452 @@ pub(crate) struct SessionMapping {
     pub(crate) new_response: Option<serde_json::Value>,
 }
 
+/// Return a non-empty string from the common ACP scalar/nested value shapes.
+/// Providers disagree on whether a selected value is encoded as a plain
+/// string, `{value: ...}`, or `{valueId: {value: ...}}`; initial-session
+/// negotiation must understand all of them without stringifying objects.
+fn response_string(value: &serde_json::Value) -> Option<String> {
+    super::value_as_string(value)
+}
+
+fn option_identity(option: &serde_json::Value) -> Option<String> {
+    let object = option.as_object()?;
+    let keys = [
+        "configId", "config_id", "optionId", "option_id", "id", "key", "name",
+    ];
+    keys.into_iter().find_map(|wanted| {
+        object
+            .iter()
+            .find(|(key, _)| {
+                key.replace(['-', ' '], "_")
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>()
+                    == wanted
+                        .replace(['-', ' '], "_")
+                        .chars()
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
+            })
+            .and_then(|(_, value)| response_string(value))
+    })
+}
+
+fn option_text(option: &serde_json::Value) -> String {
+    [
+        "id",
+        "key",
+        "configId",
+        "config_id",
+        "optionId",
+        "option_id",
+        "name",
+        "label",
+        "title",
+        "description",
+        "category",
+        "semantic",
+        "valueType",
+        "value_type",
+    ]
+    .into_iter()
+    .filter_map(|key| option.get(key).and_then(response_string))
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_lowercase()
+}
+
+fn option_choices(option: &serde_json::Value) -> Vec<String> {
+    // ACP implementations have used each of these names in the wild.  The
+    // recursive walk also handles a JSON-schema `{schema: {enum: [...]}}`.
+    fn collect(value: &serde_json::Value, depth: usize, out: &mut Vec<String>) {
+        if depth > 4 {
+            return;
+        }
+        if let Some(values) = value.as_array() {
+            for item in values {
+                if let Some(choice) = response_string(item) {
+                    out.push(choice);
+                }
+            }
+            return;
+        }
+        let Some(object) = value.as_object() else {
+            return;
+        };
+        for key in [
+            "options", "choices", "values", "available", "enum", "items", "schema",
+            "optionValues", "option_values",
+        ] {
+            if let Some(nested) = object.get(key) {
+                collect(nested, depth + 1, out);
+            }
+        }
+    }
+
+    let mut values = Vec::new();
+    collect(option, 0, &mut values);
+    values.sort();
+    values.dedup();
+    values
+}
+
+/// Locate a writable reasoning/thinking config option advertised by an ACP
+/// agent.  `None` deliberately means "capability not advertised"; callers
+/// must not turn the Hermes permission modes into a fake thinking setting.
+/// When choices are advertised, the requested wire id must be one of them.
+pub(crate) fn find_reasoning_option_id(
+    options: &[serde_json::Value],
+    requested: &str,
+) -> Option<String> {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return None;
+    }
+    fn comparable(value: &str) -> String {
+        value
+            .chars()
+            .filter(|character| character.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    fn score(option: &serde_json::Value) -> i32 {
+        let object = match option.as_object() {
+            Some(object) => object,
+            None => return 0,
+        };
+        let mut score = 0;
+        for key in ["configId", "config_id", "optionId", "option_id", "id", "key"] {
+            if let Some(value) = object.get(key).and_then(response_string) {
+                let token = comparable(&value);
+                if [
+                    "reasoning", "reasoningeffort", "thinking", "thought", "thoughtlevel", "effort",
+                ]
+                .iter()
+                .any(|marker| token == *marker)
+                {
+                    score = score.max(100);
+                } else if ["reason", "think", "thought", "effort"]
+                    .iter()
+                    .any(|marker| token.contains(marker))
+                {
+                    score = score.max(70);
+                }
+            }
+        }
+        for key in ["category", "name", "label", "title", "description", "semantic"] {
+            if let Some(value) = object.get(key).and_then(response_string) {
+                let token = comparable(&value);
+                if [
+                    "reasoning", "reasoningeffort", "thinking", "thought", "thoughtlevel", "effort",
+                ]
+                .iter()
+                .any(|marker| token == *marker)
+                {
+                    score = score.max(80);
+                } else if ["reason", "think", "thought", "effort"]
+                    .iter()
+                    .any(|marker| token.contains(marker))
+                {
+                    score = score.max(50);
+                }
+            }
+        }
+        // A temperature/tuning slider is not a thinking level even when its
+        // presentation label happens to contain the word "reasoning".
+        if object
+            .iter()
+            .filter_map(|(_, value)| value.as_str())
+            .any(|value| comparable(value).contains("temperature"))
+            && score < 100
+        {
+            score -= 30;
+        }
+        score
+    }
+    let mut candidates: Vec<(i32, usize, String)> = options
+        .iter()
+        .enumerate()
+        .filter_map(|(index, option)| {
+        let object = option.as_object()?;
+        let semantic = option_text(option);
+        let semantic_match = [
+            "reason", "reasoning", "think", "thinking", "thought", "effort", "推理", "思考",
+        ]
+        .iter()
+        .any(|marker| semantic.contains(marker));
+        let rank = score(option);
+        if !semantic_match && rank <= 0 {
+            return None;
+        }
+        let read_only = ["readOnly", "readonly", "read_only"]
+            .into_iter()
+            .any(|key| object.get(key).and_then(serde_json::Value::as_bool) == Some(true))
+            || object.get("editable").and_then(serde_json::Value::as_bool) == Some(false);
+        if read_only {
+            return None;
+        }
+        let id = option_identity(option)?;
+        let choices = option_choices(option);
+        if !choices.is_empty()
+            && !choices.iter().any(|choice| {
+                comparable(choice) == comparable(requested)
+            })
+        {
+            return None;
+        }
+        Some((rank.max(1), index, id))
+    })
+        .collect();
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+    candidates.into_iter().next().map(|(_, _, id)| id)
+}
+
+fn merge_response_value(base: &mut serde_json::Value, patch: serde_json::Value) {
+    let (Some(base_object), Some(patch_object)) = (base.as_object_mut(), patch.as_object()) else {
+        *base = patch;
+        return;
+    };
+    for (key, value) in patch_object {
+        // An empty configOptions response is common for set_model/set_mode;
+        // retaining the session/new catalogue avoids erasing selectors.
+        if key == "configOptions"
+            && value.as_array().is_some_and(|values| values.is_empty())
+            && base_object
+                .get(key)
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|values| !values.is_empty())
+        {
+            continue;
+        }
+        if let Some(existing) = base_object.get_mut(key) {
+            if existing.is_object() && value.is_object() {
+                merge_response_value(existing, value.clone());
+                continue;
+            }
+        }
+        base_object.insert(key.clone(), value.clone());
+    }
+}
+
+fn set_response_current(response: &mut serde_json::Value, section: &str, key: &str, value: &str) {
+    let Some(root) = response.as_object_mut() else {
+        return;
+    };
+    let section_value = root
+        .entry(section.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(section_object) = section_value.as_object_mut() {
+        section_object.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+    }
+}
+
+fn set_config_option_current(response: &mut serde_json::Value, key: &str, value: &str) {
+    let options_value = if response.get("configOptions").is_some() {
+        response.get_mut("configOptions")
+    } else {
+        response.get_mut("config_options")
+    };
+    let Some(options) = options_value.and_then(serde_json::Value::as_array_mut) else {
+        return;
+    };
+    for option in options {
+        let matches = option_identity(option)
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(key));
+        if matches {
+            if let Some(object) = option.as_object_mut() {
+                object.insert(
+                    "currentValue".to_string(),
+                    serde_json::Value::String(value.to_string()),
+                );
+            }
+            break;
+        }
+    }
+}
+
+fn merge_setting_response(
+    response: &mut serde_json::Value,
+    setting_response: serde_json::Value,
+    section: &str,
+    current_key: &str,
+    option_key: &str,
+    value: &str,
+) {
+    merge_response_value(response, setting_response);
+    set_response_current(response, section, current_key, value);
+    set_config_option_current(response, option_key, value);
+}
+
+fn merge_config_setting_response(
+    response: &mut serde_json::Value,
+    setting_response: serde_json::Value,
+    option_key: &str,
+    value: &str,
+) {
+    merge_response_value(response, setting_response);
+    set_config_option_current(response, option_key, value);
+}
+
+fn advertised_config_option_id(response: &serde_json::Value, semantic: &str) -> Option<String> {
+    let options = response
+        .get("configOptions")
+        .or_else(|| response.get("config_options"))
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    super::find_config_option(options, semantic).and_then(option_identity)
+}
+
+/// Apply the optional values selected in the empty-state control center.  The
+/// operation is intentionally atomic from the caller's perspective: a failed
+/// setting RPC is returned so the newly-created remote session can be closed
+/// before any local mapping is published.
+async fn apply_initial_session_options(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    response: &mut serde_json::Value,
+    initial_model: Option<&str>,
+    initial_reasoning: Option<&str>,
+    initial_mode: Option<&str>,
+) -> Result<(), PylonError> {
+    if let Some(model) = initial_model.map(str::trim).filter(|value| !value.is_empty()) {
+        let target = state
+            .protocol_for_runtime(runtime)
+            .set_model_api()
+            .route("model");
+        let (method, params) = match target {
+            crate::agent_config::ModelSwitchTarget::SetModel => (
+                acp::METHOD_SESSION_SET_MODEL,
+                acp::session_set_model_params(peri_id, model).map_err(PylonError::Protocol)?,
+            ),
+            crate::agent_config::ModelSwitchTarget::ConfigOption => {
+                let config_id = advertised_config_option_id(response, "model").ok_or_else(|| {
+                    PylonError::Protocol(
+                        "model config option is not advertised by the ACP agent".to_string(),
+                    )
+                })?;
+                (
+                    acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                    acp::session_set_config_option_params(
+                        peri_id,
+                        &config_id,
+                        &serde_json::Value::String(model.to_string()),
+                    )
+                    .map_err(PylonError::Protocol)?,
+                )
+            },
+            crate::agent_config::ModelSwitchTarget::Disabled => {
+                return Err(PylonError::Protocol(
+                    "model switching disabled by agent configuration".to_string(),
+                ));
+            }
+        };
+        let setting_response = state
+            .acp_rpc_generation_checked(runtime, method, params, generation)
+            .await
+            .map_err(PylonError::from)?;
+        state
+            .ensure_generation(runtime, generation)
+            .map_err(PylonError::Protocol)?;
+        let model_option_key = if target == crate::agent_config::ModelSwitchTarget::ConfigOption {
+            advertised_config_option_id(response, "model").unwrap_or_else(|| "model".to_string())
+        } else {
+            "model".to_string()
+        };
+        merge_setting_response(
+            response,
+            setting_response,
+            "models",
+            "currentModelId",
+            &model_option_key,
+            model,
+        );
+    }
+
+    if let Some(mode) = initial_mode.map(str::trim).filter(|value| !value.is_empty()) {
+        let params = acp::session_set_mode_params(peri_id, mode).map_err(PylonError::Protocol)?;
+        let setting_response = state
+            .acp_rpc_generation_checked(
+                runtime,
+                acp::METHOD_SESSION_SET_MODE,
+                params,
+                generation,
+            )
+            .await
+            .map_err(PylonError::from)?;
+        state
+            .ensure_generation(runtime, generation)
+            .map_err(PylonError::Protocol)?;
+        merge_setting_response(
+            response,
+            setting_response,
+            "modes",
+            "currentModeId",
+            "mode",
+            mode,
+        );
+    }
+
+    if let Some(reasoning) = initial_reasoning.map(str::trim).filter(|value| !value.is_empty()) {
+        let options = response
+            .get("configOptions")
+            .or_else(|| response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if let Some(option_id) = find_reasoning_option_id(options, reasoning) {
+            let params = acp::session_set_config_option_params(
+                peri_id,
+                &option_id,
+                &serde_json::Value::String(reasoning.to_string()),
+            )
+            .map_err(PylonError::Protocol)?;
+            let setting_response = state
+                .acp_rpc_generation_checked(
+                    runtime,
+                    acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                    params,
+                    generation,
+                )
+                .await
+                .map_err(PylonError::from)?;
+            state
+                .ensure_generation(runtime, generation)
+                .map_err(PylonError::Protocol)?;
+            merge_config_setting_response(
+                response,
+                setting_response,
+                &option_id,
+                reasoning,
+            );
+        } else {
+            // Hermes currently exposes permission modes and model state, but
+            // no ACP reasoning/thinking option.  Do not send a made-up config
+            // id (which would look successful while changing nothing).
+            tracing::warn!(
+                source = source,
+                requested = reasoning,
+                "initial reasoning level is not advertised by the ACP agent; skipped"
+            );
+            state.log_runtime_summary(
+                "warn",
+                "session",
+                Some(source.to_string()),
+                "Initial reasoning level was not advertised by the ACP agent; skipped",
+                serde_json::Map::from_iter([
+                    ("requested".to_string(), serde_json::Value::String(reasoning.to_string())),
+                    ("code".to_string(), serde_json::Value::String("reasoning_not_advertised".to_string())),
+                ]),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// G2-04：无条件建会话——上限检查 + session/new RPC + ensure_generation +
 /// SessionInfo 构造 + apply_session_response + replace_session_slot（notify 唯一出口）+
 /// 可选 close 被替换旧会话（new_session 语义；E7 拍板：ensure 路径也传 true）。
@@ -51,6 +497,8 @@ async fn create_session_slot(
     session_cwd: &str,
     workspace_id: Option<String>,
     wire_mcp_servers: &[serde_json::Value],
+    initial_model: Option<&str>,
+    initial_reasoning: Option<&str>,
     initial_mode: Option<&str>,
     close_replaced: bool,
 ) -> Result<SessionMapping, PylonError> {
@@ -86,15 +534,22 @@ async fn create_session_slot(
     };
     state.ensure_generation(runtime, generation)?;
     let peri_id = crate::acp::session_id_from(&response)?;
-    if let Some(mode) = initial_mode {
-        let mode = mode.trim();
-        if mode.is_empty() {
-            return Err(PylonError::Protocol("initial mode must not be empty".to_string()));
-        }
-        let params = acp::session_set_mode_params(&peri_id, mode).map_err(PylonError::Protocol)?;
-        if let Err(error) = state.acp_rpc_generation_checked(runtime, acp::METHOD_SESSION_SET_MODE, params, generation).await {
+    if initial_model.is_some() || initial_reasoning.is_some() || initial_mode.is_some() {
+        if let Err(error) = apply_initial_session_options(
+            state,
+            runtime,
+            source,
+            &peri_id,
+            generation,
+            &mut response,
+            initial_model,
+            initial_reasoning,
+            initial_mode,
+        )
+        .await
+        {
             let _ = close_session_rpc(state, runtime, &peri_id, generation, false).await;
-            return Err(error.into());
+            return Err(error);
         }
     }
     let mut session = SessionInfo::new(
@@ -201,6 +656,8 @@ pub(crate) async fn ensure_session_mapping(
         None,
         wire_mcp_servers,
         None,
+        None,
+        None,
         true,
     )
     .await
@@ -234,7 +691,7 @@ pub(crate) fn restore_previous_slot(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -244,6 +701,8 @@ pub(crate) async fn new_session(
     cwd: Option<String>,
     workspace_id: Option<String>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    model: Option<String>,
+    reasoning_level: Option<String>,
     mode: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     DurableSessionOwner::new(&profile_id, &agent_id, &source).validate()?;
@@ -283,6 +742,8 @@ pub(crate) async fn new_session(
         &session_cwd,
         workspace_id,
         &mcp_servers,
+        model.as_deref(),
+        reasoning_level.as_deref(),
         mode.as_deref(),
         true,
     )
@@ -298,4 +759,106 @@ pub(crate) async fn new_session(
     Ok(mapping
         .new_response
         .expect("create_session_slot 必返回 session/new 原始响应"))
+}
+
+#[cfg(test)]
+mod initial_option_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn reasoning_option_requires_advertised_semantic_id_and_choice() {
+        let options = vec![
+            json!({
+                "id": "temperature",
+                "label": "Reasoning temperature",
+                "type": "select",
+                "options": [{"id": "0.2"}, {"id": "0.8"}]
+            }),
+            json!({
+                "id": "reasoning_effort",
+                "label": "Reasoning effort",
+                "type": "select",
+                "options": [{"id": "low"}, {"id": "high"}]
+            }),
+        ];
+        assert_eq!(
+            find_reasoning_option_id(&options, "high").as_deref(),
+            Some("reasoning_effort")
+        );
+        assert_eq!(
+            find_reasoning_option_id(&options, "medium"),
+            None,
+            "requested value outside provider choices must not be sent"
+        );
+    }
+
+    #[test]
+    fn reasoning_option_skips_unadvertised_or_read_only_values() {
+        assert_eq!(
+            find_reasoning_option_id(
+                &[json!({"id": "reasoning", "label": "Thinking", "editable": false})],
+                "high",
+            ),
+            None
+        );
+        assert_eq!(find_reasoning_option_id(&[], "high"), None);
+    }
+
+    #[test]
+    fn reasoning_option_accepts_snake_case_config_catalog() {
+        let response = json!({
+            "config_options": [{
+                "config_id": "thinking_level",
+                "label": "Thinking level",
+                "choices": [{"value": "low"}, {"value": "xhigh"}]
+            }]
+        });
+        let options = response
+            .get("configOptions")
+            .or_else(|| response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        assert_eq!(
+            find_reasoning_option_id(options, "xhigh").as_deref(),
+            Some("thinking_level")
+        );
+    }
+
+    #[test]
+    fn setting_response_merge_preserves_catalog_and_updates_current_values() {
+        let mut response = json!({
+            "sessionId": "session-1",
+            "models": {
+                "availableModels": [{"modelId": "openrouter:old", "name": "old"}],
+                "currentModelId": "openrouter:old"
+            },
+            "modes": {
+                "availableModes": [{"id": "default", "name": "Default"}],
+                "currentModeId": "default"
+            },
+            "configOptions": [{"id": "model", "currentValue": "old"}]
+        });
+        merge_setting_response(
+            &mut response,
+            json!({"models": {"currentModelId": "openrouter:new"}}),
+            "models",
+            "currentModelId",
+            "model",
+            "openrouter:new",
+        );
+        merge_setting_response(
+            &mut response,
+            json!({}),
+            "modes",
+            "currentModeId",
+            "mode",
+            "accept_edits",
+        );
+        assert_eq!(response["models"]["currentModelId"], "openrouter:new");
+        assert_eq!(response["modes"]["currentModeId"], "accept_edits");
+        assert_eq!(response["models"]["availableModels"][0]["modelId"], "openrouter:old");
+        assert_eq!(response["configOptions"][0]["currentValue"], "openrouter:new");
+    }
 }

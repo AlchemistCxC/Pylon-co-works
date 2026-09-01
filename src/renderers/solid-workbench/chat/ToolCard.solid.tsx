@@ -1,6 +1,4 @@
-import Anser from 'anser'
 import { Show, createMemo, onCleanup, onMount } from 'solid-js'
-import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
 import {
@@ -17,6 +15,7 @@ import { measureToolAnchor } from './domToolConnectorMeasurement.ts'
 import { SolidDiffCard } from './DiffCard.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
+import { SolidAnsiBlock } from './AnsiBlock.solid.tsx'
 
 export type ToolCardAppearance = Pick<WorkbenchAppearanceSnapshot,
   'toolIndicator' | 'toolIndicatorGlow' | 'toolIndicatorGlowColor'>
@@ -68,10 +67,6 @@ export function SolidToolCard(props: SolidToolCardProps) {
         const glowStyle = () => props.appearance.toolIndicatorGlow > 0
           ? { textShadow: `0 0 ${props.appearance.toolIndicatorGlow}px ${props.appearance.toolIndicatorGlowColor || 'currentColor'}` }
           : undefined
-        const outputHtml = () => resolved().kind === 'execute' && resolved().outputText
-          ? sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(resolved().outputText)))
-          : ''
-
         return (
           <div
             class="term-tool"
@@ -111,10 +106,10 @@ export function SolidToolCard(props: SolidToolCardProps) {
                   <SolidDiffCard output={resolved().outputText} payload={resolved().diffPayload} />
                 </Show>
                 <Show
-                  when={resolved().kind === 'execute' && outputHtml()}
+                  when={resolved().kind === 'execute' && resolved().outputText.length > 0}
                   fallback={<pre><code>{resolved().outputText}</code></pre>}
                 >
-                  {html => <div class="term-ansi" innerHTML={html()} />}
+                  <SolidAnsiBlock text={resolved().outputText} />
                 </Show>
                 </div>
               </SolidCollapsibleRegion>

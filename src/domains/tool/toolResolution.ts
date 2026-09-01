@@ -59,10 +59,14 @@ export function splitToolTitle(rawName: string): { name: string; summary: string
   const trimmed = (rawName ?? '').trim()
   if (!trimmed) return { name: '', summary: '' }
 
+  const colon = trimmed.search(/[:\uFF1A]/)
   const open = trimmed.indexOf('(')
   const openCjk = trimmed.indexOf('（')
   const bracketIdx = openCjk >= 0 && (open < 0 || openCjk < open) ? openCjk : open
-  if (bracketIdx > 0) {
+  // Parentheses in a command argument (e.g. `terminal: echo (hi)` or
+  // `execute_code: print(1)`) are not title delimiters.  A colon that occurs
+  // first owns the split; only a leading `Tool(...)` shape uses brackets.
+  if (bracketIdx > 0 && (colon <= 0 || bracketIdx < colon)) {
     const name = trimmed.slice(0, bracketIdx).trim()
     const openBracket = trimmed[bracketIdx]
     const closeBracket = openBracket === '(' ? ')' : '）'
@@ -78,7 +82,6 @@ export function splitToolTitle(rawName: string): { name: string; summary: string
     return { name, summary: trimmed.slice(bracketIdx + 1).trim() }
   }
 
-  const colon = trimmed.search(/[:\uFF1A]/)
   if (colon > 0) {
     return { name: trimmed.slice(0, colon).trim(), summary: trimmed.slice(colon + 1).trim() }
   }

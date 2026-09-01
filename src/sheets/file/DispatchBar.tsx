@@ -6,6 +6,20 @@ import { reportRuntimeError } from '../../runtimeError'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { lineFromDataNode, normalizeSelectionRange } from './selectionCapture.ts'
+import type { Session } from '../../identityStore'
+
+export function resolveDispatchOwnerSession(
+  sessions: readonly Session[],
+  targetSource: string | null,
+  context?: { agentId: string; source: string } | null,
+  targetSessionId?: string | null,
+): Session | undefined {
+  if (!targetSource) return undefined
+  const candidates = sessions.filter(session =>
+    session.source === targetSource && (!context?.agentId || session.agentId === context.agentId))
+  if (targetSessionId) return candidates.find(session => session.id === targetSessionId)
+  return candidates.length === 1 ? candidates[0] : undefined
+}
 
 /**
  * DispatchBar — 发令指令栏（W2-08，§4.1）。
@@ -21,6 +35,7 @@ import { lineFromDataNode, normalizeSelectionRange } from './selectionCapture.ts
  */
 export default function DispatchBar({
   targetSource,
+  targetSessionId,
   context,
   filePath,
   selection,
@@ -31,6 +46,7 @@ export default function DispatchBar({
   onClearSelection,
 }: {
   targetSource: string | null
+  targetSessionId?: string | null
   context?: { agentId: string; source: string } | null
   filePath: string | null
   selection: DispatchSelection | null
@@ -62,11 +78,12 @@ export default function DispatchBar({
     setError('')
     if (!targetSource || !filePath || !instruction.trim()) return
     // OWNER-02：owner agentId 从 sheet context 或 Session owner 解析（绝不取 activeAgent）。
-    const ownerSession = (() => {
-      const matches = useIdentityStore.getState().sessions.filter(s =>
-        s.source === targetSource && (!context?.agentId || s.agentId === context.agentId))
-      return matches.length === 1 ? matches[0] : undefined
-    })()
+    const ownerSession = resolveDispatchOwnerSession(
+      useIdentityStore.getState().sessions,
+      targetSource,
+      context,
+      targetSessionId,
+    )
     if (!ownerSession) {
       setError('无法确定目标会话的完整归属')
       return

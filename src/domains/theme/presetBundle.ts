@@ -246,6 +246,8 @@ export function createPresetBundle(input: {
   id: string
   name: string
   now: number
+  /** Preserve the original creation time when an existing preset is updated. */
+  createdAt?: number
   theme: PresetJsonValue
   renderer?: RendererPresetPayload
   presentation?: PresentationPresetPayload
@@ -259,10 +261,19 @@ export function createPresetBundle(input: {
   if (input.renderer) contributions['builtin.renderer-settings'] = {
     ownerPluginId: 'builtin.pylon-renderers', providerVersion: 1, policy: 'partial', payload: input.renderer as unknown as PresetJsonValue,
   }
-  return Object.freeze({ manifestVersion: 2, id: input.id, name: input.name, source: 'user', createdAt: input.now, updatedAt: input.now, contributions: Object.freeze(contributions) })
+  return Object.freeze({
+    manifestVersion: 2,
+    id: input.id,
+    name: input.name,
+    source: 'user' as const,
+    createdAt: input.createdAt ?? input.now,
+    updatedAt: input.now,
+    contributions: Object.freeze(contributions),
+  })
 }
 
-function recordPayload(value: PresetJsonValue | undefined): Readonly<Record<string, PresetJsonValue>> {
+/** Read a contribution payload as a record (empty when absent/malformed). */
+export function recordPayload(value: PresetJsonValue | undefined): Readonly<Record<string, PresetJsonValue>> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Readonly<Record<string, PresetJsonValue>> : {}
 }
 

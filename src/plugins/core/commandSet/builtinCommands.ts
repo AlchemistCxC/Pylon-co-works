@@ -1,8 +1,8 @@
 /**
  * core.commandSet.builtin —— 内置 CLI 命令集插件。
  *
- * 与旧 FALLBACK_COMMANDS 保持同一命令清单；M2 起 commandRegistry 的 fallback
- * 也由此解析（双面同源）。agent 面片段经 buildAgentCommandPrompt 注入。
+ * commandRegistry 的 fallback 由此解析，保持命令清单单一来源；agent 面片段
+ * 经 buildAgentCommandPrompt 注入。
  */
 import {
   type CommandSetDescriptor,

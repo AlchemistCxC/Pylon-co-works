@@ -28,6 +28,7 @@ import WindowPanel from './settings/WindowPanel'
 import ConfigBackupPanel from './settings/ConfigBackupPanel'
 import HistoryRetention from './settings/HistoryRetention'
 import GatewayRiskPanel from './settings/GatewayRiskPanel'
+import InputPredictionSettingsPanel from './settings/InputPredictionSettingsPanel'
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
@@ -40,9 +41,9 @@ import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
@@ -89,7 +90,7 @@ function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
     <Group title="局部预设">
       <div className="set-preset-row">
         {GLOBAL_PRESETS.map(p => (
-          <button key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
+          <button type="button" key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
             onClick={() => onApply(zone, p.name)}>{p.label}</button>
         ))}
         {isDirty && <span className="set-preset-chip active">自定义</span>}
@@ -107,6 +108,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   initialSection?: string
   initialAgentId?: string
 }) {
+  const initialIntent = normalizeSettingsIntent({ domain: initialDomain, section: initialSection, agentId: initialAgentId })
   const settingsRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const restoreFocusRef = useRef<HTMLElement | null>(null)
@@ -178,16 +180,22 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   const [activeDomain, setActiveDomain] = useState<SettingsDomainId>(
-    (initialDomain as SettingsDomainId) || 'appearance',
+    initialIntent.domain,
   )
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(
-    initialSection && initialSection in SETTINGS_SECTION_LABELS ? initialSection as SettingsSectionId : 'global',
+    initialIntent.section,
   )
   const settingsPageRegistry = getPluginSettingsPageRegistry()
   const pluginSettingsPages = useSyncExternalStore(
     listener => settingsPageRegistry.subscribe(listener),
     () => settingsPageRegistry.getSnapshot(),
     () => settingsPageRegistry.getSnapshot(),
+  ).entries
+  const contextPanelRegistry = getContextPanelRegistry()
+  const contextPanelEntries = useSyncExternalStore(
+    listener => contextPanelRegistry.subscribe(listener),
+    () => contextPanelRegistry.getSnapshot(),
+    () => contextPanelRegistry.getSnapshot(),
   ).entries
   const rendererRegistry = getRendererRegistry()
   const rendererRegistrySnapshot = useSyncExternalStore(
@@ -196,7 +204,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => rendererRegistry.snapshot(),
   )
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
-    initialSection && !(initialSection in SETTINGS_SECTION_LABELS) ? initialSection : null,
+    initialIntent.pluginPageId ?? null,
   )
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
@@ -205,6 +213,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const [rendererObjectKey, setRendererObjectKey] = useState<string | undefined>()
   const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
+  const [customPresetFeedback, setCustomPresetFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnectPending, setReconnectPending] = useState(false)
   const [reconnectCommandError, setReconnectCommandError] = useState<string | null>(null)
@@ -217,14 +226,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     const onOpenSettings = (event: Event) => {
       const detail = (event as CustomEvent<{ domain?: string; section?: string; agentId?: string }>).detail
       if (!detail) return
-      if (detail.domain) setActiveDomain(detail.domain as SettingsDomainId)
-      if (detail.section && detail.section in SETTINGS_SECTION_LABELS) {
-        setActivePluginPageId(null)
-        setActiveSection(detail.section as SettingsSectionId)
-      } else if (detail.section) {
-        setActiveDomain('plugins')
-        setActivePluginPageId(detail.section)
-      }
+      const intent = normalizeSettingsIntent(detail)
+      setActiveDomain(intent.domain)
+      setActiveSection(intent.section)
+      setActivePluginPageId(intent.pluginPageId ?? null)
     }
     window.addEventListener('pylon:open-settings', onOpenSettings)
     return () => window.removeEventListener('pylon:open-settings', onOpenSettings)
@@ -257,6 +262,28 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     if (!preset) return
     const sub = pickZoneFields(preset.theme, zone)
     applyZonePreset(zone, presetName, sub)
+  }
+
+  /**
+   * Custom preset persistence is a user action, so failures must stay visible
+   * in this dialog. Previously an exception from provider capture (or a stale
+   * overwrite id) escaped the click handler and looked like a dead button.
+   */
+  const saveCustomPresetFromSettings = (name: string, id?: string): string | undefined => {
+    const isOverwrite = Boolean(id)
+    try {
+      const savedId = saveCustomPreset(name, id)
+      setCustomPresetFeedback({
+        kind: 'success',
+        message: isOverwrite ? '自定义预设已覆盖' : '自定义预设已保存',
+      })
+      return savedId
+    } catch (error) {
+      const action = isOverwrite ? '覆盖自定义预设' : '保存自定义预设'
+      const detail = reportRuntimeError(action, error)
+      setCustomPresetFeedback({ kind: 'error', message: `${action}失败：${detail.message}` })
+      return undefined
+    }
   }
 
   const previewZone = sectionZone(activeSection)
@@ -330,7 +357,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
 
   // F2：禁储环境安全存储（内存兜底，会话内可用）
   const storage = safeStorage()
-const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
+  const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
 
   // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
   const [density, setDensity] = useState<SettingsDensity>(() =>
@@ -383,14 +410,27 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
   // B2 边界修复：面板打开或 Renderer catalog 热更新时重建索引。
   // 不能只依赖 quickSearchOpen，否则插件热装卸后的字段要重新打开命令面板才可搜。
   const quickSearchItems = useMemo(() => {
+    // 显式引用依赖项：它们是缓存失效信号（B2），非数据来源——抑制 exhaustive-deps
     void quickSearchOpen
-      void rendererRegistrySnapshot.revision
+    void rendererRegistrySnapshot.revision
     try {
       const snapshot = getRendererRegistry().snapshot()
-      return [...buildSettingsSearchIndex(), ...projectRendererSettingsCatalog(snapshot).searchItems]
-    } catch { return buildSettingsSearchIndex() }
-  }, [quickSearchOpen, rendererRegistrySnapshot.revision])
+      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries), ...projectRendererSettingsCatalog(snapshot).searchItems]
+    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries) }
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages, contextPanelEntries])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+    if (item.contextPanelId) {
+      setActiveDomain('appearance')
+      setActiveSection('right')
+      setActivePluginPageId(null)
+      return
+    }
+    if (item.pluginPageId) {
+      setActiveDomain('plugins')
+      setActiveSection('pluginManager')
+      setActivePluginPageId(item.pluginPageId)
+      return
+    }
     if (item.rendererRoute) {
       setRendererCategoryId(item.rendererRoute.categoryId)
       setRendererObjectKey(item.rendererRoute.objectKey)
@@ -442,7 +482,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         return (
           <Group title="宠物">
             <div className="set-preset-row">
-              <button className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
+              <button type="button" className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
                 {showPet ? '宠物显示中 — 点击隐藏' : '宠物已隐藏 — 点击显示'}
               </button>
             </div>
@@ -461,11 +501,11 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
             {!isSearching && <Group title="全局预设">
               <div className="set-preset-row">
                 {GLOBAL_PRESETS.map(p => (
-                  <button key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
+                  <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}
                 {globalStatus && !GLOBAL_PRESETS.some(p => p.name === globalStatus) && (
-                  <button className="set-preset-chip active">{globalStatus}</button>
+                  <button type="button" className="set-preset-chip active">{globalStatus}</button>
                 )}
               </div>
               <div className="set-hint">
@@ -476,18 +516,26 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
               <div className="set-custom-preset-save">
                 <input className="set-input" value={customPresetName} onChange={event => setCustomPresetName(event.target.value)} placeholder="自定义预设名称" />
                 {/* A3：保存必须命名——空名禁用按钮（数据层 saveCustomPresetReducer 抛错兜底），不再静默 return */}
-                <button className="ps-btn sm" disabled={!customPresetName.trim()} title={customPresetName.trim() ? undefined : '保存必须命名'}
+                <button type="button" className="ps-btn sm" disabled={!customPresetName.trim()} title={customPresetName.trim() ? undefined : '保存必须命名'}
                   onClick={() => {
-                    const id = saveCustomPreset(customPresetName)
-                    applyCustomPreset(id)
-                    setCustomPresetName('')
+                    const id = saveCustomPresetFromSettings(customPresetName)
+                    if (id) {
+                      applyCustomPreset(id)
+                      setCustomPresetName('')
+                    }
                   }}>保存当前</button>
               </div>
+              {customPresetFeedback && (
+                <div className={`set-hint custom-preset-feedback ${customPresetFeedback.kind === 'error' ? 'is-error' : 'is-success'}`}
+                  role={customPresetFeedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">
+                  {customPresetFeedback.message}
+                </div>
+              )}
               {customPresets.length > 0 && <div className="set-custom-presets">
                 {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
-                  <button className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
-                  <button className="ps-btn sm" onClick={() => saveCustomPreset(preset.name, preset.id)}>覆盖</button>
-                  <button className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
+                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                  <button type="button" className="ps-btn sm" onClick={() => { void saveCustomPresetFromSettings(preset.name, preset.id) }}>覆盖</button>
+                  <button type="button" className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
                 </div>)}
               </div>}
             </Group>}
@@ -530,7 +578,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
               </Group>
             )}
             {!isSearching && <Group title="布局编辑">
-              <button className="ps-btn primary"
+              <button type="button" className="ps-btn primary"
                 onClick={() => {
                   const cur = useStore.getState().ccEditMode
                   setCcEditMode(!cur)
@@ -567,8 +615,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
                 </div>
               </div>
               <div className="agent-settings-actions">
-                <button className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
-                <button className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
+                <button type="button" className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
+                <button type="button" className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
               </div>
               <dl className="agent-settings-facts">
                 <div><dt>传输方式</dt><dd>{currentStatus.transport || '未报告'}</dd></div>
@@ -615,6 +663,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
       case 'gateway':
         // I13-W5：Gateway 风险 consumer——真实实例/凭据状态 + 备份边界提示（不伪装备份加密）
         return <GatewayRiskPanel />
+      case 'prediction':
+        return <InputPredictionSettingsPanel />
       case 'pluginManager':
         // M12：插件管理页（列表只读 core；signed/dev 停用；本地包安装；日志）
         return <PluginManager />
@@ -730,7 +780,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
             ))}
           </div>
           <div className="settings-nav-footer">
-            <button className="set-nav-btn reset" onClick={reset}>重置主题</button>
+            <button type="button" className="set-nav-btn reset" onClick={reset}>重置主题</button>
           </div>
         </div>
 

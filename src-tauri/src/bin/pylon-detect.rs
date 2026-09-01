@@ -1,7 +1,7 @@
 #[cfg_attr(not(test), allow(unused_imports))] // 后三项仅测试目标消费（bin 内测试模块 + 回归测试）
 use pylon_core::agent_detection::{
     detect_agent_runtime_candidates, AgentDetectionOptions, AgentDetectionReport,
-    AgentRuntimeCandidate, IdentityConfidence, ProtocolAvailability,
+    AgentRuntimeCandidate, IdentityConfidence, ProtocolAvailability, Startability,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -86,10 +86,11 @@ fn human_output(report: &AgentDetectionReport) -> String {
     };
     for candidate in &report.candidates {
         output.push_str(&format!(
-            "\n{} ({}) [identity={:?}, acp={:?}]\n  executable: {}\n  args: {}\n",
+            "\n{} ({}) [identity={:?}, startability={:?}, acp={:?}]\n  executable: {}\n  args: {}\n",
             candidate.name,
             candidate.provider,
             candidate.identity_confidence,
+            candidate.startability,
             candidate.protocol_availability,
             candidate.executable,
             if candidate.args.is_empty() {
@@ -259,6 +260,7 @@ mod tests {
                 detail: "config.yaml [provider, model]".into(),
             }],
             identity_confidence: IdentityConfidence::High,
+            startability: Startability::NotTested,
             protocol_availability: ProtocolAvailability::NotTested,
             already_imported_agent_id: None,
             warnings: Vec::new(),

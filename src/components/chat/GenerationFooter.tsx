@@ -12,6 +12,7 @@ import { activeTask } from '../../domains/tasks/taskSelectors.ts'
 import { useChatRuntimeSnapshot } from './useChatRuntimeSnapshot'
 import { nextTokenCatchUp } from './tokenCatchUp.ts'
 import type { SpinnerMotionKind } from './spinnerMotion'
+import { useShallow } from 'zustand/react/shallow'
 
 const IDIOMS = getSpinnerVerbPreset('zh').verbs
 const GLIMMER_CYCLE_MS = 3200
@@ -123,18 +124,33 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   source: string | null
   onStop?: () => void
 }) {
-  const spinnerColor = useStore(s => s.spinnerColor)
-  const spinnerSize = useStore(s => s.spinnerSize)
-  const spinnerVerbSet = useStore(s => s.spinnerVerbSet)
-  const spinnerCustomVerbs = useStore(s => s.spinnerCustomVerbs)
-  const spinnerDoneMarker = useStore(s => s.spinnerDoneMarker)
-  const spinnerCancelledMarker = useStore(s => s.spinnerCancelledMarker)
-  const spinnerErrorMarker = useStore(s => s.spinnerErrorMarker)
-  const spinnerDoneMarkerMode = useStore(s => s.spinnerDoneMarkerMode)
-  const spinnerCancelledMarkerMode = useStore(s => s.spinnerCancelledMarkerMode)
-  const spinnerErrorMarkerMode = useStore(s => s.spinnerErrorMarkerMode)
-  const spinnerIntervalMs = useStore(s => s.spinnerIntervalMs)
-  const spinnerFramePreset = useStore(s => s.spinnerFramePreset)
+  const {
+    spinnerColor,
+    spinnerSize,
+    spinnerVerbSet,
+    spinnerCustomVerbs,
+    spinnerDoneMarker,
+    spinnerCancelledMarker,
+    spinnerErrorMarker,
+    spinnerDoneMarkerMode,
+    spinnerCancelledMarkerMode,
+    spinnerErrorMarkerMode,
+    spinnerIntervalMs,
+    spinnerFramePreset,
+  } = useStore(useShallow(s => ({
+    spinnerColor: s.spinnerColor,
+    spinnerSize: s.spinnerSize,
+    spinnerVerbSet: s.spinnerVerbSet,
+    spinnerCustomVerbs: s.spinnerCustomVerbs,
+    spinnerDoneMarker: s.spinnerDoneMarker,
+    spinnerCancelledMarker: s.spinnerCancelledMarker,
+    spinnerErrorMarker: s.spinnerErrorMarker,
+    spinnerDoneMarkerMode: s.spinnerDoneMarkerMode,
+    spinnerCancelledMarkerMode: s.spinnerCancelledMarkerMode,
+    spinnerErrorMarkerMode: s.spinnerErrorMarkerMode,
+    spinnerIntervalMs: s.spinnerIntervalMs,
+    spinnerFramePreset: s.spinnerFramePreset,
+  })))
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
   const verbPreset = getSpinnerVerbPreset(spinnerVerbSet)
   const verbs = spinnerVerbSet === 'custom'

@@ -45,7 +45,7 @@ assert.match(registry, /kind: 'browser'.*sidebarMode: 'sheet'.*component: lazyWo
 
 // ── I09-A-FE-02：Browser 折叠后内部左栏完整消失，无独立折叠按钮样式 ──
 const browserCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', import.meta.url), 'utf8')
-assert.match(browserCss, /\.browser-sidebar-collapsed \.browser-sidebar \{[^}]*flex-basis: var\(--workspace-sidebar-collapsed-width, 42px\);[^}]*width: var\(--workspace-sidebar-collapsed-width, 42px\);[^}]*max-width: var\(--workspace-sidebar-collapsed-width, 42px\);/, 'Browser 折叠后必须与其他 Sheet 共用 42px 图标轨道')
+assert.match(browserCss, /\.browser-sidebar-collapsed \.browser-sidebar \{[^}]*display:\s*none;/, 'Browser 折叠后内部工具栏应完整隐藏')
 assert.doesNotMatch(browserCss, /\.browser-sidebar-collapsed \.browser-sidebar \{[^}]*48px/, 'Browser 折叠规则不得再硬编码 48px')
 assert.doesNotMatch(browserCss, /@media[\s\S]*?\.browser-sidebar \{[^}]*48px/, '窄视口折叠宽度不得硬编码 48px')
 assert.doesNotMatch(browserCss, /\.browser-sidebar-toggle/, 'Browser 不得再有独立折叠按钮样式')

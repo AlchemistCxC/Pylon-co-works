@@ -28,6 +28,10 @@ pylon-*win64.zip
 # 施工文档 Phase 1：release 产物目录与受控 WebView2 bootstrapper 不入库
 /release/
 resources/release/tools/MicrosoftEdgeWebview2Setup.exe
+# Hermes Windows runtime is fetched and verified at release-build time; the
+# binary tree is distributed in the portable archive, not committed to source.
+/src-tauri/resources/runtime/git/
+/.cache/pylon/
 
 # tauri 生成 schema（构建时自动再生成，不入库）
 /src-tauri/gen/

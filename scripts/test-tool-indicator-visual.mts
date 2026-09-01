@@ -8,7 +8,6 @@ import { resolveToolPresentationState } from '../src/domains/tool/status.ts'
 import { resolveToolIndicatorMotion, toolIndicatorMotionClass } from '../src/components/chat/toolIndicatorMotion.ts'
 
 const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 
 assert.equal(resolveToolIndicatorMotion('queued'), 'static')
 assert.equal(resolveToolIndicatorMotion('running'), 'breathe')
@@ -26,8 +25,6 @@ assert.equal(resolveToolPresentationState('failed').tone, 'err')
 assert.equal(resolveToolPresentationState(undefined, true).tone, 'ok', 'unknown+有输出 → ok')
 assert.equal(resolveToolPresentationState(undefined, false).tone, 'run', 'unknown+无输出 → run')
 
-assert.match(chatView, /toolIndicatorMotionClass\(model\.state\)/, 'ToolCard 必须按归一化状态接入动画 class')
-assert.match(chatView, /term-tool-indicator \$\{status\} \$\{toolIndicatorMotionClass/, 'indicator 必须同时保留现有颜色 status class')
 assert.match(css, /\.term-tool-indicator\.ok \{ color:var\(--tool-ok/, '完成色仍使用现有 toolOk 变量')
 assert.match(css, /\.term-tool-indicator\.err \{ color:var\(--tool-err/, '错误色仍使用现有 toolErr 变量')
 assert.match(css, /\.term-tool-indicator\.run \{ color:var\(--tool-run/, '运行色仍使用现有 toolRun 变量')

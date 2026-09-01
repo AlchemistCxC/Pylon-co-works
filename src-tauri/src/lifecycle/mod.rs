@@ -1342,7 +1342,7 @@ for line in sys.stdin:
     #[test]
     fn connection_test_error_payload_maps_executable_missing() {
         let failure = |stage, code: &str, message: &str, retryable| {
-            AcpError::Connect(AgentConnectFailure {
+            AcpError::Connect(Box::new(AgentConnectFailure {
                 stage,
                 code: code.into(),
                 message: message.into(),
@@ -1352,7 +1352,7 @@ for line in sys.stdin:
                 io_kind: None,
                 remote_code: None,
                 remote_data_summary: None,
-            })
+            }))
         };
         let payload = connection_test_error_payload(&failure(
             AgentConnectStage::Preflight,

@@ -53,12 +53,26 @@ import { usePresentationPreferenceStore } from './domains/presentation/presentat
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
+import { useRightRailStore } from './rightRailStore.ts'
 
 // 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
 const Settings = lazy(() => import('./components/Settings'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 const SessionSettings = lazy(() => import('./components/SessionSettings'))
 const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher'))
+
+// Runtime registries are process singletons.  Stable adapters keep
+// useSyncExternalStore subscriptions intact across unrelated App renders
+// (streaming, window resize, and dialog state changes).
+const contextPanelRegistry = getContextPanelRegistry()
+const subscribeContextPanels = (listener: () => void) => contextPanelRegistry.subscribe(listener)
+const getContextPanelSnapshot = () => contextPanelRegistry.getSnapshot()
+const fontContributionRegistry = getFontContributionRegistry()
+const subscribeFontContributions = (listener: () => void) => fontContributionRegistry.subscribe(listener)
+const getFontContributionSnapshot = () => fontContributionRegistry.getSnapshot()
+const interfaceModeRegistry = getInterfaceModeRegistry()
+const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
+const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
 
 function LazyDialogFallback() {
   return (
@@ -80,24 +94,21 @@ export default function App() {
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const presentationProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   useSyncExternalStore(subscribeWorkspaceRegistry, getWorkspaceRegistrySnapshot, getWorkspaceRegistrySnapshot)
-  const contextPanelRegistry = getContextPanelRegistry()
   const contextPanelSnapshot = useSyncExternalStore(
-    listener => contextPanelRegistry.subscribe(listener),
-    () => contextPanelRegistry.getSnapshot(),
-    () => contextPanelRegistry.getSnapshot(),
+    subscribeContextPanels,
+    getContextPanelSnapshot,
+    getContextPanelSnapshot,
   )
-  const fontRegistry = getFontContributionRegistry()
   const fontSnapshot = useSyncExternalStore(
-    listener => fontRegistry.subscribe(listener),
-    () => fontRegistry.getSnapshot(),
-    () => fontRegistry.getSnapshot(),
+    subscribeFontContributions,
+    getFontContributionSnapshot,
+    getFontContributionSnapshot,
   )
   useEffect(() => projectFontContributions(document.documentElement, fontSnapshot.entries), [fontSnapshot])
-  const interfaceModeRegistry = getInterfaceModeRegistry()
   const interfaceModeSnapshot = useSyncExternalStore(
-    listener => interfaceModeRegistry.subscribe(listener),
-    () => interfaceModeRegistry.getSnapshot(),
-    () => interfaceModeRegistry.getSnapshot(),
+    subscribeInterfaceModes,
+    getInterfaceModeSnapshot,
+    getInterfaceModeSnapshot,
   )
   const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!
@@ -119,11 +130,11 @@ export default function App() {
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
   // W1-03（F2-B）：折叠/宽度状态迁入 workspaceStore（预设不覆盖布局），App 只读
-  const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
+  const sidebarWidth = useRightRailStore(s => s.leftRailWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
   const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
-  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
+  const sidebarCollapsed = useRightRailStore(s => s.leftRailCollapsed)
   const activeSidebarMode = activeSheet ? resolveSheetRender(activeSheet.kind)?.sidebarMode : undefined
   // workspace / sheet 两类左栏都消费 workspaceStore.sidebarCollapsed，因此所有带左栏的
   // Sheet 共用 TitleBar 最左端入口；none 才禁用。
@@ -349,12 +360,14 @@ export default function App() {
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}
         activeAgent={activeAgent}
+        activeSheetKind={activeSheet?.kind}
+        activeSessionId={activeSession}
         sidebarCollapsed={sidebarCollapsed}
         sidebarEnabled={sidebarEnabled}
         sidebarExpandedTrack={sidebarExpandedTrack}
         rightPanelEnabled={rightPanelEnabled}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
-        onToggleSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(!sidebarCollapsed)}
+        onToggleSidebar={() => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
         onCloseSheet={id => { void closeWorkspace(id) }}
         menuActions={{
@@ -366,7 +379,7 @@ export default function App() {
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
-        onToggleRightPanel={() => { if (rightPanelEnabled) useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed) }}
+        onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
         onToggleSettings={() => setShowSettings(value => !value)}
         settingsOpen={settingsOpen}
         interfaceMode={interfaceMode}

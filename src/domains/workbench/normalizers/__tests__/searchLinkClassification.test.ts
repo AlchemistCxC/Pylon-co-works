@@ -12,6 +12,17 @@ import { normalizeContentBlock } from '../normalizerSupport.ts'
  */
 
 describe('C05 normalizer search-result classification', () => {
+  it('accepts Hermes ACP content wrappers and path-based search matches', () => {
+    const wrapped = normalizeContentBlock({
+      type: 'content',
+      content: { type: 'search', query: 'TODO', matches: [{ path: 'src/a.ts', line: 7, content: 'TODO: fix' }] },
+    })
+    expect(wrapped.part).toMatchObject({
+      kind: 'search-result', query: 'TODO',
+      results: [{ source: 'src/a.ts', snippet: 'TODO: fix', location: { path: 'src/a.ts', line: 7 } }],
+    })
+  })
+
   it('normalizes search_result block preserving entries with rank/snippet/highlight ranges', () => {
     const { part } = normalizeContentBlock({
       type: 'search_result',

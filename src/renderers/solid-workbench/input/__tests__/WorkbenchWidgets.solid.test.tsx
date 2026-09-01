@@ -55,6 +55,41 @@ describe('Solid Workbench widgets', () => {
     expect(services.commands.calls[0]?.args).toEqual(['preview-session', 'deepseek-v4-pro'])
   })
 
+  it('空态即使 preset 是 minimal/badge 也强制提供模型与思考等级下拉', async () => {
+    const services = renderWidget(
+      () => <SolidModelWidget
+        forceDropdown
+        draftValue={() => 'deepseek-v4-flash'}
+        onDraftChange={() => {}}
+        reasoningValue={() => 'medium'}
+        onReasoningChange={() => {}}
+      />,
+      { modelVariant: 'badge' },
+    )
+    const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
+    fireEvent.click(trigger)
+    expect(screen.getByRole('group', { name: '思考强度' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'xhigh' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
+    services.destroy()
+  })
+
+  it('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {
+    const selected: string[] = []
+    renderWidget(() => <SolidModelWidget
+      forceDropdown
+      draftValue={() => 'deepseek-v4-flash'}
+      onDraftChange={() => {}}
+      reasoningValue={() => 'medium'}
+      onReasoningChange={value => selected.push(value)}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
+    fireEvent.click(screen.getByRole('option', { name: 'xhigh' }))
+    expect(selected).toEqual(['xhigh'])
+    expect(screen.getByRole('button', { name: /deepseek-v4-flash（medium）/ })).toBeTruthy()
+  })
+
   it('Model minimal 循环；badge 只读不产生按钮', async () => {
     const minimal = renderWidget(() => <SolidModelWidget />, { modelVariant: 'minimal' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
@@ -75,6 +110,21 @@ describe('Solid Workbench widgets', () => {
     fireEvent.click(button)
 
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual(['preview-session', 'bypass']))
+  })
+
+  it('空态 mode 下拉显示全自动但提交 raw auto', async () => {
+    const services = renderWidget(() => <SolidModeWidget
+      forceDropdown
+      draftValue={() => 'auto'}
+      onDraftChange={value => services.runtime.update({ activeMode: value })}
+    />)
+    const trigger = screen.getByRole('button', { name: /全自动/ })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('listbox', { name: '模式列表' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: '全自动' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: '接受编辑' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('option', { name: '绕过确认' }))
+    await waitFor(() => expect(services.runtime.getSnapshot().activeMode).toBe('bypass'))
   })
 
   it('Model/Mode facade 失败显示可见错误', async () => {

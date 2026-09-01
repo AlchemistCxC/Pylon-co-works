@@ -4,7 +4,7 @@
  * store.ts 只留 `migrate: persisted => themeDomainMigrate(persisted, DEFAULTS)` 薄壳。
  * 依赖全显式 .ts，node 可直接 import 做确定性迁移测试。
  */
-import { normalizeCustomPresets } from '../../customPresets.ts'
+import { normalizeCustomPresetId, normalizeCustomPresets } from '../../customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from '../../ccLayoutState.ts'
 import {
   clampCcHeight,
@@ -94,7 +94,32 @@ export function normalizeThemeMigrationState(
   normalized.appliedPreset = appliedRecord
   normalized.custom = customRecord
 
-  normalized.customPresets = normalizeCustomPresets(state.customPresets)
+  const normalizedCustomPresets = normalizeCustomPresets(state.customPresets)
+  // A1 renamed bare custom ids into the `custom-*` namespace.  Migrate any
+  // persisted zone references in the same pass; otherwise the list row would
+  // expose `custom-foo` while appliedPreset still points at `foo`, making the
+  // preset appear inactive after a restart.
+  if (Array.isArray(state.customPresets)) {
+    const aliases = new Map<string, string>()
+    for (const item of state.customPresets) {
+      if (!item || typeof item !== 'object') continue
+      const rawId = (item as { id?: unknown }).id
+      if (typeof rawId === 'string' && rawId.trim()) {
+        const trimmedId = rawId.trim()
+        const canonicalId = normalizeCustomPresetId(trimmedId)
+        // Persisted records occasionally contain whitespace around the id;
+        // zone references may contain either the raw or trimmed spelling.
+        aliases.set(rawId, canonicalId)
+        aliases.set(trimmedId, canonicalId)
+      }
+    }
+    for (const zone of PRESET_ZONES) {
+      const current = appliedRecord[zone]
+      const canonical = aliases.get(current) ?? aliases.get(current.trim())
+      if (canonical) appliedRecord[zone] = canonical
+    }
+  }
+  normalized.customPresets = normalizedCustomPresets
   return normalized
 }
 

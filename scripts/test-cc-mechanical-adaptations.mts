@@ -52,14 +52,7 @@ assert.match(pet, /setPet\(previous => \{[\s\S]*?JSON\.stringify\(persistable\(p
 assert.match(pet, /setPet\(previous => \{[\s\S]*?localStorage\.setItem\(STORAGE_KEY, serialized\)/, 'Pet 仅在有变化时写盘')
 assert.match(pet, /document\.visibilityState !== 'visible'/, 'Pet 轮询必须受文档可见性门控')
 
-// ── D1 ChatView 接线断言 ──
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.equal(chatView.includes('isStatic={isMessageStatic(desc.renderMessage)}'), true, 'MessageRow 必须接收静态判定')
-assert.match(chatView, /const skipEntrance = reduceMotion \|\| isStatic === true/, '静态行必须跳过入场动画')
-
 // ── D7 助手圆点 CC 对齐（flex 列 + 消息文字色链 + 单块一圆点）──
-assert.match(chatView, /<div className="term-assistant-body">/, '助手内容必须包裹在 body 列（flex row 第二列）')
-assert.match(chatView, /className=\{`term-assistant\$\{assistantDot \? ' has-dot' : ''\}`\}/, 'has-dot 开关必须驱动圆点结构')
 const dotCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
 assert.match(dotCss, /\.term-assistant\.has-dot\s*\{\s*[^}]*display:flex/, '圆点列必须 flex 布局（CC 基线对齐）')
 assert.match(dotCss, /color:var\(--assistant-dot-color,\s*var\(--msg-text,/, '圆点颜色必须随消息文字链（claude 预设纯白）')

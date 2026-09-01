@@ -50,7 +50,7 @@ use crate::agent_config::AgentDef;
 use crate::permission::resolve_permission;
 use crate::runtime_log::{RuntimeLogHub, RuntimeLogLayer, RuntimeLogQuery};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::Listener;
@@ -107,7 +107,7 @@ fn invalid_params(session: &str) -> String {
 }
 
 /// 构造 fake ACP agent（provider=peri 注册协议适配器；trace 路径进 argv[1]）。
-fn fake_permission_agent(name: &str, script: &str, trace_path: &PathBuf) -> AgentDef {
+fn fake_permission_agent(name: &str, script: &str, trace_path: &Path) -> AgentDef {
     let mut agent = crate::test_utils::fake_acp_agent_with(
         name,
         script,

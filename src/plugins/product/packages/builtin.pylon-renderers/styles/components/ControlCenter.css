@@ -357,3 +357,16 @@
 .app[data-interface-mode="modern-gui"] .modern-command-dock .cc-widget.cc-natural > [role="button"],
 .app[data-interface-mode="modern-gui"] .modern-command-dock .cc-tasks-pill { border-radius:8px; }
 .app[data-interface-mode="modern-gui"] .modern-replay-continue { left:clamp(14px,4vw,48px); right:clamp(14px,4vw,48px); bottom:14px; border-radius:13px; }
+
+/* Terminal command rail: the footer follows the textarea's text start while
+   the rule itself stays on its own, wider track. */
+.app[data-interface-mode="terminal-like"] .control-center.cli-mode .cc-status-row {
+  padding-left:1.4em;
+  padding-right:0;
+  align-items:baseline;
+}
+.app[data-interface-mode="terminal-like"] .control-center.cli-mode .cc-command-hint {
+  padding-left:0;
+  padding-right:0;
+  transform:translateY(-2px);
+}

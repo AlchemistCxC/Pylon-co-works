@@ -1,15 +1,14 @@
-import { Suspense, useMemo, useState, useSyncExternalStore, type CSSProperties } from 'react'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { Suspense, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { ContextPanelContributionProps } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
-import { useStore } from '../../store.ts'
 import { selectAvailableContextPanels } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { useRightRailStore } from '../../rightRailStore.ts'
 
-export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  const rightWidth = useStore(state => state.rightWidth)
+export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet: SheetRecord; ctx: SheetContext; activePanelId?: string | null }) {
+  const rightWidth = useRightRailStore(state => state.width)
   const registry = getContextPanelRegistry()
   const snapshot = useSyncExternalStore(
     listener => registry.subscribe(listener),
@@ -21,7 +20,10 @@ export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; c
     sheetId: sheet.id,
     activeSessionId: ctx.activeSession,
   }), [ctx.activeSession, sheet.id, sheet.kind, snapshot])
-  const [activeId, setActiveId] = useState<string>('')
+  const [activeId, setActiveId] = useState<string>(activePanelId ?? '')
+  useEffect(() => {
+    if (activePanelId !== undefined) setActiveId(activePanelId ?? '')
+  }, [activePanelId])
   const active = entries.find(entry => entry.contributionId === activeId) ?? entries[0]
 
   if (!active) return null
@@ -37,7 +39,9 @@ export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; c
           activeSessionId: ctx.activeSession,
         }}
         onEvent={(event, detail) => {
-          if (event === 'host:collapse') useWorkspaceStore.getState().setRightPanelCollapsed(true)
+          if (event === 'host:collapse') {
+            useRightRailStore.getState().setCollapsed(true)
+          }
           if (event === 'host:select-session' && (typeof detail === 'string' || detail === null)) ctx.selectSession(detail)
         }}
       />
@@ -55,7 +59,9 @@ export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; c
             <button key={entry.contributionId} type="button" role="tab" aria-selected={entry.contributionId === active.contributionId} className={`context-panel-mode ${entry.contributionId === active.contributionId ? 'active' : ''}`} onClick={() => setActiveId(entry.contributionId)}>{entry.value.label}</button>
           ))}
         </div>
-        <button type="button" className="context-panel-collapse" onClick={() => useWorkspaceStore.getState().setRightPanelCollapsed(true)} aria-label="收起右栏">»</button>
+        <button type="button" className="context-panel-collapse" onClick={() => {
+          useRightRailStore.getState().setCollapsed(true)
+        }} aria-label="收起右栏">»</button>
       </div>
       <div className="context-panel-body">
         <PluginContributionBoundary key={`${active.ownerRuntimeInstanceId}:${active.contributionId}`} contributionId={active.contributionId}>{renderActive()}</PluginContributionBoundary>

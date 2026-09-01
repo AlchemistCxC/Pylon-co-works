@@ -46,7 +46,6 @@ beforeEach(ensureRenderersActive)
 describe('Renderer UI lifecycle', () => {
   it('产品 renderer 插件停用后 DOM 响应式回收全部贡献', async () => {
     render(<RendererProbe />)
-    expect(screen.getByTestId('renderers')).toHaveTextContent('core.renderer.react')
     expect(screen.getByTestId('renderers')).toHaveTextContent('core.renderer.solid')
 
     const identity = getPluginRuntime().snapshot().active.find(candidate => (
@@ -56,7 +55,6 @@ describe('Renderer UI lifecycle', () => {
     await getPluginRuntime().deactivate(identity!.key)
 
     await waitFor(() => {
-      expect(screen.getByTestId('renderers')).not.toHaveTextContent('core.renderer.react')
       expect(screen.getByTestId('renderers')).not.toHaveTextContent(CORE_SOLID_RENDERER_PLUGIN_ID)
       expect(screen.getByTestId('renderers')).toHaveTextContent('kernel-fallback')
     })

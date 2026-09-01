@@ -17,6 +17,7 @@
 
 import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from './themeFieldDefs'
 import type { ZoneName } from './themeFieldDefs'
+import type { ContextPanelSettingsContribution } from './plugin-runtime/context-panel/contextPanelTypes.ts'
 
 export type SettingsDomainId = 'appearance' | 'workspace' | 'agents-connections' | 'plugins'
 
@@ -35,7 +36,16 @@ export type SettingsSectionId =
   | 'agent'
   | 'session'
   | 'gateway'
+  | 'prediction'
   | 'pluginManager'
+
+export interface SettingsIntent {
+  readonly domain: SettingsDomainId
+  readonly section: SettingsSectionId
+  /** Plugin contribution id when the section is not a built-in section. */
+  readonly pluginPageId?: string
+  readonly agentId?: string
+}
 
 export interface SettingsDomain {
   id: SettingsDomainId
@@ -46,7 +56,7 @@ export interface SettingsDomain {
 export const SETTINGS_DOMAINS: readonly SettingsDomain[] = [
   { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'] },
   { id: 'workspace', label: '工作区', sections: ['window', 'pet', 'history', 'backup'] },
-  { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway'] },
+  { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway', 'prediction'] },
   { id: 'plugins', label: '插件', sections: ['pluginManager'] },
 ] as const
 
@@ -77,7 +87,57 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   agent: 'Agent',
   session: '会话',
   gateway: 'Gateway',
+  prediction: '输入预测',
   pluginManager: '插件管理',
+}
+
+const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>(Object.keys(SETTINGS_SECTION_LABELS) as SettingsSectionId[])
+
+/** Historical deep-link aliases kept at the Settings boundary only. */
+const LEGACY_SETTINGS_ROUTES: Readonly<Record<string, { domain: SettingsDomainId; section: SettingsSectionId }>> = {
+  'renderer/suite': { domain: 'appearance', section: 'renderers' },
+  'renderer/catalog': { domain: 'appearance', section: 'renderers' },
+  'renderer': { domain: 'appearance', section: 'renderers' },
+  'general': { domain: 'appearance', section: 'global' },
+  'conversation': { domain: 'appearance', section: 'chat' },
+  'terminal': { domain: 'appearance', section: 'cc' },
+  'right-panel': { domain: 'appearance', section: 'right' },
+  'plugins': { domain: 'plugins', section: 'pluginManager' },
+}
+
+/**
+ * Normalize settings deep-links/events to the current domain registry.
+ * This is intentionally not part of theme persistence migration: navigation
+ * compatibility must not change user settings data or its schema version.
+ */
+export function normalizeSettingsIntent(input: {
+  domain?: string | null
+  section?: string | null
+  agentId?: string | null
+} = {}): SettingsIntent {
+  const rawDomain = input.domain?.trim() ?? ''
+  const rawSection = input.section?.trim() ?? ''
+  const route = LEGACY_SETTINGS_ROUTES[rawDomain && rawSection ? `${rawDomain}/${rawSection}` : rawDomain]
+    ?? LEGACY_SETTINGS_ROUTES[rawSection]
+
+  if (route) return { ...route, ...(input.agentId ? { agentId: input.agentId } : {}) }
+
+  const section = SETTINGS_SECTION_IDS.has(rawSection as SettingsSectionId)
+    ? rawSection as SettingsSectionId
+    : 'global'
+  // Unknown sections under plugins are contribution ids; preserve them so the
+  // plugin host can decide whether the page is still installed.
+  const pluginPageId = rawSection && !SETTINGS_SECTION_IDS.has(rawSection as SettingsSectionId) && rawDomain === 'plugins'
+    ? rawSection
+    : undefined
+  const canonicalSection = pluginPageId ? 'pluginManager' : section
+  const canonicalDomain = pluginPageId ? 'plugins' : domainOfSection(canonicalSection)
+  return {
+    domain: canonicalDomain,
+    section: canonicalSection,
+    ...(pluginPageId ? { pluginPageId } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+  }
 }
 
 /** 主题 zone → section（字段归属派生：themeFieldDefs 的 zone 经此归入 section） */
@@ -164,7 +224,7 @@ export interface SettingsSearchItem {
   readonly label: string         // 字段名
   readonly section: SettingsSectionId
   readonly advanced: boolean     // D2-A：advanced 命中带徽标
-  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry'
+  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry' | 'plugin-page' | 'context-panel'
   /** B3：唯一 DOM 锚（链A=`field:${key}`；链B entry 无唯一锚时回退文本匹配） */
   readonly anchor?: string
   /** Renderer catalog route; kept optional so theme/plugin search stays stable. */
@@ -174,9 +234,16 @@ export interface SettingsSearchItem {
     readonly groupId: string
     readonly fieldKey: string
   }
+  /** Plugin settings page route; page owns its internal fields. */
+  readonly pluginPageId?: string
+  readonly contextPanelId?: string
 }
 
-export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[]): readonly SettingsSearchItem[] {
+export function buildSettingsSearchIndex(
+  rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[],
+  pluginPages?: readonly { contributionId: string; value: { label?: string; description?: string } }[],
+  contextPanels?: readonly { contributionId: string; value: { label?: string; settings?: ContextPanelSettingsContribution } }[],
+): readonly SettingsSearchItem[] {
   const items: SettingsSearchItem[] = []
   // 链A：THEME_FIELD_DEFS 按 zone 过滤
   for (const key of THEME_FIELD_KEYS) {
@@ -203,6 +270,33 @@ export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { i
       section: 'renderers',
       advanced: false,
       kind: 'renderer-entry',
+    })
+  }
+  // Plugin pages own their internal schema, so index the page itself rather
+  // than pretending opaque fields have host-side anchors.
+  for (const entry of pluginPages ?? []) {
+    items.push({
+      path: '插件 › 插件管理',
+      label: entry.value.label ?? entry.contributionId,
+      section: 'pluginManager',
+      advanced: false,
+      kind: 'plugin-page',
+      pluginPageId: entry.contributionId,
+    })
+  }
+  // Context-panel contributions may expose a small settings surface without
+  // owning the global Settings page. Index the contribution as a navigable
+  // right-rail item; the host can later resolve the id to its panel settings.
+  for (const entry of contextPanels ?? []) {
+    const settings = entry.value.settings
+    if (!settings) continue
+    items.push({
+      path: `外观 › ${settings.section === 'pluginManager' ? '插件管理' : '右栏'}`,
+      label: settings.label || entry.value.label || entry.contributionId,
+      section: settings.section === 'pluginManager' ? 'pluginManager' : 'right',
+      advanced: false,
+      kind: settings.pageId ? 'plugin-page' : 'context-panel',
+      ...(settings.pageId ? { pluginPageId: settings.pageId } : { contextPanelId: entry.contributionId }),
     })
   }
   return items

@@ -9,7 +9,6 @@ import { nextTokenCatchUp } from '../src/components/chat/tokenCatchUp.ts'
 import { resolveActivityLine } from '../src/domains/activity/activityLine.ts'
 
 const footer = readFileSync('src/components/chat/GenerationFooter.tsx', 'utf8')
-const view = readFileSync('src/components/chat/ChatView.tsx', 'utf8')
 const controller = readFileSync('src/components/chat/chatEventController.ts', 'utf8')
 const css = readFileSync('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'utf8')
 
@@ -22,12 +21,6 @@ requireToken(footer, "| { kind: 'thinking' }", '思考阶段')
 requireToken(footer, "| { kind: 'tool'; name: string }", '工具阶段')
 requireToken(footer, "| { kind: 'responding' }", '回复阶段')
 requireToken(footer, "data-phase={spinnerFramePreset === 'cc' ? undefined : phase?.kind || 'idle'}", 'spinner 阶段状态标记（cc 帧恒色不设 phase）')
-requireToken(view, 'const [generationPhase, setGenerationPhase]', 'ChatView 阶段状态')
-requireToken(view, 'const MOCK_GENERATION_PHASES: GenerationPhase[]', '浏览器 mock 阶段序列')
-requireToken(view, 'setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length)', '浏览器 mock 阶段轮换')
-requireToken(view, 'running={generating || browserMockPhase !== undefined}', '浏览器 mock spinner 接线')
-requireToken(view, 'phase={browserMockPhase || generationPhase || undefined}', 'Footer 阶段接线')
-requireToken(view, 'source={sessionRef.current}', 'Footer source 接线（横向订阅读 plan）')
 requireToken(controller, "currentRefs!.setGenerationPhase({ kind: 'thinking' })", 'thought 阶段切换')
 requireToken(controller, "currentRefs!.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })", 'tool 阶段切换')
 requireToken(controller, "currentRefs!.setGenerationPhase({ kind: 'responding' })", '回复阶段切换')

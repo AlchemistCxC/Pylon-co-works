@@ -24,8 +24,9 @@ import {
 import type { Profile } from './identityStore'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
-import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
+import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, recordPayload, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
+import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
 export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
 export type { SessionConfig } from './runtimeStore'
@@ -123,7 +124,7 @@ type ThemeState = ThemeSettings & {
   /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
-  setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
+  setZoneField: (zone: string, partial: Partial<ThemeSettings>, source?: SettingWriteSource) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
   saveCustomPreset: (name: string, id?: string) => string
   applyCustomPreset: (id: string) => void
@@ -140,7 +141,12 @@ export const useStore = create<ThemeState>()(persist(
 
   customPresets: [],
 
-  setZoneField: (zone, partial) => set(state => setZoneFieldReducer(state, zone, partial)),
+  // D-trace：写入溯源——source 由调用方声明（用户编辑/呈现风格/界面模式…），
+  // 缺省 user-edit。记录在漏斗出口完成，reducer 保持纯函数。
+  setZoneField: (zone, partial, source = 'user-edit') => {
+    recordSettingWrites(source, zone, Object.keys(partial))
+    set(state => setZoneFieldReducer(state, zone, partial))
+  },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
     // D1：ccBgHeight 必须 ≥ ccHeight（背景不短于容器，与 setZoneField 漏斗同不变量）
@@ -192,7 +198,10 @@ export const useStore = create<ThemeState>()(persist(
     ...markZoneCustom(state, 'cc'),
   })),
 
-  resetTheme: () => set(structuredClone(DEFAULTS)),
+  resetTheme: () => {
+    recordSettingWrites('theme-reset', '*', Object.keys(DEFAULTS))
+    set(structuredClone(DEFAULTS))
+  },
 
   resetZone: (zone) => set(state => {
     const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
@@ -205,6 +214,7 @@ export const useStore = create<ThemeState>()(persist(
         })
         .map(field => [field, DEFAULTS[field]]),
     )
+    recordSettingWrites('zone-reset', zone, Object.keys(reset))
     return {
       ...reset,
       appliedPreset: { ...state.appliedPreset, [zone]: '' },
@@ -213,15 +223,30 @@ export const useStore = create<ThemeState>()(persist(
   }),
 
   // 六个预设动作：纯计算在 domains/theme/presetReducer.ts，此处只留 set(reducer(state, args)) 薄壳
-  applyZonePreset: (zone, presetName, presetTheme) => set(state => applyZonePresetReducer(state, zone, presetName, presetTheme)),
-  setGlobalPreset: (name, theme) => set(() => setGlobalPresetReducer(name, theme)),
+  applyZonePreset: (zone, presetName, presetTheme) => {
+    recordSettingWrites('zone-preset', zone, Object.keys(presetTheme))
+    set(state => applyZonePresetReducer(state, zone, presetName, presetTheme))
+  },
+  setGlobalPreset: (name, theme) => {
+    recordSettingWrites('global-preset', '*', Object.keys({ ...DEFAULTS, ...theme }))
+    set(() => setGlobalPresetReducer(name, theme))
+  },
   saveCustomPreset: (name, id) => {
     const state = get()
     const now = Date.now()
     // id/now 由 shell 注入：reducer 保持确定性（A0 起，预设逻辑可做确定性行为测试）
-    const resolvedId = id && state.customPresets.some(preset => preset.id === id)
-      ? id
-      : createCustomPresetId(now, Object.keys(state.customPresets))
+    const requestedId = typeof id === 'string' && id.trim() ? id.trim() : undefined
+    const existing = requestedId
+      ? state.customPresets.find(preset => preset.id === requestedId)
+      : undefined
+    // An explicit id means “overwrite this preset”.  Silently falling back to
+    // a new id makes a stale row look like a no-op (and can create duplicates)
+    // after persisted data has been migrated or a mode switch rebuilt the UI.
+    if (requestedId && !existing) throw new Error('要覆盖的自定义预设不存在')
+    const resolvedId = existing?.id
+      ?? createCustomPresetId(now, state.customPresets.map(preset => preset.id))
+    const cleanName = name.trim()
+    if (!cleanName) throw new Error('预设名称不能为空')
     const rendererStore = getRendererSettingsStore()
     const captureProviders = createFirstPartyPresetProviderRegistry({
       captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
@@ -239,8 +264,9 @@ export const useStore = create<ThemeState>()(persist(
     })
     const bundle = createPresetBundle({
       id: resolvedId,
-      name: name.trim().slice(0, 40),
+      name: cleanName.slice(0, 40),
       now,
+      ...(existing ? { createdAt: existing.createdAt } : {}),
       theme: captureProviders.resolve('builtin.theme')!.capture(),
       renderer: captureProviders.resolve('builtin.renderer-settings')!.capture() as unknown as RendererPresetPayload,
       presentation: captureProviders.resolve('builtin.presentation')!.capture() as unknown as PresentationPresetPayload,
@@ -251,7 +277,12 @@ export const useStore = create<ThemeState>()(persist(
   },
   applyCustomPreset: (id) => {
     const preset = get().customPresets.find(item => item.id === id)
-    if (!preset) return
+    // D-fix：查不到预设必须可见地报告（此前静默 return——持久化引用漂移时
+    // 表现为"切换了但什么都没发生"）。
+    if (!preset) {
+      reportRuntimeError('应用自定义预设', new Error(`自定义预设不存在：${id}`))
+      return
+    }
     const bundle = normalizePresetBundle(preset.bundle) ?? adaptLegacyThemePreset({
       id: preset.id,
       name: preset.name,
@@ -259,6 +290,9 @@ export const useStore = create<ThemeState>()(persist(
       createdAt: preset.createdAt,
       updatedAt: preset.updatedAt,
     })
+    // 主题 payload 单一真值：bundle 里的保存态 delta（免疫 appliedPreset 引用
+    // 与列表 id 的漂移），回退用 preset.theme 本体。
+    const themePayload = (recordPayload(bundle.contributions['builtin.theme']?.payload)) as Record<string, unknown>
     const beforeTheme = Object.fromEntries([
       ...THEME_SETTING_KEYS.map(key => [key, get()[key]] as const),
       ['appliedPreset', get().appliedPreset],
@@ -270,7 +304,16 @@ export const useStore = create<ThemeState>()(persist(
     const beforeRenderer = rendererStore.getSnapshot()
     const registry = createFirstPartyPresetProviderRegistry({
       captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
-      applyTheme: () => set(state => applyCustomPresetReducer(state, id) ?? {}),
+      applyTheme: () => set(state => {
+        const patch = applyCustomPresetReducer(state, id, themePayload)
+        // D-fix：reducer 落空（查不到保存态）必须可见，禁止 ?? {} 静默吞掉。
+        if (!patch) {
+          reportRuntimeError('应用自定义预设', new Error(`自定义预设主题缺失：${id}`))
+          return {}
+        }
+        recordSettingWrites('custom-preset', id, Object.keys(patch))
+        return patch
+      }),
       restoreTheme: () => set(beforeTheme),
       capturePresentation: () => ({
         activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,

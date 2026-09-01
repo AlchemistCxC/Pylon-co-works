@@ -147,6 +147,26 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().generation).toBe(1)
   })
 
+  it('替换到空闲文档时清理上一会话遗留的生成活动轴', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    runtime.update({
+      generating: true,
+      generationActivity: {
+        kind: 'tooling',
+        activeTools: [{ id: 'read-1', name: 'Read' }],
+      },
+    })
+
+    runtime.replaceDocument(createWorkbenchDocument('session-b'), {
+      ownerKey: 'owner-b', generation: 2, sessionId: 'session-b',
+    })
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      sessionId: 'session-b', generating: false,
+      generationActivity: undefined,
+    })
+  })
+
   it('session switch 保留新会话 pending interaction，且拒绝旧 owner/generation 串入', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const sessionA = { ...createWorkbenchDocument('session-a'), revision: 4, interactions: [{

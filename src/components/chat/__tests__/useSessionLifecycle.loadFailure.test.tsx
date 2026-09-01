@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('../../../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+vi.mock('../../../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('../../../infrastructure/events/canonicalEventRepository', () => ({
   tauriCanonicalEventRepository: () => ({ loadAll: vi.fn(async () => []) }),

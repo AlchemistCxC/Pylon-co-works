@@ -10,6 +10,26 @@ const session: Session = {
 }
 
 describe('Agent Workbench production commands', () => {
+  it('首条请求仍在流式传输时立即选中新会话', async () => {
+    let resolveSend!: () => void
+    const sendMessage = vi.fn(() => new Promise<void>(resolve => { resolveSend = resolve }))
+    const selectSession = vi.fn()
+    const commands = createAgentWorkbenchCommandFacade({
+      createSession: vi.fn(async () => ({ sessionId: session.id })),
+      resolveSession: id => id === session.id ? session : undefined,
+      sendMessage,
+      selectSession,
+    })
+
+    const creating = commands.createSession({ initialPrompt: { text: 'hello' } })
+    await Promise.resolve()
+    expect(selectSession).toHaveBeenCalledWith(session.id)
+    expect(selectSession).toHaveBeenCalledTimes(1)
+
+    resolveSend()
+    await expect(creating).resolves.toEqual({ sessionId: session.id })
+  })
+
   it('首条请求失败时回滚新会话，不选中半成品', async () => {
     const discardSession = vi.fn(async () => undefined)
     const selectSession = vi.fn()
@@ -23,7 +43,8 @@ describe('Agent Workbench production commands', () => {
 
     await expect(commands.createSession({ initialPrompt: { text: 'hello' } })).rejects.toThrow('transport failed')
     expect(discardSession).toHaveBeenCalledWith(session.id)
-    expect(selectSession).not.toHaveBeenCalled()
+    expect(selectSession).toHaveBeenNthCalledWith(1, session.id)
+    expect(selectSession).toHaveBeenNthCalledWith(2, null)
   })
 
   it('send 以本地 Session 解析 durable owner，并在 ACP 调用前写入 optimistic user', async () => {

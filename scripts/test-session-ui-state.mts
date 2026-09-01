@@ -26,7 +26,6 @@ assert.equal(sessionUiStateGet('sess-b', 'draft'), 'B 的草稿', '清除 A 不�
 // ── 接线断言 ──
 const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
 assert.match(inputBar, /useSessionUiState\(sessionId, 'draft', ''\)/, 'InputBar 草稿必须按会话作用域')
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 const searchHook = readFileSync(new URL('../src/components/chat/useMessageSearch.ts', import.meta.url), 'utf8')
 // CV-3：搜索状态收敛到 useMessageSearch（会话作用域注册表）
 assert.match(searchHook, /useSessionUiState\(sessionId, 'search-query'/, '搜索词必须按会话作用域')

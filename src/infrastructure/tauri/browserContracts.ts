@@ -1,9 +1,9 @@
 /**
- * browserContracts — browser 契约壳（W4-04 桩化）。
+ * browserContracts — Browser Sheet 的启动错误分类与轻量会话类型。
  *
- * CDP 命令契约未定——**不虚构命令名**（W4-03 纪律）；本文件预留 normalize 与错误分类
- * 的桩形状（后端契约到位后对齐字段名并接真实 invoke）。前端只消费后端返回的
- * session/profile 标识（不读 cookie，不导出，不进 localStorage）。
+ * Browser Sheet 现在由桌面端 WebView2 manager 提供真实命令面（开发浏览器只提供
+ * 明确标注的 iframe preview）。这里仍保持前端的错误分类边界：命令不存在属于
+ * blocked，其余启动失败保留后端返回的可读消息；不读取 cookie、storage 或请求头。
  */
 
 export interface BrowserSessionInfo {
@@ -15,7 +15,7 @@ export type BrowserStartStatus =
   | { kind: 'blocked' }
   | { kind: 'error'; message: string }
 
-/** 命令不可用 → blocked（待后端 CDP 契约）；其余 error */
+/** 命令不可用 → blocked；其余启动失败 → error */
 export function classifyBrowserStartError(error: unknown): BrowserStartStatus {
   // Tauri invoke 拒绝值为 { code, message } 结构化对象（非 Error）——提取 message 而非 [object Object]
   const raw = error instanceof Error

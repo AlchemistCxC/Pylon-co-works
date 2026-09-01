@@ -21,6 +21,7 @@ mod gateway;
 mod gateway_cmds;
 mod git;
 mod hermes;
+mod hermes_runtime;
 mod lifecycle;
 mod logs_cmds;
 mod mcp;
@@ -269,6 +270,9 @@ pub(crate) struct AppStateHandles {
     /// Production setup readiness barrier 后必为 Some；Option 仅保留测试构造兼容与
     /// 防御性诊断。dispatcher 对有 durable owner 的事件必须先 append 再发布。
     pub(crate) event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
+    /// ACP session-level snapshots (commands/mode) share the message DB and
+    /// are persisted when providers update them asynchronously.
+    pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
 }
 
 /// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
@@ -323,6 +327,7 @@ impl AppStateHandles {
             gateway: state.gateway.clone(),
             approval_mode: state.approval_mode.clone(),
             event_service: state.event_service.clone(),
+            message_service: state.message_service.clone(),
         }
     }
 
@@ -856,9 +861,11 @@ pub fn run() {
                 crate::gateway_cmds::gateway_instance_start, crate::gateway_cmds::gateway_instance_stop,
                 crate::gateway_cmds::gateway_instance_restart,
                 crate::gateway_cmds::gateway_instance_set_credentials,
-                crate::browser_cmds::browser_start, crate::browser_cmds::browser_new_tab, crate::browser_cmds::browser_select_tab, crate::browser_cmds::browser_close_tab, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
+                crate::browser_cmds::browser_start, crate::browser_cmds::browser_new_tab, crate::browser_cmds::browser_open_tab, crate::browser_cmds::browser_select_tab, crate::browser_cmds::browser_close_tab, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
                 crate::browser_cmds::browser_back, crate::browser_cmds::browser_forward, crate::browser_cmds::browser_reload,
-                crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
+                crate::browser_cmds::browser_snapshot, crate::browser_cmds::browser_click, crate::browser_cmds::browser_type,
+                crate::browser_cmds::browser_press, crate::browser_cmds::browser_scroll,
+                 crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_visible, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])

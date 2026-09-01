@@ -1,0 +1,4 @@
+# 项目级工具链锁定：此项目使用 GNU 工具链构建（2026-08-30 决定）
+# 全局 rustup default 仍为 MSVC；想切回 MSVC 时删除本文件或改 channel 为 stable-x86_64-pc-windows-msvc
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"

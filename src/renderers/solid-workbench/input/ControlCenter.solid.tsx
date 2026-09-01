@@ -7,6 +7,10 @@ import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSu
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
+import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
+import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
+import { useIdentityStore } from '../../../identityStore.ts'
+import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
@@ -21,6 +25,155 @@ export function SolidControlCenter() {
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
   const [selected, setSelected] = createSignal<CcWidgetId>()
+  const [workspaceId, setWorkspaceId] = createSignal('')
+  /** Workspace carried by Sidebar's create-session intent. The event is
+   * intentionally cached because Sidebar clears the active session in the
+   * same tick after dispatching it. */
+  const [preferredWorkspaceId, setPreferredWorkspaceId] = createSignal('')
+  const [workspaceSelectionTouched, setWorkspaceSelectionTouched] = createSignal(false)
+  const [modelId, setModelId] = createSignal('')
+  const [reasoningLevel, setReasoningLevel] = createSignal('medium')
+  const [mode, setMode] = createSignal('')
+  const [submitting, setSubmitting] = createSignal(false)
+  const [submitError, setSubmitError] = createSignal('')
+  const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
+  const [sessionEntering, setSessionEntering] = createSignal(false)
+  let previousSessionId: string | null = input().sessionId
+  let sessionEnteringTimer: ReturnType<typeof setTimeout> | undefined
+  let workspaceSelect: HTMLSelectElement | undefined
+  let workspaceSyncRevision = 0
+  const emptyWorkspaces = () => input().availableWorkspaces ?? []
+  const modeOptions = () => resolveModeOptionEntries(runtime(), mode()).map(item => item.id)
+  const profileModel = () => runtime().activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
+  const emptyVisual = () => !input().sessionId || sessionEntering()
+  createEffect(() => {
+    if (modelId() || !profileModel()) return
+    setModelId(profileModel())
+  })
+  createEffect(() => {
+    if (mode() || !runtime().activeMode) return
+    setMode(runtime().activeMode || modeOptions()[0] || 'default')
+  })
+  createEffect(() => {
+    const options = emptyWorkspaces()
+    const current = workspaceId()
+    const preferred = preferredWorkspaceId()
+    const valid = (id: string) => Boolean(id) && options.some(item => item.id === id)
+
+    // A workspace intent from the sidebar has priority over the generic
+    // "most recently active" heuristic, but only for this empty-state entry.
+    if (valid(preferred)) {
+      if (current !== preferred) setWorkspaceId(preferred)
+      return
+    }
+    if (current && valid(current)) return
+
+    // Chat mode may still opt into a workspace. Never erase a user choice just
+    // because the mode is chat; only repair a stale id or choose an initial
+    // value when the user has not touched the selector.
+    if (workspaceSelectionTouched()) {
+      if (current && !valid(current)) setWorkspaceId('')
+      return
+    }
+
+    const recent = options.length
+      ? options.reduce((a, b) => (b.lastActiveAt ?? 0) > (a.lastActiveAt ?? 0) ? b : a)
+      : undefined
+    const hasExplicitActivity = options.some(item => item.lastActiveAt !== undefined && item.lastActiveAt !== null)
+    const next = options.length === 1
+      ? options[0]!.id
+      : hasExplicitActivity ? recent?.id ?? '' : ''
+    if (current !== next) setWorkspaceId(next)
+  })
+  // Reconcile the native select after its <option> children have been
+  // reconciled. Browsers reset select.value to the empty option when a keyed
+  // option list is replaced, even though the Solid signal did not change.
+  // Keeping this as a DOM-boundary repair preserves the signal as the source
+  // of truth without stealing a user's explicit selection.
+  createEffect(() => {
+    const desired = workspaceId()
+    const options = emptyWorkspaces()
+    const revision = ++workspaceSyncRevision
+    queueMicrotask(() => {
+      if (revision !== workspaceSyncRevision) return
+      const select = workspaceSelect
+      if (!select) return
+      const valid = desired === '' || options.some(item => item.id === desired)
+      if (valid && select.value !== desired) select.value = desired
+    })
+  })
+  createEffect(() => {
+    const current = input().sessionId
+    if (!previousSessionId && current) {
+      setSessionEntering(true)
+      if (sessionEnteringTimer) clearTimeout(sessionEnteringTimer)
+      sessionEnteringTimer = setTimeout(() => {
+        sessionEnteringTimer = undefined
+        setSessionEntering(false)
+      }, 360)
+    }
+    previousSessionId = current
+  })
+  onCleanup(() => {
+    if (sessionEnteringTimer) clearTimeout(sessionEnteringTimer)
+  })
+  const pickFolder = () => window.dispatchEvent(new CustomEvent('pylon:pick-workspace-folder'))
+  onMount(() => {
+    const onFolderPicked = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path
+      if (path) setWorkspaceDraft({ name: path.split(/[\\\\/]/).filter(Boolean).at(-1) || '新工作区', path })
+    }
+    const onNewSession = (event: Event) => {
+      const workspace = (event as CustomEvent<{ workspaceId?: unknown }>).detail?.workspaceId
+      const id = typeof workspace === 'string' ? workspace.trim() : ''
+      setPreferredWorkspaceId(id)
+      setWorkspaceSelectionTouched(false)
+      setWorkspaceId(id)
+      setWorkspaceDraft()
+      setSubmitError('')
+    }
+    window.addEventListener('pylon:workspace-folder-picked', onFolderPicked)
+    window.addEventListener('pylon:new-session', onNewSession)
+    onCleanup(() => {
+      window.removeEventListener('pylon:workspace-folder-picked', onFolderPicked)
+      window.removeEventListener('pylon:new-session', onNewSession)
+    })
+  })
+  const createWorkspace = async () => {
+    const draft = workspaceDraft(); if (!draft?.name.trim() || !draft.path) return
+    try {
+      const workspace = await useWorkspaceEntityStore.getState().createWorkspace(draft.name.trim(), draft.path)
+      setWorkspaceId(workspace.id)
+      setPreferredWorkspaceId(workspace.id)
+      setWorkspaceSelectionTouched(true)
+      setWorkspaceDraft()
+      setSubmitError('')
+    }
+    catch (error) { setSubmitError(error instanceof Error ? error.message : '创建工作区失败') }
+  }
+  const createEmptySession = async (text: string, attachments: readonly WorkbenchAttachment[]) => {
+    if (input().workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return false }
+    if (submitting()) return false
+    setSubmitting(true); setSubmitError('')
+    try {
+      const created = await workbench.commands.createSession({
+        ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
+        ...(modelId().trim() ? { model: modelId().trim() } : {}),
+        reasoningLevel: reasoningLevel(),
+        mode: mode() || modeOptions()[0] || 'default',
+        initialPrompt: { text, attachments },
+      })
+      if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+      return true
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error)); return false
+    } finally { setSubmitting(false) }
+  }
+  const emptyComposer = createMemo(() => !input().sessionId ? {
+    onSubmit: createEmptySession,
+    submitting,
+    after: <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>,
+  } : undefined)
   let stopDragging: (() => void) | undefined
   onCleanup(() => stopDragging?.())
   createEffect(() => {
@@ -40,20 +193,25 @@ export function SolidControlCenter() {
     window.addEventListener('keydown', onKeyDown)
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
-  const readonly = () => input().preview === true || input().replayReadonly === true
+  const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
   const externalButtonMode = () => isExternalSubmitMode({
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
   })
   const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
   const externalAttach = () => externalButtonMode() && !appearance().ccHidden.includes('attach')
+  const hiddenWidgetIds = () => !emptyVisual()
+    ? appearance().ccHidden
+    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]
   const visibilityContext = () => ({
-    hidden: appearance().ccHidden,
+    hidden: hiddenWidgetIds(),
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
     ccStyle: appearance().ccStyle,
     editMode: appearance().ccEditMode,
-    presentationProfileId: input().presentationProfileId,
+    // The workspace selector is an intentional empty-state affordance even
+    // for terminal-classic, whose normal session chrome hides context chips.
+    presentationProfileId: input().sessionId ? input().presentationProfileId : undefined,
   })
   const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
   const minHeight = () => resolveCcMinHeight({
@@ -61,7 +219,7 @@ export function SolidControlCenter() {
     footerLayout: appearance().footerLayout,
     hintMode: appearance().cliHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: appearance().ccHidden,
+      hiddenIds: hiddenWidgetIds(),
       inputMode: appearance().inputMode,
       ccStyle: appearance().ccStyle,
       submitButtonMode: appearance().inputSubmitButtonMode,
@@ -76,15 +234,48 @@ export function SolidControlCenter() {
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
-        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} />
+        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
       case 'session':
         return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
         </span>
       case 'workspace':
-        return <span class="cc-info-chip cc-workspace-chip" title={input().workspacePath ?? input().workspaceLabel ?? '当前会话没有工作目录'}>
+        return <Show when={emptyVisual()} fallback={<span class="cc-info-chip cc-workspace-chip" title={input().workspacePath ?? input().workspaceLabel ?? '当前会话没有工作目录'}>
           <span aria-hidden="true">▣</span><span>{input().workspaceLabel ?? '无工作目录'}</span>
-        </span>
+        </span>}>
+          <div class="cc-empty-workspace-control">
+            <label class="cc-empty-workspace-select">
+              <span aria-hidden="true">▣</span>
+              <select
+                ref={node => { workspaceSelect = node }}
+                aria-label="新会话工作区"
+                disabled={submitting() || emptyWorkspaces().length === 0}
+                value={workspaceId()}
+                onInput={event => {
+                  const value = event.currentTarget.value
+                  setWorkspaceSelectionTouched(true)
+                  setPreferredWorkspaceId(value)
+                  setWorkspaceId(value)
+                }}
+                onChange={event => {
+                  const value = event.currentTarget.value
+                  setWorkspaceSelectionTouched(true)
+                  setPreferredWorkspaceId(value)
+                  setWorkspaceId(value)
+                }}
+              >
+                <option value="" selected={workspaceId() === ''}>{input().workspaceMode === 'work' ? '选择工作区…' : '不使用工作区'}</option>
+                <For each={emptyWorkspaces()}>{item => <option value={item.id} selected={item.id === workspaceId()}>{item.label} · {item.path}</option>}</For>
+              </select>
+            </label>
+            <button type="button" class="cc-empty-workspace-create" disabled={submitting()} onClick={pickFolder} aria-label="新建工作区">＋</button>
+            <Show when={workspaceDraft()}>{draft => <div class="cc-empty-workspace-popover">
+              <input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} />
+              <code title={draft().path}>{draft().path}</code>
+              <button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建</button>
+            </div>}</Show>
+          </div>
+        </Show>
       case 'activity':
         return <span class="cc-info-chip cc-activity-chip" data-running={runtime().generating ? 'true' : 'false'} role="status" aria-live="polite">
           <span aria-hidden="true">{runtime().generating ? '◌' : '●'}</span><span>{runtime().generating ? '生成中' : '就绪'}</span>
@@ -101,9 +292,19 @@ export function SolidControlCenter() {
         </span>
       }
       case 'model':
-        return <SolidModelWidget />
+        return <SolidModelWidget
+          draftValue={emptyVisual() ? modelId : undefined}
+          onDraftChange={emptyVisual() ? setModelId : undefined}
+          reasoningValue={reasoningLevel}
+          onReasoningChange={setReasoningLevel}
+          forceDropdown={emptyVisual()}
+        />
       case 'mode':
-        return <SolidModeWidget />
+        return <SolidModeWidget
+          draftValue={emptyVisual() ? mode : undefined}
+          onDraftChange={emptyVisual() ? setMode : undefined}
+          forceDropdown={emptyVisual()}
+        />
       case 'send':
         return <SolidSendWidget disabled={readonly()} />
       case 'attach':
@@ -219,7 +420,7 @@ export function SolidControlCenter() {
     </div>
   )}</For>
 
-  const commandHint = () => appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
+  const commandHint = () => input().sessionId && appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
     ? <div class="cc-command-hint" aria-label="输入快捷键提示">
       <span class="cc-command-hint-key">/: 命令</span>
       <span class="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
@@ -228,8 +429,11 @@ export function SolidControlCenter() {
     : null
 
   return <div
-    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}`}
+    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
+    role={!input().sessionId ? 'region' : undefined}
+    aria-label={!input().sessionId ? 'Agent 工作台空态' : undefined}
+    aria-busy={!input().sessionId ? submitting() : undefined}
     style={{
       '--cc-height': `${appearance().ccHeight}px`,
       '--cc-min-height': `${minHeight()}px`,

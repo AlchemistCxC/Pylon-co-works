@@ -4,6 +4,8 @@ import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, Wor
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
+import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
+import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
@@ -15,7 +17,9 @@ export interface WorkbenchDocumentReader {
 }
 
 export type WorkbenchGenerationSnapshot = Readonly<Pick<WorkbenchRuntimeSnapshot,
-  'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'thinkingStart' | 'tokenCount' | 'summary'>>
+  'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'thinkingStart' | 'tokenCount' | 'summary'> & {
+  generationActivity?: GenerationActivitySnapshot
+}>
 
 /** Session-scoped ephemeral state that cannot be reconstructed from persisted transcript rows. */
 export interface WorkbenchGenerationReader {
@@ -119,6 +123,8 @@ export interface WorkbenchHostPort {
   readonly commands: WorkbenchCommandPort
   readonly capabilities: WorkbenchCapabilityReader
   readonly diagnostics: RendererDiagnosticPort
+  /** Optional host-owned local/remote provider for input prediction. */
+  readonly predictionProvider?: InputPredictionProvider
 }
 
 export interface WorkbenchHostPortInput {
@@ -132,6 +138,7 @@ export interface WorkbenchHostPortInput {
   readonly sessionId: string | null
   readonly capabilities?: WorkbenchCapabilitySnapshot
   readonly diagnostics?: ((diagnostic: RendererDiagnosticContext) => void) | Pick<RendererDiagnosticPort, 'report'>
+  readonly predictionProvider?: InputPredictionProvider
   readonly renderAppearance?: {
     resolve(request: { readonly kind: string; readonly suiteId: string; readonly slotId: string }, host: WorkbenchAppearanceSnapshot): RenderAppearanceSnapshot
     subscribe(listener: () => void): () => void
@@ -166,6 +173,7 @@ function createGenerationReader(runtime: WorkbenchRuntime): WorkbenchGenerationR
       generationStart: snapshot.generationStart,
       lastTokenAt: snapshot.lastTokenAt,
       generationPhase: snapshot.generationPhase,
+      generationActivity: snapshot.generationActivity,
       thinkingStart: snapshot.thinkingStart,
       tokenCount: snapshot.tokenCount,
       summary: snapshot.summary,
@@ -296,6 +304,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
     commands: createCommandPort(input.commands, capabilities),
     capabilities,
     diagnostics: createDiagnosticPort(input),
+    predictionProvider: input.predictionProvider,
   })
 }
 

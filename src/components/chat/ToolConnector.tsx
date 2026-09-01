@@ -3,6 +3,7 @@ import { useStore } from '../../store'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../../domains/tool/toolPresentation'
 import { toolConnectorMotionClass } from './toolIndicatorMotion'
 import type { ToolVisualState } from '../../domains/tool/status.ts'
+import { useShallow } from 'zustand/react/shallow'
 
 /**
  * 连续 Tool 之间的连接线（真实 DOM 元素）。
@@ -15,14 +16,27 @@ function ToolConnector({ status, visualState = 'unknown' }: {
   status: ToolConnectorStatus
   visualState?: ToolVisualState
 }) {
-  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
-  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const toolOk = useStore(s => s.toolOk)
-  const toolRun = useStore(s => s.toolRun)
-  const toolErr = useStore(s => s.toolErr)
-  const connectorStyle = useStore(s => s.toolConnectorStyle)
-  const connectorWidth = useStore(s => s.toolConnectorWidth)
-  const connectorOpacity = useStore(s => s.toolConnectorOpacity)
+  const {
+    rawConnectorMode,
+    rawConnectorColor,
+    toolOk,
+    toolRun,
+    toolErr,
+    connectorStyle,
+    connectorWidth,
+    connectorOpacity,
+  } = useStore(useShallow(s => ({
+    rawConnectorMode: s.toolConnectorMode,
+    rawConnectorColor: s.toolConnectorColor,
+    toolOk: s.toolOk,
+    toolRun: s.toolRun,
+    toolErr: s.toolErr,
+    connectorStyle: s.toolConnectorStyle,
+    connectorWidth: s.toolConnectorWidth,
+    connectorOpacity: s.toolConnectorOpacity,
+  })))
+  const connectorMode = rawConnectorMode || 'none'
+  const connectorColor = rawConnectorColor || 'rgba(0,0,0,0.12)'
   const color = resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor)
   const style: React.CSSProperties = {
     background: color,

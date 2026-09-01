@@ -15,6 +15,11 @@ import { resolveToolSemantic } from '../../tool/toolRegistry.ts'
 import { resolveToolType } from '../../tool/toolResolution.ts'
 import { normalizePlanEntries } from '../plan/goalModel.ts'
 import type { WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
+import {
+  extractConfigOptionChoices,
+  extractConfigOptionId,
+  extractConfigOptionValue,
+} from '../../../infrastructure/acp/chatContracts.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
   id: 'acp',
@@ -37,7 +42,8 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
 }
 
 function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {
-  const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined
+  const sessionUpdate = typeof update.sessionUpdate === 'string' ? update.sessionUpdate
+    : typeof update.session_update === 'string' ? update.session_update : undefined
   const diagnostics: ReturnType<typeof createDiagnostic>[] = []
   const content = update.content
   const blocks = content !== undefined ? content : typeof update.text === 'string' ? { type: 'text', text: update.text } : undefined
@@ -56,7 +62,11 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'tool_call_update': {
       const status = typeof update.status === 'string' ? update.status : 'in_progress'
       const type = status === 'completed' ? 'tool.completed' : status === 'failed' || status === 'error' ? 'tool.failed' : 'tool.progress'
-      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics: withToolNameDiagnostic(diagnostics, update, context) }
+      // Hermes completion updates intentionally omit the machine name; the
+      // projector merges them into the started card by toolCallId. Do not
+      // manufacture `unknown` here or a completion would overwrite the
+      // previously resolved skill/search identity.
+      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics }
     }
     case 'plan':
       // C08：entries 结构化收窄为五状态 PlanEntryV2（cancelled 不坍缩、未知状态保留 rawStatus），
@@ -91,18 +101,28 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
   const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
     ? pylonMeta.toolName.trim()
     : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
+  const hasMachineName = name !== 'unknown'
+  const updateKind = typeof update.sessionUpdate === 'string'
+    ? update.sessionUpdate
+    : typeof update.session_update === 'string' ? update.session_update : undefined
+  const omitMissingUpdateIdentity = updateKind === 'tool_call_update' && !hasMachineName
   const providerName = typeof update.name === 'string' && update.name.trim() ? update.name.trim() : name
   const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
   const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
     provider: context.provider,
     generation: context.toolGeneration,
   })
-  const normalizedInput = update.input !== undefined ? update.input : update.rawInput
+  const normalizedInput = update.input !== undefined ? update.input
+    : update.rawInput !== undefined ? update.rawInput
+      : update.raw_input !== undefined ? update.raw_input
+        : update.args !== undefined ? update.args
+          : update.arguments !== undefined ? update.arguments
+            : update.parameters
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
-    name: name,
-    providerName,
-    canonicalName: semantic?.name ?? resolution.canonicalName,
+    ...(!omitMissingUpdateIdentity ? { name } : {}),
+    ...(!omitMissingUpdateIdentity ? { providerName } : {}),
+    ...(!omitMissingUpdateIdentity ? { canonicalName: semantic?.name ?? resolution.canonicalName } : {}),
     kind: resolution.kind,
     action: resolution.action,
     semanticKind: `tool.${resolution.kind}`,
@@ -110,8 +130,8 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
     ...(typeof update.title === 'string' ? { title: update.title } : {}),
     ...(resolution.capabilities ? { capabilities: toJsonValue(resolution.capabilities) } : {}),
     ...(normalizedInput !== undefined ? { input: toJsonValue(normalizedInput) } : {}),
-    ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : {}),
-    ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : {}),
+    ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : update.raw_input !== undefined ? { rawInput: toJsonValue(update.raw_input) } : {}),
+    ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : update.raw_output !== undefined ? { rawOutput: toJsonValue(update.raw_output) } : {}),
     ...(Array.isArray(update.locations) ? { locations: toJsonValue(update.locations) } : {}),
     ...(update.progress !== undefined ? { progress: toJsonValue(update.progress) } : {}),
     ...(typeof update.durationMs === 'number' && Number.isFinite(update.durationMs) && update.durationMs >= 0
@@ -173,30 +193,45 @@ function normalizeAvailableCommands(value: unknown): readonly JsonValue[] {
 }
 
 function normalizeConfigOptions(update: Record<string, unknown>): readonly JsonValue[] {
-  const values = Array.isArray(update.configOptions) ? update.configOptions : [update]
+  const values = Array.isArray(update.configOptions)
+    ? update.configOptions
+    : Array.isArray(update.config_options)
+      ? update.config_options
+      : [update]
   return values.map((item, index) => {
     if (!isRecord(item)) return toJsonValue(item)
-    const id = stringField(item.id ?? item.key ?? item.name) ?? `unknown-option-${index}`
-    const choices = item.options ?? item.choices ?? item.values ?? item.available
-    const value = item.currentValue ?? item.value ?? item.current ?? item.selected ?? null
-    const valueType = stringField(item.valueType ?? item.type)
+    const id = extractConfigOptionId(item) ?? `unknown-option-${index}`
+    const choices = extractConfigOptionChoices(item)
+    const hasValue = hasWireField(item, [
+      'currentValue', 'current_value', 'value', 'current', 'selected',
+      'selectedValue', 'selected_value', 'defaultValue', 'default_value',
+    ])
+    const value = hasValue ? extractConfigOptionValue(item) ?? null : null
+    const valueType = stringField(wireField(item, ['valueType', 'value_type', 'type']))
     const editable = (typeof item.editable === 'boolean' ? item.editable : item.readOnly !== true)
       && isAcpWritableConfigValue(valueType, value)
-    const unknown = unknownWireFields(item, ['id', 'key', 'name', 'label', 'currentValue', 'value', 'current', 'selected', 'valueType', 'type', 'editable', 'readOnly', 'options', 'choices', 'values', 'available', 'schema', 'version', 'capability', 'raw'])
+      && item.readonly !== true && item.read_only !== true
+    const unknown = unknownWireFields(item, [
+      'id', 'key', 'configId', 'config_id', 'optionId', 'option_id', 'name', 'label', 'title', 'description', 'category',
+      'currentValue', 'current_value', 'value', 'current', 'selected', 'selectedValue', 'selected_value', 'defaultValue', 'default_value',
+      'valueType', 'value_type', 'type', 'editable', 'readOnly', 'readonly', 'read_only',
+      'options', 'choices', 'values', 'available', 'items', 'schema', 'version', 'capability', 'raw',
+    ])
     const retainedRaw = {
       ...(isRecord(item.raw) ? item.raw : {}),
-      ...(!isAcpWritableConfigValue(valueType, value) ? { value, ...(valueType ? { valueType } : {}) } : {}),
+      ...(!isAcpWritableConfigValue(valueType, value) && hasValue ? { value, ...(valueType ? { valueType } : {}) } : {}),
       ...unknown,
     }
+    const schema = wireField(item, ['schema'])
     return toJsonValue({
       id,
-      label: stringField(item.label ?? item.name) ?? id,
-      ...(['currentValue', 'value', 'current', 'selected'].some(key => key in item)
+      label: stringField(wireField(item, ['label', 'name', 'title'])) ?? id,
+      ...(hasValue
         ? { value } : {}),
       ...(valueType ? { valueType } : {}),
       editable,
-      ...(choices !== undefined ? { schema: { options: choices } } : item.schema !== undefined ? { schema: item.schema } : {}),
-      ...(finiteNonNegative(item.version) !== undefined ? { version: item.version } : {}),
+      ...(choices.length > 0 ? { schema: { options: choices } } : schema !== undefined ? { schema } : {}),
+      ...(finiteNonNegative(wireField(item, ['version'])) !== undefined ? { version: wireField(item, ['version']) } : {}),
       ...(stringField(item.capability) ? { capability: item.capability } : {}),
       ...(Object.keys(retainedRaw).length > 0 ? { raw: retainedRaw } : {}),
     })
@@ -204,9 +239,27 @@ function normalizeConfigOptions(update: Record<string, unknown>): readonly JsonV
 }
 
 function isAcpWritableConfigValue(valueType: string | undefined, value: unknown): boolean {
-  return valueType === 'boolean' ? typeof value === 'boolean'
-    : valueType === 'select' ? typeof value === 'string'
+  const type = valueType?.toLowerCase()
+  return type === 'boolean' || type === 'bool' ? typeof value === 'boolean'
+    : type === 'select' || type === 'enum' ? typeof value === 'string'
       : false
+}
+
+function normalizedWireKey(key: string): string {
+  return key.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
+}
+
+function wireField(record: Record<string, unknown>, keys: readonly string[]): unknown {
+  const wanted = new Set(keys.map(normalizedWireKey))
+  for (const [key, value] of Object.entries(record)) {
+    if (wanted.has(normalizedWireKey(key))) return value
+  }
+  return undefined
+}
+
+function hasWireField(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  const wanted = new Set(keys.map(normalizedWireKey))
+  return Object.keys(record).some(key => wanted.has(normalizedWireKey(key)))
 }
 
 function unknownWireFields(value: Record<string, unknown>, known: readonly string[]): Record<string, unknown> {

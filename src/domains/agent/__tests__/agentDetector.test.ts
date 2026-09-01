@@ -6,6 +6,7 @@ describe('agent detector DTO', () => {
     const candidates = normalizeAgentRuntimeCandidates([null, { candidateId: 'peri:c', detectorId: 'builtin.detector.peri', provider: 'peri', suggestedAgentId: 'peri', name: 'Peri', executable: 'C:/peri.exe', args: [], evidence: [{ kind: 'path', detail: 'C:/peri.exe' }], identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [], alreadyImportedAgentId: 'peri' }])
     expect(candidates).toHaveLength(1)
     expect(candidates[0].alreadyImportedAgentId).toBe('peri')
+    expect(candidates[0].startability).toBe('not_tested')
   })
 
   it('publishes only verified native ACP detector families', () => {
@@ -40,7 +41,7 @@ describe('agent detector DTO', () => {
       elapsedMs: 101,
       truncated: false,
     })).toEqual({
-      candidates: [expect.objectContaining({ identityConfidence: 'high', protocolAvailability: 'not_tested' })],
+      candidates: [expect.objectContaining({ identityConfidence: 'high', startability: 'not_tested', protocolAvailability: 'not_tested' })],
       diagnostics: [{ code: 'version_probe_timeout', stage: 'version_probe', detectorId: 'fixture', message: 'timeout', retryable: true }],
       elapsedMs: 101,
       truncated: false,

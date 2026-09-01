@@ -22,6 +22,8 @@
 
 use super::*;
 
+use std::path::Path;
+
 use crate::acp::AcpClient;
 use crate::acp::{AcpWireHub, WireIdKind, WireRecord};
 use crate::agent_config::AgentDef;
@@ -91,7 +93,7 @@ fn invalid_params(session: &str) -> String {
 
 /// 构造 fake ACP agent（provider 由参数决定——peri/hermes 注册同名适配器；
 /// trace 路径进 argv[1]）。
-fn fake_provider_agent(name: &str, script: &str, trace_path: &PathBuf, provider: &str) -> AgentDef {
+fn fake_provider_agent(name: &str, script: &str, trace_path: &Path, provider: &str) -> AgentDef {
     let mut agent = crate::test_utils::fake_acp_agent_with(
         name,
         script,

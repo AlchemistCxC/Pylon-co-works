@@ -71,7 +71,10 @@ export function useScrollFollow(
   useEffect(() => {
     if (!bottomRef.current) return
     if (!shouldAutoScroll(scrollFollowRef.current)) return
-    scrollToBottomRef.current?.()
+    // Streaming updates arrive every token; smooth scrolling on each tick
+    // stacks animations and causes a visible flicker when the stream settles.
+    // User-invoked scrolls still use the smooth default below.
+    scrollToBottomRef.current?.('auto')
   }, [messages, generating, streamingText, streamingThinking])
 
   return { bottomRef, scrollToBottomRef }

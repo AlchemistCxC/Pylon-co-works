@@ -1098,11 +1098,11 @@ pub(crate) async fn plugin_package_list(
 }
 
 fn list_installed_at(root: &Path) -> Result<Vec<InstalledPluginPackage>, PluginError> {
-    let state = read_state(&root)?;
+    let state = read_state(root)?;
     let mut result = Vec::new();
     for (plugin_id, package_instance_id) in &state.active_versions {
         result.push(InstalledPluginPackage {
-            package: describe_installed(&root, plugin_id, package_instance_id, true)?,
+            package: describe_installed(root, plugin_id, package_instance_id, true)?,
             enabled: !state.disabled.contains(plugin_id),
         });
     }
@@ -1125,7 +1125,7 @@ pub(crate) async fn plugin_package_set_enabled(
 
 fn set_enabled_at(root: &Path, plugin_id: &str, enabled: bool) -> Result<(), PluginError> {
     validate_plugin_id(plugin_id)?;
-    let mut state = read_state(&root)?;
+    let mut state = read_state(root)?;
     if !state.active_versions.contains_key(plugin_id) {
         return Err(PluginError::NotFound(plugin_id.into()));
     }
@@ -1134,7 +1134,7 @@ fn set_enabled_at(root: &Path, plugin_id: &str, enabled: bool) -> Result<(), Plu
     } else if !state.disabled.iter().any(|id| id == plugin_id) {
         state.disabled.push(plugin_id.into());
     }
-    write_state(&root, &state)?;
+    write_state(root, &state)?;
     Ok(())
 }
 

@@ -18,6 +18,8 @@ import {
   SECTION_OWNERS,
   PAGE_OWNED_SECTIONS,
   isPageOwnedSection,
+  normalizeSettingsIntent,
+  buildSettingsSearchIndex,
 } from '../settingsDomains'
 import { ZONES } from '../themeFieldDefs'
 
@@ -28,7 +30,7 @@ const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
   // 工作区
   'window', 'pet', 'history', 'backup',
   // Agent 与连接
-  'agent', 'session', 'gateway',
+  'agent', 'session', 'gateway', 'prediction',
   // 插件
   'pluginManager',
 ]
@@ -43,7 +45,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(SETTINGS_DOMAINS.map(d => d.sections)).toEqual([
       ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'],
       ['window', 'pet', 'history', 'backup'],
-      ['agent', 'session', 'gateway'],
+      ['agent', 'session', 'gateway', 'prediction'],
       ['pluginManager'],
     ])
   })
@@ -72,6 +74,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(domainOfSection('history')).toBe('workspace')
     expect(domainOfSection('agent')).toBe('agents-connections')
     expect(domainOfSection('gateway')).toBe('agents-connections')
+    expect(domainOfSection('prediction')).toBe('agents-connections')
     expect(domainOfSection('pluginManager')).toBe('plugins')
   })
 
@@ -93,6 +96,70 @@ describe('ISSUE-13 W1 搜索路径', () => {
     for (const domain of SETTINGS_DOMAINS) {
       expect(SETTINGS_DOMAIN_BY_ID[domain.id]).toBe(domain)
     }
+  })
+})
+
+describe('P6 Slice A 设置意图归一化', () => {
+  it('旧 renderer/suite 深链落到外观 › 渲染器', () => {
+    expect(normalizeSettingsIntent({ domain: 'renderer', section: 'suite' })).toEqual({
+      domain: 'appearance', section: 'renderers',
+    })
+  })
+
+  it('旧 section 别名映射到 canonical section，并以 section 归属校正 domain', () => {
+    expect(normalizeSettingsIntent({ domain: 'workspace', section: 'conversation' })).toEqual({
+      domain: 'appearance', section: 'chat',
+    })
+    expect(normalizeSettingsIntent({ domain: 'wrong', section: 'gateway' })).toEqual({
+      domain: 'agents-connections', section: 'gateway',
+    })
+  })
+
+  it('插件贡献页保留 page id，同时使用插件管理作为宿主 section', () => {
+    expect(normalizeSettingsIntent({ domain: 'plugins', section: 'plugin.example.settings', agentId: 'peri' })).toEqual({
+      domain: 'plugins', section: 'pluginManager', pluginPageId: 'plugin.example.settings', agentId: 'peri',
+    })
+  })
+
+  it('未知入口回退到全局设置，不进入空白页', () => {
+    expect(normalizeSettingsIntent({ domain: 'missing', section: 'missing' })).toEqual({
+      domain: 'appearance', section: 'global',
+    })
+  })
+})
+
+describe('P6 Slice C 贡献注册表搜索投影', () => {
+  it('插件设置页进入全局速搜，并保留可恢复的 page id', () => {
+    const item = buildSettingsSearchIndex(undefined, [{
+      contributionId: 'plugin.example.settings',
+      value: { label: '示例插件设置', description: '说明' },
+    }]).find(candidate => candidate.pluginPageId === 'plugin.example.settings')
+    expect(item).toMatchObject({
+      path: '插件 › 插件管理',
+      label: '示例插件设置',
+      section: 'pluginManager',
+      kind: 'plugin-page',
+      pluginPageId: 'plugin.example.settings',
+    })
+  })
+
+  it('右栏插件可贡献设置入口并归入外观 › 右栏', () => {
+    const item = buildSettingsSearchIndex(undefined, undefined, [{
+      contributionId: 'plugin.context.files',
+      value: { label: '文件面板', settings: { id: 'files-settings', label: '文件面板设置', section: 'right' } },
+    }]).find(candidate => candidate.contextPanelId === 'plugin.context.files')
+    expect(item).toMatchObject({
+      path: '外观 › 右栏',
+      label: '文件面板设置',
+      section: 'right',
+      kind: 'context-panel',
+      contextPanelId: 'plugin.context.files',
+    })
+    const linked = buildSettingsSearchIndex(undefined, undefined, [{
+      contributionId: 'plugin.context.files',
+      value: { label: '文件面板', settings: { id: 'files-settings', label: '文件面板设置', pageId: 'plugin.context.files.settings' } },
+    }]).find(candidate => candidate.pluginPageId === 'plugin.context.files.settings')
+    expect(linked?.kind).toBe('plugin-page')
   })
 })
 

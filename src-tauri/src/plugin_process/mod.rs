@@ -35,33 +35,27 @@ pub(crate) enum ProcessStatus {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 enum ProcessProtocol {
     Raw,
     Lines,
     JsonLines,
+    #[default]
     JsonRpc,
     Http,
 }
 
-impl Default for ProcessProtocol {
-    fn default() -> Self {
-        Self::JsonRpc
-    }
-}
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 enum RestartPolicy {
+    #[default]
     Never,
     OnFailure,
     Always,
 }
 
-impl Default for RestartPolicy {
-    fn default() -> Self {
-        Self::Never
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,18 +84,15 @@ impl Default for RestartOptions {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 enum ShutdownMethod {
+    #[default]
     Stdin,
     JsonRpc,
     Signal,
     Kill,
 }
 
-impl Default for ShutdownMethod {
-    fn default() -> Self {
-        Self::Stdin
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

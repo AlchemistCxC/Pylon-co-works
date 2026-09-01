@@ -28,22 +28,51 @@ const NO_HIDDEN_IDS: readonly string[] = []
 
 // Widget registry 位于 cc/widgetRegistry.tsx，供中控画布、工具栏和后续 Preview 共用。
 export default function ControlCenter({ sessionId }: Props) {
-  const ccHeight = useStore(s => s.ccHeight) || 120
-  const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
-  const inputMode = useStore(s => s.inputMode)
-  const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
-  const hidden = useStore(s => s.ccHidden ?? NO_HIDDEN_IDS)
-  const ccStyle = useStore(s => s.ccStyle)
-  const layout = useStore(s => s.ccLayout)
-  const editMode = useStore(s => s.ccEditMode)
-  const ccVariant = useStore(s => s.ccVariant) || 'terminal'
-  const cliHintMode = useStore(s => s.cliHintMode || 'full')
-  const footerLayout = useStore(s => s.footerLayout || 'free')
-  const cliOverflowMode = useStore(s => s.cliOverflowMode || 'fixed-scroll')
-  const ccBg = useStore(s => s.ccBg) || 'transparent'
-  const ccBgImage = useStore(s => s.ccBgImage) || ''
-  const setCcEditMode = useStore(s => s.setCcEditMode)
-  const setCcHeight = useStore(s => s.setCcHeight)
+  const {
+    rawCcHeight,
+    rawCcBgHeight,
+    inputMode,
+    rawSubmitButtonMode,
+    rawHidden,
+    ccStyle,
+    layout,
+    editMode,
+    rawCcVariant,
+    rawCliHintMode,
+    rawFooterLayout,
+    rawCliOverflowMode,
+    rawCcBg,
+    rawCcBgImage,
+    setCcEditMode,
+    setCcHeight,
+  } = useStore(useShallow(s => ({
+    rawCcHeight: s.ccHeight,
+    rawCcBgHeight: s.ccBgHeight,
+    inputMode: s.inputMode,
+    rawSubmitButtonMode: s.inputSubmitButtonMode,
+    rawHidden: s.ccHidden,
+    ccStyle: s.ccStyle,
+    layout: s.ccLayout,
+    editMode: s.ccEditMode,
+    rawCcVariant: s.ccVariant,
+    rawCliHintMode: s.cliHintMode,
+    rawFooterLayout: s.footerLayout,
+    rawCliOverflowMode: s.cliOverflowMode,
+    rawCcBg: s.ccBg,
+    rawCcBgImage: s.ccBgImage,
+    setCcEditMode: s.setCcEditMode,
+    setCcHeight: s.setCcHeight,
+  })))
+  const ccHeight = rawCcHeight || 120
+  const ccBgHeight = rawCcBgHeight ?? ccHeight
+  const submitButtonMode = rawSubmitButtonMode || 'inline'
+  const hidden = rawHidden ?? NO_HIDDEN_IDS
+  const ccVariant = rawCcVariant || 'terminal'
+  const cliHintMode = rawCliHintMode || 'full'
+  const footerLayout = rawFooterLayout || 'free'
+  const cliOverflowMode = rawCliOverflowMode || 'fixed-scroll'
+  const ccBg = rawCcBg || 'transparent'
+  const ccBgImage = rawCcBgImage || ''
   const hintId = useId()
   const presentationProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const inputHintId = inputMode === 'cli' && cliHintMode !== 'hidden' ? hintId : undefined

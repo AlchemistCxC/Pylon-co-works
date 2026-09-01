@@ -5,7 +5,7 @@ import type { ContextPanelContribution } from './contextPanelTypes.ts'
 
 function validateContribution(contribution: ContextPanelContribution): ContextPanelContribution {
   if (!contribution.id || contribution.id !== contribution.id.trim()) throw new Error('Context panel contribution id 非法')
-  if (!contribution.workspaceKind.trim()) throw new Error(`Context panel workspaceKind 不能为空：${contribution.id}`)
+  if (contribution.scope !== 'global' && !contribution.workspaceKind?.trim()) throw new Error(`Context panel workspaceKind 不能为空：${contribution.id}`)
   if (!contribution.label.trim()) throw new Error(`Context panel label 不能为空：${contribution.id}`)
   if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
     throw new Error(`Context panel first-party component 非法：${contribution.id}`)
@@ -32,6 +32,6 @@ export class ContextPanelRegistry {
   getSnapshot(): RegistrySnapshot<ContextPanelContribution> { return this.registry.getSnapshot() }
 
   hasForWorkspace(workspaceKind: string): boolean {
-    return this.registry.getSnapshot().entries.some(entry => entry.value.workspaceKind === workspaceKind)
+    return this.registry.getSnapshot().entries.some(entry => entry.value.scope === 'global' || entry.value.workspaceKind === workspaceKind)
   }
 }

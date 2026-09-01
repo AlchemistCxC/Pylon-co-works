@@ -167,6 +167,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     <>
       <DispatchBar
         targetSource={target?.source ?? null}
+        targetSessionId={target?.sessionId ?? null}
         context={context}
         filePath={tab.path}
         selection={selection}

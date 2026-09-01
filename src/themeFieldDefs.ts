@@ -116,21 +116,21 @@ export const THEME_FIELD_DEFS = {
   showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hint: '隐藏工作区标签栏、左侧栏和宠物，可得到只保留聊天内容的单栏视图' },
 
   // ── sidebar ──
-  sidebarBg: { ...C('sidebar', '背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
-  sidebarBgImage: { ...T('sidebar', '背景图'), default: '', control: 'bgImage', group: "背景", },
+  sidebarBg: { ...C('sidebar', '侧栏背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
+  sidebarBgImage: { ...T('sidebar', '侧栏背景图'), default: '', control: 'bgImage', group: "背景", },
   sidebarWidth: { ...N('sidebar', '左栏宽度', 160, 400), default: 250, group: "布局", unit: 'px' },
-  sidebarTransparency: { ...N('sidebar', '背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
-  sidebarBlur: { ...N('sidebar', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
+  sidebarTransparency: { ...N('sidebar', '侧栏背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
+  sidebarBlur: { ...N('sidebar', '侧栏模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
   sidebarTextColor: { ...C('sidebar', '文字颜色'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "文字", semanticRole: 'content.text' },
   sidebarNameSize: { ...N('sidebar', '会话名称字号', 11, 20), tier: 'basic', default: 14, group: "文字", unit: 'px' },
   // W2-10：侧栏平铺后无分组——字段保留兼容预设，不再注入 cssVar（防死注入）
   sidebarGroupSize: { ...N('sidebar', '分组标题字号', 10, 16), default: 12, group: "文字", unit: 'px', noCssVar: true, hidden: true },
 
   // ── chat ──
-  chatBg: { ...C('chat', '背景色'), default: '', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
-  chatBgImage: { ...T('chat', '背景图'), default: '', control: 'bgImage', group: "背景", },
-  chatTransparency: { ...N('chat', '背景不透明度', 0, 1, 0.05), default: 1, group: "背景", percent: true, suffix: '%' },
-  chatBlur: { ...N('chat', '模糊', 0, 40, 2), default: 0, group: "背景", unit: 'px', suffix: 'px' },
+  chatBg: { ...C('chat', '消息流背景色'), default: '', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
+  chatBgImage: { ...T('chat', '消息流背景图'), default: '', control: 'bgImage', group: "背景", },
+  chatTransparency: { ...N('chat', '消息流背景不透明度', 0, 1, 0.05), default: 1, group: "背景", percent: true, suffix: '%' },
+  chatBlur: { ...N('chat', '消息流模糊', 0, 40, 2), default: 0, group: "背景", unit: 'px', suffix: 'px' },
   chatFont: { ...S('chat', '聊天区字体', ['mono', 'system', 'serif']), optionLabels: {
     mono: '终端等宽体', system: '系统无衬线', serif: '阅读衬线',
   }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: '智能体聊天主区域使用的字体；代码块始终使用等宽体' },
@@ -298,9 +298,10 @@ export const THEME_FIELD_DEFS = {
   rightBg: { ...C('right', '右栏背景色'), default: 'rgba(0,0,0,0.02)', group: "外观", semanticRole: 'surface.panel', semanticSource: true },
   rightBgImage: { ...T('right', '右栏背景图'), default: '', control: 'bgImage', group: "外观" },
   // W2-12：宽度经 App 计算 rightInset inline 应用，不注入 cssVar
-  rightWidth: { ...N('right', '右栏宽度', 200, 400), default: 260, group: "外观", unit: 'px', noCssVar: true },
-  rightTransparency: { ...N('right', '背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
-  rightBlur: { ...N('right', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
+  // 已迁移到应用级 rightRailStore；保留字段仅供旧主题读取，不再在设置页渲染。
+  rightWidth: { ...N('right', '右栏宽度', 200, 400), default: 260, group: "外观", unit: 'px', noCssVar: true, hidden: true, hint: '已迁移到标题栏右侧栏的拖拽布局' },
+  rightTransparency: { ...N('right', '右栏背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
+  rightBlur: { ...N('right', '右栏模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
 
   // ── META（持久化但非预设内容）──
   ccEditMode: { default: false, type: 'text', label: '编辑模式', zone: 'cc', noCssVar: true, hidden: true, meta: true },

@@ -6,7 +6,9 @@
 //! 内部初始化用 about:blank）。缩放属于 Browser Sheet，新标签继承当前值。
 
 use serde::Serialize;
+use serde_json::Value;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::Emitter;
 
 pub(crate) const BROWSER_WEBVIEW_LABEL_PREFIX: &str = "pylon-browser";
@@ -14,6 +16,41 @@ pub(crate) const BROWSER_INITIAL_URL: &str = "about:blank";
 pub(crate) const BROWSER_DEFAULT_ZOOM_PERCENT: u16 = 90;
 pub(crate) const BROWSER_MIN_ZOOM_PERCENT: u16 = 50;
 pub(crate) const BROWSER_MAX_ZOOM_PERCENT: u16 = 200;
+
+/// 统一 Browser Sheet 的“链接进内部新标签”语义。
+///
+/// Tauri 的 `on_new_window` 主要覆盖 `window.open`，而 WebView2 对普通锚点的
+/// `target="_blank"` 在不同版本上触发路径并不完全一致。这个初始化脚本把锚点
+/// 明确转成 `window.open`，再由下方的新窗口回调创建内部标签，不把链接丢给系统浏览器。
+const LINK_TARGET_INTERCEPT_SCRIPT: &str = r#"
+(() => {
+  const marker = '__PYLON_BROWSER_LINK_BRIDGE__';
+  if (window[marker]) return;
+  window[marker] = true;
+  document.addEventListener('click', event => {
+    if (event.defaultPrevented || (typeof event.button === 'number' && event.button !== 0 && event.button !== 1)) return;
+    const origin = event.target;
+    const element = origin instanceof Element ? origin.closest('a[href]') : null;
+    if (!element) return;
+    const href = element.href;
+    const target = element.getAttribute('target');
+    const rawHref = (element.getAttribute('href') || '').trim();
+    // Browser Sheet 的链接策略：普通 HTTP(S) 链接也进入内部新标签；
+    // 只有显式 `_self` 或同文档 hash 跳转留在当前页面，避免误打断页内目录。
+    let destination;
+    try { destination = new URL(href, window.location.href); } catch (_) { return; }
+    const sameDocument = rawHref.startsWith('#') || (destination.origin === window.location.origin
+      && destination.pathname === window.location.pathname
+      && destination.search === window.location.search
+      && Boolean(destination.hash));
+    const opensTab = (target || '').toLowerCase() !== '_self' && !sameDocument;
+    if (!opensTab || !/^https?:$/i.test(destination.protocol) || element.hasAttribute('download')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.open(destination.href, '_blank', 'noopener');
+  }, true);
+})();
+"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BrowserPhase {
@@ -54,6 +91,8 @@ pub(crate) struct BrowserSnapshot {
     pub(crate) zoom_percent: u16,
     pub(crate) active_tab_id: Option<u64>,
     pub(crate) tabs: Vec<BrowserTabSnapshot>,
+    /// 原生子 WebView 是否处于可见态；非活动 Sheet keep-alive 时为 false。
+    pub(crate) visible: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, serde::Deserialize)]
@@ -87,6 +126,10 @@ struct BrowserInner {
     bounds: Option<BrowserBounds>,
     window: Option<tauri::Window>,
     app: Option<tauri::AppHandle>,
+    /// Sheet 生命周期闸门：关闭 Sheet 后，已排队的 new-window 回调不得复活标签。
+    accept_new_windows: bool,
+    /// Browser Sheet 是否位于活动主区。子 WebView 是原生层，不能依赖父 DOM 隐藏。
+    visible: bool,
 }
 
 struct BrowserTab {
@@ -109,6 +152,8 @@ impl BrowserManager {
                 bounds: None,
                 window: None,
                 app: None,
+                accept_new_windows: false,
+                visible: true,
             }),
         }
     }
@@ -146,6 +191,7 @@ impl BrowserManager {
                     title: tab.title.clone(),
                 })
                 .collect(),
+            visible: inner.visible,
         }
     }
 
@@ -175,18 +221,21 @@ impl BrowserManager {
         {
             let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
             inner.bounds = Some(bounds);
+            inner.accept_new_windows = true;
             if !inner.tabs.is_empty() || inner.phase == BrowserPhase::Starting {
                 return Ok(Self::build_snapshot(&inner));
             }
         }
-        self.create_tab(BROWSER_INITIAL_URL)
+        self.open_tab(BROWSER_INITIAL_URL)
     }
 
     pub(crate) fn new_tab(self: &Arc<Self>) -> Result<BrowserSnapshot, String> {
-        self.create_tab(BROWSER_INITIAL_URL)
+        self.open_tab(BROWSER_INITIAL_URL)
     }
 
-    fn create_tab(self: &Arc<Self>, initial_url: &str) -> Result<BrowserSnapshot, String> {
+    /// 创建并激活一个指定 URL 的内部标签。链接回调和 Agent open-tab 共用此路径，
+    /// 避免“先建空标签、再异步导航”造成活动标签/地址事件短暂错位。
+    pub(crate) fn open_tab(self: &Arc<Self>, initial_url: &str) -> Result<BrowserSnapshot, String> {
         let parsed = url::Url::parse(initial_url).map_err(|e| format!("URL 非法: {e}"))?;
         if !is_allowed_browser_url(&parsed) {
             return Err(format!(
@@ -203,6 +252,9 @@ impl BrowserManager {
         let bounds = inner
             .bounds
             .ok_or_else(|| "browser bounds 未注册（请先启动 Browser Sheet）".to_string())?;
+        if !inner.accept_new_windows {
+            return Err("浏览器会话已关闭（请先启动 Browser Sheet）".to_string());
+        }
         inner.next_tab_id += 1;
         let tab_id = inner.next_tab_id;
         if inner.tabs.is_empty() {
@@ -212,15 +264,29 @@ impl BrowserManager {
 
         let page_this = self.clone();
         let new_window_this = self.clone();
+        let new_window_app = inner
+            .app
+            .clone()
+            .ok_or_else(|| "browser host 未注册（setup 未注入主窗口）".to_string())?;
         let builder = tauri::WebviewBuilder::new(
             format!("{BROWSER_WEBVIEW_LABEL_PREFIX}-{tab_id}"),
             tauri::WebviewUrl::External(parsed),
         )
+        .initialization_script(LINK_TARGET_INTERCEPT_SCRIPT)
         .on_navigation(is_allowed_browser_url)
         .on_new_window(move |url, _features| {
             if is_allowed_browser_url(&url) {
-                if let Err(error) = new_window_this.create_tab(url.as_str()) {
-                    tracing::warn!("browser 新窗口创建标签失败（{url}）: {error}");
+                // WebView2 回调通常不在 UI 主线程；add_child 必须排队到主线程，
+                // 否则 target=_blank 在部分系统上会被静默拒绝。
+                let manager = new_window_this.clone();
+                let requested = url.to_string();
+                if let Err(error) = new_window_app.run_on_main_thread(move || {
+                    if let Err(error) = manager.open_tab(&requested) {
+                        tracing::warn!("browser 新窗口创建标签失败（{requested}）: {error}");
+                        manager.emit_browser_error(format!("打开链接失败：{error}"));
+                    }
+                }) {
+                    tracing::warn!("browser 新窗口调度失败（{url}）: {error}");
                     new_window_this.emit_browser_error(format!("打开链接失败：{error}"));
                 }
             }
@@ -272,6 +338,11 @@ impl BrowserManager {
             .and_then(|id| inner.tabs.iter().find(|tab| tab.id == id))
         {
             let _ = active.webview.hide();
+        }
+        // add_child 创建的 WebView 默认可见；keep-alive 的非活动 Browser
+        // 需要在原生层同步隐藏，不能只依赖 React 父节点的 display:none。
+        if !inner.visible {
+            let _ = webview.hide();
         }
         inner.tabs.push(BrowserTab {
             id: tab_id,
@@ -362,6 +433,183 @@ impl BrowserManager {
         Ok(Self::build_snapshot(&inner))
     }
 
+    /// 读取当前活动页面的有限、脱敏快照，作为 Agent 浏览器接口的观察面。
+    /// 不导出 cookie/localStorage；只返回地址、标题、正文前 20k 字符和前 100 个链接。
+    pub(crate) async fn page_snapshot(&self) -> Result<Value, String> {
+        self.eval_json(
+            r#"(() => JSON.stringify({
+              url: window.location.href,
+              title: document.title || null,
+              text: (document.body?.innerText || '').slice(0, 20000),
+              links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map((element, index) => ({
+                index,
+                text: (element.innerText || element.getAttribute('aria-label') || '').trim().slice(0, 240),
+                href: element.href,
+                target: element.getAttribute('target') || null,
+              })),
+              scrollX: window.scrollX,
+              scrollY: window.scrollY,
+            }))()"#,
+        )
+        .await
+    }
+
+    /// 通过 CSS selector 或可见文本触发页面元素 click。
+    pub(crate) async fn click(
+        self: &Arc<Self>,
+        selector: Option<String>,
+        text: Option<String>,
+    ) -> Result<Value, String> {
+        let selector = serde_json::to_string(&selector).map_err(|e| e.to_string())?;
+        let text = serde_json::to_string(&text).map_err(|e| e.to_string())?;
+        let result = self.eval_json(&format!(
+            r#"(() => {{
+              const selector = {selector};
+              const needle = ({text} || '').trim().toLowerCase();
+              const candidates = Array.from(document.querySelectorAll('a,button,[role="button"],input,textarea,[contenteditable="true"]'));
+              let element = null;
+              if (selector) {{
+                try {{ element = document.querySelector(selector); }} catch (_) {{
+                  return JSON.stringify({{ ok: false, code: 'invalid_selector' }});
+                }}
+              }}
+              element = element
+                || (needle ? candidates.find(value => (value.innerText || value.getAttribute('aria-label') || value.value || '').trim().toLowerCase().includes(needle)) : null);
+              if (!element) return JSON.stringify({{ ok: false, code: 'element_not_found' }});
+              element.scrollIntoView({{ block: 'center', inline: 'nearest' }});
+              // Synthetic element.click() 不一定具备 user gesture，window.open 可能被
+              // popup blocker 吞掉。把普通 HTTP(S) 锚点交给 Rust manager 直接开内部标签；
+              // 非链接或显式当前页/同文档跳转仍保留页面自身 click 语义。
+              if (element.matches('a[href]')) {{
+                let destination;
+                try {{ destination = new URL(element.href, window.location.href); }} catch (_) {{ destination = null; }}
+                const rawHref = (element.getAttribute('href') || '').trim();
+                const sameDocument = rawHref.startsWith('#') || (destination
+                  && destination.origin === window.location.origin
+                  && destination.pathname === window.location.pathname
+                  && destination.search === window.location.search
+                  && Boolean(destination.hash));
+                const opensTab = destination
+                  && (element.getAttribute('target') || '').toLowerCase() !== '_self'
+                  && !sameDocument
+                  && /^https?:$/i.test(destination.protocol)
+                  && !element.hasAttribute('download');
+                if (opensTab) return JSON.stringify({{ ok: true, tag: 'a', text: (element.innerText || element.getAttribute('aria-label') || '').trim().slice(0, 240), href: destination.href, opensTab: true }});
+              }}
+              element.click();
+              return JSON.stringify({{ ok: true, tag: element.tagName.toLowerCase(), text: (element.innerText || element.getAttribute('aria-label') || '').trim().slice(0, 240), opensTab: false }});
+            }})()"#,
+            selector = selector,
+            text = text,
+        ))
+        .await?;
+        if result.get("opensTab").and_then(Value::as_bool) == Some(true) {
+            let href = result
+                .get("href")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "链接缺少有效 URL".to_string())?;
+            let snapshot = self.open_tab(href)?;
+            return Ok(serde_json::json!({
+                "ok": true,
+                "tag": "a",
+                "text": result.get("text").cloned().unwrap_or(Value::Null),
+                "href": href,
+                "openedTab": true,
+                "browser": snapshot,
+            }));
+        }
+        Ok(result)
+    }
+
+    /// 向当前焦点输入控件写入文本，并派发 input/change 事件。
+    pub(crate) async fn type_text(
+        &self,
+        text: String,
+        selector: Option<String>,
+    ) -> Result<Value, String> {
+        let text = serde_json::to_string(&text).map_err(|e| e.to_string())?;
+        let selector = serde_json::to_string(&selector).map_err(|e| e.to_string())?;
+        self.eval_json(&format!(
+            r#"(() => {{
+              const value = {text};
+              const selector = {selector};
+              const element = (selector ? document.querySelector(selector) : null) || document.activeElement;
+              if (!element || !('value' in element || element.isContentEditable)) return JSON.stringify({{ ok: false, code: 'input_not_found' }});
+              if (element.isContentEditable) element.textContent = value;
+              else {{
+                const prototype = Object.getPrototypeOf(element);
+                const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                if (setter) setter.call(element, value); else element.value = value;
+              }}
+              element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              element.dispatchEvent(new Event('change', {{ bubbles: true }}));
+              return JSON.stringify({{ ok: true }});
+            }})()"#,
+            text = text,
+            selector = selector,
+        ))
+        .await
+    }
+
+    /// 向当前焦点元素派发 keydown/keyup；页面框架可按正常键盘事件处理。
+    pub(crate) async fn press(&self, key: String) -> Result<Value, String> {
+        let key = serde_json::to_string(&key).map_err(|e| e.to_string())?;
+        self.eval_json(&format!(
+            r#"(() => {{
+              const key = {key};
+              const target = document.activeElement || document.body;
+              if (!target) return JSON.stringify({{ ok: false, code: 'document_not_ready' }});
+              target.dispatchEvent(new KeyboardEvent('keydown', {{ key, bubbles: true, cancelable: true }}));
+              target.dispatchEvent(new KeyboardEvent('keyup', {{ key, bubbles: true, cancelable: true }}));
+              return JSON.stringify({{ ok: true, key }});
+            }})()"#,
+            key = key,
+        ))
+        .await
+    }
+
+    /// 滚动活动页面，返回滚动后的坐标。
+    pub(crate) async fn scroll(&self, delta_x: i32, delta_y: i32) -> Result<Value, String> {
+        self.eval_json(&format!(
+            r#"(() => {{ window.scrollBy({delta_x}, {delta_y}); return JSON.stringify({{ ok: true, scrollX: window.scrollX, scrollY: window.scrollY }}); }})()"#,
+            delta_x = delta_x,
+            delta_y = delta_y,
+        ))
+        .await
+    }
+
+    async fn eval_json(&self, script: &str) -> Result<Value, String> {
+        let webview = {
+            let inner = self.inner.lock().map_err(|e| e.to_string())?;
+            Self::active_webview(&inner)?.clone()
+        };
+        let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
+        // Tauri 的 callback trait 是 `Fn`（理论上可能被调用多次），而 oneshot
+        // sender 只能消费一次；用一次性槽位保持 callback 可重复调用且不 panic。
+        let sender = Arc::new(Mutex::new(Some(sender)));
+        let sender_callback = sender.clone();
+        webview
+            .eval_with_callback(script.to_string(), move |raw| {
+                if let Ok(mut slot) = sender_callback.lock() {
+                    if let Some(sender) = slot.take() {
+                        let _ = sender.send(raw);
+                    }
+                }
+            })
+            .map_err(|e| format!("执行页面脚本失败: {e}"))?;
+        let raw = tokio::time::timeout(Duration::from_secs(5), receiver)
+            .await
+            .map_err(|_| "页面脚本响应超时".to_string())
+            .and_then(|result| result.map_err(|_| "页面脚本响应通道已关闭".to_string()))?;
+        let encoded: Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("页面脚本返回值非法: {e}"))?;
+        if let Value::String(value) = encoded {
+            serde_json::from_str(&value).map_err(|e| format!("页面脚本 JSON 非法: {e}"))
+        } else {
+            Ok(encoded)
+        }
+    }
+
     pub(crate) fn set_zoom(&self, zoom_percent: u16) -> Result<BrowserSnapshot, String> {
         if !(BROWSER_MIN_ZOOM_PERCENT..=BROWSER_MAX_ZOOM_PERCENT).contains(&zoom_percent) {
             return Err(format!(
@@ -431,11 +679,13 @@ impl BrowserManager {
                 .hide()
                 .map_err(|e| format!("隐藏浏览器标签失败: {e}"))?;
         }
-        if let Err(error) = next.show() {
-            if let Some(current) = current {
-                let _ = current.show();
+        if inner.visible {
+            if let Err(error) = next.show() {
+                if let Some(current) = current {
+                    let _ = current.show();
+                }
+                return Err(format!("显示浏览器标签失败: {error}"));
             }
-            return Err(format!("显示浏览器标签失败: {error}"));
         }
         inner.active_tab_id = Some(tab_id);
         inner.error = None;
@@ -461,9 +711,13 @@ impl BrowserManager {
             } else {
                 let next_index = index.min(inner.tabs.len() - 1);
                 let next = &inner.tabs[next_index];
-                next.webview
-                    .show()
-                    .map_err(|e| format!("显示浏览器标签失败: {e}"))?;
+                if inner.visible {
+                    next.webview
+                        .show()
+                        .map_err(|e| format!("显示浏览器标签失败: {e}"))?;
+                } else {
+                    let _ = next.webview.hide();
+                }
                 inner.active_tab_id = Some(next.id);
                 inner.phase = BrowserPhase::Ready;
             }
@@ -480,9 +734,35 @@ impl BrowserManager {
         for tab in inner.tabs.drain(..) {
             let _ = tab.webview.close();
         }
+        inner.accept_new_windows = false;
+        inner.bounds = None;
+        inner.visible = true;
         inner.phase = BrowserPhase::Idle;
         inner.active_tab_id = None;
         inner.error = None;
+        let snapshot = Self::build_snapshot(&inner);
+        self.emit_status(&inner);
+        Ok(snapshot)
+    }
+
+    /// 将所有标签切换到活动/隐藏状态。这个命令专门服务于 Browser Sheet
+    /// keep-alive：原生子 WebView 不会随 React 的 display:none 自动隐藏。
+    pub(crate) fn set_visible(&self, visible: bool) -> Result<BrowserSnapshot, String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.visible = visible;
+        let active_id = inner.active_tab_id;
+        for tab in &inner.tabs {
+            if visible && Some(tab.id) == active_id {
+                tab.webview
+                    .show()
+                    .map_err(|e| format!("显示浏览器标签失败: {e}"))?;
+            } else {
+                // 隐藏失败不应留下半可见的标签集合；与 select_tab 保持同一错误语义。
+                tab.webview
+                    .hide()
+                    .map_err(|e| format!("隐藏浏览器标签失败: {e}"))?;
+            }
+        }
         let snapshot = Self::build_snapshot(&inner);
         self.emit_status(&inner);
         Ok(snapshot)

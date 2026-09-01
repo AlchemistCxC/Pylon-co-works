@@ -14,6 +14,12 @@ import { reportRuntimeError } from '../../runtimeError.ts'
 export interface AgentWorkbenchSessionCreationContext {
   readonly agentId: string
   readonly workspaceMode: 'work' | 'chat'
+  /**
+   * Optional Solid Workbench projection seam.  The host receives the full ACP
+   * response before the newly-created Session is selected; implementations may
+   * buffer it until their session binding is ready.
+   */
+  readonly applySessionResponse?: (sessionId: string, response: unknown) => void
 }
 
 /** Host-owned creation transaction used by the Solid workbench. */
@@ -73,6 +79,7 @@ export async function createAgentWorkbenchSession(
     if (remoteId) useIdentityStore.getState().setSessionPeriId(session.id, remoteId)
     const owner = { agentId: session.agentId, source: session.source }
     applySessionStateResponse(owner, normalized)
+    context.applySessionResponse?.(session.id, normalized)
     useRuntimeStore.getState().setBindingGeneration(
       owner,
       useRuntimeStore.getState().agentStatuses[session.agentId]?.generation,

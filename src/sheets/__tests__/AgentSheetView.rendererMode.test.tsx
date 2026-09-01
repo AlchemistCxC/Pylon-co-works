@@ -66,17 +66,6 @@ afterAll(async () => {
   if (active) await getPluginRuntime().deactivate(active.key)
 })
 
-vi.mock('../../components/chat/ChatView.tsx', () => ({
-  default: (props: { sessionId: string | null; workspaceKind?: string; workspaceMode?: string; agentId?: string }) => (
-    <div
-      data-testid="chat-view-props"
-      data-session={props.sessionId ?? ''}
-      data-workspace-kind={props.workspaceKind ?? ''}
-      data-workspace-mode={props.workspaceMode ?? ''}
-      data-agent={props.agentId ?? ''}
-    />
-  ),
-}))
 vi.mock('../../components/ControlCenter.tsx', () => ({ default: () => null }))
 vi.mock('../../components/PetCompanion.tsx', () => ({ default: () => null }))
 
@@ -983,6 +972,7 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('canonical message parts 经 content.text Slot seam 消费且保留消息 role framing', async () => {
+    localStorage.clear()
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-content-slot', 'runtime'),
       {
@@ -994,25 +984,30 @@ describe('AgentSheetView renderer mode context', () => {
           mount(container) {
             const node = document.createElement('div')
             node.dataset.productionContentSlot = 'true'
-            node.textContent = `content slot: ${String((snapshot.payload as { text?: unknown }).text)}`
+            const initialText = String((snapshot.payload as { text?: unknown }).text)
+            node.textContent = `content slot: ${initialText}`
             container.append(node)
             return node
           },
-          update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+          update(handle, next) {
+            const nextText = String((next.payload as { text?: unknown }).text)
+            ;(handle as HTMLElement).textContent = `content slot: ${nextText}`
+          }, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
         }),
       },
     )
     try {
-      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      const slotCtx = { ...ctx, activeSession: 'content-slot-session', sessionSource: () => 'local:content-slot' }
+      useIdentityStore.setState({ sessions: [session('content-slot-session', 'local:content-slot')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={slotCtx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
-      publishPluginEvent(normalizeRawEvent(
+      const normalizedContentEvent = normalizeRawEvent(
         { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'part payload' } } },
-        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
-      ).event)
-
-      expect(await screen.findByText('content slot: part payload')).toBeTruthy()
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:content-slot' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      )
+      publishPluginEvent(normalizedContentEvent.event)
+      expect(await screen.findByText(/content slot:\s*part payload/, {}, { timeout: 5_000 })).toBeTruthy()
       expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
       await registration.dispose()
       await waitFor(() => expect(container.querySelector('[data-production-content-slot="true"]')).toBeNull())
@@ -1532,9 +1527,12 @@ describe('AgentSheetView renderer mode context', () => {
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' }, { timeout: 5_000 })
+    // Empty state reuses the production input bar.  Submitting the first
+    // prompt is the same Enter interaction as an active session; there is no
+    // separate "开始新会话" button anymore.
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' }, { timeout: 5_000 })
     fireEvent.input(prompt, { target: { value: '检查当前项目的测试状态' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', charCode: 13 })
 
     await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
     const sessionId = selectSession.mock.calls[0]?.[0]
@@ -1548,8 +1546,8 @@ describe('AgentSheetView renderer mode context', () => {
     }))
     const sendCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'send_message')
     expect(sendCall).toBeTruthy()
-    expect(vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]).toBeLessThan(
-      selectSession.mock.invocationCallOrder[0]!,
+    expect(selectSession.mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]!,
     )
   })
 
@@ -1570,11 +1568,10 @@ describe('AgentSheetView renderer mode context', () => {
     />)
 
     const workspace = await screen.findByRole('combobox', { name: '新会话工作区' }, { timeout: 5_000 })
-    const submit = screen.getByRole('button', { name: '开始新会话' })
     expect(workspace).toHaveValue('workspace-a')
-    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '修复构建' } })
-    expect(submit).toBeEnabled()
-    fireEvent.click(submit)
+    const prompt = screen.getByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '修复构建' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', charCode: 13 })
 
     await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
     const created = useIdentityStore.getState().sessions.find(item => item.id === selectSession.mock.calls[0]?.[0])

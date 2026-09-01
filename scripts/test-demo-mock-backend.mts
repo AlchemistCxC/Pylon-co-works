@@ -88,7 +88,8 @@ for (const cmd of ['send_message', 'switch_agent', 'set_approval_mode', 'close_s
 await mockInvokeCommand('update_agents_config', { expectedRevision: 'demo-config-1', config: {} })
 
 // 4. 诚实保留：browser_start（CDP 组）与未知命令 reject，message 含 not found
-await assert.rejects(mockInvokeCommand('browser_start', { lazy: true }), /not found/i, 'browser_start 不得 mock（待后端）')
+const browserStart = await mockInvokeCommand('browser_start', { lazy: true }) as { phase?: string }
+assert.equal(typeof browserStart.phase, 'string', 'browser_start 在演示后端返回可观察状态')
 await assert.rejects(mockInvokeCommand('totally_unknown_cmd'), /not found/i, '未知命令必须 reject')
 
 // 5. plugin:dialog|save 返回绝对路径（HistorySheet 导出预检可过）

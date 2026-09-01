@@ -52,13 +52,13 @@ export function extractUpdate(input: unknown): Record<string, unknown> | undefin
   const params = isRecord(input.params) ? input.params : undefined
   if (isRecord(params?.update)) return params.update
   if (isRecord(input.update)) return input.update
-  if (typeof input.sessionUpdate === 'string') return input
-  if (typeof params?.sessionUpdate === 'string') return params
+  if (typeof input.sessionUpdate === 'string' || typeof input.session_update === 'string') return input
+  if (typeof params?.sessionUpdate === 'string' || typeof params?.session_update === 'string') return params
   return undefined
 }
 
 export function wireKind(update: Record<string, unknown> | undefined): string {
-  const value = update?.sessionUpdate ?? update?.type
+  const value = update?.sessionUpdate ?? update?.session_update ?? update?.type
   return typeof value === 'string' && value.trim() ? value : 'malformed'
 }
 
@@ -131,7 +131,13 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
     part: createUnknownContentPart('malformed', raw),
     diagnostic: { code: 'content.malformed', message: 'content block is not an object', path: [] },
   }
-  const type = typeof raw.type === 'string' ? raw.type : typeof raw.kind === 'string' ? raw.kind : typeof raw.text === 'string' ? 'text' : 'unknown'
+  // ACP tool content is wrapped as `{ type: "content", content: { ... } }`.
+  // Unwrap that transport envelope before semantic classification; treating
+  // the wrapper as an unknown content kind loses every tool result block.
+  if (typeof raw.type === 'string' && ['content', 'tool_content', 'toolContent'].includes(raw.type)
+    && isRecord(raw.content)) return normalizeContentBlock(raw.content)
+  const rawType = typeof raw.type === 'string' ? raw.type : typeof raw.kind === 'string' ? raw.kind : typeof raw.text === 'string' ? 'text' : 'unknown'
+  const type = rawType.trim().replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
   switch (type) {
     case 'text':
       return typeof raw.text === 'string'
@@ -153,8 +159,16 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return isNonEmptyContentLocation(resource.uri) ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { hasBlob: true } : {}), ...(typeof resource.title === 'string' ? { title: resource.title } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
     }
     // C05：搜索结果逐条收窄为 provider-neutral snapshot；provider 私有字段不越过 seam。
-    case 'search_result': {
-      const sourceResults = Array.isArray(raw.results) ? raw.results : []
+    case 'search_result':
+    case 'search_results':
+    case 'search': {
+      const sourceResults = Array.isArray(raw.results)
+        ? raw.results
+        : Array.isArray(raw.matches)
+          ? raw.matches
+          : Array.isArray(raw.files)
+            ? raw.files
+            : []
       const results = sourceResults.flatMap(entry => {
         const normalized = normalizeSearchResultEntry(entry)
         return normalized ? [normalized] : []
@@ -165,9 +179,13 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return {
         part: {
           kind: 'search-result',
-          ...nonEmptyTrimmed(raw.query, 'query'),
-          ...(Number.isInteger(raw.total) && Number(raw.total) >= 0 ? { total: Number(raw.total) } : {}),
-          ...nonEmptyTrimmed(raw.pagingToken, 'pagingToken'),
+          ...nonEmptyTrimmed(raw.query ?? raw.pattern, 'query'),
+          ...(Number.isInteger(raw.total) && Number(raw.total) >= 0
+            ? { total: Number(raw.total) }
+            : Number.isInteger(raw.total_count) && Number(raw.total_count) >= 0
+              ? { total: Number(raw.total_count) }
+              : {}),
+          ...nonEmptyTrimmed(raw.pagingToken ?? raw.paging_token, 'pagingToken'),
           results,
         },
         ...(results.length < sourceResults.length ? { diagnostic: {
@@ -622,12 +640,24 @@ function c15HasInvalidKnownField(raw: Record<string, unknown>, kind: 'memory' | 
 }
 
 function normalizeSearchResultEntry(value: unknown): SearchResultEntry | undefined {
-  if (!isRecord(value) || typeof value.source !== 'string' || value.source.trim().length === 0) return undefined
-  const snippet = typeof value.snippet === 'string' ? value.snippet : undefined
+  if (!isRecord(value)) return undefined
+  // Hermes search_files returns `{ path, line, content }` entries while the
+  // canonical contract calls the stable target `source` and the preview
+  // `snippet`. Accept both spellings at this seam instead of dropping every
+  // result as malformed.
+  const sourceValue = value.source ?? value.path ?? value.file ?? value.filename ?? value.uri ?? value.url
+  if (typeof sourceValue !== 'string' || sourceValue.trim().length === 0) return undefined
+  const snippetValue = value.snippet ?? value.content ?? value.text
+  const snippet = typeof snippetValue === 'string' ? snippetValue : undefined
   const highlights = snippet === undefined ? undefined : normalizeHighlightRanges(value.highlights, snippet.length)
   const location = normalizeSearchResultLocation(value.location)
+    ?? (typeof sourceValue === 'string' ? normalizeSearchResultLocation({
+      path: sourceValue,
+      ...(Number.isInteger(value.line) ? { line: Number(value.line) } : Number.isInteger(value.line_number) ? { line: Number(value.line_number) } : {}),
+      ...(Number.isInteger(value.column) ? { column: Number(value.column) } : {}),
+    }) : undefined)
   return {
-    source: value.source.trim(),
+    source: sourceValue.trim(),
     ...(Number.isInteger(value.rank) && Number(value.rank) >= 1 ? { rank: Number(value.rank) } : {}),
     ...nonEmptyTrimmed(value.title, 'title'),
     ...(location ? { location } : {}),

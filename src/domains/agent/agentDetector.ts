@@ -7,6 +7,7 @@ export interface AgentRuntimeDetectorMetadata {
 
 export interface AgentDetectionEvidence { kind: string; detail: string }
 export type AgentIdentityConfidence = 'exact' | 'high' | 'medium' | 'low'
+export type AgentStartability = 'not_tested' | 'verified' | 'failed'
 export type AgentProtocolAvailability = 'not_tested' | 'verified' | 'failed'
 
 export interface AgentDetectionDiagnostic {
@@ -27,6 +28,8 @@ export interface AgentRuntimeCandidate {
   args: string[]
   evidence: AgentDetectionEvidence[]
   identityConfidence: AgentIdentityConfidence
+  /** Backend emits this for every candidate; optional keeps older persisted/mock payloads readable. */
+  startability?: AgentStartability
   protocolAvailability: AgentProtocolAvailability
   alreadyImportedAgentId?: string
   warnings: string[]
@@ -62,8 +65,12 @@ export function normalizeAgentRuntimeCandidates(raw: unknown): AgentRuntimeCandi
       && value.args.every(argument => typeof argument === 'string')
       && Array.isArray(value.evidence) && Array.isArray(value.warnings)
       && ['exact', 'high', 'medium', 'low'].includes(value.identityConfidence ?? '')
+      && (value.startability === undefined || ['not_tested', 'verified', 'failed'].includes(value.startability))
       && ['not_tested', 'verified', 'failed'].includes(value.protocolAvailability ?? '')
-  })
+  }).map(candidate => ({
+    ...candidate,
+    startability: candidate.startability ?? 'not_tested',
+  }))
 }
 
 function normalizeDiagnostics(raw: unknown): AgentDetectionDiagnostic[] {

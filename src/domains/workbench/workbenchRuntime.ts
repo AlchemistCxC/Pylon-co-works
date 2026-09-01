@@ -1,7 +1,11 @@
 import type { Message } from '../../components/chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
 import { normalizePlanEntries, type PlanEntryV2 } from './plan/goalModel.ts'
-import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
+import type {
+  GenerationActivitySnapshot,
+  GenerationPhase,
+  GenerationSummary,
+} from './generationFooterContracts.ts'
 import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
@@ -29,6 +33,8 @@ export interface WorkbenchRuntimeSnapshot {
   streamingThinking: string
   generating: boolean
   generationPhase?: GenerationPhase
+  /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */
+  generationActivity?: GenerationActivitySnapshot
   generationStart: number
   lastTokenAt?: number
   tokenCount: number
@@ -128,12 +134,34 @@ export function createWorkbenchRuntime(
     applyDocument(document, options = {}) {
       if (!acceptDocument(options)) return
       const nextDocument = freezeDocument(document, snapshot.document)
-      publish({ ...snapshot, ...legacyFieldsFromDocument(nextDocument), document: nextDocument, sessionId: nextDocument.sessionId || snapshot.sessionId, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
+      const legacy = legacyFieldsFromDocument(nextDocument)
+      publish({
+        ...snapshot,
+        ...legacy,
+        document: nextDocument,
+        sessionId: nextDocument.sessionId || snapshot.sessionId,
+        ownerKey: options.ownerKey ?? activeOwnerKey,
+        generation: options.generation ?? activeGeneration,
+      })
     },
     replaceDocument(document, options = {}) {
+      const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
       const nextDocument = freezeDocument(document)
-      publish({ ...snapshot, ...legacyFieldsFromDocument(nextDocument), document: nextDocument, sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
+      const legacy = legacyFieldsFromDocument(nextDocument)
+      const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
+      publish({
+        ...snapshot,
+        ...legacy,
+        // Replacing the owner/session starts a fresh ephemeral activity
+        // timeline. Also clear it for an idle replacement so a stale tool
+        // label can never survive a bind or terminal snapshot.
+        ...(ownerChanged || sessionChanged || !legacy.generating ? { generationActivity: undefined } : {}),
+        document: nextDocument,
+        sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId,
+        ownerKey: options.ownerKey ?? activeOwnerKey,
+        generation: options.generation ?? activeGeneration,
+      })
     },
     destroy() {
       if (destroyed) return
@@ -177,6 +205,7 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     left.streamingThinking === right.streamingThinking &&
     left.generating === right.generating &&
     left.generationPhase === right.generationPhase &&
+    left.generationActivity === right.generationActivity &&
     left.generationStart === right.generationStart &&
     left.lastTokenAt === right.lastTokenAt &&
     left.tokenCount === right.tokenCount &&

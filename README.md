@@ -1,8 +1,8 @@
-# Pylon
+﻿# Pylon
 
 Pylon 是一个基于 ACP（Agent Client Protocol）的桌面 Agent 工作台。它负责连接本地 Agent、管理会话和工作区，并把消息、思考、工具调用、文件和权限请求组织在同一个界面中。Pylon 不包含模型，也不绑定某一家 Agent；只要 Agent 能通过 ACP 接入，就可以使用同一套工作台。
 
-本文是当前版本的使用与开发说明。实现地图和扩展契约见 [`docs/`](docs/)，内部施工资料已移到 `G:\Project\prism-team-workdir\Docs\prism-desktop-internal`。
+本文是当前版本的使用与开发说明。实现地图和扩展契约见 [`docs/`](docs/)；施工书、原型等内部过程资料不在本仓库（位置见团队内部指引），其中已落地的结论应回写到 docs 对应文档。
 
 ## 1. 能做什么
 
@@ -42,15 +42,33 @@ npm run tauri dev
 
 浏览器预览使用内置 mock 消息，适合检查终端风格、消息间距、工具卡和响应式布局；它不会模拟真实 ACP 生命周期。
 
+### 2.3 Windows/Hermes 的自带 Git 运行时
+
+Windows 便携版会在 `resources/runtime/git/` 内携带一份完整的 Git for Windows
+PortableGit。使用 Hermes 时不需要在目标电脑另外安装 Git、Bash，也不需要修改系统
+`PATH`。Pylon 只会在 `provider=hermes` 且使用 Windows subprocess ACP transport 的
+子进程上选择这份运行时，并把 Bash 路径和兼容环境变量限制在该子进程内；其他 Agent
+不会继承这套路径或环境。
+
+源码仓库不提交 PortableGit 二进制树。构建 Windows 便携版前运行
+`python scripts/prepare_hermes_runtime.py`（`npm run release:portable` 会自动运行），
+脚本会按 `src-tauri/resources/runtime/portable-git.json` 中的版本、下载地址和
+SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应直接失败，不能生成一个
+看似可用但无法启动 Hermes 的包。
+
+便携版的文件组成、构建命令、审计步骤和分发前检查见
+[Pylon-发行包清单](docs/说明书/Pylon-发行包清单.md)；解压后的首次运行说明见
+`resources/release/README.txt`。
+
 ## 3. 第一次使用
 
 1. 打开“设置 → Agent”，新增或编辑 Agent runtime。填写启动命令、参数和必要的环境变量。
-2. 在左栏选择 Agent。聊天模式可以直接新建会话；工作区模式先选择一个工作区，再输入首条请求。
-3. 点击“开始新会话”。Pylon 会先创建本地会话，再向 Agent 建立 ACP session；首条请求发送失败时会回滚新建的会话。
+2. 在左栏选择 Agent。聊天模式不要求工作区；工作区模式需要先选择一个工作区（只有一个可用时会自动选中）。
+3. 在输入框直接输入首条请求发送。Pylon 会随首条请求创建本地会话并向 Agent 建立 ACP session；首条请求发送失败时会回滚新建的会话。
 4. 发送消息后，消息流会显示回复和工具活动。工具输出默认折叠，点击工具行可展开；长输出会限制在独立滚动区域内。
 5. 需要查看项目文件时，打开文件工作台。文件工作台使用当前会话的工作目录，不会自动切换到其他会话的目录。
 
-空态创建入口的行为：聊天模式不要求工作区；工作区模式没有可用工作区时提交按钮保持禁用，选择工作区后才允许创建。创建成功会自动选中新会话并发送首条请求。
+空态创建入口的行为：聊天模式不要求工作区；工作区模式没有可用工作区时无法提交（前端拦截，后端同样拒绝）。创建成功会自动选中新会话并发送首条请求。
 
 ## 4. 工作区、会话与数据
 
@@ -79,7 +97,7 @@ npm run tauri dev
 
 Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结构由同一套消息契约提供，预设只改变字体、间距、颜色、指示器和表面表现。终端风格下，消息块共用固定左侧指示列，助手标记、思考块和工具标记保持同一条基线。
 
-设置修改即时生效，并按 Profile 保存。恢复默认值只影响当前设置范围；插件贡献的设置项由贡献者声明，宿主负责展示和持久化。
+设置修改即时生效，并持久保存在本地用户数据目录；恢复默认值只影响当前设置范围。呈现风格（Presentation Profile）是独立于主题字段的选择层，修改字体、颜色等字段不会切换当前 Profile；插件贡献的设置项由贡献者声明，宿主负责展示和持久化。
 
 ## 7. 插件
 
@@ -92,13 +110,13 @@ Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结
 
 插件启用、停用、重新加载和卸载都在“设置 → 插件”完成。插件运行在宿主授予的 Scope 中；它们可以执行本机代码，因此只安装来源可信的插件。安装失败或激活异常时，Pylon 会保留已保存配置并进入降级/安全模式，而不是静默删除设置。
 
-用户向导：[Pylon-插件系统说明书-用户版](docs/Pylon-插件系统说明书-用户版.md)
+用户向导：[Pylon-插件系统说明书-用户版](docs/说明书/Pylon-插件系统说明书-用户版.md)
 
-开发者契约：[Pylon-插件系统说明书-开发者版](docs/Pylon-插件系统说明书-开发者版.md)
+开发者契约：[Pylon-插件系统说明书-开发者版](docs/说明书/Pylon-插件系统说明书-开发者版.md)
 
 ## 8. CLI 与 Gateway
 
-CLI 通过本机 IPC 控制已运行的 Pylon 实例，可查询状态、切换会话、修改呈现设置、打开 Sheet 或触发插件命令。完整命令表见 [Pylon-CLI-命令表](docs/Pylon-CLI-命令表.md)。
+CLI 通过本机 IPC 控制已运行的 Pylon 实例，可查询状态、切换会话、修改呈现设置、打开 Sheet 或触发插件命令。完整命令表见 [Pylon-CLI-命令表](docs/说明书/Pylon-CLI-命令表.md)。
 
 Gateway 是可选的消息转发层：外部平台的消息进入 Gateway 后映射到 ACP session，Agent 回复再由 Gateway 转回平台。Gateway 不会绕过会话权限或 Agent runtime 的配置。
 
@@ -106,7 +124,7 @@ Gateway 是可选的消息转发层：外部平台的消息进入 Gateway 后映
 
 ### Agent 无法启动
 
-检查 Agent 可执行文件、参数、工作目录和权限；在“运行监控”查看启动 stderr。先用同样的命令在终端直接启动，确认 Agent 本身能运行。
+检查 Agent 可执行文件、参数、工作目录和权限；在运行日志 Sheet（或 Agent 设置面板的启动诊断）查看启动 stderr。先用同样的命令在终端直接启动，确认 Agent 本身能运行。
 
 ### 会话恢复失败
 
@@ -146,23 +164,50 @@ npx vitest run src/domains/theme
 
 提交前至少运行 `npm run lint`、相关区域测试和 `npm run build`。改动渲染器时再运行 `npm run check:solid`；改动 Rust/Tauri 时再运行 `npm run check:rust`。
 
+开发调试：主题字段的写入来源可在控制台用 `window.__pylonSettingProvenance.recent()` / `.last('字段名')` 追溯（手动编辑、预设、呈现风格等贡献者互可区分）；设置信息架构的一致性不变量由 `src/domains/theme/__tests__/settingsTraceability.test.ts` 锁定。
+
+### 10.1 Windows 便携版发布
+
+便携版发布流程会准备自带的 Hermes PortableGit、构建 Tauri 主程序和 Agent 检测器，
+再生成 ZIP、SHA-256 校验文件和内容 manifest：
+
+```bash
+npm run release:portable
+```
+
+默认流程要求把 Microsoft WebView2 Evergreen Bootstrapper 放在
+`resources/release/tools/MicrosoftEdgeWebview2Setup.exe`。如果分发渠道另行提供
+WebView2，可显式使用 `python scripts/pack_release.py --without-webview2`，并在交付
+说明中保留联网安装步骤。不要手工从包中删除 `resources/runtime/git`。
+
 ## 11. 代码地图
 
 ```text
 src/main.tsx                         应用入口与 bootstrap
+src/kernel/                          Kernel 壳：应用挂载、恢复、Safe Mode
+src/plugin-runtime/                  插件宿主：Runtime/Scope/注册表/包运行时与皮肤
 src/App.tsx                          产品壳、Sheet、生命周期
-src/domains/                         领域模型与状态同步
+src/domains/                         领域模型与状态同步（theme/workbench/presentation…）
 src/application/transactions/        跨领域应用事务
-src/components/chat/                 React 消息流、ACP 事件与会话生命周期
-src/renderers/solid-workbench/       Solid 工作台与消息内容实现
-src/sheets/agent-workbench/          Renderer Suite 宿主与 Agent 工作台接线
+src/host/renderer-suite/             Renderer Suite 宿主（prepare/stage/原子切换）
+src/components/chat/                 事件控制器、消息行管线与输入组件
+src/components/settings/             设置页面板（Agent/插件/渲染器/备份…）
+src/themeFieldRenderer.tsx           声明式主题字段渲染（defs 驱动）
+src/renderers/solid-workbench/       Solid 工作台与消息内容实现（builtin.solid suite）
+src/sheets/agent-workbench/          Agent 工作台 Sheet 与 Suite 宿主接线
+src/cli/                             pylon-cli 本机 IPC 服务端
+src/infrastructure/                  Tauri 客户端、canonical 事件仓库等适配器
 src/plugins/product/                 第一方插件、样式和注册表
 src/plugins/core/                    第一方插件使用的实现模块
-src-tauri/                           Rust Kernel、IPC、SQLite 与进程管理
+src-tauri/src/agent_config/          agents.yaml 解析/校验/原子写/补丁 API
+src-tauri/src/acp/                   ACP 客户端（连接、JSON-RPC、传输、wire trace）
+src-tauri/src/session/               会话仓库（canonical 事件、SQLite 迁移、prompt 生命周期）
+src-tauri/src/gateway/               Gateway 实例与平台路由
+src-tauri/src/                       Rust Kernel 入口、IPC、权限、进程管理
 shared/                              前后端共享协议和类型
 ```
 
-当前架构事实、数据流和测试入口见 [Pylon-项目架构参考](docs/Pylon-项目架构参考.md)；插件化拓扑见 [Pylon-插件化前后端拓扑全图](docs/Pylon-插件化前后端拓扑全图.md)。
+当前架构事实、数据流和测试入口见 [Pylon-项目架构参考](docs/说明书/Pylon-项目架构参考.md)；插件化拓扑见 [Pylon-插件化前后端拓扑全图](docs/说明书/Pylon-插件化前后端拓扑全图.md)。
 
 ## 12. 当前边界
 
@@ -174,14 +219,14 @@ shared/                              前后端共享协议和类型
 
 ## 13. 文档索引
 
-- [CLI 命令表](docs/Pylon-CLI-命令表.md)
-- [Agent 检测器](docs/Pylon-Agent-检测器.md)
-- [插件用户手册](docs/Pylon-插件系统说明书-用户版.md)
-- [插件开发者手册](docs/Pylon-插件系统说明书-开发者版.md)
+- [CLI 命令表](docs/说明书/Pylon-CLI-命令表.md)
+- [Agent 检测器](docs/说明书/Pylon-Agent-检测器.md)
+- [插件用户手册](docs/说明书/Pylon-插件系统说明书-用户版.md)
+- [插件开发者手册](docs/说明书/Pylon-插件系统说明书-开发者版.md)
 - [插件设置选项贡献](docs/Pylon-插件设置选项贡献.md)
-- [项目架构参考](docs/Pylon-项目架构参考.md)
-- [插件化拓扑全图](docs/Pylon-插件化前后端拓扑全图.md)
-- [发行包内容记录](docs/releases/RELEASES.md)
+- [项目架构参考](docs/说明书/Pylon-项目架构参考.md)
+- [插件化拓扑全图](docs/说明书/Pylon-插件化前后端拓扑全图.md)
+- [发行包清单](docs/说明书/Pylon-发行包清单.md)
 
 ## License
 

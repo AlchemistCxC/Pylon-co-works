@@ -6,14 +6,14 @@ import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 
 const host = readFileSync(new URL('../src/components/right-panel/ContextPanelHost.tsx', import.meta.url), 'utf8')
-const slot = readFileSync(new URL('../src/workspace-sheets/SheetRightSlot.tsx', import.meta.url), 'utf8')
+const slot = readFileSync(new URL('../src/components/right-panel/RightRailHost.tsx', import.meta.url), 'utf8')
 const productWorkspace = readFileSync(new URL('../src/plugins/product/builtinPylonWorkspace.ts', import.meta.url), 'utf8')
 const activation = readFileSync(new URL('../src/plugin-runtime/pluginActivationContext.ts', import.meta.url), 'utf8')
 const shadow = readFileSync(new URL('../src/plugin-runtime/shadowUpdate.ts', import.meta.url), 'utf8')
 
-assert.match(slot, /rightPanelCollapsed = useWorkspaceStore\(s => s\.rightPanelCollapsed\)/, 'slot 必须读统一折叠状态')
-assert.match(slot, /if \(!enabled \|\| rightPanelCollapsed\) return null/, '无贡献或折叠时不得挂载')
-assert.match(slot, /<ContextPanelHost sheet=\{sheet\} ctx=\{ctx\} \/>/, 'slot 必须挂统一贡献 Host')
+assert.match(slot, /useRightRailStore\(state => state\.collapsed\)/, '全局右栏宿主必须读统一折叠状态')
+assert.match(slot, /if \(collapsed \|\| entries\.length === 0\) return null/, '无贡献或折叠时不得挂载')
+assert.match(slot, /<ContextPanelHost sheet=\{activeSheet\} ctx=\{ctx\} activePanelId=\{effectivePanelId\} \/>/, '宿主必须挂统一贡献 Host')
 assert.match(host, /role="tablist"/, '多贡献必须以可访问标签切换')
 assert.match(host, /PluginContributionBoundary/, '每个右栏贡献必须有独立错误边界')
 assert.match(host, /renderKind === 'isolated-surface'/, '外置 UI 必须走隔离 surface')
@@ -31,10 +31,5 @@ assert.match(agentPanel, /touchedFilesRecord\[toAgentContextKey\(touchedContext\
 assert.match(agentPanel, /import MessageSearchBar/, 'Agent 搜索必须复用 MessageSearchBar')
 const filePanel = readFileSync(new URL('../src/components/right-panel/FileContextPanel.tsx', import.meta.url), 'utf8')
 assert.match(filePanel, /useWorkspaceStore\(s => s\.touchedFiles\)/, 'File 右栏必须反查 touchedFiles')
-
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.match(chatView, /useMessageSearch\(sessionId, messages\)/, '搜索定位 hook 仍在 ChatView')
-assert.match(chatView, /searchMatches\[searchIndex\]\?\.id/, '活动命中高亮必须保留')
-assert.equal(chatView.includes('<MessageSearchBar'), false, '搜索 UI 只能在右栏贡献中')
 
 console.log('context panel 贡献宿主守卫通过')

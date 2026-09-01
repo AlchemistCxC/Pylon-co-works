@@ -25,7 +25,6 @@ const EXCLUDED = new Set([
   'test-sheet-persistence.test.mts',
   // 这些脚本会经过包含 parameter property 的产品模块；Node strip-only 无法转译，
   // 由 legacy-plugin-runtime-compat.test.mts 在 Vitest 中保留原断言执行。
-  'test-command-registry.mts',
   'test-normalizer.mts',
   'test-session-runtime.mts',
   'test-compact-transaction.mts',

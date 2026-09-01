@@ -11,7 +11,7 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
-import { createAgentWorkbenchSessionRuntime } from './agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
 import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
 import ReactWorkbenchFatalFallback, { type WorkbenchFatalFailure } from './ReactWorkbenchFatalFallback.tsx'
 import type { ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
@@ -42,6 +42,16 @@ const workspaceLabel = (workdir: string | undefined) => workdir
   .filter(Boolean)
   .pop()
 
+// Keep the mutable-ref read outside the effect cleanup so the hooks linter can
+// verify the lifecycle contract without weakening the StrictMode deferral.
+function isCurrentLifecycleToken(ref: { current: number }, token: number): boolean {
+  return ref.current === token
+}
+
+const rendererRegistry = getRendererRegistry()
+const subscribeRendererCatalog = (listener: () => void) => rendererRegistry.subscribe(listener)
+const getRendererCatalogSnapshot = () => rendererRegistry.snapshot()
+
 export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWorkbenchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const currentPropsRef = useRef(props)
@@ -54,6 +64,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         return createAgentWorkbenchSession(request, {
           agentId: current.sheet.agentId || useIdentityStore.getState().activeAgent,
           workspaceMode: current.workspaceMode,
+          applySessionResponse: (sessionId, response) => sessionRuntimeRef.current?.applySessionResponse(response, sessionId),
         })
       },
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
@@ -82,11 +93,10 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const workspace = session?.workspaceId ? workspaces.find(item => item.id === session.workspaceId) : undefined
   const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const selectedSuiteId = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[props.modeId])
-  const registry = getRendererRegistry()
   const rendererSettings = getRendererSettingsStore()
   const presentationProfiles = getPresentationProfileRegistry()
   const rendererSettingOptions = getPluginSettingOptionsRegistry()
-  const catalog = useSyncExternalStore(listener => registry.subscribe(listener), () => registry.snapshot(), () => registry.snapshot())
+  const catalog = useSyncExternalStore(subscribeRendererCatalog, getRendererCatalogSnapshot, getRendererCatalogSnapshot)
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
     workspaceMode: props.workspaceMode, replayReadonly: props.isReplay,
@@ -132,7 +142,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     return { setMessages: ignore, setStreamingText: ignore, setStreamingThinking: ignore, setGenerating: ignore, setGenerationPhase: ignore, setSummary: ignore, setLastTokenAt: ignore }
   }, [])
 
-  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, session])
+  const sessionBindingKey = workbenchSessionBindingKey(session)
+  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey])
   useEffect(() => {
     const pickWorkspaceFolder = async () => {
       const selected = await open({ directory: true, multiple: false, title: '选择工作区文件夹' })
@@ -152,7 +163,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     const token = ++runtimeLifecycleToken.current
     return () => {
       queueMicrotask(() => {
-        if (runtimeLifecycleToken.current === token) sessionRuntime.destroy()
+        if (isCurrentLifecycleToken(runtimeLifecycleToken, token)) sessionRuntime.destroy()
       })
     }
   }, [sessionRuntime])
@@ -370,7 +381,9 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       setFailure({ suiteId: 'builtin.solid', phase: 'resolve', message: error instanceof Error ? error.message : String(error) }); setFatal(true)
     }
   }
-  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain: 'renderer', section: 'suite' } }))
+  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
+    detail: { domain: 'appearance', section: 'renderers' },
+  }))
   const openDiagnostics = () => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))
   const openFallbackMedia = (part: ImageContentPart) => {
     const host = hostPortRef.current
@@ -449,7 +462,7 @@ function ActiveAgentSessionLifecycle(props: {
   const lifecycle = useSessionLifecycle(props.session?.id ?? null, props.sessions, props.setters, props.selectSession)
   useEffect(() => {
     if (props.session && lifecycle.canonicalRefresh?.sessionId === props.session.id) void props.sessionRuntime.bind(props.session)
-  }, [props.sessionRuntime, props.session, lifecycle.canonicalRefresh])
+  }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
   return lifecycle.recoveryFailure
     ? <div className="renderer-suite-recovery-banner" role="alert">会话恢复失败：{lifecycle.recoveryFailure.message}</div>
     : null

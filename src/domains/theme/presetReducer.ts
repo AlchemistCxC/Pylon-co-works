@@ -217,11 +217,21 @@ export function saveCustomPresetReducer(
   return { patch: { customPresets: upsertCustomPreset(state.customPresets, preset) }, savedId: preset.id }
 }
 
-/** 应用自定义预设：防御性归一化 + 全 PRESET_ZONES 记 id + 全 custom 清零；找不到返回 null（无操作） */
-export function applyCustomPresetReducer(state: ThemePresetState, id: string): ThemePresetPatch | null {
-  const preset = state.customPresets.find(item => item.id === id)
-  if (!preset) return null
-  const theme = normalizeThemeState(pickCustomPresetTheme(preset.theme) as Record<string, unknown>) as Partial<ThemeSettings>
+/**
+ * 应用自定义预设：防御性归一化 + 全 PRESET_ZONES 记 id + 全 custom 清零。
+ * theme 显式传入时直接消费（bundle 驱动，免疫 id 漂移）；否则按 id 回查
+ * customPresets（旧路径）。两者都落空返回 null（调用方必须可见地报告，
+ * 不得静默吞掉）。
+ */
+export function applyCustomPresetReducer(
+  state: ThemePresetState,
+  id: string,
+  explicitTheme?: Record<string, unknown>,
+): ThemePresetPatch | null {
+  const source = explicitTheme
+    ?? state.customPresets.find(item => item.id === id)?.theme
+  if (!source) return null
+  const theme = normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Partial<ThemeSettings>
   return {
     ...DEFAULTS,
     ...theme,

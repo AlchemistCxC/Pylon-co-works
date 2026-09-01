@@ -84,6 +84,29 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('同一绑定身份的 Session 元数据更新不会重建流式文档', async () => {
+    let loads = 0
+    let liveEvent: ((event: WorkbenchEventEnvelope) => void) | undefined
+    const active = session()
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => { loads += 1; return [] },
+      subscribe: listener => { liveEvent = listener; return () => { liveEvent = undefined } },
+    })
+
+    await service.bind(active)
+    liveEvent?.(message(1, 'assistant', '流式内容'))
+    const before = service.runtime.getSnapshot().document
+
+    await service.bind({ ...active, name: '终态更新后的标题', autoName: '自动标题', lastReplyAt: 42, periId: 'remote-1', workspaceId: 'workspace-2', workdir: 'C:/workspace-2' })
+
+    expect(loads).toBe(1)
+    expect(service.runtime.getSnapshot().document).toBe(before)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([
+      expect.objectContaining({ role: 'assistant', content: '流式内容' }),
+    ])
+    service.destroy()
+  })
+
   it('在 ACP 发送完成前把用户消息乐观投影到当前文档', async () => {
     let finishSend: (() => void) | undefined
     const active = session()
@@ -263,6 +286,59 @@ describe('Agent Workbench canonical session runtime', () => {
     live?.(message(2, 'assistant', 'world'))
     expect(service.runtime.getSnapshot().document).not.toBe(loadedDocument)
     expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+    service.destroy()
+  })
+
+  it('创建响应在 bind 前到达时仍投影模型、模式与选项到 canonical Workbench 文档', async () => {
+    const active = session('created-session', 'local:created')
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [], subscribe: () => () => {},
+    })
+    service.applySessionResponse({
+      sessionId: 'remote-created',
+      models: {
+        currentModelId: 'openrouter:deepseek-v4-flash',
+        availableModels: [
+          { modelId: 'openrouter:deepseek-v4-flash', name: 'DeepSeek Flash' },
+          { modelId: 'openrouter:deepseek-v4-pro', name: 'DeepSeek Pro' },
+        ],
+      },
+      modes: {
+        currentModeId: 'accept_edits',
+        availableModes: [
+          { id: 'default', name: 'Default' },
+          { id: 'accept_edits', name: 'Accept Edits' },
+        ],
+      },
+    }, active.id)
+    await service.bind(active)
+    const document = service.runtime.getSnapshot().document
+    expect(document?.session).toMatchObject({
+      status: 'ready', model: 'openrouter:deepseek-v4-flash', mode: 'accept_edits',
+    })
+    expect(document?.session.options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'model', value: 'openrouter:deepseek-v4-flash' }),
+      expect.objectContaining({ id: 'mode', value: 'accept_edits' }),
+    ]))
+    const modelOption = document?.session.options.find(option => option.id === 'model')
+    expect(modelOption?.schema).toEqual(expect.objectContaining({
+      options: expect.arrayContaining([expect.objectContaining({ id: 'openrouter:deepseek-v4-pro' })]),
+    }))
+    service.destroy()
+  })
+
+  it('重复投影相同创建响应不会制造重复 session 事件', async () => {
+    const active = session('created-idempotent', 'local:created-idempotent')
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    await service.bind(active)
+    const response = {
+      sessionId: 'remote-created',
+      models: { currentModelId: 'm', availableModels: ['m'] },
+      modes: { currentModeId: 'default', availableModes: ['default'] },
+    }
+    service.applySessionResponse(response, active.id)
+    service.applySessionResponse(response, active.id)
+    expect(service.runtime.getSnapshot().document?.timeline.filter(item => item.kind === 'session')).toHaveLength(1)
     service.destroy()
   })
 

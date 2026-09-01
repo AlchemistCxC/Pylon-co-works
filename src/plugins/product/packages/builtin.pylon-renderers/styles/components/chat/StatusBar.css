@@ -48,6 +48,12 @@
 .cc-mode-minimal[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
 .cc-mode-minimal[data-mode="default"]{ color:var(--text-dim,#999); }
 
+.cc-mode-group { display:inline-flex; align-items:center; gap:8px; }
+.cc-reasoning-widget { display:inline-flex; align-items:center; gap:4px; color:var(--text-dim); font:inherit; }
+.cc-reasoning-label { font-size:.86em; opacity:.78; }
+.cc-reasoning-widget select { appearance:none; border:0; border-radius:0; padding:0; color:inherit; background:transparent; font:inherit; cursor:pointer; }
+.cc-reasoning-widget select:hover { color:var(--text); }
+
 .cc-model-minimal { background:transparent; border:0; color:var(--pill-text,#999); font-family:var(--mono); cursor:pointer; }
 
 @media (prefers-reduced-motion:reduce) {

@@ -5,15 +5,14 @@ export const DEFAULT_PRESENTATION_PROFILE_ID = 'builtin.presentation.terminal-cl
 
 interface PresentationPreferenceState {
   activeProfileId: string
-  messageRendererId: string
   /** User-selected Renderer Suite per Interface Mode. Unknown ids are retained for recovery. */
   rendererSuiteIdByMode: Record<string, string>
   setActiveProfileId(id: string): void
-  setMessageRendererId(id: string): void
   setRendererSuiteId(mode: string, suiteId: string): void
 }
 
-export type PersistedPresentationPreferences = Partial<Pick<PresentationPreferenceState, 'activeProfileId' | 'messageRendererId' | 'rendererSuiteIdByMode'>>
+type LegacyPresentationPreferences = { activeProfileId?: string; messageRendererId?: string }
+export type PersistedPresentationPreferences = Partial<Pick<PresentationPreferenceState, 'activeProfileId' | 'rendererSuiteIdByMode'>> & LegacyPresentationPreferences
 
 const PRESENTATION_MODE_IDS = ['modern-gui', 'terminal-like'] as const
 const LEGACY_RENDERER_TO_SUITE: Readonly<Record<string, string>> = Object.freeze({
@@ -54,10 +53,8 @@ export function migratePresentationPreferences(
 export const usePresentationPreferenceStore = create<PresentationPreferenceState>()(persist(
   set => ({
     activeProfileId: DEFAULT_PRESENTATION_PROFILE_ID,
-    messageRendererId: 'auto',
     rendererSuiteIdByMode: {},
     setActiveProfileId: id => set({ activeProfileId: id || DEFAULT_PRESENTATION_PROFILE_ID }),
-    setMessageRendererId: id => set({ messageRendererId: id || 'auto' }),
     setRendererSuiteId: (mode, suiteId) => {
       if (!mode.trim() || !suiteId.trim()) return
       set(state => ({ rendererSuiteIdByMode: { ...state.rendererSuiteIdByMode, [mode]: suiteId } }))
@@ -78,7 +75,6 @@ export const usePresentationPreferenceStore = create<PresentationPreferenceState
     },
     partialize: state => ({
       activeProfileId: state.activeProfileId,
-      messageRendererId: state.messageRendererId,
       rendererSuiteIdByMode: state.rendererSuiteIdByMode,
     }),
   },

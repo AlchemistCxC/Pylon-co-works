@@ -22,18 +22,33 @@ import { reportRuntimeError } from '../../runtimeError'
 import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRuntimeState, type SourceChatRuntime } from './sessionRuntimeStore.ts'
 import type { Message } from './messageTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
+import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import { createHorizontalSubscription } from './horizontalSubscription.ts'
 import { extractTouchedPath } from '../../infrastructure/acp/touchedFiles.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
 import type { AgentContext, AgentContextKey } from '../../agentContext'
 import { sessionContext, toAgentContextKey } from '../../agentContext'
-import { detectChatIdentityCapabilities, extractExternalIdentity, reconcileIngressMessages, type ChatIdentityCapabilities } from './messageIdentity'
+import { detectChatIdentityCapabilities, extractExternalIdentity, type ChatIdentityCapabilities } from './messageIdentity'
 import { hasEnabledHooks, runHookPhase } from '../../host/hookPipeline.ts'
 import type { HookContext, HookPhase } from '../../contracts/agentHook.ts'
 import { runSessionBoundaryHook } from './hookRuntime.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import type { HookName } from '../../plugin-runtime/hooks/hookTypes.ts'
+import {
+  insertMissingMessageAtBasePosition,
+  isRenderedSource,
+  isRepresentedByCanonical,
+  mergeBase,
+  mergeReplayMessages,
+  messagesRepresentSame,
+  settleListeners,
+  stripReplayPersonaPrefix,
+} from './chatReplayCoordinator.ts'
+
+// Compatibility exports: existing tests and callers can keep importing these
+// helpers from the controller while the implementation lives behind the replay seam.
+export { mergeReplayMessages, settleListeners } from './chatReplayCoordinator.ts'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
@@ -100,6 +115,8 @@ export interface ChatControllerHandle {
   getLastActivityAt: (source: string) => number | undefined
   /** source-scoped 生成阶段；避免工具/思考阶段在切换后退化。 */
   getGenerationPhase: (source: string) => GenerationPhase | undefined
+  /** 新活动轴；旧调用方可不实现，缺失时回退 generationPhase。 */
+  getGenerationActivity?: (source: string) => GenerationActivitySnapshot | undefined
   /** 会话切换时恢复该 source 的完成态 footer。 */
   getSummary: (source: string) => GenerationSummary | undefined
   /** G1：重试注册失败的 listener，返回是否有新成功项（报告 8.5） */
@@ -150,201 +167,6 @@ const noopCanonicalEventSink: CanonicalEventSink = {
 /** 重绑定当前渲染 refs（ChatView 重挂载时调用；controller 内部经此读最新 refs） */
 export function bindChatControllerRefs(refs: ChatEventControllerRefs): void {
   currentRefs = refs
-}
-
-
-/**
- * FE-AUD-024：并行注册的 listener 用 allSettled 收敛——保留成功 stop handle
- * （不全丢弃），失败逐个回调报告（ErrorCenter），dispose 只清理成功项。
- */
-export interface ListenerSettleResult<T> {
-  fns: T[]
-  /** G1：失败项（index/reason），供调用方重试注册（报告 8.5） */
-  failures: Array<{ index: number; reason: unknown }>
-}
-
-/**
- * 回放合并（验收回归）：replay 权威历史 resolved + load 期间 live 增量。
- * 只按外部 identity（messageId/eventId/turnId/toolCallId）去重；无 identity 的
- * live 增量保守保留——相同正文仍可能是两条合法消息，不按内容签名猜测合并
- * （该行为由 replayE2E.test.ts 显式锁定）。
- * 不能用本地 id 去重：replay 以 seq:0 重建、live 沿用 runtime 的单调 seq，
- * 同一逻辑消息的两个副本 id 恒不同（user-3 vs user-7），id 去重是死代码。
- */
-export function mergeReplayMessages<T extends { id: string; role?: string; sender?: string; content?: string; externalIdentity?: { messageId?: string; eventId?: string; turnId?: string; toolCallId?: string } }>(
-  resolved: T[],
-  liveAdditions: T[],
-  capabilities: ChatIdentityCapabilities = {},
-): T[] {
-  return reconcileIngressMessages(resolved, liveAdditions, capabilities)
-}
-
-export function settleListeners<T>(
-  listeners: Array<Promise<T>>,
-  onRejected: (reason: unknown, index: number) => void,
-): Promise<ListenerSettleResult<T>> {
-  return Promise.allSettled(listeners).then(results => {
-    const fns: T[] = []
-    const failures: Array<{ index: number; reason: unknown }> = []
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        fns.push(result.value)
-      } else {
-        failures.push({ index, reason: result.reason })
-        onRejected(result.reason, index)
-      }
-    })
-    return { fns, failures }
-  })
-}
-
-function stripReplayPersonaPrefix(content: string): string {
-  const separator = '\n\n---\n\n'
-  const index = content.indexOf(separator)
-  if (index < 0) return content
-  const stripped = content.slice(index + separator.length)
-  return stripped || content
-}
-
-function canonicalTypedText(event: CanonicalEventRow): string | undefined {
-  const text = (event.typedPayload as { text?: unknown } | undefined)?.text
-  return typeof text === 'string' ? text : undefined
-}
-
-/** Match a load-buffered UI event to the canonical row that committed it. */
-function canonicalRepresentsChatEvent(row: CanonicalEventRow, event: ChatEvent): boolean {
-  if (row.owner.localSessionId !== event.source) return false
-  const identity = row.identity
-  switch (event.type) {
-    case 'user':
-      return row.eventType === 'user.message' && canonicalTypedText(row) === event.content
-    case 'message-chunk':
-      return row.eventType === 'assistant.text.delta'
-        && canonicalTypedText(row) === event.text
-        && (!event.externalIdentity?.messageId || identity?.messageId === event.externalIdentity.messageId)
-    case 'thought-chunk':
-      return row.eventType === 'assistant.thinking.delta'
-        && canonicalTypedText(row) === event.text
-        && (!event.externalIdentity?.turnId || identity?.turnId === event.externalIdentity.turnId)
-    case 'tool-call':
-      return row.eventType === 'tool.call.started'
-        && (!event.toolCallId || identity?.toolCallId === event.toolCallId)
-    case 'tool-call-update':
-      return ['tool.call.updated', 'tool.call.completed', 'tool.call.failed'].includes(row.eventType)
-        && (!event.toolCallId || identity?.toolCallId === event.toolCallId)
-    case 'done':
-      return row.eventType === 'turn.completed'
-    case 'error':
-      return row.eventType === 'turn.failed'
-    default:
-      return false
-  }
-}
-
-function isRepresentedByCanonical(
-  event: ChatEvent,
-  canonicalEvents: readonly CanonicalEventRow[],
-  consumed: Set<number>,
-): boolean {
-  const index = canonicalEvents.findIndex((row, rowIndex) =>
-    !consumed.has(rowIndex) && canonicalRepresentsChatEvent(row, event),
-  )
-  if (index < 0) return false
-  consumed.add(index)
-  return true
-}
-
-function isRenderedSource(source: string, renderedSource: string | null): boolean {
-  return source.length > 0 && renderedSource === source
-}
-
-/**
- * 缓存与内存态合并（load 开始前的首屏占位）。
- * 内存态优先（更新鲜）；仅当缓存中存在内存缺失的 id 时才补入，避免「每次切回
- * 都复制一遍」。completed 消息绝不因缓存陈旧而被丢弃——权威替换发生在
- * commitReplaySnapshot，而不是 initSource。
- */
-function messagesRepresentSame(left: Message, right: Message): boolean {
-  const leftIdentity = left.externalIdentity
-  const rightIdentity = right.externalIdentity
-  if (left.role === 'tool' && right.role === 'tool') {
-    const leftToolCallId = leftIdentity?.toolCallId
-    const rightToolCallId = rightIdentity?.toolCallId
-    if (leftToolCallId && rightToolCallId) return leftToolCallId === rightToolCallId
-  }
-  for (const field of ['messageId', 'eventId', 'turnId'] as const) {
-    const leftValue = leftIdentity?.[field]
-    const rightValue = rightIdentity?.[field]
-    if (leftValue && rightValue && leftValue === rightValue) return true
-  }
-  if (left.id === right.id) return true
-  return left.role === right.role && left.content === right.content
-}
-
-function mergeBase(cached: Message[], live: Message[], preferCanonicalOrder = false): Message[] {
-  if (preferCanonicalOrder) {
-    // canonical 是切回会话时的权威投影：以其顺序重建并收敛历史 running 状态。
-    // 内存中未被 canonical 表示的消息仍视作 load 期间新增，按原顺序保留在尾部。
-    const unmatchedLive = [...live]
-    const canonical = cached.map(message => {
-      const matchedIndex = unmatchedLive.findIndex(candidate => messagesRepresentSame(message, candidate))
-      if (matchedIndex >= 0) unmatchedLive.splice(matchedIndex, 1)
-      return { ...message, running: false }
-    })
-    return unmatchedLive.length > 0 ? [...canonical, ...unmatchedLive] : canonical
-  }
-  const liveIds = new Set(live.map(message => message.id))
-  // canonical 占位与 replay 重建同一条消息时 id 可能错位（占位含 thought 而
-  // replay 不含时，后续 user-/msg- 序号整体偏移）。除 id 外再按 toolCallId 与
-  // “role:content” 去重，避免同一条消息被当缺失追加导致重叠。
-  const liveToolKeys = new Set<string>()
-  const liveContentKeys = new Set<string>()
-  for (const message of live) {
-    if (message.role === 'tool') {
-      const toolCallId = message.externalIdentity?.toolCallId
-      if (toolCallId) liveToolKeys.add(`tool-call:${toolCallId}`)
-    } else {
-      liveContentKeys.add(`${message.role}:${message.content}`)
-    }
-  }
-  const missing = cached
-    .filter(message => {
-      if (liveIds.has(message.id)) return false
-      if (message.role === 'tool') {
-        const toolCallId = message.externalIdentity?.toolCallId
-        return toolCallId === undefined || !liveToolKeys.has(`tool-call:${toolCallId}`)
-      }
-      return !liveContentKeys.has(`${message.role}:${message.content}`)
-    })
-    .map(message => ({ ...message, running: false }))
-  return missing.length > 0 ? [...live, ...missing] : live
-}
-
-function insertMissingMessageAtBasePosition(
-  messages: Message[],
-  baseMessages: Message[],
-  missingMessage: Message,
-): Message[] {
-  const baseIndex = baseMessages.indexOf(missingMessage)
-  if (baseIndex < 0) return [...messages, missingMessage]
-
-  for (let index = baseIndex + 1; index < baseMessages.length; index += 1) {
-    const nextAnchor = messages.findIndex(message => messagesRepresentSame(message, baseMessages[index]))
-    if (nextAnchor >= 0) {
-      const result = [...messages]
-      result.splice(nextAnchor, 0, missingMessage)
-      return result
-    }
-  }
-  for (let index = baseIndex - 1; index >= 0; index -= 1) {
-    const previousAnchor = messages.findIndex(message => messagesRepresentSame(message, baseMessages[index]))
-    if (previousAnchor >= 0) {
-      const result = [...messages]
-      result.splice(previousAnchor + 1, 0, missingMessage)
-      return result
-    }
-  }
-  return [...messages, missingMessage]
 }
 
 /**
@@ -1475,6 +1297,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     getGenerating: (source) => runtimeAt(source)?.generating ?? false,
     getLastActivityAt: (source) => runtimeAt(source)?.lastActivityAt,
     getGenerationPhase: (source) => runtimeAt(source)?.generationPhase,
+    getGenerationActivity: (source) => runtimeAt(source)?.generationActivity,
     getSummary: (source) => {
       const summary = runtimeAt(source)?.lastSummary
       return summary ? { ...summary, completedFrame: '' } : undefined

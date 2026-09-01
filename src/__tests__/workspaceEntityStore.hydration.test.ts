@@ -4,7 +4,7 @@ import { serializeWorkspaces, type Workspace } from '../workspaceEntities.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 

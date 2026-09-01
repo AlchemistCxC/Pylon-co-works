@@ -26,6 +26,8 @@ pub enum SessionUpdateVariant {
     ToolCallUpdate,
     SessionInfoUpdate,
     ConfigOptionUpdate,
+    AvailableCommandsUpdate,
+    CurrentModeUpdate,
 }
 
 impl SessionUpdateVariant {
@@ -39,6 +41,8 @@ impl SessionUpdateVariant {
             "tool_call_update" => Some(Self::ToolCallUpdate),
             "session_info_update" => Some(Self::SessionInfoUpdate),
             "config_option_update" => Some(Self::ConfigOptionUpdate),
+            "available_commands_update" => Some(Self::AvailableCommandsUpdate),
+            "current_mode_update" => Some(Self::CurrentModeUpdate),
             _ => None,
         }
     }

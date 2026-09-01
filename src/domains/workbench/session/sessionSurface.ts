@@ -1,4 +1,11 @@
 import type { JsonValue } from '../events/workbenchEventSchema.ts'
+import {
+  extractChoiceId,
+  extractChoiceLabel,
+  extractConfigOptionChoices,
+  extractConfigOptionId,
+  extractConfigOptionValue,
+} from '../../../infrastructure/acp/chatContracts.ts'
 
 export interface UsageSnapshot {
   readonly inputTokens?: number
@@ -150,22 +157,41 @@ export function normalizeSessionCommands(values: readonly JsonValue[]): readonly
 export function normalizeSessionConfigOptions(values: readonly JsonValue[]): readonly SessionConfigOption[] {
   return Object.freeze(values.map((value, index) => {
     if (!isRecord(value)) return Object.freeze({ id: `unknown-option-${index}`, label: `unknown-option-${index}`, raw: { value } })
-    const id = stringField(value.id) ?? `unknown-option-${index}`
-    const label = stringField(value.label) ?? id
-    const valueType = stringField(value.valueType)
-    const optionValue = 'value' in value ? value.value : undefined
-    const schema = 'schema' in value ? value.schema : undefined
+    const id = extractConfigOptionId(value) ?? `unknown-option-${index}`
+    const label = stringField(value.label) ?? stringField(value.name) ?? stringField(value.title) ?? id
+    const valueType = stringField(value.valueType) ?? stringField(value.value_type) ?? stringField(value.type)
+    const hasValue = ['value', 'currentValue', 'current_value', 'current', 'selected', 'selectedValue', 'selected_value'].some(key => key in value)
+    const optionValue = hasValue ? extractConfigOptionValue(value) as JsonValue : undefined
+    const rawChoices = extractConfigOptionChoices(value)
+    const normalizedChoices = rawChoices
+      .map(choice => {
+        const choiceId = extractChoiceId(choice)
+        if (!choiceId) return undefined
+        return { id: choiceId, label: extractChoiceLabel(choice, choiceId) ?? choiceId }
+      })
+      .filter((choice): choice is { id: string; label: string } => Boolean(choice))
+    const sourceSchema = 'schema' in value ? value.schema : undefined
+    const schema = sourceSchema !== undefined
+      ? sourceSchema
+      : normalizedChoices.length > 0
+        ? { options: normalizedChoices as unknown as JsonValue }
+        : undefined
     const writable = isWritableConfigOption(valueType, optionValue, schema)
     const raw = {
       ...(isRecord(value.raw) ? value.raw : {}),
-      ...(!writable && 'value' in value ? { value: value.value, ...(valueType ? { valueType } : {}) } : {}),
-      ...withoutKeys(value, ['id', 'label', 'value', 'valueType', 'editable', 'schema', 'version', 'capability', 'raw']),
+      ...(!writable && hasValue ? { value: optionValue, ...(valueType ? { valueType } : {}) } : {}),
+      ...withoutKeys(value, [
+        'id', 'key', 'configId', 'config_id', 'optionId', 'option_id', 'name', 'label', 'title',
+        'value', 'currentValue', 'current_value', 'current', 'selected', 'selectedValue', 'selected_value',
+        'valueType', 'value_type', 'type', 'editable', 'readOnly', 'readonly', 'read_only',
+        'schema', 'version', 'capability', 'raw', 'options', 'choices', 'values', 'available', 'items',
+      ]),
     }
     const retained = optionalRaw(raw)
     const version = finiteNonNegative(value.version)
     return Object.freeze({ id, label,
-      ...('value' in value ? { value: value.value } : {}), ...(valueType ? { valueType } : {}),
-      ...(typeof value.editable === 'boolean' ? { editable: value.editable && writable } : {}), ...('schema' in value ? { schema: value.schema } : {}),
+      ...(hasValue ? { value: optionValue } : {}), ...(valueType ? { valueType } : {}),
+      ...(typeof value.editable === 'boolean' ? { editable: value.editable && writable } : {}), ...(schema !== undefined ? { schema } : {}),
       ...(version !== undefined ? { version } : {}), ...(stringField(value.capability) ? { capability: stringField(value.capability) } : {}),
       ...(retained ? { raw: retained } : {}),
     })
@@ -173,9 +199,12 @@ export function normalizeSessionConfigOptions(values: readonly JsonValue[]): rea
 }
 
 function isWritableConfigOption(valueType: string | undefined, value: JsonValue | undefined, schema: JsonValue | undefined): boolean {
-  if (valueType === 'boolean') return typeof value === 'boolean'
-  if (valueType !== 'select' || typeof value !== 'string' || !isRecord(schema)) return false
-  return Array.isArray(schema.options) && schema.options.length > 0
+  const type = valueType?.toLowerCase()
+  if (type === 'boolean' || type === 'bool') return typeof value === 'boolean'
+  if ((type !== 'select' && type !== 'enum') || typeof value !== 'string' || !isRecord(schema)) return false
+  return Array.isArray(schema.options)
+    ? schema.options.length > 0
+    : Array.isArray(schema.enum) && schema.enum.length > 0
 }
 
 function finiteNonNegative(value: unknown): number | undefined {

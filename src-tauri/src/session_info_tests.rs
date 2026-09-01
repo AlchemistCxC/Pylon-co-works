@@ -67,6 +67,18 @@ fn session_response_preserves_mode_and_all_config_options() {
 }
 
 #[test]
+fn session_response_reads_model_from_standard_models_state() {
+    let mut session = SessionInfo::new("peri-1".into(), String::new(), ".".into(), false, 0);
+    session.apply_session_response(&serde_json::json!({
+        "models": {
+            "currentModelId": "openrouter:deepseek-v4-flash",
+            "availableModels": [{"modelId": "openrouter:deepseek-v4-flash"}]
+        }
+    }));
+    assert_eq!(session.model, "openrouter:deepseek-v4-flash");
+}
+
+#[test]
 fn config_option_update_accepts_nested_value_shape() {
     let option =
         serde_json::json!({"id": "model", "value": {"valueId": {"value": "deepseek-reasoner"}}});

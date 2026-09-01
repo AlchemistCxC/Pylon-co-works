@@ -9,7 +9,6 @@ import { test } from 'vitest'
 test('chat replay regression contract（legacy 迁移）', async () => {
 
 const root = new URL('../src/components/chat/', import.meta.url)
-const chatView = readFileSync(new URL('ChatView.tsx', root), 'utf8')
 const controller = readFileSync(new URL('chatEventController.ts', root), 'utf8')
 const store = readFileSync(new URL('sessionRuntimeStore.ts', root), 'utf8')
 const replayState = readFileSync(new URL('replayState.ts', root), 'utf8')
@@ -18,7 +17,6 @@ const eventState = readFileSync(new URL('sessionEventState.ts', root), 'utf8')
 
 // CV-4：事件控制器挂接收敛到 useSessionLifecycle（attach 必须先于切换 effect）
 const lifecycleHook = readFileSync(new URL('useSessionLifecycle.ts', root), 'utf8')
-assert.match(chatView, /useSessionLifecycle\(/, 'ChatView 必须消费会话生命周期 hook')
 assert.match(lifecycleHook, /attachChatEventController\(controllerRefs\)/, 'hook 必须挂载事件控制器')
 assert.ok(lifecycleHook.indexOf('attachChatEventController(controllerRefs)') < lifecycleHook.indexOf('if (sessionId === prevSessionRef.current && processedReloadRef.current === reloadToken) return'), 'controller attach 必须先于 session 切换 effect 声明')
 assert.doesNotMatch(store, /replaying/, 'U2-C 单一路径不得保留 replaying 缓冲')

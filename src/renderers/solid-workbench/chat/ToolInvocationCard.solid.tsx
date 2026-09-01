@@ -20,6 +20,7 @@ import { isStructuredContentKind, SolidStructuredContent } from './content/Struc
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { capitalizeToolName } from '../../../components/chat/toolPresentationModel.ts'
+import { buildToolRenderModel } from '../../../domains/tool/toolPresentation.ts'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
@@ -36,10 +37,35 @@ export function SolidToolInvocationCard(props: {
     || props.snapshot.result.error !== undefined
   ))
   const presentation = () => toolStatePresentation(state(), hasOutput())
+  const renderModel = createMemo(() => buildToolRenderModel({
+    // Resolve summaries from the wire/canonical machine name so provider
+    // dictionaries (Hermes `execute_code` → `code`, `terminal` → `command`)
+    // remain available even when a localized display title is present.
+    name: props.snapshot.name || props.snapshot.canonicalName || props.snapshot.title || '未知工具',
+    toolKind: props.snapshot.kind,
+    input: props.snapshot.input,
+  }))
   const displayName = () => capitalizeToolName(props.snapshot.title
     || props.snapshot.canonicalName
     || props.snapshot.name
     || '未知工具')
+  const providerName = () => {
+    const wireName = props.snapshot.name?.trim()
+    if (!props.snapshot.title || !wireName) return ''
+    const canonicalDisplay = renderModel().resolution.displayName?.trim().toLowerCase()
+    if (canonicalDisplay && canonicalDisplay === displayName().trim().toLowerCase()) return ''
+    return wireName.toLowerCase() !== displayName().trim().toLowerCase() ? wireName : ''
+  }
+  const summary = () => {
+    // Keep generic cards collapsed/quiet (their input remains in the body).
+    // The compact header summary is reserved for Hermes' command-like tools,
+    // where hiding the command used to make `terminal` look unparsed.
+    const wireName = props.snapshot.name?.trim().toLowerCase()
+    return props.snapshot.kind === 'execute'
+      && (wireName === 'terminal' || wireName === 'process' || wireName === 'execute_code')
+      ? renderModel().summary
+      : ''
+  }
   const collapse = createCollapsiblePresenter({
     defaultOpen: () => !booleanSetting(props.appearance, 'defaultCollapsed', true),
     resetKey: () => props.snapshot.id,
@@ -82,9 +108,8 @@ export function SolidToolInvocationCard(props: {
         </span>
       </Show>
       <span class="term-tool-name">{displayName()}</span>
-      <Show when={props.snapshot.name && props.snapshot.name !== displayName()}>
-        <span class="term-tool-summary"> ({props.snapshot.name})</span>
-      </Show>
+      <Show when={providerName()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
+      <Show when={summary()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
       <span class="term-tool-suffix"> — {presentation().label}</span>
       <Show when={duration()}>{value => <span class="term-tool-duration"> · {value()}</span>}</Show>
     </button>

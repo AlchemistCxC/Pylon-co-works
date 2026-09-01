@@ -140,8 +140,9 @@ describe('I09-A-FE-01 titlebar 折叠按钮 capability', () => {
         onCloseWindow={vi.fn()}
       />,
     )
-    const button = screen.getByRole('button', { name: '当前 Sheet 无右栏' })
+    const button = screen.getByRole('button', { name: '右侧栏' })
     expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', '当前没有可用右侧栏')
     fireEvent.click(button)
     expect(onToggleRightPanel).not.toHaveBeenCalled()
   })

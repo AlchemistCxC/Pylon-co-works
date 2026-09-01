@@ -78,8 +78,6 @@ assert.equal(acpTypes.includes('export interface'), false, 'acpTypes 不得再�
 const chatController = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 assert.match(chatController, /infrastructure\/acp\/chatContracts/, 'controller 必须消费 chatContracts')
 // 渲染组件不直接解析 wire 私有键（_meta 只由边界层经 extract 读取）
-const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.equal(chatView.includes('_meta'), false, 'ChatView 不得直接解析 _meta 私有键')
 
 // P1-10：三份 wire mock → 统一渲染模型（kind 归一不抛错）
 {

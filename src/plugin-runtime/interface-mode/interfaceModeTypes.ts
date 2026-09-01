@@ -28,6 +28,11 @@ export interface InterfaceModeContribution {
   readonly chromeStyle: InterfaceModeChromeStyle
   readonly workbench: InterfaceModeWorkbench
   readonly shellSurface?: InterfaceModeShellSurface
+  /** Optional shell recipes reserved for future plugin-provided layouts. */
+  readonly titlebarRecipeId?: string
+  readonly leftRailRecipeId?: string
+  readonly rightRailRecipeId?: string
+  readonly capabilities?: Readonly<Record<string, boolean>>
 }
 
 export type InterfaceModeRegistryEntry = RegistryEntry<InterfaceModeContribution>

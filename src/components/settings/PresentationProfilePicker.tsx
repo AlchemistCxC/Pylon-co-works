@@ -21,7 +21,7 @@ export default function PresentationProfilePicker() {
     const profile = profileRegistry.resolve(id)?.value
     if (!profile) return
     applyPresentationProfile(profile, {
-      setZoneField: (zone, patch) => useStore.getState().setZoneField(zone, patch),
+      setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
       setActiveProfileId: next => {
         usePresentationPreferenceStore.getState().setActiveProfileId(next)
         useInterfaceModeStore.getState().rememberProfile(interfaceMode, next)

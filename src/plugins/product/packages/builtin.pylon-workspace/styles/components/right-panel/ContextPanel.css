@@ -19,6 +19,13 @@
   backdrop-filter:blur(var(--right-blur,0px)); -webkit-backdrop-filter:blur(var(--right-blur,0px));
 }
 
+/* Right rail assets keep the composition selected at import time. Resizing the
+ * rail changes only the containing surface; it never re-imports or re-crops the
+ * user asset. */
+.right-rail-host[data-background-sizing="fit"] .context-panel::before { background-size:contain; background-repeat:no-repeat; }
+.right-rail-host[data-background-sizing="fill"] .context-panel::before { background-size:cover; background-repeat:no-repeat; }
+.right-rail-host[data-background-sizing="stretch"] .context-panel::before { background-size:100% 100%; background-repeat:no-repeat; }
+
 .context-panel-head {
   display: flex;
   align-items: center;

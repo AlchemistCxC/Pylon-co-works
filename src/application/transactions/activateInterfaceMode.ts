@@ -45,7 +45,7 @@ export function interfaceModeIsUsable(mode: InterfaceModeContribution): boolean 
 
 function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContribution): void {
   applyPresentationProfile(profile, {
-    setZoneField: (zone, patch) => useStore.getState().setZoneField(zone, patch),
+    setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
     setActiveProfileId: profileId => usePresentationPreferenceStore.getState().setActiveProfileId(profileId),
   })
   useInterfaceModeStore.getState().rememberProfile(mode, profile.id)

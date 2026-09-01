@@ -32,7 +32,7 @@ export function SolidAnsiBlock(props: SolidAnsiBlockProps) {
 
   return (
     <div
-      class="term-ansi-block"
+      class="term-ansi term-ansi-block"
       data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
       data-wrap={props.wrap ?? 'soft'}
       data-palette={props.palette ?? 'terminal'}

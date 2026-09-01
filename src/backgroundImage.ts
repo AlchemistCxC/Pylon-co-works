@@ -7,6 +7,23 @@ export interface BackgroundImageResult {
   error: string | null
 }
 
+export type BackgroundSizing = 'fit' | 'fill' | 'stretch'
+
+export interface BackgroundPresentation {
+  readonly src: string
+  readonly sizing: BackgroundSizing
+  readonly baseWidth: number
+}
+
+/** Build the stable presentation metadata captured when a background asset is imported. */
+export function createBackgroundPresentation(src: string, baseWidth: number, sizing: BackgroundSizing = 'fill'): BackgroundPresentation {
+  return {
+    src: src.trim(),
+    sizing,
+    baseWidth: Number.isFinite(baseWidth) && baseWidth > 0 ? Math.round(baseWidth) : 1,
+  }
+}
+
 type LocalPathConverter = (path: string) => string
 const PASSTHROUGH_SCHEME = /^(?:https?:|data:|blob:|asset:|file:)/i
 const WINDOWS_LOCAL_PATH = /^(?:[a-z]:[\\/]|\\\\)/i

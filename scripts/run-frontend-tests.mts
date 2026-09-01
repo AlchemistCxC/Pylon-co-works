@@ -17,7 +17,6 @@ const excludedScripts = new Map([
   ['test-settings-layout.test.mts', '已迁入 Vitest'],
   ['test-sheet-persistence.mts', '已由 test-sheet-persistence.test.mts 在 Vitest 中执行'],
   ['test-sheet-persistence.test.mts', '已迁入 Vitest'],
-  ['test-command-registry.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
   ['test-normalizer.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
   ['test-session-runtime.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
   ['test-compact-transaction.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],

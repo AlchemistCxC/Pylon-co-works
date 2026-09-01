@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import { projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
@@ -133,6 +133,7 @@ describe('mountSolidWorkbench', () => {
 
   it('用户离开底部后不抢滚动，并可一键恢复自动跟随', async () => {
     const scrollIntoView = vi.fn()
+    const scrollTo = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: scrollIntoView,
@@ -143,6 +144,7 @@ describe('mountSolidWorkbench', () => {
       scrollTop: { value: 100, writable: true, configurable: true },
       scrollHeight: { value: 1_000, configurable: true },
       clientHeight: { value: 300, configurable: true },
+      scrollTo: { value: scrollTo, configurable: true },
     })
 
     fireEvent.scroll(viewport)
@@ -154,12 +156,51 @@ describe('mountSolidWorkbench', () => {
     expect(scrollIntoView).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' })
-    expect(screen.queryByRole('button', { name: '回到底部' })).toBeNull()
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+    // The rail action remains available as an explicit endpoint control after
+    // follow mode is restored; subsequent output should auto-follow again.
+    expect(screen.getByRole('button', { name: '回到底部' })).toBeTruthy()
 
     scrollIntoView.mockClear()
+    scrollTo.mockClear()
     services.runtime.update({ streamingText: '恢复跟随后继续输出' })
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' }))
+  })
+
+  it('流式正文异步改变高度时，sticky 状态继续跟随底部', async () => {
+    const previousResizeObserver = globalThis.ResizeObserver
+    class MockResizeObserver {
+      static instances: MockResizeObserver[] = []
+      readonly observed = new Set<Element>()
+      constructor(private readonly callback: ResizeObserverCallback) { MockResizeObserver.instances.push(this) }
+      observe(element: Element) { this.observed.add(element) }
+      unobserve(element: Element) { this.observed.delete(element) }
+      disconnect() { this.observed.clear() }
+      trigger() { this.callback([], this as unknown as ResizeObserver) }
+    }
+    globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+    try {
+      const scrollTo = vi.fn()
+      const { host, services } = mountPreview()
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      Object.defineProperties(viewport, {
+        scrollTop: { value: 700, writable: true, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+        clientHeight: { value: 300, configurable: true },
+        scrollTo: { value: scrollTo, configurable: true },
+      })
+      await Promise.resolve()
+      scrollTo.mockClear()
+
+      const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
+      expect(contentObserver).toBeTruthy()
+      contentObserver!.trigger()
+      await Promise.resolve()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      services.runtime.destroy()
+    } finally {
+      globalThis.ResizeObserver = previousResizeObserver
+    }
   })
 
   it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
@@ -307,6 +348,57 @@ describe('mountSolidWorkbench', () => {
     expect(destroys).toBe(0)
     const canonicalMessageId = projectWorkbench(events).document.messages[0]!.id
     expect(host.querySelectorAll(`[data-message-id="${canonicalMessageId}"]`)).toHaveLength(1)
+  })
+
+  it('诊断：诗歌流式旁路切到 canonical 后保留段落结构', async () => {
+    const { host, services } = mountPreview()
+    const poem = '**星河**\n\n春风拂过山岗\n月光落在窗\n\n我把远方写进诗行\n让星河在梦里流淌'
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
+      ownerKey: 'owner-preview', generation: 1, sessionId: 'preview-session',
+    })
+    services.runtime.update({ streamingText: poem, generating: true })
+    const streamingBody = await waitFor(() => {
+      const body = host.querySelector('.term-row-assistant .term-assistant-body')
+      expect(body).not.toBeNull()
+      return body as HTMLElement
+    })
+    const streamingMarkup = streamingBody.innerHTML
+
+    const events = [
+      createWorkbenchEnvelope({
+        sessionId: 'preview-session', sequence: 1,
+        recordedAt: '2026-08-25T00:00:01.000Z',
+        source: { provider: 'peri', sourceId: 'poem-delta' },
+        identity: { messageId: 'poem-message' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text: poem }] },
+      }),
+      createWorkbenchEnvelope({
+        sessionId: 'preview-session', sequence: 2,
+        recordedAt: '2026-08-25T00:00:02.000Z',
+        source: { provider: 'peri', sourceId: 'poem-complete' },
+        identity: { messageId: 'poem-message' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.completed', role: 'assistant', parts: [] },
+      }),
+    ]
+    const finalDocument = projectWorkbench(events).document
+    services.runtime.replaceDocument(finalDocument, {
+      ownerKey: 'owner-preview', generation: 2, sessionId: 'preview-session',
+    })
+    services.runtime.update({ streamingText: '', generating: false })
+
+    const finalBody = await waitFor(() => {
+      const body = host.querySelector(`[data-message-id="${finalDocument.messages[0]!.id}"] .term-assistant-body`)
+      expect(body).not.toBeNull()
+      return body as HTMLElement
+    })
+    await waitFor(() => expect(finalBody.querySelector('strong')).not.toBeNull())
+    // Keep this seam explicit: the final renderer must expose all three blocks
+    // and preserve the soft line break inside each verse.
+    expect(streamingMarkup).toContain('春风拂过山岗')
+    expect(finalBody.textContent).toContain('春风拂过山岗\n月光落在窗')
+    expect(finalBody.querySelectorAll('p')).toHaveLength(3)
   })
 
   it('canonical reasoning updates keep one expanded Slot live until completion', async () => {
@@ -527,11 +619,18 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
-    expect(emptyState).toHaveTextContent('准备开始')
+    expect(emptyState).toHaveAttribute('data-control-center', 'production')
+    expect(screen.getByRole('img', { name: 'Pylon Agent' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
-    expect(screen.getByRole('textbox', { name: '首条请求' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '开始新会话' })).toBeDisabled()
-    expect(host.querySelector('.control-center')).toBeNull()
+    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeTruthy()
+    expect(screen.queryByLabelText('输入快捷键提示')).toBeNull()
+    expect(host.querySelector('.control-center')).toBe(emptyState)
+    expect(host.querySelectorAll('.input-textarea')).toHaveLength(1)
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, replayReadonly: false })
+    await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).toBeTruthy())
+    expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.firstElementChild).toBe(root)
   })
 
@@ -544,12 +643,13 @@ describe('mountSolidWorkbench', () => {
 
     const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
     expect(workspace).toHaveValue('workspace-a')
-    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '检查当前项目' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    const prompt = screen.getByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '检查当前项目' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
       command: 'createSession',
-      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目' } }],
+      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目', attachments: [] }, mode: 'auto', model: 'deepseek-v4-flash', reasoningLevel: 'medium' }],
     }))
   })
 
@@ -576,6 +676,52 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(workspace).toHaveValue(''))
   })
 
+  it('Sidebar 创建会话事件先到达时缓存 workspaceId，不被空态初始化覆盖', async () => {
+    const { lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
+        { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
+      ],
+    })
+    // Sidebar dispatches before clearing the selected session.
+    window.dispatchEvent(new CustomEvent('pylon:new-session', { detail: { workspaceId: 'workspace-target' } }))
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
+        { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
+      ],
+    })
+    expect(await screen.findByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-target')
+  })
+
+  it('手动选择工作区后，列表更新不会重新套用最近活跃项', async () => {
+    const { lifecycle } = mountPreview()
+    const options = [
+      { id: 'workspace-a', label: 'A', path: 'G:/a', lastActiveAt: 10 },
+      { id: 'workspace-b', label: 'B', path: 'G:/b', lastActiveAt: 20 },
+    ]
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work', availableWorkspaces: options })
+    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
+    fireEvent.change(workspace, { target: { value: 'workspace-a' } })
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [...options, { id: 'workspace-c', label: 'C', path: 'G:/c', lastActiveAt: 99 }],
+    })
+    await waitFor(() => expect(workspace).toHaveValue('workspace-a'))
+  })
+
+  it('空态不挂载 composer 快捷键提示，并在创建后标记进入过渡态', async () => {
+    const { host, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    expect(host.querySelector('.input-composer-meta')).toBeNull()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'chat' })
+    await waitFor(() => expect(host.querySelector('.control-center')?.className).toContain('is-session-entering'))
+  })
+
   it('空态创建期间冻结事务输入并暴露忙碌状态', async () => {
     let finishCreation: ((value: { sessionId: string }) => void) | undefined
     const { services, lifecycle } = mountPreview()
@@ -584,15 +730,14 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '执行耗时任务' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     const emptyState = screen.getByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(prompt).toBeDisabled()
-    expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
 
     finishCreation?.({ sessionId: 'created-session' })
     await waitFor(() => expect(emptyState).toHaveAttribute('aria-busy', 'false'))
@@ -605,13 +750,12 @@ describe('mountSolidWorkbench', () => {
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '保留这份任务描述' } })
-    const submit = screen.getByRole('button', { name: '开始新会话' })
-    submit.focus()
-    fireEvent.click(submit)
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 暂时不可用')
+    expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()
     expect(prompt).toHaveValue('保留这份任务描述')
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-a')
     expect(prompt).toBeEnabled()

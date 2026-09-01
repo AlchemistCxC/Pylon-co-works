@@ -1,4 +1,4 @@
-//! session/load 回放收集（R12/P3-5 拆分自 acp.rs；行为零变化）。
+﻿//! session/load 回放收集（R12/P3-5 拆分自 acp.rs；行为零变化）。
 //!
 //! 回放与响应均经 broadcast 收集（不注册 pending）：调用方在锁内经
 //! `AcpClient::replay_handles` 一次性提取句柄后释放锁，锁外交给

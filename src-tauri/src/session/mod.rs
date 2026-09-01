@@ -191,7 +191,7 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
     ) -> crate::agent_config::AcpProtocolConfig {
         self.agent_for_runtime(runtime)
-            .map(|agent| agent.protocol().clone())
+            .map(|agent| crate::hermes_runtime::effective_protocol(&agent))
             .unwrap_or_default()
     }
 
@@ -1326,6 +1326,157 @@ for line in sys.stdin:
             !methods.iter().any(|m| m == "session/set_model"),
             "不得按 active agent 走 set_model: {methods:?}"
         );
+    }
+
+    /// P28：空态创建所选的 model/mode/reasoning 必须在 session/new 成功后、
+    /// 本地映射发布前按真实 ACP wire 顺序应用。这个 fake agent 保留每一条
+    /// 请求的完整参数，避免只测 helper 序列化而漏掉 command → runtime → ACP
+    /// 的实际接缝。
+    #[tokio::test]
+    async fn new_session_applies_initial_options_in_wire_order_and_returns_merged_state() {
+        const FAKE_SCRIPT: &str = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    method=request.get('method')
+    params=request.get('params') or {}
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={
+            'sessionId':'p28-session',
+            'models':{
+                'currentModelId':'provider:old',
+                'availableModels':[{'modelId':'provider:old','name':'Old'}]
+            },
+            'modes':{
+                'currentModeId':'default',
+                'availableModes':[{'id':'default','name':'Default'}, {'id':'accept_edits','name':'Accept Edits'}]
+            },
+            'configOptions':[{
+                'id':'reasoning_effort',
+                'name':'Reasoning effort',
+                'category':'thought_level',
+                'options':[{'id':'none'}, {'id':'high'}],
+                'currentValue':'none'
+            }]
+        }
+    elif method == 'session/set_model':
+        response['result']={'models':{'currentModelId':params.get('modelId')}}
+    elif method == 'session/set_mode':
+        response['result']={'modes':{'currentModeId':params.get('modeId')}}
+    elif method == 'session/set_config_option':
+        response['result']={'configOptions':[{'id':params.get('configId'),'currentValue':params.get('value')}]}
+    print(json.dumps(response), flush=True)
+"#;
+        let trace_path = std::env::temp_dir().join(format!(
+            "pylon-p28-initial-options-{}.jsonl",
+            std::process::id()
+        ));
+        let mut agent = crate::test_utils::fake_acp_agent_with(
+            "p28-agent",
+            FAKE_SCRIPT,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            set_model_api: Some(crate::agent_config::SetModelApi::SetModel),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("p28-agent")
+            .with_agent(agent)
+            .with_runtime("p28-agent", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let state = app.state::<AppState>();
+
+        let response = new_session(
+            state,
+            "p28-agent".to_string(),
+            "local:p28".to_string(),
+            "profile-p28".to_string(),
+            "persona".to_string(),
+            Some(".".to_string()),
+            None,
+            None,
+            Some("provider:new".to_string()),
+            Some("high".to_string()),
+            Some("accept_edits".to_string()),
+        )
+        .await
+        .expect("initial model/mode/reasoning must be applied");
+
+        assert_eq!(response["sessionId"], "p28-session");
+        assert_eq!(response["models"]["currentModelId"], "provider:new");
+        assert_eq!(response["modes"]["currentModeId"], "accept_edits");
+        assert_eq!(
+            response["configOptions"]
+                .as_array()
+                .and_then(|options| options.iter().find(|option| option["id"] == "reasoning_effort"))
+                .and_then(|option| option.get("currentValue")),
+            Some(&serde_json::json!("high"))
+        );
+        let mapped = runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get("local:p28")
+            .cloned()
+            .expect("local session mapping must publish after all settings");
+        assert_eq!(mapped.model, "provider:new");
+        assert_eq!(mapped.mode.as_deref(), Some("accept_edits"));
+
+        // The connection handshake is intentionally ignored; the creation
+        // transaction itself must be exactly new → model → mode → reasoning.
+        let trace = std::fs::read_to_string(&trace_path).expect("read P28 wire trace");
+        std::fs::remove_file(&trace_path).ok();
+        let requests: Vec<serde_json::Value> = trace
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let methods: Vec<&str> = requests
+            .iter()
+            .filter_map(|request| request.get("method").and_then(|method| method.as_str()))
+            .collect();
+        let new_index = methods
+            .iter()
+            .position(|method| *method == "session/new")
+            .expect("session/new must be sent");
+        let model_index = methods
+            .iter()
+            .position(|method| *method == "session/set_model")
+            .expect("session/set_model must be sent");
+        let mode_index = methods
+            .iter()
+            .position(|method| *method == "session/set_mode")
+            .expect("session/set_mode must be sent");
+        let reasoning_index = methods
+            .iter()
+            .position(|method| *method == "session/set_config_option")
+            .expect("reasoning config option must be sent");
+        assert!(new_index < model_index && model_index < mode_index && mode_index < reasoning_index,
+            "initial setting wire order must be new → model → mode → reasoning: {methods:?}");
+        let model_request = &requests[model_index];
+        assert_eq!(model_request["params"]["sessionId"], "p28-session");
+        assert_eq!(model_request["params"]["modelId"], "provider:new");
+        let mode_request = &requests[mode_index];
+        assert_eq!(mode_request["params"]["sessionId"], "p28-session");
+        assert_eq!(mode_request["params"]["modeId"], "accept_edits");
+        let reasoning_request = &requests[reasoning_index];
+        assert_eq!(reasoning_request["params"]["sessionId"], "p28-session");
+        assert_eq!(reasoning_request["params"]["configId"], "reasoning_effort");
+        assert_eq!(reasoning_request["params"]["value"], "high");
+
+        runtime.acp.lock().await.kill().expect("fake ACP cleanup");
     }
 
     /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加

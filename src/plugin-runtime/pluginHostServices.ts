@@ -18,6 +18,7 @@ import type { PluginSettingsPageRegistry } from './settings/pluginSettingsRegist
 import type { PluginSettingsStore } from './settings/pluginSettingsStore.ts'
 import type { AgentSidebarRegistry } from './sidebar/sidebarRegistry.ts'
 import type { PluginUiRegistry } from './ui/pluginUiRegistry.ts'
+import type { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
 
 export interface RuntimeRegistries {
   readonly registryHub: RegistryHub
@@ -36,6 +37,7 @@ export interface RuntimeRegistries {
   readonly fontContributionRegistry: FontContributionRegistry
   readonly sessionCreationRegistry: SessionCreationRegistry
   readonly interfaceModeRegistry: InterfaceModeRegistry
+  readonly titlebarRegistry: TitlebarRegistry
   readonly workspaceRegistry: WorkspaceRegistryStore
 }
 

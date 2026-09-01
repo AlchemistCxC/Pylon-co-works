@@ -1,7 +1,7 @@
 /**
  * core.renderer.solid —— 内置 Solid 渲染器 facade。
  *
- * 与 reactRenderer 同理：组合根导入期不加载 solid-js/web，
+ * 组合根导入期不加载 solid-js/web，
  * mount 时动态 import 并建立单个 Solid root；update 只推进 semantic signals。
  */
 import {
@@ -121,9 +121,8 @@ export function createCoreSolidRendererPluginDefinition(): BuiltinPluginDefiniti
     activate: ({ renderer }) => {
       renderer.registerMessageRenderer({
         id: `${CORE_SOLID_RENDERER_PLUGIN_ID}.renderer`,
-        label: 'SolidJS（实验）',
-        description: '保留的候选消息渲染引擎；完整 Workbench 尚未切入生产。',
-        experimental: true,
+        label: 'SolidJS',
+        description: '内置唯一消息渲染引擎，与 Solid Workbench 共用内容与生命周期模型。',
         priority: 2000,
         fallback: true,
         canRender: input => !input.rendererId || input.rendererId === CORE_SOLID_RENDERER_PLUGIN_ID,

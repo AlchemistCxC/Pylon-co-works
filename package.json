@@ -10,6 +10,7 @@
     "build:solid-smoke": "vite build --config vite.solid-smoke.config.ts && node scripts/check-solid-smoke-build.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
+    "prepare:hermes-runtime": "python scripts/prepare_hermes_runtime.py",
     "pack:portable": "python scripts/pack_release.py",
     "release:portable": "npm run build && npm run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && npm run pack:portable",
     "test": "vitest run",
@@ -61,8 +62,8 @@
     "remark-rehype": "^11.1.2",
     "solid-js": "^1.9.14",
     "unified": "^11.0.5",
-    "zustand": "^5",
-    "vscode-oniguruma": "^2.0.1"
+    "vscode-oniguruma": "^2.0.1",
+    "zustand": "^5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

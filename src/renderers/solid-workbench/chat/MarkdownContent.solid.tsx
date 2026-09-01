@@ -65,12 +65,26 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
     const pending = text.slice(committedText.length)
     const split = splitStreamingMarkdownBlocks(pending)
     for (const block of split.stableBlocks) {
-      tailRow.update(block)
+      // The splitter includes the blank-line delimiter in each stable block
+      // so `committedText` remains lossless.  That delimiter is structural,
+      // though—not content that should become an extra `pre-wrap` line inside
+      // the row.  The shared `.term-p + .term-p` cadence below represents the
+      // separator; strip it from the visible stable text to keep streaming
+      // geometry identical to the completed Markdown path.
+      tailRow.update(trimStableBlockDelimiter(block))
       stableRows.push(tailRow)
       committedText += block
       tailRow = createStreamingBlockRow(nextId++, '')
     }
-    tailRow.update(split.unstable)
+    // Consecutive blank lines are intentionally collapsed by the splitter
+    // rather than becoming empty renderer rows.  If the remaining tail starts
+    // with another delimiter, drop that structural prefix as well; otherwise
+    // `pre-wrap` would re-introduce an extra empty line after the CSS paragraph
+    // cadence has already represented the boundary.
+    const unstableText = split.stableBlocks.length > 0
+      ? trimStreamingDelimiterStart(split.unstable)
+      : split.unstable
+    tailRow.update(unstableText)
     if (final && split.unstable.length > 0) {
       stableRows.push(tailRow)
       committedText += split.unstable
@@ -90,6 +104,18 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
     streaming={props.streaming}
     inline={props.inline}
   />}</For>
+}
+
+function trimStableBlockDelimiter(block: string): string {
+  // A stable block is emitted only after at least one blank line.  Consume all
+  // trailing line terminators/indent-only lines from the rendered fragment;
+  // the canonical text remains untouched in `committedText` above.  Supporting
+  // CRLF here keeps the visual result independent of provider line endings.
+  return block.replace(/(?:\r?\n[\t ]*)+$/u, '')
+}
+
+function trimStreamingDelimiterStart(text: string): string {
+  return text.replace(/^(?:\r?\n[\t ]*)+/u, '')
 }
 
 function createStreamingBlockRow(id: number, initialText: string): StreamingBlockRow {
@@ -190,9 +216,18 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
 
   const tagName = allowedTagName(node.tagName)
   // CSS-02：Markdown heading 显式 class contract（§5.15 step 3）——h1-h6 输出 term-h1~term-h6，
-  // 配合 ChatView.css 限定 .term-assistant 内的层级规则（与 React renderer 同 contract）。
+  // 配合 ChatView.css 限定 .term-assistant 内的层级规则（Solid renderer 唯一 contract）。
   const headingClass = tagName.match(/^h[1-6]$/) ? `term-${tagName}` : undefined
-  return <Dynamic component={tagName} class={headingClass}><MarkdownChildren children={node.children} /></Dynamic>
+  // Keep the block contract shared with the legacy React renderer.  The
+  // global stylesheet intentionally resets native element margins, so relying
+  // on the browser's bare `<p>`/`<li>` defaults makes a completed stream look
+  // materially tighter than its plain-text streaming counterpart.
+  const blockClass = tagName === 'p'
+    ? 'term-p'
+    : tagName === 'li'
+      ? 'term-li'
+      : headingClass
+  return <Dynamic component={tagName} class={blockClass}><MarkdownChildren children={node.children} /></Dynamic>
 }
 
 function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {

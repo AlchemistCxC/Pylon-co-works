@@ -1,7 +1,7 @@
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import { fileTabViewType, type FileTabRecord } from '../../sheets/file/fileSheetState.ts'
 import { getFileWorkbenchRegistry } from '../runtimeServices.ts'
-import type { FileActivityContribution, FileProvider, FileViewRendererDefinition, GitProvider } from './fileWorkbenchTypes.ts'
+import type { FileActivityContribution, FileLanguageProvider, FileProvider, FileViewRendererDefinition, GitProvider } from './fileWorkbenchTypes.ts'
 
 export function listFileActivities(target: WorkspaceTarget | null): readonly FileActivityContribution[] {
   return getFileWorkbenchRegistry().getSnapshot().entries.map(entry => entry.value)
@@ -13,6 +13,12 @@ export function resolveFileProvider(target: WorkspaceTarget | null): FileProvide
   const providers = getFileWorkbenchRegistry().getSnapshot().entries.map(entry => entry.value)
     .filter((value): value is Extract<typeof value, { kind: 'file-provider' }> => value.kind === 'file-provider')
     .filter(value => value.provider.canHandle(target))
+  return providers.sort((a, b) => a.priority - b.priority)[0]?.provider ?? null
+}
+export function resolveFileLanguageProvider(path: string): FileLanguageProvider | null {
+  const providers = getFileWorkbenchRegistry().getSnapshot().entries.map(entry => entry.value)
+    .filter((value): value is Extract<typeof value, { kind: 'language-provider' }> => value.kind === 'language-provider')
+    .filter(value => value.provider.canHandle(path))
   return providers.sort((a, b) => a.priority - b.priority)[0]?.provider ?? null
 }
 export function resolveGitProvider(target: WorkspaceTarget | null): GitProvider | null {

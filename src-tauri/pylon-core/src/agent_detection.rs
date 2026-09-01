@@ -56,6 +56,16 @@ pub enum ProtocolAvailability {
     Failed,
 }
 
+/// Evidence that the discovered executable can be started independently of
+/// whether it completed an ACP handshake.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Startability {
+    NotTested,
+    Verified,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeCandidate {
@@ -68,6 +78,7 @@ pub struct AgentRuntimeCandidate {
     pub args: Vec<String>,
     pub evidence: Vec<AgentDetectionEvidence>,
     pub identity_confidence: IdentityConfidence,
+    pub startability: Startability,
     pub protocol_availability: ProtocolAvailability,
     pub already_imported_agent_id: Option<String>,
     pub warnings: Vec<String>,
@@ -507,6 +518,7 @@ const PROBE_OUTPUT_LIMIT: usize = 4 * 1024;
 
 struct VersionProbeOutcome {
     version: Option<String>,
+    startability: Startability,
     diagnostic: Option<AgentDetectionDiagnostic>,
 }
 
@@ -673,6 +685,7 @@ async fn version_probe(
     if budget.is_zero() {
         return VersionProbeOutcome {
             version: None,
+            startability: Startability::NotTested,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 "detection_budget_exhausted",
@@ -695,6 +708,7 @@ async fn version_probe(
         Err(error) => {
             return VersionProbeOutcome {
                 version: None,
+                startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_spawn_failed",
@@ -722,6 +736,7 @@ async fn version_probe(
             child.kill_and_wait().await;
             return VersionProbeOutcome {
                 version: None,
+                startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_timeout",
@@ -736,6 +751,7 @@ async fn version_probe(
         Err(error) => {
             return VersionProbeOutcome {
                 version: None,
+                startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_wait_failed",
@@ -751,6 +767,7 @@ async fn version_probe(
     if !status.success() {
         return VersionProbeOutcome {
             version: None,
+            startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 "version_probe_non_zero",
@@ -773,6 +790,7 @@ async fn version_probe(
     if version.is_empty() {
         VersionProbeOutcome {
             version: None,
+            startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 "version_probe_empty",
@@ -783,6 +801,7 @@ async fn version_probe(
     } else {
         VersionProbeOutcome {
             version: Some(version),
+            startability: Startability::Verified,
             diagnostic: None,
         }
     }
@@ -932,6 +951,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             diagnostics.push(diagnostic);
         }
         let version = probe.version;
+        let startability = probe.startability;
         let alias_index = located.alias_index;
         let path = located.executable;
         let source = located.source;
@@ -968,6 +988,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             args: candidate_args,
             evidence,
             identity_confidence,
+            startability,
             protocol_availability: ProtocolAvailability::NotTested,
             already_imported_agent_id: imported,
             warnings: {
@@ -1272,6 +1293,7 @@ mod tests {
         );
         assert!(report.candidates.iter().all(|candidate| {
             candidate.identity_confidence == IdentityConfidence::Medium
+                && candidate.startability == Startability::Failed
                 && candidate.protocol_availability == ProtocolAvailability::NotTested
         }));
         std::fs::remove_dir_all(root).unwrap();
@@ -1363,6 +1385,7 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
+        assert_eq!(report.candidates[0].startability, Startability::Failed);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1371,7 +1394,7 @@ mod tests {
     async fn managed_probe_cleanup_kills_descendant_processes() {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
         let root = fixture_root("probe-tree");
@@ -1400,11 +1423,23 @@ mod tests {
             .unwrap();
 
         child.kill_and_wait().await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if !handle.is_null() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            if handle.is_null() {
+                break;
+            }
+            let mut exit_code = 0u32;
+            let queried = unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0;
             unsafe { CloseHandle(handle) };
-            panic!("version probe descendant {pid} survived cleanup");
+            const STILL_ACTIVE: u32 = 259;
+            if queried && exit_code != STILL_ACTIVE {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("version probe descendant {pid} survived cleanup");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         std::fs::remove_dir_all(root).unwrap();
     }

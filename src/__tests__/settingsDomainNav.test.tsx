@@ -5,7 +5,7 @@
  * - 选择分区 → 内容渲染正确（复用既有块组件）
  */
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Settings from '../components/Settings'
 import { useIdentityStore } from '../identityStore'
@@ -27,14 +27,16 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
     })
   })
 
-  // 限定左侧导航容器查询——SettingsPreview 右侧面板 mock 里可能有同名 tab（如"工作区"）
+  // 二级 section 仅在 settings-nav 内；一级 domain 在独立 rail 内。
   const nav = () => within(document.querySelector('.settings-nav') as HTMLElement)
   const navButton = (name: string) => nav().getByRole('button', { name })
+  const domainNav = () => within(document.querySelector('.settings-domain-rail') as HTMLElement)
+  const domainButton = (name: string) => domainNav().getByRole('button', { name })
 
   it('一级导航渲染三个设置域，tier（快速/进阶/专家）无残留', () => {
     render(<Settings />)
-    for (const label of ['外观', '工作区', 'Agent 与连接']) {
-      expect(navButton(label)).toBeInTheDocument()
+    for (const label of ['外观', '工作', 'Agent', '插件']) {
+      expect(domainButton(label)).toBeInTheDocument()
     }
     expect(nav().queryByRole('button', { name: '快速' })).toBeNull()
     expect(nav().queryByRole('button', { name: '进阶' })).toBeNull()
@@ -50,7 +52,7 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
 
   it('切到工作区 → 分区为窗口/宠物/历史保留/配置备份；选窗口渲染窗口尺寸块', () => {
     render(<Settings />)
-    fireEvent.click(navButton('工作区'))
+    fireEvent.click(domainButton('工作'))
     for (const section of ['窗口', '宠物', '历史保留', '配置备份']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -61,7 +63,7 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
 
   it('切到 Agent 与连接 → 分区为 Agent/会话/Gateway；选 Agent 渲染当前 Agent 区', () => {
     render(<Settings />)
-    fireEvent.click(navButton('Agent 与连接'))
+    fireEvent.click(domainButton('Agent'))
     for (const section of ['Agent', '会话', 'Gateway']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -71,8 +73,8 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
 
   it('切回外观 → 分区列表恢复（domain 可往返）', () => {
     render(<Settings />)
-    fireEvent.click(navButton('工作区'))
-    fireEvent.click(navButton('外观'))
+    fireEvent.click(domainButton('工作'))
+    fireEvent.click(domainButton('外观'))
     for (const section of ['模板库', '全局', '侧栏', '消息流', '中控台', '右栏']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -127,7 +129,7 @@ describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
     const chatRow = w.getByRole('button', { name: '消息流' })
     fireEvent.click(within(chatRow.parentElement as HTMLElement).getByRole('button', { name: '置顶 消息流' }))
     // 切到工作区域
-    fireEvent.click(w.getByRole('button', { name: '工作区' }))
+    fireEvent.click(within(document.querySelector('.settings-domain-rail') as HTMLElement).getByRole('button', { name: '工作' }))
     // 常用区出现置顶项（★ 为 aria-hidden 装饰，accessible name 即「消息流」）——点它
     const pinnedBtn = w.getByRole('button', { name: '消息流' })
     expect(pinnedBtn.closest('.settings-nav-section-block')).toBeNull()
@@ -135,5 +137,25 @@ describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
     // 断言：domain 回到外观（分区列表含「全局」）且内容区是消息流的 Owner 头
     expect(w.getByRole('button', { name: '全局' })).toBeInTheDocument()
     expect(screen.getByTestId('settings-owner-badge').textContent).toContain('message-stream')
+  })
+})
+
+describe('P6 Slice A 设置入口兼容', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetStores()
+    invoke.mockReset()
+  })
+
+  it('消费旧 renderer/suite 事件时落到现行渲染器分区', async () => {
+    render(<Settings />)
+    window.dispatchEvent(new CustomEvent('pylon:open-settings', {
+      detail: { domain: 'renderer', section: 'suite' },
+    }))
+    const navEl = document.querySelector('.settings-nav') as HTMLElement
+    await waitFor(() => {
+      expect(within(navEl).getByRole('button', { name: '渲染器' })).toHaveClass('active')
+      expect(screen.getByText('Renderer fixture')).toBeInTheDocument()
+    })
   })
 })

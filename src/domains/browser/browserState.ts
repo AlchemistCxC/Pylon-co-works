@@ -1,9 +1,8 @@
 /**
  * browserState — browser 前端状态机（W4-03）。
  *
- * idle/starting/ready/error；单实例（重复 start 只发一次 invoke——守卫断言）；
- * 导航/后退/前进/刷新接口占位。CDP 命令契约未定——不虚构命令名（壳先行，W4-04
- * 接真实契约）。
+ * idle/starting/ready/error；浏览器的标签、导航和页面交互由 BrowserClient/Tauri
+ * manager 负责，这里只保留 Sheet 壳的生命周期状态，避免把 WebView 细节带进渲染层。
  */
 
 export type BrowserPhase = 'idle' | 'starting' | 'ready' | 'error'
