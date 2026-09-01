@@ -40,7 +40,9 @@ struct ReplayImport {
 fn replay_journal_commit_outcome(status: &str) -> &'static str {
     match status {
         "imported" => "recovery-import-committed",
-        "already-imported" | "already-present" => "recovery-import-already-present",
+        "already-imported" | "already-present" | "reconciled" => {
+            "recovery-import-already-present"
+        }
         "local-authoritative" => "local-journal-wins",
         "incomplete-not-imported" => "incomplete-preserved-runtime",
         "empty" => "empty",
@@ -293,6 +295,10 @@ mod tests {
         assert_eq!(
             replay_journal_commit_outcome("local-authoritative"),
             "local-journal-wins"
+        );
+        assert_eq!(
+            replay_journal_commit_outcome("reconciled"),
+            "recovery-import-already-present"
         );
         assert_eq!(
             replay_journal_commit_outcome("incomplete-not-imported"),
