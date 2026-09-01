@@ -2,7 +2,7 @@
 
 Pylon 是以 ACP 连接多个本地 Agent runtime 的桌面工作台；配置实例、provider 基线与实时协议能力必须保持清晰分层。
 
-项目结构、Kernel/插件层归属、关键调用链与定向阅读入口见 [`docs/Pylon-项目架构参考.md`](docs/Pylon-项目架构参考.md)。后续任务默认先读该文档并做局部核验，不重新进行全量架构侦察。
+项目结构、Kernel/插件层归属、关键调用链与定向阅读入口见 [`docs/说明书/Pylon-项目架构参考.md`](docs/说明书/Pylon-项目架构参考.md)。后续任务默认先读该文档并做局部核验，不重新进行全量架构侦察。
 
 Kernel 加固的已确认产品决策、问题编号与施工进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../Docs/Archive/Pylon-Kernel-施工台账.md)。
 
@@ -26,9 +26,9 @@ _Avoid_: detected Agent, auto-imported Agent
 
 ## Rendering language
 
-渲染引擎长程施工的唯一入口为 `G:\Project\prism-team-workdir\Docs\渲染引擎施工\00-唯一入口台账.md`；架构、WI 状态和代码施工方式不得从已失效的仓内旧方案重新推导。
+渲染引擎长程施工的唯一入口为 `G:\Project\prism-team-workdir\Docs\Archive\渲染引擎施工\00-唯一入口台账.md`；架构、WI 状态和代码施工方式不得从已失效的仓内旧方案重新推导。
 
-当前前后端插件依赖与 Renderer Suite 规划接缝见 [`docs/Pylon-插件化前后端拓扑全图.md`](docs/Pylon-插件化前后端拓扑全图.md)；图中 planned 节点不得当作当前实现。
+当前前后端插件依赖与 Renderer Suite 规划接缝见 [`docs/说明书/Pylon-插件化前后端拓扑全图.md`](docs/说明书/Pylon-插件化前后端拓扑全图.md)；图中 planned 节点不得当作当前实现。
 
 **Presentation Profile**:
 一组可持久化、可由插件贡献的视觉与交互令牌，描述消息布局、输入形态、控制中心材质和配套图形资产；它不决定使用 React、Solid 或隔离 UI。
