@@ -82,10 +82,10 @@ flowchart TB
       SETTINGS[src/components/Settings.tsx]
       PLUGINMGR[PluginManager]
       AGENTSHEET[AgentSheetView]
-      CHAT[React ChatView]
-      MSGHOST[MessageRendererHost<br/>真实消费 RendererRegistry]
-      ISOLATED[IsolatedPluginSurface<br/>完整 Agent 主区原型]
-      SOLID[SolidWorkbenchApp<br/>当前 renderer / 直接 Solid rows]
+      SUITEWB[AgentRendererSuiteWorkbench<br/>Renderer Suite 宿主接线]
+      CHATCTRL[chatEventController 消费面]
+      ISOLATED[IsolatedPluginSurface<br/>isolated-surface 模式宿主]
+      SOLID[SolidWorkbenchApp<br/>builtin.solid suite 实现]
       FILESHEET[FileSheetView]
       SIDEHOST[SheetSidebarSlot]
       CTXHOST[ContextPanelHost]
@@ -96,7 +96,7 @@ flowchart TB
       USERREPO[userDataRepository]
       SESSIONLIFE[useSessionLifecycle]
       CHATCTRL[chatEventController]
-      LEGACYRUNTIME[sessionRuntimeStore / runtimeStore]
+      LEGACYRUNTIME[sessionRuntimeStore / runtimeStore<br/>会话运行时状态（CC 输入组件与 CLI ports 消费）]
       ROWPIPE[messagePipeline / chatRowPipeline]
       WORKRUNTIME[WorkbenchRuntime<br/>当前 Message/Plan snapshot]
       WORKCOMMAND[WorkbenchCommandFacade]
@@ -117,22 +117,25 @@ flowchart TB
       CLIBRIDGE[Pylon CLI bridge]
     end
 
-    subgraph PLANNED[Renderer 大改中预埋的未来插件化接缝]
-      RKIND[PLANNED RenderKind Catalog<br/>semantic kind / fallback / fixture]
-      RSUITE[PLANNED Renderer Suite contributions<br/>factory / compatibility / required kinds]
-      RSLOT[PLANNED Renderer Slot contributions<br/>targetSuites / kinds / surface]
-      CROSSVAL[PLANNED candidate contribution graph validator]
-      ACTRES[PLANNED RendererActivationResolver]
-      ACTSNAP[PLANNED immutable RendererActivationSnapshot]
-      HOSTPORT[PLANNED WorkbenchHostPort<br/>document / appearance / commands / capabilities / diagnostics]
-      SUITEHOST[PLANNED RendererSuiteHost<br/>prepare / stage / atomic switch / fallback]
-      SOLIDSUITE[PLANNED built-in Solid Suite adapter]
+    subgraph RENDERSUITE[Renderer Suite 宿主（当前实现）]
+      RSUITE[plugin-runtime/renderers/rendererSuiteTypes.ts<br/>RendererSuiteContribution]
+      RSLOT[rendererSuiteTypes.ts<br/>RendererSlotContribution targetSuites/kinds/surface]
+      RKIND[plugin-runtime/renderers/rendererTypes.ts<br/>RenderKindDefinition]
+      ACTRES[plugin-runtime/renderers/rendererActivationResolver.ts<br/>activation snapshot 解析]
+      ACTSNAP[rendererSuiteTypes.ts<br/>RendererActivationSnapshot immutable]
+      CROSSVAL[plugin-runtime/renderers/rendererSuiteValidation.ts<br/>candidate contribution graph 校验]
+      SUITEHOST[src/host/renderer-suite/rendererSuiteHost.ts<br/>prepare / stage / atomic switch / fallback]
+      HOSTPORT[renderers/solid-workbench/workbenchContracts.ts<br/>WorkbenchHostPort / WorkbenchMountInput]
+      SOLIDSUITE[renderers/solid-workbench/builtinSolidRendererSuite.ts<br/>suiteId builtin.solid]
+      WORKDOC[domains/workbench/workbenchProjector.ts<br/>WorkbenchDocument 单一投影输出]
+      SETSCHEMA[plugin-runtime/renderers/rendererSettingsTypes.ts<br/>+ components/settings/rendererSettingsCatalog.ts]
+      SETPANEL[components/settings/RendererSettingsPanel.tsx]
+      SUITEPREF[presentationPreferenceStore<br/>rendererSuiteIdByMode]
+    end
+
+    subgraph PLANNED[Renderer 深化中尚未实现的接缝]
       THIRDSUITE[PLANNED installable third-party Solid Suite]
-      SETSCHEMA[PLANNED RendererSettingsSchema<br/>Suite / Slot / Kind namespaces]
-      SETPANEL[PLANNED auto RendererSettingsPanel]
-      SUITEPREF[PLANNED Suite preference by Interface Mode]
       REACTFATAL[PLANNED React minimal fatal fallback<br/>same WorkbenchDocument]
-      WORKDOC[PLANNED WorkbenchDocument reader<br/>single projector output]
     end
   end
 
@@ -203,12 +206,13 @@ flowchart TB
   PACTX --> REGISTRIES
   PUPDATE --> REGISTRIES
 
-  %% Product package dependency graph and registrations
-  PTOOLS --> PADAPTERS
-  PTOOLS --> PSHELL
-  PADAPTERS --> PSHELL
-  PRENDERERS --> PSHELL
-  PWORKSPACE --> PSHELL
+  %% Product package dependency graph（箭头 = 依赖方 --> 被依赖方，与图例同向；
+  %% 真值：src/plugins/product/packages/*/pylon-plugin.json 的 dependencies）
+  PSHELL --> PTOOLS
+  PSHELL --> PADAPTERS
+  PSHELL --> PRENDERERS
+  PSHELL --> PWORKSPACE
+  PADAPTERS --> PTOOLS
   COMPOSE --> PTOOLS
   COMPOSE --> PADAPTERS
   COMPOSE --> PRENDERERS
@@ -255,11 +259,10 @@ flowchart TB
   SHEETLAYOUT --> SIDEHOST --> SIDEREG
   SHEETLAYOUT --> CTXHOST --> CTXREG
   AGENTSHEET --> IMODEREG
-  AGENTSHEET --> CHAT --> MSGHOST --> RENDERREG
-  AGENTSHEET --> MODERN
-  AGENTSHEET --> ISOLATED --> UIREG
-  SOLID -->|current: snapshot ids only| RENDERREG
-  SOLID -->|current: direct imports| WORKRUNTIME
+  AGENTSHEET --> SUITEWB --> SUITEHOST
+  AGENTSHEET -->|renderKind=isolated-surface| ISOLATED --> UIREG
+  SOLID -->|snapshot ids only| RENDERREG
+  SOLID -->|direct imports| WORKRUNTIME
   FILESHEET --> FILEREG
   FILESHEET --> UIREG
 
@@ -267,9 +270,10 @@ flowchart TB
   IDSTORE --> USERREPO --> ACPCLIENTS
   SESSIONLIFE --> ACPCLIENTS
   SESSIONLIFE --> CHATCTRL
-  CHATCTRL --> LEGACYRUNTIME --> ROWPIPE --> CHAT
+  CHATCTRL --> LEGACYRUNTIME
+  SOLID -->|buildChatRowDescriptors| ROWPIPE
+  SOLID -->|messageListPort items| ROWPIPE
   CHATCTRL --> GAP --> CANONREPO
-  WORKRUNTIME --> LEGACYRUNTIME
   WORKRUNTIME --> WORKCOMMAND
   WORKRUNTIME --> APPEARANCE
   WORKRUNTIME --> SESSIONUI
@@ -332,45 +336,44 @@ flowchart TB
   PRISM ==> GATEWAYFILES
   CLI --> PYLONCLI --> EMIT
 
-  %% Planned Renderer Suite deepening; no second plugin runtime or journal
-  RENDERREG -. deepen .-> RKIND
-  RENDERREG -. deepen .-> RSUITE
-  RENDERREG -. deepen .-> RSLOT
-  PUPDATE -. candidate snapshots .-> CROSSVAL
-  RKIND -. references .-> CROSSVAL
-  RSUITE -. references .-> CROSSVAL
-  RSLOT -. references .-> CROSSVAL
-  SETOPTREG -. references .-> CROSSVAL
-  PRESREG -. references .-> CROSSVAL
-  IMODEREG -. references .-> CROSSVAL
-  RKIND -. current registry snapshot .-> ACTRES
-  RSUITE -. current registry snapshot .-> ACTRES
-  RSLOT -. current registry snapshot .-> ACTRES
-  IMODEREG -. mode default .-> SUITEPREF
-  SUITEPREF -. selected suite .-> ACTRES
-  ACTRES -. derives .-> ACTSNAP -. drives .-> SUITEHOST
-  WORKRUNTIME -. A04/A09 migration .-> WORKDOC -. readonly .-> HOSTPORT
-  WORKCOMMAND -. semantic adapter .-> HOSTPORT
-  APPEARANCE -. resolved snapshot .-> HOSTPORT
-  SESSIONUI -. namespaced UI .-> HOSTPORT
-  HOSTPORT -. stable seam .-> SUITEHOST
-  SUITEHOST -. mounts .-> SOLIDSUITE
-  SUITEHOST -. mounts .-> THIRDSUITE
-  SOLIDSUITE -. node rendering .-> RSLOT
+  %% Renderer Suite 接缝（原 PLANNED A11–A17 已落地：实线为当前实现）
+  RENDERREG --> RKIND
+  RENDERREG --> RSUITE
+  RENDERREG --> RSLOT
+  PUPDATE --> CROSSVAL
+  RKIND --> CROSSVAL
+  RSUITE --> CROSSVAL
+  RSLOT --> CROSSVAL
+  SETOPTREG --> CROSSVAL
+  PRESREG --> CROSSVAL
+  IMODEREG --> CROSSVAL
+  RKIND --> ACTRES
+  RSUITE --> ACTRES
+  RSLOT --> ACTRES
+  IMODEREG --> SUITEPREF
+  SUITEPREF --> ACTRES
+  ACTRES --> ACTSNAP --> SUITEHOST
+  WORKRUNTIME --> WORKDOC --> HOSTPORT
+  WORKCOMMAND --> HOSTPORT
+  APPEARANCE --> HOSTPORT
+  SESSIONUI --> HOSTPORT
+  HOSTPORT --> SUITEHOST
+  SUITEHOST --> SOLIDSUITE
+  SUITEHOST -. mount candidate .-> THIRDSUITE
+  SOLIDSUITE --> RSLOT
   THIRDSUITE -. node rendering .-> RSLOT
-  RSUITE -. declares .-> SETSCHEMA
-  RSLOT -. declares .-> SETSCHEMA
-  RKIND -. declares .-> SETSCHEMA
-  SETSCHEMA -. generates .-> SETPANEL
-  SETPANEL -. edits overrides .-> SETSTORE
-  SETTINGS -. hosts .-> SETPANEL
-  AGENTSHEET -. replace renderer branches .-> SUITEHOST
+  RSUITE --> SETSCHEMA
+  RSLOT --> SETSCHEMA
+  RKIND --> SETSCHEMA
+  SETSCHEMA --> SETPANEL
+  SETPANEL --> SETSTORE
+  SETTINGS --> SETPANEL
   PKGRUNTIME -. installed adapter .-> THIRDSUITE
   SUITEHOST -. final fatal only .-> REACTFATAL
   WORKDOC -. same revision .-> REACTFATAL
 
   classDef planned fill:#eef7ff,stroke:#3b82f6,stroke-width:1px,stroke-dasharray:6 4,color:#111827;
-  class RKIND,RSUITE,RSLOT,CROSSVAL,ACTRES,ACTSNAP,HOSTPORT,SUITEHOST,SOLIDSUITE,THIRDSUITE,SETSCHEMA,SETPANEL,SUITEPREF,REACTFATAL,WORKDOC planned;
+  class THIRDSUITE,REACTFATAL planned;
 ```
 
 ## 图例与最重要结论
@@ -378,7 +381,7 @@ flowchart TB
 - 普通实线：当前直接依赖、调用或宿主消费。
 - 带文字的实线：当前 contribution registration、adapter 或 package lifecycle。
 - 粗箭头：当前 durable 写入或关键数据流。
-- 蓝色虚线框且名称带 `PLANNED`：本轮施工书新增的未来接缝，尚未进入生产代码。
+- 蓝色虚线框且名称带 `PLANNED`：尚未进入生产代码的接缝（当前仅剩第三方可安装 Suite 与 React fatal fallback 两项；原 A11–A17 规划已落地为实线）。
 - Rust 后端没有第二套 Web Plugin Runtime：它负责包事务、资源协议和插件子进程；WebView 中唯一 `PluginRuntime` 负责加载 entry、生命周期和 contributions。
 - Kernel journal/projector 永远位于 Renderer Suite 之前；Suite 只替换表现与交互 adapter，不能成为第二业务状态源。
 
@@ -401,7 +404,7 @@ flowchart TB
 ## 维护规则
 
 1. 增删 Plugin Host registry、Product Plugin、Tauri plugin command 或 Renderer Suite 接缝时，同一提交更新本图。
-2. A11–A17 每完成一项，把对应 `PLANNED` 节点改为真实文件名和实线边；不得只改文字状态。
+2. 原 A11–A17 规划（Renderer Suite 宿主接缝）已落地为实线节点；后续新增同类接缝时，完成一项就把 PLANNED 节点改为真实文件名和实线边，不得只改文字状态。
 3. 若发现图中两个以上当前实线关系与源码不符，触发一次局部架构复核；不要继续在错误图上叠加节点。
 4. 施工状态仍只写外部唯一入口台账；本图不复制 WI 状态。
 5. 修改 Mermaid 后必须用真实 Mermaid parser/renderer 渲染一次；围栏、节点计数等文本检查不能替代语法检查。含 `@` 等 Mermaid 特殊 token 的节点标签必须使用双引号包裹。

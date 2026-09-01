@@ -7,7 +7,7 @@
 
 当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../../Docs/Archive/Pylon-Kernel-施工台账.md)。
 
-插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图同时用虚线标出 Renderer Suite 施工规划，虚线不得视为当前实现。
+插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图的 Renderer Suite 宿主接缝已落地为实线；仅第三方可安装 Suite 与 React fatal fallback 仍是虚线规划，虚线不得视为当前实现。
 
 ## 1. 文档目的
 
@@ -415,7 +415,7 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 | Plugin 架构边界 | Kernel bootstrap + contract/scope/runtime/package + product port/sink 13 文件矩阵；静态 contribution boundary |
 | Kernel mount/recovery | `src/kernel/__tests__` + application runtime tests |
 | Renderer/Workbench | Solid Workbench tests + `check:solid` |
-| Renderer Suite 基建（规划） | render kind/suite/slot registry + candidate graph + Suite Host + settings/selection + real package integration |
+| Renderer Suite 宿主（已落地） | `src/host/renderer-suite/*`、`src/plugin-runtime/renderers/*`、`src/renderers/solid-workbench/builtinSolidRendererSuite.ts` + AgentRendererSuiteWorkbench tests |
 
 跨层错误必须补跨层回归测试；单 module 测试通过不能证明调用方使用了相同 key、相同 ordering 或相同错误语义。
 
