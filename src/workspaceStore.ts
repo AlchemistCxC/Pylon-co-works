@@ -15,6 +15,7 @@ import type { AgentContext, AgentContextKey } from './agentContext.ts'
 import { toAgentContextKey } from './agentContext.ts'
 import { normalizeFilePath } from './domains/file/fileRelations.ts'
 import { resolveWorkspace } from './workspace-sheets/workspaceRegistry.ts'
+import { useRightRailStore } from './rightRailStore.ts'
 
 /** I01-W3：touchedFiles 刷新版本戳 key——context key + normalized path 二元（禁止冒号 split）。 */
 export function touchedFileVersionKey(context: AgentContext, path: string): string {
@@ -126,6 +127,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
       sidebarWidth = readThemeSidebarWidth() ?? sidebarWidth
     }
     const layout: SheetLayoutState = { ...result.layout, sidebarWidth }
+    // Keep the v3 application layout store in lockstep while old workspace
+    // snapshots are hydrated.  This is a one-way compatibility bridge; new
+    // UI writes go directly to useRightRailStore.
+    useRightRailStore.getState().setLeftRailWidth(layout.sidebarWidth)
+    useRightRailStore.getState().setLeftRailCollapsed(layout.sidebarCollapsed)
+    useRightRailStore.getState().setCollapsed(layout.rightPanelCollapsed)
     // 迁移写回失败不能让 hydrate 抛错；内存仍返回迁移后的 v2 状态
     try {
       if (result.migrated) persistSheetStateV2(localStorage, { ...result.state, agentStates: result.state.agentStates }, layout)
@@ -222,10 +229,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     return commitWorkspaceMutation(state, { sheetAgentStates })
   }),
   patchSheetAgentStates: (agentStates) => set(state => commitWorkspaceMutation(state, { sheetAgentStates: agentStates })),
-  setSidebarWidth: (sidebarWidth) => set(state => commitWorkspaceMutation(state, { sidebarWidth })),
+  setSidebarWidth: (sidebarWidth) => {
+    // 兼容旧调用方：布局真值已迁移到 rightRailStore，workspace 字段仅保留
+    // versioned snapshot/旧插件读取桥，不能再让两套状态分叉。
+    useRightRailStore.getState().setLeftRailWidth(sidebarWidth)
+    set(state => commitWorkspaceMutation(state, { sidebarWidth }))
+  },
   // 左栏是应用布局，而不是 Sheet 内容。所有 Sheet 共享这一份持久化状态。
-  setSidebarCollapsed: (sidebarCollapsed) => set(state => commitWorkspaceMutation(state, { sidebarCollapsed })),
-  setRightPanelCollapsed: (rightPanelCollapsed) => set(state => commitWorkspaceMutation(state, { rightPanelCollapsed })),
+  setSidebarCollapsed: (sidebarCollapsed) => {
+    useRightRailStore.getState().setLeftRailCollapsed(sidebarCollapsed)
+    set(state => commitWorkspaceMutation(state, { sidebarCollapsed }))
+  },
+  setRightPanelCollapsed: (rightPanelCollapsed) => {
+    useRightRailStore.getState().setCollapsed(rightPanelCollapsed)
+    set(state => commitWorkspaceMutation(state, { rightPanelCollapsed }))
+  },
   setShowPet: (show) => set(() => {
     writeShowPet(localStorage, show)
     return { showPet: show }

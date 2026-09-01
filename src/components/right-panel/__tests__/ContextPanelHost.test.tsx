@@ -10,7 +10,7 @@ import AgentContextPanel from '../AgentContextPanel.tsx'
 import { createPreviewWorkbenchServices } from '../../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchHostPort } from '../../../renderers/solid-workbench/workbenchHostPort.ts'
 import { publishActiveWorkbenchHostPort } from '../../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
-import { useStore } from '../../../store.ts'
+import { useRightRailStore, RIGHT_RAIL_DEFAULT_WIDTH } from '../../../rightRailStore.ts'
 
 const registrations: AsyncDisposable[] = []
 
@@ -39,7 +39,7 @@ const ctx: SheetContext = {
 
 afterEach(async () => {
   await Promise.all(registrations.splice(0).map(registration => registration.dispose()))
-  useStore.setState({ rightWidth: 260 })
+  useRightRailStore.getState().setWidth(RIGHT_RAIL_DEFAULT_WIDTH)
   vi.restoreAllMocks()
 })
 
@@ -75,7 +75,7 @@ describe('ContextPanelHost', () => {
       id: 'width-panel', workspaceKind: sheet.kind, label: '宽度', order: 100,
       renderKind: 'first-party-react', component: () => <div>宽度内容</div>,
     }))
-    useStore.setState({ rightWidth: 347 })
+    useRightRailStore.getState().setWidth(347)
 
     render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
 

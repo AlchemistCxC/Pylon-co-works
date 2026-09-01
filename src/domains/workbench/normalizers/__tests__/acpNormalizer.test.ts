@@ -211,4 +211,28 @@ describe('ACP normalizer', () => {
       },
     ] })
   })
+
+  it('normalizes snake-case config ids and nested value ids without losing machine choices', () => {
+    const result = normalizeAcpEvent({ update: {
+      session_update: 'config_option_update',
+      config_options: [{
+        config_id: 'thought_level',
+        label: 'Thinking level',
+        current_value: { value_id: { value: 'high' } },
+        value_type: 'select',
+        schema: { enum: [{ value_id: 'low', name: 'Low' }, { value_id: 'high', name: 'High' }] },
+      }],
+    } }, context)
+
+    expect(result.events[0].event).toMatchObject({
+      type: 'session.config-updated',
+      options: [{
+        id: 'thought_level',
+        value: 'high',
+        valueType: 'select',
+        editable: true,
+        schema: { options: [{ value_id: 'low', name: 'Low' }, { value_id: 'high', name: 'High' }] },
+      }],
+    })
+  })
 })

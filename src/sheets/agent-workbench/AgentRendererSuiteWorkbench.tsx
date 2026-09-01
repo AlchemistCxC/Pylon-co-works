@@ -64,6 +64,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         return createAgentWorkbenchSession(request, {
           agentId: current.sheet.agentId || useIdentityStore.getState().activeAgent,
           workspaceMode: current.workspaceMode,
+          applySessionResponse: (sessionId, response) => sessionRuntimeRef.current?.applySessionResponse(response, sessionId),
         })
       },
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),

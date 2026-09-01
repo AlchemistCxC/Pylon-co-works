@@ -15,9 +15,20 @@ import { usePresentationPreferenceStore } from '../domains/presentation/presenta
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
+import { useRightRailStore } from '../rightRailStore.ts'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
+  // Persist middleware writes synchronously.  A test may intentionally leave
+  // a quota-failing MemoryStorage installed after exercising the error path;
+  // resetting in-memory state must still proceed and must not turn that
+  // intentional fault into a cross-test failure.
+  try {
+    useRightRailStore.setState(useRightRailStore.getInitialState(), true)
+  } catch {
+    // The state update happens before persist's storage write.  Ignore only
+    // the storage exception here; production actions retain their error path.
+  }
   useIdentityStore.setState(useIdentityStore.getInitialState(), true)
   useRuntimeStore.setState(useRuntimeStore.getInitialState(), true)
   useStore.setState(useStore.getInitialState(), true)

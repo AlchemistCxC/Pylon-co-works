@@ -10,6 +10,8 @@ import {
 } from '../../../contracts/sessionStateSync.ts'
 import { useRuntimeStore } from '../../../runtimeStore.ts'
 import {
+  extractConfigOptionId,
+  extractConfigOptionValue,
   extractModelConfig,
   extractSessionUsage,
   extractUsage,
@@ -25,7 +27,7 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
   applyResponse(context, response) {
     const ctx = context as AgentContext
     const res = response as SessionResponseObject
-    const cfg = extractModelConfig(res.configOptions)
+    const cfg = extractModelConfig(res.configOptions, res)
     // A new/load response may advertise choices needed by the compatibility UI,
     // but current model/mode/usage are journal-owned facts. Restoring those here
     // would create a second recovery authority beside canonical_events.
@@ -57,14 +59,17 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
         if (Array.isArray(upd.configOptions)) {
           const cfg = extractModelConfig(upd.configOptions)
           if (cfg.model || cfg.models) useRuntimeStore.getState().setSessionConfig(ctx, { ...cfg, raw: upd.configOptions })
-          const modeOption = upd.configOptions.find(option => (option.id || option.key) === 'mode')
-          const mode = modeOption?.currentValue ?? modeOption?.value
+          const modeOption = upd.configOptions.find(option => {
+            const id = extractConfigOptionId(option)
+            return id?.replace(/[-\s]+/g, '_').toLowerCase() === 'mode'
+          })
+          const mode = extractConfigOptionValue(modeOption)
           if (mode != null) useRuntimeStore.getState().setSessionMode(ctx, String(mode))
         } else {
-          const key = upd.id ?? upd.key
-          const val = upd.currentValue ?? upd.value
-          if (key === 'model' && val != null) useRuntimeStore.getState().setSessionConfig(ctx, { model: String(val) })
-          if (key === 'mode' && val != null) useRuntimeStore.getState().setSessionMode(ctx, String(val))
+          const key = extractConfigOptionId(upd)
+          const val = extractConfigOptionValue(upd)
+          if (key?.replace(/[-\s]+/g, '_').toLowerCase() === 'model' && val != null) useRuntimeStore.getState().setSessionConfig(ctx, { model: String(val) })
+          if (key?.replace(/[-\s]+/g, '_').toLowerCase() === 'mode' && val != null) useRuntimeStore.getState().setSessionMode(ctx, String(val))
         }
         break
       }

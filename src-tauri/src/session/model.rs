@@ -124,23 +124,57 @@ impl SessionInfo {
     pub(crate) fn apply_session_response(&mut self, response: &serde_json::Value) {
         if let Some(options) = response
             .get("configOptions")
+            .or_else(|| response.get("config_options"))
             .and_then(|value| value.as_array())
         {
             self.config_options = options.clone();
             self.apply_config_options(options);
+        }
+        // ACP 1.4 and Hermes expose the selected model in different places.
+        // Prefer the standard `models.currentModelId` state when present, then
+        // retain the config-option fallback handled above.
+        if let Some(model) = response
+            .get("models")
+            .and_then(|models| {
+                models
+                    .get("currentModelId")
+                    .or_else(|| models.get("current_model_id"))
+                    .or_else(|| models.get("currentModel"))
+                    .or_else(|| models.get("current_model"))
+                    .or_else(|| models.get("current"))
+            })
+            .and_then(value_as_string)
+        {
+            self.model = model;
+        } else if let Some(model) = response
+            .get("modelId")
+            .or_else(|| response.get("model_id"))
+            .or_else(|| response.get("model"))
+            .and_then(value_as_string)
+        {
+            self.model = model;
         }
         self.mode = response
             .get("modes")
             .and_then(|modes| {
                 modes
                     .get("currentModeId")
+                    .or_else(|| modes.get("current_mode_id"))
                     .or_else(|| modes.get("currentMode"))
+                    .or_else(|| modes.get("current_mode"))
                     .or_else(|| modes.get("current"))
             })
             .and_then(value_as_string)
             .or_else(|| {
                 find_config_option(&self.config_options, "mode")
                     .and_then(config_option_current_value)
+            })
+            .or_else(|| {
+                response
+                    .get("modeId")
+                    .or_else(|| response.get("mode_id"))
+                    .or_else(|| response.get("mode"))
+                    .and_then(value_as_string)
             });
         if let Some(usage) = response
             .get("usage")
@@ -290,43 +324,110 @@ mod tests {
 }
 
 pub(crate) fn value_as_string(value: &serde_json::Value) -> Option<String> {
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .or_else(|| {
-            value
-                .get("value")
-                .and_then(|nested| nested.as_str())
-                .map(ToOwned::to_owned)
-        })
-        .or_else(|| {
-            value
-                .get("valueId")
-                .and_then(|nested| nested.get("value"))
-                .and_then(|nested| nested.as_str())
-                .map(ToOwned::to_owned)
-        })
+    fn normalized_key(key: &str) -> String {
+        let mut out = String::with_capacity(key.len() + 4);
+        for (index, ch) in key.chars().enumerate() {
+            if ch.is_uppercase() && index > 0 {
+                out.push('_');
+            }
+            if ch == '-' || ch == ' ' {
+                out.push('_');
+            } else {
+                out.extend(ch.to_lowercase());
+            }
+        }
+        out
+    }
+    fn walk(value: &serde_json::Value, depth: usize) -> Option<String> {
+        if depth > 8 {
+            return None;
+        }
+        if let Some(text) = value.as_str() {
+            let text = text.trim();
+            return (!text.is_empty()).then(|| text.to_string());
+        }
+        let object = value.as_object()?;
+        // Stable machine ids always precede display labels/current wrappers.
+        let keys = [
+            "valueId", "value_id", "modelId", "model_id", "modeId", "mode_id", "id", "key",
+            "value", "currentValue", "current_value", "current", "selected", "selectedValue",
+            "selected_value", "name", "label",
+        ];
+        for wanted in keys {
+            let wanted = normalized_key(wanted);
+            let Some((_, nested)) = object
+                .iter()
+                .find(|(key, _)| normalized_key(key) == wanted)
+            else {
+                continue;
+            };
+            if let Some(result) = walk(nested, depth + 1) {
+                return Some(result);
+            }
+        }
+        None
+    }
+    walk(value, 0)
 }
 
 pub(crate) fn find_config_option<'a>(
     options: &'a [serde_json::Value],
     key: &str,
 ) -> Option<&'a serde_json::Value> {
+    fn normalized(value: &str) -> String {
+        value
+            .trim()
+            .replace(['-', ' ', '.'], "_")
+            .chars()
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    let wanted = normalized(key);
+    let aliases: &[&str] = match wanted.as_str() {
+        "model" | "models" | "model_id" | "modelid" => &["model", "models", "model_id", "modelid", "model_selection"],
+        "mode" | "modes" | "mode_id" | "modeid" => &["mode", "modes", "mode_id", "modeid", "permission_mode", "permissions_mode"],
+        "reason" | "reasoning" | "thinking" | "thought" | "effort" => &["reason", "reasoning", "reasoning_effort", "thinking", "thought", "thought_level", "effort"],
+        _ => &[],
+    };
     options.iter().find(|option| {
-        option
-            .get("id")
-            .or_else(|| option.get("key"))
-            .or_else(|| option.get("name"))
-            .and_then(|value| value.as_str())
-            == Some(key)
+        let Some(object) = option.as_object() else {
+            return false;
+        };
+        let fields = [
+            "configId", "config_id", "optionId", "option_id", "id", "key", "name", "label",
+            "title", "category", "description",
+        ];
+        fields.iter().filter_map(|field| object.get(*field).and_then(value_as_string)).any(|candidate| {
+            let candidate = normalized(&candidate);
+            candidate == wanted
+                || aliases.iter().any(|alias| candidate == normalized(alias))
+                || aliases.iter().any(|alias| candidate.contains(&normalized(alias)))
+        })
     })
 }
 
 pub(crate) fn config_option_current_value(option: &serde_json::Value) -> Option<String> {
-    option
-        .get("currentValue")
-        .and_then(value_as_string)
-        .or_else(|| option.get("value").and_then(value_as_string))
-        .or_else(|| option.get("current").and_then(value_as_string))
-        .or_else(|| option.get("selected").and_then(value_as_string))
+    let object = option.as_object()?;
+    [
+        "currentValue", "current_value", "selectedValue", "selected_value", "selected", "value",
+        "current", "defaultValue", "default_value",
+    ]
+    .iter()
+    .find_map(|key| {
+        object
+            .iter()
+            .find(|(candidate, _)| {
+                candidate
+                    .replace(['-', ' '], "_")
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>()
+                    == key
+                    .replace(['-', ' '], "_")
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>()
+            })
+            .and_then(|(_, value)| value_as_string(value))
+    })
 }

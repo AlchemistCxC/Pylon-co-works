@@ -289,6 +289,59 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('创建响应在 bind 前到达时仍投影模型、模式与选项到 canonical Workbench 文档', async () => {
+    const active = session('created-session', 'local:created')
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [], subscribe: () => () => {},
+    })
+    service.applySessionResponse({
+      sessionId: 'remote-created',
+      models: {
+        currentModelId: 'openrouter:deepseek-v4-flash',
+        availableModels: [
+          { modelId: 'openrouter:deepseek-v4-flash', name: 'DeepSeek Flash' },
+          { modelId: 'openrouter:deepseek-v4-pro', name: 'DeepSeek Pro' },
+        ],
+      },
+      modes: {
+        currentModeId: 'accept_edits',
+        availableModes: [
+          { id: 'default', name: 'Default' },
+          { id: 'accept_edits', name: 'Accept Edits' },
+        ],
+      },
+    }, active.id)
+    await service.bind(active)
+    const document = service.runtime.getSnapshot().document
+    expect(document?.session).toMatchObject({
+      status: 'ready', model: 'openrouter:deepseek-v4-flash', mode: 'accept_edits',
+    })
+    expect(document?.session.options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'model', value: 'openrouter:deepseek-v4-flash' }),
+      expect.objectContaining({ id: 'mode', value: 'accept_edits' }),
+    ]))
+    const modelOption = document?.session.options.find(option => option.id === 'model')
+    expect(modelOption?.schema).toEqual(expect.objectContaining({
+      options: expect.arrayContaining([expect.objectContaining({ id: 'openrouter:deepseek-v4-pro' })]),
+    }))
+    service.destroy()
+  })
+
+  it('重复投影相同创建响应不会制造重复 session 事件', async () => {
+    const active = session('created-idempotent', 'local:created-idempotent')
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    await service.bind(active)
+    const response = {
+      sessionId: 'remote-created',
+      models: { currentModelId: 'm', availableModels: ['m'] },
+      modes: { currentModeId: 'default', availableModes: ['default'] },
+    }
+    service.applySessionResponse(response, active.id)
+    service.applySessionResponse(response, active.id)
+    expect(service.runtime.getSnapshot().document?.timeline.filter(item => item.kind === 'session')).toHaveLength(1)
+    service.destroy()
+  })
+
   it('真实 schemaVersion=1 canonical SQLite 行经 normalizer 投影而非误当 Workbench envelope', async () => {
     const service = createAgentWorkbenchSessionRuntime({
       loadAll: async () => [

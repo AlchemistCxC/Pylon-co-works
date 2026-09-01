@@ -31,7 +31,10 @@ export function createPreviewWorkbenchServices(): PreviewWorkbenchServices {
     thinkingStart: 1_200,
     availableModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     activeModel: 'deepseek-v4-flash',
-    availableModes: ['default', 'edit', 'auto', 'bypass'],
+    // Keep the preview fixture aligned with Hermes' permission-mode ids.  The
+    // renderer may still provide labels/aliases for legacy ids, but fixtures
+    // should exercise the wire values we actually send over ACP.
+    availableModes: ['default', 'accept_edits', 'auto', 'bypass'],
     activeMode: 'auto',
     canAttach: true,
     promptImage: false,

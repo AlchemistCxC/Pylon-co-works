@@ -39,7 +39,7 @@ assert.match(sheetHost, /<Component sheet=\{sheet\} ctx=\{ctx\}/, 'SheetHost 必
 // SheetLayout 负责 activeSheet 解析 + ctx 构建 + 侧栏/右栏壳
 const sheetLayout = readFileSync(new URL('../src/workspace-sheets/SheetLayout.tsx', import.meta.url), 'utf8')
 assert.match(sheetLayout, /<SheetSidebarSlot sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染侧栏壳')
-assert.match(sheetLayout, /<SheetRightSlot sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染右栏壳')
+assert.match(sheetLayout, /<RightRailHost sheet=\{activeSheet\} ctx=\{ctx\} activeAgent=\{activeAgent\} \/>/, 'SheetLayout 必须渲染应用级右栏壳')
 assert.match(sheetLayout, /<SheetHost sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染主区')
 
 // 5. SheetContext 13 字段齐备（源码断言）

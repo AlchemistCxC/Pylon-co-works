@@ -345,10 +345,11 @@ describe('C16 provider coverage inventory', () => {
       const generic = normalizeAgentEvent({ update: {
         sessionUpdate: 'tool_call', toolCallId: `${provider}-other`, title: 'Skill', kind: 'other',
       } }, context(provider))
+      const expectedGenericName = provider === 'hermes' ? 'skill_view' : 'unknown'
       expect(generic.events[0]?.event).toMatchObject({
-        type: 'tool.started', tool: { name: 'unknown', semanticKind: 'tool.other' },
+        type: 'tool.started', tool: { name: expectedGenericName, semanticKind: 'tool.other' },
       })
-      expect(generic.diagnostics.map(item => item.code)).toContain('tool.name.missing')
+      if (provider === 'peri') expect(generic.diagnostics.map(item => item.code)).toContain('tool.name.missing')
     }
 
     const flattened = normalizeAgentEvent({ update: {

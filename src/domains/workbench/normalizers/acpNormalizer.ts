@@ -15,6 +15,11 @@ import { resolveToolSemantic } from '../../tool/toolRegistry.ts'
 import { resolveToolType } from '../../tool/toolResolution.ts'
 import { normalizePlanEntries } from '../plan/goalModel.ts'
 import type { WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
+import {
+  extractConfigOptionChoices,
+  extractConfigOptionId,
+  extractConfigOptionValue,
+} from '../../../infrastructure/acp/chatContracts.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
   id: 'acp',
@@ -188,30 +193,45 @@ function normalizeAvailableCommands(value: unknown): readonly JsonValue[] {
 }
 
 function normalizeConfigOptions(update: Record<string, unknown>): readonly JsonValue[] {
-  const values = Array.isArray(update.configOptions) ? update.configOptions : [update]
+  const values = Array.isArray(update.configOptions)
+    ? update.configOptions
+    : Array.isArray(update.config_options)
+      ? update.config_options
+      : [update]
   return values.map((item, index) => {
     if (!isRecord(item)) return toJsonValue(item)
-    const id = stringField(item.id ?? item.key ?? item.name) ?? `unknown-option-${index}`
-    const choices = item.options ?? item.choices ?? item.values ?? item.available
-    const value = item.currentValue ?? item.value ?? item.current ?? item.selected ?? null
-    const valueType = stringField(item.valueType ?? item.type)
+    const id = extractConfigOptionId(item) ?? `unknown-option-${index}`
+    const choices = extractConfigOptionChoices(item)
+    const hasValue = hasWireField(item, [
+      'currentValue', 'current_value', 'value', 'current', 'selected',
+      'selectedValue', 'selected_value', 'defaultValue', 'default_value',
+    ])
+    const value = hasValue ? extractConfigOptionValue(item) ?? null : null
+    const valueType = stringField(wireField(item, ['valueType', 'value_type', 'type']))
     const editable = (typeof item.editable === 'boolean' ? item.editable : item.readOnly !== true)
       && isAcpWritableConfigValue(valueType, value)
-    const unknown = unknownWireFields(item, ['id', 'key', 'name', 'label', 'currentValue', 'value', 'current', 'selected', 'valueType', 'type', 'editable', 'readOnly', 'options', 'choices', 'values', 'available', 'schema', 'version', 'capability', 'raw'])
+      && item.readonly !== true && item.read_only !== true
+    const unknown = unknownWireFields(item, [
+      'id', 'key', 'configId', 'config_id', 'optionId', 'option_id', 'name', 'label', 'title', 'description', 'category',
+      'currentValue', 'current_value', 'value', 'current', 'selected', 'selectedValue', 'selected_value', 'defaultValue', 'default_value',
+      'valueType', 'value_type', 'type', 'editable', 'readOnly', 'readonly', 'read_only',
+      'options', 'choices', 'values', 'available', 'items', 'schema', 'version', 'capability', 'raw',
+    ])
     const retainedRaw = {
       ...(isRecord(item.raw) ? item.raw : {}),
-      ...(!isAcpWritableConfigValue(valueType, value) ? { value, ...(valueType ? { valueType } : {}) } : {}),
+      ...(!isAcpWritableConfigValue(valueType, value) && hasValue ? { value, ...(valueType ? { valueType } : {}) } : {}),
       ...unknown,
     }
+    const schema = wireField(item, ['schema'])
     return toJsonValue({
       id,
-      label: stringField(item.label ?? item.name) ?? id,
-      ...(['currentValue', 'value', 'current', 'selected'].some(key => key in item)
+      label: stringField(wireField(item, ['label', 'name', 'title'])) ?? id,
+      ...(hasValue
         ? { value } : {}),
       ...(valueType ? { valueType } : {}),
       editable,
-      ...(choices !== undefined ? { schema: { options: choices } } : item.schema !== undefined ? { schema: item.schema } : {}),
-      ...(finiteNonNegative(item.version) !== undefined ? { version: item.version } : {}),
+      ...(choices.length > 0 ? { schema: { options: choices } } : schema !== undefined ? { schema } : {}),
+      ...(finiteNonNegative(wireField(item, ['version'])) !== undefined ? { version: wireField(item, ['version']) } : {}),
       ...(stringField(item.capability) ? { capability: item.capability } : {}),
       ...(Object.keys(retainedRaw).length > 0 ? { raw: retainedRaw } : {}),
     })
@@ -219,9 +239,27 @@ function normalizeConfigOptions(update: Record<string, unknown>): readonly JsonV
 }
 
 function isAcpWritableConfigValue(valueType: string | undefined, value: unknown): boolean {
-  return valueType === 'boolean' ? typeof value === 'boolean'
-    : valueType === 'select' ? typeof value === 'string'
+  const type = valueType?.toLowerCase()
+  return type === 'boolean' || type === 'bool' ? typeof value === 'boolean'
+    : type === 'select' || type === 'enum' ? typeof value === 'string'
       : false
+}
+
+function normalizedWireKey(key: string): string {
+  return key.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
+}
+
+function wireField(record: Record<string, unknown>, keys: readonly string[]): unknown {
+  const wanted = new Set(keys.map(normalizedWireKey))
+  for (const [key, value] of Object.entries(record)) {
+    if (wanted.has(normalizedWireKey(key))) return value
+  }
+  return undefined
+}
+
+function hasWireField(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  const wanted = new Set(keys.map(normalizedWireKey))
+  return Object.keys(record).some(key => wanted.has(normalizedWireKey(key)))
 }
 
 function unknownWireFields(value: Record<string, unknown>, known: readonly string[]): Record<string, unknown> {

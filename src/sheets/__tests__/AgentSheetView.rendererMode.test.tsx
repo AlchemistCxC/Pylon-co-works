@@ -1527,9 +1527,12 @@ describe('AgentSheetView renderer mode context', () => {
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
-    const prompt = await screen.findByRole('textbox', { name: '首条请求' }, { timeout: 5_000 })
+    // Empty state reuses the production input bar.  Submitting the first
+    // prompt is the same Enter interaction as an active session; there is no
+    // separate "开始新会话" button anymore.
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' }, { timeout: 5_000 })
     fireEvent.input(prompt, { target: { value: '检查当前项目的测试状态' } })
-    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', charCode: 13 })
 
     await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
     const sessionId = selectSession.mock.calls[0]?.[0]
@@ -1565,11 +1568,10 @@ describe('AgentSheetView renderer mode context', () => {
     />)
 
     const workspace = await screen.findByRole('combobox', { name: '新会话工作区' }, { timeout: 5_000 })
-    const submit = screen.getByRole('button', { name: '开始新会话' })
     expect(workspace).toHaveValue('workspace-a')
-    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '修复构建' } })
-    expect(submit).toBeEnabled()
-    fireEvent.click(submit)
+    const prompt = screen.getByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '修复构建' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', charCode: 13 })
 
     await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
     const created = useIdentityStore.getState().sessions.find(item => item.id === selectSession.mock.calls[0]?.[0])

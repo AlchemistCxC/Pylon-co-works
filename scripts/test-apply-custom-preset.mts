@@ -14,7 +14,7 @@ import {
 // （替代旧版"复刻 harness + store 源码断言"），验证业务状态隔离 + ccLayout 归一化。
 
 const reducerSource = readFileSync(new URL('../src/domains/theme/presetReducer.ts', import.meta.url), 'utf8')
-assert.match(reducerSource, /pickCustomPresetTheme\(preset\.theme/, 'reducer 必须经白名单捕获预设主题')
+assert.match(reducerSource, /pickCustomPresetTheme\(source/, 'reducer 必须经白名单捕获预设主题')
 assert.match(reducerSource, /normalizeCcLayout\(theme\.ccLayout\)/, 'reducer 必须归一化 ccLayout')
 assert.doesNotMatch(reducerSource, /\.\.\.preset\.theme\s*,[\s\S]*profiles|profiles\s*:/, 'reducer 不得直铺预设主题')
 
