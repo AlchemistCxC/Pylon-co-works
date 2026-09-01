@@ -321,9 +321,27 @@ export const ZONE_FIELDS: Record<string, ThemeFieldKey[]> = ZONES.reduce((acc, z
   return acc
 }, {} as Record<string, ThemeFieldKey[]>)
 
-/** Machine-readable field owner matrix used by theme persistence and migrations. */
-export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone: string; readonly owner: 'theme' }>> = Object.freeze(
-  Object.fromEntries(THEME_FIELD_KEYS.map(key => [key, Object.freeze({ zone: THEME_FIELD_DEFS[key].zone, owner: 'theme' as const })])) as Record<ThemeFieldKey, { readonly zone: string; readonly owner: 'theme' }>,
+/**
+ * Machine-readable field owner matrix used by theme persistence and migrations.
+ *
+ * Most fields remain owned by the theme store.  Layout values that were moved
+ * out of ThemeSettings keep their legacy keys for migration compatibility, but
+ * their current authority is recorded here so a new field cannot silently
+ * become a second source of truth.
+ */
+export type ThemeFieldOwner = 'theme' | 'workspace-layout' | 'right-rail'
+
+const THEME_FIELD_OWNER_OVERRIDES: Readonly<Partial<Record<ThemeFieldKey, ThemeFieldOwner>>> = Object.freeze({
+  sidebarWidth: 'workspace-layout',
+  showPet: 'workspace-layout',
+  rightWidth: 'right-rail',
+})
+
+export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone: ZoneName; readonly owner: ThemeFieldOwner }>> = Object.freeze(
+  Object.fromEntries(THEME_FIELD_KEYS.map(key => [key, Object.freeze({
+    zone: THEME_FIELD_DEFS[key].zone,
+    owner: THEME_FIELD_OWNER_OVERRIDES[key] ?? 'theme',
+  })])) as Record<ThemeFieldKey, { readonly zone: ZoneName; readonly owner: ThemeFieldOwner }>,
 )
 
 /** cssVar 注入表：--xxx → 字段名（供 App.tsx 循环注入） */

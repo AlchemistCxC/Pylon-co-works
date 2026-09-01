@@ -25,6 +25,11 @@ const themeFields = [...themeInterface.matchAll(/([A-Za-z_$][\w$]*)\s*\??\s*:/g)
 assert.ok(themeFields.length > 0, 'ThemeSettings 字段集合不得为空')
 
 const explicitMetaFields = new Set(['appliedPreset', 'custom', 'ccEditMode'])
+const expectedOwnerOverrides: Record<string, string> = {
+  sidebarWidth: 'workspace-layout',
+  showPet: 'workspace-layout',
+  rightWidth: 'right-rail',
+}
 const allowedZones = new Set(['global', 'layout', 'sidebar', 'chat', 'cc', 'right'])
 const themeFieldSet = new Set(themeFields)
 const mappedEntries = Object.entries(ZONE_FIELDS)
@@ -44,6 +49,10 @@ for (const [zone, fields] of mappedEntries) {
 
 const coveredThemeFields = new Set([...seenFields].filter(field => !explicitMetaFields.has(field)))
 const missingOwners = [...coveredThemeFields].filter(field => !(field in THEME_FIELD_OWNERS))
+const illegalOwners = [...coveredThemeFields].filter(field => !['theme', 'workspace-layout', 'right-rail'].includes(THEME_FIELD_OWNERS[field as keyof typeof THEME_FIELD_OWNERS]?.owner))
+for (const [field, owner] of Object.entries(expectedOwnerOverrides)) {
+  assert.equal(THEME_FIELD_OWNERS[field as keyof typeof THEME_FIELD_OWNERS]?.owner, owner, `${field} owner 必须保持当前 authority`)
+}
 const missingFields = themeFields.filter(field => !explicitMetaFields.has(field) && !coveredThemeFields.has(field))
 const unexpectedMetaMappings = themeFields.filter(field => explicitMetaFields.has(field) && seenFields.has(field))
 
@@ -54,6 +63,7 @@ const problems = [
   missingFields.length ? `遗漏字段: ${missingFields.join(', ')}` : '',
   unexpectedMetaMappings.length ? `元字段不应映射: ${unexpectedMetaMappings.join(', ')}` : '',
   missingOwners.length ? `缺少 owner: ${missingOwners.join(', ')}` : '',
+  illegalOwners.length ? `非法 owner: ${illegalOwners.join(', ')}` : '',
 ].filter(Boolean)
 
 assert.equal(problems.length, 0, `ZONE_FIELDS 一致性契约失败\n${problems.join('\n')}`)
