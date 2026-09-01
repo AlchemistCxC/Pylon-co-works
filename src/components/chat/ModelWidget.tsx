@@ -5,6 +5,7 @@ import { setSessionModel } from './sessionModel'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentContext } from '../../agentContext'
 import { toAgentContextKey } from '../../agentContext'
+import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
 
 // 无后端 session 时的降级列表（预览/未连接）
 const FALLBACK_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro']
@@ -34,7 +35,7 @@ export default function ModelWidget({ context }: Props) {
     if (m === model) return
     if (context) {
       setSessionModel(context, m).catch(error => {
-        window.dispatchEvent(new CustomEvent('pylon:model-error', { detail: String(error) }))
+        dispatchPylonEvent(window, 'pylon:model-error', String(error))
       })
     } else {
       // 降级：无 session（预览等），只改 profile

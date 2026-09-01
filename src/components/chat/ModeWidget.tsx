@@ -3,6 +3,7 @@ import { useRuntimeStore } from '../../runtimeStore'
 import { invoke } from '@tauri-apps/api/core'
 import { createRuntimeClient } from '../../infrastructure/tauri/runtimeClient'
 import { applyApprovalModeChange, nextApprovalMode } from '../../domains/permission/approvalMode.ts'
+import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
 
 /**
  * Approval mode widget（P0-04）：
@@ -30,7 +31,7 @@ export default function ModeWidget() {
       writeMode: setApprovalMode,
       invokeSet: targetMode => createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setApprovalMode(targetMode),
     }).catch(error => {
-      window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))
+      dispatchPylonEvent(window, 'pylon:mode-error', String(error))
     })
   }
 

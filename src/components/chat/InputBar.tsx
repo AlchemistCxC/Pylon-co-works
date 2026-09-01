@@ -19,6 +19,7 @@ import { nextSessionMode } from './sessionModeState'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import type { Session } from '../../identityStore'
+import { onPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
 
 function sendWithStream(options: { session: Session; content: string; persona: string; attachments: string[] }): Promise<unknown> {
   const payload = buildSendMessagePayload(options)
@@ -169,21 +170,19 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }, [value, inputVariant, cliOverflowMode])
 
   useEffect(() => {
-    const onModelError = (event: Event) => {
-      const message = (event as CustomEvent<string>).detail
+    const stop = onPylonEvent(window, 'pylon:model-error', event => {
+      const message = event.detail
       setSendError(message || '模型切换失败')
-    }
-    window.addEventListener('pylon:model-error', onModelError)
-    return () => window.removeEventListener('pylon:model-error', onModelError)
+    })
+    return stop
   }, [])
 
   useEffect(() => {
-    const onModeError = (event: Event) => {
-      const message = (event as CustomEvent<string>).detail
+    const stop = onPylonEvent(window, 'pylon:mode-error', event => {
+      const message = event.detail
       setSendError(message || '权限模式切换失败')
-    }
-    window.addEventListener('pylon:mode-error', onModeError)
-    return () => window.removeEventListener('pylon:mode-error', onModeError)
+    })
+    return stop
   }, [])
 
   // 全局取消：焦点不在输入框（如阅读长回复）时，Esc / Ctrl+C 也能中断生成
@@ -418,14 +417,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   sendQueuedRef.current = sendQueued
 
   useEffect(() => {
-    const onLoadFinished = (event: Event) => {
-      const detail = (event as CustomEvent<{ source?: string }>).detail
+    const stop = onPylonEvent(window, 'pylon:load-finished', event => {
+      const detail = event.detail
       if (!sessionSource || detail?.source !== sessionSource) return
       const next = queuedMessagesRef.current[0]
       if (next) void sendQueuedRef.current(next)
-    }
-    window.addEventListener('pylon:load-finished', onLoadFinished)
-    return () => window.removeEventListener('pylon:load-finished', onLoadFinished)
+    })
+    return stop
   }, [sessionSource])
 
   const cancel = async () => {

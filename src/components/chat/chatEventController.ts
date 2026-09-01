@@ -34,6 +34,7 @@ import { hasEnabledHooks, runHookPhase } from '../../host/hookPipeline.ts'
 import type { HookContext, HookPhase } from '../../contracts/agentHook.ts'
 import { runSessionBoundaryHook } from './hookRuntime.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
+import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
 import type { HookName } from '../../plugin-runtime/hooks/hookTypes.ts'
 import {
   insertMissingMessageAtBasePosition,
@@ -314,7 +315,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     loadGenerations.delete(source)
     detachedSources.delete(source)
     if (loadTransactions.get(source)?.generation === generation) loadTransactions.delete(source)
-    window.dispatchEvent(new CustomEvent('pylon:load-finished', { detail: { source, generation } }))
+    dispatchPylonEvent(window, 'pylon:load-finished', { source, generation })
   }
 
   const abortSessionLoad = (source: string, generation: number): void => {
