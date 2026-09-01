@@ -1240,6 +1240,15 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     requestCancel,
     sendOptimisticUser: (source, content, clientMsgId, options) => {
       if (!isActiveSource(source)) return
+      if (options === undefined) {
+        // C0-OPT migration diagnostic: legacy callers still use the durable
+        // compatibility default; new callers must declare runtime-local
+        // optimistic ownership explicitly with persistCanonical:false.
+        console.warn('[C0-OPT] sendOptimisticUser requires explicit persistCanonical policy', {
+          source,
+          clientMsgId,
+        })
+      }
       // 乐观渲染也立即自动命名（与 pylon:user 确认点一致），首条消息即命名
       const store = useIdentityStore.getState()
       const session = store.sessions.find(s => s.source === source)

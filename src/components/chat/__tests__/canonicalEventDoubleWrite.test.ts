@@ -303,6 +303,27 @@ describe('canonical 双写（A1-c P2）', () => {
     handle.dispose()
   })
 
+  it('兼容 facade 的隐式 durable 默认发出 C0-OPT 迁移诊断', async () => {
+    const source = 'local:dw-implicit-diagnostic'
+    useIdentityStore.setState({ sessions: [makeSession('s4-diagnostic', source)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+    handle.initSource(source, [])
+
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      handle.sendOptimisticUser(source, '兼容调用', 'cid-diagnostic')
+      expect(warning).toHaveBeenCalledWith(
+        '[C0-OPT] sendOptimisticUser requires explicit persistCanonical policy',
+        { source, clientMsgId: 'cid-diagnostic' },
+      )
+    } finally {
+      warning.mockRestore()
+      handle.dispose()
+    }
+  })
+
   it('显式 runtime-local optimistic policy 不写 canonical sink', async () => {
     const source = 'local:dw-optimistic-local'
     useIdentityStore.setState({ sessions: [makeSession('s4-local', source)] })
