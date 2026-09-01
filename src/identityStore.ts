@@ -28,7 +28,7 @@ const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。
  *
  * 承载：profiles / activeProfileId / sessions / users / agents / activeAgent。
- * 不持久化（sessions 由 sessionPersistence 独立管理）。
+ * 持久化由 identity persistence boundary 管理（sessions 由 sessionPersistence 独立管理）。
  * 跨域联动（profile/session/agent 变化同步 workspace 与 runtime）在本 store 组合 action 内
  * 经 getState 调用其他域 store。
  */
