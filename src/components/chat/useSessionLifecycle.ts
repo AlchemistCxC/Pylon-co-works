@@ -298,14 +298,15 @@ export function useSessionLifecycle(
     if (s.periId) {
       // A1-c P4：先读 canonical_events 投影作为首屏占位（读失败按空缓存降级并可见上报），
       // 再走既有的 load_persisted_session 权威恢复。localStorage 旧快照不再读写。
-      tauriCanonicalEventRepository().loadAll(ownerKey)
-        .then(rows => {
-          controllerHandleRef.current?.seedCanonicalCursor?.(
+      const coordinator = replayCoordinatorRef.current
+      const placeholder = coordinator
+        ? coordinator.readCanonicalPlaceholder({
             ownerKey,
-            rows.reduce((max, row) => Math.max(max, row.sequence), 0),
-          )
-          return projectMessagesFromCanonical(rows)
-        })
+            loadCanonical: () => tauriCanonicalEventRepository().loadAll(ownerKey),
+            projectCanonical: rows => projectMessagesFromCanonical(rows),
+          }).then(result => result.messages)
+        : Promise.resolve([] as Message[])
+      placeholder
         .catch(error => {
           reportRuntimeError(`读取 canonical 首屏占位失败（${s.id}）`, error)
           return []

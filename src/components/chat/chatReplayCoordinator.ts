@@ -46,6 +46,12 @@ export interface ReplayLoadRequest {
   readonly isCurrent?: () => boolean
 }
 
+export interface ReplayCanonicalPlaceholder {
+  readonly rows: CanonicalEventRow[]
+  readonly messages: Message[]
+  readonly revision: number
+}
+
 export class ReplayLoadInProgressError extends Error {
   readonly code = 'replay_load_in_progress' as const
 
@@ -69,6 +75,17 @@ export class ReplayLoadCoordinator {
 
   currentGeneration(source: string): number | undefined {
     return this.current.get(source)
+  }
+
+  async readCanonicalPlaceholder(request: {
+    readonly ownerKey: string
+    readonly loadCanonical: () => Promise<CanonicalEventRow[]>
+    readonly projectCanonical: (rows: readonly CanonicalEventRow[]) => Message[]
+  }): Promise<ReplayCanonicalPlaceholder> {
+    const rows = await request.loadCanonical()
+    const revision = rows.reduce((max, row) => Math.max(max, row.sequence), 0)
+    this.controller.seedCanonicalCursor?.(request.ownerKey, revision)
+    return { rows, messages: request.projectCanonical(rows), revision }
   }
 
   async load(request: ReplayLoadRequest): Promise<ReplayLoadOutcome | null> {
