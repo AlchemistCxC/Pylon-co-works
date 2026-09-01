@@ -1,4 +1,4 @@
-# Pylon
+﻿# Pylon
 
 Pylon 是一个基于 ACP（Agent Client Protocol）的桌面 Agent 工作台。它负责连接本地 Agent、管理会话和工作区，并把消息、思考、工具调用、文件和权限请求组织在同一个界面中。Pylon 不包含模型，也不绑定某一家 Agent；只要 Agent 能通过 ACP 接入，就可以使用同一套工作台。
 
@@ -57,7 +57,7 @@ SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应
 看似可用但无法启动 Hermes 的包。
 
 便携版的文件组成、构建命令、审计步骤和分发前检查见
-[Pylon-发行包清单](docs/Pylon-发行包清单.md)；解压后的首次运行说明见
+[Pylon-发行包清单](docs/说明书/Pylon-发行包清单.md)；解压后的首次运行说明见
 `resources/release/README.txt`。
 
 ## 3. 第一次使用
@@ -110,13 +110,13 @@ Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结
 
 插件启用、停用、重新加载和卸载都在“设置 → 插件”完成。插件运行在宿主授予的 Scope 中；它们可以执行本机代码，因此只安装来源可信的插件。安装失败或激活异常时，Pylon 会保留已保存配置并进入降级/安全模式，而不是静默删除设置。
 
-用户向导：[Pylon-插件系统说明书-用户版](docs/Pylon-插件系统说明书-用户版.md)
+用户向导：[Pylon-插件系统说明书-用户版](docs/说明书/Pylon-插件系统说明书-用户版.md)
 
-开发者契约：[Pylon-插件系统说明书-开发者版](docs/Pylon-插件系统说明书-开发者版.md)
+开发者契约：[Pylon-插件系统说明书-开发者版](docs/说明书/Pylon-插件系统说明书-开发者版.md)
 
 ## 8. CLI 与 Gateway
 
-CLI 通过本机 IPC 控制已运行的 Pylon 实例，可查询状态、切换会话、修改呈现设置、打开 Sheet 或触发插件命令。完整命令表见 [Pylon-CLI-命令表](docs/Pylon-CLI-命令表.md)。
+CLI 通过本机 IPC 控制已运行的 Pylon 实例，可查询状态、切换会话、修改呈现设置、打开 Sheet 或触发插件命令。完整命令表见 [Pylon-CLI-命令表](docs/说明书/Pylon-CLI-命令表.md)。
 
 Gateway 是可选的消息转发层：外部平台的消息进入 Gateway 后映射到 ACP session，Agent 回复再由 Gateway 转回平台。Gateway 不会绕过会话权限或 Agent runtime 的配置。
 
@@ -202,7 +202,7 @@ src-tauri/src/                       Rust Kernel 入口、IPC、权限、进程�
 shared/                              前后端共享协议和类型
 ```
 
-当前架构事实、数据流和测试入口见 [Pylon-项目架构参考](docs/Pylon-项目架构参考.md)；插件化拓扑见 [Pylon-插件化前后端拓扑全图](docs/Pylon-插件化前后端拓扑全图.md)。
+当前架构事实、数据流和测试入口见 [Pylon-项目架构参考](docs/说明书/Pylon-项目架构参考.md)；插件化拓扑见 [Pylon-插件化前后端拓扑全图](docs/说明书/Pylon-插件化前后端拓扑全图.md)。
 
 ## 12. 当前边界
 
@@ -214,14 +214,14 @@ shared/                              前后端共享协议和类型
 
 ## 13. 文档索引
 
-- [CLI 命令表](docs/Pylon-CLI-命令表.md)
-- [Agent 检测器](docs/Pylon-Agent-检测器.md)
-- [插件用户手册](docs/Pylon-插件系统说明书-用户版.md)
-- [插件开发者手册](docs/Pylon-插件系统说明书-开发者版.md)
+- [CLI 命令表](docs/说明书/Pylon-CLI-命令表.md)
+- [Agent 检测器](docs/说明书/Pylon-Agent-检测器.md)
+- [插件用户手册](docs/说明书/Pylon-插件系统说明书-用户版.md)
+- [插件开发者手册](docs/说明书/Pylon-插件系统说明书-开发者版.md)
 - [插件设置选项贡献](docs/Pylon-插件设置选项贡献.md)
-- [项目架构参考](docs/Pylon-项目架构参考.md)
-- [插件化拓扑全图](docs/Pylon-插件化前后端拓扑全图.md)
-- [发行包清单](docs/Pylon-发行包清单.md)
+- [项目架构参考](docs/说明书/Pylon-项目架构参考.md)
+- [插件化拓扑全图](docs/说明书/Pylon-插件化前后端拓扑全图.md)
+- [发行包清单](docs/说明书/Pylon-发行包清单.md)
 
 ## License
 

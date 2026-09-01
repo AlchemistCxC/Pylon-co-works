@@ -1,6 +1,6 @@
 # Pylon 插件系统说明书（用户版）
 
-> 适用版本：Pylon 1.4.0
+> 适用版本：Pylon 1.4.1
 >
 > 插件契约：Plugin API 1.0，`pylon-plugin.json` schema 1
 
@@ -234,7 +234,7 @@ Pylon 会：
 
 Pylon 当前不提供 CSS selector 沙箱。插件作者应使用插件 id 前缀或稳定 `data-*` 属性限制选择器作用域。
 
-Pylon 1.4.0 有两个顶层界面模式：Modern GUI 与 Terminal-like。插件样式可以使用 `[data-interface-mode="modern-gui"]` 或 `[data-interface-mode="terminal-like"]` 只影响指定模式。切换界面模式不会停用插件，也不会切换六套主题预设。
+Pylon 有两个顶层界面模式：Modern GUI 与 Terminal-like。插件样式可以使用 `[data-interface-mode="modern-gui"]` 或 `[data-interface-mode="terminal-like"]` 只影响指定模式。切换界面模式不会停用插件，也不会切换内置主题预设（当前 10 套）。
 
 插件可以为现有模式贡献渲染风格、字体、图标化 Workspace 和局部界面，但当前不能安装第三种完整界面模式，也不能替换整个 Agent 工作台。如果某插件把普通主题选项宣传成“完整界面模式”，应以实际可见功能为准。
 
@@ -280,7 +280,7 @@ pylon-cli command exec presentation.apply --args '{"profileId":"builtin.presenta
 
 插件提供可执行命令后会自动出现在 `command list`；停用插件后，其命令和其他贡献会立即从控制面消失。变更命令通常返回 `operationId`，可用 `operation inspect/logs/cancel` 跟踪。
 
-CLI 不是离线配置编辑器：Pylon 必须正在运行。完整命令、参数和安全边界见 [Pylon CLI 命令表](../Pylon-CLI-命令表.md)。
+CLI 不是离线配置编辑器：Pylon 必须正在运行。完整命令、参数和安全边界见 [Pylon CLI 命令表](Pylon-CLI-命令表.md)。
 
 ---
 
@@ -342,7 +342,6 @@ CLI 不是离线配置编辑器：Pylon 必须正在运行。完整命令、参�
 ## 13. 相关文档
 
 - [插件系统说明书（开发者版）](Pylon-插件系统说明书-开发者版.md)
-- [插件设置选项贡献](Pylon-插件设置选项贡献.md)
-- [渲染层级与 Modern GUI 归属](Pylon-渲染层级与Modern-GUI归属-20260819.md)
+- [插件设置选项贡献](../Pylon-插件设置选项贡献.md)
 - [Pylon README](../../README.md)
 - [Process Supervisor 示例](../../examples/process-plugins/README.md)

@@ -1,11 +1,11 @@
-# Pylon 项目架构参考
+﻿# Pylon 项目架构参考
 
 > 状态：当前实现地图，不是目标架构承诺  
 > 最后核验：2026-09-01
 > 适用仓库：`prism-desktop`  
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
-当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../Docs/Archive/Pylon-Kernel-施工台账.md)。
+当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../../Docs/Archive/Pylon-Kernel-施工台账.md)。
 
 插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图同时用虚线标出 Renderer Suite 施工规划，虚线不得视为当前实现。
 
@@ -19,7 +19,7 @@
 - **目标方向**：加固时推荐维持的 ownership 和依赖方向，尚不代表已经实现。
 - **待决策**：必须由产品语义决定，不能由重构者擅自选择。
 
-领域术语以仓库根目录的 [`CONTEXT.md`](../CONTEXT.md) 为准。本文使用的关键术语包括 Agent Catalog、Agent Profile、Agent Instance、Runtime Candidate、Presentation Profile、Renderer Engine 和 Workbench Renderer。
+领域术语以仓库根目录的 [`CONTEXT.md`](../../CONTEXT.md) 为准。本文使用的关键术语包括 Agent Catalog、Agent Profile、Agent Instance、Runtime Candidate、Presentation Profile、Renderer Engine 和 Workbench Renderer。
 
 ## 2. 一句话项目定位
 
@@ -98,8 +98,9 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/src/acp` | subprocess、JSON-RPC、transport、replay | Rust Kernel | `mod.rs`、`replay.rs`、`process.rs` |
-| `src-tauri/src/session` | Session create/prompt/load/state、SQLite repos | Rust Kernel | `persist.rs`、`msg_repo.rs`、`event_repo.rs` |
+| `src-tauri/src/acp` | subprocess、JSON-RPC、transport、replay | Rust Kernel | `error.rs`、`client.rs`、`replay.rs`、`transport.rs` |
+| `src-tauri/src/agent_config` | agents.yaml 解析、校验、原子写与补丁 API | Rust Kernel | `types.rs`、`load.rs`、`patch.rs`、`atomic_write.rs` |
+| `src-tauri/src/session` | Session create/prompt/load/state、SQLite repos | Rust Kernel | `persist.rs`、`msg_repo/mod.rs`、`msg_repo/migrations.rs`、`event_repo.rs` |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
 | `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
 | `src-tauri/pylon-core` | Agent Catalog、native detection、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs` |
@@ -355,17 +356,17 @@ stateDiagram-v2
 | 优先级 | 风险 | 主要位置 |
 |---|---|---|
 | P0（已修复） | live/prompt、无损入口、cursor、empty-journal import 与 partial-journal snapshot reconciliation 已收口；load race committed rows 按 sequence 补应用 | session/persist.rs、event_repo.rs、messageProjection、chatEventController |
-| P1（已修复） | `deleted_sessions` 曾以裸 session/source 为主键且删除 wire 误用 metadata id；v12 改为 owner_key 主键并让 begin/finalize 统一使用 Session.source | session/msg_repo.rs、event_repo.rs、removeSessionTransaction.ts |
+| P1（已修复） | `deleted_sessions` 曾以裸 session/source 为主键且删除 wire 误用 metadata id；v12 改为 owner_key 主键并让 begin/finalize 统一使用 Session.source | session/msg_repo/、event_repo.rs、removeSessionTransaction.ts |
 | P0（已修复） | DB services 曾异步初始化，首次 unavailable 可演变为永久失败；现由 setup readiness barrier 串行打开并一次安装 | `src-tauri/src/session/persistence_bootstrap.rs`、`src-tauri/src/lib.rs` |
 | P0（已修复） | Tauri Identity 读取失败曾回退 localStorage 并可反向覆盖较新 SQLite；现为带 revision cache + degraded-readonly，权威重读清失败 pending | identityStore.ts、userDataRepository.ts |
 | P0（已修复） | 内置插件异常曾可阻止 Kernel 渲染；现由 KernelBootstrap 暴露 degraded/retry/Safe Mode | KernelRoot、kernelBootstrap、pluginCompositionRoot |
 | P1（已修复） | session/load 失败曾自动创建新远端 Session；现为显式重试或独立本地分叉 | useSessionLifecycle、identityStore、ChatView |
 | P1（已修复） | replay 超限曾无完整性信息且保留最早窗口；现返回边界并保留最近窗口 | Rust acp/replay.rs、sessionClient、ChatView |
 | P1（已修复） | replay/live reconciliation 曾可能按 role+content 猜测重复；现仅使用协议明确支持的外部 identity，无 identity 的重复正文保留 | messageIdentity.ts、chatEventController.ts |
-| P0（已修复） | 当前 schema version 曾跳过实际结构与 integrity 校验；现 startup quick_check + schema manifest + future-version guard fail closed | session/msg_repo.rs、persistence_bootstrap.rs |
+| P0（已修复） | 当前 schema version 曾跳过实际结构与 integrity 校验；现 startup quick_check + schema manifest + future-version guard fail closed | session/msg_repo/、persistence_bootstrap.rs |
 | P1（已修复） | canonical JSON 损坏曾静默归一 null/none；现按 event/column 报 corrupt，并可 `evt_export_raw` 隔离取证 | session/event_repo.rs、canonicalEventRepository.ts |
-| P1（已修复） | v9 migration 曾删除 legacy message tables；v11 现将可证明基础消息回填至同一 canonical journal，全部旧表保留为 forensic archive，失败整事务回滚 | session/msg_repo.rs |
-| P1（已修复） | external `agent_create` 曾发送错误 YAML 形状；现使用结构化单 Agent DTO | AgentRuntimePanel、agentClient、agent_config.rs |
+| P1（已修复） | v9 migration 曾删除 legacy message tables；v11 现将可证明基础消息回填至同一 canonical journal，全部旧表保留为 forensic archive，失败整事务回滚 | session/msg_repo/ |
+| P1（已修复） | external `agent_create` 曾发送错误 YAML 形状；现使用结构化单 Agent DTO | AgentRuntimePanel、agentClient、agent_config/ |
 | P1（已修复） | active Agent 配置保存与 live runtime 曾混淆；现区分 Stored/PendingRestart/Activated 并显式 restart rollback | lifecycle/mod.rs、AgentRuntimePanel.tsx |
 | P1（已修复） | detection high confidence 曾与 ACP 可用混合；现为 identityConfidence + validationStatus | pylon-core/agent_detection.rs、AgentRuntimePanel.tsx |
 | P2（按决策关闭） | 第三方 context 能力较宽 | D16：第三方插件完全可信；不建设权限沙箱，保留 lifecycle/contract 隔离 |
@@ -373,7 +374,7 @@ stateDiagram-v2
 
 ## 14. 已确认产品决策
 
-D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../Docs/Archive/Pylon-Kernel-施工台账.md) 第 2 节为唯一决策记录。特别是：canonical journal 是唯一 durable history；重放只深化同一 journal，不另建中央；第三方插件视为完全可信本机代码，但仍须故障隔离。
+D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../../Docs/Archive/Pylon-Kernel-施工台账.md) 第 2 节为唯一决策记录。特别是：canonical journal 是唯一 durable history；重放只深化同一 journal，不另建中央；第三方插件视为完全可信本机代码，但仍须故障隔离。
 
 ## 15. 已完成的加固顺序
 
@@ -436,7 +437,7 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 | Profile/Session metadata | `identityStore.ts` → `userDataRepository.ts` → `session/user_data.rs` |
 | Agent 连接/重连 | `lifecycle/mod.rs` → `agent_runtime.rs` → `dispatcher/mod.rs` |
 | Agent 检测 | `AgentRuntimePanel.tsx` → `agentClient.ts` → `pylon-core/agent_detection.rs` |
-| Agent 配置 | `AgentRuntimePanel.tsx` → lifecycle config commands → `agent_config.rs` |
+| Agent 配置 | `AgentRuntimePanel.tsx` → lifecycle config commands → `agent_config/` |
 | 内置插件 | `builtinProductPlugins.ts` → 目标 package activation → 目标 implementation |
 | 外置插件 | packageInstallationService/packagePluginRuntime → PluginRuntime → native plugin commands |
 | Kernel 启动 | `main.tsx` → `KernelRoot.tsx` → `kernelBootstrapServices.ts` → `pluginCompositionRoot.ts` → `App.tsx` |

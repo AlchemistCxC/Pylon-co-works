@@ -1,6 +1,6 @@
-# Pylon 插件系统说明书（开发者版）
+﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 1.4.0
+> 适用版本：Pylon 1.4.1
 >
 > 生产契约：Plugin API 1.0，`pylon-plugin.json` schema 1
 
@@ -762,7 +762,7 @@ context.settings.registerOptions({
 - 多插件按 Registry layer/priority/order 确定性叠加，注册项随 Scope 回收，并参与 shadow hot-swap 原子替换。
 - 该 API 不取得字段值、持久化、联动或控件渲染的所有权。当前值被删除时，Host 保留原值并显示“已不可用”，不会静默改写用户配置。
 
-完整协议见 [插件设置选项贡献](Pylon-插件设置选项贡献.md)。
+完整协议见 [插件设置选项贡献](../Pylon-插件设置选项贡献.md)。
 
 ---
 
@@ -1011,7 +1011,7 @@ pylon_cli
 }
 ```
 
-CLI 壳当前提供 58 个固定控制命令，完整参数见 [Pylon CLI 命令表](../Pylon-CLI-命令表.md)。主要分组：
+CLI 壳当前提供 58 个固定控制命令，完整参数见 [Pylon CLI 命令表](Pylon-CLI-命令表.md)。主要分组：
 
 ```text
 plugin list / inspect / enable / disable / reload
@@ -1256,6 +1256,5 @@ src-tauri/src/plugin_cmds.rs
 
 - [Process Supervisor examples](../../examples/process-plugins/README.md)
 - [用户版说明书](Pylon-插件系统说明书-用户版.md)
-- [插件设置选项贡献](Pylon-插件设置选项贡献.md)
-- [渲染层级与 Modern GUI 归属](Pylon-渲染层级与Modern-GUI归属-20260819.md)
+- [插件设置选项贡献](../Pylon-插件设置选项贡献.md)
 - [Pylon README](../../README.md)

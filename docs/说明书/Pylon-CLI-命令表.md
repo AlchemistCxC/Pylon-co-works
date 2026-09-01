@@ -1,6 +1,6 @@
 # Pylon CLI 命令表
 
-> 适用版本：Pylon 1.2.0（2026-08-19）  
+> 适用版本：Pylon 1.4.1（2026-09-01）  
 > 单一真值：`shared/pylon-cli-manifest.json`（CLI 壳命令）+ 运行时 Command Registry（插件命令）
 
 Pylon CLI 连接已经运行的桌面应用。CLI 壳不复制插件业务逻辑：固定控制命令进入对应控制端口，插件功能统一通过 `command exec <commandId>` 调用。
