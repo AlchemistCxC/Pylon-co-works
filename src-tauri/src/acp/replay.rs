@@ -101,7 +101,11 @@ pub(crate) async fn load_session_with_replay(
     if handles.crashed.load(Ordering::Relaxed) {
         return Err(AcpError::ConnectionClosed);
     }
-    let mut events = handles.rx.resubscribe();
+    // The receiver is created by `AcpClient::replay_handles` and moved into this
+    // collector. Keeping that ownership single prevents notifications emitted
+    // between handle creation and the first poll from being skipped by a later
+    // `resubscribe`.
+    let mut events = handles.rx;
     // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
     // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
     // 依赖后删除；id 仅用于在广播流中匹配响应。
@@ -415,6 +419,80 @@ mod tests {
         assert_eq!(batch.events.len(), 1);
         assert_eq!(batch.events[0]["update"]["content"]["text"], "kept");
         assert_eq!(batch.metadata.boundary.observed_count, 1);
+        assert!(active.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_capture_pre_poll_event_is_retained() {
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+
+        // The capture receiver already exists, but the load future has not been
+        // polled yet. A second subscription in the collector would start after
+        // this notification and lose it.
+        events_tx
+            .send(session_update(Some("target-session"), "pre-poll"))
+            .unwrap();
+
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+        events_tx.send(response(1, None)).unwrap();
+
+        let (_result, batch) = loading
+            .await
+            .expect("replay task join")
+            .expect("load result");
+
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(batch.events[0]["update"]["content"]["text"], "pre-poll");
+        assert_eq!(batch.metadata.boundary.observed_count, 1);
+        assert!(active.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn replay_capture_rapid_fanout_is_ordered() {
+        const COUNT: usize = 16;
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+
+        for index in 0..COUNT {
+            events_tx
+                .send(session_update(
+                    Some("target-session"),
+                    &format!("rapid-{index}"),
+                ))
+                .unwrap();
+        }
+        events_tx.send(response(1, None)).unwrap();
+
+        let (_result, batch) = loading
+            .await
+            .expect("replay task join")
+            .expect("load result");
+        let texts: Vec<String> = batch
+            .events
+            .iter()
+            .filter_map(|event| event["update"]["content"]["text"].as_str())
+            .map(str::to_owned)
+            .collect();
+        let expected: Vec<String> = (0..COUNT).map(|index| format!("rapid-{index}")).collect();
+
+        assert_eq!(texts, expected);
+        assert_eq!(batch.metadata.boundary.observed_count, COUNT as u64);
         assert!(active.lock().unwrap().is_empty());
     }
 
