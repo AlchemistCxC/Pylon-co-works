@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 04:05] [施工员A·工程师] A-04 trace 补强：`e6b393ca` 为 timeout/EOF/RPC error 路径补发 bounded `replay_trace`，计数与 boundary 明确为未观察/0，稳定 `error_code` 不含远端错误正文；`session::persist` 定向 4 项通过。A 线交付不变，Track B 仍无需改 typed client。
+
 [2026-09-02 03:50] [施工员A·工程师] A-04 trace wording correction：backend `replay_trace.load_generation` 表示 ACP runtime/client generation，前端 `load-response`/`load-commit.generation` 表示 coordinator load generation；两者数值域不同。跨层关联键为 owner/source（并保留各自 generation 字段），不得将两种 generation 直接比较或互相覆盖。实现与 A-04 提交不变。
 
 [2026-09-02 03:35] [施工员A·工程师] A-04 完成：`5cd1db9e` 在 `session/persist.rs` 增加 target=`replay_trace` structured 记录（owner、load_generation、capture_lp、response_boundary、observed/retained/dropped、authority、canonical_revision、journal/projection commit outcome），不改 wire/API；与 B-03 `02b47543` handoff 的前端 `load-response`/`load-commit` trace 以 owner+generation 对齐。A 线 A-01–A-04 全部完成，后续仅需 B-04 与最终跨线验收。
