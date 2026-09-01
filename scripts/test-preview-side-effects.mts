@@ -46,6 +46,6 @@ assert(/document\.addEventListener\(['"]mousemove['"]/.test(controlCenter), 'Con
 assert(/useSessionLiveStats\(sessionId\)/.test(widgetRegistry), 'widget registry side-effect contract changed: expected session runtime path')
 assert(/setInterval\(/.test(generationFooter), 'GenerationFooter side-effect contract changed: expected running timer')
 assert(/clearInterval\(/.test(generationFooter), 'GenerationFooter side-effect contract changed: expected timer cleanup')
-assert(/hydrateIdentityAndWorkspace\([^)]*\)/.test(store) && /persist\(/.test(store), 'store side-effect contract changed: expected ordered identity/workspace hydration and persistence wiring')
+assert(/reportLegacyProfilePayload\([^)]*\)/.test(store) && /persist\(/.test(store), 'store side-effect contract changed: expected legacy payload reporting and persistence wiring')
 
 console.log('settings-preview-side-effects contract: PASS')

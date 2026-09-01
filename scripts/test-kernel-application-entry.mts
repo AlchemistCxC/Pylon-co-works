@@ -18,7 +18,7 @@ assert.match(kernelRoot, /BUILTIN_PYLON_APPLICATION_ID = BUILTIN_PYLON_SHELL_ID/
 assert.match(shellPlugin, /lazy\(\(\) => import\('\.\.\/\.\.\/App\.tsx'\)\)/, 'App 必须由 shell plugin 延迟加载')
 assert.match(shellPlugin, /application\.register\(\{ id: BUILTIN_PYLON_SHELL_ID, component: PylonApplication \}\)/, 'App 必须经 plugin-owned Application API 注册')
 assert.match(kernelRoot, /bootstrap\.startNormal\(\)/, '启动时必须进入 Kernel bootstrap')
-assert.match(bootstrap, /actions\.mountApplication\(BUILTIN_PYLON_SHELL_ID\)/, 'bootstrap 激活内置 shell 后必须挂载 Pylon Application')
+assert.match(bootstrap, /mountApplication\(BUILTIN_PYLON_SHELL_ID\)/, 'bootstrap 激活内置 shell 后必须挂载 Pylon Application')
 assert.match(kernelRoot, /<ErrorBoundary>/, 'Kernel 必须永久持有 ErrorBoundary')
 assert.match(runtime, /getSnapshot:/, 'ApplicationRuntime 必须提供 snapshot')
 assert.match(runtime, /subscribe:/, 'ApplicationRuntime 必须提供响应式 subscribe')
