@@ -429,6 +429,24 @@ export function extractModeConfig(response: SessionResponseObject): { mode?: str
   }
 }
 
+/** Extract the currently selected reasoning/thinking effort and its choices. */
+export function extractReasoningConfig(
+  configOptions: ConfigOption[] | undefined,
+  response?: SessionResponseObject,
+): { thinkingEffort?: string; reasoning?: string[] } {
+  const options = Array.isArray(configOptions) ? configOptions : responseConfigOptions(response)
+  const option = findConfigOption(options, 'reasoning')
+  if (!option) return {}
+  const current = extractWireString(extractConfigOptionValue(option), [
+    'valueId', 'value_id', 'reasoning', 'thinkingEffort', 'thinking_effort', 'effort', 'id', 'key', 'value',
+  ])
+  const choices = uniqueStrings(extractConfigOptionChoices(option).map(choice => extractChoiceId(choice)))
+  return {
+    ...(current ? { thinkingEffort: current } : {}),
+    ...(choices.length > 0 ? { reasoning: choices } : {}),
+  }
+}
+
 export function extractMode(response: SessionResponseObject): string | undefined {
   return extractModeConfig(response).mode
     ?? extractWireString(readWireField(asWireRecord(response.sessionInfo), ['mode', 'currentMode', 'current_mode']), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])

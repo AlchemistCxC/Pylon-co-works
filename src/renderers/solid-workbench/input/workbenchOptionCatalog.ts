@@ -233,6 +233,16 @@ function documentOptions(snapshot: WorkbenchRuntimeSnapshot, kind: WorkbenchOpti
   return resolveDocumentOptionEntries(snapshot.document?.session.options, kind)
 }
 
+/** Read the provider-selected value from the normalized Workbench document. */
+export function resolveDocumentOptionValue(
+  options: readonly SessionConfigOption[] | undefined,
+  kind: WorkbenchOptionKind,
+): string | undefined {
+  if (!options) return undefined
+  const option = options.find(candidate => optionKind(candidate) === kind)
+  return option ? optionCurrentValue(option) : undefined
+}
+
 function preferAdvertised(
   advertised: readonly WorkbenchOptionEntry[],
   fallback: readonly WorkbenchOptionEntry[],

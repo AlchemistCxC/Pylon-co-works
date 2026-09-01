@@ -109,6 +109,18 @@ describe('Agent Workbench production commands', () => {
     expect(setMode).toHaveBeenCalledWith({ agentId: 'peri', source: 'local:a' }, 'plan')
   })
 
+  it('结构化 ACP reject 不再泄漏为 [object Object]', async () => {
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      setMode: vi.fn(async () => { throw { code: 'config_error', message: 'reasoning option unavailable' } }),
+    })
+
+    await expect(commands.setMode(session.id, 'plan')).resolves.toEqual({
+      ok: false,
+      error: 'reasoning option unavailable',
+    })
+  })
+
   it('interaction command 从同一 document 解析完整事务 identity，再走统一 response transport', async () => {
     const identity: InteractionResponseIdentity = {
       provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 7,

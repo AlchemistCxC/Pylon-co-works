@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
   }
   return {
     controller,
+    canonicalLoad: vi.fn(async () => [] as unknown[]),
     invoke: vi.fn(),
     reportRuntimeError: vi.fn(),
     resetGeneration: () => { lockGeneration = 0 },
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('../../../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('../../../infrastructure/events/canonicalEventRepository', () => ({
-  tauriCanonicalEventRepository: () => ({ loadAll: vi.fn(async () => []) }),
+  tauriCanonicalEventRepository: () => ({ loadAll: mocks.canonicalLoad }),
 }))
 vi.mock('../chatEventController', () => ({
   attachChatEventController: () => mocks.controller,
@@ -86,6 +87,8 @@ function setters(): ChatSessionSetters {
 describe('session/load failure policy (D5)', () => {
   beforeEach(() => {
     mocks.invoke.mockReset()
+    mocks.canonicalLoad.mockReset()
+    mocks.canonicalLoad.mockResolvedValue([])
     mocks.controller.abortSessionLoad.mockClear()
     mocks.controller.finishLoadLock.mockClear()
     mocks.controller.beginLoadLock.mockClear()
@@ -170,5 +173,26 @@ describe('session/load failure policy (D5)', () => {
     expect(mocks.controller.commitReplaySnapshot).not.toHaveBeenCalled()
     expect(result.current.recoveryFailure).toBeNull()
     expect(result.current.canonicalRefresh).toMatchObject({ sessionId: SESSION.id })
+  })
+
+  it('已有 canonical 历史时远端 replay 失败不显示底部恢复失败条', async () => {
+    mocks.canonicalLoad.mockResolvedValue([{
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: SESSION.source },
+      eventType: 'user.message',
+      typedPayload: { text: '已有历史' },
+      rawPayload: { update: { sessionUpdate: 'user_message_chunk', content: { text: '已有历史' } } },
+      eventId: '["profile-a","peri","local:session-1"]#1', sequence: 1, clientGeneration: 1,
+      receivedAt: '2026-09-02T00:00:00.000Z', occurredAt: '2026-09-02T00:00:00.000Z',
+      payloadVersion: 1, schemaVersion: 1,
+    }])
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'load_persisted_session') throw new Error('remote context missing')
+      return null
+    })
+
+    const { result } = renderHook(() => useSessionLifecycle(SESSION.id, [SESSION], setters(), vi.fn()))
+
+    await waitFor(() => expect(mocks.invoke.mock.calls.filter(call => call[0] === 'load_persisted_session')).toHaveLength(1))
+    await waitFor(() => expect(result.current.recoveryFailure).toBeNull())
   })
 })

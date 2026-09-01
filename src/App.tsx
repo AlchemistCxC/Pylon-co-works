@@ -25,6 +25,7 @@ import { getSkinRuntime, pickThemeBaseline } from './infrastructure/skin/skinRun
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
+import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
@@ -55,6 +56,7 @@ import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './rightRailStore.ts'
+import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
 
 // 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
 const Settings = lazy(() => import('./components/Settings'))
@@ -86,6 +88,7 @@ function LazyDialogFallback() {
 
 // FE-AUD-008：typed client 收口 command literal（注入真实 transport）
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
@@ -219,6 +222,31 @@ export default function App() {
     })
     return bootstrapRun.dispose
   }, [bootstrapRetry])
+
+  // 全局审批模式不是会话事实：启动时先恢复本地最近一次成功设置，
+  // 再同步当前 Tauri runtime，避免进程重启后 UI 与 permission dispatcher 分叉。
+  useEffect(() => {
+    if (!IS_TAURI || isBrowserMockRuntime()) return
+    let disposed = false
+    const persisted = readPersistedApprovalMode()
+    if (persisted) {
+      useRuntimeStore.getState().setApprovalMode(persisted)
+      void runtimeClient.setApprovalMode(persisted).catch(error => {
+        if (!disposed) reportRuntimeError('恢复权限模式', error)
+      })
+      return () => { disposed = true }
+    }
+    void runtimeClient.getApprovalMode().then(value => {
+      if (disposed || typeof value !== 'string') return
+      const mode = normalizeApprovalMode(value)
+      if (!mode) return
+      useRuntimeStore.getState().setApprovalMode(mode)
+      persistApprovalMode(mode)
+    }).catch(error => {
+      if (!disposed) reportRuntimeError('读取权限模式', error)
+    })
+    return () => { disposed = true }
+  }, [])
 
   // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
   // 点击其他 tab）不受影响。用 ref 对比避免 workspaceSheets 每次新引用触发重复聚焦。

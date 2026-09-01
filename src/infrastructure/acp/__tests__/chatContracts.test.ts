@@ -7,6 +7,7 @@ import {
   extractMode,
   extractModeConfig,
   extractModelConfig,
+  extractReasoningConfig,
   sessionResponseObject,
 } from '../chatContracts.ts'
 
@@ -60,5 +61,13 @@ describe('ACP chat contract extraction', () => {
     expect(extractConfigOptionChoices(option)).toHaveLength(2)
     expect(extractChoiceId({ model_id: 'provider:model', name: 'Display' }, 'model')).toBe('provider:model')
     expect(extractChoiceId({ mode_id: 'accept_edits', name: 'Accept edits' }, 'mode')).toBe('accept_edits')
+  })
+
+  it('extracts the restored reasoning effort from ACP config options', () => {
+    expect(extractReasoningConfig([{
+      config_id: 'thought_level',
+      current_value: { value_id: 'high' },
+      choices: [{ value_id: 'low' }, { value_id: 'high' }],
+    }])).toEqual({ thinkingEffort: 'high', reasoning: ['low', 'high'] })
   })
 })

@@ -7,7 +7,7 @@ import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSu
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
-import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
+import { resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
@@ -53,6 +53,14 @@ export function SolidControlCenter() {
   createEffect(() => {
     if (mode() || !runtime().activeMode) return
     setMode(runtime().activeMode || modeOptions()[0] || 'default')
+  })
+  createEffect(() => {
+    // Restored ACP config options arrive with the Workbench document after
+    // session/load. Keep the model dropdown's reasoning label aligned with
+    // that provider-selected value, but never overwrite an empty-state draft.
+    if (!input().sessionId) return
+    const restored = resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning')
+    if (restored && restored !== reasoningLevel()) setReasoningLevel(restored)
   })
   createEffect(() => {
     const options = emptyWorkspaces()

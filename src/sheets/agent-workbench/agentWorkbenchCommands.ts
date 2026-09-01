@@ -11,6 +11,7 @@ import { createInteractionResponseTransport } from '../../infrastructure/acp/int
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../agentContext.ts'
 import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
+import { formatRuntimeError } from '../../runtimeError.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
@@ -74,6 +75,10 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
 
 const rejected = (error: string) => ({ ok: false, error })
 
+function commandError(error: unknown): string {
+  return formatRuntimeError('工作台命令', error).message
+}
+
 function interactionAnswer(value: unknown): InteractionResponseAnswer | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const input = value as Record<string, unknown>
@@ -113,7 +118,7 @@ export function createAgentWorkbenchCommandFacade(
     } catch (error) {
       dependencies.rejectOptimisticUser(session.source, clientMessageId)
       dependencies.rejectOptimisticDocument(session.source, clientMessageId)
-      return { status: 'rejected', messageId: clientMessageId, error: error instanceof Error ? error.message : String(error) }
+      return { status: 'rejected', messageId: clientMessageId, error: commandError(error) }
     }
   }
   return {
@@ -130,14 +135,14 @@ export function createAgentWorkbenchCommandFacade(
       if (!session) return rejected('session_not_found')
       if (!modelId.trim()) return rejected('model_empty')
       try { await dependencies.setModel({ agentId: session.agentId, source: session.source }, modelId); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async setMode(sessionId, modeId) {
       const session = dependencies.resolveSession(sessionId)
       if (!session) return rejected('session_not_found')
       if (!modeId.trim()) return rejected('mode_empty')
       try { await dependencies.setMode({ agentId: session.agentId, source: session.source }, modeId); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async setConfigOption(sessionId, key, value, options) {
       const session = dependencies.resolveSession(sessionId)
@@ -151,7 +156,7 @@ export function createAgentWorkbenchCommandFacade(
       try {
         await dependencies.setConfigOption({ agentId: session.agentId, source: session.source }, key, value)
         return { ok: true }
-      } catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      } catch (error) { return rejected(commandError(error)) }
     },
     async createSession(input) {
       const created = await dependencies.createSession(input)
@@ -190,23 +195,23 @@ export function createAgentWorkbenchCommandFacade(
       const answer = interactionAnswer(response)
       if (!answer) return rejected('interaction_response_invalid')
       try { await dependencies.respondInteraction(request, answer); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async openResource(sessionId, resource) {
       const session = dependencies.resolveSession(sessionId)
       if (!session) return rejected('session_not_found')
       try { await dependencies.openResource(session, resource); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async revealResource(sessionId, resource) {
       const session = dependencies.resolveSession(sessionId)
       if (!session) return rejected('session_not_found')
       try { await dependencies.revealResource(session, resource); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async copy(_sessionId, text) {
       try { await navigator.clipboard.writeText(text); return { ok: true } }
-      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+      catch (error) { return rejected(commandError(error)) }
     },
     async retry() { return rejected('production_command_not_connected') },
     async recover() { return rejected('production_command_not_connected') },

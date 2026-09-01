@@ -13,8 +13,10 @@ import {
   extractConfigOptionId,
   extractConfigOptionValue,
   extractModelConfig,
+  extractReasoningConfig,
   extractSessionUsage,
   extractUsage,
+  type ConfigOption,
   type SessionResponseObject,
   type SessionUpdate,
 } from '../../../infrastructure/acp/chatContracts.ts'
@@ -28,10 +30,17 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
     const ctx = context as AgentContext
     const res = response as SessionResponseObject
     const cfg = extractModelConfig(res.configOptions, res)
-    // A new/load response may advertise choices needed by the compatibility UI,
-    // but current model/mode/usage are journal-owned facts. Restoring those here
-    // would create a second recovery authority beside canonical_events.
-    if (cfg.models) useRuntimeStore.getState().setSessionConfig(ctx, { models: cfg.models })
+    const reasoning = extractReasoningConfig(res.configOptions, res)
+    // A new/load response may advertise choices needed by the compatibility UI;
+    // current model/mode/usage remain journal-owned facts. Reasoning effort is
+    // an ACP config option, so retaining its selected value keeps the selector
+    // aligned after restart without creating a second message authority.
+    if (cfg.models || reasoning.thinkingEffort) {
+      useRuntimeStore.getState().setSessionConfig(ctx, {
+        ...(cfg.models ? { models: cfg.models } : {}),
+        ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
+      })
+    }
   },
   applyUpdate(context, update) {
     const ctx = context as AgentContext
@@ -58,7 +67,14 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
         const upd = update.payload as Extract<SessionUpdate, { sessionUpdate: 'config_option_update' }>
         if (Array.isArray(upd.configOptions)) {
           const cfg = extractModelConfig(upd.configOptions)
-          if (cfg.model || cfg.models) useRuntimeStore.getState().setSessionConfig(ctx, { ...cfg, raw: upd.configOptions })
+          const reasoning = extractReasoningConfig(upd.configOptions)
+          if (cfg.model || cfg.models || reasoning.thinkingEffort) {
+            useRuntimeStore.getState().setSessionConfig(ctx, {
+              ...cfg,
+              ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
+              raw: upd.configOptions,
+            })
+          }
           const modeOption = upd.configOptions.find(option => {
             const id = extractConfigOptionId(option)
             return id?.replace(/[-\s]+/g, '_').toLowerCase() === 'mode'
@@ -70,6 +86,8 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
           const val = extractConfigOptionValue(upd)
           if (key?.replace(/[-\s]+/g, '_').toLowerCase() === 'model' && val != null) useRuntimeStore.getState().setSessionConfig(ctx, { model: String(val) })
           if (key?.replace(/[-\s]+/g, '_').toLowerCase() === 'mode' && val != null) useRuntimeStore.getState().setSessionMode(ctx, String(val))
+          const reasoning = extractReasoningConfig([upd as unknown as ConfigOption])
+          if (reasoning.thinkingEffort) useRuntimeStore.getState().setSessionConfig(ctx, { thinkingEffort: reasoning.thinkingEffort })
         }
         break
       }

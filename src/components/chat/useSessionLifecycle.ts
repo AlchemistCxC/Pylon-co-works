@@ -323,11 +323,16 @@ export function useSessionLifecycle(
           errorCode: replayErrorCode(error),
         })
         reportRuntimeError('恢复会话', error)
-        setRecoveryFailure({
-          sessionId: s.id,
-          source: s.source,
-          message: recoveryErrorMessage(error),
-        })
+        // canonical 首屏占位已经提供可用历史时，远端 ACP replay 失败不应
+        // 把底部错误条覆盖在可读会话上；用户仍可从 Runtime/ErrorCenter
+        // 看到诊断并按需重试。空缓存时保留原有可操作失败提示。
+        if (cached.length === 0) {
+          setRecoveryFailure({
+            sessionId: s.id,
+            source: s.source,
+            message: recoveryErrorMessage(error),
+          })
+        }
       })
     }
 

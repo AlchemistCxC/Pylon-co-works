@@ -301,6 +301,12 @@ describe('typed status payload：lifecycle 与 capabilities 分字段 normalize�
 })
 
 describe('runtimeClient', () => {
+  it('reads the global approval mode through the typed command', async () => {
+    const invoke = new FakeInvoke().register('get_approval_mode', () => 'auto')
+    const client = createRuntimeClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+    await expect(client.getApprovalMode()).resolves.toBe('auto')
+  })
+
   it('listRuntimeLogs normalize 后出边界', async () => {
     const invoke = new FakeInvoke().register('list_runtime_logs', () => [
       { id: 1, level: 'info', message: 'x', timestamp: '2026-01-01' },

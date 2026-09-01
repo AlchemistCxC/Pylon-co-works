@@ -2,13 +2,14 @@ import { useStore } from '../../store'
 import { useRuntimeStore } from '../../runtimeStore'
 import { invoke } from '@tauri-apps/api/core'
 import { createRuntimeClient } from '../../infrastructure/tauri/runtimeClient'
-import { applyApprovalModeChange, nextApprovalMode } from '../../domains/permission/approvalMode.ts'
+import { applyApprovalModeChange, nextApprovalMode, persistApprovalMode } from '../../domains/permission/approvalMode.ts'
 import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
+import { formatRuntimeError } from '../../runtimeError.ts'
 
 /**
  * Approval mode widget（P0-04）：
  *   - 循环值限定 bypass/auto/edit/default，invoke set_approval_mode（全局，无 source）
- *   - approval mode 存 runtimeStore 不持久化；失败回滚显示值并走现有 pylon:mode-error 错误中心
+ *   - approval mode 存 runtimeStore，成功切换后写入本地持久化；失败回滚显示值并走现有 pylon:mode-error 错误中心
  *   - session mode（plan/code）由 slash command/sessionMode 链消费 set_mode，不混用
  *
  * modeVariant 取值：
@@ -30,8 +31,10 @@ export default function ModeWidget() {
       previousMode,
       writeMode: setApprovalMode,
       invokeSet: targetMode => createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setApprovalMode(targetMode),
+    }).then(() => {
+      persistApprovalMode(next)
     }).catch(error => {
-      dispatchPylonEvent(window, 'pylon:mode-error', String(error))
+      dispatchPylonEvent(window, 'pylon:mode-error', formatRuntimeError('切换权限模式', error).message)
     })
   }
 

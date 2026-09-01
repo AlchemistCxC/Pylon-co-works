@@ -25,4 +25,31 @@ describe('C14 session response authority', () => {
     expect(useRuntimeStore.getState().sessionModes[key]).toBeUndefined()
     expect(useRuntimeStore.getState().sessionLiveStats[key]).toBeUndefined()
   })
+
+  it('hydrates the ACP reasoning effort for the restored control center', () => {
+    BUILTIN_SESSION_STATE_SYNC_PROVIDER.applyResponse?.(context, {
+      configOptions: [{
+        id: 'thought_level',
+        currentValue: 'high',
+        choices: [{ value: 'low' }, { value: 'high' }],
+      }],
+    })
+
+    const key = toAgentContextKey(context)
+    expect(useRuntimeStore.getState().sessionConfig[key]?.thinkingEffort).toBe('high')
+  })
+
+  it('updates reasoning effort when ACP sends a config option update', () => {
+    BUILTIN_SESSION_STATE_SYNC_PROVIDER.applyUpdate?.(context, {
+      kind: 'config_option_update',
+      payload: {
+        sessionUpdate: 'config_option_update',
+        id: 'reasoning_effort',
+        currentValue: { valueId: 'low' },
+      },
+    })
+
+    const key = toAgentContextKey(context)
+    expect(useRuntimeStore.getState().sessionConfig[key]?.thinkingEffort).toBe('low')
+  })
 })
