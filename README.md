@@ -2,7 +2,7 @@
 
 Pylon 是一个基于 ACP（Agent Client Protocol）的桌面 Agent 工作台。它负责连接本地 Agent、管理会话和工作区，并把消息、思考、工具调用、文件和权限请求组织在同一个界面中。Pylon 不包含模型，也不绑定某一家 Agent；只要 Agent 能通过 ACP 接入，就可以使用同一套工作台。
 
-本文是当前版本的使用与开发说明。实现地图和扩展契约见 [`docs/`](docs/)，内部施工资料已移到 `G:\Project\prism-team-workdir\Docs\prism-desktop-internal`。
+本文是当前版本的使用与开发说明。实现地图和扩展契约见 [`docs/`](docs/)；施工书、原型等内部过程资料不在本仓库（位置见团队内部指引），其中已落地的结论应回写到 docs 对应文档。
 
 ## 1. 能做什么
 
@@ -164,6 +164,8 @@ npx vitest run src/domains/theme
 
 提交前至少运行 `npm run lint`、相关区域测试和 `npm run build`。改动渲染器时再运行 `npm run check:solid`；改动 Rust/Tauri 时再运行 `npm run check:rust`。
 
+开发调试：主题字段的写入来源可在控制台用 `window.__pylonSettingProvenance.recent()` / `.last('字段名')` 追溯（手动编辑、预设、呈现风格等贡献者互可区分）；设置信息架构的一致性不变量由 `src/domains/theme/__tests__/settingsTraceability.test.ts` 锁定。
+
 ### 10.1 Windows 便携版发布
 
 便携版发布流程会准备自带的 Hermes PortableGit、构建 Tauri 主程序和 Agent 检测器，
@@ -183,14 +185,20 @@ WebView2，可显式使用 `python scripts/pack_release.py --without-webview2`�
 ```text
 src/main.tsx                         应用入口与 bootstrap
 src/App.tsx                          产品壳、Sheet、生命周期
-src/domains/                         领域模型与状态同步
+src/domains/                         领域模型与状态同步（theme/workbench/presentation…）
 src/application/transactions/        跨领域应用事务
 src/components/chat/                 React 消息流、ACP 事件与会话生命周期
+src/components/settings/             设置页面板（Agent/插件/渲染器/备份…）
+src/themeFieldRenderer.tsx           声明式主题字段渲染（defs 驱动）
 src/renderers/solid-workbench/       Solid 工作台与消息内容实现
 src/sheets/agent-workbench/          Renderer Suite 宿主与 Agent 工作台接线
 src/plugins/product/                 第一方插件、样式和注册表
 src/plugins/core/                    第一方插件使用的实现模块
-src-tauri/                           Rust Kernel、IPC、SQLite 与进程管理
+src-tauri/src/agent_config/          agents.yaml 解析/校验/原子写/补丁 API
+src-tauri/src/acp/                   ACP 客户端（连接、JSON-RPC、传输、wire trace）
+src-tauri/src/session/               会话仓库（canonical 事件、SQLite 迁移、prompt 生命周期）
+src-tauri/src/gateway/               Gateway 实例与平台路由
+src-tauri/src/                       Rust Kernel 入口、IPC、权限、进程管理
 shared/                              前后端共享协议和类型
 ```
 
