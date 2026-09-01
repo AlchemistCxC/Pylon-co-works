@@ -16,6 +16,7 @@ import { toAgentContextKey } from './agentContext.ts'
 import { normalizeFilePath } from './domains/file/fileRelations.ts'
 import { resolveWorkspace } from './workspace-sheets/workspaceRegistry.ts'
 import { useRightRailStore } from './rightRailStore.ts'
+import { readLegacyLayoutSnapshot } from './infrastructure/persistence/legacyKeyMigration.ts'
 
 /** I01-W3：touchedFiles 刷新版本戳 key——context key + normalized path 二元（禁止冒号 split）。 */
 export function touchedFileVersionKey(context: AgentContext, path: string): string {
@@ -31,20 +32,7 @@ export function touchedFileVersionKey(context: AgentContext, path: string): stri
  * `pylon-workspace-sheets`（schema v2）。
  */
 
-const THEME_STORAGE_KEY = 'pylon-theme'
-
-/** v1→v2 一次性迁移源：读旧主题 sidebarWidth（读失败 250 由调用方回退） */
-function readThemeSidebarWidth(): number | null {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { state?: Record<string, unknown>; sidebarWidth?: unknown }
-    const value = parsed.state?.sidebarWidth ?? parsed.sidebarWidth
-    return typeof value === 'number' && Number.isFinite(value) ? value : null
-  } catch {
-    return null
-  }
-}
+const legacyLayout = readLegacyLayoutSnapshot()
 
 interface WorkspaceStoreState {
   workspaceSheets: ReturnType<typeof createSheetState>
@@ -114,9 +102,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
   sheetAgentStates: {},
   touchedFiles: {},
   touchVersions: {},
-  sidebarWidth: DEFAULT_SHEET_LAYOUT.sidebarWidth,
-  sidebarCollapsed: DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
-  rightPanelCollapsed: DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
+  sidebarWidth: legacyLayout.leftWidth ?? DEFAULT_SHEET_LAYOUT.sidebarWidth,
+  sidebarCollapsed: legacyLayout.leftCollapsed ?? DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
+  rightPanelCollapsed: legacyLayout.rightCollapsed ?? DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
   showPet: true,
   lastPersistError: null,
   hydrateWorkspaceSheets: (agentIds) => set(() => {
@@ -124,7 +112,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     // v1→v2 迁移：sidebarWidth 从旧主题一次性搬家（读失败回退默认 250）
     let sidebarWidth = result.layout.sidebarWidth
     if (result.migrated) {
-      sidebarWidth = readThemeSidebarWidth() ?? sidebarWidth
+      sidebarWidth = legacyLayout.leftWidth ?? sidebarWidth
     }
     const layout: SheetLayoutState = { ...result.layout, sidebarWidth }
     // Keep the v3 application layout store in lockstep while old workspace

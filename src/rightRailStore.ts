@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { readLegacyLayoutSnapshot } from './infrastructure/persistence/legacyKeyMigration.ts'
 
 export const RIGHT_RAIL_MIN_WIDTH = 220
 export const RIGHT_RAIL_MAX_WIDTH = 560
@@ -7,53 +8,7 @@ export const RIGHT_RAIL_DEFAULT_WIDTH = 320
 export const LEFT_RAIL_MIN_WIDTH = 160
 export const LEFT_RAIL_MAX_WIDTH = 520
 export const LEFT_RAIL_DEFAULT_WIDTH = 250
-const LEGACY_RIGHT_RAIL_KEY = 'pylon-right-rail'
-const LEGACY_THEME_KEY = 'pylon-theme'
-const LEGACY_WORKSPACE_KEY = 'pylon-workspace-sheets'
-
-function readLegacyWidth(): number {
-  try {
-    const oldRail = localStorage.getItem(LEGACY_RIGHT_RAIL_KEY)
-    if (oldRail) {
-      const parsed = JSON.parse(oldRail) as { state?: { width?: unknown } }
-      if (typeof parsed.state?.width === 'number') return clampRightRailWidth(parsed.state.width)
-    }
-    const theme = localStorage.getItem(LEGACY_THEME_KEY)
-    if (theme) {
-      const parsed = JSON.parse(theme) as { state?: { rightWidth?: unknown } }
-      if (typeof parsed.state?.rightWidth === 'number') return clampRightRailWidth(parsed.state.rightWidth)
-    }
-  } catch { /* storage unavailable or malformed legacy data */ }
-  return RIGHT_RAIL_DEFAULT_WIDTH
-}
-
-function readLegacyCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
-    const parsed = raw ? JSON.parse(raw) as { layout?: { rightPanelCollapsed?: unknown } } : null
-    return typeof parsed?.layout?.rightPanelCollapsed === 'boolean' ? parsed.layout.rightPanelCollapsed : false
-  } catch { return false }
-}
-
-function readLegacyLeftWidth(): number {
-  try {
-    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
-    const parsed = raw ? JSON.parse(raw) as { layout?: { sidebarWidth?: unknown } } : null
-    if (typeof parsed?.layout?.sidebarWidth === 'number') return Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(parsed.layout.sidebarWidth)))
-    const theme = localStorage.getItem(LEGACY_THEME_KEY)
-    const themeParsed = theme ? JSON.parse(theme) as { state?: { sidebarWidth?: unknown } } : null
-    if (typeof themeParsed?.state?.sidebarWidth === 'number') return Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(themeParsed.state.sidebarWidth)))
-  } catch { /* storage unavailable or malformed legacy data */ }
-  return LEFT_RAIL_DEFAULT_WIDTH
-}
-
-function readLegacyLeftCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY)
-    const parsed = raw ? JSON.parse(raw) as { layout?: { sidebarCollapsed?: unknown } } : null
-    return typeof parsed?.layout?.sidebarCollapsed === 'boolean' ? parsed.layout.sidebarCollapsed : false
-  } catch { return false }
-}
+const legacyLayout = readLegacyLayoutSnapshot()
 
 export type RightRailBackgroundSizing = 'fit' | 'fill' | 'stretch'
 
@@ -91,10 +46,10 @@ export const useRightRailStore = create<RightRailState>()(persist(
   (set) => ({
     // Preserve the v2 layout default so existing workspaces keep the rail open
     // after the v3 migration.
-    collapsed: readLegacyCollapsed(),
-    leftRailWidth: readLegacyLeftWidth(),
-    leftRailCollapsed: readLegacyLeftCollapsed(),
-    width: readLegacyWidth(),
+    collapsed: legacyLayout.rightCollapsed ?? false,
+    leftRailWidth: legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH,
+    leftRailCollapsed: legacyLayout.leftCollapsed ?? false,
+    width: legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH,
     activePanelId: null,
     background: null,
     setCollapsed: collapsed => set({ collapsed }),
@@ -117,10 +72,10 @@ export const useRightRailStore = create<RightRailState>()(persist(
         ? (persisted as { state?: Record<string, unknown> }).state
         : undefined
       return {
-        collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : readLegacyCollapsed(),
-        leftRailWidth: typeof state?.leftRailWidth === 'number' ? Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(state.leftRailWidth))) : readLegacyLeftWidth(),
-        leftRailCollapsed: typeof state?.leftRailCollapsed === 'boolean' ? state.leftRailCollapsed : readLegacyLeftCollapsed(),
-        width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : readLegacyWidth()),
+        collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : legacyLayout.rightCollapsed ?? false,
+        leftRailWidth: typeof state?.leftRailWidth === 'number' ? Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(state.leftRailWidth))) : legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH,
+        leftRailCollapsed: typeof state?.leftRailCollapsed === 'boolean' ? state.leftRailCollapsed : legacyLayout.leftCollapsed ?? false,
+        width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH),
         activePanelId: typeof state?.activePanelId === 'string' ? state.activePanelId : null,
         background: state?.background && typeof state.background === 'object' ? state.background as RightRailBackgroundPresentation : null,
       }
