@@ -87,13 +87,15 @@ export class PluginScope {
   setTimeout(handler: TimerHandler, timeout?: number, ...args: unknown[]): ReturnType<typeof setTimeout> {
     const handle = globalThis.setTimeout(handler, timeout, ...args)
     this.add(() => globalThis.clearTimeout(handle), { label: 'timeout' })
-    return handle
+    // DOM lib 返回 number、node 类型环境（vite 的 @types/node peer）返回 Timeout：
+    // 桥接两种,避免 TS2322 在 fresh install（CI）与本地（无 node 类型）之间摇摆。
+    return handle as unknown as ReturnType<typeof setTimeout>
   }
 
   setInterval(handler: TimerHandler, timeout?: number, ...args: unknown[]): ReturnType<typeof setInterval> {
     const handle = globalThis.setInterval(handler, timeout, ...args)
     this.add(() => globalThis.clearInterval(handle), { label: 'interval' })
-    return handle
+    return handle as unknown as ReturnType<typeof setInterval>
   }
 
   createAbortController(): AbortController {
