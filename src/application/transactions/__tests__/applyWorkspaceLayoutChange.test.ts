@@ -25,7 +25,7 @@ describe('applyWorkspaceLayoutChange', () => {
 
   it('returns a visible failure when a projection write rejects', () => {
     const p = ports()
-    p.workspace.getState().setSidebarWidth.mockImplementation(() => { throw new Error('persist failed') })
+    ;(p.workspace.getState().setSidebarWidth as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => { throw new Error('persist failed') })
     const result = applyWorkspaceLayoutChange({ sidebarWidth: 300 }, p)
     expect(result).toEqual({ ok: false, message: 'persist failed' })
   })
