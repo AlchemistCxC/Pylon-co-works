@@ -1,5 +1,12 @@
 import { For, Show, createSignal } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import {
+  optionLabel,
+  resolveModeOptionEntries,
+  resolveModelOptionEntries,
+  resolveReasoningOptionEntries,
+  type WorkbenchOptionEntry,
+} from './workbenchOptionCatalog.ts'
 
 function nextValue(values: readonly string[], current: string): string {
   if (values.length === 0) return current
@@ -7,21 +14,33 @@ function nextValue(values: readonly string[], current: string): string {
   return values[(index + 1 + values.length) % values.length] ?? values[0] ?? current
 }
 
-export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; reasoningValue?: () => string; onReasoningChange?: (value: string) => void } = {}) {
+export function SolidModelWidget(props: {
+  draftValue?: () => string
+  onDraftChange?: (value: string) => void
+  reasoningValue?: () => string
+  onReasoningChange?: (value: string) => void
+  /** Empty-state controls remain selectable with compact/badge presets. */
+  forceDropdown?: boolean
+} = {}) {
   const workbench = useSolidWorkbench()
   const runtime = () => workbench.runtimeSnapshot()
   const appearance = () => workbench.appearanceSnapshot()
   const [open, setOpen] = createSignal(false)
   const [error, setError] = createSignal('')
-  const models = () => runtime().availableModels.length > 0
-    ? runtime().availableModels
-    : ['deepseek-v4-flash', 'deepseek-v4-pro']
-  const model = () => props.draftValue?.() || runtime().activeModel || models()[0] || '未配置模型'
+  const modelEntries = () => resolveModelOptionEntries(runtime(), props.draftValue?.())
+  const models = () => modelEntries().map(item => item.id)
+  const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
   const displayModel = () => props.reasoningValue?.() ? `${model()}（${props.reasoningValue()}）` : model()
   const scale = () => appearance().ccScale.model ?? 100
+  const reasoningEntries = () => resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
+  const dropdown = () => props.forceDropdown === true || appearance().modelVariant === 'dropdown'
   const choose = async (target: string) => {
     const sessionId = workbench.input().sessionId
-    if (!sessionId && props.onDraftChange) { props.onDraftChange(target); setOpen(false); return }
+    // A draft setter is an explicit empty-state (or transition-state) binding.
+    // Prefer it even when the host has already published a session id: session
+    // selection and renderer updates can arrive in the same tick, and sending
+    // a live-session command here would race the create transaction.
+    if (props.onDraftChange) { props.onDraftChange(target); setOpen(false); return }
     if (!sessionId || target === model()) return
     const result = await workbench.commands.setModel(sessionId, target)
     if (!result.ok) setError(result.error || '模型切换失败')
@@ -32,63 +51,120 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
   return (
     <div class="solid-model-widget">
       <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
-      <Show when={appearance().modelVariant === 'badge'} fallback={
-        <Show when={appearance().modelVariant === 'minimal'} fallback={
-          <div class="cc-model-dropdown">
+      <Show when={dropdown()} fallback={
+        <Show when={appearance().modelVariant === 'badge'} fallback={
+          <Show when={appearance().modelVariant === 'minimal'} fallback={<ModelDropdown
+            open={open}
+            setOpen={setOpen}
+            scale={scale}
+            displayModel={displayModel}
+            model={model}
+            modelEntries={modelEntries}
+            reasoningEntries={reasoningEntries}
+            reasoningValue={props.reasoningValue}
+            onReasoningChange={props.onReasoningChange}
+            choose={choose}
+          />}>
             <button
               type="button"
-              class="model-tag"
+              class="cc-model-minimal"
+              title="点击切换模型"
               style={{ 'font-size': `${scale()}%` }}
-              aria-haspopup="listbox"
-              aria-expanded={open()}
-              onClick={() => setOpen(value => !value)}
-            >{displayModel()} ▾</button>
-            <Show when={open()}>
-              <div class="model-menu" role="listbox" aria-label="模型列表">
-                <Show when={props.reasoningValue && props.onReasoningChange}>
-                  <div class="model-menu-section" aria-label="思考强度"><span>思考强度</span><For each={['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']}>{effort => <button type="button" role="option" aria-selected={effort === props.reasoningValue?.()} class={`model-item${effort === props.reasoningValue?.() ? ' active' : ''}`} onClick={() => props.onReasoningChange?.(effort)}>{effort}</button>}</For></div>
-                </Show>
-                <For each={models()}>{item => (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={item === model()}
-                    class={`model-item${item === model() ? ' active' : ''}`}
-                    onClick={() => void choose(item)}
-                  >{item}</button>
-                )}</For>
-              </div>
-            </Show>
-          </div>
+              onClick={() => void choose(nextValue(models(), model()))}
+            >{displayModel()}</button>
+          </Show>
         }>
-          <button
-            type="button"
-            class="cc-model-minimal"
-            title="点击切换模型"
-            style={{ 'font-size': `${scale()}%` }}
-            onClick={() => void choose(nextValue(models(), model()))}
-          >{displayModel()}</button>
+          <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
         </Show>
       }>
-        <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
+        <ModelDropdown
+          open={open}
+          setOpen={setOpen}
+          scale={scale}
+          displayModel={displayModel}
+          model={model}
+          modelEntries={modelEntries}
+          reasoningEntries={reasoningEntries}
+          reasoningValue={props.reasoningValue}
+          onReasoningChange={props.onReasoningChange}
+          choose={choose}
+        />
       </Show>
     </div>
   )
 }
 
-export function SolidModeWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void } = {}) {
+function ModelDropdown(props: {
+  open: () => boolean
+  setOpen: (value: boolean | ((previous: boolean) => boolean)) => void
+  scale: () => number
+  displayModel: () => string
+  model: () => string
+  modelEntries: () => readonly WorkbenchOptionEntry[]
+  reasoningEntries: () => readonly WorkbenchOptionEntry[]
+  reasoningValue?: () => string
+  onReasoningChange?: (value: string) => void
+  choose: (value: string) => Promise<void>
+}) {
+  return <div class="cc-model-dropdown">
+    <button
+      type="button"
+      class="model-tag"
+      style={{ 'font-size': `${props.scale()}%` }}
+      aria-haspopup="listbox"
+      aria-expanded={props.open()}
+      onClick={() => props.setOpen(value => !value)}
+    >{props.displayModel()} ▾</button>
+    <Show when={props.open()}>
+      <div class="model-menu" role="listbox" aria-label="模型列表">
+        <Show when={props.reasoningValue && props.onReasoningChange}>
+          <div class="model-menu-section" role="group" aria-label="思考强度">
+            <span>思考强度</span>
+            <For each={props.reasoningEntries()}>{effort => <button
+              type="button"
+              role="option"
+              aria-selected={effort.id === props.reasoningValue?.()}
+              class={`model-item${effort.id === props.reasoningValue?.() ? ' active' : ''}`}
+              onClick={() => {
+                props.onReasoningChange?.(effort.id)
+                props.setOpen(false)
+              }}
+            >{optionLabel('reasoning', effort.id, effort.label)}</button>}</For>
+          </div>
+        </Show>
+        <For each={props.modelEntries()}>{item => (
+          <button
+            type="button"
+            role="option"
+            aria-selected={item.id === props.model()}
+            class={`model-item${item.id === props.model() ? ' active' : ''}`}
+            onClick={() => void props.choose(item.id)}
+          >{item.label || item.id}</button>
+        )}</For>
+      </div>
+    </Show>
+  </div>
+}
+
+export function SolidModeWidget(props: {
+  draftValue?: () => string
+  onDraftChange?: (value: string) => void
+  forceDropdown?: boolean
+} = {}) {
   const workbench = useSolidWorkbench()
   const runtime = () => workbench.runtimeSnapshot()
   const appearance = () => workbench.appearanceSnapshot()
   const [error, setError] = createSignal('')
-  const modes = () => runtime().availableModes.length > 0
-    ? runtime().availableModes
-    : ['default', 'edit', 'auto', 'bypass']
-  const mode = () => props.draftValue?.() || runtime().activeMode || modes()[0] || 'default'
+  const [open, setOpen] = createSignal(false)
+  const modeEntries = () => resolveModeOptionEntries(runtime(), props.draftValue?.())
+  const modes = () => modeEntries().map(item => item.id)
+  const mode = () => props.draftValue?.() || runtime().activeMode || modeEntries()[0]?.id || 'default'
   const scale = () => appearance().ccScale.mode ?? 100
+  const dropdown = () => props.forceDropdown === true
+  const displayMode = () => dropdown() ? optionLabel('mode', mode()) : mode()
   const cycle = async () => {
     const sessionId = workbench.input().sessionId
-    if (!sessionId && props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
+    if (props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
     if (!sessionId) return
     const result = await workbench.commands.setMode(sessionId, nextValue(modes(), mode()))
     if (!result.ok) setError(result.error || '权限模式切换失败')
@@ -98,18 +174,48 @@ export function SolidModeWidget(props: { draftValue?: () => string; onDraftChang
   return (
     <div class="solid-mode-widget">
       <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
-      <Show when={appearance().modeVariant === 'badge'} fallback={
-        <Show when={appearance().modeVariant === 'minimal'} fallback={
-          <button type="button" class="cc-mode-widget" title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-            <span class="mode-pill" data-mode={mode()}>{mode()}</span>
-          </button>
+      <Show when={dropdown()} fallback={
+        <Show when={appearance().modeVariant === 'badge'} fallback={
+          <Show when={appearance().modeVariant === 'minimal'} fallback={
+            <button type="button" class="cc-mode-widget" title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
+              <span class="mode-pill" data-mode={mode()}>{mode()}</span>
+            </button>
+          }>
+            <button type="button" class="cc-mode-minimal" data-mode={mode()} style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>{mode()}</button>
+          </Show>
         }>
-          <button type="button" class="cc-mode-minimal" data-mode={mode()} style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>{mode()}</button>
+          <button type="button" class="cc-mode-badge" data-mode={mode()} title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
+            [{mode()}]
+          </button>
         </Show>
       }>
-        <button type="button" class="cc-mode-badge" data-mode={mode()} title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-          [{mode()}]
-        </button>
+        <div class="cc-mode-dropdown">
+          <button
+            type="button"
+            class="cc-mode-widget cc-mode-select"
+            title="选择权限模式"
+            style={{ 'font-size': `${scale()}%` }}
+            aria-haspopup="listbox"
+            aria-expanded={open()}
+            onClick={() => setOpen(value => !value)}
+          ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ▾</button>
+          <Show when={open()}>
+            <div class="mode-menu model-menu" role="listbox" aria-label="模式列表">
+              <For each={modeEntries()}>{item => <button
+                type="button"
+                role="option"
+                aria-selected={item.id === mode()}
+                class={`model-item${item.id === mode() ? ' active' : ''}`}
+                onClick={() => {
+                  const sessionId = workbench.input().sessionId
+                  if (props.onDraftChange) props.onDraftChange(item.id)
+                  else if (sessionId) void workbench.commands.setMode(sessionId, item.id)
+                  setOpen(false)
+                }}
+              >{optionLabel('mode', item.id, item.label)}</button>}</For>
+            </div>
+          </Show>
+        </div>
       </Show>
     </div>
   )

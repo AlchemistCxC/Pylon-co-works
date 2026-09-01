@@ -51,6 +51,8 @@ async fn create_session_slot(
     session_cwd: &str,
     workspace_id: Option<String>,
     wire_mcp_servers: &[serde_json::Value],
+    initial_model: Option<&str>,
+    initial_reasoning: Option<&str>,
     initial_mode: Option<&str>,
     close_replaced: bool,
 ) -> Result<SessionMapping, PylonError> {
@@ -201,6 +203,8 @@ pub(crate) async fn ensure_session_mapping(
         None,
         wire_mcp_servers,
         None,
+        None,
+        None,
         true,
     )
     .await
@@ -234,7 +238,7 @@ pub(crate) fn restore_previous_slot(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -244,6 +248,8 @@ pub(crate) async fn new_session(
     cwd: Option<String>,
     workspace_id: Option<String>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    model: Option<String>,
+    reasoning_level: Option<String>,
     mode: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     DurableSessionOwner::new(&profile_id, &agent_id, &source).validate()?;
@@ -283,6 +289,8 @@ pub(crate) async fn new_session(
         &session_cwd,
         workspace_id,
         &mcp_servers,
+        model.as_deref(),
+        reasoning_level.as_deref(),
         mode.as_deref(),
         true,
     )

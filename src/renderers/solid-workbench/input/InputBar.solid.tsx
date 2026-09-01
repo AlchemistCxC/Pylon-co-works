@@ -485,7 +485,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
       class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}${emptyState() ? ' input-empty' : ''}`}
       data-expanded="false"
     >
-      <Show when={inputVariant() !== 'cli'}>
+      {/* Empty state is intentionally quiet: the control-center itself already
+          communicates the affordance, so keyboard-hint chrome would make the
+          centered composer look like a second instruction panel. */}
+      <Show when={inputVariant() !== 'cli' && !emptyState()}>
         <div class="input-composer-meta" aria-hidden="true">
           <span class="input-composer-kind"><span class="input-composer-glyph">{inputVariant() === 'command' ? '⌘' : '✦'}</span>{inputVariant() === 'command' ? '命令与消息' : '新消息'}</span>
           <span class="input-composer-shortcut">↵ Enter 发送 · Shift+Enter 换行</span>

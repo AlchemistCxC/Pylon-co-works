@@ -10,6 +10,25 @@ import type {
   WorkbenchHostPort,
 } from './workbenchHostPort.ts'
 import type { SolidWorkbenchServices } from './workbenchContracts.ts'
+import { resolveDocumentOptionEntries } from './input/workbenchOptionCatalog.ts'
+
+function optionIds(
+  document: WorkbenchDocument | undefined,
+  kind: 'model' | 'mode',
+  current: string | undefined,
+): readonly string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const entry of resolveDocumentOptionEntries(document?.session.options, kind)) {
+    const id = entry.id.trim()
+    if (!id || seen.has(id.toLowerCase())) continue
+    seen.add(id.toLowerCase())
+    ids.push(id)
+  }
+  const active = current?.trim() ?? ''
+  if (active && !seen.has(active.toLowerCase())) ids.unshift(active)
+  return Object.freeze(ids)
+}
 
 function documentMessages(document: WorkbenchDocument | undefined): readonly Message[] {
   return document?.messages.map(message => ({
@@ -23,6 +42,8 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   const messages = documentMessages(document)
   const generation = host.generation.getSnapshot()
   const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
+  const activeModel = document?.session.model ?? ''
+  const activeMode = document?.session.mode ?? ''
   return Object.freeze({
     revision: document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
@@ -32,8 +53,12 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
     generationPhase: generation.generationPhase,
     generationActivity: generation.generationActivity,
     thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
-    availableModels: Object.freeze([]), activeModel: document?.session.model ?? '',
-    availableModes: Object.freeze([]), activeMode: document?.session.mode ?? '',
+    // Keep the host-port projection provider-neutral: ACP choices are carried
+    // in the canonical session option surface, not in renderer-local stores.
+    // A third-party Suite therefore sees the same model/mode catalogue as the
+    // built-in Solid renderer even when its legacy runtime arrays are empty.
+    availableModels: optionIds(document, 'model', activeModel), activeModel,
+    availableModes: optionIds(document, 'mode', activeMode), activeMode,
     canAttach: host.capabilities.has('attach'), promptImage: false, error, document,
   })
 }

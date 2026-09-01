@@ -676,6 +676,52 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(workspace).toHaveValue(''))
   })
 
+  it('Sidebar 创建会话事件先到达时缓存 workspaceId，不被空态初始化覆盖', async () => {
+    const { lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
+        { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
+      ],
+    })
+    // Sidebar dispatches before clearing the selected session.
+    window.dispatchEvent(new CustomEvent('pylon:new-session', { detail: { workspaceId: 'workspace-target' } }))
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
+        { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
+      ],
+    })
+    expect(await screen.findByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-target')
+  })
+
+  it('手动选择工作区后，列表更新不会重新套用最近活跃项', async () => {
+    const { lifecycle } = mountPreview()
+    const options = [
+      { id: 'workspace-a', label: 'A', path: 'G:/a', lastActiveAt: 10 },
+      { id: 'workspace-b', label: 'B', path: 'G:/b', lastActiveAt: 20 },
+    ]
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work', availableWorkspaces: options })
+    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
+    fireEvent.change(workspace, { target: { value: 'workspace-a' } })
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [...options, { id: 'workspace-c', label: 'C', path: 'G:/c', lastActiveAt: 99 }],
+    })
+    await waitFor(() => expect(workspace).toHaveValue('workspace-a'))
+  })
+
+  it('空态不挂载 composer 快捷键提示，并在创建后标记进入过渡态', async () => {
+    const { host, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    expect(host.querySelector('.input-composer-meta')).toBeNull()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'chat' })
+    await waitFor(() => expect(host.querySelector('.control-center')?.className).toContain('is-session-entering'))
+  })
+
   it('空态创建期间冻结事务输入并暴露忙碌状态', async () => {
     let finishCreation: ((value: { sessionId: string }) => void) | undefined
     const { services, lifecycle } = mountPreview()

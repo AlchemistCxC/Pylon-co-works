@@ -1001,15 +1001,18 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
  * context rows, or creation controls. */
 function WorkbenchEmptyBrand(props: { workspaceMode: 'work' | 'chat' }) {
   const model = () => selectAgentEmptyState(props.workspaceMode)
-  return <div class="agent-empty-state solid-workbench-empty-brand" role="img" aria-label="Pylon Agent">
-    <div class="agent-empty-brand" aria-hidden="true">
-      <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">
+  return <div class="agent-empty-state solid-workbench-empty-brand" data-workspace-mode={props.workspaceMode} role="img" aria-label="Pylon Agent">
+    <div class="agent-empty-lockup" aria-hidden="true">
+      <div class="agent-empty-brand">
+        <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">
         <path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" />
         <circle class="pylon-mark-node" cx="32" cy="21.215" r="4" />
         <circle class="pylon-mark-node" cx="20" cy="42" r="4" />
         <circle class="pylon-mark-node" cx="44" cy="42" r="4" />
         <path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" />
-      </svg>
+        </svg>
+      </div>
+      <span class="agent-empty-wordmark">PYLON</span>
     </div>
     <div class="agent-empty-eyebrow">{model().eyebrow}</div>
     <h2 class="agent-empty-title">{model().title}</h2>

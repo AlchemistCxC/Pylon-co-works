@@ -311,9 +311,11 @@
   transition: margin-top 260ms ease, transform 260ms ease, opacity 180ms ease;
 }
 
-/* Empty state keeps the production control-center geometry. The only change
-   is vertical placement: with no chat shell it is centered in the available
-   stage, then naturally returns to the bottom dock once a session exists. */
+/* Empty state keeps the production control-center geometry. The only changes
+   are a bounded content track and vertical placement: with no chat shell it
+   is centered in the available stage, then returns to the bottom dock once a
+   session exists. The input/status track intentionally does not span the
+   whole window; this keeps the empty surface visually balanced on wide panes. */
 .solid-workbench-control-center-slot.is-empty {
   position: absolute;
   inset-inline: 0;
@@ -323,6 +325,7 @@
   margin: 0;
   flex: 0 0 auto;
   transform: translateY(-50%);
+  --cc-empty-content-width: min(720px, calc(100% - 32px));
 }
 .solid-workbench-control-center-slot.is-empty .cc-bg,
 .solid-workbench-control-center-slot.is-empty .cc-edit-hdr,
@@ -334,19 +337,51 @@
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='pct'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tasks'] { display: none; }
-.solid-workbench-control-center-slot.is-empty .cc-body,
+.solid-workbench-control-center-slot.is-empty .cc-body {
+  box-sizing: border-box;
+  width: var(--cc-empty-content-width);
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
+  padding-inline: 0;
+}
 .solid-workbench-control-center-slot.is-empty .cc-input-slot,
+.solid-workbench-control-center-slot.is-empty .cc-status-row,
+.solid-workbench-control-center-slot.is-empty .cc-footer-status-row,
 .solid-workbench-control-center-slot.is-empty .cc-widget { width: 100%; }
-.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty {
+.solid-workbench-control-center-slot.is-empty .cc-widget.cc-natural { width: max-content !important; }
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='workspace'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='model'],
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='mode'] { max-width: 100%; }
+.solid-workbench-control-center-slot.is-empty.is-session-entering {
+  animation: solid-empty-composer-to-dock 360ms cubic-bezier(.22,.8,.24,1) both;
+}
+.solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering) {
   animation: solid-empty-composer-enter 280ms ease both;
 }
 @keyframes solid-empty-composer-enter {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes solid-empty-composer-to-dock {
+  from { top: 50%; transform: translateY(-50%); }
+  to { top: calc(100% - var(--cc-height, 120px)); transform: translateY(0); }
+}
+/* The workspace/model/mode controls are creation-only affordances. Fade that
+   layer while the same control-center node travels to its session position;
+   the regular session widgets are then revealed by the existing render path. */
+.solid-workbench-control-center-slot.is-session-entering
+  :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot { transition: none; }
   .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
+  .solid-workbench-control-center-slot.is-session-entering { animation: none; }
+  .solid-workbench-control-center-slot.is-session-entering
+    :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+    transition: none;
+  }
 }
 
 /* 过渡态：pet 实体未迁移（React PetCompanion 待 P4），文字占位不展示假 UI */
@@ -385,7 +420,25 @@
   padding: 0 var(--ui-space-4);
   pointer-events: none;
 }
-.solid-workbench-empty-brand .agent-empty-brand { margin-bottom: var(--ui-space-3); }
+.solid-workbench-empty-brand .agent-empty-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-2);
+  padding: 0 var(--ui-space-2);
+  color: var(--accent);
+}
+.solid-workbench-empty-brand .agent-empty-brand {
+  width: 48px;
+  height: 48px;
+  margin: 0;
+}
+.solid-workbench-empty-brand .agent-empty-brand .pylon-mark { width: 44px; height: 44px; }
+.solid-workbench-empty-brand .agent-empty-wordmark {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font: 700 var(--font-size-sm)/1 var(--mono);
+  letter-spacing: .24em;
+}
 .solid-workbench-empty-brand .agent-empty-eyebrow { margin-bottom: var(--ui-space-1); }
 .solid-workbench-empty-brand .agent-empty-title { font-size: clamp(20px, 2.4vw, 28px); }
 .solid-agent-empty-error { color: var(--danger, #dc6372); font: var(--font-size-sm) var(--font); }
