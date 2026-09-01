@@ -1,17 +1,17 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { reportRuntimeError } from './runtimeError'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
-import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
-import { createCustomPresetId, pickCustomPresetTheme } from './customPresets'
-import { markZoneCustom } from './themePresetState'
-import { ZONE_FIELDS } from './themeFieldDefs'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
-import { THEME_SETTING_KEYS } from './themeFieldDefs'
-import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration'
-import { DEFAULTS } from './domains/theme/themeDefaults'
-import type { CustomPreset } from './customPresets'
-import { reportLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
+import { reportRuntimeError } from './runtimeError.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState.ts'
+import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
+import { createCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
+import { markZoneCustom } from './themePresetState.ts'
+import { ZONE_FIELDS } from './themeFieldDefs.ts'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { THEME_SETTING_KEYS } from './themeFieldDefs.ts'
+import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration.ts'
+import { DEFAULTS } from './domains/theme/themeDefaults.ts'
+import type { CustomPreset } from './customPresets.ts'
+import { reportLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace.ts'
 import {
   applyCustomPresetReducer,
   applyZonePresetReducer,
@@ -20,8 +20,8 @@ import {
   setGlobalPresetReducer,
   setZoneFieldReducer,
   toThemeDelta,
-} from './domains/theme/presetReducer'
-import type { Profile } from './identityStore'
+} from './domains/theme/presetReducer.ts'
+import type { Profile } from './identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, recordPayload, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'

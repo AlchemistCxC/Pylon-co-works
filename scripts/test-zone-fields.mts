@@ -5,6 +5,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { ZONE_FIELDS } from '../src/presets.ts'
+import { THEME_FIELD_OWNERS } from '../src/themeFieldDefs.ts'
 
 const storeSource = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
 const themeInterface = storeSource.match(/export interface ThemeSettings\s*\{([\s\S]*?)\n\}/)?.[1]
@@ -42,6 +43,7 @@ for (const [zone, fields] of mappedEntries) {
 }
 
 const coveredThemeFields = new Set([...seenFields].filter(field => !explicitMetaFields.has(field)))
+const missingOwners = [...coveredThemeFields].filter(field => !(field in THEME_FIELD_OWNERS))
 const missingFields = themeFields.filter(field => !explicitMetaFields.has(field) && !coveredThemeFields.has(field))
 const unexpectedMetaMappings = themeFields.filter(field => explicitMetaFields.has(field) && seenFields.has(field))
 
@@ -51,6 +53,7 @@ const problems = [
   duplicateFields.size ? `重复归属字段: ${[...duplicateFields].join(', ')}` : '',
   missingFields.length ? `遗漏字段: ${missingFields.join(', ')}` : '',
   unexpectedMetaMappings.length ? `元字段不应映射: ${unexpectedMetaMappings.join(', ')}` : '',
+  missingOwners.length ? `缺少 owner: ${missingOwners.join(', ')}` : '',
 ].filter(Boolean)
 
 assert.equal(problems.length, 0, `ZONE_FIELDS 一致性契约失败\n${problems.join('\n')}`)

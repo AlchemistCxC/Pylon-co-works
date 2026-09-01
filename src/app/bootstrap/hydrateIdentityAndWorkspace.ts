@@ -1,7 +1,7 @@
-import type { ProfilePersistenceState } from '../../profilePersistence'
-import { useIdentityStore } from '../../identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import type { ProfilePersistenceState } from '../../profilePersistence.ts'
+import { useIdentityStore } from '../../identityStore.ts'
+import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { markLegacyMigrationComplete } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 export type HydrationStage = 'profiles' | 'workspace-sheets' | 'workspace-entities' | 'sessions'
