@@ -89,10 +89,10 @@ for (const entry of buildGitStatus()) {
 // 7. seed 接线（App effect 顺序守卫）：App.tsx 末尾 effect + 顺序约束
 {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /import \{ seedDemo \} from '\.\/demo\/seed'/, 'App 必须接 seedDemo')
+  assert.match(app, /browserDemoBootstrap/, 'App 必须通过 browser/mock bootstrap seam 接入 demo')
   assert.match(app, /if \(IS_TAURI && !isBrowserMockRuntime\(\)\) return/, 'seed effect 必须真实 Tauri 守卫')
   assert.match(app, /demoSeededRef\.current/, 'seed 必须幂等 ref')
-  assert.match(app, /seedDemo\(setActiveSession/, 'seed 必须传 setActiveSession（写回持久化）')
+  assert.match(app, /runBrowserDemoSeed\(setActiveSession/, 'seed 必须传 setActiveSession（写回持久化）')
   const seedEffect = app.slice(app.indexOf('demoSeededRef'))
   const hydrateIdx = app.indexOf('hydrateWorkspaceSheets()')
   assert.ok(seedEffect.includes('useEffect') && app.indexOf('demoSeededRef') > hydrateIdx, 'seed effect 必须声明在 hydrate 之后')
