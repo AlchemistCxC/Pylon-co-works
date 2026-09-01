@@ -1014,3 +1014,154 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acp::AcpClient;
+
+    /// B-02 / C0-OPT：prompt ingest 是 GUI user.message 的唯一 durable owner。
+    /// 该 characterization 不经过前端 sink，直接锁定 Rust ingest 的 owner、
+    /// identity、provenance 与单行提交语义，供 React/Solid runtime-local echo 对照。
+    #[tokio::test]
+    async fn ingest_prompt_event_commits_one_authoritative_user_row_for_gui_owner() {
+        let source = "local:prompt-owner";
+        let agent_id = "prompt-agent";
+        let profile_id = "profile-prompt";
+        let remote_session_id = "remote-prompt";
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session = SessionInfo::new(
+            remote_session_id.to_string(),
+            String::new(),
+            ".".to_string(),
+            false,
+            3,
+        );
+        session.profile_id = Some(profile_id.to_string());
+        runtime
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .insert(source.to_string(), session);
+
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent(agent_id)
+            .with_agent(crate::test_utils::fake_acp_agent(agent_id, ""))
+            .with_runtime(agent_id, runtime.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        let row = ingest_prompt_event(
+            &state,
+            &runtime,
+            source,
+            Some(remote_session_id.to_string()),
+            3,
+            serde_json::json!({
+                "source": source,
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": { "text": "hello from prompt" }
+                }
+            }),
+        )
+        .await
+        .expect("prompt ingest")
+        .expect("GUI owner must produce a canonical row");
+
+        let owner_key = serde_json::to_string(&[profile_id, agent_id, source]).expect("owner key");
+        assert_eq!(row.owner_key, owner_key);
+        assert_eq!(row.profile_id, profile_id);
+        assert_eq!(row.agent_id, agent_id);
+        assert_eq!(row.local_session_id, source);
+        assert_eq!(row.remote_session_id.as_deref(), Some(remote_session_id));
+        assert_eq!(row.event_type, "user.message");
+        assert_eq!(row.event_id, format!("{owner_key}#1"));
+        assert_eq!(row.sequence, 1);
+        assert_eq!(row.provenance_origin, "local-observed");
+        assert_eq!(row.provenance_trust, "authoritative");
+        assert_eq!(row.provenance_provider.as_deref(), Some(agent_id));
+        assert_eq!(row.identity.as_ref().and_then(|identity| identity.get("messageId")), None);
+
+        let page = event_service
+            .list_events(owner_key, None, 100)
+            .await
+            .expect("list canonical rows");
+        assert_eq!(page.events.len(), 1, "one successful prompt produces one authoritative user row");
+        assert_eq!(page.events[0], row);
+    }
+
+    /// B-02 / C0-OPT：完整 send_prompt_core 成功路径仍只为用户 prompt 产生一条
+    /// authoritative `user.message`；终态行可以另外存在，但不得再出现第二条用户事实。
+    #[tokio::test]
+    async fn send_prompt_core_success_has_one_authoritative_user_row() {
+        const SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'prompt-success-session'}
+    elif method == 'session/prompt':
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("prompt-success-agent", SCRIPT);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            prompt_timeout_secs: Some(5),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("prompt-success-agent")
+            .with_agent(agent)
+            .with_runtime("prompt-success-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        let context = PromptContext {
+            source: "local:prompt-success".to_string(),
+            profile_id: Some("profile-success".to_string()),
+            content: "hello from send".to_string(),
+            ..Default::default()
+        };
+        send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            &context,
+        )
+        .await
+        .expect("prompt must succeed");
+
+        let owner_key = serde_json::to_string(&[
+            "profile-success",
+            "prompt-success-agent",
+            "local:prompt-success",
+        ])
+        .expect("owner key");
+        let page = event_service
+            .list_events(owner_key, None, 100)
+            .await
+            .expect("list canonical rows");
+        let user_rows: Vec<_> = page
+            .events
+            .iter()
+            .filter(|event| event.event_type == "user.message")
+            .collect();
+        assert_eq!(user_rows.len(), 1, "successful send must commit one authoritative user row");
+        let user = user_rows[0];
+        assert_eq!(user.provenance_origin, "local-observed");
+        assert_eq!(user.provenance_trust, "authoritative");
+        assert_eq!(user.provenance_provider.as_deref(), Some("prompt-success-agent"));
+        assert_eq!(user.identity, None, "client correlation is not canonical identity");
+    }
+}
