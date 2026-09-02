@@ -428,6 +428,10 @@ export default function App() {
          onToggleSettings={() => setShowSettings(value => !value)}
          onOpenSettingsDomain={domain => {
            setSettingsIntent({ domain })
+           // If Settings is already mounted, its local navigation state is
+           // updated through the existing intent event. The initial props path
+           // still handles the first mount without introducing a second store.
+           window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain } }))
            setShowSettings(true)
          }}
          settingsOpen={settingsOpen}

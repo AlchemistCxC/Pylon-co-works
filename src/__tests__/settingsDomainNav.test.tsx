@@ -1,6 +1,6 @@
 /**
  * ISSUE-13 W2（T13-2）Settings 布局迁移行为测试：
- * - 左侧一级导航 = 稳定设置域（外观/工作区/Agent 与连接），tier（快速/进阶/专家）无残留
+ * - 设置页不再挂载一级域导航；域切换由标题栏设置菜单的 intent 事件驱动
  * - 切换 domain → 分区列表跟随 domain config 变化
  * - 选择分区 → 内容渲染正确（复用既有块组件）
  */
@@ -27,17 +27,14 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
     })
   })
 
-  // 二级 section 仅在 settings-nav 内；一级 domain 在独立 rail 内。
+  // 二级 section 仅在 settings-nav 内；一级 domain 由标题栏菜单驱动。
   const nav = () => within(document.querySelector('.settings-nav') as HTMLElement)
   const navButton = (name: string) => nav().getByRole('button', { name })
-  const domainNav = () => within(document.querySelector('.settings-domain-rail') as HTMLElement)
-  const domainButton = (name: string) => domainNav().getByRole('button', { name })
 
-  it('一级导航渲染三个设置域，tier（快速/进阶/专家）无残留', () => {
+  it('设置页不保留一级域导航，tier（快速/进阶/专家）无残留', () => {
     render(<Settings />)
-    for (const label of ['外观', '工作', 'Agent', '插件']) {
-      expect(domainButton(label)).toBeInTheDocument()
-    }
+    expect(document.querySelector('.settings-domain-rail')).toBeNull()
+    expect(screen.getByText(/使用标题栏.*设置.*菜单切换/)).toBeInTheDocument()
     expect(nav().queryByRole('button', { name: '快速' })).toBeNull()
     expect(nav().queryByRole('button', { name: '进阶' })).toBeNull()
     expect(nav().queryByRole('button', { name: '专家' })).toBeNull()
@@ -51,8 +48,7 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
   })
 
   it('切到工作区 → 分区为窗口/宠物/历史保留/配置备份；选窗口渲染窗口尺寸块', () => {
-    render(<Settings />)
-    fireEvent.click(domainButton('工作'))
+    render(<Settings initialDomain="workspace" />)
     for (const section of ['窗口', '宠物', '历史保留', '配置备份']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -62,8 +58,7 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
   })
 
   it('切到 Agent 与连接 → 分区为 Agent/会话/Gateway；选 Agent 渲染当前 Agent 区', () => {
-    render(<Settings />)
-    fireEvent.click(domainButton('Agent'))
+    render(<Settings initialDomain="agents-connections" />)
     for (const section of ['Agent', '会话', 'Gateway']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -71,10 +66,10 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
     expect(screen.getByText('当前 Agent')).toBeInTheDocument()
   })
 
-  it('切回外观 → 分区列表恢复（domain 可往返）', () => {
-    render(<Settings />)
-    fireEvent.click(domainButton('工作'))
-    fireEvent.click(domainButton('外观'))
+  it('标题栏设置意图切换域后分区列表恢复（domain 可往返）', async () => {
+    render(<Settings initialDomain="workspace" />)
+    window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain: 'appearance' } }))
+    await waitFor(() => expect(nav().getByRole('button', { name: '模板库' })).toBeInTheDocument())
     for (const section of ['模板库', '全局', '侧栏', '消息流', '中控台', '右栏']) {
       expect(navButton(section)).toBeInTheDocument()
     }
@@ -121,21 +116,22 @@ describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
     invoke.mockReset()
   })
 
-  it('F1 常用区点击其他 domain 的 section 时，domain 跟随切换', () => {
+  it('F1 常用区点击其他 domain 的 section 时，domain 跟随切换', async () => {
     render(<Settings />)
     const navEl = document.querySelector('.settings-nav') as HTMLElement
     const w = within(navEl)
     // 在外观域置顶「消息流」
     const chatRow = w.getByRole('button', { name: '消息流' })
     fireEvent.click(within(chatRow.parentElement as HTMLElement).getByRole('button', { name: '置顶 消息流' }))
-    // 切到工作区域
-    fireEvent.click(within(document.querySelector('.settings-domain-rail') as HTMLElement).getByRole('button', { name: '工作' }))
+    // 通过标题栏设置菜单发出域切换意图
+    window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain: 'workspace' } }))
+    await waitFor(() => expect(w.getByRole('button', { name: '窗口' })).toBeInTheDocument())
     // 常用区出现置顶项（★ 为 aria-hidden 装饰，accessible name 即「消息流」）——点它
-    const pinnedBtn = w.getByRole('button', { name: '消息流' })
+    const pinnedBtn = w.getAllByRole('button', { name: '消息流' }).find(button => button.classList.contains('pinned'))!
     expect(pinnedBtn.closest('.settings-nav-section-block')).toBeNull()
     fireEvent.click(pinnedBtn)
     // 断言：domain 回到外观（分区列表含「全局」）且内容区是消息流的 Owner 头
-    expect(w.getByRole('button', { name: '全局' })).toBeInTheDocument()
+    await waitFor(() => expect(w.getByRole('button', { name: '全局' })).toBeInTheDocument())
     expect(screen.getByTestId('settings-owner-badge').textContent).toContain('message-stream')
   })
 })

@@ -662,6 +662,16 @@
 .workspace-titlebar.titlebar-settings-open .titlebar-window-btn {
   pointer-events: auto;
 }
+/* Domain switching remains available while the Settings surface is open; the
+   other titlebar actions stay visually present but inert. */
+.workspace-titlebar.titlebar-settings-open [data-menu-trigger="settings"],
+.workspace-titlebar.titlebar-settings-open [data-menu-trigger="settings"] + .workspace-menu {
+  pointer-events:auto;
+}
+.workspace-titlebar.titlebar-settings-open [data-menu-trigger="right-panel"],
+.workspace-titlebar.titlebar-settings-open [data-menu-trigger="interface"] {
+  pointer-events:none;
+}
 /* 设置打开时标题栏整体层级保持在设置页之上（Settings 从 44px/58px 下开始，露出标题栏） */
 .workspace-titlebar.titlebar-settings-open {
   position: relative;

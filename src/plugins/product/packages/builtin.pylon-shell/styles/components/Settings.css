@@ -907,53 +907,9 @@
   color: var(--text-dim, var(--text-secondary, #888));
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Settings Index Ledger
-   一级窄 rail / 二三级目录 / 设置表 / 预设或预览侧栏。
-   颜色只消费宿主视觉 token；本层不声明第二套 ThemeSettings。
-   ═══════════════════════════════════════════════════════════════ */
-.settings-domain-rail {
-  display:flex;
-  width:76px;
-  flex:0 0 76px;
-  min-height:0;
-  flex-direction:column;
-  gap:2px;
-  padding:12px 7px;
-  overflow-y:auto;
-  border-right:1px solid var(--stroke-subtle);
-  background:var(--surface-sunken);
-}
-.settings-domain-btn {
-  position:relative;
-  display:grid;
-  min-height:54px;
-  place-content:center;
-  gap:4px;
-  padding:6px 4px;
-  border:1px solid transparent;
-  border-radius:var(--ui-radius-sm);
-  color:var(--text-dim);
-  background:transparent;
-  cursor:pointer;
-  font-size:var(--font-size-xs);
-  text-align:center;
-  transition:color var(--motion-fast) var(--ease-standard),background var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard);
-}
-.settings-domain-btn:hover { color:var(--text); background:var(--state-hover-bg); }
-.settings-domain-btn.active {
-  color:var(--text);
-  border-color:var(--state-selected-stroke);
-  background:var(--state-selected-bg);
-}
-.settings-domain-index {
-  color:var(--text-placeholder);
-  font:var(--font-size-4xs)/1 var(--mono);
-  letter-spacing:.08em;
-}
-.settings-domain-btn.active .settings-domain-index { color:var(--accent); }
-.settings-domain-btn:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
-
+/* Settings content keeps a two-column navigation model: the titlebar owns
+   top-level domain switching, while this rail lists the active domain's
+   sections. */
 .settings-nav { width:242px; flex-basis:242px; gap:0; padding:0 10px 10px; }
 .settings-nav-context {
   display:grid;
@@ -1032,26 +988,6 @@
   --dialog-bg:var(--surface-overlay);
 }
 .app[data-interface-mode="terminal-like"] .dialog-content { border-radius:4px; box-shadow:var(--shadow-raised); }
-.app[data-interface-mode="terminal-like"] .settings-domain-rail {
-  width:78px;
-  flex-basis:78px;
-  padding:0;
-  gap:0;
-  background:color-mix(in srgb,var(--surface-sunken) 92%,var(--global-bg-color));
-}
-.app[data-interface-mode="terminal-like"] .settings-domain-btn {
-  min-height:62px;
-  border:0;
-  border-bottom:1px solid var(--stroke-subtle);
-  border-radius:0;
-  font-family:var(--mono);
-}
-.app[data-interface-mode="terminal-like"] .settings-domain-btn:hover { background:var(--state-hover-bg); }
-.app[data-interface-mode="terminal-like"] .settings-domain-btn.active {
-  color:var(--text);
-  background:color-mix(in srgb,var(--accent) 9%,var(--surface-panel));
-  box-shadow:inset 2px 0 var(--accent);
-}
 .app[data-interface-mode="terminal-like"] .settings-nav {
   width:244px;
   flex-basis:244px;
@@ -1307,28 +1243,10 @@
 ) { border-radius:2px; }
 .app[data-interface-mode="terminal-like"] :is(.set-color-popover,.pylon-select-listbox,.agent-runtime-toast) { border-radius:4px; }
 
-/* Modern GUI 沿用同一双栏结构，但可使用较柔和的壳层。 */
-.app[data-interface-mode="modern-gui"] .settings-domain-rail {
-  margin:var(--ui-space-2) 0 var(--ui-space-2) var(--ui-space-2);
-  border:1px solid var(--stroke-default);
-  border-radius:var(--ui-radius-lg) 0 0 var(--ui-radius-lg);
-  background:var(--surface-panel);
-}
-.app[data-interface-mode="modern-gui"] .settings-domain-btn { border-radius:var(--ui-radius-md); }
+/* Modern GUI keeps the same two-column settings surface with a softer shell. */
 .app[data-interface-mode="modern-gui"] .settings-nav {
-  margin:var(--ui-space-2) var(--ui-space-2) var(--ui-space-2) 0;
-  border-radius:0 var(--ui-radius-lg) var(--ui-radius-lg) 0;
-}
-.app[data-interface-mode="modern-gui"] .settings-nav-context { margin:0 -10px 12px; border-radius:0 var(--ui-radius-lg) 0 0; }
-
-@media(max-width:1080px) {
-  .settings-domain-rail { width:68px; flex-basis:68px; }
-  .settings-nav { width:218px; flex-basis:218px; }
-}
-@media(max-width:860px) {
-  .settings-domain-rail { width:62px; flex-basis:62px; }
-  .settings-domain-index { display:none; }
-  .settings-nav { width:196px; flex-basis:196px; }
+  margin:var(--ui-space-2);
+  border-radius:var(--ui-radius-lg);
 }
 
 /* Renderer Settings Ledger：object index 只负责选择，Inspector 一次只挂载一份 schema。 */
@@ -1522,4 +1440,48 @@
   .renderer-settings-ledger { grid-template-columns:160px minmax(0,1fr); }
   .renderer-settings-inspector { padding-left:16px; }
   .renderer-setting-field { grid-template-columns:minmax(110px,.62fr) minmax(150px,1fr) auto; }
+}
+
+/* ── Domain split presentation ──
+   The titlebar owns top-level domain switching; this surface presents the
+   active domain's section navigation and content without duplicating field
+   state or persistence ownership. */
+.settings-header > div:first-child { min-width:0; }
+.settings-header-route {
+  display:block;
+  margin-top:3px;
+  color:var(--accent);
+  font:var(--font-size-4xs)/1.2 var(--mono);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.settings-nav-context-title { display:flex; min-width:0; align-items:center; gap:7px; }
+.settings-nav-context-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.settings-nav-context-glyph { color:var(--accent); font:var(--font-size-md)/1 var(--mono); }
+.settings-nav-context > small {
+  overflow:hidden;
+  color:var(--text-dim);
+  font-size:var(--font-size-2xs);
+  line-height:1.35;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* New section roots enter with a restrained lift when the user changes the
+   domain/section. No data or scroll state is changed by this treatment. */
+.settings-body > :is(.settings-section-header, .set-toolbar, .set-group, .agent-settings-heading, .agent-settings-overview, .settings-empty-state, .renderer-settings-panel, .plugin-manager) {
+  animation:settings-section-enter var(--motion-standard) var(--ease-emphasized) both;
+}
+@keyframes settings-section-enter {
+  from { opacity:0; transform:translateY(4px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+.app[data-interface-mode="terminal-like"] .settings-nav-context-title strong { font-family:var(--font); }
+.app[data-interface-mode="terminal-like"] .settings-header-route { font-family:var(--mono); }
+
+@media (prefers-reduced-motion:reduce) {
+  .settings-body > :is(.settings-section-header, .set-toolbar, .set-group, .agent-settings-heading, .agent-settings-overview, .settings-empty-state, .renderer-settings-panel, .plugin-manager) {
+    animation:none;
+  }
 }

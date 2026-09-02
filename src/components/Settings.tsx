@@ -43,7 +43,7 @@ import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
@@ -294,14 +294,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       setActiveSection('pluginManager')
     }
   }, [activePluginPageId, pluginSettingsPages])
-
-  // I13-W1：切换 domain 时跳到该 domain 首个 section
-  const switchDomain = (next: SettingsDomainId) => {
-    if (next === activeDomain) return
-    setActiveDomain(next)
-    setActivePluginPageId(null)
-    setActiveSection(SETTINGS_DOMAIN_BY_ID[next].sections[0])
-  }
 
   const switchAgent = async (agentId: string) => {
     if (switchingAgentId || agentId === activeAgent) return
@@ -672,32 +664,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }
 
   return (
-    <div ref={settingsRef} className="settings" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
+    <div ref={settingsRef} className="settings" role="dialog" aria-modal="true" aria-labelledby={titleId} data-settings-domain={activeDomain} data-settings-section={activeSection} onKeyDown={handleDialogKeyDown}>
       <header className="settings-header">
         <div>
           <h2 id={titleId}>设置</h2>
           <p>调整 Pylon 的外观、工作区和 Agent 运行方式。</p>
+          <span className="settings-header-route" aria-live="polite">当前域 / {activeDomainConfig.label} · 使用标题栏“设置”菜单切换</span>
         </div>
         <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
       </header>
       <div className="settings-tabs-root">
-        {/* Index Ledger：一级 domain 独立为窄栏；设置值与事务仍归各 owner。 */}
-        <nav className="settings-domain-rail" aria-label="设置域">
-          {SETTINGS_DOMAINS.map((domain, index) => (
-            <button key={domain.id} type="button"
-              className={`settings-domain-btn${activeDomain === domain.id ? ' active' : ''}`}
-              aria-current={activeDomain === domain.id ? 'page' : undefined}
-              title={domain.label}
-              onClick={() => switchDomain(domain.id)}>
-              <span className="settings-domain-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
-              <span>{SETTINGS_DOMAIN_SHORT_LABELS[domain.id]}</span>
-            </button>
-          ))}
-        </nav>
         <div className="settings-nav">
-          <div className="settings-nav-context">
+          <div className="settings-nav-context" data-settings-domain={activeDomain}>
             <span>DOMAIN / {activeDomain}</span>
-            <strong>{activeDomainConfig.label}</strong>
+            <div className="settings-nav-context-title">
+              <span className="settings-nav-context-glyph" aria-hidden="true">{SETTINGS_DOMAIN_MENU_META[activeDomain].glyph}</span>
+              <strong>{activeDomainConfig.label}</strong>
+            </div>
+            <small>{SETTINGS_DOMAIN_MENU_META[activeDomain].description}</small>
           </div>
           <div className="settings-nav-group settings-nav-sections">
             {pinned.length > 0 && (
@@ -784,7 +768,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           </div>
         </div>
 
-        <div className="settings-body">
+        <div className="settings-body" data-settings-domain={activeDomain} data-settings-section={activeSection}>
           {!activePluginPageId && (
             <SettingsSectionHeader section={activeSection} density={density} onDensity={changeDensity} />
           )}

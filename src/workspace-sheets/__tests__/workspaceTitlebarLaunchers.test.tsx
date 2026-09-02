@@ -92,4 +92,14 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     expect(screen.queryByRole('menu')).toBeNull()
     expect(document.activeElement).toBe(settings)
   })
+
+  it('设置菜单在设置页打开时仍可切换顶层域', () => {
+    const onOpenSettingsDomain = vi.fn()
+    render(<WorkspaceTitlebar {...baseProps} settingsOpen onOpenSettingsDomain={onOpenSettingsDomain} />)
+    const settings = screen.getByRole('button', { name: '设置' })
+    fireEvent.click(settings)
+    fireEvent.click(screen.getByRole('menuitem', { name: '插件' }))
+    expect(onOpenSettingsDomain).toHaveBeenCalledWith('plugins')
+    expect(document.activeElement).toBe(settings)
+  })
 })
