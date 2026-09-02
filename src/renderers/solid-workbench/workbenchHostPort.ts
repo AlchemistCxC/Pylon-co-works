@@ -230,7 +230,11 @@ function createCommandPort(delegate: WorkbenchCommandFacade, capabilities: Workb
       const method = delegate[command] as (...values: readonly unknown[]) => Promise<unknown>
       const result = await method(...args)
       if (result && typeof result === 'object' && 'status' in result && result.status === 'rejected') {
-        return { ok: false, error: { code: 'command_rejected', message: '命令被运行时拒绝', recoverability: 'none' } }
+        const message = 'error' in result && typeof (result as { error?: unknown }).error === 'string'
+          && (result as { error: string }).error.trim().length > 0
+          ? (result as { error: string }).error
+          : '命令被运行时拒绝'
+        return { ok: false, error: { code: 'command_rejected', message, recoverability: message === '命令被运行时拒绝' ? 'none' : 'retry' } }
       }
       if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
         const error = 'error' in result ? (result as { error?: unknown }).error : undefined

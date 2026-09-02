@@ -1799,7 +1799,11 @@ for line in sys.stdin:
 "#;
         let mut agent = crate::test_utils::fake_acp_agent("i2-hang-agent", HANG_SCRIPT);
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
-            prompt_timeout_secs: Some(1),
+            // The configured prompt budget is intentionally much larger than
+            // the first-token bound.  The surfaced error must name the bound
+            // that actually fired, not blindly echo prompt_timeout_secs.
+            prompt_timeout_secs: Some(180),
+            first_token_timeout_secs: Some(1),
             cancel_settle_timeout_secs: Some(1),
             ..Default::default()
         });
@@ -1829,7 +1833,7 @@ for line in sys.stdin:
         .expect_err("prompt 挂起必须超时");
         assert!(
             error.to_string().contains("timed out after 1s"),
-            "超时文案必须参数化，实际: {error}"
+            "超时文案必须使用真正触发的 first-token 边界，而非 180s prompt 预算，实际: {error}"
         );
         assert!(
             start.elapsed().as_secs() < 10,
@@ -1854,6 +1858,22 @@ for line in sys.stdin:
         assert!(timeout_entry.fields.contains_key("requestId"));
         assert!(timeout_entry.fields.contains_key("sessionId"));
         assert!(timeout_entry.fields.contains_key("agentId"));
+        assert_eq!(
+            timeout_entry.fields.get("timeoutKind").and_then(|v| v.as_str()),
+            Some("first-token")
+        );
+        assert_eq!(
+            timeout_entry.fields.get("timeoutBoundSecs").and_then(|v| v.as_u64()),
+            Some(1)
+        );
+        assert!(
+            timeout_entry
+                .fields
+                .get("actualElapsedMs")
+                .and_then(|v| v.as_u64())
+                .is_some_and(|value| value >= 1_000),
+            "必须记录实际单调等待时长"
+        );
     }
 
     /// R-t5 回归（Bug 1）：agent 持续流式产出（agent_message_chunk）但迟迟不返回终态

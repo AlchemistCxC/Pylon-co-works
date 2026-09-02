@@ -213,6 +213,29 @@ describe('乐观渲染（方案 B）', () => {
     expect(source.messages[1]?.sender).toBe('system')
     expect(source.lastSummary?.reason).toBe('error')
   })
+
+  it('error 终态保留 ACP timeout provenance，并以实际 elapsed 作为摘要耗时', () => {
+    let state = reduce({}, { type: 'optimistic-user', source: 'local:a', agentId: AGENT, content: 'hello', clientMsgId: 'id-timeout' })
+    state = reduce(state, {
+      type: 'error',
+      source: 'local:a',
+      agentId: AGENT,
+      error: 'timed out after 2s (first-token timeout; elapsed 2041ms)',
+      failure: {
+        source: 'prompt-timeout',
+        timeoutKind: 'first-token',
+        configuredTimeoutSecs: 180,
+        triggeredTimeoutSecs: 2,
+        actualElapsedMs: 2041,
+      },
+    })
+    expect(state[key('local:a')]!.lastSummary).toMatchObject({
+      elapsedMs: 2041,
+      durationSource: 'live-monotonic',
+      durationAvailable: true,
+      failure: { source: 'prompt-timeout', triggeredTimeoutSecs: 2 },
+    })
+  })
 })
 
 describe('mergeReplayMessages（通用外部 identity）', () => {

@@ -8,7 +8,7 @@ import { getToolSummary } from '../../domains/tool/toolPresentation.ts'
 import { resolveChunkAppend } from '../../domains/events/chunkMerge.ts'
 import { applyPlanEntries } from '../../domains/tasks/taskStatusMachine.ts'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
-import type { ContentBlock, OptionalChatEventIdentity } from '../../infrastructure/acp/chatContracts.ts'
+import type { ContentBlock, OptionalChatEventIdentity, PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 import type { AgentContextKey } from '../../agentContext.ts'
 import { toAgentContextKey } from '../../agentContext.ts'
 import type {
@@ -43,6 +43,10 @@ export interface ChatSummary {
   elapsedMs: number
   tokenCount: number
   reason: 'done' | 'cancelled' | 'error'
+  /** Failure provenance is optional so old runtime snapshots remain valid. */
+  failure?: PromptFailureMetadata
+  durationSource?: 'live-monotonic' | 'canonical-events' | 'provider' | 'unknown'
+  durationAvailable?: boolean
 }
 
 export interface SourceChatRuntime {
@@ -97,7 +101,7 @@ export type ChatEvent =
   | { type: 'tool-call-update'; source: string; agentId?: string; toolCallId?: string; toolKind?: string; contentBlocks?: ContentBlock[]; rawOutput?: unknown; status?: string; clientGeneration?: number; replay?: boolean }
   | { type: 'usage-update'; source: string; agentId?: string; tokensUsed: number }
   | { type: 'done'; source: string; agentId?: string; replay?: boolean; explicitReplay?: boolean }
-  | { type: 'error'; source: string; agentId?: string; error: string; cancelled?: boolean; replay?: boolean; explicitReplay?: boolean }
+  | { type: 'error'; source: string; agentId?: string; error: string; cancelled?: boolean; replay?: boolean; explicitReplay?: boolean; failure?: PromptFailureMetadata }
   | { type: 'begin-cancel'; source: string; agentId?: string }
   | { type: 'cancel-success'; source: string; agentId?: string }
   | { type: 'cancel-rejected'; source: string; agentId?: string; error: string }
@@ -716,9 +720,14 @@ export function applyChatEvent(
         generationPhase: undefined,
         ...(terminationScope === 'live' ? {
           lastSummary: {
-            elapsedMs: now - (current.generationStart ?? now),
+            elapsedMs: event.failure?.actualElapsedMs ?? (now - (current.generationStart ?? now)),
             tokenCount: current.tokenCount,
             reason: event.cancelled === true ? 'cancelled' : 'error',
+            ...(event.failure ? {
+              failure: event.failure,
+              durationSource: event.failure.source === 'provider' ? 'provider' : 'live-monotonic',
+              durationAvailable: event.failure.actualElapsedMs !== undefined,
+            } : {}),
           },
         } : {}),
       }

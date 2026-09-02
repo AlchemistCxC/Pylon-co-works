@@ -3,6 +3,7 @@ import type { PersistedSessionLoadResult, ReplayMetadata } from '../../infrastru
 import { reconcileIngressMessages, type ChatIdentityCapabilities } from './messageIdentity'
 import type { ChatEvent } from './sessionRuntimeStore.ts'
 import type { Message } from './messageTypes.ts'
+import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnDuration } from '../../domains/events/canonicalTurnDuration.ts'
 
 export type ReplayLoadAuthority = 'local-journal' | 'recovery-import' | 'remote-fallback' | 'none'
 export type ReplayLoadCommit = 'canonical-projection' | 'replay-snapshot' | 'preserved-runtime' | 'empty'
@@ -22,6 +23,10 @@ export interface ReplayLoadOutcome {
   readonly replayCount: number
   readonly replayJournalStatus: PersistedSessionLoadResult['replayJournalStatus']
   readonly generation: number
+  /** Durable turn timing used when the process-local generation clock is gone. */
+  readonly canonicalDuration?: CanonicalTurnDuration
+  /** A terminal row may exist even when its timestamps are malformed. */
+  readonly hasCanonicalTurnTerminal?: boolean
 }
 
 export interface ReplayLoadControllerAdapter {
@@ -114,6 +119,7 @@ export class ReplayLoadCoordinator {
       const projectionRows = result.authority === 'local-journal'
         ? canonicalRows.filter(row => row.provenance?.origin === 'local-observed' && row.provenance.trust === 'authoritative')
         : canonicalRows
+      const canonicalDuration = deriveCanonicalTurnDuration(projectionRows.length > 0 ? projectionRows : canonicalRows)
       const replayFallbackAllowed = result.replayMetadata.complete && result.authority !== 'local-journal'
 
       let messages: Message[]
@@ -150,6 +156,8 @@ export class ReplayLoadCoordinator {
         replayCount: result.replay.length,
         replayJournalStatus: result.replayJournalStatus,
         generation,
+        ...(canonicalDuration ? { canonicalDuration } : {}),
+        hasCanonicalTurnTerminal: hasCanonicalTurnTerminal(projectionRows.length > 0 ? projectionRows : canonicalRows),
       }
     } catch (error) {
       if (lockGeneration !== undefined) this.controller.abortSessionLoad(request.source, lockGeneration)

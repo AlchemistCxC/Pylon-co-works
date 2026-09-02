@@ -1,5 +1,6 @@
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
+import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
@@ -90,6 +91,22 @@ function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[]
   if (canonical !== undefined) return canonical
   const migrated = migrateWorkbenchEnvelope(value)
   return migrated.ok ? [migrated.value] : []
+}
+
+function canonicalBoundaryRows(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
+  return rows.filter((row): row is CanonicalTurnBoundaryEvent => (
+    isRecord(row)
+    && typeof row.sequence === 'number'
+    && typeof row.eventType === 'string'
+  ))
+}
+
+function canonicalDurationFromRows(rows: readonly unknown[]) {
+  return deriveCanonicalTurnDuration(canonicalBoundaryRows(rows))
+}
+
+function canonicalHasTerminalFromRows(rows: readonly unknown[]): boolean {
+  return hasCanonicalTurnTerminal(canonicalBoundaryRows(rows))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -637,6 +654,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const run = (async () => {
       try {
         const rows = await loadAll(refreshOwnerKey)
+        const canonicalDuration = canonicalDurationFromRows(rows)
+        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         // Session switches/rebinds invalidate the result. Do not let a late
         // canonical read replace the document belonging to the new owner.
         if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
@@ -678,13 +697,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         }
         syncSourceRuntime(refreshSource)
         const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && (settled.document?.messages.length ?? 0) > 0) {
+        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
           updateRuntimeState({
             summary: {
-              elapsedMs: 0,
+              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
               tokenCount: settled.tokenCount,
               completedFrame: '',
               reason: 'done',
+              durationSource: canonicalDuration?.source ?? 'unknown',
+              durationAvailable: canonicalDuration !== undefined,
             },
           })
         }
@@ -776,6 +797,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       await loadAll(loadingOwnerKey).then(rows => {
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
           || canonicalReadEpoch !== bindReadEpoch) return
+        const canonicalDuration = canonicalDurationFromRows(rows)
+        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
           ? (() => {
             // Session snapshots historically used both the stable Session.id
@@ -806,13 +829,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // display-only done summary so the footer remains in its terminal
         // state instead of disappearing; this does not add a journal event.
         const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && (settled.document?.messages.length ?? 0) > 0) {
+        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
           updateRuntimeState({
             summary: {
-              elapsedMs: 0,
+              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
               tokenCount: settled.tokenCount,
               completedFrame: '',
               reason: 'done',
+              durationSource: canonicalDuration?.source ?? 'unknown',
+              durationAvailable: canonicalDuration !== undefined,
             },
           })
         }

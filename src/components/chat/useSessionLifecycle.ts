@@ -299,11 +299,14 @@ export function useSessionLifecycle(
         if (sessionRef.current === s.source) {
           setReplayIntegrity(outcome.replayMetadata.complete ? null : { sessionId: s.id, metadata: outcome.replayMetadata })
           setMessages(outcome.messages)
-          setSummary(controller.getSummary(s.source) ?? (outcome.messages.length > 0 ? {
-            elapsedMs: 0,
+          const canonicalDuration = outcome.canonicalDuration
+          setSummary(controller.getSummary(s.source) ?? (outcome.hasCanonicalTurnTerminal ? {
+            elapsedMs: canonicalDuration?.elapsedMs ?? 0,
             tokenCount: controller.getTokenCount(s.source),
             completedFrame: '',
             reason: 'done',
+            durationSource: canonicalDuration?.source ?? 'unknown',
+            durationAvailable: canonicalDuration !== undefined,
           } : null))
         }
         applySessionStateResponse(context, res)

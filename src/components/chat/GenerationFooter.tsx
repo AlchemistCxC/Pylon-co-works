@@ -13,6 +13,7 @@ import { useChatRuntimeSnapshot } from './useChatRuntimeSnapshot'
 import { nextTokenCatchUp } from './tokenCatchUp.ts'
 import type { SpinnerMotionKind } from './spinnerMotion'
 import { useShallow } from 'zustand/react/shallow'
+import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 
 const IDIOMS = getSpinnerVerbPreset('zh').verbs
 const GLIMMER_CYCLE_MS = 3200
@@ -22,6 +23,9 @@ export interface GenerationSummary {
   tokenCount: number
   completedFrame: string
   reason: 'done' | 'cancelled' | 'error'
+  failure?: PromptFailureMetadata
+  durationSource?: 'live-monotonic' | 'canonical-events' | 'provider' | 'unknown'
+  durationAvailable?: boolean
 }
 
 function formatElapsed(elapsedMs: number) {
@@ -230,7 +234,11 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
       <span className="term-summary-frame" style={{ fontSize: `${spinnerSize}px` }}>
         {marker}
       </span>
-      <span>{summary.reason === 'cancelled' ? '已停止' : summary.reason === 'error' ? '处理失败' : '生成完毕（处理耗时）'} {formatElapsed(summary.elapsedMs)}</span>
+       <span>{summary.reason === 'cancelled' ? '已停止' : summary.reason === 'error' ? '处理失败' : '生成完毕（处理耗时）'} {formatSummaryElapsed(summary)}</span>
     </div>
   )
+}
+
+function formatSummaryElapsed(summary: GenerationSummary): string {
+  return summary.durationAvailable === false ? '耗时不可用' : formatElapsed(summary.elapsedMs)
 }

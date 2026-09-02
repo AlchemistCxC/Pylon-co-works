@@ -5,7 +5,7 @@ import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import { extractUsage, extractPlanEntries, type ContentBlock, type PeriDonePayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
+import { extractUsage, extractPlanEntries, type ContentBlock, type PeriDonePayload, type PeriErrorPayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
 import { applySessionStateUpdate } from '../../domains/sessionState/sessionStateSync.ts'
 import { normalizeRawEvent, type CanonicalNormalizeResult } from '../../domains/events/canonicalNormalizer'
 import { toolFieldsFromCanonical } from '../../domains/events/toolProjection'
@@ -362,7 +362,15 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       // 终态收敛（done/error/cancel-success 生成 summary）时同步清空阶段标记
       if (prevSummary === undefined && nextSummary !== undefined) currentRefs!.setGenerationPhase(null)
       currentRefs!.setSummary(nextSummary
-        ? { elapsedMs: nextSummary.elapsedMs, tokenCount: nextSummary.tokenCount, completedFrame: '', reason: nextSummary.reason }
+        ? {
+            elapsedMs: nextSummary.elapsedMs,
+            tokenCount: nextSummary.tokenCount,
+            completedFrame: '',
+            reason: nextSummary.reason,
+            ...(nextSummary.failure ? { failure: nextSummary.failure } : {}),
+            ...(nextSummary.durationSource ? { durationSource: nextSummary.durationSource } : {}),
+            ...(nextSummary.durationAvailable !== undefined ? { durationAvailable: nextSummary.durationAvailable } : {}),
+          }
         : null)
     }
   }
@@ -956,7 +964,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     user?: (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }) => Promise<void>
     update?: (event: { payload: PeriUpdatePayload }) => Promise<void>
     done?: (event: { payload: PeriDonePayload }) => Promise<void>
-    error?: (event: { payload: { source: string; error: string; cancelled?: boolean; replay?: boolean; canonicalEvent?: unknown } }) => Promise<void>
+    error?: (event: { payload: PeriErrorPayload }) => Promise<void>
   } = {}
   const listenerFactories: Array<() => Promise<UnlistenFn>> = [
     () => {
@@ -1218,7 +1226,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     },
 
     () => {
-      const handler = async (event: { payload: { source: string; error: string; cancelled?: boolean; replay?: boolean; canonicalEvent?: unknown } }) => {
+      const handler = async (event: { payload: PeriErrorPayload }) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const { source, error } = event.payload
@@ -1235,7 +1243,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       if (errorContext && !isSourceLoading(source) && !kernelCommitted) {
         persistCanonicalEvent(errorContext, { source, update: { sessionUpdate: 'error', error: effectiveError, cancelled: event.payload.cancelled === true } }, true)
       }
-      dispatch({ type: 'error', source, error: effectiveError, cancelled: event.payload.cancelled === true, replay: false })
+      dispatch({
+        type: 'error',
+        source,
+        error: effectiveError,
+        cancelled: event.payload.cancelled === true,
+        replay: false,
+        ...(event.payload.failure ? { failure: event.payload.failure } : {}),
+      })
       notifyHook(event.payload.cancelled === true ? 'turn.cancelled' : 'turn.failed', source, {
         source,
         status: event.payload.cancelled === true ? 'cancelled' : 'failed',

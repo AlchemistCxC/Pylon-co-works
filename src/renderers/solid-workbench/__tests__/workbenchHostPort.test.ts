@@ -285,6 +285,23 @@ describe('WorkbenchHostPort', () => {
     }))
   })
 
+  it('preserves a rejected send error instead of replacing it with a generic runtime rejection', async () => {
+    const commands = createFakeWorkbenchCommandFacade({
+      send: async () => ({ status: 'rejected', error: 'ACP protocol: timed out after 1s (first-token timeout)' }),
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { prompt: true },
+    })
+
+    await expect(host.commands.send('s1', { text: '自检工具' })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'command_rejected', message: 'ACP protocol: timed out after 1s (first-token timeout)' },
+    })
+  })
+
   it('production Solid adapter preserves interaction expectedRevision through the Host port', async () => {
     const commands = createFakeWorkbenchCommandFacade()
     const host = createWorkbenchHostPort({

@@ -120,12 +120,30 @@ impl RawMessage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptTimeoutKind {
+    FirstToken,
+    Idle,
+}
+
+impl PromptTimeoutKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::FirstToken => "first-token",
+            Self::Idle => "idle",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum PromptWaitOutcome {
     Response(RawMessage),
     CancelledAfterTimeout {
         response: Option<RawMessage>,
         cancel_error: Option<String>,
+        timeout_kind: PromptTimeoutKind,
+        timeout_bound: std::time::Duration,
+        elapsed: std::time::Duration,
     },
     ConnectionClosed,
 }
@@ -223,13 +241,17 @@ where
             }
             // fire_reason 用于日志（多少秒后因何截断）；对外文案仍是统一超时语义。
             tracing::warn!(
-                "ACP: prompt truncated ({:?}) after {}s",
-                fire_reason.reason,
-                fire_reason.elapsed_secs
+                "ACP: prompt truncated ({}) after {}ms (bound={}ms)",
+                fire_reason.kind.as_str(),
+                fire_reason.elapsed.as_millis(),
+                fire_reason.bound.as_millis()
             );
             return PromptWaitOutcome::CancelledAfterTimeout {
                 response,
                 cancel_error,
+                timeout_kind: fire_reason.kind,
+                timeout_bound: fire_reason.bound,
+                elapsed: fire_reason.elapsed,
             };
         }
         tokio::select! {
@@ -246,10 +268,12 @@ where
 
 /// 截断判据的触发结果。
 struct TruncationFire {
-    /// 触发的语义类别（首 token / 闲置 / 总上限）。
-    reason: &'static str,
-    /// 触发时的已等待秒数。
-    elapsed_secs: u64,
+    /// 触发的语义类别（首 token / 闲置）。
+    kind: PromptTimeoutKind,
+    /// 本次判定使用的配置边界。
+    bound: std::time::Duration,
+    /// 从 prompt wait 开始到触发的实际单调耗时。
+    elapsed: std::time::Duration,
 }
 
 /// 评估是否该判死；返回 Some = 应立即截断。
@@ -267,7 +291,7 @@ fn evaluate_truncation(
         // 已开始：按闲置判定。
         if let Some(last) = last_activity {
             if now.duration_since(last) >= idle_timeout {
-                Some(("idle", idle_timeout))
+                Some((PromptTimeoutKind::Idle, idle_timeout))
             } else {
                 None
             }
@@ -276,14 +300,15 @@ fn evaluate_truncation(
         }
     } else if elapsed >= first_token_timeout {
         // 从未开始：按首 token 判定。
-        Some(("first_token", first_token_timeout))
+        Some((PromptTimeoutKind::FirstToken, first_token_timeout))
     } else {
         None
     };
-    if let Some((reason, bound)) = reason {
+    if let Some((kind, bound)) = reason {
         return Some(TruncationFire {
-            reason,
-            elapsed_secs: bound.as_secs().max(1),
+            kind,
+            bound,
+            elapsed,
         });
     }
     None

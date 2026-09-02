@@ -28,8 +28,8 @@ pub(crate) use jsonrpc::drain_pending;
 #[cfg(test)]
 pub(crate) use jsonrpc::wait_prompt_with_cancel;
 pub(crate) use jsonrpc::{
-    remove_pending_from, wait_prompt_with_recovery, Pending, PreparedRpc, PromptWaitOutcome,
-    PENDING_SHARDS,
+    remove_pending_from, wait_prompt_with_recovery, Pending, PreparedRpc, PromptTimeoutKind,
+    PromptWaitOutcome, PENDING_SHARDS,
 };
 #[cfg(test)]
 pub(crate) use protocol::load_params;

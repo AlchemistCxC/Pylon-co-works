@@ -23,16 +23,6 @@ function message(sequence: number, role: 'user' | 'assistant', text: string, ses
   })
 }
 
-function completedMessage(sequence: number, text: string, sessionId = 'local:a'): WorkbenchEventEnvelope {
-  return createWorkbenchEnvelope({
-    sessionId, sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
-    source: { provider: 'peri', sourceId: `completed-${sequence}` },
-    identity: { messageId: `completed-message-${sequence}` },
-    provenance: { origin: 'local-observed', trust: 'authoritative' },
-    event: { type: 'message.completed', role: 'assistant', parts: [{ kind: 'text', text }] },
-  })
-}
-
 function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<string, unknown> = {}) {
   const owner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
   return {
@@ -55,7 +45,7 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 
 describe('Agent Workbench canonical session runtime', () => {
   it('重启后 canonical 已完成消息仍显示完成态摘要', async () => {
-    const active = session('session-restored', 'local:restored')
+    const active = session('session-restored', 'local:a')
     const controller = {
       subscribe: () => () => {},
       getGenerating: () => false,
@@ -69,7 +59,10 @@ describe('Agent Workbench canonical session runtime', () => {
       rejectOptimisticUser: () => {},
     }
     const service = createAgentWorkbenchSessionRuntime({
-      loadAll: async () => [completedMessage(1, '已恢复完成', active.source)],
+      loadAll: async () => [
+        canonicalRow(1, 'user_message_chunk', { content: { type: 'text', text: '已恢复请求' } }),
+        canonicalRow(2, 'done'),
+      ],
       subscribe: () => () => {},
       chatController: () => controller,
     })
@@ -78,7 +71,7 @@ describe('Agent Workbench canonical session runtime', () => {
 
     expect(service.runtime.getSnapshot()).toMatchObject({
       generating: false,
-      summary: { reason: 'done', elapsedMs: 0, tokenCount: 12 },
+      summary: { reason: 'done', elapsedMs: 1000, tokenCount: 12 },
     })
     service.destroy()
   })

@@ -2,7 +2,91 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
-use crate::acp::AcpError;
+use crate::acp::{AcpError, PromptTimeoutKind};
+
+/// Additive failure provenance carried by `pylon:error`.  The legacy top-level
+/// `error` string remains the user-facing compatibility field; this structure
+/// lets the renderer distinguish a provider response from a local timeout or
+/// transport failure without parsing prose.
+#[derive(Debug, Clone, Default)]
+struct PromptFailureMetadata {
+    source: &'static str,
+    timeout_kind: Option<&'static str>,
+    configured_timeout_secs: Option<u64>,
+    triggered_timeout_secs: Option<u64>,
+    actual_elapsed_ms: Option<u64>,
+    provider_message: Option<String>,
+}
+
+impl PromptFailureMetadata {
+    fn to_json(&self) -> serde_json::Value {
+        let mut value = serde_json::Map::new();
+        value.insert(
+            "source".to_string(),
+            serde_json::Value::String(self.source.to_string()),
+        );
+        if let Some(kind) = self.timeout_kind {
+            value.insert(
+                "timeoutKind".to_string(),
+                serde_json::Value::String(kind.to_string()),
+            );
+        }
+        if let Some(seconds) = self.configured_timeout_secs {
+            value.insert(
+                "configuredTimeoutSecs".to_string(),
+                serde_json::Value::from(seconds),
+            );
+        }
+        if let Some(seconds) = self.triggered_timeout_secs {
+            value.insert(
+                "triggeredTimeoutSecs".to_string(),
+                serde_json::Value::from(seconds),
+            );
+        }
+        if let Some(elapsed) = self.actual_elapsed_ms {
+            value.insert(
+                "actualElapsedMs".to_string(),
+                serde_json::Value::from(elapsed),
+            );
+        }
+        if let Some(message) = self.provider_message.as_deref() {
+            value.insert(
+                "providerMessage".to_string(),
+                serde_json::Value::String(message.to_string()),
+            );
+        }
+        serde_json::Value::Object(value)
+    }
+}
+
+fn elapsed_millis(start: std::time::Instant) -> u64 {
+    start.elapsed().as_millis().min(u64::MAX as u128) as u64
+}
+
+fn failure_for_acp_error(error: &AcpError, elapsed_ms: Option<u64>) -> PromptFailureMetadata {
+    let (source, timeout_kind, triggered_timeout_secs) = match error {
+        AcpError::WriteTimeout => (
+            "write-timeout",
+            Some("write"),
+            Some(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS),
+        ),
+        AcpError::RpcTimeout => (
+            "rpc",
+            Some("rpc"),
+            Some(crate::agent_config::DEFAULT_RPC_TIMEOUT_SECS),
+        ),
+        AcpError::ConnectionClosed => ("connection", None, None),
+        _ => ("internal", None, None),
+    };
+    PromptFailureMetadata {
+        source,
+        timeout_kind,
+        triggered_timeout_secs,
+        actual_elapsed_ms: elapsed_ms,
+        provider_message: None,
+        ..Default::default()
+    }
+}
 
 /// A2/A3：向 source 已注册的流式通道发送终帧（done/error 信封）并注销注册。
 /// B1 扩展：user echo 也经此单轨化。未注册 → 返回 false（调用方走广播兜底）。
@@ -72,12 +156,16 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
     error: &PylonError,
+    failure: Option<&PromptFailureMetadata>,
 ) -> Result<(), PylonError> {
     let mut error_payload = serde_json::json!({
         "source": ctx.source,
         "code": error.code(),
         "error": error.to_string(),
     });
+    if let Some(failure) = failure {
+        error_payload["failure"] = failure.to_json();
+    }
     if let Some(profile_id) = ctx.profile_id.as_deref() {
         let agent_id = state.agent_id_for_runtime(runtime).ok_or_else(|| {
             PylonError::AgentRuntimeUnavailable {
@@ -99,6 +187,14 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
                 (owner, None)
             }
         };
+        let mut update = serde_json::json!({
+            "sessionUpdate": "error",
+            "errorCode": error.code(),
+            "error": error.to_string(),
+        });
+        if let Some(failure) = failure {
+            update["failure"] = failure.to_json();
+        }
         let result = event_service_of(state)?
             .ingest_event(
                 owner,
@@ -106,11 +202,7 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
                 state.current_generation(runtime),
                 serde_json::json!({
                     "source": ctx.source,
-                    "update": {
-                        "sessionUpdate": "error",
-                        "errorCode": error.code(),
-                        "error": error.to_string(),
-                    }
+                    "update": update,
                 }),
             )
             .await?;
@@ -350,6 +442,11 @@ fn advance_round<R: tauri::Runtime>(flow: &mut PromptFlow<'_, R>) {
             // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
             session.last_response_round = session.inject_round;
             session.last_response_text.clear();
+            // R-t5：上一回合的 activity 不能被当前 prompt 当成“已经收到首个
+            // token”。清空后，wait_prompt_with_recovery 会从本次 outbound
+            // request 重新等待 first-token 边界；本回合的第一条 update 再写回
+            // `last_activity` 续命 idle budget。
+            session.last_activity = None;
         }
     }
 }
@@ -574,10 +671,20 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
 ) -> Result<String, PylonError> {
-    let result = send_prompt_core_impl(state, runtime, window, gateway, ctx).await;
+    let mut failure = None;
+    let result = send_prompt_core_impl(state, runtime, window, gateway, ctx, &mut failure).await;
     if let Err(error) = &result {
+        // Every known ACP boundary records its own provenance.  A validation
+        // or setup error may happen before that boundary; preserve a stable
+        // internal source rather than making the UI infer one from prose.
+        if failure.is_none() {
+            failure = Some(PromptFailureMetadata {
+                source: "internal",
+                ..Default::default()
+            });
+        }
         if let Err(persistence_error) =
-            publish_prompt_failure(state, runtime, window, gateway, ctx, error).await
+            publish_prompt_failure(state, runtime, window, gateway, ctx, error, failure.as_ref()).await
         {
             tracing::error!(
                 code = persistence_error.code(),
@@ -598,6 +705,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     window: Option<&tauri::Window<R>>,
     gateway: &GatewayCore,
     ctx: &PromptContext,
+    failure: &mut Option<PromptFailureMetadata>,
 ) -> Result<String, PylonError> {
     // 解构 ctx 业务参数（引用形态，管线内只读；session_prompt 由 prepare_prompt_blocks
     // 经 flow.ctx 直接读取，不在本函数体内消费）。
@@ -764,6 +872,10 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
         }
     }
+    // Start the monotonic prompt clock immediately before the outbound ACP
+    // request.  Setup/validation time is not presented as provider waiting
+    // time, while transport failures still retain a useful elapsed sample.
+    let prompt_started_at = std::time::Instant::now();
     let rpc = {
         let acp = runtime.acp.lock().await;
         acp.prepare_prompt(&flow.peri_id, std::mem::take(&mut flow.prompt_blocks))?
@@ -778,6 +890,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let mut rx = match rpc.send_keep_rx().await {
         Ok(rx) => rx,
         Err(error) => {
+            *failure = Some(failure_for_acp_error(&error, Some(elapsed_millis(prompt_started_at))));
             let _ =
                 state.remove_session_if_matches(runtime, source, &flow.peri_id, flow.generation);
             return Err(PylonError::from(error));
@@ -787,7 +900,6 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let peri_id_for_cancel = flow.peri_id.clone();
     // G2-06：超时参数化（per-agent 协议配置，缺省 300/30 = 现状常量值）。
     let protocol = state.protocol_for_runtime(runtime);
-    let prompt_timeout_secs = protocol.prompt_timeout();
     let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();
     let idle_timeout_secs = protocol.idle_timeout();
     let first_token_timeout_secs = protocol.first_token_timeout();
@@ -868,6 +980,12 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
+                *failure = Some(PromptFailureMetadata {
+                    source: "provider",
+                    actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+                    provider_message: Some(error.clone()),
+                    ..Default::default()
+                });
                 let typed_error = AcpError::Rpc(error.clone());
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
                 // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
@@ -889,6 +1007,11 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
+            *failure = Some(PromptFailureMetadata {
+                source: "connection",
+                actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+                ..Default::default()
+            });
             runtime.acp.lock().await.remove_pending(flow.request_id);
             // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
             // session/load probe 收敛 Attached/Detached；删除会丢失待验证证据。
@@ -924,6 +1047,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         PromptWaitOutcome::CancelledAfterTimeout {
             response,
             cancel_error,
+            timeout_kind,
+            timeout_bound,
+            elapsed,
         } => {
             runtime.acp.lock().await.remove_pending(flow.request_id);
             if let Some(cancel_error) = cancel_error {
@@ -958,8 +1084,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     Err(error) => return Err(error.into()),
                 }
             }
-            // G2-06：超时文案参数化（缺省 300 时与旧文案逐字一致——session.rs:2108
-            // 负例表 "timed out after 300s" 依赖此不变量）。
+            // G2-06：超时文案必须使用真正触发的边界，而不是把 prompt 总预算
+            // 冒充成 idle/first-token 的实际等待时长。保留旧的前缀，兼容已有
+            // provider/前端按 "timed out after Ns" 的轻量解析。
             // 方案 I：区分"流式内容已到、终态缺失"与"完全无输出"——本回合是否收到过
             // assistant 内容（dispatcher 经 collect_response_chunk 写入 last_response_text）。
             let has_streamed_content = {
@@ -969,7 +1096,23 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     .map(|s| !s.last_response_text.trim().is_empty())
                     .unwrap_or(false)
             };
-            let error = format!("timed out after {prompt_timeout_secs}s");
+            let timeout_label = match timeout_kind {
+                PromptTimeoutKind::FirstToken => "first-token",
+                PromptTimeoutKind::Idle => "idle",
+            };
+            let timeout_secs = timeout_bound.as_secs().max(1);
+            let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            *failure = Some(PromptFailureMetadata {
+                source: "prompt-timeout",
+                timeout_kind: Some(timeout_label),
+                configured_timeout_secs: Some(protocol.prompt_timeout()),
+                triggered_timeout_secs: Some(timeout_secs),
+                actual_elapsed_ms: Some(actual_elapsed_ms),
+                ..Default::default()
+            });
+            let error = format!(
+                "timed out after {timeout_secs}s ({timeout_label} timeout; elapsed {actual_elapsed_ms}ms)"
+            );
             // M5 感知：超时 → 发呆（区别于普通失败）
             let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
             // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
@@ -990,6 +1133,18 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     (
                         "hasStreamedContent".to_string(),
                         serde_json::Value::Bool(has_streamed_content),
+                    ),
+                    (
+                        "timeoutKind".to_string(),
+                        serde_json::Value::String(timeout_label.to_string()),
+                    ),
+                    (
+                        "timeoutBoundSecs".to_string(),
+                        serde_json::Value::from(timeout_secs),
+                    ),
+                    (
+                        "actualElapsedMs".to_string(),
+                        serde_json::Value::from(actual_elapsed_ms),
                     ),
                     (
                         "requestId".to_string(),
@@ -1163,5 +1318,24 @@ for line in sys.stdin:
         assert_eq!(user.provenance_trust, "authoritative");
         assert_eq!(user.provenance_provider.as_deref(), Some("prompt-success-agent"));
         assert_eq!(user.identity, None, "client correlation is not canonical identity");
+    }
+
+    #[test]
+    fn prompt_failure_metadata_keeps_timeout_provenance_additive() {
+        let metadata = PromptFailureMetadata {
+            source: "prompt-timeout",
+            timeout_kind: Some("first-token"),
+            configured_timeout_secs: Some(180),
+            triggered_timeout_secs: Some(2),
+            actual_elapsed_ms: Some(2_041),
+            provider_message: None,
+        };
+        let value = metadata.to_json();
+        assert_eq!(value["source"], "prompt-timeout");
+        assert_eq!(value["timeoutKind"], "first-token");
+        assert_eq!(value["configuredTimeoutSecs"], 180);
+        assert_eq!(value["triggeredTimeoutSecs"], 2);
+        assert_eq!(value["actualElapsedMs"], 2_041);
+        assert!(value.get("providerMessage").is_none());
     }
 }

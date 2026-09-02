@@ -442,8 +442,14 @@ use tokio::sync::{mpsc, oneshot, watch};
             PromptWaitOutcome::CancelledAfterTimeout {
                 response,
                 cancel_error,
+                timeout_kind,
+                timeout_bound,
+                elapsed,
             } => {
                 assert!(cancel_error.is_none());
+                assert_eq!(timeout_kind, PromptTimeoutKind::FirstToken);
+                assert_eq!(timeout_bound, std::time::Duration::from_millis(10));
+                assert!(elapsed >= timeout_bound);
                 assert_eq!(
                     response
                         .and_then(|raw| raw.result)
@@ -1345,7 +1351,8 @@ for line in sys.stdin:
             outcome,
             PromptWaitOutcome::CancelledAfterTimeout {
                 response: None,
-                cancel_error: None
+                cancel_error: None,
+                ..
             }
         ));
         client.remove_pending(request_id);
@@ -1646,8 +1653,14 @@ for line in sys.stdin:
             PromptWaitOutcome::CancelledAfterTimeout {
                 response: Some(raw),
                 cancel_error,
+                timeout_kind,
+                timeout_bound,
+                elapsed,
             } => {
                 assert!(cancel_error.is_none());
+                assert_eq!(timeout_kind, PromptTimeoutKind::FirstToken);
+                assert_eq!(timeout_bound, std::time::Duration::from_millis(20));
+                assert!(elapsed >= timeout_bound);
                 assert_eq!(
                     raw.result
                         .and_then(|value| value.get("stopReason").cloned()),

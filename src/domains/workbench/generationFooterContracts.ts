@@ -1,4 +1,5 @@
 import type { SpinnerAppearanceSnapshot } from './appearance.ts'
+import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 
 export type GenerationPhase =
   | { kind: 'thinking' }
@@ -34,6 +35,9 @@ export interface GenerationSummary {
   tokenCount: number
   completedFrame: string
   reason: 'done' | 'cancelled' | 'error'
+  failure?: PromptFailureMetadata
+  durationSource?: 'live-monotonic' | 'canonical-events' | 'provider' | 'unknown'
+  durationAvailable?: boolean
 }
 
 export interface GenerationFooterInput {

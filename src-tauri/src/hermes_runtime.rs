@@ -29,8 +29,11 @@ pub(crate) const HERMES_CONCURRENT_TOOL_TIMEOUT_ENV: &str = "HERMES_CONCURRENT_T
 pub(crate) const HERMES_CONCURRENT_TOOL_TIMEOUT_DEFAULT: &str = "30";
 
 /// Hermes-only defaults.  They are applied only when the user did not provide
-/// an explicit value in `agents.yaml`.
-pub(crate) const HERMES_IDLE_TIMEOUT_DEFAULT_SECS: u64 = 12;
+/// an explicit value in `agents.yaml`.  The idle budget deliberately follows
+/// the normal prompt budget: a provider may spend a long interval thinking
+/// without emitting a session/update heartbeat, and a short compatibility
+/// window would terminate a healthy turn while it is still making progress.
+pub(crate) const HERMES_IDLE_TIMEOUT_DEFAULT_SECS: u64 = crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS;
 pub(crate) const HERMES_CANCEL_SETTLE_DEFAULT_SECS: u64 = 5;
 
 const BASH_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -87,9 +90,9 @@ pub(crate) fn should_apply(agent: &AgentDef) -> bool {
 /// Apply safe Hermes defaults without overwriting explicit configuration.
 ///
 /// `first_token_timeout_secs` needs special handling: the existing accessor
-/// falls back to `idle_timeout_secs`.  When we tighten the Hermes idle window,
-/// preserve the old prompt/first-token budget unless the user explicitly set
-/// one of them.
+/// falls back to `idle_timeout_secs`.  Keep the prompt/first-token budget for
+/// the idle window unless the user explicitly supplied an idle value; Hermes
+/// must not silently turn a configured 180s prompt into a 12s local cutoff.
 pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
     let mut protocol = agent.protocol().clone();
     if !should_apply(agent) {
@@ -98,13 +101,13 @@ pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
 
     let idle_was_explicit = protocol.idle_timeout_secs.is_some();
     if !idle_was_explicit {
-        let preserved_first_token = protocol
-            .first_token_timeout_secs
-            .or(protocol.prompt_timeout_secs)
-            .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS);
-        protocol.idle_timeout_secs = Some(HERMES_IDLE_TIMEOUT_DEFAULT_SECS);
+        let preserved_idle = protocol
+            .prompt_timeout_secs
+            .or(protocol.first_token_timeout_secs)
+            .unwrap_or(HERMES_IDLE_TIMEOUT_DEFAULT_SECS);
+        protocol.idle_timeout_secs = Some(preserved_idle);
         if protocol.first_token_timeout_secs.is_none() {
-            protocol.first_token_timeout_secs = Some(preserved_first_token);
+            protocol.first_token_timeout_secs = Some(preserved_idle);
         }
     }
     if protocol.cancel_settle_timeout_secs.is_none() {
@@ -572,7 +575,8 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(
                 effective.idle_timeout_secs,
-                Some(HERMES_IDLE_TIMEOUT_DEFAULT_SECS)
+                Some(180),
+                "未显式配置 idle 时不得把 180s prompt 预算收紧为短闲置窗口"
             );
             assert_eq!(effective.first_token_timeout_secs, Some(180));
             assert_eq!(
@@ -582,6 +586,21 @@ mod tests {
         } else {
             assert_eq!(effective.idle_timeout_secs, None);
             assert_eq!(effective.first_token_timeout_secs, None);
+        }
+    }
+
+    #[test]
+    fn hermes_default_idle_budget_follows_prompt_budget() {
+        let hermes = agent(Some("hermes"), "subprocess");
+        let effective = effective_protocol(&hermes);
+        if cfg!(windows) {
+            assert_eq!(
+                effective.idle_timeout_secs,
+                Some(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS),
+                "Hermes 默认闲置窗口必须允许长思考，不得固定为 12s"
+            );
+        } else {
+            assert_eq!(effective.idle_timeout_secs, None);
         }
     }
 }

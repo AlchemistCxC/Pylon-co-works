@@ -164,6 +164,38 @@ export interface PeriDonePayload {
   canonicalEvent?: unknown
 }
 
+/** Additive prompt failure provenance.  The legacy `error` string remains the
+ * compatibility display field; renderers may use this metadata for a precise
+ * diagnostic without guessing from provider prose. */
+export type PromptFailureSource =
+  | 'provider'
+  | 'rpc'
+  | 'prompt-timeout'
+  | 'write-timeout'
+  | 'connection'
+  | 'cancelled'
+  | 'internal'
+
+export type PromptTimeoutKind = 'first-token' | 'idle' | 'rpc' | 'write'
+
+export interface PromptFailureMetadata {
+  readonly source: PromptFailureSource
+  readonly timeoutKind?: PromptTimeoutKind
+  readonly configuredTimeoutSecs?: number
+  readonly triggeredTimeoutSecs?: number
+  readonly actualElapsedMs?: number
+  readonly providerMessage?: string
+}
+
+export interface PeriErrorPayload {
+  source: string
+  error: string
+  cancelled?: boolean
+  replay?: boolean
+  canonicalEvent?: unknown
+  failure?: PromptFailureMetadata
+}
+
 /** 可选内部 envelope 身份；不改变 ACP wire 的必需字段。 */
 export interface OptionalChatEventIdentity {
   messageId?: string
