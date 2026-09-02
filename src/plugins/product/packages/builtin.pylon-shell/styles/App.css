@@ -299,6 +299,94 @@
   color: var(--text-dim);
 }
 
+/* VS Code inspired titlebar grammar: quiet text triggers, a small active
+   underline, and one token-driven popup surface shared by all three entries. */
+.workspace-titlebar-menu-anchor > button {
+  min-height:28px;
+  margin:auto 1px;
+  border:1px solid transparent;
+  border-radius:var(--ui-radius-xs,2px);
+  color:var(--titlebar-text-muted);
+  font-size:var(--font-size-xs);
+  font-weight:500;
+  letter-spacing:0;
+  text-decoration:none;
+  transition:color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+}
+.workspace-titlebar-menu-anchor > button:hover,
+.workspace-titlebar-menu-anchor > button[aria-expanded="true"] {
+  color:var(--titlebar-text-resolved);
+  background:var(--state-hover-bg);
+  border-color:var(--stroke-subtle);
+  text-decoration:none;
+}
+.workspace-titlebar-menu-anchor > button[aria-expanded="true"] {
+  box-shadow:inset 0 -2px var(--accent);
+}
+.workspace-titlebar .workspace-menu-chrome {
+  animation:workspace-menu-enter var(--motion-fast) var(--ease-emphasized) both;
+  transform-origin:top right;
+}
+@keyframes workspace-menu-enter {
+  from { opacity:0; transform:translateY(-4px) scale(.985); }
+  to { opacity:1; transform:translateY(0) scale(1); }
+}
+.workspace-titlebar .workspace-menu-chrome[data-menu-kind="settings"] { min-width:252px; }
+.workspace-menu-subheading {
+  padding:2px 8px 5px;
+  color:var(--text-placeholder);
+  font-size:var(--font-size-4xs);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.workspace-titlebar .workspace-menu-chrome .workspace-menu-domain-item {
+  grid-template-columns:22px minmax(0,1fr) 12px;
+  gap:8px;
+  min-height:42px;
+  padding:5px 8px;
+}
+.workspace-menu-domain-glyph {
+  display:grid;
+  place-items:center;
+  width:22px;
+  color:var(--accent);
+  font-family:var(--mono);
+  font-size:14px;
+}
+.workspace-menu-item-copy {
+  display:grid;
+  min-width:0;
+  gap:2px;
+}
+.workspace-menu-item-copy strong {
+  overflow:hidden;
+  color:inherit;
+  font-size:var(--font-size-xs);
+  font-weight:600;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.workspace-menu-item-copy small {
+  overflow:hidden;
+  color:var(--text-dim);
+  font-size:var(--font-size-2xs);
+  font-weight:400;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.workspace-menu-chevron {
+  color:var(--text-placeholder);
+  font-family:var(--mono);
+  font-size:15px;
+  text-align:right;
+  transition:color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.workspace-menu-domain-item:hover .workspace-menu-chevron,
+.workspace-menu-domain-item:focus-visible .workspace-menu-chevron { color:var(--accent); transform:translateX(2px); }
+@media (prefers-reduced-motion:reduce) {
+  .workspace-titlebar .workspace-menu-chrome { animation:none; }
+}
+
 .sheet-launcher-overlay {
   position:fixed; inset:0; z-index:70; background:color-mix(in srgb,var(--text) 42%,transparent);
   backdrop-filter:blur(4px); animation:sheet-launcher-in 100ms ease-out;

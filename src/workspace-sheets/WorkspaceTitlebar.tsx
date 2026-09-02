@@ -16,6 +16,7 @@ import { activateInterfaceMode } from '../application/transactions/activateInter
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { TitlebarContext } from '../plugin-runtime/titlebar/titlebarTypes.ts'
+import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../settingsDomains.ts'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -38,6 +39,8 @@ interface WorkspaceTitlebarProps {
   onReopenSheet: () => void
   onToggleRightPanel: () => void
   onToggleSettings: () => void
+  /** Open Settings directly at one of the four top-level domains. */
+  onOpenSettingsDomain?: (domain: SettingsDomainId) => void
   interfaceMode?: InterfaceMode
   chromeStyle?: InterfaceModeChromeStyle
   quickSwitchLabel?: string
@@ -69,6 +72,7 @@ export default function WorkspaceTitlebar({
   onReopenSheet,
   rightPanelEnabled = true,
   onToggleSettings,
+  onOpenSettingsDomain,
   interfaceMode = 'terminal-like',
   chromeStyle = interfaceMode === 'modern-gui' ? 'icons' : 'glyphs',
   onMinimize,
@@ -234,7 +238,32 @@ export default function WorkspaceTitlebar({
           </div>
           <div className="workspace-titlebar-menu-anchor">
             <button type="button" onClick={event => toggleMenu('settings', event.currentTarget)} title="设置" aria-label="设置" aria-haspopup="menu" aria-expanded={openMenu === 'settings'} aria-controls={menuId('settings')} data-menu-trigger="settings"><span className="workspace-titlebar-entry-label">设置</span></button>
-            {openMenu === 'settings' && <div id={menuId('settings')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="settings" onKeyDown={handleMenuKeyDown}><div className="workspace-menu-heading">设置</div><button type="button" role="menuitem" onClick={() => { closeMenu(); onToggleSettings() }}><span className="workspace-menu-check" aria-hidden="true" /><span>全局设置</span></button></div>}
+            {openMenu === 'settings' && <div id={menuId('settings')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="settings" onKeyDown={handleMenuKeyDown}>
+              <div className="workspace-menu-heading">设置</div>
+              <div className="workspace-menu-subheading">跳转到设置域</div>
+              {SETTINGS_DOMAINS.map(domain => {
+                const meta = SETTINGS_DOMAIN_MENU_META[domain.id]
+                const label = SETTINGS_DOMAIN_SHORT_LABELS[domain.id]
+                return <button
+                  key={domain.id}
+                  type="button"
+                  role="menuitem"
+                  className="workspace-menu-domain-item"
+                  aria-label={label}
+                  title={`${domain.label}：${meta.description}`}
+                  data-settings-domain={domain.id}
+                  onClick={() => {
+                    closeMenu()
+                    if (onOpenSettingsDomain) onOpenSettingsDomain(domain.id)
+                    else onToggleSettings()
+                  }}
+                >
+                  <span className="workspace-menu-check workspace-menu-domain-glyph" aria-hidden="true">{meta.glyph}</span>
+                  <span className="workspace-menu-item-copy"><strong>{label}</strong><small>{meta.description}</small></span>
+                  <span className="workspace-menu-chevron" aria-hidden="true">›</span>
+                </button>
+              })}
+            </div>}
           </div>
           {contributedActions.map(entry => {
             const contribution = entry.value

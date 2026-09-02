@@ -424,9 +424,13 @@ export default function App() {
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
-        onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
-        onToggleSettings={() => setShowSettings(value => !value)}
-        settingsOpen={settingsOpen}
+         onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
+         onToggleSettings={() => setShowSettings(value => !value)}
+         onOpenSettingsDomain={domain => {
+           setSettingsIntent({ domain })
+           setShowSettings(true)
+         }}
+         settingsOpen={settingsOpen}
         interfaceMode={interfaceMode}
         chromeStyle={interfaceModeContribution.chromeStyle}
         quickSwitchLabel={quickInterfaceMode?.label}

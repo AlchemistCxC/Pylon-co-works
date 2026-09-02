@@ -72,6 +72,17 @@ export const SETTINGS_DOMAIN_SHORT_LABELS: Readonly<Record<SettingsDomainId, str
   plugins: '插件',
 }
 
+/** Compact menu copy shared by the titlebar and the Settings domain rail. */
+export const SETTINGS_DOMAIN_MENU_META: Readonly<Record<SettingsDomainId, {
+  readonly glyph: string
+  readonly description: string
+}>> = {
+  appearance: { glyph: '◈', description: '主题、消息与字体' },
+  workspace: { glyph: '▦', description: '窗口、历史与工作区行为' },
+  'agents-connections': { glyph: '✦', description: 'Agent、连接与输入能力' },
+  plugins: { glyph: '◇', description: '插件安装与贡献设置' },
+}
+
 export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   templates: '模板库',
   global: '全局',
@@ -117,6 +128,15 @@ export function normalizeSettingsIntent(input: {
 } = {}): SettingsIntent {
   const rawDomain = input.domain?.trim() ?? ''
   const rawSection = input.section?.trim() ?? ''
+  // A top-level domain route is a complete intent on its own.  Previously a
+  // domain-only deep link fell through to the default `global` section and was
+  // consequently normalised back to the appearance domain, so titlebar menu
+  // entries for 工作区/Agent/插件 all opened 外观 instead.
+  if (!rawSection && SETTINGS_DOMAIN_BY_ID[rawDomain as SettingsDomainId]) {
+    const domain = rawDomain as SettingsDomainId
+    const section = SETTINGS_DOMAIN_BY_ID[domain].sections[0] ?? 'global'
+    return { domain, section, ...(input.agentId ? { agentId: input.agentId } : {}) }
+  }
   const route = LEGACY_SETTINGS_ROUTES[rawDomain && rawSection ? `${rawDomain}/${rawSection}` : rawDomain]
     ?? LEGACY_SETTINGS_ROUTES[rawSection]
 

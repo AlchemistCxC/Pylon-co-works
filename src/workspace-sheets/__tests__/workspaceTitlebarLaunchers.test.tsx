@@ -19,6 +19,7 @@ const baseProps = {
   onReopenSheet: vi.fn(),
   onToggleRightPanel: vi.fn(),
   onToggleSettings: vi.fn(),
+  onOpenSettingsDomain: vi.fn(),
   onMinimize: vi.fn(),
   onToggleFullscreen: vi.fn(),
   onCloseWindow: vi.fn(),
@@ -80,9 +81,9 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     const settings = screen.getByRole('button', { name: '设置' })
 
     fireEvent.click(settings)
-    const menuItem = screen.getByRole('menuitem', { name: '全局设置' })
+    const menuItem = screen.getByRole('menuitem', { name: '外观' })
     fireEvent.click(menuItem)
-    expect(baseProps.onToggleSettings).toHaveBeenCalledOnce()
+    expect(baseProps.onOpenSettingsDomain).toHaveBeenCalledWith('appearance')
     expect(document.activeElement).toBe(settings)
 
     fireEvent.click(settings)

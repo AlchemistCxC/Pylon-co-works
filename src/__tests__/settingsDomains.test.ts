@@ -121,6 +121,18 @@ describe('P6 Slice A 设置意图归一化', () => {
     })
   })
 
+  it('顶层域入口不带 section 时落到该域首个分区', () => {
+    expect(normalizeSettingsIntent({ domain: 'workspace' })).toEqual({
+      domain: 'workspace', section: 'window',
+    })
+    expect(normalizeSettingsIntent({ domain: 'agents-connections' })).toEqual({
+      domain: 'agents-connections', section: 'agent',
+    })
+    expect(normalizeSettingsIntent({ domain: 'plugins' })).toEqual({
+      domain: 'plugins', section: 'pluginManager',
+    })
+  })
+
   it('未知入口回退到全局设置，不进入空白页', () => {
     expect(normalizeSettingsIntent({ domain: 'missing', section: 'missing' })).toEqual({
       domain: 'appearance', section: 'global',
