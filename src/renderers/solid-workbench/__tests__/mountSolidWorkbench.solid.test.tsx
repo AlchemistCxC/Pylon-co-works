@@ -96,6 +96,39 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelectorAll('[data-activity-id="tool-between"]')).toHaveLength(1)
   })
 
+  it('工具聚合行复用普通工具卡结构，并跟随组内最后一次调用的状态色', async () => {
+    const { host, services } = mountPreview()
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], toolCallId: string) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `group-${sequence}` }, identity: { toolCallId },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const document = projectWorkbench([
+      envelope(1, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } }, 'group-tool-1'),
+      envelope(2, { type: 'tool.completed', tool: { name: 'Read', title: '读取文件', status: 'completed' } }, 'group-tool-1'),
+      envelope(3, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } }, 'group-tool-2'),
+      envelope(4, { type: 'tool.failed', tool: { name: 'Read', title: '读取文件', status: 'failed' } }, 'group-tool-2'),
+    ]).document
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const group = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('.solid-workbench-activity-group')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    expect(group).toHaveClass('term-tool')
+    expect(group).toHaveAttribute('data-count', '2')
+    expect(group).toHaveAttribute('data-status', 'err')
+    expect(group).toHaveAttribute('data-last-tool-status', 'failed')
+    expect(group.querySelector('.term-tool-head')).not.toBeNull()
+    expect(group.querySelector('.term-tool-indicator')).toHaveClass('err')
+    expect(group.querySelector('.term-tool-name')).toHaveTextContent('读取文件')
+    expect(group.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(group.querySelector<HTMLButtonElement>('.term-tool-head')!)
+    expect(group.querySelectorAll('.solid-workbench-activity-slot')).toHaveLength(2)
+  })
+
   it('让输入字号继承聊天字号，并保持助手正文与圆点处于同一布局行', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
@@ -194,9 +227,18 @@ describe('mountSolidWorkbench', () => {
 
       const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
       expect(contentObserver).toBeTruthy()
+      // The resize signal represents a real async height change (for example
+      // a newly measured Markdown/image block), so the bottom endpoint moves.
+      Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
       contentObserver!.trigger()
       await Promise.resolve()
-      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: 'auto' })
+      scrollTo.mockClear()
+      // Repeated observer notifications at the same endpoint must not issue a
+      // second scroll write; this is the jitter regression guard.
+      contentObserver!.trigger()
+      await Promise.resolve()
+      expect(scrollTo).not.toHaveBeenCalled()
       services.runtime.destroy()
     } finally {
       globalThis.ResizeObserver = previousResizeObserver
@@ -399,6 +441,50 @@ describe('mountSolidWorkbench', () => {
     expect(streamingMarkup).toContain('春风拂过山岗')
     expect(finalBody.textContent).toContain('春风拂过山岗\n月光落在窗')
     expect(finalBody.querySelectorAll('p')).toHaveLength(3)
+  })
+
+  it('canonical 思考流与 legacy streamingThinking 不重复渲染', async () => {
+    const { host, services } = mountPreview()
+    const reasoning = createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1,
+      recordedAt: '2026-08-25T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'thinking-stream' },
+      identity: { turnId: 'thinking-turn' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'reasoning.delta', parts: [{ kind: 'text', text: '同一段思考' }] },
+    })
+    const document = projectWorkbench([reasoning]).document
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+    services.runtime.update({ streamingThinking: '同一段思考', generating: true })
+
+    await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
+    expect(host.querySelectorAll('.term-reasoning')).toHaveLength(1)
+  })
+
+  it('legacy 工具行接管消息列表时仍保留 canonical/legacy 思考流可见性', async () => {
+    const { host, services } = mountPreview()
+    const reasoning = createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1,
+      recordedAt: '2026-08-25T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'thinking-with-tool' },
+      identity: { turnId: 'thinking-with-tool-turn' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'reasoning.delta', parts: [{ kind: 'text', text: '工具旁的思考' }] },
+    })
+    const canonical = projectWorkbench([reasoning]).document
+    const legacyTool = {
+      id: 'legacy-tool-row', role: 'tool' as const, sender: 'peri', content: '', time: 't',
+      toolName: 'Read', toolStatus: 'running', running: true,
+    }
+    services.runtime.update({
+      document: canonical,
+      messages: [legacyTool],
+      streamingThinking: '工具旁的思考',
+      generating: true,
+    })
+
+    await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
+    expect(host).toHaveTextContent('工具旁的思考')
   })
 
   it('canonical reasoning updates keep one expanded Slot live until completion', async () => {

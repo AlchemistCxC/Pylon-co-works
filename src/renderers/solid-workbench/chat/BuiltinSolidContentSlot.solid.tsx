@@ -80,10 +80,15 @@ export function BuiltinSolidContentSlot(props: {
       default: return 'inherit'
     }
   }
+  const isReasoningKind = () => kind() === 'content.reasoning' || kind() === 'content.redacted-reasoning'
   const contentStyle = () => ({
     'font-family': fontFamily(),
-    'font-size': explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit',
-    'line-height': String(numberSetting('lineHeight', 1.6)),
+    'font-size': isReasoningKind()
+      ? (explicitReasoningTypographySetting('fontSize') ? `${numberSetting('fontSize', 13)}px` : 'inherit')
+      : (explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit'),
+    'line-height': isReasoningKind() && !explicitReasoningTypographySetting('lineHeight')
+      ? 'inherit'
+      : String(numberSetting('lineHeight', 1.6)),
     'max-width': `${numberSetting('maxWidth', 1600)}px`,
   })
   const explicitKindSetting = (key: string) => {
@@ -96,6 +101,26 @@ export function BuiltinSolidContentSlot(props: {
     const source = (kindSources as Record<string, unknown>)[key]
     return source === 'profile' || source === 'user-override' || source === 'session-preview'
   }
+  const explicitReasoningTypographySetting = (key: string) => {
+    const renderSettings = props.appearance.renderSettings
+    // Direct callers may intentionally provide a numeric value without the
+    // production source metadata; preserve that compatibility seam.
+    if (!renderSettings || typeof renderSettings !== 'object' || Array.isArray(renderSettings)) {
+      return typeof props.appearance[key] === 'number'
+    }
+    const sources = (renderSettings as Record<string, unknown>).sources
+    if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return typeof props.appearance[key] === 'number'
+    const kindSources = (sources as Record<string, unknown>).kind
+    if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return typeof props.appearance[key] === 'number'
+    const source = (kindSources as Record<string, unknown>)[key]
+    if (source === undefined) return typeof props.appearance[key] === 'number'
+    // Profile/schema defaults inherit the chat message rail. Only a deliberate
+    // user/session override establishes a numeric reasoning typography.
+    return source === 'user-override' || source === 'session-preview'
+  }
+  const optionalTypographySetting = (key: string, fallback: number) => (
+    explicitReasoningTypographySetting(key) ? numberSetting(key, fallback) : undefined
+  )
 
   return (
     <div
@@ -139,8 +164,8 @@ export function BuiltinSolidContentSlot(props: {
           foreground={stringSetting('foreground', 'var(--text-dim)')}
           background={stringSetting('background', 'transparent')}
           borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
-          fontSize={numberSetting('fontSize', 13)}
-          lineHeight={numberSetting('lineHeight', 1.6)}
+          fontSize={optionalTypographySetting('fontSize', 13)}
+          lineHeight={optionalTypographySetting('lineHeight', 1.6)}
           defaultCollapsed={booleanSetting('defaultCollapsed', true)}
           maxHeight={numberSetting('maxHeight', 320)}
           runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}
@@ -157,8 +182,8 @@ export function BuiltinSolidContentSlot(props: {
           foreground={stringSetting('foreground', 'var(--text-dim)')}
           background={stringSetting('background', 'transparent')}
           borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
-          fontSize={numberSetting('fontSize', 13)}
-          lineHeight={numberSetting('lineHeight', 1.6)}
+          fontSize={optionalTypographySetting('fontSize', 13)}
+          lineHeight={optionalTypographySetting('lineHeight', 1.6)}
           defaultCollapsed={booleanSetting('defaultCollapsed', true)}
           maxHeight={numberSetting('maxHeight', 320)}
           runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}

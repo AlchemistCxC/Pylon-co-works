@@ -25,4 +25,29 @@ describe('BuiltinSolidContentSlot text appearance', () => {
     />)
     expect(overridden.container.querySelector<HTMLElement>('.solid-content-kind')?.style.fontSize).toBe('18px')
   })
+
+  it('lets reasoning schema defaults inherit conversation typography while preserving direct overrides', () => {
+    const inherited = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'reasoning-default', kind: 'content.reasoning', revision: 1, payload: { text: '思考', state: 'complete' } }}
+      appearance={{
+        fontSize: 13,
+        lineHeight: 1.6,
+        renderSettings: { sources: { kind: { fontSize: 'kind-default', lineHeight: 'kind-default' } } },
+      }}
+      commands={commands}
+    />)
+    const inheritedNode = inherited.container.querySelector<HTMLElement>('.solid-content-kind')!
+    expect(inheritedNode.style.fontSize).toBe('inherit')
+    expect(inheritedNode.style.lineHeight).toBe('inherit')
+    inherited.unmount()
+
+    const direct = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'reasoning-direct', kind: 'content.reasoning', revision: 1, payload: { text: '思考', state: 'complete' } }}
+      appearance={{ fontSize: 16, lineHeight: 1.7 }}
+      commands={commands}
+    />)
+    const directNode = direct.container.querySelector<HTMLElement>('.solid-content-kind')!
+    expect(directNode.style.fontSize).toBe('16px')
+    expect(directNode.style.lineHeight).toBe('1.7')
+  })
 })

@@ -104,7 +104,7 @@ export function SolidToolInvocationCard(props: {
       onClick={collapse.toggle}>
       <Show when={stringSetting(props.appearance, 'indicator', 'glyph') !== 'none'}>
         <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">
-          {indicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone, props.appearance)}
+          {resolveToolIndicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone, props.appearance)}
         </span>
       </Show>
       <span class="term-tool-name">{displayName()}</span>
@@ -270,7 +270,9 @@ function formatDuration(value: number | undefined): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`
 }
 
-function indicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err', appearance: RenderAppearanceSnapshot): string {
+/** Shared with aggregate activity headers so indicator mode/asset resolution
+ * cannot drift from the ordinary tool card. */
+export function resolveToolIndicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err', appearance: RenderAppearanceSnapshot): string {
   if (indicator === 'dot') return '•'
   if (indicator !== 'glyph') return indicator
   return resolveToolIndicatorAssetForTone(tone, {

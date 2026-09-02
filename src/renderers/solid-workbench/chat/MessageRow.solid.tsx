@@ -174,8 +174,11 @@ export function ReasoningBlock(props: {
     '--reasoning-foreground': props.foreground ?? 'var(--text-dim)',
     color: props.foreground ?? 'var(--text-dim)',
     'background-color': props.background ?? 'transparent',
-    'font-size': `${props.fontSize ?? 13}px`,
-    'line-height': String(props.lineHeight ?? 1.6),
+    // Leave typography unset by default so the reasoning row inherits the
+    // same message font/line-height as user and assistant rows.  Renderer
+    // settings can still provide an explicit override when requested.
+    ...(props.fontSize !== undefined ? { 'font-size': `${props.fontSize}px` } : {}),
+    ...(props.lineHeight !== undefined ? { 'line-height': String(props.lineHeight) } : {}),
   })
   const bodyStyle = () => ({
     'max-height': `${props.maxHeight ?? 320}px`,
@@ -183,17 +186,31 @@ export function ReasoningBlock(props: {
   })
   let bodyElement: HTMLDivElement | undefined
   let followBottom = true
+  let followQueued = false
+  let lastFollowTop: number | undefined
   const onBodyScroll = () => {
     if (!bodyElement) return
     followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
+    if (!followBottom) lastFollowTop = undefined
   }
   createEffect(() => {
     const text = props.text
     const running = props.running
     const open = collapse.open()
     if (!text || !running || !open || !bodyElement || !followBottom) return
+    if (followQueued) return
+    followQueued = true
     queueMicrotask(() => {
-      if (bodyElement && followBottom) bodyElement.scrollTop = bodyElement.scrollHeight
+      followQueued = false
+      if (!bodyElement || !followBottom) return
+      const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
+      // Markdown/highlight updates can notify more than once for one token.
+      // Rewriting the same inner scroll endpoint needlessly competes with the
+      // outer chat follow rail and produces visible vertical jitter.
+      if (lastFollowTop !== undefined && Math.abs(lastFollowTop - top) <= 0.5
+        && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
+      bodyElement.scrollTop = top
+      lastFollowTop = top
     })
   })
 

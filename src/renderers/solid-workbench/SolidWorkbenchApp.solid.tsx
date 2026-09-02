@@ -21,7 +21,7 @@ import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidW
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
-import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
+import { resolveToolIndicatorGlyph, SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 import { SolidProcessActivity } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
@@ -32,6 +32,7 @@ import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/ch
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
+import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
@@ -79,6 +80,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     trackHeight: 0,
   })
   let followedSessionId: string | null | undefined
+  let bottomFollowQueued = false
+  let lastAutoFollowTop: number | undefined
+  let followedSnapshotRevision: number | undefined
   // Programmatic scrolls emit the same `scroll` events as user input. Keep
   // those feedback events from briefly flipping the follow state while a
   // button animation is in flight, and invalidate any already queued
@@ -88,6 +92,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
   const beginScrollAction = (nextFollowBottom: boolean, behavior: ScrollBehavior) => {
     scrollActionRevision += 1
+    lastAutoFollowTop = undefined
     followLockUntil = now() + (behavior === 'smooth' ? SMOOTH_LOCK_MS : INSTANT_LOCK_MS)
     setFollowBottom(nextFollowBottom)
   }
@@ -100,9 +105,40 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     stopScrollRailDrag = undefined
     followLockUntil = 0
     scrollActionRevision += 1
+    bottomFollowQueued = false
+    lastAutoFollowTop = undefined
+    followedSnapshotRevision = undefined
     connectorPort.destroy()
   })
   const document = () => snapshot().document
+  // Canonical events and the legacy controller can briefly expose the same
+  // in-flight text through both `document.messages` and the transient
+  // streaming fields. Prefer the canonical running row once it exists; two
+  // independently measured reasoning rows make the chat height/scroll rail
+  // oscillate on every token.
+  const visibleStreamingThinking = createMemo(() => {
+    const currentSnapshot = snapshot()
+    const text = currentSnapshot.streamingThinking
+    if (!text) return ''
+    // When legacy tool rows are present, `viewMessages()` intentionally owns
+    // the message list and canonical messages are not mounted there yet. Only
+    // suppress the transient row if the candidate list is actually rendered.
+    const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
+      ? currentSnapshot.messages
+      : document()?.messages
+    const canonicalRunning = streamRowCoversText(candidates, 'reasoning', text, currentSnapshot.generating)
+    return canonicalRunning ? '' : text
+  })
+  const visibleStreamingText = createMemo(() => {
+    const currentSnapshot = snapshot()
+    const text = currentSnapshot.streamingText
+    if (!text) return ''
+    const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
+      ? currentSnapshot.messages
+      : document()?.messages
+    const canonicalRunning = streamRowCoversText(candidates, 'assistant', text, currentSnapshot.generating)
+    return canonicalRunning ? '' : text
+  })
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
     const projected = document()?.messages
@@ -181,7 +217,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     syncScrollRail(viewport)
     if (now() < followLockUntil) return
     const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
-    setFollowBottom(distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX)
+    const atBottom = distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX
+    if (!atBottom) lastAutoFollowTop = undefined
+    setFollowBottom(atBottom)
   }
 
   const eventElement = (event?: Event) => {
@@ -199,6 +237,17 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const scrollViewportToBottom = (viewport: HTMLDivElement, behavior: ScrollBehavior) => {
     const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    // ResizeObserver/content effects can request the same endpoint several
+    // times in one stream tick. Avoid repeating an already-applied auto write;
+    // repeated writes fight browser scroll anchoring and are perceived as
+    // vertical jitter in a live reasoning stream. The first request is kept so
+    // a newly mounted viewport still gets an explicit endpoint assignment.
+    if (behavior === 'auto' && lastAutoFollowTop !== undefined
+      && Math.abs(lastAutoFollowTop - top) <= 0.5
+      && Math.abs(viewport.scrollTop - top) <= 0.5) {
+      syncScrollRail(viewport)
+      return
+    }
     if (typeof viewport.scrollTo === 'function') {
       viewport.scrollTo({ top, behavior })
     } else {
@@ -208,6 +257,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     // asynchronously for smooth scrolling, while jsdom/test hosts may only
     // expose a spy; assigning the endpoint makes the follow state deterministic.
     viewport.scrollTop = top
+    if (behavior === 'auto') lastAutoFollowTop = top
     syncScrollRail(viewport)
   }
 
@@ -311,7 +361,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const queueBottomFollow = () => {
     const revision = scrollActionRevision
+    if (bottomFollowQueued) {
+      return
+    }
+    bottomFollowQueued = true
     queueMicrotask(() => {
+      bottomFollowQueued = false
       if (revision !== scrollActionRevision || !followBottom()) return
       if (chatViewport) scrollViewportToBottom(chatViewport, 'auto')
     })
@@ -353,7 +408,16 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
   createEffect(() => {
     sessionId()
-    snapshot()
+    const currentSnapshot = snapshot()
+    // A new runtime revision is a fresh content opportunity even when the
+    // computed bottom offset happens to be numerically identical (for example
+    // jsdom or a fixed-height viewport).  Allow one follow write for it, while
+    // still suppressing duplicate ResizeObserver callbacks for the same
+    // revision.
+    if (currentSnapshot.revision !== followedSnapshotRevision) {
+      followedSnapshotRevision = currentSnapshot.revision
+      lastAutoFollowTop = undefined
+    }
     queueMicrotask(() => syncScrollRail())
     if (!followBottom()) return
     queueBottomFollow()
@@ -453,13 +517,13 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   queueBottomFollow()
                 }}
               />
-              <Show when={snapshot().streamingThinking}>
+              <Show when={visibleStreamingThinking()}>
                 {text => <div class="term-row term-row-reasoning" data-render-type="reasoning" data-streaming="true">
                   <ReasoningBlock text={text()} running />
                 </div>}
               </Show>
               <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
-              <Show when={snapshot().streamingText}>
+              <Show when={visibleStreamingText()}>
                 {text => <div class="term-row term-row-assistant" data-render-type="assistant" data-streaming="true">
                   <AssistantContent text={text()} appearance={appearance()} streaming />
                 </div>}
@@ -730,6 +794,33 @@ function visibleDiagnostics(document: WorkbenchDocument) {
   return document.diagnostics.filter(diagnostic => !errorEventIds.has(diagnostic.eventId))
 }
 
+/**
+ * The controller still exposes a legacy transient stream while the canonical
+ * document is being projected.  Hide that compatibility row only after the
+ * canonical running message actually contains the same prefix; an empty
+ * placeholder row must not swallow visible transient text during pause/resume
+ * or the short hand-off between the two display paths.
+ */
+function streamRowCoversText(
+  messages: readonly { role: string; content: string; running?: boolean }[] | undefined,
+  role: 'assistant' | 'reasoning',
+  transientText: string,
+  generating: boolean,
+): boolean {
+  if (!messages || transientText.length === 0) return false
+  return messages.some(message => {
+    if (message.role !== role || (generating && message.running !== true)) return false
+    const canonicalText = typeof message.content === 'string' ? message.content : ''
+    if (canonicalText.length === 0) return false
+    return canonicalText === transientText
+      || canonicalText.startsWith(transientText)
+  })
+}
+
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, character => `%${character.charCodeAt(0).toString(16).padStart(4, '0')}%`)
+}
+
 function CanonicalActivitySlot(props: {
   activity: WorkbenchActivityNode
   document: WorkbenchDocument
@@ -978,28 +1069,123 @@ function CanonicalActivityGroup(props: {
   open: boolean
   onToggle: () => void
 }) {
-  const label = () => props.group.items[0]?.title || props.group.toolKey
-  return <section class="solid-workbench-activity-group" data-activity-group={props.group.groupId} data-count={props.group.count}>
+  // A group is a display projection only.  Its indicator/status are derived
+  // from the final member so a mixed run settles to the same visual state as
+  // the last ordinary tool card (rather than the group's aggregate `mixed`).
+  const lastActivity = () => props.group.items.at(-1)!
+  const lastSnapshot = () => toolInvocationSnapshot(props.document, lastActivity().id)
+  const toolAppearance = () => resolveToolActivityAppearance(lastActivity(), props.context)
+  const state = () => {
+    const snapshot = lastSnapshot()
+    return normalizeToolStatus(snapshot?.status ?? snapshot?.result?.status ?? lastActivity().status)
+  }
+  const hasOutput = () => {
+    const result = lastSnapshot()?.result
+    return result !== undefined && (
+      result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
+    )
+  }
+  const presentation = () => toolStatePresentation(state(), hasOutput())
+  const label = () => {
+    const snapshot = lastSnapshot()
+    return snapshot?.title
+      || snapshot?.canonicalName
+      || snapshot?.name
+      || '未知工具'
+  }
+  const indicatorMode = () => stringAppearanceSetting(toolAppearance(), 'indicator', 'glyph')
+  const indicatorGlyph = () => resolveToolIndicatorGlyph(indicatorMode(), presentation().tone, toolAppearance())
+  const bodyId = () => `solid-tool-group-${safeDomId(props.group.groupId)}`
+  const renderKind = () => activityRenderKind(lastActivity(), props.context)
+  const statusPalette = () => stringAppearanceSetting(toolAppearance(), 'statusPalette', 'semantic')
+  const density = () => stringAppearanceSetting(toolAppearance(), 'density', 'comfortable')
+  return <article
+    class="term-tool solid-workbench-activity-group"
+    role="status"
+    aria-label={`工具：${capitalizeToolName(label())}，${props.group.count} 次调用，${presentation().label}`}
+    data-content-kind="tool.group"
+    data-activity-group={props.group.groupId}
+    data-count={props.group.count}
+    data-tool-state={presentation().state}
+    data-status-label={presentation().label}
+    data-status={presentation().tone}
+    data-status-palette={statusPalette()}
+    data-density={density() === 'compact' ? 'compact' : 'comfortable'}
+    data-kind={renderKind()}
+    data-reduced-motion={props.context.input().reducedMotion ? 'true' : 'false'}
+    style={{
+      color: stringAppearanceSetting(toolAppearance(), 'foreground', 'var(--text)'),
+      background: stringAppearanceSetting(toolAppearance(), 'background', 'transparent'),
+      'border-color': stringAppearanceSetting(toolAppearance(), 'borderColor', 'var(--border)'),
+      'max-width': `${numberAppearanceSetting(toolAppearance(), 'maxWidth', 960)}px`,
+    }}
+    data-group-status={props.group.status}
+    data-last-tool-status={lastActivity().status}
+  >
     <button
-      class="solid-workbench-activity-group-head"
+      class="term-tool-head solid-workbench-activity-group-head"
       type="button"
       aria-expanded={props.open}
+      aria-controls={bodyId()}
       onClick={props.onToggle}
     >
-      <span>{capitalizeToolName(label())}</span>
-      <span> · {props.group.count} 次调用 · {props.group.status === 'mixed' ? '状态混合' : props.group.status}</span>
+      <Show when={indicatorMode() !== 'none'}>
+        <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">{indicatorGlyph()}</span>
+      </Show>
+      <span class="term-tool-name">{capitalizeToolName(label())}</span>
+      <span class="term-tool-summary"> ({props.group.count} 次调用)</span>
+      <span class="term-tool-state-label"> — {presentation().label}</span>
     </button>
     <Show when={props.open}>
-      <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
+      <div id={bodyId()} class="term-tool-body solid-workbench-activity-group-body">
+        <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
         <For each={props.group.items}>{activity => <CanonicalActivitySlot
           activity={activity}
           document={props.document}
           context={props.context}
           connectorPort={props.connectorPort}
         />}</For>
+        </div>
       </div>
     </Show>
-  </section>
+  </article>
+}
+
+function resolveToolActivityAppearance(
+  activity: WorkbenchActivityNode,
+  context: SolidWorkbenchContextValue,
+): Readonly<Record<string, unknown>> {
+  const kind = activityRenderKind(activity, context)
+  const slotId = resolveActivitySlotId(kind, context) ?? 'builtin.solid.content.base'
+  return context.hostPort?.appearance.resolve?.({
+    kind,
+    suiteId: context.activation?.suite.value.id ?? 'builtin.solid',
+    slotId,
+  }) ?? { ...context.appearanceSnapshot() }
+}
+
+function stringAppearanceSetting(appearance: Readonly<Record<string, unknown>>, key: string, fallback: string): string {
+  return typeof appearance[key] === 'string' ? appearance[key] as string : fallback
+}
+
+function numberAppearanceSetting(appearance: Readonly<Record<string, unknown>>, key: string, fallback: number): number {
+  return typeof appearance[key] === 'number' && Number.isFinite(appearance[key] as number)
+    ? appearance[key] as number
+    : fallback
+}
+
+function resolveActivitySlotId(kind: string, context: SolidWorkbenchContextValue): string | undefined {
+  const activation = context.activation
+  if (!activation) return undefined
+  const visited = new Set<string>()
+  let current: string | undefined = kind
+  while (current && !visited.has(current)) {
+    visited.add(current)
+    const candidate = activation.slots.get(current)?.find(entry => entry.value.kinds.includes(current!))
+    if (candidate) return candidate.value.id
+    current = activation.kinds.get(current)?.value.fallbackKind
+  }
+  return undefined
 }
 
 /**

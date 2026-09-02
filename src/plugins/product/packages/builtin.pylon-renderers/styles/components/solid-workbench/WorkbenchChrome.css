@@ -171,23 +171,27 @@
 .solid-workbench-timeline { margin: 8px 24px 0; }
 .solid-workbench-assist { margin: 8px 24px 0; }
 .solid-workbench-activities { margin: 8px 0 0; }
-.solid-workbench-activity-group { margin: 0 0 var(--chat-tool-gap, 5px); }
+.solid-workbench-activity-group {
+  margin: 0 0 var(--chat-tool-gap, 5px);
+  min-width: 0;
+}
 .solid-workbench-activity-group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-1);
-  width: 100%;
-  padding: var(--ui-space-1) 0;
-  color: var(--text-dim);
-  background: transparent;
-  border: 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  /* Keep the exact tool-card header geometry: indicator column, name,
+     summary and state suffix all participate in one nowrap flex row. */
+  align-items: baseline;
+  gap: 0;
 }
 .solid-workbench-activity-group-head:hover,
 .solid-workbench-activity-group-head:focus-visible { color: var(--text); }
 .solid-workbench-activity-group-items { display: grid; gap: var(--chat-tool-gap, 5px); }
+.solid-workbench-activity-group-body {
+  max-width: none;
+  margin-right: 0;
+  font-size: inherit;
+  line-height: inherit;
+  overflow: visible;
+  background: transparent;
+}
 .solid-workbench-interactions { margin: 8px 24px 0; }
 .solid-workbench-extensions { margin: 8px 24px 0; }
 .solid-workbench-usage,

@@ -46,9 +46,10 @@
 }
 .term-row-reasoning {
   min-width:0;
-  /* Thought is machine-side annotation: keep it on the chat/terminal rail,
-     independently of the selectable Markdown body font. */
-  font-family:var(--chat-font,var(--mono));
+  /* Thought is part of the conversation: use the same message typography as
+     user/assistant rows.  Code blocks and inline code opt back into --mono
+     below, so ordinary English remains readable in the chat face. */
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
   color:var(--msg-text,var(--chat-text-color,var(--text)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }
@@ -534,7 +535,14 @@
    结构同 CC AssistantTextMessage：flex row 圆点列 + 内容列（.term-assistant-body），
    圆点与首行共享 line box → 同基线对齐；首内容块 margin-top 归零
    （CC Markdown column gap 只在块之间，首块无上间距，圆点贴首行）。 */
-.term-assistant.has-dot { position:relative; display:flex; align-items:flex-start; }
+.term-assistant.has-dot {
+  position:relative;
+  display:flex;
+  flex-wrap:nowrap;
+  align-items:flex-start;
+  width:100%;
+  min-width:0;
+}
 .app[data-message-layout="claude"] { --dot-col-width: 1.6em; }
 /* 统一指示列（claude 布局）：助手/thinking/工具 内容列一律从 1.6em 起——
    无圆点助手也占指示列（内容与工具名/thinking 对齐），不再贴左缘 */
@@ -559,7 +567,10 @@
   align-self:flex-start;
   margin-top:0.1em;
 }
-.term-assistant.has-dot > .term-assistant-body { flex:1; min-width:0; }
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  min-width:0;
+}
 .term-assistant.has-dot > .term-assistant-body > :first-child { margin-top:0; }
 .term-assistant.has-dot > .term-assistant-body > :first-child > :first-child,
 .term-assistant.has-dot > .term-assistant-body > :first-child > :first-child > :first-child { margin-top:0; }
@@ -1926,12 +1937,51 @@
   .term-tool,
   .term-tool-head
 ) {
-  /* Tool names and status are machine annotations: follow the selectable
-     code/path font, independently of the prose and Thought choices. */
-  font-family:var(--mono);
+  /* The header is ordinary readable copy.  Only explicit code/path/output
+     surfaces use the mono face, keeping mixed English labels from looking
+     wider than the surrounding conversation. */
+  font-family:var(--msg-font,var(--chat-font,var(--font)));
 }
 .app[data-interface-mode="terminal-like"] .term-row-reasoning {
-  font-family:var(--chat-font,var(--mono));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+}
+.app[data-interface-mode="terminal-like"] :is(
+  .term-tool-body,
+  .term-tool-body pre,
+  .term-tool-body code,
+  .term-code-block,
+  .term-ansi,
+  .tool-object-inspector
+) {
+  font-family:var(--mono);
+}
+/* A grouped row owns a term-tool shell around its expanded child cards. Keep
+   the child cards' own tone/state selectors authoritative so the final member
+   color does not bleed into every expanded member. */
+.solid-workbench-activity-group-body .term-tool[data-status="ok"] > .term-tool-head .term-tool-name {
+  color:var(--tool-ok,#1e9646);
+}
+.solid-workbench-activity-group-body .term-tool[data-status="err"] > .term-tool-head .term-tool-name {
+  color:var(--tool-err,#be2828);
+}
+.solid-workbench-activity-group-body .term-tool[data-status="run"] > .term-tool-head .term-tool-name {
+  color:var(--tool-run,#3b82f6);
+}
+.solid-workbench-activity-group-body .term-tool[data-tool-state="queued"] > .term-tool-head > .term-tool-indicator {
+  opacity:0.46;
+}
+.solid-workbench-activity-group-body .term-tool[data-tool-state="cancelled"] > .term-tool-head > .term-tool-indicator {
+  opacity:0.52;
+  filter:saturate(0.25);
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="ok"] > .term-tool-head .term-tool-name {
+  color:var(--state-success,var(--tool-ok,var(--accent)));
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="err"] > .term-tool-head .term-tool-name {
+  color:var(--state-danger,var(--tool-err,var(--danger)));
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="run"] > .term-tool-head .term-tool-name {
+  color:var(--accent,var(--tool-run));
 }
 /* Collapsed thought rows are a label-only rail, but their header must occupy
    the same vertical inset as the expanded state.  Removing this padding only
