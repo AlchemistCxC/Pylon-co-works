@@ -62,6 +62,39 @@ export interface PresetChangeSummary {
   readonly changed: number
 }
 
+export type PresetApplyResult =
+  | {
+      readonly status: 'applied'
+      readonly id: string
+      readonly providers: readonly string[]
+      readonly revision: number
+      readonly unavailable?: readonly string[]
+    }
+  | {
+      readonly status: 'failed'
+      readonly id: string
+      readonly failedProvider: string
+      readonly message: string
+      readonly rolledBack: boolean
+      readonly revision: number
+    }
+
+/** Error enriched with the provider/phase that rejected a bundle operation. */
+export class PresetProviderTransactionError extends Error {
+  readonly providerId: string
+  readonly phase: 'prepare' | 'commit'
+  readonly cause: unknown
+
+  constructor(providerId: string, phase: 'prepare' | 'commit', cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    super(message)
+    this.name = 'PresetProviderTransactionError'
+    this.providerId = providerId
+    this.phase = phase
+    this.cause = cause
+  }
+}
+
 export interface PresetPreparedApply {
   readonly summary: readonly PresetChangeSummary[]
   commit(): void | Promise<void>
@@ -112,17 +145,23 @@ export function preparePresetBundle(
   scope?: PresetCaptureScope,
 ): PreparedPresetBundle {
   const prepared: PresetPreparedApply[] = []
+  const preparedProviderIds: string[] = []
   const summaries: PresetChangeSummary[] = []
   try {
     for (const [providerId, contribution] of Object.entries(bundle.contributions)) {
       const provider = registry.resolve(providerId)
       if (!provider) continue
-      const payload = provider.migrate && contribution.providerVersion !== provider.schemaVersion
-        ? provider.migrate(contribution.providerVersion, contribution.payload)
-        : contribution.payload
-      const item = provider.prepareApply(payload, { policy: contribution.policy, scope, bundleId: bundle.id })
-      prepared.push(item)
-      summaries.push(...item.summary)
+      try {
+        const payload = provider.migrate && contribution.providerVersion !== provider.schemaVersion
+          ? provider.migrate(contribution.providerVersion, contribution.payload)
+          : contribution.payload
+        const item = provider.prepareApply(payload, { policy: contribution.policy, scope, bundleId: bundle.id })
+        prepared.push(item)
+        preparedProviderIds.push(providerId)
+        summaries.push(...item.summary)
+      } catch (error) {
+        throw new PresetProviderTransactionError(providerId, 'prepare', error)
+      }
     }
   } catch (error) {
     // Best effort rollback; preserve the original prepare error.
@@ -138,7 +177,12 @@ export function preparePresetBundle(
     commit: async () => {
       if (settled) return
       try {
-        for (const item of prepared) await item.commit()
+        for (let index = 0; index < prepared.length; index += 1) {
+          try { await prepared[index]!.commit() }
+          catch (error) {
+            throw new PresetProviderTransactionError(preparedProviderIds[index] ?? 'unknown', 'commit', error)
+          }
+        }
         settled = true
       } catch (error) {
         for (let index = prepared.length - 1; index >= 0; index--) {

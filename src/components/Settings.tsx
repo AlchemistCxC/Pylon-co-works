@@ -12,7 +12,8 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import { useWorkspaceStore } from '../workspaceStore'
-import { pickCustomPresetTheme } from '../customPresets'
+import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
+import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
@@ -214,6 +215,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
   const [customPresetFeedback, setCustomPresetFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [applyingPresetId, setApplyingPresetId] = useState<string | null>(null)
+  const presetApplyRequest = useRef(0)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnectPending, setReconnectPending] = useState(false)
   const [reconnectCommandError, setReconnectCommandError] = useState<string | null>(null)
@@ -237,6 +240,43 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
     applyGlobalPresetTransaction(name)
+  }
+
+  const applyCustomPresetTransaction = (requestedId: string): Promise<PresetApplyResult> =>
+    applyCustomPreset(normalizeCustomPresetId(requestedId))
+
+  const applyCustomPresetFromSettings = async (requestedId: string): Promise<PresetApplyResult> => {
+    const id = normalizeCustomPresetId(requestedId)
+    const request = ++presetApplyRequest.current
+    setApplyingPresetId(id)
+    setCustomPresetFeedback(null)
+    try {
+      const result = await applyCustomPreset(id)
+      if (request !== presetApplyRequest.current) return result
+      if (result.status === 'applied') {
+        setCustomPresetFeedback({
+          kind: 'success',
+          message: result.unavailable && result.unavailable.length > 0
+            ? `自定义预设已应用（不可用提供者：${result.unavailable.join('、')}）`
+            : '自定义预设已应用',
+        })
+      } else {
+        setCustomPresetFeedback({
+          kind: 'error',
+          message: `自定义预设应用失败（${result.failedProvider}）：${result.message}`,
+        })
+      }
+      return result
+    } catch (error) {
+      const detail = reportRuntimeError('应用自定义预设', error)
+      const result: PresetApplyResult = {
+        status: 'failed', id, failedProvider: 'unknown', message: detail.message, rolledBack: false, revision: request,
+      }
+      if (request === presetApplyRequest.current) setCustomPresetFeedback({ kind: 'error', message: `自定义预设应用失败：${detail.message}` })
+      return result
+    } finally {
+      if (request === presetApplyRequest.current) setApplyingPresetId(null)
+    }
   }
 
   // 改单个字段 — 标记当前 section 对应的 zone 为 custom（非主题 section 回退 global）
@@ -467,7 +507,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'templates':
         return (
           <Group title="模板库">
-            <TemplateLibrary onApply={applyGlobalPreset} onRestore={applyGlobalPreset} />
+            <TemplateLibrary onApply={applyGlobalPreset} onRestore={applyGlobalPreset} onCustomApply={applyCustomPresetTransaction} />
           </Group>
         )
       case 'pet':
@@ -512,8 +552,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                   onClick={() => {
                     const id = saveCustomPresetFromSettings(customPresetName)
                     if (id) {
-                      applyCustomPreset(id)
-                      setCustomPresetName('')
+                      void applyCustomPresetFromSettings(id).then(result => {
+                        if (result.status === 'applied') setCustomPresetName('')
+                      })
                     }
                   }}>保存当前</button>
               </div>
@@ -525,7 +566,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
               )}
               {customPresets.length > 0 && <div className="set-custom-presets">
                 {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
-                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} disabled={applyingPresetId !== null} aria-busy={applyingPresetId === preset.id || undefined} onClick={() => { void applyCustomPresetFromSettings(preset.id) }}>{preset.name}</button>
                   <button type="button" className="ps-btn sm" onClick={() => { void saveCustomPresetFromSettings(preset.name, preset.id) }}>覆盖</button>
                   <button type="button" className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
                 </div>)}

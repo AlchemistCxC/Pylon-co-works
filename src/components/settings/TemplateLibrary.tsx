@@ -1,11 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { GLOBAL_PRESETS } from '../../presets'
 import { THEME_DEFAULTS } from '../../themeFieldDefs'
 import SettingsPreview from '../SettingsPreview'
 import type { ThemeSettings } from '../../store'
 import { themeToCssVars } from './templateThemeVars.ts'
-import { createPresetBundle, presetCoverage } from '../../domains/theme/presetBundle.ts'
+import { createPresetBundle, presetCoverage, type PresetApplyResult } from '../../domains/theme/presetBundle.ts'
+import { normalizeCustomPresetId } from '../../customPresets.ts'
 
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。
@@ -16,12 +17,16 @@ import { createPresetBundle, presetCoverage } from '../../domains/theme/presetBu
  * 默认」重应用当前模板 delta（清手调字段）。
  */
 
-export default function TemplateLibrary({ onApply, onRestore }: {
-  onApply: (presetName: string) => void
-  onRestore: (presetName: string) => void
+export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
+  onApply: (presetName: string) => void | Promise<void>
+  onRestore: (presetName: string) => void | Promise<void>
+  onCustomApply?: (presetId: string) => Promise<PresetApplyResult>
 }) {
   const customPresets = useStore(s => s.customPresets)
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
+  const [applyingId, setApplyingId] = useState<string | null>(null)
+  const applyingRef = useRef<string | null>(null)
+  const [applyFeedback, setApplyFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const official = useMemo(() => GLOBAL_PRESETS.map(preset => ({
     id: `official:${preset.name}`,
     name: preset.name,
@@ -38,6 +43,39 @@ export default function TemplateLibrary({ onApply, onRestore }: {
     bundle: preset.bundle,
   })), [customPresets])
 
+  const applyTemplate = async (template: { id: string; name: string }) => {
+    if (applyingRef.current) return
+    const custom = template.id.startsWith('custom:')
+    applyingRef.current = template.id
+    setApplyingId(template.id)
+    setApplyFeedback(null)
+    try {
+      if (custom) {
+        const result = await (onCustomApply
+          ? onCustomApply(normalizeCustomPresetId(template.name))
+          : applyCustomPreset(normalizeCustomPresetId(template.name)))
+        if (result.status === 'applied') {
+          setApplyFeedback({
+            kind: 'success',
+            message: result.unavailable && result.unavailable.length > 0
+              ? `自定义预设已应用（不可用提供者：${result.unavailable.join('、')}）`
+              : '自定义预设已应用',
+          })
+        } else {
+          setApplyFeedback({ kind: 'error', message: `自定义预设应用失败（${result.failedProvider}）：${result.message}` })
+        }
+      } else {
+        await onApply(template.name)
+        setApplyFeedback({ kind: 'success', message: '预设已应用' })
+      }
+    } catch (error) {
+      setApplyFeedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+    } finally {
+      applyingRef.current = null
+      setApplyingId(null)
+    }
+  }
+
   const renderCard = (template: { id: string; name: string; label: string; theme: Partial<ThemeSettings>; bundle?: import('../../domains/theme/presetBundle.ts').PresetBundleV2 }) => (
     <div
       key={template.id}
@@ -47,10 +85,9 @@ export default function TemplateLibrary({ onApply, onRestore }: {
         <SettingsPreview zone="global" />
       </div>
       <div className="template-actions">
-        <button type="button" className="template-apply" onClick={() => {
-          if (template.id.startsWith('custom:')) applyCustomPreset(template.name)
-          else onApply(template.name)
-        }}>应用</button>
+        <button type="button" className="template-apply" disabled={applyingId !== null} aria-busy={applyingId === template.id || undefined} onClick={() => { void applyTemplate(template) }}>
+          {applyingId === template.id ? '应用中…' : '应用'}
+        </button>
         {!template.id.startsWith('custom:') && (
           <button type="button" className="template-restore" onClick={() => onRestore(template.name)}>恢复此模板默认</button>
         )}
@@ -74,6 +111,7 @@ export default function TemplateLibrary({ onApply, onRestore }: {
 
   return (
     <div className="template-library">
+      {applyFeedback && <div className={`template-apply-feedback is-${applyFeedback.kind}`} role={applyFeedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{applyFeedback.message}</div>}
       <div className="template-section">
         <div className="file-section-title">官方模板</div>
         <div className="template-grid">{official.map(renderCard)}</div>

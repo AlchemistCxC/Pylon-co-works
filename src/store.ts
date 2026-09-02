@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { reportRuntimeError } from './runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState.ts'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
-import { createCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
+import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { ZONE_FIELDS } from './themeFieldDefs.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
@@ -24,7 +24,7 @@ import {
 import type { Profile } from './identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
-import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, recordPayload, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
+import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, PresetProviderTransactionError, recordPayload, type PresentationPresetPayload, type PresetApplyResult, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
@@ -127,13 +127,16 @@ type ThemeState = ThemeSettings & {
   setZoneField: (zone: string, partial: Partial<ThemeSettings>, source?: SettingWriteSource) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
   saveCustomPreset: (name: string, id?: string) => string
-  applyCustomPreset: (id: string) => void
+  applyCustomPreset: (id: string) => Promise<PresetApplyResult>
   removeCustomPreset: (id: string) => void
 }
 
 // clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
 
 // DEFAULTS 定义移入 domains/theme/themeDefaults.ts（可被 node import → 完整性断言测试）
+
+let customPresetApplyRevision = 0
+let customPresetApplyTail: Promise<void> = Promise.resolve()
 
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
@@ -275,81 +278,117 @@ export const useStore = create<ThemeState>()(persist(
     set(patch)
     return savedId
   },
-  applyCustomPreset: (id) => {
-    const preset = get().customPresets.find(item => item.id === id)
-    // D-fix：查不到预设必须可见地报告（此前静默 return——持久化引用漂移时
-    // 表现为"切换了但什么都没发生"）。
-    if (!preset) {
-      reportRuntimeError('应用自定义预设', new Error(`自定义预设不存在：${id}`))
-      return
-    }
-    const bundle = normalizePresetBundle(preset.bundle) ?? adaptLegacyThemePreset({
-      id: preset.id,
-      name: preset.name,
-      theme: toPresetJson(preset.theme),
-      createdAt: preset.createdAt,
-      updatedAt: preset.updatedAt,
-    })
-    // 主题 payload 单一真值：bundle 里的保存态 delta（免疫 appliedPreset 引用
-    // 与列表 id 的漂移），回退用 preset.theme 本体。
-    const themePayload = (recordPayload(bundle.contributions['builtin.theme']?.payload)) as Record<string, unknown>
-    const beforeTheme = Object.fromEntries([
-      ...THEME_SETTING_KEYS.map(key => [key, get()[key]] as const),
-      ['appliedPreset', get().appliedPreset],
-      ['custom', get().custom],
-      ['customPresets', get().customPresets],
-    ])
-    const beforePresentation = usePresentationPreferenceStore.getState()
-    const rendererStore = getRendererSettingsStore()
-    const beforeRenderer = rendererStore.getSnapshot()
-    const registry = createFirstPartyPresetProviderRegistry({
-      captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
-      applyTheme: () => set(state => {
-        const patch = applyCustomPresetReducer(state, id, themePayload)
-        // D-fix：reducer 落空（查不到保存态）必须可见，禁止 ?? {} 静默吞掉。
-        if (!patch) {
-          reportRuntimeError('应用自定义预设', new Error(`自定义预设主题缺失：${id}`))
-          return {}
-        }
-        recordSettingWrites('custom-preset', id, Object.keys(patch))
-        return patch
-      }),
-      restoreTheme: () => set(beforeTheme),
-      capturePresentation: () => ({
-        activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
-        rendererSuiteIdByMode: usePresentationPreferenceStore.getState().rendererSuiteIdByMode,
-      }),
-      applyPresentation: payload => {
-        if (typeof payload.activeProfileId === 'string') usePresentationPreferenceStore.getState().setActiveProfileId(payload.activeProfileId)
-        if (payload.rendererSuiteIdByMode) for (const [mode, suiteId] of Object.entries(payload.rendererSuiteIdByMode)) {
-          if (typeof suiteId === 'string') usePresentationPreferenceStore.getState().setRendererSuiteId(mode, suiteId)
-        }
-      },
-      restorePresentation: () => usePresentationPreferenceStore.setState({
+  applyCustomPreset: id => {
+    const revision = ++customPresetApplyRevision
+    const run = async (): Promise<PresetApplyResult> => {
+      const canonicalId = normalizeCustomPresetId(id)
+      const preset = get().customPresets.find(item => normalizeCustomPresetId(item.id) === canonicalId)
+      const presetId = canonicalId
+      // D-fix：查不到预设必须可见地报告（此前静默 return——持久化引用漂移时
+      // 表现为"切换了但什么都没发生"）。
+      if (!preset) {
+        const message = `自定义预设不存在：${canonicalId}`
+        reportRuntimeError('应用自定义预设', new Error(message))
+        return { status: 'failed', id: canonicalId, failedProvider: 'preset', message, rolledBack: true, revision }
+      }
+
+      const bundle = normalizePresetBundle(preset.bundle) ?? adaptLegacyThemePreset({
+        id: preset.id,
+        name: preset.name,
+        theme: toPresetJson(preset.theme),
+        createdAt: preset.createdAt,
+        updatedAt: preset.updatedAt,
+      })
+      const themeContribution = bundle.contributions['builtin.theme']
+      const themePayloadValue = themeContribution?.payload
+      if (!themeContribution || !themePayloadValue || typeof themePayloadValue !== 'object' || Array.isArray(themePayloadValue)) {
+        const message = `自定义预设主题缺失：${presetId}`
+        reportRuntimeError('准备应用预设', new Error(message))
+        return { status: 'failed', id: presetId, failedProvider: 'builtin.theme', message, rolledBack: true, revision }
+      }
+      // 主题 payload 单一真值：bundle 里的保存态 delta（免疫 appliedPreset 引用
+      // 与列表 id 的漂移），回退用 preset.theme 本体。
+      const themePayload = recordPayload(themePayloadValue) as Record<string, unknown>
+      const state = get()
+      const beforeTheme = Object.fromEntries([
+        ...THEME_SETTING_KEYS.map(key => [key, state[key]] as const),
+        ['appliedPreset', structuredClone(state.appliedPreset)],
+        ['custom', structuredClone(state.custom)],
+        ['customPresets', structuredClone(state.customPresets)],
+      ])
+      const beforePresentation = usePresentationPreferenceStore.getState()
+      const beforePresentationSnapshot = {
         activeProfileId: beforePresentation.activeProfileId,
-        rendererSuiteIdByMode: beforePresentation.rendererSuiteIdByMode,
-      }),
-      captureRenderer: () => ({ values: beforeRenderer.values, unavailable: beforeRenderer.unavailable }),
-      applyRenderer: (payload, context) => {
-        const current = rendererStore.getSnapshot()
-        rendererStore.replaceOverrides(
-          context.policy === 'complete' ? (payload.values ?? {}) : (payload.values ?? current.values),
-          context.policy === 'complete' ? (payload.unavailable ?? {}) : (payload.unavailable ?? current.unavailable),
-        )
-      },
-      restoreRenderer: () => rendererStore.replaceOverrides(beforeRenderer.values, beforeRenderer.unavailable),
-    })
-    let prepared
-    try {
-      prepared = preparePresetBundle(markUnavailablePresetProviders(bundle, registry), registry)
-    } catch (error) {
-      reportRuntimeError('准备应用预设', error)
-      return
+        rendererSuiteIdByMode: structuredClone(beforePresentation.rendererSuiteIdByMode),
+      }
+      const rendererStore = getRendererSettingsStore()
+      const beforeRenderer = rendererStore.getSnapshot()
+      const registry = createFirstPartyPresetProviderRegistry({
+        captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
+        applyTheme: () => set(current => {
+          const patch = applyCustomPresetReducer(current, presetId, themePayload)
+          if (!patch) throw new Error(`自定义预设主题缺失：${presetId}`)
+          recordSettingWrites('custom-preset', presetId, Object.keys(patch))
+          return patch
+        }),
+        restoreTheme: () => set(beforeTheme),
+        capturePresentation: () => ({
+          activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
+          rendererSuiteIdByMode: usePresentationPreferenceStore.getState().rendererSuiteIdByMode,
+        }),
+        applyPresentation: payload => {
+          if (typeof payload.activeProfileId === 'string') usePresentationPreferenceStore.getState().setActiveProfileId(payload.activeProfileId)
+          if (payload.rendererSuiteIdByMode) for (const [mode, suiteId] of Object.entries(payload.rendererSuiteIdByMode)) {
+            if (typeof suiteId === 'string') usePresentationPreferenceStore.getState().setRendererSuiteId(mode, suiteId)
+          }
+        },
+        restorePresentation: () => usePresentationPreferenceStore.setState(beforePresentationSnapshot),
+        captureRenderer: () => ({ values: beforeRenderer.values, unavailable: beforeRenderer.unavailable }),
+        applyRenderer: (payload, context) => {
+          const current = rendererStore.getSnapshot()
+          rendererStore.replaceOverrides(
+            context.policy === 'complete' ? (payload.values ?? {}) : (payload.values ?? current.values),
+            context.policy === 'complete' ? (payload.unavailable ?? {}) : (payload.unavailable ?? current.unavailable),
+          )
+        },
+        restoreRenderer: () => rendererStore.replaceOverrides(beforeRenderer.values, beforeRenderer.unavailable),
+      })
+      const classified = markUnavailablePresetProviders(bundle, registry)
+      const expectedProviderIds = ['builtin.theme', 'builtin.presentation', 'builtin.renderer-settings']
+      const unavailable = [...new Set([
+        ...expectedProviderIds.filter(providerId => !bundle.contributions[providerId] || !registry.resolve(providerId)),
+        ...Object.keys(bundle.contributions).filter(providerId => !registry.resolve(providerId)),
+      ])]
+      const providerIds = Object.keys(bundle.contributions).filter(providerId => registry.resolve(providerId))
+      let prepared
+      try {
+        prepared = preparePresetBundle(classified, registry)
+        await prepared.commit()
+      } catch (error) {
+        const failedProvider = error instanceof PresetProviderTransactionError ? error.providerId : 'unknown'
+        const message = error instanceof Error ? error.message : String(error)
+        reportRuntimeError('应用预设', error)
+        return { status: 'failed', id: presetId, failedProvider, message, rolledBack: true, revision }
+      }
+      return {
+        status: 'applied', id: presetId, providers: Object.freeze(providerIds), revision,
+        ...(unavailable.length > 0 ? { unavailable: Object.freeze(unavailable) } : {}),
+      }
     }
-    const commitResult = prepared.commit()
-    if (commitResult && typeof (commitResult as Promise<void>).then === 'function') {
-      void Promise.resolve(commitResult).catch((error: unknown) => reportRuntimeError('应用预设', error))
+
+    const safeRun = async (): Promise<PresetApplyResult> => {
+      try {
+        return await run()
+      } catch (error) {
+        const canonicalId = normalizeCustomPresetId(id)
+        const message = error instanceof Error ? error.message : String(error)
+        reportRuntimeError('应用预设', error)
+        return { status: 'failed', id: canonicalId, failedProvider: 'unknown', message, rolledBack: false, revision }
+      }
     }
+    const pending = customPresetApplyTail.then(safeRun, safeRun)
+    customPresetApplyTail = pending.then(() => undefined, () => undefined)
+    return pending
   },
   removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
 }),

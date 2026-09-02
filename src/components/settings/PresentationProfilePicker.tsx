@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { applyPresentationProfile } from '../../application/transactions/applyPresentationProfile.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
@@ -15,22 +15,30 @@ export default function PresentationProfilePicker() {
   ).entries
   const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const familyLabels: Record<string, string> = { terminal: '终端', reading: '阅读', hybrid: '混合', gui: 'GUI', custom: '插件' }
 
   const activate = (id: string) => {
     const profile = profileRegistry.resolve(id)?.value
-    if (!profile) return
-    applyPresentationProfile(profile, {
+    if (!profile) {
+      setFeedback({ kind: 'error', message: `呈现风格不存在：${id}` })
+      return
+    }
+    const result = applyPresentationProfile(profile, {
       setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
       setActiveProfileId: next => {
         usePresentationPreferenceStore.getState().setActiveProfileId(next)
         useInterfaceModeStore.getState().rememberProfile(interfaceMode, next)
       },
     })
+    setFeedback(result.status === 'applied'
+      ? { kind: 'success', message: '呈现风格已应用' }
+      : { kind: 'error', message: `呈现风格应用失败（${result.failedProvider}）：${result.message}` })
   }
 
   return (
     <div className="presentation-settings" data-pylon-component="presentation-profile-picker">
+      {feedback && <div className={`presentation-profile-feedback is-${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{feedback.message}</div>}
       <div className="presentation-profile-grid" aria-label="渲染风格">
         {profiles.filter(entry => presentationProfileInterfaceMode(entry.value) === interfaceMode).map(entry => {
           const profile = entry.value
