@@ -123,6 +123,47 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('canonical 活动态投影缺少运行行时仍保持 controller 的计时起点', async () => {
+    const active = session('session-clock', 'local:clock')
+    const controller = {
+      subscribe: () => () => {},
+      getGenerating: () => true,
+      getStartTime: () => 1_700_000_000_000,
+      getLastActivityAt: () => 1_700_000_012_000,
+      getGenerationPhase: () => ({ kind: 'thinking' as const }),
+      getGenerationActivity: () => undefined,
+      getThinkingStart: () => undefined,
+      getTokenCount: () => 0,
+      getSummary: () => undefined,
+      rejectOptimisticUser: () => {},
+    }
+    let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      subscribe: listener => { publish = listener; return () => { publish = undefined } },
+      chatController: () => controller,
+    })
+    await service.bind(active)
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_047_000)
+
+    publish?.(createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'clock-status' },
+      identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'session.status-updated', status: 'running' },
+    }))
+
+    expect(service.runtime.getSnapshot()).toMatchObject({
+      generating: true,
+      generationStart: 1_700_000_000_000,
+      lastTokenAt: 1_700_000_012_000,
+    })
+    service.destroy()
+  })
+
   it('同一绑定身份的 Session 元数据更新不会重建流式文档', async () => {
     let loads = 0
     let liveEvent: ((event: WorkbenchEventEnvelope) => void) | undefined

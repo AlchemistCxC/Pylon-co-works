@@ -475,7 +475,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       envelope,
     })
     pendingOptimisticBySource.set(targetSource, existing)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
       generationStart: now,
@@ -551,7 +551,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       buffered.push(envelope)
       return
     }
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
   }
 
   const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
@@ -593,7 +593,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelope = confirmPendingFromEnvelope(incoming)
     if (loading) { buffered.push(envelope); return }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
   }
   const unsubscribeEvents = subscribe(event => {
     if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return

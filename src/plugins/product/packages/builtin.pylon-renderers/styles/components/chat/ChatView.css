@@ -1933,8 +1933,10 @@
 .app[data-interface-mode="terminal-like"] .term-row-reasoning {
   font-family:var(--chat-font,var(--mono));
 }
-/* Collapsed thought rows are a label-only rail; remove their inner vertical
-   padding so the shared row cadence is not counted twice before the answer. */
+/* Collapsed thought rows are a label-only rail, but their header must occupy
+   the same vertical inset as the expanded state.  Removing this padding only
+   while collapsed made “思考过程” jump down when the body opened.  The outer
+   row cadence remains the single source of inter-block spacing. */
 .app[data-interface-mode="terminal-like"] .term-row-reasoning:has(.term-collapse[data-open="false"]) .term-reasoning {
-  padding-block:0;
+  padding-block: var(--ui-space-1);
 }

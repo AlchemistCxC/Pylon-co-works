@@ -176,7 +176,17 @@
   font: 12px var(--mono);
 }
 .browser-address::placeholder { color: var(--text-placeholder); }
-.browser-address-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent); }
+/* Keep focus inside the address control's existing 30px geometry.  An outer
+   ring made the toolbar jump visually against the WebView; the inset accent
+   rule is visible for keyboard focus without changing layout or hit targets. */
+.browser-address-wrap:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.browser-address:focus-visible {
+  outline: 1px solid var(--state-focus-ring);
+  outline-offset: -1px;
+}
 .browser-zoom-toggle {
   min-width: 52px;
   height: 30px;

@@ -74,6 +74,14 @@ export interface WorkbenchDocumentApplyOptions {
   readonly generation?: number
   /** replaceDocument may explicitly clear the active session. */
   readonly sessionId?: string | null
+  /**
+   * Keep the host-owned generation clock while applying a document projection.
+   * The canonical document and the live controller are separate streams; a
+   * projection can briefly omit running rows (or their timestamps) while a
+   * turn is still active.  Callers that own an authoritative live generation
+   * reader set this flag so that gap cannot reset elapsed time.
+   */
+  readonly preserveGeneration?: boolean
 }
 
 /** Mutable document runtime used by production composition and preview fixtures. */
@@ -135,9 +143,12 @@ export function createWorkbenchRuntime(
       if (!acceptDocument(options)) return
       const nextDocument = freezeDocument(document, snapshot.document)
       const legacy = legacyFieldsFromDocument(nextDocument)
+      const stableLegacy = options.preserveGeneration
+        ? preserveActiveGeneration(snapshot, legacy)
+        : legacy
       publish({
         ...snapshot,
-        ...legacy,
+        ...stableLegacy,
         document: nextDocument,
         sessionId: nextDocument.sessionId || snapshot.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
@@ -385,6 +396,31 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
           : generating ? { kind: 'thinking' } : undefined,
     thinkingStart: timestampOf(runningReasoning?.time),
     error,
+  }
+}
+
+/**
+ * Reconcile a canonical document projection with the host's live generation
+ * clock.  `legacyFieldsFromDocument` is intentionally deterministic, but an
+ * in-flight projection may contain no running message/activity (or may carry
+ * a transient session status).  Falling back to `Date.now()` in that window
+ * makes the footer jump back to 0–1s.  The live controller remains the source
+ * of truth for the active turn, so retain its ephemeral fields until it
+ * explicitly publishes the terminal state.
+ */
+function preserveActiveGeneration(
+  previous: WorkbenchRuntimeSnapshot,
+  projected: Partial<WorkbenchRuntimeSnapshot>,
+): Partial<WorkbenchRuntimeSnapshot> {
+  if (!previous.generating) return projected
+  return {
+    ...projected,
+    generating: true,
+    ...(previous.generationStart > 0 ? { generationStart: previous.generationStart } : {}),
+    ...(previous.lastTokenAt !== undefined ? { lastTokenAt: previous.lastTokenAt } : {}),
+    ...(previous.generationPhase !== undefined ? { generationPhase: previous.generationPhase } : {}),
+    ...(previous.generationActivity !== undefined ? { generationActivity: previous.generationActivity } : {}),
+    ...(previous.thinkingStart !== undefined ? { thinkingStart: previous.thinkingStart } : {}),
   }
 }
 

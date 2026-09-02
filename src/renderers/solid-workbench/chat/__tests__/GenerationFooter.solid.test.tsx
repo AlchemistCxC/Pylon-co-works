@@ -113,6 +113,63 @@ describe('SolidGenerationFooter', () => {
     expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(0s)')
   })
 
+  it('同一运行回合收到瞬态 0 起点时不把经过时间重置为 1s', async () => {
+    const clock = createFakeWorkbenchClock(1_700_000_000_000)
+    const [startTime, setStartTime] = createSignal(clock.now() - 10_000)
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={0} startTime={startTime()} lastTokenAt={clock.now()} summary={null}
+      appearance={APPEARANCE} clock={clock} random={() => 0}
+    />)
+
+    clock.advance(47_000)
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(57s)')
+
+    // The canonical projection can briefly expose its legacy zero sentinel
+    // while the controller still reports the same active generation.
+    setStartTime(0)
+    await Promise.resolve()
+    clock.advance(120)
+    await waitFor(() => expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(57s)'))
+
+    setStartTime(clock.now())
+    clock.advance(120)
+    await waitFor(() => expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(57s)'))
+  })
+
+  it('两个会话同时运行时按 generationKey 隔离计时，并继续忽略新会话内的瞬态起点', async () => {
+    const clock = createFakeWorkbenchClock(1_700_000_000_000)
+    const [generation, setGeneration] = createSignal({
+      key: 'session-a',
+      start: clock.now() - 60_000,
+      lastTokenAt: clock.now(),
+    })
+    const result = render(() => <SolidGenerationFooter
+      running
+      generationKey={generation().key}
+      tokenCount={0}
+      startTime={generation().start}
+      lastTokenAt={generation().lastTokenAt}
+      summary={null}
+      appearance={APPEARANCE}
+      clock={clock}
+      random={() => 0}
+    />)
+
+    clock.advance(10_000)
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(1m 10s)')
+
+    // The host switches to an already-running session without a false→true
+    // edge. Its identity and authoritative start are published together.
+    setGeneration({ key: 'session-b', start: clock.now() - 2_000, lastTokenAt: clock.now() })
+    await waitFor(() => expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(2s)'))
+
+    // A split document projection may still publish a zero/current-time
+    // sentinel for the same owner; it must not reopen the elapsed clock.
+    setGeneration({ key: 'session-b', start: 0, lastTokenAt: clock.now() })
+    clock.advance(120)
+    await waitFor(() => expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(2s)'))
+  })
+
   it('tool phase 抑制 stalled，并使用工具标题；active task 覆盖 phase', () => {
     const clock = createFakeWorkbenchClock(10_000)
     const tool = render(() => <SolidGenerationFooter

@@ -60,12 +60,14 @@ SENSITIVE_KEY_RE = re.compile(
 )
 DRIVE_PATH_RE = re.compile(r"\b[A-Za-z]:[\\/]")
 PLACEHOLDER_MARKERS = ("path\\to", "path/to", "your-", "example", "占位", "...")
-SDK_REQUIRED_FILES = frozenset({
+# 插件开发 SDK：发行包附带完整离线分发包（2026-09-01 用户决定——不再只带最小
+# runtime 子集，插件开发者需拿到 testing.js + types/ 类型声明全套）。
+DEV_SDK_DIR = REPO_DIR / "dist-plugin-sdk" / "normal"
+DEV_SDK_REQUIRED = frozenset({
     "pylon-plugin-sdk.js",
+    "testing.js",
     "pylon-plugin-manifest.schema.json",
 })
-SDK_MAX_BUNDLE_BYTES = 64 * 1024
-SDK_FORBIDDEN_MARKERS = ("createMockContext", "PluginScope", "testing.js")
 
 
 class PackError(Exception):
@@ -193,51 +195,30 @@ def append_tree_files(
             files.append((full, f"{package_root.rstrip('/')}/{rel}"))
 
 
-def validate_offline_sdk(resources_dir: Path) -> None:
-    """Ensure the Tauri-copied SDK is the minimal offline distribution.
+def collect_dev_sdk() -> list[tuple[Path, str]]:
+    """收集完整插件开发 SDK（dist-plugin-sdk/normal 全量）到 resources/sdk/。
 
-    The release packer intentionally validates the copied ``target/release``
-    resources, rather than silently falling back to the source tree.  This
-    catches stale/partial Tauri builds before an archive is published.
+    发行包附带完整离线 SDK 分发包：pylon-plugin-sdk.js（纯浏览器 ESM runtime）
+    + testing.js（测试基建）+ types/ 全套类型声明 + manifest schema。
     """
-    sdk_dir = resources_dir / "sdk"
-    if not sdk_dir.is_dir():
+    if not DEV_SDK_DIR.is_dir():
         raise PackError(
-            f"缺少离线插件 SDK 目录: {sdk_dir}。"
-            "请先运行 npm run build:plugin-sdk，再重新构建 Tauri release。"
+            f"缺少插件开发 SDK 目录: {DEV_SDK_DIR}。"
+            "请先运行 npm run build:plugin-sdk，再打包。"
         )
 
     files = {
-        path.relative_to(sdk_dir).as_posix(): path
-        for path in sdk_dir.rglob("*")
+        path.relative_to(DEV_SDK_DIR).as_posix(): path
+        for path in DEV_SDK_DIR.rglob("*")
         if path.is_file()
     }
-    missing = sorted(SDK_REQUIRED_FILES - files.keys())
+    missing = sorted(DEV_SDK_REQUIRED - files.keys())
     if missing:
-        raise PackError(f"离线插件 SDK 缺少文件: {', '.join(missing)}")
-    unexpected = sorted(set(files) - SDK_REQUIRED_FILES)
-    if unexpected:
         raise PackError(
-            "离线插件 SDK 只能包含 runtime 与 manifest，发现额外文件: "
-            + ", ".join(unexpected)
+            f"插件开发 SDK 缺少文件: {', '.join(missing)}。"
+            "请重新运行 npm run build:plugin-sdk。"
         )
-
-    bundle = files["pylon-plugin-sdk.js"]
-    size = bundle.stat().st_size
-    if size > SDK_MAX_BUNDLE_BYTES:
-        raise PackError(
-            f"离线插件 SDK bundle {size} 字节超过 {SDK_MAX_BUNDLE_BYTES} 字节上限"
-        )
-    try:
-        bundle_text = bundle.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise PackError(f"读取离线插件 SDK bundle 失败: {bundle}: {exc}") from exc
-    leaked = [marker for marker in SDK_FORBIDDEN_MARKERS if marker in bundle_text]
-    if leaked:
-        raise PackError(
-            "离线插件 SDK 不得包含 testing/宿主运行时闭包，发现标记: "
-            + ", ".join(leaked)
-        )
+    return [(path, f"resources/sdk/{rel}") for rel, path in sorted(files.items())]
 
 
 def collect_source_files(version: str, without_webview2: bool, with_runtime: bool = False) -> list[tuple[Path, str]]:
@@ -274,13 +255,18 @@ def collect_source_files(version: str, without_webview2: bool, with_runtime: boo
     if not resources_dir.is_dir():
         raise PackError(
             f"release resources 目录不存在: {resources_dir}。"
-            "离线插件 SDK 是发行包必需资源。"
+            "插件开发 SDK 是发行包必需资源。"
         )
-    validate_offline_sdk(resources_dir)
+    # 插件开发 SDK：完整离线分发包取自 dist-plugin-sdk/normal（2026-09-01 用户
+    # 决定，不再使用 Tauri 拷贝的最小 runtime 子集——插件开发者需要 testing.js
+    # 与 types/ 全套类型声明）。
+    files.extend(collect_dev_sdk())
     for root, _dirs, names in os.walk(resources_dir):
         for name in names:
             full = Path(root) / name
             rel = full.relative_to(RELEASE_DIR).as_posix()
+            if rel.startswith("resources/sdk/"):
+                continue  # SDK 由 dist-plugin-sdk 全量提供，跳过 Tauri 最小集
             files.append((full, rel))
 
     # Hermes PortableGit runtime：默认排除（2026-08-31 用户决定——bash 已在标准路径

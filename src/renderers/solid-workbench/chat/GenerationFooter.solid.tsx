@@ -69,12 +69,14 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   let destroyed = false
   let observedStartTime = props.startTime
   let observedGenerationRunning = props.running
-  let observedGenerationStartTime = props.startTime
+  let observedGenerationKey = props.generationKey ?? ''
   let observedVerbSignature = verbSignature()
   let observedCopyPrimary: string | undefined
   let observedCopyLiveness: GenerationLiveness | undefined
   let observedContextSignature = ''
-  let effectiveStartTime = normalizeGenerationStart(props.startTime, clock().now())
+  const [effectiveStartTime, setEffectiveStartTime] = createSignal(
+    normalizeGenerationStart(props.startTime, clock().now()),
+  )
 
   const clearHotTimer = () => {
     if (hotTimer !== null) clock().clearInterval(hotTimer)
@@ -162,7 +164,13 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     const nextStartTime = props.startTime
     if (nextStartTime === observedStartTime) return
     observedStartTime = nextStartTime
-    effectiveStartTime = normalizeGenerationStart(nextStartTime, clock().now())
+    // `startTime` is projected by a different host reader than the live
+    // generation flag. During a turn that projection can briefly publish its
+    // zero/current-time sentinel. The running edge below owns lifecycle
+    // boundaries; never let a mid-turn hint reset the clock (the reset would
+    // surface as an elapsed value stuck at 0–1s). While idle, keep the latest
+    // hint ready for the next run.
+    if (!props.running) setEffectiveStartTime(normalizeGenerationStart(nextStartTime, clock().now()))
   })
 
   createEffect(() => {
@@ -199,24 +207,45 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   }))
   const secondaryContext = () => copy().secondary
 
-  // 生成生命周期只在 running 由 false→true 或 startTime 变化时开启新 generation。
-  // generation id 不暴露给协议，专门用于阻断旧定时器回写新回合。
+  // 生成生命周期只在 running 由 false→true、宿主明确切换 owner/session，
+  // 或 Footer 尚未建立 generation 时开启。generation id 不暴露给协议，
+  // 专门用于阻断旧定时器回写新回合。
   createEffect(() => {
     const running = props.running
-    const startTime = props.startTime
+    const generationKey = props.generationKey ?? ''
     const previousRunning = observedGenerationRunning
-    const previousStartTime = observedGenerationStartTime
+    const previousGenerationKey = observedGenerationKey
+    const generationKeyChanged = generationKey !== previousGenerationKey
+    // A generation is a lifecycle edge, not every projection write.  The
+    // document and live-controller readers may publish different start times
+    // for a few microtasks; treating that write as a new generation resets the
+    // footer to one second. A stable owner/session key is the one exception:
+    // it tells us that two sessions are being viewed while both remain
+    // running, so the local footer state must be isolated for the new owner.
     const startsNewGeneration = running && (
-      !previousRunning || startTime !== previousStartTime || !currentGenerationId()
+      !previousRunning || !currentGenerationId() || generationKeyChanged
     )
 
     observedGenerationRunning = running
-    observedGenerationStartTime = startTime
+    observedGenerationKey = generationKey
 
     if (startsNewGeneration) {
+      const previousId = currentGenerationId()
+      if (previousId && generationKeyChanged) {
+        // A key switch can happen without a false→true edge. Finish the old
+        // copy state first so a pending timer cannot leak its text into the
+        // newly selected session; `dispatchCopy` also clears that timer.
+        dispatchCopy({ type: 'finish', generationId: previousId, at: clock().now() })
+      }
       const id = `generation-${++generationSerial}`
       const preset = chooseGenerationIndicatorVerb(configuredVerbs(), props.random ?? Math.random)
-      effectiveStartTime = normalizeGenerationStart(startTime, clock().now())
+      setEffectiveStartTime(normalizeGenerationStart(props.startTime, clock().now()))
+      // `effectiveStartTime` is intentionally updated only at lifecycle
+      // boundaries (it must not react to every projected timestamp write).
+      // Publishing it through a signal also forces one repaint when a real
+      // key switch happens while the footer remains mounted.
+      setNow(clock().now())
+      setDisplayedTokens(0)
       setCurrentGenerationId(id)
       setSelectedPresetVerb(preset)
       observedCopyPrimary = undefined
@@ -228,6 +257,12 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
       if (id) dispatchCopy({ type: 'finish', generationId: id, at: clock().now() })
       setCurrentGenerationId('')
       setSelectedPresetVerb('')
+    }
+
+    // Keep an idle footer ready for the next owner without starting a copy
+    // machine generation before the host reports `running`.
+    if (!running && generationKeyChanged) {
+      setEffectiveStartTime(normalizeGenerationStart(props.startTime, clock().now()))
     }
   })
 
@@ -274,7 +309,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     dispatchCopy({ type: 'liveness-change', generationId: id, liveness, text: primary, at: clock().now() })
   })
 
-  const elapsedMs = () => Math.max(0, now() - effectiveStartTime)
+  const elapsedMs = () => Math.max(0, now() - effectiveStartTime())
   const frame = () => resolveFrame(
     [...props.appearance.frames],
     elapsedMs(),

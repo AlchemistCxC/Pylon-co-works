@@ -167,6 +167,31 @@ describe('createPreviewWorkbenchRuntime', () => {
     })
   })
 
+  it('活动文档缺少时间戳时不把经过时间重置为当前时刻', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const start = 1_700_000_000_000
+    const now = start + 47_000
+    runtime.update({
+      generating: true,
+      generationStart: start,
+      lastTokenAt: start + 12_000,
+      generationPhase: { kind: 'thinking' },
+    })
+
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    const base = createWorkbenchDocument('session-a')
+    runtime.applyDocument({
+      ...base,
+      session: { ...base.session, status: 'running' },
+    }, { ownerKey: undefined, generation: undefined, preserveGeneration: true })
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      generating: true,
+      generationStart: start,
+      lastTokenAt: start + 12_000,
+    })
+  })
+
   it('session switch 保留新会话 pending interaction，且拒绝旧 owner/generation 串入', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const sessionA = { ...createWorkbenchDocument('session-a'), revision: 4, interactions: [{

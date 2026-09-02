@@ -466,6 +466,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
               </Show>
               <SolidGenerationFooter
                 running={snapshot().generating}
+                // The runtime snapshot carries the document and live
+                // generation projection together.  Use its session identity
+                // (rather than the independently-updated mount input) so a
+                // session switch cannot reset the footer against the previous
+                // session's start timestamp for one render.
+                generationKey={snapshot().sessionId ?? ''}
                 tokenCount={canonicalTokenCount(document()?.session.usage, snapshot().tokenCount)}
                 startTime={snapshot().generationStart}
                 lastTokenAt={snapshot().lastTokenAt}

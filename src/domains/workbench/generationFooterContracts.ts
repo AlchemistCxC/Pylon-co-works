@@ -38,6 +38,13 @@ export interface GenerationSummary {
 
 export interface GenerationFooterInput {
   running: boolean
+  /**
+   * Stable owner/session identity for the mounted footer.  A footer can stay
+   * mounted while the host switches between two already-running sessions;
+   * this key lets the renderer open a fresh local generation in that case
+   * without treating every projected startTime write as a new turn.
+   */
+  generationKey?: string
   tokenCount: number
   startTime: number
   lastTokenAt?: number
