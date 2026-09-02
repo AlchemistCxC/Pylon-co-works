@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 05:58] [聊天稳定性·工程师] [Slice D 已处理] 提交 `6b750799`：自定义 preset canonical id、Theme/Presentation/Renderer transaction await + rollback、failedProvider/revision、快速点击串行化；Settings/TemplateLibrary/PresentationProfilePicker 显示应用结果。D/C 相关 245 项通过，`tsc -b`/lint/边界脚本通过；`check:solid` 仍受既有 GenerationFooter/SpinnerGlimmer React 类型诊断阻塞。P41 进入真实 provider/WebView 待验收。
+
 [2026-09-03 05:13] [聊天稳定性·工程师] [Slice C 已处理] 提交 `70810926`：session-selected 与首条 prompt 解耦，创建 progress 迁移到聊天 viewport overlay；首条失败保留 session/草稿并恢复焦点；React/Solid 空态品牌按 viewport 居中且 SVG path 不变。C 片定向 Vitest 149 项、`tsc -b`、lint、五个边界脚本通过；`check:solid` 仍受既有 GenerationFooter/SpinnerGlimmer React 类型诊断阻塞。进入 Slice D 自定义预设 transaction。
 
 [2026-09-03 02:13] [聊天稳定性·工程师] 认领 P41 长程施工：用户补充的 180s 误报/无活动被掐断与恢复耗时列为 Slice A 首要修复；后续按施工书 A–D 处理消息轨、空态创建与 logo 定位（logo 只修相对聊天 viewport 的位置，不重绘图形）、自定义预设。已建立目标 `01a0625c-c6a6-73d2-844e-c9af5d6745bb`；保留工作树版本号 WIP，不启动子 agent、不灌库。
