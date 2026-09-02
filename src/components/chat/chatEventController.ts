@@ -172,6 +172,21 @@ export function bindChatControllerRefs(refs: ChatEventControllerRefs): void {
   currentRefs = refs
 }
 
+const TERMINAL_TOOL_EVENT_STATUSES = new Set([
+  'completed', 'complete', 'finished', 'done', 'success', 'succeeded',
+  'failed', 'failure', 'error', 'cancelled', 'canceled', 'cancel',
+  'killed', 'timeout', 'aborted', 'terminated',
+])
+
+function isTerminalToolEventStatus(status: string | undefined): boolean {
+  return status !== undefined && TERMINAL_TOOL_EVENT_STATUSES.has(status.trim().toLowerCase())
+}
+
+function isTerminalToolMessage(message: Message): boolean {
+  return message.role === 'tool'
+    && (message.running !== true || isTerminalToolEventStatus(message.toolStatus))
+}
+
 /**
  * 事件控制器（阶段 2 收敛版）：Tauri listeners → sessionRuntimeStore 纯 reducer →
  * 副作用同步（渲染 setState / localStorage 持久化 / store live 状态 / frames / autoName）。
@@ -566,6 +581,12 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     const replayDispatch = (event: ChatEvent) => {
       replayState = applyChatEvent(replayState, event, replayContext)
     }
+    // Track lifecycle evidence from the replay before the synthetic terminal
+    // `done` settles running cards. This lets a completion that arrived while
+    // the snapshot was in flight update a replayed start, while still dropping
+    // a duplicate completion already present in the snapshot.
+    const replayToolIdsSeen = new Set<string>()
+    const replayTerminalToolIds = new Set<string>()
 
     // EVT-03：replay/restart 统一经 normalizeRawEvent 归一化（§5.11——不再自带 sessionUpdate switch）。
     const normalizedReplay: CanonicalNormalizeResult[] = []
@@ -600,6 +621,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
         case 'tool.call.started': {
           const tool = toolFieldsFromCanonical(canonical)
+          if (canonical.identity?.toolCallId) replayToolIdsSeen.add(canonical.identity.toolCallId)
           replayDispatch({ type: 'tool-call', source, agentId: context.agentId, toolCallId: canonical.identity?.toolCallId, title: tool.title, toolKind: tool.kind, contentBlocks: tool.contentBlocks as ContentBlock[] | undefined, rawInput: tool.rawInput, clientGeneration: bindingGeneration, replay: true })
           break
         }
@@ -607,6 +629,18 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         case 'tool.call.completed':
         case 'tool.call.failed': {
           const tool = toolFieldsFromCanonical(canonical)
+          if (canonical.identity?.toolCallId) {
+            replayToolIdsSeen.add(canonical.identity.toolCallId)
+            // `tool.call.updated` is normally a progress event.  Treat it as
+            // terminal evidence only when the canonical type or its explicit
+            // status says so; otherwise a later completion racing the replay
+            // must still be admitted.
+            if (canonical.eventType === 'tool.call.completed'
+              || canonical.eventType === 'tool.call.failed'
+              || isTerminalToolEventStatus(tool.status)) {
+              replayTerminalToolIds.add(canonical.identity.toolCallId)
+            }
+          }
           replayDispatch({ type: 'tool-call-update', source, agentId: context.agentId, toolCallId: canonical.identity?.toolCallId, toolKind: tool.kind, contentBlocks: tool.contentBlocks as ContentBlock[] | undefined, rawOutput: tool.rawOutput, status: tool.status, clientGeneration: bindingGeneration, replay: true })
           break
         }
@@ -720,6 +754,12 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     // 恰好在中途读取而丢失。旧后端没有 committed rows 时仍保留 legacy 的保守策略。
     if (!existing.loadBaseFromCanonical) {
       let acceptedTranscriptEvent = false
+      const snapshotToolsById = new Map(
+        nextMessages
+          .filter((message): message is Message & { externalIdentity: { toolCallId: string } } =>
+            message.role === 'tool' && typeof message.externalIdentity?.toolCallId === 'string')
+          .map(message => [message.externalIdentity.toolCallId, message]),
+      )
       for (const event of queuedEvents) {
         const identityKey = queuedIdentityKey(event)
         // 无稳定身份的 late event 无法证明属于 snapshot 之后，保守丢弃。
@@ -728,7 +768,23 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
           if (acceptedTranscriptEvent && (event.type === 'done' || event.type === 'error')) dispatch(event, true)
           continue
         }
-        if (snapshotIdentityKeys.has(identityKey)) continue
+        if (identityKey.startsWith('tool-call:')) {
+          const toolId = identityKey.slice('tool-call:'.length)
+          const snapshotTool = snapshotToolsById.get(toolId)
+          if (snapshotTool) {
+            // A replay start is the same fact as a buffered start and can be
+            // discarded. A buffered update, however, may be the terminal
+            // event that arrived after the replay snapshot was captured. Do
+            // not drop that update merely because the tool id is present.
+            if (event.type === 'tool-call') continue
+            if (event.type === 'tool-call-update' && (
+              replayTerminalToolIds.has(toolId)
+              || (!replayToolIdsSeen.has(toolId) && isTerminalToolMessage(snapshotTool) && !isTerminalToolEventStatus(event.status))
+            )) continue
+          }
+        } else if (snapshotIdentityKeys.has(identityKey)) {
+          continue
+        }
         acceptedTranscriptEvent = true
         dispatch(event, true)
       }

@@ -231,6 +231,39 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     handle.dispose()
   })
 
+  it('切换期间工具完成事件晚于重放 start 时仍应收敛为已完成', async () => {
+    const A = 'local:session-a', B = 'local:session-b'
+    useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+
+    handle.initSource(A, [])
+    // 模拟从 B 切回 A 后，load replay 只带回 tool start；在 load 窗口内
+    // 到达的 completed update 会进入 source-scoped buffer。
+    handle.initSource(B, [])
+    handle.initSource(A, [])
+    const generation = handle.beginLoadLock(A)
+    await fire('pylon:update', {
+      source: A,
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-late', status: 'completed', rawOutput: 'ok' },
+    })
+
+    handle.commitReplaySnapshot(A, generation, [
+      replayUpdate({ sessionUpdate: 'tool_call', toolCallId: 'tc-late', title: 'Read', kind: 'read_file' }),
+    ])
+    handle.finishLoadLock(A, generation)
+
+    const tool = handle.getMessages(A).find(message => message.role === 'tool')
+    expect(tool).toMatchObject({
+      id: 'tool-tc-late',
+      toolStatus: 'completed',
+      running: false,
+      toolOutput: 'ok',
+    })
+    handle.dispose()
+  })
+
   it('重放 reasoning 与 live/canonical 同语义：相邻无 identity 思考块聚合为一条', async () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })

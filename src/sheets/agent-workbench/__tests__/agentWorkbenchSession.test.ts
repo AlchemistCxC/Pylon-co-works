@@ -369,6 +369,101 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('canonical refresh 吸收绑定后到达的工具终态', async () => {
+    const active = session('session-tool-refresh', 'local:tool-refresh')
+    const started = createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'tool-start' },
+      identity: { toolCallId: 'tool-refresh-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read', kind: 'read_file' } },
+    })
+    const completed = createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 2,
+      recordedAt: '2026-08-22T00:00:02.000Z',
+      source: { provider: 'peri', sourceId: 'tool-complete' },
+      identity: { toolCallId: 'tool-refresh-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', rawOutput: 'ok' } },
+    })
+    let rows: readonly unknown[] = [started]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      subscribe: () => () => {},
+    })
+
+    await service.bind(active)
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-1', status: 'running',
+    }))
+
+    rows = [started, completed]
+    await service.refresh(active)
+
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-1', status: 'completed',
+    }))
+    service.destroy()
+  })
+
+  it('刷新读取赢过仍在途的初始绑定读取，不被旧快照回写覆盖', async () => {
+    const active = session('session-tool-refresh-race', 'local:tool-refresh-race')
+    const started = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'tool-start-race' },
+      identity: { toolCallId: 'tool-refresh-race-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read' } },
+    })
+    const completed = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 2,
+      recordedAt: '2026-08-22T00:00:02.000Z',
+      source: { provider: 'peri', sourceId: 'tool-complete-race' },
+      identity: { toolCallId: 'tool-refresh-race-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', rawOutput: 'ok' } },
+    })
+    const lateMessage = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 3,
+      recordedAt: '2026-08-22T00:00:03.000Z',
+      source: { provider: 'peri', sourceId: 'message-after-bind-read' },
+      identity: { messageId: 'message-after-bind-read' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'late' }] },
+    })
+    let resolveInitial!: (rows: readonly unknown[]) => void
+    let resolveRefresh!: (rows: readonly unknown[]) => void
+    let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
+    let calls = 0
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: () => calls++ === 0
+        ? new Promise(resolve => { resolveInitial = resolve })
+        : new Promise(resolve => { resolveRefresh = resolve }),
+      subscribe: listener => { publish = listener; return () => { publish = undefined } },
+    })
+
+    const binding = service.bind(active)
+    await Promise.resolve()
+    publish?.(lateMessage)
+    const refreshing = service.refresh(active)
+    resolveRefresh?.([started, completed])
+    await refreshing
+    resolveInitial?.([started])
+    await binding
+
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-race-1', status: 'completed',
+    }))
+    expect(service.runtime.getSnapshot().document?.messages).toContainEqual(expect.objectContaining({
+      content: 'late', role: 'assistant',
+    }))
+    service.destroy()
+  })
+
   it('创建响应在 bind 前到达时仍投影模型、模式与选项到 canonical Workbench 文档', async () => {
     const active = session('created-session', 'local:created')
     const service = createAgentWorkbenchSessionRuntime({

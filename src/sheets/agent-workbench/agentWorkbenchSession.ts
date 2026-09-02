@@ -399,6 +399,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let malformedCount = 0
   let destroyed = false
   let unsubscribeSourceRuntime = () => {}
+  // A canonical replay can finish after this runtime's initial bind. Keep a
+  // separate, coalesced refresh seam so the same binding key does not make a
+  // later durable tool terminal event invisible (bind itself is intentionally
+  // idempotent for ordinary Session metadata updates).
+  let refreshInFlight: Promise<void> | null = null
+  // Every canonical read gets a monotonically increasing token. A bind read
+  // that started before a refresh (or before a new bind) must not publish its
+  // older snapshot after the newer read has won the race.
+  let canonicalReadEpoch = 0
   /** Responses from the atomic empty-state create transaction can arrive
    * before React has rebound the Workbench to the newly-added local Session.
    * Keep them keyed by local Session.id until that bind completes. */
@@ -614,6 +623,99 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     }
   })
 
+  const refresh = async (session: Session | undefined): Promise<void> => {
+    if (destroyed || !session || !ownerKey || !boundSessionId || !source) return
+    const bindingKey = workbenchSessionBindingKey(session)
+    const refreshOwnerKey = ownerKey
+    const refreshSource = source
+    const refreshSessionId = boundSessionId
+    const refreshGeneration = generation
+    if (bindingKey !== boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
+    if (refreshInFlight) return refreshInFlight
+    const refreshEpoch = ++canonicalReadEpoch
+
+    const run = (async () => {
+      try {
+        const rows = await loadAll(refreshOwnerKey)
+        // Session switches/rebinds invalidate the result. Do not let a late
+        // canonical read replace the document belonging to the new owner.
+        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
+          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
+          || canonicalReadEpoch !== refreshEpoch) return
+
+        let refreshMalformedCount = 0
+        const envelopes = rows.flatMap(row => {
+          const migrated = toWorkbenchEnvelopes(row)
+          if (migrated.length > 0) return migrated
+          refreshMalformedCount += 1
+          return []
+        })
+        // If refresh supersedes an initial bind read, fold events that arrived
+        // while that read was in flight into the winning projection and release
+        // the load buffer. Otherwise those events would remain stranded behind
+        // the invalidated bind promise.
+        const bufferedAtRefresh = buffered
+        const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
+        // Start from the live document so already-applied event ids remain
+        // idempotent while newly persisted terminal updates (for example a tool
+        // completion that raced the initial read) are folded in place.
+        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        const reconciled = withPendingOptimistic(refreshSource, projected)
+        const document = refreshMalformedCount > 0
+          ? withJournalDiagnostic(reconciled, refreshMalformedCount)
+          : reconciled
+        buffered = []
+        loading = false
+        runtime.replaceDocument(document, {
+          ownerKey: refreshOwnerKey,
+          generation: refreshGeneration,
+          sessionId: refreshSessionId,
+        })
+        if (refreshMalformedCount > 0) {
+          updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${refreshMalformedCount} 条事件无法迁移` })
+        } else {
+          updateRuntimeState({ status: 'ready', error: null })
+        }
+        syncSourceRuntime(refreshSource)
+        const settled = runtime.getSnapshot()
+        if (!settled.generating && !settled.summary && (settled.document?.messages.length ?? 0) > 0) {
+          updateRuntimeState({
+            summary: {
+              elapsedMs: 0,
+              tokenCount: settled.tokenCount,
+              completedFrame: '',
+              reason: 'done',
+            },
+          })
+        }
+      } catch (error) {
+        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
+          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
+          || canonicalReadEpoch !== refreshEpoch) return
+        const bufferedAfterFailure = buffered
+        buffered = []
+        loading = false
+        // A failed refresh may have superseded the initial bind read. Keep
+        // already-observed live/session-response events visible even though
+        // the canonical reload itself is degraded.
+        for (const envelope of bufferedAfterFailure) {
+          const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
+          runtime.applyDocument(reduceWorkbenchEvent(current, envelope), {
+            ownerKey: refreshOwnerKey,
+            generation: refreshGeneration,
+            preserveGeneration: true,
+          })
+        }
+        updateRuntimeState({ status: 'degraded', error: error instanceof Error ? error.message : String(error) })
+      }
+    })()
+    const pending = run.finally(() => {
+      if (refreshInFlight === pending) refreshInFlight = null
+    })
+    refreshInFlight = pending
+    return pending
+  }
+
   return {
     runtime, appearance, sessionUi, commands,
     /**
@@ -624,6 +726,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
      * effect runs; the response is buffered and consumed by bind().
      */
     applySessionResponse,
+    refresh,
     async bind(session: Session | undefined): Promise<void> {
       const nextBindingKey = workbenchSessionBindingKey(session)
       // Session objects are recreated for ordinary metadata updates (name,
@@ -634,6 +737,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       // dedicated lifecycle/reload-token seam instead of rebinding here.
       if (boundSessionBindingKey === nextBindingKey) return
       boundSessionBindingKey = nextBindingKey
+      // Invalidate any in-flight refresh for the previous binding. Its own
+      // epoch/key guard will make the eventual result a no-op; clearing the
+      // pointer lets the new binding schedule its own refresh immediately.
+      canonicalReadEpoch += 1
+      refreshInFlight = null
       const nextGeneration = ++generation
       boundSessionId = session?.id
       boundProvider = session?.agentId || 'acp'
@@ -664,8 +772,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       if (source) syncSourceRuntime(source)
       if (!session || !ownerKey) return
       const loadingOwnerKey = ownerKey
+      const bindReadEpoch = canonicalReadEpoch
       await loadAll(loadingOwnerKey).then(rows => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
+        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
+          || canonicalReadEpoch !== bindReadEpoch) return
         const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
           ? (() => {
             // Session snapshots historically used both the stable Session.id
@@ -707,7 +817,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           })
         }
       }).catch(error => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
+        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
+          || canonicalReadEpoch !== bindReadEpoch) return
         loading = false; buffered = []
         updateRuntimeState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
       })

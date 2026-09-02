@@ -460,8 +460,16 @@ function ActiveAgentSessionLifecycle(props: {
   sessionRuntime: ReturnType<typeof createAgentWorkbenchSessionRuntime>
 }) {
   const lifecycle = useSessionLifecycle(props.session?.id ?? null, props.sessions, props.setters, props.selectSession)
+  const sessionRef = useRef(props.session)
+  sessionRef.current = props.session
   useEffect(() => {
-    if (props.session && lifecycle.canonicalRefresh?.sessionId === props.session.id) void props.sessionRuntime.bind(props.session)
+    const session = sessionRef.current
+    if (session && lifecycle.canonicalRefresh?.sessionId === session.id) {
+      // bind() is intentionally idempotent for metadata-only Session updates.
+      // Canonical replay can nevertheless discover a terminal tool event after
+      // the initial bind, so explicitly refresh the same owner document here.
+      void props.sessionRuntime.refresh(session)
+    }
   }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
   return lifecycle.recoveryFailure
     ? <div className="renderer-suite-recovery-banner" role="alert">会话恢复失败：{lifecycle.recoveryFailure.message}</div>
