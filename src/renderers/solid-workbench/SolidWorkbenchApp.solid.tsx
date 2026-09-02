@@ -454,13 +454,13 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 }}
               />
               <Show when={snapshot().streamingThinking}>
-                {text => <div class="term-row term-row-reasoning" data-render-type="reasoning">
+                {text => <div class="term-row term-row-reasoning" data-render-type="reasoning" data-streaming="true">
                   <ReasoningBlock text={text()} running />
                 </div>}
               </Show>
               <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
               <Show when={snapshot().streamingText}>
-                {text => <div class="term-row term-row-assistant" data-render-type="assistant">
+                {text => <div class="term-row term-row-assistant" data-render-type="assistant" data-streaming="true">
                   <AssistantContent text={text()} appearance={appearance()} streaming />
                 </div>}
               </Show>

@@ -33,6 +33,7 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
         data-render-type={props.renderMessage.type}
         data-pylon-component="message"
         data-message-role={message().role}
+        data-streaming={message().running === true ? 'true' : undefined}
       >
         <Show when={props.renderMessage.type === 'user'}>
           <UserLine
@@ -44,7 +45,7 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
           />
         </Show>
         <Show when={props.renderMessage.type === 'assistant'}>
-          <AssistantContent text={message().content} appearance={props.appearance} semanticContent={props.semanticContent} />
+          <AssistantContent text={message().content} appearance={props.appearance} streaming={message().running === true} semanticContent={props.semanticContent} />
         </Show>
         <Show when={props.renderMessage.type === 'reasoning'}>
           <Show when={props.semanticContent !== undefined} fallback={

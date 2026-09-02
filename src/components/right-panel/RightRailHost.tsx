@@ -65,12 +65,15 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
   }, [dragWidth, setWidth, width])
 
-  if (collapsed || entries.length === 0) return null
+  // Keep the rail mounted while collapsed. The application-level host owns
+  // the rail lifetime; retaining the DOM lets the shell animate its width and
+  // preserves an active panel's local state across a collapse/expand cycle.
+  if (entries.length === 0) return null
   const activeSheet = sheet ?? VIRTUAL_SHEET
   const renderedWidth = dragWidth ?? width
   const maxWidth = Math.min(RIGHT_RAIL_MAX_WIDTH, Math.max(RIGHT_RAIL_MIN_WIDTH, window.innerWidth - 360))
   return (
-    <div className="right-rail-host" data-background-sizing={background?.sizing ?? 'fill'} style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px`, '--right-bg-image': background?.src ? `url(${JSON.stringify(background.src)})` : 'var(--right-bg-image, none)' } as CSSProperties}>
+    <div className={`right-rail-host${collapsed ? ' is-collapsed' : ''}`} data-collapsed={collapsed ? 'true' : 'false'} aria-hidden={collapsed ? 'true' : undefined} data-background-sizing={background?.sizing ?? 'fill'} style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px`, '--right-bg-image': background?.src ? `url(${JSON.stringify(background.src)})` : 'var(--right-bg-image, none)' } as CSSProperties}>
       <div
         className="right-rail-resize-handle"
         role="separator"
@@ -78,8 +81,9 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
         aria-valuemin={RIGHT_RAIL_MIN_WIDTH}
         aria-valuemax={maxWidth}
         aria-valuenow={Math.min(renderedWidth, maxWidth)}
-        tabIndex={0}
+        tabIndex={collapsed ? -1 : 0}
         onPointerDown={event => {
+          if (collapsed) return
           event.preventDefault()
           dragRef.current = { startX: event.clientX, startWidth: width }
           event.currentTarget.setPointerCapture?.(event.pointerId)

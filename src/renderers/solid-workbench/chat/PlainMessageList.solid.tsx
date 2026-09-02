@@ -19,6 +19,10 @@ export function PlainMessageList(props: PlainMessageListProps) {
   const [rows, setRows] = createSignal<readonly StableMessageListRow[]>(
     (props.initialItems ?? []).map(createStableMessageListRow),
   )
+  // Keep the initial history quiet. Rows created by a later projection are
+  // marked once so CSS can animate the actual send/append boundary without
+  // replaying the whole transcript on mount.
+  const seenKeys = new Set((props.initialItems ?? []).map(item => item.key))
   const rowElements = new Map<string, HTMLElement>()
   let container: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
   let bottomAnchor: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
@@ -31,7 +35,11 @@ export function PlainMessageList(props: PlainMessageListProps) {
       const previousRows = new Map(untrack(rows).map(row => [row.key, row]))
       const nextRows = nextItems.map(item => {
         const existing = previousRows.get(item.key)
-        if (!existing) return createStableMessageListRow(item)
+        if (!existing) {
+          const entering = !seenKeys.has(item.key)
+          seenKeys.add(item.key)
+          return createStableMessageListRow(item, entering)
+        }
         existing.update(item)
         return existing
       })
@@ -129,6 +137,9 @@ export function PlainMessageList(props: PlainMessageListProps) {
             class="plain-message-list__row"
             data-message-id={item.descriptor.renderMessage.message.id}
             data-message-key={row.key}
+            data-entry={row.entering ? 'new' : undefined}
+            data-message-role={item.descriptor.renderMessage.message.role}
+            data-streaming={item.descriptor.renderMessage.message.running === true ? 'true' : undefined}
           >
             {props.renderItem(item)}
           </div>
@@ -142,10 +153,11 @@ export function PlainMessageList(props: PlainMessageListProps) {
 interface StableMessageListRow {
   readonly key: string
   readonly item: MessageListItem
+  readonly entering: boolean
   update(item: MessageListItem): void
 }
 
-function createStableMessageListRow(initialItem: MessageListItem): StableMessageListRow {
+function createStableMessageListRow(initialItem: MessageListItem, entering = false): StableMessageListRow {
   const [current, setCurrent] = createSignal(initialItem)
   const item: MessageListItem = {
     get key() { return current().key },
@@ -155,6 +167,7 @@ function createStableMessageListRow(initialItem: MessageListItem): StableMessage
   return {
     key: initialItem.key,
     item,
+    entering,
     update: setCurrent,
   }
 }
