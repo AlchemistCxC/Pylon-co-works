@@ -127,9 +127,13 @@ export function BuiltinSolidContentSlot(props: {
     if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return false
     const source = (kindSources as Record<string, unknown>)[key]
     if (source === undefined) return false
-    // Profile/schema defaults inherit the chat message rail. Only a deliberate
-    // user/session override establishes a prose typography override.
+    // Profile kind tokens may intentionally tune numeric prose metrics (for
+    // example a larger reading size), so keep those values visible to the
+    // Slot.  A profile-provided font family is different: ordinary prose must
+    // continue to inherit the message rail even when a legacy/profile snapshot
+    // carries a mono family; code semantics opt into mono at their own nodes.
     return source === 'user-override' || source === 'session-preview'
+      || (source === 'profile' && key !== 'fontFamily')
   }
   const optionalTypographySetting = (key: string, fallback: number) => (
     explicitProseTypographySetting(key) ? numberSetting(key, fallback) : undefined

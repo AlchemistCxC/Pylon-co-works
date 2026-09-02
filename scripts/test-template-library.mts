@@ -29,12 +29,13 @@ assert.match(library, /customPresets\.map/, '必须有自定义模板区')
 assert.match(library, /themeToCssVars\(template\.theme\)/, '预览必须经局部 cssVars')
 assert.equal(library.includes('setZoneField'), false, '预览路径不得写全局 store（局部 cssVars）')
 assert.match(library, /onClick=\{\(\) => \{/, '点击才应用')
-assert.match(library, /applyCustomPreset\(template\.name\)/, '自定义点击必须应用')
+assert.match(library, /onCustomApply\(normalizeCustomPresetId\(template\.name\)\)/, '自定义点击必须经 canonical callback 应用')
+assert.match(library, /applyCustomPreset\(normalizeCustomPresetId\(template\.name\)\)/, '无 callback 时自定义点击必须经 canonical id 应用')
 assert.match(library, /onRestore\(template\.name\)/, '恢复模板必须重应用')
 
 // 3. 恢复此模板默认 = 重应用当前 delta（delta 语义：{ ...THEME_DEFAULTS, ...delta } 覆盖手调字段）
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
-assert.match(settings, /<TemplateLibrary onApply=\{applyGlobalPreset\} onRestore=\{applyGlobalPreset\} \/>/, '恢复 = 重应用当前预设（清手调字段）')
+assert.match(settings, /<TemplateLibrary\s+onApply=\{applyGlobalPreset\}\s+onRestore=\{applyGlobalPreset\}\s+onCustomApply=\{applyCustomPresetTransaction\}\s*\/>/, '模板库应复用全局恢复与 canonical 自定义应用 transaction')
 
 // 4. 官方区模板展开后 theme 完整（delta 展开到全量）
 {
