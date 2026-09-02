@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-02 14:18] [架构师·K] P40 施工书就绪：新增 `Docs/施工书/Pylon-Agent浏览器Accessibility与语义操作施工书-20260902.md`，按 AX-S1–S7 固化 CDP bridge、AX/revision/stale、语义动作、typed Browser capability、evaluate 设置、隐私/审计和真实 WebView 验收；P40 台账/问题清单已同步为“待施工”。仅文档变更，未触碰生产代码或并行 WIP。
+
 [2026-09-02 05:50] [主施工员·工程师] [已处理] 追加 storage getter 防护提交 `bf339e5e`；审批模式持久化在 localStorage 不可用时安全降级，台账证据已同步。
 
 [2026-09-02 05:47] [主施工员·工程师] [已处理] 用户轻量 issue 窄修已提交：`0cd5cd71`、`65a06317`、`83574ab2`、`a9c06d0b`；9 个定向文件共 70 项、`tsc -b`、lint、`check:solid` 通过。P39 已写入外部台账；创建动画位置保留待产品确认。
