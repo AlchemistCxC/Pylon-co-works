@@ -448,7 +448,7 @@
   width:100%; min-height:var(--input-min-height,56px); margin-top:var(--ui-space-2);
   background:var(--input-bg,var(--bg-input)); border:var(--line-width-1) solid var(--border);
   border-radius: 0; padding:var(--ui-space-3) var(--ui-space-4); cursor:pointer; text-align:left;
-  color:var(--input-text-color,var(--text)); font-family:var(--font); font-size:var(--input-font-size, var(--font-size-xl));
+  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--font)); font-size:var(--input-font-size, var(--font-size-xl));
 }
 .replay-continue-bar:hover { border-color:var(--input-focus-border,var(--border-focus)); }
 .replay-continue-hint { opacity:0.6; }
