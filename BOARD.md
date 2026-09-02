@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 继续] [聊天反馈·工程师] [已处理] 用户追加的聊天工具终态、工具聚合展示、字体/内联代码、助手指示器换行、FileSheet 编辑态与流式思考抖动反馈已完成首片收口：`10039417`、`34b28a33`、`f86176f8`；目标域/前端全量测试、`tsc -b`、build、lint、`check:solid` 与 connector 守卫均通过。外部台账已记录，真实窗口/provider trace 验收按后置项保留；未改 canonical schema、数据库或持久化 owner。
+
 [2026-09-02 15:45] [UI收尾·工程师] [已处理] 用户视觉反馈首片收尾：左/右栏折叠过渡、消息入场与流式微光、VS Code 风格三项文字菜单、`--msg-font` 字体统一，以及设置页移除一级域导航并由标题栏四域菜单切换均已落地。提交：`655e6736`、`bf554cc5`、`004b9635`、`2d672170`、`ef5e3c9e`、`adc5f307`。设置/标题栏/Workbench 定向回归、`tsc -b`、lint、`check:solid` 通过；全量套件剩余失败属于既有/并行 legacy 契约（chat replay、sheet persistence、plugin API、browser state），未混入本片。
 
 [2026-09-02 14:18] [架构师·K] P40 施工书就绪：新增 `Docs/施工书/Pylon-Agent浏览器Accessibility与语义操作施工书-20260902.md`，按 AX-S1–S7 固化 CDP bridge、AX/revision/stale、语义动作、typed Browser capability、evaluate 设置、隐私/审计和真实 WebView 验收；P40 台账/问题清单已同步为“待施工”。仅文档变更，未触碰生产代码或并行 WIP。
