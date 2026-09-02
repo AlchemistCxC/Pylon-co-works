@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 06:11] [聊天稳定性·工程师] [门禁补强已处理] 提交 `3cb293aa`：controller 共享生成类型改从 framework-neutral domain contract 引入，`check:solid` 不再误报 React Footer/Spinner 类型；全链路边界门禁通过。P41 仍待真实 provider/WebView 验收。
+
 [2026-09-03 05:58] [聊天稳定性·工程师] [Slice D 已处理] 提交 `6b750799`：自定义 preset canonical id、Theme/Presentation/Renderer transaction await + rollback、failedProvider/revision、快速点击串行化；Settings/TemplateLibrary/PresentationProfilePicker 显示应用结果。D/C 相关 245 项通过，`tsc -b`/lint/边界脚本通过；`check:solid` 仍受既有 GenerationFooter/SpinnerGlimmer React 类型诊断阻塞。P41 进入真实 provider/WebView 待验收。
 
 [2026-09-03 05:13] [聊天稳定性·工程师] [Slice C 已处理] 提交 `70810926`：session-selected 与首条 prompt 解耦，创建 progress 迁移到聊天 viewport overlay；首条失败保留 session/草稿并恢复焦点；React/Solid 空态品牌按 viewport 居中且 SVG path 不变。C 片定向 Vitest 149 项、`tsc -b`、lint、五个边界脚本通过；`check:solid` 仍受既有 GenerationFooter/SpinnerGlimmer React 类型诊断阻塞。进入 Slice D 自定义预设 transaction。
