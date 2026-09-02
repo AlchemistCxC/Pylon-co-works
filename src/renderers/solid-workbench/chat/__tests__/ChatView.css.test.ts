@@ -56,6 +56,14 @@ describe('reasoning row geometry contract', () => {
     expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\[data-reduced-motion='true'\][^}]*\.solid-workbench-creation-progress-bar\s*\{[^}]*animation: none;/s)
   })
 
+  it('centers the Solid logo independently of the adjacent wordmark', () => {
+    const lockup = chromeCss.match(/\.solid-workbench-empty-brand \.agent-empty-lockup\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    expect(lockup).toContain('display: grid')
+    expect(lockup).toContain('grid-template-columns: minmax(0,1fr) 48px minmax(0,1fr)')
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-brand\s*\{[^}]*grid-column: 2;[^}]*justify-self: center;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-wordmark\s*\{[^}]*grid-column: 3;/s)
+  })
+
   it('keeps the React empty surface full-width so its logo centers in the same viewport', () => {
     expect(css).toMatch(/\.chat-empty\s*\{[^}]*min-height:100%;[^}]*width:100%;/s)
     expect(css).toMatch(/\.chat-empty\.agent-empty-state\s*\{[^}]*position:relative;/s)
