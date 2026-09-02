@@ -72,6 +72,70 @@
   min-width: 0;
   min-height: 0;
 }
+.solid-workbench-chat-shell {
+  /* The visual rail overlays this shell. Keep creation feedback centered in
+     the actual chat viewport, excluding the rail's occupied column. */
+  --creation-overlay-right-inset: var(--scroll-action-rail-width, 20px);
+}
+.solid-workbench-chat-shell.solid-workbench-empty-chat-shell {
+  --creation-overlay-right-inset: 0px;
+}
+.solid-workbench-creation-overlay-host {
+  position: absolute;
+  inset: 0 var(--creation-overlay-right-inset) 0 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--ui-space-4);
+  pointer-events: none;
+}
+.solid-workbench-creation-overlay-host[data-visible='false'] { visibility: hidden; }
+.solid-workbench-creation-overlay-host[data-reduced-motion='true'] .solid-workbench-creation-progress-bar { animation: none; }
+.solid-workbench-creation-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(100%, 360px);
+  max-width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  font: 500 var(--msg-font-size, var(--chat-font-size, var(--font-size-sm)))/
+    var(--msg-line-height, var(--chat-line-height, 1.35))
+    var(--msg-font, var(--chat-font, var(--font)));
+  letter-spacing: .01em;
+  box-shadow: var(--shadow-soft, 0 4px 18px rgba(0, 0, 0, .12));
+}
+.solid-workbench-creation-progress-track {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 2px;
+  flex: 0 0 56px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.solid-workbench-creation-progress-bar {
+  position: absolute;
+  inset-block: 0;
+  left: -35%;
+  width: 35%;
+  background: var(--accent);
+  animation: solid-workbench-creation-progress 900ms ease-in-out infinite;
+}
+.solid-workbench-creation-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes solid-workbench-creation-progress {
+  from { transform: translateX(0); }
+  to { transform: translateX(380%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .solid-workbench-creation-progress-bar { animation: none; }
+}
 .solid-workbench-scroll-rail {
   position: absolute;
   inset: 0 0 0 auto;
@@ -359,59 +423,6 @@
 .solid-workbench-control-center-slot.is-empty.is-session-entering {
   animation: solid-empty-composer-to-dock 360ms cubic-bezier(.22,.8,.24,1) both;
 }
-.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) {
-  animation: solid-empty-create-pulse 900ms ease-in-out infinite alternate;
-}
-.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) .cc-body { opacity: .82; }
-.cc-creation-progress {
-  position: absolute;
-  right: 12px;
-  bottom: 5px;
-  left: 12px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  pointer-events: none;
-  color: var(--text-dim);
-  font: 500 var(--font-size-2xs)/1 var(--mono);
-  letter-spacing: .02em;
-}
-.solid-workbench-control-center-slot.is-empty .cc-creation-progress {
-  right: auto;
-  left: 50%;
-  width: var(--cc-empty-content-width);
-  max-width: calc(100% - 24px);
-  transform: translateX(-50%);
-}
-.cc-creation-progress-track {
-  position: relative;
-  display: block;
-  width: 56px;
-  height: 2px;
-  flex: 0 0 56px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.cc-creation-progress-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -35%;
-  width: 35%;
-  background: var(--accent);
-  animation: solid-empty-create-progress 900ms ease-in-out infinite;
-}
-.cc-creation-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@keyframes solid-empty-create-pulse {
-  from { transform: translateY(-50%) scale(.998); opacity: .88; }
-  to { transform: translateY(-50%) scale(1); opacity: 1; }
-}
-@keyframes solid-empty-create-progress {
-  from { transform: translateX(0); }
-  to { transform: translateX(380%); }
-}
 .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering):not(.is-session-creating) {
   animation: solid-empty-composer-enter 280ms ease both;
 }
@@ -434,8 +445,6 @@
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot { transition: none; }
   .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
-  .solid-workbench-control-center-slot.is-session-creating,
-  .cc-creation-progress-bar { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering
     :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
@@ -463,19 +472,29 @@
   border-top: 1px solid var(--border);
 }
 
-/* 空态消息流占位：不绘制第二套品牌/表单 UI，只为中控区提供居中空间。 */
+/* 空态消息流占位：聊天 viewport 自己提供几何参照，品牌标记与创建 overlay
+   不再以中控区或整个工作台的百分比定位。 */
+.solid-workbench-empty-chat-viewport {
+  position: relative;
+}
 .solid-workbench-empty-space {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
   flex: 1;
 }
 .solid-workbench-empty-brand {
-  position: absolute;
-  top: clamp(10%, 8vh, 18%);
-  left: 0;
-  right: 0;
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
   padding: 0 var(--ui-space-4);
   pointer-events: none;
 }

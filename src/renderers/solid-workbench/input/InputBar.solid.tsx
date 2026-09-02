@@ -169,6 +169,18 @@ export function SolidInputBar(props: SolidInputBarProps) {
     })
   })
 
+  createEffect(() => {
+    const error = sendError()
+    const id = sessionId()
+    if (!error || !id) return
+    // A first-prompt failure can arrive after the empty composer has switched
+    // to its session namespace. Restore keyboard focus only if the user is
+    // still on that same session and the input is usable.
+    queueMicrotask(() => {
+      if (id === sessionId() && !isDisabled()) textarea?.focus()
+    })
+  })
+
   const recordHistory = (text: string, ui: ReturnType<typeof workbench.sessionUi.capture>) => {
     ui.update<string[]>('input-history', [], previous => [...previous.filter(item => item !== text), text].slice(-50))
     ui.set('input-history-index', -1)
@@ -224,11 +236,18 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const id = sessionId()
     const normalized = text.trim()
     if (!normalized) return false
-    if (!id && emptyState()) {
+    const wasEmptySession = !id
+    if (wasEmptySession && emptyState()) {
       const ok = await emptyState()!.onSubmit(normalized, messageAttachments)
       if (ok && clearComposer) {
-        setDraft('')
-        setAttachments([])
+        // createSession may select the new session before this continuation
+        // resumes. Do not route the empty-state cleanup into the new session's
+        // namespace; an async first-prompt failure may need to restore this
+        // exact draft for retry.
+        if (!wasEmptySession || !sessionId()) {
+          setDraft('')
+          setAttachments([])
+        }
       }
       if (!ok) queueMicrotask(() => textarea?.focus())
       return ok

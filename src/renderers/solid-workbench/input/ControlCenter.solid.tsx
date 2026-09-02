@@ -172,6 +172,20 @@ export function SolidControlCenter() {
         initialPrompt: { text, attachments },
       })
       if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+      if (created.initialPromptOutcome) {
+        const restoreInitialPrompt = (error: string) => {
+          const ui = workbench.sessionUi.capture(created.sessionId)
+          // A user may already have started the next message while the first
+          // prompt was running. Only restore the failed prompt into an empty
+          // composer; never overwrite newer input.
+          ui.update('draft', '', current => current.trim() ? current : text)
+          ui.update<readonly WorkbenchAttachment[]>('attachments', [], current => current.length > 0 ? current : attachments)
+          ui.set('input-error', error)
+        }
+        void created.initialPromptOutcome.then(result => {
+          if (result.status === 'rejected') restoreInitialPrompt(result.error || '首条请求发送失败')
+        }, error => restoreInitialPrompt(error instanceof Error ? error.message : String(error)))
+      }
       return true
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error)); return false
@@ -494,12 +508,6 @@ export function SolidControlCenter() {
         <div class="cc-status-row">{statusSlots()}{commandHint()}</div>
       </>}
     </div>
-    <Show when={submitting() && !sessionEntering()}>
-      <div class="cc-creation-progress" data-creation-progress role="status" aria-label="正在创建会话">
-        <span class="cc-creation-progress-track" aria-hidden="true"><span class="cc-creation-progress-bar" /></span>
-        <span class="cc-creation-progress-label">正在建立会话…</span>
-      </div>
-    </Show>
     <Show when={appearance().ccEditMode && selected()}>{id => (
       <div class="cc-prop-panel" role="dialog" aria-label={`${WIDGET_LABELS[id()]} 属性`}>
         <div class="cc-prop-header"><span>{WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>

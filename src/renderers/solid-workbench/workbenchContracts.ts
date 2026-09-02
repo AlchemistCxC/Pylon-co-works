@@ -1,6 +1,7 @@
 import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
+import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
@@ -23,6 +24,8 @@ export interface SolidWorkbenchServices {
   appearance: WorkbenchAppearanceStore
   sessionUi: SessionUiStore
   commands: WorkbenchCommandFacade
+  /** Optional display-only empty-state creation lifecycle. */
+  sessionCreation?: WorkbenchSessionCreationReader
   /** Stable framework-neutral seam consumed by Suite adapters. */
   hostPort?: WorkbenchHostPort
   /** Optional host-owned local/remote provider for low-frequency input prediction. */

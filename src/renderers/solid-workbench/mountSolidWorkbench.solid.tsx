@@ -75,6 +75,7 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     appearanceSnapshot,
     sessionUi: services.sessionUi,
     commands: services.commands,
+    sessionCreation: services.sessionCreation ?? services.commands.sessionCreation ?? hostPort.sessionCreation,
     hostPort,
     predictionProvider: createPredictionRouter({
       forkProvider: services.predictionProvider ?? hostPort.predictionProvider,

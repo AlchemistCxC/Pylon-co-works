@@ -1,6 +1,6 @@
 import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
-import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.ts'
+import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, SessionCreateResult, ExportSessionInput, CommandResult, WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
@@ -77,7 +77,7 @@ export interface WorkbenchCommandPort {
   attach(sessionId: string): Promise<WorkbenchCommandResult<readonly WorkbenchAttachment[]>>
   setModel(sessionId: string, modelId: string): Promise<WorkbenchCommandResult<CommandResult>>
   setMode(sessionId: string, modeId: string): Promise<WorkbenchCommandResult<CommandResult>>
-  createSession(input?: SessionCreateInput): Promise<WorkbenchCommandResult<{ sessionId: string }>>
+  createSession(input?: SessionCreateInput): Promise<WorkbenchCommandResult<SessionCreateResult>>
   compact(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>
   exportSession(sessionId: string, input: ExportSessionInput): Promise<WorkbenchCommandResult<CommandResult>>
   clearSession(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>
@@ -121,6 +121,8 @@ export interface WorkbenchHostPort {
   readonly appearance: ResolvedAppearanceReader
   readonly sessionUi: SessionUiPort
   readonly commands: WorkbenchCommandPort
+  /** Display-only empty-state creation lifecycle; never persisted as a fact. */
+  readonly sessionCreation?: WorkbenchSessionCreationReader
   readonly capabilities: WorkbenchCapabilityReader
   readonly diagnostics: RendererDiagnosticPort
   /** Optional host-owned local/remote provider for input prediction. */
@@ -306,6 +308,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
     appearance: createAppearanceReader(input, capabilities),
     sessionUi: createSessionUiPort(input.sessionUi, namespace),
     commands: createCommandPort(input.commands, capabilities),
+    sessionCreation: input.commands.sessionCreation,
     capabilities,
     diagnostics: createDiagnosticPort(input),
     predictionProvider: input.predictionProvider,

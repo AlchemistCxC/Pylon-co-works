@@ -36,6 +36,7 @@ import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/s
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
+import type { WorkbenchSessionCreationSnapshot } from '../../domains/workbench/workbenchCommandFacade.ts'
 
 // Compatibility export for the existing interaction kind contract/tests.
 export { interactionRenderKind } from './solidWorkbenchProjectionSupport.ts'
@@ -66,6 +67,18 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const [messageListPort, setMessageListPort] = createSignal<import('../../domains/workbench/messageListPort.ts').MessageListPort>()
   const [followBottom, setFollowBottom] = createSignal(true)
   const sessionId = () => props.context.input().sessionId
+  const sessionCreationReader = () => props.context.sessionCreation ?? props.context.commands.sessionCreation
+  const [sessionCreation, setSessionCreation] = createSignal<WorkbenchSessionCreationSnapshot>(
+    sessionCreationReader()?.getSnapshot() ?? { phase: 'idle', sessionId: null, error: null, attempt: 0 },
+  )
+  onMount(() => {
+    const reader = sessionCreationReader()
+    if (!reader) return
+    const sync = () => setSessionCreation(reader.getSnapshot())
+    sync()
+    onCleanup(reader.subscribe(sync))
+  })
+  const creationProgressVisible = () => sessionCreation().phase === 'creating-session' && !sessionId()
   const [searchQuery] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-query', '')
   const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
   let bottomAnchor: HTMLDivElement | undefined
@@ -472,6 +485,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-session-id={props.context.input().sessionId ?? undefined}
       data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
+      data-creation-state={sessionCreation().phase}
       style={{
         '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px`,
         '--input-font-size': 'var(--chat-font-size)',
@@ -483,14 +497,28 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       </Show>
       <Show
         when={props.context.input().sessionId}
-        fallback={<div class="solid-workbench-empty-space">
-          <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+        fallback={<div class="solid-workbench-chat-shell solid-workbench-empty-chat-shell" data-chat-viewport="empty">
+          <div
+            ref={node => { chatViewport = node }}
+            class="chat-view solid-workbench-chat solid-workbench-empty-chat-viewport"
+            data-chat-viewport="scroll"
+            onScroll={event => updateBottomFollow(event.currentTarget)}
+          >
+            <div class="solid-workbench-empty-space">
+              <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+            </div>
+          </div>
+          <CreationOverlayHost
+            visible={creationProgressVisible()}
+            reducedMotion={props.context.input().reducedMotion === true}
+          />
         </div>}
       >
-        <div class="solid-workbench-chat-shell">
+        <div class="solid-workbench-chat-shell" data-chat-viewport="session">
           <div
             ref={node => { chatViewport = node }}
             class="chat-view solid-workbench-chat"
+            data-chat-viewport="scroll"
             onScroll={event => updateBottomFollow(event.currentTarget)}
           >
             <div ref={node => { chatContent = node }} class="term">
@@ -570,6 +598,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             />
             <div ref={bottomAnchor} class="solid-workbench-bottom-anchor" aria-hidden="true" />
           </div>
+          <CreationOverlayHost
+            visible={creationProgressVisible()}
+            reducedMotion={props.context.input().reducedMotion === true}
+          />
           <div class="solid-workbench-scroll-rail" role="group" aria-label="聊天滚动导航">
             <button
               type="button"
@@ -1246,6 +1278,23 @@ function WorkbenchEmptyBrand(props: { workspaceMode: 'work' | 'chat' }) {
     </div>
     <div class="agent-empty-eyebrow">{model().eyebrow}</div>
     <h2 class="agent-empty-title">{model().title}</h2>
+  </div>
+}
+
+/** Creation feedback belongs to the chat viewport, not the control-center layout. */
+function CreationOverlayHost(props: { visible: boolean; reducedMotion: boolean }) {
+  return <div
+    class="solid-workbench-creation-overlay-host"
+    data-creation-overlay-host
+    data-visible={props.visible ? 'true' : 'false'}
+    data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
+  >
+    <Show when={props.visible}>
+      <div class="solid-workbench-creation-progress" data-creation-progress role="status" aria-label="正在创建会话" aria-live="polite">
+        <span class="solid-workbench-creation-progress-track" aria-hidden="true"><span class="solid-workbench-creation-progress-bar" /></span>
+        <span class="solid-workbench-creation-progress-label">正在建立会话…</span>
+      </div>
+    </Show>
   </div>
 }
 

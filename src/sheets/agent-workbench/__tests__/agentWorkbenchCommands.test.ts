@@ -10,7 +10,7 @@ const session: Session = {
 }
 
 describe('Agent Workbench production commands', () => {
-  it('首条请求仍在流式传输时立即选中新会话', async () => {
+  it('首条请求仍在流式传输时立即选中新会话并结束创建阶段', async () => {
     let resolveSend!: () => void
     const sendMessage = vi.fn(() => new Promise<void>(resolve => { resolveSend = resolve }))
     const selectSession = vi.fn()
@@ -25,12 +25,25 @@ describe('Agent Workbench production commands', () => {
     await Promise.resolve()
     expect(selectSession).toHaveBeenCalledWith(session.id)
     expect(selectSession).toHaveBeenCalledTimes(1)
+    const early = await Promise.race([
+      creating.then(value => ({ settled: true, value })),
+      new Promise<{ settled: false }>(resolve => setTimeout(() => resolve({ settled: false }), 25)),
+    ])
+    expect(early).toMatchObject({ settled: true, value: { sessionId: session.id } })
+    if (!early.settled) throw new Error('createSession did not settle at the session-selected boundary')
+    expect(commands.sessionCreation?.getSnapshot()).toMatchObject({
+      phase: 'prompt-running', sessionId: session.id,
+    })
 
     resolveSend()
-    await expect(creating).resolves.toEqual({ sessionId: session.id })
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    await early.value.initialPromptOutcome
+    expect(commands.sessionCreation?.getSnapshot()).toMatchObject({
+      phase: 'prompt-terminal', sessionId: session.id,
+    })
   })
 
-  it('首条请求失败时回滚新会话，不选中半成品', async () => {
+  it('首条请求失败时保留已选会话并暴露可见失败状态', async () => {
     const discardSession = vi.fn(async () => undefined)
     const selectSession = vi.fn()
     const commands = createAgentWorkbenchCommandFacade({
@@ -41,10 +54,14 @@ describe('Agent Workbench production commands', () => {
       selectSession,
     })
 
-    await expect(commands.createSession({ initialPrompt: { text: 'hello' } })).rejects.toThrow('transport failed')
-    expect(discardSession).toHaveBeenCalledWith(session.id)
+    const created = await commands.createSession({ initialPrompt: { text: 'hello' } })
+    await expect(created.initialPromptOutcome).resolves.toMatchObject({ status: 'rejected', error: 'transport failed' })
+    expect(discardSession).not.toHaveBeenCalled()
     expect(selectSession).toHaveBeenNthCalledWith(1, session.id)
-    expect(selectSession).toHaveBeenNthCalledWith(2, null)
+    expect(selectSession).toHaveBeenCalledTimes(1)
+    expect(commands.sessionCreation?.getSnapshot()).toMatchObject({
+      phase: 'creation-failed', sessionId: session.id, error: 'transport failed',
+    })
   })
 
   it('send 以本地 Session 解析 durable owner，并在 ACP 调用前写入 optimistic user', async () => {

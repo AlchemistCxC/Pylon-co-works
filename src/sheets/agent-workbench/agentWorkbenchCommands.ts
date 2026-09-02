@@ -4,7 +4,7 @@ import { useIdentityStore, type Session } from '../../identityStore.ts'
 import { getChatController } from '../../components/chat/chatEventController.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
-import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
+import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { setSessionModel } from '../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../components/chat/sessionMode.ts'
 import { createInteractionResponseTransport } from '../../infrastructure/acp/interactionTransport.ts'
@@ -98,6 +98,7 @@ export function createAgentWorkbenchCommandFacade(
   overrides: Partial<AgentWorkbenchCommandDependencies> = {},
 ): WorkbenchCommandFacade {
   const dependencies: AgentWorkbenchCommandDependencies = { ...productionDependencies(), ...overrides }
+  const sessionCreation = createWorkbenchSessionCreationStore()
   const send: WorkbenchCommandFacade['send'] = async (sessionId, command) => {
     const session = dependencies.resolveSession(sessionId)
     const content = command.text.trim()
@@ -122,6 +123,7 @@ export function createAgentWorkbenchCommandFacade(
     }
   }
   return {
+    sessionCreation,
     prompt: send, send,
     async cancel(sessionId) {
       const session = dependencies.resolveSession(sessionId)
@@ -159,28 +161,40 @@ export function createAgentWorkbenchCommandFacade(
       } catch (error) { return rejected(commandError(error)) }
     },
     async createSession(input) {
-      const created = await dependencies.createSession(input)
-      // Select the newly-created session before dispatching its first prompt.
-      // A streamed ACP response can take an arbitrary amount of time; waiting
-      // for `send` here leaves the empty-state workbench visible until the
-      // whole generation finishes.
-      dependencies.selectSession(created.sessionId)
-      if (input?.initialPrompt) {
-        const result = await send(created.sessionId, input.initialPrompt)
-        if (result.status === 'rejected') {
-          try {
-            await dependencies.discardSession(created.sessionId)
-          } finally {
-            // Do not leave the shell pointing at a session that was removed
-            // after a failed first request. SheetLayout will persist the
-            // cleared selection for the owning agent.
-            dependencies.selectSession(null)
-          }
-          throw new Error(result.error || '首条请求发送失败')
+      const attempt = sessionCreation.begin()
+      try {
+        const created = await dependencies.createSession(input)
+        if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+
+        // Selecting the local session is the end of the empty-state creation
+        // phase.  Do this before starting the potentially long first prompt so
+        // the renderer can switch to the normal chat surface immediately.
+        dependencies.selectSession(created.sessionId)
+        sessionCreation.markSessionSelected(attempt, created.sessionId)
+        if (input?.initialPrompt) {
+          sessionCreation.markPromptRunning(attempt, created.sessionId)
+          // The first prompt owns the ordinary generation footer.  Keep it
+          // detached from the creation command's completion promise so a slow
+          // provider cannot keep the empty-state progress animation alive.
+          const initialPromptOutcome = send(created.sessionId, input.initialPrompt)
+          void initialPromptOutcome.then(result => {
+            if (result.status === 'rejected') {
+              sessionCreation.markFailed(attempt, result.error || '首条请求发送失败', created.sessionId)
+              return
+            }
+            sessionCreation.markPromptTerminal(attempt, created.sessionId)
+          }, error => {
+            sessionCreation.markFailed(attempt, commandError(error), created.sessionId)
+          })
+          return { ...created, initialPromptOutcome }
+        } else {
+          sessionCreation.markPromptTerminal(attempt, created.sessionId)
         }
         return created
+      } catch (error) {
+        sessionCreation.markFailed(attempt, commandError(error), null)
+        throw error
       }
-      return created
     },
     async compact() { return rejected('production_command_not_connected') },
     async exportSession() { return rejected('production_command_not_connected') },

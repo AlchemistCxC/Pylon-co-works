@@ -16,6 +16,9 @@ import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
+import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
+import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
+import type { Session } from '../../../identityStore.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -862,7 +865,7 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(emptyState).toHaveAttribute('aria-busy', 'false'))
   })
 
-  it('空态发送后在 ACP 尚未返回时立即暴露创建过渡层', async () => {
+  it('空态发送后在 ACP 尚未返回时把创建过渡层放在聊天 viewport 中', async () => {
     let finishCreation: ((value: { sessionId: string }) => void) | undefined
     const { host, services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(() => new Promise<{ sessionId: string }>(resolve => { finishCreation = resolve })))
@@ -874,9 +877,83 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => {
       const center = host.querySelector('.control-center')
       expect(center).toHaveAttribute('data-creation-state', 'creating')
-      expect(center?.querySelector('[data-creation-progress]')).not.toBeNull()
+      const progress = host.querySelector('[data-creation-progress]')
+      expect(progress).not.toBeNull()
+      expect(progress?.closest('[data-creation-overlay-host]')).not.toBeNull()
+      expect(progress?.closest('.control-center')).toBeNull()
+      expect(host.querySelector('.solid-workbench-empty-chat-viewport')).not.toBeNull()
     })
     finishCreation?.({ sessionId: 'created-session' })
+    await waitFor(() => expect(host.querySelector('[data-creation-progress]')).toBeNull())
+  })
+
+  it('创建失败分支保留已选会话并停止创建进度', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    const creation = services.commands.sessionCreation as WorkbenchSessionCreationStore
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true, workspaceMode: 'chat' })
+    const attempt = creation.begin()
+    creation.markSessionSelected(attempt, 'created-session')
+    creation.markFailed(attempt, '首条请求失败', 'created-session')
+
+    await waitFor(() => {
+      expect(host.querySelector('.solid-workbench-chat-shell[data-chat-viewport="session"]')).not.toBeNull()
+      expect(host.querySelector('.solid-agent-workbench')).toHaveAttribute('data-creation-state', 'creation-failed')
+    })
+    expect(host.querySelector('[data-creation-progress]')).toBeNull()
+    expect(host.querySelector('.solid-workbench-chat-shell')?.getAttribute('data-chat-viewport')).toBe('session')
+  })
+
+  it('首条 prompt 异步失败时保留可重试草稿并把焦点交回输入栏', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const createdSession: Session = {
+      id: 'created-session', source: 'local:created-session', agentId: 'peri', profileId: 'profile-a', name: 'Created',
+      createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '',
+    }
+    const lifecycleRef: { current?: ReturnType<typeof mountSolidWorkbench> } = {}
+    services.commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === createdSession.id ? createdSession : undefined,
+      createSession: vi.fn(async () => ({ sessionId: createdSession.id })),
+      sendMessage: vi.fn(async () => { throw new Error('provider rejected first prompt') }),
+      optimisticUser: () => {}, rejectOptimisticUser: () => {}, optimisticDocument: () => {}, rejectOptimisticDocument: () => {},
+      selectSession: id => { if (id) lifecycleRef.current?.update({ sheetId: 'sheet-a', sessionId: id, preview: true, workspaceMode: 'chat', reducedMotion: true }) },
+    }) as typeof services.commands
+    const lifecycle = mountSolidWorkbench({
+      host,
+      input: { sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat', reducedMotion: true },
+      services,
+    })
+    lifecycleRef.current = lifecycle
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '保留并重试这条消息' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+    await waitFor(() => {
+      expect(host.querySelector('.input-error')).toHaveTextContent('provider rejected first prompt')
+      expect(services.sessionUi.get('created-session', 'draft', '')).toBe('保留并重试这条消息')
+      expect(prompt).toHaveValue('保留并重试这条消息')
+      expect(prompt).toHaveFocus()
+    })
+  })
+
+  it('空态品牌使用聊天 viewport 几何容器且不改写现有 Pylon 向量路径', async () => {
+    const { host, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat', rightInset: 96 })
+    const viewport = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('.solid-workbench-empty-chat-viewport')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    const brand = host.querySelector<HTMLElement>('.solid-workbench-empty-brand')!
+    const mark = brand.querySelector<SVGSVGElement>('.pylon-mark')!
+    expect(viewport.closest('[data-chat-viewport="empty"]')).toBeTruthy()
+    expect(brand).toHaveClass('agent-empty-state')
+    expect(mark).toHaveAttribute('viewBox', '0 0 64 64')
+    expect(mark.querySelector('.pylon-mark-frame')).toHaveAttribute('d', 'M32 7 53 19v26L32 57 11 45V19Z')
+    expect(mark.querySelector('.pylon-mark-links')).toHaveAttribute('d', 'm30 24.679-8 13.857m20 0-8-13.857M24 42h16')
   })
 
   it('创建后不把模型/模式协商选项渲染成会话区配置卡，且弹层不会残留', async () => {

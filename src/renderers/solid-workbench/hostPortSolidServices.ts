@@ -177,5 +177,5 @@ function createCommands(host: WorkbenchHostPort): WorkbenchCommandFacade {
 }
 
 export function createSolidWorkbenchServicesFromHostPort(host: WorkbenchHostPort): SolidWorkbenchServices {
-  return Object.freeze({ runtime: createRuntime(host), appearance: createAppearance(host), sessionUi: createSessionUi(host), commands: createCommands(host), hostPort: host, predictionProvider: host.predictionProvider })
+  return Object.freeze({ runtime: createRuntime(host), appearance: createAppearance(host), sessionUi: createSessionUi(host), commands: createCommands(host), sessionCreation: host.sessionCreation, hostPort: host, predictionProvider: host.predictionProvider })
 }

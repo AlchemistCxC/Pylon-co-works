@@ -5,6 +5,10 @@ const css = readFileSync(
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',
   'utf8',
 )
+const chromeCss = readFileSync(
+  'src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css',
+  'utf8',
+)
 
 describe('reasoning row geometry contract', () => {
   it('keeps the collapsed and expanded reasoning header on the same vertical rail', () => {
@@ -42,5 +46,18 @@ describe('reasoning row geometry contract', () => {
   it('uses the shared marker gutter for the streaming frame without a visual offset', () => {
     expect(css).toMatch(/\.term-spinner-row \.spinner-frame\s*\{[^}]*flex:0 0 var\(--dot-col-width,var\(--agent-marker-col,1\.6em\)\);[^}]*text-align:left;/s)
     expect(css).toMatch(/\.term-spinner-row\s*\{[^}]*margin-left:0;[^}]*transform:none;/s)
+  })
+
+  it('anchors empty-state brand and creation progress to the chat viewport', () => {
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-space\s*\{[^}]*align-items: center;[^}]*min-height: 100%;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand\s*\{[^}]*position: static;[^}]*display: flex;[^}]*justify-content: center;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\s*\{[^}]*position: absolute;[^}]*inset: 0 var\(--creation-overlay-right-inset\) 0 0;[^}]*place-items: center;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-chat-shell\.solid-workbench-empty-chat-shell\s*\{[^}]*--creation-overlay-right-inset: 0px;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\[data-reduced-motion='true'\][^}]*\.solid-workbench-creation-progress-bar\s*\{[^}]*animation: none;/s)
+  })
+
+  it('keeps the React empty surface full-width so its logo centers in the same viewport', () => {
+    expect(css).toMatch(/\.chat-empty\s*\{[^}]*min-height:100%;[^}]*width:100%;/s)
+    expect(css).toMatch(/\.chat-empty\.agent-empty-state\s*\{[^}]*position:relative;/s)
   })
 })
