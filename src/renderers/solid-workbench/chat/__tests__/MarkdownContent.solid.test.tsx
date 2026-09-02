@@ -92,6 +92,18 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(container.querySelector(':scope > .term-inline-code')).toBeNull()
   })
 
+  it('内联代码保留独立代码字体/着色 class，普通英文仍是正文节点', async () => {
+    const { container } = render(() => <MarkdownContent text={'普通 English 与 `inline()` 混排'} />)
+    const inline = await waitFor(() => {
+      const node = container.querySelector('.term-inline-code')
+      if (!node) throw new Error('inline code not mounted')
+      return node
+    })
+    expect(inline).toHaveTextContent('inline()')
+    expect(inline.tagName).toBe('CODE')
+    expect(container.textContent).toContain('普通 English 与')
+  })
+
   it('保留安全 Markdown 图片并拒绝可执行 source', async () => {
     const safe = render(() => <MarkdownContent text="![diagram](https://example.com/diagram.png)" />)
     await waitFor(() => expect(safe.container.querySelector('img')).not.toBeNull())

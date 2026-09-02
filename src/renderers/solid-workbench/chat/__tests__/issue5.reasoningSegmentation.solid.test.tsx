@@ -95,4 +95,50 @@ describe('issue 5 reasoning segmentation regression', () => {
     services.destroy()
     host.remove()
   })
+
+  it('coalesces open reasoning follow-bottom writes to one animation frame', async () => {
+    const previousRaf = globalThis.requestAnimationFrame
+    const previousCancel = globalThis.cancelAnimationFrame
+    let nextFrame = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    const writes: number[] = []
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = ++nextFrame
+      frames.set(id, callback)
+      return id
+    }) as typeof requestAnimationFrame
+    globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+    try {
+      const [text, setText] = createSignal('初始思考')
+      const result = render(() => <ReasoningBlock text={text()} running defaultCollapsed={false} />)
+      const body = await waitFor(() => {
+        const node = result.container.querySelector<HTMLDivElement>('.term-reasoning-body')
+        if (!node) throw new Error('reasoning body not mounted')
+        return node
+      })
+      let scrollHeight = 160
+      Object.defineProperties(body, {
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        clientHeight: { configurable: true, value: 80 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+      })
+      Object.defineProperty(body, 'scrollTop', {
+        configurable: true,
+        get: () => writes.at(-1) ?? 0,
+        set: value => { writes.push(value) },
+      })
+      setText('第一段思考内容')
+      scrollHeight = 200
+      setText('第二段思考内容继续')
+      scrollHeight = 240
+      await Promise.resolve()
+      expect(writes).toHaveLength(0)
+      for (const callback of frames.values()) callback(performance.now())
+      expect(writes).toHaveLength(1)
+      expect(writes[0]).toBe(160)
+    } finally {
+      globalThis.requestAnimationFrame = previousRaf
+      globalThis.cancelAnimationFrame = previousCancel
+    }
+  })
 })

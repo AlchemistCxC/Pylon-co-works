@@ -50,4 +50,13 @@ describe('BuiltinSolidContentSlot text appearance', () => {
     expect(directNode.style.fontSize).toBe('16px')
     expect(directNode.style.lineHeight).toBe('1.7')
   })
+
+  it('keeps ordinary text on the message rail even when a legacy slot sends mono', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'text-mono-legacy', kind: 'content.markdown', revision: 1, payload: { text: '普通英文 should follow chat font' } }}
+      appearance={{ fontFamily: 'mono', fontSize: 14, lineHeight: 1.6 }}
+      commands={commands}
+    />)
+    expect(result.container.querySelector<HTMLElement>('.solid-content-kind')?.style.fontFamily).toBe('inherit')
+  })
 })

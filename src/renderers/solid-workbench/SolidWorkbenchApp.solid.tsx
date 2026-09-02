@@ -81,6 +81,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
   let followedSessionId: string | null | undefined
   let bottomFollowQueued = false
+  let bottomFollowFrame: number | undefined
   let lastAutoFollowTop: number | undefined
   let followedSnapshotRevision: number | undefined
   // Programmatic scrolls emit the same `scroll` events as user input. Keep
@@ -106,6 +107,8 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     followLockUntil = 0
     scrollActionRevision += 1
     bottomFollowQueued = false
+    if (bottomFollowFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(bottomFollowFrame)
+    bottomFollowFrame = undefined
     lastAutoFollowTop = undefined
     followedSnapshotRevision = undefined
     connectorPort.destroy()
@@ -250,13 +253,15 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     }
     if (typeof viewport.scrollTo === 'function') {
       viewport.scrollTo({ top, behavior })
+      // `scrollTo({ behavior: 'smooth' })` owns the animation.  Assigning
+      // scrollTop immediately afterwards cancels that animation and produces
+      // the visible jump reported during a live thinking stream.  For the
+      // auto-follow path, retain the synchronous assignment only when the
+      // endpoint actually differs (jsdom/test hosts often stub scrollTo).
+      if (behavior === 'auto' && Math.abs(viewport.scrollTop - top) > 0.5) viewport.scrollTop = top
     } else {
       viewport.scrollTop = top
     }
-    // Keep the model in sync immediately as well. Native scrollTo updates
-    // asynchronously for smooth scrolling, while jsdom/test hosts may only
-    // expose a spy; assigning the endpoint makes the follow state deterministic.
-    viewport.scrollTop = top
     if (behavior === 'auto') lastAutoFollowTop = top
     syncScrollRail(viewport)
   }
@@ -361,15 +366,19 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const queueBottomFollow = () => {
     const revision = scrollActionRevision
-    if (bottomFollowQueued) {
-      return
-    }
+    if (bottomFollowQueued) return
     bottomFollowQueued = true
-    queueMicrotask(() => {
+    const applyFollow = () => {
+      bottomFollowFrame = undefined
       bottomFollowQueued = false
       if (revision !== scrollActionRevision || !followBottom()) return
       if (chatViewport) scrollViewportToBottom(chatViewport, 'auto')
-    })
+    }
+    // ResizeObserver/content effects can arrive several times before a paint.
+    // Coalesce all of them into one endpoint write per frame; this prevents the
+    // browser's scroll anchoring from fighting a microtask-per-character loop.
+    if (typeof requestAnimationFrame === 'function') bottomFollowFrame = requestAnimationFrame(applyFollow)
+    else queueMicrotask(applyFollow)
   }
 
   const scrollToTop = (event?: Event) => {
@@ -809,11 +818,16 @@ function streamRowCoversText(
 ): boolean {
   if (!messages || transientText.length === 0) return false
   return messages.some(message => {
-    if (message.role !== role || (generating && message.running !== true)) return false
+    if (message.role !== role) return false
     const canonicalText = typeof message.content === 'string' ? message.content : ''
     if (canonicalText.length === 0) return false
-    return canonicalText === transientText
-      || canonicalText.startsWith(transientText)
+    // A terminal projection can briefly clear `running` before the legacy
+    // stream field is cleared. An exact/prefix match is still the same visible
+    // row, so suppressing the transient copy avoids a mount/unmount height
+    // pulse. A non-running *shorter* row is not considered coverage: it may be
+    // a previous turn whose text happens to share a prefix.
+    if (canonicalText === transientText) return true
+    return generating && message.running === true && canonicalText.startsWith(transientText)
   })
 }
 

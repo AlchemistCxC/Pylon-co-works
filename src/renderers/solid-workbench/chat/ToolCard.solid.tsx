@@ -92,7 +92,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
                 role="img"
               >{indicator().glyph}</span>
               <span class="term-tool-name">{capitalizeToolName(resolved().name)}</span>
-              <Show when={displaySummary()}>{summary => <span class="term-tool-summary"> ({summary()})</span>}</Show>
+              <Show when={displaySummary()}>{summary => <span class="term-tool-summary term-tool-summary-code"> ({summary()})</span>}</Show>
               <span class="term-tool-state-label"> — {toolStatePresentation(resolved().state, resolved().hasOutput).label}</span>
               <Show when={suffix()}>{text => <span class="term-tool-suffix">{text()}</span>}</Show>
             </button>

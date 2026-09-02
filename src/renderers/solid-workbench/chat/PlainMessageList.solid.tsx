@@ -28,6 +28,21 @@ export function PlainMessageList(props: PlainMessageListProps) {
   let bottomAnchor: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
   let destroyed = false
   let resizeObserver: ResizeObserver | undefined
+  let measurementFrame: number | undefined
+  let measurementQueued = false
+
+  const invalidateMeasurements = (reason: MeasurementInvalidationReason) => {
+    if (!container || destroyed || measurementQueued) return
+    measurementQueued = true
+    const publish = () => {
+      measurementFrame = undefined
+      measurementQueued = false
+      if (!container || destroyed) return
+      port.invalidateMeasurements(reason)
+    }
+    if (typeof requestAnimationFrame === 'function') measurementFrame = requestAnimationFrame(publish)
+    else queueMicrotask(publish)
+  }
 
   const port: MessageListPort = {
     setItems(nextItems) {
@@ -45,7 +60,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
       })
       setItems([...nextItems])
       setRows(nextRows)
-      queueMicrotask(() => port.invalidateMeasurements('items-changed'))
+      invalidateMeasurements('items-changed')
     },
     async scrollTo(anchor) {
       if (destroyed) return false
@@ -89,6 +104,9 @@ export function PlainMessageList(props: PlainMessageListProps) {
     destroy() {
       if (destroyed) return
       destroyed = true
+      if (measurementFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(measurementFrame)
+      measurementFrame = undefined
+      measurementQueued = false
       resizeObserver?.disconnect()
       resizeObserver = undefined
       rowElements.clear()

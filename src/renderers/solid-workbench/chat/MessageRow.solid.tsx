@@ -186,8 +186,15 @@ export function ReasoningBlock(props: {
   })
   let bodyElement: HTMLDivElement | undefined
   let followBottom = true
-  let followQueued = false
+  let followScheduled = false
+  let followFrame: number | undefined
   let lastFollowTop: number | undefined
+  const cancelFollow = () => {
+    if (followFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(followFrame)
+    followFrame = undefined
+    followScheduled = false
+  }
+  onCleanup(cancelFollow)
   const onBodyScroll = () => {
     if (!bodyElement) return
     followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
@@ -198,10 +205,11 @@ export function ReasoningBlock(props: {
     const running = props.running
     const open = collapse.open()
     if (!text || !running || !open || !bodyElement || !followBottom) return
-    if (followQueued) return
-    followQueued = true
-    queueMicrotask(() => {
-      followQueued = false
+    if (followScheduled) return
+    followScheduled = true
+    const applyFollow = () => {
+      followFrame = undefined
+      followScheduled = false
       if (!bodyElement || !followBottom) return
       const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
       // Markdown/highlight updates can notify more than once for one token.
@@ -211,7 +219,9 @@ export function ReasoningBlock(props: {
         && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
       bodyElement.scrollTop = top
       lastFollowTop = top
-    })
+    }
+    if (typeof requestAnimationFrame === 'function') followFrame = requestAnimationFrame(applyFollow)
+    else queueMicrotask(applyFollow)
   })
 
   return (

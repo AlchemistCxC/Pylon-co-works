@@ -28,4 +28,19 @@ describe('reasoning row geometry contract', () => {
     expect(markerBlock).toContain('width:100%')
     expect(css).toMatch(/\.term-assistant\.has-dot > \.term-assistant-body\s*\{[^}]*flex:1 1 auto;[^}]*min-width:0;/s)
   })
+
+  it('does not apply a negative horizontal transform to the streaming indicator row', () => {
+    expect(css).not.toContain('transform: translateX(-4px)')
+  })
+
+  it('keeps tool prose on the message font while code/path surfaces opt into mono', () => {
+    expect(css).toMatch(/\.term-tool-body\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--font\)\)\);/s)
+    expect(css).toMatch(/\.term-tool-summary-code\s*\{\s*font-family:var\(--mono\);/s)
+    expect(css).toMatch(/\.term-tool-body :is\([^)]*\.term-code-block[^)]*\)\s*\{\s*font-family:var\(--mono\);/s)
+  })
+
+  it('uses the shared marker gutter for the streaming frame without a visual offset', () => {
+    expect(css).toMatch(/\.term-spinner-row \.spinner-frame\s*\{[^}]*flex:0 0 var\(--dot-col-width,var\(--agent-marker-col,1\.6em\)\);[^}]*text-align:left;/s)
+    expect(css).toMatch(/\.term-spinner-row\s*\{[^}]*margin-left:0;[^}]*transform:none;/s)
+  })
 })

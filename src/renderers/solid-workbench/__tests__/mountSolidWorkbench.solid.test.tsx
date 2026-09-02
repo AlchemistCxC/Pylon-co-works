@@ -231,8 +231,7 @@ describe('mountSolidWorkbench', () => {
       // a newly measured Markdown/image block), so the bottom endpoint moves.
       Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
       contentObserver!.trigger()
-      await Promise.resolve()
-      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: 'auto' })
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: 'auto' }))
       scrollTo.mockClear()
       // Repeated observer notifications at the same endpoint must not issue a
       // second scroll write; this is the jitter regression guard.
@@ -456,6 +455,23 @@ describe('mountSolidWorkbench', () => {
     const document = projectWorkbench([reasoning]).document
     services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
     services.runtime.update({ streamingThinking: '同一段思考', generating: true })
+
+    await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
+    expect(host.querySelectorAll('.term-reasoning')).toHaveLength(1)
+  })
+
+  it('canonical 终态短暂清除 running 时仍抑制重复 transient 思考行', async () => {
+    const { host, services } = mountPreview()
+    const reasoning = createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1,
+      recordedAt: '2026-08-25T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'thinking-terminal' },
+      identity: { turnId: 'thinking-terminal-turn' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'reasoning.completed', parts: [{ kind: 'text', text: '终态思考' }] },
+    })
+    services.runtime.replaceDocument(projectWorkbench([reasoning]).document, { ownerKey: 'owner-preview', generation: 1 })
+    services.runtime.update({ streamingThinking: '终态思考', generating: true })
 
     await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
     expect(host.querySelectorAll('.term-reasoning')).toHaveLength(1)

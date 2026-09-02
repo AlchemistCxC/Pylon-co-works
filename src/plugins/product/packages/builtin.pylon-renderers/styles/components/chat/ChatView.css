@@ -1012,7 +1012,6 @@
 .term-spinner-row {
   gap: var(--ui-space-3);
   padding: var(--ui-space-1) 0;
-  transform: translateX(-4px);
 }
 .term-spinner { padding-block: var(--ui-space-1); }
 .spinner-glimmer-core { animation:spinner-glimmer-sweep 3200ms linear infinite; }
@@ -2068,4 +2067,75 @@
     animation:none !important;
     background:none;
   }
+}
+
+/* B1 authoritative tail: profile-specific rules above may set compact tool
+   body metrics, but they must not change the message rail's font or marker
+   geometry. */
+.term-tool-body {
+  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-size:inherit;
+  line-height:var(--msg-line-height,var(--chat-line-height,1.35));
+}
+.term-tool-body .term-tool-prose,
+.term-tool-body .term-tool-label {
+  font-family:var(--msg-font,var(--chat-font,var(--font)));
+}
+.term-tool-body :is(.term-tool-summary-code,.term-file-path,.term-file-range,.term-file-preview,.term-terminal-body,.term-log-entries,.term-ansi,.term-code-block,.tool-object-inspector,pre,code) {
+  font-family:var(--mono);
+}
+.term-tool-summary-code { font-family:var(--mono); }
+.term-tool-head,
+.term-tool-name,
+.term-tool-summary,
+.term-tool-state-label,
+.term-tool-suffix,
+.term-tool-duration,
+.term-tool-label,
+.term-spinner-row,
+.term-spinner-row .term-spinner,
+.term-spinner-row .spinner-frame,
+.term-spinner-row .spinner-verb,
+.term-spinner-row .spinner-context,
+.term-spinner-row .spinner-meta,
+.term-spinner-row .spinner-activity {
+  font-family:var(--msg-font,var(--chat-font,var(--font)));
+}
+.term-spinner-row { align-items:baseline; margin-left:0; transform:none; }
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  width:auto;
+  max-width:100%;
+}
+/* Full-width terminal rails can use a zero basis to ignore a transient Slot's
+   max-content contribution. Bubble rows remain auto-sized so the body keeps
+   its intrinsic width instead of collapsing the entire bubble to the marker. */
+.app[data-message-layout="classic"] .term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 0;
+  width:0;
+}
+.term-reasoning-body { min-width:0; width:100%; }
+.term-spinner-row .spinner-frame {
+  flex:0 0 var(--dot-col-width,var(--agent-marker-col,1.6em));
+  width:var(--dot-col-width,var(--agent-marker-col,1.6em));
+  min-width:var(--dot-col-width,var(--agent-marker-col,1.6em));
+  text-align:left;
+  font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+}
+.term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child,
+.term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child > :first-child {
+  margin-block-start:0;
+}
+.plain-message-list__row[data-entry="new"][data-streaming="true"],
+.plain-message-list__row[data-entry="new"][data-streaming="true"]::after {
+  /* A streaming row is updated in place; an entry transform on every
+     transient segment would look like the whole chat is jumping vertically. */
+  animation:none;
+}
+.term-assistant.has-dot > .term-assistant-dot,
+.term-assistant.has-dot > .term-assistant-dot-img,
+.term-tool-head > .term-tool-indicator {
+  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+  line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }

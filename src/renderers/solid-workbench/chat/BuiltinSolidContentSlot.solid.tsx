@@ -72,7 +72,16 @@ export function BuiltinSolidContentSlot(props: {
   const booleanSetting = (key: string, fallback: boolean) => typeof props.appearance[key] === 'boolean'
     ? props.appearance[key] as boolean
     : fallback
+  const isProseKind = () => kind() === 'content.text'
+    || kind() === 'content.markdown'
+    || kind() === 'content.reasoning'
+    || kind() === 'content.redacted-reasoning'
   const fontFamily = () => {
+    // Conversation prose always starts from the message rail.  A legacy
+    // renderer snapshot may still carry `fontFamily: mono`; treating that as
+    // the default here is what caused ordinary English to inherit code
+    // metrics.  An explicit per-kind user/session override remains honored.
+    if (isProseKind() && !explicitProseTypographySetting('fontFamily')) return 'inherit'
     switch (props.appearance.fontFamily) {
       case 'mono': return 'var(--mono)'
       case 'sans': return 'var(--font)'
@@ -80,13 +89,12 @@ export function BuiltinSolidContentSlot(props: {
       default: return 'inherit'
     }
   }
-  const isReasoningKind = () => kind() === 'content.reasoning' || kind() === 'content.redacted-reasoning'
   const contentStyle = () => ({
     'font-family': fontFamily(),
-    'font-size': isReasoningKind()
-      ? (explicitReasoningTypographySetting('fontSize') ? `${numberSetting('fontSize', 13)}px` : 'inherit')
+    'font-size': isProseKind()
+      ? (explicitProseTypographySetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit')
       : (explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit'),
-    'line-height': isReasoningKind() && !explicitReasoningTypographySetting('lineHeight')
+    'line-height': isProseKind() && !explicitProseTypographySetting('lineHeight')
       ? 'inherit'
       : String(numberSetting('lineHeight', 1.6)),
     'max-width': `${numberSetting('maxWidth', 1600)}px`,
@@ -101,25 +109,30 @@ export function BuiltinSolidContentSlot(props: {
     const source = (kindSources as Record<string, unknown>)[key]
     return source === 'profile' || source === 'user-override' || source === 'session-preview'
   }
-  const explicitReasoningTypographySetting = (key: string) => {
+  const explicitProseTypographySetting = (key: string) => {
     const renderSettings = props.appearance.renderSettings
     // Direct callers may intentionally provide a numeric value without the
     // production source metadata; preserve that compatibility seam.
     if (!renderSettings || typeof renderSettings !== 'object' || Array.isArray(renderSettings)) {
-      return typeof props.appearance[key] === 'number'
+      const direct = props.appearance[key]
+      // The catalog defaults (14px / 1.6) are indistinguishable from a
+      // legacy snapshot that merely copied host values. Treat those defaults
+      // as inherited; non-default direct values remain an explicit override.
+      return typeof direct === 'number'
+        && ((key === 'fontSize' && direct !== 14) || (key === 'lineHeight' && direct !== 1.6))
     }
     const sources = (renderSettings as Record<string, unknown>).sources
-    if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return typeof props.appearance[key] === 'number'
+    if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return false
     const kindSources = (sources as Record<string, unknown>).kind
-    if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return typeof props.appearance[key] === 'number'
+    if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return false
     const source = (kindSources as Record<string, unknown>)[key]
-    if (source === undefined) return typeof props.appearance[key] === 'number'
+    if (source === undefined) return false
     // Profile/schema defaults inherit the chat message rail. Only a deliberate
-    // user/session override establishes a numeric reasoning typography.
+    // user/session override establishes a prose typography override.
     return source === 'user-override' || source === 'session-preview'
   }
   const optionalTypographySetting = (key: string, fallback: number) => (
-    explicitReasoningTypographySetting(key) ? numberSetting(key, fallback) : undefined
+    explicitProseTypographySetting(key) ? numberSetting(key, fallback) : undefined
   )
 
   return (

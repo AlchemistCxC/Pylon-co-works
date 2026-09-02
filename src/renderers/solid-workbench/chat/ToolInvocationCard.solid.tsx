@@ -108,8 +108,8 @@ export function SolidToolInvocationCard(props: {
         </span>
       </Show>
       <span class="term-tool-name">{displayName()}</span>
-      <Show when={providerName()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
-      <Show when={summary()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
+      <Show when={providerName()}>{value => <span class="term-tool-summary term-tool-summary-code"> ({value()})</span>}</Show>
+      <Show when={summary()}>{value => <span class="term-tool-summary term-tool-summary-code"> ({value()})</span>}</Show>
       <span class="term-tool-suffix"> — {presentation().label}</span>
       <Show when={duration()}>{value => <span class="term-tool-duration"> · {value()}</span>}</Show>
     </button>
@@ -153,7 +153,7 @@ export function ToolContentPart(props: { part: ContentPart; appearance?: RenderA
     return <SolidAnsiBlock text={props.part.text} />
   }
   if ((props.part.kind === 'text' || props.part.kind === 'markdown') && 'text' in props.part && typeof props.part.text === 'string') {
-    return <div class={props.class} data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
+    return <div class={`term-tool-prose${props.class ? ` ${props.class}` : ''}`} data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
   }
   if (props.part.kind === 'file-reference' || props.part.kind === 'file-selection' || props.part.kind === 'document' || props.part.kind === 'resource') {
     const canOpen = props.commands?.canExecute?.('resource.open') === true
