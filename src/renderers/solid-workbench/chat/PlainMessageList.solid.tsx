@@ -17,7 +17,7 @@ export interface PlainMessageListProps {
 export function PlainMessageList(props: PlainMessageListProps) {
   const [items, setItems] = createSignal<readonly MessageListItem[]>(props.initialItems ?? [])
   const [rows, setRows] = createSignal<readonly StableMessageListRow[]>(
-    (props.initialItems ?? []).map(createStableMessageListRow),
+    (props.initialItems ?? []).map(item => createStableMessageListRow(item)),
   )
   // Keep the initial history quiet. Rows created by a later projection are
   // marked once so CSS can animate the actual send/append boundary without
