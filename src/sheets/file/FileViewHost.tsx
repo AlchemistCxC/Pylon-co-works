@@ -44,7 +44,10 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [instruction, setInstruction] = useState('')
   const [selection, setSelection] = useState<DispatchSelection | null>(null)
   const [fileContent, setFileContent] = useState('')
-  const [editing, setEditing] = useState(false)
+  // Open text tabs directly in the editor.  Keeping one editing surface from
+  // the first loaded snapshot avoids the read-only → editor typography/layout
+  // swap that used to shift line wrapping by a few pixels.
+  const [editing, setEditing] = useState(true)
   const [baseline, setBaseline] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle')
   const [saveError, setSaveError] = useState('')
@@ -84,7 +87,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setTruncated(cleared.truncated)
     setInstruction(cleared.instruction)
     setFileContent(cleared.fileContent)
-    setEditing(false)
+    setEditing(true)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
@@ -220,7 +223,13 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         path={tab.path}
         revealLine={tab.line}
         editing={editing}
-        onTruncated={setTruncated}
+        onTruncated={value => {
+          setTruncated(value)
+          // A truncated response is intentionally read-only.  Opening normal
+          // files starts in edit mode, but never grants an incomplete buffer
+          // an editable surface.
+          if (value) setEditing(false)
+        }}
         onContentReady={content => { setFileContent(content); setBaseline(content) }}
         onContentChange={setFileContent}
         onExternalChange={() => {
