@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 07:41] [聊天稳定性·工程师] [已处理] P41 Logo 定位收口：提交 `2685aeca`，Solid 空态 lockup 改为三列 grid，让 SVG 固定在聊天 viewport 的中心列，wordmark 独立在右列并在窄屏截断；未修改 viewBox/path。ChatView CSS contract 9 项、全量 Vitest 469 文件/2906 项、`tsc -b`、lint（0 errors，2 条既有 Hook warnings）、`check:solid`、build、`git diff --check` 全绿。浏览器 smoke 几何复测默认/800×600 中心偏差约 0.007px、无横向溢出；真实 Tauri/WebView 像素仍待验收。
+
 [2026-09-03 07:04] [聊天稳定性·工程师] [已处理] P41 timeout copy 边界补强：提交 `d2671de2`，明确非法 `triggeredTimeoutSecs` 不得回退到配置预算；新增回归后全量 Vitest 469 文件/2905 项、`tsc -b`、lint、`check:solid`、build 全绿。P41 仍待真实 provider/WebView trace。
 
 [2026-09-03 06:57] [聊天稳定性·工程师] [已处理] P41 ACP 错误展示补强：提交 `1bc05dfc`，新增纯函数 failure presentation；provider 返回的“180s”只进入技术详情/raw，用户摘要按来源与真实触发 bound 显示。controller、streaming send、ACP/Workbench normalizer 共用摘要，终帧后命令拒绝不再泛化为误导文案；新增 6 项相关回归，前端全量 469 文件/2904 项及 tsc/lint/check:solid/build 全绿。真实 provider/WebView trace 仍待验收。
