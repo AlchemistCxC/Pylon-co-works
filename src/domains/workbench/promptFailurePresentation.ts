@@ -48,6 +48,15 @@ function timeoutCopy(kind: string | undefined, bound: string | undefined): strin
   }
 }
 
+function timeoutBound(failure: PromptFailurePresentationMetadata | undefined): string | undefined {
+  // An explicitly supplied (but malformed) triggered bound must not silently
+  // fall back to the configured budget and recreate the original false 180s
+  // claim.  Only an absent triggered value may use configuredTimeoutSecs.
+  return failure?.triggeredTimeoutSecs !== undefined
+    ? seconds(failure.triggeredTimeoutSecs)
+    : seconds(failure?.configuredTimeoutSecs)
+}
+
 /** Resolve safe user copy while preserving the provider/local error detail. */
 export function presentPromptFailure(
   error: unknown,
@@ -63,14 +72,14 @@ export function presentPromptFailure(
     case 'prompt-timeout':
       userSummary = timeoutCopy(
         cleanText(failure?.timeoutKind),
-        seconds(failure?.triggeredTimeoutSecs) ?? seconds(failure?.configuredTimeoutSecs),
+        timeoutBound(failure),
       )
       break
     case 'rpc':
-      userSummary = timeoutCopy('rpc', seconds(failure?.triggeredTimeoutSecs) ?? seconds(failure?.configuredTimeoutSecs))
+      userSummary = timeoutCopy('rpc', timeoutBound(failure))
       break
     case 'write-timeout':
-      userSummary = timeoutCopy('write', seconds(failure?.triggeredTimeoutSecs) ?? seconds(failure?.configuredTimeoutSecs))
+      userSummary = timeoutCopy('write', timeoutBound(failure))
       break
     case 'connection':
       userSummary = 'ACP 连接已关闭'

@@ -32,4 +32,13 @@ describe('prompt failure presentation', () => {
   it('keeps untyped legacy errors unchanged', () => {
     expect(presentPromptFailure('network unavailable')).toEqual({ userSummary: 'network unavailable' })
   })
+
+  it('does not fall back to the configured budget when a triggered bound is invalid', () => {
+    const result = presentPromptFailure('timed out after 180s', {
+      source: 'prompt-timeout', timeoutKind: 'idle',
+      configuredTimeoutSecs: 180, triggeredTimeoutSecs: 0,
+    })
+    expect(result.userSummary).toBe('响应闲置超时')
+    expect(result.userSummary).not.toContain('180s')
+  })
 })
