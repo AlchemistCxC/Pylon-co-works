@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 06:26] [聊天稳定性·工程师] [已处理] P41 门禁回归补强：提交 `0bd15531`，恢复 profile kind 数值字号/行高在 prose Slot 的显式应用，同时保持普通英文 prose 字体继承消息轨、代码语义 mono；同步更新 `test-template-library.mts` 结构守卫以锁定 canonical preset callback/id。全量 Vitest 468 文件/2898 项、`tsc -b`、lint、`check:solid`、build、`git diff --check` 全绿。版本号 WIP 保留；真实 provider/WebView 验收仍待后置。
+
 [2026-09-03 06:11] [聊天稳定性·工程师] [门禁补强已处理] 提交 `3cb293aa`：controller 共享生成类型改从 framework-neutral domain contract 引入，`check:solid` 不再误报 React Footer/Spinner 类型；全链路边界门禁通过。P41 仍待真实 provider/WebView 验收。
 
 [2026-09-03 05:58] [聊天稳定性·工程师] [Slice D 已处理] 提交 `6b750799`：自定义 preset canonical id、Theme/Presentation/Renderer transaction await + rollback、failedProvider/revision、快速点击串行化；Settings/TemplateLibrary/PresentationProfilePicker 显示应用结果。D/C 相关 245 项通过，`tsc -b`/lint/边界脚本通过；`check:solid` 仍受既有 GenerationFooter/SpinnerGlimmer React 类型诊断阻塞。P41 进入真实 provider/WebView 待验收。
