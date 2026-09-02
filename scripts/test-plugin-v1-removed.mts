@@ -3,6 +3,16 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
+// This file is also executed by the strip-only Node legacy runner.  Consume
+// the shared manifest schema here instead of importing the runtime parser
+// (which intentionally uses richer TypeScript syntax) so the guard remains
+// executable in both Node and Vitest.
+const manifestSchema = JSON.parse(readFileSync(join(root, 'shared/pylon-plugin-manifest.schema.json'), 'utf8')) as {
+  properties?: { api?: { enum?: unknown[] } }
+}
+const supportedPluginApiVersions = manifestSchema.properties?.api?.enum
+  ?.filter((value): value is string => typeof value === 'string') ?? []
+assert.ok(supportedPluginApiVersions.length > 0, 'manifest schema 必须声明 Plugin API allowlist')
 const forbidden = [
   'src/contracts/plugin.ts',
   'src/host/pluginRegistry.ts',
@@ -31,7 +41,11 @@ for (const base of ['examples', 'src/plugins/product/packages']) {
   for (const path of walk(join(root, base)).filter(path => path.endsWith('pylon-plugin.json'))) {
     const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
     assert.equal(manifest.schema, 1, `${path} 必须使用 schema 1`)
-    assert.equal(manifest.api, '1.0', `${path} 必须使用 API 1.0`)
+    assert.ok(
+      typeof manifest.api === 'string'
+        && supportedPluginApiVersions.includes(manifest.api),
+      `${path} 必须使用受支持的 Plugin API（${supportedPluginApiVersions.join('/')}）`,
+    )
     assert.equal(typeof (manifest.web as { entry?: unknown } | undefined)?.entry, 'string', `${path} 必须声明 web.entry`)
     for (const deleted of ['trust', 'capabilities', 'contributes', 'signature', 'entry']) {
       assert.equal(deleted in manifest, false, `${path} 不得保留旧字段 ${deleted}`)
@@ -53,4 +67,4 @@ const pluginManager = readFileSync(join(root, 'src/components/settings/PluginMan
 assert.doesNotMatch(pluginManager, /PluginRegistry|PluginHost|api=0\.1|devMode|paste/i)
 assert.match(pluginManager, /Pylon Plugin API \{PYLON_PLUGIN_API_VERSION\}/)
 
-console.log('插件 API 0.1 与旧运行时删除守卫通过')
+console.log('插件 API allowlist 与旧运行时删除守卫通过')

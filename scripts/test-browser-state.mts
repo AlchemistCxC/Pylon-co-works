@@ -43,10 +43,14 @@ assert.match(view, /browserReducer, undefined, createBrowserState/, '必须经�
 const registry = readFileSync(new URL('../src/plugins/core/sheet/builtinWorkspacePlugins.ts', import.meta.url), 'utf8')
 assert.match(registry, /kind: 'browser'.*sidebarMode: 'sheet'.*component: lazyWorkspace\(BrowserSheetView\)/, 'browser type 必须注册完整 renderer')
 
-// ── I09-A-FE-02：Browser 折叠后内部左栏完整消失，无独立折叠按钮样式 ──
+// ── I09-A-FE-02：Browser 折叠后保留 42px 图标轨道，无独立折叠按钮样式 ──
 const browserCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', import.meta.url), 'utf8')
-assert.match(browserCss, /\.browser-sidebar-collapsed \.browser-sidebar \{[^}]*display:\s*none;/, 'Browser 折叠后内部工具栏应完整隐藏')
-assert.doesNotMatch(browserCss, /\.browser-sidebar-collapsed \.browser-sidebar \{[^}]*48px/, 'Browser 折叠规则不得再硬编码 48px')
+const collapsedSidebarRule = browserCss.match(/\.browser-sidebar-collapsed\s+\.browser-sidebar\s*\{[^}]*\}/)?.[0]
+assert.ok(collapsedSidebarRule, 'Browser 必须声明折叠态工具栏规则')
+assert.match(collapsedSidebarRule, /width:\s*42px;/, 'Browser 折叠态必须保留 42px 图标轨道')
+assert.match(collapsedSidebarRule, /flex-basis:\s*42px;/, 'Browser 折叠态 flex-basis 必须与图标轨道一致')
+assert.doesNotMatch(collapsedSidebarRule, /display:\s*none/, 'Browser 折叠态不得移除可用的图标轨道')
+assert.doesNotMatch(browserCss, /\.browser-sidebar-collapsed[^}]*48px/, 'Browser 折叠规则不得再硬编码 48px')
 assert.doesNotMatch(browserCss, /@media[\s\S]*?\.browser-sidebar \{[^}]*48px/, '窄视口折叠宽度不得硬编码 48px')
 assert.doesNotMatch(browserCss, /\.browser-sidebar-toggle/, 'Browser 不得再有独立折叠按钮样式')
 
