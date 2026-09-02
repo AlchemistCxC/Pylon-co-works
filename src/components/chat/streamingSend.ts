@@ -2,12 +2,33 @@ import { invoke, type Channel } from '@tauri-apps/api/core'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { getChatController, type ChatControllerHandle } from './chatEventController.ts'
 import { closeStreamChannel, openStreamChannel, type StreamFrame, type StreamFrameHandler } from './streamChannel.ts'
+import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
+import { presentPromptFailure } from '../../domains/workbench/promptFailurePresentation.ts'
 
 export interface StreamingSendDependencies {
   invoke(command: string, args?: unknown): Promise<unknown>
   open(source: string, handler: StreamFrameHandler): Channel<StreamFrame> | undefined
   close(source: string): void
   controller(): ChatControllerHandle | null
+}
+
+/** Error returned when the streaming command rejects after publishing pylon:error. */
+export class StreamingPromptFailure extends Error {
+  readonly failure?: PromptFailureMetadata
+  readonly technicalMessage: string
+
+  constructor(message: string, failure?: PromptFailureMetadata) {
+    const presentation = presentPromptFailure(message, failure)
+    super(presentation.userSummary)
+    this.name = 'StreamingPromptFailure'
+    this.failure = failure
+    this.technicalMessage = presentation.technicalMessage ?? message
+  }
+
+  /** InputBar's legacy String(error) path should show the safe summary only. */
+  override toString(): string {
+    return this.message
+  }
 }
 
 const productionDependencies: StreamingSendDependencies = {
@@ -28,7 +49,17 @@ export function sendMessageWithStream(
   dependencies: StreamingSendDependencies = productionDependencies,
 ): Promise<unknown> {
   const source = payload.source
+  let terminalFailure: { message?: string; failure?: PromptFailureMetadata } | undefined
   const channel = dependencies.open(source, frame => {
+    if (frame.event === 'pylon:error' && frame.payload && typeof frame.payload === 'object' && !Array.isArray(frame.payload)) {
+      const value = frame.payload as { error?: unknown; failure?: unknown }
+      terminalFailure = {
+        ...(typeof value.error === 'string' ? { message: value.error } : {}),
+        ...(value.failure && typeof value.failure === 'object' && !Array.isArray(value.failure)
+          ? { failure: value.failure as PromptFailureMetadata }
+          : {}),
+      }
+    }
     const controller = dependencies.controller()
     if (controller) void controller.handleStreamFrame(frame)
     if (frame.event === 'pylon:done' || frame.event === 'pylon:error') dependencies.close(source)
@@ -37,6 +68,10 @@ export function sendMessageWithStream(
   if (!channel) return client.sendMessage(payload)
   return client.sendMessageStreaming(payload, channel).catch(error => {
     dependencies.close(source)
+    if (terminalFailure) {
+      const message = terminalFailure.message ?? (error instanceof Error ? error.message : String(error))
+      throw new StreamingPromptFailure(message, terminalFailure.failure)
+    }
     throw error
   })
 }

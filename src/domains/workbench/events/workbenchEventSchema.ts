@@ -148,6 +148,8 @@ export interface DiagnosticEvent {
   readonly level?: 'info' | 'warning' | 'error'
   readonly message?: string
   readonly code?: string
+  /** Optional structured detail kept behind the default user-facing summary. */
+  readonly data?: JsonValue
 }
 
 export type WorkbenchSemanticEvent =

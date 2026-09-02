@@ -376,6 +376,33 @@ describe('canonical 双写（A1-c P2）', () => {
     handle.dispose()
   })
 
+  it('error 展示使用 failure 摘要但 canonical raw 保留 provider 诊断', async () => {
+    const source = 'local:dw-provider-error'
+    useIdentityStore.setState({ sessions: [makeSession('s-provider-error', source)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+    handle.initSource(source, [])
+
+    const failure = {
+      source: 'provider', configuredTimeoutSecs: 180, actualElapsedMs: 24_000,
+      providerMessage: 'ACP protocol: timed out after 180s (provider error)',
+    } as const
+    await handle.handleStreamFrame({
+      event: 'pylon:error',
+      payload: { source, error: failure.providerMessage, failure },
+    })
+
+    expect(handle.getMessages(source).at(-1)?.content).toBe('Provider 返回错误')
+    expect(sink.offers[0]?.raw).toMatchObject({
+      source,
+      update: {
+        sessionUpdate: 'error', error: failure.providerMessage, failure,
+      },
+    })
+    handle.dispose()
+  })
+
   it('pruneSources 丢弃被移除 source 的 canonical owner', async () => {
     const A = 'local:dw-a', B = 'local:dw-b'
     useIdentityStore.setState({ sessions: [makeSession('sA', A), makeSession('sB', B)] })

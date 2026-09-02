@@ -6,6 +6,7 @@ import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { extractUsage, extractPlanEntries, type ContentBlock, type PeriDonePayload, type PeriErrorPayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
+import { presentPromptFailure } from '../../domains/workbench/promptFailurePresentation.ts'
 import { applySessionStateUpdate } from '../../domains/sessionState/sessionStateSync.ts'
 import { normalizeRawEvent, type CanonicalNormalizeResult } from '../../domains/events/canonicalNormalizer'
 import { toolFieldsFromCanonical } from '../../domains/events/toolProjection'
@@ -1242,14 +1243,24 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         if (result.blocked) return
         effectiveError = result.message ?? error
       }
+      // Keep the wire/provider text for persistence and hooks, but render a
+      // source-aware summary so a provider-configured value such as 180s is
+      // never presented as local elapsed time.
+      const failurePresentation = presentPromptFailure(effectiveError, event.payload.failure)
       const errorContext = resolveContext(source)
       if (errorContext && !isSourceLoading(source) && !kernelCommitted) {
-        persistCanonicalEvent(errorContext, { source, update: { sessionUpdate: 'error', error: effectiveError, cancelled: event.payload.cancelled === true } }, true)
+        persistCanonicalEvent(errorContext, {
+          source,
+          update: {
+            sessionUpdate: 'error', error: effectiveError, cancelled: event.payload.cancelled === true,
+            ...(event.payload.failure ? { failure: event.payload.failure } : {}),
+          },
+        }, true)
       }
       dispatch({
         type: 'error',
         source,
-        error: effectiveError,
+        error: failurePresentation.userSummary,
         cancelled: event.payload.cancelled === true,
         replay: false,
         ...(event.payload.failure ? { failure: event.payload.failure } : {}),

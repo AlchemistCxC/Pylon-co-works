@@ -1,7 +1,7 @@
 import type { Channel } from '@tauri-apps/api/core'
 import { describe, expect, it, vi } from 'vitest'
 import type { SendMessagePayload } from '../../../infrastructure/acp/chatClient.ts'
-import { sendMessageWithStream, type StreamingSendDependencies } from '../streamingSend.ts'
+import { sendMessageWithStream, StreamingPromptFailure, type StreamingSendDependencies } from '../streamingSend.ts'
 import type { StreamFrame, StreamFrameHandler } from '../streamChannel.ts'
 
 const payload: SendMessagePayload = {
@@ -45,5 +45,29 @@ describe('sendMessageWithStream', () => {
       invoke, open: () => undefined, close: vi.fn(), controller: () => null,
     })
     expect(invoke).toHaveBeenCalledWith('send_message', payload)
+  })
+
+  it('preserves terminal failure provenance when the streaming command rejects after pylon:error', async () => {
+    let handler: StreamFrameHandler | undefined
+    const raw = 'ACP protocol: timed out after 180s (provider error)'
+    const failure = {
+      source: 'provider', configuredTimeoutSecs: 180, actualElapsedMs: 24_000,
+      providerMessage: raw,
+    } as const
+    const dependencies: StreamingSendDependencies = {
+      invoke: vi.fn(async () => {
+        handler?.({ event: 'pylon:error', payload: { source: payload.source, error: raw, failure } })
+        throw new Error(raw)
+      }),
+      open: (_source, next) => { handler = next; return {} as Channel<StreamFrame> },
+      close: vi.fn(),
+      controller: () => null,
+    }
+
+    const error = await sendMessageWithStream(payload, dependencies).catch(value => value)
+    expect(error).toBeInstanceOf(StreamingPromptFailure)
+    expect(error).toMatchObject({ message: 'Provider 返回错误', failure })
+    expect(String(error)).toBe('Provider 返回错误')
+    expect((error as StreamingPromptFailure).technicalMessage).toBe(raw)
   })
 })

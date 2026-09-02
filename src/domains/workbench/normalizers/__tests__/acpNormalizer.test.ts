@@ -139,6 +139,23 @@ describe('ACP normalizer', () => {
     ]))
   })
 
+  it('uses a short summary for provider timeout prose while retaining technical metadata', () => {
+    const result = normalizeAcpEvent({
+      update: {
+        sessionUpdate: 'error',
+        error: 'ACP protocol: timed out after 180s (provider error)',
+        failure: {
+          source: 'provider', configuredTimeoutSecs: 180, actualElapsedMs: 24_000,
+          providerMessage: 'ACP protocol: timed out after 180s (provider error)',
+        },
+      },
+    }, context)
+    const event = result.events[0]?.event
+    expect(event).toMatchObject({ type: 'diagnostic.notice', message: 'Provider 返回错误', code: 'provider.error' })
+    expect((event as { data?: { failure?: { source?: string } } }).data?.failure?.source).toBe('provider')
+    expect(result.diagnostics[0]?.message).toBe('Provider 返回错误')
+  })
+
   it.each([
     ['tool_call', undefined],
     ['tool_call_update', 'completed'],

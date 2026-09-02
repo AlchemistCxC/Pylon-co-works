@@ -20,6 +20,7 @@ import {
   extractConfigOptionId,
   extractConfigOptionValue,
 } from '../../../infrastructure/acp/chatContracts.ts'
+import { presentPromptFailure, type PromptFailurePresentationMetadata } from '../promptFailurePresentation.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
   id: 'acp',
@@ -88,9 +89,25 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
       return { event: { type: 'session.completed', stopReason: typeof update.stopReason === 'string' ? update.stopReason : undefined }, diagnostics }
     case 'error': {
       const message = typeof update.error === 'string' ? update.error : typeof update.message === 'string' ? update.message : typeof update.errorMessage === 'string' ? update.errorMessage : 'provider reported an error'
+      const failure = isRecord(update.failure)
+        ? update.failure as PromptFailurePresentationMetadata
+        : undefined
+      const presentation = presentPromptFailure(message, failure)
+      const detail = failure
+        ? toJsonValue({
+            failure,
+            ...(presentation.technicalMessage ? { technicalMessage: presentation.technicalMessage } : {}),
+          })
+        : undefined
       // The semantic code drives projector convergence. Provider-specific error
       // detail remains available in raw/normalizer diagnostics.
-      return { event: { type: 'diagnostic.notice', level: 'error', message, code: 'provider.error' }, diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', message, ['error'], true)] }
+      return {
+        event: {
+          type: 'diagnostic.notice', level: 'error', message: presentation.userSummary, code: 'provider.error',
+          ...(detail !== undefined ? { data: detail } : {}),
+        },
+        diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', presentation.userSummary, ['error'], true)],
+      }
     }
     default:
       diagnostics.push(createDiagnostic(context, update, 'wire.unknown', `unknown ACP session update: ${wireKind(update)}`, ['sessionUpdate'], true))
