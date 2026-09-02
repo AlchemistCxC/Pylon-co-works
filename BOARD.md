@@ -4,6 +4,8 @@
 
 [2026-09-03 03:12] [聊天稳定性·工程师] [Slice A 已处理] 提交 `b6379b11`：修复 Hermes 短 idle 截断与 180s 错报，增加 ACP failure provenance、单调实际耗时和 canonical 恢复耗时；无数据库/schema/journal owner 变更。A 片定向 Vitest 89 项、Rust timeout/metadata、tsc、lint、check:solid 通过；进入 Slice B（消息轨字体/流式几何与抖动）。
 
+[2026-09-03 04:19] [聊天稳定性·工程师] [Slice B 已处理] 提交 `4de6f903`：统一思考/输入/正文/工具/生成指示的消息字体与左轴，保留代码/路径/内联 code 的 mono+着色；修复助手首行 Slot margin/宽度、canonical/transient 思考重复行，并把外层/内层 follow 与 measurement 合并到每帧一次。B 片定向 167 项、tsc、lint、check:solid 通过；进入 Slice C 空态创建 overlay 与 logo viewport 定位。
+
 [2026-09-03 继续] [聊天反馈·工程师] [已处理] 用户追加的聊天工具终态、工具聚合展示、字体/内联代码、助手指示器换行、FileSheet 编辑态与流式思考抖动反馈已完成首片收口：`10039417`、`34b28a33`、`f86176f8`；目标域/前端全量测试、`tsc -b`、build、lint、`check:solid` 与 connector 守卫均通过。外部台账已记录，真实窗口/provider trace 验收按后置项保留；未改 canonical schema、数据库或持久化 owner。
 
 [2026-09-02 15:45] [UI收尾·工程师] [已处理] 用户视觉反馈首片收尾：左/右栏折叠过渡、消息入场与流式微光、VS Code 风格三项文字菜单、`--msg-font` 字体统一，以及设置页移除一级域导航并由标题栏四域菜单切换均已落地。提交：`655e6736`、`bf554cc5`、`004b9635`、`2d672170`、`ef5e3c9e`、`adc5f307`。设置/标题栏/Workbench 定向回归、`tsc -b`、lint、`check:solid` 通过；全量套件剩余失败属于既有/并行 legacy 契约（chat replay、sheet persistence、plugin API、browser state），未混入本片。
