@@ -21,7 +21,10 @@ import { addGeneratingSource, removeGeneratingSource } from './sessionEventState
 import { reportRuntimeError } from '../../runtimeError'
 import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRuntimeState, type SourceChatRuntime } from './sessionRuntimeStore.ts'
 import type { Message } from './messageTypes.ts'
-import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
+// Keep the shared controller contract framework-neutral. Importing these
+// types from the React footer pulls the entire React JSX surface into the
+// Solid-only type graph and makes `check:solid` report false component errors.
+import type { GenerationPhase, GenerationSummary } from '../../domains/workbench/generationFooterContracts.ts'
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import { createHorizontalSubscription } from './horizontalSubscription.ts'
