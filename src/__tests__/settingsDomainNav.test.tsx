@@ -15,7 +15,7 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 
-describe('ISSUE-13 W2 左侧 domain 导航', () => {
+describe('ISSUE-13 W2 当前域内 section 导航', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()

@@ -314,8 +314,9 @@
 .set-advanced summary::before { content:'▸ '; font-size:var(--font-size-3xs); }
 .set-advanced[open] summary::before { content:'▾ '; }
 
-/* I13-W2：设置一级导航已迁入左侧 settings-nav（settingsDomains 驱动），
-   原顶部 tier-nav 行与快速层视图（settings-quick/set-basic-fields）样式随之删除 */
+/* I13-W2：设置一级域切换由标题栏设置菜单承担；左侧 settings-nav 仅列出
+   当前域的 section（settingsDomains 驱动）。原顶部 tier-nav 行与快速层视图
+   （settings-quick/set-basic-fields）样式随之删除。 */
 
 /* W2-14：模板库（官方 6 + 自定义，预览局部 cssVars 不触全局） */
 .template-library { display: flex; flex-direction: column; gap: 16px; }
