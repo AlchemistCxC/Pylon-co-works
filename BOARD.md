@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 07:04] [聊天稳定性·工程师] [已处理] P41 timeout copy 边界补强：提交 `d2671de2`，明确非法 `triggeredTimeoutSecs` 不得回退到配置预算；新增回归后全量 Vitest 469 文件/2905 项、`tsc -b`、lint、`check:solid`、build 全绿。P41 仍待真实 provider/WebView trace。
+
 [2026-09-03 06:57] [聊天稳定性·工程师] [已处理] P41 ACP 错误展示补强：提交 `1bc05dfc`，新增纯函数 failure presentation；provider 返回的“180s”只进入技术详情/raw，用户摘要按来源与真实触发 bound 显示。controller、streaming send、ACP/Workbench normalizer 共用摘要，终帧后命令拒绝不再泛化为误导文案；新增 6 项相关回归，前端全量 469 文件/2904 项及 tsc/lint/check:solid/build 全绿。真实 provider/WebView trace 仍待验收。
 
 [2026-09-03 06:26] [聊天稳定性·工程师] [已处理] P41 门禁回归补强：提交 `0bd15531`，恢复 profile kind 数值字号/行高在 prose Slot 的显式应用，同时保持普通英文 prose 字体继承消息轨、代码语义 mono；同步更新 `test-template-library.mts` 结构守卫以锁定 canonical preset callback/id。全量 Vitest 468 文件/2898 项、`tsc -b`、lint、`check:solid`、build、`git diff --check` 全绿。版本号 WIP 保留；真实 provider/WebView 验收仍待后置。
