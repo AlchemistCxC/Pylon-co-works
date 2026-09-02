@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Settings from '../../components/Settings'
 import { useIdentityStore } from '../../identityStore'
@@ -148,10 +148,14 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
   })
 
   describe('Settings（Agent 状态区）', () => {
-    // I13-W1：一级导航 = 稳定设置域——先入 Agent 与连接域，再选中 Agent section
+    // I13-W2：一级域切换由标题栏设置菜单发出 canonical intent；Settings
+    // 只负责当前域内的 section 导航，不再依赖已移除的 domain rail。
     const openAgentTab = () => {
-      fireEvent.click(within(document.querySelector('.settings-domain-rail') as HTMLElement).getByRole('button', { name: 'Agent' }))
-      fireEvent.click(within(document.querySelector('.settings-nav') as HTMLElement).getByRole('button', { name: 'Agent' }))
+      act(() => {
+        window.dispatchEvent(new CustomEvent('pylon:open-settings', {
+          detail: { domain: 'agents-connections', section: 'agent' },
+        }))
+      })
     }
 
     it('无快照 → 状态显示“状态未知”，不出现假绿“已连接”', () => {

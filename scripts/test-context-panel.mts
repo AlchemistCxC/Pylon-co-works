@@ -12,7 +12,9 @@ const activation = readFileSync(new URL('../src/plugin-runtime/pluginActivationC
 const shadow = readFileSync(new URL('../src/plugin-runtime/shadowUpdate.ts', import.meta.url), 'utf8')
 
 assert.match(slot, /useRightRailStore\(state => state\.collapsed\)/, '全局右栏宿主必须读统一折叠状态')
-assert.match(slot, /if \(collapsed \|\| entries\.length === 0\) return null/, '无贡献或折叠时不得挂载')
+assert.match(slot, /if \(entries\.length === 0\) return null/, '无贡献时不得挂载')
+assert.match(slot, /right-rail-host\$\{collapsed/, '折叠状态必须由右栏外壳承担，以支持宽度/透明度动画')
+assert.match(slot, /data-collapsed=\{collapsed \? 'true' : 'false'\}/, '右栏外壳必须暴露折叠状态')
 assert.match(slot, /<ContextPanelHost sheet=\{activeSheet\} ctx=\{ctx\} activePanelId=\{effectivePanelId\} \/>/, '宿主必须挂统一贡献 Host')
 assert.match(host, /role="tablist"/, '多贡献必须以可访问标签切换')
 assert.match(host, /PluginContributionBoundary/, '每个右栏贡献必须有独立错误边界')

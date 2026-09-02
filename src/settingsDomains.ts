@@ -72,7 +72,7 @@ export const SETTINGS_DOMAIN_SHORT_LABELS: Readonly<Record<SettingsDomainId, str
   plugins: '插件',
 }
 
-/** Compact menu copy shared by the titlebar and the Settings domain rail. */
+/** Compact menu copy shared by the titlebar menu and the active Settings domain context. */
 export const SETTINGS_DOMAIN_MENU_META: Readonly<Record<SettingsDomainId, {
   readonly glyph: string
   readonly description: string
