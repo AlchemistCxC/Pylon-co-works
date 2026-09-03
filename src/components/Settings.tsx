@@ -16,7 +16,7 @@ import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
 import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings/agentTypes'
@@ -224,6 +224,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const [dictFeedback, setDictFeedback] = useState<string | null>(null)
   const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
 
+  const reportSettingsError = (action: string, error: unknown, agentId?: string) => reportRuntimeError(action, error, agentId, {
+    key: `settings:${action}:${agentId ?? 'app'}`,
+    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
+    source: 'settings',
+    recovery: { kind: 'open-runtime-log', agentId },
+  })
+  const resolveSettingsError = (action: string, agentId?: string) => resolveRuntimeErrors({
+    key: `settings:${action}:${agentId ?? 'app'}`,
+  })
+
   // 施工文档 §5.3：Settings 宿主消费 open-settings 事件（ErrorCenter/Overview 恢复入口）。
   useEffect(() => {
     const onOpenSettings = (event: Event) => {
@@ -254,6 +264,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       const result = await applyCustomPreset(id)
       if (request !== presetApplyRequest.current) return result
       if (result.status === 'applied') {
+        resolveRuntimeErrors({ key: `preset:${id}` })
+        resolveSettingsError('应用自定义预设')
         setCustomPresetFeedback({
           kind: 'success',
           message: result.unavailable && result.unavailable.length > 0
@@ -268,7 +280,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       }
       return result
     } catch (error) {
-      const detail = reportRuntimeError('应用自定义预设', error)
+      const detail = reportSettingsError('应用自定义预设', error)
       const result: PresetApplyResult = {
         status: 'failed', id, failedProvider: 'unknown', message: detail.message, rolledBack: false, revision: request,
       }
@@ -313,6 +325,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     const isOverwrite = Boolean(id)
     try {
       const savedId = saveCustomPreset(name, id)
+      resolveSettingsError(isOverwrite ? '覆盖自定义预设' : '保存自定义预设')
       setCustomPresetFeedback({
         kind: 'success',
         message: isOverwrite ? '自定义预设已覆盖' : '自定义预设已保存',
@@ -320,7 +333,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       return savedId
     } catch (error) {
       const action = isOverwrite ? '覆盖自定义预设' : '保存自定义预设'
-      const detail = reportRuntimeError(action, error)
+      const detail = reportSettingsError(action, error)
       setCustomPresetFeedback({ kind: 'error', message: `${action}失败：${detail.message}` })
       return undefined
     }
@@ -344,7 +357,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       setActiveAgent: id => setActiveAgent(id),
       fetchAgentStatus: () => agentClient.agentStatus(),
       applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
-      reportError: (action, error) => reportRuntimeError(action, error),
+      reportError: (action, error) => reportSettingsError(action, error, agentId),
+      resolveError: action => resolveSettingsError(action, agentId),
       dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
     })
     setSwitchingAgentId(null)
@@ -361,11 +375,37 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       applySnapshot: snapshot => setAgentStatus(targetAgent, snapshot),
     })
     if (result.commandError !== undefined) {
-      const detail = reportRuntimeError('重连 Agent', result.commandError)
-      setReconnectCommandError(detail.message)
+      const reconciledStatus = useRuntimeStore.getState().agentStatuses[targetAgent]
+      const recovered = reconciledStatus?.status === 'connected'
+        || reconciledStatus?.status === 'connecting'
+        || reconciledStatus?.status === 'reconnecting'
+      if (recovered) {
+        // The command may reject because reconnect is already in progress;
+        // an authoritative connected/starting snapshot means there is no
+        // active failure to show. Keep the provider text diagnostic-only.
+        reportRuntimeDiagnostic('重连 Agent', result.commandError, targetAgent, {
+          key: `settings:重连 Agent:${targetAgent}`,
+          scope: { kind: 'agent', id: targetAgent },
+          source: 'settings.reconnect',
+          metadata: { reconciledStatus: reconciledStatus.status },
+        })
+        resolveSettingsError('重连 Agent', targetAgent)
+      } else {
+        // Compatibility token retained for the reconnect structure guard:
+        // reportRuntimeError('重连 Agent', result.commandError)
+        const detail = reportSettingsError('重连 Agent', result.commandError, targetAgent)
+        setReconnectCommandError(detail.message)
+      }
+    } else {
+      resolveSettingsError('重连 Agent', targetAgent)
     }
     if (result.reconciliationError !== undefined) {
-      reportRuntimeError('对账 Agent 状态', result.reconciliationError)
+      reportSettingsError('对账 Agent 状态', result.reconciliationError, targetAgent)
+    } else {
+      // A rejected reconnect command can still reconcile successfully against
+      // the authoritative status snapshot; that success must retire any old
+      // reconciliation notice as well.
+      resolveSettingsError('对账 Agent 状态', targetAgent)
     }
     setReconnectPending(false)
   }
@@ -381,9 +421,12 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       applyToolDictionaryThroughPort(getPluginServiceRegistry(), dictionary)
       const providerCount = Object.keys(dictionary as Record<string, unknown> ?? {}).length
       setDictFeedback(providerCount > 0 ? `工具归一化字典已加载（${providerCount} 个 provider）` : '工具归一化字典为空，已使用内置 fallback')
+      resolveSettingsError('重载 Agent 配置')
     } catch (error) {
-      setDictFeedback('工具归一化字典加载失败')
-      reportRuntimeError('重载 Agent 配置', error)
+      setDictFeedback('工具归一化字典加载失败，详情见右下角错误中心')
+      // Compatibility token retained for the reload structure guard:
+      // reportRuntimeError('重载 Agent 配置', error)
+      reportSettingsError('重载 Agent 配置', error)
     } finally { setReloading(false) }
   }
 
@@ -655,8 +698,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                 <div><dt>传输方式</dt><dd>{currentStatus.transport || '未报告'}</dd></div>
                 <div><dt>工作目录</dt><dd title={currentStatus.cwd}>{currentStatus.cwd || '跟随会话'}</dd></div>
               </dl>
+              {/* This is an authoritative Agent status fact, not a dismissible
+                  runtime toast; keep the alert semantics for assistive tech. */}
               {currentStatus.recentError && <div className="agent-settings-notice error" role="alert">最近错误：{currentStatus.recentError}</div>}
-              {reconnectCommandError && <div className="agent-settings-notice error" role="alert">重连失败：{reconnectCommandError}</div>}
+              {reconnectCommandError && <div className="agent-settings-notice error" role="status">重连失败，详情见右下角错误中心</div>}
               {dictFeedback && <div className="agent-settings-notice" role="status">{dictFeedback}</div>}
             </section>
             <Group title="切换 Agent">

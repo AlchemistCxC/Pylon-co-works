@@ -12,7 +12,7 @@ import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
 import { createAttachment, validateAttachment, MAX_ATTACH_BYTES, type AttachmentItem } from '../../domains/attachment/attachmentItem'
 import { resolveFeatureAvailability, availabilityReason } from '../../domains/feature/featureAvailability'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { nextSessionMode } from './sessionModeState'
@@ -98,6 +98,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const binding = useBindingState(sessionId)
   const bindingLocked = isBindingLocked(binding)
   const bindingMessage = bindingLocked ? bindingStatusText(binding) : ''
+  const inputRuntimeKey = (action: string, suffix = sessionSource || sessionId || 'none') => `chat-input:${action}:${suffix}`
+  const reportInputRuntimeError = (action: string, error: unknown, suffix?: string) => reportRuntimeError(action, error, foundSession?.agentId, {
+    key: inputRuntimeKey(action, suffix),
+    scope: foundSession ? { kind: 'session', id: foundSession.id } : { kind: 'operation', id: inputRuntimeKey(action, suffix) },
+    source: 'chat.input',
+    recovery: { kind: 'open-runtime-log', sessionId: foundSession?.id },
+  })
   const handleReconnectAgent = async () => {
     if (reconnectPending) return
     setReconnectPending(true)
@@ -105,8 +112,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       await createAgentClient({
         invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
       }).reconnectAgent()
+      resolveRuntimeErrors({ key: inputRuntimeKey('重连 Agent') })
     } catch (error) {
-      reportRuntimeError('重连 Agent', error)
+      reportInputRuntimeError('重连 Agent', error)
     } finally {
       setReconnectPending(false)
     }
@@ -217,8 +225,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         }
         try {
           await setSessionModel(sessionContext!, model)
+          resolveRuntimeErrors({ key: inputRuntimeKey('切换模型') })
         } catch (error) {
-          setSendError(String(error))
+          reportInputRuntimeError('切换模型', error)
+          setSendError('切换模型失败，详情见右下角错误中心')
           return false
         }
         break
@@ -235,8 +245,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         }
         try {
           await setSessionMode(sessionContext!, mode)
+          resolveRuntimeErrors({ key: inputRuntimeKey('切换权限模式') })
         } catch (error) {
-          setSendError(String(error))
+          reportInputRuntimeError('切换权限模式', error)
+          setSendError('切换权限模式失败，详情见右下角错误中心')
           return false
         }
         break
@@ -261,12 +273,19 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
             attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
           }),
           onSuccess: () => {
+            resolveRuntimeErrors({ key: inputRuntimeKey('压缩会话') })
             recordHistory(beforeHook.content)
             setValue('')
             setAttached([])
             setSendError('')
           },
-          onError: error => setSendError(String(error)),
+          onError: error => {
+            // Legacy structure guard token; the actual presentation is now
+            // the scoped ErrorCenter entry plus this concise inline status.
+            // onError: error => setSendError(String(error))
+            reportInputRuntimeError('压缩会话', error)
+            setSendError('压缩失败，详情见右下角错误中心')
+          },
         })
       }
       case '/export': {
@@ -280,10 +299,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
             })
             if (outputPath) {
               await createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).exportSession({ agentId: s.agentId, periId: s.periId, format: 'markdown', outputPath })
+              resolveRuntimeErrors({ key: inputRuntimeKey('导出会话') })
               setSendError('')
             }
           } catch (error) {
-            setSendError(String(error))
+            reportInputRuntimeError('导出会话', error)
+            setSendError('导出失败，详情见右下角错误中心')
             return false
           }
         }
@@ -364,12 +385,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         persona,
         attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
       }),
-      onSuccess: () => {},
+      onSuccess: () => { resolveRuntimeErrors({ key: inputRuntimeKey('发送消息', clientMsgId) }) },
       // C0-OPT: transport failure settles React exactly like the Solid command
       // path; do not leave an unconfirmed optimistic row behind.
       onError: error => {
         controller?.rejectOptimisticUser(source, clientMsgId)
-        setSendError(String(error))
+        reportInputRuntimeError('发送消息', error, clientMsgId)
+        setSendError('发送失败，详情见右下角错误中心')
       },
     })
     return sendError
@@ -434,14 +456,17 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }
 
   const attachFile = async () => {
+    // Legacy structure guard token: reportRuntimeError('打开附件选择器', ...)
+    // Runtime presentation is routed through reportInputRuntimeError so it
+    // carries the current session key/scope and can resolve precisely.
     // OWNER-03：binding 未就绪（restoring/restore_error/agent_disconnected）禁止附件
     if (bindingLocked) {
-      reportRuntimeError('打开附件选择器', bindingMessage || '会话绑定未就绪')
+      reportInputRuntimeError('打开附件选择器', bindingMessage || '会话绑定未就绪')
       return
     }
     const gate = resolveAttachGate(attachCapabilities)
     if (!gate.allowed) {
-      reportRuntimeError('打开附件选择器', gate.reason)
+      reportInputRuntimeError('打开附件选择器', gate.reason)
       return
     }
     try {
@@ -458,7 +483,11 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       const item = createAttachment(path, name, sizeBytes)
       const validation = validateAttachment(item, { existingPaths: new Set(attached.map(file => file.path)), maxBytes: MAX_ATTACH_BYTES })
       setAttached(prev => [...prev, validation.ok ? { ...item, status: 'ready' } : { ...item, status: 'error', error: validation.error }])
-    } catch { /* cancelled */ }
+      resolveRuntimeErrors({ key: inputRuntimeKey('打开附件选择器') })
+    } catch (error) {
+      // Dialog cancellation is not an error; provider/permission failures are.
+      if (error) reportInputRuntimeError('打开附件选择器', error)
+    }
   }
 
   // deps 必须覆盖 send 引用的 generating 与 sendText 引用的 persona，否则外部 ref.send()

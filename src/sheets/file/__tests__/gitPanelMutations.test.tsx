@@ -7,7 +7,7 @@ import type { WorkspaceTarget } from '../../../domains/workspace/workspaceTarget
 import GitPanel from '../GitPanel.tsx'
 import { reportRuntimeError } from '../../../runtimeError.ts'
 
-vi.mock('../../../runtimeError', () => ({ reportRuntimeError: vi.fn() }))
+vi.mock('../../../runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
 
 const target: WorkspaceTarget = {
   sessionId: 'session-a',

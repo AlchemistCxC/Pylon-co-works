@@ -6,6 +6,7 @@ import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceCont
 import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { useWorkspaceStore, touchedFileVersionKey } from '../../workspaceStore'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import type { AgentContext } from '../../agentContext'
 import { languageFromPath } from './fileSheetState.ts'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
@@ -73,6 +74,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   useEffect(() => { editingRef.current = editing === true }, [editing])
   // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
   const targetKey = workspaceTargetKey(target)
+  const errorKey = `file-tab:${targetKey ?? 'none'}:${path}`
   const touchVersion = useWorkspaceStore(s => (target && path && context) ? s.touchVersions[touchedFileVersionKey(context, path)] : undefined)
 
   useEffect(() => { contentRef.current = content }, [content])
@@ -123,6 +125,12 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       if (!loaded) {
         setLoading(false)
         setError('文件读取响应异常，请重试')
+        reportRuntimeError('读取文件', new Error('文件读取响应异常，请重试'), undefined, {
+          key: errorKey,
+          scope: { kind: 'sheet', id: `file-tab:${targetKey ?? 'none'}` },
+          source: 'file.tab',
+          recovery: { kind: 'open-runtime-log', sheetId: `file-tab:${targetKey ?? 'none'}` },
+        })
         return
       }
       setLoading(false)
@@ -136,6 +144,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       diskRef.current = loaded.text
       onTruncated(loaded.truncated)
       onContentReady?.(loaded.text)
+      resolveRuntimeErrors({ key: errorKey })
       // Keep highlighting tied to the same guarded file snapshot. The helper
       // also owns edit-mode invalidation so leaving the editor rehydrates the
       // read-only projection for the current (possibly unsaved) text.
@@ -146,6 +155,12 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) {
         setLoading(false)
         setError(err instanceof Error ? err.message : String(err))
+        reportRuntimeError('读取文件', err, undefined, {
+          key: errorKey,
+          scope: { kind: 'sheet', id: `file-tab:${targetKey ?? 'none'}` },
+          source: 'file.tab',
+          recovery: { kind: 'open-runtime-log', sheetId: `file-tab:${targetKey ?? 'none'}` },
+        })
       }
     })
   }
@@ -276,7 +291,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   }, [content, path, revealLine])
 
   if (!target || !provider) return <div className="file-tab-view file-tab-empty">未安装可用的文件 provider</div>
-  if (error) return <div className="file-tab-view file-tab-error" role="alert">{error}</div>
+  if (error) return <div className="file-tab-view file-tab-error" role="status">文件读取失败，详情见右下角错误中心</div>
   if (loading) return <div className="file-tab-view file-tab-loading" role="status">正在读取文件…</div>
 
   if (editing) {

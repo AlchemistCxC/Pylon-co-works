@@ -4,7 +4,7 @@ import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Se
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
@@ -46,6 +46,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const workspaces = useWorkspaceEntityStore(s => s.workspaces)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [errorIsValidation, setErrorIsValidation] = useState(false)
   const [recent, setRecent] = useState<PersistedSessionSummary[]>([])
   const [showConfigEditor, setShowConfigEditor] = useState(false)
   const [storage, setStorage] = useState<StorageDiagnostics | undefined>(undefined)
@@ -58,9 +59,17 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     let disposed = false
     invoke('startup_diagnostics')
       .then(raw => {
-        if (!disposed) setStorage(normalizeStartupDiagnostics(raw).storage)
+        if (!disposed) {
+          setStorage(normalizeStartupDiagnostics(raw).storage)
+          resolveRuntimeErrors({ key: 'overview:startup-diagnostics' })
+        }
       })
-      .catch(error => reportRuntimeError('读取启动诊断', error))
+      .catch(error => {
+        if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
+          key: 'overview:startup-diagnostics', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+          recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+        })
+      })
     return () => { disposed = true }
   }, [])
 
@@ -70,8 +79,12 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     try {
       await invoke('migrate_appdata_to_portable')
       setMigrationDismissed(true)
+      resolveRuntimeErrors({ key: 'overview:migrate-portable' })
     } catch (error) {
-      reportRuntimeError('迁移 AppData 到便携目录', error)
+      reportRuntimeError('迁移 AppData 到便携目录', error, undefined, {
+        key: 'overview:migrate-portable', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+      })
     } finally {
       setMigrationBusy(false)
     }
@@ -83,8 +96,16 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     let disposed = false
     const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     client.listPersistedSessions().then(all => {
-      if (!disposed) setRecent(recentPersistedSessions(all))
-    }).catch(err => reportRuntimeError('读取最近会话', err))
+      if (!disposed) {
+        setRecent(recentPersistedSessions(all))
+        resolveRuntimeErrors({ key: 'overview:recent-sessions' })
+      }
+    }).catch(err => {
+      if (!disposed) reportRuntimeError('读取最近会话', err, undefined, {
+        key: 'overview:recent-sessions', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+      })
+    })
     return () => { disposed = true }
   }, [])
 
@@ -92,6 +113,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (switchingId) return
     setSwitchingId(agent.id)
     setError('')
+    setErrorIsValidation(false)
     const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
@@ -101,8 +123,16 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
       reportError: (action, err) => {
         setError(err instanceof Error ? err.message : String(err))
-        reportRuntimeError(action, err)
+        // Compatibility token retained for the overview structure guard:
+        // reportRuntimeError(action, err)
+        reportRuntimeError(action, err, agent.id, {
+          key: `overview:agent:${agent.id}:${action}`,
+          scope: { kind: 'agent', id: agent.id },
+          source: 'overview.agent-switch',
+          recovery: { kind: 'open-runtime-log', agentId: agent.id },
+        })
       },
+      resolveError: action => resolveRuntimeErrors({ key: `overview:agent:${agent.id}:${action}` }),
       dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
       // 无缝进 sheet：成功后 open agent sheet（失败保持 overview）
       openAgentSheet: (id, title) => ctx.openSheet({ kind: 'agent', title, agentId: id }),
@@ -115,6 +145,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   // FE-AUD-010：找/建逻辑收敛到 resumePersistedSessionTransaction，不靠数组长度定位。
   const resumeSession = async (p: PersistedSessionSummary) => {
     setError('')
+    setErrorIsValidation(false)
     // I01-W4：owner-aware 打开——owner 无法确定时 blocked，不静默归 active Agent
     const result = await openOwnedSessionTransaction(
       { source: p.source, periId: p.periId, title: p.title, updatedAt: p.updatedAt },
@@ -128,7 +159,14 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
         openAgentSheet: ({ title, agentId }) => ctx.openSheet({ kind: 'agent', title, agentId }),
       },
     )
-    if (!result.ok) { setError(result.message); return }
+    if (!result.ok) {
+      setError(result.message)
+      // Transport failures are already represented by the central ErrorCenter
+      // (the standard owner-switch transaction reports there). Keep only
+      // validation/ownership facts as assertive inline guidance.
+      setErrorIsValidation(result.kind !== 'transport')
+      return
+    }
   }
 
   const openKnownSession = (session: Session) => resumeSession({
@@ -357,7 +395,9 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
           </button>
         </section>
         {showConfigEditor && <div className="overview-config-editor"><AgentConfigEditor agentId={activeAgent} /></div>}
-        {error && <div className="overview-error" role="alert">{error}</div>}
+        {error && (errorIsValidation
+          ? <div className="overview-error" role="alert">{error}</div>
+          : <p className="overview-error overview-error-reference" role="status">操作失败，详情见右下角错误中心</p>)}
       </div>
       </main>
     </div>

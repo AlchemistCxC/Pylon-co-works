@@ -6,7 +6,7 @@ import {
   type AgentCreateConfig,
   type AgentsConfigDocument,
 } from '../../infrastructure/acp/agentClient'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { useIdentityStore, type AgentEntry } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
@@ -185,15 +185,25 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const [provisioningCandidateId, setProvisioningCandidateId] = useState<string | null>(null)
   const provisioningCandidateRef = useRef<string | null>(null)
   const focusedInitialAgentRef = useRef<string | null>(null)
+  const mountedRef = useRef(true)
+
+  const panelErrorKey = (operation: string, agentId?: string) => `agent-panel:${operation}:${agentId ?? 'app'}`
+  const reportPanelError = (operation: string, error: unknown, agentId?: string) => reportRuntimeError(operation, error, agentId, {
+    key: panelErrorKey(operation, agentId),
+    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'agent-settings' },
+    source: 'settings.agent-runtime',
+    recovery: { kind: 'open-runtime-log', agentId },
+  })
+  const resolvePanelError = (operation: string, agentId?: string) => resolveRuntimeErrors({ key: panelErrorKey(operation, agentId) })
 
   const reportConfigMutationError = (operation: string, error: unknown, agentId?: string) => {
-    const detail = reportRuntimeError(operation, error, agentId)
+    const detail = reportPanelError(operation, error, agentId)
     if (wireErrorCode(error) === 'config_revision_conflict') {
       setConfigConflict(true)
       setFeedback('配置已被其他进程修改；你的草稿仍保留。请重新载入配置后再提交。')
       return detail
     }
-    setFeedback(`${operation}失败：${detail.message}`)
+    setFeedback(`${operation}失败，详情见右下角错误中心`)
     return detail
   }
 
@@ -203,9 +213,10 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       await refreshAgents()
       setConfigConflict(false)
       setFeedback('配置已重新载入；未提交草稿仍保留。')
+      resolvePanelError('重新载入 Agent 配置')
     } catch (error) {
-      const detail = reportRuntimeError('重新载入 Agent 配置', error)
-      setFeedback(`重新载入失败：${detail.message}`)
+      reportPanelError('重新载入 Agent 配置', error)
+      setFeedback('重新载入失败，详情见右下角错误中心')
     }
   }
 
@@ -217,6 +228,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       const registered = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
       const detectors = registered.length > 0 ? registered : builtinAgentCatalog.detectors()
       const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors))
+      if (!mountedRef.current) return
       setCandidates(report.candidates)
       setSelectedCandidateId(current => report.candidates.some(candidate => candidate.candidateId === current)
         ? current
@@ -225,15 +237,19 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       setDetectionElapsedMs(report.elapsedMs)
       setDetectionTruncated(report.truncated)
       setDetectionCompleted(true)
+      resolvePanelError('探测本机 Agent')
     } catch (error) {
-      reportRuntimeError('探测本机 Agent', error)
-      setFeedback(`探测失败：${error instanceof Error ? error.message : String(error)}`)
-    } finally { setDetecting(false) }
+      if (!mountedRef.current) return
+      reportPanelError('探测本机 Agent', error)
+      setFeedback('探测失败，详情见右下角错误中心')
+    } finally { if (mountedRef.current) setDetecting(false) }
   }
 
   useEffect(() => {
+    mountedRef.current = true
     void detectRuntimes()
     // 首次进入 Agent 配置即扫描一次；后续扫描仍由“重新探测”显式触发。
+    return () => { mountedRef.current = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -243,10 +259,12 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     if (invalid) { setFeedback(invalid); return null }
     setFeedback(null)
     setCandidateValidation(current => ({ ...current, [candidate.candidateId]: { status: 'testing' } }))
+    let reportedTransportFailure = false
     const result = await agentClient.testAgentCandidate(draft.id, {
       name: draft.name, provider: draft.provider, transport: 'subprocess', exe: draft.executable, args: [...draft.args],
     }).catch(error => {
-      const detail = reportRuntimeError('验证 Agent 候选', error)
+      const detail = reportPanelError('验证 Agent 候选', error, draft.id)
+      reportedTransportFailure = true
       return {
         ok: false,
         agentId: draft.id,
@@ -255,6 +273,8 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       }
     })
     const validation: AgentCandidateValidationState = { status: result.ok ? 'ok' : 'failed', result }
+    if (result.ok) resolvePanelError('验证 Agent 候选', draft.id)
+    else if (!reportedTransportFailure) reportPanelError('验证 Agent 候选', result.error ?? new Error('Agent 候选验证失败'), draft.id)
     setCandidateValidation(current => ({ ...current, [candidate.candidateId]: validation }))
     return validation
   }
@@ -314,6 +334,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         setFeedback(`已保存 ${draft.name}（${id}），但尚未连接。请检查运行时日志后重试。`)
       } else {
         setFeedback(null)
+        resolvePanelError('导入 Agent 候选', id)
         notify(`已导入并打开 ${draft.name}（${id}）${importMode === 'unverified' ? '；状态：未验证' : ''}`)
       }
       await detectRuntimes()
@@ -431,6 +452,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       setEditingId(null)
       setConfigConflict(false)
       setFeedback(null)
+      resolvePanelError('保存 Agent 字段', agentId)
       notify(`已保存 ${agentId}`)
     } catch (error) {
       reportConfigMutationError('保存 Agent 字段', error, agentId)
@@ -455,6 +477,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       await refreshAgents()
       setConfigConflict(false)
       setFeedback(null)
+      resolvePanelError('设置默认 Agent', agentId)
       notify(`已将 ${agentId} 设为默认`)
     } catch (error) {
       reportConfigMutationError('设置默认 Agent', error, agentId)
@@ -475,8 +498,13 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
           ? `连接成功（${result.durationMs}ms）`
           : `连接失败：${result.error?.message ?? '未知错误'}`,
       }))
+      if (result.ok) {
+        resolvePanelError('测试 Agent 连接', agentId)
+      } else {
+        reportPanelError('测试 Agent 连接', result.error ?? new Error('Agent 连接失败'), agentId)
+      }
     } catch (error) {
-      const detail = reportRuntimeError('测试 Agent 连接', error, agentId)
+      const detail = reportPanelError('测试 Agent 连接', error, agentId)
       setTestResult(prev => ({ ...prev, [agentId]: detail.message }))
     } finally {
       setTestingId(null)
@@ -490,6 +518,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     try {
       await agentClient.restartAgentRuntime(agentId)
       await refreshAgents()
+      resolvePanelError('重启 Agent runtime', agentId)
       notify(`已重启 ${agentId} 并应用配置`)
     } catch (error) {
       reportConfigMutationError('重启 Agent runtime', error, agentId)
@@ -518,6 +547,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       setConfigConflict(false)
       setCreateDraft({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
       setFeedback(null)
+      resolvePanelError('新建 Agent', id)
       notify(`已新建 Agent ${id}`)
     } catch (error) {
       // 施工文档 §4.6：embedded source 首次配置——create 撞 config_read_only 时，
@@ -526,6 +556,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         try {
           await agentClient.initializeAgentsConfig(id, agentsDocument(id, config))
           await refreshAgents()
+          resolvePanelError('初始化 Agent 配置', id)
           setShowCreate(false)
           setCreateDraft({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
           setFeedback(`已初始化外部配置并新建 Agent ${id}`)
@@ -648,7 +679,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
             <InvocationPreview executable={discoveredDraft.executable} args={discoveredDraft.args} />
           </div>
           {candidate.evidence.map((evidence, index) => <div className="set-hint" key={`${evidence.kind}:${index}`}>{evidence.kind}：{evidence.detail}</div>)}
-          {candidate.warnings.map(warning => <div className="set-hint" role="alert" key={warning}>{warning}</div>)}
+          {candidate.warnings.map(warning => <div className="set-hint" role="status" key={warning}>{warning}</div>)}
           <div className="set-preset-row">
             {candidate.alreadyImportedAgentId ? (
               <button className="ps-btn sm primary" type="button" aria-busy={provisioningCandidateId === candidate.candidateId} disabled={provisioningCandidateId !== null} onClick={() => void activateImportedCandidate(candidate)}>{provisioningCandidateId === candidate.candidateId ? '连接中…' : '使用此 Agent'}</button>

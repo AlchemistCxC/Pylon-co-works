@@ -18,7 +18,7 @@ import {
   type CanonicalConversationEvent,
   type CanonicalEventOwner,
 } from '../../domains/events/eventSchema'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import {
   asCanonicalEventRepositoryError,
   tauriCanonicalEventRepository,
@@ -71,14 +71,30 @@ interface OwnerState {
 export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): CanonicalEventSink {
   const repository = deps.repository ?? tauriCanonicalEventRepository()
   const states = new Map<string, OwnerState>()
+  let disposed = false
   /** discard 后不得复活（scheduler 层也拒写；此处挡掉 reseed 与归一）。 */
   const discardedOwners = new Set<string>()
   const seedTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const seedInflight = new Map<string, Promise<void>>()
   const seedRetryMs = deps.seedRetryMs ?? 300
+  const errorKey = (ownerKey: string) => `canonical-sink:${ownerKey}`
   const reportError = deps.onError ?? ((ownerKey: string, error: unknown) => {
-    reportRuntimeError(`canonical 事件落盘失败（${ownerKey}）`, error)
+    reportRuntimeError(`canonical 事件落盘失败（${ownerKey}）`, error, undefined, {
+      key: errorKey(ownerKey),
+      scope: { kind: 'operation', id: ownerKey },
+      source: 'canonical.sink',
+      recovery: { kind: 'open-runtime-log' },
+    })
   })
+  const resolveError = (ownerKey: string): void => {
+    // A caller-provided onError owns its own presentation contract. The
+    // built-in reporter, however, must retire its tray entry after a later
+    // successful seed/append so a transient persistence fault cannot linger.
+    if (!disposed && !deps.onError) resolveRuntimeErrors({ key: errorKey(ownerKey), source: 'canonical.sink' })
+  }
+  const safeReportError = (ownerKey: string, error: unknown): void => {
+    if (!disposed) reportError(ownerKey, error)
+  }
 
   const scheduler = createCanonicalEventPersistScheduler({
     debounceMs: deps.debounceMs ?? 300,
@@ -86,6 +102,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       const canonicalEvents = events as CanonicalConversationEvent[]
       try {
         const revision = await repository.append(canonicalEvents, expectedRevision)
+        resolveError(ownerKey)
         // durable-before-publish：插件/渲染订阅者只能看到已由 canonical_events 接受的事实。
         // append 失败时保持 pending，绝不把未提交事件广播成 committed 事实。
         for (const event of canonicalEvents) publishPluginEvent(event)
@@ -113,7 +130,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
         throw error
       }
     },
-    onError: reportError,
+    onError: safeReportError,
   })
 
   const reseed = (ownerKey: string, scheduleRetry = true): Promise<void> => {
@@ -140,6 +157,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       current.status = 'ready'
       current.seedAttempts = 0
       current.seedError = null
+      resolveError(ownerKey)
       if (current.pending.length > 0) {
         scheduler.markDirty(ownerKey, [...current.pending], true)
       }
@@ -161,7 +179,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
           }, delay))
         }
       }
-      reportError(ownerKey, error)
+      safeReportError(ownerKey, error)
     }).finally(() => {
       seedInflight.delete(ownerKey)
     })
@@ -183,6 +201,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
 
   return {
     offer(context, raw, force = false) {
+      if (disposed) return
       const ownerKey = toCanonicalOwnerKey(context.owner)
       if (discardedOwners.has(ownerKey)) return
       let state = states.get(ownerKey)
@@ -227,6 +246,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       scheduler.discard(ownerKey)
     },
     dispose: () => {
+      disposed = true
       discardedOwners.clear()
       for (const timer of seedTimers.values()) clearTimeout(timer)
       seedTimers.clear()

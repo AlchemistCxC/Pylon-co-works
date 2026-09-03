@@ -210,6 +210,29 @@ describe('canonicalEventSink', () => {
     sink.dispose()
   })
 
+  it('dispose 后在飞写迟到失败不再上报或复活 owner', async () => {
+    const fake = fakeRepository()
+    fake.revision.mockResolvedValue(0)
+    let rejectAppend!: (error: unknown) => void
+    fake.append.mockImplementation(() => new Promise((_resolve, reject) => { rejectAppend = reject }))
+    const onError = vi.fn()
+    const sink = createCanonicalEventSink({ repository: fake.repository, onError })
+
+    sink.offer(context, rawUser('in-flight'), true)
+    await flushMicrotasks()
+    expect(fake.append).toHaveBeenCalledTimes(1)
+    const revisionCalls = fake.revision.mock.calls.length
+
+    sink.dispose()
+    rejectAppend(new Error('old sink failed late'))
+    await flushMicrotasks()
+    sink.offer(context, rawUser('must-not-revive'), true)
+    await flushMicrotasks()
+
+    expect(onError).not.toHaveBeenCalled()
+    expect(fake.revision).toHaveBeenCalledTimes(revisionCalls)
+  })
+
   it('discard：未落盘事件丢弃，之后同 owner offer 不重新播种/不写', async () => {
     const fake = fakeRepository()
     fake.revision.mockResolvedValue(0)

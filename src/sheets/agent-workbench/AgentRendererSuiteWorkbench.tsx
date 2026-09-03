@@ -22,6 +22,7 @@ import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -134,6 +135,10 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const fallbackChainRef = useRef<Set<string>>(new Set())
   const automaticRetryRef = useRef<{ key?: string; attempts: number }>({ attempts: 0 })
   const automaticRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reportedRuntimeErrorRef = useRef<string | null>(null)
+  const reportedRuntimeErrorKeyRef = useRef<string | null>(null)
+  const reportedSuiteErrorKeyRef = useRef<string | null>(null)
+  const retrySolidRef = useRef<() => void>(() => {})
   const visibilityRef = useRef(input.visibility)
   inputRef.current = input; catalogRef.current = catalog
 
@@ -143,7 +148,57 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   }, [])
 
   const sessionBindingKey = workbenchSessionBindingKey(session)
-  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey])
+  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey, session])
+  // Recoverable bind/refresh failures are application notifications, not a
+  // second banner in the chat surface. Publish one scoped entry and let the
+  // central tray own its visibility and dismissal.
+  useEffect(() => {
+    const scope = session
+      ? { kind: 'session' as const, id: session.id }
+      : { kind: 'sheet' as const, id: props.sheet.id }
+    const runtimeErrorKey = session
+      ? `workbench-runtime:session:${session.id}`
+      : `workbench-runtime:sheet:${props.sheet.id}`
+    let disposed = false
+    const previousRuntimeErrorKey = reportedRuntimeErrorKeyRef.current
+    if (previousRuntimeErrorKey && previousRuntimeErrorKey !== runtimeErrorKey) {
+      resolveRuntimeErrors({ key: previousRuntimeErrorKey, source: 'workbench.runtime' })
+      reportedRuntimeErrorKeyRef.current = null
+      reportedRuntimeErrorRef.current = null
+    }
+    const observe = () => {
+      if (disposed) return
+      const current = sessionRuntime.runtime.getSnapshot()
+      const failed = (current.status === 'error' || current.status === 'degraded') && Boolean(current.error)
+      if (!failed) {
+        reportedRuntimeErrorRef.current = null
+        reportedRuntimeErrorKeyRef.current = null
+        resolveRuntimeErrors({ key: runtimeErrorKey, source: 'workbench.runtime' })
+        return
+      }
+      const message = current.error!
+      const signature = `${scope.kind}:${scope.id}:${message}`
+      if (reportedRuntimeErrorRef.current === signature) return
+      reportedRuntimeErrorRef.current = signature
+      reportedRuntimeErrorKeyRef.current = runtimeErrorKey
+      reportRuntimeError('工作台运行时', new Error(message), session?.agentId, {
+        key: runtimeErrorKey,
+        scope,
+        source: 'workbench.runtime',
+        recovery: { kind: 'open-runtime-log', sessionId: session?.id },
+        recoveryAction: {
+          label: '重试会话恢复',
+          run: () => session ? sessionRuntime.bind(session) : undefined,
+        },
+      })
+    }
+    observe()
+    const unsubscribe = sessionRuntime.runtime.subscribe(observe)
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [props.sheet.id, session?.id, session?.agentId, sessionRuntime, session])
   useEffect(() => {
     const pickWorkspaceFolder = async () => {
       const selected = await open({ directory: true, multiple: false, title: '选择工作区文件夹' })
@@ -381,6 +436,34 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       setFailure({ suiteId: 'builtin.solid', phase: 'resolve', message: error instanceof Error ? error.message : String(error) }); setFatal(true)
     }
   }
+  retrySolidRef.current = retrySolid
+
+  // A retained/fallback Suite is recoverable application state. Keep its
+  // diagnostic in the central tray instead of rendering a second banner in
+  // the chat surface; fatal fallback remains the explicit blocking UI below.
+  useEffect(() => {
+    const scope = session
+      ? { kind: 'session' as const, id: session.id }
+      : { kind: 'sheet' as const, id: props.sheet.id }
+    const previousKey = reportedSuiteErrorKeyRef.current
+    if (fatal || !failure) {
+      if (previousKey) resolveRuntimeErrors({ key: previousKey })
+      reportedSuiteErrorKeyRef.current = null
+      return
+    }
+    const key = `renderer-suite:${props.sheet.id}:${session?.id ?? 'none'}:${failure.suiteId}:${failure.phase}`
+    if (previousKey && previousKey !== key) resolveRuntimeErrors({ key: previousKey })
+    if (previousKey === key) return
+    reportedSuiteErrorKeyRef.current = key
+    const message = `${failure.suiteId} / ${failure.phase} / ${failure.message}`
+    reportRuntimeError('Renderer Suite 回退', new Error(message), session?.agentId, {
+      key,
+      scope,
+      source: 'renderer-suite',
+      recovery: { kind: 'open-runtime-log', sessionId: session?.id, suiteId: failure.suiteId },
+      recoveryAction: { label: '重试 Solid', run: () => retrySolidRef.current() },
+    })
+  }, [failure, fatal, props.sheet.id, session, session?.id, session?.agentId])
   const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
     detail: { domain: 'appearance', section: 'renderers' },
   }))
@@ -436,18 +519,9 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       onOpenResource={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
       onCopyResource={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
       onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
-      onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
-      onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}
-    {!fatal && failure && <div className="renderer-suite-fallback-banner" role="status"
-      data-failed-suite-id={failure.suiteId} data-failed-plugin-id={failure.pluginId} data-failure-phase={failure.phase}>
-      {failure.retained ? 'Suite 候选未生效，继续使用健康实例' : 'Suite 已安全回退'}：{failure.suiteId} / {failure.phase} / {failure.message}
-      <div className="renderer-suite-fallback-actions">
-        <button type="button" onClick={retrySolid}>重试 Solid</button>
-        <button type="button" onClick={selectSuite}>切换 Suite</button>
-        <button type="button" onClick={openDiagnostics}>打开诊断</button>
-      </div>
-    </div>}
-    {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions} setters={headlessSetters}
+       onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
+       onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}
+     {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions} setters={headlessSetters}
       selectSession={props.ctx.selectSession} sessionRuntime={sessionRuntime} />}
   </div>
 }
@@ -471,7 +545,7 @@ function ActiveAgentSessionLifecycle(props: {
       void props.sessionRuntime.refresh(session)
     }
   }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
-  return lifecycle.recoveryFailure
-    ? <div className="renderer-suite-recovery-banner" role="alert">会话恢复失败：{lifecycle.recoveryFailure.message}</div>
-    : null
+  // useSessionLifecycle reports recovery failures with a session scope; the
+  // application ErrorCenter is the single ordinary-error presentation.
+  return null
 }

@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => {
     canonicalLoad: vi.fn(async () => [] as unknown[]),
     invoke: vi.fn(),
     reportRuntimeError: vi.fn(),
+    reportRuntimeDiagnostic: vi.fn(),
+    resolveRuntimeErrors: vi.fn(),
     resetGeneration: () => { lockGeneration = 0 },
   }
 })
@@ -49,7 +51,11 @@ vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({
 vi.mock('../../../plugins/core/sessionCreation/builtinSessionCreation.ts', () => ({
   collectProfilePersona: () => '',
 }))
-vi.mock('../../../runtimeError', () => ({ reportRuntimeError: mocks.reportRuntimeError }))
+vi.mock('../../../runtimeError', () => ({
+  reportRuntimeError: mocks.reportRuntimeError,
+  reportRuntimeDiagnostic: mocks.reportRuntimeDiagnostic,
+  resolveRuntimeErrors: mocks.resolveRuntimeErrors,
+}))
 
 import { useSessionLifecycle, type ChatSessionSetters } from '../useSessionLifecycle'
 import { useIdentityStore, type Session } from '../../../identityStore'
@@ -93,6 +99,8 @@ describe('session/load failure policy (D5)', () => {
     mocks.controller.finishLoadLock.mockClear()
     mocks.controller.beginLoadLock.mockClear()
     mocks.reportRuntimeError.mockClear()
+    mocks.reportRuntimeDiagnostic.mockClear()
+    mocks.resolveRuntimeErrors.mockClear()
     mocks.resetGeneration()
     useRuntimeStore.setState({ sessionReloadTokens: {}, bindingGenerations: {} })
     useIdentityStore.setState({
@@ -194,5 +202,78 @@ describe('session/load failure policy (D5)', () => {
 
     await waitFor(() => expect(mocks.invoke.mock.calls.filter(call => call[0] === 'load_persisted_session')).toHaveLength(1))
     await waitFor(() => expect(result.current.recoveryFailure).toBeNull())
+    expect(mocks.reportRuntimeError).not.toHaveBeenCalledWith('恢复会话', expect.anything(), expect.anything(), expect.anything())
+    expect(mocks.reportRuntimeDiagnostic).toHaveBeenCalledWith('恢复会话', expect.any(Error), SESSION.agentId, expect.objectContaining({
+      key: `session-recovery:${SESSION.id}`,
+    }))
+  })
+
+  it('canonical 与 replay 都失败时只报告可重试的 active 恢复错误，重试成功后按 session resolve', async () => {
+    let canonicalShouldFail = true
+    mocks.canonicalLoad.mockImplementation(async () => {
+      if (canonicalShouldFail) throw new Error('canonical unavailable')
+      return []
+    })
+    let replayShouldFail = true
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'load_persisted_session') {
+        if (replayShouldFail) throw new Error('remote context missing')
+        return { response: { loaded: true }, replay: [] }
+      }
+      return null
+    })
+
+    const { result } = renderHook(() => useSessionLifecycle(SESSION.id, [SESSION], setters(), vi.fn()))
+    await waitFor(() => expect(result.current.recoveryFailure?.message).toBe('remote context missing'))
+    expect(mocks.reportRuntimeError).toHaveBeenCalledWith('读取 canonical 首屏占位失败（local-record-1）', expect.any(Error), SESSION.agentId, expect.objectContaining({
+      key: `session-placeholder:${SESSION.id}`,
+    }))
+    expect(mocks.reportRuntimeError).toHaveBeenCalledWith('恢复会话', expect.any(Error), SESSION.agentId, expect.objectContaining({
+      key: `session-recovery:${SESSION.id}`,
+    }))
+    expect(mocks.reportRuntimeDiagnostic).not.toHaveBeenCalled()
+
+    canonicalShouldFail = false
+    replayShouldFail = false
+    act(() => result.current.retryRecovery())
+    await waitFor(() => expect(mocks.resolveRuntimeErrors).toHaveBeenCalledWith(expect.objectContaining({
+      key: `session-recovery:${SESSION.id}`,
+    })))
+    expect(mocks.resolveRuntimeErrors).toHaveBeenCalledWith(expect.objectContaining({
+      key: `session-placeholder:${SESSION.id}`,
+    }))
+    expect(result.current.recoveryFailure).toBeNull()
+  })
+
+  it('切换会话后 canonical 首屏占位的迟到失败不会污染当前通知', async () => {
+    let rejectOldCanonical!: (error: unknown) => void
+    const oldCanonical = new Promise<unknown[]>((_resolve, reject) => { rejectOldCanonical = reject })
+    mocks.canonicalLoad.mockReturnValueOnce(oldCanonical).mockResolvedValue([])
+    mocks.invoke.mockImplementation(async command => command === 'load_persisted_session'
+      ? {
+        response: { loaded: true }, replay: [],
+        replayMetadata: {
+          complete: true, truncated: false, droppedCount: 0,
+          boundary: { kind: 'session-load-response', observedCount: 0, retainedStartOrdinal: 0, retainedEndOrdinal: 0 },
+        },
+      }
+      : null)
+    const nextSession: Session = { ...SESSION, id: 'local-record-2', source: 'local:session-2', periId: 'remote-2' }
+    const view = renderHook(
+      ({ sessionId, sessions }: { sessionId: string; sessions: Session[] }) => useSessionLifecycle(sessionId, sessions, setters(), vi.fn()),
+      { initialProps: { sessionId: SESSION.id, sessions: [SESSION] } },
+    )
+    await waitFor(() => expect(rejectOldCanonical).toBeDefined())
+
+    useIdentityStore.setState({ sessions: [SESSION, nextSession] })
+    view.rerender({ sessionId: nextSession.id, sessions: [SESSION, nextSession] })
+    rejectOldCanonical(new Error('old session placeholder failed'))
+
+    await waitFor(() => expect(mocks.canonicalLoad).toHaveBeenCalledTimes(2))
+    expect(mocks.reportRuntimeError).not.toHaveBeenCalledWith(
+      `读取 canonical 首屏占位失败（${SESSION.id}）`,
+      expect.anything(), expect.anything(), expect.anything(),
+    )
+    view.unmount()
   })
 })

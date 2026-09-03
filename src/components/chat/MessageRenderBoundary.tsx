@@ -22,7 +22,15 @@ export class MessageRenderBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: unknown): void {
-    reportRuntimeError(`渲染消息 ${this.props.message.id}`, error)
+    // The row fallback below is already visible in context. Record the
+    // technical fact for Runtime diagnostics without duplicating it in the
+    // global notification tray.
+    reportRuntimeError(`渲染消息 ${this.props.message.id}`, error, undefined, {
+      key: `message-render:${this.props.message.id}`,
+      visibility: 'diagnostic',
+      scope: { kind: 'operation', id: `message-render:${this.props.message.id}` },
+      source: 'chat.message-render',
+    })
   }
 
   render(): React.ReactNode {

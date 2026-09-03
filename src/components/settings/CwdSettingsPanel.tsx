@@ -11,7 +11,7 @@ import { FolderSearch, X } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import type { Workspace } from '../../workspaceEntities'
 import { isAbsolutePath } from '../../workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
@@ -58,6 +58,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
   const [mcpOptions, setMcpOptions] = useState<McpOption[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveErrorIsValidation, setSaveErrorIsValidation] = useState(false)
 
   useEffect(() => {
     setName(workspace.name)
@@ -66,16 +67,27 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
     setHookPluginIds(workspace.hookPluginIds.join(', '))
     setMcpIds(new Set(workspace.mcpServerIds))
     setSaveError(null)
+    setSaveErrorIsValidation(false)
   }, [workspace.id, workspace.name, workspace.rootPath, workspace.skills, workspace.hookPluginIds, workspace.mcpServerIds])
 
   useEffect(() => {
     let disposed = false
     createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
       .getMcpServers()
-      .then(list => { if (!disposed) setMcpOptions(list as McpOption[]) })
-      .catch(error => reportRuntimeError('读取 MCP 配置', error))
+      .then(list => {
+        if (!disposed) {
+          setMcpOptions(list as McpOption[])
+          resolveRuntimeErrors({ key: `cwd:${workspace.id}:mcp` })
+        }
+      })
+      .catch(error => {
+        if (!disposed) reportRuntimeError('读取 MCP 配置', error, undefined, {
+          key: `cwd:${workspace.id}:mcp`, scope: { kind: 'operation', id: `cwd:${workspace.id}:mcp` }, source: 'settings.cwd',
+          recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
+        })
+      })
     return () => { disposed = true }
-  }, [])
+  }, [workspace.id])
 
   const dirty = useMemo(() => (
     name.trim() !== workspace.name
@@ -97,9 +109,18 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
   const pickRootPath = async () => {
     try {
       const selected = await open({ directory: true, multiple: false, title: '更换工作区文件夹' })
-      if (typeof selected === 'string') setRootPath(selected)
+      if (typeof selected === 'string') {
+        setRootPath(selected)
+        setSaveError(null)
+        setSaveErrorIsValidation(false)
+      }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '无法打开文件夹选择器')
+      setSaveErrorIsValidation(false)
+      setSaveError('无法打开文件夹选择器，详情见右下角错误中心')
+      reportRuntimeError('打开工作区选择器', error, undefined, {
+        key: `cwd:${workspace.id}:picker`, scope: { kind: 'operation', id: `cwd:${workspace.id}:picker` }, source: 'settings.cwd',
+        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
+      })
     }
   }
 
@@ -109,10 +130,11 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
   }
 
   const save = async () => {
-    if (!name.trim()) { setSaveError('工作区名称不能为空'); return }
-    if (!isAbsolutePath(rootPath.trim())) { setSaveError('工作目录必须是绝对路径'); return }
+    if (!name.trim()) { setSaveErrorIsValidation(true); setSaveError('工作区名称不能为空'); return }
+    if (!isAbsolutePath(rootPath.trim())) { setSaveErrorIsValidation(true); setSaveError('工作目录必须是绝对路径'); return }
     setSaving(true)
     setSaveError(null)
+    setSaveErrorIsValidation(false)
     try {
       await updateWorkspace(workspace.id, {
         name: name.trim(),
@@ -121,11 +143,15 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
         mcpServerIds: [...mcpIds],
         hookPluginIds: parseList(hookPluginIds),
       })
+      resolveRuntimeErrors({ key: `cwd:${workspace.id}:save` })
       onClose()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setSaveError(message)
-      reportRuntimeError('保存工作区设置', error)
+      setSaveErrorIsValidation(false)
+      setSaveError('保存工作区设置失败，详情见右下角错误中心')
+      reportRuntimeError('保存工作区设置', error, undefined, {
+        key: `cwd:${workspace.id}:save`, scope: { kind: 'sheet', id: workspace.id }, source: 'settings.cwd',
+        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
+      })
     } finally {
       setSaving(false)
     }
@@ -208,7 +234,9 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       </div>
       </section>
 
-      {saveError && <div className="set-hint cwd-settings-error" role="alert">{saveError}</div>}
+      {saveError && (saveErrorIsValidation
+        ? <div className="set-hint cwd-settings-error" role="alert">{saveError}</div>
+        : <div className="set-hint cwd-settings-error" role="status">{saveError}</div>)}
       <div className="cwd-settings-footer">
         <span className={`cwd-settings-dirty ${dirty ? 'active' : ''}`} role="status">{dirty ? '有未保存的更改' : '所有更改已保存'}</span>
         <div className="sess-field-actions">

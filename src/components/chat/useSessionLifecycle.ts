@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { createSessionClient, type ReplayMetadata } from '../../infrastructure/acp/sessionClient'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
@@ -209,7 +209,9 @@ export function useSessionLifecycle(
         model: profile?.model || undefined,
         ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
       })).then((response: unknown) => {
-        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) {
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)
+          || sessionRef.current !== s.source
+          || processedReloadRef.current !== reloadToken) {
           if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
           return
         }
@@ -220,11 +222,20 @@ export function useSessionLifecycle(
         // OWNER-04：new_session 成功 → 记录本次绑定建立时的 agent generation。
         // 重连后 generation 递增，bindingState.refineBindingGeneration 将旧 binding 判为 stale。
         useRuntimeStore.getState().setBindingGeneration(context, useRuntimeStore.getState().agentStatuses[s.agentId]?.generation)
+        resolveRuntimeErrors({ key: `session-create:${s.id}`, source: 'chat.session-create' })
         if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
       }).catch(error => {
         if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
-        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
-        reportRuntimeError('创建会话', error)
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)
+          || sessionRef.current !== s.source
+          || processedReloadRef.current !== reloadToken) return
+        reportRuntimeError('创建会话', error, s.agentId, {
+          key: `session-create:${s.id}`,
+          scope: { kind: 'session', id: s.id },
+          source: 'chat.session-create',
+          recovery: { kind: 'open-runtime-log', sessionId: s.id },
+          recoveryAction: { label: '重试会话恢复', run: retryRecovery },
+        })
       })
     }
 
@@ -309,6 +320,9 @@ export function useSessionLifecycle(
             durationAvailable: canonicalDuration !== undefined,
           } : null))
         }
+        resolveRuntimeErrors({ action: '恢复会话', scope: { kind: 'session', id: s.id }, source: 'chat.session-recovery' })
+        resolveRuntimeErrors({ key: `session-recovery:${s.id}`, source: 'chat.session-recovery' })
+        resolveRuntimeErrors({ key: `session-placeholder:${s.id}`, source: 'chat.session-placeholder' })
         applySessionStateResponse(context, res)
         // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
         // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
@@ -325,16 +339,25 @@ export function useSessionLifecycle(
           authority: 'none', canonicalRevision: 0, commitOutcome: 'load-error',
           errorCode: replayErrorCode(error),
         })
-        reportRuntimeError('恢复会话', error)
+        const options = {
+          key: `session-recovery:${s.id}`,
+          scope: { kind: 'session' as const, id: s.id },
+          source: 'chat.session-recovery',
+          recovery: { kind: 'open-runtime-log' as const, sessionId: s.id },
+          recoveryAction: { label: '重试会话恢复', run: retryRecovery },
+        }
         // canonical 首屏占位已经提供可用历史时，远端 ACP replay 失败不应
         // 把底部错误条覆盖在可读会话上；用户仍可从 Runtime/ErrorCenter
         // 看到诊断并按需重试。空缓存时保留原有可操作失败提示。
         if (cached.length === 0) {
+          reportRuntimeError('恢复会话', error, s.agentId, options)
           setRecoveryFailure({
             sessionId: s.id,
             source: s.source,
             message: recoveryErrorMessage(error),
           })
+        } else {
+          reportRuntimeDiagnostic('恢复会话', error, s.agentId, options)
         }
       })
     }
@@ -352,7 +375,17 @@ export function useSessionLifecycle(
         : Promise.resolve([] as Message[])
       placeholder
         .catch(error => {
-          reportRuntimeError(`读取 canonical 首屏占位失败（${s.id}）`, error)
+          // The canonical read can finish after a session switch/reload. A
+          // late failure belongs to that abandoned generation and must not
+          // create a notification for the currently visible session.
+          if (sessionRef.current !== s.source || processedReloadRef.current !== reloadToken) return []
+          reportRuntimeError(`读取 canonical 首屏占位失败（${s.id}）`, error, s.agentId, {
+            key: `session-placeholder:${s.id}`,
+            scope: { kind: 'session', id: s.id },
+            source: 'chat.session-placeholder',
+            recovery: { kind: 'open-runtime-log', sessionId: s.id },
+            recoveryAction: { label: '重试会话恢复', run: retryRecovery },
+          })
           return []
         })
         .then(cached => {
@@ -391,9 +424,15 @@ export function useSessionLifecycle(
     if (!sessionId) return
     const forkId = useIdentityStore.getState().forkSession(sessionId)
     if (!forkId) {
-      reportRuntimeError('创建分叉会话', new Error('无法创建本地分叉会话'))
+      reportRuntimeError('创建分叉会话', new Error('无法创建本地分叉会话'), undefined, {
+        key: `session-fork:${sessionId}`,
+        scope: { kind: 'session', id: sessionId },
+        source: 'chat.session-fork',
+        recovery: { kind: 'open-runtime-log', sessionId },
+      })
       return
     }
+    resolveRuntimeErrors({ key: `session-fork:${sessionId}` })
     setRecoveryFailure(null)
     selectSession(forkId)
   }

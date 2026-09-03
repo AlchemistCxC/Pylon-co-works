@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   getBuiltinPluginIds,
   getBuiltinPluginCriticality,
@@ -12,6 +12,7 @@ import type { InstalledPluginPackage } from '../../infrastructure/plugins/plugin
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 const LOG_LIMIT = 12
 
@@ -73,6 +74,7 @@ export default function PluginManager({
   const [installed, setInstalled] = useState<InstalledPluginPackage[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [log, setLog] = useState<string[]>([])
+  const reportedBootstrapKeysRef = useRef<Map<string, string>>(new Map())
 
   const appendLog = useCallback((line: string) => {
     setLog(previous => [...previous.slice(-(LOG_LIMIT - 1)), line])
@@ -84,13 +86,47 @@ export default function PluginManager({
       return
     }
     setInstalled(await service.list())
+    resolveRuntimeErrors({ key: 'plugin-manager:list' })
   }, [nativePackagesAvailable, service])
 
   useEffect(() => {
     if (!nativePackagesAvailable) return
     void refresh()
-      .catch(error => appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`))
+      .catch(error => {
+        appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`)
+        reportRuntimeError('读取 API 1.0 插件包', error, undefined, {
+          key: 'plugin-manager:list', scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      })
   }, [appendLog, nativePackagesAvailable, refresh, service])
+
+  // Plugin bootstrap failures are recoverable runtime facts. Keep the retry
+  // affordance in this panel, but publish one scoped notification so the
+  // ordinary error presentation still lives in the central tray.
+  useEffect(() => {
+    const failures = bootstrapSnapshot.kind === 'degraded' ? bootstrapSnapshot.failures : []
+    const nextKeys = new Map<string, string>()
+    for (const failure of failures) {
+      const key = `plugin-bootstrap:${failure.pluginId}:${failure.stage}`
+      nextKeys.set(key, failure.message)
+      if (reportedBootstrapKeysRef.current.get(key) === failure.message) continue
+      reportRuntimeError('启动插件', new Error(failure.message), undefined, {
+        key,
+        scope: { kind: 'operation', id: `plugin:${failure.pluginId}` },
+        source: 'kernel.plugin-bootstrap',
+        metadata: { pluginId: failure.pluginId, stage: failure.stage, code: failure.code },
+        recovery: { kind: 'open-runtime-log', suiteId: failure.pluginId },
+        recoveryAction: failure.retryable
+          ? { label: `重试 ${failure.pluginId}`, run: () => bootstrap.retryPlugin(failure.pluginId) }
+          : undefined,
+      })
+    }
+    for (const key of reportedBootstrapKeysRef.current.keys()) {
+      if (!nextKeys.has(key)) resolveRuntimeErrors({ key })
+    }
+    reportedBootstrapKeysRef.current = nextKeys
+  }, [bootstrap, bootstrapSnapshot])
 
   const run = async (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
     if (busy) return
@@ -98,9 +134,21 @@ export default function PluginManager({
     try {
       const result = await task()
       appendLog(result.ok ? `${label}成功` : `${label}失败：${result.message ?? '未知错误'}`)
+      if (result.ok) {
+        resolveRuntimeErrors({ key: `plugin-manager:${label}` })
+      } else {
+        reportRuntimeError(label, new Error(result.message ?? '未知错误'), undefined, {
+          key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      }
       await refresh()
     } catch (error) {
       appendLog(`${label}失败：${error instanceof Error ? error.message : String(error)}`)
+      reportRuntimeError(label, error, undefined, {
+        key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+        recovery: { kind: 'open-runtime-log' },
+      })
     } finally {
       setBusy(null)
     }
@@ -264,7 +312,7 @@ export default function PluginManager({
         <div className="set-group" aria-label="插件启动故障">
           <div className="set-group-title" aria-expanded="true">启动故障</div>
           {bootstrapSnapshot.failures.map(failure => (
-            <div className="plugin-row" key={`${failure.pluginId}:${failure.stage}`} role="alert">
+            <div className="plugin-row" key={`${failure.pluginId}:${failure.stage}`} role="status">
               <span className="plugin-row-id">{failure.pluginId}</span>
               <span className="set-hint">{failure.stage} · {failure.message}</span>
               {failure.retryable && (

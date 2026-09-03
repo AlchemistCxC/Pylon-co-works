@@ -42,4 +42,11 @@ describe('Pylon visual material contract', () => {
     expect(shellStyles).toContain('var(--brand-node-warn)')
     expect(shellStyles).toContain('var(--brand-node-error)')
   })
+
+  it('keeps the error tray anchor deterministic across embedded WebViews', () => {
+    expect(shellStyles).toMatch(/\.error-center-badge\s*\{[^}]*right:\s*14px;[^}]*bottom:\s*14px;/s)
+    expect(shellStyles).toMatch(/\.error-center\s*\{[^}]*right:\s*14px;[^}]*bottom:\s*var\(--error-center-bottom,\s*130px\);/s)
+    expect(shellStyles).not.toContain('safe-area-inset-bottom')
+    expect(shellStyles).not.toContain('safe-area-inset-right')
+  })
 })

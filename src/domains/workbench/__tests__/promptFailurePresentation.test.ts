@@ -29,6 +29,13 @@ describe('prompt failure presentation', () => {
     expect(result.technicalMessage).toBe('timed out after 180s')
   })
 
+  it('recognizes legacy ACP provider timeout text without trusting its configured seconds', () => {
+    const result = presentPromptFailure('ACP protocol: timed out after 180s (provider error)')
+    expect(result.userSummary).toBe('Provider 返回错误')
+    expect(result.userSummary).not.toContain('180s')
+    expect(result.technicalMessage).toContain('180s')
+  })
+
   it('keeps untyped legacy errors unchanged', () => {
     expect(presentPromptFailure('network unavailable')).toEqual({ userSummary: 'network unavailable' })
   })

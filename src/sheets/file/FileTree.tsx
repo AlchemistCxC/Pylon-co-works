@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw } from 'lucide-react'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { classifyWorkspaceError, mergeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
 import FileTypeIcon from './FileTypeIcon'
@@ -26,6 +26,7 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
   const [error, setError] = useState('')
   const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
   const targetKey = workspaceTargetKey(target)
+  const errorKey = useCallback((relativePath = '') => `file-tree:${targetKey ?? 'none'}:${relativePath}`, [targetKey])
 
   const load = useCallback(async (relativePath?: string) => {
     if (!target || !targetKey || !provider) return
@@ -39,10 +40,16 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
         ? { entries: mergeWorkspaceEntries(previous.entries, relativePath, entries), selectedPath: previous.selectedPath }
         : { entries, selectedPath: previous.selectedPath })
       setError('')
+      resolveRuntimeErrors({ key: errorKey(relativePath ?? '') })
     } catch (err) {
       if (!isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyWorkspaceError(err).message)
-      reportRuntimeError('读取工作区', err)
+      reportRuntimeError('读取工作区', err, undefined, {
+        key: errorKey(relativePath ?? ''),
+        scope: { kind: 'sheet', id: `file-tree:${targetKey ?? 'none'}` },
+        source: 'file.tree',
+        recovery: { kind: 'open-runtime-log', sheetId: `file-tree:${targetKey ?? 'none'}` },
+      })
     } finally {
       if (isCurrentSourceRequest(requestContext.current, token)) {
         setLoading(previous => {
@@ -52,13 +59,14 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
         })
       }
     }
-  }, [target, targetKey, provider])
+  }, [target, targetKey, provider, errorKey])
 
   useEffect(() => {
     requestContext.current = advanceSourceContext(requestContext.current, targetKey)
     setTree({ entries: [], selectedPath: null })
     setExpanded(new Set())
     setLoading(new Set())
+    setError('')
     void load()
     return () => {
       requestContext.current = advanceSourceContext(requestContext.current, null)
@@ -137,7 +145,7 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
           <RefreshCw size={13} />
         </button>
       </div>
-      {error && <div className="file-tree-error" role="alert">{error}</div>}
+      {error && <p className="file-section-hint file-tree-error-reference" role="status">文件树读取失败，详情见右下角错误中心</p>}
       {(!target || !provider) && (
         <div className="sheet-empty-state file-tree-empty-state" role="status">
           <div className="sheet-empty-mark" aria-hidden="true">⌁</div>

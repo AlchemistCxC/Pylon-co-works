@@ -16,7 +16,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Session } from '../../identityStore'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { switchAgentTransaction } from './switchAgentTransaction'
 import type { TransactionResult } from './transactionResult'
@@ -29,13 +29,24 @@ import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
  * openOwnedSessionTransaction 负责最后以 owner 打开 agent sheet。
  */
 export function createStandardSwitchAgent(getAgentName: (agentId: string) => string | undefined): (agentId: string) => Promise<TransactionResult<string>> {
+  const operationKey = (agentId: string, action: string) => `agent-switch:${agentId}:${action}`
   return (agentId: string) => switchAgentTransaction(agentId, getAgentName(agentId) ?? agentId, {
     switchAgent: id => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).switchAgent(id),
     resetRuntime: () => useRuntimeStore.getState().resetAll(),
     setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
     fetchAgentStatus: () => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).agentStatus(),
     applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
-    reportError: (action, error) => reportRuntimeError(action, error),
+    reportError: (action, error) => reportRuntimeError(action, error, agentId, {
+      key: operationKey(agentId, action),
+      scope: { kind: 'agent', id: agentId },
+      source: 'agent.switch',
+      recovery: { kind: 'open-runtime-log', agentId },
+    }),
+    resolveError: action => resolveRuntimeErrors({
+      key: operationKey(agentId, action),
+      source: 'agent.switch',
+      scope: { kind: 'agent', id: agentId },
+    }),
     dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
   })
 }

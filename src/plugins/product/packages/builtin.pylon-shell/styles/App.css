@@ -464,17 +464,6 @@
   overflow: hidden;
   position: relative;
 }
-.runtime-error-banner {
-  position:fixed; top:var(--titlebar-h,44px); left:50%; transform:translateX(-50%); z-index:90;
-  display:flex; align-items:center; gap:10px; max-width:min(720px,calc(100vw - 32px));
-  padding:9px 12px; border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);
-  border-radius: 0; background:color-mix(in srgb,var(--danger) 16%,var(--bg-panel));
-  color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,0.22); backdrop-filter:blur(12px);
-}
-.runtime-error-banner strong { color:var(--danger); white-space:nowrap; }
-.runtime-error-banner span { min-width:0; overflow-wrap:anywhere; }
-.runtime-error-banner button { margin-left:auto; border:0; background:none; color:var(--text-dim); cursor:pointer; }
-
 /* 编辑模式下放开 overflow，让工具栏能浮出中控区上方 */
 .cc-editing-app .main-body {
   overflow: visible;
@@ -505,54 +494,67 @@
 
 /* ── 全局运行错误中心 ── */
 .error-center-badge {
-  position: fixed; top: var(--titlebar-h,44px); right: 12px; z-index: 90;
-  padding: 3px 10px; border-radius: 0; border: 1px solid var(--tool-err, #be2828);
-  background: color-mix(in srgb, var(--tool-err, #be2828) 12%, transparent);
+  /* Keep the desktop/WebView anchor deterministic.  A few embedded hosts
+     expose an unbounded safe-area inset, which can otherwise move this badge
+     away from the visible lower corner. */
+  position: fixed; right: 14px; bottom: 14px; z-index: 90;
+  min-width: 42px; min-height: 30px; padding: 4px 10px; border-radius: var(--ui-radius-sm, 4px);
+  border: 1px solid color-mix(in srgb, var(--tool-err, #be2828) 55%, var(--border));
+  background: color-mix(in srgb, var(--tool-err, #be2828) 10%, var(--surface-panel, var(--bg-panel)));
   color: var(--tool-err, #be2828); font-size: var(--font-size-sm); font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 12%, transparent);
+}
+.error-center-badge.severity-warning {
+  border-color: color-mix(in srgb, var(--warning, #d29922) 55%, var(--border));
+  background: color-mix(in srgb, var(--warning, #d29922) 10%, var(--surface-panel, var(--bg-panel)));
+  color: var(--warning, #d29922);
+}
+.error-center-badge.severity-info {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-panel, var(--bg-panel)));
+  color: var(--accent);
 }
 .error-center {
-  position: fixed; top: calc(var(--titlebar-h,44px) + var(--ui-space-6)); right: 12px; z-index: 90;
-  width: 380px; max-height: 60vh; overflow: auto;
-  padding: 10px 12px; border: 1px solid var(--border); border-radius: 0;
-  background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-  font-size: var(--font-size-sm);
+  /* Keep the tray above the composer without touching its hit area.  The
+     composer height is dynamic; reserve the larger of the configured dock
+     height and the compact default plus a small breathing gap. */
+  position: fixed; right: 14px;
+  bottom: var(--error-center-bottom, 130px); z-index: 90;
+  width: min(390px, calc(100vw - 28px)); max-height: min(42vh, 480px); overflow: hidden;
+  padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--tool-err, #be2828) 38%, var(--border));
+  border-radius: var(--ui-radius-md, 6px); background: color-mix(in srgb, var(--surface-panel, var(--bg-panel)) 96%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--text) 18%, transparent); backdrop-filter: blur(14px);
+  font-size: var(--font-size-sm); pointer-events: auto; contain: layout paint;
 }
-.error-center-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-weight: 700; }
+.error-center.severity-warning { border-color: color-mix(in srgb, var(--warning, #d29922) 38%, var(--border)); }
+.error-center.severity-info { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); }
+.error-center-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 700; }
+.error-center-head-hint { flex: 1; min-width: 0; color: var(--text-dim); font-size: var(--font-size-2xs); font-weight: 400; }
 .error-center-action {
-  border: 1px solid var(--border); border-radius: 0; background: none;
-  color: var(--text-dim); font-size: var(--font-size-xs); cursor: pointer; padding: 1px 6px;
+  border: 1px solid var(--border); border-radius: var(--ui-radius-sm, 4px); background: transparent;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); font-size: var(--font-size-xs); cursor: pointer; padding: 3px 7px; white-space: nowrap;
 }
-.error-center-list { list-style: none; margin: 0; padding: 0; }
-.error-center-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
-.error-center-item strong { color: var(--tool-err, #be2828); flex-shrink: 0; }
-.error-center-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-
-/* Host-side ACP interaction rejection: explanatory, not actionable like the
-   permission modal (there is no response choice to present). */
-.interaction-rejection-notice {
-  position: fixed; top: calc(var(--titlebar-h,44px) + 10px); left: 50%; transform: translateX(-50%);
-  z-index: 190; display: flex; align-items: flex-start; gap: 12px;
-  width: min(520px, calc(100vw - 32px)); padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 58%, var(--border));
-  border-left: 3px solid var(--danger); border-radius: 0;
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg-panel));
-  color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.2);
-}
-.interaction-rejection-copy { min-width: 0; display: grid; gap: 2px; }
-.interaction-rejection-copy strong { color: var(--danger); font-size: var(--font-size-sm); }
-.interaction-rejection-copy span { color: var(--text-dim); font-family: var(--mono); font-size: var(--font-size-2xs); overflow-wrap: anywhere; }
-.interaction-rejection-copy small { color: var(--text); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
-.interaction-rejection-notice > button { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 18px; line-height: 1; }
-
-/* FE-AUD-001：工作区写盘失败提示（SheetLayout 顶部） */
-.workspace-persist-warning {
-  margin: 6px 12px;
-  padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 40%, var(--border));
-  border-radius: 0;
-  font-size: var(--font-size-sm);
-  color: var(--tool-err, var(--danger));
-  background: color-mix(in srgb, var(--tool-err, var(--danger)) 8%, transparent);
+.error-center-list { list-style: none; display: grid; gap: 7px; max-height: calc(min(42vh, 480px) - 54px); overflow: auto; overscroll-behavior: contain; margin: 0; padding: 0 2px 2px 0; }
+.error-center-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; padding: 8px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-inline-start: 3px solid var(--tool-err, #be2828); border-radius: var(--ui-radius-sm, 4px); background: color-mix(in srgb, var(--tool-err, #be2828) 5%, transparent); }
+.error-center-item.severity-warning { border-inline-start-color: var(--warning, #d29922); background: color-mix(in srgb, var(--warning, #d29922) 5%, transparent); }
+.error-center-item.severity-info { border-inline-start-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.error-center-item-main { display: grid; flex: 1 1 220px; min-width: 0; gap: 3px; }
+.error-center-item strong { color: var(--tool-err, #be2828); overflow-wrap: anywhere; }
+.error-center-item.severity-warning strong { color: var(--warning, #d29922); }
+.error-center-item.severity-info strong { color: var(--accent); }
+.error-center-msg { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.error-center-count { color: var(--text-dim); font-size: var(--font-size-2xs); }
+.error-center-details { margin-top: 3px; color: var(--text-dim); font-size: var(--font-size-2xs); }
+.error-center-details summary { width: fit-content; cursor: pointer; color: var(--text-dim); }
+.error-center-detail-list { display: grid; gap: 2px; margin: 5px 0; }
+.error-center-detail-list > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 6px; }
+.error-center-detail-list dt { color: var(--text-dim); }
+.error-center-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text); }
+.error-center-technical { max-height: 150px; overflow: auto; margin: 5px 0 0; padding: 6px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: var(--ui-radius-sm, 4px); background: color-mix(in srgb, var(--surface-sunken, var(--bg-panel)) 74%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-2xs)/1.4 var(--mono); }
+.error-center-dismiss { align-self: flex-start; }
+@media (max-width:700px) {
+  .error-center { right: 10px; bottom: var(--error-center-bottom, 130px); width: calc(100vw - 20px); }
+  .error-center-badge { right: 10px; bottom: 10px; }
 }
 
 /* ── Agent 状态三灯（左上角品牌区）：保留原状态语义，移除连接线 ── */

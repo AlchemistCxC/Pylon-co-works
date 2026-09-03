@@ -6,6 +6,7 @@ import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot 
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
@@ -224,27 +225,149 @@ const capabilityForCommand: Readonly<Record<keyof WorkbenchCommandPort, Workbenc
   respondInteraction: 'interactionResponse', openResource: 'resourceOpen', revealResource: 'resourceReveal', copy: 'clipboardWrite', retry: 'retry', recover: 'recovery',
 }
 
-function createCommandPort(delegate: WorkbenchCommandFacade, capabilities: WorkbenchCapabilityReader): WorkbenchCommandPort {
+type CommandBindingSnapshot = {
+  readonly suiteId?: string
+  readonly sheetId: string
+  readonly sessionOwnerKey: string | null
+  readonly sessionId: string | null
+}
+
+const commandAction: Readonly<Record<keyof WorkbenchCommandPort, string>> = {
+  prompt: '发送消息', send: '发送消息', cancel: '取消生成', attach: '添加附件',
+  setModel: '切换模型', setMode: '切换权限模式', createSession: '创建会话', compact: '压缩会话',
+  exportSession: '导出会话', clearSession: '清空会话', setConfigOption: '更新会话配置',
+  toolAction: '执行工具操作', respondInteraction: '处理交互请求', openResource: '打开资源',
+  revealResource: '显示资源', copy: '复制内容', retry: '重试消息', recover: '恢复会话',
+}
+
+const commandRecoveryKind: Readonly<Partial<Record<keyof WorkbenchCommandPort, 'retry' | 'log'>>> = {
+  prompt: 'retry', send: 'retry', cancel: 'retry', setModel: 'retry', setMode: 'retry',
+  createSession: 'retry', compact: 'retry', exportSession: 'retry', clearSession: 'retry',
+  setConfigOption: 'retry', toolAction: 'retry', respondInteraction: 'retry',
+  openResource: 'retry', revealResource: 'retry', copy: 'retry', retry: 'retry', recover: 'retry',
+  attach: 'log',
+}
+
+function commandBinding(input: WorkbenchHostPortInput): CommandBindingSnapshot {
+  const binding = input.binding?.() ?? input
+  return {
+    suiteId: binding.suiteId ?? input.suiteId,
+    sheetId: binding.sheetId,
+    sessionOwnerKey: binding.sessionOwnerKey,
+    sessionId: binding.sessionId,
+  }
+}
+
+function sameCommandBinding(left: CommandBindingSnapshot, right: CommandBindingSnapshot): boolean {
+  return left.suiteId === right.suiteId
+    && left.sheetId === right.sheetId
+    && left.sessionOwnerKey === right.sessionOwnerKey
+    && left.sessionId === right.sessionId
+}
+
+function targetCommandBinding(
+  binding: CommandBindingSnapshot,
+  command: keyof WorkbenchCommandPort,
+  args: readonly unknown[],
+): CommandBindingSnapshot {
+  // Every session command carries its target Session.id as the first argument.
+  // Prefer that explicit identity over a potentially lagging mount binding so
+  // a command issued during a switch is attributed to the session it actually
+  // addressed (and never to whichever session happens to be visible later).
+  const target = typeof args[0] === 'string' && args[0].trim() && command !== 'createSession'
+    ? args[0].trim()
+    : binding.sessionId
+  return target === binding.sessionId ? binding : { ...binding, sessionId: target }
+}
+
+function commandScope(binding: CommandBindingSnapshot, command: keyof WorkbenchCommandPort) {
+  return binding.sessionId
+    ? { kind: 'session' as const, id: binding.sessionId }
+    : { kind: 'operation' as const, id: `${binding.sheetId}:${binding.suiteId ?? 'unknown'}:${command}` }
+}
+
+function commandErrorPrefix(binding: CommandBindingSnapshot, command: keyof WorkbenchCommandPort): string {
+  const scope = commandScope(binding, command)
+  return `workbench-command:${scope.kind}:${scope.id}:${command}:`
+}
+
+function isPresentableCommandError(error: WorkbenchCommandError): boolean {
+  // A missing capability is an intentional renderer contract outcome (for
+  // example a read-only third-party Suite), not an operational failure. It
+  // remains available through Renderer diagnostics and the local field state.
+  return error.code !== 'command_capability_denied'
+}
+
+function reportCommandFailure(
+  binding: CommandBindingSnapshot,
+  command: keyof WorkbenchCommandPort,
+  error: WorkbenchCommandError,
+  stale = false,
+): void {
+  if (!isPresentableCommandError(error)) return
+  const scope = commandScope(binding, command)
+  const report = stale ? reportRuntimeDiagnostic : reportRuntimeError
+  report(commandAction[command], { code: error.code, message: error.message }, undefined, {
+    key: `${commandErrorPrefix(binding, command)}${error.code}`,
+    scope,
+    source: 'workbench.command',
+    recovery: { kind: 'open-runtime-log', sessionId: binding.sessionId ?? undefined },
+    metadata: {
+      command,
+      suiteId: binding.suiteId,
+      sheetId: binding.sheetId,
+      sessionOwnerKey: binding.sessionOwnerKey,
+      recoverability: error.recoverability,
+      recoveryKind: commandRecoveryKind[command] ?? 'log',
+      staleBinding: stale,
+    },
+  })
+}
+
+function resolveCommandFailures(binding: CommandBindingSnapshot, command: keyof WorkbenchCommandPort): void {
+  const prefix = commandErrorPrefix(binding, command)
+  resolveRuntimeErrors(entry => entry.source === 'workbench.command' && entry.key.startsWith(prefix))
+}
+
+function createCommandPort(
+  delegate: WorkbenchCommandFacade,
+  capabilities: WorkbenchCapabilityReader,
+  readBinding: () => CommandBindingSnapshot,
+): WorkbenchCommandPort {
   const invoke = async <K extends keyof WorkbenchCommandPort>(command: K, args: readonly unknown[]): Promise<WorkbenchCommandResult<unknown>> => {
+    // Capture the binding before awaiting the delegate. A session switch while
+    // a provider call is in flight must not resolve or re-key the new session's
+    // notification when the old call eventually settles.
+    const binding = targetCommandBinding(readBinding(), command, args)
+    const mountBinding = readBinding()
     const capability = capabilityForCommand[command]
     if (!capabilities.has(capability)) return { ok: false, error: { code: 'command_capability_denied', message: `命令能力未授权：${capability}`, recoverability: 'none', capability } }
     try {
       const method = delegate[command] as (...values: readonly unknown[]) => Promise<unknown>
       const result = await method(...args)
+      const stale = !sameCommandBinding(mountBinding, readBinding())
       if (result && typeof result === 'object' && 'status' in result && result.status === 'rejected') {
         const message = 'error' in result && typeof (result as { error?: unknown }).error === 'string'
           && (result as { error: string }).error.trim().length > 0
           ? (result as { error: string }).error
           : '命令被运行时拒绝'
-        return { ok: false, error: { code: 'command_rejected', message, recoverability: message === '命令被运行时拒绝' ? 'none' : 'retry' } }
+        const error = { code: 'command_rejected', message, recoverability: message === '命令被运行时拒绝' ? 'none' as const : 'retry' as const }
+        reportCommandFailure(binding, command, error, stale)
+        return { ok: false, error }
       }
       if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
         const error = 'error' in result ? (result as { error?: unknown }).error : undefined
-        return { ok: false, error: { code: 'command_rejected', message: typeof error === 'string' ? error : '命令被运行时拒绝', recoverability: 'retry' } }
+        const normalized = { code: 'command_rejected', message: typeof error === 'string' ? error : '命令被运行时拒绝', recoverability: 'retry' as const }
+        reportCommandFailure(binding, command, normalized, stale)
+        return { ok: false, error: normalized }
       }
+      if (!stale) resolveCommandFailures(binding, command)
       return { ok: true, value: result }
     } catch (error) {
-      return { ok: false, error: { code: 'command_failed', message: error instanceof Error ? error.message : String(error), recoverability: 'retry' } }
+      const stale = !sameCommandBinding(mountBinding, readBinding())
+      const normalized = { code: 'command_failed', message: error instanceof Error ? error.message : String(error), recoverability: 'retry' as const }
+      reportCommandFailure(binding, command, normalized, stale)
+      return { ok: false, error: normalized }
     }
   }
   const port = {} as WorkbenchCommandPort
@@ -259,7 +382,12 @@ export function createWorkbenchCommandPort(
   delegate: WorkbenchCommandFacade,
   capabilities: WorkbenchCapabilityReader,
 ): WorkbenchCommandPort {
-  return createCommandPort(delegate, capabilities)
+  // This public helper has no host binding metadata. Keep the old behavior
+  // for callers that construct a command port in isolation; the application
+  // HostPort path below supplies the scoped error context.
+  return createCommandPort(delegate, capabilities, () => ({
+    suiteId: 'unknown', sheetId: 'unknown', sessionOwnerKey: null, sessionId: null,
+  }))
 }
 
 function createCapabilityReader(runtime: WorkbenchRuntime, declared: WorkbenchCapabilitySnapshot | undefined): WorkbenchCapabilityReader {
@@ -307,7 +435,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
     generation: createGenerationReader(input.runtime),
     appearance: createAppearanceReader(input, capabilities),
     sessionUi: createSessionUiPort(input.sessionUi, namespace),
-    commands: createCommandPort(input.commands, capabilities),
+    commands: createCommandPort(input.commands, capabilities, () => commandBinding(input)),
     sessionCreation: input.commands.sessionCreation,
     capabilities,
     diagnostics: createDiagnosticPort(input),

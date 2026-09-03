@@ -1188,7 +1188,8 @@
 .system-notice-data > summary { cursor: pointer; color: var(--lifecycle-muted-foreground, var(--text-dim)); }
 .lifecycle-technical > summary:focus-visible,
 .system-notice-data > summary:focus-visible,
-.lifecycle-actions button:focus-visible {
+.lifecycle-actions button:focus-visible,
+.system-error-card-actions button:focus-visible {
   outline: var(--line-width-2) solid var(--accent);
   outline-offset: 2px;
 }
@@ -1217,6 +1218,17 @@
   cursor: pointer;
 }
 .lifecycle-actions button:hover { border-color: var(--lifecycle-severity-color, var(--accent)); background: var(--bg-hover); }
+.system-error-card-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.system-error-card-actions button {
+  min-height: var(--ui-control-compact);
+  padding: 0 var(--ui-space-3);
+  border: var(--line-width-1) solid var(--border);
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.system-error-card-actions button:hover { border-color: var(--lifecycle-severity-color, var(--accent)); background: var(--bg-hover); }
 :is(.lifecycle-card,.system-error-card,.system-notice-card)[data-density="compact"] {
   gap: var(--ui-space-1);
   padding: var(--ui-space-2);

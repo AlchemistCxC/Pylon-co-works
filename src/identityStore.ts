@@ -5,7 +5,7 @@ import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_ENVELOPE_V
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
 import { clearSessionUiState } from './components/chat/sessionUiState'
-import { reportRuntimeError } from './runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
 import { selectUserDataRepository, type UserDataRepository } from './userDataRepository'
 import { resolveUnresolvedSessionTransaction } from './app/bootstrap/resolveUnresolvedSessionTransaction'
 import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
@@ -255,9 +255,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       try {
         await userDataRepository.deleteProfile(id)
       } catch (error) {
-        reportRuntimeError('删除 Profile（后端事务）', error)
+        reportRuntimeError('删除 Profile（后端事务）', error, undefined, {
+          key: `identity:delete-profile:${id}`, scope: { kind: 'app', id: 'identity' }, source: 'identity',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return
       }
+      resolveRuntimeErrors({ key: `identity:delete-profile:${id}` })
       identityMutationSeq += 1
       const [profilesEnv, sessionsEnv] = await Promise.all([
         userDataRepository.load('profiles'),
@@ -384,7 +388,12 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   },
   hydrateFromLocal: async (legacy) => {
     if (!canMutateIdentityDomain(get().identityPersistence, 'profiles', 'sessions')) {
-      reportRuntimeError('导入用户数据', new Error('SQLite 用户数据处于只读降级状态，请先重试恢复'))
+      reportRuntimeError('导入用户数据', new Error('SQLite 用户数据处于只读降级状态，请先重试恢复'), undefined, {
+        key: 'identity:import',
+        scope: { kind: 'app', id: 'identity' },
+        source: 'identity',
+        recovery: { kind: 'open-runtime-log' },
+      })
       return
     }
     // I14-W6 CR-01：导入等"本地已写入"场景——强制本地路径读回（读取刚写入的
@@ -428,7 +437,12 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         ...(cwd?.hookPluginIds ? { workspaceHookPluginIds: [...cwd.hookPluginIds] } : {}),
       }, now)
     } catch (error) {
-      reportRuntimeError('准备会话插件贡献', error)
+      reportRuntimeError('准备会话插件贡献', error, owner, {
+        key: `identity:create-session:${id}`,
+        scope: { kind: 'operation', id: `session:${id}` },
+        source: 'identity.session',
+        recovery: { kind: 'open-runtime-log', sessionId: id },
+      })
       return ''
     }
     // source = 'local:' + id（唯一）：会话重放/运行时状态按 AgentContextKey（agentId+source）
@@ -461,6 +475,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       queueMicrotask(syncIdentityToBackend)
       return { sessions, lastPersistError: persistFlag(ok, state.lastPersistError) }
     })
+    resolveRuntimeErrors({ key: `identity:create-session:${id}` })
     return id
   },
   forkSession: (sourceId) => {
@@ -494,7 +509,12 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         ...(original.workspaceId ? { workspaceId: original.workspaceId } : {}),
       }, now)
     } catch (error) {
-      reportRuntimeError('准备分叉会话插件贡献', error)
+      reportRuntimeError('准备分叉会话插件贡献', error, original.agentId, {
+        key: `identity:fork-session:${id}`,
+        scope: { kind: 'operation', id: `session:${id}` },
+        source: 'identity.session',
+        recovery: { kind: 'open-runtime-log', sessionId: id },
+      })
       return ''
     }
 
@@ -523,6 +543,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     set({ sessions, lastPersistError: persistFlag(ok, state.lastPersistError) })
     identityMutationSeq += 1
     queueMicrotask(syncIdentityToBackend)
+    resolveRuntimeErrors({ key: `identity:fork-session:${id}` })
     return id
   },
   removeSession: (id) => set(state => {
@@ -642,9 +663,15 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       },
     })
     if (!result.ok) {
-      if (result.kind === 'transport') reportRuntimeError('恢复遗留会话归属', result.cause ?? result.message)
+      if (result.kind === 'transport') {
+        reportRuntimeError('恢复遗留会话归属', result.cause ?? result.message, undefined, {
+          key: `identity:resolve-session:${sessionId}`, scope: { kind: 'session', id: sessionId }, source: 'identity',
+          recovery: { kind: 'open-runtime-log', sessionId },
+        })
+      }
       return false
     }
+    resolveRuntimeErrors({ key: `identity:resolve-session:${sessionId}` })
     return true
   },
   hydrateSessions: async () => {
@@ -820,7 +847,10 @@ function syncIdentityToBackend(
       lastPersistError: 'SQLite 用户数据同步失败；已切换为只读，请重试恢复',
       identityPersistence: { ...current.identityPersistence, [domain]: 'degraded-readonly' },
     }))
-    reportRuntimeError(`同步用户数据到后端失败（${domain}）`, error)
+    reportRuntimeError(`同步用户数据到后端失败（${domain}）`, error, undefined, {
+      key: `identity:sync:${domain}`, scope: { kind: 'app', id: 'identity' }, source: 'identity.sync',
+      recovery: { kind: 'open-runtime-log' },
+    })
   }
   if (domains.includes('profiles') && state.identityPersistence.profiles !== 'degraded-readonly') {
     updateIdentityCacheMeta('profiles', 'pending')
@@ -834,6 +864,7 @@ function syncIdentityToBackend(
         lastPersistError: current.identityPersistence.sessions === 'degraded-readonly' ? current.lastPersistError : null,
         identityPersistence: { ...current.identityPersistence, profiles: 'ready' },
       }))
+      resolveRuntimeErrors({ key: 'identity:sync:profiles' })
     }).catch((error) => {
       handleError('profiles', error)
     })
@@ -850,6 +881,7 @@ function syncIdentityToBackend(
         lastPersistError: current.identityPersistence.profiles === 'degraded-readonly' ? current.lastPersistError : null,
         identityPersistence: { ...current.identityPersistence, sessions: 'ready' },
       }))
+      resolveRuntimeErrors({ key: 'identity:sync:sessions' })
     }).catch((error) => {
       handleError('sessions', error)
     })

@@ -492,9 +492,6 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       }}
       aria-label="Solid Agent Workbench"
     >
-      <Show when={snapshot().status === 'error'}>
-        <div class="solid-workbench-runtime-error" role="alert">{snapshot().error || '工作台运行时错误'}</div>
-      </Show>
       <Show
         when={props.context.input().sessionId}
         fallback={<div class="solid-workbench-chat-shell solid-workbench-empty-chat-shell" data-chat-viewport="empty">
@@ -730,6 +727,8 @@ function WorkbenchDocumentSurface(props: {
                 onRecover={props.sessionId && props.context.hostPort?.capabilities.has('recovery')
                   ? strategy => { void props.commands.recover(props.sessionId!, strategy) }
                   : undefined}
+                onOpenDiagnostics={() => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))}
+                dismissible
               />}
             />
           )}</For>

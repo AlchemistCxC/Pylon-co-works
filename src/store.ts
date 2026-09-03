@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { reportRuntimeError } from './runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState.ts'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
@@ -288,7 +288,10 @@ export const useStore = create<ThemeState>()(persist(
       // 表现为"切换了但什么都没发生"）。
       if (!preset) {
         const message = `自定义预设不存在：${canonicalId}`
-        reportRuntimeError('应用自定义预设', new Error(message))
+        reportRuntimeError('应用自定义预设', new Error(message), undefined, {
+          key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return { status: 'failed', id: canonicalId, failedProvider: 'preset', message, rolledBack: true, revision }
       }
 
@@ -303,7 +306,10 @@ export const useStore = create<ThemeState>()(persist(
       const themePayloadValue = themeContribution?.payload
       if (!themeContribution || !themePayloadValue || typeof themePayloadValue !== 'object' || Array.isArray(themePayloadValue)) {
         const message = `自定义预设主题缺失：${presetId}`
-        reportRuntimeError('准备应用预设', new Error(message))
+        reportRuntimeError('准备应用预设', new Error(message), undefined, {
+          key: `preset-prepare:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return { status: 'failed', id: presetId, failedProvider: 'builtin.theme', message, rolledBack: true, revision }
       }
       // 主题 payload 单一真值：bundle 里的保存态 delta（免疫 appliedPreset 引用
@@ -367,9 +373,14 @@ export const useStore = create<ThemeState>()(persist(
       } catch (error) {
         const failedProvider = error instanceof PresetProviderTransactionError ? error.providerId : 'unknown'
         const message = error instanceof Error ? error.message : String(error)
-        reportRuntimeError('应用预设', error)
+        reportRuntimeError('应用预设', error, undefined, {
+          key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return { status: 'failed', id: presetId, failedProvider, message, rolledBack: true, revision }
       }
+      resolveRuntimeErrors({ key: `preset:${presetId}` })
+      resolveRuntimeErrors({ key: `preset-prepare:${presetId}` })
       return {
         status: 'applied', id: presetId, providers: Object.freeze(providerIds), revision,
         ...(unavailable.length > 0 ? { unavailable: Object.freeze(unavailable) } : {}),
@@ -382,7 +393,10 @@ export const useStore = create<ThemeState>()(persist(
       } catch (error) {
         const canonicalId = normalizeCustomPresetId(id)
         const message = error instanceof Error ? error.message : String(error)
-        reportRuntimeError('应用预设', error)
+        reportRuntimeError('应用预设', error, undefined, {
+          key: `preset:${canonicalId}`, scope: { kind: 'operation', id: `preset:${canonicalId}` }, source: 'theme.preset',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return { status: 'failed', id: canonicalId, failedProvider: 'unknown', message, rolledBack: false, revision }
       }
     }
@@ -399,9 +413,15 @@ export const useStore = create<ThemeState>()(persist(
     setItem: (key, value) => {
       try {
         localStorage.setItem(key, value)
+        resolveRuntimeErrors({ key: 'app:theme-persistence', source: 'theme.persistence' })
       } catch (error) {
         // 写盘失败可见（ErrorCenter 指纹去重聚合）；不 throw——内存态继续（1C）
-        reportRuntimeError('保存主题配置', error)
+        reportRuntimeError('保存主题配置', error, undefined, {
+          key: 'app:theme-persistence',
+          scope: { kind: 'app', id: 'theme' },
+          source: 'theme.persistence',
+          recovery: { kind: 'open-runtime-log' },
+        })
       }
     },
     removeItem: key => localStorage.removeItem(key),

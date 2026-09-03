@@ -14,6 +14,7 @@ import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBu
 import { getChatController, type ChatControllerHandle } from '../../components/chat/chatEventController.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
+import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
   extractChoiceId,
@@ -694,6 +695,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${refreshMalformedCount} 条事件无法迁移` })
         } else {
           updateRuntimeState({ status: 'ready', error: null })
+          // A successful canonical refresh is authoritative evidence that any
+          // earlier recoverable bind/replay notice for this session is stale.
+          // Resolve by stable key only; errors from other sessions remain.
+          resolveRuntimeErrors({ key: `session-recovery:${refreshSessionId}`, source: 'chat.session-recovery' })
         }
         syncSourceRuntime(refreshSource)
         const settled = runtime.getSnapshot()
@@ -823,6 +828,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         updateRuntimeState(malformedCount > 0
           ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
           : { status: 'ready', error: null })
+        if (malformedCount === 0) {
+          resolveRuntimeErrors({ key: `session-recovery:${session.id}`, source: 'chat.session-recovery' })
+        }
         syncSourceRuntime(session.source)
         // A restarted process has no in-memory controller summary, while the
         // canonical document already contains the completed turn. Publish a

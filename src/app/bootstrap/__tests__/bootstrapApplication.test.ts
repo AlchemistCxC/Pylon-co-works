@@ -19,6 +19,7 @@ function createDeps(overrides: Partial<BootstrapDeps> = {}): { deps: Required<Bo
     applyAgentStatus: (payload) => { calls.push(`applyStatus:${(payload as { status?: string }).status}`) },
     registerListeners: async () => { calls.push('listen'); return () => { calls.push('dispose') } },
     reportError: vi.fn(),
+    resolveError: vi.fn(),
     setStatus: vi.fn(),
     cancelled: () => false,
   }
@@ -34,6 +35,12 @@ describe('bootstrapApplication', () => {
     const statuses = setStatus.mock.calls.map((call: Array<unknown>) => call[0])
     expect(statuses[0]).toBe('loading')
     expect(statuses[statuses.length - 1]).toBe('ready')
+    expect(deps.resolveError).toHaveBeenCalledWith('恢复本地数据')
+    expect(deps.resolveError).toHaveBeenCalledWith('读取 Agent 列表')
+    expect(deps.resolveError).toHaveBeenCalledWith('应用 Agent 列表')
+    expect(deps.resolveError).toHaveBeenCalledWith('应用工具归一化字典')
+    expect(deps.resolveError).toHaveBeenCalledWith('读取 Agent 状态')
+    expect(deps.resolveError).toHaveBeenCalledWith('注册事件监听')
   })
 
   it('Agent 列表失败 → degraded：applyAgents 不调用、本地工作区保留、可重试计数', async () => {
@@ -96,10 +103,11 @@ describe('bootstrapApplication', () => {
   it('fetch 返回前已取消（StrictMode 双挂载晚到）→ 不应用 agents', async () => {
     let resolveFetch!: (value: Array<{ id: string; name: string }>) => void
     const applyAgents = vi.fn()
+    let cancelled = false
     const deps: Required<BootstrapDeps> = {
       isTauri: true,
       hydrateDomains: () => {},
-      fetchAgents: () => new Promise(res => { resolveFetch = res }),
+      fetchAgents: () => new Promise(res => { resolveFetch = value => { cancelled = true; res(value) } }),
       applyAgents,
       fetchToolDictionary: async () => ({}),
       applyToolDictionary: () => {},
@@ -107,8 +115,9 @@ describe('bootstrapApplication', () => {
       applyAgentStatus: vi.fn(),
       registerListeners: async () => () => {},
       reportError: vi.fn(),
+      resolveError: vi.fn(),
       setStatus: vi.fn(),
-      cancelled: () => true,
+      cancelled: () => cancelled,
     }
     const pending = bootstrapApplication(deps)
     // I14-W6：hydrateDomains 可为 async，bootstrap 经 await——fetchAgents 在下一
@@ -140,5 +149,21 @@ describe('bootstrapApplication', () => {
     })
     expect(await bootstrapApplication(deps)).toBe('ready')
     expect(calls).toEqual(['hydrate', 'fetch', 'apply:1', 'listen'])
+  })
+
+  it('卸载后 hydrate 的迟到失败不创建新的错误通知', async () => {
+    let rejectHydrate!: (error: unknown) => void
+    let cancelled = false
+    const reportError = vi.fn()
+    const { deps } = createDeps({
+      hydrateDomains: () => new Promise<void>((_resolve, reject) => { rejectHydrate = reject }),
+      reportError,
+      cancelled: () => cancelled,
+    })
+    const pending = bootstrapApplication(deps)
+    cancelled = true
+    rejectHydrate(new Error('old mount failed'))
+    await expect(pending).resolves.toBe('cancelled')
+    expect(reportError).not.toHaveBeenCalled()
   })
 })

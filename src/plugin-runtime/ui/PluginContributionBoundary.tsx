@@ -10,7 +10,15 @@ export class PluginContributionBoundary extends Component<{
   static getDerivedStateFromError(error: Error) { return { error } }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    reportRuntimeError(`渲染插件贡献 ${this.props.contributionId}`, new Error(`${error.message}\n${info.componentStack ?? ''}`))
+    // The boundary's local placeholder is the user-facing context. Keep the
+    // crash searchable in Runtime diagnostics without duplicating a global
+    // tray error for the same isolated contribution.
+    reportRuntimeError(`渲染插件贡献 ${this.props.contributionId}`, new Error(`${error.message}\n${info.componentStack ?? ''}`), undefined, {
+      key: `plugin-contribution:${this.props.contributionId}`,
+      visibility: 'diagnostic',
+      scope: { kind: 'operation', id: `plugin-contribution:${this.props.contributionId}` },
+      source: 'plugin.contribution-boundary',
+    })
   }
 
   render() {

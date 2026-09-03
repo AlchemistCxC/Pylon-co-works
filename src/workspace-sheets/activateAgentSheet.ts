@@ -3,7 +3,7 @@ import { switchAgentTransaction } from '../application/transactions/switchAgentT
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 
 /**
  * Release 1.x Agent Sheet activation boundary: switch the single GUI runtime
@@ -24,7 +24,12 @@ export async function activateAgentSheet(
     setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
     fetchAgentStatus: () => agentClient.agentStatus(),
     applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
-    reportError: (action, error) => reportRuntimeError(action, error),
+    reportError: (action, error) => reportRuntimeError(action, error, agentId, {
+      key: `agent:${agentId}:${action}`,
+      scope: { kind: 'agent', id: agentId },
+      source: 'agent.activation',
+    }),
+    resolveError: action => resolveRuntimeErrors({ key: `agent:${agentId}:${action}` }),
     dispatchSwitched: () => {
       if (!options?.silent) window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
     },

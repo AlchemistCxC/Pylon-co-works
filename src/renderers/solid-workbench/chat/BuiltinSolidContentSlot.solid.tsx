@@ -432,6 +432,8 @@ export function BuiltinSolidContentSlot(props: {
             appearance={lifecycleAppearance(props.appearance, stringSetting, booleanSetting)}
             onRetry={can('message.retry') ? () => execute('message.retry', undefined) : undefined}
             onRecover={can('session.recover') ? strategy => execute('session.recover', { strategy }) : undefined}
+            onOpenDiagnostics={() => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))}
+            dismissible
           />}
         </Show>
       </Match>

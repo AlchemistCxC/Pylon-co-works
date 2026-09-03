@@ -40,6 +40,8 @@ export interface BootstrapDeps {
   /** 注册全局 controller/listener，返回 dispose handle（阶段 2.8） */
   registerListeners: () => Promise<() => void>
   reportError: (action: string, error: unknown) => void
+  /** Optional success seam used to resolve a matching active notification. */
+  resolveError?: (action: string) => void
   setStatus: (status: HydrationStatus, error?: string | null) => void
   /** 组件卸载后为 true：不再应用迟到的 agents/listener 结果 */
   cancelled: () => boolean
@@ -49,7 +51,12 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
   deps.setStatus('loading')
   try {
     await deps.hydrateDomains()
+    if (deps.cancelled()) return 'cancelled'
+    deps.resolveError?.('恢复本地数据')
   } catch (error) {
+    // An unmounted Application must not turn a late rejection from its old
+    // bootstrap run into a new notification for the remounted tree.
+    if (deps.cancelled()) return 'cancelled'
     deps.reportError('恢复本地数据', error)
     deps.setStatus('degraded', '本地数据恢复失败')
     return 'degraded'
@@ -63,7 +70,10 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
   let agents: AgentEntry[]
   try {
     agents = await deps.fetchAgents()
+    if (deps.cancelled()) return 'cancelled'
+    deps.resolveError?.('读取 Agent 列表')
   } catch (error) {
+    if (deps.cancelled()) return 'cancelled'
     // degraded：本地工作区保留，可重试（报告阶段 2.4）
     deps.reportError('读取 Agent 列表', error)
     deps.setStatus('degraded', '读取 Agent 列表失败')
@@ -72,7 +82,10 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
   if (deps.cancelled()) return 'cancelled'
   try {
     deps.applyAgents(agents)
+    if (deps.cancelled()) return 'cancelled'
+    deps.resolveError?.('应用 Agent 列表')
   } catch (error) {
+    if (deps.cancelled()) return 'cancelled'
     deps.reportError('应用 Agent 列表', error)
     deps.setStatus('degraded', isPluginServiceUnavailable(error)
       ? 'Agent 插件服务不可用'
@@ -89,13 +102,19 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
       dictionary = await deps.fetchToolDictionary()
       dictionaryLoaded = true
       if (deps.cancelled()) return 'cancelled'
+      deps.resolveError?.('读取工具归一化字典')
+      if (deps.cancelled()) return 'cancelled'
     } catch (error) {
+      if (deps.cancelled()) return 'cancelled'
       deps.reportError('读取工具归一化字典', error)
     }
     if (dictionaryLoaded) {
       try {
         deps.applyToolDictionary(dictionary)
+        if (deps.cancelled()) return 'cancelled'
+        deps.resolveError?.('应用工具归一化字典')
       } catch (error) {
+        if (deps.cancelled()) return 'cancelled'
         deps.reportError('应用工具归一化字典', error)
         deps.setStatus('degraded', isPluginServiceUnavailable(error)
           ? '工具字典插件服务不可用'
@@ -112,7 +131,10 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
       const payload = await deps.fetchAgentStatus()
       if (deps.cancelled()) return 'cancelled'
       deps.applyAgentStatus(payload)
+      if (deps.cancelled()) return 'cancelled'
+      deps.resolveError?.('读取 Agent 状态')
     } catch (error) {
+      if (deps.cancelled()) return 'cancelled'
       deps.reportError('读取 Agent 状态', error)
     }
   }
@@ -120,7 +142,13 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
   let dispose: () => void
   try {
     dispose = await deps.registerListeners()
+    if (deps.cancelled()) {
+      dispose()
+      return 'cancelled'
+    }
+    deps.resolveError?.('注册事件监听')
   } catch (error) {
+    if (deps.cancelled()) return 'cancelled'
     deps.reportError('注册事件监听', error)
     deps.setStatus('degraded', '注册事件监听失败')
     return 'degraded'

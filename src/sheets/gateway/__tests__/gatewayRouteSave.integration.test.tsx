@@ -9,14 +9,19 @@
  * 4. 严格校验：缺 instance/profile/session 时禁止保存并显示错误；
  * 5. 旧 route 迁移：平台唯一 enabled instance 时既有 legacy route 自动补绑定 instanceId。
  */
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useIdentityStore } from '../../../identityStore'
 import GatewaySheetView from '../GatewaySheetView'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
+import { clearErrors, getErrors } from '../../../errorCenter.ts'
 
 const fakeInvoke = new FakeInvoke()
+
+afterEach(() => {
+  clearErrors()
+})
 
 /** 安装 Tauri internals，让 @tauri-apps/api/core 的真实 invoke 走 fakeInvoke（集成路径） */
 function installFakeTauriInternals(): void {
@@ -159,5 +164,22 @@ describe('I12 W6 UI consumer（LR2-WI02）', () => {
     await screen.findByText(/qq:group:1/)
     fireEvent.click(screen.getByText(/qq:group:1/))
     await screen.findByText(/instanceId/)
+  })
+
+  it('实例操作重试成功后收敛对应错误通知', async () => {
+    let attempts = 0
+    fakeInvoke.register('gateway_instance_start', () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('启动失败')
+      return INSTANCES[0]
+    })
+    renderGateway()
+    await screen.findByText(/qq:group:1/)
+
+    fireEvent.click(screen.getByRole('button', { name: '启动' }))
+    await waitFor(() => expect(getErrors().some(entry => entry.key === 'gateway:gw:启动网关实例')).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: '启动' }))
+    await waitFor(() => expect(getErrors().some(entry => entry.key === 'gateway:gw:启动网关实例')).toBe(false))
   })
 })

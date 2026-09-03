@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { createGatewayClient, type AdapterCatalogItem, type AdapterInstance, type GatewayInstanceInput } from '../../infrastructure/tauri/gatewayClient'
 import { migrateLegacyRouteBindings, saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
 import { GATEWAY_ROUTE_RESETS, type GatewayRouteReset, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
@@ -19,7 +19,9 @@ function statusLabel(status: AdapterInstance['status']): string {
   return status === 'connected' ? '已连接' : status === 'starting' ? '启动中' : status === 'error' ? '错误' : '已停止'
 }
 
-export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+  const sheetScope = useMemo(() => ({ kind: 'sheet' as const, id: sheet.id }), [sheet.id])
+  const operationKey = useCallback((action: string, suffix = '') => `gateway:${sheet.id}:${action}${suffix ? `:${suffix}` : ''}`, [sheet.id])
   const [gatewayClient] = useState(() => createGatewayClient({
     invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
   }))
@@ -89,19 +91,31 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
         saveRoutes: payload => gatewayClient.updateAgentsConfig(payload),
         reload: () => gatewayClient.reload(),
         readBackRoutes: readMigrated,
-        reportError: (action, error) => reportRuntimeError(action, error),
+        reportError: (action, error) => reportRuntimeError(action, error, undefined, {
+          key: operationKey(action), scope: sheetScope, source: 'gateway',
+          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+        }),
       },
     )
     if (!result.ok) {
       // G3：命令缺失 → blocked（「待后端」分支可达）；锁中毒/回读 mismatch 明确展示
       if (result.kind === 'blocked') setWriteStatus({ kind: 'blocked' })
-      else if (result.kind === 'mismatch') setWriteStatus({ kind: 'lock-poisoned' })
+      else if (result.kind === 'mismatch') {
+        setWriteStatus({ kind: 'lock-poisoned' })
+        reportRuntimeError('保存网关配置', new Error(result.message), undefined, {
+          key: operationKey('保存网关配置'), scope: sheetScope, source: 'gateway',
+          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+        })
+      }
       else setWriteStatus({ kind: 'error', message: result.message })
       return
     }
     // FE-AUD-004：保存成功后用事务回读结果刷新 UI（status 不只挂载时读一次）
     setStatus({ ...(status ?? { adapters: [], routes: [], qq: null, inject: null }), routes: result.value as GatewayStatus['routes'] })
     setWriteStatus({ kind: 'ok' })
+    for (const action of ['读取网关路由', '保存网关配置', '重载网关', '回读网关状态']) {
+      resolveRuntimeErrors({ key: operationKey(action) })
+    }
   }
 
   // I12 W6：source 变化时，若平台恰好一个 enabled instance 则自动预选实例（可手动改）
@@ -114,53 +128,86 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
   useEffect(() => {
     let disposed = false
     gatewayClient.status().then(raw => {
-      if (!disposed) setStatus(raw as GatewayStatus)
+      if (!disposed) {
+        setStatus(raw as GatewayStatus)
+        setError('')
+        resolveRuntimeErrors({ key: operationKey('读取网关状态') })
+      }
     }).catch(err => {
       if (!disposed) {
         setError(err instanceof Error ? err.message : String(err))
-        reportRuntimeError('读取网关状态', err)
+        reportRuntimeError('读取网关状态', err, undefined, {
+          key: operationKey('读取网关状态'), scope: sheetScope, source: 'gateway',
+          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+        })
       }
     })
     return () => { disposed = true }
-  }, [gatewayClient])
+  }, [gatewayClient, operationKey, sheet.id, sheetScope])
 
   // Phase 2：平台会话（gateway_sessions 只读快照）
   useEffect(() => {
     let disposed = false
     gatewayClient.sessions().then(raw => {
-      if (!disposed) setSessions(raw as PlatformSession[])
+      if (!disposed) {
+        setSessions(raw as PlatformSession[])
+        resolveRuntimeErrors({ key: operationKey('读取平台会话') })
+      }
     }).catch(err => {
-      if (!disposed) reportRuntimeError('读取平台会话', err)
+      if (!disposed) reportRuntimeError('读取平台会话', err, undefined, {
+        key: operationKey('读取平台会话'), scope: sheetScope, source: 'gateway',
+        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+      })
     })
     return () => { disposed = true }
-  }, [gatewayClient])
+  }, [gatewayClient, operationKey, sheet.id, sheetScope])
 
   // I12-W5：实例列表 + 平台 catalog（创建表单可用平台来源）
   const reloadInstances = useCallback(async () => {
     try {
       setInstances(await gatewayClient.instances())
       setInstanceError('')
+      resolveRuntimeErrors({ key: operationKey('读取网关实例') })
     } catch (err) {
       setInstanceError(err instanceof Error ? err.message : String(err))
+      reportRuntimeError('读取网关实例', err, undefined, {
+        key: operationKey('读取网关实例'), scope: sheetScope, source: 'gateway',
+        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+      })
     }
-  }, [gatewayClient])
+  }, [gatewayClient, operationKey, sheet.id, sheetScope])
   useEffect(() => {
     let disposed = false
     void reloadInstances()
     gatewayClient.catalog().then(items => {
-      if (!disposed) setCatalog(items)
+      if (!disposed) {
+        setCatalog(items)
+        resolveRuntimeErrors({ key: operationKey('读取平台目录') })
+      }
     }).catch(err => {
-      if (!disposed) reportRuntimeError('读取平台目录', err)
+      if (!disposed) reportRuntimeError('读取平台目录', err, undefined, {
+        key: operationKey('读取平台目录'), scope: sheetScope, source: 'gateway',
+        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+      })
     })
     return () => { disposed = true }
-  }, [gatewayClient, reloadInstances])
+  }, [gatewayClient, reloadInstances, operationKey, sheet.id, sheetScope])
 
-  const runInstanceAction = async (action: () => Promise<unknown>) => {
+  const runInstanceAction = async (operation: string, action: () => Promise<unknown>) => {
     try {
       await action()
+      // The mutation itself succeeded; retire its prior notification before
+      // the follow-up snapshot read. A snapshot failure is tracked separately
+      // under "读取网关实例" and must not make a successful mutation look
+      // permanently failed.
+      resolveRuntimeErrors({ key: operationKey(operation) })
       await reloadInstances()
     } catch (err) {
       setInstanceError(err instanceof Error ? err.message : String(err))
+      reportRuntimeError(operation, err, undefined, {
+        key: operationKey(operation), scope: sheetScope, source: 'gateway',
+        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
+      })
     }
   }
 
@@ -173,14 +220,14 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       enabled: true,
       autoStart: false,
     }
-    await runInstanceAction(() => gatewayClient.createInstance(input))
+    await runInstanceAction('创建网关实例', () => gatewayClient.createInstance(input))
     setCreateForm({ platform: createForm.platform, id: '', label: '' })
   }
 
   const submitCredentials = async (id: string) => {
     const secret = credentialSecrets[id]
     if (!secret) return
-    await runInstanceAction(() => gatewayClient.setInstanceCredentials(id, secret))
+    await runInstanceAction('保存网关凭据', () => gatewayClient.setInstanceCredentials(id, secret))
     // I12-W5：凭据提交后清空前端 secret state（明文不残留）
     setCredentialSecrets(prev => ({ ...prev, [id]: '' }))
   }
@@ -213,7 +260,7 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
         )}
       </aside>}
       <main className="gateway-main">
-        {error && <div className="file-tree-error" role="alert">{error}</div>}
+        {error && <p className="file-section-hint gateway-error-reference" role="status">网关状态读取失败，详情见右下角错误中心</p>}
         <div className="file-main-kicker">GATEWAY</div>
         <h2 className="file-main-title">平台概览</h2>
         <div className="gateway-routes">
@@ -270,14 +317,14 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
           </div>
           {formError && <div className="file-tree-error" role="alert">{formError}</div>}
           {writeStatus.kind === 'blocked' && <p className="file-section-hint" role="status">待后端：update_agents_config 命令尚未提供</p>}
-          {writeStatus.kind === 'lock-poisoned' && <div className="file-tree-error" role="alert">网关配置锁中毒：磁盘已更新、运行态仍旧配置</div>}
-          {writeStatus.kind === 'error' && <div className="file-tree-error" role="alert">{writeStatus.message}</div>}
+          {writeStatus.kind === 'lock-poisoned' && <p className="file-section-hint gateway-error-reference" role="status">网关配置回读不一致，详情见右下角错误中心</p>}
+          {writeStatus.kind === 'error' && <p className="file-section-hint gateway-error-reference" role="status">网关配置保存失败，详情见右下角错误中心</p>}
           {writeStatus.kind === 'ok' && <p className="file-section-hint" role="status">已保存并重载</p>}
         </div>
         {/* I12-W5：实例管理（真实实例/状态/错误/操作；未实现平台不可用） */}
         <div className="gateway-instances">
           <div className="file-section-title">实例</div>
-          {instanceError && <div className="file-tree-error" role="alert">{instanceError}</div>}
+          {instanceError && <p className="file-section-hint gateway-error-reference" role="status">网关实例操作失败，详情见右下角错误中心</p>}
           {instances.length === 0 ? (
             <p className="file-section-hint">无实例</p>
           ) : (
@@ -290,12 +337,12 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
                     <span className="search-result-text">· {instance.platform}</span>
                     <span className="search-result-text">凭据：{instance.credentialStatus === 'configured' ? '已配置' : instance.credentialStatus === 'invalid' ? '损坏' : '未配置'}</span>
                   </div>
-                  {instance.lastError && <div className="file-tree-error" role="alert">{instance.lastError}</div>}
+                  {instance.lastError && <p className="file-section-hint" role="status">上次运行错误：{instance.lastError}</p>}
                   <div className="gateway-edit-row">
-                    <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction(() => gatewayClient.startInstance(instance.id))}>启动</button>
-                    <button type="button" className="template-apply" disabled={instance.status === 'stopped' || instance.status === 'starting'} onClick={() => void runInstanceAction(() => gatewayClient.stopInstance(instance.id))}>停止</button>
-                    <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction(() => gatewayClient.restartInstance(instance.id))}>重启</button>
-                    <button type="button" className="template-apply" disabled={instance.status !== 'stopped'} onClick={() => void runInstanceAction(() => gatewayClient.removeInstance(instance.id))}>删除</button>
+                    <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('启动网关实例', () => gatewayClient.startInstance(instance.id))}>启动</button>
+                    <button type="button" className="template-apply" disabled={instance.status === 'stopped' || instance.status === 'starting'} onClick={() => void runInstanceAction('停止网关实例', () => gatewayClient.stopInstance(instance.id))}>停止</button>
+                    <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('重启网关实例', () => gatewayClient.restartInstance(instance.id))}>重启</button>
+                    <button type="button" className="template-apply" disabled={instance.status !== 'stopped'} onClick={() => void runInstanceAction('删除网关实例', () => gatewayClient.removeInstance(instance.id))}>删除</button>
                   </div>
                   <div className="gateway-edit-row">
                     <input className="runtime-filter-input" type="password" placeholder="appId:clientSecret" value={credentialSecrets[instance.id] ?? ''} onChange={e => setCredentialSecrets(prev => ({ ...prev, [instance.id]: e.target.value }))} aria-label={`${instance.id} 凭据`} />

@@ -57,6 +57,16 @@ function timeoutBound(failure: PromptFailurePresentationMetadata | undefined): s
     : seconds(failure?.configuredTimeoutSecs)
 }
 
+function inferProviderFailure(raw: string, failure: PromptFailurePresentationMetadata | undefined): boolean {
+  if (failure?.source === 'provider') return true
+  // Older ACP providers emitted only a free-form error string.  Their
+  // configured timeout (for example "180s") is provider metadata, not proof
+  // that the local prompt actually waited that long.  Treat the stable
+  // protocol/provider wording as a provider failure and keep the raw string
+  // in technical details.
+  return /(?:^|\b)ACP\s+protocol\s*:/i.test(raw) && /provider\s+error/i.test(raw)
+}
+
 /** Resolve safe user copy while preserving the provider/local error detail. */
 export function presentPromptFailure(
   error: unknown,
@@ -65,7 +75,7 @@ export function presentPromptFailure(
   const raw = cleanText(error) ?? cleanText(failure?.providerMessage) ?? '未知错误'
   const source = cleanText(failure?.source)
   let userSummary: string
-  switch (source) {
+  switch (inferProviderFailure(raw, failure) ? 'provider' : source) {
     case 'provider':
       userSummary = 'Provider 返回错误'
       break

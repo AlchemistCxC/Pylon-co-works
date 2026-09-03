@@ -18,6 +18,7 @@ import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { invoke } from '@tauri-apps/api/core'
+import { clearErrors, getErrors } from '../../errorCenter.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
@@ -107,7 +108,10 @@ function systemErrorSlotSummary(payload: unknown): string {
 }
 
 describe('AgentSheetView renderer mode context', () => {
-  beforeEach(resetStores)
+  beforeEach(() => {
+    resetStores()
+    clearErrors()
+  })
 
   it('默认 Interface Mode 经 Renderer Suite Host 挂载内置 Solid Workbench', async () => {
     const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
@@ -496,22 +500,34 @@ describe('AgentSheetView renderer mode context', () => {
       await screen.findByText('healthy-suite-v1')
 
       await runtime.update(suitePlugin(pluginId, 'broken-suite-v2', true))
-      await screen.findByRole('status', {}, { timeout: 5_000 })
+      await waitFor(() => expect(getErrors()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          action: 'Renderer Suite 回退',
+          source: 'renderer-suite',
+          key: expect.stringMatching(new RegExp(`^renderer-suite:agent-sheet:none:${pluginId}\\.suite:`)),
+        }),
+      ])))
       await new Promise(resolve => setTimeout(resolve, 250))
 
       expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
       expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
       expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
-      expect(screen.getByRole('button', { name: '重试 Solid' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: '切换 Suite' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: '打开诊断' })).toBeTruthy()
+      // Ordinary Suite fallback errors have one presentation: the application
+      // ErrorCenter. The healthy renderer remains mounted without a local
+      // banner or duplicate recovery controls.
+      expect(container.querySelector('.renderer-suite-fallback-banner')).toBeNull()
+      expect(screen.queryByRole('button', { name: '重试 Solid' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '切换 Suite' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '打开诊断' })).toBeNull()
 
       await runtime.disable(pluginId)
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
       expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
+      clearErrors()
     } finally {
       await runtime.disable(pluginId)
+      clearErrors()
     }
   })
 

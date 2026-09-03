@@ -249,6 +249,30 @@
 .runtime-marker-status { color: var(--danger, #e5484d); }
 .runtime-marker-agent { color: var(--accent); }
 .runtime-marker-detail { color: var(--text-dim); }
+
+/* P42：中央错误 tray 之外的诊断/历史查询面；不改变错误事实状态。 */
+.runtime-error-facts {
+  flex: 0 0 auto;
+  max-height: min(32vh, 360px);
+  overflow: auto;
+  padding: var(--ui-space-3);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+}
+.runtime-error-facts-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ui-space-2); margin-bottom: var(--ui-space-2); }
+.runtime-error-facts-head span { color: var(--text-dim); font-size: 11px; }
+.runtime-error-facts-list { display: grid; gap: var(--ui-space-1); list-style: none; margin: 0; padding: 0; }
+.runtime-error-fact { padding: var(--ui-space-2); border: 1px solid var(--border); background: color-mix(in srgb, var(--bg-input) 60%, transparent); }
+.runtime-error-fact.state-active { border-inline-start: 3px solid var(--danger, #e5484d); }
+.runtime-error-fact.state-resolved { border-inline-start: 3px solid var(--tool-ok, #1e9646); }
+.runtime-error-fact.state-dismissed { border-inline-start: 3px solid var(--text-dim); }
+.runtime-error-fact-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--ui-space-2); align-items: baseline; font-size: 12px; }
+.runtime-error-fact-summary span { min-width: 0; overflow-wrap: anywhere; color: var(--text-dim); }
+.runtime-error-fact-summary small { color: var(--text-dim); white-space: nowrap; }
+.runtime-error-fact details { margin-top: var(--ui-space-1); font-size: 11px; }
+.runtime-error-fact details summary { cursor: pointer; color: var(--text-dim); }
+.runtime-error-fact-detail { display: grid; gap: var(--ui-space-1); margin-top: var(--ui-space-1); color: var(--text-dim); overflow-wrap: anywhere; }
+.runtime-error-fact-detail pre { max-height: 120px; overflow: auto; margin: 0; padding: var(--ui-space-1); white-space: pre-wrap; background: var(--bg-input); font: 11px/1.4 var(--mono); }
 @media (max-width: 760px) {
   .runtime-log-row { flex-wrap: wrap; }
   .runtime-log-message { flex-basis: 100%; overflow-wrap: anywhere; }

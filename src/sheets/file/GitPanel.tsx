@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Download, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Upload } from 'lucide-react'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { classifyGitError, normalizeGitHistory, normalizeGitOperationResult, normalizeGitStatus, normalizeGitStatusWithBranch, type GitCommit, type GitErrorDetail, type GitOperationResult, type GitStatusEntry, type GitStatusWithBranch } from '../../infrastructure/tauri/gitContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
@@ -88,6 +88,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
   const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
   const previousTargetKey = useRef<string | null | undefined>(undefined)
   const targetKey = workspaceTargetKey(target)
+  const errorKey = useCallback((action: string) => `git:${targetKey ?? 'none'}:${action}`, [targetKey])
 
   useEffect(() => {
     const targetChanged = previousTargetKey.current !== targetKey
@@ -132,13 +133,20 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
       setHistory(normalizeGitHistory(historyRaw))
       const info = result.branch
       setBranchName(info.branch ? info.branch : info.detached ? '(detached)' : null)
+      setError(null)
+      resolveRuntimeErrors({ key: errorKey('读取 Git 信息') })
     }).catch(err => {
       if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyGitError(err))
-      reportRuntimeError('读取 Git 信息', err)
+      reportRuntimeError('读取 Git 信息', err, undefined, {
+        key: errorKey('读取 Git 信息'),
+        scope: { kind: 'sheet', id: `git:${targetKey ?? 'none'}` },
+        source: 'git.panel',
+        recovery: { kind: 'open-runtime-log', sheetId: `git:${targetKey ?? 'none'}` },
+      })
     })
     return () => { disposed = true }
-  }, [target, targetKey, provider, refreshRevision])
+  }, [target, targetKey, provider, refreshRevision, errorKey])
 
   const applyStatus = (statusRaw: GitStatusWithBranch) => {
     const result = normalizeGitStatusWithBranch(statusRaw)
@@ -163,6 +171,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         setHistory(nextHistory)
       }
       setFeedback({ kind: 'success', message: result.summary || `${action}完成` })
+      resolveRuntimeErrors({ key: `git:${sourceAtStart ?? 'none'}:${action}` })
       if (action === '提交') setCommitMessage('')
       if (action === '创建分支' || action === '切换分支') {
         setBranchDraft('')
@@ -170,8 +179,13 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
       }
     } catch (cause) {
       if (requestContext.current.source !== sourceAtStart) return
-      setFeedback({ kind: 'error', message: classifyGitError(cause).message })
-      reportRuntimeError(action, cause)
+      setFeedback({ kind: 'error', message: '操作失败，详情见右下角错误中心' })
+      reportRuntimeError(action, cause, undefined, {
+        key: `git:${sourceAtStart ?? 'none'}:${action}`,
+        scope: { kind: 'sheet', id: `git:${sourceAtStart ?? 'none'}` },
+        source: 'git.panel',
+        recovery: { kind: 'open-runtime-log', sheetId: `git:${sourceAtStart ?? 'none'}` },
+      })
     } finally {
       if (requestContext.current.source === sourceAtStart) setBusyAction(null)
     }
@@ -181,7 +195,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
 
   if (!target || !provider) return <div className="file-section-panel"><p className="file-section-hint">未安装可用的 Git provider</p></div>
   if (error?.kind === 'not-repo') return <div className="file-section-panel"><p className="file-section-hint">当前工作区不是 Git 仓库</p></div>
-  if (error) return <div className="file-section-panel"><div className="file-tree-error" role="alert">{error.message}</div></div>
+  if (error) return <div className="file-section-panel"><p className="file-section-hint file-tree-error-reference" role="status">Git 信息读取失败，详情见右下角错误中心</p></div>
 
   return (
     <div className="file-section-panel git-panel">
@@ -207,7 +221,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
           {provider.switchBranch && <button type="button" disabled={Boolean(busyAction) || !branchDraft.trim()} onClick={() => void runMutation('切换分支', () => provider.switchBranch!(target, branchDraft))}>切换已有分支</button>}
         </div>
       </form>}
-      {feedback && <div className={`git-feedback ${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</div>}
+      {feedback && <div className={`git-feedback ${feedback.kind}`} role="status">{feedback.message}</div>}
       {writable && provider.commit && <form className="git-commit-box" onSubmit={event => {
         event.preventDefault()
         if (commitMessage.trim()) void runMutation('提交', () => provider.commit!(target, commitMessage), true)

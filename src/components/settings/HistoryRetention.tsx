@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Select from '../ui/Select.tsx'
 import {
   DEFAULT_COUNT_LIMIT,
@@ -23,6 +23,7 @@ import {
   type RetentionPolicySnapshot,
   type RetentionPreview,
 } from '../../retentionPolicyRepository'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 /**
  * HistoryRetention — 消息历史保留策略设置（I13-A-FE-02，D-03/D-15）。
@@ -60,21 +61,35 @@ export default function HistoryRetention() {
   const [pruning, setPruning] = useState(false)
   const [cleanError, setCleanError] = useState<string | null>(null)
   const [cleanResult, setCleanResult] = useState<RetentionPreview | null>(null)
+  const mountedRef = useRef(true)
 
   const reload = () => {
     setLoading(true)
     setLoadError(null)
     // 不清 saveError：冲突重读后需保留「已在别处修改」提示；下次保存时再清
     loadRetentionPolicy(localStorage)
-      .then(next => setSnapshot(next))
-      .catch(error => setLoadError(retentionErrorMessage(error)))
-      .finally(() => setLoading(false))
+      .then(next => {
+        if (!mountedRef.current) return
+        setSnapshot(next)
+        resolveRuntimeErrors({ key: 'settings:history-retention:load' })
+      })
+      .catch(error => {
+        if (!mountedRef.current) return
+        setLoadError(retentionErrorMessage(error))
+        reportRuntimeError('读取历史保留策略', error, undefined, {
+          key: 'settings:history-retention:load', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      })
+      .finally(() => { if (mountedRef.current) setLoading(false) })
   }
 
   // A1-c/B5：Tauri 模式重接后端权威值（canonical retention 已就绪）；browser
   // 模式从 localStorage 同步初始化（见 useState 初值），无需异步加载。
   useEffect(() => {
+    mountedRef.current = true
     if (IS_TAURI) void reload()
+    return () => { mountedRef.current = false }
   }, [])
 
   const update = (next: RetentionPolicy) => {
@@ -87,8 +102,17 @@ export default function HistoryRetention() {
       setCleanError(null)
     }
     if (snapshot.source === 'local') {
-      writeRetentionPolicy(localStorage, next)
-      setSnapshot({ ...snapshot, policy: next })
+      try {
+        writeRetentionPolicy(localStorage, next)
+        setSnapshot({ ...snapshot, policy: next })
+        resolveRuntimeErrors({ key: 'settings:history-retention:save' })
+      } catch (error) {
+        setSaveError('保存失败，详情见右下角错误中心')
+        reportRuntimeError('保存历史保留策略', error, undefined, {
+          key: 'settings:history-retention:save', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      }
       return
     }
     setSaving(true)
@@ -97,6 +121,7 @@ export default function HistoryRetention() {
       .then(revision => {
         setSnapshot(current => (current ? { ...current, policy: next, revision, corruptWarning: null } : current))
         resetCleanState()
+        resolveRuntimeErrors({ key: 'settings:history-retention:save' })
       })
       .catch(error => {
         if (retentionErrorCode(error) === 'retention_revision_conflict') {
@@ -105,6 +130,10 @@ export default function HistoryRetention() {
         } else {
           setSaveError(`保存失败：${retentionErrorMessage(error)}`)
         }
+        reportRuntimeError('保存历史保留策略', error, undefined, {
+          key: 'settings:history-retention:save', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
+          recovery: { kind: 'open-runtime-log' },
+        })
       })
       .finally(() => setSaving(false))
   }
@@ -134,8 +163,13 @@ export default function HistoryRetention() {
     setPreview(null)
     try {
       setPreview(await previewRetentionPolicy(policy))
+      resolveRuntimeErrors({ key: 'settings:history-retention:preview' })
     } catch (error) {
       setCleanError(`预览失败：${retentionErrorMessage(error)}`)
+      reportRuntimeError('预览历史清理', error, undefined, {
+        key: 'settings:history-retention:preview', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
+        recovery: { kind: 'open-runtime-log' },
+      })
     } finally {
       setPreviewing(false)
     }
@@ -150,6 +184,7 @@ export default function HistoryRetention() {
       setCleanResult(result)
       setPreview(null)
       setConfirming(false)
+      resolveRuntimeErrors({ key: 'settings:history-retention:prune' })
     } catch (error) {
       if (retentionErrorCode(error) === 'retention_stale_preview') {
         // 预览后策略已变 → 拒绝按旧统计执行，重读最新策略要求重新预览
@@ -161,6 +196,10 @@ export default function HistoryRetention() {
         setCleanError(`清理失败：${retentionErrorMessage(error)}`)
         setConfirming(false)
       }
+      reportRuntimeError('清理历史记录', error, undefined, {
+        key: 'settings:history-retention:prune', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
+        recovery: { kind: 'open-runtime-log' },
+      })
     } finally {
       setPruning(false)
     }
@@ -172,7 +211,7 @@ export default function HistoryRetention() {
       <h3 className="set-group-inner-title">历史保留策略</h3>
       {loadError ? (
         <>
-          <div className="set-hint" role="alert">{loadError}</div>
+          <div className="set-hint" role="status">{loadError}（详情见右下角错误中心）</div>
           <div className="set-preset-row">
             <button type="button" className="ps-btn sm" onClick={reload}>重试</button>
           </div>
@@ -181,7 +220,7 @@ export default function HistoryRetention() {
         <div className="set-hint">正在加载保留策略…</div>
       ) : (
         <>
-          {snapshot.corruptWarning && <div className="set-hint set-impact" role="alert">{snapshot.corruptWarning}</div>}
+          {snapshot.corruptWarning && <div className="set-hint set-impact" role="status">{snapshot.corruptWarning}</div>}
           <div className="set-row">
             <span className="set-row-label">保留策略</span>
             <Select ariaLabel="保留策略" className="set-select" value={policy.mode} disabled={saving} onChange={value => changeMode(value as RetentionMode)} options={RETENTION_MODE_OPTIONS.map(option => ({ value: option.value, label: option.label }))} />
@@ -199,7 +238,7 @@ export default function HistoryRetention() {
             </div>
           )}
           {impact && <div className="set-hint set-impact" role="status">{impact.text}</div>}
-          {saveError && <div className="set-hint" role="alert">{saveError}</div>}
+          {saveError && <div className="set-hint" role="status">{saveError}</div>}
           {saving && <div className="set-hint">保存中…</div>}
           {canClean && (
             <>
@@ -238,7 +277,7 @@ export default function HistoryRetention() {
                   已清理 {cleanResult.totalCandidates} 条事件，影响 {cleanResult.affectedSessions} 个会话
                 </div>
               )}
-              {cleanError && <div className="set-hint" role="alert">{cleanError}</div>}
+              {cleanError && <div className="set-hint" role="status">{cleanError}</div>}
             </>
           )}
           <div className="set-hint">立即清理是独立确认操作；修改下拉项只保存策略，不会删除任何事件。</div>

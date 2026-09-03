@@ -1,4 +1,4 @@
-import { Show } from 'solid-js'
+import { Show, createEffect, createSignal } from 'solid-js'
 import type { LifecycleState, NormalizedError } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
 import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 
@@ -158,31 +158,55 @@ export function SolidSystemErrorCard(props: {
   appearance?: Partial<SolidLifecycleAppearance>
   onRetry?: () => void
   onRecover?: (strategy: 'reload-plugin' | 'reimport') => void
+  /** Display-only dismissal; the canonical system error remains in the document. */
+  dismissible?: boolean
+  onOpenDiagnostics?: () => void
 }) {
   const appearance = () => ({ ...DEFAULT_LIFECYCLE_APPEARANCE, ...props.appearance })
   const motion = () => props.reducedMotion ? 'none' : appearance().motion
+  const [hidden, setHidden] = createSignal(false)
+  let hiddenForKey = ''
+  createEffect(() => {
+    const errorKey = `${props.error.userSummary}\u0000${props.error.code ?? ''}\u0000${props.error.phase ?? ''}\u0000${props.error.eventId ?? ''}\u0000${props.error.runtimeInstanceId ?? ''}`
+    if (errorKey !== hiddenForKey) {
+      hiddenForKey = errorKey
+      setHidden(false)
+    }
+  })
   return (
-    <section
-      class="system-error-card"
-      role="alert"
-      aria-label={`系统错误：${props.error.userSummary}`}
-      data-recoverability={props.error.recoverability}
-      data-phase={props.error.phase}
-      data-density={appearance().density}
-      data-motion={motion()}
-      data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
-      style={{
-        color: appearance().foreground,
-        background: appearance().background,
-        'border-color': appearance().borderColor,
-        '--lifecycle-severity-color': appearance().errorColor,
-        '--lifecycle-muted-foreground': appearance().mutedForeground,
-      }}
-    >
-      <strong>{props.error.userSummary}</strong>
-      <ErrorDetails error={props.error} appearance={appearance()} />
-      <RecoveryActions error={props.error} onRetry={props.onRetry} onRecover={props.onRecover} />
-    </section>
+    <Show when={!hidden()}>
+      <section
+        class="system-error-card"
+        role="alert"
+        aria-label={`系统错误：${props.error.userSummary}`}
+        data-recoverability={props.error.recoverability}
+        data-phase={props.error.phase}
+        data-density={appearance().density}
+        data-motion={motion()}
+        data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
+        style={{
+          color: appearance().foreground,
+          background: appearance().background,
+          'border-color': appearance().borderColor,
+          '--lifecycle-severity-color': appearance().errorColor,
+          '--lifecycle-muted-foreground': appearance().mutedForeground,
+        }}
+      >
+        <strong>{props.error.userSummary}</strong>
+        <ErrorDetails error={props.error} appearance={appearance()} />
+        <RecoveryActions error={props.error} onRetry={props.onRetry} onRecover={props.onRecover} />
+        <Show when={props.dismissible === true || props.onOpenDiagnostics}>
+          <div class="system-error-card-actions">
+            <Show when={props.onOpenDiagnostics}>
+              <button type="button" onClick={() => props.onOpenDiagnostics?.()}>在错误中心查看</button>
+            </Show>
+            <Show when={props.dismissible === true}>
+              <button type="button" onClick={() => setHidden(true)}>隐藏</button>
+            </Show>
+          </div>
+        </Show>
+      </section>
+    </Show>
   )
 }
 

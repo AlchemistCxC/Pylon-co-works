@@ -11,6 +11,7 @@ function createDeps(registerListeners: BootstrapDeps['registerListeners']): Omit
     applyAgents: () => {},
     registerListeners,
     reportError: vi.fn(),
+    resolveError: vi.fn(),
     setStatus: vi.fn(),
   }
 }

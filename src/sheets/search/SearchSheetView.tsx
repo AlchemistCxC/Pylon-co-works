@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Database, Search, X } from 'lucide-react'
 import { useIdentityStore } from '../../identityStore'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'
 import PylonMark from '../../components/PylonMark'
 import { sessionUiStateSet } from '../../components/chat/sessionUiState'
@@ -25,6 +25,7 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
   // I14-W4：request generation——旧响应不覆盖新 query
   const generationRef = useRef(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const errorKey = useCallback((needle: string) => `search:${_sheet.id}:${needle}`, [_sheet.id])
 
   useEffect(() => {
     const needle = query.trim()
@@ -38,14 +39,20 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
         setResults(found)
         setTruncated(cut)
         setLoading(false)
+        resolveRuntimeErrors({ key: errorKey(needle) })
       })
       .catch(error => {
         if (generationRef.current !== generation) return
         setLoading(false)
         setSearchError(error instanceof Error ? error.message : String(error))
-        reportRuntimeError('搜索会话消息', error)
+        reportRuntimeError('搜索会话消息', error, undefined, {
+          key: errorKey(needle),
+          scope: { kind: 'sheet', id: _sheet.id },
+          source: 'search.sheet',
+          recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+        })
       })
-  }, [query])
+  }, [query, errorKey, _sheet.id])
 
   const openResult = async (result: SearchHitUi) => {
     const session = sessions.find(item => item.id === result.sessionId)
@@ -68,7 +75,12 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
     )
     if (!opened.ok) {
       // 切换失败保持原页面（不 selectSession 不开 sheet），仅可见提示
-      reportRuntimeError('打开会话', opened.message)
+      reportRuntimeError('打开会话', opened.message, undefined, {
+        key: `search-open:${_sheet.id}:${session.id}`,
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'search.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
     }
   }
 
@@ -97,7 +109,7 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
           aria-label="跨会话搜索"
         />
         {loading && <p className="file-section-hint" role="status">搜索中…</p>}
-        {searchError && <p className="file-section-hint" role="alert">搜索失败：{searchError}</p>}
+        {searchError && <p className="file-section-hint search-error-reference" role="status">搜索失败，详情见右下角错误中心</p>}
         {truncated && <p className="file-section-hint" role="status">结果过多已截断（上限 {50} 条）</p>}
         <ul className="search-result-list search-sheet-results">
           {results.map(result => (
@@ -109,7 +121,7 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
             </li>
           ))}
         </ul>
-        {query.trim() && results.length === 0 && (
+        {query.trim() && results.length === 0 && !searchError && (
           <div className="sheet-empty-state search-empty-state" role="status">
             <div className="sheet-empty-mark"><PylonMark size={30} title="Pylon 搜索" /></div>
             <strong>没有匹配结果</strong>

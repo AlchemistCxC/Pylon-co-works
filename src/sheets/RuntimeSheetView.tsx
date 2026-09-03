@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../runtimeStore'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { useDiagnosticErrors, useErrorHistory, type ErrorEntry } from '../errorCenter.ts'
 import { createRuntimeClient } from '../infrastructure/tauri/runtimeClient'
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
@@ -21,6 +22,9 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
   const [diagnostics, setDiagnostics] = useState<StartupDiagnostics | null>(null)
   const [markers, setMarkers] = useState<CrashMarker[]>([])
   const agentStatuses = useRuntimeStore(state => state.agentStatuses)
+  const diagnosticErrors = useDiagnosticErrors()
+  const errorHistory = useErrorHistory()
+  const runtimeErrorKey = useCallback((operation: string) => `runtime-sheet:${_sheet.id}:${operation}`, [_sheet.id])
   // W1-09：crashed/error → 本地诊断 marker（按 agentId:status:generation 去重）
   useEffect(() => {
     setMarkers(previous => deriveCrashMarkers(previous, agentStatuses))
@@ -30,11 +34,31 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
     // 浏览器模式 mock 后端已装（demo）：invoke/listen 经假 __TAURI_INTERNALS__ 返回 mock 数据
     let disposed = false
     createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).startupDiagnostics().then(raw => {
-      if (!disposed) setDiagnostics(normalizeStartupDiagnostics(raw))
-    }).catch(error => reportRuntimeError('读取启动诊断', error))
+      if (!disposed) {
+        setDiagnostics(normalizeStartupDiagnostics(raw))
+        resolveRuntimeErrors({ key: runtimeErrorKey('读取启动诊断') })
+      }
+    }).catch(error => {
+      if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
+        key: runtimeErrorKey('读取启动诊断'),
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'runtime.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
+    })
     createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listRuntimeLogs().then(raw => {
-      if (!disposed) setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
-    }).catch(error => reportRuntimeError('读取运行日志', error))
+      if (!disposed) {
+        setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
+        resolveRuntimeErrors({ key: runtimeErrorKey('读取运行日志') })
+      }
+    }).catch(error => {
+      if (!disposed) reportRuntimeError('读取运行日志', error, undefined, {
+        key: runtimeErrorKey('读取运行日志'),
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'runtime.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
+    })
     // B2：挂载时开 live 推送、卸载时关（ringbuffer pull 兜底不受影响）
     const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     void runtimeClient.setRuntimeLogLive(true).catch(() => {})
@@ -48,17 +72,24 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       void runtimeClient.setRuntimeLogLive(false).catch(() => {})
       unlisten.then(stop => stop()).catch(() => {})
     }
-  }, [])
+  }, [_sheet.id, runtimeErrorKey])
 
   const { levels, sources } = useMemo(() => collectRuntimeLogFacets(entries), [entries])
   const filtered = useMemo(() => filterRuntimeLogs(entries, filter), [entries, filter])
+  const recentErrorHistory = useMemo(() => errorHistory.slice(0, 20), [errorHistory])
 
   const clear = async () => {
     try {
       await createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).clearRuntimeLogs()
       setEntries([])
+      resolveRuntimeErrors({ key: runtimeErrorKey('清空运行日志') })
     } catch (error) {
-      reportRuntimeError('清空运行日志', error)
+      reportRuntimeError('清空运行日志', error, undefined, {
+        key: runtimeErrorKey('清空运行日志'),
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'runtime.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
     }
   }
 
@@ -117,6 +148,9 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
               </div>
             ))}
           </div>
+        )}
+        {(diagnosticErrors.length > 0 || recentErrorHistory.length > 0) && (
+          <RuntimeErrorFacts diagnostics={diagnosticErrors} history={recentErrorHistory} />
         )}
         <div className="runtime-count">
           <span>实时日志</span>
@@ -178,6 +212,46 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       </main>
     </div>
   )
+}
+
+function RuntimeErrorFacts({ diagnostics, history }: { diagnostics: readonly ErrorEntry[]; history: readonly ErrorEntry[] }) {
+  return (
+    <section className="runtime-error-facts" aria-label="应用错误事实">
+      <div className="runtime-error-facts-head">
+        <strong>应用错误事实</strong>
+        <span>{diagnostics.length > 0 ? `${diagnostics.length} 条待诊断` : '无待诊断'} · 保留最近 {history.length} 条</span>
+      </div>
+      <ul className="runtime-error-facts-list">
+        {history.map(entry => (
+          <li key={entry.id} className={`runtime-error-fact state-${entry.state}`}>
+            <div className="runtime-error-fact-summary">
+              <strong>{entry.action}</strong>
+              <span>{entry.message}</span>
+              <small>{entry.state === 'active' ? '待处理' : entry.state === 'resolved' ? '已恢复' : '已隐藏'}</small>
+            </div>
+            <details>
+              <summary>详细信息</summary>
+              <div className="runtime-error-fact-detail">
+                {entry.code && <div><code>code</code> = {entry.code}</div>}
+                {entry.source && <div><code>source</code> = {entry.source}</div>}
+                {entry.scope && <div><code>scope</code> = {entry.scope.kind}:{entry.scope.id}</div>}
+                {entry.technicalMessage && <pre>{entry.technicalMessage}</pre>}
+                {entry.metadata && <pre>{safeErrorJson(entry.metadata)}</pre>}
+              </div>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function safeErrorJson(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value, null, 2)
+    if (typeof serialized !== 'string') return '[详情不可用]'
+    return serialized.length <= 8_192 ? serialized : `${serialized.slice(0, 8_192)}\n…（详情已截断）`
+  } catch { return '[详情不可用]' }
 }
 
 function formatTime(timestamp: number): string {

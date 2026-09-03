@@ -6,6 +6,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentContext } from '../../agentContext'
 import { toAgentContextKey } from '../../agentContext'
 import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 // 无后端 session 时的降级列表（预览/未连接）
 const FALLBACK_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro']
@@ -34,8 +35,19 @@ export default function ModelWidget({ context }: Props) {
   const setModel = (m: string) => {
     if (m === model) return
     if (context) {
-      setSessionModel(context, m).catch(error => {
-        dispatchPylonEvent(window, 'pylon:model-error', String(error))
+      const key = `chat:model:${toAgentContextKey(context)}`
+      setSessionModel(context, m).then(() => {
+        resolveRuntimeErrors({ key, source: 'chat.model' })
+      }, error => {
+        const detail = reportRuntimeError('切换模型', error, context.agentId, {
+          key,
+          scope: { kind: 'session', id: context.source },
+          source: 'chat.model',
+          recovery: { kind: 'open-runtime-log', sessionId: context.source },
+        })
+        // Keep the legacy local event for the input bar's contextual hint;
+        // the ErrorCenter remains the sole global error presentation.
+        dispatchPylonEvent(window, 'pylon:model-error', detail.message)
       })
     } else {
       // 降级：无 session（预览等），只改 profile

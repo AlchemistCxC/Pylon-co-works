@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { createRuntimeClient } from '../../infrastructure/tauri/runtimeClient'
 import { applyApprovalModeChange, nextApprovalMode, persistApprovalMode } from '../../domains/permission/approvalMode.ts'
 import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
-import { formatRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 /**
  * Approval mode widget（P0-04）：
@@ -33,8 +33,15 @@ export default function ModeWidget() {
       invokeSet: targetMode => createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setApprovalMode(targetMode),
     }).then(() => {
       persistApprovalMode(next)
-    }).catch(error => {
-      dispatchPylonEvent(window, 'pylon:mode-error', formatRuntimeError('切换权限模式', error).message)
+      resolveRuntimeErrors({ key: 'chat:approval-mode', source: 'chat.mode' })
+    }, error => {
+      const detail = reportRuntimeError('切换权限模式', error, undefined, {
+        key: 'chat:approval-mode',
+        scope: { kind: 'app', id: 'approval-mode' },
+        source: 'chat.mode',
+        recovery: { kind: 'open-runtime-log' },
+      })
+      dispatchPylonEvent(window, 'pylon:mode-error', detail.message)
     })
   }
 
