@@ -10,6 +10,7 @@ import {
 import type { Message } from '../../../components/chat/messageTypes.ts'
 import { toolStatePresentation, type ToolVisualState } from '../../../domains/tool/status.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
+import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'
 import type { ToolConnectorLayoutPort } from '../../../domains/workbench/toolConnectorLayoutPort.ts'
 import { measureToolAnchor } from './domToolConnectorMeasurement.ts'
 import { SolidDiffCard } from './DiffCard.solid.tsx'
@@ -92,7 +93,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
                 role="img"
               >{indicator().glyph}</span>
               <span class="term-tool-name">{capitalizeToolName(resolved().name)}</span>
-              <Show when={displaySummary()}>{summary => <span class="term-tool-summary term-tool-summary-code"> ({summary()})</span>}</Show>
+              <Show when={displaySummary()}>{summary => <span class={`term-tool-summary${toolSummaryUsesCodeFont(resolved().kind) ? ' term-tool-summary-code' : ''}`}> ({summary()})</span>}</Show>
               <span class="term-tool-state-label"> — {toolStatePresentation(resolved().state, resolved().hasOutput).label}</span>
               <Show when={suffix()}>{text => <span class="term-tool-suffix">{text()}</span>}</Show>
             </button>

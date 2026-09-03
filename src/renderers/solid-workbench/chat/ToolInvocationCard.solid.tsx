@@ -20,6 +20,7 @@ import { isStructuredContentKind, SolidStructuredContent } from './content/Struc
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { capitalizeToolName } from '../../../components/chat/toolPresentationModel.ts'
+import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'
 import { buildToolRenderModel } from '../../../domains/tool/toolPresentation.ts'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
@@ -109,7 +110,7 @@ export function SolidToolInvocationCard(props: {
       </Show>
       <span class="term-tool-name">{displayName()}</span>
       <Show when={providerName()}>{value => <span class="term-tool-summary term-tool-summary-code"> ({value()})</span>}</Show>
-      <Show when={summary()}>{value => <span class="term-tool-summary term-tool-summary-code"> ({value()})</span>}</Show>
+      <Show when={summary()}>{value => <span class={`term-tool-summary${toolSummaryUsesCodeFont(renderModel().kind) ? ' term-tool-summary-code' : ''}`}> ({value()})</span>}</Show>
       <span class="term-tool-suffix"> — {presentation().label}</span>
       <Show when={duration()}>{value => <span class="term-tool-duration"> · {value()}</span>}</Show>
     </button>

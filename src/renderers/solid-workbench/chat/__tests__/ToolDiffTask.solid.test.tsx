@@ -44,6 +44,23 @@ describe('SolidToolCard', () => {
     expect(failed.container.querySelector('.term-tool')?.getAttribute('data-tool-state')).toBe('failed')
   })
 
+  it('普通工具摘要继承消息字体，路径摘要才使用代码字体', () => {
+    const result = render(() => <>
+      <SolidToolCard
+        message={toolMessage({ id: 'summary-read', toolName: 'Read', toolKind: 'read', toolInput: 'src/App.tsx' })}
+        appearance={TOOL_APPEARANCE}
+      />
+      <SolidToolCard
+        message={toolMessage({ id: 'summary-note', toolName: 'Notice', toolKind: 'other', toolInput: 'ordinary English summary' })}
+        appearance={TOOL_APPEARANCE}
+      />
+    </>)
+    const summaries = [...result.container.querySelectorAll('.term-tool-summary')]
+    expect(summaries).toHaveLength(2)
+    expect(summaries[0]).toHaveClass('term-tool-summary-code')
+    expect(summaries[1]).not.toHaveClass('term-tool-summary-code')
+  })
+
   it('展开 execute 输出时复用结构化 ANSI block 并安全渲染', async () => {
     const result = render(() => <SolidToolCard
       message={toolMessage({
