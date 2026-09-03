@@ -738,18 +738,18 @@
    （terminal-like 模式的同款钉定见下方 :729 区块与 P1 对齐测试。） */
 .term-assistant.has-dot > .term-assistant-dot,
 .term-tool-indicator {
-  font-family: var(--chat-font, var(--mono));
-  font-size: var(--chat-font-size, var(--font-size-lg));
+  font-family: var(--msg-font, var(--chat-font, var(--mono)));
+  font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)));
 }
-/* Terminal-like 的 marker 以 ChatView 字号解析固定列；隔离 content kind 的字号/字体覆盖，
+/* Terminal-like 的 marker 以消息轨字号解析固定列；隔离 content kind 的字号/字体覆盖，
    避免 canonical Tool 的 1.6em 与助手 marker 在不同上下文中换算成不同像素宽度。 */
 .app[data-interface-mode="terminal-like"] :is(
   .term-assistant.has-dot > .term-assistant-dot
 ) {
   display: inline-flex;
-  font-family: var(--chat-font,var(--mono));
-  font-size: var(--chat-font-size,var(--font-size-lg));
-  line-height: var(--chat-line-height,1.35);
+  font-family: var(--msg-font,var(--chat-font,var(--mono)));
+  font-size: var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+  line-height: var(--msg-line-height,var(--chat-line-height,1.35));
   width: var(--dot-col-width, 1.6em);
   flex: 0 0 var(--dot-col-width, 1.6em);
   justify-content: flex-start;
@@ -760,11 +760,11 @@
   /* Keep the same fixed gutter and natural marker size as the assistant marker. */
   justify-content: flex-start;
   text-align: left;
-  /* Tool labels use the mono face, but the glyph itself must match the
-     preview/chat rail.  Mono fonts commonly draw ●/✱ noticeably smaller. */
-  font-family: var(--chat-font, var(--mono));
-  font-size: var(--chat-font-size, var(--font-size-lg));
-  line-height: var(--chat-line-height, 1.35);
+  /* The glyph follows the message rail too; otherwise this more-specific rule
+     silently overrides the shared B1 typography declared at the file tail. */
+  font-family: var(--msg-font, var(--chat-font, var(--mono)));
+  font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)));
+  line-height: var(--msg-line-height, var(--chat-line-height, 1.35));
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {
@@ -1873,7 +1873,7 @@
 .app[data-interface-mode="terminal-like"] {
   /* Keep the marker close to its label while retaining one shared action
      spine for Thought, tools and assistant markers. */
-  --agent-marker-col: calc(var(--chat-font-size, 15px) * 1.25);
+  --agent-marker-col: calc(var(--msg-font-size, var(--chat-font-size, 15px)) * 1.25);
 }
 .app[data-interface-mode="terminal-like"] .term {
   --dot-col-width: var(--agent-marker-col);
@@ -1882,7 +1882,7 @@
   padding-left: var(--agent-marker-col);
 }
 .app[data-interface-mode="terminal-like"] .term-reasoning-head {
-  min-height: calc(var(--chat-font-size, 15px) * var(--chat-line-height, 1.4));
+  min-height: calc(var(--msg-font-size, var(--chat-font-size, 15px)) * var(--msg-line-height, var(--chat-line-height, 1.4)));
 }
 .app[data-interface-mode="terminal-like"] .term-tool-head > .term-tool-indicator,
 .app[data-interface-mode="terminal-like"] .term-assistant.has-dot > .term-assistant-dot,
@@ -1924,7 +1924,8 @@
 /* ── Terminal-like type roles ──
    The presentation profile supplies a readable default for human prose while
    the existing font pickers remain the source of truth for both columns.
-   Prefixes/markers are machine labels, so they stay aligned to the mono rail. */
+   User prefixes remain machine labels on the mono rail. Assistant/tool
+   indicators follow the message font so their glyphs match the adjacent copy. */
 .app[data-interface-mode="terminal-like"] :is(
   .term-user-prefix,
   .term-user-name,

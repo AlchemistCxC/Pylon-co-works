@@ -47,6 +47,19 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\.term-tool-head\s*\)\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
     expect(css).toMatch(/\.term-tool-head,\s*\.term-tool-name,[\s\S]*?\.term-spinner-row \.spinner-activity\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
     expect(css).toMatch(/\.term-assistant\.has-dot > \.term-assistant-dot,[\s\S]*?\.term-tool-head > \.term-tool-indicator\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
+
+    const terminalAssistantMarker = css.match(
+      /\.app\[data-interface-mode="terminal-like"\] :is\(\s*\.term-assistant\.has-dot > \.term-assistant-dot\s*\)\s*\{([\s\S]*?)\n\}/,
+    )?.[1] ?? ''
+    const terminalToolIndicator = css.match(
+      /\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{([\s\S]*?)\n\}/,
+    )?.[1] ?? ''
+    expect(terminalAssistantMarker).toContain('font-family: var(--msg-font,var(--chat-font,var(--mono)))')
+    expect(terminalAssistantMarker).toContain('font-size: var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)))')
+    expect(terminalAssistantMarker).toContain('line-height: var(--msg-line-height,var(--chat-line-height,1.35))')
+    expect(terminalToolIndicator).toContain('font-family: var(--msg-font, var(--chat-font, var(--mono)))')
+    expect(terminalToolIndicator).toContain('font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)))')
+    expect(terminalToolIndicator).toContain('line-height: var(--msg-line-height, var(--chat-line-height, 1.35))')
   })
 
   it('uses the shared marker gutter for the streaming frame without a visual offset', () => {
