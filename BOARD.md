@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 10:04] [聊天稳定性·工程师] [已处理] P41 指示器 typography cascade 收口：浏览器真实 Hermes 演示会话证实 terminal-like 高 specificity 规则仍把助手 marker/工具 glyph 固定到 `--chat-font`（mono），覆盖文件尾的消息轨规则；提交 `10cc86e4` 将 marker、工具 glyph、spinner 的字体/字号/行高改为 `--msg-font → --chat-font → --mono`，marker gutter 同步使用消息字号。普通工具名/思考正文/输入栏与消息字体一致，inline code/path 仍 JetBrains Mono+着色；左轴保持一致。先红后绿：相关 4 文件 41 项、全量 Vitest 469 文件/2908 项、tsc、lint（0 errors、2 条既有 warnings）、check:solid、build、diff check 通过。原生 Tauri/provider trace 仍待验收。
+
 [2026-09-03 09:35] [聊天稳定性·工程师] [已处理] P41 空态层级复验补强：browser preview 恢复后确认此前 Logo 虽已水平居中，但品牌层与居中 composer 共占全高会发生垂直重叠；提交 `5cfab344` 将品牌层锚定到聊天 viewport 上部，composer/创建 overlay 继续按 viewport 居中。默认及 800×600 几何复测 Logo 水平中心偏差约 0.007px、品牌与 composer 无相交；全量 Vitest 469 文件/2908 项、`tsc -b`、lint（0 errors，2 条既有 warnings）、`check:solid`、build、`check:docs`、`git diff --check` 全绿。该 browser preview 证据仍不替代原生 Tauri/provider trace，P41 保持待验收。
 
 [2026-09-03 08:31] [聊天稳定性·工程师] [待验收] P41 真实窗口反馈环：Computer Use native pipe 按恢复流程重试仍报“系统找不到指定的文件”，未能取得 Tauri 窗口；未发送真实 provider prompt、未读取/写入数据库。browser smoke 仅作为本地 preview 证据，原生 Tauri/WebView 像素与 provider 时间戳 trace 继续后置，P41 不提前关闭。
