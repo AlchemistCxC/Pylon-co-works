@@ -32,6 +32,38 @@ let mockGitEntries = buildGitStatus()
 let mockGitBranch = 'demo'
 let mockGitHistory = buildGitHistory()
 let mockAgentConfigRevision = 1
+// Browser preview keeps the same active-agent/status seam as the native
+// runtime so switching an Agent does not manufacture a diagnostic just because
+// the mock transport lacks the cold-start status snapshot.
+let mockActiveAgentId = 'peri'
+
+const MOCK_AGENT_STATUSES: Record<string, Record<string, unknown>> = {
+  peri: {
+    agentId: 'peri', agent: 'peri', status: 'connected', transport: 'acp',
+    cwd: '/path/to/project', generation: 12,
+    capabilities: { loadSession: true, promptCapabilities: { image: true, audio: true } },
+  },
+  hermes: {
+    agentId: 'hermes', agent: 'hermes', status: 'error', transport: 'acp',
+    cwd: '/path/to/ops', generation: 4, error: '健康检查失败：HTTP 503',
+  },
+  claude: {
+    agentId: 'claude', agent: 'claude', status: 'reconnecting', transport: 'acp',
+    cwd: '/path/to/agent-runtime', generation: 8, error: '连接已重置，正在重新协商能力',
+  },
+  pi: {
+    agentId: 'pi', agent: 'pi', status: 'connecting', transport: 'acp',
+    cwd: '/path/to/agent-runtime', generation: 2,
+  },
+  gm: {
+    agentId: 'gm', agent: 'gm', status: 'disconnected', transport: 'web',
+    cwd: '/path/to/worldbook', generation: 6, error: '远端暂未上线',
+  },
+}
+
+function mockAgentStatus(): Record<string, unknown> {
+  return { ...(MOCK_AGENT_STATUSES[mockActiveAgentId] ?? MOCK_AGENT_STATUSES.peri) }
+}
 
 interface MockBrowserTab {
   id: number
@@ -321,6 +353,7 @@ function mockGitOperation(summary: string) {
 export async function mockInvokeCommand(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (cmd) {
     case 'list_agents': return buildDemoAgents()
+    case 'agent_status': return mockAgentStatus()
     case 'agent_config_snapshot': return {
       revision: `demo-config-${mockAgentConfigRevision}`,
       agents: buildDemoAgents(),
@@ -549,7 +582,12 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
       agentId: typeof args.agentId === 'string' ? args.agentId : 'peri',
       configActivationState: 'activated',
     }
-    case 'switch_agent':
+    case 'switch_agent': {
+      const requested = typeof args.name === 'string' ? args.name.trim() : ''
+      const matched = buildDemoAgents().find(agent => agent.id === requested || agent.name === requested)
+      if (matched) mockActiveAgentId = matched.id
+      return null
+    }
     case 'reconnect_agent':
     case 'reload_agents':
     case 'set_approval_mode':
