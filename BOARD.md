@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 10:30] [聊天稳定性·工程师] [已处理] P41 最终门禁复验：`81838f95` 新增设置预览 typography 回归后，全量 Vitest 470 文件/2909 项通过；`tsc -b`、lint（0 errors、2 条既有 warnings）、`check:solid`、build、`check:docs`、`git diff --check` 均通过。工作树仅保留用户版本号 WIP（package.json、src-tauri Cargo/tauri 配置），P41 继续待真实 Tauri/provider 验收。
+
 [2026-09-03 10:20] [聊天稳定性·工程师] [已处理] P41 工具摘要代码字体收口：设置页真实预览发现 `Read`/`Edit` 工具名虽继承聊天字体，但 `(src/main.ts)`、`(npm run build)` 只挂 `.term-tool-summary`，且该类在文件尾消息轨规则后覆盖了早先 mono 声明。提交 `81838f95`：SettingsPreview 为路径/命令摘要增加 `.term-tool-summary-code`，ChatView CSS 文件尾追加权威 mono 规则；新增 `SettingsPreview.typography.test.tsx` 与 cascade 顺序 contract。真实预览复测：工具名为系统聊天字体，路径/命令及内联 `main()` 为 JetBrains Mono，颜色保持主题着色；相关 3 文件/16 项、tsc、lint（0 errors、2 条既有 warnings）、check:solid、build、diff check 通过。P41 仍待原生窗口/provider trace。
 
 [2026-09-03 10:04] [聊天稳定性·工程师] [已处理] P41 指示器 typography cascade 收口：浏览器真实 Hermes 演示会话证实 terminal-like 高 specificity 规则仍把助手 marker/工具 glyph 固定到 `--chat-font`（mono），覆盖文件尾的消息轨规则；提交 `10cc86e4` 将 marker、工具 glyph、spinner 的字体/字号/行高改为 `--msg-font → --chat-font → --mono`，marker gutter 同步使用消息字号。普通工具名/思考正文/输入栏与消息字体一致，inline code/path 仍 JetBrains Mono+着色；左轴保持一致。先红后绿：相关 4 文件 41 项、全量 Vitest 469 文件/2908 项、tsc、lint（0 errors、2 条既有 warnings）、check:solid、build、diff check 通过。原生 Tauri/provider trace 仍待验收。
