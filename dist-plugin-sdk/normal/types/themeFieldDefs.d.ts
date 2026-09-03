@@ -195,7 +195,7 @@ export declare const THEME_FIELD_DEFS: {
     };
     readonly codeFont: {
         readonly optionLabels: {
-            readonly mono: "JetBrains Mono";
+            readonly mono: "Consolas（VS Code 默认）";
         };
         readonly default: "mono";
         readonly group: "字体";
