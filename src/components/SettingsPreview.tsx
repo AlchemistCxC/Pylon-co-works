@@ -257,5 +257,5 @@ function PvTool({ name, input, status }: { name: string; input: string; status: 
   const safeGlowColor = glowColor || ''
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = safeGlow > 0 ? { textShadow: `0 0 ${safeGlow}px ${safeGlowColor || statusColor || 'currentColor'}` } : undefined
-  return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
+  return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary term-tool-summary-code"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
 }

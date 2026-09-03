@@ -41,6 +41,11 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.term-tool-body\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
     expect(css).toMatch(/\.term-tool-summary-code\s*\{\s*font-family:var\(--mono\);/s)
     expect(css).toMatch(/\.term-tool-body :is\([^)]*\.term-code-block[^)]*\)\s*\{\s*font-family:var\(--mono\);/s)
+
+    const messageRailRule = css.lastIndexOf('.term-tool-head,\n.term-tool-name')
+    const codeSummaryRule = css.lastIndexOf('.term-tool-summary-code {')
+    expect(messageRailRule).toBeGreaterThan(-1)
+    expect(codeSummaryRule).toBeGreaterThan(messageRailRule)
   })
 
   it('keeps tool headers and indicators on the message font when no token is supplied', () => {

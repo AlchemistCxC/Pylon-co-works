@@ -2141,3 +2141,8 @@
   font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }
+
+/* Explicit path/command summaries are code semantics even though the
+   containing tool header follows the message rail. Keep this rule after the
+   broad header typography so it cannot be shadowed by the final cascade. */
+.term-tool-summary-code { font-family:var(--mono); }
