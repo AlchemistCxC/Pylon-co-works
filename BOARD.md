@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 11:18] [聊天稳定性·工程师] [已处理] P41 最终 browser/Rust 反馈环：Pi 压力会话 spinner 与工具 indicator 左轴同为 `x≈281.989px`、无负向 transform；Pi↔Hermes 切换后已完成工具状态不回退，聚合头颜色跟随最后成员且展开成员颜色独立；FileSheet 打开 `package.json` 保持“编辑中”。180s 定向 Rust（first-token bound、持续活动、failure metadata）均通过。`8842ea87` 后全量 Vitest 470 文件/2911 项，tsc、lint、check:solid、build、diff check 全绿；P41 仍待真实 Tauri/WebView/provider trace。
+
 [2026-09-03 11:07] [聊天稳定性·工程师] [已处理] P41 工具摘要语义分层收口：browser/设置预览与 Solid 组件回归确认，未知/other 工具的自然语言摘要不应无条件使用代码字体；提交 `8842ea87` 新增 `toolSummaryUsesCodeFont`，仅 read/edit/execute/search/fetch 的路径、命令、URL、搜索表达式摘要加 `.term-tool-summary-code`，普通摘要继承消息字体。相关 3 文件 29 项先红后绿；全量 Vitest 470 文件/2911 项、tsc、lint（0 errors、2 条既有 warnings）、check:solid、build、diff check 通过。Pi 压力会话 browser 复测 spinner 左轴与工具状态正常，P41 仍待原生 Tauri/provider trace。
 
 [2026-09-03 10:30] [聊天稳定性·工程师] [已处理] P41 最终门禁复验：`81838f95` 新增设置预览 typography 回归后，全量 Vitest 470 文件/2909 项通过；`tsc -b`、lint（0 errors、2 条既有 warnings）、`check:solid`、build、`check:docs`、`git diff --check` 均通过。工作树仅保留用户版本号 WIP（package.json、src-tauri Cargo/tauri 配置），P41 继续待真实 Tauri/provider 验收。
