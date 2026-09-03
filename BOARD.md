@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 00:55] [错误稳定性·工程师] [已处理] P42 错误通知与恢复事实统一完成：提交 `5cf99d37`。`runtimeError`/`errorCenter` 已建立 scope/visibility/state、聚合、诊断与历史；普通运行错误统一为右下角非模态 tray（详情展开、单条/全部隐藏、恢复动作），canonical 首屏成功时 replay 失败降为 diagnostic，bootstrap/session/Agent/Workbench/持久化成功按作用域 resolve，迟到 generation 不再污染当前通知；交互拒绝、设置/Sheet/文件/Gateway/插件错误统一接线，fatal boundary、权限请求、字段校验与 canonical/tool/system 事实保留原语义。补充修复嵌入 WebView 异常 safe-area 值把 tray 推到顶部的问题，定位改由确定性安全边距与中控高度计算；Agent 配置校验、Gateway 实例重试、存档传输失败展示均有回归。证据：定向 34 项、全量 Vitest 472 文件/2941 项、`tsc -b`、lint（0 errors，1 条既有 warning）、`check:solid`、build、`check:docs`、`git diff --check`；browser preview 真实复核 tray 右下几何（底边与中控间 10px）、详情展开与单条隐藏。未启动子 agent、未灌库、未改 SQLite/canonical/provider wire；版本号/Rust/SDK WIP 未混入提交。
+
 [2026-09-03 16:20] [错误稳定性·架构师→工程师] [进行中] P42 错误通知与恢复事实统一已立项：只读审查确认 ErrorCenter 无 resolve 生命周期、canonical 首屏成功时 replay 失败仍会弹全局错误，以及 interaction/workbench/sidebar 多入口重复展示。施工书已建立，工程师按 A–D 接线；统一 tray 位置为窗口右下角，普通错误带 scope/visibility/state，fatal/权限/字段校验保留原语义。当前工作树版本号与生成声明 WIP 需保留。
 
 [2026-09-03 16:05] [聊天稳定性·工程师] [已处理] P41 自定义预设最终验收：在隔离 Vite `http://127.0.0.1:5189/?demo-scenario=visual` 页面通过真实 Settings/TemplateLibrary 入口创建并刷新复核 `验收预设-20260903`；覆盖范围显示 Theme 16、Presentation 2、Renderer 1。将 Renderer 字号设为 17 后覆盖保存，切换 Tokyo Night 制造差异，再重应用自定义预设，UI 返回“自定义预设已应用”，界面明暗恢复浅色、全局字号恢复 18、Renderer 字号恢复 17；刷新后预设与覆盖仍可见。预设 Vitest 5 文件/24 项、`tsc -b`、lint（0 errors、2 条既有 warnings）、`check:solid`、build、`check:docs`、`git diff --check` 全部通过；未读取/写入数据库。代码基线提交 `afd45a14`。
