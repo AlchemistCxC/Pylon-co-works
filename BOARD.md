@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 12:32] [聊天稳定性·工程师] [已处理] P41 浏览器反馈环补强：Chrome/Edge 跨 Agent 切换曾因 mock 缺失 `agent_status` 稳定产生假诊断；`59358d89` 增加当前 Agent 状态快照与内存态 `switch_agent`，并新增 visual QA 回归。Chrome reload 后跨 Agent 切换无假诊断；仅改开发 mock，不触碰 provider/SQLite/canonical/持久化。P41 仍待真实 Tauri/provider trace 与 WebView 验收。
+
 [2026-09-03 12:23] [聊天稳定性·工程师] [已处理] P41 终态耗时未知边界收口：诊断反馈环复现 live `done/error/cancel-success` 缺少可靠起点时 `0s` 伪造；`834351b3` 统一 `resolveLiveDuration`，无事实时标记 `durationSource=unknown`/`durationAvailable=false`，React/Solid 均显示“耗时不可用”。定向 17 文件/195 项、全量 Vitest 470 文件/2914 项、tsc、lint（0 errors、2 条既有 warnings）、check:solid、build、diff check 全绿。Chrome 预览复测工具终态/聚合/字体/滚动/FileSheet；Computer Use native pipe 仍不可用，未发送真实 provider prompt、未读写数据库。
 
 [2026-09-03 11:18] [聊天稳定性·工程师] [已处理] P41 最终 browser/Rust 反馈环：Pi 压力会话 spinner 与工具 indicator 左轴同为 `x≈281.989px`、无负向 transform；Pi↔Hermes 切换后已完成工具状态不回退，聚合头颜色跟随最后成员且展开成员颜色独立；FileSheet 打开 `package.json` 保持“编辑中”。180s 定向 Rust（first-token bound、持续活动、failure metadata）均通过。`8842ea87` 后全量 Vitest 470 文件/2911 项，tsc、lint、check:solid、build、diff check 全绿；P41 仍待真实 Tauri/WebView/provider trace。
