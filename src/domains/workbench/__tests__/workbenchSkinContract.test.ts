@@ -37,7 +37,25 @@ describe('Workbench 皮肤迁移 contract', () => {
     for (const fixture of fixtureSet.fixtures) {
       for (const key of THEME_SETTING_KEYS) expect(fixture.theme[key], `${fixture.id}.${key}`).not.toBeUndefined()
       for (const attribute of WORKBENCH_DATA_ATTRIBUTES) expect(fixture.dataAttributes[attribute], `${fixture.id}.${attribute}`).toBeTruthy()
+      for (const variable of ['--global-font', '--font', '--mono', '--chat-font', '--msg-font']) {
+        expect(fixture.cssVariables[variable], `${fixture.id}.${variable}`).toBeTruthy()
+      }
     }
+  })
+
+  it('自定义界面/代码字体 fixture 保留插件变量与代码 fallback', () => {
+    const fixtureSet = createWorkbenchSkinFixtureSet([{
+      id: 'custom-fonts',
+      name: '字体贡献',
+      theme: { globalFont: 'vendor.ui', codeFont: 'vendor.code', chatFont: 'vendor.chat', msgFont: 'vendor.chat' },
+      createdAt: 1,
+      updatedAt: 2,
+    }], FIXED_TIME)
+    const fixture = fixtureSet.fixtures.find(item => item.id === 'custom-custom-fonts')!
+    expect(fixture.cssVariables['--global-font']).toContain('--pylon-font-vendor-ui')
+    expect(fixture.cssVariables['--mono']).toContain('--pylon-font-vendor-code')
+    expect(fixture.cssVariables['--mono']).toContain('var(--font-mono-default')
+    expect(fixture.cssVariables['--chat-font']).toContain('--pylon-font-vendor-chat')
   })
 
   it('自定义预设按输入基线动态加入 fixture', () => {

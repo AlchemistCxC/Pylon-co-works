@@ -99,7 +99,7 @@ export const THEME_FIELD_DEFS = {
   globalFont: { ...S('global', '界面字体', ['system', 'serif', 'mono']), optionLabels: {
     system: '系统无衬线', serif: '阅读衬线', mono: '等宽代码体',
   }, default: 'system', group: "字体", control: 'fontPicker', fontRole: 'interface', allowCustomOptions: true, hint: '应用导航、设置与普通界面的字体；代码和路径仍保留等宽体' },
-  codeFont: { ...S('global', '代码与路径字体', ['mono']), optionLabels: { mono: 'JetBrains Mono' }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'code', allowCustomOptions: true, hint: '代码、路径与终端输出专用；插件可以贡献新的等宽字体' },
+  codeFont: { ...S('global', '代码与路径字体', ['mono']), optionLabels: { mono: 'Consolas（VS Code 默认）' }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'code', allowCustomOptions: true, hint: '代码、路径与终端输出专用；插件可以贡献新的等宽字体' },
   globalFontSize: { ...N('global', '基础字号', 12, 24), tier: 'basic', default: 18, group: "字体", unit: 'px' },
   globalBgImage: { ...T('global', '背景图'), default: '', control: 'bgImage', group: "玻璃效果", },
   globalBgColor: { ...C('global', '背景底色'), tier: 'basic', default: '#e8e8ec', group: "玻璃效果", hint: '背景图或透明材质下方使用的基础颜色', semanticRole: 'surface.canvas', semanticSource: true },

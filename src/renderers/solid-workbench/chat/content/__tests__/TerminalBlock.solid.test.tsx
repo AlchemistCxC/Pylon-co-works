@@ -93,7 +93,11 @@ describe('C07 SolidTerminalBlock', () => {
     const fallbackBody = fallback.container.querySelector('.term-terminal-body') as HTMLElement
     expect(fallbackBody.style.fontSize).toBe('13px')
     expect(fallbackBody.style.lineHeight).toBe('1.5')
+    expect(fallbackBody.style.fontFamily).toBe('var(--mono)')
     expect(fallbackBody.innerHTML).not.toContain('NaN')
+
+    const mono = render(() => <SolidTerminalBlock part={terminalPart} appearance={{ fontFamily: 'mono' }} />)
+    expect((mono.container.querySelector('.term-terminal-body') as HTMLElement).style.fontFamily).toBe('var(--mono)')
   })
 
   it('copy goes through injected callback with sanitized text', async () => {

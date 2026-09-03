@@ -72,10 +72,10 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
       })
       context.fonts.registerFont({
         id: 'mono',
-        label: 'JetBrains Mono',
-        description: '用于代码、路径、终端与 Agent 记录流。',
-        family: "'JetBrains Mono', 'Cascadia Code', Consolas, 'Sarasa Mono SC', monospace",
-        roles: ['content', 'code'],
+        label: 'Consolas（VS Code 默认）',
+        description: 'Windows VS Code 默认代码字体，用于代码、路径、终端与 Agent 记录流。',
+        family: "'Consolas', 'Courier New', 'Cascadia Code', 'Cascadia Mono', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace",
+        roles: ['interface', 'content', 'code'],
         order: 30,
         sample: 'const pylon = await connect()'
       })

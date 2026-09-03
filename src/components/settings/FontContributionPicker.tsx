@@ -19,7 +19,7 @@ interface FontContributionPickerProps {
 const FALLBACK_LABELS: Record<string, string> = {
   system: '系统无衬线',
   serif: '低对比阅读衬线',
-  mono: 'JetBrains Mono',
+  mono: 'Consolas（VS Code 默认）',
 }
 
 export default function FontContributionPicker({ value, role, ariaLabel, onChange, optionContributions = [], settingTarget }: FontContributionPickerProps) {

@@ -117,7 +117,7 @@ export function SolidTerminalBlock(props: { part: ContentPart; actions?: Termina
           'white-space': wrap() === 'soft' ? 'pre-wrap' : 'pre',
           'font-family': props.appearance?.fontFamily === 'inherit'
             ? 'inherit'
-            : 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            : 'var(--mono)',
           'font-size': `${boundedNumber(props.appearance?.fontSize, 13)}px`,
           'line-height': String(boundedNumber(props.appearance?.lineHeight, 1.5)),
         }}>

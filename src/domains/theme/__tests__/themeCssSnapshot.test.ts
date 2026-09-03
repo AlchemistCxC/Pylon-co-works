@@ -3,7 +3,7 @@
  * 显式派生（背景/字体/布局）+ defs 循环注入 + 空 color 省略 + 布局宽度。
  */
 import { describe, expect, it } from 'vitest'
-import { selectThemeCssSnapshot, WORKSPACE_SIDEBAR_COLLAPSED_WIDTH } from '../themeCssSnapshot'
+import { resolveFontToken, selectThemeCssSnapshot, WORKSPACE_SIDEBAR_COLLAPSED_WIDTH } from '../themeCssSnapshot'
 
 const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
 
@@ -20,10 +20,21 @@ describe('selectThemeCssSnapshot', () => {
     expect(vars['--msg-font']).toContain('--font-mono-default')
   })
 
-  it('插件字体 id 投影为稳定 CSS 变量并保留系统字体 fallback', () => {
+  it('插件字体 id 投影为稳定 CSS 变量，并按角色保留正确 fallback', () => {
     const vars = selectThemeCssSnapshot(makeState({ globalFont: 'vendor.readable-ui', codeFont: 'vendor.code' }), LAYOUT)
     expect(vars['--global-font']).toContain('--pylon-font-vendor-readable-ui')
     expect(vars['--mono']).toContain('--pylon-font-vendor-code')
+    expect(vars['--mono']).toContain('var(--font-mono-default')
+    expect(vars['--global-font']).toContain('var(--font-system')
+  })
+
+  it('字体 token helper 对代码与界面贡献使用不同 fallback', () => {
+    expect(resolveFontToken('vendor.code', 'code')).toBe(
+      'var(--pylon-font-vendor-code, var(--font-mono-default, var(--mono)))',
+    )
+    expect(resolveFontToken('vendor.ui')).toBe(
+      'var(--pylon-font-vendor-ui, var(--font-system, var(--font)))',
+    )
   })
 
   it('有左栏 Sheet 的 TitleBar 与左栏在展开/折叠时保持同宽', () => {

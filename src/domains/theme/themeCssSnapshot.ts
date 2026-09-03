@@ -21,11 +21,21 @@ export interface ThemeCssLayout {
   sidebarExpandedTrack?: boolean
 }
 
-function fontToken(value: unknown): string {
+/**
+ * Resolve a persisted font selection to a CSS token.
+ *
+ * `fallback` is deliberately role-aware: an unavailable code contribution
+ * must remain monospaced after plugin deactivation, while interface/content
+ * contributions may safely fall back to the system UI stack.
+ */
+export function resolveFontToken(value: unknown, fallback: 'system' | 'code' = 'system'): string {
+  const fallbackToken = fallback === 'code'
+    ? 'var(--font-mono-default, var(--mono))'
+    : 'var(--font-system, var(--font))'
   if (value === 'mono') return 'var(--font-mono-default, var(--mono))'
   if (value === 'serif') return 'var(--font-serif-default, var(--serif))'
   if (value === 'system' || value === 'sans' || typeof value !== 'string' || !value.trim()) return 'var(--font-system, var(--font))'
-  return `var(${fontContributionCssVariable(value)}, var(--font-system, var(--font)))`
+  return `var(${fontContributionCssVariable(value)}, ${fallbackToken})`
 }
 
 /** Private CSS fallback variable; public role names remain in visualSemantics. */
@@ -118,7 +128,7 @@ export function selectThemeCssSnapshot(
   layout: ThemeCssLayout,
 ): Record<string, string> {
   const { sidebarWidth, sidebarEnabled, sidebarExpandedTrack = sidebarEnabled } = layout
-  const globalFontToken = fontToken(s.globalFont)
+  const globalFontToken = resolveFontToken(s.globalFont)
   const roleValues = resolveRoleValues(s)
   const scheme = s.uiScheme === 'dark' || s.uiScheme === 'light' ? s.uiScheme : undefined
   const hasScheme = scheme !== undefined
@@ -133,9 +143,9 @@ export function selectThemeCssSnapshot(
     // 代码、路径与终端继续使用独立的 --mono，不受这里影响。
     '--global-font': globalFontToken,
     '--font': globalFontToken,
-    '--mono': fontToken(s.codeFont ?? 'mono'),
-    '--chat-font': fontToken(s.chatFont),
-    '--msg-font': fontToken(s.msgFont),
+    '--mono': resolveFontToken(s.codeFont ?? 'mono', 'code'),
+    '--chat-font': resolveFontToken(s.chatFont),
+    '--msg-font': resolveFontToken(s.msgFont),
     '--msg-text': (s.msgTextColor as string) || 'var(--chat-text-color,var(--text))',
     // 所有 Sheet 左栏统一：展开使用用户宽度，折叠使用 42px 控制轨道。
     '--workspace-sidebar-collapsed-width': `${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
