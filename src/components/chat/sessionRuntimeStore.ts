@@ -169,6 +169,46 @@ function mapMessages(runtime: SourceChatRuntime, mapper: (m: Message, index: num
   return { ...runtime, messages: runtime.messages.map(mapper) }
 }
 
+interface LiveDurationResolution {
+  readonly elapsedMs: number
+  readonly durationSource: 'live-monotonic' | 'provider' | 'unknown'
+  readonly durationAvailable: boolean
+}
+
+/**
+ * Resolve a live terminal duration without turning a missing clock into a
+ * fabricated zero-second result.  A zero value is still valid when it is an
+ * observed start/elapsed timestamp (the deterministic test clock uses epoch
+ * zero); only an absent or non-finite value is considered unavailable.
+ */
+function resolveLiveDuration(
+  generationStart: number | undefined,
+  now: number,
+  actualElapsedMs?: number,
+  preferredSource: 'live-monotonic' | 'provider' = 'live-monotonic',
+): LiveDurationResolution {
+  if (typeof actualElapsedMs === 'number' && Number.isFinite(actualElapsedMs) && actualElapsedMs >= 0) {
+    return {
+      elapsedMs: actualElapsedMs,
+      durationSource: preferredSource,
+      durationAvailable: true,
+    }
+  }
+  if (typeof generationStart === 'number' && Number.isFinite(generationStart)
+    && Number.isFinite(now)) {
+    return {
+      elapsedMs: Math.max(0, now - generationStart),
+      durationSource: 'live-monotonic',
+      durationAvailable: true,
+    }
+  }
+  return {
+    elapsedMs: 0,
+    durationSource: 'unknown',
+    durationAvailable: false,
+  }
+}
+
 /**
  * Copy-on-write update for a known message position.  Streaming chunks and
  * tool updates already locate their target (the tail or a unique tool id), so
@@ -662,6 +702,7 @@ export function applyChatEvent(
       // replay 作用域 done 不收敛会导致 spinner 常转）；summary 仅 live 作用域写。
       // cancelState 解析：cancel 在途时 done 到达 = 生成已实际完成 → 置 cancelled，
       // 后续 cancel-success 不再覆盖 summary/elapsed=0，cancel-rejected 不再弹回 generating
+      const duration = resolveLiveDuration(current.generationStart, now)
       runtime = {
         ...runtime,
         generating: false,
@@ -673,7 +714,7 @@ export function applyChatEvent(
           : current.cancelState,
         ...(terminationScope === 'live' ? {
           lastSummary: {
-            elapsedMs: now - (current.generationStart ?? now),
+            ...duration,
             tokenCount: current.tokenCount,
             reason: 'done',
           },
@@ -702,6 +743,12 @@ export function applyChatEvent(
       if (terminationScope === 'live') {
         runtime = flushStreaming(runtime, now, agentId)
       }
+      const duration = resolveLiveDuration(
+        current.generationStart,
+        now,
+        event.failure?.actualElapsedMs,
+        event.failure?.source === 'provider' ? 'provider' : 'live-monotonic',
+      )
       const seq = runtime.seq + 1
       runtime = appendMessage(runtime, {
         id: `err-${seq}`,
@@ -720,14 +767,10 @@ export function applyChatEvent(
         generationPhase: undefined,
         ...(terminationScope === 'live' ? {
           lastSummary: {
-            elapsedMs: event.failure?.actualElapsedMs ?? (now - (current.generationStart ?? now)),
+            ...duration,
             tokenCount: current.tokenCount,
             reason: event.cancelled === true ? 'cancelled' : 'error',
-            ...(event.failure ? {
-              failure: event.failure,
-              durationSource: event.failure.source === 'provider' ? 'provider' : 'live-monotonic',
-              durationAvailable: event.failure.actualElapsedMs !== undefined,
-            } : {}),
+            ...(event.failure ? { failure: event.failure } : {}),
           },
         } : {}),
       }
@@ -743,6 +786,7 @@ export function applyChatEvent(
     case 'cancel-success': {
       if (current.cancelState.status !== 'canceling') return state
       let runtime = flushStreaming(current, now, agentId)
+      const duration = resolveLiveDuration(current.generationStart, now)
       runtime = {
         ...runtime,
         cancelState: applyCancelEvent(source, { kind: 'success' }, current.cancelState),
@@ -751,7 +795,7 @@ export function applyChatEvent(
         generationActivity: undefined,
         generationPhase: undefined,
         lastSummary: {
-          elapsedMs: now - (current.generationStart ?? now),
+          ...duration,
           tokenCount: current.tokenCount,
           reason: 'cancelled',
         },

@@ -28,6 +28,26 @@ describe('GenerationFooter 终态渲染（spinner-preview-terminal-states 契约
     expect(screen.getByText(/处理耗时/)).toBeTruthy()
   })
 
+  it('终态缺少可靠耗时时显示不可用而不是 0s', () => {
+    render(<GenerationFooter
+      running={false}
+      frames={frames}
+      tokenCount={0}
+      startTime={0}
+      summary={{
+        elapsedMs: 0,
+        tokenCount: 0,
+        reason: 'done',
+        completedFrame: '',
+        durationSource: 'unknown',
+        durationAvailable: false,
+      }}
+      source={null}
+    />)
+    expect(screen.getByText(/耗时不可用/)).toBeTruthy()
+    expect(screen.queryByText(/处理耗时 0s/)).toBeNull()
+  })
+
   it('cancelled 终态显示"已停止"且不显示"处理耗时"', () => {
     render(<GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={summaryOf('cancelled')} source={null} />)
     expect(screen.getByText(/已停止/)).toBeTruthy()

@@ -236,6 +236,15 @@ describe('乐观渲染（方案 B）', () => {
       failure: { source: 'prompt-timeout', triggeredTimeoutSecs: 2 },
     })
   })
+
+  it('缺少可靠计时起点的 live 终态不伪造 0s', () => {
+    const state = reduce({}, { type: 'done', source: 'local:a', agentId: AGENT })
+    expect(state[key('local:a')]!.lastSummary).toMatchObject({
+      elapsedMs: 0,
+      durationSource: 'unknown',
+      durationAvailable: false,
+    })
+  })
 })
 
 describe('mergeReplayMessages（通用外部 identity）', () => {
