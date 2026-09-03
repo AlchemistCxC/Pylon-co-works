@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-03 08:31] [聊天稳定性·工程师] [待验收] P41 真实窗口反馈环：Computer Use native pipe 按恢复流程重试仍报“系统找不到指定的文件”，未能取得 Tauri 窗口；未发送真实 provider prompt、未读取/写入数据库。browser smoke 仅作为本地 preview 证据，原生 Tauri/WebView 像素与 provider 时间戳 trace 继续后置，P41 不提前关闭。
+
 [2026-09-03 08:17] [聊天稳定性·工程师] [已处理] P41 computed-style 反馈环补强：browser smoke 实测发现 `.term`/思考正文已用消息字体，但工具头与输入框在消息 token 缺省时回落到系统 sans；提交 `bbdf28f6` 将 ChatView、InputBar、创建进度的 fallback 统一到 `--msg-font → --chat-font → --mono`，代码/内联 code 仍 mono+着色。新增 CSS contract 4 项；全量 Vitest 469 文件/2908 项、`tsc -b`、lint（0 errors，2 条既有 Hook warnings）、`check:solid`、build、`git diff --check` 全绿。reload 后字体 equality=true、工具/助手左轴 delta=0、inline code 仍 JetBrains Mono/rgb(180,120,20)。原生 Tauri/provider trace 仍待验收。
 
 [2026-09-03 07:41] [聊天稳定性·工程师] [已处理] P41 Logo 定位收口：提交 `2685aeca`，Solid 空态 lockup 改为三列 grid，让 SVG 固定在聊天 viewport 的中心列，wordmark 独立在右列并在窄屏截断；未修改 viewBox/path。ChatView CSS contract 9 项、全量 Vitest 469 文件/2906 项、`tsc -b`、lint（0 errors，2 条既有 Hook warnings）、`check:solid`、build、`git diff --check` 全绿。浏览器 smoke 几何复测默认/800×600 中心偏差约 0.007px、无横向溢出；真实 Tauri/WebView 像素仍待验收。
