@@ -81,12 +81,13 @@ describe('reasoning row geometry contract', () => {
     expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\[data-reduced-motion='true'\][^}]*\.solid-workbench-creation-progress-bar\s*\{[^}]*animation: none;/s)
   })
 
-  it('centers the Solid logo independently of the adjacent wordmark', () => {
+  it('centers the complete Solid logo lockup as one visible unit', () => {
     const lockup = chromeCss.match(/\.solid-workbench-empty-brand \.agent-empty-lockup\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
-    expect(lockup).toContain('display: grid')
-    expect(lockup).toContain('grid-template-columns: minmax(0,1fr) 48px minmax(0,1fr)')
-    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-brand\s*\{[^}]*grid-column: 2;[^}]*justify-self: center;/s)
-    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-wordmark\s*\{[^}]*grid-column: 3;/s)
+    expect(lockup).toContain('display: inline-flex')
+    expect(lockup).toContain('width: max-content')
+    expect(lockup).toContain('max-width: 100%')
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-brand\s*\{[^}]*flex: 0 0 48px;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand \.agent-empty-wordmark\s*\{[^}]*max-width: calc\(100% - 48px - var\(--ui-space-2\)\);/s)
   })
 
   it('keeps the React empty surface full-width so its logo centers in the same viewport', () => {

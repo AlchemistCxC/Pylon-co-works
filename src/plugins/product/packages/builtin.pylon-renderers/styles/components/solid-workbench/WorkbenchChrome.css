@@ -502,10 +502,14 @@
   pointer-events: none;
 }
 .solid-workbench-empty-brand .agent-empty-lockup {
-  display: grid;
-  grid-template-columns: minmax(0,1fr) 48px minmax(0,1fr);
+  /* Center the complete visible lockup (mark + wordmark) as one unit.  The
+     previous full-width three-column grid centered only the SVG and left the
+     visible PYLON wordmark pulling the logo to the right. */
+  display: inline-flex;
   align-items: center;
-  width: 100%;
+  gap: var(--ui-space-2);
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
   margin-bottom: var(--ui-space-2);
@@ -513,19 +517,17 @@
   color: var(--accent);
 }
 .solid-workbench-empty-brand .agent-empty-brand {
-  grid-column: 2;
-  justify-self: center;
+  flex: 0 0 48px;
   width: 48px;
   height: 48px;
   margin: 0;
 }
 .solid-workbench-empty-brand .agent-empty-brand .pylon-mark { width: 44px; height: 44px; }
 .solid-workbench-empty-brand .agent-empty-wordmark {
-  grid-column: 3;
-  justify-self: start;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 100%;
-  margin-left: var(--ui-space-2);
+  max-width: calc(100% - 48px - var(--ui-space-2));
+  margin-left: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
