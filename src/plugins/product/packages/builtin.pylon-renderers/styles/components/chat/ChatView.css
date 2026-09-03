@@ -450,7 +450,7 @@
   width:100%; min-height:var(--input-min-height,56px); margin-top:var(--ui-space-2);
   background:var(--input-bg,var(--bg-input)); border:var(--line-width-1) solid var(--border);
   border-radius: 0; padding:var(--ui-space-3) var(--ui-space-4); cursor:pointer; text-align:left;
-  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--font)); font-size:var(--input-font-size, var(--font-size-xl));
+  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--input-font-size, var(--font-size-xl));
 }
 .replay-continue-bar:hover { border-color:var(--input-focus-border,var(--border-focus)); }
 .replay-continue-hint { opacity:0.6; }
@@ -1940,7 +1940,7 @@
   /* The header is ordinary readable copy.  Only explicit code/path/output
      surfaces use the mono face, keeping mixed English labels from looking
      wider than the surrounding conversation. */
-  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
 }
 .app[data-interface-mode="terminal-like"] .term-row-reasoning {
   font-family:var(--msg-font,var(--chat-font,var(--mono)));
@@ -2074,13 +2074,13 @@
    body metrics, but they must not change the message rail's font or marker
    geometry. */
 .term-tool-body {
-  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
   font-size:inherit;
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }
 .term-tool-body .term-tool-prose,
 .term-tool-body .term-tool-label {
-  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
 }
 .term-tool-body :is(.term-tool-summary-code,.term-file-path,.term-file-range,.term-file-preview,.term-terminal-body,.term-log-entries,.term-ansi,.term-code-block,.tool-object-inspector,pre,code) {
   font-family:var(--mono);
@@ -2100,7 +2100,7 @@
 .term-spinner-row .spinner-context,
 .term-spinner-row .spinner-meta,
 .term-spinner-row .spinner-activity {
-  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
 }
 .term-spinner-row { align-items:baseline; margin-left:0; transform:none; }
 .term-assistant.has-dot > .term-assistant-body {
@@ -2136,7 +2136,7 @@
 .term-assistant.has-dot > .term-assistant-dot,
 .term-assistant.has-dot > .term-assistant-dot-img,
 .term-tool-head > .term-tool-indicator {
-  font-family:var(--msg-font,var(--chat-font,var(--font)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
   font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }

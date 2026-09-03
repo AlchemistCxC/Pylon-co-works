@@ -107,7 +107,7 @@
   border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   font: 500 var(--msg-font-size, var(--chat-font-size, var(--font-size-sm)))/
     var(--msg-line-height, var(--chat-line-height, 1.35))
-    var(--msg-font, var(--chat-font, var(--font)));
+    var(--msg-font, var(--chat-font, var(--mono)));
   letter-spacing: .01em;
   box-shadow: var(--shadow-soft, 0 4px 18px rgba(0, 0, 0, .12));
 }
