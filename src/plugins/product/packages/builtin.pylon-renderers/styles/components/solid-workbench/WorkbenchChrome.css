@@ -480,7 +480,7 @@
 .solid-workbench-empty-space {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   box-sizing: border-box;
   width: 100%;
@@ -488,13 +488,16 @@
   flex: 1;
 }
 .solid-workbench-empty-brand {
-  position: static;
+  position: absolute;
+  top: clamp(10%, 8vh, 18%);
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 100%;
-  min-height: 100%;
+  width: auto;
+  min-height: 0;
   padding: 0 var(--ui-space-4);
   pointer-events: none;
 }

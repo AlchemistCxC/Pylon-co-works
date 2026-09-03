@@ -55,8 +55,9 @@ describe('reasoning row geometry contract', () => {
   })
 
   it('anchors empty-state brand and creation progress to the chat viewport', () => {
-    expect(chromeCss).toMatch(/\.solid-workbench-empty-space\s*\{[^}]*align-items: center;[^}]*min-height: 100%;/s)
-    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand\s*\{[^}]*position: static;[^}]*display: flex;[^}]*justify-content: center;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-space\s*\{[^}]*align-items: flex-start;[^}]*min-height: 100%;/s)
+    expect(chromeCss).toMatch(/\.solid-workbench-empty-brand\s*\{[^}]*position: absolute;[^}]*top: clamp\(10%, 8vh, 18%\);[^}]*display: flex;[^}]*justify-content: center;/s)
+    expect(chromeCss).not.toMatch(/\.solid-workbench-empty-brand\s*\{[^}]*min-height: 100%;/s)
     expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\s*\{[^}]*position: absolute;[^}]*inset: 0 var\(--creation-overlay-right-inset\) 0 0;[^}]*place-items: center;/s)
     expect(chromeCss).toMatch(/\.solid-workbench-chat-shell\.solid-workbench-empty-chat-shell\s*\{[^}]*--creation-overlay-right-inset: 0px;/s)
     expect(chromeCss).toMatch(/\.solid-workbench-creation-overlay-host\[data-reduced-motion='true'\][^}]*\.solid-workbench-creation-progress-bar\s*\{[^}]*animation: none;/s)
