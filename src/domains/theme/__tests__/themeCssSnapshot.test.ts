@@ -35,6 +35,10 @@ describe('selectThemeCssSnapshot', () => {
     expect(resolveFontToken('vendor.ui')).toBe(
       'var(--pylon-font-vendor-ui, var(--font-system, var(--font)))',
     )
+    expect(resolveFontToken(undefined, 'code')).toBe('var(--font-mono-default, var(--mono))')
+    expect(resolveFontToken('', 'code')).toBe('var(--font-mono-default, var(--mono))')
+    expect(resolveFontToken('serif', 'code')).toBe('var(--font-mono-default, var(--mono))')
+    expect(resolveFontToken('system', 'code')).toBe('var(--font-mono-default, var(--mono))')
   })
 
   it('有左栏 Sheet 的 TitleBar 与左栏在展开/折叠时保持同宽', () => {

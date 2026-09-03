@@ -40,7 +40,12 @@ export default function FontContributionPicker({ value, role, ariaLabel, onChang
     ? resolved
     : [{ value, label: `${FALLBACK_LABELS[value] ?? value}（已不可用）`, disabled: true }, ...resolved]
   const sample = selected?.sample ?? (role === 'code' ? 'const pylon = await connect()' : 'Pylon 让 Agent 工作变得清晰')
-  const previewFamily = selected ? `var(${fontContributionCssVariable(selected.id)}, ${selected.family})` : 'inherit'
+  // An unloaded code contribution must preview the same role-safe fallback
+  // that production CSS uses; showing `inherit` here made Settings disagree
+  // with the actual code/terminal rendering after a plugin was disabled.
+  const previewFamily = selected
+    ? `var(${fontContributionCssVariable(selected.id)}, ${selected.family})`
+    : role === 'code' ? 'var(--mono)' : 'inherit'
 
   return (
     <div className="font-contribution-picker">

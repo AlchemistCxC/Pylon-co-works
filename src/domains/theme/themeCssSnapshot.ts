@@ -33,8 +33,13 @@ export function resolveFontToken(value: unknown, fallback: 'system' | 'code' = '
     ? 'var(--font-mono-default, var(--mono))'
     : 'var(--font-system, var(--font))'
   if (value === 'mono') return 'var(--font-mono-default, var(--mono))'
+  // `codeFont` only exposes mono plus plugin ids. Treat legacy/invalid
+  // proportional selections as unavailable instead of allowing code to lose
+  // its monospaced role after migration or a hand-edited persisted value.
+  if (fallback === 'code' && (value === 'serif' || value === 'system' || value === 'sans')) return fallbackToken
   if (value === 'serif') return 'var(--font-serif-default, var(--serif))'
-  if (value === 'system' || value === 'sans' || typeof value !== 'string' || !value.trim()) return 'var(--font-system, var(--font))'
+  if (typeof value !== 'string' || !value.trim()) return fallbackToken
+  if (value === 'system' || value === 'sans') return 'var(--font-system, var(--font))'
   return `var(${fontContributionCssVariable(value)}, ${fallbackToken})`
 }
 
