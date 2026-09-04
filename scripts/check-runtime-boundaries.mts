@@ -78,6 +78,16 @@ export const GLOBAL_STORE_ALLOWLIST = new Set([
   'src/renderers/solid-workbench/input/ControlCenter.solid.tsx',
 ])
 
+/**
+ * 宪法 §3.2.5：Solid 渲染器子树不得直发 `pylon:*` window CustomEvent，UI 动作
+ * 一律走 semantic command（宿主侧持有 typed DOM bridge）。遗留输入桥站点保持
+ * 报告制清单；新增渲染器直发即违规。
+ */
+export const RENDERER_CUSTOM_EVENT_ALLOWLIST = new Set([
+  'src/renderers/solid-workbench/input/ControlCenter.solid.tsx',
+  'src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx',
+])
+
 async function walk(directory: string): Promise<string[]> {
   let entries
   try { entries = await readdir(directory) } catch { return [] }
@@ -93,13 +103,6 @@ async function walk(directory: string): Promise<string[]> {
 
 function displayPath(path: string): string {
   return relative(projectRoot, path).replaceAll('\\', '/')
-}
-
-function importSpecifiers(source: string): string[] {
-  const values: string[] = []
-  for (const match of source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/g)) values.push(match[1])
-  for (const match of source.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) values.push(match[1])
-  return values
 }
 
 function hasDirectInvoke(source: string): boolean {
@@ -131,6 +134,11 @@ function customEventNames(source: string): string[] {
   return names
 }
 
+/** Construction sites only — the renderer rule targets dispatch ownership, not typed listeners. */
+function constructedCustomEventNames(source: string): string[] {
+  return [...source.matchAll(/\bnew\s+CustomEvent(?:<[^>]*>)?\s*\(\s*['"](pylon:[^'"]+)['"]/g)].map(match => match[1])
+}
+
 async function registryNames(): Promise<Set<string>> {
   const path = resolve(projectRoot, 'src/domains/events/pylonCustomEvents.ts')
   const source = await readFile(path, 'utf8')
@@ -157,6 +165,10 @@ export async function runRuntimeBoundaryCheck(): Promise<{ violations: string[];
     }
     for (const name of customEventNames(source)) {
       if (!registry.has(name)) violations.push(`${path}: CustomEvent ${name} 未登记 typed registry`)
+    }
+    if (path.startsWith('src/renderers/') && constructedCustomEventNames(source).length > 0) {
+      if (RENDERER_CUSTOM_EVENT_ALLOWLIST.has(path)) reports.push(`${path}: renderer 直发 pylon CustomEvent（legacy allowlist，仅报告）`)
+      else violations.push(`${path}: renderer 直发 pylon CustomEvent，须改走 semantic command（宪法 §3.2.5）`)
     }
   }
   return { violations, reports }

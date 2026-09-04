@@ -1,5 +1,6 @@
 import type { RenderSemanticCommand } from '../../contracts/messageRenderer.ts'
 import type { WorkbenchCapabilityReader, WorkbenchHostPort, WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
+import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
 
 export function isRenderSemanticCommand(value: unknown): value is RenderSemanticCommand {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
@@ -18,6 +19,8 @@ export function canExecuteRendererSemanticCommand(commandType: string, capabilit
     case 'message.retry': return capabilities.has('retry')
     case 'session.recover': return capabilities.has('recovery')
     case 'session.config.update': return capabilities.has('sessionConfig')
+    // Host-level navigation; the DOM bridge is host-owned, not a renderer capability.
+    case 'diagnostics.open':
     case 'assist.accept':
     case 'assist.reject': return true
     default: return false
@@ -41,6 +44,17 @@ export async function executeRendererSemanticCommand(input: {
     code, message, phase: 'action', recoverability: 'none',
     slotId: input.slotId, kind: input.kind, actionType: command.type,
   })
+
+  // `diagnostics.open` is a host-owned UI navigation and needs no active
+  // session (an unbound empty-state system error card can offer it).  Renderers
+  // must not construct `pylon:*` window CustomEvents themselves; the typed DOM
+  // bridge stays behind this host seam (B-04 / 宪法 §3.2.5).
+  if (command.type === 'diagnostics.open') {
+    if (typeof window !== 'undefined') dispatchPylonEvent(window, 'pylon:open-runtime-sheet')
+    else reject('renderer_action_unavailable', 'diagnostics.open 需要 DOM 宿主')
+    return
+  }
+
   if (!sessionId) { reject('renderer_action_context_missing', 'Renderer action 缺少活动 Session'); return }
 
   if (command.type === 'assist.accept') {
