@@ -75,6 +75,7 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
         />
       return active.value.schema && adapter ? <><RendererSettingsSchemaHost
         schema={active.value.schema}
+        anchorPrefix={`schema:${active.contributionId}`}
         values={adapterSnapshot.values}
         unavailable={adapterSnapshot.unavailable}
         onChange={(key, value) => { void adapter.setValue(key, value) }}
@@ -86,15 +87,17 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
     const props: ContextPanelContributionProps = { sheet, ctx }
     const schemaContent = active.value.schema && adapter ? <RendererSettingsSchemaHost
       schema={active.value.schema}
+      anchorPrefix={`schema:${active.contributionId}`}
       values={adapterSnapshot.values}
       unavailable={adapterSnapshot.unavailable}
       options={Object.fromEntries(active.value.schema.groups.flatMap(group => group.fields.map(field => {
         const key = settingFieldKey(field)
-        if (!('options' in field)) return []
+        if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
         const target = 'optionTarget' in field && field.optionTarget
           ? field.optionTarget
           : `context-panel.${encodeURIComponent(active.ownerPluginId ?? '').replaceAll('.', '%2E')}.${encodeURIComponent(active.contributionId).replaceAll('.', '%2E')}.${encodeURIComponent(key).replaceAll('.', '%2E')}`
-        return [[key, resolvePluginSettingOptions(target, field.options, optionSnapshot.entries)]] as const
+        const base = 'options' in field ? field.options : []
+        return [[key, resolvePluginSettingOptions(target, base, optionSnapshot.entries)]] as const
       })))}
       onChange={(key, value) => { void adapter.setValue(key, value) }}
       onReset={key => { void adapter.reset(key) }}

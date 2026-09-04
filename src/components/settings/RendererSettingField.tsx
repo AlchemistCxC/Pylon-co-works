@@ -38,6 +38,7 @@ export function RendererSettingsSchemaHost(props: {
   readonly unavailable?: Readonly<Record<string, { readonly value?: SettingsValue; readonly code: string; readonly message: string }>>
   readonly options?: Readonly<Record<string, readonly RendererSettingOption[]>>
   readonly density?: 'basic' | 'standard' | 'all'
+  readonly anchorPrefix?: string
   onChange(fieldKey: string, value: SettingsValue): void
   onReset?(fieldKey: string): void
   onRestoreUnavailable?(fieldKey: string): void
@@ -50,8 +51,8 @@ export function RendererSettingsSchemaHost(props: {
         {group.fields.filter(field => isSettingVisible(field, density) && evaluateRenderSettingCondition(field.showIf, props.values)).map(field => {
           const key = settingFieldKey(field)
           const options = props.options?.[key] ?? ('options' in field ? field.options : undefined)
-          return <RendererSettingField key={key} field={field} value={props.values[key]} options={options}
-            onChange={value => props.onChange(key, value)} onReset={props.onReset ? () => props.onReset?.(key) : undefined} />
+          return <div key={key} data-search-anchor={`${props.anchorPrefix ?? 'schema'}:${key}`}><RendererSettingField field={field} value={props.values[key]} options={options}
+            onChange={value => props.onChange(key, value)} onReset={props.onReset ? () => props.onReset?.(key) : undefined} /></div>
         })}
       </div>
     </section>)}

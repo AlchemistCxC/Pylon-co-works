@@ -22,10 +22,18 @@ function scopedValues(
   values: Readonly<Record<string, RendererSettingValue>>,
   namespace: 'kind' | 'suite' | 'slot',
   id: string,
+  ownerPluginId?: string,
 ): Readonly<Record<string, RendererSettingValue>> {
-  const prefix = `${namespace}.${id}.`
+  const encode = (value: string) => encodeURIComponent(value).replaceAll('.', '%2E')
+  const prefixes = [
+    `${namespace}.${id}.`,
+    `${namespace}.${encode(id)}.`,
+    ...(ownerPluginId ? [`${namespace}.${encode(ownerPluginId)}.${encode(id)}.`] : []),
+  ]
   return Object.fromEntries(Object.entries(values).flatMap(([key, value]) =>
-    key.startsWith(prefix) ? [[key.slice(prefix.length), value] as const] : []))
+    prefixes.find(prefix => key.startsWith(prefix))
+      ? [[key.slice(prefixes.find(prefix => key.startsWith(prefix))!.length), value] as const]
+      : []))
 }
 
 function hostDefaults(
@@ -41,6 +49,7 @@ function resolveScope(input: {
   readonly schema?: RendererSettingsSchema
   readonly namespace: 'kind' | 'suite' | 'slot'
   readonly id: string
+  readonly ownerPluginId?: string
   readonly host: WorkbenchAppearanceSnapshot
   readonly settings: RendererSettingsStoreSnapshot
   readonly defaults?: Readonly<Record<string, RendererSettingValue>>
@@ -56,7 +65,11 @@ function resolveScope(input: {
   const availableOptions = Object.fromEntries(input.schema.groups.flatMap(group => group.fields.flatMap(field => {
     if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
     const key = field.key ?? field.id ?? ''
-    const target = `${input.namespace}.${input.id}.${key}`
+    const encode = (value: string) => encodeURIComponent(value).replaceAll('.', '%2E')
+    const encodedOwner = input.ownerPluginId && !input.ownerPluginId.startsWith('builtin.')
+      ? `${encode(input.ownerPluginId)}.`
+      : ''
+    const target = `${input.namespace}.${encodedOwner}${encodedOwner ? encode(input.id) : input.id}.${encode(key)}`
     const options = resolveFieldOptions(field, target, input.optionEntries ?? [])
     return [[key, options.map(option => option.value)] as const]
   })))
@@ -65,8 +78,8 @@ function resolveScope(input: {
     hostDefaults: hostDefaults(input.host, input.schema),
     kindDefaults: input.defaults,
     profileTokens: input.profile,
-    userOverrides: scopedValues(input.settings.values, input.namespace, input.id),
-    sessionPreview: scopedValues(input.settings.sessionPreview, input.namespace, input.id),
+    userOverrides: scopedValues(input.settings.values, input.namespace, input.id, input.ownerPluginId),
+    sessionPreview: scopedValues(input.settings.sessionPreview, input.namespace, input.id, input.ownerPluginId),
     availableOptions,
   })
   return resolution
@@ -89,11 +102,12 @@ export interface ProductionRendererSettingsScopeInput {
 export function resolveProductionRendererSettingsScope(
   input: ProductionRendererSettingsScopeInput,
 ): Pick<RenderAppearanceResolution, 'values' | 'sources' | 'unavailable' | 'diagnostics'> {
-  const contribution = input.namespace === 'kind'
-    ? input.catalog.renderKinds.find(entry => entry.value.id === input.id)?.value
+  const contributionEntry = input.namespace === 'kind'
+    ? input.catalog.renderKinds.find(entry => entry.value.id === input.id)
     : input.namespace === 'suite'
-      ? input.catalog.rendererSuites.find(entry => entry.value.id === input.id)?.value
-      : input.catalog.rendererSlots.find(entry => entry.value.id === input.id)?.value
+      ? input.catalog.rendererSuites.find(entry => entry.value.id === input.id)
+      : input.catalog.rendererSlots.find(entry => entry.value.id === input.id)
+  const contribution = contributionEntry?.value
   const defaults = input.namespace === 'kind' && contribution && 'defaultTokens' in contribution
     ? contribution.defaultTokens as Readonly<Record<string, RendererSettingValue>>
     : undefined
@@ -101,6 +115,7 @@ export function resolveProductionRendererSettingsScope(
     schema: contribution?.settings,
     namespace: input.namespace,
     id: input.id,
+    ownerPluginId: contributionEntry?.ownerPluginId,
     host: input.hostAppearance,
     settings: input.settings,
     defaults,

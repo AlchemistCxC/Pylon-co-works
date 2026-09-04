@@ -330,7 +330,15 @@ function freeze(value: unknown, seen = new WeakSet<object>()): unknown {
 export function normalizeRendererSettingsSchema(schema: RendererSettingsSchema): RendererSettingsSchema {
   validateRendererSettingsSchema(schema)
   const copy = structuredClone(schema) as RendererSettingsSchema
-  return freeze(copy) as RendererSettingsSchema
+  // Metadata order is consumer-visible: keep declaration order as the stable
+  // tie-breaker while honoring explicit group/field order values.
+  const ordered: RendererSettingsSchema = {
+    ...copy,
+    groups: copy.groups
+      .map(group => ({ ...group, fields: [...group.fields].sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)) }))
+      .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)),
+  }
+  return freeze(ordered) as RendererSettingsSchema
 }
 
 export function settingFieldKey(field: Pick<RenderSettingField, 'key' | 'id'>): string {

@@ -16,6 +16,7 @@ import { selectWorkbenchAppearance } from '../../domains/workbench/appearance.ts
 import { useStore } from '../../store.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
+import { stringifySettingsTarget } from '../../plugin-runtime/settings/settingsTargetGrammar.ts'
 import {
   projectRendererSettingsCatalog,
   rendererSettingsEntryKey,
@@ -50,6 +51,14 @@ function fieldMatches(field: RenderSettingField, query: string, options: readonl
   return haystack.includes(query)
 }
 
+function optionTargetFor(entry: RendererSettingsCatalogEntry, fieldKey: string): string {
+  // Keep first-party legacy keys stable; namespaced third-party owners use the
+  // encoded structured grammar so dotted ids cannot collide.
+  return entry.ownerPluginId && entry.ownerPluginId !== 'fixture' && !entry.ownerPluginId.startsWith('builtin.')
+    ? stringifySettingsTarget({ namespace: entry.namespace, ownerId: entry.id, fieldKey, ownerPluginId: entry.ownerPluginId })
+    : `${entry.namespace}.${entry.id}.${fieldKey}`
+}
+
 function entryMatches(
   entry: RendererSettingsCatalogEntry,
   query: string,
@@ -58,9 +67,8 @@ function entryMatches(
   if (!query) return true
   if ([entry.id, entry.label, entry.description, entry.ownerPluginId, entry.placement.categoryLabel]
     .filter(Boolean).join(' ').toLowerCase().includes(query)) return true
-  const namespace = entry.namespace + '.' + entry.id
   return entry.schema.groups.some(group => group.fields.some(field => {
-    const target = namespace + '.' + settingFieldKey(field)
+    const target = optionTargetFor(entry, settingFieldKey(field))
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
     const options = resolveFieldOptions(field, optionTarget, optionEntries)
     return fieldMatches(field, query, options)
@@ -70,14 +78,24 @@ function entryMatches(
 function fixtureValues(
   entry: RendererSettingsCatalogEntry,
   snapshot: ReturnType<RendererSettingsStore['getSnapshot']>,
+  hostDefaults: Readonly<Record<string, RendererSettingValue>>,
+  optionEntries: Parameters<typeof resolvePluginSettingOptions>[2],
 ): { readonly values: Readonly<Record<string, RendererSettingValue>>; readonly sources: Readonly<Record<string, RenderAppearanceSource>> } {
   const namespace = entry.namespace + '.' + entry.id
   const scoped = (source: Readonly<Record<string, RendererSettingValue>>) => Object.fromEntries(Object.entries(source).flatMap(([key, value]) =>
     key.startsWith(namespace + '.') ? [[key.slice(namespace.length + 1), value] as const] : []))
+  const availableOptions = Object.fromEntries(entry.schema.groups.flatMap(group => group.fields.flatMap(field => {
+    if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
+    const key = settingFieldKey(field)
+    const target = optionTargetFor(entry, key)
+    return [[key, resolveFieldOptions(field, target, optionEntries).map(option => option.value)] as const]
+  })))
   return resolveRenderAppearance({
     schema: entry.schema,
+    hostDefaults,
     userOverrides: scoped(snapshot.values),
     sessionPreview: scoped(snapshot.sessionPreview),
+    availableOptions,
   })
 }
 
@@ -128,7 +146,7 @@ function RendererSettingsGroup(props: {
   }, [query])
   const fields = group.fields.filter(field => {
     if (!isSettingVisible(field, density)) return false
-    const target = namespace + '.' + settingFieldKey(field)
+    const target = optionTargetFor(entry, settingFieldKey(field))
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
     const options = resolveFieldOptions(field, optionTarget, optionEntries)
     const matches = fieldMatches(field, query, options)
@@ -138,7 +156,7 @@ function RendererSettingsGroup(props: {
   const advancedCount = group.fields.filter(field => field.advanced).length
   const resetGroup = () => {
     for (const field of group.fields) {
-      const target = namespace + '.' + settingFieldKey(field)
+      const target = optionTargetFor(entry, settingFieldKey(field))
       store.removeOverride(target)
       store.clearSessionPreview(target)
     }
@@ -164,7 +182,7 @@ function RendererSettingsGroup(props: {
       </div>
       {fields.map(field => {
         const key = settingFieldKey(field)
-        const target = namespace + '.' + key
+      const target = optionTargetFor(entry, key)
         const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
         const options = resolveFieldOptions(field, optionTarget, optionEntries)
         const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
@@ -259,7 +277,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const activeObjectKey = selected ? rendererSettingsEntryKey(selected) : ''
   const selectedResolution = useMemo(() => {
     if (!selected) return { values: {}, sources: {} }
-    if (props.schemas) return fixtureValues(selected, storeSnapshot)
+    if (props.schemas) return fixtureValues(selected, storeSnapshot, selectWorkbenchAppearance(useStore.getState(), 0) as unknown as Readonly<Record<string, RendererSettingValue>>, optionSnapshot.entries)
     const profile = presentationProfiles.entries.find(entry => entry.contributionId === activeProfileId)?.value
     return resolveProductionRendererSettingsScope({
       hostAppearance: selectWorkbenchAppearance(useStore.getState(), 0),

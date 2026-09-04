@@ -42,6 +42,7 @@ import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
+import { useRightRailStore } from '../rightRailStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
@@ -504,12 +505,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       setActiveDomain('appearance')
       setActiveSection('right')
       setActivePluginPageId(null)
+      useRightRailStore.getState().setActivePanel(item.contextPanelId)
+      useRightRailStore.getState().setCollapsed(false)
+      if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.pluginPageId) {
       setActiveDomain('plugins')
       setActiveSection('pluginManager')
       setActivePluginPageId(item.pluginPageId)
+      if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.rendererRoute) {

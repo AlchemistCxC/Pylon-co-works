@@ -182,8 +182,12 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
     }
     for (const [key, unavailable] of Object.entries(page.valueAdapter!.getSnapshot().unavailable)) {
-      if (records.some(record => record.ownerId === entry.contributionId && record.fieldKey === key)) continue
-      records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [{ code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }] })
+      const existingIndex = records.findIndex(record => record.ownerId === entry.contributionId && record.fieldKey === key)
+      const diagnostic = { code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }
+      if (existingIndex >= 0) {
+        const existing = records[existingIndex]!
+        records[existingIndex] = { ...existing, active: false, diagnostics: [...existing.diagnostics, diagnostic] }
+      } else records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [diagnostic] })
     }
   }
   for (const entry of input.contextPanels ?? []) {
@@ -213,8 +217,12 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
     }
     for (const [key, unavailable] of Object.entries(panel.valueAdapter!.getSnapshot().unavailable)) {
-      if (records.some(record => record.ownerId === entry.contributionId && record.fieldKey === key)) continue
-      records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [{ code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }] })
+      const existingIndex = records.findIndex(record => record.ownerId === entry.contributionId && record.fieldKey === key)
+      const diagnostic = { code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }
+      if (existingIndex >= 0) {
+        const existing = records[existingIndex]!
+        records[existingIndex] = { ...existing, active: false, diagnostics: [...existing.diagnostics, diagnostic] }
+      } else records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [diagnostic] })
     }
   }
   return records
@@ -223,11 +231,13 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
 function withDiagnostics(records: SettingsContributionRecord[]): SettingsContributionRecord[] {
   const byIdentity = new Map<string, SettingsContributionRecord[]>()
   const byRoute = new Map<string, SettingsContributionRecord[]>()
+  const bySemantic = new Map<string, SettingsContributionRecord[]>()
   for (const record of records) {
     const id = identity(record)
     const route = JSON.stringify(record.canonicalRoute)
     byIdentity.set(id, [...(byIdentity.get(id) ?? []), record])
     byRoute.set(route, [...(byRoute.get(route) ?? []), record])
+    if (record.semanticKey) bySemantic.set(record.semanticKey, [...(bySemantic.get(record.semanticKey) ?? []), record])
   }
   return records.map(record => {
     const diagnostics = [...record.diagnostics]
@@ -239,6 +249,10 @@ function withDiagnostics(records: SettingsContributionRecord[]): SettingsContrib
     const routeCollision = routePeers.some(peer => identity(peer) !== identity(record))
     const routeIndex = routePeers.indexOf(record)
     if (routeCollision) diagnostics.push({ code: 'route-collision', message: '跨 owner canonical route 冲突' })
+    const semanticPeers = record.semanticKey ? (bySemantic.get(record.semanticKey) ?? []) : []
+    if (semanticPeers.length > 1 && semanticPeers.some(peer => identity(peer) !== identity(record))) {
+      diagnostics.push({ code: 'semantic-key-collision', message: `semanticKey ${record.semanticKey} 跨 owner 重叠；保留各自作用域` })
+    }
     const blocked = (duplicate && identityIndex > 0) || (routeCollision && routeIndex > 0)
     return {
       ...record,
@@ -290,6 +304,7 @@ export function buildSettingsContributionSearchItems(
       advanced: Boolean(record.deprecated || record.diagnostics.length > 0),
       kind: record.source === 'plugin-page' ? 'plugin-page' : record.source === 'context-panel' ? 'context-panel' : record.source === 'theme' ? 'chain-a' : 'renderer-entry',
       ...(record.namespace === 'theme' && record.fieldKey ? { anchor: `field:${record.fieldKey}` } : {}),
+      ...((record.source === 'plugin-page' || record.source === 'context-panel') && record.fieldKey ? { anchor: `schema:${record.ownerId}:${record.fieldKey}` } : {}),
       ...(record.namespace && ['kind', 'slot', 'suite'].includes(record.namespace) && record.fieldKey ? {
         rendererRoute: {
           categoryId: route.category ?? 'plugin-extension',

@@ -63,7 +63,11 @@ function validValue(field: RenderSettingField, value: RendererSettingValue, avai
       return (field.minSelected === undefined || value.length >= field.minSelected) && (field.maxSelected === undefined || value.length <= field.maxSelected)
     }
     case 'color':
-      return typeof value === 'string' && value.trim().length > 0
+      if (typeof value !== 'string' || value.trim().length === 0) return false
+      // A picker (or palette+picker) deliberately accepts arbitrary color
+      // values; palette-only fields are constrained to the dynamic palette.
+      if (field.presentation === 'picker' || field.presentation === 'palette+picker') return true
+      return !available || available.length === 0 || available.includes(value)
     case 'number':
       return typeof value === 'number' && Number.isFinite(value) && (field.min === undefined || value >= field.min) && (field.max === undefined || value <= field.max)
     case 'boolean':
@@ -81,6 +85,7 @@ function optionUnavailable(field: RenderSettingField, value: RendererSettingValu
   if (!available) return false
   if (field.type === 'choice') return typeof value === 'string' && !available.includes(value)
   if (field.type === 'multi-choice' && Array.isArray(value)) return value.some(item => typeof item === 'string' && !available.includes(item))
+  if (field.type === 'color' && field.presentation === 'palette') return typeof value === 'string' && !available.includes(value)
   return false
 }
 

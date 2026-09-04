@@ -43,15 +43,17 @@ export default function PluginSettingsPageHost({ pageId }: { pageId: string }) {
 
   const schemaContent = entry.value.schema && adapter ? <RendererSettingsSchemaHost
     schema={entry.value.schema}
+    anchorPrefix={`schema:${pageId}`}
     values={adapterSnapshot.values}
     unavailable={adapterSnapshot.unavailable}
     options={Object.fromEntries(entry.value.schema.groups.flatMap(group => group.fields.map(field => {
       const key = settingFieldKey(field)
-      if (!('options' in field)) return []
+      if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
       const target = 'optionTarget' in field && field.optionTarget
         ? field.optionTarget
         : `plugin-page.${encodeURIComponent(pluginId).replaceAll('.', '%2E')}.${encodeURIComponent(pageId).replaceAll('.', '%2E')}.${encodeURIComponent(key).replaceAll('.', '%2E')}`
-      return [[key, resolvePluginSettingOptions(target, field.options, optionSnapshot.entries)]] as const
+      const base = 'options' in field ? field.options : []
+      return [[key, resolvePluginSettingOptions(target, base, optionSnapshot.entries)]] as const
     })))}
     onChange={(key, value) => { void adapter.setValue(key, value) }}
     onReset={key => { void adapter.reset(key) }}
