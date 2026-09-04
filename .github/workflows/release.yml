@@ -15,19 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # P46 片A：预置 bun（脚本换轨期与 pnpm 并存，片C 切 bun install）
+      # P46：bun 负责依赖安装与脚本编排（bun.lock 冻结安装）；vite/vitest 仍由 Node 宿主
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -40,12 +35,12 @@ jobs:
         run: rustup override set stable-x86_64-pc-windows-msvc
 
       - name: 安装依赖
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       # 完整便携链：前端 build + tauri --no-bundle + pylon-detect + pack_release.py
       # 产物：release/pylon-<version>-win64.zip + .sha256 + .manifest.json
       - name: 打包发行包
-        run: npm run release:portable
+        run: bun run release:portable
 
       - name: 发布到 GitHub Release
         uses: softprops/action-gh-release@v2

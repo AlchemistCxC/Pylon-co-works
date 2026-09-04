@@ -12,26 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # P46 片A：预置 bun（脚本换轨期与 pnpm 并存，片C 切 bun install）
+      # P46：bun 负责依赖安装与脚本编排（bun.lock 冻结安装）；vite/vitest 仍由 Node 宿主
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
-      - name: 安装依赖（pnpm）
-        run: pnpm install --frozen-lockfile
+      - name: 安装依赖（bun）
+        run: bun install --frozen-lockfile
 
       # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
       - name: 统一前端门禁（check:frontend）
-        run: npm run check:frontend
+        run: bun run check:frontend
 
   rust:
     name: Rust（测试 + clippy + 构建）
@@ -39,19 +34,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # P46 片A：预置 bun（脚本换轨期与 pnpm 并存，片C 切 bun install）
+      # P46：bun 负责依赖安装与脚本编排（bun.lock 冻结安装）；vite/vitest 仍由 Node 宿主
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       # toolchain 显式指定：rust-toolchain.toml 的完整 toolchain 名会让 dtolnay
       # 解析失败（"target tuple in channel name"）；MSVC 为 CI runner 自带工具链。
@@ -66,12 +56,12 @@ jobs:
       - name: 使用 MSVC 工具链（CI runner 自带链接器）
         run: rustup override set stable-x86_64-pc-windows-msvc
 
-      - name: 安装依赖（pnpm）
-        run: pnpm install --frozen-lockfile
+      - name: 安装依赖（bun）
+        run: bun install --frozen-lockfile
 
       # tauri::generate_context! 编译期要求 ../dist 存在（frontendDist），先构建前端
       - name: 前端构建（tauri generate_context 前置）
-        run: npm run build
+        run: bun run build
 
       # ISSUE-20 W1：同一 check:rust 入口（cargo test --lib + cargo build），不复制命令。
       # 集成组（b11_inject/obs03/p1_wire）依赖本地环境（spawn fake agent 子进程回环），
