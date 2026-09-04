@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 23:09] [主施工员·工程师] 跨域回归修复：第三方 Suite/Slot 仍保持既有 legacy Store key 写入（避免行为回归），仅 option lookup 使用结构化 target；`thirdPartySolidRenderer.integration` 与 Renderer Panel 10 项通过，tsc 通过。
+
 [2026-09-04 23:07] [主施工员·工程师] P44 adapter identity seam：Plugin Page/Context Panel 注册与 shadow transaction 校验 adapter namespace、ownerPluginId、contributionId；补注册拒绝回归。定向 13 项、tsc、lint 通过。
 
 [2026-09-04 23:05] [主施工员·工程师] P44 resolver/catalog seam：fixture 与 production 统一动态 options/host defaults；dotted owner target 对第三方编码、内置 legacy 保持兼容；palette-only 非法颜色保留 unavailable；schema group/field order 生效；semanticKey 跨 owner 只诊断；Context 搜索可选中面板并滚动到字段。定向 20 项、tsc、lint、check:solid 通过（既有 warning 保留）。
