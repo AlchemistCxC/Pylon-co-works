@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 17:55] [Riccati·架构师] 认领新设置架构评审：只读核对 `settingsDomains`、Renderer Settings Schema/Suite/Slot、预设 provider 与三处（渲染器/消息流/中控台）重叠证据；拟产出 `Docs/评审/` 评审报告与 `Docs/渲染引擎施工/` 施工书，暂不改生产代码，不触碰他人 WIP。已派只读交叉复核 `/root/settings_arch_review`，不改文件。
+
 [2026-09-04 03:40] [字体体系·工程师] [已处理] P43 最终收尾补充：公开 SDK 生成声明同步为 `Consolas（VS Code 默认）`（提交 `57bdfd18`），并补录 Settings picker 对缺失代码字体的 `var(--mono)` 预览、非法代码字体值回退和 F4/F5 contract。最终 `check:frontend`（覆盖率、build、依赖/产物隔离）与全量 Vitest 475 文件/2949 项通过；用户版本号、Rust 与其余 SDK 生成声明 WIP 仍未纳入提交。
 
 [2026-09-04 02:15] [字体体系·工程师] [已处理] P43 字体体系与代码字体默认值完成：提交 `9e82c7bc`、`fede66f2`。内置代码栈改为 Windows VS Code 默认的 Consolas → Courier New（保留 CJK/跨平台 fallback），移除 JetBrains Mono 生产依赖与静态加载；`globalFont` 的 mono 选项补齐 interface 角色，插件 Font Contribution 继续支持按角色新增/选择，失效/非法代码贡献回退默认 mono，设置预览与生产一致。终端/日志块统一消费 `var(--mono)`，普通宠物面板文本消费 `var(--font)`，Workbench skin contract 补齐 global/code/mono 变量；内联代码仍 `--mono` + `--chat-code-color`。定向 36 项 + fallback/picker 16 项、全量 Vitest 475 文件/2949 项、`tsc -b`、lint（0 errors，仅既有 1 条 Hook warning）、`check:solid`、build、`check:frontend`、`check:docs`、`git diff --check` 与 `pnpm install --frozen-lockfile --offline --ignore-scripts` 全通过。未启动子 agent、未灌库、未改 SQLite/canonical/schema/API；版本号、Rust、SDK 生成声明 WIP 未混入提交。补充审查：Settings picker 会真实显示代码/界面/内容三角色候选，生产源码中无未覆盖的硬编码系统/等宽字体族。
