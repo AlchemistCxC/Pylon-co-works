@@ -1,10 +1,8 @@
 import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
 
 const scriptsDir = resolve(process.cwd(), 'scripts')
-const legacyLoader = pathToFileURL(resolve(scriptsDir, 'legacy-ts-loader.mjs')).href
 const excludedScripts = new Map([
   ['test-profile-prompt-visibility.mts', '直接读取 src-tauri 后端源码'],
   // 已迁入 Vitest 直跑（*.test.mts），不再作为 standalone 脚本 spawn：
@@ -43,7 +41,8 @@ const summarize = (value: unknown) => {
 let failed = false
 for (const name of scripts) {
   const scriptPath = resolve(scriptsDir, name)
-  const result = spawnSync(process.execPath, [...process.execArgv, '--no-warnings', '--experimental-loader', legacyLoader, scriptPath], {
+  // P46：bun 宿主下 execPath 即 bun，原生执行 .mts；不再透传 Node 专属 flag 与 loader
+  const result = spawnSync(process.execPath, [scriptPath], {
     cwd: process.cwd(),
     encoding: 'utf8',
   })

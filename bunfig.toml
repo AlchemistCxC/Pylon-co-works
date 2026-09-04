@@ -1,0 +1,5 @@
+# bun 安装信任配置（可选 bun 工作流使用，等价于 pnpm-workspace.yaml 的 onlyBuiltDependencies）
+# esbuild 需要执行 install 脚本编译原生二进制；bun 默认不自动跑 post-install，
+# 必须在 trustedDependencies 显式声明，否则 vite/dev 会因缺 esbuild 原生库而启动失败。
+[install]
+trustedDependencies = ["esbuild"]
