@@ -19,7 +19,10 @@ const CHUNK_BUDGET = 450_000
 // style assets；对应 gzip 现在计入 JS 总量。按 fresh build 606,709 B 重定标，
 // P0-P3 新增 File Workbench、消息 renderer host 与 Agent detector 设置 UI，且把
 // 产品组合根恢复为独立 lazy chunk 后，fresh build 为 624,088 B；保留约 0.9%。
-const TOTAL_GZIP_BUDGET = 630_000
+// 2026-09-05 重定标：P30–P45（插件化设置系统、插件 runtime、错误中心、字体体系、
+// 流式终态一致性等）落地后 fresh build 为 1,577,822 B；旧预算 630,000 自 P0-P3
+// 后未随版重定（本门禁不在 check:frontend/CI 链内）。保留约 1.4% 余量。
+const TOTAL_GZIP_BUDGET = 1_600_000
 
 if (!exists(distDir)) {
   console.error('dist/assets 不存在——请先 npm run build')
