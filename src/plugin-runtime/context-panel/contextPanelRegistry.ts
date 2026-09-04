@@ -26,7 +26,14 @@ export class ContextPanelRegistry {
   }
 
   beginShadowTransaction(owner: PluginIdentity, replacingRuntimeInstanceId: string): RegistryTransaction<ContextPanelContribution> {
-    return this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
+    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
+    return {
+      ...transaction,
+      register: (contribution, options) => {
+        const normalized = validateContribution(contribution)
+        return transaction.register(normalized, { ...options, contributionId: normalized.id, priority: normalized.order })
+      },
+    }
   }
 
   subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }

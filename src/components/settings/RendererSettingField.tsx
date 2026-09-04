@@ -2,7 +2,7 @@ import type { ChangeEvent } from 'react'
 import * as Switch from '@radix-ui/react-switch'
 import * as Slider from '@radix-ui/react-slider'
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
-import type { RenderSettingField, RendererSettingOption, RendererPresentation, RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import type { RenderSettingField, RendererSettingOption, RendererPresentation, RendererSettingValue, RendererSettingsSchema, SettingsValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import ColorPopover from '../ColorPopover.tsx'
 import Select from '../ui/Select.tsx'
@@ -25,6 +25,41 @@ export interface RendererSettingFieldProps {
   onPreviewChange?(value: RendererSettingValue): void
   onPreviewCommit?(): void
   onReset?(): void
+}
+
+/** Framework-neutral schema host used by Plugin Page/Context Panel contributions.
+ * The host owns field layout/conditions while the contribution owns only the
+ * adapter-backed values. This keeps schema pages on the same control contract
+ * as Renderer settings without teaching plugin components about global stores.
+ */
+export function RendererSettingsSchemaHost(props: {
+  readonly schema: RendererSettingsSchema
+  readonly values: Readonly<Record<string, SettingsValue>>
+  readonly unavailable?: Readonly<Record<string, { readonly value?: SettingsValue; readonly code: string; readonly message: string }>>
+  readonly options?: Readonly<Record<string, readonly RendererSettingOption[]>>
+  readonly density?: 'basic' | 'standard' | 'all'
+  onChange(fieldKey: string, value: SettingsValue): void
+  onReset?(fieldKey: string): void
+  onRestoreUnavailable?(fieldKey: string): void
+}) {
+  const density = props.density ?? 'all'
+  return <div className="settings-schema-host">
+    {props.schema.groups.map(group => <section key={group.id} className="renderer-settings-group" data-group-anchor={group.id}>
+      <h4 className="renderer-settings-group-heading"><span className="renderer-settings-group-copy"><strong>{group.label}</strong>{group.description && <small>{group.description}</small>}</span></h4>
+      <div className="renderer-settings-fields">
+        {group.fields.filter(field => isSettingVisible(field, density) && evaluateRenderSettingCondition(field.showIf, props.values)).map(field => {
+          const key = settingFieldKey(field)
+          const options = props.options?.[key] ?? ('options' in field ? field.options : undefined)
+          return <RendererSettingField key={key} field={field} value={props.values[key]} options={options}
+            onChange={value => props.onChange(key, value)} onReset={props.onReset ? () => props.onReset?.(key) : undefined} />
+        })}
+      </div>
+    </section>)}
+    {Object.entries(props.unavailable ?? {}).map(([key, item]) => <div className="renderer-setting-unavailable" key={key}>
+      <span>{key}：{item.message}（{item.code}）</span>
+      {props.onRestoreUnavailable && <button type="button" onClick={() => props.onRestoreUnavailable?.(key)}>恢复</button>}
+    </div>)}
+  </div>
 }
 
 export function evaluateRenderSettingCondition(condition: RenderSettingField['showIf'], values: Readonly<Record<string, RendererSettingValue>>): boolean {

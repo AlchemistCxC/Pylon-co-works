@@ -164,7 +164,10 @@ export interface RendererSettingsSchema {
   readonly groups: readonly RenderSettingGroup[]
 }
 
-const OPTION_TARGET_PATTERN = /^(kind|suite|slot)\.[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+$/
+// Renderer targets keep their historical dotted compatibility form; plugin
+// page/context-panel targets include an encoded plugin owner and contribution
+// segment so options remain isolated by (plugin, contribution, field).
+const OPTION_TARGET_PATTERN = /^(?:kind|suite|slot)\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+(?:\.[A-Za-z0-9_%~-]+)?$|^(?:plugin-page|context-panel)\.[A-Za-z0-9_%~-]+\.[A-Za-z0-9_%~-]+\.[A-Za-z0-9_%~-]+$/
 
 function fail(message: string): never {
   throw new Error(`Renderer settings schema 无效：${message}`)
