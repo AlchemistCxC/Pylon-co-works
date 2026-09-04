@@ -156,7 +156,7 @@ function RendererSettingsGroup(props: {
   const advancedCount = group.fields.filter(field => field.advanced).length
   const resetGroup = () => {
     for (const field of group.fields) {
-      const target = optionTargetFor(entry, settingFieldKey(field))
+      const target = `${entry.namespace}.${entry.id}.${settingFieldKey(field)}`
       store.removeOverride(target)
       store.clearSessionPreview(target)
     }
@@ -181,9 +181,9 @@ function RendererSettingsGroup(props: {
         <button type="button" onClick={event => { event.stopPropagation(); resetGroup() }}>恢复本组</button>
       </div>
       {fields.map(field => {
-        const key = settingFieldKey(field)
-      const target = optionTargetFor(entry, key)
-        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+      const key = settingFieldKey(field)
+        const target = `${entry.namespace}.${entry.id}.${key}`
+        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? optionTargetFor(entry, key) : optionTargetFor(entry, key)
         const options = resolveFieldOptions(field, optionTarget, optionEntries)
         const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
         const storedValue = storeSnapshot.values[target]
