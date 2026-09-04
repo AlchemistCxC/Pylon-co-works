@@ -56,7 +56,7 @@ export interface SettingsContributionCatalog {
   readonly revision: number
   readonly records: readonly SettingsContributionRecord[]
   readonly categories: readonly { readonly id: string; readonly label: string; readonly order: number; readonly entryCount: number }[]
-  readonly searchItems: readonly SettingsContributionRecord[]
+  readonly searchItems: readonly SettingsSearchItem[]
 }
 
 export interface SettingsContributionCatalogInput {
@@ -222,7 +222,8 @@ export function projectSettingsContributionCatalog(input: SettingsContributionCa
     ...category,
     entryCount: frozen.filter(record => record.canonicalRoute.category === category.id && record.active && !record.deprecated).length,
   })).filter(category => category.entryCount > 0 || category.id === 'advanced-catalog')
-  return Object.freeze({ revision: input.rendererSnapshot?.revision ?? 0, records: frozen, categories: Object.freeze(categories), searchItems: frozen })
+  const base = { revision: input.rendererSnapshot?.revision ?? 0, records: frozen, categories: Object.freeze(categories), searchItems: [] as readonly SettingsSearchItem[] }
+  return Object.freeze({ ...base, searchItems: buildSettingsContributionSearchItems(base) })
 }
 
 /** Editable routes are the conflict-free, active owner entries only. */

@@ -34,7 +34,7 @@ import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
-import { buildSettingsContributionSearchItems, projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
+import { projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
@@ -479,7 +479,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     void quickSearchOpen
     void rendererRegistrySnapshot.revision
     void settingsContributionCatalog.revision
-    return buildSettingsContributionSearchItems(settingsContributionCatalog)
+    return settingsContributionCatalog.searchItems
   }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
