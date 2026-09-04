@@ -87,6 +87,26 @@ export type {
   PluginSettingValue,
 } from '../plugin-runtime/settings/pluginSettingsTypes.ts'
 export type { PluginSettingsApi } from '../plugin-runtime/settings/pluginSettingsApi.ts'
+/** Framework-neutral settings schema/adapter contract for plugin pages and
+ * context panels. Renderer-prefixed names remain available as compatibility
+ * aliases from the same module. */
+export type {
+  SettingsSchema,
+  SettingsField,
+  SettingsValue,
+  SettingsValueAdapter,
+  RendererSettingsSchema,
+  RenderSettingField,
+  RendererSettingValue,
+  RendererSettingOption,
+  RendererSettingsPlacement,
+} from '../plugin-runtime/renderers/rendererSettingsTypes.ts'
+export type { SettingsTarget } from '../plugin-runtime/settings/settingsTargetGrammar.ts'
+export {
+  validateSettingsTarget,
+  stringifySettingsTarget,
+  parseSettingsTarget,
+} from '../plugin-runtime/settings/settingsTargetGrammar.ts'
 export type {
   FontContribution,
   FontRole,
