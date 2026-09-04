@@ -50,4 +50,19 @@ describe('plugin settings contracts', () => {
     })
     expect(normalized.target).toBe('kind.acme%2Ewidgets%2Echart.accent')
   })
+
+  it('preserves ownerPluginId and Theme compatibility when normalizing targets', () => {
+    const normalized = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.owner',
+      target: { namespace: 'kind', ownerPluginId: 'plugin.acme', ownerId: 'acme.widgets.chart', fieldKey: 'accent' },
+      upsert: [{ value: 'amber' }],
+    })
+    expect(normalized.target).toBe('kind.plugin%2Eacme.acme%2Ewidgets%2Echart.accent')
+    const theme = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.theme',
+      target: { namespace: 'theme', ownerId: 'theme', fieldKey: 'accent' },
+      upsert: [{ value: 'amber' }],
+    })
+    expect(theme.target).toBe('theme.accent')
+  })
 })

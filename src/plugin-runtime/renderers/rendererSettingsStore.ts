@@ -29,7 +29,11 @@ export interface RendererSettingsStore {
   clearDiagnostics(): void
 }
 
-const KEY_PATTERN = /^(kind|suite|slot)\.[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+$/
+// Renderer keys may be canonical structured targets (`%2E` encoded owner or
+// field, with an optional encoded plugin segment) or legacy dotted Kind keys.
+// Keep validation at the boundary while allowing the shared target grammar's
+// percent escapes to pass through unchanged.
+const KEY_PATTERN = /^(kind|suite|slot)\.[A-Za-z0-9%_.-]+\.[A-Za-z0-9%_.-]+(?:\.[A-Za-z0-9%_.-]+)?$/
 const DEFAULT_STORAGE_KEY = 'pylon-renderer-settings'
 
 function freezeSnapshot(snapshot: RendererSettingsStoreSnapshot): RendererSettingsStoreSnapshot {
