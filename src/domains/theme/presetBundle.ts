@@ -52,7 +52,7 @@ export interface PresetCoverage {
   readonly explicit: number
   readonly defaulted: number
   readonly unavailable: number
-  readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing'
+  readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing' | 'excluded'
   readonly policy?: 'complete' | 'partial'
 }
 
@@ -356,7 +356,7 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
     'builtin.presentation': 'Presentation',
     'builtin.renderer-settings': 'Renderer overrides',
   }
-  return Object.entries(labels).map(([id, label]) => {
+  const coverage = Object.entries(labels).map(([id, label]) => {
     const contribution = bundle?.contributions[id]
     const unavailablePayload = bundle?.unavailable?.[id]
     const counts = coverageCounts(id, contribution, unavailablePayload)
@@ -378,4 +378,9 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
       ...(contribution ? { policy: contribution.policy } : bundle?.source === 'builtin' ? { policy: 'partial' as const } : {}),
     }
   })
+  // Plugin Page/Context Panel schemas have no approved preset provider in
+  // this bundle version; make that exclusion visible to avoid implying that
+  // Theme/Renderer providers captured plugin-owned values.
+  if (bundle) coverage.push({ id: 'plugin-schema', providerId: 'plugin-schema', label: 'Plugin schema', explicit: 0, defaulted: 0, unavailable: 0, state: 'excluded', policy: 'partial' })
+  return coverage
 }

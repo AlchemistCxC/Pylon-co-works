@@ -101,6 +101,8 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
             ? ' · 未记录'
             : item.state === 'unavailable'
               ? ` · 不可用 ${item.unavailable}`
+              : item.state === 'excluded'
+                ? ' · 不纳入预设'
               : item.defaulted > 0
                 ? ` · ${item.explicit} 显式 / ${item.defaulted} 默认`
                 : ` · ${item.explicit} 显式`}{item.policy === 'partial' ? ' · 局部' : ''}
