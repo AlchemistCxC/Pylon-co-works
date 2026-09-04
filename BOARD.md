@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 23:15] [主施工员·工程师] P44 preset coverage：TemplateLibrary/presetCoverage 明示 Plugin Page/Context schema 按已批准策略 `excluded/partial`，不伪装由 Theme/Renderer provider 捕获；相关 11 项、tsc、lint 通过。
+
 [2026-09-04 23:13] [主施工员·工程师] P44 Theme owner matrix：`THEME_FIELD_OWNERS` 接入 Theme catalog 与 `ZoneGroupFields` 过滤，sidebarWidth/rightWidth/showPet 等 workspace/right-rail owner 不再生成 Theme editable route；兼容持久化仍保留。定向 Settings 30 项、tsc 通过。
 
 [2026-09-04 23:09] [主施工员·工程师] 跨域回归修复：第三方 Suite/Slot 仍保持既有 legacy Store key 写入（避免行为回归），仅 option lookup 使用结构化 target；`thirdPartySolidRenderer.integration` 与 Renderer Panel 10 项通过，tsc 通过。
