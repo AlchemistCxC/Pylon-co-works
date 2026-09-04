@@ -1,4 +1,5 @@
 import { THEME_FIELD_DEFS } from '../../themeFieldDefs.ts'
+import { RENDERER_SETTINGS_CATEGORIES } from '../../domains/rendererContent/rendererSettingsPlacement.ts'
 import { domainOfSection, SECTION_ZONES, SETTINGS_DOMAIN_BY_ID, SETTINGS_SECTION_LABELS, type SettingsSectionId, type SettingsSearchItem } from '../../settingsDomains.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RenderSettingField, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
@@ -54,6 +55,7 @@ export interface SettingsContributionRecord {
 export interface SettingsContributionCatalog {
   readonly revision: number
   readonly records: readonly SettingsContributionRecord[]
+  readonly categories: readonly { readonly id: string; readonly label: string; readonly order: number; readonly entryCount: number }[]
   readonly searchItems: readonly SettingsContributionRecord[]
 }
 
@@ -216,7 +218,11 @@ function withDiagnostics(records: SettingsContributionRecord[]): SettingsContrib
 export function projectSettingsContributionCatalog(input: SettingsContributionCatalogInput = {}): SettingsContributionCatalog {
   const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot), ...pluginRecords(input)])
   const frozen = freezeDeep(records.slice().sort((a, b) => JSON.stringify(a.canonicalRoute).localeCompare(JSON.stringify(b.canonicalRoute)))) as readonly SettingsContributionRecord[]
-  return Object.freeze({ revision: input.rendererSnapshot?.revision ?? 0, records: frozen, searchItems: frozen })
+  const categories = RENDERER_SETTINGS_CATEGORIES.map(category => ({
+    ...category,
+    entryCount: frozen.filter(record => record.canonicalRoute.category === category.id && record.active && !record.deprecated).length,
+  })).filter(category => category.entryCount > 0 || category.id === 'advanced-catalog')
+  return Object.freeze({ revision: input.rendererSnapshot?.revision ?? 0, records: frozen, categories: Object.freeze(categories), searchItems: frozen })
 }
 
 /** Editable routes are the conflict-free, active owner entries only. */

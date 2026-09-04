@@ -32,7 +32,6 @@ import InputPredictionSettingsPanel from './settings/InputPredictionSettingsPane
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
-import { projectRendererSettingsCatalog } from './settings/rendererSettingsCatalog.ts'
 import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
 import { buildSettingsContributionSearchItems, projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
@@ -463,13 +462,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const navGroupsFor = (section: SettingsSectionId): readonly { readonly id: string; readonly label: string }[] => {
     // Renderer 的三级项由 owner placement 投影成稳定语义类别；完整 object graph 留在高级目录。
     if (section === 'renderers') {
-      const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value
-        ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
-      const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
-        ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
-        : undefined
-      const projection = projectRendererSettingsCatalog(rendererRegistrySnapshot, activeSuiteId)
-      return projection.categories.map(category => ({ id: category.id, label: category.label }))
+      return settingsContributionCatalog.categories.map(category => ({ id: category.id, label: category.label }))
     }
     const zone = sectionZone(section)
     if (!zone) return []
