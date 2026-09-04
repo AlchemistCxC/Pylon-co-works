@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 23:13] [主施工员·工程师] P44 Theme owner matrix：`THEME_FIELD_OWNERS` 接入 Theme catalog 与 `ZoneGroupFields` 过滤，sidebarWidth/rightWidth/showPet 等 workspace/right-rail owner 不再生成 Theme editable route；兼容持久化仍保留。定向 Settings 30 项、tsc 通过。
+
 [2026-09-04 23:09] [主施工员·工程师] 跨域回归修复：第三方 Suite/Slot 仍保持既有 legacy Store key 写入（避免行为回归），仅 option lookup 使用结构化 target；`thirdPartySolidRenderer.integration` 与 Renderer Panel 10 项通过，tsc 通过。
 
 [2026-09-04 23:07] [主施工员·工程师] P44 adapter identity seam：Plugin Page/Context Panel 注册与 shadow transaction 校验 adapter namespace、ownerPluginId、contributionId；补注册拒绝回归。定向 13 项、tsc、lint 通过。
