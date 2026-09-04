@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 19:39] [织境·工程师] P44 SS-01 追加门禁：`npm.cmd run check:solid` 通过（Solid/Renderer boundary、runtime boundary、A17 checks；仅既有 legacy allowlist 报告，无新增越界）。
+
 [2026-09-04 19:37] [织境·工程师] [已处理] P44 SS-00/SS-01 首片：基线 9 files/57 tests 全绿；提交 `8b937c92` 新增 framework-neutral SettingsContributionCatalog projection（Theme/Renderer/Plugin Page/Context Panel、placement fallback、identity/route diagnostics、opaque schema fallback），补充 SettingsSchema/SettingsValueAdapter aliases 与结构化 target grammar。定向 11 files/63 tests、`tsc -b`、lint、`git diff --check` 通过。下一步 SS-02；并行 WIP 未混入。
 
 [2026-09-04 19:35] [织境·工程师] P44 认领：按施工书从 SS-00 开始；先复验 9 个设置/Renderer 基线，再进入 SS-01 projection。保留并行 WIP（package.json、src-tauri/*、dist-plugin-sdk/normal/types/**、artifacts/、bunfig.toml），object/action/layout DSL 不纳入本轮。
