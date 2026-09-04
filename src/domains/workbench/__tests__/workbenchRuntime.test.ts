@@ -53,6 +53,25 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().generationStart).toBe(0)
   })
 
+  it('keeps a terminal document closed even when the binding has no turn epoch', () => {
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1,
+      generating: true, generationStart: 10,
+    })
+    const terminal = {
+      ...createWorkbenchDocument('session-a'),
+      revision: 9,
+      session: { ...createWorkbenchDocument('session-a').session, status: 'completed' as const },
+    }
+    runtime.applyDocument(terminal, { ownerKey: 'owner-a', generation: 1 })
+    runtime.applyDocument(terminal, {
+      ownerKey: 'owner-a', generation: 1,
+      generationPatch: { generating: true, generationStart: 999 },
+    })
+    expect(runtime.getSnapshot().generating).toBe(false)
+    expect(runtime.getSnapshot().terminalFence).toBeUndefined()
+  })
+
   it('does not infer a terminal fence from a completed text row before a delayed tool start', () => {
     const make = (sequence: number, event: 'message.delta' | 'message.completed' | 'tool.started') => createWorkbenchEnvelope({
       sessionId: 'session-a', sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
@@ -76,7 +95,7 @@ describe('createPreviewWorkbenchRuntime', () => {
   })
 
   it('新 turnEpoch 清除旧 summary/fence，late active patch 不能复活旧回合', () => {
-    const base = { ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 2, generating: false, summary: { elapsedMs: 1, tokenCount: 1, completedFrame: '', reason: 'done' as const }, terminalFence: { turnEpoch: 2 } }
+    const base = { ...initial(), revision: 0, ownerKey: 'owner-a', generation: 1, turnEpoch: 2, generating: false, summary: { elapsedMs: 1, tokenCount: 1, completedFrame: '', reason: 'done' as const }, terminalFence: { turnEpoch: 2 } }
     const next = mergeWorkbenchRuntimeSnapshot(base, { turnEpoch: 3, generationPatch: { generating: true, generationStart: 100 } })
     expect(next).toMatchObject({ turnEpoch: 3, generating: true, summary: null })
     expect(next.terminalFence).toBeUndefined()
@@ -84,7 +103,7 @@ describe('createPreviewWorkbenchRuntime', () => {
 
   it('旧 turnEpoch patch 不能回退当前回合或清除 terminal fence', () => {
     const base = {
-      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 5,
+      ...initial(), revision: 0, ownerKey: 'owner-a', generation: 1, turnEpoch: 5,
       generating: false, summary: { elapsedMs: 9, tokenCount: 2, completedFrame: '', reason: 'done' as const },
       terminalFence: { ownerKey: 'owner-a', turnEpoch: 5, sequence: 12 },
     }

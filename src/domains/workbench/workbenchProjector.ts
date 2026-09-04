@@ -519,6 +519,7 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       ? true
       : providerIdentityKey(envelope.identity) !== ''
         && providerIdentityKey(envelope.identity) === providerIdentityKey(previous.identity)
+        || providerIdentityKey(envelope.identity) === '' && previous.running === true
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
   const duplicateIndex = role === 'user'
@@ -1115,9 +1116,11 @@ function reduceDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventE
 function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, code: string, message: string, level: 'info' | 'warning' | 'error', data?: unknown): WorkbenchDocument {
   const diagnostic = { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }
   const failedTurn = code === 'turn.failed' || code === 'provider.error'
+  const alreadyTerminal = TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())
+  const transitionToError = failedTurn && !alreadyTerminal
   return {
     ...document,
-    ...(failedTurn ? {
+    ...(transitionToError ? {
       messages: document.messages.map(item => item.running ? { ...item, running: false } : item),
       session: { ...document.session, status: 'error' },
     } : {}),

@@ -41,6 +41,17 @@ describe('WorkbenchProjector lifecycle slices (C13)', () => {
     expect(document.messages).toEqual([expect.objectContaining({ content: 'partial', running: false })])
   })
 
+  it('does not rewrite a completed terminal status when a provider error arrives late', () => {
+    const document = reduce([
+      envelope(1, { type: 'session.completed' }),
+      envelope(2, { type: 'diagnostic.notice', level: 'error', code: 'provider.error', message: 'late provider failure' }),
+    ])
+    expect(document.session.status).toBe('completed')
+    expect(document.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'provider.error', level: 'error' }),
+    ]))
+  })
+
   it('absorbs all late reasoning and tool terminal events after session completion', () => {
     const document = reduce([
       envelope(1, { type: 'session.completed' }),

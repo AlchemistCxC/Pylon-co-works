@@ -122,6 +122,12 @@ describe('WorkbenchProjector', () => {
     expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
   })
 
+  it('aggregates contiguous identity-less user chunks into one prompt row', () => {
+    const first = envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'first' }] })
+    const second = envelope(2, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'second' }] })
+    expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
+  })
+
   it('aggregates one assistant stream when the provider rotates identity on every chunk', () => {
     const chunks = [
       envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '这' }] }, { messageId: 'chunk-1' }),
