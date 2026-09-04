@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildRendererSettingsCatalog, probeSettingsRegistries } from '../rendererSettingsCatalog.ts'
 import type { RendererRegistrySnapshot } from '../../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RenderKindDefinition } from '../../../plugin-runtime/renderers/rendererTypes.ts'
+import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
 
 const schema = {
   schemaVersion: 1,
@@ -48,5 +49,18 @@ describe('Renderer settings catalog fallback placement', () => {
       expect.objectContaining({ code: 'plugin_settings_duplicate', id: 'plugin.settings' }),
       expect.objectContaining({ code: 'plugin_settings_invalid' }),
     ]))
+  })
+
+  it('shared Tool Kind schema is compatibility-only while Slot remains the editable route', () => {
+    const entries = buildRendererSettingsCatalog({
+      revision: 1,
+      renderKinds: BUILTIN_TOOL_RENDER_KINDS.map(kind => ({ contributionId: kind.id, ownerPluginId: 'core', ownerRuntimeInstanceId: 'core', layer: 'platform' as const, priority: 1, value: kind })),
+      messageRenderers: [], contentRenderers: [], toolRenderers: [], codeHighlighters: [], rendererSuites: [], rendererSlots: [],
+    })
+    const tool = entries.find(entry => entry.id === 'tool.read')!
+    expect(tool.compatibilityOnly).toBe(true)
+    expect(tool.fieldCount).toBe(0)
+    expect(tool.compatibilityFieldCount).toBeGreaterThan(0)
+    expect(tool.schema.groups[0].fields[0]).toMatchObject({ deprecated: true, inheritsFrom: expect.stringContaining('slot.') })
   })
 })

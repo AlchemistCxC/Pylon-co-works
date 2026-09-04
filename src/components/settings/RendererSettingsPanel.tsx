@@ -3,7 +3,7 @@ import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRen
 import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
-import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { isSettingVisible, settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
 import RendererSuitePicker from './RendererSuitePicker.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -15,7 +15,7 @@ import type { SettingsDensity } from './settingsChromeState.ts'
 import { selectWorkbenchAppearance } from '../../domains/workbench/appearance.ts'
 import { useStore } from '../../store.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
-import { resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
+import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
 import {
   projectRendererSettingsCatalog,
   rendererSettingsEntryKey,
@@ -60,7 +60,7 @@ function entryMatches(
   return entry.schema.groups.some(group => group.fields.some(field => {
     const target = namespace + '.' + settingFieldKey(field)
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    const options = resolveFieldOptions(field, optionTarget, optionEntries)
     return fieldMatches(field, query, options)
   }))
 }
@@ -125,10 +125,10 @@ function RendererSettingsGroup(props: {
     if (query) setOpen(true)
   }, [query])
   const fields = group.fields.filter(field => {
-    if (density !== 'all' && field.advanced) return false
+    if (!isSettingVisible(field, density)) return false
     const target = namespace + '.' + settingFieldKey(field)
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    const options = resolveFieldOptions(field, optionTarget, optionEntries)
     const matches = fieldMatches(field, query, options)
     return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
   })
@@ -164,7 +164,7 @@ function RendererSettingsGroup(props: {
         const key = settingFieldKey(field)
         const target = namespace + '.' + key
         const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+        const options = resolveFieldOptions(field, optionTarget, optionEntries)
         const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
         const storedValue = storeSnapshot.values[target]
         const unavailableValues = 'options' in field
@@ -309,19 +309,24 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
             <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>
           </div>
         </header>
-        {selected.schema.groups.map(group => <RendererSettingsGroup
-          key={group.id}
-          entry={selected}
-          group={group}
-          namespace={selected.namespace + '.' + selected.id}
-          values={selectedResolution.values}
-          sources={selectedResolution.sources}
-          query={query}
-          density={density}
-          store={store}
-          storeSnapshot={storeSnapshot}
-          optionEntries={optionSnapshot.entries}
-        />)}
+        {selected.compatibilityOnly
+          ? <div className="set-hint renderer-settings-compatibility" role="status">
+            该 Kind 设置已迁移至共享 Slot；此处仅保留旧 key 的兼容读取与诊断，不提供重复编辑表单。
+            {selected.compatibilityFieldCount ? `（兼容字段 ${selected.compatibilityFieldCount} 项）` : ''}
+          </div>
+          : selected.schema.groups.map(group => <RendererSettingsGroup
+            key={group.id}
+            entry={selected}
+            group={group}
+            namespace={selected.namespace + '.' + selected.id}
+            values={selectedResolution.values}
+            sources={selectedResolution.sources}
+            query={query}
+            density={density}
+            store={store}
+            storeSnapshot={storeSnapshot}
+            optionEntries={optionSnapshot.entries}
+          />)}
       </div>}
     </div>}
     {Object.entries(storeSnapshot.unavailable).map(([key, value]) => <div className="renderer-setting-unavailable" key={key}>

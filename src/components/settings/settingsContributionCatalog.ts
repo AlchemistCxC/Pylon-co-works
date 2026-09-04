@@ -120,7 +120,7 @@ function rendererRecords(snapshot: RendererRegistrySnapshot | undefined): Settin
         placementSource,
         semanticKey: (field as RenderSettingField & { semanticKey?: string }).semanticKey,
         inheritsFrom: (field as RenderSettingField & { inheritsFrom?: string }).inheritsFrom,
-        active: true,
+        active: !(source.namespace === 'kind' && source.value.id.startsWith('tool.')),
         deprecated: (field as RenderSettingField & { deprecated?: boolean }).deprecated,
         aliases: (field as RenderSettingField & { aliases?: readonly string[] }).aliases,
         diagnostics: categoryKnown ? [] : [{ code: 'placement-fallback', message: `未知 Renderer category：${category}` }],
@@ -198,7 +198,7 @@ export function projectSettingsContributionCatalog(input: SettingsContributionCa
 export function buildSettingsContributionSearchItems(
   catalog: SettingsContributionCatalog,
 ): readonly SettingsSearchItem[] {
-  return Object.freeze(catalog.records.map(record => {
+  return Object.freeze(catalog.records.filter(record => !(record.namespace === 'kind' && record.ownerId.startsWith('tool.') && record.deprecated)).map(record => {
     const route = record.canonicalRoute
     const domain = SETTINGS_DOMAIN_BY_ID[route.domain as keyof typeof SETTINGS_DOMAIN_BY_ID]
     const section = route.section as SettingsSectionId

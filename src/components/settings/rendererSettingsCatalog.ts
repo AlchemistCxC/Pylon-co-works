@@ -16,6 +16,9 @@ export interface RendererSettingsCatalogEntry {
   readonly placement: RendererSettingsPlacement
   readonly active: boolean
   readonly fieldCount: number
+  /** Legacy Kind schemas retained for migration/diagnostics, never editable in the normal form. */
+  readonly compatibilityOnly?: boolean
+  readonly compatibilityFieldCount?: number
 }
 
 export interface RendererSettingsCatalogCategory {
@@ -94,6 +97,10 @@ export function probeSettingsRegistries(
 
 function fieldCount(schema: RendererSettingsSchema): number {
   return schema.groups.reduce((count, group) => count + group.fields.length, 0)
+}
+
+function visibleFieldCount(schema: RendererSettingsSchema, compatibilityOnly: boolean): number {
+  return compatibilityOnly ? 0 : fieldCount(schema)
 }
 
 function technicalPlacement(objectOrder: number): RendererSettingsPlacement {
@@ -176,7 +183,9 @@ export function buildRendererSettingsCatalog(
     // the normal Tool Activity category presents the shared Slot once.
     active: (supportedKinds ? supportedKinds.has(entry.value.id) : true)
       && !entry.value.id.startsWith('tool.'),
-    fieldCount: fieldCount(entry.value.settings),
+    compatibilityOnly: entry.value.id.startsWith('tool.'),
+    fieldCount: visibleFieldCount(entry.value.settings, entry.value.id.startsWith('tool.')),
+    compatibilityFieldCount: entry.value.id.startsWith('tool.') ? fieldCount(entry.value.settings) : undefined,
   }] : [])
 
   return Object.freeze([...suiteEntries, ...slotEntries, ...kindEntries].sort((a, b) =>

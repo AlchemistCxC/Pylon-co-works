@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectSettingsContributionCatalog, settingsContributionIdentity } from '../settingsContributionCatalog.ts'
+import { buildSettingsContributionSearchItems, projectSettingsContributionCatalog, settingsContributionIdentity } from '../settingsContributionCatalog.ts'
 import type { RendererRegistrySnapshot } from '../../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { PluginSettingsPageContribution } from '../../../plugin-runtime/settings/pluginSettingsTypes.ts'
@@ -43,5 +43,20 @@ describe('SettingsContributionCatalog', () => {
     const duplicates = records.filter(record => record.ownerId === 'same')
     expect(duplicates.every(record => record.diagnostics.some(diagnostic => diagnostic.code === 'duplicate-identity'))).toBe(true)
     expect(settingsContributionIdentity(duplicates[0])).toContain('plugin-page')
+  })
+
+  it('keeps migrated layout and assistant avatar fields to one canonical editable route', () => {
+    const catalog = projectSettingsContributionCatalog()
+    expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(0)
+    expect(catalog.records.filter(record => record.fieldKey === 'assistantDotImage')).toHaveLength(1)
+    expect(catalog.records.find(record => record.fieldKey === 'assistantDotImage')?.canonicalRoute.section).toBe('chat')
+  })
+
+  it('does not index deprecated shared Tool Kind fields as duplicate search entries', () => {
+    const snapshot = rendererSnapshot({ renderKinds: [{
+      ...entry({ id: 'tool.read', category: 'tool', priority: 1, fallbackKind: 'content.unknown', settingsSchemaVersion: 1, validateInput: () => true, settings: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'density', type: 'boolean', deprecated: true }] }] } } as never),
+    }] })
+    const catalog = projectSettingsContributionCatalog({ rendererSnapshot: snapshot })
+    expect(buildSettingsContributionSearchItems(catalog).some(item => item.label === 'density' && item.kind === 'renderer-entry')).toBe(false)
   })
 })
