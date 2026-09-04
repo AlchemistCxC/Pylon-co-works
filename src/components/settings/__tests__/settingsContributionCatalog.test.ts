@@ -56,6 +56,18 @@ describe('SettingsContributionCatalog', () => {
     expect(settingsContributionIdentity(duplicates[0])).toContain('plugin-page')
   })
 
+  it('blocks the deterministic loser of a cross-owner route collision', () => {
+    const schema = { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'x', type: 'boolean' }] }] }
+    const snapshot = rendererSnapshot({
+      rendererSuites: [entry({ id: 'same', label: 'Suite', requiredKinds: [], apiVersion: 1, runtime: { framework: 'solid', version: '1' }, factory: {} as never, settings: schema } as never, 'same-suite')],
+      rendererSlots: [entry({ id: 'same', label: 'Slot', targetSuites: ['*'], kinds: [], priority: 1, fallback: true, canRender: () => true, createSurface: () => ({}), settings: schema } as never, 'same-slot')],
+    })
+    const records = projectSettingsContributionCatalog({ rendererSnapshot: snapshot }).records.filter(record => record.fieldKey === 'x')
+    expect(records).toHaveLength(2)
+    expect(records.filter(record => record.active)).toHaveLength(1)
+    expect(records.some(record => record.diagnostics.some(diagnostic => diagnostic.code === 'route-collision'))).toBe(true)
+  })
+
   it('keeps migrated layout and assistant avatar fields to one canonical editable route', () => {
     const catalog = projectSettingsContributionCatalog()
     expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(0)

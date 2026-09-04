@@ -216,10 +216,21 @@ function withDiagnostics(records: SettingsContributionRecord[]): SettingsContrib
   }
   return records.map(record => {
     const diagnostics = [...record.diagnostics]
-    if ((byIdentity.get(identity(record))?.length ?? 0) > 1) diagnostics.push({ code: 'duplicate-identity', message: '同一 owner/field identity 重复' })
+    const identityPeers = byIdentity.get(identity(record)) ?? []
+    const identityIndex = identityPeers.indexOf(record)
+    const duplicate = identityPeers.length > 1
+    if (duplicate) diagnostics.push({ code: 'duplicate-identity', message: '同一 owner/field identity 重复' })
     const routePeers = byRoute.get(JSON.stringify(record.canonicalRoute)) ?? []
-    if (routePeers.some(peer => identity(peer) !== identity(record))) diagnostics.push({ code: 'route-collision', message: '跨 owner canonical route 冲突' })
-    return { ...record, diagnostics: Object.freeze(diagnostics) }
+    const routeCollision = routePeers.some(peer => identity(peer) !== identity(record))
+    const routeIndex = routePeers.indexOf(record)
+    if (routeCollision) diagnostics.push({ code: 'route-collision', message: '跨 owner canonical route 冲突' })
+    const blocked = (duplicate && identityIndex > 0) || (routeCollision && routeIndex > 0)
+    return {
+      ...record,
+      active: blocked ? false : record.active,
+      ...(routeCollision && routeIndex > 0 ? { canonicalRoute: { ...record.canonicalRoute, category: 'plugin-extension' } } : {}),
+      diagnostics: Object.freeze(diagnostics),
+    }
   })
 }
 
