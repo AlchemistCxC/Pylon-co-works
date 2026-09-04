@@ -45,4 +45,23 @@ describe('streaming display scheduler terminal coalescing', () => {
     expect(published[1]?.sessionId).toBe('session-b')
     scheduler.dispose()
   })
+
+  it('preserves canonical part kinds during a partial reveal', () => {
+    let clock = 0
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value), {
+      now: () => clock,
+      revealUnitsPerSecond: 1,
+      maxRevealUnitsPerTick: 1,
+    })
+    const message = (content: string, parts: WorkbenchRuntimeSnapshot['messages'][number]['parts'], running: boolean) => ({
+      id: 'assistant-1', role: 'assistant' as const, content, parts, running, time: '', sender: 'peri',
+    })
+    scheduler.push(snapshot({ generating: true, messages: [message('a', [{ kind: 'markdown', text: 'a' }], true)] }))
+    clock = 34
+    scheduler.push(snapshot({ generating: true, messages: [message('a\ncode', [{ kind: 'markdown', text: 'a\n' }, { kind: 'code', text: 'code', language: 'ts' }], true)] }))
+    expect(published[1]?.messages[0]?.parts?.[0]).toMatchObject({ kind: 'markdown', text: 'a\n' })
+    expect(published[1]?.messages[0]?.parts?.[1]).toBeUndefined()
+    scheduler.dispose()
+  })
 })

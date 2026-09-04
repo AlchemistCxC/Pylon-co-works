@@ -457,15 +457,26 @@ function partialTextParts(
   if (parts === undefined) return undefined
   if (visibleText.length === 0) return []
 
-  // A stream can contain rich parts, but exposing the target parts while only
-  // part of `content` is visible would leak the not-yet-rendered tail through
-  // a semantic Slot. During the short partial window use one safe Markdown
-  // text part; the terminal tick restores the canonical parts object.
-  const preferred = parts.find(part => (
-    part.kind === 'markdown' || part.kind === 'text' || part.kind === 'reasoning' || part.kind === 'thinking'
-  ))
-  const kind = preferred?.kind === 'text' ? 'text' : 'markdown'
-  return [{ kind, text: visibleText }]
+  // Keep the canonical block kinds during interpolation. Replacing a rich
+  // multi-part message with one synthetic markdown part changes paragraph/
+  // code-block geometry on every terminal handoff, which is visible as a
+  // height jump. Clip only text-bearing parts to the visible prefix and do
+  // not expose later rich parts until their text range is reached.
+  const textKinds = new Set(['text', 'markdown', 'code', 'ansi', 'reasoning', 'thinking'])
+  let remaining = visibleText.length
+  const clipped: ContentPart[] = []
+  for (const part of parts) {
+    if (!textKinds.has(part.kind) || typeof (part as { text?: unknown }).text !== 'string') {
+      if (remaining > 0) continue
+      break
+    }
+    const text = (part as { text: string }).text
+    const take = Math.min(remaining, text.length)
+    if (take > 0) clipped.push({ ...part, text: text.slice(0, take) } as ContentPart)
+    remaining -= take
+    if (remaining <= 0) break
+  }
+  return clipped
 }
 
 function advancePrefix(current: string, target: string, budget: number): PrefixAdvance {
