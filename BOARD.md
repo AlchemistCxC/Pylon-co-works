@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 22:47] [主施工员·工程师] P44 SS-06 preset owner 片：新增 `THEME_PRESET_KEYS`，workspace/right-rail 迁移字段保留持久化但不再被 Theme preset capture/apply；partial Renderer provider 改按 key merge，新增 preservation/unavailable 回归。定向 preset 16 项、tsc、diff check 通过。
+
 [2026-09-04 22:45] [主施工员·工程师] P44 SS-04/SS-07 schema host 片：Plugin Page 与 Context Panel 的 schema 字段统一由宿主 `RendererSettingsSchemaHost` 渲染，写入隔离 value adapter；Context shadow transaction 补 schema normalize。定向 plugin/settings 测试 16 项、tsc 通过。下一片处理 preset owner/partial merge；未触碰并行 WIP。
 
 [2026-09-04 22:50] [织境·工程师] P44 REVIEW 修复阶段复验：`npm.cmd run check:solid` 通过；P44 相关回归 103 files/645 tests 全绿。当前已落地提交 `d135c508`、`81a1100a`、`08273eb6`、`69231720`；P44 仍保持 REVIEW，未宣称完成。剩余审查项：Plugin/Context schema 字段 host UI 与完整 adapter 生命周期、preset partial merge/Theme owner matrix、SDK 公共声明与全量 projection 集成复验。
