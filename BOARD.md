@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 22:49] [主施工员·工程师] P44 SDK seam：`src/sdk/index.ts` 公开导出通用 `SettingsSchema/SettingsTarget/SettingsValueAdapter` 及唯一 target parser/stringifier；未修改未提交的 `dist-plugin-sdk/normal/types/**`，待发行流程生成声明。
+
 [2026-09-04 22:47] [主施工员·工程师] P44 SS-06 preset owner 片：新增 `THEME_PRESET_KEYS`，workspace/right-rail 迁移字段保留持久化但不再被 Theme preset capture/apply；partial Renderer provider 改按 key merge，新增 preservation/unavailable 回归。定向 preset 16 项、tsc、diff check 通过。
 
 [2026-09-04 22:45] [主施工员·工程师] P44 SS-04/SS-07 schema host 片：Plugin Page 与 Context Panel 的 schema 字段统一由宿主 `RendererSettingsSchemaHost` 渲染，写入隔离 value adapter；Context shadow transaction 补 schema normalize。定向 plugin/settings 测试 16 项、tsc 通过。下一片处理 preset owner/partial merge；未触碰并行 WIP。
