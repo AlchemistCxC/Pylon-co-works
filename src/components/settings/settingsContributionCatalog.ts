@@ -18,6 +18,14 @@ export interface SettingsContributionDiagnostic {
   readonly message: string
 }
 
+export interface SettingsConsumerTrace {
+  readonly ownerDefinition: string
+  readonly settingsControl: string
+  readonly storeOrPreview: string
+  readonly productionConsumer: string
+  readonly visibleResult: string
+}
+
 export interface SettingsContributionRecord {
   readonly source: SettingsContributionSource
   readonly ownerId: string
@@ -40,6 +48,7 @@ export interface SettingsContributionRecord {
   readonly deprecated?: boolean
   readonly aliases?: readonly string[]
   readonly diagnostics: readonly SettingsContributionDiagnostic[]
+  readonly consumerTrace?: SettingsConsumerTrace
 }
 
 export interface SettingsContributionCatalog {
@@ -82,6 +91,10 @@ function themeRecords(): SettingsContributionRecord[] {
         group: definition.group, field: fieldKey,
       },
       placementSource: 'host-policy', active: true,
+      consumerTrace: {
+        ownerDefinition: `themeFieldDefs:${fieldKey}`, settingsControl: 'themeFieldRenderer',
+        storeOrPreview: 'ThemeStore.setZoneField', productionConsumer: 'themeCssSnapshot', visibleResult: 'Workbench CSS/theme value',
+      },
       diagnostics: [],
     })
   }
@@ -124,6 +137,10 @@ function rendererRecords(snapshot: RendererRegistrySnapshot | undefined): Settin
         deprecated: (field as RenderSettingField & { deprecated?: boolean }).deprecated,
         aliases: (field as RenderSettingField & { aliases?: readonly string[] }).aliases,
         diagnostics: categoryKnown ? [] : [{ code: 'placement-fallback', message: `未知 Renderer category：${category}` }],
+        consumerTrace: {
+          ownerDefinition: `${source.namespace}:${source.value.id}.${key}`, settingsControl: 'RendererSettingField',
+          storeOrPreview: 'RendererSettingsStore', productionConsumer: 'productionRenderAppearance', visibleResult: 'resolved renderer appearance',
+        },
       })
     }
   }
@@ -142,6 +159,10 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
       namespace: 'plugin-page' as const, canonicalRoute: { domain: 'plugins', section: 'pluginManager', object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
       diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
+      consumerTrace: {
+        ownerDefinition: `plugin-page:${entry.contributionId}`, settingsControl: hasSchema && hasAdapter ? 'RendererSettingField' : 'PluginSettingsPageHost',
+        storeOrPreview: hasAdapter ? 'SettingsValueAdapter' : 'opaque surface', productionConsumer: 'plugin contribution owner', visibleResult: 'plugin settings surface',
+      },
     }
     if (!hasSchema || !hasAdapter) { records.push(base); continue }
     for (const group of page.schema!.groups) for (const field of group.fields) {
@@ -160,6 +181,10 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
       namespace: 'context-panel' as const, canonicalRoute: { domain: section === 'right' ? 'appearance' : 'plugins', section, object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
       diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
+      consumerTrace: {
+        ownerDefinition: `context-panel:${entry.contributionId}`, settingsControl: hasSchema && hasAdapter ? 'RendererSettingField' : 'ContextPanelHost',
+        storeOrPreview: hasAdapter ? 'SettingsValueAdapter' : 'opaque surface', productionConsumer: 'context panel owner', visibleResult: 'context panel settings surface',
+      },
     }
     if (!hasSchema || !hasAdapter) { records.push(base); continue }
     for (const group of panel.schema!.groups) for (const field of group.fields) {
@@ -192,6 +217,11 @@ export function projectSettingsContributionCatalog(input: SettingsContributionCa
   const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot), ...pluginRecords(input)])
   const frozen = freezeDeep(records.slice().sort((a, b) => JSON.stringify(a.canonicalRoute).localeCompare(JSON.stringify(b.canonicalRoute)))) as readonly SettingsContributionRecord[]
   return Object.freeze({ revision: input.rendererSnapshot?.revision ?? 0, records: frozen, searchItems: frozen })
+}
+
+/** Editable routes are the conflict-free, active owner entries only. */
+export function canonicalEditableRecords(catalog: SettingsContributionCatalog): readonly SettingsContributionRecord[] {
+  return Object.freeze(catalog.records.filter(record => record.active && !record.deprecated && !record.diagnostics.some(diagnostic => diagnostic.code === 'duplicate-identity' || diagnostic.code === 'route-collision')))
 }
 
 /** Convert the canonical records into the SettingsQuickSearch contract. */

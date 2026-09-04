@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSettingsContributionSearchItems, projectSettingsContributionCatalog, settingsContributionIdentity } from '../settingsContributionCatalog.ts'
+import { buildSettingsContributionSearchItems, canonicalEditableRecords, projectSettingsContributionCatalog, settingsContributionIdentity } from '../settingsContributionCatalog.ts'
 import type { RendererRegistrySnapshot } from '../../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { PluginSettingsPageContribution } from '../../../plugin-runtime/settings/pluginSettingsTypes.ts'
@@ -58,5 +58,13 @@ describe('SettingsContributionCatalog', () => {
     }] })
     const catalog = projectSettingsContributionCatalog({ rendererSnapshot: snapshot })
     expect(buildSettingsContributionSearchItems(catalog).some(item => item.label === 'density' && item.kind === 'renderer-entry')).toBe(false)
+  })
+
+  it('emits consumer traces and excludes compatibility records from editable routes', () => {
+    const catalog = projectSettingsContributionCatalog()
+    const accent = catalog.records.find(record => record.fieldKey === 'accent')!
+    expect(accent.consumerTrace).toMatchObject({ settingsControl: 'themeFieldRenderer', productionConsumer: 'themeCssSnapshot' })
+    expect(canonicalEditableRecords(catalog).some(record => record.fieldKey === 'accent')).toBe(true)
+    expect(canonicalEditableRecords(catalog).some(record => record.ownerId === 'tool.read')).toBe(false)
   })
 })
