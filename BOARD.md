@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 22:42] [织境·工程师] P44 REVIEW 修复第四片：提交 `69231720`，Renderer records 复用 host placement/active-suite projection，第三方 `tool.*` 不再按前缀误隐藏；showPet 生成 workspace page-owned canonical route 并接入 Solid appearance source；非法 user/session value 保留 unavailable；palette presentation 禁止隐式自由输入；Preview 统一传递动态 option entries；compatibility Kind 不再显示“恢复当前对象”。相关 5 files/42 tests、tsc/lint/diff check 通过（仅既有 warning）。P44 仍保持 REVIEW，待 preset/SDK/全链路回归及架构复验。
+
 [2026-09-04 22:32] [织境·工程师] P44 REVIEW 修复第三片：提交 `08273eb6` 接入 Plugin Settings schema adapter host，统一 page registry/schema normalize，adapter 使用稳定 length-delimited bucket，snapshot 缓存/外部更新 revision/无操作不发布，并提供 unavailable mark/restore；PluginSettingsPageHost 的 schema 页面改走 adapter，opaque 页面保留 legacy bucket。新增 adapter/schema 回归 20 项，tsc/lint/diff check 通过（仅既有 warning）；P44 仍保持 REVIEW，下一片处理 active suite/placement、owner matrix 与 showPet/palette。
 
 [2026-09-04 22:20] [织境·工程师] P44 REVIEW 修复第二片：提交 `81a1100a` 将 SettingsContributionCatalog 扩展为共享 compositor（renderer projection、activation snapshot、revision），Settings、RendererSettingsPanel、RendererSettingsPreview 改为消费同一 projection；active Suite 进入 catalog，categories/searchItems 深冻结回归。相关 3 files/21 tests、tsc/lint/diff check 通过；P44 仍保持 REVIEW，Plugin/Context host adapter 与 owner/placement 后续处理。
