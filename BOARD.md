@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 02:42] [主施工员·工程师] P45 流式终态一致性首片完成：提交 `6fd0dddd`。新增 runtime 原子 terminal merge/turnEpoch/fence、projector late-event 吸收与 session lifecycle allowlist；Solid canonical/transient 单一 display owner、scheduler invariant 兜底、Host Port terminal guard、connector 同值/同帧去重；目标域 25 文件/313 项通过，lint 0 errors（1 条既有 warning），Solid/boundary 脚本与 `git diff --check` 通过。并行 WIP（SDK 声明、package/Rust、artifacts、bunfig）未混入；`tsc -b`/`check:solid` 仍被既有 presetBundle/settingsContributionCatalog 诊断阻塞。真实 Tauri/WebView/provider trace 后置。
+
 [2026-09-04 23:15] [主施工员·工程师] P44 preset coverage：TemplateLibrary/presetCoverage 明示 Plugin Page/Context schema 按已批准策略 `excluded/partial`，不伪装由 Theme/Renderer provider 捕获；相关 11 项、tsc、lint 通过。
 
 [2026-09-04 23:13] [主施工员·工程师] P44 Theme owner matrix：`THEME_FIELD_OWNERS` 接入 Theme catalog 与 `ZoneGroupFields` 过滤，sidebarWidth/rightWidth/showPet 等 workspace/right-rail owner 不再生成 Theme editable route；兼容持久化仍保留。定向 Settings 30 项、tsc 通过。
