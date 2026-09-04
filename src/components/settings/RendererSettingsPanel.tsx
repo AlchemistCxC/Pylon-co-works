@@ -201,6 +201,9 @@ function RendererSettingsGroup(props: {
           />
           <div className="renderer-setting-provenance">
             <span>{SOURCE_LABELS[sources[key] ?? 'schema-default']}</span>
+            {field.scope && <span data-setting-scope={field.scope}>scope: {field.scope}</span>}
+            {field.inheritsFrom && <span>继承自 {field.inheritsFrom}</span>}
+            {field.semanticKey && <span>semantic: {field.semanticKey}</span>}
             <code>{target}</code>
           </div>
         </div>

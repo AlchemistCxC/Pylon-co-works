@@ -3,12 +3,13 @@ import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistryEntry, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './pluginSettingsTypes.ts'
+import { stringifySettingsTarget } from './settingsTargetGrammar.ts'
 
-const TARGET_PATTERN = /^[a-z][a-z0-9-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+$/
+const TARGET_PATTERN = /^[a-z][a-z0-9-]*(?:\.[A-Za-z0-9_%~-]+)+$/
 // Legacy targets may contain dotted third-party Kind owners. Structured
 // targets are canonical; this compatibility validator only rejects empty
 // segments and preserves the original string for migration.
-const RENDERER_TARGET_PATTERN = /^(suite|slot)\.[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+$|^kind\.[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+$/
+const RENDERER_TARGET_PATTERN = /^(suite|slot)\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+$|^kind\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+$/
 
 function themeFieldFromTarget(target: string): ThemeFieldKey | null {
   if (!target.startsWith('theme.')) return null
@@ -35,17 +36,18 @@ export function validatePluginSettingOptionsContribution(
   if (!contribution.id || contribution.id !== contribution.id.trim()) {
     throw new Error('Plugin setting options contribution id 非法')
   }
-  if (!TARGET_PATTERN.test(contribution.target) || (contribution.target.startsWith('kind.') || contribution.target.startsWith('suite.') || contribution.target.startsWith('slot.')) && !RENDERER_TARGET_PATTERN.test(contribution.target)) {
+  const target = typeof contribution.target === 'string' ? contribution.target : stringifySettingsTarget(contribution.target)
+  if (!TARGET_PATTERN.test(target) || (target.startsWith('kind.') || target.startsWith('suite.') || target.startsWith('slot.')) && !RENDERER_TARGET_PATTERN.test(target)) {
     throw new Error(`Plugin setting options target 非法：${contribution.id}`)
   }
-  const themeField = themeFieldFromTarget(contribution.target)
-  if (contribution.target.startsWith('theme.') && !themeField) {
-    throw new Error(`Plugin setting options target 不存在：${contribution.target}`)
+  const themeField = themeFieldFromTarget(target)
+  if (target.startsWith('theme.') && !themeField) {
+    throw new Error(`Plugin setting options target 不存在：${target}`)
   }
   if (themeField) {
     const definition = THEME_FIELD_DEFS[themeField]
     if (definition.type !== 'select' && definition.type !== 'color') {
-      throw new Error(`Plugin setting options target 不支持候选项：${contribution.target}`)
+      throw new Error(`Plugin setting options target 不支持候选项：${target}`)
     }
   }
   const remove = [...new Set(contribution.remove ?? [])]
@@ -61,6 +63,7 @@ export function validatePluginSettingOptionsContribution(
   }
   return Object.freeze({
     ...contribution,
+    target,
     remove: Object.freeze(remove),
     upsert: Object.freeze(upsert),
   })

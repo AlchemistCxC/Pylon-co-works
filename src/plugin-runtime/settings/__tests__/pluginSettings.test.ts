@@ -43,4 +43,11 @@ describe('plugin settings contracts', () => {
       id: 'plugin.palette', target: 'kind.acme.widgets.chart.accent', upsert: [{ value: 'amber' }],
     })).not.toThrow()
   })
+
+  it('normalizes structured targets to an unambiguous legacy string', () => {
+    const normalized = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.structured', target: { namespace: 'kind', ownerId: 'acme.widgets.chart', fieldKey: 'accent' }, upsert: [{ value: 'amber' }],
+    })
+    expect(normalized.target).toBe('kind.acme%2Ewidgets%2Echart.accent')
+  })
 })
