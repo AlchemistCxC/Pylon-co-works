@@ -29,12 +29,23 @@ describe('SettingsContributionCatalog', () => {
     expect(record.diagnostics.some(diagnostic => diagnostic.code === 'placement-fallback')).toBe(true)
   })
 
+  it('uses host policy for known owner placement hints', () => {
+    const snapshot = rendererSnapshot({ renderKinds: [entry({ id: 'content.fixture', category: 'content', priority: 1, fallbackKind: 'content.unknown', settingsSchemaVersion: 1, validateInput: () => true, settings: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'x', type: 'boolean' }] }] }, settingsPlacement: { categoryId: 'markdown-text', categoryLabel: 'owner supplied label' } }) as never] })
+    expect(projectSettingsContributionCatalog({ rendererSnapshot: snapshot }).records.find(record => record.fieldKey === 'x')?.placementSource).toBe('host-policy')
+  })
+
   it('keeps plugin schema opaque without an adapter and projects fields with one', () => {
     const opaque: PluginSettingsPageContribution = { id: 'opaque', label: 'Opaque', renderKind: 'isolated-surface', surfaceId: 'opaque' }
     const adapted: PluginSettingsPageContribution = { id: 'adapted', label: 'Adapted', renderKind: 'isolated-surface', surfaceId: 'adapted', schema: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'enabled', type: 'boolean' }] }] }, valueAdapter: { namespace: 'plugin-page', getSnapshot: () => ({ values: {}, unavailable: {}, revision: 0 }), setValue: () => {}, removeValue: () => {}, reset: () => {}, subscribe: () => () => {} } }
     const records = projectSettingsContributionCatalog({ pluginPages: [entry(opaque, 'opaque'), entry(adapted, 'adapted')] }).records
     expect(records.find(record => record.ownerId === 'opaque')?.fieldKey).toBeUndefined()
     expect(records.some(record => record.ownerId === 'adapted' && record.fieldKey === 'enabled')).toBe(true)
+  })
+
+  it('keeps adapter unavailable values as visible records', () => {
+    const page: PluginSettingsPageContribution = { id: 'adapted', label: 'Adapted', renderKind: 'isolated-surface', surfaceId: 'adapted', schema: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [] }] }, valueAdapter: { namespace: 'plugin-page', getSnapshot: () => ({ values: {}, unavailable: { retired: { value: 'old', code: 'option-removed', message: '候选已卸载' } }, revision: 2 }), setValue: () => {}, removeValue: () => {}, reset: () => {}, subscribe: () => () => {} } }
+    const record = projectSettingsContributionCatalog({ pluginPages: [entry(page, 'adapted')] }).records.find(item => item.fieldKey === 'retired')
+    expect(record).toMatchObject({ active: false, diagnostics: [{ code: 'option-removed' }] })
   })
 
   it('distinguishes duplicate identity from route collision', () => {

@@ -117,7 +117,7 @@ function rendererRecords(snapshot: RendererRegistrySnapshot | undefined): Settin
     const placement = source.value.settingsPlacement
     const category = placement?.categoryId ?? 'plugin-extension'
     const categoryKnown = ['foundation', 'markdown-text', 'code-terminal', 'reasoning', 'tool-activity', 'workflow', 'files-resources', 'interaction-diagnostic', 'plugin-extension', 'advanced-catalog'].includes(category)
-    const placementSource = categoryKnown ? (placement ? 'owner-hint' : 'fallback') : 'fallback'
+    const placementSource = categoryKnown ? 'host-policy' : 'fallback'
     for (const group of schema.groups) for (const field of group.fields) {
       const key = settingFieldKey(field)
       if (!key) continue
@@ -171,6 +171,10 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
       const key = settingFieldKey(field)
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
     }
+    for (const [key, unavailable] of Object.entries(page.valueAdapter!.getSnapshot().unavailable)) {
+      if (records.some(record => record.ownerId === entry.contributionId && record.fieldKey === key)) continue
+      records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [{ code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }] })
+    }
   }
   for (const entry of input.contextPanels ?? []) {
     const panel = entry.value
@@ -192,6 +196,10 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
     for (const group of panel.schema!.groups) for (const field of group.fields) {
       const key = settingFieldKey(field)
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
+    }
+    for (const [key, unavailable] of Object.entries(panel.valueAdapter!.getSnapshot().unavailable)) {
+      if (records.some(record => record.ownerId === entry.contributionId && record.fieldKey === key)) continue
+      records.push({ ...base, fieldKey: key, active: false, canonicalRoute: { ...base.canonicalRoute, field: key }, diagnostics: [{ code: unavailable.code || 'unavailable', message: unavailable.message || '字段当前不可用，已保留原值' }] })
     }
   }
   return records
