@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
+import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 
 function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
   return {
@@ -54,14 +55,19 @@ describe('streaming display scheduler terminal coalescing', () => {
       revealUnitsPerSecond: 1,
       maxRevealUnitsPerTick: 1,
     })
-    const message = (content: string, parts: WorkbenchRuntimeSnapshot['messages'][number]['parts'], running: boolean) => ({
-      id: 'assistant-1', role: 'assistant' as const, content, parts, running, time: '', sender: 'peri',
+    const message = (content: string, parts: WorkbenchMessage['parts'], running: boolean): WorkbenchMessage => ({
+      id: 'assistant-1', segmentId: 'segment-1', role: 'assistant', content, parts,
+      identity: {}, source: { provider: 'peri', sourceId: 'test' }, sequence: 1, running, time: '',
     })
-    scheduler.push(snapshot({ generating: true, messages: [message('a', [{ kind: 'markdown', text: 'a' }], true)] }))
+    const document = (content: string, parts: WorkbenchMessage['parts']): ReturnType<typeof createWorkbenchDocument> => ({
+      ...createWorkbenchDocument('session-a'), revision: content.length,
+      messages: [message(content, parts, true)],
+    })
+    scheduler.push(snapshot({ generating: true, document: document('a', [{ kind: 'markdown', text: 'a' }]) }))
     clock = 34
-    scheduler.push(snapshot({ generating: true, messages: [message('a\ncode', [{ kind: 'markdown', text: 'a\n' }, { kind: 'code', text: 'code', language: 'ts' }], true)] }))
-    expect(published[1]?.messages[0]?.parts?.[0]).toMatchObject({ kind: 'markdown', text: 'a\n' })
-    expect(published[1]?.messages[0]?.parts?.[1]).toBeUndefined()
+    scheduler.push(snapshot({ generating: true, document: document('a\ncode', [{ kind: 'markdown', text: 'a\n' }, { kind: 'code', text: 'code', language: 'ts' }]) }))
+    expect(published[1]?.document?.messages[0]?.parts[0]).toMatchObject({ kind: 'markdown', text: 'a\n' })
+    expect(published[1]?.document?.messages[0]?.parts[1]).toBeUndefined()
     scheduler.dispose()
   })
 })
