@@ -497,8 +497,9 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
 function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
-    if (role === 'user') document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
-    else if (event.type === 'message.delta') return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late assistant event ignored after terminal fence', 'warning')
+    const userTurnInProgress = role === 'user' && document.messages.at(-1)?.role === 'user' && document.messages.at(-1)?.running === true
+    if (role === 'user' && (event.type === 'message.started' || event.type === 'message.delta' || (event.type === 'message.completed' && userTurnInProgress))) document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
+    else if (role !== 'user' || event.type === 'message.completed') return addLateEventDiagnostic(document, envelope, 'late assistant event ignored after terminal fence')
   }
   document = settleSupersededRunningMessages(document, role)
   const parts = event.parts ?? []
@@ -556,8 +557,8 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 }
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
-  if (event.type === 'reasoning.delta' && TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
-    return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late reasoning event ignored after terminal fence', 'warning')
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addLateEventDiagnostic(document, envelope, 'late reasoning event ignored after terminal fence')
   }
   document = settleSupersededRunningMessages(document, 'reasoning')
   const parts = event.parts ?? []
@@ -581,6 +582,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const append = previous !== undefined
     && previous.role === 'reasoning'
     && textStreamContinues(document, previous, envelope)
+    && !document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
     && (previous.running || (event.type !== 'reasoning.delta' && sameTerminalIdentity))
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
@@ -598,7 +600,8 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     }
     return document
   }
-  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running) {
+  const hasToolBoundary = previous !== undefined && document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
+  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary) {
     const previousTurn = previous.identity.turnId
     const incomingTurn = envelope.identity.turnId
     const previousProvider = providerIdentityKey(previous.identity)
@@ -644,8 +647,8 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
 }
 
 function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent): WorkbenchDocument {
-  if ((event.type === 'tool.started' || event.type === 'tool.progress') && TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
-    return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late tool event ignored after terminal fence', 'warning')
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addLateEventDiagnostic(document, envelope, 'late tool event ignored after terminal fence')
   }
   const tool = isRecord(event.tool) ? event.tool : {}
   const id = stringValue(tool.toolCallId) || envelope.identity.toolCallId || envelope.eventId
@@ -731,6 +734,9 @@ function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: Wo
 }
 
 function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent): WorkbenchDocument {
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addLateEventDiagnostic(document, envelope, 'late activity event ignored after terminal fence')
+  }
   const id = event.activityId || envelope.identity.taskId || envelope.eventId
   const activity = isRecord(event.activity) ? event.activity : {}
   const patch = isRecord(event.patch) ? event.patch : {}
@@ -1032,13 +1038,18 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   const completedAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
   const previousStatus = document.session.status
   const requestedStatus = event.type === 'session.completed' ? 'completed' : event.status
-  const nextStatus = requestedStatus && SESSION_LIFECYCLE_STATUSES.has(requestedStatus.toLowerCase())
-    && !(TERMINAL_SESSION_STATUSES.has(previousStatus.toLowerCase()) && event.type === 'session.status-updated' && !TERMINAL_SESSION_STATUSES.has(requestedStatus.toLowerCase()))
+  const requestedLower = requestedStatus?.toLowerCase()
+  const previousLower = previousStatus.toLowerCase()
+  const terminalRegression = TERMINAL_SESSION_STATUSES.has(previousLower)
+    && requestedLower !== undefined && requestedLower !== previousLower
+  const nextStatus = requestedStatus && SESSION_LIFECYCLE_STATUSES.has(requestedLower ?? '')
+    && !terminalRegression
     ? requestedStatus
     : previousStatus
+  const settlesMessages = TERMINAL_SESSION_STATUSES.has(nextStatus.toLowerCase())
   return {
     ...document,
-    ...(event.type === 'session.completed' ? {
+    ...(settlesMessages ? {
       messages: document.messages.map(message => message.running ? {
         ...message,
         running: false,
@@ -1149,6 +1160,11 @@ function insertBySequence<T extends { sequence: number }>(items: readonly T[], i
     else high = middle
   }
   return [...items.slice(0, low), item, ...items.slice(low)]
+}
+
+function addLateEventDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, message: string): WorkbenchDocument {
+  if (document.diagnostics.some(item => item.code === 'late-event-after-terminal')) return document
+  return addDiagnostic(document, envelope, 'late-event-after-terminal', message, 'warning')
 }
 
 function updateTimeline(items: readonly WorkbenchTimelineEntry[], eventId: string, patch: Partial<WorkbenchTimelineEntry>): WorkbenchTimelineEntry[] {

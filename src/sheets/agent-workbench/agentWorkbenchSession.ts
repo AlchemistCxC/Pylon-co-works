@@ -441,7 +441,18 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }>>()
 
   const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
-    runtime.update({ ...patch, document: runtime.getSnapshot().document })
+    const current = runtime.getSnapshot()
+    if (!current.document) {
+      runtime.update(patch)
+      return
+    }
+    const { document: _ignoredDocument, ...generationPatch } = patch
+    runtime.applyDocument(current.document, {
+      ownerKey,
+      generation,
+      preserveGeneration: false,
+      generationPatch,
+    })
   }
 
   const syncSourceRuntime = (targetSource: string) => {
@@ -451,7 +462,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const generating = controller.getGenerating(targetSource)
     const controllerSummary = controller.getSummary(targetSource)
     const existingSummary = runtime.getSnapshot().summary
-    updateRuntimeState({
+    const currentDocument = runtime.getSnapshot().document
+    if (!currentDocument) return
+    runtime.applyDocument(currentDocument, {
+      ownerKey,
+      generation,
+      preserveGeneration: false,
+      generationPatch: {
       generating,
       generationStart: generating ? controller.getStartTime(targetSource) : 0,
       lastTokenAt: controller.getLastActivityAt(targetSource),
@@ -465,6 +482,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       // Keep the display-only restored terminal summary stable across later
       // controller notifications that still have no in-memory summary.
       summary: controllerSummary ?? (!generating && existingSummary?.reason === 'done' ? existingSummary : null),
+      },
     })
   }
 
@@ -619,7 +637,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
 
   const applyLive = (incoming: WorkbenchEventEnvelope) => {
-    const isUserStart = (incoming.event.type === 'message.delta' || incoming.event.type === 'message.completed') && incoming.event.role === 'user'
+    const currentBefore = runtime.getSnapshot().document
+    const priorUser = [...(currentBefore?.messages ?? [])].reverse().find(message => message.role === 'user')
+    const isUserStart = incoming.event.type === 'message.delta' && incoming.event.role === 'user'
+      && !(priorUser?.running === true)
     const content = isUserStart ? (incoming.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('') : ''
     const pending = pendingOptimisticBySource.get(incoming.sessionId) ?? []
     const echoesOptimistic = pending.some(item => item.clientMessageId === incoming.identity.interactionId || item.content === content)

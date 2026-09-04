@@ -42,18 +42,24 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   const messages = documentMessages(document)
   const generation = host.generation.getSnapshot()
   const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
+  // A terminal fence/summary is stronger than a stale controller flag. Once
+  // observed, clear active-only metadata in the same host projection so a
+  // third-party Suite cannot render a mixed terminal+active snapshot.
+  const terminal = terminalStatus || generation.summary !== null || generation.terminalFence !== undefined
+  const generating = terminal ? false : generation.generating
   const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
   return Object.freeze({
-    revision: document?.revision ?? 0, sessionId: document?.sessionId || null,
+    revision: generation.revision ?? document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
-    streamingText: '', streamingThinking: '', generating: terminalStatus ? false : generation.generating,
-    generationStart: generation.generationStart, lastTokenAt: generation.lastTokenAt,
+    streamingText: '', streamingThinking: '', generating,
+    generationStart: generating ? generation.generationStart : 0,
+    lastTokenAt: generating ? generation.lastTokenAt : undefined,
     tokenCount: generation.tokenCount, summary: generation.summary,
-    generationPhase: generation.generationPhase,
-    generationActivity: generation.generationActivity,
-    thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
+    generationPhase: generating ? generation.generationPhase : undefined,
+    generationActivity: generating ? generation.generationActivity : undefined,
+    thinkingStart: generating ? generation.thinkingStart : undefined, tasks: document?.plan.entries ?? Object.freeze([]),
     turnEpoch: generation.turnEpoch,
     terminalFence: generation.terminalFence,
     // Keep the host-port projection provider-neutral: ACP choices are carried

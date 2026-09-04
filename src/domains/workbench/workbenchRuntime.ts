@@ -66,7 +66,7 @@ export interface WorkbenchTerminalFence {
 
 export interface WorkbenchRuntimeMergeInput {
   readonly document?: WorkbenchDocument
-  readonly generationPatch?: Partial<Pick<WorkbenchRuntimeSnapshot, 'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'generationActivity' | 'thinkingStart' | 'summary'>>
+  readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>
   readonly terminalFence?: WorkbenchTerminalFence | null
   readonly turnEpoch?: number
   readonly preserveGeneration?: boolean
@@ -105,7 +105,7 @@ export interface WorkbenchDocumentApplyOptions {
   /** Optional atomic turn/generation metadata committed with this document. */
   readonly turnEpoch?: number
   readonly terminalFence?: WorkbenchTerminalFence | null
-  readonly generationPatch?: WorkbenchRuntimeMergeInput['generationPatch']
+  readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>
 }
 
 /** Mutable document runtime used by production composition and preview fixtures. */
@@ -116,6 +116,13 @@ export function createWorkbenchRuntime(
   let activeOwnerKey = initial.ownerKey
   let activeGeneration = initial.generation
   let snapshot = freezeSnapshot(normalizeRuntimeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) }))
+  // Provenance of `snapshot.document`.  Documents derived here from legacy
+  // snapshot fields (preview fixtures, legacy-only hosts) may keep rebuilding on
+  // legacy patches.  Documents that entered through applyDocument/replaceDocument
+  // (or a setSnapshot carrying one) are authoritative projections; update()
+  // must never silently replace them — that path drops activities,
+  // interactions, extensions and semantic parts, and zeroes message sequences.
+  let documentLegacyDerived = initial.document === undefined
   const listeners = new Set<() => void>()
   const sliceListeners = new Map<WorkbenchRuntimeSlice, Set<() => void>>()
   let destroyed = false
@@ -155,12 +162,19 @@ export function createWorkbenchRuntime(
       }
     },
     setSnapshot(next) {
+      documentLegacyDerived = next.document === undefined
       publish(next)
     },
     update(patch) {
       const next = { ...snapshot, ...patch, revision }
       if (!Object.prototype.hasOwnProperty.call(patch, 'document') && legacyDocumentFields.some(field => Object.prototype.hasOwnProperty.call(patch, field))) {
-        next.document = documentFromLegacy(next)
+        if (documentLegacyDerived) {
+          next.document = documentFromLegacy(next)
+        } else {
+          console.warn('[workbench-runtime] update() 忽略 legacy 字段对 canonical document 的重建；document 只能经 applyDocument/replaceDocument 变更')
+        }
+      } else if (Object.prototype.hasOwnProperty.call(patch, 'document')) {
+        documentLegacyDerived = false
       }
       publish(next)
     },
@@ -174,13 +188,23 @@ export function createWorkbenchRuntime(
         terminalFence: options.terminalFence,
         generationPatch: options.generationPatch,
       })
-      publish({ ...merged, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
+      publish({
+        ...merged,
+        // The canonical document is keyed by provider source while the host
+        // runtime sessionId is the stable bound Session.id. Applying a live
+        // projection must not silently replace the host identity with the
+        // document's source id; replaceDocument is the explicit identity seam.
+        sessionId: snapshot.sessionId ?? nextDocument.sessionId,
+        ownerKey: options.ownerKey ?? activeOwnerKey,
+        generation: options.generation ?? activeGeneration,
+      })
     },
     replaceDocument(document, options = {}) {
       const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
       const nextDocument = freezeDocument(document)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
+      const documentAdvanced = nextDocument.revision > (snapshot.document?.revision ?? -1)
       const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
         turnEpoch: options.turnEpoch,
@@ -193,6 +217,7 @@ export function createWorkbenchRuntime(
         // timeline. Also clear it for an idle replacement so a stale tool
         // label can never survive a bind or terminal snapshot.
         ...(ownerChanged || sessionChanged || !merged.generating ? { generationActivity: undefined } : {}),
+        ...(ownerChanged || sessionChanged || documentAdvanced ? { streamingText: '', streamingThinking: '' } : {}),
         document: nextDocument,
         sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
@@ -212,6 +237,8 @@ export function createWorkbenchRuntime(
     const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
     if (ownerChanged && !replace) return false
     if (options.generation !== undefined && activeGeneration !== undefined && options.generation < activeGeneration && !(replace && ownerChanged)) return false
+    if (options.turnEpoch !== undefined && snapshot.turnEpoch !== undefined
+      && options.turnEpoch < snapshot.turnEpoch && !(replace && ownerChanged)) return false
     if (replace && options.ownerKey !== undefined) activeOwnerKey = options.ownerKey
     if (replace && options.generation !== undefined) activeGeneration = options.generation
     return true
@@ -276,17 +303,35 @@ export function mergeWorkbenchRuntimeSnapshot(
   const document = input.document ?? previous.document
   const projected = document ? legacyFieldsFromDocument(document) : {}
   const stable = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
+  const rawPatch = input.generationPatch ?? {}
+  const requestedEpoch = input.turnEpoch ?? rawPatch.turnEpoch
+  const previousEpoch = previous.turnEpoch
+  // turnEpoch is a monotonic runtime-local fence. A stale controller/document
+  // callback may still arrive after a new turn has started, but it must not
+  // roll the epoch back or clear the newer turn's terminal state.
+  const epochIsOlder = requestedEpoch !== undefined && previousEpoch !== undefined && requestedEpoch < previousEpoch
+  const epochIsNew = requestedEpoch !== undefined && (previousEpoch === undefined || requestedEpoch > previousEpoch)
+  const effectiveEpoch = epochIsOlder ? previousEpoch : requestedEpoch ?? previousEpoch
+  const patchWithoutControl = { ...(epochIsOlder ? {} : rawPatch) }
+  delete (patchWithoutControl as { turnEpoch?: number }).turnEpoch
+  delete (patchWithoutControl as { terminalFence?: WorkbenchTerminalFence | null }).terminalFence
   const inferredFence = document && hasTerminalDocumentState(document) && previous.generating && previous.turnEpoch !== undefined && previous.terminalFence === undefined
     ? { ownerKey: previous.ownerKey, turnEpoch: previous.turnEpoch, sequence: document.revision }
     : undefined
   const candidate: WorkbenchRuntimeSnapshot = {
     ...previous,
     ...(document ? { ...stable, document, sessionId: document.sessionId || previous.sessionId } : {}),
-    ...(input.generationPatch ?? {}),
-    ...(input.turnEpoch !== undefined ? { turnEpoch: input.turnEpoch } : {}),
-    ...(input.terminalFence === null ? { terminalFence: undefined } : input.terminalFence ? { terminalFence: input.terminalFence } : inferredFence ? { terminalFence: inferredFence } : {}),
+    ...patchWithoutControl,
+    ...(effectiveEpoch !== undefined ? { turnEpoch: effectiveEpoch } : {}),
+    ...(epochIsNew
+      ? { terminalFence: undefined }
+      : input.terminalFence === null && !epochIsOlder
+        ? { terminalFence: undefined }
+        : input.terminalFence && !epochIsOlder && input.terminalFence.turnEpoch >= (effectiveEpoch ?? 0)
+          ? { terminalFence: input.terminalFence }
+          : inferredFence ? { terminalFence: inferredFence } : {}),
   }
-  if (input.turnEpoch !== undefined && input.turnEpoch !== previous.turnEpoch) {
+  if (epochIsNew) {
     candidate.summary = null
     candidate.terminalFence = undefined
   }
@@ -501,8 +546,11 @@ function preserveActiveGeneration(
 
 function hasTerminalDocumentState(document: WorkbenchDocument): boolean {
   const status = document.session.status.toLowerCase()
-  return ['completed', 'error', 'cancelled', 'failed'].includes(status)
-    || document.timeline.some(entry => entry.kind === 'session' && entry.status === 'completed')
+  if (['completed', 'error', 'cancelled', 'failed'].includes(status)
+    || document.timeline.some(entry => entry.kind === 'session' && entry.status === 'completed')) return true
+  const textRows = document.messages.filter(message => message.role === 'assistant' || message.role === 'reasoning')
+  const hasRunningActivity = document.activities.some(activity => !isTerminalActivityStatus(activity.status))
+  return textRows.length > 0 && textRows.every(message => !message.running) && !hasRunningActivity
 }
 
 function isTerminalActivityStatus(status: string): boolean {

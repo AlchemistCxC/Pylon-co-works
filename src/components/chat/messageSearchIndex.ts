@@ -31,6 +31,9 @@ export function getMessageSearchText(message: Message): string {
   const toolText = message.role === 'tool'
     ? resolveToolRenderer(message.toolName || '').getSearchText?.(message.toolOutput) || ''
     : ''
+  const semanticParts = 'semanticParts' in message
+    ? stringifySearchValue((message as Message & { semanticParts?: unknown }).semanticParts)
+    : ''
   const text = [
     message.sender,
     message.content,
@@ -38,6 +41,7 @@ export function getMessageSearchText(message: Message): string {
     message.toolInput,
     toolText,
     stringifySearchValue(message.toolOutput),
+    semanticParts,
   ]
     .filter(Boolean)
     .join('\n')

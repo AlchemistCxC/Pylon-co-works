@@ -43,6 +43,27 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   // discriminator at the top level.  Flatten that transport envelope at the seam;
   // raw input is still retained unchanged by makeEnvelope for diagnostics.
   const effectiveUpdate = flattenAcpUpdate(update)
+  // A session info packet may carry both configuration mode and an explicit
+  // lifecycle status. They are independent semantic facts and must not be
+  // collapsed into one event (mode="running" is not lifecycle evidence).
+  if (canonicalSessionUpdate(effectiveUpdate) === 'session_info_update') {
+    const mode = typeof effectiveUpdate.mode === 'string'
+      ? effectiveUpdate.mode
+      : typeof effectiveUpdate.currentMode === 'string' ? effectiveUpdate.currentMode : undefined
+    const status = typeof effectiveUpdate.status === 'string'
+      && LIFECYCLE_STATUSES.has(effectiveUpdate.status.toLowerCase())
+      ? effectiveUpdate.status
+      : undefined
+    if (mode !== undefined && status !== undefined) {
+      return {
+        events: [
+          makeEnvelope({ type: 'session.mode-updated', mode }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
+          makeEnvelope({ type: 'session.status-updated', status }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
+        ],
+        diagnostics: [],
+      }
+    }
+  }
   const normalized = semanticEventForUpdate(effectiveUpdate, context)
   const event = makeEnvelope(normalized.event, input, context, update, {}, identityFromUpdate(effectiveUpdate))
   return { events: [event], diagnostics: normalized.diagnostics }

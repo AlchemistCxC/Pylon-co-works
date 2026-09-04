@@ -41,6 +41,23 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(next).toMatchObject({ turnEpoch: 3, generating: true, summary: null })
     expect(next.terminalFence).toBeUndefined()
   })
+
+  it('旧 turnEpoch patch 不能回退当前回合或清除 terminal fence', () => {
+    const base = {
+      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 5,
+      generating: false, summary: { elapsedMs: 9, tokenCount: 2, completedFrame: '', reason: 'done' as const },
+      terminalFence: { ownerKey: 'owner-a', turnEpoch: 5, sequence: 12 },
+    }
+    const next = mergeWorkbenchRuntimeSnapshot(base, {
+      turnEpoch: 4,
+      terminalFence: null,
+      generationPatch: { generating: true, generationStart: 100 },
+    })
+    expect(next.turnEpoch).toBe(5)
+    expect(next.terminalFence).toMatchObject({ turnEpoch: 5, sequence: 12 })
+    expect(next.summary).toMatchObject({ reason: 'done' })
+    expect(next.generating).toBe(false)
+  })
   it('暴露只读 document view，并按 slice 局部通知', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const messages = vi.fn()

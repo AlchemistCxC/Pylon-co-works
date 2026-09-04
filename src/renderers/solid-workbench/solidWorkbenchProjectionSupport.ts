@@ -21,7 +21,13 @@ export function selectDisplayStream(
   if (!row || !row.content) return row ? { role, text: transientText || row.content, owner: transientText ? 'transient' : 'canonical', canonical: row } : { role, text: '', owner: 'none' }
   if (!transientText || !row.running) return { role, text: row.content, owner: 'canonical', canonical: row }
   if (transientText.startsWith(row.content) && transientText.length > row.content.length) return { role, text: transientText, owner: 'transient', canonical: row }
-  return { role, text: row.content.length >= transientText.length ? row.content : transientText, owner: 'canonical', canonical: row }
+  // Identity/content conflict: prefer the newest transient value as the sole
+  // visible owner rather than swallowing unrelated text behind a role-only
+  // coverage check. The canonical row is replaced at the list seam.
+  if (!transientText.startsWith(row.content) && !row.content.startsWith(transientText)) {
+    return { role, text: transientText, owner: 'transient', canonical: row }
+  }
+  return { role, text: row.content, owner: 'canonical', canonical: row }
 }
 
 export function canonicalTokenCount(

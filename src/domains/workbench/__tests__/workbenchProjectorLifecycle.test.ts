@@ -32,6 +32,28 @@ function reduce(events: readonly WorkbenchEventEnvelope[]): WorkbenchDocument {
 }
 
 describe('WorkbenchProjector lifecycle slices (C13)', () => {
+  it('terminal status-updated settles running rows and remains monotonic', () => {
+    const running = envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'partial' }] })
+    const completed = envelope(2, { type: 'session.status-updated', status: 'completed' })
+    const regressed = envelope(3, { type: 'session.status-updated', status: 'error' })
+    const document = reduce([running, completed, regressed])
+    expect(document.session.status).toBe('completed')
+    expect(document.messages).toEqual([expect.objectContaining({ content: 'partial', running: false })])
+  })
+
+  it('absorbs all late reasoning and tool terminal events after session completion', () => {
+    const document = reduce([
+      envelope(1, { type: 'session.completed' }),
+      envelope(2, { type: 'reasoning.completed', parts: [{ kind: 'text', text: 'late thought' }] }),
+      envelope(3, { type: 'reasoning.redacted', parts: [], reason: 'late' }),
+      envelope(4, { type: 'tool.completed', tool: { toolCallId: 'late-tool', name: 'Read', status: 'completed' } }),
+      envelope(5, { type: 'tool.failed', tool: { toolCallId: 'late-tool-2', name: 'Read', status: 'failed' } }),
+    ])
+    expect(document.messages).toHaveLength(0)
+    expect(document.activities).toHaveLength(0)
+    expect(document.diagnostics.filter(item => item.code === 'late-event-after-terminal')).toHaveLength(1)
+  })
+
   it('projects retry chain into lifecycle slice and keeps timeline entries', () => {
     const document = reduce([
       envelope(1, { type: 'lifecycle.retrying', attempt: 1, maxAttempts: 3, delayMs: 1000, error: { technicalMessage: 'boom', recoverability: 'retry' } as unknown as import('../events/workbenchEventSchema.ts').JsonValue }),

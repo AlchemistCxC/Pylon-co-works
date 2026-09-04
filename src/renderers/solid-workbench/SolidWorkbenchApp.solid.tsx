@@ -28,13 +28,13 @@ import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
-import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
+import { messageMatchesQuery } from '../../components/chat/messageSearchIndex.ts'
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
-import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
+import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, selectDisplayStream, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
 import type { WorkbenchSessionCreationSnapshot } from '../../domains/workbench/workbenchCommandFacade.ts'
 
@@ -128,21 +128,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
   const document = () => snapshot().document
   const displayDocument = createMemo(() => {
-    const current = document()
-    if (!current) return current
-    const snap = snapshot()
-    const transientByRole = new Map([
-      ['assistant', snap.streamingText],
-      ['reasoning', snap.streamingThinking],
-    ] as const)
-    const messages = current.messages.filter(message => {
-      const transient = message.role === 'assistant' || message.role === 'reasoning' ? transientByRole.get(message.role) : undefined
-      if (!transient || !message.running || !transient.startsWith(message.content) || transient.length <= message.content.length) return true
-      // The transient stream is the sole owner while it has the longer
-      // prefix; remove the lagging canonical row from this render projection.
-      return false
-    })
-    return messages.length === current.messages.length ? current : { ...current, messages }
+    // Ownership is resolved once, at the message-list seam, by
+    // selectDisplayStream(session/turn/segment identity). Keep the canonical
+    // document intact for activity placement, diagnostics and other readers.
+    return document()
   })
   // Canonical events and the legacy controller can briefly expose the same
   // in-flight text through both `document.messages` and the transient
@@ -150,47 +139,62 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   // independently measured reasoning rows make the chat height/scroll rail
   // oscillate on every token.
   const visibleStreamingThinking = createMemo(() => {
-    const currentSnapshot = snapshot()
-    const text = currentSnapshot.streamingThinking
-    if (!text) return ''
-    // When legacy tool rows are present, `viewMessages()` intentionally owns
-    // the message list and canonical messages are not mounted there yet. Only
-    // suppress the transient row if the candidate list is actually rendered.
-    const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
-      ? currentSnapshot.messages
-      : displayDocument()?.messages
-    const canonicalRunning = streamRowCoversText(candidates, 'reasoning', text, currentSnapshot.generating)
-    return canonicalRunning ? '' : text
+    // Transient reasoning is normalized into viewMessages() as the sole row;
+    // this legacy fallback remains as an empty compatibility seam.
+    return ''
   })
   const visibleStreamingText = createMemo(() => {
-    const currentSnapshot = snapshot()
-    const text = currentSnapshot.streamingText
-    if (!text) return ''
-    const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
-      ? currentSnapshot.messages
-      : displayDocument()?.messages
-    const canonicalRunning = streamRowCoversText(candidates, 'assistant', text, currentSnapshot.generating)
-    return canonicalRunning ? '' : text
+    // See visibleStreamingThinking: the message list owns transient rows.
+    return ''
   })
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
-    const projected = document()?.messages
-    // Legacy preview fixtures still contain tool rows that A04 represents as
-    // activity nodes. Keep those rows until the content cards consume activity
-    // slices; all canonical document messages take precedence otherwise.
-    if (legacy.some(message => message.role === 'tool')) return legacy
-    return projected?.map(toSolidMessage) ?? legacy
+    const projected = displayDocument()?.messages
+    // Canonical document messages are the sole owner whenever available. The
+    // legacy list remains only as a compatibility fallback for preview hosts
+    // that have not mounted a WorkbenchDocument yet (including legacy tool
+    // rows); mixing the two lists would reintroduce duplicate stream owners.
+    const canonical = projected ?? []
+    if (canonical.length === 0 && legacy.length > 0) return legacy
+    const legacyToolIds = new Set(legacy.filter(message => message.role === 'tool').map(message => message.id))
+    const base = canonical
+      .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
+      .map(toSolidMessage)
+    const appendTransient = (role: 'assistant' | 'reasoning', text: string) => {
+      if (!text) return
+      const candidates = canonical.filter(message => message.role === role)
+      // Legacy controller streams can remain active while a replayed
+      // canonical placeholder is not marked running yet. Treat only that
+      // explicit generating gap as eligible for handoff; a terminal row keeps
+      // ownership once the runtime is no longer generating.
+      const latest = candidates.at(-1)
+      const selectorCandidates = latest && !latest.running && snapshot().generating
+        ? [...candidates.slice(0, -1), { ...latest, running: true }]
+        : candidates
+      const record = selectDisplayStream(selectorCandidates, role, text)
+      if (record.owner !== 'transient') return
+      const index = record.canonical ? base.findIndex(message => message.id === record.canonical!.id) : -1
+      const transient: Message = {
+        id: record.canonical?.id ?? `${snapshot().sessionId ?? 'session'}:transient:${role}`,
+        role,
+        sender: 'streaming',
+        content: record.text,
+        time: '',
+        running: true,
+      }
+      if (index >= 0) base.splice(index, 1, transient)
+      else base.push(transient)
+    }
+    appendTransient('reasoning', snapshot().streamingThinking)
+    appendTransient('assistant', snapshot().streamingText)
+    // Legacy preview hosts still expose tool rows before their activity
+    // projection is available. Preserve those non-text rows without merging
+    // legacy assistant/reasoning rows back into the canonical stream.
+    return [...base, ...legacy.filter(message => message.role === 'tool')]
   })
   const renderMessages = createMemo(() => prepareMessages([...viewMessages()]))
   const searchMatches = createMemo(() => {
     if (!searchQuery().trim()) return []
-    if (!snapshot().messages.some(message => message.role === 'tool') && document()) {
-      return document()!.messages.filter(message => searchValuesMatchQuery([
-        message.source.provider,
-        message.content,
-        message.parts,
-      ], searchQuery()))
-    }
     return viewMessages().filter(message => messageMatchesQuery(message, searchQuery()))
   })
   const activeSearchMessageId = createMemo(() => searchMatches()[searchIndex()]?.id)
@@ -204,7 +208,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     descriptor,
   })))
   const activityPlacement = createMemo(() => selectActivityTimelinePlacement(
-    snapshot().messages.some(message => message.role === 'tool') ? undefined : document(),
+    document(),
   ))
   const connectorEdges = createMemo<readonly SolidToolConnectorEdge[]>(() => mergeToolConnectorEdges(
     buildLegacyToolConnectorEdges(descriptors(), appearance()),
@@ -744,7 +748,7 @@ function WorkbenchDocumentSurface(props: {
                 onRecover={props.sessionId && props.context.hostPort?.capabilities.has('recovery')
                   ? strategy => { void props.commands.recover(props.sessionId!, strategy) }
                   : undefined}
-                onOpenDiagnostics={() => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))}
+                onOpenDiagnostics={() => { void fallbackRenderCommands(props.context).execute({ type: 'diagnostics.open' }) }}
                 dismissible
               />}
             />
@@ -849,33 +853,6 @@ function WorkbenchDocumentSurface(props: {
 function visibleDiagnostics(document: WorkbenchDocument) {
   const errorEventIds = new Set(document.systemErrors.flatMap(error => error.eventId ? [error.eventId] : []))
   return document.diagnostics.filter(diagnostic => !errorEventIds.has(diagnostic.eventId))
-}
-
-/**
- * The controller still exposes a legacy transient stream while the canonical
- * document is being projected.  Hide that compatibility row only after the
- * canonical running message actually contains the same prefix; an empty
- * placeholder row must not swallow visible transient text during pause/resume
- * or the short hand-off between the two display paths.
- */
-function streamRowCoversText(
-  messages: readonly { role: string; content: string; running?: boolean }[] | undefined,
-  role: 'assistant' | 'reasoning',
-  transientText: string,
-  generating: boolean,
-): boolean {
-  if (!messages || transientText.length === 0) return false
-  return messages.some(message => {
-    if (message.role !== role) return false
-    const canonicalText = typeof message.content === 'string' ? message.content : ''
-    if (canonicalText.length === 0) return false
-    // A canonical row (running or terminal) is the authority whenever it
-    // exists for this role. Prefix direction is handled by displayDocument;
-    // keeping this selector total prevents a second transient row during
-    // non-prefix/late-event races.
-    if (message.running === true) return true
-    return canonicalText === transientText || !generating
-  })
 }
 
 function safeDomId(value: string): string {
