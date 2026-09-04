@@ -36,8 +36,9 @@ export function validatePluginSettingOptionsContribution(
   if (!contribution.id || contribution.id !== contribution.id.trim()) {
     throw new Error('Plugin setting options contribution id 非法')
   }
-  const target = typeof contribution.target === 'string' ? contribution.target : stringifySettingsTarget(contribution.target)
-  if (!TARGET_PATTERN.test(target) || (target.startsWith('kind.') || target.startsWith('suite.') || target.startsWith('slot.')) && !RENDERER_TARGET_PATTERN.test(target)) {
+  const structuredTarget = typeof contribution.target !== 'string'
+  const target = structuredTarget ? stringifySettingsTarget(contribution.target) : contribution.target
+  if (!TARGET_PATTERN.test(target) || (!structuredTarget && (target.startsWith('kind.') || target.startsWith('suite.') || target.startsWith('slot.')) && !RENDERER_TARGET_PATTERN.test(target))) {
     throw new Error(`Plugin setting options target 非法：${contribution.id}`)
   }
   const themeField = themeFieldFromTarget(target)
