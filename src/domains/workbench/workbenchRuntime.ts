@@ -27,6 +27,10 @@ export interface WorkbenchRuntimeSnapshot {
   ownerKey?: string
   /** Agent/runtime generation associated with the current owner. */
   generation?: number
+  /** Runtime-local turn identity; never persisted to provider/canonical wire. */
+  turnEpoch?: number
+  /** Terminal absorption fence for the current owner/turn. */
+  terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
   messages: readonly Message[]
   streamingText: string
@@ -50,6 +54,22 @@ export interface WorkbenchRuntimeSnapshot {
   error: string | null
   /** A04 projection view; legacy fields remain compatibility selectors for the current Solid adapter. */
   document?: WorkbenchDocument
+}
+
+export interface WorkbenchTerminalFence {
+  readonly ownerKey?: string
+  readonly turnEpoch: number
+  readonly eventId?: string
+  readonly sequence?: number
+  readonly arrivalOrdinal?: number
+}
+
+export interface WorkbenchRuntimeMergeInput {
+  readonly document?: WorkbenchDocument
+  readonly generationPatch?: Partial<Pick<WorkbenchRuntimeSnapshot, 'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'generationActivity' | 'thinkingStart' | 'summary'>>
+  readonly terminalFence?: WorkbenchTerminalFence | null
+  readonly turnEpoch?: number
+  readonly preserveGeneration?: boolean
 }
 
 export interface WorkbenchRuntime {
@@ -82,6 +102,10 @@ export interface WorkbenchDocumentApplyOptions {
    * reader set this flag so that gap cannot reset elapsed time.
    */
   readonly preserveGeneration?: boolean
+  /** Optional atomic turn/generation metadata committed with this document. */
+  readonly turnEpoch?: number
+  readonly terminalFence?: WorkbenchTerminalFence | null
+  readonly generationPatch?: WorkbenchRuntimeMergeInput['generationPatch']
 }
 
 /** Mutable document runtime used by production composition and preview fixtures. */
@@ -91,12 +115,13 @@ export function createWorkbenchRuntime(
   let revision = 0
   let activeOwnerKey = initial.ownerKey
   let activeGeneration = initial.generation
-  let snapshot = freezeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) })
+  let snapshot = freezeSnapshot(normalizeRuntimeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) }))
   const listeners = new Set<() => void>()
   const sliceListeners = new Map<WorkbenchRuntimeSlice, Set<() => void>>()
   let destroyed = false
 
   const publish = (next: WorkbenchRuntimeSnapshot) => {
+    next = normalizeRuntimeSnapshot(next)
     if (destroyed || runtimeSnapshotsEqual(snapshot, next)) return
     const previous = snapshot
     revision += 1
@@ -142,32 +167,32 @@ export function createWorkbenchRuntime(
     applyDocument(document, options = {}) {
       if (!acceptDocument(options)) return
       const nextDocument = freezeDocument(document, snapshot.document)
-      const legacy = legacyFieldsFromDocument(nextDocument)
-      const stableLegacy = options.preserveGeneration
-        ? preserveActiveGeneration(snapshot, legacy)
-        : legacy
-      publish({
-        ...snapshot,
-        ...stableLegacy,
+      const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
-        sessionId: nextDocument.sessionId || snapshot.sessionId,
-        ownerKey: options.ownerKey ?? activeOwnerKey,
-        generation: options.generation ?? activeGeneration,
+        preserveGeneration: options.preserveGeneration,
+        turnEpoch: options.turnEpoch,
+        terminalFence: options.terminalFence,
+        generationPatch: options.generationPatch,
       })
+      publish({ ...merged, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
     },
     replaceDocument(document, options = {}) {
       const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
       const nextDocument = freezeDocument(document)
-      const legacy = legacyFieldsFromDocument(nextDocument)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
+      const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
+        document: nextDocument,
+        turnEpoch: options.turnEpoch,
+        terminalFence: options.terminalFence,
+        generationPatch: options.generationPatch,
+      })
       publish({
-        ...snapshot,
-        ...legacy,
+        ...merged,
         // Replacing the owner/session starts a fresh ephemeral activity
         // timeline. Also clear it for an idle replacement so a stale tool
         // label can never survive a bind or terminal snapshot.
-        ...(ownerChanged || sessionChanged || !legacy.generating ? { generationActivity: undefined } : {}),
+        ...(ownerChanged || sessionChanged || !merged.generating ? { generationActivity: undefined } : {}),
         document: nextDocument,
         sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
@@ -210,6 +235,8 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     left.sessionId === right.sessionId &&
     left.ownerKey === right.ownerKey &&
     left.generation === right.generation &&
+    left.turnEpoch === right.turnEpoch &&
+    terminalFencesEqual(left.terminalFence, right.terminalFence) &&
     left.status === right.status &&
     left.messages === right.messages &&
     left.streamingText === right.streamingText &&
@@ -234,10 +261,52 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
   )
 }
 
+function terminalFencesEqual(left: WorkbenchTerminalFence | undefined, right: WorkbenchTerminalFence | undefined): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.ownerKey === right.ownerKey && left.turnEpoch === right.turnEpoch
+    && left.eventId === right.eventId && left.sequence === right.sequence && left.arrivalOrdinal === right.arrivalOrdinal
+}
+
+/** Atomically reconcile canonical document and generation metadata. */
+export function mergeWorkbenchRuntimeSnapshot(
+  previous: WorkbenchRuntimeSnapshot,
+  input: WorkbenchRuntimeMergeInput,
+): WorkbenchRuntimeSnapshot {
+  const document = input.document ?? previous.document
+  const projected = document ? legacyFieldsFromDocument(document) : {}
+  const stable = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
+  const inferredFence = document && hasTerminalDocumentState(document) && previous.generating && previous.turnEpoch !== undefined && previous.terminalFence === undefined
+    ? { ownerKey: previous.ownerKey, turnEpoch: previous.turnEpoch, sequence: document.revision }
+    : undefined
+  const candidate: WorkbenchRuntimeSnapshot = {
+    ...previous,
+    ...(document ? { ...stable, document, sessionId: document.sessionId || previous.sessionId } : {}),
+    ...(input.generationPatch ?? {}),
+    ...(input.turnEpoch !== undefined ? { turnEpoch: input.turnEpoch } : {}),
+    ...(input.terminalFence === null ? { terminalFence: undefined } : input.terminalFence ? { terminalFence: input.terminalFence } : inferredFence ? { terminalFence: inferredFence } : {}),
+  }
+  if (input.turnEpoch !== undefined && input.turnEpoch !== previous.turnEpoch) {
+    candidate.summary = null
+    candidate.terminalFence = undefined
+  }
+  return normalizeRuntimeSnapshot(candidate)
+}
+
+function normalizeRuntimeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
+  if (snapshot.summary !== null || snapshot.terminalFence !== undefined) {
+    const terminalFence = snapshot.terminalFence ?? (snapshot.turnEpoch !== undefined ? { ownerKey: snapshot.ownerKey, turnEpoch: snapshot.turnEpoch } : undefined)
+    return { ...snapshot, generating: false, generationStart: 0, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, ...(terminalFence ? { terminalFence } : {}) }
+  }
+  if (snapshot.generating) return { ...snapshot, summary: null, terminalFence: undefined }
+  return snapshot
+}
+
 function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
   if (!Object.isFrozen(snapshot.messages)) snapshot.messages = Object.freeze([...snapshot.messages])
   if (!Object.isFrozen(snapshot.tasks)) snapshot.tasks = Object.freeze([...snapshot.tasks])
   if (snapshot.document && !Object.isFrozen(snapshot.document)) snapshot.document = freezeDocument(snapshot.document)
+  if (snapshot.terminalFence && !Object.isFrozen(snapshot.terminalFence)) snapshot.terminalFence = Object.freeze({ ...snapshot.terminalFence })
   return Object.freeze(snapshot)
 }
 
@@ -364,7 +433,10 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     : document.session.status === 'completed' ? 'ready' : 'ready'
   const runningMessages = document.messages.filter(message => message.running)
   const runningActivity = [...document.activities].reverse().find(activity => !isTerminalActivityStatus(activity.status))
-  const generating = runningMessages.length > 0 || runningActivity !== undefined || isActiveSessionStatus(document.session.status)
+  // Lifecycle status alone is not evidence of an active turn. Require a
+  // running message/activity so mode strings and stale status cannot revive
+  // a completed generation.
+  const generating = runningMessages.length > 0 || runningActivity !== undefined
   const runningReasoning = [...runningMessages].reverse().find(message => message.role === 'reasoning')
   const lastRunningMessage = runningMessages.at(-1)
   const generationStart = generating
@@ -411,8 +483,11 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
 function preserveActiveGeneration(
   previous: WorkbenchRuntimeSnapshot,
   projected: Partial<WorkbenchRuntimeSnapshot>,
+  document?: WorkbenchDocument,
 ): Partial<WorkbenchRuntimeSnapshot> {
   if (!previous.generating) return projected
+  if (previous.summary !== null || previous.terminalFence !== undefined) return projected
+  if (document && hasTerminalDocumentState(document)) return projected
   return {
     ...projected,
     generating: true,
@@ -424,12 +499,14 @@ function preserveActiveGeneration(
   }
 }
 
-function isTerminalActivityStatus(status: string): boolean {
-  return ['completed', 'failed', 'error', 'cancelled', 'killed', 'timeout'].includes(status.toLowerCase())
+function hasTerminalDocumentState(document: WorkbenchDocument): boolean {
+  const status = document.session.status.toLowerCase()
+  return ['completed', 'error', 'cancelled', 'failed'].includes(status)
+    || document.timeline.some(entry => entry.kind === 'session' && entry.status === 'completed')
 }
 
-function isActiveSessionStatus(status: string): boolean {
-  return ['running', 'generating', 'thinking', 'responding', 'working'].includes(status.toLowerCase())
+function isTerminalActivityStatus(status: string): boolean {
+  return ['completed', 'failed', 'error', 'cancelled', 'killed', 'timeout'].includes(status.toLowerCase())
 }
 
 function timestampOf(value: string | undefined): number | undefined {

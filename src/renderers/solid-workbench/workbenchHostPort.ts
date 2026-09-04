@@ -20,6 +20,9 @@ export interface WorkbenchDocumentReader {
 export type WorkbenchGenerationSnapshot = Readonly<Pick<WorkbenchRuntimeSnapshot,
   'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'thinkingStart' | 'tokenCount' | 'summary'> & {
   generationActivity?: GenerationActivitySnapshot
+  revision?: number
+  turnEpoch?: number
+  terminalFence?: WorkbenchRuntimeSnapshot['terminalFence']
 }>
 
 /** Session-scoped ephemeral state that cannot be reconstructed from persisted transcript rows. */
@@ -180,6 +183,9 @@ function createGenerationReader(runtime: WorkbenchRuntime): WorkbenchGenerationR
       thinkingStart: snapshot.thinkingStart,
       tokenCount: snapshot.tokenCount,
       summary: snapshot.summary,
+      revision: snapshot.revision,
+      turnEpoch: snapshot.turnEpoch,
+      terminalFence: snapshot.terminalFence,
     })
   }
   return { getSnapshot, subscribe: listener => runtime.subscribe(listener) }

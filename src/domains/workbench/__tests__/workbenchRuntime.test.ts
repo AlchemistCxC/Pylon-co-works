@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPreviewWorkbenchRuntime, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
+import { createPreviewWorkbenchRuntime, mergeWorkbenchRuntimeSnapshot, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
 import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
@@ -27,6 +27,20 @@ function initial() {
 }
 
 describe('createPreviewWorkbenchRuntime', () => {
+  it('原子合并终态时强制收敛 generation invariant 并封存 fence', () => {
+    const runtime = createPreviewWorkbenchRuntime({ ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4, generating: true, generationStart: 10 })
+    const terminal = { ...createWorkbenchDocument('session-a'), revision: 9, session: { ...createWorkbenchDocument('session-a').session, status: 'completed' } }
+    runtime.applyDocument(terminal, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: false, summary: null, turnEpoch: 4, terminalFence: { turnEpoch: 4 } })
+    expect(runtime.getSnapshot().generationStart).toBe(0)
+  })
+
+  it('新 turnEpoch 清除旧 summary/fence，late active patch 不能复活旧回合', () => {
+    const base = { ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 2, generating: false, summary: { elapsedMs: 1, tokenCount: 1, completedFrame: '', reason: 'done' as const }, terminalFence: { turnEpoch: 2 } }
+    const next = mergeWorkbenchRuntimeSnapshot(base, { turnEpoch: 3, generationPatch: { generating: true, generationStart: 100 } })
+    expect(next).toMatchObject({ turnEpoch: 3, generating: true, summary: null })
+    expect(next.terminalFence).toBeUndefined()
+  })
   it('暴露只读 document view，并按 slice 局部通知', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const messages = vi.fn()

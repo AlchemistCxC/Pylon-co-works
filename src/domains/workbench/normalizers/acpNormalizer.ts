@@ -28,6 +28,8 @@ export const acpNormalizer: AgentEventNormalizer = {
   normalize: normalizeAcpEvent,
 }
 
+const LIFECYCLE_STATUSES = new Set(['running', 'generating', 'thinking', 'responding', 'working', 'completed', 'error', 'failed', 'cancelled', 'degraded', 'idle', 'ready'])
+
 export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: NormalizeContext): NormalizeResult {
   const update = extractUpdate(input)
   if (!update) {
@@ -84,7 +86,16 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'config_option_update':
       return { event: { type: 'session.config-updated', options: normalizeConfigOptions(update) }, diagnostics }
     case 'session_info_update':
-      return { event: { type: 'session.status-updated', status: typeof update.mode === 'string' ? update.mode : 'updated' }, diagnostics }
+      // ACP's `mode` is configuration metadata (for example "running" can
+      // mean an execution mode), not lifecycle evidence. Only an explicit
+      // lifecycle status field from the allowlist may affect session status.
+      if (typeof update.mode === 'string' || typeof update.currentMode === 'string') {
+        return { event: { type: 'session.mode-updated', mode: String(update.mode ?? update.currentMode) }, diagnostics }
+      }
+      if (typeof update.status === 'string' && LIFECYCLE_STATUSES.has(update.status.toLowerCase())) {
+        return { event: { type: 'session.status-updated', status: update.status }, diagnostics }
+      }
+      return { event: { type: 'session.mode-updated', mode: undefined }, diagnostics }
     case 'done':
       return { event: { type: 'session.completed', stopReason: typeof update.stopReason === 'string' ? update.stopReason : undefined }, diagnostics }
     case 'error': {

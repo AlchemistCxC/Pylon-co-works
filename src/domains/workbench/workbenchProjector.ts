@@ -496,6 +496,10 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
 
 function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    if (role === 'user') document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
+    else if (event.type === 'message.delta') return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late assistant event ignored after terminal fence', 'warning')
+  }
   document = settleSupersededRunningMessages(document, role)
   const parts = event.parts ?? []
   const content = textFromParts(parts)
@@ -534,6 +538,17 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       } : message),
     }
   }
+  // A terminal segment is an absorption fence. A late delta may only start a
+  // new visible segment when the provider supplies an explicit, different
+  // turn identity; otherwise it belongs to the sealed turn and is ignored.
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)) {
+    const previousTurn = previous.identity.turnId
+    const incomingTurn = envelope.identity.turnId
+    const previousProvider = providerIdentityKey(previous.identity)
+    const incomingProvider = providerIdentityKey(envelope.identity)
+    const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
+    if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
+  }
   const messages = append
     ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal }]
     : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
@@ -541,6 +556,9 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 }
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
+  if (event.type === 'reasoning.delta' && TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late reasoning event ignored after terminal fence', 'warning')
+  }
   document = settleSupersededRunningMessages(document, 'reasoning')
   const parts = event.parts ?? []
   // C01：redacted 时正文不保留原文（D06——raw 不进入 projection），只保留安全占位。
@@ -580,6 +598,14 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     }
     return document
   }
+  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running) {
+    const previousTurn = previous.identity.turnId
+    const incomingTurn = envelope.identity.turnId
+    const previousProvider = providerIdentityKey(previous.identity)
+    const incomingProvider = providerIdentityKey(envelope.identity)
+    const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
+    if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
+  }
   // C01：时长 = 终态 occurredAt − 首个 delta occurredAt；append 段沿用首段时间基准。
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
   const startedAt = append && previous?.thoughtStartedAtMs !== undefined
@@ -618,6 +644,9 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
 }
 
 function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent): WorkbenchDocument {
+  if ((event.type === 'tool.started' || event.type === 'tool.progress') && TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addDiagnostic(document, envelope, 'late-event-after-terminal', 'late tool event ignored after terminal fence', 'warning')
+  }
   const tool = isRecord(event.tool) ? event.tool : {}
   const id = stringValue(tool.toolCallId) || envelope.identity.toolCallId || envelope.eventId
   const status = toolLifecycleStatus(event.type, stringValue(tool.status) || 'progress')
@@ -1001,6 +1030,12 @@ function reduceGoal(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
 
 function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: SessionEvent): WorkbenchDocument {
   const completedAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
+  const previousStatus = document.session.status
+  const requestedStatus = event.type === 'session.completed' ? 'completed' : event.status
+  const nextStatus = requestedStatus && SESSION_LIFECYCLE_STATUSES.has(requestedStatus.toLowerCase())
+    && !(TERMINAL_SESSION_STATUSES.has(previousStatus.toLowerCase()) && event.type === 'session.status-updated' && !TERMINAL_SESSION_STATUSES.has(requestedStatus.toLowerCase()))
+    ? requestedStatus
+    : previousStatus
   return {
     ...document,
     ...(event.type === 'session.completed' ? {
@@ -1014,7 +1049,7 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     } : {}),
     session: {
       ...document.session,
-      status: event.type === 'session.completed' ? 'completed' : event.status ?? document.session.status,
+      status: nextStatus,
       ...(event.stopReason ? { stopReason: event.stopReason } : {}),
       ...(event.model ? { model: event.model } : {}),
       ...(event.mode ? { mode: event.mode } : {}),
@@ -1023,6 +1058,9 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     },
   }
 }
+
+const TERMINAL_SESSION_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled'])
+const SESSION_LIFECYCLE_STATUSES = new Set(['idle', 'loading', 'ready', 'degraded', 'running', 'generating', 'thinking', 'responding', 'working', ...TERMINAL_SESSION_STATUSES])
 
 function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
   if (event.type === 'assist.prediction') {

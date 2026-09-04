@@ -67,6 +67,7 @@ export function createToolConnectorLayoutPort(
 ): ToolConnectorLayoutPort {
   const tools = new Map<string, () => ToolAnchorMeasurement | null>()
   const connectors = new Map<string, ToolConnectorRegistration>()
+  const lastApplied = new Map<string, ToolConnectorLayout | null>()
   let scheduled: unknown | null = null
   let destroyed = false
 
@@ -77,7 +78,14 @@ export function createToolConnectorLayoutPort(
       const from = tools.get(connector.fromMessageId)?.() ?? null
       const to = tools.get(connector.toMessageId)?.() ?? null
       const target = connector.measure()
-      connector.apply(from && to && target ? calculateToolConnectorLayout(from, to, target) : null)
+      const layout = from && to && target ? calculateToolConnectorLayout(from, to, target) : null
+      const previous = lastApplied.get(connector.key)
+      const same = previous === layout || (previous !== undefined && previous !== null && layout !== null
+        && previous.left === layout.left && previous.top === layout.top && previous.height === layout.height)
+      if (!same) {
+        connector.apply(layout)
+        lastApplied.set(connector.key, layout)
+      }
     }
   }
 
@@ -97,6 +105,7 @@ export function createToolConnectorLayoutPort(
       port.invalidate('items-changed')
       return () => {
         if (connectors.get(registration.key) === registration) connectors.delete(registration.key)
+        lastApplied.delete(registration.key)
         registration.apply(null)
       }
     },
@@ -112,6 +121,7 @@ export function createToolConnectorLayoutPort(
       for (const connector of connectors.values()) connector.apply(null)
       connectors.clear()
       tools.clear()
+      lastApplied.clear()
     },
   }
 

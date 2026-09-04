@@ -3,6 +3,27 @@ import type { ContentPart } from '../../domains/workbench/content/contentPartSch
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
 
+export interface DisplayStreamRecord {
+  readonly role: 'assistant' | 'reasoning'
+  readonly text: string
+  readonly owner: 'canonical' | 'transient' | 'none'
+  readonly canonical?: WorkbenchDocument['messages'][number]
+}
+
+/** Resolve canonical/transient text to one visible owner for a stream. */
+export function selectDisplayStream(
+  canonical: readonly WorkbenchDocument['messages'][number][],
+  role: 'assistant' | 'reasoning',
+  transientText: string,
+): DisplayStreamRecord {
+  const row = [...canonical].reverse().find(message => message.role === role)
+  if (!row && transientText) return { role, text: transientText, owner: 'transient' }
+  if (!row || !row.content) return row ? { role, text: transientText || row.content, owner: transientText ? 'transient' : 'canonical', canonical: row } : { role, text: '', owner: 'none' }
+  if (!transientText || !row.running) return { role, text: row.content, owner: 'canonical', canonical: row }
+  if (transientText.startsWith(row.content) && transientText.length > row.content.length) return { role, text: transientText, owner: 'transient', canonical: row }
+  return { role, text: row.content.length >= transientText.length ? row.content : transientText, owner: 'canonical', canonical: row }
+}
+
 export function canonicalTokenCount(
   usage: WorkbenchDocument['session']['usage'],
   fallback: number,

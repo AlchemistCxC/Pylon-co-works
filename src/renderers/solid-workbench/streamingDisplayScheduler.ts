@@ -40,6 +40,20 @@ export interface StreamingDisplayScheduler {
   dispose(): void
 }
 
+/** Renderer safety net: never publish an impossible terminal combination. */
+export function cohereDisplaySnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
+  if (snapshot.summary === null && snapshot.terminalFence === undefined) return snapshot
+  if (!snapshot.generating && snapshot.generationStart === 0 && snapshot.generationPhase === undefined && snapshot.generationActivity === undefined && snapshot.thinkingStart === undefined) return snapshot
+  return {
+    ...snapshot,
+    generating: false,
+    generationStart: 0,
+    generationPhase: undefined,
+    generationActivity: undefined,
+    thinkingStart: undefined,
+  }
+}
+
 type DisplayMessage = {
   readonly id: string
   readonly role: string
@@ -169,6 +183,7 @@ export function createStreamingDisplayScheduler(
 
   const push = (snapshot: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
+    snapshot = cohereDisplaySnapshot(snapshot)
     target = snapshot
     if (displayed === undefined) {
       publishSnapshot(snapshot)
@@ -199,7 +214,7 @@ export function createStreamingDisplayScheduler(
 
   const flush = (snapshot?: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
-    if (snapshot !== undefined) target = snapshot
+    if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
     if (target === undefined) return
     clearTimer()
     publishSnapshot(target)
@@ -289,7 +304,8 @@ function requiresImmediateFlush(
 ): boolean {
   if (current.sessionId !== next.sessionId
     || current.ownerKey !== next.ownerKey
-    || current.generation !== next.generation) return true
+    || current.generation !== next.generation
+    || current.turnEpoch !== next.turnEpoch) return true
   if (current.document?.sessionId !== next.document?.sessionId) return true
   if (next.status === 'error' || next.summary !== null && next.summary !== current.summary) return true
 

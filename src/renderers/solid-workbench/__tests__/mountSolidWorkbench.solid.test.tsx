@@ -19,6 +19,7 @@ import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
 import type { Session } from '../../../identityStore.ts'
+import { selectDisplayStream } from '../solidWorkbenchProjectionSupport.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -27,6 +28,16 @@ afterEach(() => {
   cleanup()
   for (const services of servicesList.splice(0)) services.destroy()
   for (const host of hosts.splice(0)) host.remove()
+})
+
+describe('canonical/transient display owner', () => {
+  it('selects exactly one owner across short/equal/long prefixes and terminal precedence', () => {
+    const canonical = [{ id: 'm', segmentId: 'm', role: 'assistant' as const, content: 'abc', parts: [], identity: {}, source: { provider: 'p', sessionId: 's', sourceId: 'p' }, sequence: 1, running: true, time: '' }]
+    expect(selectDisplayStream(canonical, 'assistant', 'abcdef')).toMatchObject({ owner: 'transient', text: 'abcdef' })
+    expect(selectDisplayStream(canonical, 'assistant', 'abc')).toMatchObject({ owner: 'canonical', text: 'abc' })
+    expect(selectDisplayStream(canonical, 'assistant', 'ab')).toMatchObject({ owner: 'canonical', text: 'abc' })
+    expect(selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'abcdef')).toMatchObject({ owner: 'canonical', text: 'abc' })
+  })
 })
 
 function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {

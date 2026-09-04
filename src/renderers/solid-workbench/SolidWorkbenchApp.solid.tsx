@@ -127,6 +127,23 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     connectorPort.destroy()
   })
   const document = () => snapshot().document
+  const displayDocument = createMemo(() => {
+    const current = document()
+    if (!current) return current
+    const snap = snapshot()
+    const transientByRole = new Map([
+      ['assistant', snap.streamingText],
+      ['reasoning', snap.streamingThinking],
+    ] as const)
+    const messages = current.messages.filter(message => {
+      const transient = message.role === 'assistant' || message.role === 'reasoning' ? transientByRole.get(message.role) : undefined
+      if (!transient || !message.running || !transient.startsWith(message.content) || transient.length <= message.content.length) return true
+      // The transient stream is the sole owner while it has the longer
+      // prefix; remove the lagging canonical row from this render projection.
+      return false
+    })
+    return messages.length === current.messages.length ? current : { ...current, messages }
+  })
   // Canonical events and the legacy controller can briefly expose the same
   // in-flight text through both `document.messages` and the transient
   // streaming fields. Prefer the canonical running row once it exists; two
@@ -141,7 +158,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     // suppress the transient row if the candidate list is actually rendered.
     const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
       ? currentSnapshot.messages
-      : document()?.messages
+      : displayDocument()?.messages
     const canonicalRunning = streamRowCoversText(candidates, 'reasoning', text, currentSnapshot.generating)
     return canonicalRunning ? '' : text
   })
@@ -151,7 +168,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     if (!text) return ''
     const candidates = currentSnapshot.messages.some(message => message.role === 'tool')
       ? currentSnapshot.messages
-      : document()?.messages
+      : displayDocument()?.messages
     const canonicalRunning = streamRowCoversText(candidates, 'assistant', text, currentSnapshot.generating)
     return canonicalRunning ? '' : text
   })
@@ -556,7 +573,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   <ReasoningBlock text={text()} running />
                 </div>}
               </Show>
-              <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
+                  <WorkbenchDocumentSurface document={displayDocument()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
               <Show when={visibleStreamingText()}>
                 {text => <div class="term-row term-row-assistant" data-render-type="assistant" data-streaming="true">
                   <AssistantContent text={text()} appearance={appearance()} streaming />
@@ -852,13 +869,12 @@ function streamRowCoversText(
     if (message.role !== role) return false
     const canonicalText = typeof message.content === 'string' ? message.content : ''
     if (canonicalText.length === 0) return false
-    // A terminal projection can briefly clear `running` before the legacy
-    // stream field is cleared. An exact/prefix match is still the same visible
-    // row, so suppressing the transient copy avoids a mount/unmount height
-    // pulse. A non-running *shorter* row is not considered coverage: it may be
-    // a previous turn whose text happens to share a prefix.
-    if (canonicalText === transientText) return true
-    return generating && message.running === true && canonicalText.startsWith(transientText)
+    // A canonical row (running or terminal) is the authority whenever it
+    // exists for this role. Prefix direction is handled by displayDocument;
+    // keeping this selector total prevents a second transient row during
+    // non-prefix/late-event races.
+    if (message.running === true) return true
+    return canonicalText === transientText || !generating
   })
 }
 

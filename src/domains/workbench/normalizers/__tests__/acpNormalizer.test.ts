@@ -269,4 +269,16 @@ describe('ACP normalizer', () => {
       }],
     })
   })
+
+  it('keeps session_info_update mode out of lifecycle status', () => {
+    const result = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', mode: 'running', usage: { inputTokens: 2 } } }, context)
+    expect(result.events[0].event).toEqual({ type: 'session.mode-updated', mode: 'running' })
+  })
+
+  it('accepts only explicit allowlisted lifecycle status', () => {
+    const terminal = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', status: 'completed' } }, context)
+    expect(terminal.events[0].event).toEqual({ type: 'session.status-updated', status: 'completed' })
+    const unknown = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', status: 'mystery' } }, context)
+    expect(unknown.events[0].event.type).toBe('session.mode-updated')
+  })
 })

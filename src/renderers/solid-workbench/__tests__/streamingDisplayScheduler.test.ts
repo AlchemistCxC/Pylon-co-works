@@ -13,6 +13,15 @@ function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchR
 }
 
 describe('streaming display scheduler terminal coalescing', () => {
+  it('never publishes summary with generating=true', async () => {
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value))
+    scheduler.push(snapshot({ generating: true }))
+    scheduler.push(snapshot({ generating: true, summary: { elapsedMs: 2, tokenCount: 1, completedFrame: '', reason: 'done' } }))
+    await Promise.resolve()
+    expect(published.at(-1)).toMatchObject({ generating: false, summary: { reason: 'done' } })
+    scheduler.dispose()
+  })
   it('coalesces same-tick terminal metadata updates into one publication', async () => {
     const published: WorkbenchRuntimeSnapshot[] = []
     const scheduler = createStreamingDisplayScheduler(value => published.push(value))

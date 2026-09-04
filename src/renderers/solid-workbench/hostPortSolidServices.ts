@@ -41,18 +41,21 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   const document = host.document.getSnapshot()
   const messages = documentMessages(document)
   const generation = host.generation.getSnapshot()
+  const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
   const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
   return Object.freeze({
     revision: document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
-    streamingText: '', streamingThinking: '', generating: generation.generating,
+    streamingText: '', streamingThinking: '', generating: terminalStatus ? false : generation.generating,
     generationStart: generation.generationStart, lastTokenAt: generation.lastTokenAt,
     tokenCount: generation.tokenCount, summary: generation.summary,
     generationPhase: generation.generationPhase,
     generationActivity: generation.generationActivity,
     thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
+    turnEpoch: generation.turnEpoch,
+    terminalFence: generation.terminalFence,
     // Keep the host-port projection provider-neutral: ACP choices are carried
     // in the canonical session option surface, not in renderer-local stores.
     // A third-party Suite therefore sees the same model/mode catalogue as the

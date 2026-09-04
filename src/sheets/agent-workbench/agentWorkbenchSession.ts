@@ -412,6 +412,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let ownerKey: string | undefined
   let source: string | undefined
   let generation = 0
+  let turnEpoch = 0
   let loading = false
   let buffered: WorkbenchEventEnvelope[] = []
   let malformedCount = 0
@@ -502,7 +503,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       envelope,
     })
     pendingOptimisticBySource.set(targetSource, existing)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    turnEpoch += 1
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
       generationStart: now,
@@ -617,10 +619,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
 
   const applyLive = (incoming: WorkbenchEventEnvelope) => {
+    const isUserStart = (incoming.event.type === 'message.delta' || incoming.event.type === 'message.completed') && incoming.event.role === 'user'
+    const content = isUserStart ? (incoming.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('') : ''
+    const pending = pendingOptimisticBySource.get(incoming.sessionId) ?? []
+    const echoesOptimistic = pending.some(item => item.clientMessageId === incoming.identity.interactionId || item.content === content)
+    if (isUserStart && !echoesOptimistic) turnEpoch += 1
     const envelope = confirmPendingFromEnvelope(incoming)
     if (loading) { buffered.push(envelope); return }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: isUserStart ? null : undefined, preserveGeneration: true })
   }
   const unsubscribeEvents = subscribe(event => {
     if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return
@@ -769,6 +776,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       canonicalReadEpoch += 1
       refreshInFlight = null
       const nextGeneration = ++generation
+      turnEpoch = 0
       boundSessionId = session?.id
       boundProvider = session?.agentId || 'acp'
       source = session?.source
@@ -778,7 +786,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       malformedCount = 0
       loading = Boolean(session)
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
-        ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, sessionId: session?.id ?? null,
+        ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
       })
       if (session) {
         const pendingResponses = [
