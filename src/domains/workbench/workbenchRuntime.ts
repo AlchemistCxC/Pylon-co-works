@@ -180,6 +180,7 @@ export function createWorkbenchRuntime(
     },
     applyDocument(document, options = {}) {
       if (!acceptDocument(options)) return
+      documentLegacyDerived = false
       const nextDocument = freezeDocument(document, snapshot.document)
       const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
@@ -202,6 +203,7 @@ export function createWorkbenchRuntime(
     replaceDocument(document, options = {}) {
       const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
+      documentLegacyDerived = false
       const nextDocument = freezeDocument(document)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
       const documentAdvanced = nextDocument.revision > (snapshot.document?.revision ?? -1)
