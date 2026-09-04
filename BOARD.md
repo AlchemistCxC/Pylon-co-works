@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 19:12] [Riccati·架构师] [已处理] P44 评审/施工书已补强并登记：section 基线 4 domain/16 section；字段级 Renderer 处理表；host group/category policy；Slot Tool 去重与 field-count；结构化 target、value adapter（含 pluginId+contributionId 隔离与 unavailable value 保留）；Plugin schema preset exclusion；七项待批准契约。已同步 `Docs/README.md`、`Docs/Pylon-问题台账.md`、`Docs/Pylon-下一阶段问题清单.md` 与 Renderer 唯一入口台账。基线 9 files/57 tests、`npm.cmd run check:docs` 通过；无生产代码改动。
+
 [2026-09-04 19:05] [Riccati·架构师] P44 文档补强：根据只读交叉复核，将设置 section 基线修正为 4 domain/16 section；在评审/施工书冻结通用 schema 的 value adapter、结构化 target grammar、Plugin schema preset policy、host group placement 与 legacy field-count 兼容规则；随后同步 Docs README、问题台账/清单与 Renderer 唯一入口指针。仍不改生产代码，等待契约批准。
 
 [2026-09-04 17:55] [Riccati·架构师] 认领新设置架构评审：只读核对 `settingsDomains`、Renderer Settings Schema/Suite/Slot、预设 provider 与三处（渲染器/消息流/中控台）重叠证据；拟产出 `Docs/评审/` 评审报告与 `Docs/渲染引擎施工/` 施工书，暂不改生产代码，不触碰他人 WIP。已派只读交叉复核 `/root/settings_arch_review`，不改文件。
