@@ -7,7 +7,7 @@ import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } 
 import { markZoneCustom } from './themePresetState.ts'
 import { ZONE_FIELDS } from './themeFieldDefs.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
-import { THEME_SETTING_KEYS } from './themeFieldDefs.ts'
+import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
 import type { CustomPreset } from './customPresets.ts'
@@ -317,7 +317,7 @@ export const useStore = create<ThemeState>()(persist(
       const themePayload = recordPayload(themePayloadValue) as Record<string, unknown>
       const state = get()
       const beforeTheme = Object.fromEntries([
-        ...THEME_SETTING_KEYS.map(key => [key, state[key]] as const),
+        ...THEME_PRESET_KEYS.map(key => [key, state[key]] as const),
         ['appliedPreset', structuredClone(state.appliedPreset)],
         ['custom', structuredClone(state.custom)],
         ['customPresets', structuredClone(state.customPresets)],
@@ -352,10 +352,20 @@ export const useStore = create<ThemeState>()(persist(
         captureRenderer: () => ({ values: beforeRenderer.values, unavailable: beforeRenderer.unavailable }),
         applyRenderer: (payload, context) => {
           const current = rendererStore.getSnapshot()
-          rendererStore.replaceOverrides(
-            context.policy === 'complete' ? (payload.values ?? {}) : (payload.values ?? current.values),
-            context.policy === 'complete' ? (payload.unavailable ?? {}) : (payload.unavailable ?? current.unavailable),
-          )
+          const incomingValues = payload.values ?? {}
+          const incomingUnavailable = payload.unavailable ?? {}
+          if (context.policy === 'complete') {
+            rendererStore.replaceOverrides(incomingValues, incomingUnavailable)
+            return
+          }
+          // Partial bundles only own the keys they declare. Merge values and
+          // unavailable independently so an omitted override is preserved;
+          // an explicit unavailable entry clears the corresponding value.
+          const values = { ...current.values, ...incomingValues }
+          const unavailable = { ...current.unavailable, ...incomingUnavailable }
+          for (const key of Object.keys(incomingValues)) delete unavailable[key]
+          for (const key of Object.keys(incomingUnavailable)) delete values[key]
+          rendererStore.replaceOverrides(values, unavailable)
         },
         restoreRenderer: () => rendererStore.replaceOverrides(beforeRenderer.values, beforeRenderer.unavailable),
       })

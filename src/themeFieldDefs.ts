@@ -346,6 +346,13 @@ export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone:
   })])) as Record<ThemeFieldKey, { readonly zone: ZoneName; readonly owner: ThemeFieldOwner }>,
 )
 
+/** Preset-owned Theme fields. Workspace/right-rail authorities remain
+ * persisted for compatibility but are never captured or overwritten by a
+ * Theme preset. */
+export const THEME_PRESET_KEYS: readonly ThemeFieldKey[] = THEME_SETTING_KEYS.filter(key =>
+  THEME_FIELD_OWNERS[key].owner === 'theme',
+)
+
 /** cssVar 注入表：--xxx → 字段名（供 App.tsx 循环注入） */
 export const THEME_CSS_VAR_MAP: Readonly<Record<string, ThemeFieldKey>> = THEME_FIELD_KEYS.reduce((acc, key) => {
   const def = THEME_FIELD_DEFS[key]

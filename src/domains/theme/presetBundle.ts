@@ -1,5 +1,5 @@
 import type { RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { THEME_SETTING_KEYS } from '../../themeFieldDefs.ts'
+import { THEME_PRESET_KEYS } from '../../themeFieldDefs.ts'
 
 export type PresetJsonValue = null | boolean | number | string | readonly PresetJsonValue[] | { readonly [key: string]: PresetJsonValue }
 
@@ -330,11 +330,11 @@ function coverageCounts(providerId: string, contribution: PresetContribution | u
     : Object.keys(unavailableRecord).length
   if (!contribution) return { explicit: 0, defaulted: 0, unavailable }
   if (providerId === 'builtin.theme') {
-    const known = new Set<string>(THEME_SETTING_KEYS as readonly string[])
+    const known = new Set<string>(THEME_PRESET_KEYS as readonly string[])
     const explicit = Object.keys(payload).filter(key => known.has(key)).length
     return {
       explicit,
-      defaulted: contribution.policy === 'complete' ? Math.max(0, THEME_SETTING_KEYS.length - explicit) : 0,
+      defaulted: contribution.policy === 'complete' ? Math.max(0, THEME_PRESET_KEYS.length - explicit) : 0,
       unavailable,
     }
   }

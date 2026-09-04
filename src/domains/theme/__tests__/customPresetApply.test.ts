@@ -137,6 +137,30 @@ describe('custom preset apply (D-fix)', () => {
     expect(useStore.getState().appliedPreset.chat).toBe(id)
   })
 
+  it('merges partial Renderer payloads by key and honors explicit unavailable clears', async () => {
+    const rendererStore = getRendererSettingsStore()
+    rendererStore.setOverride('kind.tool.read.maxWidth', 640)
+    rendererStore.setOverride('kind.tool.read.density', 'compact')
+    rendererStore.markUnavailable('kind.tool.read.status', 'legacy')
+    const id = 'custom-partial-renderer'
+    useStore.setState({ customPresets: [{
+      id, name: '局部 Renderer', theme: { chatFontSize: 18 }, createdAt: 1, updatedAt: 1,
+      bundle: createPresetBundle({
+        id, name: '局部 Renderer', now: 1, theme: { chatFontSize: 18 },
+        renderer: { values: { 'kind.tool.read.maxWidth': 720, 'kind.tool.read.status': 'ok' }, unavailable: {} },
+      }),
+    }] as never })
+
+    const result = await useStore.getState().applyCustomPreset(id)
+    expect(result.status).toBe('applied')
+    expect(rendererStore.getSnapshot().values).toMatchObject({
+      'kind.tool.read.maxWidth': 720,
+      'kind.tool.read.density': 'compact',
+      'kind.tool.read.status': 'ok',
+    })
+    expect(rendererStore.getSnapshot().unavailable['kind.tool.read.status']).toBeUndefined()
+  })
+
   it('normalizes a legacy bare id at the click boundary', async () => {
     useStore.setState({ customPresets: [{
       id: 'custom-legacy-id', name: '旧 id', theme: { chatFontSize: 21 }, createdAt: 1, updatedAt: 1,

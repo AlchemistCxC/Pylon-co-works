@@ -28,12 +28,17 @@ import {
   deleteCustomPreset,
   type CustomPreset,
 } from '../../customPresets.ts'
-import { normalizeThemeState, THEME_DEFAULTS } from '../../themeFieldDefs.ts'
+import { normalizeThemeState, THEME_DEFAULTS, THEME_PRESET_KEYS } from '../../themeFieldDefs.ts'
 import { markZoneCustom } from '../../themePresetState.ts'
 import type { ThemeSettings } from '../../store.ts'
 import type { PresetBundleV2 } from './presetBundle.ts'
 
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
+const PRESET_KEY_SET = new Set<string>(THEME_PRESET_KEYS)
+
+function filterPresetTheme(value: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => PRESET_KEY_SET.has(key))) as Partial<ThemeSettings>
+}
 
 /** W2-15（F3-B）：全量主题 → 相对 DEFAULTS 的 delta（过滤与默认相等键；自定义预设存储用） */
 export function toThemeDelta(theme: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
@@ -170,11 +175,12 @@ export function applyZonePresetReducer(
   presetName: string,
   presetTheme: Partial<ThemeSettings>,
 ): ThemePresetPatch {
+  const theme = filterPresetTheme(presetTheme)
   return {
-    ...presetTheme,
+    ...theme,
     // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
-    ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
-    ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
+    ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
+    ...(zone === 'cc' && theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
     appliedPreset: { ...state.appliedPreset, [zone]: presetName },
     custom: { ...state.custom, [zone]: false },
   }
@@ -182,11 +188,13 @@ export function applyZonePresetReducer(
 
 /** 切换全局预设：全 PRESET_ZONES 记名 + 全 custom 清零 + 恢复规范排布 */
 export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSettings>): ThemePresetPatch {
+  const filteredTheme = filterPresetTheme(theme)
+  const presetDefaults = filterPresetTheme(DEFAULTS)
   return {
-    ...DEFAULTS,
-    ...theme,
-    ccLayout: normalizeCcLayout(theme.ccLayout),
-    ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
+    ...presetDefaults,
+    ...filteredTheme,
+    ccLayout: normalizeCcLayout(filteredTheme.ccLayout),
+    ...(filteredTheme.ccHeight !== undefined ? syncPresetCcHeight(filteredTheme) : {}),
     appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, name])),
     custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
@@ -231,9 +239,9 @@ export function applyCustomPresetReducer(
   const source = explicitTheme
     ?? state.customPresets.find(item => item.id === id)?.theme
   if (!source) return null
-  const theme = normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Partial<ThemeSettings>
+  const theme = filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>)
   return {
-    ...DEFAULTS,
+    ...filterPresetTheme(DEFAULTS),
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
