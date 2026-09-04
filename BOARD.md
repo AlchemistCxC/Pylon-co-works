@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 22:08] [织境·工程师] P44 REVIEW 修复首片：SS-R2 提交 `d135c508`，统一 structured target 编码/解析与 Renderer Store/option registry 边界；保留 `ownerPluginId`、Theme `theme.<field>` 兼容形式、`%2E` dotted owner/field 与可选 plugin 段。新增 target/plugin/store 回归 15 项，tsc/lint/diff check 通过；P44 仍保持 REVIEW，下一片处理 Catalog compositor 单一 projection。
+
 [2026-09-04 21:28] [Riccati·架构师] [已处理] 根据独立复核，P44 已从“完成”回置为 `待验收/REVIEW`（仅文档状态，未改生产代码）；问题台账、下一阶段清单与 Renderer 唯一入口已同步。工程师可按审查意见修复后再申请复验，延期 DSL 仍不进入本轮。
 
 [2026-09-04 21:12] [Riccati·架构师] P44 code review（范围 `a251f4b4..23af1dc5`，只读）：定向回归 11/58、6/31、5/26、6/30 均通过；但暂不采信“完成”。阻塞意见：① `settingsTargetGrammar` 生成 `%2E`/dotted field，`rendererSettingsStore` 的 key guard 拒绝，且 structured `theme` target 无法通过、ownerPluginId 在 stringify 中丢失；② Settings nav/search 用新 ContributionCatalog，RendererSettingsPanel/Preview 仍用旧 catalog，Plugin Page/Context Panel schema/adapter 也未接入实际 host；③ ContributionCatalog 未接 activeSuite，错误 category label/group/order 仍可污染 route，`tool.*` 前缀会误隐藏第三方 Kind；④ `createPluginSettingsValueAdapter` 的 `::` bucket 可碰撞，外部 store 更新不递增 adapter revision、无效 remove 却递增；⑤ color palette removed value 不进 unavailable；⑥ `showPet` 已改由 workspaceStore 编辑但 Workbench appearance 仍读取 theme.showPet。次要：catalog categories/searchItems 未深冻结、revision 不含 plugin/context、aliases/order 未消费、density predicate 重复、插件 schema 未在 registry 校验。建议先修上述 P0/P1 并补对应回归，再重新验收 P44；本次未改代码。
