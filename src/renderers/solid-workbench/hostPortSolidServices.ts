@@ -38,9 +38,19 @@ function documentMessages(document: WorkbenchDocument | undefined): readonly Mes
 }
 
 function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
-  const document = host.document.getSnapshot()
+  // Document and generation are legacy split readers. Read them as a pair and
+  // retry when their revisions disagree so a subscriber cannot observe a
+  // terminal document alongside the previous active generation tick.
+  let document = host.document.getSnapshot()
+  let generation = host.generation.getSnapshot()
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const documentRevision = document?.revision
+    const generationRevision = generation.revision
+    if (documentRevision === undefined || generationRevision === undefined || documentRevision === generationRevision) break
+    document = host.document.getSnapshot()
+    generation = host.generation.getSnapshot()
+  }
   const messages = documentMessages(document)
-  const generation = host.generation.getSnapshot()
   const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
   // A terminal fence/summary is stronger than a stale controller flag. Once
   // observed, clear active-only metadata in the same host projection so a

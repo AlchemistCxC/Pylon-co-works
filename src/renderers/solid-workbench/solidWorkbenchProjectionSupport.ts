@@ -19,7 +19,16 @@ export function selectDisplayStream(
   const row = [...canonical].reverse().find(message => message.role === role)
   if (!row && transientText) return { role, text: transientText, owner: 'transient' }
   if (!row || !row.content) return row ? { role, text: transientText || row.content, owner: transientText ? 'transient' : 'canonical', canonical: row } : { role, text: '', owner: 'none' }
-  if (!transientText || !row.running) return { role, text: row.content, owner: 'canonical', canonical: row }
+  if (!transientText) return { role, text: row.content, owner: 'canonical', canonical: row }
+  // A terminal canonical row belongs to the previous turn. Only absorb a
+  // transient tail when it is a valid prefix continuation; unrelated text is
+  // a new display record and must not replace the historical row.
+  if (!row.running) {
+    if (transientText.startsWith(row.content) || row.content.startsWith(transientText)) {
+      return { role, text: row.content, owner: 'canonical', canonical: row }
+    }
+    return { role, text: transientText, owner: 'transient' }
+  }
   if (transientText.startsWith(row.content) && transientText.length > row.content.length) return { role, text: transientText, owner: 'transient', canonical: row }
   // Identity/content conflict: prefer the newest transient value as the sole
   // visible owner rather than swallowing unrelated text behind a role-only

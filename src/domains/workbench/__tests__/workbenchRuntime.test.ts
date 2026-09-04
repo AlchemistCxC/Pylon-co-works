@@ -35,6 +35,46 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().generationStart).toBe(0)
   })
 
+  it('canonical terminal document cannot be revived by a stale controller patch', () => {
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4,
+      generating: true, generationStart: 10,
+    })
+    const terminal = {
+      ...createWorkbenchDocument('session-a'),
+      revision: 9,
+      session: { ...createWorkbenchDocument('session-a').session, status: 'completed' as const },
+    }
+    runtime.applyDocument(terminal, {
+      ownerKey: 'owner-a', generation: 1,
+      generationPatch: { generating: true, generationStart: 999, summary: null },
+    })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: false, terminalFence: { turnEpoch: 4 } })
+    expect(runtime.getSnapshot().generationStart).toBe(0)
+  })
+
+  it('does not infer a terminal fence from a completed text row before a delayed tool start', () => {
+    const make = (sequence: number, event: 'message.delta' | 'message.completed' | 'tool.started') => createWorkbenchEnvelope({
+      sessionId: 'session-a', sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: 'source-a' }, identity: { messageId: 'message-a', toolCallId: event === 'tool.started' ? 'tool-a' : undefined },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: event === 'tool.started'
+        ? { type: event, tool: { toolCallId: 'tool-a', name: 'Read' } }
+        : { type: event, role: 'assistant', parts: event === 'message.delta' ? [{ kind: 'text', text: 'answer' }] : [] },
+    })
+    const textDone = projectWorkbench([make(1, 'message.delta'), make(2, 'message.completed')]).document
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4,
+      generating: true, generationStart: 10,
+    })
+    runtime.applyDocument(textDone, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: true })
+    expect(runtime.getSnapshot().terminalFence).toBeUndefined()
+    const withTool = projectWorkbench([make(1, 'message.delta'), make(2, 'message.completed'), make(3, 'tool.started')]).document
+    runtime.applyDocument(withTool, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: true })
+  })
+
   it('新 turnEpoch 清除旧 summary/fence，late active patch 不能复活旧回合', () => {
     const base = { ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 2, generating: false, summary: { elapsedMs: 1, tokenCount: 1, completedFrame: '', reason: 'done' as const }, terminalFence: { turnEpoch: 2 } }
     const next = mergeWorkbenchRuntimeSnapshot(base, { turnEpoch: 3, generationPatch: { generating: true, generationStart: 100 } })

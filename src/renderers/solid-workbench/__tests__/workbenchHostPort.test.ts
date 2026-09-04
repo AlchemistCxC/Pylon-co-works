@@ -58,6 +58,46 @@ describe('WorkbenchHostPort', () => {
     source.destroy()
   })
 
+  it('re-reads split document/generation readers until one revision pair converges', () => {
+    const source = runtime()
+    source.replaceDocument({
+      ...source.getSnapshot().document!,
+      revision: 2,
+      session: { ...source.getSnapshot().document!.session, status: 'completed' },
+    }, { ownerKey: 'owner-a', generation: 1 })
+    const base = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    let documentReads = 0
+    let generationReads = 0
+    const splitHost = {
+      ...base,
+      document: {
+        ...base.document,
+        getSnapshot: () => {
+          documentReads += 1
+          return documentReads === 1 ? { ...source.getSnapshot().document!, revision: 1 } : source.getSnapshot().document
+        },
+      },
+      generation: {
+        ...base.generation,
+        getSnapshot: () => {
+          generationReads += 1
+          return { ...base.generation.getSnapshot(), revision: 2, generating: true }
+        },
+      },
+    } as typeof base
+    const combined = createSolidWorkbenchServicesFromHostPort(splitHost).runtime.getSnapshot()
+    expect(combined.revision).toBe(2)
+    expect(combined.generating).toBe(false)
+    expect(documentReads).toBeGreaterThan(1)
+    expect(generationReads).toBeGreaterThan(1)
+    source.destroy()
+  })
+
   it('exposes an immutable document reader and slice subscriptions', () => {
     const source = runtime()
     const host = createWorkbenchHostPort({

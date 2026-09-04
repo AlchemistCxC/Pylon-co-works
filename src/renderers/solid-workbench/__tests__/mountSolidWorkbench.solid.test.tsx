@@ -37,6 +37,9 @@ describe('canonical/transient display owner', () => {
     expect(selectDisplayStream(canonical, 'assistant', 'abc')).toMatchObject({ owner: 'canonical', text: 'abc' })
     expect(selectDisplayStream(canonical, 'assistant', 'ab')).toMatchObject({ owner: 'canonical', text: 'abc' })
     expect(selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'abcdef')).toMatchObject({ owner: 'canonical', text: 'abc' })
+    const conflict = selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'xyz')
+    expect(conflict).toMatchObject({ owner: 'transient', text: 'xyz' })
+    expect(conflict.canonical).toBeUndefined()
   })
 })
 

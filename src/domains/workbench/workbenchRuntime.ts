@@ -314,6 +314,7 @@ export function mergeWorkbenchRuntimeSnapshot(
   const epochIsOlder = requestedEpoch !== undefined && previousEpoch !== undefined && requestedEpoch < previousEpoch
   const epochIsNew = requestedEpoch !== undefined && (previousEpoch === undefined || requestedEpoch > previousEpoch)
   const effectiveEpoch = epochIsOlder ? previousEpoch : requestedEpoch ?? previousEpoch
+  const documentIsTerminal = document !== undefined && hasTerminalDocumentState(document)
   const patchWithoutControl = { ...(epochIsOlder ? {} : rawPatch) }
   delete (patchWithoutControl as { turnEpoch?: number }).turnEpoch
   delete (patchWithoutControl as { terminalFence?: WorkbenchTerminalFence | null }).terminalFence
@@ -336,6 +337,19 @@ export function mergeWorkbenchRuntimeSnapshot(
   if (epochIsNew) {
     candidate.summary = null
     candidate.terminalFence = undefined
+  }
+  // A canonical terminal projection is authoritative for the current turn.
+  // Controller callbacks can arrive later with a stale active flag; never let
+  // that patch resurrect the spinner or active-only metadata.
+  if (documentIsTerminal && !epochIsNew) {
+    candidate.generating = false
+    candidate.generationStart = 0
+    candidate.generationPhase = undefined
+    candidate.generationActivity = undefined
+    candidate.thinkingStart = undefined
+    if (candidate.terminalFence === undefined && effectiveEpoch !== undefined) {
+      candidate.terminalFence = { ownerKey: candidate.ownerKey, turnEpoch: effectiveEpoch }
+    }
   }
   return normalizeRuntimeSnapshot(candidate)
 }
@@ -548,11 +562,14 @@ function preserveActiveGeneration(
 
 function hasTerminalDocumentState(document: WorkbenchDocument): boolean {
   const status = document.session.status.toLowerCase()
-  if (['completed', 'error', 'cancelled', 'failed'].includes(status)
-    || document.timeline.some(entry => entry.kind === 'session' && entry.status === 'completed')) return true
-  const textRows = document.messages.filter(message => message.role === 'assistant' || message.role === 'reasoning')
-  const hasRunningActivity = document.activities.some(activity => !isTerminalActivityStatus(activity.status))
-  return textRows.length > 0 && textRows.every(message => !message.running) && !hasRunningActivity
+  // Only an explicit lifecycle terminal event is sufficient evidence. A
+  // completed assistant/reasoning row is not: providers may emit a delayed
+  // tool.started for the same turn, and inferring a fence from a temporary
+  // text-only gap would stop the footer before that tool is observed.
+  return ['completed', 'error', 'cancelled', 'failed'].includes(status)
+    || document.timeline.some(entry => entry.kind === 'session'
+      && typeof entry.status === 'string'
+      && ['completed', 'error', 'cancelled', 'failed'].includes(entry.status.toLowerCase()))
 }
 
 function isTerminalActivityStatus(status: string): boolean {

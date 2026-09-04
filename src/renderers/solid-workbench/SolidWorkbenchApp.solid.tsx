@@ -163,15 +163,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const appendTransient = (role: 'assistant' | 'reasoning', text: string) => {
       if (!text) return
       const candidates = canonical.filter(message => message.role === role)
-      // Legacy controller streams can remain active while a replayed
-      // canonical placeholder is not marked running yet. Treat only that
-      // explicit generating gap as eligible for handoff; a terminal row keeps
-      // ownership once the runtime is no longer generating.
-      const latest = candidates.at(-1)
-      const selectorCandidates = latest && !latest.running && snapshot().generating
-        ? [...candidates.slice(0, -1), { ...latest, running: true }]
-        : candidates
-      const record = selectDisplayStream(selectorCandidates, role, text)
+      const record = selectDisplayStream(candidates, role, text)
       if (record.owner !== 'transient') return
       const index = record.canonical ? base.findIndex(message => message.id === record.canonical!.id) : -1
       const transient: Message = {
