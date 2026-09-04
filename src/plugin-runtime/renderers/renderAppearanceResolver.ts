@@ -4,6 +4,10 @@ import type {
   RendererSettingsSchema,
 } from './rendererSettingsTypes.ts'
 import { settingFieldKey } from './rendererSettingsTypes.ts'
+import type { RendererSettingOption } from './rendererSettingsTypes.ts'
+import type { RegistryEntry } from '../registry/types.ts'
+import type { PluginSettingOptionsContribution } from '../settings/pluginSettingsTypes.ts'
+import { resolvePluginSettingOptions } from '../settings/pluginSettingOptionsRegistry.ts'
 
 export type RenderAppearanceSource = 'schema-default' | 'host-default' | 'kind-default' | 'profile' | 'user-override' | 'session-preview'
 
@@ -19,7 +23,7 @@ export interface RenderAppearanceResolveInput {
 }
 
 export interface RenderAppearanceDiagnostic {
-  readonly code: 'renderer.setting.invalid' | 'renderer.setting.unavailable'
+  readonly code: 'renderer.setting.invalid' | 'renderer.setting.unavailable' | 'renderer.setting.inheritance'
   readonly key: string
   readonly message: string
   readonly source: RenderAppearanceSource | 'unknown'
@@ -30,6 +34,18 @@ export interface RenderAppearanceResolution {
   readonly sources: Readonly<Record<string, RenderAppearanceSource>>
   readonly unavailable: Readonly<Record<string, RendererSettingValue>>
   readonly diagnostics: readonly RenderAppearanceDiagnostic[]
+}
+
+/** Single option/palette resolver shared by Settings, preview and production. */
+export function resolveFieldOptions(
+  field: RenderSettingField,
+  target: string,
+  entries: readonly RegistryEntry<PluginSettingOptionsContribution>[] = [],
+): readonly RendererSettingOption[] {
+  const base = field.type === 'choice' || field.type === 'multi-choice' ? field.options : []
+  if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return Object.freeze([])
+  const optionTarget = field.type === 'color' ? field.paletteTarget : field.optionTarget
+  return resolvePluginSettingOptions(optionTarget ?? target, base, entries)
 }
 
 function fieldsOf(schema: RendererSettingsSchema): Map<string, RenderSettingField> {
@@ -106,6 +122,9 @@ export function resolveRenderAppearance(input: RenderAppearanceResolveInput): Re
       }
       values[key] = value
       sources[key] = source
+      if (field.inheritsFrom && source !== 'schema-default') {
+        diagnostics.push({ code: 'renderer.setting.inheritance', key, message: `设置字段 ${key} 继承自 ${field.inheritsFrom}`, source })
+      }
     }
   }
   return Object.freeze({

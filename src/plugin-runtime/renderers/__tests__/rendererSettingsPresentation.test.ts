@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   DISPLAY_DEFAULTS,
+  isSettingVisible,
   resolvePresentation,
   validateRendererSettingsSchema,
   type RenderSettingField,
 } from '../rendererSettingsTypes.ts'
+import { resolveFieldOptions } from '../renderAppearanceResolver.ts'
+import type { RegistryEntry } from '../../registry/types.ts'
+import type { PluginSettingOptionsContribution } from '../../settings/pluginSettingsTypes.ts'
 
 /**
  * S1 显示解析基座（施工书 06 §S1）：
@@ -30,6 +34,22 @@ describe('S1 resolvePresentation 两层解析', () => {
     expect(DISPLAY_DEFAULTS.number).toBe('slider+input')
     expect(DISPLAY_DEFAULTS.boolean).toBe('toggle')
     expect(DISPLAY_DEFAULTS.text).toBe('input')
+  })
+
+  it('统一 visibility predicate respects density tiers', () => {
+    expect(isSettingVisible({ tier: 'basic' }, 'basic')).toBe(true)
+    expect(isSettingVisible({ advanced: true }, 'standard')).toBe(false)
+    expect(isSettingVisible({ advanced: true }, 'all')).toBe(true)
+  })
+
+  it('color paletteTarget resolves through the same option registry as choices', () => {
+    const field = { key: 'accent', type: 'color', paletteTarget: 'slot.builtin.solid.content.base.accent' } as const
+    const option = { value: '#123456', label: 'Fixture' }
+    const entry: RegistryEntry<PluginSettingOptionsContribution> = {
+      contributionId: 'palette', ownerPluginId: 'fixture', ownerRuntimeInstanceId: 'fixture@1', layer: 'feature', priority: 1,
+      value: { id: 'palette', target: field.paletteTarget, upsert: [option] },
+    }
+    expect(resolveFieldOptions(field, field.paletteTarget, [entry])).toEqual([expect.objectContaining(option)])
   })
 })
 

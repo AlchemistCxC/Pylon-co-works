@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { PluginSettingsPageRegistry } from '../pluginSettingsRegistry.ts'
 import { PluginSettingsStore } from '../pluginSettingsStore.ts'
+import { validatePluginSettingOptionsContribution } from '../pluginSettingOptionsRegistry.ts'
 
 describe('plugin settings contracts', () => {
   beforeEach(() => localStorage.clear())
@@ -35,5 +36,11 @@ describe('plugin settings contracts', () => {
     expect(a).toHaveBeenCalledOnce()
     expect(b).not.toHaveBeenCalled()
     expect(localStorage.getItem('pylon-plugin-settings-v1')).toContain('plugin.a')
+  })
+
+  it('accepts multi-segment legacy Kind targets without truncating owner identity', () => {
+    expect(() => validatePluginSettingOptionsContribution({
+      id: 'plugin.palette', target: 'kind.acme.widgets.chart.accent', upsert: [{ value: 'amber' }],
+    })).not.toThrow()
   })
 })

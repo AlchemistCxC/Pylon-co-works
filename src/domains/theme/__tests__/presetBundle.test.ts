@@ -11,6 +11,12 @@ describe('PresetBundle v2', () => {
     expect(presetCoverage(undefined).every(item => item.state === 'missing')).toBe(true)
   })
 
+  it('marks missing official providers as partial instead of implying complete coverage', () => {
+    const bundle = createPresetBundle({ id: 'official:test', name: 'Official', now: 1, source: 'builtin', theme: { accent: '#fff' } })
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.presentation')).toMatchObject({ state: 'missing', policy: 'partial' })
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.renderer-settings')).toMatchObject({ state: 'missing', policy: 'partial' })
+  })
+
   it('drops malformed contribution entries without dropping the envelope', () => {
     const bundle = normalizePresetBundle({
       manifestVersion: 2,

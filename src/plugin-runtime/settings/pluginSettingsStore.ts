@@ -1,4 +1,5 @@
 import type { PluginSettingValue } from './pluginSettingsTypes.ts'
+import type { SettingsValueAdapter } from '../renderers/rendererSettingsTypes.ts'
 import { validatePluginKey } from './pluginKeyValidation.ts'
 
 const STORAGE_KEY = 'pylon-plugin-settings-v1'
@@ -72,5 +73,32 @@ export class PluginSettingsStore {
 
   private publish(pluginId: string): void {
     for (const listener of [...(this.listeners.get(pluginId) ?? [])]) listener()
+  }
+}
+
+/** Host-owned adapter that isolates each page/panel by plugin + contribution. */
+export function createPluginSettingsValueAdapter(input: {
+  readonly store: PluginSettingsStore
+  readonly ownerPluginId: string
+  readonly contributionId: string
+  readonly namespace: 'plugin-page' | 'context-panel'
+}): SettingsValueAdapter {
+  const bucket = `${input.ownerPluginId}::${input.contributionId}`
+  let revision = 0
+  const unavailable: Record<string, { value?: PluginSettingValue; code: string; message: string }> = {}
+  const notify = () => { revision += 1 }
+  return {
+    namespace: input.namespace,
+    ownerPluginId: input.ownerPluginId,
+    contributionId: input.contributionId,
+    getSnapshot: () => Object.freeze({
+      values: Object.freeze({ ...input.store.getSnapshot(bucket) }) as Readonly<Record<string, PluginSettingValue>>,
+      unavailable: Object.freeze({ ...unavailable }),
+      revision,
+    }),
+    setValue: (fieldKey, value) => { delete unavailable[fieldKey]; notify(); input.store.set(bucket, fieldKey, value as PluginSettingValue) },
+    removeValue: fieldKey => { notify(); input.store.remove(bucket, fieldKey) },
+    reset: fieldKey => { notify(); input.store.remove(bucket, fieldKey) },
+    subscribe: listener => input.store.subscribe(bucket, listener),
   }
 }

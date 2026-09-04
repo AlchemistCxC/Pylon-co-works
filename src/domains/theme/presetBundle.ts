@@ -295,6 +295,7 @@ export function createPresetBundle(input: {
   theme: PresetJsonValue
   renderer?: RendererPresetPayload
   presentation?: PresentationPresetPayload
+  source?: PresetBundleV2['source']
 }): PresetBundleV2 {
   const contributions: Record<string, PresetContribution> = {
     'builtin.theme': { ownerPluginId: 'builtin.pylon-shell', providerVersion: 1, policy: 'complete', payload: input.theme },
@@ -309,7 +310,7 @@ export function createPresetBundle(input: {
     manifestVersion: 2,
     id: input.id,
     name: input.name,
-    source: 'user' as const,
+    source: input.source ?? 'user',
     createdAt: input.createdAt ?? input.now,
     updatedAt: input.now,
     contributions: Object.freeze(contributions),
@@ -374,7 +375,7 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
       label,
       ...counts,
       state,
-      ...(contribution ? { policy: contribution.policy } : {}),
+      ...(contribution ? { policy: contribution.policy } : bundle?.source === 'builtin' ? { policy: 'partial' as const } : {}),
     }
   })
 }

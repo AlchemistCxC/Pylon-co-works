@@ -32,7 +32,7 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
     name: preset.name,
     label: preset.label,
     theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
-    bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, theme: preset.theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
+    bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, source: 'builtin', theme: preset.theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
   })), [])
 
   const custom = useMemo(() => customPresets.map(preset => ({

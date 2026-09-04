@@ -39,9 +39,9 @@ const TEXT_SETTINGS = Object.freeze({
   schemaVersion: 1,
   groups: [{
     id: 'typography', label: '文本排版', layout: 'grid', fields: [
-      { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: FONT_OPTIONS, default: 'inherit' },
-      { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 32, step: 1, unit: 'px', default: 14 },
-      { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.6 },
+      { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: FONT_OPTIONS, default: 'inherit', semanticKey: 'message.fontFamily', scope: 'renderer', inheritsFrom: 'theme.chatFont' },
+      { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 32, step: 1, unit: 'px', default: 14, semanticKey: 'message.fontSize', scope: 'renderer', inheritsFrom: 'theme.chatFontSize' },
+      { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.6, semanticKey: 'message.lineHeight', scope: 'renderer', inheritsFrom: 'theme.chatLineHeight' },
       { key: 'maxWidth', label: '最大宽度', type: 'number', presentation: 'slider+input', min: 240, max: 1600, step: 20, unit: 'px', default: 760 },
     ],
   }],

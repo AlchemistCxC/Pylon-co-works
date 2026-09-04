@@ -1,11 +1,10 @@
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import type { RenderCatalogSnapshot } from './rendererRegistry.ts'
-import { resolveRenderAppearance, type RenderAppearanceResolution } from './renderAppearanceResolver.ts'
+import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceResolution } from './renderAppearanceResolver.ts'
 import type { RendererSettingValue, RendererSettingsSchema } from './rendererSettingsTypes.ts'
 import type { RendererSettingsStoreSnapshot } from './rendererSettingsStore.ts'
 import type { RegistryEntry } from '../registry/types.ts'
-import { resolvePluginSettingOptions } from '../settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOptionsContribution } from '../settings/pluginSettingsTypes.ts'
 
 export interface ProductionRenderAppearanceInput {
@@ -51,12 +50,14 @@ function resolveScope(input: {
   if (!input.schema) return {
     values: Object.freeze({}),
     sources: Object.freeze({}),
+    unavailable: Object.freeze({}),
+    diagnostics: Object.freeze([]),
   }
   const availableOptions = Object.fromEntries(input.schema.groups.flatMap(group => group.fields.flatMap(field => {
-    if (field.type !== 'choice' && field.type !== 'multi-choice') return []
+    if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
     const key = field.key ?? field.id ?? ''
-    const target = field.optionTarget ?? `${input.namespace}.${input.id}.${key}`
-    const options = resolvePluginSettingOptions(target, field.options, input.optionEntries ?? [])
+    const target = `${input.namespace}.${input.id}.${key}`
+    const options = resolveFieldOptions(field, target, input.optionEntries ?? [])
     return [[key, options.map(option => option.value)] as const]
   })))
   const resolution = resolveRenderAppearance({
@@ -68,7 +69,7 @@ function resolveScope(input: {
     sessionPreview: scopedValues(input.settings.sessionPreview, input.namespace, input.id),
     availableOptions,
   })
-  return { values: resolution.values, sources: resolution.sources }
+  return resolution
 }
 
 export interface ProductionRendererSettingsScopeInput {
@@ -87,7 +88,7 @@ export interface ProductionRendererSettingsScopeInput {
  */
 export function resolveProductionRendererSettingsScope(
   input: ProductionRendererSettingsScopeInput,
-): Pick<RenderAppearanceResolution, 'values' | 'sources'> {
+): Pick<RenderAppearanceResolution, 'values' | 'sources' | 'unavailable' | 'diagnostics'> {
   const contribution = input.namespace === 'kind'
     ? input.catalog.renderKinds.find(entry => entry.value.id === input.id)?.value
     : input.namespace === 'suite'
@@ -146,6 +147,16 @@ export function resolveProductionRenderAppearance(input: ProductionRenderAppeara
         slot: slotResolution.sources,
         kind: kindResolution.sources,
       }),
+      unavailable: Object.freeze({
+        suite: suiteResolution.unavailable,
+        slot: slotResolution.unavailable,
+        kind: kindResolution.unavailable,
+      }),
+      diagnostics: Object.freeze([
+        ...suiteResolution.diagnostics,
+        ...slotResolution.diagnostics,
+        ...kindResolution.diagnostics,
+      ]),
     }),
   })
 }

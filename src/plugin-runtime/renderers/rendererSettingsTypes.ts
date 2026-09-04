@@ -63,6 +63,7 @@ export interface RendererSettingOption {
   readonly description?: string
   readonly disabled?: boolean
   readonly order?: number
+  readonly tier?: 'basic'
 }
 
 export type RenderSettingCondition =
@@ -82,6 +83,14 @@ interface RenderSettingFieldBase {
   readonly default?: RendererSettingValue
   readonly showIf?: RenderSettingCondition
   readonly resetLabel?: string
+  /** Stable semantic metadata used by the Settings compositor. */
+  readonly semanticKey?: string
+  readonly scope?: 'theme' | 'renderer' | 'slot' | 'suite' | 'kind' | 'plugin'
+  readonly inheritsFrom?: string
+  readonly deprecated?: boolean
+  readonly aliases?: readonly string[]
+  readonly order?: number
+  readonly tier?: 'basic'
 }
 
 export interface RenderChoiceSettingField extends RenderSettingFieldBase {
@@ -143,6 +152,7 @@ export interface RenderSettingGroup {
   readonly description?: string
   readonly layout?: 'stack' | 'grid' | 'inline' | 'tabs'
   readonly collapsedByDefault?: boolean
+  readonly order?: number
   readonly fields: readonly RenderSettingField[]
 }
 
@@ -218,6 +228,15 @@ function validateOptions(fieldKeyValue: string, options: readonly RendererSettin
 
 function validateField(field: RenderSettingField, fields: ReadonlySet<string>): void {
   const key = fieldKey(field)
+  if (field.semanticKey !== undefined && !field.semanticKey.trim()) fail(`${key} semanticKey 不能为空`)
+  if (field.scope !== undefined && !['theme', 'renderer', 'slot', 'suite', 'kind', 'plugin'].includes(field.scope)) fail(`${key} scope 非法`)
+  if (field.inheritsFrom !== undefined && !field.inheritsFrom.trim()) fail(`${key} inheritsFrom 不能为空`)
+  if (field.order !== undefined && (!Number.isFinite(field.order))) fail(`${key} order 非法`)
+  if (field.aliases !== undefined) {
+    if (!Array.isArray(field.aliases) || field.aliases.some(alias => typeof alias !== 'string' || !alias.trim())) fail(`${key} aliases 非法`)
+    if (field.aliases.includes(key)) fail(`${key} aliases 不得包含 canonical key`)
+    if (new Set(field.aliases).size !== field.aliases.length) fail(`${key} aliases 重复`)
+  }
   if (field.label !== undefined && !field.label.trim()) fail(`${key} label 不能为空`)
   if (field.description !== undefined && typeof field.description !== 'string') fail(`${key} description 非法`)
   if (field.default !== undefined && !isSerializable(field.default)) fail(`${key} default 必须可序列化`)
@@ -272,18 +291,25 @@ export function validateRendererSettingsSchema(schema: RendererSettingsSchema): 
   if (!Array.isArray(schema.groups)) fail('groups 必须是数组')
   const groups = new Set<string>()
   const fields = new Set<string>()
+  const aliases = new Set<string>()
   for (const group of schema.groups) {
     if (!isRecord(group) || typeof group.id !== 'string' || !group.id.trim()) fail('group id 非法')
     if (groups.has(group.id)) fail(`group id 重复：${group.id}`)
     groups.add(group.id)
     if (typeof group.label !== 'string' || !group.label.trim()) fail(`group label 非法：${group.id}`)
+    if (group.order !== undefined && !Number.isFinite(group.order)) fail(`group order 非法：${group.id}`)
     if (!Array.isArray(group.fields)) fail(`group fields 非法：${group.id}`)
     for (const field of group.fields) {
       const key = fieldKey(field)
       if (fields.has(key)) fail(`field key 重复：${key}`)
       fields.add(key)
+      for (const alias of field.aliases ?? []) {
+        if (fields.has(alias) || aliases.has(alias)) fail(`field alias 与 schema key 冲突：${alias}`)
+        aliases.add(alias)
+      }
     }
   }
+  for (const alias of aliases) if (fields.has(alias)) fail(`field alias 与 schema key 冲突：${alias}`)
   for (const group of schema.groups) for (const field of group.fields) validateField(field, fields)
 }
 
@@ -321,6 +347,15 @@ export const DISPLAY_DEFAULTS = Object.freeze({
 } satisfies Record<RenderSettingField['type'], string>) as Readonly<Record<RenderSettingField['type'], RendererPresentation>>
 
 export type RendererPresentation = ChoicePresentation | MultiChoicePresentation | ColorPresentation | NumberPresentation | 'toggle' | 'checkbox' | 'input' | 'textarea'
+
+export type SettingsDensity = 'basic' | 'standard' | 'all'
+
+/** Shared visibility predicate for Theme and Renderer field surfaces. */
+export function isSettingVisible(field: Pick<RenderSettingField, 'advanced' | 'tier'>, density: SettingsDensity): boolean {
+  if (density === 'all') return true
+  if (density === 'basic') return field.tier === 'basic'
+  return field.advanced !== true
+}
 
 /** 显示方式单点解析：schema 显式声明优先，未声明走类型默认（设计书 §3.6/§3.7）。 */
 export function resolvePresentation(field: RenderSettingField): RendererPresentation {
