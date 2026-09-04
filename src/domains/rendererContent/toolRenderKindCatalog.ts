@@ -128,6 +128,10 @@ const ids = [
   'tool.read', 'tool.edit', 'tool.search', 'tool.fetch', 'tool.execute',
 ] as const
 
+/** Explicit first-party IDs used by Settings compatibility routing. Third-party
+ * `tool.*` namespaces must remain normal contributions. */
+export const BUILTIN_TOOL_RENDER_KIND_IDS: ReadonlySet<string> = new Set(ids)
+
 export const BUILTIN_TOOL_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze(ids.map(id => Object.freeze({
   id,
   category: 'tool',

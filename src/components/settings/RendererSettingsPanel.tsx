@@ -312,7 +312,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
           <div className="renderer-settings-owner">
             <span>{selected.active ? 'ACTIVE' : 'AVAILABLE'}</span>
             <small>{selected.ownerPluginId}</small>
-            <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>
+            {!selected.compatibilityOnly && <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>}
           </div>
         </header>
         {selected.compatibilityOnly

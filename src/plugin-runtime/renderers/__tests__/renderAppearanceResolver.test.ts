@@ -35,6 +35,7 @@ describe('render appearance resolver', () => {
     expect(result.values).toMatchObject({ density: 'compact', scale: 80 })
     expect(result.unavailable.unknown).toBe('kept')
     expect(result.diagnostics.map(item => item.code)).toEqual(expect.arrayContaining(['renderer.setting.invalid', 'renderer.setting.unavailable']))
+    expect(result.unavailable.scale).toBe(999)
   })
 
   it('option 被插件移除时标记 unavailable，不静默改写当前值', () => {

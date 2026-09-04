@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPreviewWorkbenchServices } from '../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { THEME_DEFAULTS } from '../../themeFieldDefs.ts'
 import { THEME_SETTING_KEYS } from '../../themeFieldDefs.ts'
 import { useStore } from '../../store.ts'
-import { getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
+import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
@@ -126,6 +126,12 @@ export default function RendererSettingsPreview(props: {
   const [error, setError] = useState<string | null>(null)
   const [previewState, setPreviewState] = useState<PreviewState>('default')
   const profileId = usePresentationPreferenceStore(state => state.activeProfileId)
+  const optionRegistry = getPluginSettingOptionsRegistry()
+  const optionSnapshot = useSyncExternalStore(
+    listener => optionRegistry.subscribe(listener),
+    () => optionRegistry.getSnapshot(),
+    () => optionRegistry.getSnapshot(),
+  )
   const rendererSnapshot = props.settingsCatalog?.rendererSnapshot ?? props.catalog
   const previewSuiteId = props.entry ? previewSuiteForEntry(props.entry, rendererSnapshot, props.activeSuiteId) : undefined
   const previewKind = props.entry ? pickPreviewKind(props.entry, rendererSnapshot, previewSuiteId) : ''
@@ -176,6 +182,7 @@ export default function RendererSettingsPreview(props: {
       slotId: slot.value.id,
       kind,
       profileKindTokens: profile?.kindTokens?.[kind],
+      optionEntries: optionSnapshot.entries,
     })
     const commands: RenderCommandPort = {
       execute: async command => {
@@ -201,6 +208,7 @@ export default function RendererSettingsPreview(props: {
             slotId: slot.value.id,
             kind,
             profileKindTokens: profile?.kindTokens?.[kind],
+            optionEntries: optionSnapshot.entries,
           })
           surface.update(handle, node, nextAppearance)
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
@@ -223,7 +231,7 @@ export default function RendererSettingsPreview(props: {
       services.destroy()
       host.replaceChildren()
     }
-  }, [effectivePreviewState, previewKind, previewSuiteId, props.catalog, props.entry, profileId, rendererSnapshot])
+  }, [effectivePreviewState, optionSnapshot.entries, previewKind, previewSuiteId, props.catalog, props.entry, profileId, rendererSnapshot])
 
   if (!props.entry) return <div className="renderer-settings-preview-empty">选择一个渲染对象查看真实示例。</div>
   return <div className="renderer-settings-preview">

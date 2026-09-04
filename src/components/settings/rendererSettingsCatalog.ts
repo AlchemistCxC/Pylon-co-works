@@ -3,6 +3,7 @@ import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/re
 import type { RendererSettingsPlacement, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { buildSettingsSearchIndex, RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
 import type { SettingsSearchItem } from '../../settingsDomains.ts'
+import { BUILTIN_TOOL_RENDER_KIND_IDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 
 export type RendererSettingsNamespace = 'kind' | 'suite' | 'slot'
 
@@ -182,10 +183,10 @@ export function buildRendererSettingsCatalog(
     // schema. Keep every original Kind addressable in Advanced Catalog, while
     // the normal Tool Activity category presents the shared Slot once.
     active: (supportedKinds ? supportedKinds.has(entry.value.id) : true)
-      && !entry.value.id.startsWith('tool.'),
-    compatibilityOnly: entry.value.id.startsWith('tool.'),
-    fieldCount: visibleFieldCount(entry.value.settings, entry.value.id.startsWith('tool.')),
-    compatibilityFieldCount: entry.value.id.startsWith('tool.') ? fieldCount(entry.value.settings) : undefined,
+      && !BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id),
+    compatibilityOnly: BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id),
+    fieldCount: visibleFieldCount(entry.value.settings, BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id)),
+    compatibilityFieldCount: BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id) ? fieldCount(entry.value.settings) : undefined,
   }] : [])
 
   return Object.freeze([...suiteEntries, ...slotEntries, ...kindEntries].sort((a, b) =>

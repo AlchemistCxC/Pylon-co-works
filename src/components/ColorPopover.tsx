@@ -23,6 +23,8 @@ interface Props {
   allowAlpha?: boolean
   /** 字段语义标签（渲染器设置按字段命名触发按钮，供 label 关联与读屏）。 */
   ariaLabel?: string
+  /** palette presentation is selection-only; picker/palette+picker may edit. */
+  allowCustom?: boolean
 }
 
 function pickerColor(value: string): string {
@@ -64,7 +66,7 @@ function colorKind(value: string): string {
   return '原始 CSS'
 }
 
-export default function ColorPopover({ value, onChange, chips = true, palette, semanticTokens, allowAlpha = false, ariaLabel }: Props) {
+export default function ColorPopover({ value, onChange, chips = true, palette, semanticTokens, allowAlpha = false, ariaLabel, allowCustom = true }: Props) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value)
   const [recent, setRecent] = useState<readonly string[]>(recentColors)
@@ -123,13 +125,13 @@ export default function ColorPopover({ value, onChange, chips = true, palette, s
             <span className="set-color-current-sample" style={{ background: value || 'transparent' }} />
             <div><small>当前值</small><strong>{colorKind(value)}</strong></div>
           </div>
-          <label className="set-color-value-input">
+          {allowCustom && <label className="set-color-value-input">
             <span>CSS / HEX / RGBA</span>
             <input value={draft} spellCheck={false} onChange={event => setDraft(event.currentTarget.value)} onBlur={commitDraft} onKeyDown={handleDraftKey} />
-          </label>
+          </label>}
           {semanticTokens && semanticTokens.length > 0 && <ColorChoiceRow label="跟随语义色" choices={semanticTokens} value={value} onChoose={choose} />}
           <ColorChoiceRow label="调色板" choices={choices} value={value} onChoose={choose} />
-          {recent.length > 0 && <ColorChoiceRow label="最近使用" choices={recent.map(item => ({ value: item }))} value={value} onChoose={choose} />}
+          {allowCustom && recent.length > 0 && <ColorChoiceRow label="最近使用" choices={recent.map(item => ({ value: item }))} value={value} onChoose={choose} />}
           {allowAlpha && <label className="set-color-alpha">
             <span>透明度</span>
             {alpha === undefined
@@ -139,7 +141,7 @@ export default function ColorPopover({ value, onChange, chips = true, palette, s
                 if (next) commit(next)
               }} /><output>{Math.round(alpha)}%</output></>}
           </label>}
-          <button type="button" className="set-color-custom" onClick={() => pickerRef.current?.click()}>打开系统色盘</button>
+          {allowCustom && <button type="button" className="set-color-custom" onClick={() => pickerRef.current?.click()}>打开系统色盘</button>}
         </div>
         <button type="button" className="set-color-backdrop" aria-label="关闭颜色选择器" onClick={() => setOpen(false)} />
       </>}

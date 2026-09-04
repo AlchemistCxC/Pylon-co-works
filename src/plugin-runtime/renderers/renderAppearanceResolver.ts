@@ -115,6 +115,7 @@ export function resolveRenderAppearance(input: RenderAppearanceResolveInput): Re
             unavailable[key] = value
             diagnostics.push({ code: 'renderer.setting.unavailable', key, message: `设置字段 ${key} 的候选项已卸载，已保留原值`, source })
           } else {
+            unavailable[key] = value
             diagnostics.push({ code: 'renderer.setting.invalid', key, message: `设置字段 ${key} 的 ${source} 值无效，已回退`, source })
           }
         }

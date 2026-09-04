@@ -86,7 +86,7 @@ function sectionForThemeZone(zone: string): SettingsSectionId | undefined {
 function themeRecords(): SettingsContributionRecord[] {
   const records: SettingsContributionRecord[] = []
   for (const [fieldKey, definition] of Object.entries(THEME_FIELD_DEFS)) {
-    if (definition.hidden || definition.meta) continue
+    if (definition.hidden || definition.meta || fieldKey === 'showPet') continue
     const section = sectionForThemeZone(definition.zone)
     if (!section) continue
     records.push({
@@ -104,47 +104,48 @@ function themeRecords(): SettingsContributionRecord[] {
       diagnostics: [],
     })
   }
+  // showPet is owned by workspaceStore; retain one canonical page-owned route
+  // so Theme compatibility metadata cannot create a second editable field.
+  records.push({
+    source: 'page-owned', ownerId: 'workspace.showPet', namespace: 'page-owned', fieldKey: 'showPet', label: '桌面宠物',
+    canonicalRoute: { domain: 'workspace', section: 'pet', field: 'showPet' }, placementSource: 'host-policy', active: true,
+    consumerTrace: { ownerDefinition: 'workspaceStore.showPet', settingsControl: 'Settings workspace pet toggle', storeOrPreview: 'WorkspaceStore.setShowPet', productionConsumer: 'Workbench appearance', visibleResult: 'Solid pet visibility' },
+    diagnostics: [],
+  })
   return records
 }
 
-function rendererRecords(snapshot: RendererRegistrySnapshot | undefined): SettingsContributionRecord[] {
+function rendererRecords(snapshot: RendererRegistrySnapshot | undefined, activeSuiteId?: string): SettingsContributionRecord[] {
   if (!snapshot) return []
   const records: SettingsContributionRecord[] = []
-  const sources = [
-    ...snapshot.rendererSuites.map(entry => ({ source: 'renderer-suite' as const, namespace: 'suite' as const, entry, value: entry.value })),
-    ...snapshot.rendererSlots.map(entry => ({ source: 'renderer-slot' as const, namespace: 'slot' as const, entry, value: entry.value })),
-    ...snapshot.renderKinds.map(entry => ({ source: 'renderer-kind' as const, namespace: 'kind' as const, entry, value: entry.value })),
-  ]
-  for (const source of sources) {
-    const schema = source.value.settings as RendererSettingsSchema | undefined
-    if (!schema) continue
-    const placement = source.value.settingsPlacement
-    const category = placement?.categoryId ?? 'plugin-extension'
-    const categoryKnown = ['foundation', 'markdown-text', 'code-terminal', 'reasoning', 'tool-activity', 'workflow', 'files-resources', 'interaction-diagnostic', 'plugin-extension', 'advanced-catalog'].includes(category)
-    const placementSource = categoryKnown ? 'host-policy' : 'fallback'
-    for (const group of schema.groups) for (const field of group.fields) {
+  const projection = projectRendererSettingsCatalog(snapshot, activeSuiteId)
+  for (const entry of projection.entries) {
+    const source = entry.namespace === 'suite' ? 'renderer-suite' as const : entry.namespace === 'slot' ? 'renderer-slot' as const : 'renderer-kind' as const
+    const category = entry.placement.categoryId
+    const placementSource = category === 'plugin-extension' && !entry.active ? 'fallback' : 'host-policy'
+    for (const group of entry.schema.groups) for (const field of group.fields) {
       const key = settingFieldKey(field)
       if (!key) continue
       records.push({
-        source: source.source,
-        ownerId: source.value.id,
-        ownerPluginId: source.entry.ownerPluginId,
-        namespace: source.namespace,
+        source,
+        ownerId: entry.id,
+        ownerPluginId: entry.ownerPluginId,
+        namespace: entry.namespace,
         fieldKey: key,
         label: field.label ?? key,
         canonicalRoute: {
-          domain: 'appearance', section: 'renderers', category: categoryKnown ? category : 'plugin-extension',
-          object: source.value.id, group: group.id, field: key,
+          domain: 'appearance', section: 'renderers', category,
+          object: entry.id, group: group.id, field: key,
         },
-        placementSource,
+        placementSource: entry.placement.categoryId === 'plugin-extension' ? 'fallback' : placementSource,
         semanticKey: (field as RenderSettingField & { semanticKey?: string }).semanticKey,
         inheritsFrom: (field as RenderSettingField & { inheritsFrom?: string }).inheritsFrom,
-        active: !(source.namespace === 'kind' && source.value.id.startsWith('tool.')),
+        active: entry.active,
         deprecated: (field as RenderSettingField & { deprecated?: boolean }).deprecated,
         aliases: (field as RenderSettingField & { aliases?: readonly string[] }).aliases,
-        diagnostics: categoryKnown ? [] : [{ code: 'placement-fallback', message: `未知 Renderer category：${category}` }],
+        diagnostics: entry.placement.categoryId === 'plugin-extension' ? [{ code: 'placement-fallback', message: '未知 Renderer category，已归入插件扩展' }] : [],
         consumerTrace: {
-          ownerDefinition: `${source.namespace}:${source.value.id}.${key}`, settingsControl: 'RendererSettingField',
+          ownerDefinition: `${entry.namespace}:${entry.id}.${key}`, settingsControl: 'RendererSettingField',
           storeOrPreview: 'RendererSettingsStore', productionConsumer: 'productionRenderAppearance', visibleResult: 'resolved renderer appearance',
         },
       })
@@ -249,7 +250,7 @@ function withDiagnostics(records: SettingsContributionRecord[]): SettingsContrib
 }
 
 export function projectSettingsContributionCatalog(input: SettingsContributionCatalogInput = {}): SettingsContributionCatalog {
-  const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot), ...pluginRecords(input)])
+  const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot, input.activeSuiteId), ...pluginRecords(input)])
   const frozen = freezeDeep(records.slice().sort((a, b) => JSON.stringify(a.canonicalRoute).localeCompare(JSON.stringify(b.canonicalRoute)))) as readonly SettingsContributionRecord[]
   const renderer = input.rendererSnapshot
     ? projectRendererSettingsCatalog(input.rendererSnapshot, input.activeSuiteId)

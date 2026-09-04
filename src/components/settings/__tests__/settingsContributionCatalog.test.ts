@@ -66,10 +66,10 @@ describe('SettingsContributionCatalog', () => {
   it('blocks the deterministic loser of a cross-owner route collision', () => {
     const schema = { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'x', type: 'boolean' }] }] }
     const snapshot = rendererSnapshot({
-      rendererSuites: [entry({ id: 'same', label: 'Suite', requiredKinds: [], apiVersion: 1, runtime: { framework: 'solid', version: '1' }, factory: {} as never, settings: schema } as never, 'same-suite')],
-      rendererSlots: [entry({ id: 'same', label: 'Slot', targetSuites: ['*'], kinds: [], priority: 1, fallback: true, canRender: () => true, createSurface: () => ({}), settings: schema } as never, 'same-slot')],
+      rendererSuites: [entry({ id: 'same', label: 'Suite', requiredKinds: [], apiVersion: 1, runtime: { framework: 'solid', version: '1' }, factory: {} as never, settings: schema, settingsPlacement: { categoryId: 'markdown-text', categoryLabel: 'Markdown' } } as never, 'same-suite')],
+      rendererSlots: [entry({ id: 'same', label: 'Slot', targetSuites: ['*'], kinds: [], priority: 1, fallback: true, canRender: () => true, createSurface: () => ({}), settings: schema, settingsPlacement: { categoryId: 'markdown-text', categoryLabel: 'Markdown' } } as never, 'same-slot')],
     })
-    const records = projectSettingsContributionCatalog({ rendererSnapshot: snapshot }).records.filter(record => record.fieldKey === 'x')
+    const records = projectSettingsContributionCatalog({ rendererSnapshot: snapshot, activeSuiteId: 'same' }).records.filter(record => record.fieldKey === 'x')
     expect(records).toHaveLength(2)
     expect(records.filter(record => record.active)).toHaveLength(1)
     expect(records.some(record => record.diagnostics.some(diagnostic => diagnostic.code === 'route-collision'))).toBe(true)
@@ -77,7 +77,8 @@ describe('SettingsContributionCatalog', () => {
 
   it('keeps migrated layout and assistant avatar fields to one canonical editable route', () => {
     const catalog = projectSettingsContributionCatalog()
-    expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(0)
+    expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(1)
+    expect(catalog.records.find(record => record.fieldKey === 'showPet')?.canonicalRoute).toMatchObject({ domain: 'workspace', section: 'pet' })
     expect(catalog.records.filter(record => record.fieldKey === 'assistantDotImage')).toHaveLength(1)
     expect(catalog.records.find(record => record.fieldKey === 'assistantDotImage')?.canonicalRoute.section).toBe('chat')
   })

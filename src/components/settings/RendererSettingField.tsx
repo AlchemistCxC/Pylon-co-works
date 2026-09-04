@@ -149,6 +149,7 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
       return <div className="renderer-setting-field" data-setting-key={settingFieldKey(field)}>
         <span className="renderer-setting-label">{label}</span>
         <ColorPopover value={color} chips={chips} ariaLabel={label}
+          allowCustom={presentation !== 'palette'}
           allowAlpha={field.alpha}
           semanticTokens={RENDERER_SEMANTIC_COLORS}
           palette={options.length > 0 ? options.map(option => ({ value: option.value, label: option.label, disabled: option.disabled })) : undefined}
