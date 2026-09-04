@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 19:35] [织境·工程师] P44 认领：按施工书从 SS-00 开始；先复验 9 个设置/Renderer 基线，再进入 SS-01 projection。保留并行 WIP（package.json、src-tauri/*、dist-plugin-sdk/normal/types/**、artifacts/、bunfig.toml），object/action/layout DSL 不纳入本轮。
+
 [2026-09-04 19:25] [Riccati·架构师] [已处理] 用户确认：P44 七项契约全部批准；object editor、action field、插件自定义布局 DSL 写入施工书 §11 后续计划，本轮不执行、不计入验收。用户暂不要求开工，将由其另行安排工程师；当前不改生产代码，P44 保持“待施工/待工程师认领”。
 
 [2026-09-04 19:12] [Riccati·架构师] [已处理] P44 评审/施工书已补强并登记：section 基线 4 domain/16 section；字段级 Renderer 处理表；host group/category policy；Slot Tool 去重与 field-count；结构化 target、value adapter（含 pluginId+contributionId 隔离与 unavailable value 保留）；Plugin schema preset exclusion；七项待批准契约。已同步 `Docs/README.md`、`Docs/Pylon-问题台账.md`、`Docs/Pylon-下一阶段问题清单.md` 与 Renderer 唯一入口台账。基线 9 files/57 tests、`npm.cmd run check:docs` 通过；无生产代码改动。
