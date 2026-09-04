@@ -2,6 +2,7 @@ import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
 import type { ContextPanelContribution } from './contextPanelTypes.ts'
+import { normalizeRendererSettingsSchema } from '../renderers/rendererSettingsTypes.ts'
 
 function validateContribution(contribution: ContextPanelContribution): ContextPanelContribution {
   if (!contribution.id || contribution.id !== contribution.id.trim()) throw new Error('Context panel contribution id 非法')
@@ -13,7 +14,7 @@ function validateContribution(contribution: ContextPanelContribution): ContextPa
   if (contribution.renderKind === 'isolated-surface' && !contribution.surfaceId.trim()) {
     throw new Error(`Context panel isolated surfaceId 不能为空：${contribution.id}`)
   }
-  return Object.freeze({ ...contribution })
+  return Object.freeze({ ...contribution, ...(contribution.schema ? { schema: normalizeRendererSettingsSchema(contribution.schema) } : {}) })
 }
 
 export class ContextPanelRegistry {

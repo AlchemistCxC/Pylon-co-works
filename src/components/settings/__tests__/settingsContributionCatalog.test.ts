@@ -42,6 +42,13 @@ describe('SettingsContributionCatalog', () => {
     expect(records.some(record => record.ownerId === 'adapted' && record.fieldKey === 'enabled')).toBe(true)
   })
 
+  it('fails closed for malformed plugin schema instead of crashing projection', () => {
+    const malformed = { id: 'bad', label: 'Bad', renderKind: 'isolated-surface' as const, surfaceId: 'bad', schema: { schemaVersion: 1, groups: [{ id: '', label: '', fields: [] }] } }
+    const record = projectSettingsContributionCatalog({ pluginPages: [entry(malformed, 'bad')] }).records.find(item => item.ownerId === 'bad')
+    expect(record?.fieldKey).toBeUndefined()
+    expect(record?.diagnostics.some(diagnostic => diagnostic.code === 'schema-invalid')).toBe(true)
+  })
+
   it('keeps adapter unavailable values as visible records', () => {
     const page: PluginSettingsPageContribution = { id: 'adapted', label: 'Adapted', renderKind: 'isolated-surface', surfaceId: 'adapted', schema: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [] }] }, valueAdapter: { namespace: 'plugin-page', getSnapshot: () => ({ values: {}, unavailable: { retired: { value: 'old', code: 'option-removed', message: '候选已卸载' } }, revision: 2 }), setValue: () => {}, removeValue: () => {}, reset: () => {}, subscribe: () => () => {} } }
     const record = projectSettingsContributionCatalog({ pluginPages: [entry(page, 'adapted')] }).records.find(item => item.fieldKey === 'retired')

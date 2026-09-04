@@ -83,22 +83,84 @@ export function createPluginSettingsValueAdapter(input: {
   readonly contributionId: string
   readonly namespace: 'plugin-page' | 'context-panel'
 }): SettingsValueAdapter {
-  const bucket = `${input.ownerPluginId}::${input.contributionId}`
+  // Length-delimited key prevents `a::b::c` collisions while keeping the
+  // bucket opaque to plugin code. Legacy pluginId buckets remain available to
+  // opaque pages and are not implicitly copied into a schema contribution.
+  const bucket = `pylon:${input.ownerPluginId.length}:${input.ownerPluginId}:${input.contributionId.length}:${input.contributionId}`
   let revision = 0
   const unavailable: Record<string, { value?: PluginSettingValue; code: string; message: string }> = {}
-  const notify = () => { revision += 1 }
-  return {
+  let snapshot: ReturnType<SettingsValueAdapter['getSnapshot']> | undefined
+  let selfMutation = false
+  const listeners = new Set<() => void>()
+  let externalUnsubscribe: (() => void) | undefined
+  const invalidate = () => { snapshot = undefined; revision += 1 }
+  const notify = () => { invalidate(); for (const listener of [...listeners]) listener() }
+  const ensureExternalSubscription = () => {
+    if (externalUnsubscribe) return
+    externalUnsubscribe = input.store.subscribe(bucket, () => {
+      if (selfMutation) return
+      notify()
+    })
+  }
+  const adapter: SettingsValueAdapter = {
     namespace: input.namespace,
     ownerPluginId: input.ownerPluginId,
     contributionId: input.contributionId,
-    getSnapshot: () => Object.freeze({
-      values: Object.freeze({ ...input.store.getSnapshot(bucket) }) as Readonly<Record<string, PluginSettingValue>>,
-      unavailable: Object.freeze({ ...unavailable }),
-      revision,
-    }),
-    setValue: (fieldKey, value) => { delete unavailable[fieldKey]; notify(); input.store.set(bucket, fieldKey, value as PluginSettingValue) },
-    removeValue: fieldKey => { notify(); input.store.remove(bucket, fieldKey) },
-    reset: fieldKey => { notify(); input.store.remove(bucket, fieldKey) },
-    subscribe: listener => input.store.subscribe(bucket, listener),
+    getSnapshot: () => {
+      if (!snapshot) snapshot = Object.freeze({
+        values: Object.freeze({ ...input.store.getSnapshot(bucket) }) as Readonly<Record<string, PluginSettingValue>>,
+        unavailable: Object.freeze(Object.fromEntries(Object.entries(unavailable).map(([key, value]) => [key, Object.freeze({ ...value })]))),
+        revision,
+      })
+      return snapshot
+    },
+    setValue: (fieldKey, value) => {
+      selfMutation = true
+      try {
+        input.store.set(bucket, fieldKey, value as PluginSettingValue)
+      } finally {
+        selfMutation = false
+      }
+      delete unavailable[fieldKey]
+      notify()
+    },
+    removeValue: fieldKey => {
+      if (!(fieldKey in input.store.getSnapshot(bucket))) return
+      selfMutation = true
+      try { input.store.remove(bucket, fieldKey) } finally { selfMutation = false }
+      notify()
+    },
+    reset: fieldKey => {
+      if (!(fieldKey in input.store.getSnapshot(bucket))) return
+      selfMutation = true
+      try { input.store.remove(bucket, fieldKey) } finally { selfMutation = false }
+      notify()
+    },
+    markUnavailable: (fieldKey, value, code, message) => {
+      unavailable[fieldKey] = { value: value as PluginSettingValue, code, message }
+      notify()
+    },
+    restoreUnavailable: fieldKey => {
+      const item = unavailable[fieldKey]
+      if (!item) return
+      if (item.value !== undefined) {
+        selfMutation = true
+        try { input.store.set(bucket, fieldKey, item.value) } finally { selfMutation = false }
+      }
+      delete unavailable[fieldKey]
+      notify()
+    },
+    subscribe: listener => {
+      ensureExternalSubscription()
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size === 0) {
+          externalUnsubscribe?.()
+          externalUnsubscribe = undefined
+        }
+      }
+    },
   }
+  return adapter
 }

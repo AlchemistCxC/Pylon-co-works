@@ -4,7 +4,7 @@ import { projectRendererSettingsCatalog, type RendererSettingsCatalogProjection 
 import { domainOfSection, SECTION_ZONES, SETTINGS_DOMAIN_BY_ID, SETTINGS_SECTION_LABELS, type SettingsSectionId, type SettingsSearchItem } from '../../settingsDomains.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RenderSettingField, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { normalizeRendererSettingsSchema, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
 import type { PluginSettingsPageContribution } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { ContextPanelContribution } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
@@ -157,21 +157,26 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
   const records: SettingsContributionRecord[] = []
   for (const entry of input.pluginPages ?? []) {
     const page = entry.value
-    const hasSchema = Boolean(page.schema)
+    let schema: RendererSettingsSchema | undefined
+    let schemaError: unknown
+    if (page.schema) {
+      try { schema = normalizeRendererSettingsSchema(page.schema) } catch (error) { schemaError = error }
+    }
+    const hasSchema = Boolean(schema)
     const hasAdapter = Boolean(page.valueAdapter)
     const base = {
       source: 'plugin-page' as const, ownerId: entry.contributionId, ownerPluginId: entry.ownerPluginId,
       label: page.label,
       namespace: 'plugin-page' as const, canonicalRoute: { domain: 'plugins', section: 'pluginManager', object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
-      diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
+      diagnostics: schemaError ? [{ code: 'schema-invalid', message: schemaError instanceof Error ? schemaError.message : 'schema 非法，保留 opaque page' }] : (!hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }]),
       consumerTrace: {
         ownerDefinition: `plugin-page:${entry.contributionId}`, settingsControl: hasSchema && hasAdapter ? 'RendererSettingField' : 'PluginSettingsPageHost',
         storeOrPreview: hasAdapter ? 'SettingsValueAdapter' : 'opaque surface', productionConsumer: 'plugin contribution owner', visibleResult: 'plugin settings surface',
       },
     }
     if (!hasSchema || !hasAdapter) { records.push(base); continue }
-    for (const group of page.schema!.groups) for (const field of group.fields) {
+    for (const group of schema!.groups) for (const field of group.fields) {
       const key = settingFieldKey(field)
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
     }
@@ -183,21 +188,26 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
   for (const entry of input.contextPanels ?? []) {
     const panel = entry.value
     const section = panel.settings?.section === 'pluginManager' ? 'pluginManager' : 'right'
-    const hasSchema = Boolean(panel.schema)
+    let schema: RendererSettingsSchema | undefined
+    let schemaError: unknown
+    if (panel.schema) {
+      try { schema = normalizeRendererSettingsSchema(panel.schema) } catch (error) { schemaError = error }
+    }
+    const hasSchema = Boolean(schema)
     const hasAdapter = Boolean(panel.valueAdapter)
     const base = {
       source: 'context-panel' as const, ownerId: entry.contributionId, ownerPluginId: entry.ownerPluginId,
       label: panel.settings?.label ?? panel.label,
       namespace: 'context-panel' as const, canonicalRoute: { domain: section === 'right' ? 'appearance' : 'plugins', section, object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
-      diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
+      diagnostics: schemaError ? [{ code: 'schema-invalid', message: schemaError instanceof Error ? schemaError.message : 'schema 非法，保留 opaque page' }] : (!hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }]),
       consumerTrace: {
         ownerDefinition: `context-panel:${entry.contributionId}`, settingsControl: hasSchema && hasAdapter ? 'RendererSettingField' : 'ContextPanelHost',
         storeOrPreview: hasAdapter ? 'SettingsValueAdapter' : 'opaque surface', productionConsumer: 'context panel owner', visibleResult: 'context panel settings surface',
       },
     }
     if (!hasSchema || !hasAdapter) { records.push(base); continue }
-    for (const group of panel.schema!.groups) for (const field of group.fields) {
+    for (const group of schema!.groups) for (const field of group.fields) {
       const key = settingFieldKey(field)
       records.push({ ...base, fieldKey: key, canonicalRoute: { ...base.canonicalRoute, group: group.id, field: key } })
     }

@@ -40,7 +40,8 @@ import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
@@ -196,6 +197,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => contextPanelRegistry.getSnapshot(),
     () => contextPanelRegistry.getSnapshot(),
   ).entries
+  const pluginSettingsStore = getPluginSettingsStore()
   const rendererRegistry = getRendererRegistry()
   const rendererRegistrySnapshot = useSyncExternalStore(
     listener => rendererRegistry.subscribe(listener),
@@ -209,12 +211,20 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
       : undefined
   })()
+  const pluginPagesForCatalog = useMemo(() => pluginSettingsPages.map(entry => {
+    if (!entry.value.schema || entry.value.valueAdapter) return entry
+    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'plugin-page' }) } }
+  }), [pluginSettingsPages, pluginSettingsStore])
+  const contextPanelsForCatalog = useMemo(() => contextPanelEntries.map(entry => {
+    if (!entry.value.schema || entry.value.valueAdapter) return entry
+    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'context-panel' }) } }
+  }), [contextPanelEntries, pluginSettingsStore])
   const settingsContributionCatalog = useMemo(() => projectSettingsContributionCatalog({
     rendererSnapshot: rendererRegistrySnapshot,
     activeSuiteId: activeRendererSuiteId,
-    pluginPages: pluginSettingsPages,
-    contextPanels: contextPanelEntries,
-  }), [activeRendererSuiteId, rendererRegistrySnapshot, pluginSettingsPages, contextPanelEntries])
+    pluginPages: pluginPagesForCatalog,
+    contextPanels: contextPanelsForCatalog,
+  }), [activeRendererSuiteId, rendererRegistrySnapshot, pluginPagesForCatalog, contextPanelsForCatalog])
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
     initialIntent.pluginPageId ?? null,
   )

@@ -33,6 +33,9 @@ export interface SettingsValueAdapter {
   removeValue(fieldKey: string): void | Promise<void>
   reset(fieldKey: string): void | Promise<void>
   subscribe(listener: () => void): () => void
+  /** Optional host-only unavailable bridge for dynamic option/plugin unload. */
+  markUnavailable?(fieldKey: string, value: SettingsValue, code: string, message: string): void
+  restoreUnavailable?(fieldKey: string): void
 }
 
 /**

@@ -2,6 +2,7 @@ import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
 import type { PluginSettingsPageContribution } from './pluginSettingsTypes.ts'
+import { normalizeRendererSettingsSchema } from '../renderers/rendererSettingsTypes.ts'
 
 export function validatePluginSettingsPage(page: PluginSettingsPageContribution): PluginSettingsPageContribution {
   if (!page.id || page.id !== page.id.trim()) throw new Error('Plugin settings page id 非法')
@@ -12,7 +13,7 @@ export function validatePluginSettingsPage(page: PluginSettingsPageContribution)
   if (page.renderKind === 'isolated-surface' && !page.surfaceId?.trim()) {
     throw new Error(`Plugin settings page surfaceId 不能为空：${page.id}`)
   }
-  return Object.freeze({ ...page })
+  return Object.freeze({ ...page, ...(page.schema ? { schema: normalizeRendererSettingsSchema(page.schema) } : {}) })
 }
 
 export class PluginSettingsPageRegistry {
