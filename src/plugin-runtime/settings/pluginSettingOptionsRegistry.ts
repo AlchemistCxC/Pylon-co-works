@@ -9,7 +9,7 @@ const TARGET_PATTERN = /^[a-z][a-z0-9-]*(?:\.[A-Za-z0-9_%~-]+)+$/
 // Legacy targets may contain dotted third-party Kind owners. Structured
 // targets are canonical; this compatibility validator only rejects empty
 // segments and preserves the original string for migration.
-const RENDERER_TARGET_PATTERN = /^(suite|slot)\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+$|^kind\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+$/
+const RENDERER_TARGET_PATTERN = /^(suite|slot)\.[A-Za-z0-9_.%~-]+\.[A-Za-z0-9_%~-]+$|^kind\.[A-Za-z0-9_.%~-]+(?:\.[A-Za-z0-9_%~-]+){2,}$/
 
 function themeFieldFromTarget(target: string): ThemeFieldKey | null {
   if (!target.startsWith('theme.')) return null
