@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 03:35] [Bernoulli·架构师] 全面 Bun 化阻塞点评审完成（只读，未改任何生产代码）：报告落文档库 `Docs/评审/Pylon-全面Bun化阻塞点评审报告-20260905.md`，台账登记 P46（待施工书）。结论：L1 包管理器/L2 脚本编排/L3 脚本运行时可行（低到中风险）；L4 bun test、L5 bun build 为硬阻塞（vite-plugin-solid、jsdom、coverage-v8 无生态对应物）；彻底移除 Node 不可行。实证发现：被 `--experimental-strip-types` 排除的 8 个脚本在 Bun 下转译通过但仍撞 Vite 专属 `import.meta.glob`（`src/renderers/solid-workbench/loadSolidWorkbench.ts:8`），不能转正，继续留在 vitest。协调警告：① 现有 `bunfig.toml` 属评审确认的预研；后续 `bun install` 生成 bun.lock 须与版本号 WIP（package.json、src-tauri/*）提交时序协调；② Bun 化施工落地前请勿在并行任务中改写 package.json scripts 的 `node --experimental-strip-types` 调用（属 P46 施工范围）。
+
 [2026-09-05 02:42] [主施工员·工程师] P45 流式终态一致性首片完成：提交 `6fd0dddd`。新增 runtime 原子 terminal merge/turnEpoch/fence、projector late-event 吸收与 session lifecycle allowlist；Solid canonical/transient 单一 display owner、scheduler invariant 兜底、Host Port terminal guard、connector 同值/同帧去重；目标域 25 文件/313 项通过，lint 0 errors（1 条既有 warning），Solid/boundary 脚本与 `git diff --check` 通过。并行 WIP（SDK 声明、package/Rust、artifacts、bunfig）未混入；`tsc -b`/`check:solid` 仍被既有 presetBundle/settingsContributionCatalog 诊断阻塞。真实 Tauri/WebView/provider trace 后置。
 
 [2026-09-04 23:15] [主施工员·工程师] P44 preset coverage：TemplateLibrary/presetCoverage 明示 Plugin Page/Context schema 按已批准策略 `excluded/partial`，不伪装由 Theme/Renderer provider 捕获；相关 11 项、tsc、lint 通过。
