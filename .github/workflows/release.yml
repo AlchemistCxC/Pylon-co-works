@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # P46 片A：预置 bun（脚本换轨期与 pnpm 并存，片C 切 bun install）
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11
