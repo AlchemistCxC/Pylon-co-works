@@ -90,4 +90,17 @@ describe('SettingsContributionCatalog', () => {
     expect(canonicalEditableRecords(catalog).some(record => record.fieldKey === 'accent')).toBe(true)
     expect(canonicalEditableRecords(catalog).some(record => record.ownerId === 'tool.read')).toBe(false)
   })
+
+  it('publishes one renderer projection for navigation, panel and preview consumers', () => {
+    const snapshot = rendererSnapshot({
+      rendererSuites: [entry({ id: 'suite.one', label: 'Suite', requiredKinds: [], apiVersion: 1, runtime: { framework: 'solid', version: '1' }, factory: {} as never, settings: { schemaVersion: 1, groups: [{ id: 'g', label: 'G', fields: [{ key: 'x', type: 'boolean' }] }] } } as never)],
+    })
+    const catalog = projectSettingsContributionCatalog({ rendererSnapshot: snapshot, activeSuiteId: 'suite.one' })
+    expect(catalog.rendererSnapshot).toBe(snapshot)
+    expect(catalog.renderer.entries[0]?.id).toBe('suite.one')
+    expect(catalog.renderer.entries[0]?.active).toBe(true)
+    expect(catalog.renderer.searchItems[0]?.rendererRoute?.objectKey).toBe('suite.suite.one')
+    expect(catalog.categories).toEqual(catalog.renderer.categories)
+    expect(Object.isFrozen(catalog.searchItems[0])).toBe(true)
+  })
 })

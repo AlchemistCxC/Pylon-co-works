@@ -21,6 +21,7 @@ import {
   rendererSettingsEntryKey,
   type RendererSettingsCatalogEntry,
 } from './rendererSettingsCatalog.ts'
+import type { SettingsContributionCatalog } from './settingsContributionCatalog.ts'
 
 export interface RendererSettingsSchemaEntry {
   readonly id: string
@@ -39,6 +40,7 @@ export interface RendererSettingsPanelProps {
   readonly objectKey?: string
   readonly density?: SettingsDensity
   readonly onSelectionChange?: (entry: RendererSettingsCatalogEntry | undefined) => void
+  readonly settingsCatalog?: SettingsContributionCatalog
 }
 
 function fieldMatches(field: RenderSettingField, query: string, options: readonly PluginSettingOption[]): boolean {
@@ -216,11 +218,12 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const { onSelectionChange } = props
   const store = props.store ?? getRendererSettingsStore()
   const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const registrySnapshot = useSyncExternalStore(
+  const liveRegistrySnapshot = useSyncExternalStore(
     listener => getRendererRegistry().subscribe(listener),
     () => getRendererRegistry().snapshot(),
     () => getRendererRegistry().snapshot(),
   )
+  const registrySnapshot = props.settingsCatalog?.rendererSnapshot ?? liveRegistrySnapshot
   const optionSnapshot = useSyncExternalStore(
     listener => getPluginSettingOptionsRegistry().subscribe(listener),
     () => getPluginSettingOptionsRegistry().getSnapshot(),
@@ -241,8 +244,8 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
     : undefined
   const entries = useMemo(() => props.schemas
     ? fixtureCatalog(props.schemas)
-    : projectRendererSettingsCatalog(registrySnapshot, activeSuiteId).entries,
-  [activeSuiteId, props.schemas, registrySnapshot])
+    : (props.settingsCatalog?.renderer ?? projectRendererSettingsCatalog(registrySnapshot, activeSuiteId)).entries,
+  [activeSuiteId, props.schemas, props.settingsCatalog, registrySnapshot])
   const query = props.search?.trim().toLowerCase() ?? ''
   const categoryId = props.categoryId ?? (props.schemas ? 'fixture' : 'foundation')
   const density = props.density ?? 'standard'

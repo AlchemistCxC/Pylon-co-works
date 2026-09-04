@@ -202,11 +202,19 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => rendererRegistry.snapshot(),
     () => rendererRegistry.snapshot(),
   )
+  const activeRendererSuiteId = (() => {
+    const modeId = useInterfaceModeStore.getState().interfaceMode
+    const mode = getInterfaceModeRegistry().resolve(modeId)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === modeId)
+    return mode?.workbench.renderKind === 'renderer-suite'
+      ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
+      : undefined
+  })()
   const settingsContributionCatalog = useMemo(() => projectSettingsContributionCatalog({
     rendererSnapshot: rendererRegistrySnapshot,
+    activeSuiteId: activeRendererSuiteId,
     pluginPages: pluginSettingsPages,
     contextPanels: contextPanelEntries,
-  }), [rendererRegistrySnapshot, pluginSettingsPages, contextPanelEntries])
+  }), [activeRendererSuiteId, rendererRegistrySnapshot, pluginSettingsPages, contextPanelEntries])
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
     initialIntent.pluginPageId ?? null,
   )
@@ -624,7 +632,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           </>
         )
       case 'renderers':
-        return <RendererSettingsPanel search={searchQuery} categoryId={rendererCategoryId} objectKey={rendererObjectKey} density={density} onSelectionChange={setRendererPreviewEntry} />
+        return <RendererSettingsPanel search={searchQuery} categoryId={rendererCategoryId} objectKey={rendererObjectKey} density={density} settingsCatalog={settingsContributionCatalog} onSelectionChange={setRendererPreviewEntry} />
       case 'cc':
         return (
           <>
@@ -861,10 +869,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <div className="settings-preview-pane">
             <div className="settings-preview-label">{activeSection === 'renderers' ? 'Renderer fixture' : '实时预览'}</div>
             {activeSection === 'renderers'
-              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} activeSuiteId={(() => {
-                const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
-                return mode?.workbench.renderKind === 'renderer-suite' ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId : undefined
-              })()} />
+              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} settingsCatalog={settingsContributionCatalog} activeSuiteId={activeRendererSuiteId} />
               : <SettingsPreview zone={previewZone!} />}
           </div>
         )}

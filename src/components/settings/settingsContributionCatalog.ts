@@ -1,5 +1,6 @@
 import { THEME_FIELD_DEFS } from '../../themeFieldDefs.ts'
 import { RENDERER_SETTINGS_CATEGORIES } from '../../domains/rendererContent/rendererSettingsPlacement.ts'
+import { projectRendererSettingsCatalog, type RendererSettingsCatalogProjection } from './rendererSettingsCatalog.ts'
 import { domainOfSection, SECTION_ZONES, SETTINGS_DOMAIN_BY_ID, SETTINGS_SECTION_LABELS, type SettingsSectionId, type SettingsSearchItem } from '../../settingsDomains.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RenderSettingField, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
@@ -57,16 +58,19 @@ export interface SettingsContributionCatalog {
   readonly records: readonly SettingsContributionRecord[]
   readonly categories: readonly { readonly id: string; readonly label: string; readonly order: number; readonly entryCount: number }[]
   readonly searchItems: readonly SettingsSearchItem[]
+  readonly renderer: RendererSettingsCatalogProjection
+  readonly rendererSnapshot?: RendererRegistrySnapshot
 }
 
 export interface SettingsContributionCatalogInput {
   readonly rendererSnapshot?: RendererRegistrySnapshot
+  readonly activeSuiteId?: string
   readonly pluginPages?: readonly RegistryEntry<PluginSettingsPageContribution>[]
   readonly contextPanels?: readonly RegistryEntry<ContextPanelContribution>[]
 }
 
 function freezeDeep<T>(value: T): T {
-  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value
+  if (!value || typeof value !== 'object') return value
   for (const child of Object.values(value as Record<string, unknown>)) freezeDeep(child)
   return Object.freeze(value)
 }
@@ -237,12 +241,21 @@ function withDiagnostics(records: SettingsContributionRecord[]): SettingsContrib
 export function projectSettingsContributionCatalog(input: SettingsContributionCatalogInput = {}): SettingsContributionCatalog {
   const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot), ...pluginRecords(input)])
   const frozen = freezeDeep(records.slice().sort((a, b) => JSON.stringify(a.canonicalRoute).localeCompare(JSON.stringify(b.canonicalRoute)))) as readonly SettingsContributionRecord[]
-  const categories = RENDERER_SETTINGS_CATEGORIES.map(category => ({
-    ...category,
-    entryCount: frozen.filter(record => record.canonicalRoute.category === category.id && record.active && !record.deprecated).length,
-  })).filter(category => category.entryCount > 0 || category.id === 'advanced-catalog')
-  const base = { revision: input.rendererSnapshot?.revision ?? 0, records: frozen, categories: Object.freeze(categories), searchItems: [] as readonly SettingsSearchItem[] }
-  return Object.freeze({ ...base, searchItems: buildSettingsContributionSearchItems(base) })
+  const renderer = input.rendererSnapshot
+    ? projectRendererSettingsCatalog(input.rendererSnapshot, input.activeSuiteId)
+    : Object.freeze({ entries: Object.freeze([]), categories: Object.freeze([]), searchItems: Object.freeze([]) }) as RendererSettingsCatalogProjection
+  const categories = renderer.categories.length > 0
+    ? renderer.categories
+    : Object.freeze(RENDERER_SETTINGS_CATEGORIES.map(category => ({
+      ...category,
+      entryCount: frozen.filter(record => record.canonicalRoute.category === category.id && record.active && !record.deprecated).length,
+    })).filter(category => category.entryCount > 0 || category.id === 'advanced-catalog'))
+  const adapterRevisions = [...(input.pluginPages ?? []), ...(input.contextPanels ?? [])]
+    .map(entry => entry.value.valueAdapter?.getSnapshot().revision ?? 0)
+  const revision = [input.rendererSnapshot?.revision ?? 0, ...(adapterRevisions.length > 0 ? adapterRevisions : [0])]
+    .reduce((hash, value) => ((hash * 31) ^ value) >>> 0, 17)
+  const base = { revision, records: frozen, categories, searchItems: [] as readonly SettingsSearchItem[], renderer, rendererSnapshot: input.rendererSnapshot }
+  return Object.freeze({ ...base, searchItems: freezeDeep(buildSettingsContributionSearchItems(base)) })
 }
 
 /** Editable routes are the conflict-free, active owner entries only. */
