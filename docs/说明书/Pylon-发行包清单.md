@@ -38,7 +38,7 @@
 | `resources/runtime/git/**` | 必须（Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe` |
 | `resources/runtime/portable-git.json` | 必须 | PortableGit 版本、来源和 SHA-256 元数据 |
 | `resources/runtime/README.txt` | 必须 | 运行时用途、许可和准备方式说明 |
-| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `npm run build:plugin-sdk` 生成 |
+| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
 | `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema；与离线 SDK 一起发布 |
 | `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
@@ -80,8 +80,8 @@ PortableGit 二进制树不入 Git 源码仓库。`prepare_hermes_runtime.py` �
 在仓库根目录执行：
 
 ```bash
-npm install
-npm run release:portable
+bun install
+bun run release:portable
 ```
 
 `release:portable` 依次完成：
@@ -97,9 +97,9 @@ npm run release:portable
 显式降级打包：
 
 ```bash
-npm run prepare:hermes-runtime
-npm run build
-npm run tauri -- build --no-bundle
+bun run prepare:hermes-runtime
+bun run build
+bun run tauri -- build --no-bundle
 cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect
 python scripts/pack_release.py --without-webview2
 ```

@@ -396,10 +396,10 @@ D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../
 ### 常用命令
 
 ```powershell
-npm run test:unit
-npm run test:frontend
-npm run build
-npm run check:solid
+bun run test:unit
+bun run test:frontend
+bun run build
+bun run check:solid
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 ```
