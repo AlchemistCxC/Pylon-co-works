@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 22:32] [织境·工程师] P44 REVIEW 修复第三片：提交 `08273eb6` 接入 Plugin Settings schema adapter host，统一 page registry/schema normalize，adapter 使用稳定 length-delimited bucket，snapshot 缓存/外部更新 revision/无操作不发布，并提供 unavailable mark/restore；PluginSettingsPageHost 的 schema 页面改走 adapter，opaque 页面保留 legacy bucket。新增 adapter/schema 回归 20 项，tsc/lint/diff check 通过（仅既有 warning）；P44 仍保持 REVIEW，下一片处理 active suite/placement、owner matrix 与 showPet/palette。
+
 [2026-09-04 22:20] [织境·工程师] P44 REVIEW 修复第二片：提交 `81a1100a` 将 SettingsContributionCatalog 扩展为共享 compositor（renderer projection、activation snapshot、revision），Settings、RendererSettingsPanel、RendererSettingsPreview 改为消费同一 projection；active Suite 进入 catalog，categories/searchItems 深冻结回归。相关 3 files/21 tests、tsc/lint/diff check 通过；P44 仍保持 REVIEW，Plugin/Context host adapter 与 owner/placement 后续处理。
 
 [2026-09-04 22:08] [织境·工程师] P44 REVIEW 修复首片：SS-R2 提交 `d135c508`，统一 structured target 编码/解析与 Renderer Store/option registry 边界；保留 `ownerPluginId`、Theme `theme.<field>` 兼容形式、`%2E` dotted owner/field 与可选 plugin 段。新增 target/plugin/store 回归 15 项，tsc/lint/diff check 通过；P44 仍保持 REVIEW，下一片处理 Catalog compositor 单一 projection。
