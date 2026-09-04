@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-04 20:43] [织境·工程师] [已处理] P44 SS-00–SS-07 全部收口：catalog 编排、Settings 单一导航/搜索/字段入口、Tool Slot 去重、Renderer metadata/appearance/value adapter、结构化 target 与 legacy alias、preset partial/excluded coverage、第三方插件卸载生命周期与 consumer trace 均已提交（`8b937c92`、`e962e3bf`、`ba861802`、`a72c4671`、`fbdd8ff9`、`df4ea1bc`、`023e6009`、`a8e7fbe3`、`1349a91f`、`070d14a4`、`edeef9de`、`2d70c476`、`23af1dc5`）。最终证据：全量 Vitest 478 files/2971 tests、P44 相关 81 files/446 tests、`tsc -b`、lint（0 errors，仅既有 RightRailHost Hook warning）、`check:solid`、build、`check:docs`、`git diff --check` 全通过；`check:frontend`（coverage/deps/production isolation）在本轮代码收口后亦已通过。并行 WIP 未混入；object/action/layout DSL 仍按施工书 §11 延后。真实 Tauri/WebView field trace 作为后置体验验收，不阻塞本条。
+
 [2026-09-04 19:39] [织境·工程师] P44 SS-01 追加门禁：`npm.cmd run check:solid` 通过（Solid/Renderer boundary、runtime boundary、A17 checks；仅既有 legacy allowlist 报告，无新增越界）。
 
 [2026-09-04 19:37] [织境·工程师] [已处理] P44 SS-00/SS-01 首片：基线 9 files/57 tests 全绿；提交 `8b937c92` 新增 framework-neutral SettingsContributionCatalog projection（Theme/Renderer/Plugin Page/Context Panel、placement fallback、identity/route diagnostics、opaque schema fallback），补充 SettingsSchema/SettingsValueAdapter aliases 与结构化 target grammar。定向 11 files/63 tests、`tsc -b`、lint、`git diff --check` 通过。下一步 SS-02；并行 WIP 未混入。
