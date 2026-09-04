@@ -17,11 +17,19 @@ function validateContribution(contribution: ContextPanelContribution): ContextPa
   return Object.freeze({ ...contribution, ...(contribution.schema ? { schema: normalizeRendererSettingsSchema(contribution.schema) } : {}) })
 }
 
+function validateAdapterIdentity(ownerPluginId: string, contributionId: string, adapter: ContextPanelContribution['valueAdapter']): void {
+  if (!adapter) return
+  if (adapter.namespace !== 'context-panel') throw new Error(`Context panel adapter namespace 不匹配：${contributionId}`)
+  if (adapter.ownerPluginId !== undefined && adapter.ownerPluginId !== ownerPluginId) throw new Error(`Context panel adapter ownerPluginId 不匹配：${contributionId}`)
+  if (adapter.contributionId !== undefined && adapter.contributionId !== contributionId) throw new Error(`Context panel adapter contributionId 不匹配：${contributionId}`)
+}
+
 export class ContextPanelRegistry {
   private readonly registry = new ReactiveRegistryStore<ContextPanelContribution>()
 
   register(identity: PluginIdentity, contribution: ContextPanelContribution): AsyncDisposable {
     const normalized = validateContribution(contribution)
+    validateAdapterIdentity(identity.pluginId, normalized.id, normalized.valueAdapter)
     return this.registry.register(identity, normalized, { contributionId: normalized.id, priority: normalized.order })
   }
 
@@ -31,6 +39,7 @@ export class ContextPanelRegistry {
       ...transaction,
       register: (contribution, options) => {
         const normalized = validateContribution(contribution)
+        validateAdapterIdentity(owner.pluginId, normalized.id, normalized.valueAdapter)
         return transaction.register(normalized, { ...options, contributionId: normalized.id, priority: normalized.order })
       },
     }

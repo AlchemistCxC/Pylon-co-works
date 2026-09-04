@@ -44,6 +44,15 @@ describe('plugin settings contracts', () => {
     })).not.toThrow()
   })
 
+  it('rejects a schema adapter whose namespace or owner identity is not host-scoped', () => {
+    const registry = new PluginSettingsPageRegistry()
+    expect(() => registry.register(createPluginIdentity('plugin.demo', 'runtime'), {
+      id: 'page.settings', label: 'Settings', renderKind: 'isolated-surface', surfaceId: 'surface',
+      schema: { schemaVersion: 1, groups: [] },
+      valueAdapter: { namespace: 'context-panel', ownerPluginId: 'plugin.other', contributionId: 'page.settings' } as never,
+    })).toThrow(/adapter namespace/)
+  })
+
   it('normalizes structured targets to an unambiguous legacy string', () => {
     const normalized = validatePluginSettingOptionsContribution({
       id: 'plugin.palette.structured', target: { namespace: 'kind', ownerId: 'acme.widgets.chart', fieldKey: 'accent' }, upsert: [{ value: 'amber' }],
