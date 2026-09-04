@@ -15,6 +15,26 @@ export type RendererSettingValue = null | boolean | number | string | readonly R
   readonly [key: string]: RendererSettingValue
 }
 
+/** Framework-neutral aliases used by the Settings compositor. */
+export type SettingsValue = RendererSettingValue
+export type SettingsField = RenderSettingField
+export type SettingsSchema = RendererSettingsSchema
+
+export interface SettingsValueAdapter {
+  readonly namespace: string
+  readonly ownerPluginId?: string
+  readonly contributionId?: string
+  getSnapshot(): {
+    readonly values: Readonly<Record<string, SettingsValue>>
+    readonly unavailable: Readonly<Record<string, { value?: SettingsValue; code: string; message: string }>>
+    readonly revision: number
+  }
+  setValue(fieldKey: string, value: SettingsValue): void | Promise<void>
+  removeValue(fieldKey: string): void | Promise<void>
+  reset(fieldKey: string): void | Promise<void>
+  subscribe(listener: () => void): () => void
+}
+
 /**
  * Owner-provided placement metadata consumed by the Settings compositor.
  * It describes where a schema is presented, never the value/default/consumer.

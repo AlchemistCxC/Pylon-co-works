@@ -1,4 +1,5 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
+import type { SettingsSchema, SettingsValueAdapter } from '../renderers/rendererSettingsTypes.ts'
 
 export type PluginSettingValue = null | boolean | number | string | readonly PluginSettingValue[] | {
   readonly [key: string]: PluginSettingValue
@@ -16,6 +17,9 @@ interface PluginSettingsPageBase {
   readonly label: string
   readonly description?: string
   readonly order?: number
+  /** Optional framework-neutral schema; without an adapter the page stays opaque. */
+  readonly schema?: SettingsSchema
+  readonly valueAdapter?: SettingsValueAdapter
 }
 
 export interface FirstPartyPluginSettingsPage extends PluginSettingsPageBase {
