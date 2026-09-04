@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useSyncExternalStore, useId, useLayoutEffect, useRef } from 'react'
-import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { GROUP_ORDER } from '../themeFieldDefs'
@@ -36,11 +35,11 @@ import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import { projectRendererSettingsCatalog } from './settings/rendererSettingsCatalog.ts'
 import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
+import { buildSettingsContributionSearchItems, projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
-import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
@@ -204,6 +203,11 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => rendererRegistry.snapshot(),
     () => rendererRegistry.snapshot(),
   )
+  const settingsContributionCatalog = useMemo(() => projectSettingsContributionCatalog({
+    rendererSnapshot: rendererRegistrySnapshot,
+    pluginPages: pluginSettingsPages,
+    contextPanels: contextPanelEntries,
+  }), [rendererRegistrySnapshot, pluginSettingsPages, contextPanelEntries])
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
     initialIntent.pluginPageId ?? null,
   )
@@ -295,13 +299,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const onSettingChange = (partial: Partial<ThemeSettings>) => {
     const zone = sectionZone(activeSection) || 'global'
     setZoneField(zone, partial)
-  }
-  // 助手头像：Tauri 文件选择 → 存路径到 assistantDotImage（zone=chat）
-  const pickAssistantAvatar = async () => {
-    if (!IS_TAURI) return
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const selected = await open({ multiple: false, filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }] })
-    if (selected) setZoneField('chat', { assistantDotImage: selected as string })
   }
   // 声明式字段渲染上下文（骨架 3）：纯字段组由 themeFieldRenderer 自动渲染
   const renderCtx = { t, onChange: onSettingChange, search: searchQuery }
@@ -488,11 +485,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     // 显式引用依赖项：它们是缓存失效信号（B2），非数据来源——抑制 exhaustive-deps
     void quickSearchOpen
     void rendererRegistrySnapshot.revision
-    try {
-      const snapshot = getRendererRegistry().snapshot()
-      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries), ...projectRendererSettingsCatalog(snapshot).searchItems]
-    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries) }
-  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages, contextPanelEntries])
+    void settingsContributionCatalog.revision
+    return buildSettingsContributionSearchItems(settingsContributionCatalog)
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
       setActiveDomain('appearance')
@@ -622,7 +617,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'sidebar':
         return (
           <>
-            {!isSearching && <h3>左侧栏</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.sidebar}</h3>}
             {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>
@@ -640,19 +635,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'cc':
         return (
           <>
-            {!isSearching && <h3>中控区</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.cc}</h3>}
             {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="cc" ctx={renderCtx} density={density} />
-            {!isSearching && (
-              <Group title="助手头像">
-                <div className="set-preset-row">
-                  <button type="button" className="ps-btn sm" onClick={() => void pickAssistantAvatar()}>选择图片文件…</button>
-                  {useStore.getState().assistantDotImage && (
-                    <button type="button" className="ps-btn sm" onClick={() => useStore.getState().setZoneField('chat', { assistantDotImage: '' })}>清除</button>
-                  )}
-                </div>
-              </Group>
-            )}
             {!isSearching && <Group title="布局编辑">
               <button type="button" className="ps-btn primary"
                 onClick={() => {
@@ -669,7 +654,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'right':
         return (
           <>
-            {!isSearching && <h3>右侧栏</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.right}</h3>}
             {!isSearching && <ZonePresetRow zone="right" activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="right" ctx={renderCtx} density={density} />
           </>

@@ -1,5 +1,5 @@
 import { THEME_FIELD_DEFS } from '../../themeFieldDefs.ts'
-import { domainOfSection, SECTION_ZONES, type SettingsSectionId } from '../../settingsDomains.ts'
+import { domainOfSection, SECTION_ZONES, SETTINGS_DOMAIN_BY_ID, SETTINGS_SECTION_LABELS, type SettingsSectionId, type SettingsSearchItem } from '../../settingsDomains.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RenderSettingField, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
@@ -24,6 +24,7 @@ export interface SettingsContributionRecord {
   readonly ownerPluginId?: string
   readonly namespace?: SettingsContributionNamespace
   readonly fieldKey?: string
+  readonly label?: string
   readonly canonicalRoute: {
     readonly domain: string
     readonly section: string
@@ -75,6 +76,7 @@ function themeRecords(): SettingsContributionRecord[] {
     if (!section) continue
     records.push({
       source: 'theme', ownerId: fieldKey, namespace: 'theme', fieldKey,
+      label: definition.label,
       canonicalRoute: {
         domain: domainOfSection(section), section,
         group: definition.group, field: fieldKey,
@@ -110,6 +112,7 @@ function rendererRecords(snapshot: RendererRegistrySnapshot | undefined): Settin
         ownerPluginId: source.entry.ownerPluginId,
         namespace: source.namespace,
         fieldKey: key,
+        label: field.label ?? key,
         canonicalRoute: {
           domain: 'appearance', section: 'renderers', category: categoryKnown ? category : 'plugin-extension',
           object: source.value.id, group: group.id, field: key,
@@ -135,6 +138,7 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
     const hasAdapter = Boolean(page.valueAdapter)
     const base = {
       source: 'plugin-page' as const, ownerId: entry.contributionId, ownerPluginId: entry.ownerPluginId,
+      label: page.label,
       namespace: 'plugin-page' as const, canonicalRoute: { domain: 'plugins', section: 'pluginManager', object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
       diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
@@ -152,6 +156,7 @@ function pluginRecords(input: SettingsContributionCatalogInput): SettingsContrib
     const hasAdapter = Boolean(panel.valueAdapter)
     const base = {
       source: 'context-panel' as const, ownerId: entry.contributionId, ownerPluginId: entry.ownerPluginId,
+      label: panel.settings?.label ?? panel.label,
       namespace: 'context-panel' as const, canonicalRoute: { domain: section === 'right' ? 'appearance' : 'plugins', section, object: entry.contributionId },
       placementSource: 'host-policy' as const, active: true,
       diagnostics: !hasSchema || hasAdapter ? [] : [{ code: 'value-adapter-missing', message: 'schema contribution 无 value adapter，保留 opaque page' }],
@@ -187,6 +192,38 @@ export function projectSettingsContributionCatalog(input: SettingsContributionCa
   const records = withDiagnostics([...themeRecords(), ...rendererRecords(input.rendererSnapshot), ...pluginRecords(input)])
   const frozen = freezeDeep(records.slice().sort((a, b) => JSON.stringify(a.canonicalRoute).localeCompare(JSON.stringify(b.canonicalRoute)))) as readonly SettingsContributionRecord[]
   return Object.freeze({ revision: input.rendererSnapshot?.revision ?? 0, records: frozen, searchItems: frozen })
+}
+
+/** Convert the canonical records into the SettingsQuickSearch contract. */
+export function buildSettingsContributionSearchItems(
+  catalog: SettingsContributionCatalog,
+): readonly SettingsSearchItem[] {
+  return Object.freeze(catalog.records.map(record => {
+    const route = record.canonicalRoute
+    const domain = SETTINGS_DOMAIN_BY_ID[route.domain as keyof typeof SETTINGS_DOMAIN_BY_ID]
+    const section = route.section as SettingsSectionId
+    const path = `${domain?.label ?? route.domain} › ${SETTINGS_SECTION_LABELS[section] ?? route.section}`
+    const item: SettingsSearchItem = {
+      path: `${path}${route.category ? ` › ${route.category}` : ''}${route.object ? ` › ${route.object}` : ''}${route.group ? ` › ${route.group}` : ''}`,
+      label: record.label ?? record.fieldKey ?? record.ownerId,
+      section,
+      advanced: Boolean(record.deprecated || record.diagnostics.length > 0),
+      kind: record.source === 'plugin-page' ? 'plugin-page' : record.source === 'context-panel' ? 'context-panel' : record.source === 'theme' ? 'chain-a' : 'renderer-entry',
+      ...(record.namespace === 'theme' && record.fieldKey ? { anchor: `field:${record.fieldKey}` } : {}),
+      ...(record.namespace && ['kind', 'slot', 'suite'].includes(record.namespace) && record.fieldKey ? {
+        rendererRoute: {
+          categoryId: route.category ?? 'plugin-extension',
+          objectKey: `${record.namespace}.${record.ownerId}`,
+          groupId: route.group ?? '',
+          fieldKey: record.fieldKey,
+        },
+        anchor: `renderer:${record.namespace}.${record.ownerId}:${route.group ?? ''}:${record.fieldKey}`,
+      } : {}),
+      ...(record.source === 'plugin-page' ? { pluginPageId: record.ownerId } : {}),
+      ...(record.source === 'context-panel' ? { contextPanelId: record.ownerId } : {}),
+    }
+    return item
+  }))
 }
 
 export { identity as settingsContributionIdentity }

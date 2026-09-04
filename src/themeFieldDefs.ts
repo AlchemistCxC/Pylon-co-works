@@ -113,7 +113,9 @@ export const THEME_FIELD_DEFS = {
   // 布局显隐并入 global zone（布局骨架组渲染在全局 tab），layout zone 无独立 tab/预设
   showTabBar: { ...B('global', '工作区标签栏'), default: true, group: "布局骨架" },
   showSidebar: { ...B('global', '左侧栏'), default: true, group: "布局骨架" },
-  showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hint: '隐藏工作区标签栏、左侧栏和宠物，可得到只保留聊天内容的单栏视图' },
+  // Compatibility value retained for legacy theme/preset payloads; the
+  // editable owner is workspaceStore's dedicated Pet section.
+  showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hidden: true, hint: '由工作区 › 宠物统一编辑；旧主题值仅作兼容读取' },
 
   // ── sidebar ──
   sidebarBg: { ...C('sidebar', '侧栏背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
