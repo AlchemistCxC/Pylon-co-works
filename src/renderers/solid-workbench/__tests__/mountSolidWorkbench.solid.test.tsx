@@ -2109,7 +2109,10 @@ describe('mountSolidWorkbench', () => {
       host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, hostPort, activation,
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'copy through semantic port' }))
+    // The preview fixture carries multiple assistant rows, so the custom Slot
+    // mounts one button per row; any of them routes through the same port.
+    const semanticButtons = await screen.findAllByRole('button', { name: 'copy through semantic port' })
+    fireEvent.click(semanticButtons[0]!)
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
       command: 'copy', args: ['preview-session', 'semantic copy'],
