@@ -1,8 +1,11 @@
 import { type PluginIdentity } from './pluginIdentity.js';
 import { type BuiltinPluginActivate, type BuiltinPluginActivationContext, type PluginDeactivateResult, type PluginInstance } from './pluginInstance.js';
 import type { PluginHostServices } from './pluginHostServices.js';
+import type { PluginManagementApi } from './management/pluginManagementTypes.js';
 import { type PluginContract, type PluginContractDiagnostic } from './pluginContractResolver.js';
+import { PluginScope } from './pluginScope.js';
 import { type HotSwapMode, type PluginUpdateResult } from './shadowUpdate.js';
+import type { PylonPluginCapability } from './packageManifest.js';
 export interface BuiltinPluginDefinition {
     id: string;
     kind?: 'shell' | 'workspace' | 'feature' | 'hook' | 'renderer' | 'skin' | 'agent-adapter' | 'tool-provider' | 'service' | 'automation';
@@ -13,6 +16,8 @@ export interface BuiltinPluginDefinition {
     conflicts?: readonly string[];
     activationEvents?: readonly string[];
     version?: string;
+    /** API 1.2：manifest 声明的宿主能力（封闭词表）；缺省 = 不声明。 */
+    capabilities?: readonly PylonPluginCapability[];
     packageInstanceId?: string;
     runtimeInstanceId?: string;
     hotSwapMode?: HotSwapMode;
@@ -41,6 +46,8 @@ export interface PluginRuntimeInstanceSnapshot {
 export interface PluginRuntimeOptions {
     host: PluginHostServices;
     requestSoftRemount?: () => void | Promise<void>;
+    /** API 1.2 capability 装配器：声明 ∧ 授权时返回 PluginManagementApi（C3 门控）。 */
+    createManagementApi?: (definition: BuiltinPluginDefinition, scope: PluginScope) => PluginManagementApi | undefined;
 }
 export interface PluginUpdateOptions {
     identity?: PluginIdentity;

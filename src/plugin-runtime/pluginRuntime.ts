@@ -12,6 +12,7 @@ import {
   type PluginActivationContextFactory,
 } from './pluginActivationContext.ts'
 import type { PluginHostServices } from './pluginHostServices.ts'
+import type { PluginManagementApi } from './management/pluginManagementTypes.ts'
 import {
   resolvePluginContracts,
   type PluginContract,
@@ -23,6 +24,7 @@ import {
   type HotSwapMode,
   type PluginUpdateResult,
 } from './shadowUpdate.ts'
+import type { PylonPluginCapability } from './packageManifest.ts'
 
 export interface BuiltinPluginDefinition {
   id: string
@@ -34,6 +36,8 @@ export interface BuiltinPluginDefinition {
   conflicts?: readonly string[]
   activationEvents?: readonly string[]
   version?: string
+  /** API 1.2：manifest 声明的宿主能力（封闭词表）；缺省 = 不声明。 */
+  capabilities?: readonly PylonPluginCapability[]
   packageInstanceId?: string
   runtimeInstanceId?: string
   hotSwapMode?: HotSwapMode
@@ -69,6 +73,8 @@ export interface PluginRuntimeInstanceSnapshot {
 export interface PluginRuntimeOptions {
   host: PluginHostServices
   requestSoftRemount?: () => void | Promise<void>
+  /** API 1.2 capability 装配器：声明 ∧ 授权时返回 PluginManagementApi（C3 门控）。 */
+  createManagementApi?: (definition: BuiltinPluginDefinition, scope: PluginScope) => PluginManagementApi | undefined
 }
 
 export interface PluginUpdateOptions {
@@ -134,8 +140,11 @@ export class PluginRuntime {
   constructor(options: PluginRuntimeOptions) {
     this.options = options
     this.host = options.host
-    this.createContext = (identity, scope, transactions) => (
-      createPluginActivationContext(this.host, identity, scope, transactions)
+    this.createContext = (identity, scope, transactions, definition) => (
+      createPluginActivationContext(this.host, identity, scope, transactions, {
+        definition,
+        createManagementApi: this.options.createManagementApi,
+      })
     )
   }
 
@@ -197,7 +206,7 @@ export class PluginRuntime {
     const instance = await activateBuiltinPlugin(identity, async context => {
       const prepared = await definition.prepare?.(context)
       await definition.activate(context, prepared)
-    }, this.createContext)
+    }, this.createContext, definition)
     this.instances.set(identity.key, instance)
     this.definitions.set(identity.key, definition)
     this.knownDefinitions.set(definition.id, definition)
@@ -212,7 +221,7 @@ export class PluginRuntime {
     const instance = await activateBuiltinPlugin(resolvedIdentity, async context => {
       const prepared = await definition.prepare?.(context)
       await definition.activate(context, prepared)
-    }, this.createContext)
+    }, this.createContext, definition)
     this.instances.set(resolvedIdentity.key, instance)
     this.definitions.set(resolvedIdentity.key, definition)
     this.knownDefinitions.set(definition.id, definition)
@@ -230,7 +239,9 @@ export class PluginRuntime {
       : createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
     const scope = new PluginScope(identity.key)
     try {
-      const result = definition.activate(this.createContext(identity, scope))
+      const result = definition.activate(
+        this.createContext(identity, scope, undefined, definition),
+      )
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         throw new Error(`同步激活要求 activate 同步返回：${definition.id}`)
       }
@@ -296,7 +307,7 @@ export class PluginRuntime {
       candidateIdentity,
       oldInstance.identity.key,
     )
-    const context = this.createContext(candidateIdentity, scope, contributions.transactions)
+    const context = this.createContext(candidateIdentity, scope, contributions.transactions, definition)
     let committed = false
     let suspended = false
     let remounted = false

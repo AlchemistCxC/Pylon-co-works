@@ -3,7 +3,7 @@ import type { BuiltinPluginActivationContext } from './pluginActivationContext.t
 import { createPackagePluginIdentity } from './pluginIdentity.ts'
 import type { BuiltinPluginDefinition, PluginRuntime } from './pluginRuntime.ts'
 import type { HotSwapMode, PluginUpdateResult } from './shadowUpdate.ts'
-import { parsePylonPluginManifest } from './packageManifest.ts'
+import { parsePylonPluginManifest, type PylonPluginCapability } from './packageManifest.ts'
 import { loadPackageStyles, type PackageStyleHandle } from './packageStyleRuntime.ts'
 
 export interface PackagePluginModule {
@@ -146,6 +146,8 @@ export class PackagePluginRuntimeService {
       runtimeInstanceId,
       hotSwapMode,
       drainTimeoutMs: manifest.hotSwap?.drainTimeoutMs,
+      // 解析器已保证词表封闭；窄化到 capability 字面量类型
+      capabilities: manifest.capabilities?.map(capability => capability as PylonPluginCapability),
       prepare: async context => {
         await this.packages.createRuntime(runtimeInstanceId)
         context.scope.add(() => this.packages.cleanupRuntime(runtimeInstanceId))

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pylon.local/schemas/pylon-plugin-manifest.schema.json",
   "title": "Pylon plugin manifest (pylon-plugin.json)",
-  "description": "Plugin API 1.0/1.1 包清单。本 schema 比宿主解析器更严格（additionalProperties: false）——用于编辑器补全与 CI 校验；宿主本身忽略未知字段。真值规则见 src/plugin-runtime/packageManifest.ts。",
+  "description": "Plugin API 1.0/1.1/1.2 包清单。本 schema 比宿主解析器更严格（additionalProperties: false）——用于编辑器补全与 CI 校验；宿主本身忽略未知字段。capabilities 仅 API 1.2 允许（封闭词表）。真值规则见 src/plugin-runtime/packageManifest.ts。",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "id", "name", "version", "api", "kind", "web"],
@@ -16,7 +16,7 @@
     },
     "name": { "type": "string", "minLength": 1 },
     "version": { "type": "string", "minLength": 1 },
-    "api": { "enum": ["1.0", "1.1"], "description": "目标 Plugin API 小版本；宿主按 allowlist 接受（1.0 插件在 1.1 宿主继续激活）" },
+    "api": { "enum": ["1.0", "1.1", "1.2"], "description": "目标 Plugin API 小版本；宿主按 allowlist 接受（1.0 插件在 1.1/1.2 宿主继续激活）" },
     "kind": {
       "enum": [
         "shell", "workspace", "feature", "hook", "renderer",
@@ -67,7 +67,13 @@
         "drainTimeoutMs": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
-    "reactVersion": { "type": "string" }
+    "reactVersion": { "type": "string" },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["plugin.management"] },
+      "description": "API 1.2 新增：声明的宿主能力（封闭词表，宿主 fail-closed 拒绝未知项）；1.0/1.1 manifest 携带该字段会被宿主拒绝"
+    }
   },
   "definitions": {
     "versionRanges": {

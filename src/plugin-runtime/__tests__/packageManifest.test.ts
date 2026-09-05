@@ -3,6 +3,7 @@ import {
   parsePylonPluginManifest,
   PluginManifestError,
   PYLON_PLUGIN_API_VERSION,
+  PYLON_PLUGIN_CAPABILITIES,
 } from '../packageManifest.ts'
 
 const valid = {
@@ -75,5 +76,59 @@ describe('api=1.0 package manifest', () => {
       code: 'plugin_manifest_invalid',
       field: 'activation.events',
     }))
+  })
+})
+
+describe('api=1.2 package manifest (capabilities)', () => {
+  const v12 = { ...valid, api: '1.2' as const }
+
+  it('accepts a legal capabilities declaration', () => {
+    const manifest = parsePylonPluginManifest({ ...v12, capabilities: ['plugin.management'] })
+    expect(manifest.capabilities).toEqual(['plugin.management'])
+  })
+
+  it('accepts 1.2 without capabilities (field is optional)', () => {
+    expect(parsePylonPluginManifest(v12)).toEqual(v12)
+  })
+
+  it('rejects an unknown capability (fail-closed vocabulary)', () => {
+    expect(() => parsePylonPluginManifest({ ...v12, capabilities: ['plugin.filesystem'] }))
+      .toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+        code: 'plugin_manifest_invalid',
+        field: 'capabilities.0',
+      }))
+  })
+
+  it('rejects duplicate capabilities', () => {
+    expect(() => parsePylonPluginManifest({
+      ...v12,
+      capabilities: ['plugin.management', 'plugin.management'],
+    })).toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+      code: 'plugin_manifest_invalid',
+      field: 'capabilities.1',
+    }))
+  })
+
+  it('rejects non-string or empty capability entries', () => {
+    expect(() => parsePylonPluginManifest({ ...v12, capabilities: ['  '] }))
+      .toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+        code: 'plugin_manifest_invalid',
+        field: 'capabilities',
+      }))
+    expect(() => parsePylonPluginManifest({ ...v12, capabilities: 'plugin.management' }))
+      .toThrow(/capabilities/)
+  })
+
+  it('rejects capabilities on api=1.1 manifests (version-aware removed-field rule)', () => {
+    expect(() => parsePylonPluginManifest({ ...valid, api: '1.1', capabilities: ['plugin.management'] }))
+      .toThrow(/capabilities.*API 1\.0/)
+  })
+
+  it('keeps the vocabulary closed and exported', () => {
+    expect(PYLON_PLUGIN_CAPABILITIES).toEqual(['plugin.management'])
+  })
+
+  it('rejects api=1.3 as an unsupported version', () => {
+    expect(() => parsePylonPluginManifest({ ...v12, api: '1.3' })).toThrow(/仅支持/)
   })
 })

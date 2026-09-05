@@ -43,6 +43,8 @@ import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/plug
 import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
 import { createPluginStorageApi } from './storage/pluginStorageApi.ts'
 import type { PluginStorageApi } from './storage/pluginStorageTypes.ts'
+import type { PluginManagementApi } from './management/pluginManagementTypes.ts'
+import type { BuiltinPluginDefinition } from './pluginRuntime.ts'
 
 export interface PluginActivationTransactions {
   readonly application: PluginApplicationRegistryTransaction
@@ -88,12 +90,24 @@ export interface BuiltinPluginActivationContext {
   readonly titlebar: PluginTitlebarApi
   /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
   readonly storage: PluginStorageApi
+  /** API 1.2 新增：capability-gated 管理面。仅当 manifest 声明 `plugin.management`
+   *  且用户已授权时存在；未声明或未授权时属性不存在（C3：条件装配，不是空实现）。 */
+  readonly management?: PluginManagementApi
+}
+
+export interface PluginActivationContextOptions {
+  readonly definition?: BuiltinPluginDefinition
+  readonly createManagementApi?: (
+    definition: BuiltinPluginDefinition,
+    scope: PluginScope,
+  ) => PluginManagementApi | undefined
 }
 
 export type PluginActivationContextFactory = (
   identity: PluginIdentity,
   scope: PluginScope,
   transactions?: PluginActivationTransactions,
+  definition?: BuiltinPluginDefinition,
 ) => BuiltinPluginActivationContext
 
 export function createPluginActivationContext(
@@ -101,9 +115,15 @@ export function createPluginActivationContext(
   identity: PluginIdentity,
   scope: PluginScope,
   transactions?: PluginActivationTransactions,
+  options: PluginActivationContextOptions = {},
 ): BuiltinPluginActivationContext {
   const dataApis = createPluginSessionDataApis(identity)
   const { registries } = host
+  // C3 门控：management 属性存在 ⇔ 声明 ∧ 授权（createManagementApi 由宿主
+  // 注入 grant 检查；未声明/未授权返回 undefined → 属性不装配）
+  const management = options.definition && options.createManagementApi
+    ? options.createManagementApi(options.definition, scope)
+    : undefined
   return {
     identity,
     scope,
@@ -150,5 +170,6 @@ export function createPluginActivationContext(
       transactions?.titlebar,
     ),
     storage: createPluginStorageApi(identity),
+    ...(management ? { management } : {}),
   }
 }

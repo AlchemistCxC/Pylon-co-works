@@ -13,6 +13,7 @@ import {
   PYLON_PLUGIN_API_LATEST,
   PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_API_VERSION,
+  PYLON_PLUGIN_CAPABILITIES,
   PYLON_PLUGIN_MANIFEST_FILE,
   type PylonPluginManifest,
 } from '../plugin-runtime/packageManifest.ts'
@@ -51,6 +52,19 @@ export type { PluginSessionCreationApi } from '../plugin-runtime/session-creatio
 export type { PluginInterfaceModeApi } from '../plugin-runtime/interface-mode/pluginInterfaceModeApi.ts'
 export type { PluginTitlebarApi } from '../plugin-runtime/titlebar/pluginTitlebarApi.ts'
 export type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.ts'
+/** API 1.2 capability-gated 管理面：仅当 manifest 声明 `plugin.management`
+ *  且用户对该版本授权后，activation context 才装配 `management` 属性。 */
+export type { PluginManagementApi } from '../plugin-runtime/management/pluginManagementTypes.ts'
+export type {
+  PluginManagementErrorCode,
+  PluginRuntimeOverview,
+  PluginRuntimeOverviewEntry,
+  PluginBootstrapOverview,
+  PluginBootstrapOverviewEntry,
+  PluginContractDiagnostics,
+  PluginCapabilityGrantFact,
+} from '../plugin-runtime/management/pluginManagementTypes.ts'
+export type { PylonPluginCapability } from '../plugin-runtime/packageManifest.ts'
 
 export type {
   HookName,
@@ -131,6 +145,7 @@ export {
   PYLON_PLUGIN_API_VERSION,
   PYLON_PLUGIN_API_LATEST,
   PYLON_PLUGIN_API_SUPPORTED,
+  PYLON_PLUGIN_CAPABILITIES,
   PYLON_PLUGIN_MANIFEST_FILE,
 }
 export { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from '../plugin-runtime/storage/pluginStorageContract.ts'

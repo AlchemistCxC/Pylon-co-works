@@ -7,7 +7,7 @@
  * - helpers 的 DOM 输出一律使用宿主视觉语义 token（VISUAL_SEMANTIC_TOKENS），
  *   不复制宿主的透明度/阴影/动画毫秒值。
  */
-import { PYLON_PLUGIN_API_MIN, PYLON_PLUGIN_API_LATEST, PYLON_PLUGIN_API_SUPPORTED, PYLON_PLUGIN_API_VERSION, PYLON_PLUGIN_MANIFEST_FILE, type PylonPluginManifest } from '../plugin-runtime/packageManifest.js';
+import { PYLON_PLUGIN_API_MIN, PYLON_PLUGIN_API_LATEST, PYLON_PLUGIN_API_SUPPORTED, PYLON_PLUGIN_API_VERSION, PYLON_PLUGIN_CAPABILITIES, PYLON_PLUGIN_MANIFEST_FILE, type PylonPluginManifest } from '../plugin-runtime/packageManifest.js';
 import type { PackagePluginModule } from '../plugin-runtime/packagePluginRuntime.js';
 import type { PluginUiSurface } from '../plugin-runtime/ui/pluginUiTypes.js';
 export type { BuiltinPluginActivationContext as PluginActivationContext } from '../plugin-runtime/pluginActivationContext.js';
@@ -28,6 +28,11 @@ export type { PluginSessionCreationApi } from '../plugin-runtime/session-creatio
 export type { PluginInterfaceModeApi } from '../plugin-runtime/interface-mode/pluginInterfaceModeApi.js';
 export type { PluginTitlebarApi } from '../plugin-runtime/titlebar/pluginTitlebarApi.js';
 export type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.js';
+/** API 1.2 capability-gated 管理面：仅当 manifest 声明 `plugin.management`
+ *  且用户对该版本授权后，activation context 才装配 `management` 属性。 */
+export type { PluginManagementApi } from '../plugin-runtime/management/pluginManagementTypes.js';
+export type { PluginManagementErrorCode, PluginRuntimeOverview, PluginRuntimeOverviewEntry, PluginBootstrapOverview, PluginBootstrapOverviewEntry, PluginContractDiagnostics, PluginCapabilityGrantFact, } from '../plugin-runtime/management/pluginManagementTypes.js';
+export type { PylonPluginCapability } from '../plugin-runtime/packageManifest.js';
 export type { HookName, HookMode, HookExecution, HookFailurePolicy, HookInvocationContext, HookActionResult, HookDefinition, HookInvocationResult, } from '../plugin-runtime/hooks/hookTypes.js';
 export type { PluginHookApi } from '../plugin-runtime/hooks/pluginHookApi.js';
 export type { PluginUiSurface, PluginUiEventBridge, PluginUiUnmount, PluginUiFramework, } from '../plugin-runtime/ui/pluginUiTypes.js';
@@ -55,7 +60,7 @@ export type { FileWorkbenchContribution } from '../plugin-runtime/file-workbench
 export { VISUAL_SEMANTIC_TOKENS, VISUAL_SEMANTIC_ROLE_TOKENS } from '../domains/theme/visualSemantics.js';
 export { PYLON_PLUGIN_API_MIN, 
 /** @deprecated 语义是最低接受版本，改用 PYLON_PLUGIN_API_MIN */
-PYLON_PLUGIN_API_VERSION, PYLON_PLUGIN_API_LATEST, PYLON_PLUGIN_API_SUPPORTED, PYLON_PLUGIN_MANIFEST_FILE, };
+PYLON_PLUGIN_API_VERSION, PYLON_PLUGIN_API_LATEST, PYLON_PLUGIN_API_SUPPORTED, PYLON_PLUGIN_CAPABILITIES, PYLON_PLUGIN_MANIFEST_FILE, };
 export { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from '../plugin-runtime/storage/pluginStorageContract.js';
 /** Gives plugin entry modules a checked, inference-friendly lifecycle definition. */
 export declare function definePlugin(module: PackagePluginModule): PackagePluginModule;

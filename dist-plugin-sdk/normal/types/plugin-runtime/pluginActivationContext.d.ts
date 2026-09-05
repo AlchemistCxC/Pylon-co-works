@@ -38,6 +38,8 @@ import type { InterfaceModeContribution } from './interface-mode/interfaceModeTy
 import { type PluginTitlebarApi } from './titlebar/pluginTitlebarApi.js';
 import type { TitlebarContribution } from './titlebar/titlebarTypes.js';
 import type { PluginStorageApi } from './storage/pluginStorageTypes.js';
+import type { PluginManagementApi } from './management/pluginManagementTypes.js';
+import type { BuiltinPluginDefinition } from './pluginRuntime.js';
 export interface PluginActivationTransactions {
     readonly application: PluginApplicationRegistryTransaction;
     readonly commands: CommandRegistryTransaction;
@@ -81,6 +83,13 @@ export interface BuiltinPluginActivationContext {
     readonly titlebar: PluginTitlebarApi;
     /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
     readonly storage: PluginStorageApi;
+    /** API 1.2 新增：capability-gated 管理面。仅当 manifest 声明 `plugin.management`
+     *  且用户已授权时存在；未声明或未授权时属性不存在（C3：条件装配，不是空实现）。 */
+    readonly management?: PluginManagementApi;
 }
-export type PluginActivationContextFactory = (identity: PluginIdentity, scope: PluginScope, transactions?: PluginActivationTransactions) => BuiltinPluginActivationContext;
-export declare function createPluginActivationContext(host: PluginHostServices, identity: PluginIdentity, scope: PluginScope, transactions?: PluginActivationTransactions): BuiltinPluginActivationContext;
+export interface PluginActivationContextOptions {
+    readonly definition?: BuiltinPluginDefinition;
+    readonly createManagementApi?: (definition: BuiltinPluginDefinition, scope: PluginScope) => PluginManagementApi | undefined;
+}
+export type PluginActivationContextFactory = (identity: PluginIdentity, scope: PluginScope, transactions?: PluginActivationTransactions, definition?: BuiltinPluginDefinition) => BuiltinPluginActivationContext;
+export declare function createPluginActivationContext(host: PluginHostServices, identity: PluginIdentity, scope: PluginScope, transactions?: PluginActivationTransactions, options?: PluginActivationContextOptions): BuiltinPluginActivationContext;

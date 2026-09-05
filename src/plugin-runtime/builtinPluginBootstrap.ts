@@ -2,8 +2,8 @@ import type { BuiltinPluginDefinition, PluginRuntime } from './pluginRuntime.ts'
 
 export interface BuiltinPluginBootstrapFailure {
   readonly pluginId: string
-  readonly stage: 'activate' | 'dependency'
-  readonly code: 'plugin_activation_failed' | 'dependency_failed'
+  readonly stage: 'activate' | 'dependency' | 'capability-consent'
+  readonly code: 'plugin_activation_failed' | 'dependency_failed' | 'plugin_capability_denied'
   readonly message: string
   readonly retryable: boolean
 }
@@ -18,10 +18,19 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export interface BuiltinPluginBootstrapOptions {
+  /** API 1.2 同意流：声明了 capability 但授权缺失 → 前置失败（capability-consent）。
+   *  未注入时跳过检查（纯单测/旧路径兼容）。 */
+  readonly evaluateConsent?: (
+    definition: BuiltinPluginDefinition,
+  ) => { status: 'granted' | 'awaiting_consent'; missingCapabilities: readonly string[] }
+}
+
 export async function bootstrapPluginDefinitions(
   runtime: PluginRuntime,
   definitions: readonly BuiltinPluginDefinition[],
   mode: 'normal' | 'safe-mode',
+  options: BuiltinPluginBootstrapOptions = {},
 ): Promise<BuiltinPluginBootstrapResult> {
   if (mode === 'safe-mode') {
     const ids = new Set(definitions.map(item => item.id))
@@ -51,6 +60,20 @@ export async function bootstrapPluginDefinitions(
         retryable: true,
       }))
       continue
+    }
+    if (options.evaluateConsent && definition.capabilities && definition.capabilities.length > 0) {
+      const consent = options.evaluateConsent(definition)
+      if (consent.status === 'awaiting_consent') {
+        // 不阻塞 boot：登记为可重试的 degraded 事实，授权后 retryPlugin 自然激活
+        failures.push(Object.freeze({
+          pluginId: definition.id,
+          stage: 'capability-consent',
+          code: 'plugin_capability_denied',
+          message: `等待能力授权：${consent.missingCapabilities.join(', ')}`,
+          retryable: true,
+        }))
+        continue
+      }
     }
     try {
       if (definition.version && definition.packageInstanceId) await runtime.activatePackage(definition)

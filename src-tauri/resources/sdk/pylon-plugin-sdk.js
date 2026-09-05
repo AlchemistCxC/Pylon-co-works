@@ -4,10 +4,11 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 
 // src/plugin-runtime/packageManifest.ts
 var PYLON_PLUGIN_API_MIN = "1.0";
-var PYLON_PLUGIN_API_LATEST = "1.1";
-var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, PYLON_PLUGIN_API_LATEST];
+var PYLON_PLUGIN_API_LATEST = "1.2";
+var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", PYLON_PLUGIN_API_LATEST];
 var PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN;
 var PYLON_PLUGIN_MANIFEST_FILE = "pylon-plugin.json";
+var PYLON_PLUGIN_CAPABILITIES = ["plugin.management"];
 var PluginManifestError = class extends Error {
   constructor(field, message) {
     super(`pylon-plugin.json ${field} ${message}`);
@@ -37,6 +38,10 @@ var HOT_SWAP_MODES = /* @__PURE__ */ new Set([
   "restart-required"
 ]);
 var API_SUPPORTED_SET = new Set(PYLON_PLUGIN_API_SUPPORTED);
+var CAPABILITY_SET = new Set(PYLON_PLUGIN_CAPABILITIES);
+function removedFieldsFor(api) {
+  return api === PYLON_PLUGIN_API_LATEST ? ["trust", "contributes", "signature", "entry"] : ["trust", "capabilities", "contributes", "signature", "entry"];
+}
 function record(value, field) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`pylon-plugin.json ${field} \u5FC5\u987B\u662F\u5BF9\u8C61`);
@@ -60,7 +65,7 @@ function stringMap(value, field) {
 }
 function parsePylonPluginManifest(source) {
   const manifest = record(typeof source === "string" ? JSON.parse(source) : source, "root");
-  for (const removed of ["trust", "capabilities", "contributes", "signature", "entry"]) {
+  for (const removed of removedFieldsFor(manifest.api)) {
     if (Object.hasOwn(manifest, removed)) {
       throw new Error(`pylon-plugin.json \u5B57\u6BB5 ${removed} \u5DF2\u4ECE API 1.0 \u5220\u9664`);
     }
@@ -75,6 +80,24 @@ function parsePylonPluginManifest(source) {
     throw new Error(
       `pylon-plugin.json api \u4EC5\u652F\u6301 ${PYLON_PLUGIN_API_SUPPORTED.join("/")}\uFF08\u66F4\u9AD8\u7248\u672C\u9700\u5347\u7EA7\u5BBF\u4E3B\uFF09`
     );
+  }
+  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.capabilities !== void 0) {
+    if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((value) => typeof value !== "string" || !value.trim())) {
+      throw new PluginManifestError("capabilities", "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    manifest.capabilities.forEach((capability, index) => {
+      if (!CAPABILITY_SET.has(capability)) {
+        throw new PluginManifestError(
+          `capabilities.${index}`,
+          `\u672A\u77E5 capability\uFF08\u5C01\u95ED\u8BCD\u8868\uFF1A${PYLON_PLUGIN_CAPABILITIES.join("/")}\uFF09`
+        );
+      }
+      if (seen.has(capability)) {
+        throw new PluginManifestError(`capabilities.${index}`, "capability \u91CD\u590D\u58F0\u660E");
+      }
+      seen.add(capability);
+    });
   }
   if (typeof manifest.kind !== "string" || !KINDS.has(manifest.kind)) throw new Error("pylon-plugin.json kind \u65E0\u6548");
   const web = record(manifest.web, "web");
@@ -359,6 +382,7 @@ export {
   PYLON_PLUGIN_API_MIN,
   PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_API_VERSION,
+  PYLON_PLUGIN_CAPABILITIES,
   PYLON_PLUGIN_MANIFEST_FILE,
   PluginStorageError,
   VISUAL_SEMANTIC_ROLE_TOKENS,

@@ -37,6 +37,12 @@ export interface PackageInstallationServiceOptions {
   runtime: PluginRuntime
   packageRuntime: PackagePluginRuntimeService
   packages: PluginPackageClient
+  /** API 1.2 同意流：激活前置检查，授权缺失 → typed 失败 plugin_capability_denied。
+   *  未注入时跳过（纯单测/旧路径兼容）。 */
+  evaluateConsent?: (pluginId: string, version: string, capabilities?: readonly string[]) => {
+    status: 'granted' | 'awaiting_consent'
+    missingCapabilities: readonly string[]
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -47,6 +53,7 @@ export class PackageInstallationService {
   private readonly runtime: PluginRuntime
   private readonly packageRuntime: PackagePluginRuntimeService
   private readonly packages: PluginPackageClient
+  private readonly evaluateConsent: PackageInstallationServiceOptions['evaluateConsent']
   private initialization: Promise<PackageInitializationResult> | undefined
   private readonly emittedActivationEvents = new Set<string>()
   private readonly contractListeners = new Set<() => void>()
@@ -60,6 +67,22 @@ export class PackageInstallationService {
     this.runtime = options.runtime
     this.packageRuntime = options.packageRuntime
     this.packages = options.packages
+    this.evaluateConsent = options.evaluateConsent
+  }
+
+  /** 激活前置同意检查：声明 capability 且授权缺失 → typed 失败（不抛异常，进 failed 列表）。 */
+  private assertCapabilityConsent(
+    pluginId: string,
+    version: string,
+    capabilities: readonly string[] | undefined,
+  ): void {
+    if (!this.evaluateConsent || !capabilities || capabilities.length === 0) return
+    const consent = this.evaluateConsent(pluginId, version, capabilities)
+    if (consent.status === 'awaiting_consent') {
+      throw new Error(
+        `plugin_capability_denied: 插件 ${pluginId} 等待能力授权（${consent.missingCapabilities.join(', ')}）`,
+      )
+    }
   }
 
   initialize(): Promise<PackageInitializationResult> {
@@ -107,7 +130,8 @@ export class PackageInstallationService {
       const item = byId.get(pluginId)
       if (!item || this.isActive(pluginId)) continue
       try {
-        parsePylonPluginManifest(item.package.manifest)
+        const manifest = parsePylonPluginManifest(item.package.manifest)
+        this.assertCapabilityConsent(item.package.pluginId, item.package.version, manifest.capabilities)
         await this.packageRuntime.activateInstalled(item.package)
         activated.push(pluginId)
       } catch (error) {
@@ -148,6 +172,10 @@ export class PackageInstallationService {
       ]
       const resolution = this.assertContractMutation(descriptor.pluginId, candidateItems)
       const activationEligible = resolution.eligibleIds.includes(descriptor.pluginId)
+      const manifest = parsePylonPluginManifest(descriptor.manifest)
+      if (activationEligible) {
+        this.assertCapabilityConsent(descriptor.pluginId, descriptor.version, manifest.capabilities)
+      }
       if (this.isActive(descriptor.pluginId)) {
         await this.packageRuntime.updateFromDirectory(sourcePath, descriptor.pluginId)
       } else if (activationEligible) {
@@ -191,6 +219,11 @@ export class PackageInstallationService {
       await this.packages.setEnabled(pluginId, true)
       if (!this.isActive(pluginId) && resolution.eligibleIds.includes(pluginId)) {
         try {
+          this.assertCapabilityConsent(
+            pluginId,
+            target.package.version,
+            parsePylonPluginManifest(target.package.manifest).capabilities,
+          )
           await this.packageRuntime.activateInstalled(target.package)
         } catch (error) {
           await this.packages.setEnabled(pluginId, false).catch(() => undefined)

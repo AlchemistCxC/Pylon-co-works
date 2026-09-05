@@ -2,7 +2,7 @@ import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
 import { reportRuntimeError } from '../runtimeError.ts'
 
-export type PluginBootstrapStage = 'activate' | 'dependency' | 'user-packages' | 'mount'
+export type PluginBootstrapStage = 'activate' | 'dependency' | 'capability-consent' | 'user-packages' | 'mount'
 
 export interface PluginBootstrapFailure {
   readonly pluginId: string

@@ -20,6 +20,8 @@ import {
 } from './builtinPluginBootstrap.ts'
 import { bindPluginDisableHandler, getRuntimeServices } from './runtimeServices.ts'
 import { BUILTIN_SKIN_PLUGIN_ID, createBuiltinSkinPluginDefinition } from './skin/builtinSkinPlugin.ts'
+import { createRuntimeManagementApiFactory, evaluateConsentForDefinition, getPluginCapabilityGrantStore, getRegisteredKernelBootstrap } from './management/pluginManagementWiring.ts'
+import { evaluatePluginCapabilityConsent } from './management/pluginCapabilityConsent.ts'
 
 const runtimeServices = getRuntimeServices()
 const pluginHostServices = Object.freeze({
@@ -29,7 +31,16 @@ const pluginHostServices = Object.freeze({
   processClient: getRuntimePluginProcessClient(),
   requestSoftRemount: requestApplicationSoftRemount,
 })
-const pluginRuntime = new PluginRuntime({ host: pluginHostServices })
+const definitions = new Map<string, BuiltinPluginDefinition>()
+const createManagementApi = createRuntimeManagementApiFactory({
+  // 惰性 getter：compositionRoot 模块级构造顺序上 wiring 先于各服务单例就绪；
+  // bootstrap 由 kernelBootstrapServices 装配后经 provider 注册（打破静态环）
+  getRuntime: () => pluginRuntime,
+  getInstallation: () => getPackageInstallationService(),
+  getBootstrap: getRegisteredKernelBootstrap,
+  getBuiltinCriticality: pluginId => definitions.get(pluginId)?.criticality,
+})
+const pluginRuntime = new PluginRuntime({ host: pluginHostServices, createManagementApi })
 bindPluginDisableHandler(async pluginId => {
   const result = await pluginRuntime.disable(pluginId)
   if (result.complete) return
@@ -38,7 +49,6 @@ bindPluginDisableHandler(async pluginId => {
     .map(error => `${error.resourceId}: ${error.message}`)
   throw new Error(`Plugin cleanup incomplete: ${pluginId}${messages.length > 0 ? ` (${messages.join('; ')})` : ''}`)
 })
-const definitions = new Map<string, BuiltinPluginDefinition>()
 
 for (const definition of createBuiltinProductPluginDefinitions()) definitions.set(definition.id, definition)
 definitions.set(
@@ -71,7 +81,9 @@ export async function bootstrapBuiltins(mode: BuiltinBootstrapMode): Promise<Bui
       if (!definitions.has(identity.pluginId)) await pluginRuntime.deactivate(identity.key)
     }
   }
-  return bootstrapPluginDefinitions(pluginRuntime, [...definitions.values()], mode)
+  return bootstrapPluginDefinitions(pluginRuntime, [...definitions.values()], mode, {
+    evaluateConsent: evaluateConsentForDefinition,
+  })
 }
 
 export async function retryBuiltinPlugin(pluginId: string): Promise<BuiltinPluginBootstrapResult> {
@@ -89,6 +101,7 @@ export async function retryBuiltinPlugin(pluginId: string): Promise<BuiltinPlugi
     pluginRuntime,
     [...definitions.values()].filter(definition => closure.has(definition.id)),
     'normal',
+    { evaluateConsent: evaluateConsentForDefinition },
   )
   const activePluginIds = pluginRuntime.snapshot().active.map(item => item.pluginId).sort()
   const active = new Set(activePluginIds)
@@ -138,6 +151,12 @@ export function getPackageInstallationService(): PackageInstallationService {
       runtime: pluginRuntime,
       packageRuntime: getPackagePluginRuntimeService(),
       packages: getPluginPackageClient(),
+      evaluateConsent: (pluginId, version, capabilities) => evaluatePluginCapabilityConsent({
+        pluginId,
+        pluginVersion: version,
+        capabilities,
+        grants: getPluginCapabilityGrantStore(),
+      }),
     })
   }
   return packageInstallationService
