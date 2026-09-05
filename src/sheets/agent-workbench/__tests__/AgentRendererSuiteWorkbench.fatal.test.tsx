@@ -30,17 +30,40 @@ afterAll(async () => {
   if (active) await getPluginRuntime().deactivate(active.key)
 })
 
-describe('Agent Workbench builtin Solid fatal recovery', () => {
+describe('Agent Workbench builtin Solid fatal banner', () => {
   beforeEach(resetStores)
 
-  it('最终显示读取同一 document 的 React fallback，手动重试不改 journal revision', async () => {
+  it('fatal 时显示纯错误横幅：仅重试与诊断两个入口，不渲染 document', async () => {
     render(<AgentSheetView sheet={sheet} ctx={ctx} />)
-    const fallback = await screen.findByLabelText('React Workbench fatal fallback', {}, { timeout: 5_000 })
-    expect(fallback).toHaveAttribute('data-suite-id', 'builtin.solid')
-    expect(fallback).toHaveAttribute('data-document-revision', '0')
+    const banner = await screen.findByLabelText('Renderer suite fatal banner', {}, { timeout: 5_000 })
+    expect(banner).toHaveAttribute('data-suite-id', 'builtin.solid')
+    // 纯横幅契约：只承载失败事实与两个动作，无 document 交互面
+    expect(screen.getAllByRole('button')).toHaveLength(2)
+    expect(banner.textContent).toContain('渲染引擎失败')
+    expect(banner.textContent).toContain('builtin solid prepare failed')
+    expect(banner.querySelector('[data-document-revision]')).toBeNull()
+    expect(screen.queryByLabelText('React Workbench fatal fallback')).toBeNull()
+  })
+
+  it('打开诊断走既有 pylon:open-runtime-sheet 语义事件', async () => {
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(<AgentSheetView sheet={sheet} ctx={ctx} />)
+    await screen.findByLabelText('Renderer suite fatal banner', {}, { timeout: 5_000 })
+    dispatchSpy.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: '打开诊断' }))
+    const events = dispatchSpy.mock.calls.map(call => call[0]).filter((event): event is CustomEvent =>
+      event instanceof CustomEvent && event.type.startsWith('pylon:'))
+    expect(events.map(event => event.type)).toContain('pylon:open-runtime-sheet')
+  })
+
+  it('手动重试后挂载仍失败则横幅回归（自动重试链路可达）', async () => {
+    render(<AgentSheetView sheet={sheet} ctx={ctx} />)
+    await screen.findByLabelText('Renderer suite fatal banner', {}, { timeout: 5_000 })
 
     fireEvent.click(screen.getByRole('button', { name: '重试 Solid' }))
 
-    await waitFor(() => expect(screen.getByLabelText('React Workbench fatal fallback')).toHaveAttribute('data-document-revision', '0'))
+    // 挂载持续失败（mock 恒抛错），自动重试耗尽后横幅必须重新出现
+    await waitFor(() => expect(screen.getByLabelText('Renderer suite fatal banner'))
+      .toHaveAttribute('data-suite-id', 'builtin.solid'), { timeout: 8_000 })
   })
 })

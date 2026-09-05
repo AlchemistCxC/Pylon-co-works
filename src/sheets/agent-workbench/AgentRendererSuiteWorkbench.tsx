@@ -13,8 +13,15 @@ import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbe
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
 import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
-import ReactWorkbenchFatalFallback, { type WorkbenchFatalFailure } from './ReactWorkbenchFatalFallback.tsx'
-import type { ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+
+export interface WorkbenchFatalFailure {
+  readonly suiteId: string
+  readonly pluginId?: string
+  readonly phase: string
+  readonly message: string
+  readonly retained?: boolean
+}
+
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
@@ -464,63 +471,22 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       recoveryAction: { label: '重试 Solid', run: () => retrySolidRef.current() },
     })
   }, [failure, fatal, props.sheet.id, session, session?.id, session?.agentId])
-  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
-    detail: { domain: 'appearance', section: 'renderers' },
-  }))
   const openDiagnostics = () => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))
-  const openFallbackMedia = (part: ImageContentPart) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    const target = part.sourceKind === 'path' ? { path: part.source } : { uri: part.source }
-    void host.commands.openResource(input.sessionId, target)
-  }
-  const downloadFallbackMedia = (part: ImageContentPart) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    void host.commands.openResource(input.sessionId, { ...part, disposition: 'download' })
-  }
-  const openFallbackInteractionUrl = (url: string) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    void host.commands.openResource(input.sessionId, { uri: url })
-  }
-  const copyFallbackInteractionUrl = (url: string) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('clipboardWrite')) return
-    void host.commands.copy(input.sessionId, url)
-  }
-  const retryFallbackMessage = () => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('retry')) return
-    void host.commands.retry(input.sessionId)
-  }
-  const recoverFallbackSession = (strategy: 'reload-plugin' | 'reimport') => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('recovery')) return
-    void host.commands.recover(input.sessionId, strategy)
-  }
-  const respondFallbackInteraction = (interactionId: string, response: unknown, options?: { expectedRevision?: number }) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('interactionResponse')) return
-    return host.commands.respondInteraction(input.sessionId, interactionId, response, options)
-  }
 
   return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}
     onClickCapture={event => { openFileLinkFromEvent(event, props.ctx.activeSession) }}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
-    {fatal && failure && hostPortRef.current && <ReactWorkbenchFatalFallback document={hostPortRef.current.document} failure={failure}
-      onRetry={retrySolid}
-      onSelectSuite={selectSuite}
-      onOpenDiagnostics={openDiagnostics}
-      onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
-      onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
-      onOpenInteractionUrl={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
-      onCopyInteractionUrl={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
-      onOpenResource={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
-      onCopyResource={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
-      onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
-       onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
-       onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}
+    {fatal && failure && <section className="renderer-suite-fatal-banner" role="alert"
+      aria-label="Renderer suite fatal banner" data-suite-id={failure.suiteId} data-failure-phase={failure.phase}>
+      <strong>渲染引擎失败</strong>
+      <span>{failure.suiteId} · {failure.phase}</span>
+      {failure.pluginId && <span>{failure.pluginId}</span>}
+      <span>{failure.message}</span>
+      <div className="renderer-suite-fatal-actions">
+        <button type="button" onClick={retrySolid}>重试 Solid</button>
+        <button type="button" onClick={openDiagnostics}>打开诊断</button>
+      </div>
+    </section>}
      {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions} setters={headlessSetters}
       selectSession={props.ctx.selectSession} sessionRuntime={sessionRuntime} />}
   </div>
