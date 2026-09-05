@@ -90,6 +90,9 @@ impl PetEvent {
 /// 感知事件（按收集顺序）。调用方持有 sessions 锁时调用、锁外逐条应用。
 /// C11：回放（is_replay）事件仅同步 session 状态（tokens/title/model/mode），
 /// 不产出任何宠物感知事件。
+/// 生产路径已由 38dad290 全量改走 apply_update_event_routed（typed kernel seam）；
+/// 本布尔包装仅剩 C11 宠物策略 characterization 测试消费，故 cfg(test)。
+#[cfg(test)]
 fn apply_update_event(
     session: &mut crate::session::SessionInfo,
     update: &serde_json::Value,
