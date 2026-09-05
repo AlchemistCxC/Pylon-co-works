@@ -117,6 +117,12 @@ async function fixture(options: {
         contractDiagnostics: () => installation.getContractSnapshot(),
         contributionOverview: () => [],
         capabilityGrants: () => [],
+        processOverview: async () => [],
+        storageUsage: () => [],
+        dependencyGraph: async () => [],
+        terminatePluginProcess: async () => undefined,
+        retryCleanup: async () => ({ complete: true }),
+        clearPluginStorage: () => undefined,
         isCapabilityGranted: (pluginId, capability, pluginVersion) => (
           options.grants.getGrant(pluginId, capability as 'plugin.management', pluginVersion) !== undefined
         ),

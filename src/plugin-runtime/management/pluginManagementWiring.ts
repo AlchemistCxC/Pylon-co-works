@@ -25,7 +25,10 @@ import type {
 import type { PackageInstallationService } from '../packageInstallationService.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 import type { RuntimeRegistries } from '../pluginHostServices.ts'
+import type { PluginProcessClient } from '../../infrastructure/plugins/pluginProcessClient.ts'
 import { readPluginContributionFacts } from './pluginContributionProjection.ts'
+import { readPluginStorageUsage, clearPluginStorageNamespace } from './pluginStorageUsage.ts'
+import type { PluginDependencyNode } from './pluginManagementTypes.ts'
 
 let grantStoreSingleton: PluginCapabilityGrantStore | undefined
 
@@ -85,6 +88,31 @@ export function registerRuntimeRegistriesProvider(provider: () => RuntimeRegistr
 function runtimeHostRegistries(): RuntimeRegistries {
   if (!registriesProvider) throw new Error('runtime registries 尚未装配（management wiring）')
   return registriesProvider()
+}
+
+/** 插件附带进程客户端（D5 监管；由 compositionRoot 注入，惰性取）。 */
+let processClientProvider: (() => PluginProcessClient) | undefined
+
+export function registerPluginProcessClientProvider(provider: () => PluginProcessClient): void {
+  processClientProvider = provider
+}
+
+function hostProcessClient(): PluginProcessClient {
+  if (!processClientProvider) throw new Error('plugin process client 尚未装配（management wiring）')
+  return processClientProvider()
+}
+
+/** 内置包依赖图节点（D5 依赖契约诊断；数据 = first-party manifests）。 */
+let builtinDependencyNodesProvider: (() => readonly PluginDependencyNode[]) | undefined
+
+export function registerBuiltinDependencyNodesProvider(
+  provider: () => readonly PluginDependencyNode[],
+): void {
+  builtinDependencyNodesProvider = provider
+}
+
+function builtinDependencyNodes(): readonly PluginDependencyNode[] {
+  return builtinDependencyNodesProvider?.() ?? []
 }
 
 /** C3 门控装配器：声明 plugin.management ∧ 当前版本已授权 → PluginManagementApi；
@@ -161,6 +189,50 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
         grants.getGrant(pluginId, capability as 'plugin.management', pluginVersion) !== undefined
       ),
       isProductRequired: pluginId => options.getBuiltinCriticality(pluginId) === 'product-required',
+      processOverview: async () => {
+        const descriptors = await hostProcessClient().list()
+        return descriptors.map(descriptor => ({
+          processId: descriptor.processId,
+          pluginId: descriptor.pluginId,
+          runtimeInstanceId: descriptor.runtimeInstanceId,
+          status: descriptor.status,
+          restartAttempts: descriptor.restartAttempts,
+        }))
+      },
+      storageUsage: () => readPluginStorageUsage(),
+      dependencyGraph: async () => {
+        const nodes: PluginDependencyNode[] = [...builtinDependencyNodes()]
+        const known = new Set(nodes.map(node => node.pluginId))
+        const installed = await installation.list()
+        for (const item of installed) {
+          if (known.has(item.package.pluginId)) continue
+          const manifest = item.package.manifest
+          nodes.push({
+            pluginId: manifest.id,
+            kind: String(manifest.kind),
+            version: item.package.version,
+            builtin: false,
+            dependencies: Object.keys(manifest.dependencies ?? {}),
+            optionalDependencies: Object.keys(manifest.optionalDependencies ?? {}),
+            conflicts: [...(manifest.conflicts ?? [])],
+          })
+        }
+        return nodes.sort((a, b) => a.pluginId.localeCompare(b.pluginId))
+      },
+      terminatePluginProcess: processId => hostProcessClient().terminate(processId),
+      retryCleanup: async runtimeInstanceId => {
+        const result = await options.getRuntime().retryCleanup(runtimeInstanceId)
+        if (result.complete) return { complete: true }
+        const errors = [
+          result.deactivateError?.message,
+          ...result.scope.errors.map(error => error.message),
+        ].filter((message): message is string => Boolean(message))
+        return {
+          complete: false,
+          message: `清理未完成：${errors.join('；') || `${result.scope.remaining} 个资源残留`}`,
+        }
+      },
+      clearPluginStorage: pluginId => clearPluginStorageNamespace(pluginId),
       setEnabled: (pluginId, enabled) => installation.setEnabled(pluginId, enabled),
       reload: pluginId => installation.reload(pluginId),
       uninstall: pluginId => installation.uninstall(pluginId),

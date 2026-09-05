@@ -70,6 +70,32 @@ function createPluginManagementApi(
       assertAuthorized()
       return deps.capabilityGrants()
     },
+    processOverview() {
+      assertAuthorized()
+      return deps.processOverview()
+    },
+    storageUsage() {
+      assertAuthorized()
+      return deps.storageUsage()
+    },
+    dependencyGraph() {
+      assertAuthorized()
+      return deps.dependencyGraph()
+    },
+    async terminatePluginProcess(processId) {
+      assertAuthorized()
+      await deps.terminatePluginProcess(processId)
+    },
+    async retryCleanup(runtimeInstanceId) {
+      assertAuthorized()
+      const outcome = await deps.retryCleanup(runtimeInstanceId)
+      if (!outcome.complete) throw new Error(outcome.message ?? '清理未完成')
+      return outcome
+    },
+    clearPluginStorage(pluginId) {
+      assertAuthorized()
+      deps.clearPluginStorage(pluginId)
+    },
     async setEnabled(pluginId, enabled) {
       assertAuthorized()
       assertNotSelf(pluginId)
@@ -131,4 +157,7 @@ export type {
   PluginContractDiagnostics,
   PluginCapabilityGrantFact,
   PluginContributionFact,
+  PluginProcessOverviewEntry,
+  PluginStorageUsageEntry,
+  PluginDependencyNode,
 } from './pluginManagementTypes.ts'

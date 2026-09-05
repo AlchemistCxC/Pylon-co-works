@@ -26,6 +26,8 @@ import {
   getPluginCapabilityGrantStore,
   getRegisteredKernelBootstrap,
   registerRuntimeRegistriesProvider,
+  registerPluginProcessClientProvider,
+  registerBuiltinDependencyNodesProvider,
 } from './management/pluginManagementWiring.ts'
 import { evaluatePluginCapabilityConsent } from './management/pluginCapabilityConsent.ts'
 
@@ -48,6 +50,16 @@ const createManagementApi = createRuntimeManagementApiFactory({
 })
 const pluginRuntime = new PluginRuntime({ host: pluginHostServices, createManagementApi })
 registerRuntimeRegistriesProvider(() => runtimeServices)
+registerPluginProcessClientProvider(() => pluginHostServices.processClient)
+registerBuiltinDependencyNodesProvider(() => [...definitions.values()].map(definition => ({
+  pluginId: definition.id,
+  kind: definition.kind ?? 'feature',
+  version: definition.version ?? '0.0.0',
+  builtin: true,
+  dependencies: Object.keys(definition.dependencies ?? {}),
+  optionalDependencies: Object.keys(definition.optionalDependencies ?? {}),
+  conflicts: [...(definition.conflicts ?? [])],
+})))
 bindPluginDisableHandler(async pluginId => {
   const result = await pluginRuntime.disable(pluginId)
   if (result.complete) return

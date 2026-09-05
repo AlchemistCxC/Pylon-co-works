@@ -54,6 +54,41 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
       { pluginId: 'builtin.pylon-shell', contributions: { commands: ['shell.open'] }, total: 1 },
     ],
     capabilityGrants: () => [],
+    processOverview: vi.fn(async () => [
+      {
+        processId: 'proc-1',
+        pluginId: 'user.demo',
+        runtimeInstanceId: 'user.demo@1.0.0-pkg#run-1',
+        status: 'running' as const,
+        restartAttempts: 1,
+      },
+    ]),
+    storageUsage: () => [
+      { pluginId: 'user.demo', usedBytes: 256, budgetBytes: 65536, keyCount: 3 },
+    ],
+    dependencyGraph: async () => [
+      {
+        pluginId: 'builtin.pylon-shell',
+        kind: 'shell',
+        version: '1.0.0',
+        builtin: true,
+        dependencies: ['builtin.pylon-tools'],
+        optionalDependencies: [],
+        conflicts: [],
+      },
+      {
+        pluginId: 'user.demo',
+        kind: 'feature',
+        version: '1.0.0',
+        builtin: false,
+        dependencies: [],
+        optionalDependencies: [],
+        conflicts: ['other.demo'],
+      },
+    ],
+    terminatePluginProcess: vi.fn(async () => undefined),
+    retryCleanup: vi.fn(async () => ({ complete: true })),
+    clearPluginStorage: () => undefined,
     isCapabilityGranted: () => true,
     isProductRequired: pluginId => pluginId === 'builtin.pylon-shell',
     setEnabled: vi.fn(async () => { calls.push(`setEnabled:${overrides}`); return { ok: true } }),
@@ -165,6 +200,66 @@ describe('plugin manager panel (framework-free DOM)', () => {
     reloadButton.click()
     await vi.waitFor(() => {
       expect(handle.root.textContent).toContain('重载 user.demo失败：runtime 缺失')
+    })
+    handle.dispose()
+  })
+
+  // P53 D5：运行时监管区块（进程/存储配额/依赖关系）
+  it('renders supervision blocks: processes, storage quota and dependency graph', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const deps = mockManagementDeps()
+
+    const handle = mountPluginManagerPanel(container, { management: toApi(deps) })
+
+    await vi.waitFor(() => {
+      expect(handle.root.querySelector('[data-process-id="proc-1"]')).not.toBeNull()
+    })
+    expect(handle.root.querySelector('[data-process-id="proc-1"]')?.textContent).toContain('running（重启 1 次）')
+    expect(handle.root.querySelector('[data-storage-plugin="user.demo"]')?.textContent)
+      .toContain('256/65536 字节 · 3 键')
+    expect(handle.root.querySelector('[data-dependency-node="builtin.pylon-shell"]')?.textContent)
+      .toContain('依赖 builtin.pylon-tools')
+    expect(handle.root.querySelector('[data-dependency-node="user.demo"]')?.textContent)
+      .toContain('冲突 other.demo')
+
+    // cleanup-failed 行提供一键重试（走 management.retryCleanup）
+    const retryCleanup = vi.fn(async () => ({ complete: true }))
+    const handle2 = mountPluginManagerPanel(container, {
+      management: toApi({ ...deps, retryCleanup }),
+    })
+    await vi.waitFor(() => {
+      expect(handle2.root.querySelector('[data-cleanup-failed="user.demo"]')).not.toBeNull()
+    })
+    const retryButton = [...handle2.root.querySelectorAll('button')]
+      .find(button => button.textContent === '重试清理')!
+    retryButton.click()
+    await vi.waitFor(() => {
+      expect(retryCleanup).toHaveBeenCalledWith('user.demo@1.0.0-pkg#run-1')
+    })
+    handle.dispose()
+    handle2.dispose()
+  })
+
+  // P53 D5：终止进程按钮经 management API 委派
+  it('terminates a plugin process through the management api', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const deps = mockManagementDeps()
+    const terminatePluginProcess = vi.fn(async () => undefined)
+
+    const handle = mountPluginManagerPanel(container, {
+      management: toApi({ ...deps, terminatePluginProcess }),
+    })
+
+    await vi.waitFor(() => {
+      expect(handle.root.querySelector('[data-process-id="proc-1"]')).not.toBeNull()
+    })
+    const terminateButton = [...handle.root.querySelectorAll('button')]
+      .find(button => button.textContent === '终止/重启')!
+    terminateButton.click()
+    await vi.waitFor(() => {
+      expect(terminatePluginProcess).toHaveBeenCalledWith('proc-1')
     })
     handle.dispose()
   })

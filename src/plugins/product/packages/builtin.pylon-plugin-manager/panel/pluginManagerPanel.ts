@@ -142,6 +142,25 @@ export function mountPluginManagerPanel(
     shadow.append(shadowList)
     parent.append(shadow)
 
+    // P53 D5：运行时监管（进程）+ 存储配额 + 依赖关系图
+    const processes = el('div', 'pypm-group')
+    processes.append(el('div', 'pypm-group-title', '插件进程'))
+    const processList = el('div', 'pypm-list')
+    processes.append(processList)
+    parent.append(processes)
+
+    const storage = el('div', 'pypm-group')
+    storage.append(el('div', 'pypm-group-title', '存储配额'))
+    const storageList = el('div', 'pypm-list')
+    storage.append(storageList)
+    parent.append(storage)
+
+    const dependencies = el('div', 'pypm-group')
+    dependencies.append(el('div', 'pypm-group-title', '依赖与冲突'))
+    const dependencyList = el('div', 'pypm-list')
+    dependencies.append(dependencyList)
+    parent.append(dependencies)
+
     let contributionsGroup: HTMLElement | undefined
     if (contributionVisible) {
       contributionsGroup = el('div', 'pypm-group')
@@ -273,12 +292,92 @@ export function mountPluginManagerPanel(
         } else {
           for (const instance of cleanupFailures) {
             const row = el('div', 'pypm-row')
+            row.setAttribute('data-cleanup-failed', instance.pluginId)
+            const retry = button('重试清理')
+            retry.addEventListener('click', () => {
+              void runOperation(`重试清理 ${instance.pluginId}`, async () => {
+                const outcome = await management.retryCleanup(instance.runtimeInstanceId)
+                if (!outcome.complete) throw new Error(outcome.message ?? '清理未完成')
+              })
+            })
             row.append(
               el('span', 'pypm-row-id', instance.pluginId),
-              el('span', 'pypm-row-state', '清理失败（重试经宿主页"重试清理"）'),
+              el('span', 'pypm-row-state', '清理失败'),
+              retry,
             )
             shadowList.append(row)
           }
+        }
+
+        processList.replaceChildren()
+        try {
+          const processes = await management.processOverview()
+          if (processes.length === 0) {
+            processList.append(el('p', 'pypm-hint', '当前没有插件附带进程。'))
+          }
+          for (const process of processes) {
+            const row = el('div', 'pypm-row')
+            row.setAttribute('data-process-id', process.processId)
+            const terminate = button('终止/重启')
+            terminate.addEventListener('click', () => {
+              void runOperation(`终止进程 ${process.pluginId}`, () => management.terminatePluginProcess(process.processId))
+            })
+            row.append(
+              el('span', 'pypm-row-id', process.pluginId),
+              el('span', 'pypm-row-state', `${process.status}（重启 ${process.restartAttempts} 次）`),
+              terminate,
+            )
+            processList.append(row)
+          }
+        } catch (error) {
+          processList.append(el('p', 'pypm-hint', `进程读取失败：${error instanceof Error ? error.message : String(error)}`))
+        }
+
+        storageList.replaceChildren()
+        const usage = management.storageUsage()
+        if (usage.length === 0) {
+          storageList.append(el('p', 'pypm-hint', '当前没有插件持久数据。'))
+        }
+        for (const entry of usage) {
+          const row = el('div', 'pypm-row')
+          row.setAttribute('data-storage-plugin', entry.pluginId)
+          const clear = button('清空')
+          clear.addEventListener('click', () => {
+            void runOperation(`清空存储 ${entry.pluginId}`, async () => {
+              management.clearPluginStorage(entry.pluginId)
+            })
+          })
+          row.append(
+            el('span', 'pypm-row-id', entry.pluginId),
+            el('span', 'pypm-row-state', `${entry.usedBytes}/${entry.budgetBytes} 字节 · ${entry.keyCount} 键`),
+            clear,
+          )
+          storageList.append(row)
+        }
+
+        dependencyList.replaceChildren()
+        try {
+          const graph = await management.dependencyGraph()
+          if (graph.length === 0) {
+            dependencyList.append(el('p', 'pypm-hint', '当前无依赖声明。'))
+          }
+          for (const node of graph) {
+            const row = el('div', 'pypm-row')
+            row.setAttribute('data-dependency-node', node.pluginId)
+            const relations = [
+              ...(node.dependencies.length > 0 ? [`依赖 ${node.dependencies.join(', ')}`] : []),
+              ...(node.optionalDependencies.length > 0 ? [`可选 ${node.optionalDependencies.join(', ')}`] : []),
+              ...(node.conflicts.length > 0 ? [`冲突 ${node.conflicts.join(', ')}`] : []),
+            ]
+            row.append(
+              el('span', 'pypm-row-title', node.pluginId),
+              el('span', 'pypm-row-state', node.builtin ? '内置' : '外置'),
+              el('span', 'pypm-hint', relations.length > 0 ? relations.join(' · ') : '无依赖'),
+            )
+            dependencyList.append(row)
+          }
+        } catch (error) {
+          dependencyList.append(el('p', 'pypm-hint', `依赖图读取失败：${error instanceof Error ? error.message : String(error)}`))
         }
       } catch (error) {
         notice(`读取插件状态失败：${error instanceof Error ? error.message : String(error)}`)
