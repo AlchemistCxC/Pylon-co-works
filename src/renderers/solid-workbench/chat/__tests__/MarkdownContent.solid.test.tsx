@@ -85,6 +85,22 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     })
   })
 
+  it('流式首段的前导空行不渲染为可见空行（与解析路径剥前导空白一致）', async () => {
+    const [text, setText] = createSignal('\n\n开始输出')
+    const result = render(() => <MarkdownContent text={text()} streaming />)
+
+    await waitFor(() => expect(result.container).toHaveTextContent('开始输出'))
+    const blocks = [...result.container.querySelectorAll('.term-p')]
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(blocks[0]!.textContent?.startsWith('\n')).toBe(false)
+    expect(blocks.every(block => (block.textContent ?? '').length > 0)).toBe(true)
+
+    setText('\n\n开始输出\n\n第二段继续')
+    await waitFor(() => expect(result.container).toHaveTextContent('第二段继续'))
+    const grown = [...result.container.querySelectorAll('.term-p')]
+    expect(grown.every(block => (block.textContent ?? '').length > 0)).toBe(true)
+  })
+
   it('单行 fenced code 仍渲染为块级代码而不是 inline code', async () => {
     const { container } = render(() => <MarkdownContent text={'```ts\nconst x = 1\n```'} />)
     await waitFor(() => expect(container.querySelector('.term-code-block')).not.toBeNull())

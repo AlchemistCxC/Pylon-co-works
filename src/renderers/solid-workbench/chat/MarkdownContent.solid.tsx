@@ -46,23 +46,38 @@ interface StreamingBlockRow {
 function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; inline?: boolean }) {
   let nextId = 1
   let committedText = ''
+  // Blank leading lines are kept out of the visible rows while remaining a
+  // prefix of every future snapshot, so lossless reconciliation keeps working.
+  let hiddenLeading = ''
   let stableRows: StreamingBlockRow[] = []
   let tailRow = createStreamingBlockRow(nextId++, '')
   const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
 
   const reset = (text: string, final: boolean) => {
     committedText = ''
+    hiddenLeading = ''
     stableRows = []
     tailRow = createStreamingBlockRow(nextId++, '')
     reconcile(text, final)
   }
 
   const reconcile = (text: string, final: boolean) => {
-    if (!text.startsWith(committedText)) {
+    let visible = text
+    if (committedText === '') {
+      // Providers may open an assistant stream with blank lines (for example
+      // right after a reasoning phase). CommonMark drops them once the parser
+      // runs, but the plain fast path renders each as an empty pre-wrap line,
+      // pushing the first generated characters below the assistant indicator.
+      visible = trimLeadingBlankLines(text)
+      hiddenLeading = text.slice(0, text.length - visible.length)
+    } else if (hiddenLeading.length > 0 && visible.startsWith(hiddenLeading)) {
+      visible = visible.slice(hiddenLeading.length)
+    }
+    if (!visible.startsWith(committedText)) {
       reset(text, final)
       return
     }
-    const pending = text.slice(committedText.length)
+    const pending = visible.slice(committedText.length)
     const split = splitStreamingMarkdownBlocks(pending)
     for (const block of split.stableBlocks) {
       // The splitter includes the blank-line delimiter in each stable block
@@ -104,6 +119,11 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
     streaming={props.streaming}
     inline={props.inline}
   />}</For>
+}
+
+/** Strip fully blank leading lines; the first content line keeps its indentation. */
+function trimLeadingBlankLines(text: string): string {
+  return text.replace(/^(?:[^\S\r\n]*\r?\n)+/, '')
 }
 
 function trimStableBlockDelimiter(block: string): string {

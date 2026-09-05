@@ -107,6 +107,9 @@
 @keyframes pylon-reasoning-shimmer { to { background-position:-200% 0; } }
 .term-reasoning-body { padding:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-4); border-left:var(--line-width-1) solid color-mix(in srgb, var(--border) 72%, transparent); margin:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-1); max-height:320px; overflow-y:auto; overscroll-behavior:contain; }
 .term-reasoning-body :is(ol,ul) { box-sizing:border-box; margin-inline:0; padding-inline-start:2em; }
+.term-reasoning-body .term-plain-text { white-space:normal; }
+/* 上面这条对齐流式纯文本回退与解析路径的软换行语义：思考体内单个换行折叠为空格
+   （与 CommonMark 解析一致）；assistant 上下文两条路径均为 pre-wrap，不受影响。 */
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-file-card { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:var(--ui-space-2); width:min(100%,960px); padding:var(--ui-space-2); border:var(--line-width-1) solid var(--border); border-radius:var(--message-radius,0); }
