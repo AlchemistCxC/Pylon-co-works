@@ -105,7 +105,7 @@ export interface WorkbenchDocumentApplyOptions {
   readonly sessionId?: string | null
   /**
    * Keep the host-owned generation clock while applying a document projection.
-   * The canonical document and the live controller are separate streams; a
+   * The canonical document and the live TurnClock are separate streams; a
    * projection can briefly omit running rows (or their timestamps) while a
    * turn is still active.  Callers that own an authoritative live generation
    * reader set this flag so that gap cannot reset elapsed time.
@@ -317,7 +317,7 @@ export function mergeWorkbenchRuntimeSnapshot(
   const rawPatch = input.generationPatch ?? {}
   const requestedEpoch = input.turnEpoch ?? rawPatch.turnEpoch
   const previousEpoch = previous.turnEpoch
-  // turnEpoch is a monotonic runtime-local fence. A stale controller/document
+  // turnEpoch is a monotonic runtime-local fence. A stale clock/document
   // callback may still arrive after a new turn has started, but it must not
   // roll the epoch back or clear the newer turn's terminal state.
   const epochIsOlder = requestedEpoch !== undefined && previousEpoch !== undefined && requestedEpoch < previousEpoch
@@ -348,8 +348,9 @@ export function mergeWorkbenchRuntimeSnapshot(
     candidate.terminalFence = undefined
   }
   // A canonical terminal projection is authoritative for the current turn.
-  // Controller callbacks can arrive later with a stale active flag; never let
-  // that patch resurrect the spinner or active-only metadata.
+  // A late clock patch (TurnClock reconcile, optimistic rollback) can arrive
+  // with a stale active flag; never let that patch resurrect the spinner or
+  // active-only metadata.
   if (documentIsTerminal && !epochIsNew) {
     candidate.generating = false
     candidate.generationStart = 0
@@ -375,7 +376,7 @@ function normalizeRuntimeSnapshot(snapshot: WorkbenchRuntimeSnapshot): Workbench
     // A display-only restored summary must not synthesize a terminal fence:
     // the fence is only cleared by a turn-epoch advance or an explicit null,
     // so a synthesized one would pin the indicator terminal and block the
-    // next controller-driven generation from restarting it.
+    // next TurnClock-driven generation from restarting it.
     const synthesizedFence = snapshot.summary?.displayOnly === true
       ? undefined
       : snapshot.turnEpoch !== undefined ? { ownerKey: snapshot.ownerKey, turnEpoch: snapshot.turnEpoch } : undefined
@@ -557,12 +558,12 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
 
 /**
  * Reconcile a canonical document projection with the host's live generation
- * clock.  `legacyFieldsFromDocument` is intentionally deterministic, but an
- * in-flight projection may contain no running message/activity (or may carry
- * a transient session status).  Falling back to `Date.now()` in that window
- * makes the footer jump back to 0–1s.  The live controller remains the source
- * of truth for the active turn, so retain its ephemeral fields until it
- * explicitly publishes the terminal state.
+ * clock (P52 D3: the clock owner is the session TurnClock).  `legacyFieldsFromDocument`
+ * is intentionally deterministic, but an in-flight projection may contain no
+ * running message/activity (or may carry a transient session status).  Falling
+ * back to `Date.now()` in that window makes the footer jump back to 0–1s.
+ * The TurnClock remains the source of truth for the active turn, so retain its
+ * ephemeral fields until it explicitly publishes the terminal state.
  */
 function preserveActiveGeneration(
   previous: WorkbenchRuntimeSnapshot,
