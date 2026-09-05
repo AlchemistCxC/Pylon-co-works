@@ -359,13 +359,27 @@ export function mergeWorkbenchRuntimeSnapshot(
     if (candidate.terminalFence === undefined && effectiveEpoch !== undefined) {
       candidate.terminalFence = { ownerKey: candidate.ownerKey, turnEpoch: effectiveEpoch }
     }
+  } else if (!documentIsTerminal && !epochIsOlder && stable.generating === true && input.document !== undefined && previous.terminalFence !== undefined) {
+    // The fence above outlives the evidence that set it as soon as the next
+    // canonical projection carries a running turn (for example the user echo
+    // after a rebind, or an assistant continuation without a new user turn).
+    // A stale fence in that state pins the indicator terminal forever.
+    candidate.summary = null
+    candidate.terminalFence = undefined
   }
   return normalizeRuntimeSnapshot(candidate)
 }
 
 function normalizeRuntimeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
   if (snapshot.summary !== null || snapshot.terminalFence !== undefined) {
-    const terminalFence = snapshot.terminalFence ?? (snapshot.turnEpoch !== undefined ? { ownerKey: snapshot.ownerKey, turnEpoch: snapshot.turnEpoch } : undefined)
+    // A display-only restored summary must not synthesize a terminal fence:
+    // the fence is only cleared by a turn-epoch advance or an explicit null,
+    // so a synthesized one would pin the indicator terminal and block the
+    // next controller-driven generation from restarting it.
+    const synthesizedFence = snapshot.summary?.displayOnly === true
+      ? undefined
+      : snapshot.turnEpoch !== undefined ? { ownerKey: snapshot.ownerKey, turnEpoch: snapshot.turnEpoch } : undefined
+    const terminalFence = snapshot.terminalFence ?? synthesizedFence
     return { ...snapshot, generating: false, generationStart: 0, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, ...(terminalFence ? { terminalFence } : {}) }
   }
   if (snapshot.generating) return { ...snapshot, summary: null, terminalFence: undefined }

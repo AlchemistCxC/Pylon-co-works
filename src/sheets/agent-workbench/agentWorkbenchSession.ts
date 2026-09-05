@@ -747,6 +747,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
               reason: 'done',
               durationSource: canonicalDuration?.source ?? 'unknown',
               durationAvailable: canonicalDuration !== undefined,
+              // Display-only restore: must not synthesize a terminal fence
+              // (see normalizeRuntimeSnapshot), or the next controller-driven
+              // generation cannot restart the indicator after a rebind.
+              displayOnly: true,
             },
           })
         }
@@ -883,6 +887,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
               reason: 'done',
               durationSource: canonicalDuration?.source ?? 'unknown',
               durationAvailable: canonicalDuration !== undefined,
+              // Display-only restore: must not synthesize a terminal fence
+              // (see normalizeRuntimeSnapshot), or the next controller-driven
+              // generation cannot restart the indicator after a rebind.
+              displayOnly: true,
             },
           })
         }
