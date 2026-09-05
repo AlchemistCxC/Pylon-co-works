@@ -2063,7 +2063,8 @@
 .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
   content:'';
   position:absolute;
-  inset:0 auto 0 -6px;
+  /* 与消息轨左缘对齐（用户确认：此前 -6px 伸出行外，视觉略偏左）。 */
+  inset:0 auto 0 0;
   width:2px;
   pointer-events:none;
   background:var(--accent);

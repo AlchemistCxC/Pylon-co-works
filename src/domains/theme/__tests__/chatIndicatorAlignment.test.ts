@@ -43,4 +43,10 @@ describe('chat indicator alignment contract', () => {
   it('keeps ordered-list markers inside the reasoning scroll port', () => {
     expect(chatCss).toMatch(/\.term-reasoning-body\s+:is\(ol,ul\)\s*\{[^}]*padding-inline-start\s*:\s*2em\s*;/s)
   })
+
+  it('pins the streaming accent bar to the message rail left edge', () => {
+    // 用户确认的左对齐口径：流式特效竖条与消息行左缘对齐，不伸出行外
+    // （此前 inset 左侧 -6px 使竖条悬在行外，视觉略偏左）。
+    expect(chatCss).toMatch(/\.term-row-assistant\[data-streaming="true"\]::after,\s*\.term-row-reasoning\[data-streaming="true"\]::after,\s*\.plain-message-list__row\[data-streaming="true"\] \.term-row-assistant::after\s*\{[^}]*inset\s*:\s*0 auto 0 0\s*;/s)
+  })
 })
