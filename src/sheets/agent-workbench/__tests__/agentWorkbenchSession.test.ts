@@ -76,6 +76,38 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('bind without a turn epoch keeps a canonical terminal document closed against a stale controller', async () => {
+    const active = session('session-restored-stale-controller', 'local:stale-controller')
+    const controller = {
+      subscribe: () => () => {},
+      getGenerating: () => true,
+      getStartTime: () => 1_000,
+      getLastActivityAt: () => 2_000,
+      getGenerationPhase: () => ({ kind: 'responding' as const }),
+      getGenerationActivity: () => undefined,
+      getThinkingStart: () => undefined,
+      getTokenCount: () => 12,
+      getSummary: () => undefined,
+      rejectOptimisticUser: () => {},
+    }
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [
+        canonicalRow(1, 'user_message_chunk', { content: { type: 'text', text: '已完成请求' } }),
+        canonicalRow(2, 'done'),
+      ],
+      subscribe: () => () => {},
+      chatController: () => controller,
+    })
+
+    await service.bind(active)
+
+    expect(service.runtime.getSnapshot()).toMatchObject({
+      generating: false,
+      document: { session: { status: 'completed' } },
+    })
+    service.destroy()
+  })
+
   it('切换会话后从 source-scoped runtime 恢复生成指示器与迟滞时钟', async () => {
     const live = new Map([
       ['local:a', { generating: true, start: 1_000, last: 4_000 }],
