@@ -70,4 +70,16 @@ describe('streaming display scheduler terminal coalescing', () => {
     expect(published[1]?.document?.messages[0]?.parts[1]).toBeUndefined()
     scheduler.dispose()
   })
+
+  it('does not retract a longer displayed stream for a shorter in-flight canonical prefix', () => {
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value))
+    const message = (content: string) => ({
+      id: 'assistant-1', role: 'assistant' as const, content, time: '', sender: 'peri', running: true,
+    })
+    scheduler.push(snapshot({ generating: true, messages: [message('abcdef')] }))
+    scheduler.push(snapshot({ generating: true, messages: [message('abc')] }))
+    expect(published.at(-1)?.messages[0]?.content).toBe('abcdef')
+    scheduler.dispose()
+  })
 })

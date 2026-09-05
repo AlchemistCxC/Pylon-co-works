@@ -184,6 +184,7 @@ export function createStreamingDisplayScheduler(
   const push = (snapshot: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
     snapshot = cohereDisplaySnapshot(snapshot)
+    if (displayed !== undefined) snapshot = preserveDisplayedPrefix(displayed, snapshot)
     target = snapshot
     if (displayed === undefined) {
       publishSnapshot(snapshot)
@@ -257,6 +258,49 @@ export function createStreamingDisplayScheduler(
   }
 
   return { push, flush, pause, resume, dispose }
+}
+
+/**
+ * Canonical and compatibility streams may briefly publish different-length
+ * prefixes for the same running row. Do not make the display retract while
+ * the newer canonical snapshot is still active; retain the longer displayed
+ * prefix until a later snapshot catches up (or a terminal snapshot arrives).
+ */
+function preserveDisplayedPrefix(
+  displayed: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+): WorkbenchRuntimeSnapshot {
+  if (!next.generating
+    || displayed.sessionId !== next.sessionId
+    || displayed.ownerKey !== next.ownerKey
+    || displayed.generation !== next.generation
+    || displayed.turnEpoch !== next.turnEpoch) return next
+  const messages = preserveMessagePrefixes(displayed.messages, next.messages)
+  const document = displayed.document && next.document
+    ? { ...next.document, messages: preserveMessagePrefixes(displayed.document.messages, next.document.messages) as WorkbenchDocument['messages'] }
+    : next.document
+  const streamingText = displayed.streamingText.startsWith(next.streamingText) ? displayed.streamingText : next.streamingText
+  const streamingThinking = displayed.streamingThinking.startsWith(next.streamingThinking) ? displayed.streamingThinking : next.streamingThinking
+  return {
+    ...next,
+    messages,
+    streamingText,
+    streamingThinking,
+    ...(document ? { document } : {}),
+  }
+}
+
+function preserveMessagePrefixes<T extends DisplayMessage>(
+  displayed: readonly T[],
+  next: readonly T[],
+): readonly T[] {
+  const displayedById = new Map(displayed.map(message => [message.id, message]))
+  return next.map(message => {
+    const previous = displayedById.get(message.id)
+    if (!previous || previous.role !== message.role || !message.running || message.content.length >= previous.content.length) return message
+    if (!previous.content.startsWith(message.content)) return message
+    return previous
+  })
 }
 
 function isTerminalTransition(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
