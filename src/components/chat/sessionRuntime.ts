@@ -91,5 +91,8 @@ export function buildSendMessagePayload({ session, content, persona, attachments
     // 非命令隐藏投递、成功后消费与失败重试。
     sessionPrompt,
     attachments,
+    // P51：随发送透传持久化 periId——后端据此优先 ACP session/load 复活原会话，
+    // 而不是在重启后静默新建导致 agent 端上下文丢失。
+    ...(session.periId ? { periId: session.periId } : {}),
   }
 }

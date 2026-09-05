@@ -100,3 +100,25 @@ describe('buildSendMessagePayload commandSet 注入（M2）', () => {
     expect(payload.sessionPrompt).toBe('创建时 Persona')
   })
 })
+
+describe('buildSendMessagePayload periId 透传（P51 重启上下文复活）', () => {
+  it('携带持久化 periId 供后端 session/load 复活原会话', () => {
+    const payload = buildSendMessagePayload({
+      session: session({ periId: 'peri-original' }),
+      content: '重启后的第一条消息',
+      persona: 'p',
+      attachments: [],
+    })
+    expect(payload.periId).toBe('peri-original')
+  })
+
+  it('无 periId（首次会话）省略字段，不发送空值', () => {
+    const payload = buildSendMessagePayload({
+      session: session(),
+      content: 'hi',
+      persona: 'p',
+      attachments: [],
+    })
+    expect('periId' in payload).toBe(false)
+  })
+})

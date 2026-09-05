@@ -222,7 +222,16 @@ export default function App() {
           const status = normalizeAgentStatus(event.payload, activeAgent)
           useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
         })
-        return () => { unlisten() }
+        // P51：后端 session/load 复活失败而新建会话时广播（Pylon 重启后首次发送）。
+        // 回写新 periId，使下一次发送/重启能继续复活这条新会话而不是再新建。
+        const unlistenRecreated = await listen<{ source: string; periId: string }>('pylon:session-recreated', event => {
+          const { source, periId } = event.payload
+          const session = useIdentityStore.getState().sessions.find(item => item.source === source)
+          if (session && session.periId !== periId) {
+            useIdentityStore.getState().setSessionPeriId(session.id, periId)
+          }
+        })
+        return () => { unlisten(); unlistenRecreated() }
       },
       reportError: (action, error) => reportRuntimeError(action, error, undefined, {
         key: bootstrapKey(action),
