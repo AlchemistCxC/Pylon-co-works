@@ -62,6 +62,10 @@ function createPluginManagementApi(
       assertAuthorized()
       return deps.contractDiagnostics()
     },
+    contributionOverview() {
+      assertAuthorized()
+      return deps.contributionOverview()
+    },
     capabilityGrants() {
       assertAuthorized()
       return deps.capabilityGrants()
@@ -126,4 +130,5 @@ export type {
   PluginBootstrapOverviewEntry,
   PluginContractDiagnostics,
   PluginCapabilityGrantFact,
+  PluginContributionFact,
 } from './pluginManagementTypes.ts'

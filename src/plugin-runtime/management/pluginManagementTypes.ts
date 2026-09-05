@@ -74,6 +74,13 @@ export interface PluginCapabilityGrantFact {
   readonly apiVersion: string
 }
 
+/** 贡献面透视事实（registry 只读投影；surface → contributionId 清单）。 */
+export interface PluginContributionFact {
+  readonly pluginId: string
+  readonly contributions: Readonly<Record<string, readonly string[]>>
+  readonly total: number
+}
+
 export interface PluginManagementDeps {
   /** 只读：已安装包清单（含 manifest 投影）。 */
   listInstalled(): Promise<readonly InstalledPluginPackage[]>
@@ -83,6 +90,8 @@ export interface PluginManagementDeps {
   bootstrapOverview(): PluginBootstrapOverview
   /** 只读：包契约诊断（waiting_activation/契约阻止）。 */
   contractDiagnostics(): PluginContractDiagnostics
+  /** 只读：每插件注册贡献摘要（贡献面透视，registry 只读投影）。 */
+  contributionOverview(): readonly PluginContributionFact[]
   /** 只读：授权事实投影。 */
   capabilityGrants(): readonly PluginCapabilityGrantFact[]
   /** 每次调用现查 grant；失效返回 false。 */
@@ -102,6 +111,7 @@ export interface PluginManagementApi {
   runtimeOverview(): PluginRuntimeOverview
   bootstrapOverview(): PluginBootstrapOverview
   contractDiagnostics(): PluginContractDiagnostics
+  contributionOverview(): readonly PluginContributionFact[]
   capabilityGrants(): readonly PluginCapabilityGrantFact[]
   setEnabled(pluginId: string, enabled: boolean): Promise<void>
   reload(pluginId: string): Promise<void>

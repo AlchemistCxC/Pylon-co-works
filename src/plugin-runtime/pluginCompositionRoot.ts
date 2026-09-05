@@ -20,7 +20,13 @@ import {
 } from './builtinPluginBootstrap.ts'
 import { bindPluginDisableHandler, getRuntimeServices } from './runtimeServices.ts'
 import { BUILTIN_SKIN_PLUGIN_ID, createBuiltinSkinPluginDefinition } from './skin/builtinSkinPlugin.ts'
-import { createRuntimeManagementApiFactory, evaluateConsentForDefinition, getPluginCapabilityGrantStore, getRegisteredKernelBootstrap } from './management/pluginManagementWiring.ts'
+import {
+  createRuntimeManagementApiFactory,
+  evaluateConsentForDefinition,
+  getPluginCapabilityGrantStore,
+  getRegisteredKernelBootstrap,
+  registerRuntimeRegistriesProvider,
+} from './management/pluginManagementWiring.ts'
 import { evaluatePluginCapabilityConsent } from './management/pluginCapabilityConsent.ts'
 
 const runtimeServices = getRuntimeServices()
@@ -41,6 +47,7 @@ const createManagementApi = createRuntimeManagementApiFactory({
   getBuiltinCriticality: pluginId => definitions.get(pluginId)?.criticality,
 })
 const pluginRuntime = new PluginRuntime({ host: pluginHostServices, createManagementApi })
+registerRuntimeRegistriesProvider(() => runtimeServices)
 bindPluginDisableHandler(async pluginId => {
   const result = await pluginRuntime.disable(pluginId)
   if (result.complete) return

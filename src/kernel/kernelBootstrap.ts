@@ -10,6 +10,9 @@ export interface PluginBootstrapFailure {
   readonly code: string
   readonly message: string
   readonly retryable: boolean
+  /** capability-consent 专属：授权卡据此绑定 grant 的版本失效语义。 */
+  readonly pluginVersion?: string
+  readonly capabilities?: readonly string[]
 }
 
 export interface BuiltinBootstrapResult {

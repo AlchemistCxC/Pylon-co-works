@@ -32,6 +32,7 @@ function depsOverrides(overrides: Partial<PluginManagementDeps> = {}): PluginMan
       skippedPluginIds: [],
     }),
     contractDiagnostics: () => ({ revision: 0, eligibleIds: [], diagnostics: [] }),
+    contributionOverview: () => [],
     capabilityGrants: () => [],
     isCapabilityGranted: () => true,
     isProductRequired: () => false,

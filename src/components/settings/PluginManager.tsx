@@ -13,6 +13,8 @@ import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.tsx'
+import { BUILTIN_PYLON_PLUGIN_MANAGER_ID } from '../../plugins/product/productPluginIds.ts'
 
 const LOG_LIMIT = 12
 
@@ -22,6 +24,7 @@ const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
   'builtin.pylon-shell': '应用外壳',
   'builtin.pylon-tools': '工具字典',
   'builtin.pylon-workspace': '工作区与 Sheet',
+  'builtin.pylon-plugin-manager': '插件管理器（增强）',
   'builtin.skin': '主题与皮肤',
 }
 
@@ -179,6 +182,18 @@ export default function PluginManager({
   )
   const builtinIds = getBuiltinPluginIds()
   const packageIds = installed.map(item => item.package.pluginId).sort()
+  // P53 D2：capability-consent 失败投影（授权卡数据源）+ 管理器激活态（增强入口）
+  const pendingConsent = bootstrapSnapshot.kind === 'degraded'
+    ? bootstrapSnapshot.failures
+      .filter(failure => failure.stage === 'capability-consent')
+      .map(failure => ({
+        pluginId: failure.pluginId,
+        pluginVersion: failure.pluginVersion ?? '0.0.0',
+        capabilities: failure.capabilities ?? ['plugin.management'],
+        message: failure.message,
+      }))
+    : []
+  const managerActive = snapshot.active.some(identity => identity.pluginId === BUILTIN_PYLON_PLUGIN_MANAGER_ID)
 
   const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
     await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
@@ -297,6 +312,21 @@ export default function PluginManager({
       <div className="set-hint">
         Pylon Plugin API {PYLON_PLUGIN_API_VERSION}；安装、停用、启用与热更新全部由统一 Runtime 执行。
       </div>
+      <PluginCapabilityConsentCard pending={pendingConsent} bootstrap={bootstrap} />
+      {managerActive && (
+        <div className="set-preset-row">
+          <button
+            type="button"
+            className="ps-btn primary sm"
+            aria-label="打开插件管理器增强面板"
+            onClick={() => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
+              detail: { domain: 'plugins', section: 'pylon-plugin-manager' },
+            }))}
+          >
+            打开增强管理面板…
+          </button>
+        </div>
+      )}
       <div className="plugin-overview" aria-label="插件概览">
         <span><strong>{snapshot.active.length}</strong> 个运行中</span>
         <span><strong>{installed.length}</strong> 个用户插件</span>

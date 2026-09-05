@@ -24,6 +24,8 @@ import type {
 } from './pluginManagementTypes.ts'
 import type { PackageInstallationService } from '../packageInstallationService.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
+import type { RuntimeRegistries } from '../pluginHostServices.ts'
+import { readPluginContributionFacts } from './pluginContributionProjection.ts'
 
 let grantStoreSingleton: PluginCapabilityGrantStore | undefined
 
@@ -71,6 +73,18 @@ export interface RuntimeManagementWiringOptions {
   readonly getInstallation: () => PackageInstallationService
   readonly getBootstrap: () => BootstrapProvider
   readonly getBuiltinCriticality: (pluginId: string) => 'kernel-required' | 'product-required' | 'optional' | undefined
+}
+
+/** 贡献面透视的 registry 数据源（由 compositionRoot 注入，惰性取）。 */
+let registriesProvider: (() => RuntimeRegistries) | undefined
+
+export function registerRuntimeRegistriesProvider(provider: () => RuntimeRegistries): void {
+  registriesProvider = provider
+}
+
+function runtimeHostRegistries(): RuntimeRegistries {
+  if (!registriesProvider) throw new Error('runtime registries 尚未装配（management wiring）')
+  return registriesProvider()
 }
 
 /** C3 门控装配器：声明 plugin.management ∧ 当前版本已授权 → PluginManagementApi；
@@ -127,6 +141,7 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
         return { state: state.kind, activePluginIds: [], failures: [], skippedPluginIds: [] }
       },
       contractDiagnostics: () => installation.getContractSnapshot(),
+      contributionOverview: () => readPluginContributionFacts(runtimeHostRegistries()),
       capabilityGrants: () => {
         const facts: PluginCapabilityGrantFact[] = []
         for (const [pluginId, capabilities] of Object.entries(grants.snapshot())) {

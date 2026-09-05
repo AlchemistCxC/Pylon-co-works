@@ -6,6 +6,9 @@ export interface BuiltinPluginBootstrapFailure {
   readonly code: 'plugin_activation_failed' | 'dependency_failed' | 'plugin_capability_denied'
   readonly message: string
   readonly retryable: boolean
+  /** capability-consent 专属：授权卡据此绑定 grant 的版本失效语义。 */
+  readonly pluginVersion?: string
+  readonly capabilities?: readonly string[]
 }
 
 export interface BuiltinPluginBootstrapResult {
@@ -71,6 +74,8 @@ export async function bootstrapPluginDefinitions(
           code: 'plugin_capability_denied',
           message: `等待能力授权：${consent.missingCapabilities.join(', ')}`,
           retryable: true,
+          pluginVersion: definition.version ?? '0.0.0',
+          capabilities: Object.freeze([...definition.capabilities]),
         }))
         continue
       }
