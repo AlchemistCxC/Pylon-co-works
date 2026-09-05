@@ -27,6 +27,9 @@ const required = [
   'starter/no-build/pylon-plugin.json',
   'starter/no-build/index.js',
   'starter/typescript/dist/index.js',
+  'starter/manager-demo/pylon-plugin.json',
+  'starter/manager-demo/dist/index.js',
+  'starter/manager-demo/styles/panel.css',
   'docs/Pylon-插件系统说明书-开发者版.md',
   'docs/Pylon-发行包清单.md',
   'README.md',
@@ -37,7 +40,9 @@ for (const rel of required) check(`结构 ${rel}`, existsSync(join(kitRoot, rel)
 const sdk = await import(pathToFileURL(join(kitRoot, 'sdk', 'pylon-plugin-sdk.js')))
 check('SDK 导出完整', ['definePlugin', 'createSettingsSurface', 'createPluginLogger', 'VISUAL_SEMANTIC_TOKENS']
   .every(key => key in sdk))
-check('SDK 版本 allowlist', sdk.PYLON_PLUGIN_API_SUPPORTED.join('/') === '1.0/1.1')
+check('SDK 版本 allowlist', sdk.PYLON_PLUGIN_API_SUPPORTED.join('/') === '1.0/1.1/1.2')
+check('SDK 能力词表导出', Array.isArray(sdk.PYLON_PLUGIN_CAPABILITIES)
+  && sdk.PYLON_PLUGIN_CAPABILITIES.includes('plugin.management'))
 
 // 3. SDK 包清单 types 指向存在
 const pkg = JSON.parse(readFileSync(join(kitRoot, 'sdk', 'package.json'), 'utf8'))
@@ -56,6 +61,15 @@ check('testing 子路径 exports 完整',
 // 4. 起步插件 manifest 可解析
 const manifest = JSON.parse(readFileSync(join(kitRoot, 'starter/no-build/pylon-plugin.json'), 'utf8'))
 check('no-build manifest 合法', manifest.schema === 1 && manifest.api === '1.1')
+
+// 4.1 外置管理器示例（P53 D4）：api 1.2 + capability 声明 + 预构建入口
+const managerManifest = JSON.parse(readFileSync(join(kitRoot, 'starter/manager-demo/pylon-plugin.json'), 'utf8'))
+check('manager-demo manifest 合法', managerManifest.schema === 1
+  && managerManifest.api === '1.2'
+  && Array.isArray(managerManifest.capabilities)
+  && managerManifest.capabilities.includes('plugin.management'))
+check('manager-demo 入口 bundle 含激活导出',
+  readFileSync(join(kitRoot, 'starter/manager-demo/dist/index.js'), 'utf8').includes('activate'))
 
 // 5. 类型树声明了 createSettingsSurface
 const indexDts = readFileSync(join(kitRoot, 'sdk', 'types', 'sdk', 'index.d.ts'), 'utf8')

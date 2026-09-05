@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../shared/pylon-plugin-manifest.schema.json",
+  "schema": 1,
+  "id": "external.pylon-plugin-manager-demo",
+  "name": "External Plugin Manager Demo",
+  "version": "1.0.0",
+  "api": "1.2",
+  "kind": "feature",
+  "capabilities": ["plugin.management"],
+  "web": { "entry": "./dist/index.js", "styles": ["./styles/panel.css"] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 5000 }
+}

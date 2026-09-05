@@ -1,0 +1,11 @@
+{
+  "name": "plugin-manager-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=browser --alias:@pylon/plugin-sdk=../../../src/sdk/index.ts --outfile=dist/index.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
