@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../identityStore.ts'
 import { useIdentityStore } from '../../identityStore.ts'
+import { useRuntimeStore } from '../../runtimeStore.ts'
 import { RendererSuiteHost } from '../../host/renderer-suite/rendererSuiteHost.ts'
 import { resolveRendererActivation } from '../../plugin-runtime/renderers/rendererActivationResolver.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
@@ -12,7 +13,7 @@ import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
-import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
+import { AgentWorkbenchLifecycle } from './agentWorkbenchLifecycle.ts'
 
 export interface WorkbenchFatalFailure {
   readonly suiteId: string
@@ -148,11 +149,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const retrySolidRef = useRef<() => void>(() => {})
   const visibilityRef = useRef(input.visibility)
   inputRef.current = input; catalogRef.current = catalog
-
-  const headlessSetters = useMemo<ChatSessionSetters>(() => {
-    const ignore = () => {}
-    return { setMessages: ignore, setStreamingText: ignore, setStreamingThinking: ignore, setGenerating: ignore, setGenerationPhase: ignore, setSummary: ignore, setLastTokenAt: ignore }
-  }, [])
 
   const sessionBindingKey = workbenchSessionBindingKey(session)
   useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey, session])
@@ -487,7 +483,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         <button type="button" onClick={openDiagnostics}>打开诊断</button>
       </div>
     </section>}
-     {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions} setters={headlessSetters}
+     {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions}
       selectSession={props.ctx.selectSession} sessionRuntime={sessionRuntime} />}
   </div>
 }
@@ -495,23 +491,36 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
 function ActiveAgentSessionLifecycle(props: {
   session: Session | undefined
   sessions: readonly Session[]
-  setters: ChatSessionSetters
   selectSession(id: string | null): void
   sessionRuntime: ReturnType<typeof createAgentWorkbenchSessionRuntime>
 }) {
-  const lifecycle = useSessionLifecycle(props.session?.id ?? null, props.sessions, props.setters, props.selectSession)
+  const lifecycleRef = useRef<AgentWorkbenchLifecycle | null>(null)
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new AgentWorkbenchLifecycle()
+    // Canonical replay can discover a terminal tool event after the initial
+    // bind; refresh the same owner document when the load chain completes.
+    lifecycleRef.current.onCanonicalRefresh = (session) => { void props.sessionRuntime.refresh(session) }
+  }
+  const lifecycle = lifecycleRef.current
   const sessionRef = useRef(props.session)
   sessionRef.current = props.session
+  // CWD-03：reload 令牌变化 = 同会话 workdir/workspace 变更 → 重跑激活链。
+  const reloadKey = props.session ? `${props.session.agentId}\u0000${props.session.source}` : undefined
+  const reloadToken = useRuntimeStore(state => reloadKey ? state.sessionReloadTokens[reloadKey] : undefined)
   useEffect(() => {
     const session = sessionRef.current
-    if (session && lifecycle.canonicalRefresh?.sessionId === session.id) {
-      // bind() is intentionally idempotent for metadata-only Session updates.
-      // Canonical replay can nevertheless discover a terminal tool event after
-      // the initial bind, so explicitly refresh the same owner document here.
-      void props.sessionRuntime.refresh(session)
-    }
-  }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
-  // useSessionLifecycle reports recovery failures with a session scope; the
-  // application ErrorCenter is the single ordinary-error presentation.
+    if (!session) return
+    const reloadRef = { current: reloadToken }
+    void lifecycle.activate(session, {
+      reloadToken,
+      isCurrent: () => sessionRef.current?.id === session.id && reloadRef.current === reloadToken,
+    })
+  }, [lifecycle, props.session?.id, reloadToken])
+  // prune：移除已删除会话的 load generation 记录。
+  useEffect(() => {
+    lifecycle.prune(props.sessions.map(session => session.source))
+  }, [lifecycle, props.sessions])
+  // Recovery failures are reported with a session scope; the application
+  // ErrorCenter is the single ordinary-error presentation.
   return null
 }

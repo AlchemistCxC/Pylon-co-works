@@ -67,7 +67,6 @@ afterAll(async () => {
   if (active) await getPluginRuntime().deactivate(active.key)
 })
 
-vi.mock('../../components/ControlCenter.tsx', () => ({ default: () => null }))
 vi.mock('../../components/PetCompanion.tsx', () => ({ default: () => null }))
 
 const ctx: SheetContext = {

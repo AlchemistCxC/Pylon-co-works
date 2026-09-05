@@ -21,7 +21,7 @@ export interface StreamFrame {
   payload: unknown
 }
 
-/** 帧消费者：chatEventController 按 event 字段路由到既有分支。 */
+/** 帧消费者：canonicalEventFeed 按 event 字段统一处理（P52 D2）。 */
 export type StreamFrameHandler = (frame: StreamFrame) => void
 
 interface ActiveStream {

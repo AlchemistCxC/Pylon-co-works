@@ -27,7 +27,6 @@ import { normalizeAgentStatus, type AgentStatusPayload } from './components/sett
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
-import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
@@ -185,11 +184,6 @@ export default function App() {
       window.removeEventListener('pylon:open-settings', openSettings)
       window.removeEventListener('pylon:open-runtime-sheet', openRuntime)
     }
-  }, [])
-
-  // G0：Chat controller 应用级宿主——listener 随应用生命周期（卸载才 dispose）
-  useEffect(() => () => {
-    getChatController()?.dispose()
   }, [])
 
   // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener

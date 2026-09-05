@@ -41,7 +41,7 @@ interface RuntimeStoreState {
   agentStatuses: Record<string, AgentStatus>
   /**
    * OWNER-04：每会话绑定建立时的 agent generation 快照（load_persisted_session /
-   * new_session 成功时由 useSessionLifecycle 记录）。重连后 agentStatus.generation
+   * new_session 成功时由 agentWorkbenchLifecycle 记录）。重连后 agentStatus.generation
    * 递增，bindingState.refineBindingGeneration 依此判定 binding_stale——
    * 旧 binding 必须 Invalidated，不能继续发送旧 remote id（§5.9 rule 4）。
    */
@@ -50,7 +50,7 @@ interface RuntimeStoreState {
   sessionBindingHealth: Record<AgentContextKey, SessionBindingSnapshot | undefined>
   /**
    * CWD-03：会话原地 reload 令牌（rootPath 变更 → binding invalidate → close → load/new）。
-   * useSessionLifecycle 以 [sessionId, reloadToken] 为 effect 依赖；令牌递增即强制
+   * agentWorkbenchLifecycle 以 [sessionId, reloadToken] 为依赖；令牌递增即强制
    * 同会话重跑 load 路径（读取已同步的新 workdir/workspaceId，InputBar 恢复）。
    */
   sessionReloadTokens: Record<string, number>

@@ -11,7 +11,6 @@ import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/z
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
-import { getChatController, type ChatControllerHandle } from '../../components/chat/chatEventController.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
 import { resolveRuntimeErrors } from '../../runtimeError.ts'
@@ -32,9 +31,6 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
-  /** P52 D3：时钟族 getter 已随 controller 订阅退役；仅保留 optimistic echo
-   * 撤销入口（controller 的 React 状态面到 D4 才消亡）。 */
-  chatController?: () => Pick<ChatControllerHandle, 'rejectOptimisticUser'> | null
 }
 
 /**
@@ -363,7 +359,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
   const subscribe = dependencies.subscribe ?? defaults.subscribe
-  const chatController = () => dependencies.chatController?.() ?? getChatController()
   const runtime = createWorkbenchRuntime({
     sessionId: null, status: 'idle', messages: [], streamingText: '', streamingThinking: '',
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
@@ -377,7 +372,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let boundSessionBindingKey: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
-    rejectOptimisticUser: (targetSource, clientMessageId) => chatController()?.rejectOptimisticUser(targetSource, clientMessageId),
+    // P52 D4：controller React 状态面死亡——乐观 echo 撤销只剩 document 侧投影。
     optimisticDocument: projectOptimisticUser,
     rejectOptimisticDocument: rejectOptimisticUser,
     resolveConfigOption(sessionId, key) {

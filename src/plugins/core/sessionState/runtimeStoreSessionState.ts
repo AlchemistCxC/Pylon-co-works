@@ -2,7 +2,7 @@
  * core.sessionState.runtimeStore —— 内置会话状态同步 provider。
  *
  * 把 new_session / load_persisted_session 响应与 live session_update 写入
- * runtimeStore 的逻辑从 useSessionLifecycle / chatEventController 收口到本插件。
+ * runtimeStore 的逻辑从 agentWorkbenchLifecycle 收口到本插件。
  * 由产品 agent-adapters 插件登记进 owner-aware Plugin Service Registry。
  */
 import {

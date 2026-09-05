@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
-import { getChatController } from '../../components/chat/chatEventController.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
@@ -11,7 +10,7 @@ import { createInteractionResponseTransport } from '../../infrastructure/acp/int
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../agentContext.ts'
 import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
-import { formatRuntimeError } from '../../runtimeError.ts'
+import { formatRuntimeError, reportRuntimeError } from '../../runtimeError.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
@@ -23,11 +22,14 @@ export interface AgentWorkbenchCommandDependencies {
   resolveSession(sessionId: string): Session | undefined
   resolvePersona(session: Session): string
   sendMessage(payload: SendMessagePayload): Promise<unknown>
+  /** P52 D4：controller React 状态面已死——乐观 echo 只有 document 侧投影。 */
   optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
   rejectOptimisticUser(source: string, clientMessageId: string): void
   optimisticDocument(source: string, content: string, clientMessageId: string): void
   rejectOptimisticDocument(source: string, clientMessageId: string): void
   nextClientMessageId(source: string): string
+  /** P52 D4：cancel 状态机由 facade 持有（原 controller requestCancel 迁入）。 */
+  requestCancel(source: string, agentId: string): void
   setModel(context: AgentContext, modelId: string): Promise<void>
   setMode(context: AgentContext, modeId: string): Promise<void>
   setConfigOption(context: AgentContext, key: string, value: unknown): Promise<void>
@@ -49,11 +51,19 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
       return collectProfilePersona(session.creationSnapshot) || profile?.persona || ''
     },
     sendMessage: payload => sendMessageWithStream(payload),
-    optimisticUser: (source, content, clientMessageId, options) => getChatController()?.sendOptimisticUser(source, content, clientMessageId, options),
-    rejectOptimisticUser: (source, clientMessageId) => getChatController()?.rejectOptimisticUser(source, clientMessageId),
+    optimisticUser: () => {},
+    rejectOptimisticUser: () => {},
     optimisticDocument: () => {},
     rejectOptimisticDocument: () => {},
     nextClientMessageId: source => `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    requestCancel: (source, agentId) => {
+      // P52 D4：原 controller requestCancel 状态机迁入。begin-cancel 去重
+      // （非生成态不调后端）由调用方 generating 守卫承担（footer 只在 running
+      // 时渲染 onStop）；后端取消结果的收敛由终帧（pylon:error cancelled）驱动。
+      void createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+        .cancelPrompt({ agentId, source })
+        .catch(error => { reportRuntimeError('取消生成', error) })
+    },
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
     setConfigOption: async (context, key, value) => {
@@ -128,7 +138,7 @@ export function createAgentWorkbenchCommandFacade(
     async cancel(sessionId) {
       const session = dependencies.resolveSession(sessionId)
       if (!session) return { status: 'rejected', error: 'session_not_found' }
-      getChatController()?.requestCancel(session.source)
+      dependencies.requestCancel(session.source, session.agentId)
       return { status: 'cancelled' }
     },
     async attach() { return [] },

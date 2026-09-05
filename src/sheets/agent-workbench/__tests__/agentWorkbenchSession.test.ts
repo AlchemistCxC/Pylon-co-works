@@ -321,34 +321,26 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
-  it('发送被拒绝后 source runtime 通知不能让生成指示器复活', async () => {
-    let controllerGenerating = false
-    let sourceListener: (() => void) | undefined
+  it('发送被拒绝后时钟回滚：迟到的非文档证据不得经 updateRuntimeState 复活指示器', async () => {
     const active = session()
-    const controller = {
-      subscribe: (_source: string, listener: () => void) => { sourceListener = listener; return () => {} },
-      getGenerating: () => controllerGenerating,
-      getStartTime: () => controllerGenerating ? 1_000 : 0,
-      getLastActivityAt: () => controllerGenerating ? 1_000 : undefined,
-      getGenerationPhase: () => controllerGenerating ? { kind: 'thinking' as const } : undefined,
-      getThinkingStart: () => undefined,
-      getTokenCount: () => 0,
-      getSummary: () => undefined,
-      rejectOptimisticUser: () => { controllerGenerating = false },
-    }
     const service = createAgentWorkbenchSessionRuntime({
-      loadAll: async () => [], subscribe: () => () => {}, chatController: () => controller,
+      loadAll: async () => [],
+      subscribe: () => () => {},
       commands: {
         resolveSession: id => id === active.id ? active : undefined,
         resolvePersona: () => '', nextClientMessageId: () => 'client-reject-runtime',
-        optimisticUser: () => { controllerGenerating = true },
+        optimisticUser: () => {},
         sendMessage: async () => { throw new Error('offline') },
       },
     })
     await service.bind(active)
     await service.commands.send(active.id, { text: '发送失败' })
-    sourceListener?.()
-
+    // 发送被拒：乐观投影已撤销、TurnClock 已回滚、document 无 running 行。
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([])
+    // reconcileTurnClock 是唯一的时钟回写路径：无活动时钟的 source 在
+    // bind/refresh 后不得恢复 generating（区别于有活动时钟的切回恢复用例）。
+    await service.bind(active)
     expect(service.runtime.getSnapshot().generating).toBe(false)
     service.destroy()
   })

@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
-import GenerationFooter from './chat/GenerationFooter'
-import { resolveSpinnerFrames } from './chat/spinnerFrames'
+import { resolveSpinnerFrames, resolveSpinnerMarker } from './chat/spinnerFrames'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../domains/tool/toolPresentation'
 import { resolveToolIndicatorAssetForTone } from './chat/toolIndicatorAssets'
 import { toCssBackgroundImage } from '../backgroundImage'
+import { THEME_DEFAULTS, THEME_SETTING_KEYS } from '../themeFieldDefs'
+import { loadSettingsPreviewControlCenter, type SettingsPreviewControlCenterHandle } from '../renderers/solid-workbench/settingsPreviewControlCenterLoader.ts'
 import { useShallow } from 'zustand/react/shallow'
 
 interface Props { zone: string }
@@ -15,6 +15,47 @@ const PREVIEW_TOOLS = [
   { name: 'Bash', input: 'npm run build', status: 'err' },
   { name: 'Edit', input: 'src/main.ts', status: 'run' },
 ] as const
+
+/**
+ * P52 D4：中控预览挂真实 SolidControlCenter（用户拍板弃静态占位）。
+ * 经 loader（import.meta.glob）加载 .solid 挂载文件；主题经 useStore 订阅实时
+ * 同步。加载失败回退静态 cc 壳（预览不因 Solid 面异常整页崩）。
+ */
+function PvSolidControlCenter() {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    let disposed = false
+    let handle: SettingsPreviewControlCenterHandle | undefined
+    let unsubscribeTheme: (() => void) | undefined
+    const themeSnapshot = () => Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]]))
+    void loadSettingsPreviewControlCenter()
+      .then(({ mountSettingsPreviewControlCenter }) => {
+        if (disposed) return
+        handle = mountSettingsPreviewControlCenter(host)
+        handle.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() })
+        unsubscribeTheme = useStore.subscribe(() => {
+          handle?.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() })
+        })
+      })
+      .catch(() => { if (!disposed) setFailed(true) })
+    return () => {
+      disposed = true
+      unsubscribeTheme?.()
+      handle?.destroy()
+    }
+  }, [])
+  if (failed) return (
+    <div className="control-center cc-variant-peri" style={{ pointerEvents: 'none' }} aria-label="中控预览占位">
+      <div className="cc-status-secondary" />
+      <div className="cc-status-primary" />
+      <div className="cc-actions" />
+    </div>
+  )
+  return <div ref={hostRef} aria-label="Solid 中控预览" />
+}
 
 export default function SettingsPreview({ zone }: Props) {
   const [dims, setDims] = useState(() => ({
@@ -164,7 +205,7 @@ function PreviewApp({ zone }: { zone: string }) {
                 </div>
               </div>
             </div>
-            <div style={z('cc')}><ControlCenter sessionId={null} /></div>
+            <div style={z('cc')}><PvSolidControlCenter /></div>
           </div>
         </div>
 
@@ -202,6 +243,7 @@ function PvSpinner() {
     doneMode,
     cancelledMode,
     errorMode,
+    spinnerSize,
   } = useStore(useShallow(s => ({
     preset: s.spinnerFramePreset,
     customFrames: s.spinnerCustomFrames,
@@ -211,19 +253,31 @@ function PvSpinner() {
     doneMode: s.spinnerDoneMarkerMode,
     cancelledMode: s.spinnerCancelledMarkerMode,
     errorMode: s.spinnerErrorMarkerMode,
+    spinnerSize: s.spinnerSize,
   })))
   const frames = resolveSpinnerFrames(preset, customFrames)
-  const previewSummary = (reason: 'done' | 'cancelled' | 'error', completedFrame = '') => ({
-    elapsedMs: 3000,
-    tokenCount: 1200,
-    completedFrame,
-    reason,
-  })
+  // P52 D4：React GenerationFooter 已退役——预览用同一 resolveSpinnerMarker
+  // 呈现三终态标记（终态文案契约由 Solid footer 测试锁定，此处仅视觉预览）。
+  const markers = [
+    { reason: 'done' as const, mode: doneMode, marker: doneMarker, label: '生成完毕', cls: 'term-summary-done' },
+    { reason: 'cancelled' as const, mode: cancelledMode, marker: cancelledMarker, label: '已停止', cls: 'term-summary-cancelled' },
+    { reason: 'error' as const, mode: errorMode, marker: errorMarker, label: '处理失败', cls: 'term-summary-error' },
+  ]
   return <>
-    <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('done')} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('cancelled')} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('error')} source={null} />
+    <div className="term-spinner-row">
+      <div className="term-spinner" data-activity="active">
+        <span className="spinner-frame" style={{ fontSize: `${spinnerSize}px` }}>{frames[0]}</span>
+        <span className="spinner-meta">(<span>3s</span>)</span>
+      </div>
+    </div>
+    {markers.map(item => (
+      <div className={`term-summary ${item.cls}`} key={item.reason}>
+        <span className="term-summary-frame" style={{ fontSize: `${spinnerSize}px` }}>
+          {resolveSpinnerMarker(frames, item.mode, item.marker)}
+        </span>
+        <span>{item.label} 3s</span>
+      </div>
+    ))}
     <span className="term-preview-spinner-markers" aria-hidden="true">
       {doneMode}:{doneMarker} {cancelledMode}:{cancelledMarker} {errorMode}:{errorMarker}
     </span>
