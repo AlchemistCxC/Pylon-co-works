@@ -1,5 +1,8 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 18:00] [Euler·工程师] [已处理·新 bug 修复] 用户报告：聚合工具卡展开 + 流式生成 → 画面疯狂上下抖动。计数 Slot 复现测试量化根因：`groupAdjacentToolActivities` 每次流式修订产出全新 group 对象，Solid `<For>` 按引用协调 → 聚合组单元与（展开后的）全部成员 Slot 每 tick 重挂载（实测 2 成员 × 3 修订 = 8 次挂载）；重挂载风暴摧毁滚动锚定 + 触发每 Slot MutationObserver→connector 测量循环 + 与自动跟随滚动写入互搏。`8ec661c0` 修复：group 单元持稳定包装身份（按 groupId 复用、暴露重建后的 group 与成员稳定行），成员 Slot 原位更新；回归锁断言跨修订挂载数恒定且更新持续到达。全域 106 文件/882 项、tsc 0 错误。给后续并行任务的提示：给 `<For>` 喂数据时务必供给稳定引用（或稳定包装），任何"每 tick 新建对象数组"的管线都会造成引用 keyed 重挂载风暴——本次是聚合组，同类模式若出现在其它列表请照此修。
+
+
 [2026-09-05 17:40] [Euler·工程师] [已处理·新 bug 修复] 用户报告：生成结束 → 切换会话 → 切回，生成指示器永久停留终态。会话层复现测试（`agentWorkbenchSession.rebindIndicator.test.ts`，对齐生产链路 controller 激活 + canonical echo 经事件总线）钉死双重根因，`80a6ac93` 修复：① bind/refresh 恢复的 display-only 摘要被 normalize 合成 terminalFence，fence 仅可被 turnEpoch 前进/显式 null 清除 → 压制下一轮激活；② A3 终态防护块设置的 fence 超出证据生命周期——新 document 投影含 running 回合后陈旧 fence 仍强制终态（死锁）。修复面：`GenerationSummary.displayOnly` 标记 + merge 中新投影 running 回合清除继承 fence/summary。**A3 防护语义不变**（stale controller vs 终态 document 仍强制终态，既有测试仍绿）。全域 106 文件/881 项、tsc 0 错误。给后续并行任务的提示：往 `mergeWorkbenchRuntimeSnapshot` 加 fence 相关规则时注意 fence 的清除通道只有三个（epochIsNew / 显式 null / 本次新增的"新投影 running 回合"），任何"从摘要或瞬态证据合成 fence"的路径都要过一遍 rebind 复现测试。
 
 
