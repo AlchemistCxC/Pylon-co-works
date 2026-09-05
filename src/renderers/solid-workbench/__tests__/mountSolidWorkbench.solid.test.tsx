@@ -2118,4 +2118,76 @@ describe('mountSolidWorkbench', () => {
       command: 'copy', args: ['preview-session', 'semantic copy'],
     }))
   })
+
+  it('展开的聚合工具组成员 Slot 在流式修订间保持挂载身份（不重挂载风暴）', async () => {
+    let mounts = 0
+    let updates = 0
+    const slot: RendererSlotContribution = {
+      id: 'test.group-member-identity', targetSuites: ['builtin.solid'], kinds: ['tool.generic'],
+      priority: 1, fallback: false, canRender: () => true,
+      createSurface: () => ({
+        rendererId: 'test.group-member-identity', kind: 'solid',
+        mount(container) {
+          mounts += 1
+          const node = document.createElement('div')
+          node.className = 'group-member-probe'
+          container.append(node)
+          return node
+        },
+        update() { updates += 1 },
+        destroy(handle) { (handle as HTMLElement).remove() },
+        on: () => () => {},
+      }),
+    }
+    const entry = { ownerPluginId: 'test.group-member-identity', ownerRuntimeInstanceId: 'runtime', contributionId: slot.id, layer: 'feature' as const, priority: 1, value: slot } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: 'builtin.solid', layer: 'feature' as const, priority: 1, value: suite } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map(), slots: new Map([['tool.generic', [entry]]]), diagnostics: [],
+    } as RendererActivationSnapshot
+
+    const toolEnvelope = (sequence: number, toolCallId: string, status: string) => createWorkbenchEnvelope({
+      eventId: `group-tool-${toolCallId}-${sequence}`,
+      sessionId: 'preview-session',
+      sequence,
+      recordedAt: '2026-09-05T00:00:00.000Z',
+      source: { provider: 'acp', sourceId: `group-tool-${toolCallId}-${sequence}` },
+      identity: { toolCallId },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { toolCallId, name: 'Read', status } },
+    })
+    const buildDocument = () => projectWorkbench([
+      toolEnvelope(1, 'group-tool-1', 'running'),
+      toolEnvelope(2, 'group-tool-2', 'running'),
+    ]).document
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const hostPort = createWorkbenchHostPort({
+      ...services, suiteId: 'builtin.solid', sheetId: 'sheet-a',
+      sessionOwnerKey: 'owner-a', sessionId: 'preview-session',
+    })
+    services.runtime.replaceDocument(buildDocument(), { ownerKey: 'owner-a', generation: 1, sessionId: 'preview-session' })
+    mountSolidWorkbench({
+      host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, hostPort, activation,
+    })
+
+    const groupHead = await screen.findByRole('button', { name: /2 次调用/ })
+    fireEvent.click(groupHead)
+    await waitFor(() => expect(host.querySelectorAll('.group-member-probe')).toHaveLength(2))
+    expect(mounts).toBe(2)
+
+    // 模拟流式 tick：document 每次携带全新 activity 引用（同 id、状态演进）。
+    for (let tick = 0; tick < 3; tick += 1) {
+      services.runtime.applyDocument(buildDocument(), { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    }
+    await waitFor(() => expect(updates).toBeGreaterThan(0))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(mounts).toBe(2)
+    expect(host.querySelectorAll('.group-member-probe')).toHaveLength(2)
+  })
 })

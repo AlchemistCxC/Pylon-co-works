@@ -1048,12 +1048,20 @@ function CanonicalActivityList(props: {
       return existing
     }))
   })
+  // Group wrappers must keep a stable identity across streaming revisions.
+  // `groupAdjacentToolActivities` returns fresh objects per tick, and Solid's
+  // <For> reconciles by reference — feeding it fresh groups would remount the
+  // whole expanded group subtree on every paced snapshot (the remount storm
+  // behind the expanded-tool-group jitter) and destroy scroll anchoring.
+  const stableGroups = new Map<string, StableActivityGroupRow>()
   const groupedRows = createMemo(() => {
     const currentRows = rows()
+    const rowById = new Map(currentRows.map(row => [row.activity.id, row]))
     const groups = groupAdjacentToolActivities(currentRows.map(row => row.activity))
     const firstById = new Map(groups.map(group => [group.items[0]!.id, group]))
     const consumed = new Set<string>()
-    const units: Array<StableActivityRow | AdjacentToolActivityGroup> = []
+    const liveGroupIds = new Set<string>()
+    const units: Array<StableActivityRow | StableActivityGroupRow> = []
     for (const row of currentRows) {
       if (consumed.has(row.activity.id)) continue
       const group = firstById.get(row.activity.id)
@@ -1061,23 +1069,33 @@ function CanonicalActivityList(props: {
         units.push(row)
         continue
       }
-      units.push(group)
+      const memberRows = group.items
+        .map(item => rowById.get(item.id))
+        .filter((member): member is StableActivityRow => member !== undefined)
+      const stable = stableGroups.get(group.groupId) ?? createStableActivityGroupRow(group.groupId)
+      stable.update(group, memberRows)
+      stableGroups.set(group.groupId, stable)
+      liveGroupIds.add(group.groupId)
+      units.push(stable)
       // Skip the remaining members; they are rendered inside the group row.
       for (const member of group.items) consumed.add(member.id)
+    }
+    for (const groupId of [...stableGroups.keys()]) {
+      if (!liveGroupIds.has(groupId)) stableGroups.delete(groupId)
     }
     return units
   })
   return <Show when={rows().length > 0 ? props.document : undefined}>
     {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={rows().length}>
       <For each={groupedRows()}>{unit => {
-        if ('items' in unit) {
+        if ('memberRows' in unit) {
           return <CanonicalActivityGroup
-            group={unit}
+            row={unit}
             document={document()}
             context={props.context}
             connectorPort={props.connectorPort}
-            open={expandedGroups()[unit.groupId] === true}
-            onToggle={() => setExpandedGroups(previous => ({ ...previous, [unit.groupId]: !previous[unit.groupId] }))}
+            open={expandedGroups()[unit.key] === true}
+            onToggle={() => setExpandedGroups(previous => ({ ...previous, [unit.key]: !previous[unit.key] }))}
           />
         }
         return <CanonicalActivitySlot
@@ -1092,7 +1110,7 @@ function CanonicalActivityList(props: {
 }
 
 function CanonicalActivityGroup(props: {
-  group: AdjacentToolActivityGroup
+  row: StableActivityGroupRow
   document: WorkbenchDocument
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
@@ -1102,7 +1120,8 @@ function CanonicalActivityGroup(props: {
   // A group is a display projection only.  Its indicator/status are derived
   // from the final member so a mixed run settles to the same visual state as
   // the last ordinary tool card (rather than the group's aggregate `mixed`).
-  const lastActivity = () => props.group.items.at(-1)!
+  const group = () => props.row.group
+  const lastActivity = () => group().items.at(-1)!
   const lastSnapshot = () => toolInvocationSnapshot(props.document, lastActivity().id)
   const toolAppearance = () => resolveToolActivityAppearance(lastActivity(), props.context)
   const state = () => {
@@ -1125,17 +1144,17 @@ function CanonicalActivityGroup(props: {
   }
   const indicatorMode = () => stringAppearanceSetting(toolAppearance(), 'indicator', 'glyph')
   const indicatorGlyph = () => resolveToolIndicatorGlyph(indicatorMode(), presentation().tone, toolAppearance())
-  const bodyId = () => `solid-tool-group-${safeDomId(props.group.groupId)}`
+  const bodyId = () => `solid-tool-group-${safeDomId(group().groupId)}`
   const renderKind = () => activityRenderKind(lastActivity(), props.context)
   const statusPalette = () => stringAppearanceSetting(toolAppearance(), 'statusPalette', 'semantic')
   const density = () => stringAppearanceSetting(toolAppearance(), 'density', 'comfortable')
   return <article
     class="term-tool solid-workbench-activity-group"
     role="status"
-    aria-label={`工具：${capitalizeToolName(label())}，${props.group.count} 次调用，${presentation().label}`}
+    aria-label={`工具：${capitalizeToolName(label())}，${group().count} 次调用，${presentation().label}`}
     data-content-kind="tool.group"
-    data-activity-group={props.group.groupId}
-    data-count={props.group.count}
+    data-activity-group={group().groupId}
+    data-count={group().count}
     data-tool-state={presentation().state}
     data-status-label={presentation().label}
     data-status={presentation().tone}
@@ -1149,7 +1168,7 @@ function CanonicalActivityGroup(props: {
       'border-color': stringAppearanceSetting(toolAppearance(), 'borderColor', 'var(--border)'),
       'max-width': `${numberAppearanceSetting(toolAppearance(), 'maxWidth', 960)}px`,
     }}
-    data-group-status={props.group.status}
+    data-group-status={group().status}
     data-last-tool-status={lastActivity().status}
   >
     <button
@@ -1163,14 +1182,16 @@ function CanonicalActivityGroup(props: {
         <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">{indicatorGlyph()}</span>
       </Show>
       <span class="term-tool-name">{capitalizeToolName(label())}</span>
-      <span class="term-tool-summary"> ({props.group.count} 次调用)</span>
+      <span class="term-tool-summary"> ({group().count} 次调用)</span>
       <span class="term-tool-state-label"> — {presentation().label}</span>
     </button>
     <Show when={props.open}>
       <div id={bodyId()} class="term-tool-body solid-workbench-activity-group-body">
         <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
-        <For each={props.group.items}>{activity => <CanonicalActivitySlot
-          activity={activity}
+        {/* Members render through stable rows so streaming revisions update
+            the member slots in place instead of remounting the subtree. */}
+        <For each={props.row.memberRows}>{memberRow => <CanonicalActivitySlot
+          activity={memberRow.activity}
           document={props.document}
           context={props.context}
           connectorPort={props.connectorPort}
@@ -1239,6 +1260,31 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
     key,
     get activity() { return current() },
     update: setCurrent,
+  }
+}
+
+/**
+ * Stable identity for an aggregated tool group. `groupAdjacentToolActivities`
+ * rebuilds groups on every streaming revision; feeding those fresh objects to
+ * `<For>` (reference-keyed) would remount the expanded group's whole subtree
+ * per paced snapshot. The wrapper keeps the unit identity stable and exposes
+ * the rebuilt group plus the member STABLE rows, so member slots update in
+ * place.
+ */
+interface StableActivityGroupRow {
+  readonly key: string
+  readonly group: AdjacentToolActivityGroup
+  readonly memberRows: readonly StableActivityRow[]
+  update(group: AdjacentToolActivityGroup, memberRows: readonly StableActivityRow[]): void
+}
+
+function createStableActivityGroupRow(key: string): StableActivityGroupRow {
+  const [current, setCurrent] = createSignal<{ group: AdjacentToolActivityGroup; memberRows: readonly StableActivityRow[] }>()
+  return {
+    key,
+    get group() { return current()!.group },
+    get memberRows() { return current()?.memberRows ?? [] },
+    update: (group, memberRows) => setCurrent({ group, memberRows }),
   }
 }
 
