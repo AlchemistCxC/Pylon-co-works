@@ -497,9 +497,13 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
 function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    // A journal-earlier event arriving after the terminal one is out-of-order
+    // arrival, not a journal-late event; the sequence-ordered replay would
+    // still fold it, so the live path must not fence it out.
+    const journalEarlierThanFence = envelope.sequence < terminalSessionSequence(document)
     const userTurnInProgress = role === 'user' && document.messages.at(-1)?.role === 'user' && document.messages.at(-1)?.running === true
     if (role === 'user' && (event.type === 'message.started' || event.type === 'message.delta' || (event.type === 'message.completed' && userTurnInProgress))) document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
-    else if (role !== 'user' || event.type === 'message.completed') return addLateEventDiagnostic(document, envelope, 'late assistant event ignored after terminal fence')
+    else if ((role !== 'user' || event.type === 'message.completed') && !journalEarlierThanFence) return addLateEventDiagnostic(document, envelope, 'late assistant event ignored after terminal fence')
   }
   document = settleSupersededRunningMessages(document, role)
   const parts = event.parts ?? []
@@ -540,6 +544,20 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       } : message),
     }
   }
+  // Out-of-order arrival convergence: a journal-earlier text delta belongs to
+  // the sealed segment (its sequence precedes the terminal that sealed it).
+  // Fold it in instead of dropping it so the live document matches the
+  // sequence-ordered replay; the terminal state itself (running/duration) is
+  // not resurrected.
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+      ...previous,
+      content: previous.content + content,
+      parts: coalesceAdjacentDisplayTextParts([...previous.parts, ...parts]),
+    }]
+    return { ...document, messages: folded }
+  }
   // A terminal segment is an absorption fence. A late delta may only start a
   // new visible segment when the provider supplies an explicit, different
   // turn identity; otherwise it belongs to the sealed turn and is ignored.
@@ -551,6 +569,12 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
     if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
   }
+  // K03 guard: appending a journal-earlier delta after later text would
+  // corrupt segment order. Show it missing (with a diagnostic) until the next
+  // canonical refresh re-orders the journal.
+  if (append && previous && envelope.sequence < previous.sequence) {
+    return addOutOfOrderDiagnostic(document, envelope)
+  }
   const messages = append
     ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal }]
     : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
@@ -559,7 +583,11 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
-    return addLateEventDiagnostic(document, envelope, 'late reasoning event ignored after terminal fence')
+    // Journal-earlier events are out-of-order arrivals, not journal-late ones;
+    // the replay would still fold them (see reduceMessage).
+    if (!(envelope.sequence < terminalSessionSequence(document))) {
+      return addLateEventDiagnostic(document, envelope, 'late reasoning event ignored after terminal fence')
+    }
   }
   document = settleSupersededRunningMessages(document, 'reasoning')
   const parts = event.parts ?? []
@@ -602,6 +630,19 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     return document
   }
   const hasToolBoundary = previous !== undefined && document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
+  // Out-of-order arrival convergence: fold a journal-earlier delta into the
+  // sealed reasoning segment instead of dropping it (see reduceMessage). The
+  // terminal state—running flag, duration, sequence—stays as sealed.
+  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary
+    && textStreamContinues(document, previous, envelope)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+      ...previous,
+      content: previous.content + content,
+      parts: coalesceAdjacentReasoningParts([...previous.parts, ...reasoningParts]),
+    }]
+    return { ...document, messages: folded }
+  }
   if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary) {
     const previousTurn = previous.identity.turnId
     const incomingTurn = envelope.identity.turnId
@@ -609,6 +650,12 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     const incomingProvider = providerIdentityKey(envelope.identity)
     const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
     if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
+  }
+  // K03 guard: appending a journal-earlier delta after later reasoning text
+  // would corrupt order. Show it missing (with a diagnostic) until the next
+  // canonical refresh re-orders the journal.
+  if (append && previous && previous.running && envelope.sequence < previous.sequence) {
+    return addOutOfOrderDiagnostic(document, envelope)
   }
   // C01：时长 = 终态 occurredAt − 首个 delta occurredAt；append 段沿用首段时间基准。
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
@@ -1170,6 +1217,31 @@ function addLateEventDiagnostic(document: WorkbenchDocument, envelope: Workbench
   return addDiagnostic(document, envelope, 'late-event-after-terminal', message, 'warning')
 }
 
+/**
+ * Sequence of the timeline entry that drove the session into a terminal
+ * status. Events with a smaller sequence that arrive afterwards are
+ * out-of-order arrivals of journal-earlier facts, not journal-late events;
+ * the sequence-ordered replay still folds them.
+ */
+function terminalSessionSequence(document: WorkbenchDocument): number {
+  let latest = Number.NEGATIVE_INFINITY
+  for (const entry of document.timeline) {
+    if (entry.kind !== 'session' || !isRecord(entry.data)) continue
+    const data = entry.data as { type?: unknown; status?: unknown }
+    const terminal = data.type === 'session.completed'
+      || (typeof data.status === 'string' && TERMINAL_SESSION_STATUSES.has(data.status.toLowerCase()))
+    if (terminal) latest = Math.max(latest, entry.sequence)
+  }
+  return latest
+}
+
+function addOutOfOrderDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
+  if (document.diagnostics.some(item => item.code === 'out-of-order-text-dropped')) return document
+  return addDiagnostic(document, envelope, 'out-of-order-text-dropped',
+    'journal-earlier text delta arrived after later text; dropped until the next canonical refresh re-orders', 'warning',
+    { sequence: envelope.sequence })
+}
+
 function updateTimeline(items: readonly WorkbenchTimelineEntry[], eventId: string, patch: Partial<WorkbenchTimelineEntry>): WorkbenchTimelineEntry[] {
   return items.map(item => item.eventId === eventId ? { ...item, ...patch } : item)
 }
@@ -1229,7 +1301,13 @@ function settleTextSegment(
   envelope: WorkbenchEventEnvelope,
   role: WorkbenchMessage['role'],
 ): WorkbenchDocument {
-  const index = findTerminalTargetIndex(document.messages, envelope.identity, role)
+  let index = findTerminalTargetIndex(document.messages, envelope.identity, role)
+  // An out-of-order (journal-earlier) terminal may target a segment the
+  // session fence already settled; fall back to the last role row so the
+  // resequence converges with the replay.
+  if (index < 0 && envelope.sequence < terminalSessionSequence(document)) {
+    index = findLastMessageIndex(document.messages, message => message.role === role)
+  }
   if (index < 0) return document
   const target = document.messages[index]!
   if (!target.running) return document
@@ -1242,7 +1320,11 @@ function settleTextSegment(
 }
 
 function settleReasoningSegment(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
-  const index = findTerminalTargetIndex(document.messages, envelope.identity, 'reasoning')
+  let index = findTerminalTargetIndex(document.messages, envelope.identity, 'reasoning')
+  const journalEarlierTerminal = envelope.sequence < terminalSessionSequence(document)
+  if (index < 0 && journalEarlierTerminal) {
+    index = findLastMessageIndex(document.messages, message => message.role === 'reasoning')
+  }
   if (index < 0) return document
   const target = document.messages[index]!
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
@@ -1250,7 +1332,10 @@ function settleReasoningSegment(document: WorkbenchDocument, envelope: Workbench
   const durationMs = Number.isFinite(terminalAt) && Number.isFinite(startedAt)
     ? Math.max(0, terminalAt - startedAt)
     : undefined
-  if (!target.running && (target.thoughtDurationMs !== undefined || durationMs === undefined)) return document
+  // A journal-earlier terminal is the authoritative first terminal for this
+  // segment in replay order: recompute the settled state it may have been
+  // sealed with by an out-of-order session fence.
+  if (!target.running && !journalEarlierTerminal && (target.thoughtDurationMs !== undefined || durationMs === undefined)) return document
   return {
     ...document,
     messages: document.messages.map((message, messageIndex) => messageIndex === index
