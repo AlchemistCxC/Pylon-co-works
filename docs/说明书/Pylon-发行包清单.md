@@ -14,14 +14,11 @@
 - 前端资源（字体等）；
 - `agents.example.yaml` 和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
-- Hermes 所需的完整 Git for Windows PortableGit 树；
 - 离线插件 SDK（单文件 ESM + manifest schema，不含 testing harness）；
 - WebView2 安装引导（或明确声明由分发渠道另行提供）；
 - 包外的 SHA-256 文件和 manifest。
 
-其中 PortableGit 是发行包自携带的运行时，不是用户配置。它只给
-`provider=hermes` 的 Windows subprocess ACP 子进程使用，不会改写系统 `PATH`，也
-不会让其他 Agent 自动使用它。
+默认发行**不携带** Hermes 的 PortableGit 运行时（2026-08-31 决定）：Windows 上 Hermes 解析 Bash 的顺序是包内 `resources/runtime/git` → `PYLON_HERMES_RUNTIME_DIR` → 本机健康的系统 Git Bash（探测校验，不盲信 `PATH`，避免命中 WSL 的 `bash.exe` 或残缺安装）。需要把完整运行时打进发行包时，对 `pack_release.py` 使用 `--with-runtime`；此时树必须完整。该运行时只给 `provider=hermes` 的 Windows subprocess ACP 子进程使用，不会改写系统 `PATH`，也不会让其他 Agent 自动使用它。
 
 ## 2. ZIP 内的目录和文件
 
@@ -35,9 +32,9 @@
 | `WebView2Loader.dll` | 必须 | Windows WebView2 启动依赖；缺失可能导致 `0xC0000135` |
 | `pylon-cli.exe` | 建议；存在时自动收集 | CLI 管理工具；当前脚本缺失时只警告 |
 | `resources/fonts/*` | 按构建资源实际生成 | 内置字体与呈现资源 |
-| `resources/runtime/git/**` | 必须（Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe` |
-| `resources/runtime/portable-git.json` | 必须 | PortableGit 版本、来源和 SHA-256 元数据 |
-| `resources/runtime/README.txt` | 必须 | 运行时用途、许可和准备方式说明 |
+| `resources/runtime/git/**` | 可选（`--with-runtime`，Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe`。默认打包会剔除整个 `resources/runtime/` |
+| `resources/runtime/portable-git.json` | 可选（`--with-runtime`） | PortableGit 版本、来源和 SHA-256 元数据 |
+| `resources/runtime/README.txt` | 可选（`--with-runtime`） | 运行时用途、许可和准备方式说明 |
 | `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
 | `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema；与离线 SDK 一起发布 |
 | `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
@@ -62,17 +59,17 @@ ZIP 同目录另生成：
 
 在 Windows x64 构建机准备：
 
-1. Node.js（建议 LTS）和项目依赖；
+1. Bun（1.4+，依赖安装与脚本编排，`bun install`）与 Node.js 22（vite/vitest 等工具仍由 Node 宿主执行）；
 2. Rust stable、Tauri 2 所需 Windows 构建工具；
 3. Python 3；
 4. 能启动目标 Windows WebView2 的环境；
-5. 首次准备 PortableGit 时可访问 Git for Windows release 下载地址；
+5. 仅当要打 `--with-runtime` 包：首次准备 PortableGit 时可访问 Git for Windows release 下载地址；
 6. 若需要把 WebView2 一起放进包，提前取得微软 Evergreen Bootstrapper，并放到
    `resources/release/tools/MicrosoftEdgeWebview2Setup.exe`。
 
-PortableGit 二进制树不入 Git 源码仓库。`prepare_hermes_runtime.py` 会把下载文件缓存
-在 `.cache/pylon/portable-git/`，把校验通过的完整树暂存到
-`src-tauri/resources/runtime/git/`；重复构建会复用校验通过的树。切换上游版本时应
+PortableGit 二进制树不入 Git 源码仓库。默认发行不需要准备它；`--with-runtime` 打包时，
+`prepare_hermes_runtime.py` 会把下载文件缓存在 `.cache/pylon/portable-git/`，把校验通过的完整树暂存到
+`src-tauri/resources/runtime/git/`，重复构建会复用校验通过的树。切换上游版本时应
 同步更新 `portable-git.json`，不要手工拼接或只复制 `bash.exe`。
 
 ## 4. 推荐构建流程
@@ -86,22 +83,28 @@ bun run release:portable
 
 `release:portable` 依次完成：
 
-1. 下载/校验并准备 PortableGit；
+1. 构建前端（`tsc -b` + vite build）；
 2. 生成正常版与离线版 SDK（正常版留在构建目录，离线版由 Tauri 复制到 release resources）；
-3. 构建前端；
-4. 构建 Tauri release（不生成安装器）；
-5. 构建 `pylon-detect.exe`；
-6. 收集文件、审计、压缩并核对 manifest。打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
+3. 构建 Tauri release（不生成安装器；`beforeBuildCommand` 会再执行一次 `bun run build`）；
+4. 构建 `pylon-detect.exe`；
+5. 收集文件、审计、压缩并核对 manifest。默认剔除 `resources/runtime/`（PortableGit）；打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
 
-如果分发渠道不携带 WebView2 bootstrapper，可在完成前端、Tauri 和 detector 构建后
+如果分发渠道不携带 WebView2 bootstrapper，可在完成前端、SDK、Tauri 和 detector 构建后
 显式降级打包：
 
 ```bash
-bun run prepare:hermes-runtime
 bun run build
+bun run build:plugin-sdk
 bun run tauri -- build --no-bundle
 cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect
 python scripts/pack_release.py --without-webview2
+```
+
+需要内嵌 PortableGit 的发行，先准备运行时，再对打包脚本加 `--with-runtime`：
+
+```bash
+bun run prepare:hermes-runtime
+python scripts/pack_release.py --with-runtime
 ```
 
 降级包仍必须带 `tools/install-webview2.bat`，并在发布说明中明确首次运行可能需要联网
@@ -112,9 +115,9 @@ python scripts/pack_release.py --without-webview2
 ### 构建前
 
 - [ ] 三处版本号一致，目标架构为 win64。
-- [ ] `python scripts/prepare_hermes_runtime.py` 成功，且运行时校验通过。
-- [ ] `resources/runtime/git/bin/bash.exe`、`usr/bin/msys-2.0.dll` 和关键命令均存在。
-- [ ] `portable-git.json` 的 URL、版本和 SHA-256 与本次树一致。
+- [ ] 仅 `--with-runtime` 包：`python scripts/prepare_hermes_runtime.py` 成功，且运行时校验通过。
+- [ ] 仅 `--with-runtime` 包：`resources/runtime/git/bin/bash.exe`、`usr/bin/msys-2.0.dll` 和关键命令均存在，
+      `portable-git.json` 的 URL、版本和 SHA-256 与本次树一致。
 - [ ] `resources/sdk/pylon-plugin-sdk.js` 与 manifest schema 存在，且 runtime 不含 `testing.js`、`PluginScope` 或 `createMockContext`。
 - [ ] 离线 SDK bundle 不超过 64 KiB；正常版 package（含 `./testing` 类型入口）在插件开发套件中可独立导入。
 - [ ] `agents.yaml`、`.env`、密钥和本机绝对路径没有被放入待打包目录。
@@ -125,12 +128,12 @@ python scripts/pack_release.py --without-webview2
 - [ ] 使用 `Get-FileHash <zip> -Algorithm SHA256`（或等价工具）核对 `.sha256`。
 - [ ] ZIP 只有一个 `pylon-<version>-win64/` 顶层目录，并包含空 `data/`。
 - [ ] 解压到全新目录后可启动 `pylon.exe`；没有 WebView2 时，安装引导可工作。
-- [ ] 使用 `provider=hermes` 的 Agent 发起一次真实 ACP 会话，确认 Hermes 能找到包内
-  Bash 并完成最小工具调用。
+- [ ] 使用 `provider=hermes` 的 Agent 发起一次真实 ACP 会话：默认包确认 Hermes 能解析
+      本机标准路径的健康 Git Bash 并完成最小工具调用；`--with-runtime` 包确认 Hermes 使用包内 Bash。
 - [ ] 使用一个非 Hermes Agent 启动会话，确认它不继承 Hermes 的 Bash 路径和变量。
 - [ ] 检查 `manifest.json` 中的文件数量、大小和 hash 与 ZIP 内容一致。
-- [ ] 保留 PortableGit 自带的 `LICENSE.txt`、`README.portable` 及其余上游许可/声明，
-  不要为了缩小体积删除运行时文件。
+- [ ] 仅 `--with-runtime` 包：保留 PortableGit 自带的 `LICENSE.txt`、`README.portable` 及其余上游许可/声明，
+      不要为了缩小体积删除运行时文件。
 
 ## 6. 明确不能放进发行包的内容
 
@@ -139,26 +142,33 @@ python scripts/pack_release.py --without-webview2
 - `agents.yaml`、`.env`、API key、token、密码和真实本机路径；
 - 源码目录 `src/`、`src-tauri/src/`、`.git/`、`node_modules/`；
 - `*.pdb`、`*.rlib`、`*.d`、开发期 target 中间文件；
-- 未经校验的残缺 PortableGit 目录；
-- 只从系统 PATH 找到的 Bash（它不能替代包内 runtime）。
+- `--with-runtime` 包中未经校验的残缺 PortableGit 目录（默认包则根本不携带该树）。
+
+默认发行不携带运行时：Hermes 依赖探测校验过的本机系统 Git Bash；探测会拒绝 WSL
+的 `bash.exe` 与残缺安装，不接受任意 `PATH` 命中，因此不要用"把某个 bash 塞进
+包里凑数"的方式绕过。
 
 PortableGit 上游文本中的示例路径和许可内容属于第三方运行时，脚本对该树采用结构
 校验而非把上游文档当作 Pylon 配置扫描；不要因此修改或删减上游文件。
 
 ## 7. 安装包（NSIS/MSI）补充
 
-安装包不是 ZIP 的替代审计对象。`tauri.conf.json` 已声明 `resources/runtime`，因此
-NSIS/MSI 构建也必须检查安装后的资源目录仍包含完整 PortableGit：
+安装包不是 ZIP 的替代审计对象。`tauri.conf.json` 仍声明 `resources/runtime`，但默认
+安装包与默认 ZIP 一致，不包含 PortableGit；只有按 `--with-runtime` 语义构建的安装包
+才必须检查安装后的资源目录仍包含完整 PortableGit：
 
 ```bash
-npx tauri build --bundles nsis,msi
+bun run tauri -- build --bundles nsis,msi
 ```
 
-安装后应从实际安装目录验证 `resources/runtime/git`，并分别测试 Hermes 与非 Hermes
+安装后应从实际安装目录验证：默认包确认 Hermes 解析本机系统 Git Bash，
+`--with-runtime` 包确认 `resources/runtime/git` 完整，并分别测试 Hermes 与非 Hermes
 Agent。安装器的 WebView2 下载策略由 Tauri 配置决定；若企业环境禁止联网，仍应提供
 可离线获得 WebView2 的交付方案。
 
 ## 8. 运行时升级记录
+
+本节仅影响 `--with-runtime` 发行；默认发行不携带 PortableGit，无需此节。
 
 升级 PortableGit 时按以下顺序操作：
 

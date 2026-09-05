@@ -1,6 +1,6 @@
 # Pylon CLI 命令表
 
-> 适用版本：Pylon 1.4.1（2026-09-01）  
+> 适用版本：Pylon 1.5.9（2026-09-06）  
 > 单一真值：`shared/pylon-cli-manifest.json`（CLI 壳命令）+ 运行时 Command Registry（插件命令）
 
 Pylon CLI 连接已经运行的桌面应用。CLI 壳不复制插件业务逻辑：固定控制命令进入对应控制端口，插件功能统一通过 `command exec <commandId>` 调用。
@@ -79,7 +79,7 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 显式别名：`ps`、`logs`、`kill`、`compact`、`model`、`new`、`export`、`clear`、`mode`。第一段还支持无歧义前缀，例如 `sess list`。
 
-## 3. 内置插件命令（65 个）
+## 3. 内置插件命令（64 个）
 
 以下命令均已注册 `execute`，通过 `pylon-cli command exec <id> --args '{...}'` 调用。外置插件新增可执行命令后会自动出现在 `command list`，无需修改 CLI 壳。
 
@@ -112,11 +112,11 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 `layout.inspect`、`layout.sidebar.set`、`layout.sidebar-width.set`、`layout.right-panel.set`、`layout.pet.set`、`layout.agent-sidebar.set`、`workspace.sheet.focus`、`workspace.sheet.pin.toggle`、`workspace.sheet.close-others`、`workspace.sheet.close-right`、`workspace.sheet.reopen`。
 
-### 3.4 呈现风格与渲染器
+### 3.4 呈现风格
 
-`presentation.list`、`presentation.inspect`、`presentation.apply`、`presentation.renderer.list`、`presentation.renderer.set`。
+`presentation.list`、`presentation.inspect`、`presentation.apply`。
 
-呈现风格和消息渲染器保持正交：`presentation.apply` 修改视觉/交互 token；`presentation.renderer.set` 选择 `auto` 或具体消息渲染器。
+呈现风格和消息渲染器保持正交：`presentation.apply` 修改视觉/交互 token。消息渲染引擎/Suite 的选择由设置中的 Renderer Suite 选择器（呈现偏好）管理，当前没有对应的 CLI 命令。
 
 ### 3.5 插件设置、主题与配置
 

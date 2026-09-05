@@ -1,7 +1,7 @@
 # Pylon 插件化前后端拓扑全图
 
 > 状态：当前实现地图 + 明确标注的 Renderer Suite 规划接缝  
-> 核验日期：2026-08-26
+> 核验日期：2026-09-06  
 > 适用基线：当前 `prism-desktop` 工作副本；规划施工入口见仓库内工作副本外的渲染引擎施工台账（00-唯一入口台账.md）  
 > 阅读纪律：实线节点/边表示当前代码；带 `PLANNED` 且虚线边框的节点表示尚未实现。不得把规划节点写进“当前已支持”说明。
 
@@ -83,7 +83,6 @@ flowchart TB
       PLUGINMGR[PluginManager]
       AGENTSHEET[AgentSheetView]
       SUITEWB[AgentRendererSuiteWorkbench<br/>Renderer Suite 宿主接线]
-      CHATCTRL[chatEventController 消费面]
       ISOLATED[IsolatedPluginSurface<br/>isolated-surface 模式宿主]
       SOLID[SolidWorkbenchApp<br/>builtin.solid suite 实现]
       FILESHEET[FileSheetView]
@@ -94,16 +93,17 @@ flowchart TB
     subgraph DOMAIN[当前业务/Kernel 前端 modules]
       IDSTORE[identityStore]
       USERREPO[userDataRepository]
-      SESSIONLIFE[useSessionLifecycle]
-      CHATCTRL[chatEventController]
-      LEGACYRUNTIME[sessionRuntimeStore / runtimeStore<br/>会话运行时状态（CC 输入组件与 CLI ports 消费）]
+      LIFECYCLEWB[agentWorkbenchLifecycle<br/>会话生命周期 IPC 编排]
+      CANONFEED[canonicalEventFeed<br/>committed-row 唯一入口]
+      LEGACYRUNTIME[runtimeStore / sessionRuntime helpers<br/>会话运行时状态（CLI ports 与 UI 组件消费）]
       ROWPIPE[messagePipeline / chatRowPipeline]
+      WORKSESSION[agentWorkbenchSession<br/>Workbench 会话运行时 + TurnClock]
       WORKRUNTIME[WorkbenchRuntime<br/>当前 Message/Plan snapshot]
       WORKCOMMAND[WorkbenchCommandFacade]
       APPEARANCE[WorkbenchAppearanceStore]
       SESSIONUI[SessionUiStore]
       CANONREPO[CanonicalEventRepository / Sink / Scheduler]
-      GAP[committed event cursor / gap recovery]
+      GAP[CanonicalEventCursor<br/>per-owner cursor / gap 回填]
       TOOLCAT[Agent Catalog / Tool Registry]
       WORKPORTS[AgentInstanceSink / ToolDictionarySink]
     end
@@ -113,7 +113,7 @@ flowchart TB
       TAURICLIENTS[Tauri clients<br/>workspace/gateway/browser]
       PKGCLIENT[PluginPackageClient]
       PROCCLIENT[PluginProcessClient]
-      TAURIEVENTS[Tauri event listeners<br/>pylon:update / canonical event / diagnostics]
+      TAURIEVENTS[Tauri event listeners<br/>pylon:user 兜底广播 / session-recreated / 诊断]
       CLIBRIDGE[Pylon CLI bridge]
     end
 
@@ -135,7 +135,6 @@ flowchart TB
 
     subgraph PLANNED[Renderer 深化中尚未实现的接缝]
       THIRDSUITE[PLANNED installable third-party Solid Suite]
-      REACTFATAL[PLANNED React minimal fatal fallback<br/>same WorkbenchDocument]
     end
   end
 
@@ -244,7 +243,6 @@ flowchart TB
   APP --> SHEETLAYOUT
   APP --> SETTINGS
   APP --> IDSTORE
-  APP --> SESSIONLIFE
   APP --> IMODEREG
   TITLE --> IMODEREG
   SETTINGS --> PRESREG
@@ -260,6 +258,8 @@ flowchart TB
   SHEETLAYOUT --> CTXHOST --> CTXREG
   AGENTSHEET --> IMODEREG
   AGENTSHEET --> SUITEWB --> SUITEHOST
+  SUITEWB --> WORKSESSION
+  SUITEWB --> LIFECYCLEWB
   AGENTSHEET -->|renderKind=isolated-surface| ISOLATED --> UIREG
   SOLID -->|snapshot ids only| RENDERREG
   SOLID -->|direct imports| WORKRUNTIME
@@ -268,12 +268,15 @@ flowchart TB
 
   %% Current domain/data flow
   IDSTORE --> USERREPO --> ACPCLIENTS
-  SESSIONLIFE --> ACPCLIENTS
-  SESSIONLIFE --> CHATCTRL
-  CHATCTRL --> LEGACYRUNTIME
+  LIFECYCLEWB --> ACPCLIENTS
+  LIFECYCLEWB --> CANONFEED
+  LIFECYCLEWB --> LEGACYRUNTIME
+  CANONFEED --> GAP --> CANONREPO
+  CANONFEED -->|publishPluginEvent durable-before-project| EVENTBUS
+  EVENTBUS --> WORKSESSION
+  WORKSESSION --> WORKRUNTIME
   SOLID -->|buildChatRowDescriptors| ROWPIPE
   SOLID -->|messageListPort items| ROWPIPE
-  CHATCTRL --> GAP --> CANONREPO
   WORKRUNTIME --> WORKCOMMAND
   WORKRUNTIME --> APPEARANCE
   WORKRUNTIME --> SESSIONUI
@@ -283,7 +286,7 @@ flowchart TB
   CANONREPO --> INVOKE
   ACPCLIENTS --> INVOKE
   TAURICLIENTS --> INVOKE
-  TAURIEVENTS --> CHATCTRL
+  TAURIEVENTS --> CANONFEED
   CLIBRIDGE --> INVOKE
 
   %% External package installation and native process chain
@@ -369,11 +372,9 @@ flowchart TB
   SETPANEL --> SETSTORE
   SETTINGS --> SETPANEL
   PKGRUNTIME -. installed adapter .-> THIRDSUITE
-  SUITEHOST -. final fatal only .-> REACTFATAL
-  WORKDOC -. same revision .-> REACTFATAL
 
   classDef planned fill:#eef7ff,stroke:#3b82f6,stroke-width:1px,stroke-dasharray:6 4,color:#111827;
-  class THIRDSUITE,REACTFATAL planned;
+  class THIRDSUITE planned;
 ```
 
 ## 图例与最重要结论
@@ -381,7 +382,7 @@ flowchart TB
 - 普通实线：当前直接依赖、调用或宿主消费。
 - 带文字的实线：当前 contribution registration、adapter 或 package lifecycle。
 - 粗箭头：当前 durable 写入或关键数据流。
-- 蓝色虚线框且名称带 `PLANNED`：尚未进入生产代码的接缝（当前仅剩第三方可安装 Suite 与 React fatal fallback 两项；原 A11–A17 规划已落地为实线）。
+- 蓝色虚线框且名称带 `PLANNED`：尚未进入生产代码的接缝（当前仅剩第三方可安装 Suite 一项；原 A11–A17 规划已落地为实线；React minimal fatal fallback 规划已取消，Suite 宿主的 fatal 分支由纯错误横幅承接）。
 - Rust 后端没有第二套 Web Plugin Runtime：它负责包事务、资源协议和插件子进程；WebView 中唯一 `PluginRuntime` 负责加载 entry、生命周期和 contributions。
 - Kernel journal/projector 永远位于 Renderer Suite 之前；Suite 只替换表现与交互 adapter，不能成为第二业务状态源。
 
@@ -396,6 +397,7 @@ flowchart TB
 | 五个 Product Plugin | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
 | 当前 Renderer/完整 Workbench 原型 | `src/plugin-runtime/renderers/*`、`interface-mode/*`、`ui/*`、`src/sheets/AgentSheetView.tsx` |
 | 当前 Solid | `src/renderers/solid-workbench/*` |
+| canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
 | 外部包 Web 链 | `packageInstallationService.ts` → `packagePluginRuntime.ts` → `src/infrastructure/plugins/pluginPackageClient.ts` |
 | Rust package/process | `src-tauri/src/plugin_cmds.rs`、`src-tauri/src/plugin_process/mod.rs` |
 | Rust Kernel / IPC | `src-tauri/src/lib.rs`、`lifecycle/*`、`acp/*`、`dispatcher/*`、`session/*` |

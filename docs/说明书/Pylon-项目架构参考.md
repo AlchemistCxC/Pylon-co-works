@@ -1,13 +1,13 @@
 ﻿# Pylon 项目架构参考
 
 > 状态：当前实现地图，不是目标架构承诺  
-> 最后核验：2026-09-01
+> 最后核验：2026-09-06  
 > 适用仓库：`prism-desktop`  
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
 当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../../Docs/Archive/Pylon-Kernel-施工台账.md)。
 
-插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图的 Renderer Suite 宿主接缝已落地为实线；仅第三方可安装 Suite 与 React fatal fallback 仍是虚线规划，虚线不得视为当前实现。
+插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图的 Renderer Suite 宿主接缝已落地为实线；仅第三方可安装 Suite 仍是虚线规划，虚线不得视为当前实现（React minimal fatal fallback 规划已取消，Suite 宿主的 fatal 分支为纯错误横幅）。
 
 ## 1. 文档目的
 
@@ -58,7 +58,7 @@ flowchart TB
   Shell --> App["src/App.tsx"]
 
   App --> Identity["identityStore / userDataRepository"]
-  App --> Chat["Chat controller / Session lifecycle"]
+  App --> Chat["canonical feed / workbench session lifecycle"]
   App --> AcpClients["Tauri ACP clients"]
   App --> PluginConsumers["Workspace / Renderer / UI registries"]
   App --> ProductPorts["Product contribution ports"]
@@ -74,7 +74,7 @@ flowchart TB
 
   RustKernel --> KernelIngest["Kernel-owned event ingest<br/>commit before publish"]
   KernelIngest --> SQLite
-  Chat --> LegacySink["CanonicalEventSink<br/>旧后端兼容路径"]
+  Chat --> LegacySink["CanonicalEventSink 自写轨<br/>kernel 未提交的 live wire"]
   LegacySink --> IPC
   Identity --> IPC
 
@@ -91,9 +91,10 @@ flowchart TB
 | `src/plugin-runtime` | PluginRuntime、Scope、registries、shadow update、package runtime | Kernel 扩展机制 | `pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginActivationContext.ts` |
 | `src/plugins/product` | 第一方插件包定义、依赖拓扑、激活入口 | Product Plugin | `builtinProductPlugins.ts`、`packages/*` |
 | `src/plugins/core` | 第一方插件的具体贡献 implementation | Product Plugin implementation | 按目标贡献定向阅读 |
-| `src/components/chat` | UI projection、消息控制、Session load 协调 | 当前横跨 Product 与概念 Kernel | `chatEventController.ts`、`useSessionLifecycle.ts` |
+| `src/components/chat` | 消息投影、发送事务、replay 协调与呈现纯逻辑 | 当前横跨 Product 与概念 Kernel | `streamingSend.ts`、`chatReplayCoordinator.ts`、`messagePipeline.ts` |
+| `src/sheets/agent-workbench` | Workbench 会话运行时（TurnClock 生成时钟）、生命周期 IPC 编排与命令面 | Product Workbench | `agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
 | `src/identityStore.ts` | Profile/Session/Agent 前端状态与 hydration | 当前横跨 Product 与概念 Kernel | 同时阅读 `userDataRepository.ts` |
-| `src/infrastructure/events` | canonical event 前端 repository/sink/scheduler | 当前概念 Kernel implementation | sink、scheduler、repository |
+| `src/infrastructure/events` | canonical feed/cursor、repository/sink/scheduler、pluginEventBus | 当前概念 Kernel implementation | `canonicalEventFeed.ts`、sink、scheduler、repository |
 | `src/infrastructure/acp` | Tauri command typed clients | Adapter | 目标 command client 及测试 |
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
@@ -171,27 +172,27 @@ sequenceDiagram
   participant Agent as Agent subprocess
   participant ACP as Rust ACP client
   participant Dispatcher as Rust dispatcher
-  participant WebView as chatEventController
+  participant WebView as canonicalEventFeed
   participant Repo as EventService / SQLite
 
   Agent-->>ACP: session/update
   ACP-->>Dispatcher: bounded lossless notification inbox
   Dispatcher->>Repo: normalize + atomic sequence + append
   Repo-->>Dispatcher: committed canonical row
-  Dispatcher-->>WebView: pylon:update + canonicalEvent
-  WebView->>WebView: owner cursor 校验 sequence
+  Dispatcher-->>WebView: Channel 帧（canonicalEvent 通知）
+  WebView->>WebView: CanonicalEventCursor 校验 sequence（per-owner 串行 + gap 回填）
   WebView->>Repo: gap 时按 sequence 定向补读
   Repo-->>WebView: 同 journal 缺失 rows
-  WebView->>WebView: ordered projection + plugin event（不二次 append）
+  WebView->>WebView: durable-before-project publishPluginEvent + 行/转发监听（不二次 append）
 ```
 
-当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取，WebView 以 owner cursor 消费 committed row 并从同一 journal 补 gap。`canonical_events` 是重启后的历史权威：已有 authoritative local rows 时 local journal wins，replay 只作为诊断/完整性证据，不覆盖、补齐或重排本地事实。仅在空 journal（或既定幂等的 unverified import 分支）且 replay response 完整时，才允许经同一 normalize/append transaction 导入；partial/truncated replay 必须保持 `complete=false`，不得伪装完整 snapshot，也不得通过 `history.snapshot` reconciliation 合成第二历史源。
+当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取。前端自 P52 起以应用级单例 `canonicalEventFeed` 为 Channel 帧唯一入口：帧先过 source gate，再由 `CanonicalEventCursor` 做 per-owner 串行、去重与按 sequence 的 gap 定向补读，committed 行在投影之前逐条 `publishPluginEvent`（durable-before-project），终帧（done/error）以 onTerminal 信号交给 Workbench 会话的 TurnClock 收敛终态；kernel 未提交的 live wire 才走 sink 自写轨。`canonical_events` 是重启后的历史权威：已有 authoritative local rows 时 local journal wins，replay 只作为诊断/完整性证据，不覆盖、补齐或重排本地事实。仅在空 journal（或既定幂等的 unverified import 分支）且 replay response 完整时，才允许经同一 normalize/append transaction 导入；partial/truncated replay 必须保持 `complete=false`，不得伪装完整 snapshot，也不得通过 `history.snapshot` reconciliation 合成第二历史源。
 
 ### 8.2 当前恢复路径
 
 ```mermaid
 sequenceDiagram
-  participant UI as useSessionLifecycle
+  participant UI as agentWorkbenchLifecycle
   participant EventDB as canonical_events
   participant Rust as load_persisted_session
   participant Agent as ACP Agent
@@ -214,13 +215,15 @@ GUI 创建、恢复和发送链路会把 `profileId` 送入 Rust runtime 的 `Se
 
 `session/load` 失败时不会自动创建 remote session，也不会改写原 binding。该 owner 转入 detached/send-blocked，UI 让用户明确选择：按原 owner/binding 重试，或创建具有新 local `id/source` 的独立 Session 分叉。分叉继续走既有 `new_session` seam，canonical journal 仍是唯一 durable history。
 
+发送路径的映射缺失是另一条链路（P51）：Pylon 重启后内存映射消失时，`send_message` / `send_message_streaming` 可携带持久化 `periId`（`PromptContext.known_peri_id`）；Rust 先用 ACP 原生 `session/load`（普通 RPC，无 replay capture——历史由本地 canonical journal 呈现）复活原远端会话并重挂槽位，复活失败（远端会话真死）才降级新建，并经 `pylon:session-recreated {source, periId}` 广播让前端回写新 binding。若 prompt Response 携带“会话不存在”语义，则按 `(peri_id, generation)` 复核删除幽灵映射、保留 Detached 健康快照，要求显式 load/重试/分叉，不静默新建。
+
 `session/load` 成功时携带 `replayMetadata`。`boundary.kind=session-load-response` 表示匹配的 load response 是收集终点；`observedCount` 与 1-based retained ordinals 描述实际窗口。超限保留最近 N 条并报告 `droppedCount`。前端遇到缺失/不自洽 metadata 时标成 `metadata-unavailable`，不会把 partial replay 当完整 snapshot；export 对 truncated replay 返回 `replay_truncated`。
 
 前后端 replay trace 使用 `C0-v1.0-20260902` 字段对账：`owner`、`loadGeneration`、`captureLp`、`responseBoundary`、`observedCount`、`retainedCount`、`droppedCount`、`authority`、`canonicalRevision` 与 `commitOutcome`。Rust `replay_trace` 记录 transport/journal 结果，前端 `load-response`/`load-commit` 记录 projection 结果；两侧以 owner + generation 配对。无匹配 response 的 timeout/EOF/RPC/取消只记录显式失败 code，不能把已收集的部分 batch 宣称 complete。
 
 ### 8.3 Workbench 绑定与流式稳定性 seam
 
-Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；`chatEventController` 保留为 ACP/legacy Adapter，向 Runtime 提供按 source 隔离的生成元数据，不拥有第二份渲染历史。Session metadata 更新（标题、`lastReplyAt`、`periId`、workspace 路径）不得被当作文档身份变化。`workbenchSessionBindingKey` 只由 `(session.id, source, agentId, profileId)` 构成，`agentWorkbenchSession.bind` 对同一 key 幂等；因此终态事件不会因 Zustand 产生新 Session 对象而替换整份文档。需要真正重载时，使用显式 session/reload token seam，而不是依赖对象引用。
+Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 后 `chatEventController` 已删除，canonical committed row 的唯一前端入口是应用级单例 `canonicalEventFeed`（cursor/gap 回填/去重与 durable-before-project 发布），`agentWorkbenchSession` 经 pluginEventBus 消费行投影，并以 TurnClock 作为按 source 隔离的唯一生成时钟（feed 的终帧信号直接收敛 TurnClock 终态），不拥有第二份渲染历史。Session metadata 更新（标题、`lastReplyAt`、`periId`、workspace 路径）不得被当作文档身份变化。`workbenchSessionBindingKey` 只由 `(session.id, source, agentId, profileId)` 构成，`agentWorkbenchSession.bind` 对同一 key 幂等；因此终态事件不会因 Zustand 产生新 Session 对象而替换整份文档。需要真正重载时，使用显式 session/reload token seam，而不是依赖对象引用。
 
 终态 document 与 generation metadata 可能在同一事件中连续发布。显示层 `streamingDisplayScheduler` 对同一 owner/session 的 terminal transition 在微任务边界做 latest-wins 合并；结构性会话切换和显式 flush 仍同步。该合并只影响 Renderer 消费节奏，不改变 canonical journal、Workbench Runtime 事实或 legacy Adapter 的职责边界。
 
@@ -318,7 +321,7 @@ stateDiagram-v2
 | Agent lifecycle | Rust lifecycle/dispatcher | Kernel |
 | ACP transport/JSON-RPC | Rust `acp` | Kernel |
 | Session create/load/prompt | Rust session + React lifecycle | Kernel，UI 只消费 projection |
-| canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 仅兼容旧后端与 gap projection | Kernel durable journal |
+| canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 经 canonicalEventFeed 消费 committed row（cursor/gap），自写轨仅限 kernel 未提交 live wire | Kernel durable journal |
 | Session metadata persistence | identityStore + UserDataService | Kernel persistence module |
 | PluginRuntime/Scope/registries | `src/plugin-runtime` | Kernel extension mechanism |
 | Product Shell/UI | `App.tsx`、components | First-party Product Plugin |
@@ -357,14 +360,14 @@ stateDiagram-v2
 
 | 优先级 | 风险 | 主要位置 |
 |---|---|---|
-| P0（已修复） | live/prompt、无损入口、cursor 与 empty-journal import 已收口；local-authoritative precedence 与 partial replay `complete=false` 边界保持可见，load race committed rows 按 sequence 补应用 | session/persist.rs、event_repo.rs、messageProjection、chatEventController |
+| P0（已修复） | live/prompt、无损入口、cursor 与 empty-journal import 已收口；local-authoritative precedence 与 partial replay `complete=false` 边界保持可见，load race committed rows 按 sequence 补应用 | session/persist.rs、event_repo.rs、messageProjection、canonicalEventFeed |
 | P1（已修复） | `deleted_sessions` 曾以裸 session/source 为主键且删除 wire 误用 metadata id；v12 改为 owner_key 主键并让 begin/finalize 统一使用 Session.source | session/msg_repo/、event_repo.rs、removeSessionTransaction.ts |
 | P0（已修复） | DB services 曾异步初始化，首次 unavailable 可演变为永久失败；现由 setup readiness barrier 串行打开并一次安装 | `src-tauri/src/session/persistence_bootstrap.rs`、`src-tauri/src/lib.rs` |
 | P0（已修复） | Tauri Identity 读取失败曾回退 localStorage 并可反向覆盖较新 SQLite；现为带 revision cache + degraded-readonly，权威重读清失败 pending | identityStore.ts、userDataRepository.ts |
 | P0（已修复） | 内置插件异常曾可阻止 Kernel 渲染；现由 KernelBootstrap 暴露 degraded/retry/Safe Mode | KernelRoot、kernelBootstrap、pluginCompositionRoot |
-| P1（已修复） | session/load 失败曾自动创建新远端 Session；现为显式重试或独立本地分叉 | useSessionLifecycle、identityStore、ChatView |
+| P1（已修复） | session/load 失败曾自动创建新远端 Session；现为显式重试或独立本地分叉（发送路径的映射缺失另经 ACP `session/load` 复活链处理，见 §8.2） | agentWorkbenchLifecycle.ts、chatReplayCoordinator.ts、identityStore |
 | P1（已修复） | replay 超限曾无完整性信息且保留最早窗口；现返回边界并保留最近窗口 | Rust acp/replay.rs、sessionClient、ChatView |
-| P1（已修复） | replay/live reconciliation 曾可能按 role+content 猜测重复；现仅使用协议明确支持的外部 identity，无 identity 的重复正文保留 | messageIdentity.ts、chatEventController.ts |
+| P1（已修复） | replay/live reconciliation 曾可能按 role+content 猜测重复；现仅使用协议明确支持的外部 identity，无 identity 的重复正文保留 | messageIdentity.ts、canonicalEventFeed.ts |
 | P0（已修复） | 当前 schema version 曾跳过实际结构与 integrity 校验；现 startup quick_check + schema manifest + future-version guard fail closed | session/msg_repo/、persistence_bootstrap.rs |
 | P1（已修复） | canonical JSON 损坏曾静默归一 null/none；现按 event/column 报 corrupt，并可 `evt_export_raw` 隔离取证 | session/event_repo.rs、canonicalEventRepository.ts |
 | P1（已修复） | v9 migration 曾删除 legacy message tables；v11 现将可证明基础消息回填至同一 canonical journal，全部旧表保留为 forensic archive，失败整事务回滚 | session/msg_repo/ |
@@ -434,8 +437,8 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 
 | 任务 | 从这里开始，不做全量扫描 |
 |---|---|
-| Session 持久化/恢复 | `chatEventController.ts` → `useSessionLifecycle.ts` → `session/persist.rs` → repos |
-| canonical event | `canonicalEventSink.ts` → scheduler/repository → `event_repo.rs` |
+| Session 持久化/恢复 | `agentWorkbenchLifecycle.ts` → `chatReplayCoordinator.ts` → `session/persist.rs` → repos |
+| canonical event | `canonicalEventFeed.ts` → cursor/sink → `event_repo.rs` |
 | Profile/Session metadata | `identityStore.ts` → `userDataRepository.ts` → `session/user_data.rs` |
 | Agent 连接/重连 | `lifecycle/mod.rs` → `agent_runtime.rs` → `dispatcher/mod.rs` |
 | Agent 检测 | `AgentRuntimePanel.tsx` → `agentClient.ts` → `pylon-core/agent_detection.rs` |
