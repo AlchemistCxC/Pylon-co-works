@@ -24,9 +24,9 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import {
   attachChatEventController,
-  setCanonicalEventSinkFactoryForTests,
   type ChatEventControllerRefs,
 } from '../chatEventController'
+import { setCanonicalEventSinkFactoryForTests } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import type { CanonicalEventSink } from '../../../infrastructure/events/canonicalEventSink'
 import { useIdentityStore, type Session } from '../../../identityStore'
 

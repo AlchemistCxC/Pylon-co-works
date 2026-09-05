@@ -26,6 +26,7 @@ import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
+import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
 import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
@@ -411,7 +412,7 @@ export default function App() {
 
   const appWindow = appWindowSingleton
   const drainBeforeClose = () => drainPersistentStateBeforeClose({
-    flushCanonical: () => getChatController()?.flushCanonicalEventsAsync() ?? Promise.resolve(),
+    flushCanonical: () => getCanonicalEventFeed().flushAsync(),
     flushIdentity: flushIdentityBackend,
   })
   const closeWindowWithFlush = async () => {

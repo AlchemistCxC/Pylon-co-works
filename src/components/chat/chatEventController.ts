@@ -1,6 +1,6 @@
 import type React from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
@@ -9,13 +9,10 @@ import { extractUsage, extractPlanEntries, type ContentBlock, type PeriDonePaylo
 import { presentPromptFailure } from '../../domains/workbench/promptFailurePresentation.ts'
 import { applySessionStateUpdate } from '../../domains/sessionState/sessionStateSync.ts'
 import { normalizeRawEvent, type CanonicalNormalizeResult } from '../../domains/events/canonicalNormalizer'
+import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { toolFieldsFromCanonical } from '../../domains/events/toolProjection'
 import { toCanonicalOwnerKey, type CanonicalEventOwner } from '../../domains/events/eventSchema'
-import { IS_TAURI } from '../../infrastructure/tauri/env'
-import { createCanonicalEventSink, type CanonicalEventSink } from '../../infrastructure/events/canonicalEventSink'
-import { tauriCanonicalEventRepository, type CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
-import { CanonicalEventCursor } from '../../infrastructure/events/canonicalEventCursor.ts'
-import { publishPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
+import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { clearMessageStorage } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource } from './sessionEventState'
@@ -158,19 +155,6 @@ export function getChatController(): ChatControllerHandle | null {
 let currentRefs: ChatEventControllerRefs | null = null
 let singletonController: ChatControllerHandle | null = null
 
-// A1-c P2：测试可注入 fake sink；生产在 Tauri 下用真实 sink，非 Tauri 用 no-op。
-let canonicalEventSinkFactory: (() => CanonicalEventSink) | null = null
-export function setCanonicalEventSinkFactoryForTests(factory: (() => CanonicalEventSink) | null): void {
-  canonicalEventSinkFactory = factory
-}
-const noopCanonicalEventSink: CanonicalEventSink = {
-  offer: () => {},
-  flushAll: () => {},
-  flushAllAsync: async () => {},
-  discard: () => {},
-  dispose: () => {},
-}
-
 /** 重绑定当前渲染 refs（ChatView 重挂载时调用；controller 内部经此读最新 refs） */
 export function bindChatControllerRefs(refs: ChatEventControllerRefs): void {
   currentRefs = refs
@@ -201,9 +185,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   currentRefs = refs
   if (singletonController) return singletonController
   let runtimeState: ChatRuntimeState = {}
-  // A1-c P2：每个 controller 实例持一个 canonical sink；非 Tauri（browser/tests）为 no-op。
-  const canonicalSink = (canonicalEventSinkFactory ?? (() => (IS_TAURI ? createCanonicalEventSink() : noopCanonicalEventSink)))()
-  const canonicalCursor = new CanonicalEventCursor(tauriCanonicalEventRepository())
+  // P52 D2：canonical 已提交行唯一入口迁至 canonicalEventFeed——cursor/publish/
+  // pylon:user 兜底归 feed；controller 经 onForward 消费帧（kernelCommitted 随帧
+  // 传递），load 事务缓冲与 recovered 行重放经订阅回传。
+  const canonicalFeed = getCanonicalEventFeed()
+  // P52 D2：AgentContextKey → ownerKey 反查（prune 时孤儿 owner 的 feed.discard 入参）。
   const canonicalSinkKeyByContext = new Map<string, string>()
   // M3：source → session（session.end hook 在 prune 时使用）。
   const hookSessionByKey = new Map<string, { agentId: string; source: string; id: string; hooks: string[] }>()
@@ -496,11 +482,12 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     }
   }
   // A1-c P2：live 会话事件 → canonical sink（replay 永不进入；终态/切会话 force）。
+  // P52 D2：sink 归 feed 持有，controller 只保留 owner/generation 推导。
   const persistCanonicalEvent = (context: AgentContext, raw: unknown, force = false): void => {
     const key = toAgentContextKey(context)
     const { owner, clientGeneration } = canonicalToolContextFor(context.source, context.agentId, key)
     canonicalSinkKeyByContext.set(key, toCanonicalOwnerKey(owner))
-    canonicalSink.offer({ owner, clientGeneration }, raw, force)
+    canonicalFeed.offer({ owner, clientGeneration }, raw, force)
   }
   const applyRecoveredCanonicalEvent = (event: CanonicalEventRow): void => {
     const source = event.owner.localSessionId
@@ -545,28 +532,18 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         break
     }
   }
-  const processCommittedOrLegacy = async (
-    value: unknown,
-    processCurrent: (kernelCommitted: boolean) => void | Promise<void>,
-  ): Promise<void> => {
-    if (value === undefined) {
-      await processCurrent(false)
-      return
-    }
-    await canonicalCursor.accept(value, async (event, isCurrentNotification) => {
-      publishPluginEvent(event)
-      // Keep every canonical notification observed during a load, including rows that were
-      // already covered by the initial canonical read.  A source may continue generating while
-      // the user switches sessions; commit-time reconciliation needs this complete set to tell a
-      // real in-flight event from a legacy uncommitted replay broadcast.
-      const transaction = loadTransactions.get(event.owner.localSessionId)
-      if (transaction) transaction.bufferedCanonicalEvents.push(event)
-      if (isCurrentNotification) {
-        await processCurrent(true)
-      }
-      else applyRecoveredCanonicalEvent(event)
-    })
-  }
+  // P52 D2：kernel committed 行的 cursor/publish/gap 回填已整体迁至 canonicalEventFeed
+  // （feed.acceptFrame）。controller 在此消费两类回传：
+  // ① onCanonicalRow：load 事务缓冲（迁移前 processCommittedOrLegacy 的
+  //    bufferedCanonicalEvents 职责，commit 时区分真实 in-flight 与 legacy 回放）；
+  // ② onRecoveredRow：gap 回填行的 reducer 重放（迁移前 applyRecoveredCanonicalEvent）。
+  const unsubscribeCanonicalRows = canonicalFeed.onCanonicalRow(event => {
+    const transaction = loadTransactions.get(event.owner.localSessionId)
+    if (transaction) transaction.bufferedCanonicalEvents.push(event)
+  })
+  const unsubscribeRecoveredRows = canonicalFeed.onRecoveredRow(applyRecoveredCanonicalEvent)
+  // 过渡期双投收口：feed 是帧唯一入口，controller 不再自持 handleStreamFrame 的
+  // canonical 分支——onForward 直接路由到原 channelFrameHandlers 表。
   // EVT-04：live canonical 流内 sequence（仅归一化占位；不参与三路径投影字段深等）
   const liveCanonicalSequences = new Map<string, number>()
   const nextLiveCanonicalSeq = (source: string): number => {
@@ -942,11 +919,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         if (endedSession) void runSessionBoundaryHook('session.end', endedSession)
         hookSessionByKey.delete(key)
         // A1-c P2：孤儿 source 的未落盘 canonical 事件一并丢弃（不复活）。
+        // P52 D2：ownerKey 反查与 sink/cursor 清理走 feed（discard = sink+cursor 原子对）。
         const ownerKey = canonicalSinkKeyByContext.get(key)
-        if (ownerKey) {
-          canonicalSink.discard(ownerKey)
-          canonicalCursor.forget(ownerKey)
-        }
+        if (ownerKey) canonicalFeed.discard(ownerKey)
         canonicalSinkKeyByContext.delete(key)
       }
     }
@@ -962,18 +937,21 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   // allSettled 保留已成功注册的 stop handle（不全丢弃），失败逐个报告（ErrorCenter），
   // dispose 只清理成功 handle，不泄漏未注册监听器
   // G1：listener 工厂数组（重试注册失败项，报告 8.5）
-  // B1：channel 帧路由表——各工厂注册时把处理函数挂到此处，handleStreamFrame
-  // 按 StreamFrame.event 分发（处理体与广播监听逐字共用，单实现双入口）。
+  // B1：channel 帧路由表——各工厂注册时把处理函数挂到此处，feed.onForward 与
+  // 兼容 handleStreamFrame 均按 StreamFrame.event 分发（处理体单实现双入口）；
+  // kernelCommitted 由 feed 转发标记传入（P52 D2），兼容入口默认 false。
   const channelFrameHandlers: {
-    user?: (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }) => Promise<void>
-    update?: (event: { payload: PeriUpdatePayload }) => Promise<void>
-    done?: (event: { payload: PeriDonePayload }) => Promise<void>
-    error?: (event: { payload: PeriErrorPayload }) => Promise<void>
+    user?: (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }, kernelCommitted?: boolean) => Promise<void>
+    update?: (event: { payload: PeriUpdatePayload }, kernelCommitted?: boolean) => Promise<void>
+    done?: (event: { payload: PeriDonePayload }, kernelCommitted?: boolean) => Promise<void>
+    error?: (event: { payload: PeriErrorPayload }, kernelCommitted?: boolean) => Promise<void>
   } = {}
   const listenerFactories: Array<() => Promise<UnlistenFn>> = [
     () => {
-      const handler = async (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }) => {
+      const handler = async (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }, kernelCommitted = false) => {
       if (!isActiveSource(event.payload.source)) return
+      // P52 D2：canonical 行已由 feed.acceptFrame 处理（cursor/publish/回填）；
+      // 本方法只消费当前帧投影，kernelCommitted 随 feed 转发传入。
       const processCurrent = async (kernelCommitted: boolean) => {
       const { source, content, replay: eventReplay = false } = event.payload
       if (!isActiveSource(source)) return
@@ -1042,17 +1020,16 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
       }
       }
-      await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
-        .catch(error => reportRuntimeError('消费 Kernel committed user event', error))
+      await processCurrent(kernelCommitted)
       }
       channelFrameHandlers.user = handler
-      // B1：user echo 后端已 Channel 优先（send_update_frame 单轨）；本广播
-      // listen 保留为兜底——未注册 Channel（平台 ingest / 非 Tauri 测试）的来源。
-      return listen('pylon:user', handler)
+      // B1 + P52 D2：pylon:user 广播兜底与 canonical 处理均已迁 canonicalEventFeed
+      // （feed 内 listen('pylon:user') → acceptFrame → onForward 回路由）。
+      return Promise.resolve(() => {})
     },
 
     () => {
-      const handler = async (event: { payload: PeriUpdatePayload }) => {
+      const handler = async (event: { payload: PeriUpdatePayload }, kernelCommitted = false) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const source = event.payload.source
@@ -1194,8 +1171,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
       }
       }
-      await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
-        .catch(error => reportRuntimeError('消费 Kernel committed update event', error))
+      await processCurrent(kernelCommitted)
       }
       channelFrameHandlers.update = handler
       // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
@@ -1203,7 +1179,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     },
 
     () => {
-      const handler = async (event: { payload: PeriDonePayload }) => {
+      const handler = async (event: { payload: PeriDonePayload }, kernelCommitted = false) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const source = event.payload.source
@@ -1221,8 +1197,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       notifyHook('message.agent.committed', source, { source, payload: event.payload })
       notifyHook('turn.completed', source, { source, status: 'completed', payload: event.payload })
       }
-      await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
-        .catch(error => reportRuntimeError('消费 Kernel committed done event', error))
+      await processCurrent(kernelCommitted)
       }
       channelFrameHandlers.done = handler
       // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
@@ -1230,7 +1205,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     },
 
     () => {
-      const handler = async (event: { payload: PeriErrorPayload }) => {
+      const handler = async (event: { payload: PeriErrorPayload }, kernelCommitted = false) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const { source, error } = event.payload
@@ -1272,8 +1247,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         payload: event.payload,
       })
       }
-      await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
-        .catch(error => reportRuntimeError('消费 Kernel committed error event', error))
+      await processCurrent(kernelCommitted)
       }
       channelFrameHandlers.error = handler
       // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
@@ -1309,6 +1283,20 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     stopFns.push(...result.fns)
     return result.fns.length > 0
   }
+
+  // P52 D2：feed 转发接线——kernelCommitted 帧由 feed 完成 cursor/publish 后回调，
+  // 这里按 event 路由到 channelFrameHandlers（与原 handleStreamFrame 同一表）；
+  // kernelCommitted 随 handler 第二参数传入，驱动各 processCurrent 的自写跳过。
+  const unsubscribeFeedForward = canonicalFeed.onForward(({ frame, kernelCommitted }) => {
+    const event = { payload: frame.payload as never }
+    if (frame.event === 'pylon:update') return channelFrameHandlers.update?.(event as never, kernelCommitted)
+    if (frame.event === 'pylon:user') return channelFrameHandlers.user?.(event as never, kernelCommitted)
+    if (frame.event === 'pylon:done') return channelFrameHandlers.done?.(event as never, kernelCommitted)
+    if (frame.event === 'pylon:error') return channelFrameHandlers.error?.(event as never, kernelCommitted)
+    return undefined
+  })
+  // isActiveSource 前置门注入 feed（未 initSource 的源整帧丢弃，语义随迁移保留）。
+  canonicalFeed.setSourceGate(source => (source !== undefined ? isActiveSource(source) : true))
 
   const handleClear = () => {
     const source = currentRefs!.sessionRef.current
@@ -1387,19 +1375,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     commitReplaySnapshot,
     commitCanonicalProjection,
     commitPreservedRuntime,
-    handleStreamFrame: async frame => {
-      // B1：channel 帧 payload 与对应广播事件载荷同构；处理体逐字共用。
-      const event = { payload: frame.payload as never }
-      if (frame.event === 'pylon:update') {
-        await channelFrameHandlers.update?.(event)
-      } else if (frame.event === 'pylon:user') {
-        await channelFrameHandlers.user?.(event)
-      } else if (frame.event === 'pylon:done') {
-        await channelFrameHandlers.done?.(event)
-      } else if (frame.event === 'pylon:error') {
-        await channelFrameHandlers.error?.(event)
-      }
-    },
+    // P52 D2：帧唯一入口是 feed.acceptFrame（streamingSend 直投；本方法为兼容
+    // 别名——直调也经 feed，保证 kernel-committed 帧的 cursor/publish 恒先于投影）。
+    handleStreamFrame: async frame => canonicalFeed.acceptFrame(frame),
     abortSessionLoad,
     clearReplay,
     getFrames,
@@ -1428,21 +1406,21 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       return summary ? { ...summary, completedFrame: '' } : undefined
     },
     pruneSources,
-    flushCanonicalEvents: () => canonicalSink.flushAll(),
-    flushCanonicalEventsAsync: () => canonicalSink.flushAllAsync(),
-    discardCanonicalEvents: (ownerKey) => {
-      canonicalSink.discard(ownerKey)
-      canonicalCursor.forget(ownerKey)
-    },
-    seedCanonicalCursor: (ownerKey, sequence) => canonicalCursor.seed(ownerKey, sequence),
+    flushCanonicalEvents: () => canonicalFeed.flush(),
+    flushCanonicalEventsAsync: () => canonicalFeed.flushAsync(),
+    discardCanonicalEvents: (ownerKey) => canonicalFeed.discard(ownerKey),
+    seedCanonicalCursor: (ownerKey, sequence) => canonicalFeed.seed(ownerKey, sequence),
     dispose: () => {
-      canonicalSink.flushAll()
+      canonicalFeed.flush()
       stopFns.forEach(f => f())
       stopFns = []
       window.removeEventListener('peri:clear', handleClear)
       horizontal.dispose()
       hookSessionByKey.clear()
-      canonicalSink.dispose()
+      unsubscribeRecoveredRows()
+      unsubscribeCanonicalRows()
+      unsubscribeFeedForward()
+      canonicalFeed.setSourceGate(null)
       // G0：应用级 dispose 后重置单例，允许下次重新创建
       if (singletonController === handle) singletonController = null
       currentRefs = null

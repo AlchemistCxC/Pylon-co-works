@@ -6,7 +6,7 @@ import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
 
-import { getChatController } from './chat/chatEventController'
+import { getCanonicalEventFeed } from '../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from './chat/messagePersistence'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
 
@@ -82,14 +82,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       markSessionDeleting: id => {
         const target = useIdentityStore.getState().sessions.find(item => item.id === id)
         if (target) {
-          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+          getCanonicalEventFeed().discard(sessionDurableOwnerKey(target))
         }
       },
       // DEL-04（§5.13）删除终态：丢弃 canonical 未落盘事件（不复活；messages 表已停写）
       markSessionDeleted: id => {
         const target = useIdentityStore.getState().sessions.find(item => item.id === id)
         if (target) {
-          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+          getCanonicalEventFeed().discard(sessionDurableOwnerKey(target))
         }
       },
       // OWNER-02：close 目标 owner 由 session 携带（agentId + source）；best effort，失败仅报告

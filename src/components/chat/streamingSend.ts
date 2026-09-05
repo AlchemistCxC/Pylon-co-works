@@ -1,6 +1,6 @@
 import { invoke, type Channel } from '@tauri-apps/api/core'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
-import { getChatController, type ChatControllerHandle } from './chatEventController.ts'
+import { getCanonicalEventFeed, type CanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { closeStreamChannel, openStreamChannel, type StreamFrame, type StreamFrameHandler } from './streamChannel.ts'
 import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 import { presentPromptFailure } from '../../domains/workbench/promptFailurePresentation.ts'
@@ -9,7 +9,8 @@ export interface StreamingSendDependencies {
   invoke(command: string, args?: unknown): Promise<unknown>
   open(source: string, handler: StreamFrameHandler): Channel<StreamFrame> | undefined
   close(source: string): void
-  controller(): ChatControllerHandle | null
+  /** P52 D2：帧唯一入口 = canonicalEventFeed（canonical 处理后 onForward 回 legacy controller）。 */
+  feed(): CanonicalEventFeed
 }
 
 /** Error returned when the streaming command rejects after publishing pylon:error. */
@@ -35,7 +36,7 @@ const productionDependencies: StreamingSendDependencies = {
   invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
   open: openStreamChannel,
   close: closeStreamChannel,
-  controller: getChatController,
+  feed: getCanonicalEventFeed,
 }
 
 /**
@@ -60,8 +61,9 @@ export function sendMessageWithStream(
           : {}),
       }
     }
-    const controller = dependencies.controller()
-    if (controller) void controller.handleStreamFrame(frame)
+    // P52 D2：帧统一投 canonicalEventFeed——cursor/publish 在此发生，
+    // legacy controller 经 feed.onForward 消费（kernelCommitted 随帧传递）。
+    void dependencies.feed().acceptFrame(frame)
     if (frame.event === 'pylon:done' || frame.event === 'pylon:error') dependencies.close(source)
   })
   const client = createChatClient({ invoke: dependencies.invoke })

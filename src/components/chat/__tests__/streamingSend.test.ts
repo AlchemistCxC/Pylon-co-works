@@ -3,25 +3,32 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SendMessagePayload } from '../../../infrastructure/acp/chatClient.ts'
 import { sendMessageWithStream, StreamingPromptFailure, type StreamingSendDependencies } from '../streamingSend.ts'
 import type { StreamFrame, StreamFrameHandler } from '../streamChannel.ts'
+import type { CanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 
 const payload: SendMessagePayload = {
   agentId: 'peri', profileId: 'profile-a', source: 'local:a', content: 'hello',
   persona: '', sessionPrompt: '', attachments: [],
 }
 
+function fakeFeed(events: string[]): CanonicalEventFeed {
+  return {
+    acceptFrame: async (frame: StreamFrame) => { events.push(frame.event) },
+  } as unknown as CanonicalEventFeed
+}
+
 describe('sendMessageWithStream', () => {
-  it('keeps the production channel alive through user/update and closes only on done', async () => {
+  it('routes every channel frame into the canonical feed and closes only on done', async () => {
     let handler: StreamFrameHandler | undefined
     const fakeChannel = {} as Channel<StreamFrame>
     const invoke = vi.fn(async () => undefined)
     const close = vi.fn()
-    const handledEvents: string[] = []
-    const handleStreamFrame = vi.fn(async (frame: StreamFrame) => { handledEvents.push(frame.event) })
+    const acceptedEvents: string[] = []
+    const feed = vi.fn(() => fakeFeed(acceptedEvents))
     const dependencies: StreamingSendDependencies = {
       invoke,
       open: (_source, next) => { handler = next; return fakeChannel },
       close,
-      controller: () => ({ handleStreamFrame } as never),
+      feed,
     }
 
     await sendMessageWithStream(payload, dependencies)
@@ -34,7 +41,8 @@ describe('sendMessageWithStream', () => {
     expect(close).not.toHaveBeenCalled()
     handler?.({ event: 'pylon:done', payload: { source: 'local:a' } })
     expect(close).toHaveBeenCalledOnce()
-    expect(handledEvents).toEqual([
+    // P52 D2：帧唯一入口是 canonicalEventFeed（cursor/publish 后才转发 legacy 面）
+    expect(acceptedEvents).toEqual([
       'pylon:user', 'pylon:update', 'pylon:done',
     ])
   })
@@ -42,7 +50,7 @@ describe('sendMessageWithStream', () => {
   it('falls back to the legacy command outside Tauri', async () => {
     const invoke = vi.fn(async () => undefined)
     await sendMessageWithStream(payload, {
-      invoke, open: () => undefined, close: vi.fn(), controller: () => null,
+      invoke, open: () => undefined, close: vi.fn(), feed: () => fakeFeed([]),
     })
     expect(invoke).toHaveBeenCalledWith('send_message', payload)
   })
@@ -61,7 +69,7 @@ describe('sendMessageWithStream', () => {
       }),
       open: (_source, next) => { handler = next; return {} as Channel<StreamFrame> },
       close: vi.fn(),
-      controller: () => null,
+      feed: () => fakeFeed([]),
     }
 
     const error = await sendMessageWithStream(payload, dependencies).catch(value => value)
