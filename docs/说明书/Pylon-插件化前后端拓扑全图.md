@@ -43,6 +43,9 @@ flowchart TB
       PKGINSTALL[PackageInstallationService]
       PKGRUNTIME[PackagePluginRuntimeService<br/>dynamic import / styles]
       STYLE[PackageStyleRuntime]
+      CAPGRANT[PluginCapabilityGrantStore<br/>host-owned localStorage<br/>version-pinned grants]
+      CAPCONSENT[capability 同意流评估<br/>builtin: capability-consent stage<br/>外置: plugin_capability_denied]
+      MGMTAPI[PluginManagementApi<br/>capability-gated 管理面<br/>守卫三则 typed errors]
     end
 
     subgraph REGISTRIES[RuntimeServices：当前 registries 与 host modules]
@@ -66,12 +69,13 @@ flowchart TB
       IMODEREG[InterfaceModeRegistry]
     end
 
-    subgraph PRODUCT[五个第一方 Product Plugin 包 + 可选 Kernel Skin]
+    subgraph PRODUCT[六个第一方 Product Plugin 包 + 可选 Kernel Skin]
       PTOOLS[builtin.pylon-tools<br/>tool-provider]
       PADAPTERS[builtin.pylon-agent-adapters<br/>agent-adapter]
       PRENDERERS[builtin.pylon-renderers<br/>renderer]
       PWORKSPACE[builtin.pylon-workspace<br/>workspace]
       PSHELL[builtin.pylon-shell<br/>shell]
+      PMANAGER[builtin.pylon-plugin-manager<br/>feature · api 1.2<br/>capability: plugin.management]
       PSKIN[builtin.skin<br/>Kernel skin command plugin]
     end
 
@@ -204,6 +208,12 @@ flowchart TB
   PRUNTIME --> PUPDATE --> RBATCH
   PACTX --> REGISTRIES
   PUPDATE --> REGISTRIES
+  %% P53 capability 模型：声明 ∧ 授权 ⇔ management 装配（C3 门控）
+  PACTX -->|声明且已授权才装配| MGMTAPI
+  MGMTAPI --> CAPGRANT
+  BUILTINBOOT --> CAPCONSENT
+  PKGINSTALL --> CAPCONSENT
+  CAPCONSENT --> CAPGRANT
 
   %% Product package dependency graph（箭头 = 依赖方 --> 被依赖方，与图例同向；
   %% 真值：src/plugins/product/packages/*/pylon-plugin.json 的 dependencies）
@@ -217,6 +227,7 @@ flowchart TB
   COMPOSE --> PRENDERERS
   COMPOSE --> PWORKSPACE
   COMPOSE --> PSHELL
+  COMPOSE --> PMANAGER
   COMPOSE --> PSKIN
   PSHELL -->|register application/commands/styles| APPREG
   PSHELL --> CMDREG
@@ -237,6 +248,8 @@ flowchart TB
   PWORKSPACE --> SERVREG
   PWORKSPACE --> CMDREG
   PSKIN --> HOOKREG
+  PMANAGER -->|registerPage 增强面板| SETPAGEREG
+  PMANAGER -->|context.management 只读+管理操作| MGMTAPI
 
   %% Current UI consumers
   APP --> TITLE
@@ -252,6 +265,7 @@ flowchart TB
   SETTINGS --> SETOPTREG
   SETTINGS --> PLUGINMGR
   PLUGINMGR --> PKGINSTALL
+  PLUGINMGR -->|授权卡 grant/revoke| CAPGRANT
   SHEETLAYOUT --> WORKREG
   SHEETLAYOUT --> AGENTSHEET
   SHEETLAYOUT --> SIDEHOST --> SIDEREG
