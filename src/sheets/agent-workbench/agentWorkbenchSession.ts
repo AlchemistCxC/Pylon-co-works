@@ -32,7 +32,8 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
   chatController?: () => Pick<ChatControllerHandle,
     'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'getGenerationActivity' | 'rejectOptimisticUser'
-    | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
+    | 'getThinkingStart' | 'getTokenCount' | 'getSummary'>
+    & Partial<Pick<ChatControllerHandle, 'getStreamingState'>> | null
 }
 
 /**
