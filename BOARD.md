@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 10:46] [Rutherford·工程师] [P45 C 组补强] 提交 `f51f355e`：connector settle 在活动 8 帧窗口内不再被 ResizeObserver/MutationObserver 重置，新增连续 observer 回调回归；mount Solid 新增 fake RAF + ResizeObserver outer follow 同帧合并、用户离底取消排队写入回归。C 组相关测试通过；P45 仍缺带有效凭据的真实 Hermes/ACP tool/reasoning trace（本机真实 ACP probe 已握手并返回 401，采到 arrival 序列但无有效 provider identity/sequence）。
+
 [2026-09-05 10:27] [Rutherford·工程师] [P45 本圈完成] 提交 `7cefeaf2` 接通 controller transient → Workbench runtime → Solid display owner：携带 stream identity，终态 atomic clear；提交 `778e54fa` 增加 connector 同几何/同帧写入预算回归。相关 display/session/connector 目标测试通过。P45 剩余完整 fake RAF/ResizeObserver/离底 follow 计数与真实 provider trace。
 
 [2026-09-05 10:13] [Rutherford·工程师] [P45 本圈完成] 提交 `1cfd9d12` 修复 scheduler 同一 active stream 的短 canonical 回退（严格限定 session/owner/generation/turnEpoch、同 row running 且目标为当前前缀），新增回归先红后绿；提交 `be1db58b` 锁定无 turnEpoch bind 终态文档不被 stale controller 复活。目标组 4 文件 62 项通过，lint/diff check 通过。P45 仍施工中，剩余 B transient 决策、C 动态写入计数与真实 provider trace。
