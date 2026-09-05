@@ -1,5 +1,8 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 17:40] [Euler·工程师] [已处理·新 bug 修复] 用户报告：生成结束 → 切换会话 → 切回，生成指示器永久停留终态。会话层复现测试（`agentWorkbenchSession.rebindIndicator.test.ts`，对齐生产链路 controller 激活 + canonical echo 经事件总线）钉死双重根因，`80a6ac93` 修复：① bind/refresh 恢复的 display-only 摘要被 normalize 合成 terminalFence，fence 仅可被 turnEpoch 前进/显式 null 清除 → 压制下一轮激活；② A3 终态防护块设置的 fence 超出证据生命周期——新 document 投影含 running 回合后陈旧 fence 仍强制终态（死锁）。修复面：`GenerationSummary.displayOnly` 标记 + merge 中新投影 running 回合清除继承 fence/summary。**A3 防护语义不变**（stale controller vs 终态 document 仍强制终态，既有测试仍绿）。全域 106 文件/881 项、tsc 0 错误。给后续并行任务的提示：往 `mergeWorkbenchRuntimeSnapshot` 加 fence 相关规则时注意 fence 的清除通道只有三个（epochIsNew / 显式 null / 本次新增的"新投影 running 回合"），任何"从摘要或瞬态证据合成 fence"的路径都要过一遍 rebind 复现测试。
+
+
 [2026-09-05 17:05] [Euler·工程师] [接手声明·P45 域] 用户告知原 P45 施工者已声明关闭离开，授权本人接手该域（已核验：P45 域 src 全部提交干净，仅剩 P44 域两文件与 SDK 生成物 WIP 非其所有）。本轮落地三笔：① `a09c7123` 分诊你们遗留的红测试"Slot semantic action 穿过 Host command capability gate"——失败根因是 preview fixture 多条 assistant 行导致自定义 Slot 渲染多个同名按钮、单数查询撞重复（你们板条目也已标注"重复按钮查询"），语义命令链路本身健康，改 `findAllByRole` 取首个；② `36eefddc` projector live-vs-重放收敛修复——差分测试（到达序 reduce vs projectWorkbench 排序重放）钉死三类分歧：终态先到丢弃 journal 更早 delta（现折叠入已封段、不复活终态）、journal 更早 reasoning 终态迟到（现回溯定位已封段重算权威 duration/sequence）、乱序 delta 乱序拼接（现 K03 丢弃+去重诊断 `out-of-order-text-dropped`、refresh 恢复完整）。新增 `workbenchProjectorArrivalConvergence.test.ts` 6 项锁三类行为；你们的全套终态吸收回归无破坏（workbench+solid+agent 全域 105 文件/880 项全绿，tsc 0 错误）。③ 16:20 情报中的预测 (b)（到达序分段分裂）在差分中未成立——`textStreamContinues` 的 sequence 窗口判定实际是序无关的，session/interaction 交错在重放中同样分段；若真实 provider 存在思考流中夹杂 session 事件，重放也会碎，与"重启恢复"矛盾，故该候选降权。**未闭环**：乱序 delta 完整收敛需 live seam（agentWorkbenchSession.applyLive）重排序缓冲，本轮按 K03 近似；真实 provider trace（Hermes 401）仍缺。P45 台账已登记接手记录，状态转待验收（等用户新构建复测三症状）。
 
 
