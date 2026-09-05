@@ -18,8 +18,6 @@ function initial(document?: WorkbenchDocument) {
     sessionId: 'session-a',
     status: 'ready' as const,
     messages: [],
-    streamingText: '',
-    streamingThinking: '',
     generating: false,
     generationStart: 0,
     tokenCount: 0,
@@ -103,7 +101,7 @@ describe('update() legacy rebuild provenance guard', () => {
 
   it('setSnapshot without a document returns the runtime to legacy derivation', () => {
     const runtime = createPreviewWorkbenchRuntime(initial(canonicalDocument()))
-    runtime.setSnapshot({ ...initial(), revision: 0, streamingText: 'token' })
+    runtime.setSnapshot({ ...initial(), revision: 0, tokenCount: 1 })
     runtime.update({ messages: [legacyMessage] })
     expect(runtime.getSnapshot().document?.messages.map(message => message.id)).toEqual(['m1'])
   })

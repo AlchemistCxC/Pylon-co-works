@@ -63,7 +63,7 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   return Object.freeze({
     revision: generation.revision ?? document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
-    streamingText: '', streamingThinking: '', generating,
+    generating,
     generationStart: generating ? generation.generationStart : 0,
     lastTokenAt: generating ? generation.lastTokenAt : undefined,
     tokenCount: generation.tokenCount, summary: generation.summary,
@@ -84,7 +84,6 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
 
 function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
   const slice = (name: WorkbenchRuntimeSlice): unknown => {
-    if (name === 'streaming') return { text: '', thinking: '' }
     if (name === 'capabilities') return { canAttach: host.capabilities.has('attach'), promptImage: false }
     if (name === 'tasks') return host.document.getSnapshot()?.plan.entries ?? []
     return host.document.getSlice(name as never)

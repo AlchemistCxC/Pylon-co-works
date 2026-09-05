@@ -4,10 +4,6 @@ import type { PlanEntry } from '../../../domains/tasks/planTypes.ts'
 export interface WorkbenchMessageFixture {
   messages: readonly Message[]
   tasks: readonly PlanEntry[]
-  streaming: {
-    text: string
-    thinking: string
-  }
 }
 
 export interface WorkbenchInputFixture {
@@ -131,10 +127,6 @@ export const WORKBENCH_MESSAGE_FIXTURE: WorkbenchMessageFixture = {
     { content: '建立 Solid smoke renderer', status: 'in_progress' },
     { content: '切换生产 AgentSheet', status: 'pending' },
   ],
-  streaming: {
-    thinking: '正在核对组件边界…',
-    text: 'Solid renderer 正在输出首个 token。',
-  },
 }
 
 export const WORKBENCH_INPUT_FIXTURE: WorkbenchInputFixture = {

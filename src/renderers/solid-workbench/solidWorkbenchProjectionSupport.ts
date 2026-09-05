@@ -2,60 +2,6 @@ import { selectActivityDisplayOrder, type WorkbenchActivityNode, type WorkbenchD
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
-import type { WorkbenchStreamingIdentity } from '../../domains/workbench/workbenchRuntime.ts'
-
-export interface DisplayStreamRecord {
-  readonly role: 'assistant' | 'reasoning'
-  readonly text: string
-  readonly owner: 'canonical' | 'transient' | 'none'
-  readonly canonical?: WorkbenchDocument['messages'][number]
-}
-
-/** Resolve canonical/transient text to one visible owner for a stream. */
-export function selectDisplayStream(
-  canonical: readonly WorkbenchDocument['messages'][number][],
-  role: 'assistant' | 'reasoning',
-  transientText: string,
-  transientIdentity?: WorkbenchStreamingIdentity,
-): DisplayStreamRecord {
-  const row = [...canonical].reverse().find(message => message.role === role
-    && identityCompatible(message.identity, transientIdentity))
-  if (!row && transientText) return { role, text: transientText, owner: 'transient' }
-  if (!row || !row.content) return row ? { role, text: transientText || row.content, owner: transientText ? 'transient' : 'canonical', canonical: row } : { role, text: '', owner: 'none' }
-  if (!transientText) return { role, text: row.content, owner: 'canonical', canonical: row }
-  // A terminal canonical row belongs to the previous turn. Only absorb a
-  // transient tail when it is a valid prefix continuation; unrelated text is
-  // a new display record and must not replace the historical row.
-  if (!row.running) {
-    if (transientText.startsWith(row.content) || row.content.startsWith(transientText)) {
-      return { role, text: row.content, owner: 'canonical', canonical: row }
-    }
-    return { role, text: transientText, owner: 'transient' }
-  }
-  if (transientText.startsWith(row.content) && transientText.length > row.content.length) return { role, text: transientText, owner: 'transient', canonical: row }
-  // Identity/content conflict: prefer the newest transient value as the sole
-  // visible owner rather than swallowing unrelated text behind a role-only
-  // coverage check. The canonical row is replaced at the list seam.
-  if (!transientText.startsWith(row.content) && !row.content.startsWith(transientText)) {
-    return { role, text: transientText, owner: 'transient', canonical: row }
-  }
-  return { role, text: row.content, owner: 'canonical', canonical: row }
-}
-
-function identityCompatible(
-  canonical: WorkbenchDocument['messages'][number]['identity'],
-  transient?: WorkbenchStreamingIdentity,
-): boolean {
-  if (!transient) return true
-  const keys: (keyof WorkbenchStreamingIdentity)[] = ['turnId', 'messageId', 'toolCallId', 'eventId']
-  const provided = keys.filter(key => transient[key] !== undefined)
-  if (provided.length === 0) return true
-  return provided.some(key => {
-    const canonicalValue = key === 'eventId' ? undefined : canonical[key]
-    return canonicalValue !== undefined && canonicalValue === transient[key]
-  })
-}
-
 export function canonicalTokenCount(
   usage: WorkbenchDocument['session']['usage'],
   fallback: number,

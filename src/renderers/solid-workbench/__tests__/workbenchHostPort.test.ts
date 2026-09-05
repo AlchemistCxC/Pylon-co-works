@@ -12,7 +12,7 @@ import { createSolidWorkbenchServicesFromHostPort } from '../hostPortSolidServic
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
-    sessionId: 's1', status: 'ready', messages: [], streamingText: '', streamingThinking: '', generating: false,
+    sessionId: 's1', status: 'ready', messages: [], generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '',
     availableModes: [], activeMode: '', canAttach: true, promptImage: false, error: null,
   })
@@ -112,7 +112,7 @@ describe('WorkbenchHostPort', () => {
     expect(Object.isFrozen(before)).toBe(true)
     const changed = vi.fn()
     const unsubscribe = host.document.subscribeSlice('messages', changed)
-    source.update({ streamingText: 'unrelated' })
+    source.update({ tokenCount: 1 })
     expect(changed).not.toHaveBeenCalled()
     const message: WorkbenchMessage = {
       id: 'new', segmentId: 'new', role: 'assistant', content: 'hello', parts: [], identity: {},

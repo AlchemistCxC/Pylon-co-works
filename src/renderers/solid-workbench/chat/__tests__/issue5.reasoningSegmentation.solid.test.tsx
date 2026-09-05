@@ -76,14 +76,19 @@ describe('issue 5 reasoning segmentation regression', () => {
     expect(thought?.parts[0]).toMatchObject({ kind: 'text', text })
   })
 
-  it('live streamingThinking character updates remain one paragraph', async () => {
+  it('live canonical reasoning row character updates remain one paragraph', async () => {
     const host = document.createElement('div')
     document.body.append(host)
     const services = createPreviewWorkbenchServices()
     mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }, services })
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), { ownerKey: 'owner-preview', generation: 1 })
     const text = '这是一个连续的思考过程，不应该每几个字符换段。'
-    for (const char of [...text]) services.runtime.update({ streamingThinking: services.runtime.getSnapshot().streamingThinking + char, generating: true })
+    // P52 D5：逐字符流由 canonical running reasoning 行承载（transient 字段已删除）。
+    let acc = ''
+    for (const char of [...text]) {
+      acc += char
+      services.runtime.update({ messages: [{ id: 'm-think', role: 'reasoning', sender: 'peri', content: acc, time: '10:00', running: true }], generating: true })
+    }
     const body = await waitFor(() => {
       const found = host.querySelector('.solid-workbench-chat .term-reasoning-body')
       expect(found).not.toBeNull()

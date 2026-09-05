@@ -19,7 +19,6 @@ import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
 import type { Session } from '../../../identityStore.ts'
-import { selectDisplayStream } from '../solidWorkbenchProjectionSupport.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -30,25 +29,6 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove()
 })
 
-describe('canonical/transient display owner', () => {
-  it('selects exactly one owner across short/equal/long prefixes and terminal precedence', () => {
-    const canonical = [{ id: 'm', segmentId: 'm', role: 'assistant' as const, content: 'abc', parts: [], identity: {}, source: { provider: 'p', sessionId: 's', sourceId: 'p' }, sequence: 1, running: true, time: '' }]
-    expect(selectDisplayStream(canonical, 'assistant', 'abcdef')).toMatchObject({ owner: 'transient', text: 'abcdef' })
-    expect(selectDisplayStream(canonical, 'assistant', 'abc')).toMatchObject({ owner: 'canonical', text: 'abc' })
-    expect(selectDisplayStream(canonical, 'assistant', 'ab')).toMatchObject({ owner: 'canonical', text: 'abc' })
-    expect(selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'abcdef')).toMatchObject({ owner: 'canonical', text: 'abc' })
-    const conflict = selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'xyz')
-    expect(conflict).toMatchObject({ owner: 'transient', text: 'xyz' })
-    expect(conflict.canonical).toBeUndefined()
-    expect(selectDisplayStream(canonical, 'assistant', 'xyz', { turnId: 'new-turn' })).toMatchObject({
-      owner: 'transient', text: 'xyz',
-    })
-    const identified = [{ ...canonical[0]!, identity: { messageId: 'm' } }]
-    expect(selectDisplayStream(identified, 'assistant', 'abcdef', { messageId: 'm' })).toMatchObject({
-      owner: 'transient', text: 'abcdef', canonical: identified[0],
-    })
-  })
-})
 
 function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
   const host = document.createElement('div')
@@ -208,7 +188,7 @@ describe('mountSolidWorkbench', () => {
     expect(await screen.findByRole('button', { name: '回到底部' })).toBeTruthy()
     scrollIntoView.mockClear()
 
-    services.runtime.update({ streamingText: '用户上滚后的新输出' })
+    services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '用户上滚后的新输出', time: '10:00', running: true }] })
     await Promise.resolve()
     expect(scrollIntoView).not.toHaveBeenCalled()
 
@@ -220,7 +200,7 @@ describe('mountSolidWorkbench', () => {
 
     scrollIntoView.mockClear()
     scrollTo.mockClear()
-    services.runtime.update({ streamingText: '恢复跟随后继续输出' })
+    services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '恢复跟随后继续输出', time: '10:00', running: true }] })
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' }))
   })
 
@@ -492,7 +472,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
       ownerKey: 'owner-preview', generation: 1, sessionId: 'preview-session',
     })
-    services.runtime.update({ streamingText: poem, generating: true })
+    services.runtime.update({ messages: [{ id: 'm-poem', role: 'assistant', sender: 'peri', content: poem, time: '10:00', running: true }], generating: true })
     const streamingBody = await waitFor(() => {
       const body = host.querySelector('.term-row-assistant .term-assistant-body')
       expect(body).not.toBeNull()
@@ -522,7 +502,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(finalDocument, {
       ownerKey: 'owner-preview', generation: 2, sessionId: 'preview-session',
     })
-    services.runtime.update({ streamingText: '', generating: false })
+    services.runtime.update({ messages: [], generating: false })
 
     const finalBody = await waitFor(() => {
       const body = host.querySelector(`[data-message-id="${finalDocument.messages[0]!.id}"] .term-assistant-body`)
@@ -537,7 +517,7 @@ describe('mountSolidWorkbench', () => {
     expect(finalBody.querySelectorAll('p')).toHaveLength(3)
   })
 
-  it('canonical 思考流与 legacy streamingThinking 不重复渲染', async () => {
+  it('canonical 思考行唯一渲染（P52 D5 后无 transient 第二来源）', async () => {
     const { host, services } = mountPreview()
     const reasoning = createWorkbenchEnvelope({
       sessionId: 'preview-session', sequence: 1,
@@ -549,13 +529,13 @@ describe('mountSolidWorkbench', () => {
     })
     const document = projectWorkbench([reasoning]).document
     services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
-    services.runtime.update({ streamingThinking: '同一段思考', generating: true })
+    services.runtime.update({ generating: true })
 
     await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
     expect(host.querySelectorAll('.term-reasoning')).toHaveLength(1)
   })
 
-  it('canonical 终态短暂清除 running 时仍抑制重复 transient 思考行', async () => {
+  it('canonical 终态思考行唯一渲染（transient 已死，无第二行来源）', async () => {
     const { host, services } = mountPreview()
     const reasoning = createWorkbenchEnvelope({
       sessionId: 'preview-session', sequence: 1,
@@ -566,7 +546,7 @@ describe('mountSolidWorkbench', () => {
       event: { type: 'reasoning.completed', parts: [{ kind: 'text', text: '终态思考' }] },
     })
     services.runtime.replaceDocument(projectWorkbench([reasoning]).document, { ownerKey: 'owner-preview', generation: 1 })
-    services.runtime.update({ streamingThinking: '终态思考', generating: true })
+    services.runtime.update({ generating: false })
 
     await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
     expect(host.querySelectorAll('.term-reasoning')).toHaveLength(1)
@@ -590,7 +570,6 @@ describe('mountSolidWorkbench', () => {
     services.runtime.update({
       document: canonical,
       messages: [legacyTool],
-      streamingThinking: '工具旁的思考',
       generating: true,
     })
 
@@ -1093,7 +1072,7 @@ describe('mountSolidWorkbench', () => {
   it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {
     const { host, services, lifecycle } = mountPreview()
     lifecycle.pause()
-    services.runtime.update({ streamingText: '暂停期间的新文本', tokenCount: 99 })
+    services.runtime.update({ messages: [{ id: 'm-paused', role: 'assistant', sender: 'peri', content: '暂停期间的新文本', time: '10:00', running: true }], tokenCount: 99 })
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     expect(host.querySelector('[data-paused="true"]')).toBeTruthy()

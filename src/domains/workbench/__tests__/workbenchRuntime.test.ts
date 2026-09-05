@@ -126,7 +126,7 @@ describe('createPreviewWorkbenchRuntime', () => {
 
     expect(runtime.getSnapshot().document).toBeDefined()
     expect(Object.isFrozen(runtime.getSnapshot().document)).toBe(true)
-    runtime.update({ streamingText: 'token' })
+    runtime.update({ tokenCount: 1 })
     expect(messages).not.toHaveBeenCalled()
     expect(usage).not.toHaveBeenCalled()
     runtime.update({ messages: [{ id: 'm1', role: 'assistant', sender: 'peri', content: 'hello', time: '10:00' }] })
@@ -208,9 +208,9 @@ describe('createPreviewWorkbenchRuntime', () => {
     const listener = vi.fn()
     runtime.subscribe(listener)
 
-    // 多次模拟流式 tick：只改 streamingText / tokenCount。
+    // 多次模拟流式 tick：只改 tokenCount（P52 D5 后 canonical 行更新走 applyDocument）。
     for (let t = 1; t <= 50; t++) {
-      runtime.update({ streamingText: `token-${t}`, tokenCount: t })
+      runtime.update({ tokenCount: t })
     }
 
     expect(listener).toHaveBeenCalledTimes(50)

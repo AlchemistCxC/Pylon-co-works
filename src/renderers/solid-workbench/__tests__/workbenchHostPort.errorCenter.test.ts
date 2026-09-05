@@ -10,7 +10,7 @@ import { clearErrors, getDiagnosticErrors, getErrorHistory, getErrors } from '..
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
-    sessionId: 'session-a', status: 'ready', messages: [], streamingText: '', streamingThinking: '', generating: false,
+    sessionId: 'session-a', status: 'ready', messages: [], generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '',
     availableModes: [], activeMode: '', canAttach: true, promptImage: false, error: null,
   })

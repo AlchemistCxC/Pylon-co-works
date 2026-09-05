@@ -10,13 +10,6 @@ import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.t
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
 
-export interface WorkbenchStreamingIdentity {
-  readonly messageId?: string
-  readonly eventId?: string
-  readonly turnId?: string
-  readonly toolCallId?: string
-}
-
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
 
 /** Legacy chat plan rows and canonical C08 plan rows coexist only at the runtime adapter boundary. */
@@ -25,7 +18,7 @@ export type WorkbenchTaskEntry = PlanEntry | PlanEntryV2
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
   | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics' | 'extensions'
-  | 'config' | 'commands' | 'tasks' | 'streaming' | 'capabilities'
+  | 'config' | 'commands' | 'tasks' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
   revision: number
@@ -40,10 +33,6 @@ export interface WorkbenchRuntimeSnapshot {
   terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
   messages: readonly Message[]
-  streamingText: string
-  streamingThinking: string
-  /** Controller-owned transient stream identity used by the display selector. */
-  streamingIdentity?: WorkbenchStreamingIdentity
   generating: boolean
   generationPhase?: GenerationPhase
   /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */
@@ -215,7 +204,6 @@ export function createWorkbenchRuntime(
       documentLegacyDerived = false
       const nextDocument = freezeDocument(document)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
-      const documentAdvanced = nextDocument.revision > (snapshot.document?.revision ?? -1)
       const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
         turnEpoch: options.turnEpoch,
@@ -228,7 +216,6 @@ export function createWorkbenchRuntime(
         // timeline. Also clear it for an idle replacement so a stale tool
         // label can never survive a bind or terminal snapshot.
         ...(ownerChanged || sessionChanged || !merged.generating ? { generationActivity: undefined } : {}),
-        ...(ownerChanged || sessionChanged || documentAdvanced ? { streamingText: '', streamingThinking: '' } : {}),
         document: nextDocument,
         sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
@@ -268,7 +255,7 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
   // Bug4（2026-08-20）：弃用全量 JSON.stringify 深比较——流式高频 tick 会对整个含全部历史消息
   // 的 snapshot 做一次 O(总字节) 序列化，消息越多越慢（实测 1000 条 ≈1.4ms/tick，成为流式卡顿
   // 源头）。改为逐字段浅比较：messages/tasks/availableModels 等数组字段在 freezeSnapshot 下引用
-  // 稳定，引用相同即视为一致（避免把"仅 streamingText 变化"误当成整包变化）。
+  // 稳定，引用相同即视为一致。
   return (
     left.sessionId === right.sessionId &&
     left.ownerKey === right.ownerKey &&
@@ -277,8 +264,6 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     terminalFencesEqual(left.terminalFence, right.terminalFence) &&
     left.status === right.status &&
     left.messages === right.messages &&
-    left.streamingText === right.streamingText &&
-    left.streamingThinking === right.streamingThinking &&
     left.generating === right.generating &&
     left.generationPhase === right.generationPhase &&
     left.generationActivity === right.generationActivity &&
@@ -634,13 +619,11 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'assist': return document?.assist
     case 'diagnostics': return document?.diagnostics ?? []
     case 'tasks': return snapshot.tasks
-    case 'streaming': return { text: snapshot.streamingText, thinking: snapshot.streamingThinking }
     case 'capabilities': return { canAttach: snapshot.canAttach, promptImage: snapshot.promptImage }
   }
 }
 
 function sliceChanged(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): boolean {
-  if (slice === 'streaming') return left.streamingText !== right.streamingText || left.streamingThinking !== right.streamingThinking
   if (slice === 'capabilities') return left.canAttach !== right.canAttach || left.promptImage !== right.promptImage
   return selectSlice(left, slice) !== selectSlice(right, slice)
 }

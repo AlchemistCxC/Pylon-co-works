@@ -35,7 +35,7 @@ describe('C15 extension projection', () => {
     const live = reduceWorkbenchEvent(createWorkbenchDocument('session-c15'), envelope)
     expect(live).toEqual(replay)
 
-    const runtime = createWorkbenchRuntime({ sessionId: 'session-c15', status: 'ready', messages: [], streamingText: '', streamingThinking: '', generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false, promptImage: false, error: null, document: createWorkbenchDocument('session-c15') })
+    const runtime = createWorkbenchRuntime({ sessionId: 'session-c15', status: 'ready', messages: [], generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false, promptImage: false, error: null, document: createWorkbenchDocument('session-c15') })
     runtime.applyDocument(live)
     const extension = runtime.getSnapshot().document!.extensions[0]!
     expect(Object.isFrozen(extension)).toBe(true)

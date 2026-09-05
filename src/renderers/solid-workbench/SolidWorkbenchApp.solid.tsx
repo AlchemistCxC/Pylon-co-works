@@ -11,7 +11,7 @@ import type { MessageListItem } from '../../domains/workbench/messageListPort.ts
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
 import { INSTANT_LOCK_MS, SMOOTH_LOCK_MS } from '../../components/chat/scrollFollowState.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
-import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
+import { ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
 import { SolidToolConnectorLayer, type SolidToolConnectorEdge, type ToolConnectorAppearance } from './chat/ToolConnector.solid.tsx'
@@ -34,7 +34,7 @@ import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.t
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
-import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, selectDisplayStream, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
+import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
 import type { WorkbenchSessionCreationSnapshot } from '../../domains/workbench/workbenchCommandFacade.ts'
 
@@ -128,25 +128,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
   const document = () => snapshot().document
   const displayDocument = createMemo(() => {
-    // Ownership is resolved once, at the message-list seam, by
-    // selectDisplayStream(session/turn/segment identity). Keep the canonical
+    // Ownership is resolved once, at the message-list seam. Keep the canonical
     // document intact for activity placement, diagnostics and other readers.
     return document()
   })
-  // Canonical events and the legacy controller can briefly expose the same
-  // in-flight text through both `document.messages` and the transient
-  // streaming fields. Prefer the canonical running row once it exists; two
-  // independently measured reasoning rows make the chat height/scroll rail
-  // oscillate on every token.
-  const visibleStreamingThinking = createMemo(() => {
-    // Transient reasoning is normalized into viewMessages() as the sole row;
-    // this legacy fallback remains as an empty compatibility seam.
-    return ''
-  })
-  const visibleStreamingText = createMemo(() => {
-    // See visibleStreamingThinking: the message list owns transient rows.
-    return ''
-  })
+  // P52 D5：transient 流字段已死（D3 后无生产写入者）——canonical running 行
+  // 是唯一流式显示；此前的 transient 兜底 memo 与 appendTransient 注入随之退役。
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
     const projected = displayDocument()?.messages
@@ -160,25 +147,6 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const base = canonical
       .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
       .map(toSolidMessage)
-    const appendTransient = (role: 'assistant' | 'reasoning', text: string) => {
-      if (!text) return
-      const candidates = canonical.filter(message => message.role === role)
-      const record = selectDisplayStream(candidates, role, text, snapshot().streamingIdentity)
-      if (record.owner !== 'transient') return
-      const index = record.canonical ? base.findIndex(message => message.id === record.canonical!.id) : -1
-      const transient: Message = {
-        id: record.canonical?.id ?? `${snapshot().sessionId ?? 'session'}:transient:${role}`,
-        role,
-        sender: 'streaming',
-        content: record.text,
-        time: '',
-        running: true,
-      }
-      if (index >= 0) base.splice(index, 1, transient)
-      else base.push(transient)
-    }
-    appendTransient('reasoning', snapshot().streamingThinking)
-    appendTransient('assistant', snapshot().streamingText)
     // Legacy preview hosts still expose tool rows before their activity
     // projection is available. Preserve those non-text rows without merging
     // legacy assistant/reasoning rows back into the canonical stream.
@@ -564,17 +532,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   queueBottomFollow()
                 }}
               />
-              <Show when={visibleStreamingThinking()}>
-                {text => <div class="term-row term-row-reasoning" data-render-type="reasoning" data-streaming="true">
-                  <ReasoningBlock text={text()} running />
-                </div>}
-              </Show>
-                  <WorkbenchDocumentSurface document={displayDocument()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
-              <Show when={visibleStreamingText()}>
-                {text => <div class="term-row term-row-assistant" data-render-type="assistant" data-streaming="true">
-                  <AssistantContent text={text()} appearance={appearance()} streaming />
-                </div>}
-              </Show>
+              <WorkbenchDocumentSurface document={displayDocument()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
               <SolidGenerationFooter
                 running={snapshot().generating}
                 // The runtime snapshot carries the document and live

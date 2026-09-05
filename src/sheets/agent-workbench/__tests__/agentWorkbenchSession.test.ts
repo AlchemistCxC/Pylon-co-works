@@ -91,8 +91,6 @@ describe('Agent Workbench canonical session runtime', () => {
     })
 
     await service.bind(active)
-    expect(service.runtime.getSnapshot().streamingText).toBe('')
-    expect(service.runtime.getSnapshot().streamingThinking).toBe('')
 
     publish?.(createWorkbenchEnvelope({
       sessionId: active.source,
@@ -105,8 +103,7 @@ describe('Agent Workbench canonical session runtime', () => {
     }))
 
     const snapshot = service.runtime.getSnapshot()
-    // 流式显示走 canonical running 行；transient 字段不再有生产写入者（恒空）。
-    expect(snapshot.streamingText).toBe('')
+    // 流式显示唯一主人 = canonical running 行（P52 D5：transient 字段已删除）。
     expect(snapshot.document?.messages.some(message => message.running && message.content === '流式正文')).toBe(true)
     expect(snapshot.generating).toBe(true)
     service.destroy()

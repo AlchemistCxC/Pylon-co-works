@@ -279,13 +279,9 @@ function preserveDisplayedPrefix(
   const document = displayed.document && next.document
     ? { ...next.document, messages: preserveMessagePrefixes(displayed.document.messages, next.document.messages) as WorkbenchDocument['messages'] }
     : next.document
-  const streamingText = displayed.streamingText.startsWith(next.streamingText) ? displayed.streamingText : next.streamingText
-  const streamingThinking = displayed.streamingThinking.startsWith(next.streamingThinking) ? displayed.streamingThinking : next.streamingThinking
   return {
     ...next,
     messages,
-    streamingText,
-    streamingThinking,
     ...(document ? { document } : {}),
   }
 }
@@ -318,7 +314,6 @@ function defaultNow(): number {
 }
 
 function hasActiveTextStream(snapshot: WorkbenchRuntimeSnapshot): boolean {
-  if (snapshot.streamingText.length > 0 || snapshot.streamingThinking.length > 0) return true
   return snapshot.messages.some(message => (
     (message.role === 'assistant' || message.role === 'reasoning') && message.running === true
   )) || Boolean(snapshot.document?.messages.some(message => (
@@ -330,8 +325,6 @@ function hasPendingTextGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
-  if (isPrefixGrowth(current.streamingText, next.streamingText)
-    || isPrefixGrowth(current.streamingThinking, next.streamingThinking)) return true
   if (messageListHasPendingGrowth(current.messages, next.messages)) return true
   if (current.document && next.document
     && messageListHasPendingGrowth(current.document.messages, next.document.messages)) return true
@@ -359,18 +352,12 @@ function requiresImmediateFlush(
 
   if (hasNonPrefixMessageChange(current.messages, next.messages)) return true
   if (current.document && next.document && hasNonPrefixMessageChange(current.document.messages, next.document.messages)) return true
-  if (hasNonPrefixStringChange(current.streamingText, next.streamingText)
-    || hasNonPrefixStringChange(current.streamingThinking, next.streamingThinking)) return true
 
   const pending = hasPendingTextGrowth(current, next)
   // A terminal text snapshot must never wait for the next timer. This also
   // covers “assistant finished, tool is still running” projections.
   if (pending && (!hasActiveTextStream(next) || next.generating === false)) return true
   return false
-}
-
-function hasNonPrefixStringChange(current: string, next: string): boolean {
-  return current.length > 0 && next !== current && !next.startsWith(current)
 }
 
 function hasNonPrefixMessageChange<T extends DisplayMessage>(
@@ -443,11 +430,7 @@ function interpolateSnapshot(
       ? interpolateMessageList([], target.document.messages, budget)
       : { messages: [], pending: false }
 
-  const streamingText = advancePrefix(current.streamingText, target.streamingText, budget).value
-  const streamingThinking = advancePrefix(current.streamingThinking, target.streamingThinking, budget).value
   const pending = legacy.pending || documentProgress.pending
-    || streamingText !== target.streamingText
-    || streamingThinking !== target.streamingThinking
 
   if (!pending) return { snapshot: target, pending: false }
 
@@ -461,8 +444,6 @@ function interpolateSnapshot(
     snapshot: {
       ...target,
       messages: legacy.messages,
-      streamingText,
-      streamingThinking,
       ...(document ? { document } : {}),
     },
     pending: true,

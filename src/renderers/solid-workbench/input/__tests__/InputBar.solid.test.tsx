@@ -27,7 +27,7 @@ afterAll(() => { void modelCommand.dispose() })
 
 function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider) {
   const services = createPreviewWorkbenchServices()
-  services.runtime.update({ sessionId, generating: false, streamingText: '', streamingThinking: '' })
+  services.runtime.update({ sessionId, generating: false })
   const theme = structuredClone(DEFAULTS)
   theme.inputVariant = inputVariant
   theme.inputMode = inputVariant === 'cli' ? 'cli' : 'default'
