@@ -79,6 +79,8 @@ mod del03_local_first_delete;
 // 的 {code,message} 稳定序列化 + 删除后迟到 evt_append wire code=event_session_deleted）。
 #[cfg(test)]
 mod del05_error_code_matrix;
+#[cfg(test)]
+mod revive_tests;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
@@ -945,6 +947,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:999".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -966,6 +969,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:123".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -998,6 +1002,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:999".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1111,6 +1116,7 @@ for line in sys.stdin:
             attachments: Some(attachments),
             mcp_servers: None,
             cwd: None,
+            known_peri_id: None,
         };
         let result =
             send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &ctx)
@@ -1717,7 +1723,7 @@ for line in sys.stdin:
         );
         let state = state_without_active_runtime();
 
-        let error = ensure_session_mapping(&state, &runtime, "source-a", None, "persona", ".", &[])
+        let error = ensure_session_mapping(&state, &runtime, "source-a", None, "persona", ".", &[], None, &mut None)
             .await
             .err()
             .expect("probing binding must not be reused by any backend caller");
@@ -1759,6 +1765,7 @@ for line in sys.stdin:
             &PromptContext {
                 source: "i1-source".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1826,6 +1833,7 @@ for line in sys.stdin:
             &PromptContext {
                 source: "i2-source".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1925,6 +1933,7 @@ for line in sys.stdin:
         let prompt_ctx = PromptContext {
             source: "s2-source".to_string(),
             content: "hello".to_string(),
+            known_peri_id: None,
             ..Default::default()
         };
 

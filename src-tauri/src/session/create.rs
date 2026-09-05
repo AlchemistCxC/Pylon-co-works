@@ -593,9 +593,12 @@ async fn create_session_slot(
     })
 }
 
-/// G2-04：会话建立/复用——已有映射则复用（返回 is_first = !has_first_prompt），
-/// 否则走 create_session_slot（E7 拍板：自动建会话覆盖旧映射时 close 旧 peri，
-/// close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的幽灵映射）。
+/// G2-04：会话建立/复用——已有映射则复用（返回 is_first = !has_first_prompt）；
+/// 内存无映射但调用方带持久化 peri_id 时，先尝试 ACP 原生 session/load 复活
+/// 远端会话（用户决策：避免每次发送都新建导致 provider 会话列表臃肿、上下文
+/// 丢失）；复活失败才走 create_session_slot（E7 拍板：自动建会话覆盖旧映射时
+/// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
+/// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
 pub(crate) async fn ensure_session_mapping(
     state: &AppState,
@@ -605,6 +608,8 @@ pub(crate) async fn ensure_session_mapping(
     persona: &str,
     session_cwd: &str,
     wire_mcp_servers: &[serde_json::Value],
+    known_peri_id: Option<&str>,
+    recreated_peri_id: &mut Option<String>,
 ) -> Result<SessionMapping, PylonError> {
     let _creation_guard = runtime.session_creation.lock().await;
     if let Some(health) = runtime
@@ -646,7 +651,25 @@ pub(crate) async fn ensure_session_mapping(
             new_response: None,
         });
     }
-    create_session_slot(
+    // 内存无映射（Pylon 重启 / agent 重启清空）：优先用持久化 peri_id 走 ACP
+    // 原生 session/load 复活远端会话。复活成功则本消息续用原会话上下文，
+    // provider 会话列表不再因每次重启膨胀。
+    if let Some(peri_id) = known_peri_id.filter(|id| !id.is_empty()) {
+        if let Some(mapping) = revive_session_slot(
+            state,
+            runtime,
+            source,
+            peri_id,
+            profile_id,
+            session_cwd,
+            wire_mcp_servers,
+        )
+        .await?
+        {
+            return Ok(mapping);
+        }
+    }
+    let mapping = create_session_slot(
         state,
         runtime,
         source,
@@ -660,7 +683,99 @@ pub(crate) async fn ensure_session_mapping(
         None,
         true,
     )
-    .await
+    .await?;
+    // 上下文已断（远端会话死亡，本轮起是新会话）：前端需要知道新 peri_id
+    // 才能持久化并让后续 load 复活这条新会话。
+    *recreated_peri_id = Some(mapping.peri_id.clone());
+    Ok(mapping)
+}
+
+/// ACP 原生会话复活：session/load（普通 RPC，无 replay capture——历史由本地
+/// canonical journal 呈现，无需重放）成功后重建本地槽位并 Attached。
+/// 返回 Ok(None) = 复活不可行/失败，调用方降级新建；不返回 Err（错误留给
+/// 新建路径统一报告，避免双重报错）。
+async fn revive_session_slot(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    profile_id: Option<&str>,
+    session_cwd: &str,
+    wire_mcp_servers: &[serde_json::Value],
+) -> Result<Option<SessionMapping>, PylonError> {
+    let generation = state.current_generation(runtime);
+    let params = crate::acp::load_params(
+        peri_id,
+        session_cwd,
+        wire_mcp_servers.to_vec(),
+        state.protocol_for_runtime(runtime).mcp_servers,
+    )
+    .map_err(PylonError::Protocol)?;
+    let response = match state
+        .acp_rpc(runtime, crate::acp::METHOD_SESSION_LOAD, params)
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            state.log_runtime_summary(
+                "info",
+                "session",
+                Some(source.to_string()),
+                "Session revive via session/load failed; falling back to session/new",
+                serde_json::Map::from_iter([(
+                    "periId".to_string(),
+                    serde_json::Value::String(peri_id.to_string()),
+                ), (
+                    "error".to_string(),
+                    serde_json::Value::String(error.to_string()),
+                )]),
+            );
+            return Ok(None);
+        }
+    };
+    state.ensure_generation(runtime, generation)?;
+    let revived_peri_id =
+        crate::acp::session_id_from(&response).unwrap_or_else(|_| peri_id.to_string());
+    let mut session = SessionInfo::new(
+        revived_peri_id.clone(),
+        String::new(),
+        session_cwd.to_string(),
+        false,
+        generation,
+    );
+    session.profile_id = profile_id.map(str::to_string);
+    session.apply_session_response(&response);
+    let _replaced = replace_session_slot(
+        runtime,
+        source,
+        session,
+        true,
+        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+    )?;
+    let attached = crate::session_store::mark_attached_if_current(
+        runtime, source, &revived_peri_id, generation, generation,
+    )
+    .map_err(|error| PylonError::Protocol(error.to_string()))?;
+    if !attached {
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
+    }
+    state.log_runtime_summary(
+        "info",
+        "session",
+        Some(source.to_string()),
+        "Session revived via ACP session/load",
+        serde_json::Map::from_iter([(
+            "periId".to_string(),
+            serde_json::Value::String(revived_peri_id.clone()),
+        )]),
+    );
+    Ok(Some(SessionMapping {
+        peri_id: revived_peri_id,
+        is_first: false,
+        new_response: None,
+    }))
 }
 
 /// G2-02：load_persisted_session 失败恢复去重——锁 sessions → 复核映射

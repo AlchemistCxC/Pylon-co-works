@@ -1197,6 +1197,7 @@ pub fn run() {
                                     attachments: None,
                                     mcp_servers: None,
                                     cwd: agent_cwd,
+                                    known_peri_id: None,
                                 },
                             ).await {
                                 tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);

@@ -224,6 +224,7 @@ async fn gui_prompt_persists_user_and_done_before_publishing_terminal_state() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("prompt must send");
@@ -284,6 +285,7 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
         Some("profile-1".to_string()),
         "will fail".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,
@@ -414,6 +416,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("first message must send");
@@ -440,6 +443,7 @@ gateway:
         None,
         "继续".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,
@@ -494,6 +498,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("message must send");
@@ -540,6 +545,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("message must send without injection");
@@ -576,6 +582,7 @@ gateway:
         None,
         "/status".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,
@@ -636,6 +643,7 @@ gateway:
         None,
         "你好".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,

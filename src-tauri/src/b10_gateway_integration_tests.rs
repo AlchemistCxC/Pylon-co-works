@@ -162,6 +162,7 @@ gateway:
                     attachments: None,
                     mcp_servers: None,
                     cwd: None,
+                    known_peri_id: None,
                 },
             )
             .await

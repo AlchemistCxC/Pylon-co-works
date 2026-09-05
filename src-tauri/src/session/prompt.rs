@@ -238,12 +238,14 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    peri_id: Option<String>,
 ) -> Result<String, PylonError> {
     // OWNER-02（§5.8）：显式 agentId 路由到 owner runtime——只要求 agent runtime 存在，
     // 不要求会话已存在（send_message 允许自动创建会话）；不存在 owner runtime →
     // agent_runtime_unavailable，绝不 fallback active runtime。
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
     // G2-05：PromptContext 内联构造（IPC 签名锁定；字段全部 move，零 clone）。
+    // peri_id：前端持久化的远端会话 id——内存映射缺失时优先 session/load 复活。
     let ctx = PromptContext {
         source,
         profile_id,
@@ -253,6 +255,7 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
         attachments,
         mcp_servers,
         cwd: None,
+        known_peri_id: peri_id,
     };
     send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
@@ -273,6 +276,7 @@ pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    peri_id: Option<String>,
     on_update: tauri::ipc::Channel<serde_json::Value>,
 ) -> Result<String, PylonError> {
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
@@ -286,6 +290,7 @@ pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
         attachments,
         mcp_servers,
         cwd: None,
+        known_peri_id: peri_id,
     };
     // 终帧/注销由收尾两路（finalize_response → DONE 帧 / publish_prompt_failure →
     // ERROR 帧）经 send_channel_terminal 完成，不绑本函数生命周期。
@@ -656,6 +661,9 @@ pub(crate) struct PromptContext {
     pub(crate) attachments: Option<Vec<String>>,
     pub(crate) mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
     pub(crate) cwd: Option<String>,
+    /// 持久化的远端会话 id（GUI send_message 透传；平台 ingest 无）。内存映射
+    /// 缺失时用于 ACP session/load 复活原会话，避免静默新建导致上下文丢失。
+    pub(crate) known_peri_id: Option<String>,
 }
 
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
@@ -774,6 +782,16 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         // 方案 I：session/new（建会话/复用）失败必须立即向前端广播 pylon:error，
         // 不能静默传播 Err——否则用户看到的是"消息滞留 + 生成指示器空转"而非明确错误
         // （Hermes 无 provider/401 等均在此时失败）。错误同时进 runtime 日志带上下文。
+        // 持久化 peri_id（Pylon 重启后内存映射为空）：优先 ACP session/load 复活
+        // 原会话；仅当复活失败（远端会话已死）才新建，并向前端广播新会话事实。
+        let revived_peri_id = ctx
+            .known_peri_id
+            .clone()
+            .filter(|id| !id.is_empty());
+        // Recreated-session notice is emitted after ensure returns (holding a
+        // &dyn callback across the await would make the command future
+        // non-Send); the callback is replaced by a plain Option<String> out.
+        let mut recreated_peri_id: Option<String> = None;
         let mapping = match ensure_session_mapping(
             state,
             runtime,
@@ -782,6 +800,8 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             persona,
             &session_cwd,
             &requested_mcp_servers,
+            revived_peri_id.as_deref(),
+            &mut recreated_peri_id,
         )
         .await
         {
@@ -802,6 +822,18 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                 return Err(PylonError::Protocol(message));
             }
         };
+        if let Some(new_peri_id) = &recreated_peri_id {
+            if let Some(window) = window {
+                crate::emit_event(
+                    window,
+                    "pylon:session-recreated",
+                    serde_json::json!({
+                        "source": source,
+                        "periId": new_peri_id,
+                    }),
+                );
+            }
+        }
         (mapping.peri_id, mapping.is_first)
     };
 
@@ -1285,6 +1317,7 @@ for line in sys.stdin:
             source: "local:prompt-success".to_string(),
             profile_id: Some("profile-success".to_string()),
             content: "hello from send".to_string(),
+            known_peri_id: None,
             ..Default::default()
         };
         send_prompt_core::<tauri::test::MockRuntime>(

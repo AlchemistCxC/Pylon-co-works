@@ -31,9 +31,8 @@ pub(crate) use jsonrpc::{
     remove_pending_from, wait_prompt_with_recovery, Pending, PreparedRpc, PromptTimeoutKind,
     PromptWaitOutcome, PENDING_SHARDS,
 };
-#[cfg(test)]
-pub(crate) use protocol::load_params;
 pub(crate) use protocol::{
+    load_params,
     prompt_blocks, prompt_stop_reason, session_id_from, session_prompt_params,
 };
 pub use protocol::{
