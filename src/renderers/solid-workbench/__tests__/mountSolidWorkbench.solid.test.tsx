@@ -268,6 +268,73 @@ describe('mountSolidWorkbench', () => {
     }
   })
 
+  it('同一帧 outer follow 合并多次 ResizeObserver 通知，且离底取消排队写入', async () => {
+    const previousRaf = globalThis.requestAnimationFrame
+    const previousCancel = globalThis.cancelAnimationFrame
+    let nextFrame = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = ++nextFrame
+      frames.set(id, callback)
+      return id
+    }) as typeof requestAnimationFrame
+    globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+    const previousResizeObserver = globalThis.ResizeObserver
+    class MockResizeObserver {
+      static instances: MockResizeObserver[] = []
+      readonly observed = new Set<Element>()
+      constructor(private readonly callback: ResizeObserverCallback) { MockResizeObserver.instances.push(this) }
+      observe(element: Element) { this.observed.add(element) }
+      unobserve(element: Element) { this.observed.delete(element) }
+      disconnect() { this.observed.clear() }
+      trigger() { this.callback([], this as unknown as ResizeObserver) }
+    }
+    globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+    const flushFrame = () => {
+      const pending = [...frames.values()]
+      frames.clear()
+      for (const callback of pending) callback(performance.now())
+    }
+    try {
+      const scrollTo = vi.fn()
+      const { host, services } = mountPreview()
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      Object.defineProperties(viewport, {
+        scrollTop: { value: 700, writable: true, configurable: true },
+        scrollHeight: { value: 1_000, configurable: true },
+        clientHeight: { value: 300, configurable: true },
+        scrollTo: { value: scrollTo, configurable: true },
+      })
+      await Promise.resolve()
+      flushFrame()
+      scrollTo.mockClear()
+
+      const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
+      expect(contentObserver).toBeTruthy()
+      Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
+      contentObserver!.trigger()
+      contentObserver!.trigger()
+      contentObserver!.trigger()
+      expect(scrollTo).not.toHaveBeenCalled()
+      flushFrame()
+      expect(scrollTo).toHaveBeenCalledTimes(1)
+      expect(scrollTo).toHaveBeenLastCalledWith({ top: 800, behavior: 'auto' })
+
+      // A user scroll invalidates the queued action before its frame runs.
+      Object.defineProperty(viewport, 'scrollTop', { value: 100, writable: true, configurable: true })
+      Object.defineProperty(viewport, 'scrollHeight', { value: 1_200, configurable: true })
+      contentObserver!.trigger()
+      fireEvent.scroll(viewport)
+      flushFrame()
+      expect(scrollTo).toHaveBeenCalledTimes(1)
+      services.runtime.destroy()
+    } finally {
+      globalThis.requestAnimationFrame = previousRaf
+      globalThis.cancelAnimationFrame = previousCancel
+      globalThis.ResizeObserver = previousResizeObserver
+    }
+  })
+
   it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,

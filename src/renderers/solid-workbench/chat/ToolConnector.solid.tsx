@@ -172,7 +172,12 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
   const stabilize = (reason: ToolConnectorInvalidationReason) => {
     if (disposed) return
     invalidate(reason)
-    settleRemaining = Math.max(settleRemaining, 8)
+    // A resize/mutation notification can be produced by the layout pass that
+    // this settle loop itself schedules.  Do not restart the bounded window
+    // while it is active; otherwise one callback per frame turns the nominal
+    // eight-frame settle into an unbounded loop.
+    if (settleRemaining > 0 || settleFrame !== undefined) return
+    settleRemaining = 8
     if (settleFrame !== undefined || typeof requestAnimationFrame !== 'function') return
     const tick = () => {
       settleFrame = undefined
