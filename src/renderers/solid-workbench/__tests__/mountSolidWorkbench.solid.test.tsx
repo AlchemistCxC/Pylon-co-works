@@ -312,10 +312,14 @@ describe('mountSolidWorkbench', () => {
       const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
       expect(contentObserver).toBeTruthy()
       Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
+      // Drop mount/connector work; the assertions below measure only this
+      // content observer's same-frame follow request.
+      frames.clear()
       contentObserver!.trigger()
       contentObserver!.trigger()
       contentObserver!.trigger()
       expect(scrollTo).not.toHaveBeenCalled()
+      expect(frames.size).toBe(1)
       flushFrame()
       expect(scrollTo).toHaveBeenCalledTimes(1)
       expect(scrollTo).toHaveBeenLastCalledWith({ top: 800, behavior: 'auto' })
