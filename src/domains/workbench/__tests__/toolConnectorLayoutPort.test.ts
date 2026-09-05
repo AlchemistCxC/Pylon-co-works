@@ -41,6 +41,28 @@ describe('ToolConnectorLayoutPort', () => {
     expect(apply).toHaveBeenLastCalledWith({ left: 11, top: 20, height: 60 })
   })
 
+  it('同一帧重复测量同一几何只写入一次，几何变化才追加写入', () => {
+    const callbacks: (() => void)[] = []
+    const scheduler: ToolConnectorScheduler = {
+      schedule(callback) { callbacks.push(callback); return callback },
+      cancel: vi.fn(),
+    }
+    const port = createToolConnectorLayoutPort(scheduler)
+    const apply = vi.fn()
+    let top = 10
+    port.registerTool('from', () => ({ head: rect(top, 0, 100, 20), indicator: rect(top + 4, 8, 8, 8) }))
+    port.registerTool('to', () => ({ head: rect(70, 0, 100, 20), indicator: rect(74, 8, 8, 8) }))
+    port.registerConnector({ key: 'stable', fromMessageId: 'from', toMessageId: 'to', measure: () => ({ parent: rect(0, 0, 300, 300), width: 2 }), apply })
+    callbacks.shift()?.()
+    port.invalidate('manual')
+    callbacks.shift()?.()
+    expect(apply).toHaveBeenCalledTimes(1)
+    top = 20
+    port.invalidate('manual')
+    callbacks.shift()?.()
+    expect(apply).toHaveBeenCalledTimes(2)
+  })
+
   it('缺失任一 anchor 时隐藏 connector；注销和 destroy 幂等清理', () => {
     let callback: (() => void) | undefined
     const cancel = vi.fn()
