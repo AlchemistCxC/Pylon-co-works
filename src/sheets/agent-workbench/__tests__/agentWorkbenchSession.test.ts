@@ -108,6 +108,44 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('bridges controller transient streams into the Workbench runtime and clears them at terminal', async () => {
+    let notify: (() => void) | undefined
+    let generating = true
+    const active = session('session-transient-bridge', 'local:transient-bridge')
+    const controller = {
+      subscribe: (_source: string, listener: () => void) => { notify = listener; return () => { notify = undefined } },
+      getGenerating: () => generating,
+      getStartTime: () => 1_000,
+      getLastActivityAt: () => 2_000,
+      getGenerationPhase: () => ({ kind: 'responding' as const }),
+      getGenerationActivity: () => undefined,
+      getThinkingStart: () => undefined,
+      getTokenCount: () => 2,
+      getSummary: () => undefined,
+      getStreamingState: () => ({ text: generating ? 'transient assistant' : '', thinking: generating ? 'transient thought' : '' }),
+      rejectOptimisticUser: () => {},
+    }
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      subscribe: () => () => {},
+      chatController: () => controller,
+    })
+
+    await service.bind(active)
+    expect(service.runtime.getSnapshot()).toMatchObject({
+      streamingText: 'transient assistant',
+      streamingThinking: 'transient thought',
+    })
+    generating = false
+    notify?.()
+    expect(service.runtime.getSnapshot()).toMatchObject({
+      generating: false,
+      streamingText: '',
+      streamingThinking: '',
+    })
+    service.destroy()
+  })
+
   it('切换会话后从 source-scoped runtime 恢复生成指示器与迟滞时钟', async () => {
     const live = new Map([
       ['local:a', { generating: true, start: 1_000, last: 4_000 }],

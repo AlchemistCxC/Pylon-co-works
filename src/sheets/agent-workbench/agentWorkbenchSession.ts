@@ -461,6 +461,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (!controller) return
     const generating = controller.getGenerating(targetSource)
     const controllerSummary = controller.getSummary(targetSource)
+    const streaming = controller.getStreamingState?.(targetSource)
     const existingSummary = runtime.getSnapshot().summary
     const currentDocument = runtime.getSnapshot().document
     if (!currentDocument) return
@@ -479,6 +480,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       generationActivity: controller.getGenerationActivity?.(targetSource),
       thinkingStart: controller.getThinkingStart(targetSource),
       tokenCount: controller.getTokenCount(targetSource),
+      // Solid consumes the same controller-owned transient stream as the
+      // legacy React renderer. Clear it in the same terminal merge so a stale
+      // controller tail cannot outlive the canonical completed document.
+      streamingText: generating ? (streaming?.text ?? '') : '',
+      streamingThinking: generating ? (streaming?.thinking ?? '') : '',
+      streamingIdentity: generating ? streaming?.identity : undefined,
       // Keep the display-only restored terminal summary stable across later
       // controller notifications that still have no in-memory summary.
       summary: controllerSummary ?? (!generating && existingSummary?.reason === 'done' ? existingSummary : null),

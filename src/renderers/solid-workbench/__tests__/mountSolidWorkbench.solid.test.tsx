@@ -40,6 +40,13 @@ describe('canonical/transient display owner', () => {
     const conflict = selectDisplayStream([{ ...canonical[0]!, running: false }], 'assistant', 'xyz')
     expect(conflict).toMatchObject({ owner: 'transient', text: 'xyz' })
     expect(conflict.canonical).toBeUndefined()
+    expect(selectDisplayStream(canonical, 'assistant', 'xyz', { turnId: 'new-turn' })).toMatchObject({
+      owner: 'transient', text: 'xyz',
+    })
+    const identified = [{ ...canonical[0]!, identity: { messageId: 'm' } }]
+    expect(selectDisplayStream(identified, 'assistant', 'abcdef', { messageId: 'm' })).toMatchObject({
+      owner: 'transient', text: 'abcdef', canonical: identified[0],
+    })
   })
 })
 

@@ -163,7 +163,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const appendTransient = (role: 'assistant' | 'reasoning', text: string) => {
       if (!text) return
       const candidates = canonical.filter(message => message.role === role)
-      const record = selectDisplayStream(candidates, role, text)
+      const record = selectDisplayStream(candidates, role, text, snapshot().streamingIdentity)
       if (record.owner !== 'transient') return
       const index = record.canonical ? base.findIndex(message => message.id === record.canonical!.id) : -1
       const transient: Message = {

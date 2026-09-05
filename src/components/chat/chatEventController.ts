@@ -112,7 +112,7 @@ export interface ChatControllerHandle {
   /** W2-12：消息快照访问器（右栏搜索消费；hook 行为不变） */
   getMessages: (source: string) => Message[]
   /** 渲染期读取该 source 的流式缓冲（切 sheet/会话后恢复 ChatView 本地流式态） */
-  getStreamingState: (source: string) => { text: string; thinking: string }
+  getStreamingState: (source: string) => { text: string; thinking: string; identity?: { messageId?: string; eventId?: string; turnId?: string; toolCallId?: string } }
   /** EVT-03：replay 归一化 unknown/malformed 条目（raw 已保留，不静默丢弃——§5.11） */
   getReplayMalformedEvents: () => Array<{ source: string; arrivalSeq: number; warning?: string; raw: unknown }>
   /** 横向读取：思考开始时间戳（thinking 时长显示用） */
@@ -1411,7 +1411,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     getMessages: (source) => runtimeAt(source)?.messages ?? [],
     getStreamingState: (source) => {
       const runtime = runtimeAt(source)
-      return { text: runtime?.streamingText ?? '', thinking: runtime?.streamingThinking ?? '' }
+      return {
+        text: runtime?.streamingText ?? '',
+        thinking: runtime?.streamingThinking ?? '',
+        identity: runtime?.streamingIdentity,
+      }
     },
     getReplayMalformedEvents: () => malformedReplayEvents,
     getThinkingStart: (source) => runtimeAt(source)?.thinkingStart,

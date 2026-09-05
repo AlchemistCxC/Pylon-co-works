@@ -10,6 +10,13 @@ import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.t
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
 
+export interface WorkbenchStreamingIdentity {
+  readonly messageId?: string
+  readonly eventId?: string
+  readonly turnId?: string
+  readonly toolCallId?: string
+}
+
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
 
 /** Legacy chat plan rows and canonical C08 plan rows coexist only at the runtime adapter boundary. */
@@ -35,6 +42,8 @@ export interface WorkbenchRuntimeSnapshot {
   messages: readonly Message[]
   streamingText: string
   streamingThinking: string
+  /** Controller-owned transient stream identity used by the display selector. */
+  streamingIdentity?: WorkbenchStreamingIdentity
   generating: boolean
   generationPhase?: GenerationPhase
   /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */

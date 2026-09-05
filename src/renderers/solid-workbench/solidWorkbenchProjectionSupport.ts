@@ -2,6 +2,7 @@ import { selectActivityDisplayOrder, type WorkbenchActivityNode, type WorkbenchD
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
+import type { WorkbenchStreamingIdentity } from '../../domains/workbench/workbenchRuntime.ts'
 
 export interface DisplayStreamRecord {
   readonly role: 'assistant' | 'reasoning'
@@ -15,8 +16,10 @@ export function selectDisplayStream(
   canonical: readonly WorkbenchDocument['messages'][number][],
   role: 'assistant' | 'reasoning',
   transientText: string,
+  transientIdentity?: WorkbenchStreamingIdentity,
 ): DisplayStreamRecord {
-  const row = [...canonical].reverse().find(message => message.role === role)
+  const row = [...canonical].reverse().find(message => message.role === role
+    && identityCompatible(message.identity, transientIdentity))
   if (!row && transientText) return { role, text: transientText, owner: 'transient' }
   if (!row || !row.content) return row ? { role, text: transientText || row.content, owner: transientText ? 'transient' : 'canonical', canonical: row } : { role, text: '', owner: 'none' }
   if (!transientText) return { role, text: row.content, owner: 'canonical', canonical: row }
@@ -37,6 +40,20 @@ export function selectDisplayStream(
     return { role, text: transientText, owner: 'transient', canonical: row }
   }
   return { role, text: row.content, owner: 'canonical', canonical: row }
+}
+
+function identityCompatible(
+  canonical: WorkbenchDocument['messages'][number]['identity'],
+  transient?: WorkbenchStreamingIdentity,
+): boolean {
+  if (!transient) return true
+  const keys: (keyof WorkbenchStreamingIdentity)[] = ['turnId', 'messageId', 'toolCallId', 'eventId']
+  const provided = keys.filter(key => transient[key] !== undefined)
+  if (provided.length === 0) return true
+  return provided.some(key => {
+    const canonicalValue = key === 'eventId' ? undefined : canonical[key]
+    return canonicalValue !== undefined && canonicalValue === transient[key]
+  })
 }
 
 export function canonicalTokenCount(
