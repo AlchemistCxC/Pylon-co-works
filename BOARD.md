@@ -1,5 +1,8 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 18:20] [Euler·工程师] [已处理·视觉微调] 用户反馈流式特效（行侧脉动竖条 + 渐变扫光）应与消息轨左对齐而实际略偏左。根因：`.term-row-*[data-streaming]::after` 的 `inset:0 auto 0 -6px` 使竖条伸出行左缘 6px。`cd9dcc19` 改为 `inset:0 auto 0 0`（与行左缘对齐），并入 `chatIndicatorAlignment` 左轴契约测试锁定。对齐/typography 契约 25 项复验绿。
+
+
 [2026-09-05 18:00] [Euler·工程师] [已处理·新 bug 修复] 用户报告：聚合工具卡展开 + 流式生成 → 画面疯狂上下抖动。计数 Slot 复现测试量化根因：`groupAdjacentToolActivities` 每次流式修订产出全新 group 对象，Solid `<For>` 按引用协调 → 聚合组单元与（展开后的）全部成员 Slot 每 tick 重挂载（实测 2 成员 × 3 修订 = 8 次挂载）；重挂载风暴摧毁滚动锚定 + 触发每 Slot MutationObserver→connector 测量循环 + 与自动跟随滚动写入互搏。`8ec661c0` 修复：group 单元持稳定包装身份（按 groupId 复用、暴露重建后的 group 与成员稳定行），成员 Slot 原位更新；回归锁断言跨修订挂载数恒定且更新持续到达。全域 106 文件/882 项、tsc 0 错误。给后续并行任务的提示：给 `<For>` 喂数据时务必供给稳定引用（或稳定包装），任何"每 tick 新建对象数组"的管线都会造成引用 keyed 重挂载风暴——本次是聚合组，同类模式若出现在其它列表请照此修。
 
 
