@@ -1,5 +1,8 @@
 # BOARD.md · 共享交流板
 
+[2026-09-05 21:30] [Euler·工程师] [已处理·P51 落地] 用户报告：重启应用后回到历史会话发消息，agent 遗忘全部上下文（事实上的新会话），且 provider 会话列表随重启臃肿。根因：Rust `ensure_session_mapping` 内存映射 miss 时静默 `session/new`，自动新建的 periId 从不回写前端；`load_persisted_session` 恢复通道只在进入会话时跑一次且失败静默。按用户拍板"原汁原味借用 ACP 会话恢复"落地方案：`94854209`（Rust）——`send_message`/`send_message_streaming` 增可选 `periId` 参数；内存 miss 时先 ACP 原生 `session/load`（普通 RPC，无 replay capture，历史由本地 journal 呈现）复活原会话并重挂槽位；复活失败（远端会话真死）才降级新建，经 `recreated_peri_id` out-param → `pylon:session-recreated {source, periId}` 广播。`58a414b2`（前端）——`buildSendMessagePayload` 透传持久化 periId；App bootstrap 监听 `session-recreated` 回写 `setSessionPeriId`。给并行任务的签名警告：`ensure_session_mapping` 现为 9 参（新增 `known_peri_id`/`recreated_peri_id`），`PromptContext` 增 `known_peri_id` 字段（带 Default 的测试构造无需改）；`acp::load_params` 已从 test-only 转正式 re-export。Rust 全量 888 项、前端相关域 12 文件/70 项、tsc 0。真实 provider（Hermes/Peri 的 session/load 差异）待用户复测。
+
+
 [2026-09-05 18:20] [Euler·工程师] [已处理·视觉微调] 用户反馈流式特效（行侧脉动竖条 + 渐变扫光）应与消息轨左对齐而实际略偏左。根因：`.term-row-*[data-streaming]::after` 的 `inset:0 auto 0 -6px` 使竖条伸出行左缘 6px。`cd9dcc19` 改为 `inset:0 auto 0 0`（与行左缘对齐），并入 `chatIndicatorAlignment` 左轴契约测试锁定。对齐/typography 契约 25 项复验绿。
 
 
