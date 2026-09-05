@@ -1,5 +1,6 @@
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.js';
 import type { CustomPreset } from './customPresets.js';
+import { type PresetApplyResult } from './domains/theme/presetBundle.js';
 import { type SettingWriteSource } from './domains/theme/settingProvenance.js';
 export type { Profile, Session, UserMapping, AgentEntry } from './identityStore';
 export type { SessionConfig } from './runtimeStore';
@@ -201,7 +202,7 @@ type ThemeState = ThemeSettings & {
     setZoneField: (zone: string, partial: Partial<ThemeSettings>, source?: SettingWriteSource) => void;
     setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void;
     saveCustomPreset: (name: string, id?: string) => string;
-    applyCustomPreset: (id: string) => void;
+    applyCustomPreset: (id: string) => Promise<PresetApplyResult>;
     removeCustomPreset: (id: string) => void;
 };
 export declare const useStore: import("zustand").UseBoundStore<Omit<import("zustand").StoreApi<ThemeState>, "setState" | "persist"> & {

@@ -86,7 +86,7 @@ function sectionForThemeZone(zone: string): SettingsSectionId | undefined {
 function themeRecords(): SettingsContributionRecord[] {
   const records: SettingsContributionRecord[] = []
   for (const [fieldKey, definition] of Object.entries(THEME_FIELD_DEFS)) {
-    if (definition.hidden || definition.meta || fieldKey === 'showPet' || THEME_FIELD_OWNERS[fieldKey].owner !== 'theme') continue
+    if (definition.hidden || definition.meta || fieldKey === 'showPet' || THEME_FIELD_OWNERS[fieldKey as keyof typeof THEME_FIELD_OWNERS].owner !== 'theme') continue
     const section = sectionForThemeZone(definition.zone)
     if (!section) continue
     records.push({

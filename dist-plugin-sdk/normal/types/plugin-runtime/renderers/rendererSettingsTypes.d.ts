@@ -12,6 +12,31 @@ export type NumberPresentation = 'slider' | 'input' | 'slider+input';
 export type RendererSettingValue = null | boolean | number | string | readonly RendererSettingValue[] | {
     readonly [key: string]: RendererSettingValue;
 };
+/** Framework-neutral aliases used by the Settings compositor. */
+export type SettingsValue = RendererSettingValue;
+export type SettingsField = RenderSettingField;
+export type SettingsSchema = RendererSettingsSchema;
+export interface SettingsValueAdapter {
+    readonly namespace: string;
+    readonly ownerPluginId?: string;
+    readonly contributionId?: string;
+    getSnapshot(): {
+        readonly values: Readonly<Record<string, SettingsValue>>;
+        readonly unavailable: Readonly<Record<string, {
+            value?: SettingsValue;
+            code: string;
+            message: string;
+        }>>;
+        readonly revision: number;
+    };
+    setValue(fieldKey: string, value: SettingsValue): void | Promise<void>;
+    removeValue(fieldKey: string): void | Promise<void>;
+    reset(fieldKey: string): void | Promise<void>;
+    subscribe(listener: () => void): () => void;
+    /** Optional host-only unavailable bridge for dynamic option/plugin unload. */
+    markUnavailable?(fieldKey: string, value: SettingsValue, code: string, message: string): void;
+    restoreUnavailable?(fieldKey: string): void;
+}
 /**
  * Owner-provided placement metadata consumed by the Settings compositor.
  * It describes where a schema is presented, never the value/default/consumer.
@@ -30,6 +55,7 @@ export interface RendererSettingOption {
     readonly description?: string;
     readonly disabled?: boolean;
     readonly order?: number;
+    readonly tier?: 'basic';
 }
 export type RenderSettingCondition = {
     readonly equals: {
@@ -58,6 +84,14 @@ interface RenderSettingFieldBase {
     readonly default?: RendererSettingValue;
     readonly showIf?: RenderSettingCondition;
     readonly resetLabel?: string;
+    /** Stable semantic metadata used by the Settings compositor. */
+    readonly semanticKey?: string;
+    readonly scope?: 'theme' | 'renderer' | 'slot' | 'suite' | 'kind' | 'plugin';
+    readonly inheritsFrom?: string;
+    readonly deprecated?: boolean;
+    readonly aliases?: readonly string[];
+    readonly order?: number;
+    readonly tier?: 'basic';
 }
 export interface RenderChoiceSettingField extends RenderSettingFieldBase {
     readonly type: 'choice';
@@ -105,6 +139,7 @@ export interface RenderSettingGroup {
     readonly description?: string;
     readonly layout?: 'stack' | 'grid' | 'inline' | 'tabs';
     readonly collapsedByDefault?: boolean;
+    readonly order?: number;
     readonly fields: readonly RenderSettingField[];
 }
 export interface RendererSettingsSchema {
@@ -118,6 +153,9 @@ export declare function settingOptionTarget(fieldNamespace: 'kind' | 'suite' | '
 /** 类型 → 默认显示形态（设置页侧的惯例真值；组件 schema 的显式 presentation 优先）。 */
 export declare const DISPLAY_DEFAULTS: Readonly<Record<RenderSettingField["type"], RendererPresentation>>;
 export type RendererPresentation = ChoicePresentation | MultiChoicePresentation | ColorPresentation | NumberPresentation | 'toggle' | 'checkbox' | 'input' | 'textarea';
+export type SettingsDensity = 'basic' | 'standard' | 'all';
+/** Shared visibility predicate for Theme and Renderer field surfaces. */
+export declare function isSettingVisible(field: Pick<RenderSettingField, 'advanced' | 'tier'>, density: SettingsDensity): boolean;
 /** 显示方式单点解析：schema 显式声明优先，未声明走类型默认（设计书 §3.6/§3.7）。 */
 export declare function resolvePresentation(field: RenderSettingField): RendererPresentation;
 export {};

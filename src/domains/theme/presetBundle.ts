@@ -356,7 +356,7 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
     'builtin.presentation': 'Presentation',
     'builtin.renderer-settings': 'Renderer overrides',
   }
-  const coverage = Object.entries(labels).map(([id, label]) => {
+  const coverage: PresetCoverage[] = Object.entries(labels).map(([id, label]) => {
     const contribution = bundle?.contributions[id]
     const unavailablePayload = bundle?.unavailable?.[id]
     const counts = coverageCounts(id, contribution, unavailablePayload)

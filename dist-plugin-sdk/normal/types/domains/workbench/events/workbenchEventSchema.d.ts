@@ -115,6 +115,8 @@ export interface DiagnosticEvent {
     readonly level?: 'info' | 'warning' | 'error';
     readonly message?: string;
     readonly code?: string;
+    /** Optional structured detail kept behind the default user-facing summary. */
+    readonly data?: JsonValue;
 }
 export type WorkbenchSemanticEvent = MessageEvent | ReasoningEvent | ToolEvent | PlanEvent | GoalEvent | ActivityEvent | InteractionEvent | UsageEvent | SessionEvent | LifecycleEvent | AssistEvent | DiagnosticEvent | UnknownSemanticEvent | ExtensionEvent;
 export type ProvenanceOrigin = 'local-observed' | 'optimistic-local' | 'recovery-import' | 'migration' | 'plugin';

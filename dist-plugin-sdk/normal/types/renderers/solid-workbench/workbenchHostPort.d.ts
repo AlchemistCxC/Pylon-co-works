@@ -1,6 +1,6 @@
 import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.js';
 import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.js';
-import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.js';
+import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, SessionCreateResult, ExportSessionInput, CommandResult, WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.js';
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.js';
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.js';
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.js';
@@ -15,6 +15,9 @@ export interface WorkbenchDocumentReader {
 }
 export type WorkbenchGenerationSnapshot = Readonly<Pick<WorkbenchRuntimeSnapshot, 'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'thinkingStart' | 'tokenCount' | 'summary'> & {
     generationActivity?: GenerationActivitySnapshot;
+    revision?: number;
+    turnEpoch?: number;
+    terminalFence?: WorkbenchRuntimeSnapshot['terminalFence'];
 }>;
 /** Session-scoped ephemeral state that cannot be reconstructed from persisted transcript rows. */
 export interface WorkbenchGenerationReader {
@@ -68,9 +71,7 @@ export interface WorkbenchCommandPort {
     attach(sessionId: string): Promise<WorkbenchCommandResult<readonly WorkbenchAttachment[]>>;
     setModel(sessionId: string, modelId: string): Promise<WorkbenchCommandResult<CommandResult>>;
     setMode(sessionId: string, modeId: string): Promise<WorkbenchCommandResult<CommandResult>>;
-    createSession(input?: SessionCreateInput): Promise<WorkbenchCommandResult<{
-        sessionId: string;
-    }>>;
+    createSession(input?: SessionCreateInput): Promise<WorkbenchCommandResult<SessionCreateResult>>;
     compact(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>;
     exportSession(sessionId: string, input: ExportSessionInput): Promise<WorkbenchCommandResult<CommandResult>>;
     clearSession(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>;
@@ -114,6 +115,8 @@ export interface WorkbenchHostPort {
     readonly appearance: ResolvedAppearanceReader;
     readonly sessionUi: SessionUiPort;
     readonly commands: WorkbenchCommandPort;
+    /** Display-only empty-state creation lifecycle; never persisted as a fact. */
+    readonly sessionCreation?: WorkbenchSessionCreationReader;
     readonly capabilities: WorkbenchCapabilityReader;
     readonly diagnostics: RendererDiagnosticPort;
     /** Optional host-owned local/remote provider for input prediction. */

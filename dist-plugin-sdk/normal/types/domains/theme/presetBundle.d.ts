@@ -45,13 +45,34 @@ export interface PresetCoverage {
     readonly explicit: number;
     readonly defaulted: number;
     readonly unavailable: number;
-    readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing';
+    readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing' | 'excluded';
     readonly policy?: 'complete' | 'partial';
 }
 export interface PresetChangeSummary {
     readonly providerId: string;
     readonly label: string;
     readonly changed: number;
+}
+export type PresetApplyResult = {
+    readonly status: 'applied';
+    readonly id: string;
+    readonly providers: readonly string[];
+    readonly revision: number;
+    readonly unavailable?: readonly string[];
+} | {
+    readonly status: 'failed';
+    readonly id: string;
+    readonly failedProvider: string;
+    readonly message: string;
+    readonly rolledBack: boolean;
+    readonly revision: number;
+};
+/** Error enriched with the provider/phase that rejected a bundle operation. */
+export declare class PresetProviderTransactionError extends Error {
+    readonly providerId: string;
+    readonly phase: 'prepare' | 'commit';
+    readonly cause: unknown;
+    constructor(providerId: string, phase: 'prepare' | 'commit', cause: unknown);
 }
 export interface PresetPreparedApply {
     readonly summary: readonly PresetChangeSummary[];
@@ -110,6 +131,7 @@ export declare function createPresetBundle(input: {
     theme: PresetJsonValue;
     renderer?: RendererPresetPayload;
     presentation?: PresentationPresetPayload;
+    source?: PresetBundleV2['source'];
 }): PresetBundleV2;
 /** Read a contribution payload as a record (empty when absent/malformed). */
 export declare function recordPayload(value: PresetJsonValue | undefined): Readonly<Record<string, PresetJsonValue>>;

@@ -558,7 +558,8 @@ export declare const THEME_FIELD_DEFS: {
     readonly showPet: {
         readonly default: true;
         readonly group: "布局骨架";
-        readonly hint: "隐藏工作区标签栏、左侧栏和宠物，可得到只保留聊天内容的单栏视图";
+        readonly hidden: true;
+        readonly hint: "由工作区 › 宠物统一编辑；旧主题值仅作兼容读取";
         readonly type: ThemeFieldType;
         readonly label: string;
         readonly zone: ZoneName;
@@ -579,7 +580,6 @@ export declare const THEME_FIELD_DEFS: {
         readonly optionLabels?: Readonly<Record<string, string>>;
         readonly cssVar?: string;
         readonly noCssVar?: boolean;
-        readonly hidden?: boolean;
         readonly meta?: boolean;
         readonly tier?: "basic";
         readonly semanticRole?: VisualSemanticRole;
@@ -4988,6 +4988,10 @@ export declare const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, {
     readonly zone: ZoneName;
     readonly owner: ThemeFieldOwner;
 }>>;
+/** Preset-owned Theme fields. Workspace/right-rail authorities remain
+ * persisted for compatibility but are never captured or overwritten by a
+ * Theme preset. */
+export declare const THEME_PRESET_KEYS: readonly ThemeFieldKey[];
 /** cssVar 注入表：--xxx → 字段名（供 App.tsx 循环注入） */
 export declare const THEME_CSS_VAR_MAP: Readonly<Record<string, ThemeFieldKey>>;
 /** kebab-case 字段名 → cssVar（无显式声明时） */

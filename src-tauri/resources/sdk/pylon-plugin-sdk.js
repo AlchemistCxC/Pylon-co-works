@@ -120,6 +120,50 @@ function parsePylonPluginManifest(source) {
   return manifest;
 }
 
+// src/plugin-runtime/settings/settingsTargetGrammar.ts
+var NAMESPACES = /* @__PURE__ */ new Set(["theme", "kind", "slot", "suite", "plugin-page", "context-panel"]);
+function validateSettingsTarget(target) {
+  if (!target || !NAMESPACES.has(target.namespace)) throw new Error("Settings target namespace \u975E\u6CD5");
+  if (!target.ownerId.trim()) throw new Error("Settings target ownerId \u4E0D\u80FD\u4E3A\u7A7A");
+  if (!target.fieldKey.trim()) throw new Error("Settings target fieldKey \u4E0D\u80FD\u4E3A\u7A7A");
+  if (target.ownerPluginId !== void 0 && !target.ownerPluginId.trim()) throw new Error("Settings target ownerPluginId \u4E0D\u80FD\u4E3A\u7A7A");
+  return Object.freeze({ ...target });
+}
+function stringifySettingsTarget(target) {
+  const normalized = validateSettingsTarget(target);
+  const encode = (value) => encodeURIComponent(value).replaceAll(".", "%2E");
+  if (normalized.namespace === "theme" && normalized.ownerId === "theme") {
+    return ["theme", encode(normalized.fieldKey)].join(".");
+  }
+  const parts = [normalized.namespace];
+  if (normalized.ownerPluginId !== void 0) parts.push(encode(normalized.ownerPluginId));
+  parts.push(encode(normalized.ownerId), encode(normalized.fieldKey));
+  return parts.join(".");
+}
+function parseSettingsTarget(value) {
+  if (typeof value !== "string" || !value.trim()) return void 0;
+  const parts = value.split(".");
+  const namespace = parts[0];
+  if (!NAMESPACES.has(namespace)) return void 0;
+  try {
+    if (namespace === "theme" && parts.length === 2) {
+      const fieldKey2 = decodeURIComponent(parts[1]);
+      return fieldKey2 ? validateSettingsTarget({ namespace, ownerId: "theme", fieldKey: fieldKey2 }) : void 0;
+    }
+    if (parts.length !== 3 && parts.length !== 4) return void 0;
+    const decode = (part) => decodeURIComponent(part);
+    const ownerPluginId = parts.length === 4 ? decode(parts[1]) : void 0;
+    const ownerPart = parts.length === 4 ? parts[2] : parts[1];
+    const fieldPart = parts.length === 4 ? parts[3] : parts[2];
+    const ownerId = decode(ownerPart);
+    const fieldKey = decode(fieldPart);
+    if (!ownerId || !fieldKey || ownerId === "theme" && namespace === "theme") return void 0;
+    return validateSettingsTarget({ namespace, ownerId, fieldKey, ...ownerPluginId ? { ownerPluginId } : {} });
+  } catch {
+    return void 0;
+  }
+}
+
 // src/domains/theme/visualSemantics.ts
 var VISUAL_SEMANTIC_ROLE_TOKENS = Object.freeze({
   "surface.canvas": "--surface-canvas",
@@ -322,5 +366,8 @@ export {
   createPluginLogger,
   createSettingsSurface,
   definePlugin,
-  validatePluginManifest
+  parseSettingsTarget,
+  stringifySettingsTarget,
+  validatePluginManifest,
+  validateSettingsTarget
 };

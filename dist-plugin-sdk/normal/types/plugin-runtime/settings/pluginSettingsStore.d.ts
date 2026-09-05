@@ -1,4 +1,5 @@
 import type { PluginSettingValue } from './pluginSettingsTypes.js';
+import type { SettingsValueAdapter } from '../renderers/rendererSettingsTypes.js';
 export declare class PluginSettingsStore {
     private hydrated;
     private values;
@@ -12,3 +13,10 @@ export declare class PluginSettingsStore {
     private persist;
     private publish;
 }
+/** Host-owned adapter that isolates each page/panel by plugin + contribution. */
+export declare function createPluginSettingsValueAdapter(input: {
+    readonly store: PluginSettingsStore;
+    readonly ownerPluginId: string;
+    readonly contributionId: string;
+    readonly namespace: 'plugin-page' | 'context-panel';
+}): SettingsValueAdapter;

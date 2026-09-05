@@ -1,4 +1,6 @@
 import type { ComponentType, LazyExoticComponent } from 'react';
+import type { SettingsSchema, SettingsValueAdapter } from '../renderers/rendererSettingsTypes.js';
+import type { SettingsTarget } from './settingsTargetGrammar.js';
 export type PluginSettingValue = null | boolean | number | string | readonly PluginSettingValue[] | {
     readonly [key: string]: PluginSettingValue;
 };
@@ -13,6 +15,9 @@ interface PluginSettingsPageBase {
     readonly label: string;
     readonly description?: string;
     readonly order?: number;
+    /** Optional framework-neutral schema; without an adapter the page stays opaque. */
+    readonly schema?: SettingsSchema;
+    readonly valueAdapter?: SettingsValueAdapter;
 }
 export interface FirstPartyPluginSettingsPage extends PluginSettingsPageBase {
     readonly renderKind: 'first-party-react';
@@ -38,7 +43,8 @@ export interface PluginSettingOption {
 export interface PluginSettingOptionsContribution {
     readonly id: string;
     /** Stable host target. Theme fields use `theme.<ThemeFieldKey>`. */
-    readonly target: string;
+    /** Structured target is canonical; string remains the legacy compatibility form. */
+    readonly target: string | SettingsTarget;
     readonly order?: number;
     readonly remove?: readonly string[];
     readonly upsert?: readonly PluginSettingOption[];

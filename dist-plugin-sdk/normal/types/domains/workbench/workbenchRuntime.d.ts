@@ -3,6 +3,12 @@ import type { PlanEntry } from '../tasks/planTypes.js';
 import { type PlanEntryV2 } from './plan/goalModel.js';
 import type { GenerationActivitySnapshot, GenerationPhase, GenerationSummary } from './generationFooterContracts.js';
 import type { WorkbenchDocument } from './workbenchProjector.js';
+export interface WorkbenchStreamingIdentity {
+    readonly messageId?: string;
+    readonly eventId?: string;
+    readonly turnId?: string;
+    readonly toolCallId?: string;
+}
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error';
 /** Legacy chat plan rows and canonical C08 plan rows coexist only at the runtime adapter boundary. */
 export type WorkbenchTaskEntry = PlanEntry | PlanEntryV2;
@@ -14,10 +20,16 @@ export interface WorkbenchRuntimeSnapshot {
     ownerKey?: string;
     /** Agent/runtime generation associated with the current owner. */
     generation?: number;
+    /** Runtime-local turn identity; never persisted to provider/canonical wire. */
+    turnEpoch?: number;
+    /** Terminal absorption fence for the current owner/turn. */
+    terminalFence?: WorkbenchTerminalFence;
     status: WorkbenchRuntimeStatus;
     messages: readonly Message[];
     streamingText: string;
     streamingThinking: string;
+    /** Controller-owned transient stream identity used by the display selector. */
+    streamingIdentity?: WorkbenchStreamingIdentity;
     generating: boolean;
     generationPhase?: GenerationPhase;
     /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */
@@ -37,6 +49,20 @@ export interface WorkbenchRuntimeSnapshot {
     error: string | null;
     /** A04 projection view; legacy fields remain compatibility selectors for the current Solid adapter. */
     document?: WorkbenchDocument;
+}
+export interface WorkbenchTerminalFence {
+    readonly ownerKey?: string;
+    readonly turnEpoch: number;
+    readonly eventId?: string;
+    readonly sequence?: number;
+    readonly arrivalOrdinal?: number;
+}
+export interface WorkbenchRuntimeMergeInput {
+    readonly document?: WorkbenchDocument;
+    readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>;
+    readonly terminalFence?: WorkbenchTerminalFence | null;
+    readonly turnEpoch?: number;
+    readonly preserveGeneration?: boolean;
 }
 export interface WorkbenchRuntime {
     getSnapshot(): WorkbenchRuntimeSnapshot;
@@ -66,8 +92,14 @@ export interface WorkbenchDocumentApplyOptions {
      * reader set this flag so that gap cannot reset elapsed time.
      */
     readonly preserveGeneration?: boolean;
+    /** Optional atomic turn/generation metadata committed with this document. */
+    readonly turnEpoch?: number;
+    readonly terminalFence?: WorkbenchTerminalFence | null;
+    readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>;
 }
 /** Mutable document runtime used by production composition and preview fixtures. */
 export declare function createWorkbenchRuntime(initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>): PreviewWorkbenchRuntime;
 /** Preview compatibility name; production callers use createWorkbenchRuntime. */
 export declare function createPreviewWorkbenchRuntime(initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>): PreviewWorkbenchRuntime;
+/** Atomically reconcile canonical document and generation metadata. */
+export declare function mergeWorkbenchRuntimeSnapshot(previous: WorkbenchRuntimeSnapshot, input: WorkbenchRuntimeMergeInput): WorkbenchRuntimeSnapshot;

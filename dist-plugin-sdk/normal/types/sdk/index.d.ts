@@ -38,6 +38,12 @@ export type { PluginPresentationApi, } from '../plugin-runtime/presentation/plug
 export type { PresentationProfileContribution } from '../plugin-runtime/presentation/presentationProfileTypes.js';
 export type { PluginSettingsPageContribution, PluginSettingOptionsContribution, PluginSettingValue, } from '../plugin-runtime/settings/pluginSettingsTypes.js';
 export type { PluginSettingsApi } from '../plugin-runtime/settings/pluginSettingsApi.js';
+/** Framework-neutral settings schema/adapter contract for plugin pages and
+ * context panels. Renderer-prefixed names remain available as compatibility
+ * aliases from the same module. */
+export type { SettingsSchema, SettingsField, SettingsValue, SettingsValueAdapter, RendererSettingsSchema, RenderSettingField, RendererSettingValue, RendererSettingOption, RendererSettingsPlacement, } from '../plugin-runtime/renderers/rendererSettingsTypes.js';
+export type { SettingsTarget } from '../plugin-runtime/settings/settingsTargetGrammar.js';
+export { validateSettingsTarget, stringifySettingsTarget, parseSettingsTarget, } from '../plugin-runtime/settings/settingsTargetGrammar.js';
 export type { FontContribution, FontRole, } from '../plugin-runtime/fonts/fontContributionTypes.js';
 export type { PluginSessionsApi, PluginTurnsApi } from '../plugin-runtime/sessionData/pluginSessionDataApi.js';
 export type { SessionCreationContribution, SessionCreationCompiler, SessionCreationArtifactHandler, } from '../plugin-runtime/session-creation/sessionCreationTypes.js';
