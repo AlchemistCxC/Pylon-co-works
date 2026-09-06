@@ -24,7 +24,14 @@ export type PackageOperationResult =
 
 export interface PackageInitializationResult {
   activated: string[]
-  failed: Array<{ pluginId: string; message: string; code?: string }>
+  failed: Array<{
+    pluginId: string
+    message: string
+    code?: string
+    /** plugin_capability_denied 专属：宿主授权卡据此写入正确版本钉定的 grant。 */
+    version?: string
+    capabilities?: readonly string[]
+  }>
 }
 
 export interface PackageContractSnapshot {
@@ -113,7 +120,9 @@ export class PackageInstallationService {
   }
 
   async emitActivationEvent(event: string): Promise<PackageInitializationResult> {
-    if (this.emittedActivationEvents.has(event)) return this.initialize()
+    // 重复事件 = 显式重新评估请求（外置 capability 包授权后的 retryPlugin
+    // 依赖此路径绕过 initialize 缓存，review B P1-1）；重跑幂等——
+    // initializeOnce 对已激活包由 isActive 跳过。
     const previous = this.initialization
     this.emittedActivationEvents.add(event)
     if (previous) await previous.catch(() => undefined)
@@ -152,10 +161,14 @@ export class PackageInstallationService {
         await this.packageRuntime.activateInstalled(item.package)
         activated.push(pluginId)
       } catch (error) {
+        const parsed = parsePylonPluginManifest(item.package.manifest)
         failed.push({
           pluginId,
           message: errorMessage(error),
           ...(error instanceof PluginCapabilityDeniedError ? { code: error.code } : {}),
+          // 授权卡元数据（review B P1-1）：外置包授权通路依赖 version/capabilities
+          version: parsed.version,
+          capabilities: parsed.capabilities ? [...parsed.capabilities] : undefined,
         })
       }
     }
@@ -270,8 +283,8 @@ export class PackageInstallationService {
           // review P1-2（C）：inspect 与 install 是两次独立获取（URL/zip 内容
           // 可被中途替换），consent 必须对"已落库"的 manifest 复查——不许
           // 良性探查换来恶意包激活。
-          const installedManifest = parsePylonPluginManifest(target.package.manifest)
           try {
+            const installedManifest = parsePylonPluginManifest(target.package.manifest)
             this.assertCapabilityConsent(
               target.package.pluginId,
               target.package.version,

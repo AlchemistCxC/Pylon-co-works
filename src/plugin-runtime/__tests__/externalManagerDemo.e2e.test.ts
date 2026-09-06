@@ -208,6 +208,40 @@ describe('external plugin manager demo E2E (install → consent → panel)', () 
     expect(stale).toBeUndefined()
   })
 
+  // review B P1-1：外置包授权通路——未授权安装后，boot 初始化的 degraded
+  // 失败携带 plugin_capability_denied + 授权卡元数据，授权后 retryPlugin
+  // 经 user-packages 重试路径真实激活
+  it('surfaces an authorizable capability failure for external packages and activates after grant', async () => {
+    const grants = grantStore()
+    const managementSeen: { current: unknown } = { current: 'unset' }
+
+    const blocked = await fixture({
+      grants,
+      importEntry: async () => entryModule(managementSeen, '.consent'),
+    })
+    // 未授权安装失败（什么都不落库）
+    const blockedResult = await blocked.installation.installOrUpdate('C:/demo')
+    expect(blockedResult.ok).toBe(false)
+
+    // boot 初始化（模拟 kernel.ready 后的 user-packages 激活）：
+    // fixture 的 emitActivationEvent 已经跑过 initializeOnce——此处直接用
+    // installation.initialize() 的失败列表验证元数据投影
+    const init = await blocked.installation.initialize()
+    const denied = init.failed.find(failure => failure.code === 'plugin_capability_denied')
+    expect(denied).toBeDefined()
+    expect(denied?.pluginId).toBe(DEMO_ID)
+    expect(denied?.version).toBe('1.0.0')
+    expect(denied?.capabilities).toEqual(['plugin.management'])
+
+    // 宿主授权（授权卡语义）→ retryPlugin 的生产路径即重复 emitActivationEvent
+    //（kernelBootstrapServices.initializeUserPackages）→ 重新评估 → 激活
+    grants.grant(DEMO_ID, 'plugin.management', { pluginVersion: '1.0.0', apiVersion: '1.2' })
+    const retry = await blocked.installation.emitActivationEvent('kernel.ready')
+    expect(retry.failed).toEqual([])
+    expect(blocked.runtime.snapshot().active.map(identity => identity.pluginId)).toEqual([DEMO_ID])
+    expect(managementSeen.current).toBeDefined()
+  })
+
   it('activates from directory with consent pre-granted and the panel reads data through management', async () => {
     const grants = grantStore()
     grants.grant(DEMO_ID, 'plugin.management', { pluginVersion: '1.0.0', apiVersion: '1.2' })

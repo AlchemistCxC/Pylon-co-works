@@ -220,10 +220,12 @@ export default function PluginManager({
   )
   const builtinIds = getBuiltinPluginIds()
   const packageIds = installed.map(item => item.package.pluginId).sort()
-  // P53 D2：capability-consent 失败投影（授权卡数据源）+ 管理器激活态（增强入口）
+  // P53 D2：授权卡数据源 = builtin capability-consent 失败 + user-packages 阶段的
+  // plugin_capability_denied（review B P1-1：外置包授权通路——否则外置 capability 包
+  // 永远无法经宿主 UI 获得授权）
   const pendingConsent = bootstrapSnapshot.kind === 'degraded'
     ? bootstrapSnapshot.failures
-      .filter(failure => failure.stage === 'capability-consent')
+      .filter(failure => failure.code === 'plugin_capability_denied')
       .map(failure => ({
         pluginId: failure.pluginId,
         pluginVersion: failure.pluginVersion ?? '0.0.0',

@@ -257,7 +257,7 @@ export function mountPluginManagerPanel(
           })
           row.append(
             el('span', 'pypm-row-title', instance.pluginId),
-            el('span', 'pypm-row-state', '运行中'),
+            el('span', 'pypm-row-state', instance.status === 'active' ? '运行中' : instance.status),
             disable,
           )
           builtinList.append(row)
@@ -384,8 +384,10 @@ export function mountPluginManagerPanel(
           dependencyList.append(el('p', 'pypm-hint', `依赖图读取失败：${error instanceof Error ? error.message : String(error)}`))
         }
       } catch (error) {
+        // 只记日志不重入 render：持续性失败（如授权失效）会形成
+        // 失败→render→loadAll→失败 的活锁（review A N3）；错误经操作日志
+        // 在下一次用户交互/手动刷新时可见。
         notice(`读取插件状态失败：${error instanceof Error ? error.message : String(error)}`)
-        render()
       }
     }
 
