@@ -468,6 +468,23 @@ export function createUnknownContentPart(
   }
 }
 
+/** P55-D5：将 journal typed_payload.displayHint 安全派生为 ContentPart。 */
+export function contentPartFromDisplayHint(hint: unknown): ContentPart {
+  if (!hint || typeof hint !== 'object' || Array.isArray(hint)) {
+    return createUnknownContentPart('content.unknown', hint)
+  }
+  const value = hint as Record<string, unknown>
+  const kind = value.displayKind
+  if (typeof kind !== 'string' || !kind.includes('.')) {
+    return createUnknownContentPart('content.unknown', hint)
+  }
+  const payload = value.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return createUnknownContentPart(kind, hint)
+  }
+  return { kind: normalizeType(kind) as ContentPart['kind'], ...(payload as Record<string, unknown>) } as ContentPart
+}
+
 export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
   const issues: SchemaIssue[] = []
   if (!isRecord(value)) return failure([issue([], 'type.object', 'object', value)])
