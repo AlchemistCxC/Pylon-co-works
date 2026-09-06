@@ -504,6 +504,7 @@ fn normalize_kernel_event(
         Some("tool_call_update") => "tool.call.updated",
         Some("done") => "turn.completed",
         Some("error") => "turn.failed",
+        Some("cancelled") => "turn.cancelled",
         _ => "unknown",
     };
 
