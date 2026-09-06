@@ -161,6 +161,13 @@ function seedVisualQaDemo(setActiveSession: (id: string | null) => void, options
     runtime.setSessionConfig({ agentId: session.agentId, source: session.source }, {
       model: session.agentId === 'claude' ? 'claude-sonnet-4-6' : session.agentId === 'pi' ? 'gpt-5.5' : 'deepseek-v4-flash',
       models: ['deepseek-v4-flash', 'claude-sonnet-4-6', 'gpt-5.5'],
+      // P56/D3：demo 模拟「已宣告模型面」的真实会话形态——无 modelChoices 时
+      // ModelWidget 按发送不变量降级为只读徽章，demo 会失去可交互 selector。
+      modelChoices: [
+        { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+        { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+        { id: 'gpt-5.5', label: 'GPT-5.5' },
+      ],
     })
   }
   if (options.withPermission) {
