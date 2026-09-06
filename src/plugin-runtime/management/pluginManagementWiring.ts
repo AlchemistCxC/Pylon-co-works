@@ -54,7 +54,7 @@ export function evaluateConsentForDefinition(
   })
 }
 
-type BootstrapProvider = Pick<KernelBootstrap, 'getSnapshot' | 'retryPlugin'>
+type BootstrapProvider = Pick<KernelBootstrap, 'getSnapshot' | 'retryPlugin' | 'startSafeMode'>
 
 let bootstrapProvider: BootstrapProvider | undefined
 
@@ -145,6 +145,12 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
             // first-party 包版本也是 semver）
             builtin: options.getBuiltinCriticality(instance.identity.pluginId) !== undefined,
           })),
+          switches: snapshot.switches.map(item => ({
+            pluginId: item.pluginId,
+            declaredMode: item.declaredMode,
+            adoptedMode: item.adoptedMode,
+            committedAt: item.committedAt,
+          })),
         }
       },
       bootstrapOverview: () => {
@@ -162,6 +168,8 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
               code: failure.code,
               message: failure.message,
               retryable: failure.retryable,
+              ...(failure.pluginVersion ? { pluginVersion: failure.pluginVersion } : {}),
+              ...(failure.capabilities ? { capabilities: failure.capabilities } : {}),
             })),
             skippedPluginIds: state.skippedPluginIds,
           }
@@ -240,6 +248,8 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
       reload: pluginId => installation.reload(pluginId),
       uninstall: pluginId => installation.uninstall(pluginId),
       installOrUpdate: sourcePath => installation.installOrUpdate(sourcePath),
+      installOrUpdateFromZip: zipPath => installation.installOrUpdateFromZip(zipPath),
+      installOrUpdateFromUrl: url => installation.installOrUpdateFromUrl(url),
       setBuiltinEnabled: async (pluginId, enabled) => {
         if (enabled) {
           // review P1-2/A：retryPlugin 从不抛错（失败进 degraded snapshot），
@@ -273,6 +283,9 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
           }
         }
         return { ok: true }
+      },
+      enterSafeMode: async () => {
+        await options.getBootstrap().startSafeMode()
       },
     }
     return createPluginManagementApiBound({

@@ -44,6 +44,13 @@ export interface PluginRuntimeOverview {
   readonly revision: number
   readonly activePluginIds: readonly string[]
   readonly instances: readonly PluginRuntimeOverviewEntry[]
+  /** Shadow Update 记录（声明模式/实际采用模式，宿主页诊断区块对齐）。 */
+  readonly switches: readonly {
+    readonly pluginId: string
+    readonly declaredMode: string
+    readonly adoptedMode: string
+    readonly committedAt: number
+  }[]
 }
 
 export interface PluginBootstrapOverviewEntry {
@@ -52,6 +59,9 @@ export interface PluginBootstrapOverviewEntry {
   readonly code: string
   readonly message: string
   readonly retryable: boolean
+  /** capability-consent/user-packages 授权卡元数据（plugin_capability_denied 专属）。 */
+  readonly pluginVersion?: string
+  readonly capabilities?: readonly string[]
 }
 
 export interface PluginBootstrapOverview {
@@ -140,10 +150,15 @@ export interface PluginManagementDeps {
   retryCleanup(runtimeInstanceId: string): Promise<{ complete: boolean; message?: string }>
   /** 存储清理：按插件清空（既有 remove 语义，不涉其它插件）。 */
   clearPluginStorage(pluginId: string): void
+  /** 进入安全模式（宿主页同款；kernel bootstrap startSafeMode）。 */
+  enterSafeMode(): Promise<void>
   setEnabled(pluginId: string, enabled: boolean): Promise<{ ok: boolean; message?: string }>
   reload(pluginId: string): Promise<{ ok: boolean; message?: string }>
   uninstall(pluginId: string): Promise<{ ok: boolean; message?: string }>
   installOrUpdate(sourcePath: string): Promise<{ ok: boolean; message?: string }>
+  /** P53 D6：zip / https URL 安装源（复用契约/consent 前置检查与既有事务）。 */
+  installOrUpdateFromZip(zipPath: string): Promise<{ ok: boolean; message?: string }>
+  installOrUpdateFromUrl(url: string): Promise<{ ok: boolean; message?: string }>
   /** 内置侧启用/停用（→ runtime.disable / retryBuiltinPlugin）。 */
   setBuiltinEnabled(pluginId: string, enabled: boolean): Promise<{ ok: boolean; message?: string }>
 }
@@ -161,9 +176,14 @@ export interface PluginManagementApi {
   terminatePluginProcess(processId: string): Promise<void>
   retryCleanup(runtimeInstanceId: string): Promise<{ complete: boolean; message?: string }>
   clearPluginStorage(pluginId: string): void
+  /** 进入安全模式（宿主页同款功能；停用全部产品包并卸载应用）。 */
+  enterSafeMode(): Promise<void>
   setEnabled(pluginId: string, enabled: boolean): Promise<void>
   reload(pluginId: string): Promise<void>
   uninstall(pluginId: string): Promise<void>
   installOrUpdate(sourcePath: string): Promise<void>
+  installOrUpdateFromZip(zipPath: string): Promise<void>
+  installOrUpdateFromUrl(url: string): Promise<void>
+  enterSafeMode(): Promise<void>
   setBuiltinEnabled(pluginId: string, enabled: boolean): Promise<void>
 }

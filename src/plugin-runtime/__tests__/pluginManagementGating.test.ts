@@ -24,6 +24,7 @@ function depsOverrides(overrides: Partial<PluginManagementDeps> = {}): PluginMan
       revision: 0,
       activePluginIds: [],
       instances: [],
+      switches: [],
     }),
     bootstrapOverview: () => ({
       state: 'ready' as const,
@@ -40,12 +41,15 @@ function depsOverrides(overrides: Partial<PluginManagementDeps> = {}): PluginMan
     terminatePluginProcess: vi.fn(async () => undefined),
     retryCleanup: vi.fn(async () => ({ complete: true })),
     clearPluginStorage: () => undefined,
+    enterSafeMode: vi.fn(async () => undefined),
     isCapabilityGranted: () => true,
     isProductRequired: () => false,
     setEnabled: vi.fn(async () => ({ ok: true })),
     reload: vi.fn(async () => ({ ok: true })),
     uninstall: vi.fn(async () => ({ ok: true })),
     installOrUpdate: vi.fn(async () => ({ ok: true })),
+    installOrUpdateFromZip: vi.fn(async () => ({ ok: true })),
+    installOrUpdateFromUrl: vi.fn(async () => ({ ok: true })),
     setBuiltinEnabled: vi.fn(async () => ({ ok: true })),
     ...overrides,
   }
@@ -197,6 +201,7 @@ describe('management guards (C4 typed errors)', () => {
         { pluginId: 'builtin.pylon-workspace', runtimeInstanceId: 'ws#r4', version: '1.0.0', status: 'cleanup-failed' as const, builtin: true },
         { pluginId: 'plugin.manager', runtimeInstanceId: 'mgr#r5', version: '1.0.0', status: 'cleanup-failed' as const, builtin: false },
       ],
+      switches: [],
     }
     const retryCleanup = vi.fn(async () => ({ complete: true }))
     const api = make({

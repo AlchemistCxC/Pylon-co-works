@@ -33,8 +33,8 @@ export function createBuiltinPluginManagerPlugin(): BuiltinPluginDefinition {
       })
       settings.registerPage({
         id: 'pylon-plugin-manager',
-        label: '插件管理器（增强）',
-        description: '以插件身份提供的增强插件管理面板：安装/启停/重载/卸载、契约诊断与贡献面透视。',
+        label: '插件管理器',
+        description: '安装/启停/重载/卸载、内置组件、启动故障、契约诊断与贡献面透视。',
         renderKind: 'first-party-react',
         component: ManagerSettingsPage,
       } as const)

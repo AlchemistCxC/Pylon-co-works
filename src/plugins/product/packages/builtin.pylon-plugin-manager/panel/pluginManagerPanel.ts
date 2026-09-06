@@ -10,12 +10,15 @@
  * guide instead of throwing. After the user grants via the host authorization
  * card and the plugin retries activation, the panel becomes functional.
  */
-import type { PluginManagementApi } from '../../../../../sdk/index.ts'
+import { PYLON_PLUGIN_API_LATEST, type PluginManagementApi } from '../../../../../sdk/index.ts'
 
 export interface PluginManagerPanelOptions {
   readonly management?: PluginManagementApi
   /** Directory picker provided by the host UI (the panel never imports tauri dialog). */
   readonly pickDirectory?: () => Promise<string | null>
+  /** zip / URL install source pickers (P53 D6 three-source install). */
+  readonly pickZipFile?: () => Promise<string | null>
+  readonly promptUrl?: () => Promise<string | null>
   readonly onNotice?: (message: string) => void
 }
 
@@ -58,6 +61,19 @@ export function mountPluginManagerPanel(
     log.push(`[${new Date().toLocaleTimeString()}] ${message}`)
     if (log.length > LOG_LIMIT) log.splice(0, log.length - LOG_LIMIT)
     options.onNotice?.(message)
+  }
+
+  const runPickerInstall = async (
+    label: string,
+    operation: () => Promise<string | undefined>,
+  ) => {
+    try {
+      const outcome = await operation()
+      if (outcome !== undefined) notice(`${label}成功`)
+    } catch (error) {
+      notice(`${label}失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    render()
   }
 
   const runOperation = async (label: string, operation: () => Promise<void>) => {
@@ -106,13 +122,35 @@ export function mountPluginManagerPanel(
     const installButton = button('安装/更新包…', 'pypm-btn primary')
     installButton.disabled = !options.pickDirectory
     installButton.addEventListener('click', () => { void runInstall(management) })
+    const installZipButton = button('从 zip 安装…')
+    installZipButton.disabled = !options.pickZipFile
+    installZipButton.addEventListener('click', () => {
+      void runPickerInstall('从 zip 安装', async () => {
+        if (!options.pickZipFile) return undefined
+        const zipPath = await options.pickZipFile()
+        if (!zipPath) return undefined
+        await management.installOrUpdateFromZip(zipPath)
+        return 'ok'
+      })
+    })
+    const installUrlButton = button('从 URL 安装…')
+    installUrlButton.disabled = !options.promptUrl
+    installUrlButton.addEventListener('click', () => {
+      void runPickerInstall('从 URL 安装', async () => {
+        if (!options.promptUrl) return undefined
+        const url = await options.promptUrl()
+        if (!url) return undefined
+        await management.installOrUpdateFromUrl(url)
+        return 'ok'
+      })
+    })
     const refreshButton = button('刷新')
     const contributionButton = button('贡献清单')
     contributionButton.addEventListener('click', () => {
       contributionVisible = !contributionVisible
       render()
     })
-    userActions.append(installButton, refreshButton, contributionButton)
+    userActions.append(installButton, installZipButton, installUrlButton, refreshButton, contributionButton)
     userPlugins.append(userActions)
     const userList = el('div', 'pypm-list')
     userPlugins.append(userList)
@@ -204,6 +242,7 @@ export function mountPluginManagerPanel(
         const contract = management.contractDiagnostics()
 
         overview.replaceChildren(
+          el('span', undefined, `Plugin API ${PYLON_PLUGIN_API_LATEST}`),
           el('span', undefined, `${runtime.activePluginIds.length} 个运行中`),
           el('span', undefined, `${installed.length} 个用户插件`),
         )
@@ -251,14 +290,18 @@ export function mountPluginManagerPanel(
         for (const instance of builtinActive) {
           const row = el('div', 'pypm-row')
           row.setAttribute('data-builtin-id', instance.pluginId)
-          const disable = button('停用')
-          disable.addEventListener('click', () => {
-            void runOperation(`停用 ${instance.pluginId}`, () => management.setBuiltinEnabled(instance.pluginId, false))
+          const isActive = instance.status === 'active'
+          const toggle = button(isActive ? '停用' : '启用')
+          toggle.addEventListener('click', () => {
+            void runOperation(
+              `${isActive ? '停用' : '启用'} ${instance.pluginId}`,
+              () => management.setBuiltinEnabled(instance.pluginId, !isActive),
+            )
           })
           row.append(
             el('span', 'pypm-row-title', instance.pluginId),
             el('span', 'pypm-row-state', instance.status === 'active' ? '运行中' : instance.status),
-            disable,
+            toggle,
           )
           builtinList.append(row)
         }
@@ -273,8 +316,20 @@ export function mountPluginManagerPanel(
             el('span', 'pypm-row-id', failure.pluginId),
             el('span', 'pypm-hint', `${failure.stage} · ${failure.message}`),
           )
+          if (failure.retryable) {
+            const retry = button(`重试 ${failure.pluginId}`)
+            retry.addEventListener('click', () => {
+              void runOperation(`重试 ${failure.pluginId}`, () => management.setBuiltinEnabled(failure.pluginId, true))
+            })
+            row.append(retry)
+          }
           bootstrapList.append(row)
         }
+        const safeMode = button('进入安全模式', 'pypm-btn danger')
+        safeMode.addEventListener('click', () => {
+          void runOperation('进入安全模式', () => management.enterSafeMode())
+        })
+        bootstrapList.append(safeMode)
 
         diagnosticsList.replaceChildren()
         if (contract.diagnostics.length === 0) {
@@ -290,10 +345,19 @@ export function mountPluginManagerPanel(
         }
 
         shadowList.replaceChildren()
+        for (const item of runtime.switches) {
+          const row = el('div', 'pypm-row')
+          row.setAttribute('data-switch-plugin', item.pluginId)
+          row.append(
+            el('span', 'pypm-row-id', item.pluginId),
+            el('span', 'pypm-hint', `声明 ${item.declaredMode} · 实际采用 ${item.adoptedMode}`),
+          )
+          shadowList.append(row)
+        }
         const cleanupFailures = runtime.instances.filter(instance => instance.status === 'cleanup-failed')
-        if (cleanupFailures.length === 0) {
+        if (runtime.switches.length === 0 && cleanupFailures.length === 0) {
           shadowList.append(el('p', 'pypm-hint', '本次运行尚无 Shadow Update 诊断。'))
-        } else {
+        } else if (cleanupFailures.length > 0) {
           for (const instance of cleanupFailures) {
             const row = el('div', 'pypm-row')
             row.setAttribute('data-cleanup-failed', instance.pluginId)

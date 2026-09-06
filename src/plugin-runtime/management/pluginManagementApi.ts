@@ -114,6 +114,10 @@ function createPluginManagementApi(
       assertAuthorized()
       deps.clearPluginStorage(pluginId)
     },
+    async enterSafeMode() {
+      assertAuthorized()
+      await deps.enterSafeMode()
+    },
     async setEnabled(pluginId, enabled) {
       assertAuthorized()
       assertNotSelf(pluginId)
@@ -133,6 +137,14 @@ function createPluginManagementApi(
     async installOrUpdate(sourcePath) {
       assertAuthorized()
       await run(deps.installOrUpdate(sourcePath))
+    },
+    async installOrUpdateFromZip(zipPath) {
+      assertAuthorized()
+      await run(deps.installOrUpdateFromZip(zipPath))
+    },
+    async installOrUpdateFromUrl(url) {
+      assertAuthorized()
+      await run(deps.installOrUpdateFromUrl(url))
     },
     async setBuiltinEnabled(pluginId, enabled) {
       assertAuthorized()

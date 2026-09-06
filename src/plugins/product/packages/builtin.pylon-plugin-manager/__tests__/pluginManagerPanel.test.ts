@@ -35,8 +35,12 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
         activePluginIds: ['builtin.pylon-shell', 'builtin.pylon-plugin-manager'],
         instances: [
           { pluginId: 'builtin.pylon-shell', runtimeInstanceId: 'builtin.pylon-shell@b1', version: '1.0.0', status: 'active' as const, builtin: true },
+          { pluginId: 'builtin.pylon-tools', runtimeInstanceId: 'builtin.pylon-tools@t1', version: '1.0.0', status: 'active' as const, builtin: true },
           { pluginId: 'builtin.pylon-plugin-manager', runtimeInstanceId: 'builtin.pylon-plugin-manager@1.0.0-m1', version: '1.0.0', status: 'active' as const, builtin: true },
           { pluginId: 'user.demo', runtimeInstanceId: 'user.demo@1.0.0-pkg#run-1', version: '1.0.0', status: 'cleanup-failed' as const, builtin: false },
+        ],
+        switches: [
+          { pluginId: 'user.demo', declaredMode: 'parallel', adoptedMode: 'parallel', committedAt: 1 },
         ],
       }
     },
@@ -88,6 +92,7 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
       },
     ],
     terminatePluginProcess: vi.fn(async () => undefined),
+    enterSafeMode: vi.fn(async () => undefined),
     retryCleanup: vi.fn(async () => ({ complete: true })),
     clearPluginStorage: () => undefined,
     isCapabilityGranted: () => true,
@@ -96,6 +101,8 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
     reload: vi.fn(async () => ({ ok: true })),
     uninstall: vi.fn(async () => ({ ok: true })),
     installOrUpdate: vi.fn(async () => ({ ok: true })),
+    installOrUpdateFromZip: vi.fn(async () => ({ ok: true })),
+    installOrUpdateFromUrl: vi.fn(async () => ({ ok: true })),
     setBuiltinEnabled: vi.fn(async () => ({ ok: true })),
     ...overrides,
   }
@@ -109,6 +116,8 @@ function toApi(deps: PluginManagementDeps): ReturnType<typeof createPluginManage
     deps,
   })
 }
+
+
 
 describe('plugin manager panel (framework-free DOM)', () => {
   afterEach(() => {
@@ -266,5 +275,104 @@ describe('plugin manager panel (framework-free DOM)', () => {
       expect(terminatePluginProcess).toHaveBeenCalledWith('proc-1')
     })
     handle.dispose()
+  })
+
+  // P53 默认页化：安装三选（目录/zip/URL）经 management API 委派
+  it('delegates three-source installs through the management api', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const deps = mockManagementDeps()
+    const installOrUpdate = vi.fn(async () => ({ ok: true }))
+    const installOrUpdateFromZip = vi.fn(async () => ({ ok: true }))
+    const installOrUpdateFromUrl = vi.fn(async () => ({ ok: true }))
+
+    const handle = mountPluginManagerPanel(container, {
+      management: toApi({ ...deps, installOrUpdate, installOrUpdateFromZip, installOrUpdateFromUrl }),
+      pickDirectory: async () => 'C:/plugins/demo',
+      pickZipFile: async () => 'C:/plugins/demo.zip',
+      promptUrl: async () => 'https://example.com/demo.zip',
+    })
+
+    await vi.waitFor(() => {
+      expect(handle.root.querySelector('[data-plugin-id="user.demo"]')).not.toBeNull()
+    })
+    const byLabel = (label: string) => [...handle.root.querySelectorAll('button')]
+      .find(button => button.textContent === label)!
+    byLabel('安装/更新包…').click()
+    await vi.waitFor(() => expect(installOrUpdate).toHaveBeenCalledWith('C:/plugins/demo'))
+    byLabel('从 zip 安装…').click()
+    await vi.waitFor(() => expect(installOrUpdateFromZip).toHaveBeenCalledWith('C:/plugins/demo.zip'))
+    byLabel('从 URL 安装…').click()
+    await vi.waitFor(() => expect(installOrUpdateFromUrl).toHaveBeenCalledWith('https://example.com/demo.zip'))
+    handle.dispose()
+  })
+
+  // 内置组件启用/停用切换 + 启动故障重试 + switches 显示
+  it('toggles builtins both ways, retries bootstrap failures and shows shadow switches', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const deps = mockManagementDeps()
+    const setBuiltinEnabled = vi.fn(async () => ({ ok: true }))
+
+    const handle = mountPluginManagerPanel(container, {
+      management: toApi({ ...deps, setBuiltinEnabled }),
+    })
+
+    await vi.waitFor(() => {
+      expect(handle.root.querySelector('[data-builtin-id="builtin.pylon-shell"]')).not.toBeNull()
+    })
+    // 内置行：运行中 → 停用
+    // loadAll 完成会重建行内 DOM：在 waitFor 中重试点击直到委派发生。
+    // 用非 product-required 的内置行（manager）；product-required 行（shell）
+    // 会被 API 守卫在委派前拒绝——守卫行为由 gating 测试覆盖。
+    // 目标行 = 非 self、非 product-required 的内置（tools）；self（manager）与
+    // product-required（shell）的停用会被 API 守卫在委派前拒绝——守卫行为由
+    // gating 测试覆盖，这里补断言其不被委派。
+    await vi.waitFor(() => {
+      const row = handle.root.querySelector('[data-builtin-id="builtin.pylon-tools"]')
+      const toggle = row && [...row.querySelectorAll('button')].find(button => button.textContent === '停用')
+      if (!toggle) throw new Error('builtin toggle not ready')
+      toggle.click()
+      expect(setBuiltinEnabled).toHaveBeenCalledWith('builtin.pylon-tools', false)
+    })
+    const shellRow = handle.root.querySelector('[data-builtin-id="builtin.pylon-shell"]')
+    const shellToggle = shellRow && [...shellRow.querySelectorAll('button')].find(button => button.textContent === '停用')
+    shellToggle?.click()
+    expect(setBuiltinEnabled).not.toHaveBeenCalledWith('builtin.pylon-shell', false)
+    const selfRow = handle.root.querySelector('[data-builtin-id="builtin.pylon-plugin-manager"]')
+    const selfToggle = selfRow && [...selfRow.querySelectorAll('button')].find(button => button.textContent === '停用')
+    selfToggle?.click()
+    expect(setBuiltinEnabled).not.toHaveBeenCalledWith('builtin.pylon-plugin-manager', false)
+    handle.dispose()
+
+    // 启动故障行：retryable → 重试按钮 → setBuiltinEnabled(true)
+    const failing = mockManagementDeps()
+    failing.bootstrapOverview = () => ({
+      state: 'degraded' as const,
+      activePluginIds: [],
+      failures: [{
+        pluginId: 'plugin.broken',
+        stage: 'activate',
+        code: 'plugin_activation_failed',
+        message: 'entry rejected',
+        retryable: true,
+      }],
+      skippedPluginIds: [],
+    })
+    const handle2 = mountPluginManagerPanel(container, {
+      management: toApi({ ...failing, setBuiltinEnabled }),
+    })
+    await vi.waitFor(() => {
+      expect(handle2.root.textContent).toContain('entry rejected')
+    })
+    const retry = [...handle2.root.querySelectorAll('button')].find(button => button.textContent === '重试 plugin.broken')!
+    retry.click()
+    await vi.waitFor(() => {
+      expect(setBuiltinEnabled).toHaveBeenCalledWith('plugin.broken', true)
+    })
+    // switches 显示声明/实际模式
+    expect(handle2.root.textContent).toContain('声明 parallel · 实际采用 parallel')
+    handle.dispose()
+    handle2.dispose()
   })
 })

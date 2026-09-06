@@ -107,6 +107,7 @@ async function fixture(options: {
               status: instance.status,
               builtin: false,
             })),
+            switches: [],
           }
         },
         bootstrapOverview: () => ({
@@ -119,6 +120,7 @@ async function fixture(options: {
         contributionOverview: () => [],
         capabilityGrants: () => [],
         processOverview: async () => [],
+        enterSafeMode: async () => undefined,
         storageUsage: () => [],
         dependencyGraph: async () => [],
         terminatePluginProcess: async () => undefined,
@@ -132,6 +134,8 @@ async function fixture(options: {
         reload: pluginId => installation.reload(pluginId),
         uninstall: pluginId => installation.uninstall(pluginId),
         installOrUpdate: sourcePath => installation.installOrUpdate(sourcePath),
+        installOrUpdateFromZip: zipPath => installation.installOrUpdateFromZip(zipPath),
+        installOrUpdateFromUrl: url => installation.installOrUpdateFromUrl(url),
         setBuiltinEnabled: async () => ({ ok: true }),
       }
       return createPluginManagementApiBound({

@@ -283,33 +283,8 @@ describe('PluginManager v2-only', () => {
     resetPluginCapabilityGrantStoreForTests()
   })
 
-  // P53 D2：增强面板入口（管理器激活态 + pluginPageId 直达事件）
-  it('shows the enhanced panel entry once the manager package is active', async () => {
-    const service = fakeService()
-    const { getPluginRuntime, bootstrapBuiltins: bootstrap } = await import(
-      '../../../plugin-runtime/pluginCompositionRoot.ts'
-    )
-    const grants = await import('../../../plugin-runtime/management/pluginManagementWiring.ts')
-    grants.resetPluginCapabilityGrantStoreForTests()
-    grants.getPluginCapabilityGrantStore().grant('builtin.pylon-plugin-manager', 'plugin.management', {
-      pluginVersion: '1.0.0',
-      apiVersion: '1.2',
-    })
-    await bootstrap('normal')
 
-    const openSettings = vi.fn()
-    window.addEventListener('pylon:open-settings', openSettings)
-    render(<PluginManager service={service as unknown as PackageInstallationService} />)
-
-    expect(getPluginRuntime().snapshot().active.some(identity => identity.pluginId === 'builtin.pylon-plugin-manager'))
-      .toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '打开插件管理器增强面板' }))
-    expect(openSettings).toHaveBeenCalledTimes(1)
-    expect((openSettings.mock.calls[0][0] as CustomEvent).detail).toEqual({
-      domain: 'plugins',
-      section: 'pylon-plugin-manager',
-    })
-    window.removeEventListener('pylon:open-settings', openSettings)
-    grants.resetPluginCapabilityGrantStoreForTests()
-  })
+  // P53 默认页切换：宿主"插件管理"分区在管理器贡献存在时渲染包页面
+  //（renderSection 分支）——入口按钮已随默认页化移除，该行为由 Settings
+  // 域测试与浏览器反馈环覆盖。
 })

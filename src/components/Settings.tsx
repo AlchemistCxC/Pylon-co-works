@@ -744,9 +744,12 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         return <GatewayRiskPanel />
       case 'prediction':
         return <InputPredictionSettingsPanel />
-      case 'pluginManager':
-        // M12：插件管理页（列表只读 core；signed/dev 停用；本地包安装；日志）
-        return <PluginManager />
+      case 'pluginManager': {
+        // P53：插件管理默认进入管理器插件提供的页面（贡献存在时）；
+        // 包未激活/未授权时贡献不存在，回落宿主基础页（承载能力授权卡）。
+        const managerPage = pluginSettingsPages.find(entry => entry.contributionId === 'pylon-plugin-manager')
+        return managerPage ? <PluginSettingsPageHost pageId={managerPage.contributionId} /> : <PluginManager />
+      }
     }
   }
 

@@ -34,16 +34,33 @@ export default function ManagerSettingsPage(_props: PluginSettingsPageProps) {
 function toPanelOptions(bridge: PluginManagerRuntimeBridge): {
   management?: PluginManagementApi
   pickDirectory?: () => Promise<string | null>
+  pickZipFile?: () => Promise<string | null>
+  promptUrl?: () => Promise<string | null>
 } {
   const management = bridge.getManagement()
-  const pickDirectory = management ? async () => {
+  if (!management) return {}
+  const openHostDialog = async (options: { directory?: boolean; zip?: boolean }): Promise<string | null> => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({ directory: true, multiple: false, title: '选择插件包目录' })
+      const selected = await open({
+        directory: options.directory === true,
+        multiple: false,
+        title: options.zip ? '选择插件 zip 包' : '选择插件包目录',
+        ...(options.zip ? { filters: [{ name: '插件包', extensions: ['zip'] }] } : {}),
+      })
       return typeof selected === 'string' ? selected : null
     } catch {
       return null
     }
-  } : undefined
-  return management ? { management, pickDirectory } : {}
+  }
+  return {
+    management,
+    pickDirectory: () => openHostDialog({ directory: true }),
+    pickZipFile: () => openHostDialog({ zip: true }),
+    promptUrl: async () => {
+      const input = window.prompt('输入插件包 https URL（仅支持 https）')
+      const trimmed = input?.trim()
+      return trimmed ? trimmed : null
+    },
+  }
 }

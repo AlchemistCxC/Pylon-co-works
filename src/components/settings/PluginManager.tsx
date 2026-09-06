@@ -14,7 +14,6 @@ import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.tsx'
-import { BUILTIN_PYLON_PLUGIN_MANAGER_ID } from '../../plugins/product/productPluginIds.ts'
 
 const LOG_LIMIT = 12
 
@@ -24,7 +23,7 @@ const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
   'builtin.pylon-shell': '应用外壳',
   'builtin.pylon-tools': '工具字典',
   'builtin.pylon-workspace': '工作区与 Sheet',
-  'builtin.pylon-plugin-manager': '插件管理器（增强）',
+  'builtin.pylon-plugin-manager': '插件管理器',
   'builtin.skin': '主题与皮肤',
 }
 
@@ -233,7 +232,6 @@ export default function PluginManager({
         message: failure.message,
       }))
     : []
-  const managerActive = snapshot.active.some(identity => identity.pluginId === BUILTIN_PYLON_PLUGIN_MANAGER_ID)
 
   const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
     await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
@@ -353,20 +351,6 @@ export default function PluginManager({
         Pylon Plugin API {PYLON_PLUGIN_API_VERSION}；安装、停用、启用与热更新全部由统一 Runtime 执行。
       </div>
       <PluginCapabilityConsentCard pending={pendingConsent} bootstrap={bootstrap} />
-      {managerActive && (
-        <div className="set-preset-row">
-          <button
-            type="button"
-            className="ps-btn primary sm"
-            aria-label="打开插件管理器增强面板"
-            onClick={() => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
-              detail: { domain: 'plugins', section: 'pylon-plugin-manager' },
-            }))}
-          >
-            打开增强管理面板…
-          </button>
-        </div>
-      )}
       <div className="plugin-overview" aria-label="插件概览">
         <span><strong>{snapshot.active.length}</strong> 个运行中</span>
         <span><strong>{installed.length}</strong> 个用户插件</span>
