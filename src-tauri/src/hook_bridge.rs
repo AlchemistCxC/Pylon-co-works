@@ -341,6 +341,16 @@ pub(crate) fn interpret_message_received_response(
     }
 }
 
+/// D2：解释 permission.request 钩子结果。只有显式 allow/deny 才短路，
+/// 其它结果（包括超时/continue）交回既有权限流程。
+pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<bool> {
+    match response.get("action").and_then(Value::as_str) {
+        Some("allow") => Some(true),
+        Some("deny") | Some("cancel") => Some(false),
+        _ => None,
+    }
+}
+
 /// #1 发送链缝派发（prompt.rs 调用；窗口可缺——无窗口即 fail-open）。
 pub(crate) async fn before_send_hook_outcome<R: tauri::Runtime>(
     state: &crate::AppState,
@@ -697,6 +707,13 @@ mod tests {
             interpret_message_received_response(&json!({ "action": "continue" }), "dirty"),
             MessageReceivedDecision::Continue { content: "dirty".into() }
         );
+    }
+
+    #[test]
+    fn permission_hook_interpretation_only_short_circuits_explicit_actions() {
+        assert_eq!(interpret_permission_hook_response(&json!({"action":"allow"})), Some(true));
+        assert_eq!(interpret_permission_hook_response(&json!({"action":"deny"})), Some(false));
+        assert_eq!(interpret_permission_hook_response(&json!({"action":"continue"})), None);
     }
 
     /// 验收 D1-④：message.received gate 丢弃平台消息，并对齐既有失败路径的
