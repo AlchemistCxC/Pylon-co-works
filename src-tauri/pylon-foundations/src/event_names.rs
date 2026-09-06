@@ -7,41 +7,41 @@
 //! 新增事件必须在本表登记（纪律：不得绕过常量表硬编码，E11）。
 
 /// Agent 生命周期状态（AgentStatusPayload，§4.5）。
-pub(crate) const AGENT_STATUS: &str = "pylon:agent-status";
+pub const AGENT_STATUS: &str = "pylon:agent-status";
 /// session/update 全量透传（§4.1；载荷注入 source；agent_message_chunk 提取平台文本）。
-pub(crate) const SESSION_UPDATE: &str = "pylon:update";
+pub const SESSION_UPDATE: &str = "pylon:update";
 /// 回合完成（§4.2，{source, data:{stopReason}}）。
-pub(crate) const SESSION_DONE: &str = "pylon:done";
+pub const SESSION_DONE: &str = "pylon:done";
 /// 回合失败（§4.3，{source, error}）。
-pub(crate) const SESSION_ERROR: &str = "pylon:error";
+pub const SESSION_ERROR: &str = "pylon:error";
 /// 用户消息回显（§4.4，{source, content, replay?, injectActivated?}；不投平台）。
-pub(crate) const USER_ECHO: &str = "pylon:user";
+pub const USER_ECHO: &str = "pylon:user";
 /// Unified interaction event envelope (provider/agent/session/request identity + payload).
-pub(crate) const INTERACTION: &str = "pylon:interaction";
+pub const INTERACTION: &str = "pylon:interaction";
 /// Interaction request rejected by the host (unsupported provider/method or malformed
 /// payload).  This is deliberately separate from `INTERACTION`: rejected requests must
 /// never enter the permission reducer as if they were actionable approvals.
-pub(crate) const INTERACTION_REJECTED: &str = "pylon:interaction-rejected";
+pub const INTERACTION_REJECTED: &str = "pylon:interaction-rejected";
 /// 运行日志实时推送（§4.7，RuntimeLogEntry 已脱敏）。
-pub(crate) const RUNTIME_LOG: &str = "pylon:runtime-log";
+pub const RUNTIME_LOG: &str = "pylon:runtime-log";
 /// 进程内广播伪通知：ACP stdout EOF（非 WebView 事件，dispatcher 主循环消费）。
 /// acp.rs 以 `pub use` 别名暴露为 NOTIF_AGENT_CRASHED（保持既有引用不变）——
 /// 重导出要求本常量 pub（crate 为 cdylib，无外部 Rust API 面，pub 无泄漏）。
 pub const AGENT_CRASHED: &str = "pylon:agent-crashed";
 /// 浏览器 phase 迁移（Phase 4 WebView 方案，§6.0）。
-pub(crate) const BROWSER_STATUS: &str = "pylon:browser-status";
+pub const BROWSER_STATUS: &str = "pylon:browser-status";
 /// 浏览器 url/title 变化（on_page_load 触发，§6.0）。
-pub(crate) const BROWSER_PAGE: &str = "pylon:browser-page";
+pub const BROWSER_PAGE: &str = "pylon:browser-page";
 /// Plugin Process Supervisor multiplexed stdout/stderr/protocol/lifecycle event.
-pub(crate) const PLUGIN_PROCESS: &str = "pylon:plugin-process";
+pub const PLUGIN_PROCESS: &str = "pylon:plugin-process";
 /// External CLI request forwarded into the live Web Kernel command/service bus.
-pub(crate) const PYLON_CLI_REQUEST: &str = "pylon:cli-request";
+pub const PYLON_CLI_REQUEST: &str = "pylon:cli-request";
 /// Cancellation for an in-flight external CLI request.
-pub(crate) const PYLON_CLI_CANCEL: &str = "pylon:cli-cancel";
+pub const PYLON_CLI_CANCEL: &str = "pylon:cli-cancel";
 /// P55 kernel hook request（Rust 锚点 → 前端 hook dispatcher，挂表 + oneshot 应答）。
-pub(crate) const PYLON_HOOK_REQUEST: &str = "pylon:hook-request";
+pub const PYLON_HOOK_REQUEST: &str = "pylon:hook-request";
 /// P55 kernel hook cancellation（Rust 时钟超时后通知前端 abort 该请求的执行）。
-pub(crate) const PYLON_HOOK_CANCEL: &str = "pylon:hook-cancel";
+pub const PYLON_HOOK_CANCEL: &str = "pylon:hook-cancel";
 
 #[cfg(test)]
 mod tests {

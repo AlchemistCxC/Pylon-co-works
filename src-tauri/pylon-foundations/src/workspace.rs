@@ -50,7 +50,7 @@ pub enum WorkspaceError {
 /// 冒号段。语义差异仅限空串：本函数对空/纯空白返回 false（git pathspec 无意义），
 /// normalize_relative 对空串返回 "."（工作区文件操作指向根）。返回 true 仅表示
 /// "结构上相对安全"，不替代文件系统层的 canonical containment（resolve_workspace_path）。
-pub(crate) fn is_safe_relative_path(path: &str) -> bool {
+pub fn is_safe_relative_path(path: &str) -> bool {
     if path.contains('\0') || path.trim().is_empty() {
         return false;
     }
@@ -490,7 +490,7 @@ pub const SEARCH_MAX_LINE_CHARS: usize = 500;
 /// 搜索结果 DTO（wire camelCase：{path, line, lineText}；path 相对 root、`/` 分隔）。
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct WorkspaceSearchResult {
+pub struct WorkspaceSearchResult {
     pub path: String,
     pub line: usize,
     pub line_text: String,
@@ -498,7 +498,7 @@ pub(crate) struct WorkspaceSearchResult {
 
 /// 搜索硬上限（防无界 IO/超大 payload；结果数 max_results 仅允许向下 clamp）。
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SearchLimits {
+pub struct SearchLimits {
     pub max_results: usize,
     pub max_files: usize,
     pub max_bytes_per_file: usize,
@@ -506,7 +506,7 @@ pub(crate) struct SearchLimits {
 }
 
 /// 默认上限：max_results 参数只可向下 clamp 到硬上限 200。
-pub(crate) fn default_search_limits(max_results: Option<usize>) -> SearchLimits {
+pub fn default_search_limits(max_results: Option<usize>) -> SearchLimits {
     SearchLimits {
         max_results: max_results
             .unwrap_or(SEARCH_MAX_RESULTS)
@@ -523,7 +523,7 @@ pub(crate) fn default_search_limits(max_results: Option<usize>) -> SearchLimits 
 /// list_entries；目录 symlink 仅在 canonical 目标仍在 root 内时进入；文件
 /// 打开沿用 open_workspace_file 的 containment 复核（TOCTOU）；GBK 复用
 /// decode_text 解码后搜索；命中达 max_results 或扫描文件达 max_files 即停。
-pub(crate) fn search(
+pub fn search(
     root: &Path,
     query: &str,
     limits: SearchLimits,

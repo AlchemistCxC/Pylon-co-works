@@ -5,13 +5,13 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
-pub(crate) const REDACTED: &str = "[REDACTED]";
+pub const REDACTED: &str = "[REDACTED]";
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 
 /// runtime_log 语义 key 表：敏感 key 的值整体 REDACTED 替换。
 /// O26：token/apikey/api_key 改为精确或后缀匹配（tokensTotal 等共享后缀名不再误伤）；
 /// `content` 移出精确表（值内容由 sanitize_value_content 兜底）。
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
+pub fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     [
         "password",
@@ -39,7 +39,7 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
 /// `tokenvalue` 精确名保留（按命名即 token 值容器，且为既有基线测试契约）；
 /// `secret` 保持 contains 语义（无统计键碰撞，且覆盖 client_secret/clientSecret 形态）；
 /// 值内容仍由 sanitize_value_content 兜底（password/token 等值形态整体 REDACTED）。
-pub(crate) fn is_export_sensitive_key(key: &str) -> bool {
+pub fn is_export_sensitive_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     matches!(
         lower.as_str(),
@@ -64,7 +64,7 @@ static SENSITIVE_KEY_PATTERN: OnceLock<Regex> = OnceLock::new();
 static BARE_SECRET_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// R19：敏感 key + 分隔符（半角/全角冒号等号、引号，允许中间空白）或 `bearer ` 前缀检测。
-pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
+pub fn contains_sensitive_pattern(lower: &str) -> bool {
     SENSITIVE_KEY_PATTERN
         .get_or_init(|| {
             Regex::new(
@@ -78,7 +78,7 @@ pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
 /// R19：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
 /// S1：词边界锚定——`disk-usage`/`task-123`/`heyjohn` 等含子串的正常词不再误伤；
 /// 调用方已 lower 化（sanitize_value_content/sanitize_message），故保持原大小写语义。
-pub(crate) fn contains_bare_secret(lower: &str) -> bool {
+pub fn contains_bare_secret(lower: &str) -> bool {
     BARE_SECRET_PATTERN
         .get_or_init(|| {
             Regex::new(r"(^|[^a-z0-9])(sk-|ghp_|xoxb-|akia|eyj)")
@@ -88,7 +88,7 @@ pub(crate) fn contains_bare_secret(lower: &str) -> bool {
 }
 
 /// 值内容脱敏：值中若出现 secret 形态（分隔符变体/裸 secret 前缀），整体替换。
-pub(crate) fn sanitize_value_content(value: &str) -> String {
+pub fn sanitize_value_content(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
     if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
         REDACTED.to_string()
@@ -110,7 +110,7 @@ fn truncate(value: String, max_bytes: usize) -> String {
 
 /// 递归 sanitize 策略。
 #[derive(Clone, Copy)]
-pub(crate) enum SanitizePolicy {
+pub enum SanitizePolicy {
     /// export：敏感 key 子树剔除，字符串值内容检测（不截断）。
     Strip,
     /// runtime_log：敏感 key 值 REDACTED 替换，字符串值内容检测 + 截断。
@@ -137,7 +137,7 @@ impl SanitizePolicy {
 }
 
 /// 递归 sanitize：敏感 key 按策略剔除/REDACTED，非敏感子树递归，字符串值内容检测。
-pub(crate) fn sanitize_value(policy: SanitizePolicy, key: &str, value: Value) -> Option<Value> {
+pub fn sanitize_value(policy: SanitizePolicy, key: &str, value: Value) -> Option<Value> {
     if policy.key_is_sensitive(key) {
         return if policy.strips_sensitive_key() {
             None
@@ -173,7 +173,7 @@ pub(crate) fn sanitize_value(policy: SanitizePolicy, key: &str, value: Value) ->
 }
 
 /// 消息 sanitize（runtime_log 语义：整体 REDACTED 或截断）。
-pub(crate) fn sanitize_message(message: String) -> String {
+pub fn sanitize_message(message: String) -> String {
     let lower = message.to_ascii_lowercase();
     if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
         REDACTED.to_string()
@@ -183,7 +183,7 @@ pub(crate) fn sanitize_message(message: String) -> String {
 }
 
 /// 字段 map sanitize（runtime_log 语义）。
-pub(crate) fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
+pub fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
     fields
         .into_iter()
         .map(|(key, value)| {
@@ -197,7 +197,7 @@ pub(crate) fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> 
 }
 
 /// 导出消息 sanitize（export 语义）：敏感 key 剔除 + 值内容检测。
-pub(crate) fn sanitize_export_messages(messages: &[Value]) -> Vec<Value> {
+pub fn sanitize_export_messages(messages: &[Value]) -> Vec<Value> {
     messages
         .iter()
         .filter_map(|value| sanitize_value(SanitizePolicy::Strip, "message", value.clone()))
