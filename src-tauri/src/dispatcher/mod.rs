@@ -331,12 +331,14 @@ pub(crate) fn resolve_agent_provider(
 /// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
 /// P0-3（R2-WI03）：provider-scoped adapter dispatch——未注册 provider 明确
 /// unsupported + runtime log 可观察，不生成 RPC；classify 非 interaction 同样丢弃。
+#[allow(clippy::too_many_arguments)]
 async fn handle_permission_request<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
-    acp: &AcpLock,
+    acp: &std::sync::Arc<AcpLock>,
+    hook_bridge: &std::sync::Arc<crate::hook_bridge::HookBridge>,
     client_generation: &AtomicU64,
-    approval_mode: &std::sync::Mutex<String>,
-    pending_permissions: &PermissionLock,
+    approval_mode: &std::sync::Arc<std::sync::Mutex<String>>,
+    pending_permissions: &std::sync::Arc<PermissionLock>,
     provider: &str,
     agent_id: &str,
     method: Option<&str>,
@@ -404,6 +406,109 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .await;
         return;
     };
+    // P55-D2 #8：permission.request 钩子——插在 bypass/auto 判定**之前**
+    //（否则钩子见不到 auto 模式请求）。B1：主循环零 await 桥——钩子决策
+    // spawn 出去独立承担：allow/deny → pick_option 短路应答（与 bypass 分支
+    // 同款信封，permission.rs:213 send_agent_response）；continue/无应答/
+    // 超时/桥故障 → 完整交回既有 bypass/auto/pending 流（D2-② 回归逐字节
+    // 等价）。不新增第二挂起表——钩子应答本身就是权限应答。
+    if hook_bridge.has_registered_hook(crate::hook_bridge::HOOK_PERMISSION_REQUEST) {
+        let task_window = window.clone();
+        let task_acp = acp.clone();
+        let task_bridge = hook_bridge.clone();
+        let task_mode = approval_mode.clone();
+        let task_pending = pending_permissions.clone();
+        let task_provider = provider.to_string();
+        let task_agent = agent_id.to_string();
+        let task_method = method.map(str::to_string);
+        let task_params = params.cloned();
+        let task_request_id = request_id.clone();
+        let task_permission = permission.clone();
+        tokio::spawn(async move {
+            let decision = crate::hook_bridge::permission_request_hook_outcome(
+                &task_bridge,
+                Some(&task_window),
+                &task_provider,
+                &task_agent,
+                &task_request_id,
+                &task_permission,
+            )
+            .await;
+            if let crate::hook_bridge::PermissionHookDecision::Answer(allow) = decision {
+                // §10.2：allow 取第一个 allow 语义 option，deny/cancel 取第一个
+                // deny 语义 option；无有效 option → 回原流程（不伪造 optionId）。
+                if let Some(option_id) =
+                    crate::permission::pick_option(&task_permission.options, !allow)
+                {
+                    tracing::info!(
+                        "permission.request hook auto-{} tool call {} (option {option_id})",
+                        if allow { "allow" } else { "deny" },
+                        task_permission.tool_call_id
+                    );
+                    let (write_tx, crashed) = {
+                        let acp = task_acp.lock().await;
+                        (acp.write_tx.clone(), acp.crashed.clone())
+                    };
+                    crate::permission::send_agent_response(
+                        write_tx,
+                        crashed,
+                        task_request_id,
+                        crate::permission::permission_response(option_id),
+                    )
+                    .await;
+                    return;
+                }
+                tracing::warn!(
+                    "permission.request hook 短路但无可匹配 option，回退既有权限流"
+                );
+            }
+            permission_post_normalize_flow(
+                &task_window,
+                &task_acp,
+                &task_mode,
+                &task_pending,
+                &task_provider,
+                &task_agent,
+                task_method.as_deref(),
+                task_params.as_ref(),
+                task_request_id,
+                &task_permission,
+            )
+            .await;
+        });
+        return;
+    }
+    permission_post_normalize_flow(
+        window,
+        acp,
+        approval_mode,
+        pending_permissions,
+        provider,
+        agent_id,
+        method,
+        params,
+        request_id,
+        &permission,
+    )
+    .await;
+}
+
+/// 既有权限决策流（P55-D2 从 handle_permission_request 原样抽出：mode 判定 →
+/// bypass/auto 自动应答 → 挂起 pending + UI 事件）。钩子未注册时主循环直达；
+/// 钩子未短路时由 spawn 任务回退调用（D2-②：行为逐字节等价）。
+#[allow(clippy::too_many_arguments)]
+async fn permission_post_normalize_flow<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    acp: &std::sync::Arc<AcpLock>,
+    approval_mode: &std::sync::Arc<std::sync::Mutex<String>>,
+    pending_permissions: &std::sync::Arc<PermissionLock>,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    params: Option<&serde_json::Value>,
+    request_id: crate::acp::RequestId,
+    permission: &PendingPermission,
+) {
     let mode = approval_mode
         .lock()
         .map(|m| m.clone())
@@ -476,6 +581,156 @@ async fn handle_permission_request<R: tauri::Runtime>(
             }),
         );
     }
+}
+
+/// interaction reject 兜底理由（P55-D2 抽出）：缺 adapter → provider_unsupported，
+/// 有 adapter 但方法未识别 → method_unsupported。
+fn unsupported_interaction_reason(
+    provider: &str,
+    method: Option<&str>,
+) -> (&'static str, i64, String) {
+    let reason = if crate::protocol_adapter::get_protocol_adapter(provider).is_some() {
+        "method_unsupported"
+    } else {
+        "provider_unsupported"
+    };
+    (
+        reason,
+        -32601,
+        format!(
+            "interaction {} unsupported",
+            method.unwrap_or("method")
+        ),
+    )
+}
+
+/// 未被 adapter 识别为已支持交互的 interaction 类请求处理（P55-D2 从主循环
+/// 原样抽出）。缺 id → malformed reject；其余在 reject 前先过 #9
+/// interaction.request 钩子（B1：spawn 派发，主循环零 await 桥）——
+/// respond 用原 request id 回写 result、cancel 映射 JSON-RPC invalid-request
+/// error（§10.3）；continue/无应答/未注册/桥故障 → 既有 reject 逐字节不变。
+#[allow(clippy::too_many_arguments)]
+async fn handle_interaction_request<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    acp: &std::sync::Arc<AcpLock>,
+    hook_bridge: &std::sync::Arc<crate::hook_bridge::HookBridge>,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    request_id: Option<crate::acp::RequestId>,
+    params: Option<&serde_json::Value>,
+) {
+    let unsupported_reason = unsupported_interaction_reason(provider, method);
+    let Some(request_id) = request_id else {
+        // A request-shaped interaction without an id cannot receive a
+        // JSON-RPC response, but it is still surfaced as a malformed
+        // interaction so the UI/runtime log explains why no card can
+        // be acted on.  Do not silently drop official client requests.
+        let (reason_code, rpc_code, message) = ("missing_request_id", -32600, "invalid request: interaction request requires a JSON-RPC id".to_string());
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            None,
+            params,
+            reason_code,
+            rpc_code,
+            &message,
+        )
+        .await;
+        return;
+    };
+    if hook_bridge.has_registered_hook(crate::hook_bridge::HOOK_INTERACTION_REQUEST) {
+        let task_window = window.clone();
+        let task_acp = acp.clone();
+        let task_bridge = hook_bridge.clone();
+        let task_provider = provider.to_string();
+        let task_agent = agent_id.to_string();
+        let task_method = method.map(str::to_string);
+        let task_params = params.cloned();
+        tokio::spawn(async move {
+            let decision = crate::hook_bridge::interaction_request_hook_outcome(
+                &task_bridge,
+                Some(&task_window),
+                &task_provider,
+                &task_agent,
+                task_method.as_deref(),
+                &request_id,
+                task_params.as_ref(),
+            )
+            .await;
+            match decision {
+                crate::hook_bridge::InteractionHookDecision::Respond(event) => {
+                    let (write_tx, crashed) = {
+                        let acp = task_acp.lock().await;
+                        (acp.write_tx.clone(), acp.crashed.clone())
+                    };
+                    tracing::info!(
+                        "interaction.request hook responded to request {request_id}"
+                    );
+                    crate::permission::send_agent_response(
+                        write_tx,
+                        crashed,
+                        request_id,
+                        event,
+                    )
+                    .await;
+                }
+                crate::hook_bridge::InteractionHookDecision::Cancel { reason } => {
+                    tracing::info!(
+                        "interaction.request hook cancelled request {request_id}"
+                    );
+                    reject_interaction_request(
+                        &task_window,
+                        &task_acp,
+                        &task_provider,
+                        &task_agent,
+                        task_method.as_deref(),
+                        Some(request_id),
+                        task_params.as_ref(),
+                        "hook_cancelled",
+                        -32600,
+                        &reason.unwrap_or_else(|| "cancelled by hook".to_string()),
+                    )
+                    .await;
+                }
+                crate::hook_bridge::InteractionHookDecision::FallThrough => {
+                    let (reason_code, rpc_code, message) =
+                        unsupported_interaction_reason(&task_provider, task_method.as_deref());
+                    reject_interaction_request(
+                        &task_window,
+                        &task_acp,
+                        &task_provider,
+                        &task_agent,
+                        task_method.as_deref(),
+                        Some(request_id),
+                        task_params.as_ref(),
+                        reason_code,
+                        rpc_code,
+                        &message,
+                    )
+                    .await;
+                }
+            }
+        });
+        return;
+    }
+    let (reason_code, rpc_code, message) = unsupported_reason;
+    reject_interaction_request(
+        window,
+        acp,
+        provider,
+        agent_id,
+        method,
+        Some(request_id),
+        params,
+        reason_code,
+        rpc_code,
+        &message,
+    )
+    .await;
 }
 
 /// 剥离 replay 的 user 消息 persona/session_prompt 前缀（验收回归 D3）。
@@ -920,6 +1175,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         .ok()
         .and_then(|slot| slot.clone());
     let pending_permissions = runtime.pending_permissions.clone();
+    // P55-D2：kernel hook 桥——permission/interaction 缝的派发闸与请求通道。
+    let hook_bridge = handles.hook_bridge.clone();
     let agent_id = handles
         .runtimes
         .all_with_ids()
@@ -966,6 +1223,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let reconnect_epoch = reconnect_epoch.clone();
             let event_service_slot = event_service_slot.clone();
             let message_service_slot = message_service_slot.clone();
+            // P55-D2：桥 Arc 先克隆再进 move 闭包——主循环随后还要用 &hook_bridge。
+            let hook_bridge_for_crash = hook_bridge.clone();
             move |reason: String| {
                 let agent_runtime = agent_runtime.clone();
                 let pet = pet.clone();
@@ -980,6 +1239,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 let reconnect_epoch = reconnect_epoch.clone();
                 let event_service_slot = event_service_slot.clone();
                 let message_service_slot = message_service_slot.clone();
+                let hook_bridge = hook_bridge_for_crash.clone();
                 async move {
                     // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
                     let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -999,6 +1259,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         runtime_logs: runtime_logs.clone(),
                         gateway: gateway.clone(),
                         approval_mode: approval_mode.clone(),
+                        hook_bridge: hook_bridge.clone(),
                         event_service: event_service_slot.clone(),
                         message_service: message_service_slot.clone(),
                     };
@@ -1239,6 +1500,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     handle_permission_request(
                         &window,
                         &acp,
+                        &hook_bridge,
                         &client_generation,
                         &approval_mode,
                         &pending_permissions,
@@ -1282,42 +1544,15 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     .ok()
                     .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
                     .unwrap_or_else(|| "unknown".to_string());
-                // A request-shaped interaction without an id cannot receive a
-                // JSON-RPC response, but it is still surfaced as a malformed
-                // interaction so the UI/runtime log explains why no card can
-                // be acted on.  Do not silently drop official client requests.
-                let (reason_code, rpc_code, message) = if raw.id.is_none() {
-                    (
-                        "missing_request_id",
-                        -32600,
-                        "invalid request: interaction request requires a JSON-RPC id".to_string(),
-                    )
-                } else {
-                    let reason = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                        "method_unsupported"
-                    } else {
-                        "provider_unsupported"
-                    };
-                    (
-                        reason,
-                        -32601,
-                        format!(
-                            "interaction {} unsupported",
-                            raw.method.as_deref().unwrap_or("method")
-                        ),
-                    )
-                };
-                reject_interaction_request(
+                handle_interaction_request(
                     &window,
                     &acp,
+                    &hook_bridge,
                     &provider,
                     &agent_id,
                     raw.method.as_deref(),
                     raw.id,
                     raw.params.as_ref(),
-                    reason_code,
-                    rpc_code,
-                    &message,
                 )
                 .await;
                 continue;

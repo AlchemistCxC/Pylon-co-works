@@ -271,6 +271,9 @@ pub(crate) struct AppStateHandles {
     pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     pub(crate) gateway: Arc<GatewayCore>,
     pub(crate) approval_mode: Arc<Mutex<String>>,
+    /// P55-D2：kernel hook 桥（permission/interaction 缝派发闸）——与 AppState
+    /// 共享同一 Arc 实例（from_state 克隆）。
+    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
     /// Production setup readiness barrier 后必为 Some；Option 仅保留测试构造兼容与
     /// 防御性诊断。dispatcher 对有 durable owner 的事件必须先 append 再发布。
     pub(crate) event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
@@ -330,6 +333,7 @@ impl AppStateHandles {
             runtime_logs: state.runtime_logs.clone(),
             gateway: state.gateway.clone(),
             approval_mode: state.approval_mode.clone(),
+            hook_bridge: state.hook_bridge.clone(),
             event_service: state.event_service.clone(),
             message_service: state.message_service.clone(),
         }

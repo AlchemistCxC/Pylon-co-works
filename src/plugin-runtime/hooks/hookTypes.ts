@@ -23,6 +23,8 @@ export const HOOK_NAMES = [
   'tool.failed',
   'context.beforeBuild',
   'context.afterBuild',
+  'permission.request',
+  'interaction.request',
 ] as const
 
 export type HookName = typeof HOOK_NAMES[number]

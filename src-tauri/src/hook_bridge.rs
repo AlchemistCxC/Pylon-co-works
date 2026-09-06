@@ -37,6 +37,10 @@ pub(crate) const DEFAULT_HOOK_TIMEOUT_MS: u64 = 3_000;
 pub(crate) const HOOK_MESSAGE_USER_BEFORE_SEND: &str = "message.user.beforeSend";
 /// 平台入站锚点名（#3）。
 pub(crate) const HOOK_MESSAGE_RECEIVED: &str = "message.received";
+/// 权限请求锚点名（#8，D2）。
+pub(crate) const HOOK_PERMISSION_REQUEST: &str = "permission.request";
+/// 交互请求锚点名（#9，D2）——未被 adapter 识别的 interaction 类方法。
+pub(crate) const HOOK_INTERACTION_REQUEST: &str = "interaction.request";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -348,6 +352,120 @@ pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<boo
         Some("allow") => Some(true),
         Some("deny") | Some("cancel") => Some(false),
         _ => None,
+    }
+}
+
+/// #8 权限缝决策：Answer(true)=allow（选 allow 语义 option 短路应答）、
+/// Answer(false)=deny（选 deny 语义 option）；FallThrough = 钩子未短路
+/// （continue / 无应答 / 超时 / 未注册 / 桥故障）——交回既有 bypass/auto/pending
+/// 流程（D2-②：无钩子应答时既有流逐字节不变）。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PermissionHookDecision {
+    Answer(bool),
+    FallThrough,
+}
+
+/// #8 权限缝派发（dispatcher spawn 任务调用；B1——主循环零 await 桥）。
+/// 信封契约 §10.2：`{provider, agentId, requestId, payload:{title,prompt,options}}`。
+pub(crate) async fn permission_request_hook_outcome<R: tauri::Runtime, E: tauri::Emitter<R>>(
+    bridge: &HookBridge,
+    emitter: Option<&E>,
+    provider: &str,
+    agent_id: &str,
+    request_id: &crate::acp::RequestId,
+    permission: &crate::permission::PendingPermission,
+) -> PermissionHookDecision {
+    let payload = serde_json::json!({
+        "provider": provider,
+        "agentId": agent_id,
+        "requestId": request_id.to_string(),
+        "payload": {
+            "title": permission.title,
+            "prompt": permission.prompt,
+            "options": permission.options,
+        },
+    });
+    match bridge
+        .dispatch(emitter, HOOK_PERMISSION_REQUEST, &permission.session_id, payload)
+        .await
+    {
+        HookDispatchOutcome::Answered(response) => {
+            match interpret_permission_hook_response(&response) {
+                Some(allow) => PermissionHookDecision::Answer(allow),
+                None => PermissionHookDecision::FallThrough,
+            }
+        }
+        HookDispatchOutcome::NotReady | HookDispatchOutcome::NotRegistered => {
+            PermissionHookDecision::FallThrough
+        }
+        HookDispatchOutcome::Failed(error) => {
+            // fail-open：权限流回退既有分支，钩子故障绝不吞掉权限请求。
+            tracing::warn!("permission.request hook dispatch failed (fail-open): {error}");
+            PermissionHookDecision::FallThrough
+        }
+    }
+}
+
+/// #9 交互缝决策：Respond(event) = 用原 request id 回写 result（§10.3）、
+/// Cancel = JSON-RPC invalid-request error（-32600）；FallThrough = 交回既有 reject。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum InteractionHookDecision {
+    Respond(Value),
+    Cancel { reason: Option<String> },
+    FallThrough,
+}
+
+/// #9 交互缝派发（dispatcher spawn 任务调用）。Hook 只接收原始 JSON-RPC
+/// envelope（§10.3）：`{provider, agentId, method, requestId, params}`。
+/// 会话键取 `params.sessionId`（ACP request 类方法惯例），缺省回退 agent_id——
+/// 前端 dispatcher 对无法 resolve 的会话 fail-closed，不误派发。
+pub(crate) async fn interaction_request_hook_outcome<R: tauri::Runtime, E: tauri::Emitter<R>>(
+    bridge: &HookBridge,
+    emitter: Option<&E>,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    request_id: &crate::acp::RequestId,
+    params: Option<&Value>,
+) -> InteractionHookDecision {
+    let session_key = params
+        .and_then(|p| p.get("sessionId"))
+        .and_then(Value::as_str)
+        .unwrap_or(agent_id);
+    let payload = serde_json::json!({
+        "provider": provider,
+        "agentId": agent_id,
+        "method": method,
+        "requestId": request_id.to_string(),
+        "params": params,
+    });
+    match bridge
+        .dispatch(emitter, HOOK_INTERACTION_REQUEST, session_key, payload)
+        .await
+    {
+        HookDispatchOutcome::Answered(response) => {
+            match response.get("action").and_then(Value::as_str) {
+                Some("respond") => match response.get("event") {
+                    Some(event) => InteractionHookDecision::Respond(event.clone()),
+                    // respond 但缺 event 载荷 → 形状非法，fail-open 回既有 reject。
+                    None => InteractionHookDecision::FallThrough,
+                },
+                Some("cancel") => InteractionHookDecision::Cancel {
+                    reason: response
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+                _ => InteractionHookDecision::FallThrough,
+            }
+        }
+        HookDispatchOutcome::NotReady | HookDispatchOutcome::NotRegistered => {
+            InteractionHookDecision::FallThrough
+        }
+        HookDispatchOutcome::Failed(error) => {
+            tracing::warn!("interaction.request hook dispatch failed (fail-open): {error}");
+            InteractionHookDecision::FallThrough
+        }
     }
 }
 
