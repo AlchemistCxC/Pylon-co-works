@@ -148,6 +148,7 @@ export class PackagePluginRuntimeService {
       drainTimeoutMs: manifest.hotSwap?.drainTimeoutMs,
       // 解析器已保证词表封闭；窄化到 capability 字面量类型
       capabilities: manifest.capabilities?.map(capability => capability as PylonPluginCapability),
+      dangerousHooks: Object.freeze([...(manifest.dangerousHooks ?? [])]),
       prepare: async context => {
         await this.packages.createRuntime(runtimeInstanceId)
         context.scope.add(() => this.packages.cleanupRuntime(runtimeInstanceId))

@@ -25,6 +25,7 @@ import {
   type PluginUpdateResult,
 } from './shadowUpdate.ts'
 import type { PylonPluginCapability } from './packageManifest.ts'
+import type { HookName } from './hooks/hookTypes.ts'
 
 export interface BuiltinPluginDefinition {
   id: string
@@ -38,6 +39,7 @@ export interface BuiltinPluginDefinition {
   version?: string
   /** API 1.2：manifest 声明的宿主能力（封闭词表）；缺省 = 不声明。 */
   capabilities?: readonly PylonPluginCapability[]
+  dangerousHooks?: readonly HookName[]
   packageInstanceId?: string
   runtimeInstanceId?: string
   hotSwapMode?: HotSwapMode
