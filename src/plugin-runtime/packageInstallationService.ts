@@ -165,6 +165,45 @@ export class PackageInstallationService {
   async installOrUpdate(sourcePath: string): Promise<PackageOperationResult> {
     try {
       const descriptor = await this.inspect(sourcePath)
+      return await this.installDescriptor(sourcePath, descriptor)
+    } catch (error) {
+      return this.operationFailure(error)
+    }
+  }
+
+  /** P53 D6：从本机 zip 安装/更新（inspect zip → 契约/consent → installFromZip）。 */
+  async installOrUpdateFromZip(zipPath: string): Promise<PackageOperationResult> {
+    try {
+      const descriptor = await this.packages.inspectZip(zipPath)
+      parsePylonPluginManifest(descriptor.manifest)
+      return await this.installDescriptor(zipPath, descriptor, 'zip')
+    } catch (error) {
+      return this.operationFailure(error)
+    }
+  }
+
+  /** P53 D6：从 https URL 安装/更新（inspect url → 契约/consent → installFromUrl）。 */
+  async installOrUpdateFromUrl(url: string): Promise<PackageOperationResult> {
+    try {
+      const descriptor = await this.packages.inspectUrl(url)
+      parsePylonPluginManifest(descriptor.manifest)
+      return await this.installDescriptor(url, descriptor, 'url')
+    } catch (error) {
+      return this.operationFailure(error)
+    }
+  }
+
+  /**
+   * 安装已解析的 descriptor（目录/zip/url 三源共用）：契约变更检查、consent
+   * 前置检查、激活分支（active→shadow update 仅目录；zip/url 走原子安装后
+   * 重启用）、install-only 分支。source 传递给对应 client 方法。
+   */
+  private async installDescriptor(
+    source: string,
+    descriptor: PluginPackageDescriptor,
+    kind: 'directory' | 'zip' | 'url' = 'directory',
+  ): Promise<PackageOperationResult> {
+    try {
       const installed = await this.packages.list()
       const candidateItems = [
         ...installed.filter(item => item.package.pluginId !== descriptor.pluginId),
@@ -176,16 +215,38 @@ export class PackageInstallationService {
       if (activationEligible) {
         this.assertCapabilityConsent(descriptor.pluginId, descriptor.version, manifest.capabilities)
       }
-      if (this.isActive(descriptor.pluginId)) {
-        await this.packageRuntime.updateFromDirectory(sourcePath, descriptor.pluginId)
-      } else if (activationEligible) {
-        await this.packageRuntime.activateFromDirectory(sourcePath, descriptor.pluginId)
+      const installSource = async (): Promise<void> => {
+        if (kind === 'zip') await this.packages.installFromZip(source, descriptor.pluginId)
+        else if (kind === 'url') await this.packages.installFromUrl(source, descriptor.pluginId)
+        else if (this.isActive(descriptor.pluginId)) {
+          await this.packageRuntime.updateFromDirectory(source, descriptor.pluginId)
+        } else if (activationEligible) {
+          await this.packageRuntime.activateFromDirectory(source, descriptor.pluginId)
+        } else {
+          const existing = installed.some(item => item.package.pluginId === descriptor.pluginId)
+          if (existing) await this.packages.update(source, descriptor.pluginId)
+          else await this.packages.install(source, descriptor.pluginId)
+        }
+      }
+      if (this.isActive(descriptor.pluginId) && kind !== 'directory') {
+        // zip/url 更新是原子版本替换：先停用旧 runtime，装完再激活新版本
+        const cleanup = await this.runtime.disable(descriptor.pluginId)
+        if (!cleanup.complete) throw new Error(this.cleanupFailureMessage(descriptor.pluginId, cleanup))
+        try {
+          await installSource()
+        } catch (error) {
+          await this.runtime.enable(descriptor.pluginId).catch(() => undefined)
+          throw error
+        }
       } else {
-        const existing = installed.some(item => item.package.pluginId === descriptor.pluginId)
-        if (existing) await this.packages.update(sourcePath, descriptor.pluginId)
-        else await this.packages.install(sourcePath, descriptor.pluginId)
+        await installSource()
       }
       await this.packages.setEnabled(descriptor.pluginId, true)
+      if (kind !== 'directory' && resolution.eligibleIds.includes(descriptor.pluginId)
+        && !this.isActive(descriptor.pluginId)) {
+        const target = (await this.packages.list()).find(item => item.package.pluginId === descriptor.pluginId)
+        if (target) await this.packageRuntime.activateInstalled(target.package)
+      }
       return { ok: true }
     } catch (error) {
       return this.operationFailure(error)

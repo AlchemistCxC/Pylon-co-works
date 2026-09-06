@@ -574,6 +574,38 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
       mockPluginPackages = mockPluginPackages.filter(item => item.package.pluginId !== args.pluginId)
       return null
     }
+    // P53 D6：zip/URL 安装源浏览器反馈环 mock（descriptor 由期望 id 合成，
+    // 真实 zip 校验/下载在 Tauri 侧；mock 只走通前端链路）
+    case 'plugin_package_inspect_zip':
+    case 'plugin_package_inspect_url':
+    case 'plugin_install_from_zip':
+    case 'plugin_install_from_url': {
+      const sourceLabel = typeof args.zipPath === 'string'
+        ? args.zipPath
+        : typeof args.url === 'string' ? args.url : 'mock-source'
+      void sourceLabel
+      const expectedId = typeof args.expectedId === 'string' && args.expectedId.trim()
+        ? args.expectedId.trim()
+        : 'demo.zip-source'
+      const descriptor = {
+        pluginId: expectedId,
+        version: '1.0.0',
+        packageInstanceId: `${expectedId}@1.0.0-mock`,
+        manifest: {
+          schema: 1 as const, id: expectedId, name: `Mock ${expectedId}`, version: '1.0.0',
+          api: '1.0' as const, kind: 'feature' as const, web: { entry: './index.js' },
+        },
+        files: [{ path: 'index.js', size: 1, mime: 'text/javascript' }],
+        totalBytes: 1,
+        active: true,
+      }
+      if (String(cmd).startsWith('plugin_package_inspect')) return descriptor
+      mockPluginPackages = [
+        ...mockPluginPackages.filter(item => item.package.pluginId !== expectedId),
+        { package: descriptor, enabled: true },
+      ]
+      return { operationId: `mock-${Date.now()}`, package: descriptor }
+    }
     case 'new_session':
     case 'load_persisted_session':
       return buildSessionResponse(args)

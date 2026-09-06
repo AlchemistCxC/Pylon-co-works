@@ -31,6 +31,9 @@ const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
 export interface PluginManagerProps {
   service?: PackageInstallationService
   pickDirectory?: () => Promise<string | null>
+  /** P53 D6：zip / URL 安装源选择器（默认 tauri dialog / prompt）。 */
+  pickZipFile?: () => Promise<string | null>
+  promptUrl?: () => Promise<string | null>
   bootstrap?: KernelBootstrap
 }
 
@@ -38,6 +41,24 @@ async function pickPluginDirectory(): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ directory: true, multiple: false, title: '选择 api=1.0 插件包' })
   return typeof selected === 'string' ? selected : null
+}
+
+/** P53 D6：选择本机 zip 安装包。 */
+async function pickPluginZip(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    multiple: false,
+    title: '选择插件 zip 包',
+    filters: [{ name: '插件包', extensions: ['zip'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+/** P53 D6：输入 https 安装源 URL。 */
+async function promptPluginUrl(): Promise<string | null> {
+  const input = window.prompt('输入插件包 https URL（仅支持 https）')
+  const trimmed = input?.trim()
+  return trimmed ? trimmed : null
 }
 
 function cleanupResultMessage(result: PluginDeactivateResult): string {
@@ -50,6 +71,8 @@ function cleanupResultMessage(result: PluginDeactivateResult): string {
 export default function PluginManager({
   service: serviceProp,
   pickDirectory = pickPluginDirectory,
+  pickZipFile = pickPluginZip,
+  promptUrl = promptPluginUrl,
   bootstrap = kernelBootstrap,
 }: PluginManagerProps = {}) {
   const runtime = getPluginRuntime()
@@ -162,6 +185,21 @@ export default function PluginManager({
     const sourcePath = await pickDirectory()
     if (!sourcePath) return
     await run('安装/更新', () => service.installOrUpdate(sourcePath))
+  }
+
+  // P53 D6：zip / URL 安装源（三选入口；仅 https 且复用同一事务）
+  const installFromZip = async () => {
+    if (!nativePackagesAvailable) return
+    const zipPath = await pickZipFile()
+    if (!zipPath) return
+    await run('从 zip 安装', () => service.installOrUpdateFromZip(zipPath))
+  }
+
+  const installFromUrl = async () => {
+    if (!nativePackagesAvailable) return
+    const url = await promptUrl()
+    if (!url) return
+    await run('从 URL 安装', () => service.installOrUpdateFromUrl(url))
   }
 
   const activeById = useMemo(
@@ -370,6 +408,12 @@ export default function PluginManager({
         <div className="set-preset-row">
           <button type="button" className="ps-btn primary sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installOrUpdate()}>
             {busy === '安装/更新' ? '处理中…' : '安装/更新 api=1.0 包…'}
+          </button>
+          <button type="button" className="ps-btn sm" aria-label="从 zip 安装" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installFromZip()}>
+            {busy === '从 zip 安装' ? '处理中…' : '从 zip 安装…'}
+          </button>
+          <button type="button" className="ps-btn sm" aria-label="从 URL 安装" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installFromUrl()}>
+            {busy === '从 URL 安装' ? '处理中…' : '从 URL 安装…'}
           </button>
           <button type="button" className="ps-btn sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void refresh().catch(error => appendLog(String(error)))}>
             刷新
