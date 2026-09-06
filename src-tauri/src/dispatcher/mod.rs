@@ -919,6 +919,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         .lock()
         .ok()
         .and_then(|slot| slot.clone());
+    let hook_bridge = handles.hook_bridge.clone();
     let pending_permissions = runtime.pending_permissions.clone();
     let agent_id = handles
         .runtimes
@@ -966,6 +967,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let reconnect_epoch = reconnect_epoch.clone();
             let event_service_slot = event_service_slot.clone();
             let message_service_slot = message_service_slot.clone();
+            let hook_bridge = hook_bridge.clone();
             move |reason: String| {
                 let agent_runtime = agent_runtime.clone();
                 let pet = pet.clone();
@@ -980,6 +982,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 let reconnect_epoch = reconnect_epoch.clone();
                 let event_service_slot = event_service_slot.clone();
                 let message_service_slot = message_service_slot.clone();
+                let hook_bridge = hook_bridge.clone();
                 async move {
                     // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
                     let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -1001,6 +1004,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         approval_mode: approval_mode.clone(),
                         event_service: event_service_slot.clone(),
                         message_service: message_service_slot.clone(),
+                        hook_bridge: hook_bridge.clone(),
                     };
                     emit_event(
                         &window,

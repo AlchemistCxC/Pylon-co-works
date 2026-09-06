@@ -277,6 +277,7 @@ pub(crate) struct AppStateHandles {
     /// ACP session-level snapshots (commands/mode) share the message DB and
     /// are persisted when providers update them asynchronously.
     pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
+    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
 /// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
@@ -332,6 +333,7 @@ impl AppStateHandles {
             approval_mode: state.approval_mode.clone(),
             event_service: state.event_service.clone(),
             message_service: state.message_service.clone(),
+            hook_bridge: state.hook_bridge.clone(),
         }
     }
 
