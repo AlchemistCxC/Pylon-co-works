@@ -337,6 +337,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
     pending_permissions: &PermissionLock,
+    hook_bridge: &Arc<crate::hook_bridge::HookBridge>,
     provider: &str,
     agent_id: &str,
     method: Option<&str>,
@@ -408,6 +409,24 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .lock()
         .map(|m| m.clone())
         .unwrap_or_else(|_| "default".to_string());
+    if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
+        .dispatch(Some(window), "permission.request", &permission.session_id, serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "requestId": request_id.to_string(),
+            "payload": { "title": permission.title, "prompt": permission.prompt, "options": permission.options }
+        }))
+        .await
+    {
+        if let Some(allow) = crate::hook_bridge::interpret_permission_hook_response(&response) {
+            let option = pick_option(&permission.options, !allow);
+            if let Some(option_id) = option {
+                let (write_tx, crashed) = { let acp = acp.lock().await; (acp.write_tx.clone(), acp.crashed.clone()) };
+                crate::permission::send_agent_response(write_tx, crashed, request_id, permission_response(option_id)).await;
+                return;
+            }
+        }
+    }
     if matches!(mode.as_str(), "bypass" | "auto") {
         tracing::info!(
             "权限模式 {mode}：自动批准工具调用 {}",
@@ -1246,6 +1265,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         &client_generation,
                         &approval_mode,
                         &pending_permissions,
+                        &hook_bridge,
                         &provider,
                         &agent_id,
                         raw.method.as_deref(),
