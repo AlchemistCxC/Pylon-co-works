@@ -163,6 +163,11 @@ export class HookRuntime {
           this.pushSuccessTrace(entry, invocationId, startedAt, 'continued')
           continue
         }
+        // Notification hooks are observe-only: action-bearing results are ignored.
+        if (definition.mode === 'notification' && result.action !== 'continue') {
+          this.pushSuccessTrace(entry, invocationId, startedAt, 'continued')
+          continue
+        }
         if (result.action === 'cancel') {
           this.pushSuccessTrace(entry, invocationId, startedAt, 'cancelled')
           return { action: 'cancel', event: effectiveEvent, reason: result.reason, executed, skipped }
@@ -170,6 +175,10 @@ export class HookRuntime {
         if (result.action === 'respond') {
           this.pushSuccessTrace(entry, invocationId, startedAt, 'responded')
           return { action: 'respond', event: effectiveEvent, output: result.output, executed, skipped }
+        }
+        if (result.action === 'send') {
+          this.pushSuccessTrace(entry, invocationId, startedAt, 'responded')
+          return { action: 'send', event: effectiveEvent, message: result.message, executed, skipped }
         }
         if (result.event !== undefined) {
           effectiveEvent = result.event as TEvent

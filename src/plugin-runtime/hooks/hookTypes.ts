@@ -35,12 +35,14 @@ export interface HookInvocationContext<TEvent = unknown> {
   readonly hookName: HookName
   readonly event: TEvent
   readonly signal: AbortSignal
+  readonly triggeredBy?: { readonly kind: 'user' | 'hook'; readonly pluginId?: string; readonly hookName?: HookName; readonly depth: number }
 }
 
 export type HookActionResult<TEvent = unknown> =
   | { action: 'continue'; event?: TEvent }
   | { action: 'cancel'; reason: string }
   | { action: 'respond'; output: unknown }
+  | { action: 'send'; message: string }
   | void
 
 export interface HookDefinition<TEvent = unknown> {
@@ -66,10 +68,11 @@ export interface HookTraceEntry {
 }
 
 export interface HookInvocationResult<TEvent = unknown> {
-  action: 'continue' | 'cancel' | 'respond'
+  action: 'continue' | 'cancel' | 'respond' | 'send'
   event: TEvent
   reason?: string
   output?: unknown
+  message?: string
   executed: number
   skipped: number
 }
