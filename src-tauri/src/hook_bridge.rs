@@ -351,6 +351,15 @@ pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<boo
     }
 }
 
+/// D2 interaction 请求：仅显式 respond/cancel 产生短路动作，其余继续既有 reject。
+pub(crate) fn interpret_interaction_hook_response(response: &Value) -> Option<(&'static str, Value)> {
+    match response.get("action").and_then(Value::as_str) {
+        Some("respond") => response.get("output").cloned().map(|output| ("respond", output)),
+        Some("cancel") => Some(("cancel", Value::Null)),
+        _ => None,
+    }
+}
+
 /// #1 发送链缝派发（prompt.rs 调用；窗口可缺——无窗口即 fail-open）。
 pub(crate) async fn before_send_hook_outcome<R: tauri::Runtime>(
     state: &crate::AppState,
@@ -714,6 +723,13 @@ mod tests {
         assert_eq!(interpret_permission_hook_response(&json!({"action":"allow"})), Some(true));
         assert_eq!(interpret_permission_hook_response(&json!({"action":"deny"})), Some(false));
         assert_eq!(interpret_permission_hook_response(&json!({"action":"continue"})), None);
+    }
+
+    #[test]
+    fn interaction_hook_interpretation_requires_explicit_response() {
+        assert_eq!(interpret_interaction_hook_response(&json!({"action":"continue"})), None);
+        assert_eq!(interpret_interaction_hook_response(&json!({"action":"cancel"})), Some(("cancel", Value::Null)));
+        assert_eq!(interpret_interaction_hook_response(&json!({"action":"respond","output":{"ok":true}})), Some(("respond", json!({"ok":true}))));
     }
 
     /// 验收 D1-④：message.received gate 丢弃平台消息，并对齐既有失败路径的
