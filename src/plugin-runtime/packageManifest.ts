@@ -1,5 +1,6 @@
 import type { BuiltinPluginDefinition } from './pluginRuntime.ts'
 import type { HotSwapMode } from './shadowUpdate.ts'
+import { HOOK_NAMES, type HookName } from './hooks/hookTypes.ts'
 
 export const PYLON_PLUGIN_API_MIN = '1.0' as const
 export const PYLON_PLUGIN_API_LATEST = '1.2' as const
@@ -51,6 +52,8 @@ export interface PylonPluginManifest {
   /** API 1.2 新增：声明所需的宿主能力（封闭词表，见 PYLON_PLUGIN_CAPABILITIES）；
    *  1.0/1.1 manifest 出现该字段仍按 removed-field 拒绝。 */
   readonly capabilities?: readonly string[]
+  /** API 1.2 新增：声明需要用户确认的危险钩子锚点。 */
+  readonly dangerousHooks?: readonly HookName[]
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
@@ -69,7 +72,7 @@ const CAPABILITY_SET = new Set<string>(PYLON_PLUGIN_CAPABILITIES)
 function removedFieldsFor(api: unknown): readonly string[] {
   return api === PYLON_PLUGIN_API_LATEST
     ? ['trust', 'contributes', 'signature', 'entry']
-    : ['trust', 'capabilities', 'contributes', 'signature', 'entry']
+    : ['trust', 'capabilities', 'dangerousHooks', 'contributes', 'signature', 'entry']
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -130,6 +133,20 @@ export function parsePylonPluginManifest(source: string | unknown): PylonPluginM
         throw new PluginManifestError(`capabilities.${index}`, 'capability 重复声明')
       }
       seen.add(capability)
+    })
+  }
+  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.dangerousHooks !== undefined) {
+    if (!Array.isArray(manifest.dangerousHooks)
+      || manifest.dangerousHooks.some(value => typeof value !== 'string' || !value.trim())) {
+      throw new PluginManifestError('dangerousHooks', '必须是字符串数组')
+    }
+    const seen = new Set<string>()
+    manifest.dangerousHooks.forEach((hook, index) => {
+      if (!(HOOK_NAMES as readonly string[]).includes(hook)) {
+        throw new PluginManifestError(`dangerousHooks.${index}`, '未知 hook 锚点')
+      }
+      if (seen.has(hook)) throw new PluginManifestError(`dangerousHooks.${index}`, 'hook 重复声明')
+      seen.add(hook)
     })
   }
   if (typeof manifest.kind !== 'string' || !KINDS.has(manifest.kind)) throw new Error('pylon-plugin.json kind 无效')

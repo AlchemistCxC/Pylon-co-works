@@ -12,6 +12,7 @@ export const HOOK_NAMES = [
   'message.user.sendFailed',
   'message.received',
   'message.agent.committed',
+  'agent.chunk',
   'turn.started',
   'turn.completed',
   'turn.failed',

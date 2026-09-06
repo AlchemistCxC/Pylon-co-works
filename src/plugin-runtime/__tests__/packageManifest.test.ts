@@ -131,4 +131,14 @@ describe('api=1.2 package manifest (capabilities)', () => {
   it('rejects api=1.3 as an unsupported version', () => {
     expect(() => parsePylonPluginManifest({ ...v12, api: '1.3' })).toThrow(/仅支持/)
   })
+
+  it('accepts and validates dangerous hook declarations', () => {
+    expect(parsePylonPluginManifest({ ...v12, dangerousHooks: ['agent.chunk'] })).toMatchObject({
+      dangerousHooks: ['agent.chunk'],
+    })
+    expect(() => parsePylonPluginManifest({ ...v12, dangerousHooks: ['unknown.hook'] }))
+      .toThrow(/dangerousHooks\.0/)
+    expect(() => parsePylonPluginManifest({ ...valid, dangerousHooks: ['agent.chunk'] }))
+      .toThrow(/dangerousHooks.*API 1\.0/)
+  })
 })
