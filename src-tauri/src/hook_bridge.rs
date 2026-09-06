@@ -161,6 +161,15 @@ impl HookBridge {
         if !self.has_registered_hook(hook) {
             return HookDispatchOutcome::NotRegistered;
         }
+        // Triggered hooks are bounded to prevent send→hook→send cycles.
+        if payload
+            .get("triggeredBy")
+            .and_then(|value| value.get("depth"))
+            .and_then(Value::as_u64)
+            .is_some_and(|depth| depth >= 2)
+        {
+            return HookDispatchOutcome::Failed("hook trigger depth limit reached".into());
+        }
         let Some(emitter) = emitter else {
             return HookDispatchOutcome::Failed("hook bridge emitter unavailable".into());
         };
@@ -582,6 +591,20 @@ mod tests {
             elapsed < Duration::from_secs(2),
             "timeout must come from the Rust clock, took {elapsed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn trigger_depth_two_is_rejected_before_ipc() {
+        let bridge = HookBridge::default();
+        bridge.mark_started();
+        bridge.sync_registry(&json!({ "hooks": [HOOK_MESSAGE_USER_BEFORE_SEND] }));
+        let result = bridge.dispatch::<tauri::test::MockRuntime>(
+            None,
+            HOOK_MESSAGE_USER_BEFORE_SEND,
+            "s",
+            json!({ "triggeredBy": { "depth": 2 } }),
+        ).await;
+        assert!(matches!(result, HookDispatchOutcome::Failed(message) if message.contains("depth limit")));
     }
 
     /// B2/B6：ready 前与零注册锚点不派发（零 IPC）。
