@@ -260,3 +260,5 @@
 ---
 
 [2026-09-02 01:30] [施工员B·工程师] 认领 Track B B-01：先锁定现有 canonical precedence、load generation/load lock 与 replay fallback 语义；基线目标域测试 19 项通过。当前工作树另有他人 WIP，施工仅触碰 B ownership 文件。
+
+[2026-09-06 17:02] [Hook桥·工程师] [P55 D1 已提交] D1 kernel hook bridge + beforeSend/message.received 锚点 + 前端 dispatcher/signal 已提交 3bc8ef13。hook_bridge 闸门测试修复（先 sync_registry 再验证无窗口 Failed）；前端 2 文件 15 项通过。cargo test 编译阶段受 Windows STATUS_STACK_BUFFER_OVERRUN 阻塞，cargo check 曾进入 Checking；未触碰 dist-plugin-sdk/artifacts 并行 WIP。D2-D6 尚未施工。
