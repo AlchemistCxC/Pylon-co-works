@@ -46,6 +46,7 @@ tracing-subscriber = "0.3.23"
 serde_yml = "0.0.13"
 sha2 = "0.10"
 pylon-core = { path = "pylon-core" }
+pylon-foundations = { path = "pylon-foundations" }
 chrono = "0.4.45"
 windows-sys = { version = "0.61.2", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 libc = "0.2"

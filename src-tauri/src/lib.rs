@@ -15,13 +15,11 @@ mod correlation;
 mod cwd;
 mod dispatcher;
 mod error;
-mod event_names;
 mod export;
 mod gateway;
 mod gateway_cmds;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
-mod git;
 mod hermes;
 mod hermes_runtime;
 mod lifecycle;
@@ -47,7 +45,6 @@ pub mod pylon_cli;
 mod real_acp_smoke;
 mod runtime;
 mod runtime_log;
-mod sanitize;
 mod session;
 #[cfg(test)]
 mod session_expiry_platform_tests;
@@ -57,10 +54,14 @@ mod session_store;
 mod startup;
 #[cfg(test)]
 mod test_utils;
-mod time;
-mod workspace;
 mod workspace_cmds;
 mod workspaces;
+
+// P58 阶段一拆分：event_names/sanitize/time/workspace/git 迁入 pylon-foundations
+// crate（纯逻辑：零 tauri / 零 AppState，只依赖第三方）。模块级重导出让既有
+// `crate::time::` 等路径继续解析，调用点零改动；pub(crate) 使库外暴露面与
+// 拆分前的私有 mod 一致。依赖方向铁律：foundations 不得引用回本 crate。
+pub(crate) use pylon_foundations::{event_names, git, sanitize, time, workspace};
 
 use acp::AcpClient;
 use agent_config::AgentDef;
