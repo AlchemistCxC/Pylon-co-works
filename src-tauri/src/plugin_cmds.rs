@@ -1550,10 +1550,6 @@ pub(crate) struct PluginInstallProgress {
     pub bytes_done: u64,
 }
 
-fn install_zip_limits() -> (u64, u64) {
-    (MAX_INSTALL_ZIP_BYTES, MAX_INSTALL_EXTRACT_BYTES)
-}
-
 /// 校验安装源 URL：仅 https（fail-closed）。
 pub(crate) fn validate_install_url(raw: &str) -> Result<url::Url, PluginError> {
     let parsed = url::Url::parse(raw)
@@ -1571,8 +1567,10 @@ pub(crate) fn validate_install_url(raw: &str) -> Result<url::Url, PluginError> {
 }
 
 /// URL 重定向决策（纯函数，可单测）：限次且每次重定向后仍须 https。
+/// reqwest 在每次 redirect 前把当前 URL push 进 previous，故 hops 实为
+/// "已完成跳数 + 1"；`hops > INSTALL_MAX_REDIRECTS` 允许恰好 5 跳。
 pub(crate) fn install_redirect_decision(hops: usize, scheme: &str) -> Result<(), &'static str> {
-    if hops >= INSTALL_MAX_REDIRECTS {
+    if hops > INSTALL_MAX_REDIRECTS {
         return Err("too many redirects");
     }
     if scheme != "https" {
@@ -1630,17 +1628,28 @@ pub(crate) fn extract_zip_archive(
             fs::create_dir_all(&target).map_err(|e| PluginError::Io(e.to_string()))?;
             continue;
         }
-        extracted_bytes = extracted_bytes.saturating_add(entry.size());
-        if extracted_bytes > max_extract_bytes {
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| PluginError::Io(e.to_string()))?;
+        }
+        // zip bomb 防护（review P0-1）：中央目录的 uncompressed_size 可谎报，
+        // 上限必须按 std::io::copy 的实际写入量计费——take(remaining+1) 硬限幅，
+        // 超限即拒绝；并校验实际字节数与声明一致（CRC 之外的长度自洽）。
+        let remaining = max_extract_bytes.saturating_sub(extracted_bytes);
+        let mut limited = (&mut entry).take(remaining.saturating_add(1));
+        let mut out = File::create(&target).map_err(|e| PluginError::Io(e.to_string()))?;
+        let written = std::io::copy(&mut limited, &mut out)
+            .map_err(|e| PluginError::Io(e.to_string()))?;
+        if written > remaining {
             return Err(PluginError::SourceInvalid(format!(
                 "zip extraction exceeds limit: > {max_extract_bytes}"
             )));
         }
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|e| PluginError::Io(e.to_string()))?;
+        if written != entry.size() {
+            return Err(PluginError::SourceInvalid(
+                "zip entry size mismatch (declared uncompressed_size is untrustworthy)".into(),
+            ));
         }
-        let mut out = File::create(&target).map_err(|e| PluginError::Io(e.to_string()))?;
-        std::io::copy(&mut entry, &mut out).map_err(|e| PluginError::Io(e.to_string()))?;
+        extracted_bytes = extracted_bytes.saturating_add(written);
         extracted_files += 1;
     }
     if extracted_files == 0 {
@@ -1663,7 +1672,10 @@ fn unique_install_temp(prefix: &str) -> PathBuf {
             .unwrap_or_default()
             .as_nanos()
     );
-    std::env::temp_dir().join(unique)
+    let dir = std::env::temp_dir().join(unique);
+    // review P1-1：下载落盘（File::create）要求父目录存在，构造即创建
+    fs::create_dir_all(&dir).ok();
+    dir
 }
 
 fn emit_install_progress(
@@ -1754,7 +1766,8 @@ async fn install_from_zip_source(
     validate_plugin_id(expected_id)?;
     let root = root(&app)?;
     ensure_layout_at(&root)?;
-    let _guard = write_lock().await;
+    // review P2-3：下载/解压在临时区完成（可达 120s），不持有全局写锁——
+    // 锁只覆盖 install_at 事务本体，避免阻塞其它包事务命令。
     let work = unique_install_temp("pylon-plugin-install");
     let extract_dir = work.join("extracted");
     let result = async {
@@ -1797,9 +1810,13 @@ async fn install_from_zip_source(
     }
     emit_install_progress(&app, expected_id, "staging", None, 0);
     // 复用既有事务：install_at = stage_at + commit（失败 abort 回滚）
+    let _guard = write_lock().await;
     let outcome = install_at(&root, &extract_dir, expected_id);
     cleanup_install_temp(&work);
-    emit_install_progress(&app, expected_id, "committed", None, 0);
+    // review P2-1：committed 只在成功时发布；失败以命令错误返回
+    if outcome.is_ok() {
+        emit_install_progress(&app, expected_id, "committed", None, 0);
+    }
     Ok(outcome?)
 }
 
@@ -2230,9 +2247,12 @@ mod tests {
             &zip_path,
             &[("pylon-plugin.json", b"{\"schema\":1}"), ("blob.bin", &payload)],
         );
+        // 实际写入计费（review P0-1）：take 限幅截断后触发 size mismatch 或超限拒绝，
+        // 两条路径都是 fail-closed（不信任中央目录声明值）
         assert!(matches!(
             extract_zip_archive(&zip_path, &dest, MAX_INSTALL_ZIP_BYTES, 1024),
-            Err(PluginError::SourceInvalid(message)) if message.contains("exceeds limit")
+            Err(PluginError::SourceInvalid(message))
+                if message.contains("exceeds limit") || message.contains("size mismatch")
         ));
         fs::remove_dir_all(base).ok();
     }
@@ -2305,6 +2325,24 @@ mod tests {
     }
 
     #[test]
+    fn install_zip_rejects_symlink_entries() {
+        let base = temp("zip-symlink");
+        let zip_path = base.join("link.zip");
+        let dest = base.join("dest");
+        fs::create_dir_all(&base).unwrap();
+        let file = File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::SimpleFileOptions = Default::default();
+        zip.add_symlink("evil-link", "../target", options).unwrap();
+        zip.finish().unwrap();
+        assert!(matches!(
+            extract_zip_archive(&zip_path, &dest, MAX_INSTALL_ZIP_BYTES, MAX_INSTALL_EXTRACT_BYTES),
+            Err(PluginError::SourceInvalid(message)) if message.contains("symlink")
+        ));
+        fs::remove_dir_all(base).ok();
+    }
+
+    #[test]
     fn install_url_validation_rejects_non_https() {
         assert!(validate_install_url("https://example.com/demo.zip").is_ok());
         assert!(validate_install_url("http://example.com/demo.zip").is_err());
@@ -2315,9 +2353,11 @@ mod tests {
 
     #[test]
     fn install_redirect_decision_rejects_non_https_and_excess_hops() {
-        assert!(install_redirect_decision(0, "https").is_ok());
-        assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS - 1, "https").is_ok());
-        assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS, "https")
+        assert!(install_redirect_decision(1, "https").is_ok());
+        // hops（previous().len()）= 已完成跳数 + 1：len == MAX 即第 5 跳仍放行，
+        // len == MAX+1 即第 6 跳拒绝（实际允许 INSTALL_MAX_REDIRECTS 跳）
+        assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS, "https").is_ok());
+        assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS + 1, "https")
             .eq(&Err("too many redirects")));
         assert!(install_redirect_decision(0, "http").eq(&Err("redirect to non-https url")));
         assert!(install_redirect_decision(0, "ftp").eq(&Err("redirect to non-https url")));
