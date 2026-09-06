@@ -204,4 +204,18 @@ describe('HookRuntime v2', () => {
       error: 'scope resource cleanup failed',
     })
   })
+
+  it('short-circuits on trigger send and ignores actions from notifications', async () => {
+    const runtime = new HookRuntime()
+    const owner = createPluginIdentity('p.trigger', 'run-1')
+    runtime.registry.register(owner, 'turn.completed', {
+      id: 'send', mode: 'pipeline', handler: () => ({ action: 'send', message: 'follow up' }),
+    })
+    await expect(runtime.invoke('turn.completed', {})).resolves.toMatchObject({ action: 'send', message: 'follow up' })
+    const notify = new HookRuntime()
+    notify.registry.register(owner, 'turn.completed', {
+      id: 'observe', mode: 'notification', handler: () => ({ action: 'cancel', reason: 'ignored' }),
+    })
+    await expect(notify.invoke('turn.completed', {})).resolves.toMatchObject({ action: 'continue' })
+  })
 })
