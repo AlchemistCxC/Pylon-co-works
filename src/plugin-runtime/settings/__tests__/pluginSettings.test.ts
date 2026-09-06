@@ -75,3 +75,27 @@ describe('plugin settings contracts', () => {
     expect(theme.target).toBe('theme.accent')
   })
 })
+
+describe('PluginSettingsStore snapshot stability (React #185 regression)', () => {
+  it('returns a reference-stable empty snapshot for namespaces that never wrote values', async () => {
+    const { PluginSettingsStore } = await import('../pluginSettingsStore.ts')
+    const store = new PluginSettingsStore()
+    const a = store.getSnapshot('never.written')
+    const b = store.getSnapshot('never.written')
+    expect(a).toBe(b)
+  })
+
+  it('keeps the stable empty snapshot distinct from real values and does not resurrect', async () => {
+    const { PluginSettingsStore } = await import('../pluginSettingsStore.ts')
+    const store = new PluginSettingsStore()
+    const empty = store.getSnapshot('plugin.x')
+    store.set('plugin.x', 'key', 'value')
+    expect(store.getSnapshot('plugin.x')).not.toBe(empty)
+    expect(store.getSnapshot('plugin.x')).toEqual({ key: 'value' })
+    store.remove('plugin.x', 'key')
+    expect(store.getSnapshot('plugin.x')).toEqual({})
+    // remove 后回到稳定空快照（与初始空快照同源）
+    expect(store.getSnapshot('plugin.x')).toBe(store.getSnapshot('plugin.x'))
+  })
+})
+

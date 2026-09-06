@@ -14,10 +14,14 @@ export class PluginSettingsStore {
   private hydrated = false
   private values: Record<string, Readonly<Record<string, PluginSettingValue>>> = {}
   private readonly listeners = new Map<string, Set<() => void>>()
+  /** 从未写过值的 namespace 共享同一空快照：useSyncExternalStore 的
+   *  getSnapshot 要求引用稳定，每次新建 {} 会触发 React #185 无限重渲染
+   *  （真实缺陷：无 schema 插件设置页首次渲染即崩）。 */
+  private static readonly EMPTY_NAMESPACE: Readonly<Record<string, PluginSettingValue>> = Object.freeze({})
 
   getSnapshot(pluginId: string): Readonly<Record<string, PluginSettingValue>> {
     this.hydrate()
-    return this.values[pluginId] ?? Object.freeze({})
+    return this.values[pluginId] ?? PluginSettingsStore.EMPTY_NAMESPACE
   }
 
   get(pluginId: string, key: string): PluginSettingValue | undefined {
