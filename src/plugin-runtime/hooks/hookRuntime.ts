@@ -54,10 +54,16 @@ export class HookRuntime {
     return this.resolve(hookName, enabledPluginIds).length > 0
   }
 
+  /**
+   * P55-D1：可选外部取消信号（kernel hook dispatcher 桥超时/取消联动）。
+   * 传入时每个 handler 的内部 AbortController 联动外部信号（abort 传播）；
+   * 不传时行为与既往逐字节等价（不注册任何监听）。
+   */
   async invoke<TEvent>(
     hookName: HookName,
     event: TEvent,
     enabledPluginIds?: readonly string[],
+    externalSignal?: AbortSignal,
   ): Promise<HookInvocationResult<TEvent>> {
     const entries = this.resolve(hookName, enabledPluginIds)
     if (entries.length === 0) return { action: 'continue', event, executed: 0, skipped: 0 }
@@ -87,6 +93,20 @@ export class HookRuntime {
 
       const startedAt = Date.now()
       const controller = new AbortController()
+      // P55-D1：外部信号联动——监听器随本 handler 租约结束移除（防泄漏）；
+      // already-aborted 信号在注册后立即传播一次。
+      let onExternalAbort: (() => void) | undefined
+      if (externalSignal) {
+        onExternalAbort = () => controller.abort(externalSignal.reason)
+        externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+        if (externalSignal.aborted) controller.abort(externalSignal.reason)
+      }
+      const detachExternalSignal = () => {
+        if (onExternalAbort && externalSignal) {
+          externalSignal.removeEventListener('abort', onExternalAbort)
+          onExternalAbort = undefined
+        }
+      }
       const promise = Promise.resolve().then(() => definition.handler({
         invocationId,
         hookName,
@@ -113,7 +133,10 @@ export class HookRuntime {
                 : result && result.action === 'continue' && result.event !== undefined ? 'transformed' : 'continued',
           })
         }).catch(error => this.handleFailure(entry, invocationId, startedAt, error, false))
-          .finally(() => this.removeLease(entry.ownerRuntimeInstanceId, lease))
+          .finally(() => {
+            detachExternalSignal()
+            this.removeLease(entry.ownerRuntimeInstanceId, lease)
+          })
         continue
       }
 
@@ -159,6 +182,7 @@ export class HookRuntime {
         if (failureResult) return { ...failureResult, event: effectiveEvent, executed, skipped }
       } finally {
         if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
+        detachExternalSignal()
         this.removeLease(entry.ownerRuntimeInstanceId, lease)
       }
     }

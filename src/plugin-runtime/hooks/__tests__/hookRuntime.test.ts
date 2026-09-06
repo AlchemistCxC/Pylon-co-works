@@ -148,6 +148,42 @@ describe('HookRuntime v2', () => {
     expect(disablePlugin).toHaveBeenCalledWith('p.unhealthy')
   })
 
+  it('P55-D1：externalSignal abort 传播到 handler 内部 signal，且不传时行为不变', async () => {
+    const runtime = new HookRuntime()
+    const owner = createPluginIdentity('p.external', 'run-1')
+    const handlerSignals: AbortSignal[] = []
+    runtime.registry.register(owner, 'message.user.beforeSend', {
+      id: 'waits-abort',
+      mode: 'pipeline',
+      timeoutMs: 5_000,
+      failurePolicy: 'continue',
+      handler: ({ signal }) => new Promise<never>((_resolve, reject) => {
+        handlerSignals.push(signal)
+        signal.addEventListener('abort', () => reject(new Error(`aborted: ${String(signal.reason)}`)))
+      }),
+    })
+
+    // externalSignal abort → handler 内部 controller.abort → invoke 按 continue 失败策略收口。
+    const external = new AbortController()
+    const invocation = runtime.invoke('message.user.beforeSend', { text: 'x' }, undefined, external.signal)
+    await vi.waitFor(() => expect(handlerSignals).toHaveLength(1))
+    external.abort('bridge timeout')
+    await expect(invocation).resolves.toMatchObject({ action: 'continue', event: { text: 'x' } })
+    expect(handlerSignals[0]?.aborted).toBe(true)
+
+    // 不传 externalSignal：invoke 行为等价（handler 正常返回仍生效）。
+    const runtime2 = new HookRuntime()
+    const owner2 = createPluginIdentity('p.no-signal', 'run-1')
+    runtime2.registry.register(owner2, 'message.user.beforeSend', {
+      id: 'plain',
+      mode: 'pipeline',
+      handler: ({ event }) => ({ action: 'continue', event: { ...(event as { text: string }), text: `${(event as { text: string }).text}!` } }),
+    })
+    await expect(runtime2.invoke('message.user.beforeSend', { text: 'ok' })).resolves.toMatchObject({
+      action: 'continue', event: { text: 'ok!' }, executed: 1,
+    })
+  })
+
   it('records a stable diagnostic when disable-plugin cleanup cannot complete', async () => {
     const runtime = new HookRuntime(undefined, {
       onDisablePlugin: async () => { throw new Error('scope resource cleanup failed') },

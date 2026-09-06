@@ -38,6 +38,10 @@ pub(crate) const PLUGIN_PROCESS: &str = "pylon:plugin-process";
 pub(crate) const PYLON_CLI_REQUEST: &str = "pylon:cli-request";
 /// Cancellation for an in-flight external CLI request.
 pub(crate) const PYLON_CLI_CANCEL: &str = "pylon:cli-cancel";
+/// P55 kernel hook request（Rust 锚点 → 前端 hook dispatcher，挂表 + oneshot 应答）。
+pub(crate) const PYLON_HOOK_REQUEST: &str = "pylon:hook-request";
+/// P55 kernel hook cancellation（Rust 时钟超时后通知前端 abort 该请求的执行）。
+pub(crate) const PYLON_HOOK_CANCEL: &str = "pylon:hook-cancel";
 
 #[cfg(test)]
 mod tests {
@@ -62,6 +66,8 @@ mod tests {
             PLUGIN_PROCESS,
             PYLON_CLI_REQUEST,
             PYLON_CLI_CANCEL,
+            PYLON_HOOK_REQUEST,
+            PYLON_HOOK_CANCEL,
         ];
         let unique: HashSet<&str> = names.iter().copied().collect();
         assert_eq!(unique.len(), names.len(), "事件名重复：{names:?}");
@@ -85,6 +91,8 @@ mod tests {
             PLUGIN_PROCESS,
             PYLON_CLI_REQUEST,
             PYLON_CLI_CANCEL,
+            PYLON_HOOK_REQUEST,
+            PYLON_HOOK_CANCEL,
         ] {
             assert!(
                 name.starts_with("pylon:"),
@@ -115,6 +123,8 @@ mod tests {
             PLUGIN_PROCESS,
             PYLON_CLI_REQUEST,
             PYLON_CLI_CANCEL,
+            PYLON_HOOK_REQUEST,
+            PYLON_HOOK_CANCEL,
         ] {
             let topic = name.strip_prefix("pylon:").unwrap_or(name);
             assert!(!topic.is_empty(), "事件名 {name:?} 主题部分为空");

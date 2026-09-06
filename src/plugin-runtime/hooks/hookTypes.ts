@@ -10,6 +10,7 @@ export const HOOK_NAMES = [
   'message.user.beforeSend',
   'message.user.sent',
   'message.user.sendFailed',
+  'message.received',
   'message.agent.committed',
   'turn.started',
   'turn.completed',

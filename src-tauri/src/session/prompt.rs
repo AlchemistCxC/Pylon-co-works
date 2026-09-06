@@ -907,6 +907,39 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     // Start the monotonic prompt clock immediately before the outbound ACP
     // request.  Setup/validation time is not presented as provider waiting
     // time, while transport failures still retain a useful elapsed sample.
+    // P55-D1 #1：message.user.beforeSend 钩子缝（prepare_prompt_blocks 之后、
+    // 出站之前）。transform → 只改写 wire 出站 prompt_blocks（journal 原文行
+    // 已在上方 ingest_prompt_event 落库，B7 双轨）；gate → 返回拒绝错误；
+    // 超时/桥未就绪/前端无应答 → 放行原文（fail-open，对齐 Prism inject 先例）。
+    match crate::hook_bridge::before_send_hook_outcome(
+        state,
+        window,
+        source,
+        content,
+        &flow.prompt_blocks,
+    )
+    .await
+    {
+        crate::hook_bridge::BeforeSendDecision::PassThrough => {}
+        crate::hook_bridge::BeforeSendDecision::Transformed(blocks) => {
+            state.log_runtime_summary(
+                "info",
+                "hook",
+                Some(source.to_string()),
+                "message.user.beforeSend hook rewired outbound prompt",
+                serde_json::Map::from_iter([(
+                    "blockCount".to_string(),
+                    serde_json::Value::from(blocks.len()),
+                )]),
+            );
+            flow.prompt_blocks = blocks;
+        }
+        crate::hook_bridge::BeforeSendDecision::Blocked(reason) => {
+            return Err(PylonError::Protocol(format!(
+                "message.user.beforeSend hook blocked message: {reason}"
+            )));
+        }
+    }
     let prompt_started_at = std::time::Instant::now();
     let rpc = {
         let acp = runtime.acp.lock().await;
@@ -1370,5 +1403,160 @@ for line in sys.stdin:
         assert_eq!(value["triggeredTimeoutSecs"], 2);
         assert_eq!(value["actualElapsedMs"], 2_041);
         assert!(value.get("providerMessage").is_none());
+    }
+
+    /// 验收 D1-②：beforeSend transform 改写 wire 出站，但 journal 的
+    /// user.message 原文行不被改写（B7 双轨）。fake ACP 把收到的
+    /// session/prompt 请求原样写 trace 文件——wire 证据源。
+    #[tokio::test]
+    async fn before_send_hook_transform_rewrites_wire_but_journal_keeps_original() {
+        use tauri::{Listener, Manager};
+        const SCRIPT: &str = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'hook-dual-session'}
+    elif method == 'session/prompt':
+        trace.write(json.dumps(request)+'\n')
+        trace.flush()
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        let trace_path = std::env::temp_dir().join(format!(
+            "pylon-hook-dual-track-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_millis())
+                .unwrap_or(0),
+        ));
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "hook-dual-agent",
+            SCRIPT,
+            vec![trace_path.to_string_lossy().into_owned()],
+            std::collections::HashMap::new(),
+        );
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("hook-dual-agent")
+            .with_agent(agent)
+            .with_runtime("hook-dual-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        // mock app + 窗口：hook 桥事件经 Listener 捕获，应答经 bridge.respond 回程。
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let window = webview.as_ref().window();
+        let bridge = app.state::<AppState>().hook_bridge.clone();
+        bridge.mark_started();
+        bridge.sync_registry(&serde_json::json!({
+            "hooks": ["message.user.beforeSend"]
+        }));
+        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+        window.listen(
+            crate::event_names::PYLON_HOOK_REQUEST,
+            move |event| {
+                let payload: serde_json::Value = serde_json::from_str(event.payload())
+                    .expect("hook request payload");
+                let _ = tx.send(payload);
+            },
+        );
+        let responder_bridge = bridge.clone();
+        tokio::spawn(async move {
+            let request = rx.recv().expect("hook request must arrive");
+            let request_id = request["requestId"].as_str().unwrap().to_string();
+            let mut event = request["payload"].clone();
+            if let serde_json::Value::Object(ref mut map) = event {
+                map.insert(
+                    "blocks".to_string(),
+                    serde_json::json!([{ "type": "text", "text": "改写后的出站文本" }]),
+                );
+            }
+            responder_bridge
+                .respond(
+                    &request_id,
+                    Ok(serde_json::json!({
+                        "action": "continue",
+                        "event": event,
+                        "executed": 1,
+                        "skipped": 0,
+                    })),
+                )
+                .expect("respond");
+        });
+
+        let context = PromptContext {
+            source: "local:hook-dual".to_string(),
+            profile_id: Some("profile-hook".to_string()),
+            content: "用户原始消息".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        send_prompt_core::<tauri::test::MockRuntime>(
+            app.state::<AppState>().inner(),
+            &runtime,
+            Some(&window),
+            &gateway,
+            &context,
+        )
+        .await
+        .expect("prompt must succeed");
+
+        // wire 证据：fake ACP 收到的 prompt 首块文本 = 改写后文本。
+        let trace = std::fs::read_to_string(&trace_path).expect("read prompt trace");
+        let _ = std::fs::remove_file(&trace_path);
+        let wire_request: serde_json::Value = trace
+            .lines()
+            .next()
+            .map(|line| serde_json::from_str(line).expect("trace line JSON"))
+            .expect("trace must capture session/prompt");
+        assert_eq!(
+            wire_request["params"]["prompt"][0]["text"], "改写后的出站文本",
+            "wire 出站必须携带 hook 改写产物"
+        );
+        // journal 证据：user.message 原文行不被改写（B7 rawPayload/typed 原文）。
+        let owner_key = serde_json::to_string(&[
+            "profile-hook",
+            "hook-dual-agent",
+            "local:hook-dual",
+        ])
+        .expect("owner key");
+        let page = event_service
+            .list_events(owner_key, None, 100)
+            .await
+            .expect("list canonical rows");
+        let user_row = page
+            .events
+            .iter()
+            .find(|event| event.event_type == "user.message")
+            .expect("journal must contain the user.message row");
+        assert_eq!(
+            user_row.typed_payload.as_ref().and_then(|payload| payload.get("text")),
+            Some(&serde_json::json!("用户原始消息")),
+            "journal 原文行必须保持用户原文（记原文契约）"
+        );
+        assert!(
+            !trace.contains("用户原始消息"),
+            "wire 不应再出现用户原文"
+        );
     }
 }

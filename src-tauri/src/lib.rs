@@ -19,6 +19,8 @@ mod event_names;
 mod export;
 mod gateway;
 mod gateway_cmds;
+/// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
+pub mod hook_bridge;
 mod git;
 mod hermes;
 mod hermes_runtime;
@@ -238,6 +240,8 @@ pub(crate) struct AppState {
     pub(crate) plugin_processes: Arc<crate::plugin_process::PluginProcessSupervisor>,
     /// Stage 10: current-user local IPC bridge into the live Web Kernel.
     pub(crate) pylon_cli: Arc<crate::pylon_cli::PylonCliBridge>,
+    /// P55：kernel hook 桥（pending oneshot 挂表 + ready 握手 + registry 闸）。
+    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
 impl AppState {
@@ -779,6 +783,7 @@ pub fn run() {
             data_dirs: Arc::new(OnceLock::new()),
             plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
             pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
+            hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,
@@ -858,6 +863,9 @@ pub fn run() {
                 crate::pylon_cli::pylon_cli_ready,
                 crate::pylon_cli::pylon_cli_respond,
                 crate::pylon_cli::pylon_window_capture,
+                crate::hook_bridge::pylon_hook_ready,
+                crate::hook_bridge::pylon_hook_respond,
+                crate::hook_bridge::hook_registry_sync,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
                 crate::gateway_cmds::gateway_sessions,
                 crate::gateway_cmds::gateway_catalog,
@@ -1187,6 +1195,20 @@ pub fn run() {
                                 .and_then(|agents| agents.get(&agent_id).cloned())
                                 .and_then(|agent| agent.cwd);
                             // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
+                            // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
+                            // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
+                            // 既有失败路径的 rollback_seen 语义）；transform → 改写
+                            // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
+                            let content = match crate::hook_bridge::message_received_hook_outcome(
+                                state.inner(),
+                                window.as_ref(),
+                                &resolved,
+                            )
+                            .await
+                            {
+                                crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
+                                crate::hook_bridge::MessageReceivedDecision::Drop => return,
+                            };
                             if let Err(error) = send_prompt_core(
                                 state.inner(),
                                 &runtime,
@@ -1195,7 +1217,7 @@ pub fn run() {
                                 &crate::session::PromptContext {
                                     source: resolved.source.clone(),
                                     profile_id: None,
-                                    content: resolved.content.clone(),
+                                    content,
                                     persona: String::new(),
                                     session_prompt: None,
                                     attachments: None,
