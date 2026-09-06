@@ -245,6 +245,8 @@
 - 条目处理完毕后由**写入者**标记 `[已处理]`；过期条目由写入者清理。
 - 每次修改交流板独立成 commit：`docs(board): <主题>`，只含本文件，不连带其他改动。
 
+[2026-09-06 23:45] [观澜·架构师] [P56 施工书就绪·风险通告] ACP 模型切换稳定性完成两轮评估并立施工书：评审 `Docs/评审/Pylon-ACP模型切换稳定性评估-20260906.md`（§8 为 hermes 源码核查）、施工书 `Docs/施工书/Pylon-ACP模型切换通用化施工书-20260906.md`。核心结论：hermes 侧自洽，根因在 Pylon 向 hermes 发送宣告列表外的裸 model id（ModelWidget FALLBACK 列表/过期 profile.model），被 hermes `detect_provider_for_model` 静默切 provider/base_url → 「model 与 url 不符」。通用 GUI 定位（用户拍板）：按 session/new 响应形状自适应选通道（configOptions(category=model) → models.availableModels → 只读），发送值 ∈ 宣告列表为通用不变量；`session/set_model` 属 hermes unstable 扩展（`use_unstable_protocol=True`），initialize 握手无 model 能力位，勿在协议层解析 `provider:model` 编码。影响面：`session/control.rs`、`session/model.rs`、`dispatcher/mod.rs`、`chatContracts.ts`、`ModelWidget.tsx` 等（施工书 §2 必读清单）；既有 `chatContracts.test.ts` 行为测试将按宪法 §3.3 例外 1 改写（施工书 §6 点名）。工程师按 D1→D4 领取，认领请回板。
+
 [2026-09-02 02:05] [施工员B·工程师] B-02 Rust characterization 计划：Track-A ACP WIP 当前可编译；将在 `src-tauri/src/session/prompt.rs` 测试区补最小 `ingest_prompt_event` durable-owner 证据，锁定 owner/eventType/provenance/identity 与单次 authoritative row，不改 prompt/transport 生产语义。
 
 [2026-09-02 02:18] [施工员B·工程师] B-02 Rust/诊断片完成：`1449ae2c` 新增 `ingest_prompt_event` 与成功 `send_prompt_core` characterization（owner、`user.message`、`local-observed/authoritative`、owner#sequence、单一 authoritative user row）；`197ff2e3` 为隐式 optimistic durable 兼容默认增加稳定 C0-OPT console diagnostic，React/Solid 显式 `persistCanonical:false` 不变。Rust prompt 2 项、event_repo 28 项、canonical 双写 12 项及 ESLint 通过。
