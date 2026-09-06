@@ -21,7 +21,12 @@ describe('C14 session response authority', () => {
     })
 
     const key = toAgentContextKey(context)
-    expect(useRuntimeStore.getState().sessionConfig[key]).toEqual({ models: ['gpt-5', 'gpt-4'] })
+    // P56/D3：modelChoices 是响应宣告的 choices（id/label 分离真源），与 models 同属
+    // 可水合的 advertised capability；current value 仍是 journal-owned，不得到达 store。
+    expect(useRuntimeStore.getState().sessionConfig[key]).toEqual({
+      models: ['gpt-5', 'gpt-4'],
+      modelChoices: [{ id: 'gpt-5' }, { id: 'gpt-4' }],
+    })
     expect(useRuntimeStore.getState().sessionModes[key]).toBeUndefined()
     expect(useRuntimeStore.getState().sessionLiveStats[key]).toBeUndefined()
   })

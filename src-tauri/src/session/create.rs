@@ -322,14 +322,83 @@ fn merge_config_setting_response(
     set_config_option_current(response, option_key, value);
 }
 
-fn advertised_config_option_id(response: &serde_json::Value, semantic: &str) -> Option<String> {
-    let options = response
-        .get("configOptions")
-        .or_else(|| response.get("config_options"))
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    super::find_config_option(options, semantic).and_then(option_identity)
+/// P56/D1：初值 model 下发计划（纯函数便于测试；执行侧见 apply_initial_session_options）。
+#[derive(Debug)]
+pub(crate) enum InitialModelAction {
+    /// 走 session/set_config_option（configId 用宣告值，D1.5）。
+    SendConfigOption { config_id: String },
+    /// 走 session/set_model（hermes unstable 通道，原样回发宣告 id）。
+    SendSetModel,
+    /// 跳过下发（未宣告模型面 / 目标不在宣告列表），不阻断建会话（D1.4）。
+    Skip { code: &'static str, message: String },
+}
+
+/// P56/D1.3/D1.4：初值 model 计划——显式 `set_model_api` 声明优先（现状通道语义；
+/// Disabled 声明保留现状硬错），未声明按响应判定的 model_surface 路由；两条通道
+/// 统一施加发送校验：目标 ∉ 宣告 choices（或无宣告面）→ Skip（warn 上报
+/// `model_not_advertised`），不再把裸 id 发上 wire。
+fn plan_initial_model(
+    response: &serde_json::Value,
+    model: &str,
+    declared: Option<crate::agent_config::SetModelApi>,
+) -> Result<InitialModelAction, PylonError> {
+    use crate::agent_config::ModelSwitchTarget;
+    let info = super::determine_model_surface(
+        response
+            .get("configOptions")
+            .or_else(|| response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+        response.get("models"),
+    );
+    let validate = |action: InitialModelAction| -> InitialModelAction {
+        if info.choices.is_empty() || info.choices.iter().any(|choice| choice == model) {
+            action
+        } else {
+            InitialModelAction::Skip {
+                code: "model_not_advertised",
+                message: format!(
+                    "Initial model {model:?} is not advertised by the ACP agent; skipped (advertised: [{}])",
+                    info.choices.join(", ")
+                ),
+            }
+        }
+    };
+    if let Some(api) = declared {
+        // 显式声明（现状行为，兼容优先）：Disabled 保留硬错；ConfigOption 声明在
+        // 选项未宣告时不再断会话（D1.4：初值路径跳过下发）。
+        return match api.route("model") {
+            ModelSwitchTarget::SetModel => Ok(validate(InitialModelAction::SendSetModel)),
+            ModelSwitchTarget::Disabled => Err(PylonError::Protocol(
+                "model switching disabled by agent configuration".to_string(),
+            )),
+            ModelSwitchTarget::ConfigOption => match info.surface {
+                super::ModelSurface::ConfigOption { config_id } => {
+                    Ok(validate(InitialModelAction::SendConfigOption { config_id }))
+                }
+                _ => Ok(InitialModelAction::Skip {
+                    code: "model_not_advertised",
+                    message: format!(
+                        "Initial model {model:?} skipped: model config option is not advertised by the ACP agent"
+                    ),
+                }),
+            },
+        };
+    }
+    // 未声明 → 按响应形状自适应路由。
+    match info.surface {
+        super::ModelSurface::ConfigOption { config_id } => {
+            Ok(validate(InitialModelAction::SendConfigOption { config_id }))
+        }
+        super::ModelSurface::ModelsState => Ok(validate(InitialModelAction::SendSetModel)),
+        super::ModelSurface::None => Ok(InitialModelAction::Skip {
+            code: "model_not_advertised",
+            message: format!(
+                "Initial model {model:?} skipped: the ACP agent advertises no model surface"
+            ),
+        }),
+    }
 }
 
 /// Apply the optional values selected in the empty-state control center.  The
@@ -348,57 +417,84 @@ async fn apply_initial_session_options(
     initial_mode: Option<&str>,
 ) -> Result<(), PylonError> {
     if let Some(model) = initial_model.map(str::trim).filter(|value| !value.is_empty()) {
-        let target = state
-            .protocol_for_runtime(runtime)
-            .set_model_api()
-            .route("model");
-        let (method, params) = match target {
-            crate::agent_config::ModelSwitchTarget::SetModel => (
-                acp::METHOD_SESSION_SET_MODEL,
-                acp::session_set_model_params(peri_id, model).map_err(PylonError::Protocol)?,
-            ),
-            crate::agent_config::ModelSwitchTarget::ConfigOption => {
-                let config_id = advertised_config_option_id(response, "model").ok_or_else(|| {
-                    PylonError::Protocol(
-                        "model config option is not advertised by the ACP agent".to_string(),
-                    )
-                })?;
-                (
-                    acp::METHOD_SESSION_SET_CONFIG_OPTION,
-                    acp::session_set_config_option_params(
-                        peri_id,
-                        &config_id,
-                        &serde_json::Value::String(model.to_string()),
-                    )
-                    .map_err(PylonError::Protocol)?,
-                )
-            },
-            crate::agent_config::ModelSwitchTarget::Disabled => {
-                return Err(PylonError::Protocol(
-                    "model switching disabled by agent configuration".to_string(),
-                ));
+        // P56/D1.3：显式 set_model_api 声明优先（含 legacy 布尔迁移与 catalog 默认
+        // ——load.rs parse() 合并结果，agent.acp.set_model_api 为 Some 即声明态）；
+        // 未声明按响应判定的 model_surface 路由。
+        let declared = state
+            .agent_for_runtime(runtime)
+            .and_then(|agent| agent.acp)
+            .and_then(|acp| acp.set_model_api);
+        // P56/D1.4：目标 ∉ 宣告 choices（或无宣告面）→ 跳过下发 + warn（code=
+        // model_not_advertised），不抛断会话（复用 reasoning_not_advertised 先例形状）。
+        match plan_initial_model(response, model, declared)? {
+            InitialModelAction::Skip { code, message } => {
+                tracing::warn!(
+                    source = source,
+                    requested = model,
+                    "{message}"
+                );
+                state.log_runtime_summary(
+                    "warn",
+                    "session",
+                    Some(source.to_string()),
+                    &message,
+                    serde_json::Map::from_iter([
+                        ("requested".to_string(), serde_json::Value::String(model.to_string())),
+                        ("code".to_string(), serde_json::Value::String(code.to_string())),
+                    ]),
+                );
             }
-        };
-        let setting_response = state
-            .acp_rpc_generation_checked(runtime, method, params, generation)
-            .await
-            .map_err(PylonError::from)?;
-        state
-            .ensure_generation(runtime, generation)
-            .map_err(PylonError::Protocol)?;
-        let model_option_key = if target == crate::agent_config::ModelSwitchTarget::ConfigOption {
-            advertised_config_option_id(response, "model").unwrap_or_else(|| "model".to_string())
-        } else {
-            "model".to_string()
-        };
-        merge_setting_response(
-            response,
-            setting_response,
-            "models",
-            "currentModelId",
-            &model_option_key,
-            model,
-        );
+            InitialModelAction::SendSetModel => {
+                let setting_response = state
+                    .acp_rpc_generation_checked(
+                        runtime,
+                        acp::METHOD_SESSION_SET_MODEL,
+                        acp::session_set_model_params(peri_id, model)
+                            .map_err(PylonError::Protocol)?,
+                        generation,
+                    )
+                    .await
+                    .map_err(PylonError::from)?;
+                state
+                    .ensure_generation(runtime, generation)
+                    .map_err(PylonError::Protocol)?;
+                merge_setting_response(
+                    response,
+                    setting_response,
+                    "models",
+                    "currentModelId",
+                    "model",
+                    model,
+                );
+            }
+            InitialModelAction::SendConfigOption { config_id } => {
+                let setting_response = state
+                    .acp_rpc_generation_checked(
+                        runtime,
+                        acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                        acp::session_set_config_option_params(
+                            peri_id,
+                            &config_id,
+                            &serde_json::Value::String(model.to_string()),
+                        )
+                        .map_err(PylonError::Protocol)?,
+                        generation,
+                    )
+                    .await
+                    .map_err(PylonError::from)?;
+                state
+                    .ensure_generation(runtime, generation)
+                    .map_err(PylonError::Protocol)?;
+                merge_setting_response(
+                    response,
+                    setting_response,
+                    "models",
+                    "currentModelId",
+                    &config_id,
+                    model,
+                );
+            }
+        }
     }
 
     if let Some(mode) = initial_mode.map(str::trim).filter(|value| !value.is_empty()) {
@@ -975,5 +1071,97 @@ mod initial_option_tests {
         assert_eq!(response["modes"]["currentModeId"], "accept_edits");
         assert_eq!(response["models"]["availableModels"][0]["modelId"], "openrouter:old");
         assert_eq!(response["configOptions"][0]["currentValue"], "openrouter:new");
+    }
+
+    // ── P56/D1.4：初值 model 下发校验（非宣告值跳过）──
+
+    #[test]
+    fn initial_model_plan_skips_values_outside_advertised_choices() {
+        // hermes 形态 fixture：宣告 choices=[nous:hermes-4]，profile.model=deepseek-v4-pro
+        // → 跳过下发（验收 2），code=model_not_advertised。
+        let response = json!({
+            "sessionId": "session-1",
+            "models": {
+                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
+                "currentModelId": "nous:hermes-4"
+            }
+        });
+        let action = plan_initial_model(&response, "deepseek-v4-pro", None).unwrap();
+        match action {
+            InitialModelAction::Skip { code, message } => {
+                assert_eq!(code, "model_not_advertised");
+                assert!(message.contains("nous:hermes-4"), "{message}");
+            }
+            other => panic!("expected Skip, got {other:?}"),
+        }
+        // 宣告列表内的值照常下发 set_model（现状行为回归保护）。
+        assert!(matches!(
+            plan_initial_model(&response, "nous:hermes-4", None).unwrap(),
+            InitialModelAction::SendSetModel
+        ));
+        // 未宣告任何模型面 → 直接跳过，不断会话。
+        let bare = json!({"sessionId": "session-1"});
+        assert!(matches!(
+            plan_initial_model(&bare, "deepseek-v4-pro", None).unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn initial_model_plan_routes_standard_config_option_channel() {
+        // 标准 ACP 形态：category=="model" 选项的宣告 configId 胜出（干扰选项不得
+        // 胜出，验收 3）；列表内的值走 set_config_option（宣告 configId）。
+        let response = json!({
+            "sessionId": "session-1",
+            "configOptions": [
+                {
+                    "id": "reasoning-effort",
+                    "description": "Reasoning effort for the model",
+                    "options": [{"valueId": "low"}],
+                    "currentValue": "low"
+                },
+                {
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-1", "name": "Model One"}],
+                    "currentValue": "m-1"
+                }
+            ]
+        });
+        match plan_initial_model(&response, "m-1", None).unwrap() {
+            InitialModelAction::SendConfigOption { config_id } => {
+                assert_eq!(config_id, "model-selection");
+            }
+            other => panic!("expected SendConfigOption, got {other:?}"),
+        }
+        // 非宣告值跳过（两通道校验一致）。
+        assert!(matches!(
+            plan_initial_model(&response, "bare-model-x", None).unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn initial_model_plan_keeps_explicit_declaration_semantics() {
+        // 显式 set_model_api: true 声明：未宣告列表时照常下发（现状兼容，验收 8）。
+        let bare = json!({"sessionId": "session-1"});
+        assert!(matches!(
+            plan_initial_model(&bare, "anything", Some(crate::agent_config::SetModelApi::SetModel)).unwrap(),
+            InitialModelAction::SendSetModel
+        ));
+        // 显式声明 + 有宣告列表：同样施加发送校验（通用不变量）。
+        let response = json!({
+            "sessionId": "session-1",
+            "models": {
+                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
+                "currentModelId": "nous:hermes-4"
+            }
+        });
+        assert!(matches!(
+            plan_initial_model(&response, "deepseek-v4-pro", Some(crate::agent_config::SetModelApi::SetModel)).unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+        // 显式 none 声明：保留现状硬错。
+        assert!(plan_initial_model(&bare, "anything", Some(crate::agent_config::SetModelApi::None)).is_err());
     }
 }

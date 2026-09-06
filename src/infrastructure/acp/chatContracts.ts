@@ -234,6 +234,16 @@ const DEFAULT_VALUE_KEYS = [
 ] as const
 
 /**
+ * machine-id-only 键序（P56/D3.1）：与 DEFAULT_VALUE_KEYS 相同，但**不含**
+ * name/label 显示名兜底——模型值绝不允许把显示名当 id 上 wire。
+ */
+const MACHINE_ID_VALUE_KEYS = [
+  'valueId', 'value_id', 'modelId', 'model_id', 'modeId', 'mode_id',
+  'id', 'key', 'value', 'currentValue', 'current_value', 'current',
+  'selected', 'selectedValue', 'selected_value',
+] as const
+
+/**
  * Extract a machine-facing string from ACP scalar/nested value shapes.
  * Display labels are deliberately last; stable ids always win when both are
  * advertised (for example `{modelId, name}`).
@@ -258,6 +268,32 @@ export function extractWireString(
     const nested = readWireField(record, [key])
     if (nested === undefined || nested === value) continue
     const result = extractWireString(nested, preferredKeys, depth + 1)
+    if (result) return result
+  }
+  return undefined
+}
+
+/**
+ * machine-id-only 提取（P56/D3.1）：与 extractWireString 同型 walk，但只跟随
+ * MACHINE_ID_VALUE_KEYS、**不追加** name/label 显示名兜底。模型 choice 无 machine
+ * id 时返回 undefined（调用方必须丢弃该项，禁止降级把显示名上 wire）。
+ */
+export function extractMachineIdString(value: unknown, depth = 0): string | undefined {
+  if (depth > 8) return undefined
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || undefined
+  }
+  const record = asWireRecord(value)
+  if (!record) return undefined
+  const visited = new Set<string>()
+  for (const key of MACHINE_ID_VALUE_KEYS) {
+    const normalized = normalizedWireKey(key)
+    if (visited.has(normalized)) continue
+    visited.add(normalized)
+    const nested = readWireField(record, [key])
+    if (nested === undefined || nested === value) continue
+    const result = extractMachineIdString(nested, depth + 1)
     if (result) return result
   }
   return undefined
@@ -346,37 +382,45 @@ export function extractChoiceLabel(value: unknown, fallback?: string): string | 
 
 export type ConfigOptionSemantic = 'model' | 'mode' | 'reasoning'
 
-function semanticTokens(option: unknown): string[] {
-  const record = asWireRecord(option)
-  if (!record) return []
-  const values = ['configId', 'config_id', 'optionId', 'option_id', 'id', 'key', 'name', 'label', 'title', 'category', 'description']
-    .map(key => extractWireString(readWireField(record, [key]), []))
-    .filter((value): value is string => Boolean(value))
-  return values.map(value => normalizedWireKey(value).replace(/_/g, ''))
+function semanticAliases(semantic: ConfigOptionSemantic): readonly string[] {
+  return semantic === 'model'
+    ? ['model', 'models', 'modelid', 'modelselection']
+    : semantic === 'mode'
+      ? ['mode', 'modes', 'modeid', 'permissionsmode', 'permissionmode']
+      : ['reason', 'reasoning', 'reasoningeffort', 'thinking', 'thought', 'thoughtlevel', 'effort']
 }
 
-/** Find an option by semantic id while tolerating provider naming drift. */
+/**
+ * Find an option by semantic id（P56/D3.2 收紧，与 Rust find_config_option 同判据）：
+ * ① `category` 归一化精确相等为第一判据；② 无 category 命中时 id/name/label/title
+ * 的归一化 token 与别名**精确相等**降级。`description` 不参与匹配、`includes`
+ * 子串评分已移除（description 含 "model" 的 reasoning/context 选项不得再误配）。
+ */
 export function findConfigOption(
   options: readonly unknown[] | undefined,
   semantic: ConfigOptionSemantic,
 ): unknown | undefined {
   if (!Array.isArray(options)) return undefined
-  const aliases = semantic === 'model'
-    ? ['model', 'models', 'modelid', 'modelselection']
-    : semantic === 'mode'
-      ? ['mode', 'modes', 'modeid', 'permissionsmode', 'permissionmode']
-      : ['reason', 'reasoning', 'reasoningeffort', 'thinking', 'thought', 'thoughtlevel', 'effort']
-  const ranked = options.map((option, index) => {
-    const tokens = semanticTokens(option)
-    let score = 0
-    for (const token of tokens) {
-      if (aliases.includes(token)) score = Math.max(score, 100)
-      else if (aliases.some(alias => token.includes(alias))) score = Math.max(score, 60)
-    }
-    return { option, index, score }
-  }).filter(item => item.score > 0)
-  ranked.sort((left, right) => right.score - left.score || left.index - right.index)
-  return ranked[0]?.option
+  const aliases = semanticAliases(semantic)
+  const normalizedToken = (value: string): string => normalizedWireKey(value).replace(/_/g, '')
+  const isAlias = (candidate: string): boolean => aliases.includes(normalizedToken(candidate))
+  // ① category 精确优先（协议语义判别字段）。
+  const byCategory = options.find(option => {
+    const record = asWireRecord(option)
+    const category = record ? extractWireString(readWireField(record, ['category']), []) : undefined
+    return category ? isAlias(category) : false
+  })
+  if (byCategory !== undefined) return byCategory
+  // ② token 精确相等降级：仅 id/name/label/title（description 禁止参与）。
+  return options.find(option => {
+    const record = asWireRecord(option)
+    if (!record) return false
+    return ['configId', 'config_id', 'optionId', 'option_id', 'id', 'key', 'name', 'label', 'title']
+      .some(key => {
+        const value = extractWireString(readWireField(record, [key]), [])
+        return value ? isAlias(value) : false
+      })
+  })
 }
 
 function responseSection(response: SessionResponseObject | undefined, section: 'models' | 'modes'): WireRecord | undefined {
@@ -414,6 +458,14 @@ function responseCurrent(response: SessionResponseObject | undefined, kind: 'mod
     ?? extractWireString(readWireField(asWireRecord(response), keys), keys)
 }
 
+/** P56/D3.1：model 的 current 提取——machine-id-only（name/label 显示名不降级为 id）。 */
+function responseCurrentModel(response: SessionResponseObject | undefined): string | undefined {
+  const section = responseSection(response, 'models')
+  const keys = ['currentModelId', 'current_model_id', 'currentModel', 'current_model', 'current', 'modelId', 'model_id']
+  return extractMachineIdString(readWireField(section, keys))
+    ?? extractMachineIdString(readWireField(asWireRecord(response), keys))
+}
+
 function uniqueStrings(values: readonly (string | undefined)[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -430,20 +482,67 @@ export function sessionResponseObject(response: unknown): SessionResponseObject 
   return asWireRecord(response) as SessionResponseObject ?? {}
 }
 
+/** P56/D3.1：模型 choice 的呈现结构——id 恒为 machine id（上 wire 的值）。 */
+export interface ModelChoice {
+  id: string
+  label?: string
+  provider?: string
+}
+
+/** provider 仅呈现用途：hermes 风格 description（`Provider: X`）或 id 前缀。 */
+function choiceProvider(choice: unknown, id: string): string | undefined {
+  const record = asWireRecord(choice)
+  const description = record ? extractWireString(readWireField(record, ['description']), []) : undefined
+  const fromDescription = description?.match(/^Provider:\s*(.+)$/i)?.[1]?.trim()
+  if (fromDescription) return fromDescription
+  const separator = id.indexOf(':')
+  return separator > 0 ? id.slice(0, separator) : undefined
+}
+
+/** machine id 优先：无 machine id 的 choice 直接丢弃，不降级把显示名上 wire。 */
+function toModelChoice(choice: unknown): ModelChoice | undefined {
+  const id = extractMachineIdString(choice)
+  if (!id) return undefined
+  const record = asWireRecord(choice)
+  const name = record ? extractWireString(readWireField(record, ['name']), []) : undefined
+  const provider = choiceProvider(choice, id)
+  return {
+    id,
+    ...(name ? { label: name } : {}),
+    ...(provider ? { provider } : {}),
+  }
+}
+
+function uniqueModelChoices(choices: readonly (ModelChoice | undefined)[]): ModelChoice[] {
+  const seen = new Set<string>()
+  const result: ModelChoice[] = []
+  for (const choice of choices) {
+    if (!choice || seen.has(choice.id)) continue
+    seen.add(choice.id)
+    result.push(choice)
+  }
+  return result
+}
+
 export function extractModelConfig(
   configOptions: ConfigOption[] | undefined,
   response?: SessionResponseObject,
-): { model?: string; models?: string[] } {
+): { model?: string; models?: string[]; modelChoices?: ModelChoice[] } {
   const options = Array.isArray(configOptions) ? configOptions : responseConfigOptions(response)
   const option = findConfigOption(options, 'model')
-  const current = extractWireString(extractConfigOptionValue(option), ['valueId', 'value_id', 'modelId', 'model_id', 'id', 'key', 'value'])
-    ?? responseCurrent(response, 'model')
-  const optionModels = extractConfigOptionChoices(option).map(choice => extractChoiceId(choice, 'model'))
-  const responseModels = responseChoices(response, 'model').map(choice => extractChoiceId(choice, 'model'))
-  const models = uniqueStrings([...optionModels, ...responseModels])
+  const current = extractMachineIdString(extractConfigOptionValue(option))
+    ?? responseCurrentModel(response)
+  // P56/D3.1：choices 只收 machine id（valueId/modelId）；无 machine id 的 choice
+  // 丢弃。modelChoices 是 id/label 分离的真源，models 保留为其 id 投影（既有消费
+  // 方兼容）。
+  const modelChoices = uniqueModelChoices([
+    ...extractConfigOptionChoices(option).map(choice => toModelChoice(choice)),
+    ...responseChoices(response, 'model').map(choice => toModelChoice(choice)),
+  ])
+  const models = modelChoices.map(choice => choice.id)
   return {
     ...(current ? { model: current } : {}),
-    ...(models.length > 0 ? { models } : {}),
+    ...(modelChoices.length > 0 ? { models, modelChoices } : {}),
   }
 }
 

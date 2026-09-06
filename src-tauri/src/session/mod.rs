@@ -1354,7 +1354,7 @@ for line in sys.stdin:
             'sessionId':'p28-session',
             'models':{
                 'currentModelId':'provider:old',
-                'availableModels':[{'modelId':'provider:old','name':'Old'}]
+                'availableModels':[{'modelId':'provider:old','name':'Old'},{'modelId':'provider:new','name':'New'}]
             },
             'modes':{
                 'currentModeId':'default',

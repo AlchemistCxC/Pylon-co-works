@@ -12,6 +12,7 @@ import { useRuntimeStore } from '../../../runtimeStore.ts'
 import {
   extractConfigOptionId,
   extractConfigOptionValue,
+  extractMachineIdString,
   extractModelConfig,
   extractReasoningConfig,
   extractSessionUsage,
@@ -35,9 +36,11 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
     // current model/mode/usage remain journal-owned facts. Reasoning effort is
     // an ACP config option, so retaining its selected value keeps the selector
     // aligned after restart without creating a second message authority.
+    // P56/D3.3：modelChoices（id/label 分离真源）与 models（id 投影）同写。
     if (cfg.models || reasoning.thinkingEffort) {
       useRuntimeStore.getState().setSessionConfig(ctx, {
         ...(cfg.models ? { models: cfg.models } : {}),
+        ...(cfg.modelChoices ? { modelChoices: cfg.modelChoices } : {}),
         ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
       })
     }
@@ -56,6 +59,19 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
         if (currentMode != null) useRuntimeStore.getState().setSessionMode(ctx, String(currentMode))
         const usage = extractSessionUsage({ usage: upd.usage, sessionInfo: upd.sessionInfo })
         if (usage) useRuntimeStore.getState().setSessionLiveStats(ctx, usage)
+        // P56/D3.3（对齐 Rust D2.3）：payload 带 models.currentModelId（camel/snake）
+        // 时消费为当前 model——hermes 未来经此通道推 model 变化即可到达 UI。
+        const modelsSection = (upd as { models?: unknown }).models
+        const rawModels = typeof modelsSection === 'object' && modelsSection !== null
+          ? (modelsSection as Record<string, unknown>)
+          : undefined
+        if (rawModels) {
+          const model = extractMachineIdString(
+            rawModels.currentModelId ?? rawModels.current_model_id
+              ?? rawModels.currentModel ?? rawModels.current_model ?? rawModels.current,
+          )
+          if (model) useRuntimeStore.getState().setSessionConfig(ctx, { model })
+        }
         break
       }
       case 'available_commands_update': {

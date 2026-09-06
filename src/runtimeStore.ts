@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ConfigOption } from './infrastructure/acp/chatContracts.ts'
+import type { ConfigOption, ModelChoice } from './infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from './components/settings/agentTypes.ts'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState.ts'
@@ -10,7 +10,9 @@ import { toAgentContextKey } from './agentContext.ts'
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
 export interface SessionConfig {
   model?: string           // 当前 model 值
-  models?: string[]        // 可选 model 列表
+  models?: string[]        // 可选 model 列表（modelChoices 的 id 投影，兼容既有消费方）
+  /** P56/D3：宣告的模型选项（id/label 分离真源；id 为上 wire 的 machine id） */
+  modelChoices?: ModelChoice[]
   thinkingEffort?: string
   context1m?: boolean
   raw?: ConfigOption[]     // 原始 configOptions（兜底/调试）

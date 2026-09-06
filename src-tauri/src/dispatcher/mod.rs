@@ -13,7 +13,10 @@ use crate::lifecycle::do_connect_and_replace;
 use crate::permission::{permission_response, pick_option, PendingPermission};
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
-use crate::session::{extract_tool_file_name, value_as_string, SessionInfo};
+use crate::session::{
+    config_option_key_matches, extract_tool_file_name, value_as_machine_id, value_as_string,
+    SessionInfo,
+};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
@@ -174,22 +177,46 @@ fn apply_update_event_with_pet_policy(
             if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
                 session.title = title.to_string();
             }
+            // P56/D2.3：payload 带 models.currentModelId（camelCase/snake_case）时更新
+            // session.model（对齐 usage_update._meta.model 现状——hermes 未来若推此
+            // 通道即可消费；machine-id-only 提取，显示名不当 id）。
+            if let Some(model) = update
+                .get("models")
+                .and_then(|models| {
+                    models
+                        .get("currentModelId")
+                        .or_else(|| models.get("current_model_id"))
+                        .or_else(|| models.get("currentModel"))
+                        .or_else(|| models.get("current_model"))
+                        .or_else(|| models.get("current"))
+                })
+                .and_then(value_as_machine_id)
+            {
+                session.model = model;
+            }
         }
         Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
             if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
                 session.config_options = options.clone();
                 session.apply_config_options(options);
             } else {
+                // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
+                // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
+                // 子串包含猜测）。
                 let option_key = update
-                    .get("id")
+                    .get("configId")
+                    .or_else(|| update.get("config_id"))
+                    .or_else(|| update.get("id"))
                     .or_else(|| update.get("key"))
                     .and_then(|v| v.as_str());
+                let is_model_key = option_key.is_some_and(|key| config_option_key_matches(key, "model"));
+                let is_mode_key = option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
                 let current = update
                     .get("currentValue")
                     .or_else(|| update.get("value"))
                     .and_then(value_as_string);
-                match (option_key, current) {
-                    (Some("model"), Some(model)) => {
+                if is_model_key {
+                    if let Some(model) = current {
                         // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
                         // model 为空必误判 changed（对齐 usage/tool 全部门控）。
                         let changed = session.model != model;
@@ -198,7 +225,8 @@ fn apply_update_event_with_pet_policy(
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
                     }
-                    (Some("mode"), Some(mode)) => {
+                } else if is_mode_key {
+                    if let Some(mode) = current {
                         let changed = session.mode.as_deref() != Some(mode.as_str());
                         session.mode = Some(mode.clone());
                         if changed && apply_pet {
@@ -206,7 +234,6 @@ fn apply_update_event_with_pet_policy(
                             pet_events.push(PetEvent::ModeChanged(mode));
                         }
                     }
-                    _ => {}
                 }
             }
         }
@@ -1717,5 +1744,110 @@ mod tests {
             None,
             "未知 agent 无 provider"
         );
+    }
+
+    // ── P56/D2：单值 config_option_update 键归一化 + session_info_update models 消费 ──
+
+    fn dispatcher_session() -> crate::session::SessionInfo {
+        crate::session::SessionInfo::new(
+            "peri-p56".to_string(),
+            String::new(),
+            "cwd".to_string(),
+            true,
+            1,
+        )
+    }
+
+    /// 验收 7：单值 config_option_update 以 `configId`（camelCase）推送 → 更新
+    /// session.model；snake_case `config_id` 与归一化别名同效。
+    #[test]
+    fn config_option_update_reads_config_id_key_and_normalizes() {
+        for key in ["configId", "config_id"] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "config_option_update",
+                key: "model",
+                "currentValue": "nous:hermes-4",
+            });
+            let events = apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+                false,
+            );
+            assert_eq!(session.model, "nous:hermes-4", "key {key} must be read");
+            assert!(
+                matches!(events.as_slice(), [PetEvent::ModelChanged(model)] if model == "nous:hermes-4"),
+                "model change must stay a pet event"
+            );
+        }
+        // 归一化：model_selection / MODEL 均精确命中 model 语义键。
+        for key in ["model_selection", "MODEL"] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "config_option_update",
+                "configId": key,
+                "currentValue": "m-1",
+            });
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+                false,
+            );
+            assert_eq!(session.model, "m-1", "normalized key {key} must match");
+        }
+        // 无语义键的 update 不误写 model。
+        let mut session = dispatcher_session();
+        session.model = "keep".to_string();
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "reasoning_effort",
+            "currentValue": "low",
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "keep");
+    }
+
+    /// P56/D2.3：session_info_update 带 models.currentModelId（camel/snake）→
+    /// 更新 session.model（对齐 usage _meta.model 现状；hermes 未来推此通道即消费）。
+    #[test]
+    fn session_info_update_consumes_models_current_model() {
+        for (wire, expected) in [
+            (serde_json::json!({"currentModelId": "nous:hermes-4"}), "nous:hermes-4"),
+            (serde_json::json!({"current_model_id": "nous:hermes-3"}), "nous:hermes-3"),
+        ] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "session_info_update",
+                "models": wire,
+            });
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+                false,
+            );
+            assert_eq!(session.model, expected);
+        }
+        // 显示名-only 的 current 不得进入 typed 字段（machine-id-only）。
+        let mut session = dispatcher_session();
+        session.model = "keep".to_string();
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {"currentModelId": {"name": "Display Only"}},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+            false,
+        );
+        assert_eq!(session.model, "keep");
     }
 }
