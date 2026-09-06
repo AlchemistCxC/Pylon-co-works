@@ -64,6 +64,27 @@ function serializedSize(value: unknown): number {
   return new TextEncoder().encode(serialized).byteLength
 }
 
+/**
+ * 宿主管理面专用（P53 D5）：按插件清空存储 namespace，并同步模块级 cache——
+ * 绕过 cache 直写 localStorage 会让下一次 setValue 以旧 namespace 为基底"复活"
+ * 数据（review P1-1）。
+ */
+export function clearPluginStorageNamespace(pluginId: string): void {
+  const tree = loadTree()
+  if (!Object.hasOwn(tree, pluginId)) return
+  const next: StorageTree = { ...tree }
+  delete next[pluginId]
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(next))
+    cache = next
+  } catch (error) {
+    throw new PluginStorageError(
+      'persist',
+      `清理插件存储失败：${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 export function createPluginStorageApi(identity: PluginIdentity): PluginStorageApi {
   const listeners = new Set<() => void>()
   const notify = (): void => { listeners.forEach(listener => listener()) }

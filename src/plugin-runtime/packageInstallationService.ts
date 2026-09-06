@@ -24,7 +24,7 @@ export type PackageOperationResult =
 
 export interface PackageInitializationResult {
   activated: string[]
-  failed: Array<{ pluginId: string; message: string }>
+  failed: Array<{ pluginId: string; message: string; code?: string }>
 }
 
 export interface PackageContractSnapshot {
@@ -43,10 +43,24 @@ export interface PackageInstallationServiceOptions {
     status: 'granted' | 'awaiting_consent'
     missingCapabilities: readonly string[]
   }
+  /** C2 授权回收：卸载成功后回调（宿主注入 grant revoke）。 */
+  onUninstalled?: (pluginId: string) => void
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** 外置包同意流 typed 失败（review P2-2/A：从 message 前缀升级为结构化 code）。 */
+export class PluginCapabilityDeniedError extends Error {
+  readonly code = 'plugin_capability_denied'
+  constructor(
+    readonly pluginId: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'PluginCapabilityDeniedError'
+  }
 }
 
 export class PackageInstallationService {
@@ -54,6 +68,7 @@ export class PackageInstallationService {
   private readonly packageRuntime: PackagePluginRuntimeService
   private readonly packages: PluginPackageClient
   private readonly evaluateConsent: PackageInstallationServiceOptions['evaluateConsent']
+  private readonly onUninstalled: PackageInstallationServiceOptions['onUninstalled']
   private initialization: Promise<PackageInitializationResult> | undefined
   private readonly emittedActivationEvents = new Set<string>()
   private readonly contractListeners = new Set<() => void>()
@@ -68,6 +83,7 @@ export class PackageInstallationService {
     this.packageRuntime = options.packageRuntime
     this.packages = options.packages
     this.evaluateConsent = options.evaluateConsent
+    this.onUninstalled = options.onUninstalled
   }
 
   /** 激活前置同意检查：声明 capability 且授权缺失 → typed 失败（不抛异常，进 failed 列表）。 */
@@ -79,7 +95,8 @@ export class PackageInstallationService {
     if (!this.evaluateConsent || !capabilities || capabilities.length === 0) return
     const consent = this.evaluateConsent(pluginId, version, capabilities)
     if (consent.status === 'awaiting_consent') {
-      throw new Error(
+      throw new PluginCapabilityDeniedError(
+        pluginId,
         `plugin_capability_denied: 插件 ${pluginId} 等待能力授权（${consent.missingCapabilities.join(', ')}）`,
       )
     }
@@ -135,7 +152,11 @@ export class PackageInstallationService {
         await this.packageRuntime.activateInstalled(item.package)
         activated.push(pluginId)
       } catch (error) {
-        failed.push({ pluginId, message: errorMessage(error) })
+        failed.push({
+          pluginId,
+          message: errorMessage(error),
+          ...(error instanceof PluginCapabilityDeniedError ? { code: error.code } : {}),
+        })
       }
     }
     return { activated: activated.sort(), failed }
@@ -245,7 +266,29 @@ export class PackageInstallationService {
       if (kind !== 'directory' && resolution.eligibleIds.includes(descriptor.pluginId)
         && !this.isActive(descriptor.pluginId)) {
         const target = (await this.packages.list()).find(item => item.package.pluginId === descriptor.pluginId)
-        if (target) await this.packageRuntime.activateInstalled(target.package)
+        if (target) {
+          // review P1-2（C）：inspect 与 install 是两次独立获取（URL/zip 内容
+          // 可被中途替换），consent 必须对"已落库"的 manifest 复查——不许
+          // 良性探查换来恶意包激活。
+          const installedManifest = parsePylonPluginManifest(target.package.manifest)
+          try {
+            this.assertCapabilityConsent(
+              target.package.pluginId,
+              target.package.version,
+              installedManifest.capabilities,
+            )
+          } catch (error) {
+            await this.packages.setEnabled(descriptor.pluginId, false).catch(() => undefined)
+            throw error
+          }
+          try {
+            await this.packageRuntime.activateInstalled(target.package)
+          } catch (error) {
+            // 对称回滚（review P2-6）：与 setEnabled(false) 路径一致
+            await this.packages.setEnabled(descriptor.pluginId, false).catch(() => undefined)
+            throw error
+          }
+        }
       }
       return { ok: true }
     } catch (error) {
@@ -323,6 +366,8 @@ export class PackageInstallationService {
         deactivated = true
       }
       await this.packages.uninstall(pluginId, purgeData)
+      // C2 授权回收：卸载成功即回收该插件全部能力授权（重装须重新同意）
+      this.onUninstalled?.(pluginId)
       return { ok: true }
     } catch (error) {
       if (deactivated) await this.runtime.enable(pluginId).catch(() => undefined)

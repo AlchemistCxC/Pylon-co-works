@@ -141,6 +141,9 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
             version: instance.identity.version,
             status: instance.status,
             cleanup: instance.cleanup,
+            // review P1-2：面板据此外置/内置分类（identity.version 不可靠——
+            // first-party 包版本也是 semver）
+            builtin: options.getBuiltinCriticality(instance.identity.pluginId) !== undefined,
           })),
         }
       },
@@ -239,7 +242,19 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
       installOrUpdate: sourcePath => installation.installOrUpdate(sourcePath),
       setBuiltinEnabled: async (pluginId, enabled) => {
         if (enabled) {
+          // review P1-2/A：retryPlugin 从不抛错（失败进 degraded snapshot），
+          // 必须对照激活结果判定，否则启用失败被误报为成功
           await options.getBootstrap().retryPlugin(pluginId)
+          const nowActive = options.getRuntime().snapshot().active.some(
+            (identity: PluginIdentity) => identity.pluginId === pluginId,
+          )
+          if (!nowActive) {
+            const failure = options.getBootstrap().getSnapshot()
+            const reason = failure.kind === 'degraded'
+              ? failure.failures.find(item => item.pluginId === pluginId)?.message
+              : undefined
+            return { ok: false, message: reason ?? `插件 ${pluginId} 未能激活` }
+          }
           return { ok: true }
         }
         const active = runtime.snapshot().active.find(

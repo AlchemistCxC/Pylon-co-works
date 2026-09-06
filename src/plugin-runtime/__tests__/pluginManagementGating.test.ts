@@ -183,4 +183,55 @@ describe('management guards (C4 typed errors)', () => {
     await expect(api.setEnabled('plugin.other', false)).rejects.toThrow('cleanup pending')
     expect(setEnabled).toHaveBeenCalledWith('plugin.other', false)
   })
+
+  // review P0-2：retryCleanup 只能针对 cleanup-failed 实例，且不得绕过
+  // self/product-required 守卫（runtimeOverview 暴露的 instanceKey 不是"任意停用"钥匙）
+  it('restricts retryCleanup to cleanup-failed non-self non-product-required instances', async () => {
+    const overview = {
+      revision: 1,
+      activePluginIds: ['builtin.pylon-shell', 'plugin.manager', 'plugin.other'],
+      instances: [
+        { pluginId: 'builtin.pylon-shell', runtimeInstanceId: 'shell#r1', version: '1.0.0', status: 'active' as const, builtin: true },
+        { pluginId: 'plugin.other', runtimeInstanceId: 'other#r2', version: '1.0.0', status: 'active' as const, builtin: false },
+        { pluginId: 'plugin.other', runtimeInstanceId: 'other#r3', version: '1.0.0', status: 'cleanup-failed' as const, builtin: false },
+        { pluginId: 'builtin.pylon-workspace', runtimeInstanceId: 'ws#r4', version: '1.0.0', status: 'cleanup-failed' as const, builtin: true },
+        { pluginId: 'plugin.manager', runtimeInstanceId: 'mgr#r5', version: '1.0.0', status: 'cleanup-failed' as const, builtin: false },
+      ],
+    }
+    const retryCleanup = vi.fn(async () => ({ complete: true }))
+    const api = make({
+      deps: {
+        runtimeOverview: () => overview,
+        retryCleanup,
+        isProductRequired: pluginId => pluginId === 'builtin.pylon-workspace',
+      },
+    })
+
+    // 未知实例 → 拒绝
+    await expect(api.retryCleanup('ghost#r9')).rejects.toThrow('未找到运行实例')
+    // active 实例 → 拒绝（retryCleanup 不是停用通道）
+    await expect(api.retryCleanup('other#r2')).rejects.toThrow('仅适用于清理失败')
+    // cleanup-failed 但 product-required → 拒绝
+    await expect(api.retryCleanup('ws#r4')).rejects.toMatchObject({ code: 'management_product_required' })
+    // cleanup-failed 但目标是调用者自身 → 拒绝
+    await expect(api.retryCleanup('mgr#r5')).rejects.toMatchObject({ code: 'management_self_locked' })
+    // 合法目标 → 委派
+    await expect(api.retryCleanup('other#r3')).resolves.toBeTruthy()
+    expect(retryCleanup).toHaveBeenCalledWith('other#r3')
+  })
+
+  // review P1-2/A：setBuiltinEnabled(true) 必须对照激活结果判定，不得恒报成功
+  it('reports setBuiltinEnabled(true) as failed when the retry does not activate', async () => {
+    const setBuiltinEnabled = vi.fn(async (_pluginId: string, enabled: boolean) => {
+      // 模拟 wiring 真实现：retry 后对照 snapshot
+      if (enabled) {
+        const nowActive = false
+        if (!nowActive) return { ok: false, message: '插件 x 未能激活' }
+      }
+      return { ok: true }
+    })
+    const api = make({ deps: { setBuiltinEnabled } })
+    await expect(api.setBuiltinEnabled('plugin.x', true)).rejects.toThrow('未能激活')
+    expect(setBuiltinEnabled).toHaveBeenCalledWith('plugin.x', true)
+  })
 })

@@ -580,10 +580,6 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'plugin_package_inspect_url':
     case 'plugin_install_from_zip':
     case 'plugin_install_from_url': {
-      const sourceLabel = typeof args.zipPath === 'string'
-        ? args.zipPath
-        : typeof args.url === 'string' ? args.url : 'mock-source'
-      void sourceLabel
       const expectedId = typeof args.expectedId === 'string' && args.expectedId.trim()
         ? args.expectedId.trim()
         : 'demo.zip-source'

@@ -359,7 +359,7 @@ CLI 不是离线配置编辑器：Pylon 必须正在运行。完整命令、参�
 - 当前稳定契约是 Plugin API 1.0 / 1.1 / 1.2（1.1 新增插件私有存储；1.2 新增能力声明与用户授权，见 §5.1）；旧 API 0.1 已删除，不兼容旧 manifest。
 - capability 词表当前只有 `plugin.management`；除能力授权卡外没有其它权限审批 UI。
 - 第三方插件被视为完全可信的本机代码；Pylon 的依赖、生命周期与资源清理机制不是恶意代码沙箱。
-- 安装入口是本地目录，不是 zip 商店安装。
+- 安装入口支持本地目录、本机 zip 包与 https URL 三种来源（P53 D6）；没有插件市场或索引。
 - UI Surface、插件设置页、左右栏、上下文面板和 Host setting-option contribution 已可用；完整 Agent Workbench 替换仍是第一方边界。
 - 插件删除了某个设置候选项时，Pylon 会保留已有值并标记“已不可用”，直到用户主动选择新值，不会自动篡改原设置。
 - Agent Tool `pylon_cli` 可管理运行中插件、Hook、Skin、进程和 Workspace；普通用户主要使用设置页。

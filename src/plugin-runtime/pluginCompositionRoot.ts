@@ -176,6 +176,8 @@ export function getPackageInstallationService(): PackageInstallationService {
         capabilities,
         grants: getPluginCapabilityGrantStore(),
       }),
+    // C2：卸载成功即回收全部能力授权（重装须重新同意）
+    onUninstalled: pluginId => getPluginCapabilityGrantStore().revoke(pluginId),
     })
   }
   return packageInstallationService

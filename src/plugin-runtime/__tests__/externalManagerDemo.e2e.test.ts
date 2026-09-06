@@ -105,6 +105,7 @@ async function fixture(options: {
               runtimeInstanceId: instance.identity.runtimeInstanceId,
               version: instance.identity.version,
               status: instance.status,
+              builtin: false,
             })),
           }
         },
@@ -172,7 +173,8 @@ describe('external plugin manager demo E2E (install → consent → panel)', () 
     const grants = grantStore()
     const managementSeen: { current: unknown } = { current: 'unset' }
 
-    // 第一步：未授权安装——安装成功但激活前置失败 plugin_capability_denied
+    // 第一步：未授权安装——consent 前置检查在安装前抛出（什么都不落库），
+    // 返回 typed plugin_capability_denied（勘误见施工书 §7 E1）
     const blocked = await fixture({
       grants,
       importEntry: async () => entryModule(managementSeen),
@@ -188,6 +190,7 @@ describe('external plugin manager demo E2E (install → consent → panel)', () 
     expect(enableBlocked.message).toContain('plugin_capability_denied')
 
     // 第三步：宿主授权（版本绑定）后启用 → 激活且 management API 装配
+    //（fixture 与第一步相互独立，仅共享 grants 授权状态）
     grants.grant(DEMO_ID, 'plugin.management', { pluginVersion: '1.0.0', apiVersion: '1.2' })
     const granted = await fixture({
       grants,

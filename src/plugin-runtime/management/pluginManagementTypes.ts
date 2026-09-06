@@ -36,6 +36,8 @@ export interface PluginRuntimeOverviewEntry {
   readonly version: string
   readonly status: 'active' | 'deactivating' | 'inactive' | 'cleanup-failed'
   readonly cleanup?: PluginDeactivateResult
+  /** 内置（宿主 definitions 登记过）= true；用户包 = false（review P1-2 分类依据）。 */
+  readonly builtin: boolean
 }
 
 export interface PluginRuntimeOverview {
@@ -90,7 +92,7 @@ export interface PluginProcessOverviewEntry {
   readonly restartAttempts: number
 }
 
-/** 运行时监管：每插件存储用量/软配额（64 KiB 预算）。 */
+/** 运行时监管：每插件存储用量/软配额（PLUGIN_STORAGE_BUDGET_BYTES，当前 1 MiB）。 */
 export interface PluginStorageUsageEntry {
   readonly pluginId: string
   readonly usedBytes: number

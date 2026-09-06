@@ -36,7 +36,7 @@ export interface KernelBootstrapActions {
   bootstrapBuiltins(mode: 'normal' | 'safe-mode'): Promise<BuiltinBootstrapResult>
   initializeUserPackages(): Promise<{
     activated: readonly string[]
-    failed: readonly { pluginId: string; message: string }[]
+    failed: readonly { pluginId: string; message: string; code?: string }[]
   }>
   /** @deprecated Use applicationMount. Retained for compatibility during the migration window. */
   mountApplication?: (applicationId: string) => void
@@ -151,7 +151,7 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
       ...packages.failed.map(failure => Object.freeze({
         pluginId: failure.pluginId,
         stage: 'user-packages' as const,
-        code: 'user_plugin_initialization_failed',
+        code: failure.code ?? 'user_plugin_initialization_failed',
         message: failure.message,
         retryable: true,
       })),

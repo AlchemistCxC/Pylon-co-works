@@ -78,9 +78,16 @@ export function createPluginCapabilityGrantStore(
   const report = options.report ?? ((action, error) => { reportRuntimeDiagnostic(action, error) })
   const now = options.now ?? (() => Date.now())
   const listeners = new Set<() => void>()
-  const storage = options.storage === null
-    ? undefined
-    : options.storage ?? (typeof localStorage === 'undefined' ? undefined : localStorage)
+  let globalStorage: PluginCapabilityGrantStorage | undefined
+  if (options.storage !== null) {
+    try {
+      // 存储被禁的 WebView 访问 localStorage 本身可抛 SecurityError
+      globalStorage = typeof localStorage === 'undefined' ? undefined : localStorage
+    } catch {
+      globalStorage = undefined
+    }
+  }
+  const storage = options.storage === null ? undefined : options.storage ?? globalStorage
   // 存储不可用 → 全部 deny（fail-closed）
   const available = storage !== undefined
 
@@ -133,7 +140,7 @@ export function createPluginCapabilityGrantStore(
     },
     grant(pluginId, capability, input) {
       if (!available) return
-      persist({
+      const persisted = persist({
         ...grants,
         [pluginId]: {
           ...(grants[pluginId] ?? {}),
@@ -144,7 +151,7 @@ export function createPluginCapabilityGrantStore(
           },
         },
       })
-      publish()
+      if (persisted) publish()
     },
     revoke(pluginId, capability) {
       if (!available) return
@@ -161,8 +168,7 @@ export function createPluginCapabilityGrantStore(
         if (Object.keys(restCapabilities).length === 0) delete next[pluginId]
         else next[pluginId] = restCapabilities
       }
-      persist(next)
-      publish()
+      if (persist(next)) publish()
     },
     subscribe(listener) {
       listeners.add(listener)

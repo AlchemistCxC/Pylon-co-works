@@ -68,11 +68,15 @@ export default function PluginCapabilityConsentCard({
 
   return (
     <div className="set-group" data-capability-consent-card aria-label="插件能力授权">
-      <div className="set-group-title" aria-expanded="true">能力授权</div>
+      <div className="set-group-title">能力授权</div>
       <div className="set-hint">
         以下插件在 manifest 中声明了宿主能力（{PYLON_PLUGIN_CAPABILITIES.join('/')}），需要你批准后才能激活。
       </div>
-      {pending.map(item => item.capabilities.map(capability => {
+      {pending.map(item => {
+        // 兜底值保护（review P2-4/B）：failure 缺 version/capabilities 时批准会写入
+        // 永不生效的错位 grant，禁用交互而非猜默认值
+        const metaComplete = item.pluginVersion !== '0.0.0' && item.capabilities.length > 0
+        return item.capabilities.map(capability => {
         const granted = grantedKeys.has(`${item.pluginId}:${capability}:${item.pluginVersion}`)
         return (
           <div className="plugin-row" key={`${item.pluginId}:${capability}`}>
@@ -87,7 +91,7 @@ export default function PluginCapabilityConsentCard({
                     <button
                       type="button"
                       className="ps-btn primary sm"
-                      disabled={busy}
+                      disabled={busy || !metaComplete}
                       aria-label={`批准 ${item.pluginId} 的 ${capability} 能力`}
                       onClick={() => { void decide(item.pluginId, item.pluginVersion, capability, true) }}
                     >
@@ -106,8 +110,9 @@ export default function PluginCapabilityConsentCard({
                 )}
             </div>
           </div>
-        )
-      }))}
+          )
+        })
+      })}
     </div>
   )
 }

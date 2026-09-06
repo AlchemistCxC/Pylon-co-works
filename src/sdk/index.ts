@@ -65,6 +65,8 @@ export type {
   PluginCapabilityGrantFact,
 } from '../plugin-runtime/management/pluginManagementTypes.ts'
 export type { PylonPluginCapability } from '../plugin-runtime/packageManifest.ts'
+/** capability-gated 管理面的 typed 错误（守卫三则）；按 `err.code` 区分。 */
+export { PluginManagementError } from '../plugin-runtime/management/pluginManagementTypes.ts' 
 
 export type {
   HookName,

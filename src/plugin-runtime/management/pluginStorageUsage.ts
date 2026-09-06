@@ -7,6 +7,7 @@
  * PLUGIN_STORAGE_BUDGET_BYTES。只读投影，清理走既有 clear/remove 语义。
  */
 import { PLUGIN_STORAGE_BUDGET_BYTES } from '../storage/pluginStorageContract.ts'
+import { clearPluginStorageNamespace as clearHostedPluginStorageNamespace } from '../storage/pluginStorageApi.ts'
 import type { PluginStorageUsageEntry } from './pluginManagementTypes.ts'
 
 const STORE_KEY = 'pylon-plugin-storage'
@@ -42,18 +43,7 @@ export function readPluginStorageUsage(): readonly PluginStorageUsageEntry[] {
   })
 }
 
-/** 清空指定插件的存储 namespace（既有 remove 语义，不涉其它插件）。 */
+/** 清空指定插件的存储 namespace——委托 pluginStorageApi（同步其模块级 cache）。 */
 export function clearPluginStorageNamespace(pluginId: string): void {
-  try {
-    if (typeof localStorage === 'undefined') return
-    const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return
-    const tree = JSON.parse(raw) as Record<string, Record<string, unknown>>
-    if (!Object.hasOwn(tree, pluginId)) return
-    const next = { ...tree }
-    delete next[pluginId]
-    localStorage.setItem(STORE_KEY, JSON.stringify(next))
-  } catch {
-    // 损坏/不可写存储下清理尽力而为；容量投影按无授权处理同一降级语义
-  }
+  clearHostedPluginStorageNamespace(pluginId)
 }

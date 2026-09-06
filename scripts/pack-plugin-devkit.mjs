@@ -100,12 +100,41 @@ execFileSync(process.execPath, [
 ], { cwd: repoRoot, stdio: 'inherit' })
 cpSync(join(managerSource, 'pylon-plugin.json'), join(managerDemo, 'pylon-plugin.json'))
 cpSync(join(managerSource, 'styles'), join(managerDemo, 'styles'), { recursive: true })
+// review C P2-7/8：拷贝可改源码与套件内类型检查配置（build 脚本指向的 src 必须存在）
+cpSync(join(managerSource, 'src'), join(managerDemo, 'src'), { recursive: true })
+// 单一真源（施工书 D4"同一 panel/ DOM 源"）：仓库内 src/panel.ts import 宿主
+// 内嵌包源，套件里没有宿主 src——把内嵌 panel 源随套件拷入并改写 import，
+// 打包语义不变（同一份面板实现）。
+const embeddedPanelDir = join(managerDemo, 'src', 'embedded')
+mkdirSync(embeddedPanelDir, { recursive: true })
+const embeddedPanel = join(embeddedPanelDir, 'pluginManagerPanel.ts')
+cpSync(
+  join(repoRoot, 'src', 'plugins', 'product', 'packages', 'builtin.pylon-plugin-manager', 'panel', 'pluginManagerPanel.ts'),
+  embeddedPanel,
+)
+// 内嵌 panel 源对仓库内 SDK 类型的相对 import → 套件 alias（tsconfig paths 已配）
+writeFileSync(embeddedPanel, readFileSync(embeddedPanel, 'utf8')
+  .replaceAll('../../../../../sdk/index.ts', '@pylon/plugin-sdk'))
+const demoPanelTs = join(managerDemo, 'src', 'panel.ts')
+writeFileSync(demoPanelTs, readFileSync(demoPanelTs, 'utf8')
+  .replaceAll('../../../../src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.ts', './embedded/pluginManagerPanel.ts'))
 writeFileSync(join(managerDemo, 'package.json'), JSON.stringify({
   name: 'pylon-plugin-manager-demo', private: true, type: 'module',
   scripts: {
     build: 'esbuild src/index.ts --bundle --format=esm --platform=browser --alias:@pylon/plugin-sdk=../../sdk/pylon-plugin-sdk.js --outfile=dist/index.js',
+    typecheck: 'tsc -p tsconfig.json',
   },
-  devDependencies: { esbuild: '^0.24.0' },
+  devDependencies: { esbuild: '^0.24.0', typescript: '^5.6.0' },
+}, null, 2))
+writeFileSync(join(managerDemo, 'tsconfig.json'), JSON.stringify({
+  compilerOptions: {
+    strict: true, noEmit: true, target: 'ES2021', module: 'ESNext',
+    moduleResolution: 'bundler', lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+    skipLibCheck: true, allowImportingTsExtensions: true, isolatedModules: true,
+    baseUrl: '.',
+    paths: { '@pylon/plugin-sdk': ['../../sdk/types/sdk/index.d.ts'] },
+  },
+  include: ['src', '../../sdk/types/sdk/index.d.ts'],
 }, null, 2))
 
 // ── docs ──
@@ -136,6 +165,8 @@ console.log('[devkit] G1 PASS: SDK bundle 导出完整')
 
 execTsc(['-p', join(kitRoot, 'starter', 'typescript', 'tsconfig.json')])
 console.log('[devkit] G2 PASS: TS starter 对套件类型树严格编译通过')
+execTsc(['-p', join(kitRoot, 'starter', 'manager-demo', 'tsconfig.json')])
+console.log('[devkit] G3 PASS: manager-demo 对套件类型树严格编译通过')
 
 console.log(`[devkit] done → ${kitRoot}`)
 readdirSync(kitRoot).forEach(name => console.log('  ' + name))

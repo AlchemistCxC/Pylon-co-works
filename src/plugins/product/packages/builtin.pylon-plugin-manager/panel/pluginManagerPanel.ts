@@ -168,23 +168,25 @@ export function mountPluginManagerPanel(
       const contributionList = el('div', 'pypm-list')
       contributionsGroup.append(contributionList)
       parent.append(contributionsGroup)
-      const facts = management.contributionOverview()
-      if (facts.length === 0) {
-        contributionList.append(el('p', 'pypm-hint', '当前无注册贡献。'))
-      } else {
-        for (const fact of facts) {
-          const row = el('div', 'pypm-row')
-          row.setAttribute('data-contribution-plugin', fact.pluginId)
-          row.append(
-            el('span', 'pypm-row-title', fact.pluginId),
-            el('span', 'pypm-hint', contributionSummaryLine(fact)),
-          )
-          contributionList.append(row)
+      try {
+        const facts = management.contributionOverview()
+        if (facts.length === 0) {
+          contributionList.append(el('p', 'pypm-hint', '当前无注册贡献。'))
+        } else {
+          for (const fact of facts) {
+            const row = el('div', 'pypm-row')
+            row.setAttribute('data-contribution-plugin', fact.pluginId)
+            row.append(
+              el('span', 'pypm-row-title', fact.pluginId),
+              el('span', 'pypm-hint', contributionSummaryLine(fact)),
+            )
+            contributionList.append(row)
+          }
         }
+      } catch (error) {
+        contributionList.append(el('p', 'pypm-hint', `读取失败：${error instanceof Error ? error.message : String(error)}`))
       }
     }
-    void contributionsGroup
-
     const logGroup = el('div', 'pypm-group')
     logGroup.append(el('div', 'pypm-group-title', '操作日志'))
     const logList = el('div', 'pypm-list')
@@ -241,18 +243,20 @@ export function mountPluginManagerPanel(
         }
 
         builtinList.replaceChildren()
-        if (runtime.activePluginIds.length === 0) {
+        // review P1-2：只渲染 builtin 实例（activePluginIds 含用户包，不可直接遍历）
+        const builtinActive = runtime.instances.filter(instance => instance.builtin)
+        if (builtinActive.length === 0) {
           builtinList.append(el('p', 'pypm-hint', '当前没有激活的内置组件。'))
         }
-        for (const pluginId of runtime.activePluginIds) {
+        for (const instance of builtinActive) {
           const row = el('div', 'pypm-row')
-          row.setAttribute('data-plugin-id', pluginId)
+          row.setAttribute('data-builtin-id', instance.pluginId)
           const disable = button('停用')
           disable.addEventListener('click', () => {
-            void runOperation(`停用 ${pluginId}`, () => management.setBuiltinEnabled(pluginId, false))
+            void runOperation(`停用 ${instance.pluginId}`, () => management.setBuiltinEnabled(instance.pluginId, false))
           })
           row.append(
-            el('span', 'pypm-row-title', pluginId),
+            el('span', 'pypm-row-title', instance.pluginId),
             el('span', 'pypm-row-state', '运行中'),
             disable,
           )
@@ -381,6 +385,7 @@ export function mountPluginManagerPanel(
         }
       } catch (error) {
         notice(`读取插件状态失败：${error instanceof Error ? error.message : String(error)}`)
+        render()
       }
     }
 

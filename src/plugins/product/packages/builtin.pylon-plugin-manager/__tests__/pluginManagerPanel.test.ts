@@ -34,8 +34,9 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
         revision: 1,
         activePluginIds: ['builtin.pylon-shell', 'builtin.pylon-plugin-manager'],
         instances: [
-          { pluginId: 'builtin.pylon-shell', runtimeInstanceId: 'builtin.pylon-shell@b1', version: 'builtin', status: 'active' as const },
-          { pluginId: 'user.demo', runtimeInstanceId: 'user.demo@1.0.0-pkg#run-1', version: '1.0.0', status: 'cleanup-failed' as const },
+          { pluginId: 'builtin.pylon-shell', runtimeInstanceId: 'builtin.pylon-shell@b1', version: '1.0.0', status: 'active' as const, builtin: true },
+          { pluginId: 'builtin.pylon-plugin-manager', runtimeInstanceId: 'builtin.pylon-plugin-manager@1.0.0-m1', version: '1.0.0', status: 'active' as const, builtin: true },
+          { pluginId: 'user.demo', runtimeInstanceId: 'user.demo@1.0.0-pkg#run-1', version: '1.0.0', status: 'cleanup-failed' as const, builtin: false },
         ],
       }
     },
@@ -91,7 +92,7 @@ function mockManagementDeps(overrides: Partial<PluginManagementDeps> = {}): Plug
     clearPluginStorage: () => undefined,
     isCapabilityGranted: () => true,
     isProductRequired: pluginId => pluginId === 'builtin.pylon-shell',
-    setEnabled: vi.fn(async () => { calls.push(`setEnabled:${overrides}`); return { ok: true } }),
+    setEnabled: vi.fn(async () => { calls.push('setEnabled'); return { ok: true } }),
     reload: vi.fn(async () => ({ ok: true })),
     uninstall: vi.fn(async () => ({ ok: true })),
     installOrUpdate: vi.fn(async () => ({ ok: true })),
@@ -139,6 +140,9 @@ describe('plugin manager panel (framework-free DOM)', () => {
     expect(handle.root.querySelector('.pypm-overview')?.textContent).toContain('2 个运行中')
     expect(handle.root.querySelector('.pypm-overview')?.textContent).toContain('1 个用户插件')
     expect(handle.root.querySelectorAll('.pypm-group-title').length).toBeGreaterThanOrEqual(5)
+    // review P1-2/B：内置组件区块只渲染 builtin 实例——用户插件不得混入
+    expect(handle.root.querySelector('[data-builtin-id="builtin.pylon-shell"]')).not.toBeNull()
+    expect(handle.root.querySelector('[data-builtin-id="user.demo"]')).toBeNull()
     handle.dispose()
   })
 
