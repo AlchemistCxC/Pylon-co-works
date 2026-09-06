@@ -1,8 +1,7 @@
-// 合并资源：应用图标 + comctl32 v6 manifest
-// 单 .o 单 link-arg —— MSVC link.exe 对多个 COFF 资源对象只取第一个（GNU ld 会合并），
-// 拆两个 .o 会导致 manifest 在 MSVC 链接时被丢弃（cargo test 0xc0000139）。
-1 ICON "icon.ico"
-
+// comctl32 v6 manifest（TaskDialogIndirect 入口点；缺失时测试 harness 崩溃 0xc0000139）。
+// 只放 manifest，不放图标：tauri-winres 已按窗口图标（id 32512）嵌入 icon.ico，
+// 两个 .res 各含 .ico 时 rc.exe 展开的内部 RT_ICON 图像条目都从 id 1 起编，
+// MSVC 链接报 CVT1100 资源重复（2026-09-06 实测）。
 1 24
 {
   "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>"
