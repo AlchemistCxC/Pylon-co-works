@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,6 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
-
 
 pub struct AcpClient {
     child: ManagedChild,
@@ -18,6 +17,7 @@ pub struct AcpClient {
     /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
     /// AcpClient 自然更新（generation 隔离保证旧客户端不污染）。
     agent_capabilities: Option<serde_json::Value>,
+    capability_registry: CapabilityRegistry,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
     /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
@@ -146,6 +146,7 @@ impl AcpClient {
             child: ManagedChild::empty(),
             protocol: crate::agent_config::AcpProtocolConfig::default(),
             agent_capabilities: None,
+            capability_registry: CapabilityRegistry::default(),
             write_tx,
             writer_task: None,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -285,6 +286,11 @@ impl AcpClient {
     /// P1：initialize 握手返回的 agentCapabilities（连接成功才有）。
     pub(crate) fn agent_capabilities(&self) -> Option<&serde_json::Value> {
         self.agent_capabilities.as_ref()
+    }
+
+    /// Typed, fail-closed view of the initialize negotiation.
+    pub fn capabilities(&self) -> &CapabilityRegistry {
+        &self.capability_registry
     }
 
     /// OBS-01：本连接的 ACP wire 只读记录器（断开态为 None）。
@@ -497,6 +503,7 @@ impl AcpClient {
                     child,
                     protocol: crate::hermes_runtime::effective_protocol(agent),
                     agent_capabilities: None,
+                    capability_registry: CapabilityRegistry::default(),
                     write_tx,
                     writer_task: Some(writer_task),
                     next_id: Arc::new(AtomicU64::new(1)),
@@ -546,6 +553,18 @@ impl AcpClient {
                 // 能力驱动 UI（loadSession/image/fork/resume/mcp）经 agent_status
                 // 读取；未声明时保持 None。
                 client.agent_capabilities = initialize_response.get("agentCapabilities").cloned();
+                client.capability_registry =
+                    match CapabilityRegistry::from_initialize_response(&initialize_response) {
+                        Ok(registry) => registry,
+                        Err(message) => {
+                            let mut failure = AgentConnectFailure::capability(message);
+                            let tail = stderr_tail.tail_since(0, 8, 2048);
+                            if !tail.lines.is_empty() {
+                                failure.stderr_excerpt = Some(tail.lines.join("\n"));
+                            }
+                            return Err(failure.into());
+                        }
+                    };
                 if client
                     .agent_capabilities
                     .as_ref()

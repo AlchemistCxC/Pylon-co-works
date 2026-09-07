@@ -4,8 +4,10 @@
 //! to per-session channels. No lock contention between concurrent sessions.
 //! stderr is drained in a background thread to prevent pipe buffer deadlock.
 
+mod capabilities;
 mod client;
 mod error;
+pub use capabilities::{CapabilityRegistry, CapabilityState};
 pub use client::*;
 pub use error::*;
 
@@ -48,6 +50,6 @@ pub(crate) use transport::{
 pub use transport::{
     BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP, WRITE_CHAN_CAP,
 };
+pub(crate) use wire_trace::AcpWireHub;
 #[cfg_attr(not(test), allow(unused_imports))] // Wire* 类型仅测试消费（obs03/p1_wire 回归测试）
 pub use wire_trace::{AcpWireCapture, WireDirection, WireIdKind, WireRecord};
-pub(crate) use wire_trace::AcpWireHub;
