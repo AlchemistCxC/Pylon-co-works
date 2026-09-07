@@ -1,18 +1,16 @@
-﻿//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
+//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
 //!
 //! Architecture: one dedicated reader thread dispatches messages by request_id
 //! to per-session channels. No lock contention between concurrent sessions.
 //! stderr is drained in a background thread to prevent pipe buffer deadlock.
 
-
-mod error;
 mod client;
-pub use error::*;
+mod error;
 pub use client::*;
+pub use error::*;
 
 #[cfg(test)]
 mod tests;
-
 
 mod process;
 pub(crate) use process::ManagedChild;
@@ -21,9 +19,9 @@ mod protocol;
 mod replay;
 pub(crate) mod request_id;
 pub(crate) use request_id::RequestId;
-mod transport;
 mod stderr_tail;
-pub(crate) use stderr_tail::StderrTail;
+mod transport;
+pub(crate) use stderr_tail::{summarize_parser_error, StderrTail};
 pub(crate) mod wire_trace;
 #[cfg(test)]
 pub(crate) use jsonrpc::drain_pending;
@@ -34,8 +32,7 @@ pub(crate) use jsonrpc::{
     PromptWaitOutcome, PENDING_SHARDS,
 };
 pub(crate) use protocol::{
-    load_params,
-    prompt_blocks, prompt_stop_reason, session_id_from, session_prompt_params,
+    load_params, prompt_blocks, prompt_stop_reason, session_id_from, session_prompt_params,
 };
 pub use protocol::{
     session_close_params, session_new_params, session_set_config_option_params,

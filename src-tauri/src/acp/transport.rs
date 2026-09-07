@@ -471,7 +471,8 @@ pub(crate) fn spawn_stdout_reader(
             let msg_val: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
                 Err(e) => {
-                    tracing::error!("ACP parse: {}", e);
+                    let summary = super::summarize_parser_error(&e.to_string());
+                    tracing::error!("ACP parse: {}", summary);
                     if let Some(hub) = &stdout_logs {
                         hub.push(
                             crate::time::Timestamp::now(),
@@ -481,7 +482,7 @@ pub(crate) fn spawn_stdout_reader(
                             "ACP stdout JSON parse error",
                             serde_json::Map::from_iter([(
                                 "error".to_string(),
-                                serde_json::Value::String(e.to_string()),
+                                serde_json::Value::String(summary),
                             )]),
                         );
                     }
