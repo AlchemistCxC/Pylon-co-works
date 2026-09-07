@@ -78,6 +78,30 @@ mod tests {
     }
 
     #[test]
+    fn absent_empty_and_non_boolean_capabilities_remain_distinct() {
+        let absent = CapabilityRegistry::from_initialize_response(&serde_json::json!({})).unwrap();
+        let empty = CapabilityRegistry::from_initialize_response(
+            &serde_json::json!({"agentCapabilities": {}}),
+        )
+        .unwrap();
+        assert_eq!(absent.raw(), None);
+        assert_eq!(empty.raw(), Some(&serde_json::json!({})));
+        let registry = CapabilityRegistry::from_initialize_response(&serde_json::json!({
+            "agentCapabilities": {"loadSession": "true", "promptCapabilities": {"image": 1}}
+        }))
+        .unwrap();
+        for path in [
+            vec!["loadSession"],
+            vec!["promptCapabilities", "image"],
+            vec![],
+            vec!["missing"],
+        ] {
+            assert_eq!(registry.state(&path), CapabilityState::Unknown);
+            assert!(!registry.supports(&path));
+        }
+    }
+
+    #[test]
     fn malformed_capabilities_are_rejected() {
         let error = CapabilityRegistry::from_initialize_response(&serde_json::json!({
             "agentCapabilities": []

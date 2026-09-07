@@ -16,7 +16,6 @@ pub struct AcpClient {
     /// 含 loadSession/promptCapabilities/sessionCapabilities/mcpCapabilities 及
     /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
     /// AcpClient 自然更新（generation 隔离保证旧客户端不污染）。
-    agent_capabilities: Option<serde_json::Value>,
     capability_registry: CapabilityRegistry,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
@@ -145,7 +144,6 @@ impl AcpClient {
         Self {
             child: ManagedChild::empty(),
             protocol: crate::agent_config::AcpProtocolConfig::default(),
-            agent_capabilities: None,
             capability_registry: CapabilityRegistry::default(),
             write_tx,
             writer_task: None,
@@ -285,7 +283,7 @@ impl AcpClient {
 
     /// P1：initialize 握手返回的 agentCapabilities（连接成功才有）。
     pub(crate) fn agent_capabilities(&self) -> Option<&serde_json::Value> {
-        self.agent_capabilities.as_ref()
+        self.capabilities().raw()
     }
 
     /// Typed, fail-closed view of the initialize negotiation.
@@ -502,7 +500,6 @@ impl AcpClient {
                 let mut client = AcpClient {
                     child,
                     protocol: crate::hermes_runtime::effective_protocol(agent),
-                    agent_capabilities: None,
                     capability_registry: CapabilityRegistry::default(),
                     write_tx,
                     writer_task: Some(writer_task),
@@ -552,7 +549,6 @@ impl AcpClient {
                 // P1（能力协商暴露）：握手响应的 agentCapabilities 存起来——前端
                 // 能力驱动 UI（loadSession/image/fork/resume/mcp）经 agent_status
                 // 读取；未声明时保持 None。
-                client.agent_capabilities = initialize_response.get("agentCapabilities").cloned();
                 client.capability_registry =
                     match CapabilityRegistry::from_initialize_response(&initialize_response) {
                         Ok(registry) => registry,
@@ -565,20 +561,6 @@ impl AcpClient {
                             return Err(failure.into());
                         }
                     };
-                if client
-                    .agent_capabilities
-                    .as_ref()
-                    .is_some_and(|capabilities| !capabilities.is_object())
-                {
-                    let mut failure = AgentConnectFailure::capability(
-                        "initialize agentCapabilities 必须为 object".to_string(),
-                    );
-                    let tail = stderr_tail.tail_since(0, 8, 2048);
-                    if !tail.lines.is_empty() {
-                        failure.stderr_excerpt = Some(tail.lines.join("\n"));
-                    }
-                    return Err(failure.into());
-                }
                 Ok(client)
             }
             other => Err(AgentConnectFailure::preflight(
