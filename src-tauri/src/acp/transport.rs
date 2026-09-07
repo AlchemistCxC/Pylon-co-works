@@ -363,12 +363,14 @@ pub(crate) fn spawn_stderr_reader(
     agent_name: &str,
     runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
     correlation: Option<crate::correlation::RuntimeCorrelation>,
+    stderr_tail: Arc<super::StderrTail>,
 ) {
     let agent_name_stderr = agent_name.to_string();
     let stderr_logs = runtime_logs.clone();
     std::thread::spawn(move || {
         for l in BufReader::new(stderr).lines().map_while(Result::ok) {
             if !l.is_empty() {
+                stderr_tail.push(&l);
                 let safe = crate::runtime_log::sanitize_message(l.clone());
                 // LOG-01：stderr 行回声只作 console/外部日志出口（fmt layer），
                 // target 专属标记让 RuntimeLogLayer 跳过——hub 唯一归属下方显式 push，

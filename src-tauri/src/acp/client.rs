@@ -46,6 +46,7 @@ pub struct AcpClient {
     /// OBS-01：本连接的 ACP wire 只读记录器（transport 边界，infallible）。
     /// 断开态为 None；连接后始终存在（容量上限 ring buffer，可 set_enabled 关闭）。
     wire_trace: Option<Arc<AcpWireHub>>,
+    pub(crate) stderr_tail: Arc<StderrTail>,
 }
 
 /// Cloneable handle to the connection's single-consumer Kernel notification stream.
@@ -156,6 +157,7 @@ impl AcpClient {
             crashed_watch,
             _crashed_watch_rx: crashed_watch_rx,
             wire_trace: None,
+            stderr_tail: Arc::new(StderrTail::new()),
         }
     }
 
@@ -467,11 +469,13 @@ impl AcpClient {
                 let stderr = child
                     .take_stderr()
                     .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
+                let stderr_tail = Arc::new(StderrTail::new());
                 spawn_stderr_reader(
                     stderr,
                     &agent.name,
                     &runtime_logs,
                     Some(wire_trace.correlation().clone()),
+                    stderr_tail.clone(),
                 );
 
                 spawn_stdout_reader(
@@ -501,6 +505,7 @@ impl AcpClient {
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
                     wire_trace: Some(wire_trace),
+                    stderr_tail: stderr_tail.clone(),
                 };
                 // Initialize——G1-03：握手三段全部来自协议配置（覆盖制，缺省 = 现状
                 // 现值，wire 逐字节不变）：clientCapabilities（D1，agents.yaml
@@ -526,7 +531,12 @@ impl AcpClient {
                             .ok()
                             .flatten()
                             .and_then(|status| status.code());
-                        return Err(AgentConnectFailure::initialize(error, exit_code).into());
+                        let mut failure = AgentConnectFailure::initialize(error, exit_code);
+                        let tail = stderr_tail.tail_since(0, 8, 2048);
+                        if !tail.lines.is_empty() {
+                            failure.stderr_excerpt = Some(tail.lines.join("\n"));
+                        }
+                        return Err(failure.into());
                     }
                 };
                 // P1（能力协商暴露）：握手响应的 agentCapabilities 存起来——前端
@@ -538,10 +548,14 @@ impl AcpClient {
                     .as_ref()
                     .is_some_and(|capabilities| !capabilities.is_object())
                 {
-                    return Err(AgentConnectFailure::capability(
+                    let mut failure = AgentConnectFailure::capability(
                         "initialize agentCapabilities 必须为 object".to_string(),
-                    )
-                    .into());
+                    );
+                    let tail = stderr_tail.tail_since(0, 8, 2048);
+                    if !tail.lines.is_empty() {
+                        failure.stderr_excerpt = Some(tail.lines.join("\n"));
+                    }
+                    return Err(failure.into());
                 }
                 Ok(client)
             }

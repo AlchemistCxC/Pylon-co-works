@@ -495,7 +495,7 @@ impl AppStateHandles {
         // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
         // 旧 source 键，映射清空后在锁外逐个清理（锁序单向：sessions → prompt_locks）。
         // 方案 8：sessions 迁移委托 SessionStore（migrate_or_clear 返回旧 source 键）。
-        let (mut old_acp, stale_sources, probe_candidates) = {
+        let (stale_sources, probe_candidates) = {
             let mut acp = runtime.acp.lock().await;
             let new_generation = runtime
                 .client_generation
@@ -525,7 +525,16 @@ impl AppStateHandles {
                 } else {
                     Vec::new()
                 };
-            let old_acp = std::mem::replace(&mut *acp, new_acp);
+            // Retire the old process before exposing the replacement.  A plain
+            // `mem::replace` followed by a later kill leaves two live ACP
+            // instances during dispatcher startup and allows old stdout to
+            // race into the new generation.  The disconnected placeholder
+            // keeps the runtime fail-closed while the old process is drained.
+            let mut old_acp = std::mem::replace(&mut *acp, AcpClient::disconnected());
+            if let Err(error) = old_acp.kill() {
+                tracing::warn!("kill replaced agent before activation: {}", error);
+            }
+            *acp = new_acp;
             runtime
                 .client_generation
                 .store(new_generation, Ordering::Release);
@@ -545,15 +554,12 @@ impl AppStateHandles {
                 }
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
-            (old_acp, stale_sources, probe_candidates)
+            (stale_sources, probe_candidates)
         };
         // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
         // G2-08：lib.rs 本地 drop_stale_prompt_locks 删除，收敛为 runtime 方法。
         runtime.drop_prompt_locks(&stale_sources);
         start_notification_dispatcher(self, runtime, window);
-        if let Err(error) = old_acp.kill() {
-            tracing::warn!("kill replaced agent: {}", error);
-        }
         Ok(probe_candidates)
     }
 }

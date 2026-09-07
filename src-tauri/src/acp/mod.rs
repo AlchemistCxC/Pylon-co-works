@@ -22,8 +22,8 @@ mod replay;
 pub(crate) mod request_id;
 pub(crate) use request_id::RequestId;
 mod transport;
-mod connection_supervisor;
-pub(crate) use connection_supervisor::{ConnectionGeneration, ConnectionInstance, ConnectionSnapshot, ConnectionStatus, ConnectionSupervisor};
+mod stderr_tail;
+pub(crate) use stderr_tail::StderrTail;
 pub(crate) mod wire_trace;
 #[cfg(test)]
 pub(crate) use jsonrpc::drain_pending;
