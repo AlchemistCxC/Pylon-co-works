@@ -52,6 +52,23 @@ impl AcpSessionState {
     /// typed deltas so a newer Agent can be added without changing this state
     /// machine's framing or losing evidence.
     pub fn apply(&mut self, message: &RawMessage) -> Vec<AcpStateDelta> {
+        if message.kind == AcpKind::PermissionRequest {
+            let request_id = message.id.as_ref().map(ToString::to_string);
+            let tool_call_id = message
+                .params
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+                .and_then(|params| string(params, &["toolCallId", "tool_call_id"]));
+            if let (Some(request_id), Some(tool_call_id)) =
+                (request_id.clone(), tool_call_id.clone())
+            {
+                self.pending_permission = Some((request_id.clone(), tool_call_id.clone()));
+            }
+            return vec![AcpStateDelta::PermissionRequested {
+                request_id,
+                tool_call_id,
+            }];
+        }
         if message.kind != AcpKind::SessionUpdate {
             return Vec::new();
         }
@@ -116,6 +133,14 @@ impl AcpSessionState {
             }
             other => Some(AcpStateDelta::Unknown { variant: other.to_owned() }),
         };
+        if let Some(ref delta) = delta {
+            match delta {
+                AcpStateDelta::Text { text }
+                | AcpStateDelta::Reasoning { text }
+                | AcpStateDelta::UserText { text } => self.messages.push(text.clone()),
+                _ => {}
+            }
+        }
         delta.into_iter().collect()
     }
 
