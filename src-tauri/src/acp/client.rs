@@ -45,7 +45,7 @@ pub struct AcpClient {
     _crashed_watch_rx: watch::Receiver<bool>,
     /// OBS-01：本连接的 ACP wire 只读记录器（transport 边界，infallible）。
     /// 断开态为 None；连接后始终存在（容量上限 ring buffer，可 set_enabled 关闭）。
-    wire_trace: Option<Arc<AcpWireHub>>,
+    wire_trace: Option<Arc<AcpWireCapture>>,
     pub(crate) stderr_tail: Arc<StderrTail>,
 }
 
@@ -288,7 +288,7 @@ impl AcpClient {
     }
 
     /// OBS-01：本连接的 ACP wire 只读记录器（断开态为 None）。
-    pub fn wire_trace(&self) -> Option<Arc<AcpWireHub>> {
+    pub fn wire_trace(&self) -> Option<Arc<AcpWireCapture>> {
         self.wire_trace.clone()
     }
 

@@ -203,7 +203,10 @@ impl AcpWireHub {
         let Ok(msg_val) = serde_json::from_str::<serde_json::Value>(line) else {
             return;
         };
-        self.record(direction, &msg_val);
+        match direction {
+            WireDirection::PylonToAgent => self.capture_request(&msg_val),
+            WireDirection::AgentToPylon => self.capture_agent_message(&msg_val),
+        }
     }
 
     /// 当前全部记录快照（旧→新，monotonicSeq 严格递增）。
@@ -228,6 +231,7 @@ impl AcpWireHub {
     }
 
     /// Compatibility-neutral snapshot name used by transcript/replay code.
+    #[allow(dead_code)]
     pub fn records(&self) -> Vec<WireRecord> {
         self.snapshot()
     }

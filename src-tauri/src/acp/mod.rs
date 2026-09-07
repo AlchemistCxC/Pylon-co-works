@@ -23,6 +23,7 @@ mod stderr_tail;
 mod transport;
 pub(crate) use stderr_tail::{summarize_parser_error, StderrTail};
 mod state;
+#[allow(unused_imports)]
 pub use state::{AcpSessionState, AcpStateDelta};
 pub(crate) mod wire_trace;
 #[cfg(test)]

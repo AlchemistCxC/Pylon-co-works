@@ -492,7 +492,7 @@ pub(crate) fn spawn_stdout_reader(
             // OBS-01：reader 边界记录 inbound wire——必须在 u64 窄化**之前**记录
             // 原始 msg_val，否则 string/null/absent id 形态已经丢失。记录失败静默跳过。
             if let Some(trace) = &wire_trace_reader {
-                trace.record(WireDirection::AgentToPylon, &msg_val);
+                trace.capture_agent_message(&msg_val);
             }
             let method = msg_val
                 .get("method")
