@@ -268,6 +268,9 @@ impl AcpClient {
     /// R4：同时 abort writer 任务——替换时旧 writer 可能正阻塞在 stdin 写（agent
     /// 不读 stdin，管道填满），任务随后在子进程终止、写失败后自行结束。
     pub fn kill(&mut self) -> Result<(), AcpError> {
+        if self.stderr_tail.tail_since(0, 1, 512).lines.is_empty() {
+            tracing::debug!("ACP connection closing without stderr evidence");
+        }
         if let Some(task) = self.writer_task.take() {
             task.abort();
         }
