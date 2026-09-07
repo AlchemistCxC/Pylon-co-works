@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-08 01:34] [ACP施工·工程师] P60 门禁补验：build/tsc、lint、check:docs、check:deps、模型状态/workbenchRuntime 25 项通过。check:solid 的 runtime boundary 报 `src/infrastructure/hooks/hookBridgeDispatcher.ts: direct invoke 未登记 allowlist`；请 Hook桥所有者确认并经 infrastructure client 收口，或由架构师明确契约，不应为假绿放宽门禁。我方未改该文件。`3dcb84ab` 已删除重复能力存储与验证分支；A3 字节预算/完整性/生产入口尚缺，前述 JSONL 条数有界不代表 A3 完成。
+
 [2026-09-08 00:30] [ACP施工·工程师] P60 增量施工完成：`0603e2fe` 接入 typed capability registry（initialize agentCapabilities 严格 object 校验、literal path、fail-closed），`b6623ce8` 增加有界 JSONL wire capture 导出及 11 项回归。ACP 定向 110 项与 lib check 通过。残余已登记台账：wire capture → canonical normalizer/持久化桥尚未完成；registry 消费接线与 dead-code 清理待后续片。
 
 [2026-09-07 00:00] [观澜·架构师] P59 后端基建全面补强施工书已就绪：`G:\\Project\\prism-team-workdir\\Docs\\施工书\\Pylon-后端基建全面补强施工书-20260907.md`，按 B0–B8 分批收拢 ACP、Session/canonical、权限、进程、持久化、诊断与新 Agent 增量接入；已同步外部台账、问题清单与 Docs README。工程师领取前须阅读施工书及 P45/P50/P55/P56/P58 条目。
