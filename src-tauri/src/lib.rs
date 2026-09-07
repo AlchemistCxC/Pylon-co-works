@@ -490,6 +490,22 @@ impl AppStateHandles {
             return Err("new ACP client crashed before activation".to_string());
         }
 
+        // Retire the old dispatcher before touching the old client.  Aborting
+        // and awaiting the task closes the consumer side of the old inbox, so
+        // a kill-generated crash notification cannot schedule reconnect work
+        // after this replacement has begun.  This is the task-level half of
+        // the no-overlap invariant; the ACP process is synchronously killed
+        // below before the replacement is published.
+        let old_dispatcher = runtime
+            .notification_task
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(handle) = old_dispatcher {
+            handle.abort();
+            let _ = handle.await;
+        }
+
         // 优化-1：keep=false（手动 switch/reconnect）映射清空后，旧 source 的 prompt
         // 锁条目必须同步收敛（O1 语义，与 remove_session_if_matches/check_session_expiry
         // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
