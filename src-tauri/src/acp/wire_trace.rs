@@ -235,6 +235,21 @@ impl AcpWireHub {
     pub fn records(&self) -> Vec<WireRecord> {
         self.snapshot()
     }
+
+    /// Export the bounded capture as deterministic JSONL for diagnostics and
+    /// replay evidence. Serialization failures are represented as a redacted
+    /// sentinel line so exporting never perturbs the live transport.
+    pub fn to_jsonl(&self) -> String {
+        self.snapshot()
+            .into_iter()
+            .map(|record| {
+                serde_json::to_string(&record).unwrap_or_else(|_| {
+                    r#"{"error":"wire_record_serialization_failed"}"#.to_string()
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// 按 monotonicSeq 排序（CR-001：seq 分配与 enqueue 非原子的落序修正）。
@@ -490,6 +505,24 @@ mod tests {
         assert_eq!(snap.len(), 8, "容量 8，满后覆盖最旧");
         assert_eq!(snap[0].id_value, Some(json!(2)), "最旧的 0、1 被覆盖");
         assert_eq!(snap[7].id_value, Some(json!(9)));
+    }
+
+    #[test]
+    fn jsonl_export_is_bounded_and_preserves_sequence() {
+        let hub = hub();
+        for id in 0..12u64 {
+            hub.record(
+                WireDirection::PylonToAgent,
+                &json!({"jsonrpc":"2.0","id":id,"method":"session/prompt","params":{}}),
+            );
+        }
+        let exported = hub.to_jsonl();
+        let lines: Vec<_> = exported.lines().collect();
+        assert_eq!(lines.len(), 8);
+        let first: WireRecord = serde_json::from_str(lines[0]).unwrap();
+        let last: WireRecord = serde_json::from_str(lines[7]).unwrap();
+        assert_eq!(first.monotonic_seq, 5);
+        assert_eq!(last.monotonic_seq, 12);
     }
 
     #[test]
