@@ -123,6 +123,17 @@ fn apply_update_event_with_pet_policy(
     variant: Option<crate::acp::SessionUpdateVariant>,
     apply_pet: bool,
 ) -> Vec<PetEvent> {
+    // Keep the ACP reducer alongside the legacy SessionInfo fields during the
+    // migration. It emits no UI events; canonical commit/publication remains
+    // governed by the existing routing transaction below.
+    let _ = session.acp_state.apply(&crate::acp::RawMessage {
+        id: None,
+        method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
+        kind: crate::acp::AcpKind::SessionUpdate,
+        result: None,
+        params: Some(serde_json::json!({"update": update})),
+        error: None,
+    });
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
@@ -1715,6 +1726,33 @@ mod tests {
             restored["modes"]["currentModeId"],
             serde_json::json!("balanced")
         );
+    }
+
+    #[test]
+    fn acp_reducer_is_updated_without_emitting_ui_side_effects() {
+        let mut session = crate::session::SessionInfo::new(
+            "peri-reducer".to_string(), String::new(), "cwd".to_string(), true, 1,
+        );
+        let update = serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"text": "hello"}
+        });
+        let events = apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
+            false,
+        );
+        assert!(events.is_empty(), "text chunks do not create pet events");
+        assert_eq!(session.acp_state.seq, 1);
+        assert_eq!(session.acp_state.apply(&crate::acp::RawMessage {
+            id: None,
+            method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
+            kind: crate::acp::AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({"update": update})),
+            error: None,
+        }), vec![crate::acp::AcpStateDelta::Text { text: "hello".into() }]);
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。

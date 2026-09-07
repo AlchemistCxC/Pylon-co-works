@@ -32,6 +32,10 @@ pub(crate) struct ModelSurfaceInfo {
 
 #[derive(Clone)]
 pub(crate) struct SessionInfo {
+    /// ACP typed live state. This is an ingest-side projection only; canonical
+    /// persistence and renderer publication remain owned by their existing
+    /// transactions.
+    pub(crate) acp_state: crate::acp::AcpSessionState,
     pub(crate) peri_id: String,
     /// D3/Kernel ingest：本地 durable owner 的 profile 维。平台自动会话没有 UI
     /// Profile，保持 None；禁止用 active/default profile 猜测。
@@ -125,6 +129,7 @@ impl SessionInfo {
         generation: u64,
     ) -> Self {
         Self {
+            acp_state: crate::acp::AcpSessionState::default(),
             peri_id,
             profile_id: None,
             persona,
