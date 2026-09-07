@@ -1,0 +1,173 @@
+//! ACP live session state reducer.
+//!
+//! This module is deliberately UI-agnostic.  It consumes the transport's
+//! already-classified raw notification and emits typed deltas; callers decide
+//! whether a delta is committed to canonical history, projected to a renderer,
+//! or ignored as replay.  No Tauri event, store, or renderer type may appear
+//! here.
+
+#![allow(dead_code)]
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use super::{AcpKind, RawMessage};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AcpStateDelta {
+    Text { text: String },
+    Reasoning { text: String },
+    UserText { text: String },
+    ToolStarted { id: String, title: Option<String> },
+    ToolUpdated { id: String, status: Option<String>, output: Option<serde_json::Value> },
+    PermissionRequested { request_id: Option<String>, tool_call_id: Option<String> },
+    Usage { used: u64, size: Option<u64> },
+    Plan { entries: serde_json::Value },
+    Mode { mode: String },
+    Model { model: String },
+    Unknown { variant: String },
+}
+
+/// Bounded live state owned by one ACP session.  Text/tool maps are keyed by
+/// provider ids so duplicate notifications update existing state instead of
+/// creating a second UI row.  `seq` is local ingest order, not a durable
+/// journal revision.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AcpSessionState {
+    pub seq: u64,
+    pub messages: Vec<String>,
+    pub tools: BTreeMap<String, serde_json::Value>,
+    pub pending_permission: Option<(String, String)>,
+    pub usage: Option<(u64, Option<u64>)>,
+    pub plan: Option<serde_json::Value>,
+    pub mode: Option<String>,
+    pub model: Option<String>,
+}
+
+impl AcpSessionState {
+    /// Apply one raw ACP notification. Responses and unrelated notifications
+    /// are intentionally no-ops. Unknown update variants remain observable as
+    /// typed deltas so a newer Agent can be added without changing this state
+    /// machine's framing or losing evidence.
+    pub fn apply(&mut self, message: &RawMessage) -> Vec<AcpStateDelta> {
+        if message.kind != AcpKind::SessionUpdate {
+            return Vec::new();
+        }
+        let Some(params) = message.params.as_ref().and_then(serde_json::Value::as_object) else {
+            return Vec::new();
+        };
+        let Some(update) = params.get("update").and_then(serde_json::Value::as_object) else {
+            return Vec::new();
+        };
+        let variant = update
+            .get("sessionUpdate")
+            .or_else(|| update.get("session_update"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        self.seq = self.seq.saturating_add(1);
+        let delta = match variant {
+            "agent_message_chunk" => Self::text_delta(update, false),
+            "agent_thought_chunk" | "agent_reasoning_chunk" => Self::text_delta(update, true),
+            "user_message_chunk" => Self::text_delta(update, false).map(|d| match d {
+                AcpStateDelta::Text { text } => AcpStateDelta::UserText { text },
+                other => other,
+            }),
+            "tool_call" => {
+                let Some(id) = string(update, &["toolCallId", "tool_call_id", "id"]) else { return Vec::new(); };
+                let title = string(update, &["title", "name"]);
+                self.tools.insert(id.clone(), update.clone().into());
+                Some(AcpStateDelta::ToolStarted { id, title })
+            }
+            "tool_call_update" => {
+                let Some(id) = string(update, &["toolCallId", "tool_call_id", "id"]) else { return Vec::new(); };
+                let status = string(update, &["status"]);
+                let output = update.get("rawOutput").or_else(|| update.get("raw_output")).cloned();
+                self.tools.insert(id.clone(), update.clone().into());
+                Some(AcpStateDelta::ToolUpdated { id, status, output })
+            }
+            "usage_update" => {
+                let Some(used) = update.get("used").or_else(|| update.get("value")).and_then(serde_json::Value::as_u64) else { return Vec::new(); };
+                let size = update.get("size").and_then(serde_json::Value::as_u64);
+                self.usage = Some((used, size));
+                Some(AcpStateDelta::Usage { used, size })
+            }
+            "plan" => {
+                let entries = update.get("entries").cloned().unwrap_or_else(|| update.clone().into());
+                self.plan = Some(entries.clone());
+                Some(AcpStateDelta::Plan { entries })
+            }
+            "current_mode_update" => {
+                let Some(mode) = string(update, &["currentModeId", "current_mode_id", "modeId", "mode"]) else { return Vec::new(); };
+                self.mode = Some(mode.clone());
+                Some(AcpStateDelta::Mode { mode })
+            }
+            "session_info_update" | "config_option_update" => {
+                let model = update
+                    .get("models")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|m| string(m, &["currentModelId", "current_model_id", "currentModel", "current"]))
+                    .or_else(|| string(update, &["modelId", "model_id", "model"]));
+                model.map(|model| {
+                    self.model = Some(model.clone());
+                    AcpStateDelta::Model { model }
+                })
+            }
+            other => Some(AcpStateDelta::Unknown { variant: other.to_owned() }),
+        };
+        delta.into_iter().collect()
+    }
+
+    fn text_delta(update: &serde_json::Map<String, serde_json::Value>, reasoning: bool) -> Option<AcpStateDelta> {
+        let content = update.get("content").unwrap_or(&serde_json::Value::Null);
+        let text = content
+            .as_str()
+            .or_else(|| content.get("text").and_then(serde_json::Value::as_str))?
+            .to_owned();
+        if reasoning {
+            Some(AcpStateDelta::Reasoning { text })
+        } else {
+            Some(AcpStateDelta::Text { text })
+        }
+    }
+}
+
+fn string(map: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| map.get(*key).and_then(serde_json::Value::as_str).map(str::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update(value: serde_json::Value) -> RawMessage {
+        RawMessage {
+            id: None,
+            method: Some("session/update".into()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({"sessionId":"s", "update": value})),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn reduces_text_tool_usage_and_mode_without_ui_side_effects() {
+        let mut state = AcpSessionState::default();
+        assert_eq!(state.apply(&update(serde_json::json!({"sessionUpdate":"agent_message_chunk", "content":{"text":"hi"}}))), vec![AcpStateDelta::Text { text: "hi".into() }]);
+        assert_eq!(state.apply(&update(serde_json::json!({"sessionUpdate":"tool_call", "toolCallId":"t1", "title":"Read"}))).len(), 1);
+        assert_eq!(state.apply(&update(serde_json::json!({"sessionUpdate":"usage_update", "used":7, "size":100}))), vec![AcpStateDelta::Usage { used: 7, size: Some(100) }]);
+        assert_eq!(state.apply(&update(serde_json::json!({"sessionUpdate":"current_mode_update", "currentModeId":"accept"}))), vec![AcpStateDelta::Mode { mode: "accept".into() }]);
+        assert_eq!(state.seq, 4);
+        assert_eq!(state.usage, Some((7, Some(100))));
+    }
+
+    #[test]
+    fn unknown_variant_is_observable_and_non_session_messages_are_noop() {
+        let mut state = AcpSessionState::default();
+        assert_eq!(state.apply(&update(serde_json::json!({"sessionUpdate":"future_update"}))), vec![AcpStateDelta::Unknown { variant: "future_update".into() }]);
+        let response = RawMessage { id: Some(crate::acp::RequestId::Number(1)), method: None, kind: AcpKind::Response, result: Some(serde_json::json!({})), params: None, error: None };
+        assert!(state.apply(&response).is_empty());
+    }
+}

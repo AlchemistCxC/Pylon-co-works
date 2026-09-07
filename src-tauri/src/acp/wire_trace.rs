@@ -119,6 +119,11 @@ pub struct AcpWireHub {
     capacity: usize,
 }
 
+/// Stable semantic name for the transport capture seam.  The hub remains the
+/// implementation so existing consumers keep compiling while new ACP code
+/// depends on the protocol-neutral capture vocabulary.
+pub type AcpWireCapture = AcpWireHub;
+
 impl AcpWireHub {
     pub fn new(correlation: RuntimeCorrelation, capacity: usize) -> Arc<Self> {
         Arc::new(Self {
@@ -211,6 +216,21 @@ impl AcpWireHub {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         order_snapshot(records.iter().map(|record| (**record).clone()).collect())
     }
+
+    /// Capture an outbound JSON-RPC request at the transport boundary.
+    pub fn capture_request(&self, message: &serde_json::Value) {
+        self.record(WireDirection::PylonToAgent, message);
+    }
+
+    /// Capture an inbound response or notification at the transport boundary.
+    pub fn capture_agent_message(&self, message: &serde_json::Value) {
+        self.record(WireDirection::AgentToPylon, message);
+    }
+
+    /// Compatibility-neutral snapshot name used by transcript/replay code.
+    pub fn records(&self) -> Vec<WireRecord> {
+        self.snapshot()
+    }
 }
 
 /// 按 monotonicSeq 排序（CR-001：seq 分配与 enqueue 非原子的落序修正）。
@@ -231,18 +251,9 @@ fn build_record(
         .and_then(|value| value.as_str())
         .map(|s| s.to_string());
     let (id_kind, id_value) = classify_id(msg_val.get("id"));
-    let params = msg_val
-        .get("params")
-        .cloned()
-        .map(sanitize_wire);
-    let result = msg_val
-        .get("result")
-        .cloned()
-        .map(sanitize_wire);
-    let error = msg_val
-        .get("error")
-        .cloned()
-        .map(sanitize_wire);
+    let params = msg_val.get("params").cloned().map(sanitize_wire);
+    let result = msg_val.get("result").cloned().map(sanitize_wire);
+    let error = msg_val.get("error").cloned().map(sanitize_wire);
     // 远端会话 id：best-effort 从 params/result 提取的 sessionId（原 session_id）。
     let remote_session_id = extract_first_string(msg_val, &["sessionId", "session_id"]);
     // periId：session/update 事件中 Agent 上报的会话 id（与 remoteSessionId 同为

@@ -22,6 +22,8 @@ pub(crate) use request_id::RequestId;
 mod stderr_tail;
 mod transport;
 pub(crate) use stderr_tail::{summarize_parser_error, StderrTail};
+mod state;
+pub use state::{AcpSessionState, AcpStateDelta};
 pub(crate) mod wire_trace;
 #[cfg(test)]
 pub(crate) use jsonrpc::drain_pending;
@@ -46,4 +48,5 @@ pub use transport::{
     BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP, WRITE_CHAN_CAP,
 };
 #[cfg_attr(not(test), allow(unused_imports))] // Wire* 类型仅测试消费（obs03/p1_wire 回归测试）
-pub(crate) use wire_trace::{AcpWireHub, WireDirection, WireIdKind, WireRecord};
+pub use wire_trace::{AcpWireCapture, WireDirection, WireIdKind, WireRecord};
+pub(crate) use wire_trace::AcpWireHub;
