@@ -6,11 +6,16 @@
 //! introduced.
 
 use std::collections::HashMap;
+use std::io::Read;
+use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::{watch, Mutex};
 
-use super::terminal_policy::{enforce_output_limit, TerminalCompletion};
+use super::terminal_policy::{
+    default_platform_shell, enforce_output_limit, shell_wrapper_args, TerminalCompletion,
+    DEFAULT_OUTPUT_BYTE_LIMIT,
+};
 use super::ManagedChild;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -88,6 +93,54 @@ pub struct TerminalRegistry {
 }
 
 impl TerminalRegistry {
+    pub async fn create_shell(
+        &self,
+        session_id: String,
+        shell: Option<String>,
+        line: &str,
+        cwd: Option<&Path>,
+        output_limit: Option<usize>,
+    ) -> Result<String, String> {
+        let shell = shell.unwrap_or_else(|| default_platform_shell(None));
+        let mut command = std::process::Command::new(&shell);
+        command
+            .args(shell_wrapper_args(&shell, line))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let mut child = ManagedChild::new(command.spawn().map_err(|e| e.to_string())?);
+        let stdout = child.take_stdout().map_err(|e| e.to_string())?;
+        let stderr = child.take_stderr().map_err(|e| e.to_string())?;
+        let limit = output_limit.unwrap_or(DEFAULT_OUTPUT_BYTE_LIMIT as usize);
+        let id = self.insert(session_id, limit, child).await;
+        let terminal = self
+            .terminals
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("terminal inserted before readers start");
+        let watcher = terminal.clone();
+        tokio::spawn(async move {
+            loop {
+                let status = watcher.child.lock().await.try_wait().ok().flatten();
+                if let Some(status) = status {
+                    watcher
+                        .mark_exited(super::terminal_policy::map_exit_status(status))
+                        .await;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+        spawn_reader(stdout, terminal.clone());
+        spawn_reader(stderr, terminal);
+        Ok(id)
+    }
+
     pub async fn insert(
         &self,
         session_id: String,
@@ -159,6 +212,26 @@ impl TerminalRegistry {
     }
 }
 
+fn spawn_reader<R: Read + Send + 'static>(mut reader: R, terminal: Arc<TerminalInstance>) {
+    let handle = tokio::runtime::Handle::current();
+    std::thread::spawn(move || {
+        let mut pending = Vec::new();
+        let mut buf = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    pending.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&pending).into_owned();
+                    pending.clear();
+                    let _ = handle.block_on(terminal.append_output(&text));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +258,29 @@ mod tests {
         let instance = TerminalInstance::new("session-a".into(), 100, ManagedChild::empty());
         instance.mark_exited(TerminalExitStatus::default()).await;
         assert!(instance.wait_for_exit().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_shell_drains_output_and_publishes_exit() {
+        let registry = TerminalRegistry::default();
+        let line = if cfg!(windows) {
+            "echo terminal-registry"
+        } else {
+            "printf terminal-registry"
+        };
+        let id = registry
+            .create_shell("session-a".into(), None, line, None, Some(1024))
+            .await
+            .unwrap();
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            registry.wait_for_exit(&id, "session-a"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(status.exit_code.is_some() || status.signal.is_some());
+        let snapshot = registry.snapshot(&id, "session-a").await.unwrap();
+        assert!(snapshot.output.contains("terminal-registry"));
     }
 }
