@@ -661,8 +661,14 @@ pub(crate) fn spawn_sdk_engine(
     tokio::spawn(async move {
         let _ = run_wire_bridge(sdk_bridge_side, child_channel, bridge_wire).await;
     });
+    let child_crashed = crashed.clone();
+    let child_crashed_watch = crashed_watch.clone();
     tokio::spawn(async move {
         let _ = child_future.await;
+        // 子侧传输结束 = 子进程退出（含 EOF）：等价 legacy reader 的崩溃信号。
+        // 不依赖 SDK 的 EOF 语义（`incoming_closed` 在洪泛/批量场景未必及时完成）。
+        child_crashed.store(true, Ordering::Release);
+        let _ = child_crashed_watch.send(true);
     });
 
     let (inbound_tx, inbound_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
