@@ -102,7 +102,7 @@
 
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/terminal_runtime.rs` 的 `enforce_output_limit`、`decode_available_utf8`、`default_platform_shell`、`shell_wrapped_command`、`map_exit_status` 及其限值常量。
 - 目标：`src-tauri/src/acp/terminal_policy.rs`。迁入纯输出预算、增量 UTF-8 解码、shell family/wrapper 参数、平台默认 shell 和 typed `TerminalExitStatus`；Pylon 保留既有 `ManagedChild` 作为进程所有者，未复制 codeg `TerminalRuntime`/AppState/协议 handler。
-- 适配：`TerminalExitStatus` 是 Pylon adapter DTO，字段为 `exitCode`/`signal`；官方 ACP schema 当前无同形标准 DTO，runtime 接线待后续 responder 施工片完成。
+- 适配：`TerminalExitStatus` 字段为 `exitCode`/`signal`；核验 schema 1.7 的 `schema::v1::TerminalExitStatus` 已存在，后续 responder 应直接映射到官方类型，不再新增第二个 wire DTO。
 - 证据：terminal policy 定向测试覆盖 UTF-8 partial chunk、字节截断、shell 参数、默认 shell、DTO 序列化；未将纯策略测试误标为完整 terminal runtime 验收。
 
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/preflight.rs` 的 `parse_node_version`；Apache-2.0，沿用根 NOTICE 与许可证。

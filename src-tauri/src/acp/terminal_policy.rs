@@ -13,7 +13,8 @@ pub const WAIT_ERROR_BUDGET: Duration = Duration::from_secs(30);
 pub const WAIT_ERROR_IDLE_RETRY: Duration = Duration::from_secs(5);
 
 /// Pylon-owned DTO equivalent of codeg's protocol `TerminalExitStatus`.
-/// Kept at the adapter boundary until the ACP schema exposes this extension.
+/// Runtime-owned data; ACP schema 1.7 already supplies the wire type.
+/// The protocol adapter must map this into schema::v1::TerminalExitStatus.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalExitStatus {
@@ -98,12 +99,27 @@ pub fn classify_shell_family(shell: &str) -> ShellFamily {
         .and_then(|v| v.to_str())
         .unwrap_or(shell)
         .to_ascii_lowercase();
-    if name == "powershell" || name == "powershell.exe" || name == "pwsh" || name == "pwsh.exe" {
+    if name.contains("pwsh") || name.contains("powershell") {
         ShellFamily::PowerShell
     } else if name == "cmd" || name == "cmd.exe" {
         ShellFamily::Cmd
     } else {
-        ShellFamily::Posix
+        #[cfg(target_os = "windows")]
+        {
+            if name.contains("bash")
+                || name.contains("zsh")
+                || name.contains("fish")
+                || name.ends_with("sh.exe")
+            {
+                ShellFamily::Posix
+            } else {
+                ShellFamily::Cmd
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            ShellFamily::Posix
+        }
     }
 }
 
