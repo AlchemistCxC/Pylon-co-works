@@ -107,6 +107,21 @@ pub fn classify_shell_family(shell: &str) -> ShellFamily {
     }
 }
 
+pub fn default_platform_shell(comspec: Option<String>) -> String {
+    #[cfg(windows)]
+    {
+        comspec
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "cmd.exe".into())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = comspec;
+        "/bin/sh".into()
+    }
+}
+
 /// Arguments for codeg's shell wrapper. The command line remains one argv
 /// element; callers must pass it to their existing process boundary.
 pub fn shell_wrapper_args(shell: &str, line: &str) -> Vec<String> {
@@ -168,6 +183,22 @@ mod tests {
         assert_eq!(
             serde_json::to_value(status).unwrap(),
             serde_json::json!({"exitCode":null,"signal":null})
+        );
+    }
+
+    #[test]
+    fn default_shell_is_deterministic_without_environment() {
+        #[cfg(windows)]
+        assert_eq!(default_platform_shell(None), "cmd.exe");
+        #[cfg(not(windows))]
+        assert_eq!(default_platform_shell(None), "/bin/sh");
+        assert_eq!(
+            classify_shell_family(&default_platform_shell(None)),
+            if cfg!(windows) {
+                ShellFamily::Cmd
+            } else {
+                ShellFamily::Posix
+            }
         );
     }
 }
