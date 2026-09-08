@@ -40,9 +40,7 @@ struct ReplayImport {
 fn replay_journal_commit_outcome(status: &str) -> &'static str {
     match status {
         "imported" => "recovery-import-committed",
-        "already-imported" | "already-present" | "reconciled" => {
-            "recovery-import-already-present"
-        }
+        "already-imported" | "already-present" | "reconciled" => "recovery-import-already-present",
         "local-authoritative" => "local-journal-wins",
         "incomplete-not-imported" => "incomplete-preserved-runtime",
         "empty" => "empty",
@@ -60,7 +58,6 @@ fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
         crate::acp::AcpError::ReplayStreamClosed => "replay_transport_error",
         crate::acp::AcpError::ReplayLoadInProgress => "replay_load_in_progress",
         crate::acp::AcpError::Rpc(_) => "rpc_error",
-        crate::acp::AcpError::EngineUnsupported { .. } => "protocol_error",
         crate::acp::AcpError::Connect(_) => "connect_error",
         crate::acp::AcpError::Child(_) => "transport_error",
     }
@@ -116,13 +113,9 @@ pub(crate) async fn load_persisted_session(
     let handles = match runtime.acp.lock().await.begin_replay_capture(&peri_id) {
         Ok(handles) => handles,
         Err(error) => {
-            if let Err(restore_error) = restore_previous_slot(
-                &runtime,
-                &source,
-                &peri_id,
-                generation,
-                previous.clone(),
-            ) {
+            if let Err(restore_error) =
+                restore_previous_slot(&runtime, &source, &peri_id, generation, previous.clone())
+            {
                 tracing::error!(
                     source,
                     error = %restore_error,
@@ -161,7 +154,10 @@ pub(crate) async fn load_persisted_session(
                 } else {
                     let events = crate::session::event_service_of(state.inner())?;
                     let revision = events.revision(owner_key.clone()).await?;
-                    let status = if events.has_authoritative_local_events(owner_key.clone()).await? {
+                    let status = if events
+                        .has_authoritative_local_events(owner_key.clone())
+                        .await?
+                    {
                         "local-authoritative"
                     } else {
                         "incomplete-not-imported"
@@ -219,13 +215,17 @@ pub(crate) async fn load_persisted_session(
             }
             let authority = match replay_journal_status {
                 "local-authoritative" => "local-journal",
-                "imported" | "already-imported" | "already-present" | "reconciled" => "recovery-import",
+                "imported" | "already-imported" | "already-present" | "reconciled" => {
+                    "recovery-import"
+                }
                 _ if canonical_revision > 0 => "recovery-import",
                 _ => "empty",
             };
             let journal_coverage = match replay_journal_status {
                 "local-authoritative" => "local-observed",
-                "imported" | "already-imported" | "already-present" | "reconciled" => "unverified-import",
+                "imported" | "already-imported" | "already-present" | "reconciled" => {
+                    "unverified-import"
+                }
                 _ if canonical_revision > 0 => "unverified-import",
                 _ => "empty",
             };

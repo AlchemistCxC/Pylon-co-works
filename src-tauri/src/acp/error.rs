@@ -1,4 +1,3 @@
-﻿
 // ── Constants ──
 
 /// JSON-RPC method names used by the ACP protocol.
@@ -57,7 +56,12 @@ pub struct AgentConnectFailure {
 }
 
 impl AgentConnectFailure {
-    pub(crate) fn new(stage: AgentConnectStage, code: &str, message: String, retryable: bool) -> Self {
+    pub(crate) fn new(
+        stage: AgentConnectStage,
+        code: &str,
+        message: String,
+        retryable: bool,
+    ) -> Self {
         Self {
             stage,
             code: code.to_string(),
@@ -191,13 +195,6 @@ pub enum AcpError {
     ReplayLoadInProgress,
     #[error("RPC error: {0}")]
     Rpc(String),
-    /// A1a 过渡：后端在当期尚未实现该操作（typed fail-closed，映射 protocol_error；
-    /// A1b 用 `Responder`/prompt 等待实现后删除）。
-    #[error("engine {engine} does not support {operation} yet")]
-    EngineUnsupported {
-        engine: &'static str,
-        operation: &'static str,
-    },
     /// AgentConnectFailure 字段多（String×5），Box 化把 AcpError/Result 体积压回
     /// 小于 128B（clippy result_large_err）——RPC 准备等热路径不再搬运大 Err。
     #[error("{0}")]
@@ -367,4 +364,3 @@ pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
 pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
-

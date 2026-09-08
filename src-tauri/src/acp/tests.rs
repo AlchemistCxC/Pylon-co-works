@@ -528,42 +528,6 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         "持续活动不得受 prompt total timeout 截断，实际结果: {result:?}"
     );
 }
-
-#[test]
-fn drain_pending_notifies_every_waiter_and_clears_registry() {
-    let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-        Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-    let mut receivers = Vec::new();
-    for id in [1_u64, 16, 31] {
-        let (tx, rx) = oneshot::channel();
-        pending[id as usize % PENDING_SHARDS]
-            .lock()
-            .unwrap()
-            .insert(id, tx);
-        receivers.push(rx);
-    }
-
-    assert_eq!(drain_pending(&pending), 3);
-    assert!(pending.iter().all(|shard| shard.lock().unwrap().is_empty()));
-    for receiver in receivers {
-        let message = receiver
-            .blocking_recv()
-            .expect("EOF should wake pending request");
-        assert_eq!(
-            message.error,
-            Some(serde_json::json!("ACP connection closed"))
-        );
-    }
-}
-
-#[test]
-fn drain_pending_is_idempotent_after_first_close() {
-    let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-        Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-    assert_eq!(drain_pending(&pending), 0);
-    assert_eq!(drain_pending(&pending), 0);
-}
-
 #[tokio::test]
 async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
     let script = r#"import json,sys
@@ -599,7 +563,7 @@ for line in sys.stdin:
             vec![serde_json::json!({"type":"text","text":"hello"})],
         )
         .expect("prompt must serialize");
-    assert!(rpc.line().contains("session/prompt"));
+    assert!(rpc.id > 0);
     let mut response_rx = rpc
         .send_keep_rx()
         .await
@@ -1367,28 +1331,6 @@ for line in sys.stdin:
             && value["params"]["sessionId"] == "fake-session-timeout"
     }));
 }
-
-#[tokio::test]
-async fn send_line_write_timeout_marks_connection_crashed() {
-    // 假死连接：容量 1 的写通道被填满且无人消费（writer 卡死），send_line 超时 →
-    // WriteTimeout + crashed 置位，后续命令快速失败并触发自动重连。
-    // 与 fake_acp_* 一致用真实时钟，超时等待 DEFAULT_WRITE_TIMEOUT_SECS。
-    let (write_tx, _write_rx) = mpsc::channel::<String>(1);
-    write_tx
-        .send("first-line".to_string())
-        .await
-        .expect("empty channel must accept the first line");
-    let crashed = Arc::new(AtomicBool::new(false));
-    let error = send_line(write_tx, "second-line".to_string(), &crashed)
-        .await
-        .expect_err("full channel with no consumer must time out");
-    assert!(matches!(error, AcpError::WriteTimeout));
-    assert!(
-        crashed.load(Ordering::Relaxed),
-        "write timeout must mark the connection as crashed"
-    );
-}
-
 #[tokio::test]
 async fn writer_failure_signals_watch_and_pending_settles() {
     // 方案 2A 测试门：writer 写失败（EPIPE）必须经 fail_connection 统一结算——
@@ -1456,72 +1398,6 @@ print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=Tr
     client.kill().expect("cleanup");
     std::fs::remove_file(&trace_path).ok();
 }
-
-#[tokio::test]
-async fn fail_connection_signals_watch_drains_pending_and_is_idempotent() {
-    // 方案 2A：fail_connection 统一结算——crashed=true、watch 发 true、
-    // pending drain 一次、重复调用幂等（不 double-resolve）。
-    let crashed = Arc::new(AtomicBool::new(false));
-    let (crashed_watch, mut crashed_rx) = watch::channel(false);
-    let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-        Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-    // 预注册 2 个 pending waiter
-    for id in [3u64, 9] {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        pending[id as usize % PENDING_SHARDS]
-            .lock()
-            .unwrap()
-            .insert(id, tx);
-    }
-    let drained = super::transport::fail_connection(&crashed, &crashed_watch, &pending);
-    assert_eq!(drained, 2, "首次结算必须 drain 全部 pending");
-    assert!(crashed.load(Ordering::Relaxed), "crashed 必须置位");
-    // watch 通道已送达最新值 true（dispatcher 依赖它触发自动重连）
-    assert!(*crashed_rx.borrow_and_update(), "watch 最新值必须为 true");
-    // 幂等：重复调用不 double-resolve
-    let drained_again = super::transport::fail_connection(&crashed, &crashed_watch, &pending);
-    assert_eq!(drained_again, 0, "重复调用不得重复 drain");
-    assert!(*crashed_rx.borrow_and_update());
-}
-
-#[tokio::test]
-async fn send_after_crash_returns_connection_closed_without_pending_stall() {
-    // A6：模拟 EOF 竞态窗口——pending 注册后于 drain（drain 未 resolve 该 id），
-    // 但 reader 已 store crashed。send 成功后复检 crashed 必须立即返回
-    // ConnectionClosed 并清理 pending（修复前 send_keep_rx 挂满 300s / complete
-    // 挂满 30s 假超时）。
-    for complete in [false, true] {
-        let (write_tx, _write_rx) = mpsc::channel::<String>(1);
-        let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-            Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-        let crashed = Arc::new(AtomicBool::new(true));
-        let (_tx, rx) = oneshot::channel();
-        let rpc = PreparedRpc::legacy_for_test(
-            7,
-            "test-line".to_string(),
-            write_tx,
-            rx,
-            pending.clone(),
-            crashed,
-            std::time::Duration::from_secs(30),
-        );
-        let result = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
-            if complete {
-                rpc.complete().await.map(|_| ())
-            } else {
-                rpc.send_keep_rx().await.map(|_| ())
-            }
-        })
-        .await
-        .expect("crashed path must return immediately, not stall");
-        assert!(matches!(result, Err(AcpError::ConnectionClosed)));
-        assert!(
-            !pending[7 % PENDING_SHARDS].lock().unwrap().contains_key(&7),
-            "pending must be cleaned up on the crashed path"
-        );
-    }
-}
-
 #[tokio::test]
 async fn fake_acp_session_load_ignores_updates_from_other_sessions() {
     let script = r#"import json,sys

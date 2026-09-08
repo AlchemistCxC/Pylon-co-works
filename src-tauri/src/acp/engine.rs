@@ -32,34 +32,16 @@ use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatE
 
 use super::client::{ClassifiedMessage, NotificationInbox};
 use super::error::AcpError;
-use super::transport::{send_line, DEFAULT_WRITE_TIMEOUT_SECS};
 use super::wire_trace::{AcpWireCapture, AcpWireHub, WireDirection};
 use super::{AcpKind, RawMessage};
 use std::future::Future;
 
-/// D11：`AcpClient` 的内部后端。
-///
-/// 只保存 **transport 专属** 状态；共享状态（`child`/`protocol`/
-/// `capability_registry`/`stderr_tail`/`wire_trace`/`crashed`/`crashed_watch`）
-/// 上提为 `AcpClient` facade 字段。A1c 删 legacy 后本枚举收敛为单变体再删除。
-pub(crate) enum AcpBackend {
-    Legacy(LegacyBackend),
-    Sdk(SdkBackend),
-}
-
-/// legacy（手写 JSON-RPC）后端的传输状态。
-///
-/// 名义可见性为 `pub` 仅为让 `#[cfg(test)]` 的 `Deref` 实现通过 `E0446` 检查；
-/// 它位于私有 `mod engine` 下，**不在任何公开签名中出现**，字段仍为 `pub(crate)`。
-pub struct LegacyBackend {
-    pub(crate) write_tx: mpsc::Sender<String>,
-    pub(crate) writer_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) next_id: Arc<AtomicU64>,
-    pub(crate) pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    pub(crate) rx: broadcast::Receiver<ClassifiedMessage>,
-    pub(crate) notification_inbox: NotificationInbox,
-    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
-}
+/// 入站 broadcast 容量（Kernel/replay 扇出；A1c 从 transport.rs 迁入）。
+pub const BROADCAST_CAP: usize = 256;
+/// 单消费者 Kernel inbox 容量（慢 dispatcher 施加背压而非丢帧）。
+pub const NOTIFICATION_CHAN_CAP: usize = 4096;
+/// 写通道/取消等待超时（秒）——agent 忙碌不读 stdin 时防止无限挂起。
+pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
 
 /// SDK 后端（官方 `agent-client-protocol` 连接）的传输状态。
 ///
@@ -78,50 +60,32 @@ pub(crate) struct SdkBackend {
     /// `ResponderHandle::Sdk` 在锁外应答。
     pub(crate) pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
     pub(crate) shutdown: watch::Sender<bool>,
-    pub(crate) join: tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>,
+    pub(crate) join: Option<tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>>,
+    // A1c：`None` = 断开态（`AcpClient::disconnected()`），无引擎任务可 abort。
 }
 
 /// D11：后端中立应答句柄（在锁外使用，避免持锁等待写通道）。
 ///
-/// `write_tx` 封在本类型内部，不泄漏到 facade 公开 API；A1b 起 SDK 变体
-/// 改由 `Responder` 实现，A1a 阶段只构造 legacy。
-pub(crate) enum ResponderHandle {
-    Legacy {
-        write_tx: mpsc::Sender<String>,
-        crashed: Arc<AtomicBool>,
-    },
-    /// A1b：SDK 应答经引擎登记的 `Responder` 完成。
-    Sdk {
-        pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
-    },
+/// A1c：legacy 写通道实现已删除；应答统一经引擎登记的 `Responder` 完成。
+pub(crate) struct ResponderHandle {
+    pub(crate) pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
 }
 
 impl ResponderHandle {
-    pub(crate) fn legacy(write_tx: mpsc::Sender<String>, crashed: Arc<AtomicBool>) -> Self {
-        Self::Legacy { write_tx, crashed }
-    }
-
     /// 应答 agent 发来的 JSON-RPC 请求。
     pub(crate) async fn respond(
         self,
         request_id: super::RequestId,
         response: serde_json::Value,
     ) -> bool {
-        match self {
-            Self::Legacy { write_tx, crashed } => {
-                crate::permission::send_agent_response(write_tx, crashed, request_id, response)
-                    .await
-            }
-            Self::Sdk { pending_requests } => {
-                let responder = pending_requests
-                    .lock()
-                    .ok()
-                    .and_then(|mut pending| pending.remove(&request_id));
-                match responder {
-                    Some(responder) => responder.respond(response).is_ok(),
-                    None => false,
-                }
-            }
+        let responder = self
+            .pending_requests
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.remove(&request_id));
+        match responder {
+            Some(responder) => responder.respond(response).is_ok(),
+            None => false,
         }
     }
 
@@ -132,55 +96,17 @@ impl ResponderHandle {
         rpc_code: i64,
         message: &str,
     ) -> bool {
-        match self {
-            Self::Legacy { write_tx, crashed } => {
-                crate::permission::send_agent_error(
-                    write_tx, crashed, request_id, rpc_code, message,
-                )
-                .await
-            }
-            Self::Sdk { pending_requests } => {
-                let responder = pending_requests
-                    .lock()
-                    .ok()
-                    .and_then(|mut pending| pending.remove(&request_id));
-                match responder {
-                    Some(responder) => responder
-                        .respond_with_error(agent_client_protocol::Error::new(
-                            rpc_code as i32,
-                            message,
-                        ))
-                        .is_ok(),
-                    None => false,
-                }
-            }
+        let responder = self
+            .pending_requests
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.remove(&request_id));
+        match responder {
+            Some(responder) => responder
+                .respond_with_error(agent_client_protocol::Error::new(rpc_code as i32, message))
+                .is_ok(),
+            None => false,
         }
-    }
-}
-
-/// D11 ③：连接引擎选择（`connect_with_generation` 构造时读一次，运行中不得切换）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AcpEngineKind {
-    Legacy,
-    Sdk,
-}
-
-impl AcpEngineKind {
-    /// 解析 `PYLON_ACP_ENGINE` 值：缺省 `legacy`；**非法值直接报错，不回退**。
-    /// 旧实现将来会整体删除，不留「静默回退 legacy」这类需要清理的路径。
-    pub(crate) fn parse(value: Option<&str>) -> Result<Self, AcpError> {
-        match value {
-            None | Some("legacy") => Ok(Self::Legacy),
-            Some("sdk") => Ok(Self::Sdk),
-            Some(other) => Err(AcpError::Child(format!(
-                "invalid PYLON_ACP_ENGINE={other}: expected legacy|sdk"
-            ))),
-        }
-    }
-
-    /// 从环境变量读取（唯一入口；未设置 → legacy）。
-    pub(crate) fn from_env() -> Result<Self, AcpError> {
-        Self::parse(std::env::var("PYLON_ACP_ENGINE").ok().as_deref())
     }
 }
 
@@ -193,161 +119,78 @@ pub(crate) struct SdkEngineConfig {
     pub client_generation: u64,
 }
 
-/// D12：`PreparedRpc` 的后端专属状态（`id` 与 `line` 由 facade 持有）。
+/// D12：`PreparedRpc` 的 SDK 专属状态（`id` 由 facade 持有）。
 ///
-/// `id` 是 **Pylon 相关 id**：legacy 恰等于 wire id（行为不变），SDK 用本地计数器；
-/// wire id 永不暴露。
-pub(crate) enum PreparedRpcBackend {
-    Legacy(LegacyPreparedRpc),
-    Sdk(SdkPreparedRpc),
-}
-
-pub(crate) struct LegacyPreparedRpc {
-    pub(crate) write_tx: mpsc::Sender<String>,
-    pub(crate) pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    pub(crate) rx: oneshot::Receiver<RawMessage>,
-    pub(crate) crashed: Arc<AtomicBool>,
-    pub(crate) line: String,
-    pub(crate) rpc_timeout: std::time::Duration,
-}
-
+/// `id` 是 **Pylon 相关 id**（本地计数器）；wire id 永不暴露。
 pub(crate) struct SdkPreparedRpc {
     pub(crate) outbound: mpsc::Sender<SdkOutbound>,
     pub(crate) method: String,
     pub(crate) params: serde_json::Value,
-    pub(crate) line: String,
     pub(crate) rpc_timeout: std::time::Duration,
 }
 
-/// D12：`line` 仅供测试读取（A1c 删除）。
-pub(crate) fn prepared_line(backend: &PreparedRpcBackend) -> &str {
-    match backend {
-        PreparedRpcBackend::Legacy(legacy) => &legacy.line,
-        PreparedRpcBackend::Sdk(sdk) => &sdk.line,
-    }
-}
-
-/// 发送请求行，成功时返回响应接收器（legacy 路径；SDK 后端 typed fail-closed）。
+/// 发送请求行，成功时返回响应接收器。
 pub(crate) async fn send_keep_rx_prepared(
     prepared: PreparedRpc,
 ) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
     let pylon_id = prepared.id;
-    match prepared.backend {
-        PreparedRpcBackend::Legacy(legacy) => {
-            let LegacyPreparedRpc {
-                write_tx,
-                pending,
-                rx,
-                crashed,
-                line,
-                ..
-            } = legacy;
-            if let Err(error) = send_line(write_tx, line, &crashed).await {
-                remove_pending_from(&pending, prepared.id);
-                return Err(error);
-            }
-            // A6：发送后复检 crashed——reader EOF 先 store 后 drain。
-            if crashed.load(std::sync::atomic::Ordering::Acquire) {
-                remove_pending_from(&pending, prepared.id);
-                return Err(AcpError::ConnectionClosed);
-            }
-            Ok(rx)
-        }
-        PreparedRpcBackend::Sdk(sdk) => {
-            // A1b：把 SDK 的响应回调转回 `oneshot::Receiver<RawMessage>`，
-            // 让 `wait_prompt_with_cancel` 的 legacy 机制（双超时/cancel/settle）原样复用。
-            let (ready_tx, ready_rx) = oneshot::channel();
-            sdk.outbound
-                .send(SdkOutbound::RequestKeepRx {
-                    method: sdk.method,
-                    params: sdk.params,
-                    ready: ready_tx,
-                })
-                .await
-                .map_err(|_| AcpError::ConnectionClosed)?;
-            let response_rx = ready_rx.await.map_err(|_| AcpError::ConnectionClosed)??;
-            let (out_tx, out_rx) = oneshot::channel();
-            tokio::spawn(async move {
-                let raw = match response_rx.await {
-                    Ok(Ok(value)) => RawMessage {
-                        id: Some(super::RequestId::Number(pylon_id)),
-                        method: None,
-                        kind: super::AcpKind::Response,
-                        result: Some(value),
-                        params: None,
-                        error: None,
-                    },
-                    Ok(Err(error)) => RawMessage {
-                        id: Some(super::RequestId::Number(pylon_id)),
-                        method: None,
-                        kind: super::AcpKind::Response,
-                        result: None,
-                        params: None,
-                        error: Some(serde_json::json!(error.to_string())),
-                    },
-                    Err(_) => return,
-                };
-                let _ = out_tx.send(raw);
-            });
-            Ok(out_rx)
-        }
-    }
+    let sdk = prepared.sdk;
+    // A1b：把 SDK 的响应回调转回 `oneshot::Receiver<RawMessage>`，
+    // 让 `wait_prompt_with_cancel` 的双超时/cancel/settle 机制原样复用。
+    let (ready_tx, ready_rx) = oneshot::channel();
+    sdk.outbound
+        .send(SdkOutbound::RequestKeepRx {
+            method: sdk.method,
+            params: sdk.params,
+            ready: ready_tx,
+        })
+        .await
+        .map_err(|_| AcpError::ConnectionClosed)?;
+    let response_rx = ready_rx.await.map_err(|_| AcpError::ConnectionClosed)??;
+    let (out_tx, out_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let raw = match response_rx.await {
+            Ok(Ok(value)) => RawMessage {
+                id: Some(super::RequestId::Number(pylon_id)),
+                method: None,
+                kind: super::AcpKind::Response,
+                result: Some(value),
+                params: None,
+                error: None,
+            },
+            Ok(Err(error)) => RawMessage {
+                id: Some(super::RequestId::Number(pylon_id)),
+                method: None,
+                kind: super::AcpKind::Response,
+                result: None,
+                params: None,
+                error: Some(serde_json::json!(error.to_string())),
+            },
+            Err(_) => return,
+        };
+        let _ = out_tx.send(raw);
+    });
+    Ok(out_rx)
 }
 
-/// 发送 + 等待匹配响应（legacy 走写通道/pending；SDK 走 outbound 泵 + `block_task`）。
+/// 发送 + 等待匹配响应（SDK 走 outbound 泵）。
 pub(crate) async fn complete_prepared(
     prepared: PreparedRpc,
 ) -> Result<serde_json::Value, AcpError> {
-    match prepared.backend {
-        PreparedRpcBackend::Legacy(legacy) => {
-            let LegacyPreparedRpc {
-                write_tx,
-                pending,
-                rx,
-                crashed,
-                line,
-                rpc_timeout,
-            } = legacy;
-            if let Err(error) = send_line(write_tx, line, &crashed).await {
-                remove_pending_from(&pending, prepared.id);
-                return Err(error);
-            }
-            if crashed.load(std::sync::atomic::Ordering::Acquire) {
-                remove_pending_from(&pending, prepared.id);
-                return Err(AcpError::ConnectionClosed);
-            }
-            let msg = match tokio::time::timeout(rpc_timeout, rx).await {
-                Ok(Ok(msg)) => msg,
-                Ok(Err(_)) => {
-                    remove_pending_from(&pending, prepared.id);
-                    return Err(AcpError::ConnectionClosed);
-                }
-                Err(_) => {
-                    remove_pending_from(&pending, prepared.id);
-                    return Err(AcpError::RpcTimeout);
-                }
-            };
-            if let Some(err) = msg.error {
-                return Err(AcpError::Rpc(format!("{}", err)));
-            }
-            Ok(msg.result.unwrap_or(serde_json::Value::Null))
-        }
-        PreparedRpcBackend::Sdk(sdk) => {
-            let (reply_tx, reply_rx) = oneshot::channel();
-            sdk.outbound
-                .send(SdkOutbound::Request {
-                    method: sdk.method,
-                    params: sdk.params,
-                    reply: reply_tx,
-                })
-                .await
-                .map_err(|_| AcpError::ConnectionClosed)?;
-            match tokio::time::timeout(sdk.rpc_timeout, reply_rx).await {
-                Ok(Ok(result)) => result,
-                Ok(Err(_)) => Err(AcpError::ConnectionClosed),
-                Err(_) => Err(AcpError::RpcTimeout),
-            }
-        }
+    let sdk = prepared.sdk;
+    let (reply_tx, reply_rx) = oneshot::channel();
+    sdk.outbound
+        .send(SdkOutbound::Request {
+            method: sdk.method,
+            params: sdk.params,
+            reply: reply_tx,
+        })
+        .await
+        .map_err(|_| AcpError::ConnectionClosed)?;
+    match tokio::time::timeout(sdk.rpc_timeout, reply_rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(AcpError::ConnectionClosed),
+        Err(_) => Err(AcpError::RpcTimeout),
     }
 }
 
@@ -411,22 +254,14 @@ pub(crate) fn prepared_sdk_rpc(
     rpc_timeout_secs: u64,
 ) -> Result<PreparedRpc, AcpError> {
     let id = sdk.next_id.fetch_add(1, Ordering::Relaxed);
-    let line = serde_json::to_string(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": params.clone()
-    }))
-    .map_err(|error| AcpError::Child(format!("serialize failed: {error}")))?;
     Ok(PreparedRpc {
         id,
-        backend: PreparedRpcBackend::Sdk(SdkPreparedRpc {
+        sdk: SdkPreparedRpc {
             outbound: sdk.outbound.clone(),
             method: method.to_string(),
             params,
-            line,
             rpc_timeout: std::time::Duration::from_secs(rpc_timeout_secs),
-        }),
+        },
     })
 }
 
@@ -879,7 +714,7 @@ pub(crate) fn spawn_sdk_engine(
             active_replay_requests,
             pending_requests,
             shutdown: shutdown_tx,
-            join,
+            join: Some(join),
         },
         wire,
     })
@@ -1251,7 +1086,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
 
-        let responder = ResponderHandle::Sdk {
+        let responder = ResponderHandle {
             pending_requests: pending,
         };
         assert!(
@@ -1389,19 +1224,6 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
 
-    /// D11 ③：flag 解析——缺省 legacy，非法值报错（**不回退**）。
-    #[test]
-    fn acp_engine_kind_parsing_rejects_invalid() {
-        assert_eq!(AcpEngineKind::parse(None), Ok(AcpEngineKind::Legacy));
-        assert_eq!(
-            AcpEngineKind::parse(Some("legacy")),
-            Ok(AcpEngineKind::Legacy)
-        );
-        assert_eq!(AcpEngineKind::parse(Some("sdk")), Ok(AcpEngineKind::Sdk));
-        assert!(AcpEngineKind::parse(Some("SDK")).is_err());
-        assert!(AcpEngineKind::parse(Some("")).is_err());
-        assert!(AcpEngineKind::parse(Some("sacp")).is_err());
-    }
 }
 
 // ── JSON-RPC request id（原 acp/request_id.rs，A1c 收敛）──
@@ -1452,69 +1274,25 @@ impl fmt::Display for RequestId {
 
 // ── JSON-RPC pending / PreparedRpc / prompt 等待（原 acp/jsonrpc.rs，A1c 收敛）──
 
-/// JSON-RPC 挂起请求表（request id → 响应通道）。分片锁：避免所有请求竞争
-/// 一把全局锁。
-pub(crate) type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
-
-/// pending 分片数：`id % PENDING_SHARDS` 定位分片。
-pub(crate) const PENDING_SHARDS: usize = 16;
-
-/// 准备好的 JSON-RPC 请求（D12：后端专属状态封在 [`PreparedRpcBackend`]，
-/// `line`/`write_tx`/`rx` 不再出现在公开面）。
+/// 准备好的 JSON-RPC 请求（D12：后端专属状态封在 [`SdkPreparedRpc`]，
+/// `line`/`write_tx`/`rx` 不出现在公开面）。
 pub struct PreparedRpc {
-    /// Pylon 相关 id：legacy 恰等于 wire id（行为不变），SDK 用本地计数器；
-    /// wire id 永不暴露。
+    /// Pylon 相关 id（本地计数器）；wire id 永不暴露。
     pub id: u64,
-    pub(crate) backend: PreparedRpcBackend,
-}
-
-pub(crate) fn remove_pending_from(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>, id: u64) {
-    if let Ok(mut shard) = pending[id as usize % PENDING_SHARDS].lock() {
-        shard.remove(&id);
-    }
+    pub(crate) sdk: SdkPreparedRpc,
 }
 
 impl PreparedRpc {
-    /// 发送请求行，返回响应接收器（legacy）；SDK 后端 typed fail-closed（A1b 接 prompt 等待）。
+    /// 发送请求行，返回响应接收器。
     pub async fn send_keep_rx(self) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
         super::engine::send_keep_rx_prepared(self).await
     }
 
-    /// 发送 + 等待匹配响应（两后端均实现；超时值来自协议配置）。
+    /// 发送 + 等待匹配响应（超时值来自协议配置）。
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
         super::engine::complete_prepared(self).await
     }
 
-    /// D12：仅测试读取请求行（`acp/tests.rs` 保留一条；A1c 删除）。
-    #[cfg(test)]
-    pub(crate) fn line(&self) -> &str {
-        super::engine::prepared_line(&self.backend)
-    }
-
-    /// 测试专用：按 legacy 后端构造（保留既有单测形状，避免测试文件引入内部类型）。
-    /// 全限定路径：这些类型仅在 cfg(test) 下使用，避免非测试构建被判为未用导入。
-    #[cfg(test)]
-    pub(crate) fn legacy_for_test(
-        id: u64,
-        line: String,
-        write_tx: tokio::sync::mpsc::Sender<String>,
-        rx: oneshot::Receiver<RawMessage>,
-        pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-        crashed: Arc<std::sync::atomic::AtomicBool>,
-        rpc_timeout: std::time::Duration,
-    ) -> Self {
-        Self {
-            id,
-            backend: PreparedRpcBackend::Legacy(super::engine::LegacyPreparedRpc {
-                write_tx,
-                pending,
-                rx,
-                crashed,
-                line,
-                rpc_timeout,
-            }),
-        }
-    }
 }
 
 impl RawMessage {
@@ -1734,16 +1512,28 @@ fn smallest_nonzero(durations: [std::time::Duration; 3]) -> std::time::Duration 
         .unwrap_or(std::time::Duration::from_millis(1))
 }
 
-/// EOF/崩溃时唤醒全部挂起请求（发送 connection_closed 哨兵），返回 drained 数量。
-pub(crate) fn drain_pending(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>) -> usize {
-    let mut drained = 0;
-    for shard in pending.iter() {
-        if let Ok(mut requests) = shard.lock() {
-            drained += requests.len();
-            for (_, tx) in requests.drain() {
-                let _ = tx.send(RawMessage::connection_closed());
-            }
+/// ISSUE-17 W1（LR2-WI06）：ACP crash 原因稳定枚举（wire snake_case 字符串）。
+/// 禁止用错误文本正则区分 crash 类型（ISSUE-17 禁止事项）——writer 失败/超时/EOF
+/// 必须用稳定 code 区分，供 dispatcher 消费 reason 生成用户可读文案并保留诊断字段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrashReason {
+    /// stdin 写失败（EPIPE/JoinError 等）。
+    WriterFailed,
+    /// stdin 写超时（agent 存活但不读 stdin）。
+    WriterTimeout,
+    /// stdout EOF（agent 进程退出/管道关闭）。
+    StdoutClosed,
+    /// pending 分片锁中毒（保守收敛，fail-closed）。
+    PendingLockPoisoned,
+}
+
+impl CrashReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CrashReason::WriterFailed => "writer_failed",
+            CrashReason::WriterTimeout => "writer_timeout",
+            CrashReason::StdoutClosed => "stdout_closed",
+            CrashReason::PendingLockPoisoned => "pending_lock_poisoned",
         }
     }
-    drained
 }
