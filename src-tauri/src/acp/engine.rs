@@ -393,7 +393,12 @@ pub(crate) fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
     if agent_client_protocol::is_incoming_transport_closed(&error) {
         return AcpError::ConnectionClosed;
     }
-    AcpError::Rpc(error.to_string())
+    // 与 legacy 一致：把 JSON-RPC error 对象序列化为文本，下游
+    // `AgentConnectFailure::initialize` 才能提取 `code`/`message`（远端 code 不丢）。
+    match serde_json::to_string(&error) {
+        Ok(raw) => AcpError::Rpc(raw),
+        Err(_) => AcpError::Rpc(error.to_string()),
+    }
 }
 
 /// 把一条 SDK 非类型化消息还原为 Pylon 入站帧（`Response` 返回 `None`，
