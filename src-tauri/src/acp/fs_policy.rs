@@ -30,6 +30,19 @@ impl FsAccessPolicy {
         })
     }
 
+    /// Codeg's explicit unrestricted policy. Empty roots are intentional: the
+    /// shared containment function treats them as an unrestricted direction.
+    pub fn unrestricted() -> Self {
+        Self {
+            read_roots: Vec::new(),
+            write_roots: Vec::new(),
+        }
+    }
+
+    pub fn confines_reads(&self) -> bool {
+        !self.read_roots.is_empty()
+    }
+
     pub fn read_roots(&self) -> &[PathBuf] {
         &self.read_roots
     }
@@ -129,5 +142,13 @@ mod tests {
         ));
         assert!(policy.check_write(&outside.join("new.txt")).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unrestricted_policy_has_no_read_or_write_roots() {
+        let policy = FsAccessPolicy::unrestricted();
+        assert!(!policy.confines_reads());
+        assert!(policy.read_roots().is_empty());
+        assert!(policy.write_roots().is_empty());
     }
 }
