@@ -17,6 +17,19 @@ pub struct ClaudePolicy {
     pub jetbrains_air_session_failure: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeId { GrokExtQuestions, PiSelectAsk, GrokExitPlan, CodexElicitation }
+
+fn bridge_id(value: &str) -> Result<BridgeId, String> {
+    match value {
+        "grok_ext_questions" => Ok(BridgeId::GrokExtQuestions),
+        "pi_select_ask" => Ok(BridgeId::PiSelectAsk),
+        "grok_exit_plan" => Ok(BridgeId::GrokExitPlan),
+        "codex_elicitation" => Ok(BridgeId::CodexElicitation),
+        other => Err(format!("unknown interaction bridge: {other}")),
+    }
+}
+
 pub fn policy(provider: &str) -> Result<Option<CatalogAdaptation>, String> {
     agent_catalog::adaptation(provider)
 }
@@ -76,6 +89,20 @@ pub fn claude_policy(provider: &str) -> Result<Option<ClaudePolicy>, String> {
     }))
 }
 
+pub fn interaction_bridge(provider: &str, method: &str) -> Result<Option<BridgeId>, String> {
+    let Some(policy) = policy(provider)? else { return Ok(None) };
+    let Some(bridges) = policy.interaction_bridges else { return Ok(None) };
+    let Some(items) = bridges.as_array() else { return Err("interactionBridges must be an array".into()) };
+    for item in items {
+        let object = item.as_object().ok_or("interaction bridge must be an object")?;
+        if object.get("method").and_then(Value::as_str) == Some(method) {
+            let parser = object.get("parser").and_then(Value::as_str).ok_or("interaction bridge parser missing")?;
+            return Ok(Some(bridge_id(parser)?));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +134,11 @@ mod tests {
         assert_eq!(policy.native_cmd, "claude");
         assert_eq!(policy.steering_prompt_required_min_version, "0.65.0");
         assert!(policy.subagent_transcript && policy.jetbrains_air_session_failure);
+    }
+
+    #[test]
+    fn unknown_bridge_names_fail_closed() {
+        assert!(bridge_id("future_bridge").is_err());
+        assert_eq!(interaction_bridge("peri", "_x.ai/ask_user_question").unwrap(), None);
     }
 }
