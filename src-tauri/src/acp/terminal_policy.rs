@@ -17,44 +17,6 @@ pub fn next_wait_retry_backoff(current: Duration) -> Duration {
     next.min(WAIT_RETRY_MAX_BACKOFF)
 }
 
-/// Owner-neutral portion of codeg's terminal lifecycle.  The process owner
-/// remains outside this adapter (`ManagedChild`); this state machine only
-/// captures the observable kill/wait transitions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalLifecycle {
-    Running,
-    KillRequested,
-    Exited,
-    Released,
-}
-
-impl TerminalLifecycle {
-    pub fn request_kill(self) -> Self {
-        match self {
-            Self::Running => Self::KillRequested,
-            other => other,
-        }
-    }
-
-    pub fn observe_exit(self) -> Self {
-        match self {
-            Self::Running | Self::KillRequested => Self::Exited,
-            other => other,
-        }
-    }
-
-    pub fn release(self) -> Self {
-        match self {
-            Self::Exited | Self::Released => Self::Released,
-            other => other,
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Exited | Self::Released)
-    }
-}
-
 pub fn map_exit_status(status: std::process::ExitStatus) -> TerminalExitStatus {
     #[cfg(unix)]
     let signal =
@@ -250,24 +212,6 @@ mod tests {
             } else {
                 ShellFamily::Posix
             }
-        );
-    }
-
-    #[test]
-    fn lifecycle_kill_wait_release_is_monotonic_and_idempotent() {
-        let running = TerminalLifecycle::Running;
-        assert!(!running.is_terminal());
-        let killed = running.request_kill();
-        assert_eq!(killed, TerminalLifecycle::KillRequested);
-        assert_eq!(killed.request_kill(), killed);
-        let exited = killed.observe_exit();
-        assert_eq!(exited, TerminalLifecycle::Exited);
-        assert!(exited.is_terminal());
-        assert_eq!(exited.observe_exit(), exited);
-        assert_eq!(exited.release(), TerminalLifecycle::Released);
-        assert_eq!(
-            TerminalLifecycle::Released.request_kill(),
-            TerminalLifecycle::Released
         );
     }
 

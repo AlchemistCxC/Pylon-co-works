@@ -112,6 +112,9 @@
 
 ### A4 terminal policy/runtime adapter
 
+- 2026-09-09 纠偏：`437fc864` 新增的 `TerminalLifecycle` 四态枚举并非上游搬迁，且没有生产消费者，现已删除。上游实际为 `TerminalCompletion::{Running, Exited(TerminalExitStatus)}` + watch（`send_replace` 保留无订阅者时的终态），kill 使用 Notify 请求唯一进程 owner，release 先移除 registry 项再调用 kill。不得把被删除的枚举及自证测试视为生命周期验收证据。`ManagedChild` 已被 `plugin_process` 复用，并非 ACP agent 专属，前述“不能复用”的口头判断撤回。
+- `next_wait_retry_backoff` 来源为同文件 owner loop 的 `(backoff * 2).min(WAIT_RETRY_MAX_BACKOFF)`，Pylon 提取时增加乘法溢出保护；当前只有测试消费者，不代表 wait 重试已接入运行时。
+
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/terminal_runtime.rs` 的 `enforce_output_limit`、`decode_available_utf8`、`default_platform_shell`、`shell_wrapped_command`、`map_exit_status` 及其限值常量。
 - 目标：`src-tauri/src/acp/terminal_policy.rs`。迁入纯输出预算、增量 UTF-8 解码、shell family/wrapper 参数、平台默认 shell 和 typed `TerminalExitStatus`；Pylon 保留既有 `ManagedChild` 作为进程所有者，未复制 codeg `TerminalRuntime`/AppState/协议 handler。
 - 适配：`TerminalExitStatus` 字段为 `exitCode`/`signal`；核验 schema 1.7 的 `schema::v1::TerminalExitStatus` 已存在，后续 responder 应直接映射到官方类型，不再新增第二个 wire DTO。
