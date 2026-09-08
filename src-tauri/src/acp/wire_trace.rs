@@ -15,6 +15,7 @@
 
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -117,6 +118,15 @@ pub struct AcpWireHub {
     enabled: AtomicBool,
     records: Mutex<AllocRingBuffer<Arc<WireRecord>>>,
     capacity: usize,
+    canonical_correlations: Mutex<HashMap<u64, CanonicalCorrelation>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalCorrelation {
+    pub event_id: String,
+    pub sequence: i64,
+    pub revision: i64,
 }
 
 /// Stable semantic name for the transport capture seam.  The hub remains the
@@ -133,6 +143,7 @@ impl AcpWireHub {
             enabled: AtomicBool::new(true),
             records: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
+            canonical_correlations: Mutex::new(HashMap::new()),
         })
     }
 
@@ -169,6 +180,21 @@ impl AcpWireHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .len()
+    }
+
+    /// Store the repository's actual commit identity for a wire ordinal.
+    /// Values are supplied by EventService; no numeric inference occurs here.
+    pub fn record_canonical_commit(&self, ordinal: u64, correlation: CanonicalCorrelation) {
+        if let Ok(mut index) = self.canonical_correlations.lock() {
+            if index.len() >= self.capacity && !index.contains_key(&ordinal) {
+                if let Some(oldest) = index.keys().min().copied() { index.remove(&oldest); }
+            }
+            index.insert(ordinal, correlation);
+        }
+    }
+
+    pub fn correlate(&self, ordinal: u64) -> Option<CanonicalCorrelation> {
+        self.canonical_correlations.lock().ok()?.get(&ordinal).cloned()
     }
 
     /// 记录一条原始 JSON 报文（必须是在 u64 窄化**之前**的原始 Value）。
@@ -473,6 +499,16 @@ mod tests {
             assert_eq!(record.client_generation, 3, "clientGeneration 必须逐条保留");
         }
         assert_eq!(snap[2].remote_session_id.as_deref(), Some("s-1"));
+    }
+
+    #[test]
+    fn canonical_correlation_uses_explicit_repository_identity() {
+        let hub = hub();
+        assert_eq!(hub.correlate(7), None);
+        let value = CanonicalCorrelation { event_id: "event-42".into(), sequence: 9, revision: 12 };
+        hub.record_canonical_commit(7, value.clone());
+        assert_eq!(hub.correlate(7), Some(value));
+        assert_eq!(hub.correlate(8), None);
     }
 
     #[test]
