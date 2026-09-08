@@ -39,7 +39,9 @@ pub enum AcpStateDelta {
         request_id: Option<String>,
         tool_call_id: Option<String>,
     },
-    PermissionQueueDepth { depth: usize },
+    PermissionQueueDepth {
+        depth: usize,
+    },
     Usage {
         used: u64,
         size: Option<u64>,
@@ -93,10 +95,15 @@ impl AcpSessionState {
                 self.pending_permissions
                     .push((request_id.clone(), tool_call_id.clone()));
             }
-            return vec![AcpStateDelta::PermissionRequested {
-                request_id,
-                tool_call_id,
-            }, AcpStateDelta::PermissionQueueDepth { depth: self.pending_permissions.len() }];
+            return vec![
+                AcpStateDelta::PermissionRequested {
+                    request_id,
+                    tool_call_id,
+                },
+                AcpStateDelta::PermissionQueueDepth {
+                    depth: self.pending_permissions.len(),
+                },
+            ];
         }
         if message.kind != AcpKind::SessionUpdate {
             return Vec::new();
@@ -175,7 +182,12 @@ impl AcpSessionState {
                     .and_then(|meta| meta.get("outputTokens"))
                     .and_then(serde_json::Value::as_u64);
                 self.usage = Some((used, size));
-                Some(AcpStateDelta::Usage { used, size, input, output })
+                Some(AcpStateDelta::Usage {
+                    used,
+                    size,
+                    input,
+                    output,
+                })
             }
             "plan" => {
                 let entries = update

@@ -117,7 +117,10 @@ pub(crate) enum CommitOutcome {
     /// A committed outcome always carries the durable row that adapters may
     /// publish.  Keeping the row non-optional makes the C0-COMMIT invariant a
     /// type-level guarantee rather than a caller convention.
-    Committed { event: CanonicalEventRow, revision: i64 },
+    Committed {
+        event: CanonicalEventRow,
+        revision: i64,
+    },
     Rejected(EventError),
 }
 
@@ -148,7 +151,10 @@ pub(crate) async fn commit_live_event(
         .await
     {
         Ok(result) => match result.events.into_iter().next() {
-            Some(event) => CommitOutcome::Committed { event, revision: result.revision },
+            Some(event) => CommitOutcome::Committed {
+                event,
+                revision: result.revision,
+            },
             None => CommitOutcome::Rejected(EventError::Invalid(
                 "canonical ingest committed no event".to_string(),
             )),

@@ -739,11 +739,20 @@ mod tests {
         SdkEngineConfig {
             name: "pylon-engine-test".to_string(),
             client_generation: 1,
-            wire: AcpWireHub::new(RuntimeCorrelation {
-                agent_id: "test".into(), provider: None, source: "test".into(),
-                local_session_id: None, remote_session_id: None, peri_id: None,
-                client_generation: 1, request_id: None, tool_call_id: None,
-            }, 8),
+            wire: AcpWireHub::new(
+                RuntimeCorrelation {
+                    agent_id: "test".into(),
+                    provider: None,
+                    source: "test".into(),
+                    local_session_id: None,
+                    remote_session_id: None,
+                    peri_id: None,
+                    client_generation: 1,
+                    request_id: None,
+                    tool_call_id: None,
+                },
+                8,
+            ),
         }
     }
 
@@ -1235,7 +1244,6 @@ mod tests {
         agent_task.await.expect("agent task");
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
-
 }
 
 // ── JSON-RPC request id（原 acp/request_id.rs，A1c 收敛）──
@@ -1304,7 +1312,6 @@ impl PreparedRpc {
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
         super::engine::complete_prepared(self).await
     }
-
 }
 
 impl RawMessage {

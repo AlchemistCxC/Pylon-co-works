@@ -175,12 +175,7 @@ impl AcpClient {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
         }
-        prepared_sdk_rpc(
-            &self.backend,
-            method,
-            params,
-            self.protocol.rpc_timeout(),
-        )
+        prepared_sdk_rpc(&self.backend, method, params, self.protocol.rpc_timeout())
     }
 
     async fn call_async(

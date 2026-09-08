@@ -193,14 +193,20 @@ impl AcpWireHub {
     pub fn record_canonical_commit(&self, ordinal: u64, correlation: CanonicalCorrelation) {
         if let Ok(mut index) = self.canonical_correlations.lock() {
             if index.len() >= self.capacity && !index.contains_key(&ordinal) {
-                if let Some(oldest) = index.keys().min().copied() { index.remove(&oldest); }
+                if let Some(oldest) = index.keys().min().copied() {
+                    index.remove(&oldest);
+                }
             }
             index.insert(ordinal, correlation);
         }
     }
 
     pub fn correlate(&self, ordinal: u64) -> Option<CanonicalCorrelation> {
-        self.canonical_correlations.lock().ok()?.get(&ordinal).cloned()
+        self.canonical_correlations
+            .lock()
+            .ok()?
+            .get(&ordinal)
+            .cloned()
     }
 
     /// 记录一条原始 JSON 报文（必须是在 u64 窄化**之前**的原始 Value）。
@@ -210,13 +216,7 @@ impl AcpWireHub {
             return;
         }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        let record = build_record(
-            &self.trace_id,
-            &self.correlation,
-            seq,
-            direction,
-            msg_val,
-        );
+        let record = build_record(&self.trace_id, &self.correlation, seq, direction, msg_val);
         let mut records = self
             .records
             .lock()
@@ -227,13 +227,19 @@ impl AcpWireHub {
         }
         records.enqueue(Arc::new(record));
         if direction == WireDirection::AgentToPylon
-            && msg_val.get("method").and_then(|value| value.as_str()).is_some()
+            && msg_val
+                .get("method")
+                .and_then(|value| value.as_str())
+                .is_some()
         {
             if let Ok(mut ordinals) = self.inbound_ordinals.lock() {
-                if self.inbound_ordinal_overflowed.load(Ordering::Acquire) { return; }
+                if self.inbound_ordinal_overflowed.load(Ordering::Acquire) {
+                    return;
+                }
                 if ordinals.len() >= self.capacity {
                     ordinals.clear();
-                    self.inbound_ordinal_overflowed.store(true, Ordering::Release);
+                    self.inbound_ordinal_overflowed
+                        .store(true, Ordering::Release);
                     return;
                 }
                 ordinals.push_back(seq);
@@ -243,7 +249,9 @@ impl AcpWireHub {
 
     pub fn take_inbound_ordinal(&self) -> Option<u64> {
         let mut ordinals = self.inbound_ordinals.lock().ok()?;
-        if self.inbound_ordinal_overflowed.load(Ordering::Acquire) { return None; }
+        if self.inbound_ordinal_overflowed.load(Ordering::Acquire) {
+            return None;
+        }
         ordinals.pop_front()
     }
 
@@ -531,7 +539,11 @@ mod tests {
     fn canonical_correlation_uses_explicit_repository_identity() {
         let hub = hub();
         assert_eq!(hub.correlate(7), None);
-        let value = CanonicalCorrelation { event_id: "event-42".into(), sequence: 9, revision: 12 };
+        let value = CanonicalCorrelation {
+            event_id: "event-42".into(),
+            sequence: 9,
+            revision: 12,
+        };
         hub.record_canonical_commit(7, value.clone());
         assert_eq!(hub.correlate(7), Some(value));
         assert_eq!(hub.correlate(8), None);
@@ -540,8 +552,14 @@ mod tests {
     #[test]
     fn inbound_ordinal_does_not_consume_response_as_notification() {
         let hub = hub();
-        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","id":1,"result":{}}));
-        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}));
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","id":1,"result":{}}),
+        );
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}),
+        );
         assert_eq!(hub.take_inbound_ordinal(), Some(2));
     }
 
@@ -549,10 +567,16 @@ mod tests {
     fn inbound_ordinal_overflow_invalidates_correlation_instead_of_shifting() {
         let hub = hub();
         for i in 0..9 {
-            hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":i}}));
+            hub.record(
+                WireDirection::AgentToPylon,
+                &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":i}}),
+            );
         }
         assert_eq!(hub.take_inbound_ordinal(), None);
-        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":10}}));
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":10}}),
+        );
         assert_eq!(hub.take_inbound_ordinal(), None);
     }
 

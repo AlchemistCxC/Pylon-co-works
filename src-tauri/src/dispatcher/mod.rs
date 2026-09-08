@@ -139,7 +139,12 @@ fn apply_update_event_with_pet_policy(
     // adapter only mirrors reducer-owned scalar domains into the live session.
     for delta in deltas {
         match delta {
-            crate::acp::AcpStateDelta::Usage { used, size, input, output } => {
+            crate::acp::AcpStateDelta::Usage {
+                used,
+                size,
+                input,
+                output,
+            } => {
                 session.tokens_total = used;
                 session.context_size = size.unwrap_or(0);
                 if let Some(input) = input {
@@ -894,12 +899,17 @@ async fn handle_session_update<R: tauri::Runtime>(
         }
         routing::CommitOutcome::Committed { event, revision } => {
             if let (Some(ordinal), Some(wire)) = (input.wire_ordinal, wire.as_ref()) {
-                wire.record_canonical_commit(ordinal, crate::acp::CanonicalCorrelation {
-                    event_id: event.event_id.clone(), sequence: event.sequence, revision,
-                });
+                wire.record_canonical_commit(
+                    ordinal,
+                    crate::acp::CanonicalCorrelation {
+                        event_id: event.event_id.clone(),
+                        sequence: event.sequence,
+                        revision,
+                    },
+                );
             }
             Some(event)
-        },
+        }
         routing::CommitOutcome::Rejected(error) => {
             log_canonical_ingest_error(&error, agent_id, &source);
             return true;

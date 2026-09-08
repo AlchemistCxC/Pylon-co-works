@@ -22,7 +22,9 @@ impl HostToolsPolicy {
         }
     }
 
-    pub fn hosts_channels(self) -> bool { matches!(self, Self::HostStrict) }
+    pub fn hosts_channels(self) -> bool {
+        matches!(self, Self::HostStrict)
+    }
 
     pub fn allows_request(self, method: &str) -> bool {
         self.hosts_channels() && (method.starts_with("fs/") || method.starts_with("terminal/"))

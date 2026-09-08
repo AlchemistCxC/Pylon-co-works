@@ -38,7 +38,12 @@ struct CatalogDetection {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum CatalogPackageManagerKind { Npx, Uvx, Binary, None }
+pub enum CatalogPackageManagerKind {
+    Npx,
+    Uvx,
+    Binary,
+    None,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,11 +62,21 @@ pub struct CatalogRequirements {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum CatalogCheckKind { NodeMin, UvMin, BinaryPresent, AdapterPresent, ConfigEvidence }
+pub enum CatalogCheckKind {
+    NodeMin,
+    UvMin,
+    BinaryPresent,
+    AdapterPresent,
+    ConfigEvidence,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum CatalogFixKind { OpenUrl, InstallAdapter, InstallUv }
+pub enum CatalogFixKind {
+    OpenUrl,
+    InstallAdapter,
+    InstallUv,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -441,23 +456,47 @@ mod tests {
 
     #[test]
     fn detection_v2_fixture_and_empty_defaults() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../shared/agent-catalog-detection.fixture.json")).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../shared/agent-catalog-detection.fixture.json"
+        ))
+        .unwrap();
         let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
-        let detection = document["providers"][0]["detection"].as_object_mut().unwrap();
+        let detection = document["providers"][0]["detection"]
+            .as_object_mut()
+            .unwrap();
         detection.extend(fixture.as_object().unwrap().clone());
         let parsed = parse_catalog(&document.to_string()).unwrap();
         let policy = &parsed.providers[0].detection;
-        assert_eq!(serde_json::to_value(&policy.version_args).unwrap(), fixture["versionArgs"]);
-        assert_eq!(serde_json::to_value(&policy.package_manager).unwrap(), fixture["packageManager"]);
-        assert_eq!(serde_json::to_value(&policy.requires).unwrap(), fixture["requires"]);
-        assert_eq!(serde_json::to_value(&policy.checks).unwrap(), fixture["checks"]);
-        let detection = document["providers"][0]["detection"].as_object_mut().unwrap();
-        for key in fixture.as_object().unwrap().keys() { detection.remove(key); }
+        assert_eq!(
+            serde_json::to_value(&policy.version_args).unwrap(),
+            fixture["versionArgs"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.package_manager).unwrap(),
+            fixture["packageManager"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.requires).unwrap(),
+            fixture["requires"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.checks).unwrap(),
+            fixture["checks"]
+        );
+        let detection = document["providers"][0]["detection"]
+            .as_object_mut()
+            .unwrap();
+        for key in fixture.as_object().unwrap().keys() {
+            detection.remove(key);
+        }
         let parsed = parse_catalog(&document.to_string()).unwrap();
         let policy = &parsed.providers[0].detection;
         assert!(policy.version_args.is_empty() && policy.checks.is_empty());
         assert!(policy.package_manager.is_none());
-        assert_eq!(serde_json::to_value(&policy.requires).unwrap(), serde_json::json!({"node": null, "uv": null}));
+        assert_eq!(
+            serde_json::to_value(&policy.requires).unwrap(),
+            serde_json::json!({"node": null, "uv": null})
+        );
     }
 
     #[test]
@@ -472,8 +511,14 @@ mod tests {
             serde_json::json!({"checks": [{"id":"x", "label":"x", "kind":"node-min", "params":{}, "fix":{"kind":"execute", "payload":"command"}}]}),
         ] {
             let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
-            document["providers"][0]["detection"].as_object_mut().unwrap().extend(invalid.as_object().unwrap().clone());
-            assert!(parse_catalog(&document.to_string()).is_err(), "accepted {invalid}");
+            document["providers"][0]["detection"]
+                .as_object_mut()
+                .unwrap()
+                .extend(invalid.as_object().unwrap().clone());
+            assert!(
+                parse_catalog(&document.to_string()).is_err(),
+                "accepted {invalid}"
+            );
         }
     }
 
@@ -514,10 +559,16 @@ mod tests {
     fn protocol_projection_is_serializable_and_keeps_catalog_order() {
         let profiles = protocol_profiles().expect("protocol baseline must parse");
         assert_eq!(
-            profiles.iter().map(|entry| entry.provider.as_str()).collect::<Vec<_>>(),
+            profiles
+                .iter()
+                .map(|entry| entry.provider.as_str())
+                .collect::<Vec<_>>(),
             ["peri", "hermes", "claude-code"]
         );
-        let hermes = profiles.iter().find(|entry| entry.provider == "hermes").unwrap();
+        let hermes = profiles
+            .iter()
+            .find(|entry| entry.provider == "hermes")
+            .unwrap();
         assert!(!hermes.permission_requests);
         assert_eq!(hermes.set_model_api, CatalogSetModelApi::SetModel);
         let json = serde_json::to_value(&profiles).expect("projection must serialize");
@@ -530,7 +581,10 @@ mod tests {
         assert!(adaptation("peri").unwrap().is_none());
         assert!(adaptation("missing").unwrap().is_none());
         let claude = adaptation("claude-code").unwrap().unwrap();
-        assert_eq!(claude.version_gates.unwrap()["steeringPromptRequiredMinVersion"], "0.65.0");
+        assert_eq!(
+            claude.version_gates.unwrap()["steeringPromptRequiredMinVersion"],
+            "0.65.0"
+        );
         assert_eq!(claude.adapter_relation.unwrap()["nativeCmd"], "claude");
     }
 }

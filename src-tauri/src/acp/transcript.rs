@@ -81,7 +81,10 @@ pub fn merge_continuation_chain(mut chain: Vec<Transcript>) -> Transcript {
     merged
 }
 
-pub fn continuation_ancestors(mut current: String, headers: &std::collections::HashMap<String, TranscriptHeader>) -> Vec<String> {
+pub fn continuation_ancestors(
+    mut current: String,
+    headers: &std::collections::HashMap<String, TranscriptHeader>,
+) -> Vec<String> {
     let mut out = Vec::new();
     let mut visited = std::collections::HashSet::from([current.clone()]);
     while let Some(next) = headers.get(&current).and_then(|h| h.continues_from.clone()) {
@@ -97,13 +100,21 @@ pub fn continuation_ancestors(mut current: String, headers: &std::collections::H
 /// Codeg's pure compaction rule for already parsed entries. Consecutive plain
 /// assistant/thought text updates with equal `_meta` are folded; boundaries and
 /// non-text updates pass through unchanged. Returns the next compactable state.
-pub fn compact_batch(entries: &[TranscriptEntry], mut compactable: bool) -> (Vec<TranscriptEntry>, bool) {
+pub fn compact_batch(
+    entries: &[TranscriptEntry],
+    mut compactable: bool,
+) -> (Vec<TranscriptEntry>, bool) {
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
-        let mergeable = compactable && entry.k == EntryKind::Update && mergeable_text_kind(&entry.p).is_some();
+        let mergeable =
+            compactable && entry.k == EntryKind::Update && mergeable_text_kind(&entry.p).is_some();
         if !mergeable {
-            if entry.k == EntryKind::Prompt { compactable = true; }
-            if entry.k == EntryKind::TurnEnd { compactable = false; }
+            if entry.k == EntryKind::Prompt {
+                compactable = true;
+            }
+            if entry.k == EntryKind::TurnEnd {
+                compactable = false;
+            }
             out.push(entry.clone());
             continue;
         }
@@ -112,9 +123,25 @@ pub fn compact_batch(entries: &[TranscriptEntry], mut compactable: bool) -> (Vec
                 && mergeable_text_kind(&previous.p) == mergeable_text_kind(&entry.p)
                 && previous.p.get("_meta") == entry.p.get("_meta")
         }) {
-            let text = entry.p.get("content").and_then(|c| c.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
-            if let Some(existing) = previous.p.get_mut("content").and_then(|c| c.get_mut("text")).and_then(|t| t.as_str().map(str::to_owned)) {
-                if let Some(target) = previous.p.get_mut("content").and_then(|c| c.get_mut("text")) { *target = serde_json::Value::String(format!("{existing}{text}")); }
+            let text = entry
+                .p
+                .get("content")
+                .and_then(|c| c.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or_default();
+            if let Some(existing) = previous
+                .p
+                .get_mut("content")
+                .and_then(|c| c.get_mut("text"))
+                .and_then(|t| t.as_str().map(str::to_owned))
+            {
+                if let Some(target) = previous
+                    .p
+                    .get_mut("content")
+                    .and_then(|c| c.get_mut("text"))
+                {
+                    *target = serde_json::Value::String(format!("{existing}{text}"));
+                }
             }
             previous.t = entry.t;
         } else {
@@ -131,7 +158,11 @@ fn mergeable_text_kind(payload: &serde_json::Value) -> Option<&'static str> {
         _ => return None,
     };
     let content = payload.get("content")?;
-    (content.get("type").and_then(|v| v.as_str()) == Some("text") && content.get("text").is_some_and(serde_json::Value::is_string)).then_some(kind)
+    (content.get("type").and_then(|v| v.as_str()) == Some("text")
+        && content
+            .get("text")
+            .is_some_and(serde_json::Value::is_string))
+    .then_some(kind)
 }
 
 #[cfg(test)]
@@ -149,7 +180,14 @@ mod tests {
         ].iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
         let parsed = parse_transcript(&content);
         assert_eq!(parsed.header.unwrap().session_id, "first");
-        assert_eq!(parsed.entries.iter().map(|entry| entry.t).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(
+            parsed
+                .entries
+                .iter()
+                .map(|entry| entry.t)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
     }
 
     #[test]
@@ -159,7 +197,10 @@ mod tests {
 not-json
 {"t":3,"k":"turn_end","p":{"stopReason":"end_turn"}}"#;
         let parsed = parse_transcript(input);
-        assert_eq!(parsed.header.as_ref().map(|h| h.session_id.as_str()), Some("s"));
+        assert_eq!(
+            parsed.header.as_ref().map(|h| h.session_id.as_str()),
+            Some("s")
+        );
         assert_eq!(parsed.entries.len(), 2);
     }
 
@@ -167,30 +208,67 @@ not-json
     fn merges_newest_first_chain_oldest_header_and_entry_order() {
         let old = Transcript {
             header: Some(TranscriptHeader {
-                v: 1, kind: "header".into(), agent: "a".into(), session_id: "old".into(),
-                cwd: ".".into(), started_at_ms: 1, continues_from: None,
+                v: 1,
+                kind: "header".into(),
+                agent: "a".into(),
+                session_id: "old".into(),
+                cwd: ".".into(),
+                started_at_ms: 1,
+                continues_from: None,
             }),
-            entries: vec![TranscriptEntry { t: 1, k: EntryKind::Prompt, p: serde_json::json!(1) }],
+            entries: vec![TranscriptEntry {
+                t: 1,
+                k: EntryKind::Prompt,
+                p: serde_json::json!(1),
+            }],
         };
         let new = Transcript {
             header: Some(TranscriptHeader {
-                v: 1, kind: "header".into(), agent: "a".into(), session_id: "new".into(),
-                cwd: ".".into(), started_at_ms: 2, continues_from: Some("old".into()),
+                v: 1,
+                kind: "header".into(),
+                agent: "a".into(),
+                session_id: "new".into(),
+                cwd: ".".into(),
+                started_at_ms: 2,
+                continues_from: Some("old".into()),
             }),
-            entries: vec![TranscriptEntry { t: 2, k: EntryKind::TurnEnd, p: serde_json::json!(2) }],
+            entries: vec![TranscriptEntry {
+                t: 2,
+                k: EntryKind::TurnEnd,
+                p: serde_json::json!(2),
+            }],
         };
         let merged = merge_continuation_chain(vec![new, old]);
         assert_eq!(merged.header.unwrap().session_id, "old");
-        assert_eq!(merged.entries.iter().map(|e| e.t).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            merged.entries.iter().map(|e| e.t).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
     }
 
     #[test]
     fn compacts_only_adjacent_text_updates_and_preserves_last_timestamp() {
         let entries = vec![
-            TranscriptEntry { t: 1, k: EntryKind::Prompt, p: serde_json::json!({}) },
-            TranscriptEntry { t: 2, k: EntryKind::Update, p: serde_json::json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a"}}) },
-            TranscriptEntry { t: 3, k: EntryKind::Update, p: serde_json::json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"b"}}) },
-            TranscriptEntry { t: 4, k: EntryKind::TurnEnd, p: serde_json::json!({}) },
+            TranscriptEntry {
+                t: 1,
+                k: EntryKind::Prompt,
+                p: serde_json::json!({}),
+            },
+            TranscriptEntry {
+                t: 2,
+                k: EntryKind::Update,
+                p: serde_json::json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a"}}),
+            },
+            TranscriptEntry {
+                t: 3,
+                k: EntryKind::Update,
+                p: serde_json::json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"b"}}),
+            },
+            TranscriptEntry {
+                t: 4,
+                k: EntryKind::TurnEnd,
+                p: serde_json::json!({}),
+            },
         ];
         let (compacted, state) = compact_batch(&entries, false);
         assert!(!state);

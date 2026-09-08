@@ -7,12 +7,12 @@
 mod capabilities;
 mod client;
 mod engine;
-pub mod host_tools;
-pub mod fs_policy;
-pub mod terminal_policy;
-pub mod question_policy;
-pub mod plan_policy;
 mod error;
+pub mod fs_policy;
+pub mod host_tools;
+pub mod plan_policy;
+pub mod question_policy;
+pub mod terminal_policy;
 #[allow(unused_imports)]
 pub use capabilities::{CapabilityRegistry, CapabilityState};
 pub use client::*;

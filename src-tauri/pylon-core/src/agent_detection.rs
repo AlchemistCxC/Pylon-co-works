@@ -6,9 +6,9 @@ use crate::agent_catalog::{
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -522,16 +522,25 @@ const PROBE_OUTPUT_LIMIT: usize = 4 * 1024;
 fn extract_version_token(text: &str) -> Option<String> {
     fn candidate(piece: &str) -> Option<String> {
         let piece = piece.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | ';' | ':'));
-        let value = piece.strip_prefix('v').or_else(|| piece.strip_prefix('V')).unwrap_or(piece);
+        let value = piece
+            .strip_prefix('v')
+            .or_else(|| piece.strip_prefix('V'))
+            .unwrap_or(piece);
         (value.chars().next().is_some_and(|c| c.is_ascii_digit())
             && value.contains('.')
-            && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')))
-            .then(|| value.to_string())
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')))
+        .then(|| value.to_string())
     }
     for line in text.lines() {
         for token in line.split_whitespace() {
-            if token.contains("://") { continue; }
-            if let Some(value) = token.split(['/', '@']).find_map(candidate) { return Some(value); }
+            if token.contains("://") {
+                continue;
+            }
+            if let Some(value) = token.split(['/', '@']).find_map(candidate) {
+                return Some(value);
+            }
         }
     }
     None
@@ -704,13 +713,24 @@ async fn version_probe(
     version_args: &[String],
     budget: Duration,
 ) -> VersionProbeOutcome {
-    let cache_key = std::fs::metadata(&executable).ok().and_then(|m| m.modified().ok()).map(|mtime| {
-        (path_key(&executable), version_args.to_vec(), mtime)
-    });
-    static CACHE: OnceLock<Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>> = OnceLock::new();
+    let cache_key = std::fs::metadata(&executable)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|mtime| (path_key(&executable), version_args.to_vec(), mtime));
+    static CACHE: OnceLock<Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>> =
+        OnceLock::new();
     if let Some(key) = &cache_key {
-        if let Some(version) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().ok().and_then(|c| c.get(key).cloned()) {
-            return VersionProbeOutcome { version: Some(version), startability: Startability::Verified, diagnostic: None };
+        if let Some(version) = CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .ok()
+            .and_then(|c| c.get(key).cloned())
+        {
+            return VersionProbeOutcome {
+                version: Some(version),
+                startability: Startability::Verified,
+                diagnostic: None,
+            };
         }
     }
     if budget.is_zero() {
@@ -816,9 +836,8 @@ async fn version_probe(
     let stdout = stdout.unwrap_or_default();
     let stderr = stderr.unwrap_or_default();
     let version = extract_version_token(&String::from_utf8_lossy(&stdout))
-        .or_else(|| extract_version_token(&String::from_utf8_lossy(&stderr))).map(|value| {
-        value.chars().take(160).collect::<String>()
-    });
+        .or_else(|| extract_version_token(&String::from_utf8_lossy(&stderr)))
+        .map(|value| value.chars().take(160).collect::<String>());
     if version.is_none() {
         VersionProbeOutcome {
             version: None,
@@ -850,44 +869,73 @@ type ConfiguredRuntimes = HashMap<String, (String, String, Vec<String>)>;
 /// falling back to the catalog-controlled executable probe. No install or
 /// cache mutation is performed.
 pub async fn detect_local_version(provider: &str) -> Option<String> {
-    let rule = crate::agent_catalog::detection_profiles().ok()?.into_iter()
+    let rule = crate::agent_catalog::detection_profiles()
+        .ok()?
+        .into_iter()
         .find(|rule| rule.provider == provider)?;
     if let Some(manager) = &rule.package_manager {
-        if matches!(manager.kind, crate::agent_catalog::CatalogPackageManagerKind::Npx) {
+        if matches!(
+            manager.kind,
+            crate::agent_catalog::CatalogPackageManagerKind::Npx
+        ) {
             if let Some(package) = manager.package.as_deref() {
-                if let Some(version) = npm_global_version(package).await { return Some(version); }
+                if let Some(version) = npm_global_version(package).await {
+                    return Some(version);
+                }
             }
         }
     }
     let located = find_rule(&rule, None).into_iter().next()?;
     let budget = Duration::from_secs(2);
-    version_probe(&rule.detector_id, located.executable, &rule.version_args, budget)
-        .await.version
+    version_probe(
+        &rule.detector_id,
+        located.executable,
+        &rule.version_args,
+        budget,
+    )
+    .await
+    .version
 }
 
 async fn npm_global_version(package: &str) -> Option<String> {
     let mut command = tokio::process::Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
-    command.args(["list", "-g", package, "--json", "--depth=0"])
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
-    let output = tokio::time::timeout(Duration::from_secs(5), command.output()).await.ok()?.ok()?;
+    command
+        .args(["list", "-g", package, "--json", "--depth=0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(5), command.output())
+        .await
+        .ok()?
+        .ok()?;
     parse_npm_list_version(&output.stdout, package)
 }
 
 fn parse_npm_list_version(bytes: &[u8], package: &str) -> Option<String> {
     let document: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     let key = if package.starts_with('@') {
-        package[1..].find('@').map(|index| &package[..index + 1]).unwrap_or(package)
+        package[1..]
+            .find('@')
+            .map(|index| &package[..index + 1])
+            .unwrap_or(package)
     } else {
         package.split('@').next().unwrap_or(package)
     };
-    let value = document.get("dependencies")?.get(key)?.get("version")?.as_str()?;
+    let value = document
+        .get("dependencies")?
+        .get(key)?
+        .get("version")?
+        .as_str()?;
     extract_version_token(value)
 }
 
 /// Keep uvx interpreter pin construction identical across launch and probes;
 /// this is the pure portion of codeg's `uvx_python_args`.
 pub fn uvx_python_args(python: Option<&str>) -> Vec<String> {
-    python.map(|version| vec!["--python".into(), version.into()]).unwrap_or_default()
+    python
+        .map(|version| vec!["--python".into(), version.into()])
+        .unwrap_or_default()
 }
 
 pub async fn detect_agent_runtime_candidates_inner(
@@ -1014,13 +1062,9 @@ pub async fn detect_agent_runtime_candidates_inner(
                 .version_probe_budget
                 .min(deadline.saturating_duration_since(Instant::now()));
             async move {
-                let probe = version_probe(&detector_id, path, &rule.version_args, probe_budget).await;
-                (
-                    rule,
-                    located,
-                    config,
-                    probe,
-                )
+                let probe =
+                    version_probe(&detector_id, path, &rule.version_args, probe_budget).await;
+                (rule, located, config, probe)
             }
         })
         .buffer_unordered(limits.max_concurrent_probes.max(1))
@@ -1433,7 +1477,11 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(report.candidates.len(), 1, "PATH 后段的精确命令名也必须被发现");
+        assert_eq!(
+            report.candidates.len(),
+            1,
+            "PATH 后段的精确命令名也必须被发现"
+        );
         assert_eq!(
             Path::new(&report.candidates[0].executable),
             roots[16].join(&executable_names("peri")[0]),
@@ -1460,13 +1508,21 @@ mod tests {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             (path, vec!["version".into(), "--numeric".into()])
         };
-        let result = version_probe("fixture", executable.clone(), &args, Duration::from_secs(2)).await;
+        let result =
+            version_probe("fixture", executable.clone(), &args, Duration::from_secs(2)).await;
         assert_eq!(result.version.as_deref(), Some("1.2.3"));
         assert_eq!(result.startability, Startability::Verified);
         {
-            let default = version_probe("fixture", executable.clone(), &[], Duration::from_secs(2)).await;
+            let default =
+                version_probe("fixture", executable.clone(), &[], Duration::from_secs(2)).await;
             assert_eq!(default.version.as_deref(), Some("2.3.4"));
-            let invalid = version_probe("fixture", executable, &["acp".into()], Duration::from_secs(2)).await;
+            let invalid = version_probe(
+                "fixture",
+                executable,
+                &["acp".into()],
+                Duration::from_secs(2),
+            )
+            .await;
             assert_eq!(invalid.startability, Startability::Failed);
             assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
         }
@@ -1504,9 +1560,23 @@ mod tests {
 
     #[test]
     fn npm_list_fixture_extracts_scoped_and_unscoped_versions() {
-        assert_eq!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"1.2.3"}}}"#, "foo").as_deref(), Some("1.2.3"));
-        assert_eq!(parse_npm_list_version(br#"{"dependencies":{"@scope/foo":{"version":"4.5.6"}}}"#, "@scope/foo@4.5.6").as_deref(), Some("4.5.6"));
-        assert!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"bad"}}}"#, "foo").is_none());
+        assert_eq!(
+            parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"1.2.3"}}}"#, "foo")
+                .as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            parse_npm_list_version(
+                br#"{"dependencies":{"@scope/foo":{"version":"4.5.6"}}}"#,
+                "@scope/foo@4.5.6"
+            )
+            .as_deref(),
+            Some("4.5.6")
+        );
+        assert!(
+            parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"bad"}}}"#, "foo")
+                .is_none()
+        );
     }
 
     #[test]

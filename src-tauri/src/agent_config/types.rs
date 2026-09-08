@@ -373,10 +373,15 @@ impl AcpProtocolConfig {
     /// Catalog-driven capabilities when the profile does not provide an
     /// explicit override. Explicit YAML remains authoritative.
     pub fn initialize_caps_for_provider(&self, provider: Option<&str>) -> serde_json::Value {
-        if self.initialize_caps.is_some() { return self.initialize_caps() }
+        if self.initialize_caps.is_some() {
+            return self.initialize_caps();
+        }
         let caps = default_initialize_caps();
-        let Some(provider) = provider else { return caps };
-        crate::provider_adapter::client_capabilities(provider, caps).unwrap_or_else(|_| default_initialize_caps())
+        let Some(provider) = provider else {
+            return caps;
+        };
+        crate::provider_adapter::client_capabilities(provider, caps)
+            .unwrap_or_else(|_| default_initialize_caps())
     }
 }
 

@@ -29,10 +29,7 @@ fn restore_usage(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("usage").is_some() {
         return;
     }
-    if let Some(usage) = session
-        .usage_snapshot
-        .as_ref()
-    {
+    if let Some(usage) = session.usage_snapshot.as_ref() {
         if let Some(obj) = response.as_object_mut() {
             obj.insert("usage".to_string(), usage.clone());
         }
@@ -53,10 +50,7 @@ fn restore_commands(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("commands").is_some() || response.get("availableCommands").is_some() {
         return;
     }
-    if let Some(commands) = session
-        .commands_snapshot
-        .as_ref()
-    {
+    if let Some(commands) = session.commands_snapshot.as_ref() {
         if let Some(obj) = response.as_object_mut() {
             obj.insert("commands".to_string(), commands.clone());
         }
