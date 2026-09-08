@@ -143,6 +143,12 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
             return Err(error.into());
         }
     };
+    let host_env = agent
+        .env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    runtime.set_host_tools_policy(&host_env);
     // 本地 client epoch 与远端 Session continuity 分开表达。Unknown 不迁移旧映射；
     // replace 后由有界 probe 收敛，Invalidated 直接清除，Preserved 才直接迁移。
     let activation = ClientActivation {

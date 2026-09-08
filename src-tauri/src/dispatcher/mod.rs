@@ -1110,7 +1110,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let hook_bridge = handles.hook_bridge.clone();
     let pending_permissions = runtime.pending_permissions.clone();
     let terminal_registry = runtime.terminal_registry.clone();
-    let host_tools_policy = runtime.host_tools_policy;
+    let host_tools_policy = runtime.host_tools_policy.clone();
     let agent_id = handles
         .runtimes
         .all_with_ids()
@@ -1481,7 +1481,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             ) {
                 if let Some(request_id) = raw.id {
                     if host_tools_policy
-                        .allows_request(raw.method.as_deref().unwrap_or_default())
+                        .lock()
+                        .map(|policy| {
+                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                        })
+                        .unwrap_or(false)
                     {
                         handle_terminal_request(
                             &acp,

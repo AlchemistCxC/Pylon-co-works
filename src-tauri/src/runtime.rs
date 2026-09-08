@@ -64,7 +64,7 @@ pub struct AgentRuntime {
     /// bump 注销。dispatcher 对已注册 source 走 Channel 推送并跳过 WebView 广播（A3）。
     pub update_channels: Arc<UpdateChannelMap>,
     pub terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
-    pub host_tools_policy: crate::acp::host_tools::HostToolsPolicy,
+    pub host_tools_policy: Arc<Mutex<crate::acp::host_tools::HostToolsPolicy>>,
 }
 
 impl AgentRuntime {
@@ -85,8 +85,21 @@ impl AgentRuntime {
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
             terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),
-            host_tools_policy: crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
+            host_tools_policy: Arc::new(Mutex::new(
+                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
+            )),
         })
+    }
+
+    pub fn set_host_tools_policy(&self, runtime_env: &std::collections::BTreeMap<String, String>) {
+        let policy = crate::acp::host_tools::HostToolsPolicy::parse_env(runtime_env)
+            .unwrap_or_else(|error| {
+                tracing::warn!("invalid host tools policy; using agent self-hosted: {error}");
+                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+            });
+        if let Ok(mut current) = self.host_tools_policy.lock() {
+            *current = policy;
+        }
     }
 
     /// A1：注册 source 的流式更新通道（send_message 携带 Channel 时调用）。
@@ -272,6 +285,24 @@ mod tests {
             b.client_generation
                 .load(std::sync::atomic::Ordering::Acquire),
             0
+        );
+    }
+
+    #[test]
+    fn host_tools_policy_defaults_closed_and_accepts_explicit_host_mode() {
+        let runtime = AgentRuntime::new_disconnected();
+        assert_eq!(
+            *runtime.host_tools_policy.lock().unwrap(),
+            crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+        );
+        let env = std::collections::BTreeMap::from([(
+            crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
+            "host".to_string(),
+        )]);
+        runtime.set_host_tools_policy(&env);
+        assert_eq!(
+            *runtime.host_tools_policy.lock().unwrap(),
+            crate::acp::host_tools::HostToolsPolicy::HostStrict
         );
     }
 
