@@ -1471,7 +1471,13 @@ for line in sys.stdin:
         bridge.sync_registry(&serde_json::json!({
             "hooks": ["message.user.beforeSend"]
         }));
-        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+        // 桥应答 responder。**必须用 tokio unbounded 信道，不得用 std mpsc**：
+        // #[tokio::test] 默认 current_thread 单线程 runtime，spawn 出去的任务若
+        // 在 rx.recv()（std 阻塞）上等待，会钉死唯一工作线程——reader 任务永远
+        // 无法被 poll（session/new 响应读不到）、超时定时器也无法触发，整个测试
+        // 进程死锁（2026-09-07 实测：本测试曾因此挂死，CPU 0%）。tokio 信道
+        // recv 是真 await，让出线程。生产无此问题（前端 dispatcher 在独立进程）。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
         window.listen(
             crate::event_names::PYLON_HOOK_REQUEST,
             move |event| {
@@ -1482,7 +1488,7 @@ for line in sys.stdin:
         );
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let serde_json::Value::Object(ref mut map) = event {

@@ -41,6 +41,9 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/infrastructure/events/canonicalEventRepository.ts',
   'src/sheets/agent-workbench/agentWorkbenchLifecycle.ts',
   'src/infrastructure/skin/skinHostPorts.ts',
+  // P55-D1：kernel hook 桥 dispatcher——回程 invoke（pylon_hook_respond 等），
+  // 与 pylonCliBridge.ts 同范式（桥回程是 infrastructure 合法 invoke 点）。
+  'src/infrastructure/hooks/hookBridgeDispatcher.ts',
   'src/obs04/devTrigger.ts',
   'src/plugin-runtime/pluginCompositionRoot.ts',
   'src/plugin-runtime/process/processRuntimeServices.ts',

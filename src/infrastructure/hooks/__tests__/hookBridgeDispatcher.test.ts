@@ -126,7 +126,9 @@ describe('hookBridgeDispatcher（P55-D1）', () => {
   it('fail-closed：锚点名不在词表 → 不进 HookRuntime', async () => {
     useIdentityStore.setState({ sessions: [makeSession({ hooks: ['p.kernel'] })] })
     dispose = await installPylonHookBridge()
-    listeners.get('pylon:hook-request')?.(hookRequest({ hook: 'agent.chunk' }))
+    // 反例必须是词表外名字：'agent.chunk' 自 D4（7472b73）起已入 HOOK_NAMES，
+    // 词表扩张后沿用旧反例会让用例反向断言失败。
+    listeners.get('pylon:hook-request')?.(hookRequest({ hook: 'bogus.anchor.name' }))
     await vi.waitFor(() => expect(respondCalls()).toHaveLength(1))
     expect(hookRuntimeMock.handlerLog).toHaveLength(0)
     expect(respondCalls()[0]).toMatchObject({ result: { action: 'continue' } })
