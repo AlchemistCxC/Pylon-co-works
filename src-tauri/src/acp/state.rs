@@ -126,6 +126,18 @@ impl AcpSessionState {
                     return Vec::new();
                 };
                 let title = string(update, &["title", "name"]);
+                self.tools.insert(id.clone(), update.clone().into());
+                Some(AcpStateDelta::ToolStarted { id, title })
+            }
+            "tool_call_update" => {
+                let Some(id) = string(update, &["toolCallId", "tool_call_id", "id"]) else {
+                    return Vec::new();
+                };
+                let status = string(update, &["status"]);
+                let output = update
+                    .get("rawOutput")
+                    .or_else(|| update.get("raw_output"))
+                    .cloned();
                 let mut next: serde_json::Value = update.clone().into();
                 if let Some(previous) = self.tools.get(&id) {
                     let old = previous
@@ -141,18 +153,6 @@ impl AcpSessionState {
                     }
                 }
                 self.tools.insert(id.clone(), next);
-                Some(AcpStateDelta::ToolStarted { id, title })
-            }
-            "tool_call_update" => {
-                let Some(id) = string(update, &["toolCallId", "tool_call_id", "id"]) else {
-                    return Vec::new();
-                };
-                let status = string(update, &["status"]);
-                let output = update
-                    .get("rawOutput")
-                    .or_else(|| update.get("raw_output"))
-                    .cloned();
-                self.tools.insert(id.clone(), update.clone().into());
                 Some(AcpStateDelta::ToolUpdated { id, status, output })
             }
             "usage_update" => {
