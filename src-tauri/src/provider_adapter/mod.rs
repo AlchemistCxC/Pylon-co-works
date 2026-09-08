@@ -29,6 +29,25 @@ pub fn field(provider: &str, field: &str) -> Result<Option<Value>, String> {
     Ok(value)
 }
 
+pub fn client_capabilities(provider: &str, mut base: Value) -> Result<Value, String> {
+    let Some(extra) = field(provider, "clientCapabilities")? else { return Ok(base) };
+    let (Some(base_object), Some(extra_object)) = (base.as_object_mut(), extra.as_object()) else {
+        return Err("clientCapabilities adaptation must be an object".into());
+    };
+    for (key, value) in extra_object {
+        if key == "_meta" || key == "meta" {
+            let base_meta = base_object.entry("_meta").or_insert_with(|| Value::Object(Default::default()));
+            let (Some(base_meta), Some(extra_meta)) = (base_meta.as_object_mut(), value.as_object()) else {
+                return Err("clientCapabilities._meta adaptation must be an object".into());
+            };
+            base_meta.extend(extra_meta.clone());
+        } else {
+            base_object.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +64,12 @@ mod tests {
     fn empty_provider_is_empty_and_unknown_field_fails_closed() {
         assert!(policy("peri").unwrap().is_none());
         assert!(field("claude-code", "providerSpecificHack").is_err());
+    }
+
+    #[test]
+    fn client_capabilities_merge_preserves_default_meta() {
+        let result = client_capabilities("claude-code", serde_json::json!({"_meta": {"peri.replay": true}})).unwrap();
+        assert_eq!(result["_meta"]["peri.replay"], true);
+        assert_eq!(result["_meta"]["subagent-transcript"], true);
     }
 }
