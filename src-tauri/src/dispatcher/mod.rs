@@ -1571,27 +1571,38 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         })
                         .unwrap_or(false);
                     if allowed {
-                        let roots = host_tools_policy
+                        let strict = host_tools_policy
                             .lock()
-                            .ok()
-                            .and_then(|p| match *p {
-                                crate::acp::host_tools::HostToolsPolicy::HostStrict => raw
-                                    .params
-                                    .as_ref()
-                                    .and_then(|v| v.get("cwd"))
-                                    .and_then(serde_json::Value::as_str)
-                                    .map(|p| vec![std::path::PathBuf::from(p)]),
-                                _ => Some(Vec::new()),
+                            .map(|p| {
+                                matches!(*p, crate::acp::host_tools::HostToolsPolicy::HostStrict)
                             })
+                            .unwrap_or(false);
+                        let roots = raw
+                            .params
+                            .as_ref()
+                            .and_then(|v| v.get("cwd"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(|p| vec![std::path::PathBuf::from(p)])
                             .unwrap_or_default();
-                        handle_filesystem_request(
-                            &acp,
-                            raw.method.as_deref().unwrap_or_default(),
-                            request_id,
-                            raw.params.as_ref(),
-                            crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
-                        )
-                        .await;
+                        if strict && roots.is_empty() {
+                            let responder = { acp.lock().await.responder() };
+                            let _ = responder
+                                .respond_error(
+                                    request_id,
+                                    -32602,
+                                    "HostStrict filesystem requests require cwd",
+                                )
+                                .await;
+                        } else {
+                            handle_filesystem_request(
+                                &acp,
+                                raw.method.as_deref().unwrap_or_default(),
+                                request_id,
+                                raw.params.as_ref(),
+                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
+                            )
+                            .await;
+                        }
                     } else {
                         let responder = { acp.lock().await.responder() };
                         let _ = responder
