@@ -43,6 +43,8 @@ pub enum AcpStateDelta {
     Usage {
         used: u64,
         size: Option<u64>,
+        input: Option<u64>,
+        output: Option<u64>,
     },
     Plan {
         entries: serde_json::Value,
@@ -164,8 +166,16 @@ impl AcpSessionState {
                     return Vec::new();
                 };
                 let size = update.get("size").and_then(serde_json::Value::as_u64);
+                let input = update
+                    .get("_meta")
+                    .and_then(|meta| meta.get("inputTokens"))
+                    .and_then(serde_json::Value::as_u64);
+                let output = update
+                    .get("_meta")
+                    .and_then(|meta| meta.get("outputTokens"))
+                    .and_then(serde_json::Value::as_u64);
                 self.usage = Some((used, size));
-                Some(AcpStateDelta::Usage { used, size })
+                Some(AcpStateDelta::Usage { used, size, input, output })
             }
             "plan" => {
                 let entries = update
@@ -293,7 +303,9 @@ mod tests {
             )),
             vec![AcpStateDelta::Usage {
                 used: 7,
-                size: Some(100)
+                size: Some(100),
+                input: None,
+                output: None,
             }]
         );
         assert_eq!(

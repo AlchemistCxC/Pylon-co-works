@@ -139,9 +139,15 @@ fn apply_update_event_with_pet_policy(
     // adapter only mirrors reducer-owned scalar domains into the live session.
     for delta in deltas {
         match delta {
-            crate::acp::AcpStateDelta::Usage { used, size } => {
+            crate::acp::AcpStateDelta::Usage { used, size, input, output } => {
                 session.tokens_total = used;
                 session.context_size = size.unwrap_or(0);
+                if let Some(input) = input {
+                    session.tokens_in = input;
+                }
+                if let Some(output) = output {
+                    session.tokens_out = output;
+                }
             }
             // Mode/model remain handled by the existing event transaction below;
             // consuming them here would suppress its change detection.
