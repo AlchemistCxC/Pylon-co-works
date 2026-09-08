@@ -231,6 +231,7 @@ pub(crate) fn prepared_line(backend: &PreparedRpcBackend) -> &str {
 pub(crate) async fn send_keep_rx_prepared(
     prepared: PreparedRpc,
 ) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
+    let pylon_id = prepared.id;
     match prepared.backend {
         PreparedRpcBackend::Legacy(legacy) => {
             let LegacyPreparedRpc {
@@ -269,7 +270,7 @@ pub(crate) async fn send_keep_rx_prepared(
             tokio::spawn(async move {
                 let raw = match response_rx.await {
                     Ok(Ok(value)) => RawMessage {
-                        id: None,
+                        id: Some(super::RequestId::Number(pylon_id)),
                         method: None,
                         kind: super::AcpKind::Response,
                         result: Some(value),
@@ -277,7 +278,7 @@ pub(crate) async fn send_keep_rx_prepared(
                         error: None,
                     },
                     Ok(Err(error)) => RawMessage {
-                        id: None,
+                        id: Some(super::RequestId::Number(pylon_id)),
                         method: None,
                         kind: super::AcpKind::Response,
                         result: None,
