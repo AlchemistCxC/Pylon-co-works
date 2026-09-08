@@ -101,6 +101,32 @@ impl ResponderHandle {
     }
 }
 
+/// D11 ③：连接引擎选择（`connect_with_generation` 构造时读一次，运行中不得切换）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AcpEngineKind {
+    Legacy,
+    Sdk,
+}
+
+impl AcpEngineKind {
+    /// 解析 `PYLON_ACP_ENGINE` 值：缺省 `legacy`；**非法值直接报错，不回退**。
+    /// 旧实现将来会整体删除，不留「静默回退 legacy」这类需要清理的路径。
+    pub(crate) fn parse(value: Option<&str>) -> Result<Self, AcpError> {
+        match value {
+            None | Some("legacy") => Ok(Self::Legacy),
+            Some("sdk") => Ok(Self::Sdk),
+            Some(other) => Err(AcpError::Child(format!(
+                "invalid PYLON_ACP_ENGINE={other}: expected legacy|sdk"
+            ))),
+        }
+    }
+
+    /// 从环境变量读取（唯一入口；未设置 → legacy）。
+    pub(crate) fn from_env() -> Result<Self, AcpError> {
+        Self::parse(std::env::var("PYLON_ACP_ENGINE").ok().as_deref())
+    }
+}
+
 /// 引擎连接配置（仅用于日志/诊断，不参与 canonical 身份）。
 #[derive(Debug, Clone)]
 pub(crate) struct SdkEngineConfig {
@@ -758,5 +784,19 @@ mod tests {
                 operation: "send_keep_rx"
             }
         ));
+    }
+
+    /// D11 ③：flag 解析——缺省 legacy，非法值报错（**不回退**）。
+    #[test]
+    fn acp_engine_kind_parsing_rejects_invalid() {
+        assert_eq!(AcpEngineKind::parse(None), Ok(AcpEngineKind::Legacy));
+        assert_eq!(
+            AcpEngineKind::parse(Some("legacy")),
+            Ok(AcpEngineKind::Legacy)
+        );
+        assert_eq!(AcpEngineKind::parse(Some("sdk")), Ok(AcpEngineKind::Sdk));
+        assert!(AcpEngineKind::parse(Some("SDK")).is_err());
+        assert!(AcpEngineKind::parse(Some("")).is_err());
+        assert!(AcpEngineKind::parse(Some("sacp")).is_err());
     }
 }
