@@ -126,7 +126,21 @@ impl AcpSessionState {
                     return Vec::new();
                 };
                 let title = string(update, &["title", "name"]);
-                self.tools.insert(id.clone(), update.clone().into());
+                let mut next: serde_json::Value = update.clone().into();
+                if let Some(previous) = self.tools.get(&id) {
+                    let old = previous
+                        .get("rawOutput")
+                        .or_else(|| previous.get("raw_output"));
+                    let key = if next.get("rawOutput").is_some() {
+                        "rawOutput"
+                    } else {
+                        "raw_output"
+                    };
+                    if let (Some(old), Some(new)) = (old, next.get_mut(key)) {
+                        append_output(old, new);
+                    }
+                }
+                self.tools.insert(id.clone(), next);
                 Some(AcpStateDelta::ToolStarted { id, title })
             }
             "tool_call_update" => {
@@ -232,6 +246,22 @@ fn string(map: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Op
     })
 }
 
+fn append_output(previous: &serde_json::Value, next: &mut serde_json::Value) {
+    match (previous, &*next) {
+        (serde_json::Value::Array(old), serde_json::Value::Array(new)) => {
+            let mut combined = old.clone();
+            combined.extend(new.iter().cloned());
+            *next = serde_json::Value::Array(combined);
+        }
+        (serde_json::Value::String(old), serde_json::Value::String(new)) => {
+            let mut combined = old.clone();
+            combined.push_str(new);
+            *next = serde_json::Value::String(combined);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +327,21 @@ mod tests {
             error: None,
         };
         assert!(state.apply(&response).is_empty());
+    }
+
+    #[test]
+    fn tool_updates_append_output_for_existing_call() {
+        let mut state = AcpSessionState::default();
+        state.apply(&update(serde_json::json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t1",
+            "rawOutput": "a"
+        })));
+        state.apply(&update(serde_json::json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t1",
+            "rawOutput": "b"
+        })));
+        assert_eq!(state.tools["t1"]["rawOutput"], "ab");
     }
 }
