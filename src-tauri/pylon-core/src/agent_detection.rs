@@ -831,6 +831,36 @@ async fn version_probe(
 
 type ConfiguredRuntimes = HashMap<String, (String, String, Vec<String>)>;
 
+/// Codeg's read-only local-version path: consult npm global metadata before
+/// falling back to the catalog-controlled executable probe. No install or
+/// cache mutation is performed.
+pub async fn detect_local_version(provider: &str) -> Option<String> {
+    let rule = crate::agent_catalog::detection_profiles().ok()?.into_iter()
+        .find(|rule| rule.provider == provider)?;
+    if let Some(manager) = &rule.package_manager {
+        if matches!(manager.kind, crate::agent_catalog::CatalogPackageManagerKind::Npx) {
+            if let Some(package) = manager.package.as_deref() {
+                if let Some(version) = npm_global_version(package).await { return Some(version); }
+            }
+        }
+    }
+    let located = find_rule(&rule, None).into_iter().next()?;
+    let budget = Duration::from_secs(2);
+    version_probe(&rule.detector_id, located.executable, &rule.version_args, budget)
+        .await.version
+}
+
+async fn npm_global_version(package: &str) -> Option<String> {
+    let mut command = tokio::process::Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    command.args(["list", "-g", package, "--json", "--depth=0"])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(5), command.output()).await.ok()?.ok()?;
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let key = package.split('@').next().unwrap_or(package);
+    let value = document.get("dependencies")?.get(key)?.get("version")?.as_str()?;
+    extract_version_token(value)
+}
+
 pub async fn detect_agent_runtime_candidates_inner(
     options: AgentDetectionOptions,
     configured: &ConfiguredRuntimes,
