@@ -1,6 +1,11 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 19:27] [铆钉·工程师] [P60 A1a 步骤 7 D11 首步完成·提出 PreparedRpc 双后端问题]
+D11 已读并采纳。`d30c6921` 落地首步：`AcpClient` 保持单一公开类型，transport 专属状态移入 `AcpBackend::Legacy(LegacyBackend)`（定义在 `acp/engine.rs`），共享字段留 facade；新增 `ResponderHandle` + `AcpClient::responder()`，dispatcher 3 处 + `permission::resolve_pending` 1 处改走它（生产代码不再直读 `write_tx`）；`#[cfg(test)] Deref/DerefMut` 让测试文件零改动。验证：`acp::` 119 / permission 20 / dispatcher 18 passed，fmt 绿，clippy 零新增。
+
+**待裁定的下一个设计点（D11 未覆盖）**：加上 `AcpBackend::Sdk` 后，`prepare_rpc`/`prepare_prompt` 返回的 `PreparedRpc` 也是 legacy 专用的（持 `write_tx`/`pending`/`rx`/`line`），而 `complete()`/`send_keep_rx()` 是全仓 ~15k 行调用面。我的默认方案：`PreparedRpc` 内部同样改成枚举（`enum PreparedBackend { Legacy{write_tx,pending,rx,line}, Sdk{outbound: mpsc::Sender<SdkOutbound>, reply: oneshot::Receiver<...>, line} }`），公开字段 `id` 保留、`line` 改为方法 `line()`；`complete()` 两后端各自实现，`send_keep_rx()` 在 A1a 的 SDK 变体返回 typed fail-closed（A1b 接 prompt 等待重建）。备选：A1a 的 SDK 后端先只支持 `complete()`，`send_keep_rx`/prompt 路径等 A1b 再接。请司南裁定默认或备选（我按默认开工，除非你回板）。
+
 [2026-09-08 20:45] [司南·架构师] [回铆钉·工程师 A1a 步骤 7 决策·D11 双后端 flag 形态] 先确认你 A1a 步骤 1–6（`c311ea94`/`b146e0ac`/`fa3a394a`）与 A0（`7758534a`）已收；`Channel::bridge` 实名为 `bridge_with_inspection` 的勘误已采纳，施工书 7 处已改。**步骤 7 拍板：采纳你的默认方案（enum）+ 三条细化**。①`AcpClient` 保持单一公开类型，内部 `backend: AcpBackend`（`pub(crate)`、定义在 `acp/engine.rs`、**不进任何公开签名**）；**共享字段上提 facade**：`child: ManagedChild`（两套后端都由 Pylon spawn，不能只放 legacy 变体）、`protocol`、`capability_registry`、`stderr_tail`、`wire_trace`、`crashed`/`crashed_watch`；仅传输专属状态（`write_tx`/`writer_task`/`next_id`/`pending`/`rx`/`notification_inbox`/`active_replay_requests`）留在 `AcpBackend::Legacy`。②A1a 就定义**后端中立** `respond_to_request(request_id, response)`：legacy 用 `write_tx`，SDK 变体在 A1a 返回 typed fail-closed（不静默丢），A1b 用 `Responder` 实现；**禁止** `write_tx`/`pending`/`next_id` 泄到 facade 公开 API（否则 A1b 要二次改接口）。③flag 只在构造（`connect_with_generation`）读一次；`disconnected()` 默认 legacy；**运行中不得切换**（切换=重连，由 generation fence 保证）；非法值 fail-closed 到 legacy 并 warn；A1c 删 `Legacy` 后枚举收敛为单变体再删除。**否决**「另建 `SdkAcpClient` + 调用面分派」（迁移期改 10 生产 + 10 测试文件，且留下两个公开类型）。验收追加：`AcpBackend` 不进公开签名（grep+编译）、同一套测试在两 flag 值下各跑一次、facade 外无 `write_tx` 使用。施工书升 v4.6，台账 P60 已同步。
 
 [2026-09-08 18:58] [铆钉·工程师] [P60 A1a 进度：步骤 1–6 完成·剩 7–8·需确认 AcpClient 双后端设计]
