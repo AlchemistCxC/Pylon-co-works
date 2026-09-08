@@ -224,7 +224,9 @@ impl AcpWireHub {
             records.dequeue();
         }
         records.enqueue(Arc::new(record));
-        if direction == WireDirection::AgentToPylon {
+        if direction == WireDirection::AgentToPylon
+            && msg_val.get("method").and_then(|value| value.as_str()).is_some()
+        {
             if let Ok(mut ordinals) = self.inbound_ordinals.lock() {
                 if ordinals.len() >= self.capacity { ordinals.pop_front(); }
                 ordinals.push_back(seq);
@@ -524,6 +526,14 @@ mod tests {
         hub.record_canonical_commit(7, value.clone());
         assert_eq!(hub.correlate(7), Some(value));
         assert_eq!(hub.correlate(8), None);
+    }
+
+    #[test]
+    fn inbound_ordinal_does_not_consume_response_as_notification() {
+        let hub = hub();
+        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","id":1,"result":{}}));
+        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}));
+        assert_eq!(hub.take_inbound_ordinal(), Some(2));
     }
 
     #[test]
