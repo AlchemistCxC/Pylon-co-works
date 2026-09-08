@@ -11,6 +11,42 @@ pub const MAX_READ_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_WRITE_BYTES: usize = 2 * 1024 * 1024;
 pub const SLOW_OPERATION_MS: u128 = 200;
 
+/// Codeg's strict host policy: both read and write operations are confined to
+/// the canonical workspace root.  Runtime execution remains owned by the
+/// existing Pylon boundary; this type carries only the upstream policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsAccessPolicy {
+    read_roots: Vec<PathBuf>,
+    write_roots: Vec<PathBuf>,
+}
+
+impl FsAccessPolicy {
+    pub fn strict(workspace_root: &Path) -> Result<Self, String> {
+        let root = std::fs::canonicalize(workspace_root)
+            .map_err(|e| format!("cannot access {}: {e}", workspace_root.display()))?;
+        Ok(Self {
+            read_roots: vec![root.clone()],
+            write_roots: vec![root],
+        })
+    }
+
+    pub fn read_roots(&self) -> &[PathBuf] {
+        &self.read_roots
+    }
+
+    pub fn write_roots(&self) -> &[PathBuf] {
+        &self.write_roots
+    }
+
+    pub fn check_read(&self, path: &Path) -> Result<(), String> {
+        ensure_path_allowed(path, &self.read_roots, false)
+    }
+
+    pub fn check_write(&self, path: &Path) -> Result<(), String> {
+        ensure_path_allowed(path, &self.write_roots, true)
+    }
+}
+
 pub fn read_size_allowed(size: u64) -> bool {
     size <= MAX_FILE_SIZE_BYTES
 }
@@ -76,6 +112,22 @@ mod tests {
             ensure_path_allowed(&root.join("sibling"), &[allowed.join("not-root")], true).is_err()
         );
         assert!(ensure_path_allowed(&file, &[], true).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn strict_policy_uses_one_canonical_workspace_root_for_reads_and_writes() {
+        let root = std::env::temp_dir().join(format!("pylon-fs-strict-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let policy = FsAccessPolicy::strict(&root).unwrap();
+        assert_eq!(policy.read_roots(), policy.write_roots());
+        assert!(policy.check_write(&root.join("new.txt")).is_ok());
+        assert!(policy.check_read(&root).is_ok());
+        let outside = root.with_file_name(format!(
+            "{}-outside",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(policy.check_write(&outside.join("new.txt")).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
