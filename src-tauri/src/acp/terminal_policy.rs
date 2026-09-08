@@ -1,6 +1,7 @@
 //! Upstream terminal runtime limits. Execution and process ownership remain in
 //! Pylon's existing terminal boundary.
 
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const DEFAULT_OUTPUT_BYTE_LIMIT: u64 = 1_000_000;
@@ -10,6 +11,27 @@ pub const KILL_REPORT_BUDGET: Duration = Duration::from_secs(5);
 pub const WAIT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(1);
 pub const WAIT_ERROR_BUDGET: Duration = Duration::from_secs(30);
 pub const WAIT_ERROR_IDLE_RETRY: Duration = Duration::from_secs(5);
+
+/// Pylon-owned DTO equivalent of codeg's protocol `TerminalExitStatus`.
+/// Kept at the adapter boundary until the ACP schema exposes this extension.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalExitStatus {
+    pub exit_code: Option<u32>,
+    pub signal: Option<String>,
+}
+
+pub fn map_exit_status(status: std::process::ExitStatus) -> TerminalExitStatus {
+    #[cfg(unix)]
+    let signal =
+        std::os::unix::process::ExitStatusExt::signal(&status).map(|value| value.to_string());
+    #[cfg(not(unix))]
+    let signal = None;
+    TerminalExitStatus {
+        exit_code: status.code().and_then(|value| u32::try_from(value).ok()),
+        signal,
+    }
+}
 
 pub fn output_limit(requested: Option<usize>) -> usize {
     requested.unwrap_or(DEFAULT_OUTPUT_BYTE_LIMIT as usize)
@@ -137,6 +159,15 @@ mod tests {
         assert_eq!(
             shell_wrapper_args("/bin/sh", "printf hi"),
             vec!["-c", "printf hi"]
+        );
+    }
+
+    #[test]
+    fn exit_status_dto_preserves_unknown_code_and_signal_shape() {
+        let status = TerminalExitStatus::default();
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({"exitCode":null,"signal":null})
         );
     }
 }
