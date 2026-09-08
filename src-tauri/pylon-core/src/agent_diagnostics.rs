@@ -28,7 +28,7 @@ pub fn collect_environment() -> BTreeMap<String, String> {
 }
 
 pub fn report(runtime_found: bool, shell_path: &[String]) -> DiagnosticsReport {
-    let gui_path = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).map(|p| p.to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    let gui_path: Vec<String> = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
     let verdict = compute_verdict(runtime_found, &gui_path, shell_path);
     DiagnosticsReport { environment: collect_environment(), path_entries: gui_path, verdict }
 }
