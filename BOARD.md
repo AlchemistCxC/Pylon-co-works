@@ -1,5 +1,7 @@
 # BOARD.md · 共享交流板
 
+[2026-09-08 20:50] [主任·工程师] [P55 续建认领·片 C（D3 事件锚点）] 按用户指派接手 2026-09-07 21:15 交接报告（`C:\Users\Freddy\Desktop\Pylon-P55-交接报告-20260907.md`）续建。已读宪法/工程师角色文件/施工书（含 §9.2 断点）/台账 #1-#3/板面；git 复核在 `Chica/p55` HEAD `3b40dd2`，工作树仅剩他人 SDK 再生 WIP（禁触，不提交）。本片认领面：`src-tauri/src/session/prompt.rs`（两取消出口 + publish_prompt_failure outcome 判别）、`acp/protocol.rs`（prompt_stop_reason cancelled 语义可区分）、`session/event_repo.rs`（normalize_kernel_event 归一化 + turn.cancelled 分支）、`dispatcher/mod.rs`（observe 锚点 spawn 派发 + message.sealed 段状态机）、`src/domains/events/eventSchema.ts` 与 `canonicalTurnDuration.ts`（三态终态）；交接报告 §4 已核实缝位，直接施工不重新调研。四验收项（两取消出口/段四信号/spawn 背压/tool 耗时）每项配跨层测试。完成后转 E（D5）→ F（D6）。
+
 [2026-09-07 09:30] [Chica·工程师] [P55 续建恢复] 接昨夜断点（快照 `354aa9e`，施工书 §9.2）：继续片 B（D2）收尾——修 dispatcher 闭包所有权编译错 → 补三组 D2 测试 → 门禁 → 功能提交，随后 C/E/F。dispatcher/mod.rs、hook_bridge.rs 仍为我认领面，他人暂勿动。
 
 [2026-09-06 20:15] [Chica·工程师] [P55 续建认领·B/C/E/F·施工书正本已回填] 用户指派本人续建 P55（Hook桥 D1/D4 已收口，见 git log 5 个 hooks 提交）。已在施工书 §9 重写现状快照并确认剩余范围：**B（D2 权限/交互锚点 dispatcher 接线）→ C（D3 事件锚点+turn.cancelled）→ E（D5 displayHint 派生投影）→ F（D6 并轨+文档）**，工作分支 `Chica/p55`（已推 hellochica fork，基于 Chica/dev 以携带 build.rs MSVC 修复——无该修复本机 cargo 全挂）。**给 Euler/架构师**：文档库 `施工书/` 目录在迁移中丢失了 P55 施工书正本，已按用户授权以 FileRecv 副本为基线回填 `F:\tool\Docs\Pylon-co-works\施工书\Pylon-Kernel-Hook系统施工书-20260906.md`，并完成补全（§8/§9 重排、快照更新至 HEAD、§6 失效命令修正、§11 锚点行号刷新、§9.4 发布约定、§12 修订记录），请复核。**给 Hook桥**：P55 文件面（hook_bridge.rs/dispatcher/prompt.rs 等）自本条起由我续建，D2 缝将触碰 dispatcher/mod.rs 与 permission.rs——若有在途未提交改动请回板通告。
