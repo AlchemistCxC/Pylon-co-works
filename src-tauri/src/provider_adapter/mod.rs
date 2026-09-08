@@ -17,6 +17,15 @@ pub struct ClaudePolicy {
     pub jetbrains_air_session_failure: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterRelation {
+    pub native_cmd: String,
+    pub native_label: String,
+    pub shared_config_dir: String,
+    pub extra_dirs: Vec<String>,
+    pub docs_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeId { GrokExtQuestions, PiSelectAsk, GrokExitPlan, CodexElicitation }
 
@@ -71,18 +80,26 @@ pub fn client_capabilities(provider: &str, mut base: Value) -> Result<Value, Str
     Ok(base)
 }
 
+pub fn adapter_relation(provider: &str) -> Result<Option<AdapterRelation>, String> {
+    let Some(value) = field(provider, "adapterRelation")? else { return Ok(None) };
+    let object = value.as_object().ok_or("adapterRelation must be an object")?;
+    let text = |key: &str| object.get(key).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("adapterRelation.{key} missing"));
+    let extra_dirs = object.get("extraDirs").and_then(Value::as_array).ok_or("adapterRelation.extraDirs missing")?.iter().map(|item| item.as_str().map(str::to_owned).ok_or("adapterRelation.extraDirs entry must be string")).collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(AdapterRelation { native_cmd: text("nativeCmd")?, native_label: text("nativeLabel")?, shared_config_dir: text("sharedConfigDir")?, extra_dirs, docs_url: object.get("docsUrl").and_then(Value::as_str).map(str::to_owned) }))
+}
+
 pub fn claude_policy(provider: &str) -> Result<Option<ClaudePolicy>, String> {
     let Some(policy) = policy(provider)? else { return Ok(None) };
-    let relation = policy.adapter_relation.ok_or("adaptation.adapterRelation missing")?;
+    let relation = adapter_relation(provider)?.ok_or("adaptation.adapterRelation missing")?;
     let gates = policy.version_gates.ok_or("adaptation.versionGates missing")?;
     let caps = policy.client_capabilities.ok_or("adaptation.clientCapabilities missing")?;
     let string_field = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("adaptation field {key} missing"));
     let meta = caps.get("meta").ok_or("adaptation.clientCapabilities.meta missing")?;
     let air = meta.get("jetbrains.air").and_then(Value::as_object);
     Ok(Some(ClaudePolicy {
-        native_cmd: string_field(&relation, "nativeCmd")?,
-        native_label: string_field(&relation, "nativeLabel")?,
-        shared_config_dir: string_field(&relation, "sharedConfigDir")?,
+        native_cmd: relation.native_cmd,
+        native_label: relation.native_label,
+        shared_config_dir: relation.shared_config_dir,
         steering_prompt_required_min_version: string_field(&gates, "steeringPromptRequiredMinVersion")?,
         subagent_transcript: meta.get("subagent-transcript").and_then(Value::as_bool).unwrap_or(false),
         jetbrains_air_session_failure: air.is_some_and(|value| value.get("capabilities").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item.as_str() == Some("sessionFailure")))),
