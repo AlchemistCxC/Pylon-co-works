@@ -60,6 +60,7 @@ fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
         crate::acp::AcpError::ReplayStreamClosed => "replay_transport_error",
         crate::acp::AcpError::ReplayLoadInProgress => "replay_load_in_progress",
         crate::acp::AcpError::Rpc(_) => "rpc_error",
+        crate::acp::AcpError::EngineUnsupported { .. } => "protocol_error",
         crate::acp::AcpError::Connect(_) => "connect_error",
         crate::acp::AcpError::Child(_) => "transport_error",
     }

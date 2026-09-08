@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use super::engine::{AcpBackend, LegacyBackend, ResponderHandle};
+use super::engine::{
+    AcpBackend, LegacyBackend, LegacyPreparedRpc, PreparedRpcBackend, ResponderHandle,
+};
 
 pub struct AcpClient {
     child: ManagedChild,
@@ -233,12 +235,14 @@ impl AcpClient {
         let (id, line) = self.register_request(method, &params, Some(tx))?;
         Ok(PreparedRpc {
             id,
-            line,
-            write_tx: self.legacy().write_tx.clone(),
-            rx,
-            pending: self.legacy().pending.clone(),
-            crashed: self.crashed.clone(),
-            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
+                write_tx: self.legacy().write_tx.clone(),
+                pending: self.legacy().pending.clone(),
+                rx,
+                crashed: self.crashed.clone(),
+                line,
+                rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            }),
         })
     }
 
@@ -268,12 +272,14 @@ impl AcpClient {
         let (id, line) = self.register_request(METHOD_SESSION_PROMPT, &params, Some(tx))?;
         Ok(PreparedRpc {
             id,
-            line,
-            write_tx: self.legacy().write_tx.clone(),
-            rx,
-            pending: self.legacy().pending.clone(),
-            crashed: self.crashed.clone(),
-            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
+                write_tx: self.legacy().write_tx.clone(),
+                pending: self.legacy().pending.clone(),
+                rx,
+                crashed: self.crashed.clone(),
+                line,
+                rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            }),
         })
     }
 

@@ -604,7 +604,7 @@ for line in sys.stdin:
                 vec![serde_json::json!({"type":"text","text":"hello"})],
             )
             .expect("prompt must serialize");
-        assert!(rpc.line.contains("session/prompt"));
+        assert!(rpc.line().contains("session/prompt"));
         let request_id = rpc.id;
         let mut response_rx = rpc
             .send_keep_rx()
@@ -1494,15 +1494,15 @@ print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=Tr
                 Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
             let crashed = Arc::new(AtomicBool::new(true));
             let (_tx, rx) = oneshot::channel();
-            let rpc = PreparedRpc {
-                id: 7,
-                line: "test-line".to_string(),
+            let rpc = PreparedRpc::legacy_for_test(
+                7,
+                "test-line".to_string(),
                 write_tx,
                 rx,
-                pending: pending.clone(),
+                pending.clone(),
                 crashed,
-                rpc_timeout: std::time::Duration::from_secs(30),
-            };
+                std::time::Duration::from_secs(30),
+            );
             let result = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
                 if complete {
                     rpc.complete().await.map(|_| ())

@@ -26,13 +26,15 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::{
     ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, UntypedMessage,
 };
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::client::{ClassifiedMessage, NotificationInbox};
 use super::error::AcpError;
-use super::jsonrpc::{Pending, PENDING_SHARDS};
+use super::jsonrpc::{remove_pending_from, Pending, PreparedRpc, PENDING_SHARDS};
+use super::transport::send_line;
 use super::wire_trace::{AcpWireHub, WireDirection};
+use super::RawMessage;
 
 /// D11：`AcpClient` 的内部后端。
 ///
@@ -123,6 +125,127 @@ pub(crate) enum SdkInbound {
     },
     /// 我方请求的响应。
     Response { error: Option<String> },
+}
+
+/// D12：`PreparedRpc` 的后端专属状态（`id` 与 `line` 由 facade 持有）。
+///
+/// `id` 是 **Pylon 相关 id**：legacy 恰等于 wire id（行为不变），SDK 用本地计数器；
+/// wire id 永不暴露。
+pub(crate) enum PreparedRpcBackend {
+    Legacy(LegacyPreparedRpc),
+    Sdk(SdkPreparedRpc),
+}
+
+pub(crate) struct LegacyPreparedRpc {
+    pub(crate) write_tx: mpsc::Sender<String>,
+    pub(crate) pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+    pub(crate) rx: oneshot::Receiver<RawMessage>,
+    pub(crate) crashed: Arc<AtomicBool>,
+    pub(crate) line: String,
+    pub(crate) rpc_timeout: std::time::Duration,
+}
+
+pub(crate) struct SdkPreparedRpc {
+    pub(crate) outbound: mpsc::Sender<SdkOutbound>,
+    pub(crate) method: String,
+    pub(crate) params: serde_json::Value,
+    pub(crate) line: String,
+    pub(crate) rpc_timeout: std::time::Duration,
+}
+
+/// D12：`line` 仅供测试读取（A1c 删除）。
+pub(crate) fn prepared_line(backend: &PreparedRpcBackend) -> &str {
+    match backend {
+        PreparedRpcBackend::Legacy(legacy) => &legacy.line,
+        PreparedRpcBackend::Sdk(sdk) => &sdk.line,
+    }
+}
+
+/// 发送请求行，成功时返回响应接收器（legacy 路径；SDK 后端 typed fail-closed）。
+pub(crate) async fn send_keep_rx_prepared(
+    prepared: PreparedRpc,
+) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
+    let PreparedRpcBackend::Legacy(legacy) = prepared.backend else {
+        return Err(AcpError::EngineUnsupported {
+            engine: "sdk",
+            operation: "send_keep_rx",
+        });
+    };
+    let LegacyPreparedRpc {
+        write_tx,
+        pending,
+        rx,
+        crashed,
+        line,
+        ..
+    } = legacy;
+    if let Err(error) = send_line(write_tx, line, &crashed).await {
+        remove_pending_from(&pending, prepared.id);
+        return Err(error);
+    }
+    // A6：发送后复检 crashed——reader EOF 先 store 后 drain。
+    if crashed.load(std::sync::atomic::Ordering::Acquire) {
+        remove_pending_from(&pending, prepared.id);
+        return Err(AcpError::ConnectionClosed);
+    }
+    Ok(rx)
+}
+
+/// 发送 + 等待匹配响应（legacy 走写通道/pending；SDK 走 outbound 泵 + `block_task`）。
+pub(crate) async fn complete_prepared(
+    prepared: PreparedRpc,
+) -> Result<serde_json::Value, AcpError> {
+    match prepared.backend {
+        PreparedRpcBackend::Legacy(legacy) => {
+            let LegacyPreparedRpc {
+                write_tx,
+                pending,
+                rx,
+                crashed,
+                line,
+                rpc_timeout,
+            } = legacy;
+            if let Err(error) = send_line(write_tx, line, &crashed).await {
+                remove_pending_from(&pending, prepared.id);
+                return Err(error);
+            }
+            if crashed.load(std::sync::atomic::Ordering::Acquire) {
+                remove_pending_from(&pending, prepared.id);
+                return Err(AcpError::ConnectionClosed);
+            }
+            let msg = match tokio::time::timeout(rpc_timeout, rx).await {
+                Ok(Ok(msg)) => msg,
+                Ok(Err(_)) => {
+                    remove_pending_from(&pending, prepared.id);
+                    return Err(AcpError::ConnectionClosed);
+                }
+                Err(_) => {
+                    remove_pending_from(&pending, prepared.id);
+                    return Err(AcpError::RpcTimeout);
+                }
+            };
+            if let Some(err) = msg.error {
+                return Err(AcpError::Rpc(format!("{}", err)));
+            }
+            Ok(msg.result.unwrap_or(serde_json::Value::Null))
+        }
+        PreparedRpcBackend::Sdk(sdk) => {
+            let (reply_tx, reply_rx) = oneshot::channel();
+            sdk.outbound
+                .send(SdkOutbound::Request {
+                    method: sdk.method,
+                    params: sdk.params,
+                    reply: reply_tx,
+                })
+                .await
+                .map_err(|_| AcpError::ConnectionClosed)?;
+            match tokio::time::timeout(sdk.rpc_timeout, reply_rx).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => Err(AcpError::ConnectionClosed),
+                Err(_) => Err(AcpError::RpcTimeout),
+            }
+        }
+    }
 }
 
 /// 一条出站请求/通知（由 Pylon 既有 `prepare_rpc`/`prepare_prompt` 语义产生）。
@@ -608,5 +731,32 @@ mod tests {
 
         bridge.abort();
         let _ = bridge.await;
+    }
+
+    /// D12 证据：SDK 后端的 `send_keep_rx()` 必须 typed fail-closed（不是 Child(String)）。
+    #[tokio::test]
+    async fn sdk_send_keep_rx_fails_closed() {
+        let (outbound_tx, _outbound_rx) = tokio::sync::mpsc::channel(1);
+        let rpc = super::super::jsonrpc::PreparedRpc {
+            id: 11,
+            backend: PreparedRpcBackend::Sdk(SdkPreparedRpc {
+                outbound: outbound_tx,
+                method: "session/prompt".to_string(),
+                params: serde_json::json!({"sessionId": "s-1"}),
+                line: "test-line".to_string(),
+                rpc_timeout: Duration::from_secs(1),
+            }),
+        };
+        let error = rpc
+            .send_keep_rx()
+            .await
+            .expect_err("sdk send_keep_rx must fail closed");
+        assert!(matches!(
+            error,
+            AcpError::EngineUnsupported {
+                engine: "sdk",
+                operation: "send_keep_rx"
+            }
+        ));
     }
 }

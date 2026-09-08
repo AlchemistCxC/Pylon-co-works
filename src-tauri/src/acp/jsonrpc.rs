@@ -6,29 +6,28 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
-use super::transport::{send_line, DEFAULT_WRITE_TIMEOUT_SECS};
+use super::transport::DEFAULT_WRITE_TIMEOUT_SECS;
 use super::{AcpError, AcpKind, RawMessage};
 
 /// JSON-RPC 挂起请求表（request id → 响应通道）。分片锁：避免所有请求竞争
 /// 一把全局锁。
 pub(crate) type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 
+use super::engine::PreparedRpcBackend;
+
 /// pending 分片数：`id % PENDING_SHARDS` 定位分片。
 pub(crate) const PENDING_SHARDS: usize = 16;
 
-/// 准备好的 JSON-RPC 请求：注册 pending 后的完整发送单元（发送与等待在锁外）。
+/// 准备好的 JSON-RPC 请求（D12：后端专属状态封在 [`PreparedRpcBackend`]，
+/// `line`/`write_tx`/`rx` 不再出现在公开面）。
 pub struct PreparedRpc {
+    /// Pylon 相关 id：legacy 恰等于 wire id（行为不变），SDK 用本地计数器；
+    /// wire id 永不暴露。
     pub id: u64,
-    pub line: String,
-    pub write_tx: mpsc::Sender<String>,
-    pub rx: oneshot::Receiver<RawMessage>,
-    pub(crate) pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    pub(crate) crashed: Arc<AtomicBool>,
-    pub(crate) rpc_timeout: std::time::Duration,
+    pub(crate) backend: PreparedRpcBackend,
 }
 
 pub(crate) fn remove_pending_from(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>, id: u64) {
@@ -38,72 +37,45 @@ pub(crate) fn remove_pending_from(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]
 }
 
 impl PreparedRpc {
-    /// 发送请求行（统一走 `send_line`：10s 写超时防 writer 阻塞击穿超时契约），
-    /// 失败时清理已注册 pending。成功后返回响应接收器——prompt 路径用它在锁外
-    /// 进入 [`wait_prompt_with_cancel`] 的超时/取消流程（响应未到的 pending 保留，
-    /// 由 reader 到响应时移除或 EOF 时 drain，与 V14 模式一致）。
+    /// 发送请求行，返回响应接收器（legacy）；SDK 后端 typed fail-closed（A1b 接 prompt 等待）。
     pub async fn send_keep_rx(self) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
-        let PreparedRpc {
-            id,
-            line,
-            write_tx,
-            rx,
-            pending,
-            crashed,
-            ..
-        } = self;
-        if let Err(error) = send_line(write_tx, line, &crashed).await {
-            remove_pending_from(&pending, id);
-            return Err(error);
-        }
-        // A6：发送后复检 crashed——reader EOF 先 store 后 drain：注册先于 drain 的
-        // pending 会被 drain resolve；注册后于 drain 的在此命中（否则 prompt 悬挂
-        // 300s 假超时）。crashed 已置位时 pending 不可能再被消费，直接清理返回。
-        if crashed.load(Ordering::Acquire) {
-            remove_pending_from(&pending, id);
-            return Err(AcpError::ConnectionClosed);
-        }
-        Ok(rx)
+        super::engine::send_keep_rx_prepared(self).await
     }
 
-    /// 通用 RPC 结算（R3：原 `AcpClient::complete_rpc` 提取为 PreparedRpc 方法）：
-    /// 发送 + RPC 超时等待匹配响应（G1-02：超时值来自协议配置，缺省 30s）+ 错误/结果解析。
-    /// 不依赖 AcpClient 实例，可在锁外执行。
+    /// 发送 + 等待匹配响应（两后端均实现；超时值来自协议配置）。
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
-        let PreparedRpc {
+        super::engine::complete_prepared(self).await
+    }
+
+    /// D12：仅测试读取请求行（`acp/tests.rs` 保留一条；A1c 删除）。
+    #[cfg(test)]
+    pub(crate) fn line(&self) -> &str {
+        super::engine::prepared_line(&self.backend)
+    }
+
+    /// 测试专用：按 legacy 后端构造（保留既有单测形状，避免测试文件引入内部类型）。
+    /// 全限定路径：这些类型仅在 cfg(test) 下使用，避免非测试构建被判为未用导入。
+    #[cfg(test)]
+    pub(crate) fn legacy_for_test(
+        id: u64,
+        line: String,
+        write_tx: tokio::sync::mpsc::Sender<String>,
+        rx: oneshot::Receiver<RawMessage>,
+        pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+        crashed: Arc<std::sync::atomic::AtomicBool>,
+        rpc_timeout: std::time::Duration,
+    ) -> Self {
+        Self {
             id,
-            line,
-            write_tx,
-            rx,
-            pending,
-            crashed,
-            rpc_timeout,
-        } = self;
-        if let Err(error) = send_line(write_tx, line, &crashed).await {
-            remove_pending_from(&pending, id);
-            return Err(error);
+            backend: PreparedRpcBackend::Legacy(super::engine::LegacyPreparedRpc {
+                write_tx,
+                pending,
+                rx,
+                crashed,
+                line,
+                rpc_timeout,
+            }),
         }
-        // A6：与 send_keep_rx 相同的发送后复检，避免注册后于 drain 的 pending
-        // 悬挂满超时假超时（同一次崩溃窗口内保持快速 ConnectionClosed 收敛）。
-        if crashed.load(Ordering::Acquire) {
-            remove_pending_from(&pending, id);
-            return Err(AcpError::ConnectionClosed);
-        }
-        let msg = match tokio::time::timeout(rpc_timeout, rx).await {
-            Ok(Ok(msg)) => msg,
-            Ok(Err(_)) => {
-                remove_pending_from(&pending, id);
-                return Err(AcpError::ConnectionClosed);
-            }
-            Err(_) => {
-                remove_pending_from(&pending, id);
-                return Err(AcpError::RpcTimeout);
-            }
-        };
-        if let Some(err) = msg.error {
-            return Err(AcpError::Rpc(format!("{}", err)));
-        }
-        Ok(msg.result.unwrap_or(serde_json::Value::Null))
     }
 }
 
