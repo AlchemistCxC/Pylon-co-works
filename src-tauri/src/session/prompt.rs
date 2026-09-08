@@ -509,6 +509,14 @@ async fn finalize_response<R: tauri::Runtime>(
         state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
     }
     let mut done_payload = serde_json::json!({"source": source, "data": data});
+    let mut done_update = serde_json::json!({ "sessionUpdate": "done" });
+    if let Some(object) = data.as_object() {
+        for key in ["stopReason", "usage", "model"] {
+            if let Some(value) = object.get(key) {
+                done_update[key] = value.clone();
+            }
+        }
+    }
     if let Some(committed_event) = ingest_prompt_event(
         state,
         runtime,
@@ -517,7 +525,7 @@ async fn finalize_response<R: tauri::Runtime>(
         prompt_generation,
         serde_json::json!({
             "source": source,
-            "update": { "sessionUpdate": "done" },
+            "update": done_update,
         }),
     )
     .await?
