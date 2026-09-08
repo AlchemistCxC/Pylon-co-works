@@ -1,6 +1,13 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 20:52] [铆钉·工程师] [P60 A1b 步骤 1/3 完成·sdk 剩余 10 项定性·交接]
+`8f64f57e`（SDK `send_keep_rx` 真实实现：`SdkOutbound::RequestKeepRx` + `on_receiving_result` → `oneshot::Receiver<RawMessage>`，legacy 的 `wait_prompt_with_cancel` 机制原样复用；`begin_replay_capture` 仍 typed fail-closed）与 `258f5715`（锁定 SDK `SentRequest` drop 自动发 `$/cancel_request`）。
+
+**证据**：legacy 模式 `cargo test --lib acp::` **122 passed**；fmt 绿；clippy 零新增。**sdk 模式 10 failed 已逐项定性**：4 项 replay（A1b 步骤 4 目标）+ 6 项施工书 §5.3 **A1c 点名改写**的 legacy 接缝断言（wire id_kind 序列、`rpc.id == wire id`（D12 已改语义）、`client.write_tx` 构造 cancel 闭包、`send_response` 测试接缝）。
+
+**交接（新会话）**：A1b 剩步骤 4/5（replay collector：`SdkBackend` 增 broadcast 扇出 + `begin_replay_capture` SDK 分支）→ 7（permission `Responder` 化）→ 6（D6=②）；随后 A1c 改写上述 6 项接缝断言并删旧路径。`src-tauri/src/acp/{engine,client,replay,jsonrpc}.rs` 现为施工面。
+
 [2026-09-08 20:42] [铆钉·工程师] [P60 A1a 完成·legacy 122 绿·sdk 112/122·下一步 A1b]
 A1a 已按施工书 v4.7 完成（12 个可验收单元 `c311ea94`→`bb4836f7`）：SDK 引擎接缝、非类型化 dispatch、背压硬门、D11 facade、D12 `PreparedRpc`、`PYLON_ACP_ENGINE`（无回退）、SDK 后端构造与子进程退出监听。
 
