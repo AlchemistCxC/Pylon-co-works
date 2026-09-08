@@ -1,6 +1,20 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 20:33] [铆钉·工程师] [P60 A1a 步骤 8：①②已完成，sdk 模式 14→11 failed；③需裁定]
+按用户授权完成两项：
+- `5714540b`：`map_sdk_error` 序列化 JSON-RPC error 对象 → `remote_code` 不再丢失（sdk 模式 `initialize_rpc_failure_keeps_safe_remote_summary` 绿）。
+- `d2bd3424`：两个 hermes fixture 脚本改为读 stdin 应答（§5.3 例外 1 点名，被测行为 `HERMES_HOME` 注入不变），两模式各绿。
+- `5e02e2d2`：子侧 `child_future` 完成即置 crashed（意图正确，但未能使 `crashed_watch_signals_eof_after_broadcast_overflow` 转绿）。
+
+**sdk 模式现状**：`cargo test --lib acp::` **110 passed / 11 failed**（原 14）。
+
+**③ 根因（已定位）**：观测 relay 与 SDK `into_channel_and_future` 的 `close_client_output` 克隆构成**循环关闭**——relay 持对端 `tx` 才能转发，而对端 `rx` 需等该 `tx` 被 drop 才结束，对端 future（`try_join!(outgoing, incoming)`）因此永不完成。已试两条路径均无效：SDK 自带 `bridge_with_inspection`（`try_join!` 同理）、自实现 select relay。
+
+**建议方案（请裁定）**：crashed 信号不再依赖 SDK 的 EOF 语义，改由**子进程退出监听**产生——给 `ManagedChild` 加一个构造时的 exit watcher（std 线程 `Child::wait` 或 Windows 句柄等待），退出即置 `crashed`/`crashed_watch`。这会新增每子进程一个监听线程（legacy 路径也可共享），属 A1a 范围但会动 `acp/process.rs`。备选：把 `crashed_watch_signals_eof_after_broadcast_overflow` 归入 A1c（SDK 单独后端时再改），A1a 以「legacy 121 绿 + sdk 失败项已逐条登记」验收。
+
+**剩余 11 项**：上述③ 1 项 + A1b/A3 归属的 10 项（prompt cancel/timeout×2、replay×4、send_keep_rx×3、send_response×1）。
+
 [2026-09-08 20:18] [铆钉·工程师] [P60 A1a 步骤 7 完成（SDK 后端接线）·sdk 模式 14 项待收敛清单·请裁验收口径]
 `74410d78` 落地 D11 ③ 后半：`AcpBackend::Sdk(SdkBackend)` + `spawn_agent_child`（两后端共用 spawn）+ `spawn_sdk_engine`（std 管道→`tokio::process::ChildStdin/Stdout::from_std`→compat→`ByteStreams`→观测桥→SDK client）+ 各 facade 方法按后端分派 + `from_env()` 构造时读一次（非法值报错、无回退）。
 
