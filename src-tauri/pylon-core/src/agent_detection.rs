@@ -516,6 +516,26 @@ fn config_evidence(
 
 const PROBE_OUTPUT_LIMIT: usize = 4 * 1024;
 
+// Migrated from codeg `probe_cli_version_token`/`extract_version_token`.
+// Keep parsing conservative: only version-looking tokens, never URLs or paths.
+fn extract_version_token(text: &str) -> Option<String> {
+    fn candidate(piece: &str) -> Option<String> {
+        let piece = piece.trim_matches(|c: char| matches!(c, '(' | ')' | ',' | ';' | ':'));
+        let value = piece.strip_prefix('v').or_else(|| piece.strip_prefix('V')).unwrap_or(piece);
+        (value.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && value.contains('.')
+            && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')))
+            .then(|| value.to_string())
+    }
+    for line in text.lines() {
+        for token in line.split_whitespace() {
+            if token.contains("://") { continue; }
+            if let Some(value) = token.split(['/', '@']).find_map(candidate) { return Some(value); }
+        }
+    }
+    None
+}
+
 struct VersionProbeOutcome {
     version: Option<String>,
     startability: Startability,
@@ -786,15 +806,10 @@ async fn version_probe(
     let stdout = stdout.unwrap_or_default();
     let stderr = stderr.unwrap_or_default();
     let text = if stdout.is_empty() { stderr } else { stdout };
-    let version = String::from_utf8_lossy(&text)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .chars()
-        .take(160)
-        .collect::<String>();
-    if version.is_empty() {
+    let version = extract_version_token(&String::from_utf8_lossy(&text)).map(|value| {
+        value.chars().take(160).collect::<String>()
+    });
+    if version.is_none() {
         VersionProbeOutcome {
             version: None,
             startability: Startability::Failed,
@@ -807,7 +822,7 @@ async fn version_probe(
         }
     } else {
         VersionProbeOutcome {
-            version: Some(version),
+            version,
             startability: Startability::Verified,
             diagnostic: None,
         }
@@ -1375,17 +1390,17 @@ mod tests {
         #[cfg(windows)]
         let (executable, args) = {
             let path = root.join("probe.cmd");
-            std::fs::write(&path, "@echo off\r\necho %1 %2\r\n").unwrap();
+            std::fs::write(&path, "@echo off\r\necho 1.2.3\r\n").unwrap();
             (path, vec!["version".to_string(), "--numeric".to_string()])
         };
         #[cfg(unix)]
         let (executable, args) = {
             let path = root.join("probe.sh");
-            std::fs::write(&path, "printf '%s %s' \"$1\" \"$2\"\n").unwrap();
+            std::fs::write(&path, "printf '1.2.3\\n'\n").unwrap();
             (PathBuf::from("/bin/sh"), vec![path.to_string_lossy().into_owned(), "version".into(), "--numeric".into()])
         };
         let result = version_probe("fixture", executable.clone(), &args, Duration::from_secs(2)).await;
-        assert_eq!(result.version.as_deref(), Some("version --numeric"));
+        assert_eq!(result.version.as_deref(), Some("1.2.3"));
         assert_eq!(result.startability, Startability::Verified);
         #[cfg(windows)]
         {
