@@ -884,6 +884,12 @@ fn parse_npm_list_version(bytes: &[u8], package: &str) -> Option<String> {
     extract_version_token(value)
 }
 
+/// Keep uvx interpreter pin construction identical across launch and probes;
+/// this is the pure portion of codeg's `uvx_python_args`.
+pub fn uvx_python_args(python: Option<&str>) -> Vec<String> {
+    python.map(|version| vec!["--python".into(), version.into()]).unwrap_or_default()
+}
+
 pub async fn detect_agent_runtime_candidates_inner(
     options: AgentDetectionOptions,
     configured: &ConfiguredRuntimes,
@@ -1497,6 +1503,12 @@ mod tests {
         assert_eq!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"1.2.3"}}}"#, "foo").as_deref(), Some("1.2.3"));
         assert_eq!(parse_npm_list_version(br#"{"dependencies":{"@scope/foo":{"version":"4.5.6"}}}"#, "@scope/foo@4.5.6").as_deref(), Some("4.5.6"));
         assert!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"bad"}}}"#, "foo").is_none());
+    }
+
+    #[test]
+    fn uvx_python_pin_is_explicit_and_empty_when_unset() {
+        assert_eq!(uvx_python_args(Some("3.12")), vec!["--python", "3.12"]);
+        assert!(uvx_python_args(None).is_empty());
     }
 
     #[cfg(windows)]
