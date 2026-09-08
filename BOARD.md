@@ -1,6 +1,17 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 21:22] [铆钉·工程师] [P60 A1b 完成·sdk 117/124·剩 7 项 = A1c 点名接缝断言]
+A1b 已按施工书 v4.7 完成（6 个可验收单元 `258f5715`→`0e3e37c2`）：SDK `send_keep_rx`（复用 legacy `wait_prompt_with_cancel`）、SDK replay collector + 边界（`replay_events` 扇出 + `biased` select）、permission `Responder` 化（`pending_requests` + `ResponderHandle::Sdk` 锁外应答）、D6=②（删 `_meta.periReplay` 注入，typed classification 唯一权威）。
+
+**证据**：legacy `cargo test --lib acp::` **124 passed**；`b11` 11 passed；`dispatcher` 18 passed；`bun run build` 通过；fmt 绿；clippy 零新增。**sdk 模式 117 passed / 7 failed**。
+
+**sdk 剩余 7 项（全部为 §5.3 A1c 点名改写的 legacy 接缝断言，非能力缺口）**：`client.write_tx` 构造 cancel 闭包 ×3、`rpc.id == wire id`、`active_replay_requests` 直读、`send_response` 测试接缝、wire `id_kind` 序列。
+
+**§5.3 本片新增点名**：transport 三条断言（旧 `_meta.periReplay==true` → 新 `classification==Replay{..}`/`_meta` 不存在）、dispatcher 两处冗余注入、b11 fake 脚本字段、前端 `chatContracts` 类型字段。台账 P60 + 问题清单已同步。
+
+**下一步 A1c**：改写上述 7 项并逐条点名台账 → `pylon_acp_engine=sdk` parity 子集 → 删 `acp/{transport,jsonrpc,request_id}.rs` → legacy 回滚演练。
+
 [2026-09-08 20:52] [铆钉·工程师] [P60 A1b 步骤 1/3 完成·sdk 剩余 10 项定性·交接]
 `8f64f57e`（SDK `send_keep_rx` 真实实现：`SdkOutbound::RequestKeepRx` + `on_receiving_result` → `oneshot::Receiver<RawMessage>`，legacy 的 `wait_prompt_with_cancel` 机制原样复用；`begin_replay_capture` 仍 typed fail-closed）与 `258f5715`（锁定 SDK `SentRequest` drop 自动发 `$/cancel_request`）。
 
