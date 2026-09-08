@@ -25,6 +25,8 @@ pub struct QuestionSpec {
     pub header: String,
     pub multi_select: bool,
     pub options: Vec<QuestionOption>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_secret: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +128,14 @@ pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 options,
+                is_secret: q
+                    .get("_meta")
+                    .and_then(Value::as_object)
+                    .and_then(|meta| meta.get("codex"))
+                    .and_then(Value::as_object)
+                    .and_then(|codex| codex.get("isSecret"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             })
         })
         .collect()
@@ -231,6 +241,8 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert!(!parsed[0].id.is_empty());
         assert!(!parsed[0].multi_select);
+        let secret = parse_questions(&serde_json::json!({"questions":[{"question":"Key","header":"Secret","_meta":{"codex":{"isSecret":true}},"options":[{"label":"A"},{"label":"B"}]}]})).unwrap();
+        assert!(secret[0].is_secret);
     }
     #[test]
     fn rejects_duplicate_labels_and_invalid_counts() {
@@ -245,6 +257,7 @@ mod tests {
             header: "h".into(),
             multi_select: false,
             options: vec![],
+            is_secret: false,
         };
         assert!(validate_specs(&[spec]).is_ok());
         assert!(validate_specs(&[QuestionSpec {
@@ -252,7 +265,8 @@ mod tests {
             question: "q".into(),
             header: "h".into(),
             multi_select: false,
-            options: vec![]
+            options: vec![],
+            is_secret: false
         }])
         .is_err());
     }
@@ -268,6 +282,7 @@ mod tests {
                 label: "A".into(),
                 description: String::new(),
             }],
+            is_secret: false,
         };
         let outcome = build_outcome(
             &[spec.clone()],
