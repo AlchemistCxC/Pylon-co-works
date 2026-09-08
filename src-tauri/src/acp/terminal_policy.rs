@@ -12,6 +12,11 @@ pub const WAIT_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(1);
 pub const WAIT_ERROR_BUDGET: Duration = Duration::from_secs(30);
 pub const WAIT_ERROR_IDLE_RETRY: Duration = Duration::from_secs(5);
 
+pub fn next_wait_retry_backoff(current: Duration) -> Duration {
+    let next = current.checked_mul(2).unwrap_or(WAIT_RETRY_MAX_BACKOFF);
+    next.min(WAIT_RETRY_MAX_BACKOFF)
+}
+
 /// Owner-neutral portion of codeg's terminal lifecycle.  The process owner
 /// remains outside this adapter (`ManagedChild`); this state machine only
 /// captures the observable kill/wait transitions.
@@ -263,6 +268,22 @@ mod tests {
         assert_eq!(
             TerminalLifecycle::Released.request_kill(),
             TerminalLifecycle::Released
+        );
+    }
+
+    #[test]
+    fn wait_retry_backoff_doubles_and_caps() {
+        assert_eq!(
+            next_wait_retry_backoff(Duration::from_millis(10)),
+            Duration::from_millis(20)
+        );
+        assert_eq!(
+            next_wait_retry_backoff(Duration::from_millis(600)),
+            WAIT_RETRY_MAX_BACKOFF
+        );
+        assert_eq!(
+            next_wait_retry_backoff(WAIT_RETRY_MAX_BACKOFF),
+            WAIT_RETRY_MAX_BACKOFF
         );
     }
 }
