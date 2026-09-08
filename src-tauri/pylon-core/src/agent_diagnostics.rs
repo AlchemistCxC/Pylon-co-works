@@ -2,7 +2,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-const SAFE_KEYS: &[&str] = &["PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "NODE_PATH", "UV_TOOL_DIR"];
+const SAFE_KEYS: &[&str] = &["PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SHELL", "NVM_DIR", "FNM_DIR", "FNM_MULTISHELL_PATH", "VOLTA_HOME", "ASDF_DATA_DIR", "MISE_DATA_DIR", "N_PREFIX", "HOMEBREW_PREFIX", "npm_config_prefix", "LANG"];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -13,9 +13,15 @@ pub struct DiagnosticsReport { pub environment: BTreeMap<String, String>, pub pa
 pub enum DiagnosticsVerdict { Ready, PathMismatch, MissingRuntime }
 
 pub fn sanitize_value(key: &str, value: &str) -> String {
-    if matches!(key, "PATH" | "HOME" | "USERPROFILE" | "APPDATA" | "LOCALAPPDATA" | "NODE_PATH" | "UV_TOOL_DIR") {
-        value.replace(['\r', '\n'], "")
-    } else { "[redacted]".into() }
+    let lower = key.to_ascii_lowercase();
+    let secretish = ["key", "token", "secret", "password", "passwd", "auth", "credential"]
+        .iter().any(|needle| lower.contains(needle));
+    if !secretish { return value.replace(['\r', '\n'], ""); }
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 8 { return "•".repeat(chars.len()); }
+    let first: String = chars[..2].iter().collect();
+    let last: String = chars[chars.len() - 2..].iter().collect();
+    format!("{first}{}{last}", "•".repeat(chars.len().saturating_sub(4).min(16)))
 }
 
 pub fn compute_verdict(runtime_found: bool, gui_path: &[String], shell_path: &[String]) -> DiagnosticsVerdict {
@@ -47,5 +53,6 @@ mod tests {
         assert_ne!(report(true, &[]).verdict, DiagnosticsVerdict::PathMismatch);
     }
     #[test] fn path_mismatch_explains_gui_install_failure() { assert_eq!(compute_verdict(true, &["gui".into()], &["shell".into()]), DiagnosticsVerdict::PathMismatch); }
-    #[test] fn secrets_are_not_returned() { assert_eq!(sanitize_value("TOKEN", "secret"), "[redacted]"); }
+    #[test] fn secrets_are_not_returned() { assert_eq!(sanitize_value("API_TOKEN", "secret"), "••••••"); }
+    #[test] fn long_multibyte_secrets_are_masked_without_panicking() { assert_eq!(sanitize_value("密码", "abcdefghijk"), "abcdefghijk"); assert!(sanitize_value("API_KEY", "密钥值很长很长").contains('•')); }
 }
