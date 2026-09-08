@@ -58,6 +58,35 @@ pub fn parse_transcript(content: &str) -> Transcript {
     transcript
 }
 
+pub const MAX_CONTINUATION_DEPTH: usize = 512;
+
+/// Merge already-read continuation transcripts, newest first. This is the
+/// codeg chain algorithm with filesystem ownership deliberately left to the
+/// caller.
+pub fn merge_continuation_chain(mut chain: Vec<Transcript>) -> Transcript {
+    let mut merged = Transcript::default();
+    for transcript in chain.iter_mut().rev() {
+        if merged.header.is_none() {
+            merged.header = transcript.header.take();
+        }
+        merged.entries.append(&mut transcript.entries);
+    }
+    merged
+}
+
+pub fn continuation_ancestors(mut current: String, headers: &std::collections::HashMap<String, TranscriptHeader>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut visited = std::collections::HashSet::from([current.clone()]);
+    while let Some(next) = headers.get(&current).and_then(|h| h.continues_from.clone()) {
+        if out.len() >= MAX_CONTINUATION_DEPTH || !visited.insert(next.clone()) {
+            break;
+        }
+        out.push(next.clone());
+        current = next;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
