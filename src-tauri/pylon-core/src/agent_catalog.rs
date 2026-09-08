@@ -529,5 +529,8 @@ mod tests {
     fn adaptation_policy_is_empty_until_declared_and_provider_scoped() {
         assert!(adaptation("peri").unwrap().is_none());
         assert!(adaptation("missing").unwrap().is_none());
+        let claude = adaptation("claude-code").unwrap().unwrap();
+        assert_eq!(claude.version_gates.unwrap()["steeringPromptRequiredMinVersion"], "0.65.0");
+        assert_eq!(claude.adapter_relation.unwrap()["nativeCmd"], "claude");
     }
 }
