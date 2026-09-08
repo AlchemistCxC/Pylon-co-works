@@ -79,28 +79,55 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
         .checks
         .iter()
         .map(|check| {
-            let (ok, message) = match check.kind {
+            let (status, message) = match check.kind {
                 CatalogCheckKind::NodeMin => (
-                    version_at_least(
+                    if version_at_least(
                         inputs.node_version.as_deref(),
                         check.params.get("min").and_then(|v| v.as_str()),
-                    ),
+                    ) {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Fail
+                    },
                     "Node.js version",
                 ),
                 CatalogCheckKind::UvMin => (
-                    version_at_least(
+                    if version_at_least(
                         inputs.uv_version.as_deref(),
                         check.params.get("min").and_then(|v| v.as_str()),
-                    ),
+                    ) {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Warn
+                    },
                     "uv version",
                 ),
-                CatalogCheckKind::BinaryPresent => (inputs.binary_present, "native binary"),
-                CatalogCheckKind::AdapterPresent => (inputs.adapter_present, "ACP adapter"),
-                CatalogCheckKind::ConfigEvidence => {
-                    (inputs.config_evidence, "configuration evidence")
-                }
+                CatalogCheckKind::BinaryPresent => (
+                    if inputs.binary_present {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Fail
+                    },
+                    "native binary",
+                ),
+                CatalogCheckKind::AdapterPresent => (
+                    if inputs.adapter_present {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Fail
+                    },
+                    "ACP adapter",
+                ),
+                CatalogCheckKind::ConfigEvidence => (
+                    if inputs.config_evidence {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Fail
+                    },
+                    "configuration evidence",
+                ),
             };
-            let fixes = if ok {
+            let fixes = if status == CheckStatus::Pass {
                 Vec::new()
             } else {
                 check
@@ -120,11 +147,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
             CheckItem {
                 check_id: check.id.clone(),
                 label: check.label.clone(),
-                status: if ok {
-                    CheckStatus::Pass
-                } else {
-                    CheckStatus::Fail
-                },
+                status,
                 message: message.into(),
                 fixes,
             }
