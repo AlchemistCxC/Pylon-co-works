@@ -1403,3 +1403,49 @@ mod tests {
         assert!(AcpEngineKind::parse(Some("sacp")).is_err());
     }
 }
+
+// ── JSON-RPC request id（原 acp/request_id.rs，A1c 收敛）──
+
+use std::fmt;
+
+/// JSON-RPC 请求 id 的原始形态（数字或字符串）。
+///
+/// `#[serde(untagged)]`：序列化时 `Number(n)` → JSON number、`String(s)` → JSON string，
+/// 天然满足"响应用原始 variant 回写"。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum RequestId {
+    Number(u64),
+    String(String),
+}
+
+impl RequestId {
+    /// 从 wire JSON value 原样解析（保留 variant）；null/absent/布尔/浮点 → None。
+    /// stdout reader 用它替换 `as_u64()` 窄化——string/null/absent 形态不再丢失。
+    pub fn from_json_value(value: &serde_json::Value) -> Option<RequestId> {
+        match value {
+            serde_json::Value::Number(n) => n.as_u64().map(RequestId::Number),
+            serde_json::Value::String(s) => Some(RequestId::String(s.clone())),
+            _ => None,
+        }
+    }
+
+    /// 从前端回显字符串还原候选 id（ACP-01）：数字形态 → `Number`（命中原 numeric
+    /// 请求），否则 `String`。不把 string 强转 number、不把 null/空串当 0——
+    /// 最终 variant 由 pending 命中决定（见 `permission::canonical_pending_key`）。
+    pub fn from_echo_string(value: &str) -> RequestId {
+        match value.parse::<u64>() {
+            Ok(n) => RequestId::Number(n),
+            Err(_) => RequestId::String(value.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RequestId::Number(n) => write!(f, "{n}"),
+            RequestId::String(s) => write!(f, "{s}"),
+        }
+    }
+}
