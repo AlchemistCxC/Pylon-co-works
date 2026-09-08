@@ -502,6 +502,12 @@ fn normalize_kernel_event(
         Some("done") => "turn.completed",
         Some("error") => "turn.failed",
         Some("cancelled") => "turn.cancelled",
+        Some("usage_update") => "usage.updated",
+        Some("plan") => "plan.replaced",
+        Some("current_mode_update") => "session.mode-updated",
+        Some("session_info_update") => "session.model-updated",
+        Some("config_option_update") => "session.config-updated",
+        Some("available_commands_update") => "session.commands-updated",
         _ => "unknown",
     };
 
