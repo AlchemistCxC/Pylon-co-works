@@ -40,6 +40,7 @@ mod plugin_process;
 mod prism;
 mod prism_cmds;
 mod protocol_adapter;
+pub mod provider_adapter;
 pub mod pylon_cli;
 #[cfg(test)]
 mod real_acp_smoke;
