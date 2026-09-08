@@ -48,4 +48,4 @@ pub(crate) use replay::{load_session_with_replay, ReplayMetadata};
 pub(crate) use stderr::spawn_stderr_reader;
 pub(crate) use wire_trace::AcpWireHub;
 #[cfg_attr(not(test), allow(unused_imports))] // Wire* 类型仅测试消费（obs03/p1_wire 回归测试）
-pub use wire_trace::{AcpWireCapture, WireDirection, WireIdKind, WireRecord};
+pub use wire_trace::{AcpWireCapture, CanonicalCorrelation, WireDirection, WireIdKind, WireRecord};

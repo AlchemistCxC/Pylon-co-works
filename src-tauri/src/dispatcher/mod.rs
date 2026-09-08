@@ -610,6 +610,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
     wire_ordinal: Option<u64>,
+    wire: Option<Arc<crate::acp::AcpWireCapture>>,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -891,7 +892,14 @@ async fn handle_session_update<R: tauri::Runtime>(
             );
             return true;
         }
-        routing::CommitOutcome::Committed(event) => Some(event),
+        routing::CommitOutcome::Committed { event, revision } => {
+            if let (Some(ordinal), Some(wire)) = (input.wire_ordinal, wire.as_ref()) {
+                wire.record_canonical_commit(ordinal, crate::acp::CanonicalCorrelation {
+                    event_id: event.event_id.clone(), sequence: event.sequence, revision,
+                });
+            }
+            Some(event)
+        },
         routing::CommitOutcome::Rejected(error) => {
             log_canonical_ingest_error(&error, agent_id, &source);
             return true;
@@ -1275,6 +1283,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // watch 通道只携带 bool 不携带 reason → 缺省 stdout_closed（订阅前 EOF 场景）
             handle_crash(crate::acp::CrashReason::StdoutClosed.as_str().to_string()).await;
         }
+        let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1448,6 +1457,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 message_service.as_ref(),
                 classification,
                 wire_ordinal,
+                wire_trace.clone(),
                 payload,
             )
             .await
