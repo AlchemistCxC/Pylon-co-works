@@ -17,6 +17,13 @@ describe('Shared Agent Catalog', () => {
     expect(parseAgentCatalog(document).providers[0].detection).toMatchObject({ versionArgs: [], packageManager: null, requires: { node: null, uv: null }, checks: [] })
   })
 
+  it('defaults adaptation to null and rejects unknown policy names', () => {
+    expect(parseAgentCatalog(rawCatalog).providers.every(provider => provider.adaptation === null)).toBe(true)
+    const document = structuredClone(rawCatalog)
+    document.providers[0].adaptation = { unsupported: true } as never
+    expect(() => parseAgentCatalog(document)).toThrow(/未知字段/)
+  })
+
   it.each([
     { packageManager: 'npx' }, { requires: [] }, { checks: ['node-min'] },
     { packageManager: { kind: 'npm' } }, { requires: { python: '3' } },

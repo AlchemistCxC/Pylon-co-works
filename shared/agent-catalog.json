@@ -29,6 +29,7 @@
           { "relativePath": "settings.json", "format": "json", "fields": ["provider", "model", "models"] }
         ]
       },
+      "adaptation": null,
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["path", "file_path"] },
         { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["path", "file_path"] },
@@ -78,6 +79,7 @@
           { "relativePath": "config.yml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] }
         ]
       },
+      "adaptation": null,
       "tools": [
         { "name": "read_file", "displayName": "Read File", "kind": "read", "action": "read", "summaryFields": ["path"] },
         { "name": "write_file", "displayName": "Write File", "kind": "edit", "action": "write", "summaryFields": ["path"] },
@@ -131,6 +133,7 @@
           { "relativePath": "settings.json", "format": "json", "fields": ["model", "apiKeyHelper", "env.ANTHROPIC_API_KEY", "permissions"] }
         ]
       },
+      "adaptation": null,
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["file_path", "path"] },
         { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["file_path", "path"] },

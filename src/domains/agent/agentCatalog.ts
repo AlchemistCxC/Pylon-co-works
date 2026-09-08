@@ -49,7 +49,19 @@ interface CatalogProvider {
   interactionKinds: InteractionKind[]
   protocolDefaults: { setModelApi: 'config_option' | 'set_model' | 'none' }
   detection: CatalogDetection
+  adaptation: CatalogAdaptation | null
   tools: CatalogTool[]
+}
+interface CatalogAdaptation {
+  adapterRelation: Record<string, unknown> | null
+  clientCapabilities: Record<string, unknown> | null
+  promptCapabilities: Record<string, unknown> | null
+  launchEnv: unknown[] | null
+  versionGates: Record<string, unknown> | null
+  sessionEstablishment: Record<string, unknown> | null
+  configAdaptation: Record<string, unknown> | null
+  mcp: Record<string, unknown> | null
+  interactionBridges: unknown[] | null
 }
 interface CatalogDocument { schemaVersion: 2; providers: CatalogProvider[] }
 
@@ -102,6 +114,14 @@ function detectionExtensions(detection: Record<string, unknown>): Pick<CatalogDe
   return { versionArgs: [...versionArgs], packageManager, requires: { node: nullableString(requirements.node, 'requires.node'), uv: nullableString(requirements.uv, 'requires.uv') }, checks }
 }
 
+function adaptationPolicy(value: unknown, label: string): CatalogAdaptation | null {
+  if (value === undefined || value === null) return null
+  const raw = strictObject(value, label, ['adapterRelation', 'clientCapabilities', 'promptCapabilities', 'launchEnv', 'versionGates', 'sessionEstablishment', 'configAdaptation', 'mcp', 'interactionBridges'])
+  const objectOrNull = (field: string): Record<string, unknown> | null => raw[field] === undefined || raw[field] === null ? null : object(raw[field], `${label}.${field}`)
+  const arrayOrNull = (field: string): unknown[] | null => raw[field] === undefined || raw[field] === null ? null : (Array.isArray(raw[field]) ? raw[field] as unknown[] : (() => { throw new Error(`Agent Catalog ${label}.${field} 必须是数组`) })())
+  return { adapterRelation: objectOrNull('adapterRelation'), clientCapabilities: objectOrNull('clientCapabilities'), promptCapabilities: objectOrNull('promptCapabilities'), launchEnv: arrayOrNull('launchEnv'), versionGates: objectOrNull('versionGates'), sessionEstablishment: objectOrNull('sessionEstablishment'), configAdaptation: objectOrNull('configAdaptation'), mcp: objectOrNull('mcp'), interactionBridges: arrayOrNull('interactionBridges') }
+}
+
 function nonEmpty(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`Agent Catalog ${label} 不能为空`)
   return value.trim()
@@ -135,6 +155,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
     const protocolDefaults = object(raw.protocolDefaults, `${provider}.protocolDefaults`)
     if (!['config_option', 'set_model', 'none'].includes(String(protocolDefaults.setModelApi))) throw new Error(`Agent Catalog ${provider}.protocolDefaults.setModelApi 非法`)
     const detection = object(raw.detection, `${provider}.detection`)
+    const adaptation = adaptationPolicy(raw.adaptation, `${provider}.adaptation`)
     const detectorId = nonEmpty(detection.detectorId, `${provider}.detection.detectorId`)
     if (seenDetectors.has(detectorId)) throw new Error(`Agent Catalog detectorId 重复：${detectorId}`)
     seenDetectors.add(detectorId)
@@ -201,6 +222,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         configEvidence: parsedConfigEvidence,
         ...extensions,
       },
+      adaptation,
       tools,
     }
   })

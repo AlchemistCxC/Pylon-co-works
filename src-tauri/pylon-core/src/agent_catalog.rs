@@ -169,7 +169,26 @@ struct CatalogProvider {
     interaction_kinds: Vec<String>,
     protocol_defaults: CatalogProtocolDefaults,
     detection: CatalogDetection,
+    #[serde(default)]
+    adaptation: Option<CatalogAdaptation>,
     tools: Vec<CatalogTool>,
+}
+
+/// Declarative provider adaptation policy. The nested shapes are intentionally
+/// retained as JSON values until A-ADAPT assigns each consumer its closed
+/// strategy enum; unknown top-level policy names are rejected now.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogAdaptation {
+    pub adapter_relation: Option<serde_json::Value>,
+    pub client_capabilities: Option<serde_json::Value>,
+    pub prompt_capabilities: Option<serde_json::Value>,
+    pub launch_env: Option<serde_json::Value>,
+    pub version_gates: Option<serde_json::Value>,
+    pub session_establishment: Option<serde_json::Value>,
+    pub config_adaptation: Option<serde_json::Value>,
+    pub mcp: Option<serde_json::Value>,
+    pub interaction_bridges: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -383,6 +402,16 @@ pub fn set_model_api_default(provider: &str) -> Result<Option<CatalogSetModelApi
         .map(|entry| entry.protocol_defaults.set_model_api))
 }
 
+/// Return the single declarative adaptation policy for a provider. Consumers
+/// must interpret this projection; no provider-specific behavior lives here.
+pub fn adaptation(provider: &str) -> Result<Option<CatalogAdaptation>, String> {
+    Ok(catalog()?
+        .providers
+        .iter()
+        .find(|entry| entry.provider.eq_ignore_ascii_case(provider))
+        .and_then(|entry| entry.adaptation.clone()))
+}
+
 /// Return the protocol baseline in stable shared-catalog order.
 ///
 /// This is deliberately a projection rather than a direct reference to the
@@ -494,5 +523,11 @@ mod tests {
         let json = serde_json::to_value(&profiles).expect("projection must serialize");
         assert_eq!(json[0]["displayName"], "Peri");
         assert_eq!(json[1]["setModelApi"], "set_model");
+    }
+
+    #[test]
+    fn adaptation_policy_is_empty_until_declared_and_provider_scoped() {
+        assert!(adaptation("peri").unwrap().is_none());
+        assert!(adaptation("missing").unwrap().is_none());
     }
 }
