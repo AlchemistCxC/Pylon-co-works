@@ -10,7 +10,7 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, Notify};
 
 use super::terminal_policy::{
     default_platform_shell, enforce_output_limit, shell_wrapper_args, TerminalCompletion,
@@ -33,6 +33,7 @@ struct TerminalInstance {
     snapshot: Mutex<TerminalSnapshot>,
     completion: watch::Sender<TerminalCompletion>,
     reader_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    kill: Notify,
 }
 
 impl TerminalInstance {
@@ -45,6 +46,7 @@ impl TerminalInstance {
             snapshot: Mutex::new(TerminalSnapshot::default()),
             completion,
             reader_handles: Mutex::new(Vec::new()),
+            kill: Notify::new(),
         })
     }
 
@@ -93,11 +95,17 @@ impl TerminalInstance {
     }
 
     async fn kill(&self) -> Result<(), String> {
-        self.child
-            .lock()
-            .await
-            .kill_and_wait()
-            .map_err(|error| error.to_string())
+        if self.completion.borrow().exit_status().is_some() {
+            return Ok(());
+        }
+        self.kill.notify_one();
+        tokio::time::timeout(
+            super::terminal_policy::KILL_REPORT_BUDGET,
+            self.wait_for_exit(),
+        )
+        .await
+        .map_err(|_| "terminal kill report timed out".to_string())??;
+        Ok(())
     }
 }
 
@@ -141,15 +149,29 @@ impl TerminalRegistry {
         let watcher = terminal.clone();
         tokio::spawn(async move {
             loop {
-                let status = watcher.child.lock().await.try_wait().ok().flatten();
-                if let Some(status) = status {
-                    watcher.drain_readers().await;
-                    watcher
-                        .mark_exited(super::terminal_policy::map_exit_status(status))
-                        .await;
-                    break;
+                tokio::select! {
+                    _ = watcher.kill.notified() => {
+                        let child = {
+                            let mut owned = watcher.child.lock().await;
+                            std::mem::replace(&mut *owned, ManagedChild::empty())
+                        };
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let mut child = child;
+                            child.kill_and_wait()
+                        }).await;
+                        watcher.drain_readers().await;
+                        watcher.mark_exited(super::terminal_policy::TerminalExitStatus::default()).await;
+                        break;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
+                        let status = watcher.child.lock().await.try_wait().ok().flatten();
+                        if let Some(status) = status {
+                            watcher.drain_readers().await;
+                            watcher.mark_exited(super::terminal_policy::map_exit_status(status)).await;
+                            break;
+                        }
+                    }
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         });
         let stdout_reader = spawn_reader(stdout, terminal.clone());
@@ -306,5 +328,28 @@ mod tests {
         assert!(status.exit_code.is_some() || status.signal.is_some());
         let snapshot = registry.snapshot(&id, "session-a").await.unwrap();
         assert!(snapshot.output.contains("terminal-registry"));
+    }
+
+    #[tokio::test]
+    async fn kill_routes_through_owner_and_release_removes_terminal() {
+        let registry = TerminalRegistry::default();
+        let line = if cfg!(windows) {
+            "ping -n 10 127.0.0.1 > nul"
+        } else {
+            "sleep 10"
+        };
+        let id = registry
+            .create_shell("session-a".into(), None, line, None, Some(1024))
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            registry.kill(&id, "session-a"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(registry.release(&id, "session-a").await.is_ok());
+        assert!(registry.snapshot(&id, "session-a").await.is_err());
     }
 }
