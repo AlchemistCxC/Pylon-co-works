@@ -13,6 +13,7 @@ pub mod host_tools;
 pub mod plan_policy;
 pub mod question_policy;
 pub mod terminal_policy;
+pub mod terminal_runtime;
 #[allow(unused_imports)]
 pub use capabilities::{CapabilityRegistry, CapabilityState};
 pub use client::*;
