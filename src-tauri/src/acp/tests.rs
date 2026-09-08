@@ -2,10 +2,9 @@ use super::*;
 #[cfg(test)]
 use crate::agent_config::McpServersMode;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, oneshot, watch};
+use std::sync::Arc;
+use tokio::sync::oneshot;
 
-use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 测试辅助：经 prepare_rpc + complete 创建会话（生产调用点已锁外化）。
