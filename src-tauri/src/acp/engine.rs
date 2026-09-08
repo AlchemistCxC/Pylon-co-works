@@ -26,6 +26,7 @@ use agent_client_protocol::{
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use super::error::AcpError;
 use super::wire_trace::{AcpWireHub, WireDirection};
 
 /// 引擎连接配置（仅用于日志/诊断，不参与 canonical 身份）。
@@ -52,6 +53,36 @@ pub(crate) enum SdkInbound {
     },
     /// 我方请求的响应。
     Response { error: Option<String> },
+}
+
+/// 一条出站请求/通知（由 Pylon 既有 `prepare_rpc`/`prepare_prompt` 语义产生）。
+///
+/// SDK 的 dispatch loop 是单任务串行，因此出站一律经 `cx.spawn` 在独立任务中发送；
+/// 本类型只承载「方法 + 参数 + 应答通道」，不复制 Pylon 的 pending 表。
+pub(crate) enum SdkOutbound {
+    /// 需要响应的 JSON-RPC 请求（非类型化）。
+    Request {
+        method: String,
+        params: serde_json::Value,
+        reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, AcpError>>,
+    },
+    /// 不需要响应的 JSON-RPC 通知。
+    Notification {
+        method: String,
+        params: serde_json::Value,
+        reply: tokio::sync::oneshot::Sender<Result<(), AcpError>>,
+    },
+}
+
+/// SDK 错误 → Pylon `AcpError`。
+///
+/// 四个 Pylon 独有变体（`ReplayTimeout`/`ReplayLagged`/`ReplayStreamClosed`/
+/// `ReplayLoadInProgress`）由 Pylon 侧合成，不由 SDK 映射而来（施工书 A1-C6）。
+pub(crate) fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
+    if agent_client_protocol::is_incoming_transport_closed(&error) {
+        return AcpError::ConnectionClosed;
+    }
+    AcpError::Rpc(error.to_string())
 }
 
 /// 把一条 SDK 非类型化消息还原为 Pylon 入站帧。
@@ -125,6 +156,7 @@ where
 pub(crate) fn spawn_sdk_client(
     config: SdkEngineConfig,
     inbound_tx: tokio::sync::mpsc::Sender<SdkInbound>,
+    mut outbound_rx: tokio::sync::mpsc::Receiver<SdkOutbound>,
     transport: impl ConnectTo<Client> + 'static,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     closed_tx: tokio::sync::watch::Sender<bool>,
@@ -135,19 +167,30 @@ pub(crate) fn spawn_sdk_client(
             .name(config.name)
             .on_receive_dispatch(
                 move |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
-                    let inbound = classify_untyped(message);
                     let tx = inbound_tx.clone();
-                    if let Err(error) = tx.try_send(inbound) {
-                        match error {
-                            tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                                tracing::warn!(
-                                    "acp sdk engine: inbound queue full, dropping frame"
-                                );
+                    async move {
+                        match message {
+                            // 响应必须交回 SDK 的 SentRequest：若被 handler 认领而不路由，
+                            // ResponseRouter 被丢弃，等响应的请求会以 oneshot canceled 失败。
+                            Dispatch::Response(result, router) => {
+                                router.route_with_result(result)?;
                             }
-                            tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
+                            request_or_notification => {
+                                let inbound = classify_untyped(request_or_notification);
+                                if let Err(error) = tx.try_send(inbound) {
+                                    match error {
+                                        tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                                            tracing::warn!(
+                                                "acp sdk engine: inbound queue full, dropping frame"
+                                            );
+                                        }
+                                        tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
+                                    }
+                                }
+                            }
                         }
+                        Ok(Handled::Yes)
                     }
-                    std::future::ready(Ok::<_, agent_client_protocol::Error>(Handled::Yes))
                 },
                 agent_client_protocol::on_receive_dispatch!(),
             )
@@ -158,9 +201,42 @@ pub(crate) fn spawn_sdk_client(
                     Ok(())
                 }
             })
-            .connect_with(transport, async move |_cx| {
-                // 连接存活直到调用方发出 shutdown（Drop 掉发送端也会唤醒）。
-                let _ = shutdown.changed().await;
+            .connect_with(transport, async move |cx| {
+                // 出站泵：每个请求在独立任务中发送，绝不阻塞 dispatch loop。
+                loop {
+                    tokio::select! {
+                        _ = shutdown.changed() => break,
+                        outbound = outbound_rx.recv() => {
+                            let Some(outbound) = outbound else { break };
+                            let spawn_cx = cx.clone();
+                            let task_cx = cx.clone();
+                            let _ = spawn_cx.spawn(async move {
+                                match outbound {
+                                    SdkOutbound::Request { method, params, reply } => {
+                                        let result = async {
+                                            let message = UntypedMessage::new(&method, params)
+                                                .map_err(map_sdk_error)?;
+                                            task_cx.send_request(message).block_task().await
+                                                .map_err(map_sdk_error)
+                                        }
+                                        .await;
+                                        let _ = reply.send(result);
+                                    }
+                                    SdkOutbound::Notification { method, params, reply } => {
+                                        let result = async {
+                                            let message = UntypedMessage::new(&method, params)
+                                                .map_err(map_sdk_error)?;
+                                            task_cx.send_notification(message).map_err(map_sdk_error)
+                                        }
+                                        .await;
+                                        let _ = reply.send(result);
+                                    }
+                                }
+                                Ok(())
+                            });
+                        }
+                    }
+                }
                 Ok(())
             })
             .await;
@@ -174,7 +250,7 @@ mod tests {
     use agent_client_protocol::schema::v1::RequestId;
     use agent_client_protocol::{RawJsonRpcMessage, TransportFrame};
     use std::time::Duration;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     fn engine_config() -> SdkEngineConfig {
         SdkEngineConfig {
@@ -191,11 +267,14 @@ mod tests {
         let (_, mut agent_write) = tokio::io::split(agent_io);
 
         let (inbound_tx, mut inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
+        let _outbound_tx = outbound_tx;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let (closed_tx, mut closed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
             inbound_tx,
+            outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
             closed_tx,
@@ -235,6 +314,163 @@ mod tests {
             .expect("closed watch must stay open");
         assert!(*closed_rx.borrow());
 
+        let _ = shutdown_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
+    /// A1a 步骤 5 证据：出站非类型化请求经 `cx.spawn` 发送并拿回响应。
+    #[tokio::test]
+    async fn sdk_engine_outbound_request_returns_response() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let (agent_read, mut agent_write) = tokio::io::split(agent_io);
+
+        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (closed_tx, _closed_rx) = tokio::sync::watch::channel(false);
+        let handle = spawn_sdk_client(
+            engine_config(),
+            inbound_tx,
+            outbound_rx,
+            byte_streams(client_read, client_write),
+            shutdown_rx,
+            closed_tx,
+        );
+
+        // agent 端：读一条请求，按原 id 回一条 result；保持写端存活直到测试拿到响应，
+        // 避免 EOF 与响应处理竞态。
+        let (hold_tx, hold_rx) = tokio::sync::oneshot::channel::<()>();
+        let agent_task = tokio::spawn(async move {
+            let mut reader = BufReader::new(agent_read);
+            let mut line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+                .await
+                .expect("agent must receive outbound request")
+                .expect("agent read must succeed");
+            let request: serde_json::Value =
+                serde_json::from_str(line.trim()).expect("request json");
+            assert_eq!(request["method"], "session/new");
+            let response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"sessionId": "outbound-session"}
+            });
+            agent_write
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .expect("agent write");
+            agent_write.flush().await.expect("agent flush");
+            let _ = hold_rx.await;
+        });
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        outbound_tx
+            .send(SdkOutbound::Request {
+                method: "session/new".to_string(),
+                params: serde_json::json!({"cwd": "."}),
+                reply: reply_tx,
+            })
+            .await
+            .expect("outbound queue");
+        let response = tokio::time::timeout(Duration::from_secs(5), reply_rx)
+            .await
+            .expect("outbound reply must arrive")
+            .expect("reply channel must stay open")
+            .expect("outbound request must succeed");
+        assert_eq!(response["sessionId"], "outbound-session");
+
+        let _ = hold_tx.send(());
+        agent_task.await.expect("agent task");
+        let _ = shutdown_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
+    /// A1a 步骤 6（**硬门**）：入站队列满时丢帧、不阻塞 dispatch loop。
+    #[tokio::test]
+    async fn inbox_full_does_not_block_dispatch() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let (agent_read, mut agent_write) = tokio::io::split(agent_io);
+
+        // 入站队列容量 1：连发 3 条通知必有 2 条被丢。
+        let (inbound_tx, mut inbound_rx) = tokio::sync::mpsc::channel(1);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (closed_tx, _closed_rx) = tokio::sync::watch::channel(false);
+        let handle = spawn_sdk_client(
+            engine_config(),
+            inbound_tx,
+            outbound_rx,
+            byte_streams(client_read, client_write),
+            shutdown_rx,
+            closed_tx,
+        );
+
+        let (hold_tx, hold_rx) = tokio::sync::oneshot::channel::<()>();
+        let agent_task = tokio::spawn(async move {
+            for index in 0..3 {
+                let frame = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "index": index}}
+                });
+                agent_write
+                    .write_all(format!("{frame}\n").as_bytes())
+                    .await
+                    .expect("agent write");
+            }
+            agent_write.flush().await.expect("agent flush");
+            // 入站队列已满仍必须能处理出站请求（否则 dispatch loop 被阻塞）。
+            let mut reader = BufReader::new(agent_read);
+            let mut line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+                .await
+                .expect("dispatch loop must stay responsive while inbox is full")
+                .expect("agent read must succeed");
+            let request: serde_json::Value =
+                serde_json::from_str(line.trim()).expect("request json");
+            let response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"ok": true}
+            });
+            agent_write
+                .write_all(format!("{response}\n").as_bytes())
+                .await
+                .expect("agent response write");
+            agent_write.flush().await.expect("agent response flush");
+            let _ = hold_rx.await;
+        });
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        outbound_tx
+            .send(SdkOutbound::Request {
+                method: "session/new".to_string(),
+                params: serde_json::json!({"cwd": "."}),
+                reply: reply_tx,
+            })
+            .await
+            .expect("outbound queue");
+        let response = tokio::time::timeout(Duration::from_secs(5), reply_rx)
+            .await
+            .expect("outbound reply must arrive while inbox is full")
+            .expect("reply channel must stay open")
+            .expect("outbound request must succeed");
+        assert_eq!(response["ok"], true);
+
+        // 队列只保留 1 条，其余被丢帧（try_send 失败不影响转发）。
+        let first = inbound_rx.recv().await.expect("first notification kept");
+        assert_eq!(
+            first,
+            SdkInbound::Notification {
+                method: "session/update".to_string(),
+                params: serde_json::json!({"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "index": 0}}),
+            }
+        );
+
+        let _ = hold_tx.send(());
+        agent_task.await.expect("agent task");
         let _ = shutdown_tx.send(true);
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
