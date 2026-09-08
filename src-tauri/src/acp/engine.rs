@@ -117,6 +117,7 @@ pub(crate) struct SdkEngineConfig {
     pub name: String,
     /// 连接所属 client 代际（wire capture 用，与 legacy 一致）。
     pub client_generation: u64,
+    pub wire: Arc<AcpWireHub>,
 }
 
 /// D12：`PreparedRpc` 的 SDK 专属状态（`id` 由 facade 持有）。
@@ -488,6 +489,7 @@ pub(crate) fn spawn_sdk_client(
 ) -> tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>> {
     let crashed_eof = crashed.clone();
     let crashed_watch_eof = crashed_watch.clone();
+    let wire = config.wire.clone();
     tokio::spawn(async move {
         let result = Client
             .builder()
@@ -498,6 +500,7 @@ pub(crate) fn spawn_sdk_client(
                     let replay_events = replay_events.clone();
                     let active_replay_requests = active_replay_requests.clone();
                     let pending_requests = pending_requests.clone();
+                    let wire = wire.clone();
                     async move {
                         match message {
                             // 响应必须交回 SDK 的 SentRequest：若被 handler 认领而不路由，
@@ -513,7 +516,7 @@ pub(crate) fn spawn_sdk_client(
                                         pending.insert(id.clone(), responder);
                                     }
                                 }
-                                let classified = ClassifiedMessage::live(RawMessage {
+                                let mut classified = ClassifiedMessage::live(RawMessage {
                                     id,
                                     kind: super::AcpKind::from_method(Some(request.method())),
                                     method: Some(request.method().to_string()),
@@ -521,6 +524,7 @@ pub(crate) fn spawn_sdk_client(
                                     params: Some(request.params().clone()),
                                     error: None,
                                 });
+                                classified.wire_ordinal = wire.take_inbound_ordinal();
                                 publish_inbound(
                                     classified,
                                     &replay_events,
@@ -529,7 +533,7 @@ pub(crate) fn spawn_sdk_client(
                                 );
                             }
                             Dispatch::Notification(notification) => {
-                                let classified = ClassifiedMessage::live(RawMessage {
+                                let mut classified = ClassifiedMessage::live(RawMessage {
                                     id: None,
                                     kind: super::AcpKind::from_method(Some(notification.method())),
                                     method: Some(notification.method().to_string()),
@@ -537,6 +541,7 @@ pub(crate) fn spawn_sdk_client(
                                     params: Some(notification.params().clone()),
                                     error: None,
                                 });
+                                classified.wire_ordinal = wire.take_inbound_ordinal();
                                 publish_inbound(
                                     classified,
                                     &replay_events,
@@ -693,6 +698,7 @@ pub(crate) fn spawn_sdk_engine(
         SdkEngineConfig {
             name: agent.name.clone(),
             client_generation,
+            wire: wire.clone(),
         },
         inbound_tx,
         outbound_rx,
@@ -732,6 +738,11 @@ mod tests {
         SdkEngineConfig {
             name: "pylon-engine-test".to_string(),
             client_generation: 1,
+            wire: AcpWireHub::new(RuntimeCorrelation {
+                agent_id: "test".into(), provider: None, source: "test".into(),
+                local_session_id: None, remote_session_id: None, peri_id: None,
+                client_generation: 1, request_id: None, tool_call_id: None,
+            }, 8),
         }
     }
 

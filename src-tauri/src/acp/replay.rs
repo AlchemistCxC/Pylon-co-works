@@ -196,7 +196,7 @@ async fn load_session_with_replay_sdk(
                         return Err(AcpError::ReplayStreamClosed)
                     }
                 };
-                let ClassifiedMessage { raw, classification } = message;
+                let ClassifiedMessage { raw, classification, .. } = message;
                 if matches!(
                     classification,
                     ReplayClassification::Replay { request_id } if request_id == capture_request_id
@@ -309,6 +309,7 @@ mod tests {
         ClassifiedMessage {
             raw,
             classification,
+            wire_ordinal: None,
         }
     }
 

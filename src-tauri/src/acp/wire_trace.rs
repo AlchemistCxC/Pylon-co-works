@@ -16,6 +16,7 @@
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -111,6 +112,7 @@ pub struct WireRecord {
 /// 单 agent 的 wire trace 环形缓冲（容量上限，满时覆盖最旧）。
 /// OBS-02：持有完整连接级 correlation context（agentId/provider/source/
 /// clientGeneration 构造时固定）。
+#[derive(Debug)]
 pub struct AcpWireHub {
     correlation: RuntimeCorrelation,
     trace_id: String,
@@ -119,6 +121,7 @@ pub struct AcpWireHub {
     records: Mutex<AllocRingBuffer<Arc<WireRecord>>>,
     capacity: usize,
     canonical_correlations: Mutex<HashMap<u64, CanonicalCorrelation>>,
+    inbound_ordinals: Mutex<VecDeque<u64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,6 +147,7 @@ impl AcpWireHub {
             records: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
             canonical_correlations: Mutex::new(HashMap::new()),
+            inbound_ordinals: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -203,10 +207,11 @@ impl AcpWireHub {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let record = build_record(
             &self.trace_id,
             &self.correlation,
-            self.next_seq.fetch_add(1, Ordering::Relaxed),
+            seq,
             direction,
             msg_val,
         );
@@ -219,6 +224,16 @@ impl AcpWireHub {
             records.dequeue();
         }
         records.enqueue(Arc::new(record));
+        if direction == WireDirection::AgentToPylon {
+            if let Ok(mut ordinals) = self.inbound_ordinals.lock() {
+                if ordinals.len() >= self.capacity { ordinals.pop_front(); }
+                ordinals.push_back(seq);
+            }
+        }
+    }
+
+    pub fn take_inbound_ordinal(&self) -> Option<u64> {
+        self.inbound_ordinals.lock().ok()?.pop_front()
     }
 
     /// 记录一条已序列化的 outbound 行（writer 边界调用；解析失败静默跳过）。

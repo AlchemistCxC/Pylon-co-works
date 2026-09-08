@@ -109,6 +109,7 @@ pub(crate) enum ReplayClassification {
 pub(crate) struct ClassifiedMessage {
     pub(crate) raw: RawMessage,
     pub(crate) classification: ReplayClassification,
+    pub(crate) wire_ordinal: Option<u64>,
 }
 
 impl ClassifiedMessage {
@@ -116,6 +117,7 @@ impl ClassifiedMessage {
         Self {
             raw,
             classification: ReplayClassification::Live,
+            wire_ordinal: None,
         }
     }
 }

@@ -609,6 +609,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     event_service: Option<&Arc<crate::session::EventService>>,
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
+    wire_ordinal: Option<u64>,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -767,6 +768,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             variant,
             replay_loading,
             payload: payload.clone(),
+            wire_ordinal,
         };
         let decision = routing::decide(&input);
         routing_input = input;
@@ -1296,6 +1298,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let crate::acp::ClassifiedMessage {
                 raw,
                 classification,
+                wire_ordinal,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1444,6 +1447,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 event_service.as_ref(),
                 message_service.as_ref(),
                 classification,
+                wire_ordinal,
                 payload,
             )
             .await

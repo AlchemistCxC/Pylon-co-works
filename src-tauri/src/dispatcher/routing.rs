@@ -21,6 +21,7 @@ pub(crate) struct RoutingInput {
     pub(crate) variant: Option<SessionUpdateVariant>,
     pub(crate) replay_loading: bool,
     pub(crate) payload: serde_json::Value,
+    pub(crate) wire_ordinal: Option<u64>,
 }
 
 /// Side-effect policy decided once for an input event.
@@ -179,6 +180,7 @@ mod tests {
             variant,
             replay_loading,
             payload: serde_json::json!({"sessionId":"peri-s1"}),
+            wire_ordinal: None,
         }
     }
 
