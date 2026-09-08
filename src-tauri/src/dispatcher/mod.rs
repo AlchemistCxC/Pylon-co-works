@@ -285,9 +285,7 @@ fn apply_update_event_with_pet_policy(
                 .get("availableCommands")
                 .or_else(|| update.get("commands"))
             {
-                session
-                    .snapshots
-                    .insert("commands".to_string(), commands.clone());
+                session.commands_snapshot = Some(commands.clone());
             }
         }
         Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate) => {
@@ -302,9 +300,6 @@ fn apply_update_event_with_pet_policy(
                 // well as the typed field; session/load restores snapshots before the
                 // response is rebuilt, so this survives agents that only emit updates
                 // after session/new or session/load.
-                session
-                    .snapshots
-                    .insert("mode".to_string(), serde_json::Value::String(mode.clone()));
                 session.mode = Some(mode.clone());
                 if changed && apply_pet {
                     pet_events.push(PetEvent::ModeChanged(mode));
@@ -846,13 +841,17 @@ async fn handle_session_update<R: tauri::Runtime>(
                 )
             {
                 if let Some(owner) = durable_owner.clone() {
-                    let snapshot = serde_json::Value::Object(
-                        session
-                            .snapshots
-                            .iter()
-                            .map(|(key, value)| (key.clone(), value.clone()))
-                            .collect(),
-                    );
+                    let mut snapshot = serde_json::Map::new();
+                    if let Some(commands) = &session.commands_snapshot {
+                        snapshot.insert("commands".into(), commands.clone());
+                    }
+                    if let Some(usage) = &session.usage_snapshot {
+                        snapshot.insert("usage".into(), usage.clone());
+                    }
+                    if let Some(mode) = &session.mode {
+                        snapshot.insert("mode".into(), serde_json::Value::String(mode.clone()));
+                    }
+                    let snapshot = serde_json::Value::Object(snapshot);
                     session_state_to_persist = Some((owner, snapshot));
                 }
             }
@@ -1705,7 +1704,7 @@ mod tests {
             "command advertisement is not a pet event"
         );
         assert_eq!(
-            session.snapshots["commands"][0]["name"],
+            session.commands_snapshot.as_ref().unwrap()[0]["name"],
             serde_json::json!("compact")
         );
 
@@ -1735,7 +1734,7 @@ mod tests {
         );
         assert!(replay_events.is_empty());
         assert_eq!(
-            session.snapshots["commands"][0]["name"],
+            session.commands_snapshot.as_ref().unwrap()[0]["name"],
             serde_json::json!("reload")
         );
 

@@ -21,7 +21,7 @@ fn capture_usage(session: &mut SessionInfo, response: &serde_json::Value) {
         })
         .cloned()
     {
-        session.snapshots.insert("usage".to_string(), usage);
+        session.usage_snapshot = Some(usage);
     }
 }
 
@@ -29,7 +29,10 @@ fn restore_usage(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("usage").is_some() {
         return;
     }
-    if let Some(usage) = session.snapshots.get("usage") {
+    if let Some(usage) = session
+        .usage_snapshot
+        .as_ref()
+    {
         if let Some(obj) = response.as_object_mut() {
             obj.insert("usage".to_string(), usage.clone());
         }
@@ -42,7 +45,7 @@ fn capture_commands(session: &mut SessionInfo, response: &serde_json::Value) {
         .or_else(|| response.get("availableCommands"))
         .cloned();
     if let Some(commands) = commands {
-        session.snapshots.insert("commands".to_string(), commands);
+        session.commands_snapshot = Some(commands);
     }
 }
 
@@ -50,7 +53,10 @@ fn restore_commands(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("commands").is_some() || response.get("availableCommands").is_some() {
         return;
     }
-    if let Some(commands) = session.snapshots.get("commands") {
+    if let Some(commands) = session
+        .commands_snapshot
+        .as_ref()
+    {
         if let Some(obj) = response.as_object_mut() {
             obj.insert("commands".to_string(), commands.clone());
         }
@@ -84,13 +90,7 @@ fn restore_mode(session: &SessionInfo, response: &mut serde_json::Value) {
     if response.get("modes").is_some() {
         return;
     }
-    let mode = session.mode.clone().or_else(|| {
-        session
-            .snapshots
-            .get("mode")
-            .and_then(|value| value.as_str())
-            .map(str::to_string)
-    });
+    let mode = session.mode.clone();
     if let Some(mode) = mode {
         if let Some(obj) = response.as_object_mut() {
             obj.insert(

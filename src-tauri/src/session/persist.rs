@@ -192,8 +192,14 @@ pub(crate) async fn load_persisted_session(
                     session.apply_session_response(&response);
                     if let Some(persisted) = &persisted_state {
                         if let Some(object) = persisted.as_object() {
-                            for (key, value) in object {
-                                session.snapshots.insert(key.clone(), value.clone());
+                            if let Some(value) = object.get("commands") {
+                                session.commands_snapshot = Some(value.clone());
+                            }
+                            if let Some(value) = object.get("usage") {
+                                session.usage_snapshot = Some(value.clone());
+                            }
+                            if let Some(value) = object.get("mode").and_then(|v| v.as_str()) {
+                                session.mode = Some(value.to_string());
                             }
                         }
                     }

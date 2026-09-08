@@ -2,7 +2,6 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use serde::Serialize;
-use std::collections::HashMap;
 
 use super::{capture_session_state, DurableSessionOwner};
 use crate::agent_config::SetModelApi;
@@ -80,7 +79,8 @@ pub(crate) struct SessionInfo {
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
     pub(crate) last_response_text: String,
     /// 会话级可恢复状态快照（wire key -> JSON）：usage/commands/mode 及未来状态量统一放这里。
-    pub(crate) snapshots: HashMap<String, serde_json::Value>,
+    pub(crate) commands_snapshot: Option<serde_json::Value>,
+    pub(crate) usage_snapshot: Option<serde_json::Value>,
 }
 
 /// 方案 7：load_sessions wire DTO（替代手写 json!；wire 字段/形状逐字不变）。
@@ -153,7 +153,8 @@ impl SessionInfo {
             inject_round: 0,
             last_response_round: 0,
             last_response_text: String::new(),
-            snapshots: HashMap::new(),
+            commands_snapshot: None,
+            usage_snapshot: None,
         }
     }
 
@@ -227,7 +228,7 @@ impl SessionInfo {
             })
             .cloned()
         {
-            self.snapshots.insert("usage".to_string(), usage);
+            self.usage_snapshot = Some(usage);
         }
         // P56/D1.2：按响应形状刷新模型面（configOptions 优先，models.availableModels
         // 兜底，都没有 → None 只读）。
