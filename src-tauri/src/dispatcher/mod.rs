@@ -1929,4 +1929,453 @@ mod tests {
             "未知 agent 无 provider"
         );
     }
+
+    // ── P55-D2：permission.request / interaction.request 钩子缝 ──────────────
+
+    mod d2_hooks {
+        use super::*;
+        use crate::acp::RequestId;
+        use crate::test_utils::fake_acp_agent;
+        use serde_json::json;
+        use std::sync::atomic::AtomicU64;
+        use std::sync::{Arc, Mutex};
+        use tauri::{Listener, Manager};
+
+        fn mock_app_and_window() -> (
+            tauri::App<tauri::test::MockRuntime>,
+            tauri::WebviewWindow<tauri::test::MockRuntime>,
+        ) {
+            let state = crate::test_utils::TestStateBuilder::bare().build();
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("mock app must build");
+            app.manage(state);
+            let window = tauri::WebviewWindowBuilder::new(
+                &app,
+                "d2-main",
+                tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+            )
+            .build()
+            .expect("mock window must build");
+            (app, window)
+        }
+
+        fn bridge_ready(
+            app: &tauri::App<tauri::test::MockRuntime>,
+            hooks: &[&str],
+        ) -> Arc<crate::hook_bridge::HookBridge> {
+            let bridge = app.state::<crate::AppState>().hook_bridge.clone();
+            bridge.mark_started();
+            bridge.sync_registry(&json!({ "hooks": hooks }));
+            bridge
+        }
+
+        /// 桥应答器：监听 PYLON_HOOK_REQUEST，按 action 立即回程（mock 窗口上
+        /// listener 同步触发，无需独立任务）。
+        fn install_hook_responder(
+            window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+            bridge: &Arc<crate::hook_bridge::HookBridge>,
+            action: serde_json::Value,
+        ) {
+            let bridge = bridge.clone();
+            window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(event.payload()).expect("hook request payload");
+                let request_id = payload["requestId"].as_str().unwrap().to_string();
+                let mut answer = action.clone();
+                answer["executed"] = json!(1);
+                answer["skipped"] = json!(0);
+                let _ = bridge.respond(&request_id, Ok(answer));
+            });
+        }
+
+        /// python trace agent：把收到的每行 JSON-RPC 原样落盘（同 permission.rs 模式）。
+        fn trace_script(trace_path: &std::path::Path) -> String {
+            format!(
+                r#"import json,sys
+with open({trace:?}, 'a') as f:
+    for line in sys.stdin:
+        request = json.loads(line)
+        f.write(line)
+        f.flush()
+        print(json.dumps({{'jsonrpc':'2.0','id':request.get('id'),'result':{{}}}}), flush=True)
+"#,
+                trace = trace_path.to_string_lossy()
+            )
+        }
+
+        async fn trace_acp(name: &str, trace_path: &std::path::Path) -> Arc<AcpLock> {
+            let agent = fake_acp_agent(name, &trace_script(trace_path));
+            let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
+                .await
+                .expect("fake ACP 必须初始化");
+            Arc::new(tokio::sync::Mutex::new(acp))
+        }
+
+        /// 轮询 trace 文件直到出现 needle（5s 超时）。
+        async fn wait_for_trace_line(
+            trace_path: &std::path::Path,
+            needle: &str,
+        ) -> String {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                if let Ok(text) = std::fs::read_to_string(trace_path) {
+                    for line in text.lines() {
+                        if line.contains(needle) {
+                            return line.to_string();
+                        }
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "trace 中未出现 {needle}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        }
+
+        fn unique_trace_path(tag: &str) -> std::path::PathBuf {
+            std::env::temp_dir().join(format!(
+                "pylon_d2_hook_{tag}_{}_{}.jsonl",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+        }
+
+        fn d2_params() -> serde_json::Value {
+            json!({
+                "sessionId": "s1",
+                "toolCall": {"toolCallId": "call-d2", "title": "edit"},
+                "options": [{"optionId": "allow_once"}, {"optionId": "reject_once"}]
+            })
+        }
+
+        /// 注册专用 provider 适配器（全局注册表，专用名避免并发测试竞态——
+        /// 同 protocol_adapter.rs 测试惯例，不调用全局 clear）。
+        fn register_d2_adapter() {
+            crate::protocol_adapter::register_protocol_adapter(Arc::new(
+                crate::protocol_adapter::RequestPermissionAdapter {
+                    provider: "d2-hook-probe",
+                },
+            ));
+        }
+
+        fn permission_locks() -> (
+            Arc<std::sync::Mutex<String>>,
+            Arc<PermissionLock>,
+            Arc<AtomicU64>,
+        ) {
+            (
+                Arc::new(std::sync::Mutex::new("default".to_string())),
+                Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                Arc::new(AtomicU64::new(0)),
+            )
+        }
+
+        /// 验收 D2-①：钩子 allow → 直接应答 allow 语义 option，**不进挂起表**
+        ///（default 模式下无钩子本应挂起——证明短路先于 mode 判定）。
+        #[tokio::test]
+        async fn permission_hook_allow_skips_pending_table() {
+            register_d2_adapter();
+            let trace_path = unique_trace_path("allow");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["permission.request"]);
+            install_hook_responder(&window, &bridge, json!({"action": "allow"}));
+            let acp = trace_acp("d2-allow", &trace_path).await;
+            let (mode, pending, generation) = permission_locks();
+
+            handle_permission_request(
+                &window,
+                &acp,
+                &bridge,
+                &generation,
+                &mode,
+                &pending,
+                "d2-hook-probe",
+                "a1",
+                Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION),
+                RequestId::Number(51),
+                Some(&d2_params()),
+            )
+            .await;
+
+            let line = wait_for_trace_line(&trace_path, "\"id\":51").await;
+            assert!(
+                line.contains("allow_once"),
+                "钩子 allow 必须应答 allow 语义 option：{line}"
+            );
+            assert!(
+                pending.lock().unwrap().is_empty(),
+                "钩子短路后不得进入用户挂起表（D2-①）"
+            );
+        }
+
+        /// 验收 D2-①（deny 面）：钩子 deny → 应答 deny 语义 option，同样不挂起。
+        #[tokio::test]
+        async fn permission_hook_denies_with_reject_option() {
+            register_d2_adapter();
+            let trace_path = unique_trace_path("deny");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["permission.request"]);
+            install_hook_responder(&window, &bridge, json!({"action": "deny"}));
+            let acp = trace_acp("d2-deny", &trace_path).await;
+            let (mode, pending, generation) = permission_locks();
+
+            handle_permission_request(
+                &window,
+                &acp,
+                &bridge,
+                &generation,
+                &mode,
+                &pending,
+                "d2-hook-probe",
+                "a1",
+                Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION),
+                RequestId::Number(52),
+                Some(&d2_params()),
+            )
+            .await;
+
+            let line = wait_for_trace_line(&trace_path, "\"id\":52").await;
+            assert!(
+                line.contains("reject_once"),
+                "钩子 deny 必须应答 deny 语义 option：{line}"
+            );
+            assert!(pending.lock().unwrap().is_empty());
+        }
+
+        /// 验收 D2-②：钩子 continue / 未注册 → 既有权限流逐字节不变
+        ///（default 模式：挂起 pending + INTERACTION 事件；不写任何应答行）。
+        #[tokio::test]
+        async fn permission_hook_continue_falls_back_to_pending_flow() {
+            register_d2_adapter();
+            let trace_path = unique_trace_path("cont");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["permission.request"]);
+            install_hook_responder(&window, &bridge, json!({"action": "continue"}));
+            let acp = trace_acp("d2-cont", &trace_path).await;
+            let (mode, pending, generation) = permission_locks();
+
+            let interaction_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let sink = interaction_events.clone();
+            window.listen(crate::event_names::INTERACTION, move |event| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    sink.lock().unwrap().push(value);
+                }
+            });
+
+            handle_permission_request(
+                &window,
+                &acp,
+                &bridge,
+                &generation,
+                &mode,
+                &pending,
+                "d2-hook-probe",
+                "a1",
+                Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION),
+                RequestId::Number(53),
+                Some(&d2_params()),
+            )
+            .await;
+
+            // spawn 任务回退既有流：等待挂起表出现该请求。
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !pending.lock().unwrap().contains_key(&RequestId::Number(53)) {
+                assert!(std::time::Instant::now() < deadline, "钩子 continue 必须回退挂起流");
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let events = interaction_events.lock().unwrap();
+            assert!(
+                events.iter().any(|event| {
+                    event["eventType"] == "permission.request"
+                        && event["requestId"] == "53"
+                        && event["payload"]["options"].is_array()
+                }),
+                "既有 INTERACTION 事件必须照发（D2-②）：{:?}",
+                *events
+            );
+            assert!(
+                !std::fs::read_to_string(&trace_path)
+                    .map(|text| text.contains("\"id\":53"))
+                    .unwrap_or(false),
+                "钩子 continue 时不得写任何应答行（由用户审批决定）"
+            );
+        }
+
+        /// 验收 D2-②（零注册面）：锚点未注册 → 主循环直连既有流（无 spawn、
+        /// 无桥 IPC），同步挂起。
+        #[tokio::test]
+        async fn permission_without_registration_takes_legacy_path_directly() {
+            register_d2_adapter();
+            let (app, window) = mock_app_and_window();
+            // 桥 ready 但注册表为空——permission.request 零注册。
+            let bridge = bridge_ready(&app, &[]);
+            let (mode, pending, generation) = permission_locks();
+            let acp: Arc<AcpLock> = Arc::new(tokio::sync::Mutex::new(
+                crate::acp::AcpClient::disconnected(),
+            ));
+
+            handle_permission_request(
+                &window,
+                &acp,
+                &bridge,
+                &generation,
+                &mode,
+                &pending,
+                "d2-hook-probe",
+                "a1",
+                Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION),
+                RequestId::Number(54),
+                Some(&d2_params()),
+            )
+            .await;
+
+            // 未注册 → handle 内直接 await 既有流，返回时挂起表必已写入。
+            assert!(
+                pending.lock().unwrap().contains_key(&RequestId::Number(54)),
+                "零注册必须同步走既有挂起流（零 IPC）"
+            );
+        }
+
+        /// 验收 D2-③（§10.3 respond 面）：钩子 respond → 用原 request id 回写
+        /// result 信封。
+        #[tokio::test]
+        async fn interaction_hook_respond_writes_result_with_original_id() {
+            let trace_path = unique_trace_path("iresp");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["interaction.request"]);
+            install_hook_responder(
+                &window,
+                &bridge,
+                json!({"action": "respond", "event": {"answer": "yes"}}),
+            );
+            let acp = trace_acp("d2-iresp", &trace_path).await;
+
+            handle_interaction_request(
+                &window,
+                &acp,
+                &bridge,
+                "unknown-provider",
+                "a1",
+                Some("session/request_question"),
+                Some(RequestId::Number(61)),
+                Some(&json!({"sessionId": "s1", "question": "q"})),
+            )
+            .await;
+
+            let line = wait_for_trace_line(&trace_path, "\"id\":61").await;
+            assert!(
+                line.contains("\"result\"") && line.contains("\"yes\""),
+                "respond 必须回写 result 信封（原 id）：{line}"
+            );
+        }
+
+        /// 验收 D2-③（§10.3 cancel 面）：钩子 cancel → JSON-RPC invalid-request
+        /// error（-32600，reasonCode=hook_cancelled 的可见层）。
+        #[tokio::test]
+        async fn interaction_hook_cancel_maps_to_invalid_request_error() {
+            let trace_path = unique_trace_path("icancel");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["interaction.request"]);
+            install_hook_responder(
+                &window,
+                &bridge,
+                json!({"action": "cancel", "reason": "hook says no"}),
+            );
+            let acp = trace_acp("d2-icancel", &trace_path).await;
+
+            handle_interaction_request(
+                &window,
+                &acp,
+                &bridge,
+                "unknown-provider",
+                "a1",
+                Some("session/request_question"),
+                Some(RequestId::Number(62)),
+                Some(&json!({"sessionId": "s1", "question": "q"})),
+            )
+            .await;
+
+            let line = wait_for_trace_line(&trace_path, "\"id\":62").await;
+            assert!(
+                line.contains("-32600") && line.contains("hook says no"),
+                "cancel 必须映射 invalid-request error：{line}"
+            );
+        }
+
+        /// 验收 D2-②（interaction 回归面）：钩子 continue → 既有 reject
+        ///（provider 未注册 → -32601 provider_unsupported）逐字节不变。
+        #[tokio::test]
+        async fn interaction_hook_continue_keeps_legacy_reject() {
+            let trace_path = unique_trace_path("icont");
+            let _ = std::fs::remove_file(&trace_path);
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["interaction.request"]);
+            install_hook_responder(&window, &bridge, json!({"action": "continue"}));
+            let acp = trace_acp("d2-icont", &trace_path).await;
+
+            handle_interaction_request(
+                &window,
+                &acp,
+                &bridge,
+                "unknown-provider",
+                "a1",
+                Some("session/request_question"),
+                Some(RequestId::Number(63)),
+                Some(&json!({"sessionId": "s1", "question": "q"})),
+            )
+            .await;
+
+            let line = wait_for_trace_line(&trace_path, "\"id\":63").await;
+            assert!(
+                line.contains("-32601")
+                    && line.contains("interaction session/request_question unsupported"),
+                "continue 必须保持既有 reject 信封（码与文案不变）：{line}"
+            );
+        }
+
+        /// D2 边界：缺 id 的 interaction 请求不走钩子（畸形协议请求，
+        /// 保持既有 missing_request_id reject，不进桥）。
+        #[tokio::test]
+        async fn interaction_without_id_never_reaches_hook() {
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["interaction.request"]);
+            let hook_calls = Arc::new(Mutex::new(0usize));
+            let sink = hook_calls.clone();
+            window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |_| {
+                *sink.lock().unwrap() += 1;
+            });
+            let acp: Arc<AcpLock> = Arc::new(tokio::sync::Mutex::new(
+                crate::acp::AcpClient::disconnected(),
+            ));
+
+            handle_interaction_request(
+                &window,
+                &acp,
+                &bridge,
+                "unknown-provider",
+                "a1",
+                Some("session/request_question"),
+                None,
+                Some(&json!({"sessionId": "s1"})),
+            )
+            .await;
+
+            assert_eq!(
+                *hook_calls.lock().unwrap(),
+                0,
+                "缺 id 的畸形请求不得派发钩子（无法回写应答）"
+            );
+        }
+    }
 }

@@ -630,7 +630,7 @@ mod tests {
         let (app, window) = mock_app_with_state();
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_USER_BEFORE_SEND]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -639,7 +639,7 @@ mod tests {
 
         let responder_bridge = bridge.clone();
         let responder = tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -684,7 +684,7 @@ mod tests {
     async fn bridge_timeout_fails_open_after_rust_clock_deadline() {
         let (app, window) = mock_app_with_state();
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_USER_BEFORE_SEND]);
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -703,7 +703,10 @@ mod tests {
             .await;
         let elapsed = started.elapsed();
         // 超时后必须已摘表：迟到应答被拒。
-        let request = rx.recv_timeout(Duration::from_secs(1)).expect("request emitted");
+        let request = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("request wait timed out")
+            .expect("request emitted");
         let request_id = request["requestId"].as_str().unwrap().to_string();
         assert!(
             bridge.respond(&request_id, Ok(Value::Null)).is_err(),
@@ -727,7 +730,9 @@ mod tests {
         bridge.mark_started();
         bridge.sync_registry(&json!({ "hooks": [HOOK_MESSAGE_USER_BEFORE_SEND] }));
         let result = bridge.dispatch::<tauri::test::MockRuntime>(
-            None,
+            // 类型标注：None 无法自行推断 impl Emitter 的具体类型（E0283）——
+            // 本测试只验证 depth 闸先于 emitter 闸，App 即可充当空 emitter。
+            None::<&tauri::App<tauri::test::MockRuntime>>,
             HOOK_MESSAGE_USER_BEFORE_SEND,
             "s",
             json!({ "triggeredBy": { "depth": 2 } }),
@@ -846,7 +851,7 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -854,7 +859,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -893,7 +898,7 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -901,7 +906,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let Value::Object(ref mut map) = event {
