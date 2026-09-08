@@ -1026,6 +1026,57 @@ mod tests {
         ));
     }
 
+    /// A1b 步骤 3 前置：SDK 的 `SentRequest` 被 drop 会自动发 `$/cancel_request`
+    /// （与 Pylon「丢弃 pending 不发取消」不同——A1b 必须显式审计并锁定该差异）。
+    #[tokio::test]
+    async fn sent_request_drop_sends_cancel_request() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let (agent_read, _agent_write) = tokio::io::split(agent_io);
+
+        let agent_task = tokio::spawn(async move {
+            let mut reader = BufReader::new(agent_read);
+            let mut request_line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut request_line))
+                .await
+                .expect("agent must receive request")
+                .expect("agent read must succeed");
+            let request: serde_json::Value =
+                serde_json::from_str(request_line.trim()).expect("request json");
+            assert_eq!(request["method"], "session/prompt");
+
+            let mut cancel_line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut cancel_line))
+                .await
+                .expect("drop must send $/cancel_request")
+                .expect("agent read must succeed");
+            let cancel: serde_json::Value =
+                serde_json::from_str(cancel_line.trim()).expect("cancel json");
+            assert_eq!(cancel["method"], "$/cancel_request");
+        });
+
+        let transport = byte_streams(client_read, client_write);
+        let handle = tokio::spawn(async move {
+            Client
+                .builder()
+                .name("drop-cancel-probe")
+                .connect_with(transport, async |cx| {
+                    let request = UntypedMessage::new(
+                        "session/prompt",
+                        serde_json::json!({"sessionId": "s-1"}),
+                    )?;
+                    // 立即 drop：SDK 契约 = 自动发 $/cancel_request。
+                    drop(cx.send_request(request));
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    Ok(())
+                })
+                .await
+        });
+
+        agent_task.await.expect("agent task");
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
     /// D11 ③：flag 解析——缺省 legacy，非法值报错（**不回退**）。
     #[test]
     fn acp_engine_kind_parsing_rejects_invalid() {
