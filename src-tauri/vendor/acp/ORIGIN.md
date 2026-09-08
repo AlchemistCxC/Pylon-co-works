@@ -84,6 +84,13 @@
 
 ## 6. 变更流程
 
+### A-DETECT preflight 版本解析（生产代码摘取）
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/preflight.rs` 的 `parse_node_version`；Apache-2.0，沿用根 NOTICE 与许可证。
+- 目标：`src-tauri/pylon-core/src/agent_preflight.rs`，由 catalog Node/uv minimum 检查消费；解析函数按上游迁入，替换将非法分量转换为零的手写比较器。
+- Pylon 接缝：catalog `params.min` 和 `PreflightInputs`；缺失/非法版本不能证明满足要求。未迁上游 registry、AppState、探测缓存和安装动作。
+- 证据：`invalid_or_missing_versions_cannot_pass_a_requirement`、`upstream_parser_accepts_banner_whitespace_and_patch_suffixes`。Node/uv 的完整状态分级、采集与 fix action 仍待整片收敛，不以此宣称 preflight 完成。
+
 1. 新增迁入文件：复制到 `src-tauri/vendor/acp/` → 计算 `sha256` → 在本文件 §3 追加登记（含 `sourcePath`、`modifications`、`consumer`、`unmigratedDeps`）→ 跑 `node scripts/check-vendor-provenance.mjs`。
 2. 修改已迁入副本：**不要**直接改 `vendor/` 里的文件；在 Pylon adapter 中改写，并在本文件 `modifications` 字段记录改动摘要。若确需改动副本本身（例如去掉不可编译的前端依赖），必须在 `modifications` 写明并更新 `sha256`。
 3. 新增 crate 落点、依赖方向与职责边界按施工书 §0 纪律同步登记到 `Docs/Pylon-问题台账.md` P60 条目。
