@@ -143,9 +143,19 @@ fn apply_update_event_with_pet_policy(
                 session.tokens_total = used;
                 session.context_size = size.unwrap_or(0);
             }
-            crate::acp::AcpStateDelta::Mode { mode } => session.mode = Some(mode),
-            crate::acp::AcpStateDelta::Model { model } => session.model = model,
-            _ => {}
+            // Mode/model remain handled by the existing event transaction below;
+            // consuming them here would suppress its change detection.
+            crate::acp::AcpStateDelta::Mode { .. }
+            | crate::acp::AcpStateDelta::Model { .. }
+            | crate::acp::AcpStateDelta::PermissionQueueDepth { .. }
+            | crate::acp::AcpStateDelta::PermissionRequested { .. }
+            | crate::acp::AcpStateDelta::Text { .. }
+            | crate::acp::AcpStateDelta::Reasoning { .. }
+            | crate::acp::AcpStateDelta::UserText { .. }
+            | crate::acp::AcpStateDelta::ToolStarted { .. }
+            | crate::acp::AcpStateDelta::ToolUpdated { .. }
+            | crate::acp::AcpStateDelta::Plan { .. }
+            | crate::acp::AcpStateDelta::Unknown { .. } => {}
         }
     }
     let mut pet_events: Vec<PetEvent> = Vec::new();
