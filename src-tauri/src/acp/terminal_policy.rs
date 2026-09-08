@@ -187,8 +187,14 @@ mod tests {
             shell_wrapper_args("cmd.exe", "echo hi"),
             vec!["/D", "/S", "/C", "echo hi"]
         );
+        #[cfg(not(target_os = "windows"))]
         assert_eq!(
             shell_wrapper_args("/bin/sh", "printf hi"),
+            vec!["-c", "printf hi"]
+        );
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            shell_wrapper_args("sh.exe", "printf hi"),
             vec!["-c", "printf hi"]
         );
     }
