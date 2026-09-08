@@ -1405,7 +1405,7 @@ mod tests {
         #[cfg(windows)]
         {
             let default = version_probe("fixture", executable, &[], Duration::from_secs(2)).await;
-            assert_eq!(default.version.as_deref(), Some("--version"));
+            assert_eq!(default.version.as_deref(), Some("1.2.3"));
         }
         std::fs::remove_dir_all(root).unwrap();
     }
