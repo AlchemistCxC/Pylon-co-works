@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
-    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, TransportBatchEntry,
+    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, Responder, TransportBatchEntry,
     TransportFrame, UntypedMessage,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -74,6 +74,9 @@ pub(crate) struct SdkBackend {
     pub(crate) replay_events: broadcast::Sender<ClassifiedMessage>,
     /// A1b：进行中的 replay 采集（Pylon id → sessionId），用于把匹配通知标记为 Replay。
     pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    /// A1b：agent 发来的请求应答器（Pylon request id → Responder），供
+    /// `ResponderHandle::Sdk` 在锁外应答。
+    pub(crate) pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
     pub(crate) shutdown: watch::Sender<bool>,
     pub(crate) join: tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>,
 }
@@ -87,8 +90,10 @@ pub(crate) enum ResponderHandle {
         write_tx: mpsc::Sender<String>,
         crashed: Arc<AtomicBool>,
     },
-    /// A1a：SDK 应答尚未接线（A1b 用 `Responder` 实现）；typed fail-closed，不静默丢。
-    Sdk,
+    /// A1b：SDK 应答经引擎登记的 `Responder` 完成。
+    Sdk {
+        pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
+    },
 }
 
 impl ResponderHandle {
@@ -107,9 +112,15 @@ impl ResponderHandle {
                 crate::permission::send_agent_response(write_tx, crashed, request_id, response)
                     .await
             }
-            Self::Sdk => {
-                tracing::warn!("acp sdk engine: respond_to_request not wired until A1b");
-                false
+            Self::Sdk { pending_requests } => {
+                let responder = pending_requests
+                    .lock()
+                    .ok()
+                    .and_then(|mut pending| pending.remove(&request_id));
+                match responder {
+                    Some(responder) => responder.respond(response).is_ok(),
+                    None => false,
+                }
             }
         }
     }
@@ -128,9 +139,20 @@ impl ResponderHandle {
                 )
                 .await
             }
-            Self::Sdk => {
-                tracing::warn!("acp sdk engine: respond_with_error not wired until A1b");
-                false
+            Self::Sdk { pending_requests } => {
+                let responder = pending_requests
+                    .lock()
+                    .ok()
+                    .and_then(|mut pending| pending.remove(&request_id));
+                match responder {
+                    Some(responder) => responder
+                        .respond_with_error(agent_client_protocol::Error::new(
+                            rpc_code as i32,
+                            message,
+                        ))
+                        .is_ok(),
+                    None => false,
+                }
             }
         }
     }
@@ -475,6 +497,54 @@ pub(crate) fn classify_untyped(
     }))
 }
 
+/// SDK wire request id → Pylon `RequestId`（null/absent → None）。
+fn sdk_request_id_to_pylon(
+    id: &agent_client_protocol::schema::v1::RequestId,
+) -> Option<super::RequestId> {
+    match id {
+        agent_client_protocol::schema::v1::RequestId::Number(number) => {
+            u64::try_from(*number).ok().map(super::RequestId::Number)
+        }
+        agent_client_protocol::schema::v1::RequestId::Str(text) => {
+            Some(super::RequestId::String(text.clone()))
+        }
+        agent_client_protocol::schema::v1::RequestId::Null => None,
+    }
+}
+
+/// A1b：标记 replay 分类并发布（broadcast 扇出 + 有界 inbox，满时丢帧不阻塞）。
+fn publish_inbound(
+    mut classified: ClassifiedMessage,
+    replay_events: &broadcast::Sender<ClassifiedMessage>,
+    active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
+    tx: &mpsc::Sender<ClassifiedMessage>,
+) {
+    if let Some(session_id) = classified
+        .raw
+        .params
+        .as_ref()
+        .and_then(|params| params.get("sessionId"))
+        .and_then(serde_json::Value::as_str)
+    {
+        if let Ok(active) = active_replay_requests.lock() {
+            if let Some((request_id, _)) = active.iter().find(|(_, id)| id.as_str() == session_id) {
+                classified.classification = super::ReplayClassification::Replay {
+                    request_id: *request_id,
+                };
+            }
+        }
+    }
+    let _ = replay_events.send(classified.clone());
+    if let Err(error) = tx.try_send(classified) {
+        match error {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                tracing::warn!("acp sdk engine: inbound queue full, dropping frame");
+            }
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
+        }
+    }
+}
+
 /// 构造 SDK 侧 transport 与观测桥之间的四端 `Channel` 拓扑。
 ///
 /// 拓扑：`sdk_end <-> inspect_left  ==bridge==  inspect_right <-> child_end`。
@@ -578,6 +648,7 @@ pub(crate) fn spawn_sdk_client(
     crashed_watch: watch::Sender<bool>,
     replay_events: broadcast::Sender<ClassifiedMessage>,
     active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
 ) -> tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>> {
     let crashed_eof = crashed.clone();
     let crashed_watch_eof = crashed_watch.clone();
@@ -590,6 +661,7 @@ pub(crate) fn spawn_sdk_client(
                     let tx = inbound_tx.clone();
                     let replay_events = replay_events.clone();
                     let active_replay_requests = active_replay_requests.clone();
+                    let pending_requests = pending_requests.clone();
                     async move {
                         match message {
                             // 响应必须交回 SDK 的 SentRequest：若被 handler 认领而不路由，
@@ -597,41 +669,44 @@ pub(crate) fn spawn_sdk_client(
                             Dispatch::Response(result, router) => {
                                 router.route_with_result(result)?;
                             }
-                            request_or_notification => {
-                                if let Some(mut classified) = classify_untyped(request_or_notification) {
-                                    // A1b：进行中的 replay 采集把匹配 sessionId 的通知
-                                    // 标记为 Replay（供 `load_session_with_replay` 收集）。
-                                    if let Some(session_id) = classified
-                                        .raw
-                                        .params
-                                        .as_ref()
-                                        .and_then(|params| params.get("sessionId"))
-                                        .and_then(serde_json::Value::as_str)
-                                    {
-                                        if let Ok(active) = active_replay_requests.lock() {
-                                            if let Some((request_id, _)) = active
-                                                .iter()
-                                                .find(|(_, id)| id.as_str() == session_id)
-                                            {
-                                                classified.classification =
-                                                    super::ReplayClassification::Replay {
-                                                        request_id: *request_id,
-                                                    };
-                                            }
-                                        }
-                                    }
-                                    let _ = replay_events.send(classified.clone());
-                                    if let Err(error) = tx.try_send(classified) {
-                                        match error {
-                                            tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                                                tracing::warn!(
-                                                    "acp sdk engine: inbound queue full, dropping frame"
-                                                );
-                                            }
-                                            tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
-                                        }
+                            Dispatch::Request(request, responder) => {
+                                // A1b：登记 Responder 供 `ResponderHandle::Sdk` 锁外应答。
+                                let id = sdk_request_id_to_pylon(responder.id());
+                                if let Some(id) = &id {
+                                    if let Ok(mut pending) = pending_requests.lock() {
+                                        pending.insert(id.clone(), responder);
                                     }
                                 }
+                                let classified = ClassifiedMessage::live(RawMessage {
+                                    id,
+                                    kind: super::AcpKind::from_method(Some(request.method())),
+                                    method: Some(request.method().to_string()),
+                                    result: None,
+                                    params: Some(request.params().clone()),
+                                    error: None,
+                                });
+                                publish_inbound(
+                                    classified,
+                                    &replay_events,
+                                    &active_replay_requests,
+                                    &tx,
+                                );
+                            }
+                            Dispatch::Notification(notification) => {
+                                let classified = ClassifiedMessage::live(RawMessage {
+                                    id: None,
+                                    kind: super::AcpKind::from_method(Some(notification.method())),
+                                    method: Some(notification.method().to_string()),
+                                    result: None,
+                                    params: Some(notification.params().clone()),
+                                    error: None,
+                                });
+                                publish_inbound(
+                                    classified,
+                                    &replay_events,
+                                    &active_replay_requests,
+                                    &tx,
+                                );
                             }
                         }
                         Ok(Handled::Yes)
@@ -775,6 +850,8 @@ pub(crate) fn spawn_sdk_engine(
     let (replay_events, _) = broadcast::channel(super::BROADCAST_CAP);
     let active_replay_requests: Arc<Mutex<HashMap<u64, String>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let join = spawn_sdk_client(
         SdkEngineConfig {
@@ -789,6 +866,7 @@ pub(crate) fn spawn_sdk_engine(
         crashed_watch,
         replay_events.clone(),
         active_replay_requests.clone(),
+        pending_requests.clone(),
     );
 
     Ok(SdkEngineHandles {
@@ -798,6 +876,7 @@ pub(crate) fn spawn_sdk_engine(
             inbound: NotificationInbox::new(inbound_rx),
             replay_events,
             active_replay_requests,
+            pending_requests,
             shutdown: shutdown_tx,
             join,
         },
@@ -842,6 +921,7 @@ mod tests {
             crashed.clone(),
             crashed_watch,
             tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
@@ -902,6 +982,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             crashed_watch,
             tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
@@ -974,6 +1055,7 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             crashed_watch,
             tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
@@ -1110,6 +1192,92 @@ mod tests {
         let _ = bridge.await;
     }
 
+    /// A1b 步骤 7：agent 请求经 `ResponderHandle::Sdk` 在锁外应答（原值 id 回写）。
+    #[tokio::test]
+    async fn sdk_responder_answers_agent_request() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let (agent_read, mut agent_write) = tokio::io::split(agent_io);
+
+        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
+        let _outbound_tx = outbound_tx;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
+        let pending: Arc<Mutex<HashMap<super::super::RequestId, Responder>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        let handle = spawn_sdk_client(
+            engine_config(),
+            inbound_tx,
+            outbound_rx,
+            byte_streams(client_read, client_write),
+            shutdown_rx,
+            Arc::new(AtomicBool::new(false)),
+            crashed_watch,
+            tokio::sync::broadcast::channel(8).0,
+            Arc::new(Mutex::new(HashMap::new())),
+            pending.clone(),
+        );
+
+        // agent 发一条 string-id 的 permission 请求。
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "perm-1",
+            "method": "session/request_permission",
+            "params": {"sessionId": "s-1", "toolCallId": "tc-1", "options": []}
+        });
+        agent_write
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .expect("agent write");
+        agent_write.flush().await.expect("agent flush");
+
+        // 等引擎登记 Responder（Pylon id 为 String("perm-1")）。
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if pending
+                .lock()
+                .unwrap()
+                .contains_key(&super::super::RequestId::String("perm-1".to_string()))
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "engine must register the agent responder"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let responder = ResponderHandle::Sdk {
+            pending_requests: pending,
+        };
+        assert!(
+            responder
+                .respond(
+                    super::super::RequestId::String("perm-1".to_string()),
+                    serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}}),
+                )
+                .await,
+            "sdk responder must answer"
+        );
+
+        // agent 读到同 id 的响应。
+        let mut reader = BufReader::new(agent_read);
+        let mut line = String::new();
+        tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+            .await
+            .expect("agent must receive response")
+            .expect("agent read must succeed");
+        let response: serde_json::Value = serde_json::from_str(line.trim()).expect("response json");
+        assert_eq!(response["id"], "perm-1");
+        assert_eq!(response["result"]["outcome"]["optionId"], "allow_once");
+
+        let _ = shutdown_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
     /// A1b 步骤 4 前置：进行中 replay 采集的 session 通知必须被标记为 Replay。
     #[tokio::test]
     async fn sdk_inbound_replay_notification_is_classified() {
@@ -1136,6 +1304,7 @@ mod tests {
             crashed_watch,
             replay_tx,
             active,
+            Arc::new(Mutex::new(HashMap::new())),
         );
 
         let frame = serde_json::json!({

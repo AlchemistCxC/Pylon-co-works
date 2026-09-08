@@ -176,7 +176,9 @@ impl AcpClient {
             AcpBackend::Legacy(legacy) => {
                 ResponderHandle::legacy(legacy.write_tx.clone(), self.crashed.clone())
             }
-            AcpBackend::Sdk(_) => ResponderHandle::Sdk,
+            AcpBackend::Sdk(sdk) => ResponderHandle::Sdk {
+                pending_requests: sdk.pending_requests.clone(),
+            },
         }
     }
 
