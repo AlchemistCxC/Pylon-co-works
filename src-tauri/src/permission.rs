@@ -339,7 +339,7 @@ async fn resolve_pending(
     option_id: &str,
 ) -> bool {
     // 锁内复核 + 取 write_tx 克隆 + claim（发送全部在锁外）。
-    let (write_tx, crashed, claimed, canonical_id) = {
+    let (responder, claimed, canonical_id) = {
         let acp = runtime.acp.lock().await;
         let mut pending = match runtime.pending_permissions.lock() {
             Ok(guard) => guard,
@@ -370,12 +370,7 @@ async fn resolve_pending(
         {
             return false;
         }
-        (
-            acp.write_tx.clone(),
-            acp.crashed.clone(),
-            pending.remove(&canonical_id),
-            canonical_id,
-        )
+        (acp.responder(), pending.remove(&canonical_id), canonical_id)
     };
     // 锁外发送（G3 §2.2.2 收敛）：构造应答 → send_agent_response（信封 + 序列化 +
     // 10s 超时 + crashed 预检/置位）。失败恢复 pending（保留可重试）；原 :190-194
@@ -385,7 +380,7 @@ async fn resolve_pending(
     } else {
         permission_response(option_id)
     };
-    if !send_agent_response(write_tx, crashed, canonical_id.clone(), outcome).await {
+    if !responder.respond(canonical_id.clone(), outcome).await {
         restore_pending(runtime, canonical_id, claimed);
         return false;
     }

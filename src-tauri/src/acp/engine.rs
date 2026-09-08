@@ -19,15 +19,85 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
     ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, UntypedMessage,
 };
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use super::client::{ClassifiedMessage, NotificationInbox};
 use super::error::AcpError;
+use super::jsonrpc::{Pending, PENDING_SHARDS};
 use super::wire_trace::{AcpWireHub, WireDirection};
+
+/// D11：`AcpClient` 的内部后端。
+///
+/// 只保存 **transport 专属** 状态；共享状态（`child`/`protocol`/
+/// `capability_registry`/`stderr_tail`/`wire_trace`/`crashed`/`crashed_watch`）
+/// 上提为 `AcpClient` facade 字段。A1c 删 legacy 后本枚举收敛为单变体再删除。
+pub(crate) enum AcpBackend {
+    Legacy(LegacyBackend),
+}
+
+/// legacy（手写 JSON-RPC）后端的传输状态。
+///
+/// 名义可见性为 `pub` 仅为让 `#[cfg(test)]` 的 `Deref` 实现通过 `E0446` 检查；
+/// 它位于私有 `mod engine` 下，**不在任何公开签名中出现**，字段仍为 `pub(crate)`。
+pub struct LegacyBackend {
+    pub(crate) write_tx: mpsc::Sender<String>,
+    pub(crate) writer_task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) next_id: Arc<AtomicU64>,
+    pub(crate) pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+    pub(crate) rx: broadcast::Receiver<ClassifiedMessage>,
+    pub(crate) notification_inbox: NotificationInbox,
+    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+}
+
+/// D11：后端中立应答句柄（在锁外使用，避免持锁等待写通道）。
+///
+/// `write_tx` 封在本类型内部，不泄漏到 facade 公开 API；A1b 起 SDK 变体
+/// 改由 `Responder` 实现，A1a 阶段只构造 legacy。
+pub(crate) struct ResponderHandle {
+    write_tx: mpsc::Sender<String>,
+    crashed: Arc<AtomicBool>,
+}
+
+impl ResponderHandle {
+    pub(crate) fn legacy(write_tx: mpsc::Sender<String>, crashed: Arc<AtomicBool>) -> Self {
+        Self { write_tx, crashed }
+    }
+
+    /// 应答 agent 发来的 JSON-RPC 请求。
+    pub(crate) async fn respond(
+        self,
+        request_id: super::RequestId,
+        response: serde_json::Value,
+    ) -> bool {
+        crate::permission::send_agent_response(self.write_tx, self.crashed, request_id, response)
+            .await
+    }
+
+    /// 以 JSON-RPC error 应答 agent 发来的请求。
+    pub(crate) async fn respond_error(
+        self,
+        request_id: super::RequestId,
+        rpc_code: i64,
+        message: &str,
+    ) -> bool {
+        crate::permission::send_agent_error(
+            self.write_tx,
+            self.crashed,
+            request_id,
+            rpc_code,
+            message,
+        )
+        .await
+    }
+}
 
 /// 引擎连接配置（仅用于日志/诊断，不参与 canonical 身份）。
 #[derive(Debug, Clone)]

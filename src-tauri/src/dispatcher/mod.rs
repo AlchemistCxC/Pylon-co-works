@@ -310,11 +310,11 @@ async fn reject_interaction_request<R: tauri::Runtime>(
 ) {
     let request_id_text = request_id.as_ref().map(ToString::to_string);
     let response_sent = if let Some(id) = request_id {
-        let (write_tx, crashed) = {
+        let responder = {
             let acp = acp.lock().await;
-            (acp.write_tx.clone(), acp.crashed.clone())
+            acp.responder()
         };
-        crate::permission::send_agent_error(write_tx, crashed, id, rpc_code, message).await
+        responder.respond_error(id, rpc_code, message).await
     } else {
         false
     };
@@ -459,8 +459,8 @@ async fn handle_permission_request<R: tauri::Runtime>(
         if let Some(allow) = crate::hook_bridge::interpret_permission_hook_response(&response) {
             let option = pick_option(&permission.options, !allow);
             if let Some(option_id) = option {
-                let (write_tx, crashed) = { let acp = acp.lock().await; (acp.write_tx.clone(), acp.crashed.clone()) };
-                crate::permission::send_agent_response(write_tx, crashed, request_id, permission_response(option_id)).await;
+                let responder = { let acp = acp.lock().await; acp.responder() };
+                responder.respond(request_id, permission_response(option_id)).await;
                 return;
             }
         }
@@ -494,17 +494,13 @@ async fn handle_permission_request<R: tauri::Runtime>(
             return;
         };
         // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
-        let (write_tx, crashed) = {
+        let responder = {
             let acp = acp.lock().await;
-            (acp.write_tx.clone(), acp.crashed.clone())
+            acp.responder()
         };
-        crate::permission::send_agent_response(
-            write_tx,
-            crashed,
-            request_id,
-            permission_response(option_id),
-        )
-        .await;
+        responder
+            .respond(request_id, permission_response(option_id))
+            .await;
     } else {
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id.clone(), permission.clone());

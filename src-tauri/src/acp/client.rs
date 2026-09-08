@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+use super::engine::{AcpBackend, LegacyBackend, ResponderHandle};
+
 pub struct AcpClient {
     child: ManagedChild,
     /// G1-02：per-agent 协议行为配置（connect_with_logs 从 agent.protocol() clone；
@@ -17,22 +19,10 @@ pub struct AcpClient {
     /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
     /// AcpClient 自然更新（generation 隔离保证旧客户端不污染）。
     capability_registry: CapabilityRegistry,
-    /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
-    pub(crate) write_tx: mpsc::Sender<String>,
-    /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
-    /// 写入的旧任务（`disconnected()` 无运行时，为 None）。
-    writer_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) next_id: Arc<AtomicU64>,
-    pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
-    /// Broadcast channel for all received messages (responses + notifications).
-    pub rx: broadcast::Receiver<ClassifiedMessage>,
-    /// Lossless, single-consumer notification inbox for the Kernel dispatcher.
-    /// The broadcast receiver remains a replay/observation fan-out and is not a
-    /// durable-ingest source.
-    notification_inbox: NotificationInbox,
-    /// Remote session ids whose `session/load` response boundary has not been observed yet.
-    /// The stdout reader uses this to classify replay before queueing notifications.
-    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    /// D11：transport 专属状态按后端存放（见 `acp/engine.rs` 的 [`AcpBackend`]）。
+    /// 共享字段（child/protocol/capability_registry/stderr_tail/wire_trace/
+    /// crashed/crashed_watch）保留在 facade。
+    pub(crate) backend: AcpBackend,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
     /// A7：EOF 崩溃信号独立 watch 通道（保留最新值，broadcast 洪泛 Lagged 丢消息
@@ -145,13 +135,15 @@ impl AcpClient {
             child: ManagedChild::empty(),
             protocol: crate::agent_config::AcpProtocolConfig::default(),
             capability_registry: CapabilityRegistry::default(),
-            write_tx,
-            writer_task: None,
-            next_id: Arc::new(AtomicU64::new(1)),
-            pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
-            rx,
-            notification_inbox: NotificationInbox::new(notification_rx),
-            active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
+            backend: AcpBackend::Legacy(LegacyBackend {
+                write_tx,
+                writer_task: None,
+                next_id: Arc::new(AtomicU64::new(1)),
+                pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
+                rx,
+                notification_inbox: NotificationInbox::new(notification_rx),
+                active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
+            }),
             crashed: Arc::new(AtomicBool::new(false)),
             crashed_watch,
             _crashed_watch_rx: crashed_watch_rx,
@@ -160,12 +152,34 @@ impl AcpClient {
         }
     }
 
+    /// D11：legacy 后端访问器（A1a 只构造 legacy；A1c 收敛后删除）。
+    pub(crate) fn legacy(&self) -> &LegacyBackend {
+        match &self.backend {
+            AcpBackend::Legacy(legacy) => legacy,
+        }
+    }
+
+    pub(crate) fn legacy_mut(&mut self) -> &mut LegacyBackend {
+        match &mut self.backend {
+            AcpBackend::Legacy(legacy) => legacy,
+        }
+    }
+
+    /// D11：取后端中立应答句柄（锁内取、锁外 await）。
+    pub(crate) fn responder(&self) -> ResponderHandle {
+        match &self.backend {
+            AcpBackend::Legacy(legacy) => {
+                ResponderHandle::legacy(legacy.write_tx.clone(), self.crashed.clone())
+            }
+        }
+    }
+
     pub fn remove_pending(&self, id: u64) {
-        remove_pending_from(&self.pending, id);
+        remove_pending_from(&self.legacy().pending, id);
     }
 
     fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
-        &self.pending[id as usize % PENDING_SHARDS]
+        &self.legacy().pending[id as usize % PENDING_SHARDS]
     }
     /// 分配 id + 构造 json! 信封 + 序列化（O3：与 register_request 共享，
     /// 供锁外回放路径复用——该路径无需注册 pending）。
@@ -195,7 +209,7 @@ impl AcpClient {
         params: &serde_json::Value,
         pending_tx: Option<oneshot::Sender<RawMessage>>,
     ) -> Result<(u64, String), AcpError> {
-        let (id, line) = Self::register_line(&self.next_id, method, params)?;
+        let (id, line) = Self::register_line(&self.legacy().next_id, method, params)?;
         if let Some(tx) = pending_tx {
             let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
             pending.insert(id, tx);
@@ -220,9 +234,9 @@ impl AcpClient {
         Ok(PreparedRpc {
             id,
             line,
-            write_tx: self.write_tx.clone(),
+            write_tx: self.legacy().write_tx.clone(),
             rx,
-            pending: self.pending.clone(),
+            pending: self.legacy().pending.clone(),
             crashed: self.crashed.clone(),
             rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
         })
@@ -255,9 +269,9 @@ impl AcpClient {
         Ok(PreparedRpc {
             id,
             line,
-            write_tx: self.write_tx.clone(),
+            write_tx: self.legacy().write_tx.clone(),
             rx,
-            pending: self.pending.clone(),
+            pending: self.legacy().pending.clone(),
             crashed: self.crashed.clone(),
             rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
         })
@@ -270,7 +284,7 @@ impl AcpClient {
         if self.stderr_tail.tail_since(0, 1, 512).lines.is_empty() {
             tracing::debug!("ACP connection closing without stderr evidence");
         }
-        if let Some(task) = self.writer_task.take() {
+        if let Some(task) = self.legacy_mut().writer_task.take() {
             task.abort();
         }
         self.child.kill_and_wait()
@@ -324,7 +338,7 @@ impl AcpClient {
         });
         let line = serde_json::to_string(&req)
             .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
-        send_line(self.write_tx.clone(), line, &self.crashed).await
+        send_line(self.legacy().write_tx.clone(), line, &self.crashed).await
     }
 
     /// 应答 agent 发来的 JSON-RPC 请求（B9：session/request_permission）。
@@ -344,7 +358,7 @@ impl AcpClient {
         });
         let line = serde_json::to_string(&line)
             .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
-        send_line(self.write_tx.clone(), line, &self.crashed).await
+        send_line(self.legacy().write_tx.clone(), line, &self.crashed).await
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
@@ -501,13 +515,15 @@ impl AcpClient {
                     child,
                     protocol: crate::hermes_runtime::effective_protocol(agent),
                     capability_registry: CapabilityRegistry::default(),
-                    write_tx,
-                    writer_task: Some(writer_task),
-                    next_id: Arc::new(AtomicU64::new(1)),
-                    pending,
-                    rx,
-                    notification_inbox: NotificationInbox::new(notification_rx),
-                    active_replay_requests,
+                    backend: AcpBackend::Legacy(LegacyBackend {
+                        write_tx,
+                        writer_task: Some(writer_task),
+                        next_id: Arc::new(AtomicU64::new(1)),
+                        pending,
+                        rx,
+                        notification_inbox: NotificationInbox::new(notification_rx),
+                        active_replay_requests,
+                    }),
                     crashed,
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
@@ -573,6 +589,25 @@ impl AcpClient {
 
     /// Obtain the one Kernel notification inbox for this connection generation.
     pub(crate) fn notification_inbox(&self) -> NotificationInbox {
-        self.notification_inbox.clone()
+        self.legacy().notification_inbox.clone()
+    }
+}
+
+// D11 过渡：测试代码仍按旧字段名访问 legacy 传输状态（`client.write_tx` /
+// `client.active_replay_requests`）。用 `#[cfg(test)]` 的 Deref 保持测试文件零改动，
+// 生产代码必须经 `legacy()` / `responder()` 访问；A1c 删 legacy 后一并删除。
+#[cfg(test)]
+impl std::ops::Deref for AcpClient {
+    type Target = LegacyBackend;
+
+    fn deref(&self) -> &LegacyBackend {
+        self.legacy()
+    }
+}
+
+#[cfg(test)]
+impl std::ops::DerefMut for AcpClient {
+    fn deref_mut(&mut self) -> &mut LegacyBackend {
+        self.legacy_mut()
     }
 }
