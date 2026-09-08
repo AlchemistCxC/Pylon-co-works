@@ -17,6 +17,24 @@ pub fn next_wait_retry_backoff(current: Duration) -> Duration {
     next.min(WAIT_RETRY_MAX_BACKOFF)
 }
 
+/// Codeg's observable terminal completion has exactly two states.  A failed
+/// wait is not exposed as a third state: without a known exit status callers
+/// would treat it as still running and hang forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalCompletion {
+    Running,
+    Exited(TerminalExitStatus),
+}
+
+impl TerminalCompletion {
+    pub fn exit_status(&self) -> Option<&TerminalExitStatus> {
+        match self {
+            Self::Running => None,
+            Self::Exited(status) => Some(status),
+        }
+    }
+}
+
 pub fn map_exit_status(status: std::process::ExitStatus) -> TerminalExitStatus {
     #[cfg(unix)]
     let signal =
@@ -229,5 +247,13 @@ mod tests {
             next_wait_retry_backoff(WAIT_RETRY_MAX_BACKOFF),
             WAIT_RETRY_MAX_BACKOFF
         );
+    }
+
+    #[test]
+    fn completion_has_only_running_or_known_exit_status() {
+        let running = TerminalCompletion::Running;
+        assert!(running.exit_status().is_none());
+        let exited = TerminalCompletion::Exited(TerminalExitStatus::default());
+        assert!(exited.exit_status().is_some());
     }
 }
