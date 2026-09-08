@@ -15,6 +15,54 @@ pub fn output_limit(requested: Option<usize>) -> usize {
     requested.unwrap_or(DEFAULT_OUTPUT_BYTE_LIMIT as usize)
 }
 
+/// Codeg terminal runtime keeps the newest bytes and never splits UTF-8.
+pub fn enforce_output_limit(output: &mut String, limit: usize) -> usize {
+    if output.len() <= limit {
+        return 0;
+    }
+    let mut start = output.len().saturating_sub(limit);
+    while start < output.len() && !output.is_char_boundary(start) {
+        start += 1;
+    }
+    output.drain(..start);
+    start
+}
+
+/// Decode complete UTF-8 while retaining an incomplete trailing sequence for
+/// the next pipe read; invalid complete bytes use lossy replacement.
+pub fn decode_available_utf8(pending: &mut Vec<u8>) -> String {
+    let mut output = String::new();
+    let mut consumed = 0usize;
+    let mut remaining = pending.as_slice();
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(text) => {
+                output.push_str(text);
+                consumed += remaining.len();
+                break;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                if valid > 0 {
+                    output.push_str(std::str::from_utf8(&remaining[..valid]).unwrap());
+                    consumed += valid;
+                    remaining = &remaining[valid..];
+                }
+                match error.error_len() {
+                    Some(length) => {
+                        output.push_str(&String::from_utf8_lossy(&remaining[..length]));
+                        consumed += length;
+                        remaining = &remaining[length..];
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    pending.drain(..consumed);
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -26,5 +74,16 @@ mod tests {
         assert_eq!(KILL_ESCALATE_GRACE, Duration::from_secs(2));
         assert_eq!(KILL_REPORT_BUDGET, Duration::from_secs(5));
         assert_eq!(WAIT_ERROR_BUDGET, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn output_keeps_newest_utf8_and_decoder_keeps_partial_bytes() {
+        let mut output = "old-😀-new".to_owned();
+        let dropped = enforce_output_limit(&mut output, 8);
+        assert!(dropped > 0 && output == "😀-new");
+        let mut pending = vec![0xf0, 0x9f];
+        assert_eq!(decode_available_utf8(&mut pending), "");
+        pending.extend([0x98, 0x80, b'!']);
+        assert_eq!(decode_available_utf8(&mut pending), "😀!");
     }
 }
