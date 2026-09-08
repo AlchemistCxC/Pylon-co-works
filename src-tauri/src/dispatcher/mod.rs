@@ -385,6 +385,91 @@ async fn reject_interaction_request<R: tauri::Runtime>(
     );
 }
 
+async fn handle_terminal_request(
+    acp: &AcpLock,
+    registry: &crate::acp::terminal_runtime::TerminalRegistry,
+    method: &str,
+    request_id: crate::acp::RequestId,
+    params: Option<&serde_json::Value>,
+) {
+    let object = params.and_then(serde_json::Value::as_object);
+    let session_id = object
+        .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let result = match method {
+        "terminal/create" => {
+            let command = match object
+                .and_then(|p| p.get("command"))
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(command) => command,
+                None => return {
+                    let responder = { acp.lock().await.responder() };
+                    let _ = responder.respond_error(request_id, -32602, "terminal/create requires command").await;
+                },
+            };
+            let args = object
+                .and_then(|p| p.get("args"))
+                .and_then(serde_json::Value::as_array)
+                .map(|args| args.iter().filter_map(serde_json::Value::as_str).map(str::to_owned).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let line = shell_words::join(std::iter::once(command.to_owned()).chain(args));
+            let cwd = object
+                .and_then(|p| p.get("cwd"))
+                .and_then(serde_json::Value::as_str)
+                .map(std::path::Path::new);
+            let limit = object
+                .and_then(|p| p.get("outputByteLimit"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            registry
+                .create_shell(session_id.to_owned(), None, &line, cwd, limit)
+                .await
+                .map(|terminal_id| serde_json::json!({"terminalId": terminal_id}))
+        }
+        "terminal/output" => registry
+            .snapshot(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|snapshot| serde_json::json!({"output": snapshot.output, "truncated": snapshot.truncated})),
+        "terminal/wait_for_exit" | "terminal/waitForExit" => registry
+            .wait_for_exit(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|status| serde_json::json!({"exitStatus": status})),
+        "terminal/kill" => registry
+            .kill(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|_| serde_json::json!({})),
+        "terminal/release" => registry
+            .release(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|_| serde_json::json!({})),
+        _ => Err("unsupported terminal method".to_string()),
+    };
+    match result {
+        Ok(value) => {
+            let responder = { acp.lock().await.responder() };
+            let _ = responder.respond(request_id, value).await;
+        }
+        Err(error) => {
+            let responder = { acp.lock().await.responder() };
+            let _ = responder.respond_error(request_id, -32602, &error).await;
+        }
+    }
+}
+
 /// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
 /// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
 pub(crate) fn resolve_agent_provider(
@@ -1024,6 +1109,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         .and_then(|slot| slot.clone());
     let hook_bridge = handles.hook_bridge.clone();
     let pending_permissions = runtime.pending_permissions.clone();
+    let terminal_registry = runtime.terminal_registry.clone();
+    let host_tools_policy = runtime.host_tools_policy;
     let agent_id = handles
         .runtimes
         .all_with_ids()
@@ -1380,6 +1467,40 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id",
                     )
                     .await;
+                }
+                continue;
+            }
+            if matches!(
+                raw.method.as_deref(),
+                Some("terminal/create")
+                    | Some("terminal/output")
+                    | Some("terminal/wait_for_exit")
+                    | Some("terminal/waitForExit")
+                    | Some("terminal/kill")
+                    | Some("terminal/release")
+            ) {
+                if let Some(request_id) = raw.id {
+                    if host_tools_policy
+                        .allows_request(raw.method.as_deref().unwrap_or_default())
+                    {
+                        handle_terminal_request(
+                            &acp,
+                            &terminal_registry,
+                            raw.method.as_deref().unwrap_or_default(),
+                            request_id,
+                            raw.params.as_ref(),
+                        )
+                        .await;
+                    } else {
+                        let responder = { acp.lock().await.responder() };
+                        let _ = responder
+                            .respond_error(
+                                request_id,
+                                -32601,
+                                "host terminal tools are disabled for this agent",
+                            )
+                            .await;
+                    }
                 }
                 continue;
             }

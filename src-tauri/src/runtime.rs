@@ -63,6 +63,8 @@ pub struct AgentRuntime {
     /// per-source 流式更新通道（Channel 化重构 A1）：send_message 注册、终帧/C7/generation
     /// bump 注销。dispatcher 对已注册 source 走 Channel 推送并跳过 WebView 广播（A3）。
     pub update_channels: Arc<UpdateChannelMap>,
+    pub terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
+    pub host_tools_policy: crate::acp::host_tools::HostToolsPolicy,
 }
 
 impl AgentRuntime {
@@ -82,6 +84,8 @@ impl AgentRuntime {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
+            terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),
+            host_tools_policy: crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
         })
     }
 
