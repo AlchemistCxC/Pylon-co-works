@@ -101,4 +101,25 @@ not-json
         assert_eq!(parsed.header.as_ref().map(|h| h.session_id.as_str()), Some("s"));
         assert_eq!(parsed.entries.len(), 2);
     }
+
+    #[test]
+    fn merges_newest_first_chain_oldest_header_and_entry_order() {
+        let old = Transcript {
+            header: Some(TranscriptHeader {
+                v: 1, kind: "header".into(), agent: "a".into(), session_id: "old".into(),
+                cwd: ".".into(), started_at_ms: 1, continues_from: None,
+            }),
+            entries: vec![TranscriptEntry { t: 1, k: EntryKind::Prompt, p: serde_json::json!(1) }],
+        };
+        let new = Transcript {
+            header: Some(TranscriptHeader {
+                v: 1, kind: "header".into(), agent: "a".into(), session_id: "new".into(),
+                cwd: ".".into(), started_at_ms: 2, continues_from: Some("old".into()),
+            }),
+            entries: vec![TranscriptEntry { t: 2, k: EntryKind::TurnEnd, p: serde_json::json!(2) }],
+        };
+        let merged = merge_continuation_chain(vec![new, old]);
+        assert_eq!(merged.header.unwrap().session_id, "old");
+        assert_eq!(merged.entries.iter().map(|e| e.t).collect::<Vec<_>>(), vec![1, 2]);
+    }
 }
