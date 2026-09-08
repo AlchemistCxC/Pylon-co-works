@@ -870,7 +870,11 @@ async fn npm_global_version(package: &str) -> Option<String> {
     command.args(["list", "-g", package, "--json", "--depth=0"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(5), command.output()).await.ok()?.ok()?;
-    let document: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    parse_npm_list_version(&output.stdout, package)
+}
+
+fn parse_npm_list_version(bytes: &[u8], package: &str) -> Option<String> {
+    let document: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     let key = if package.starts_with('@') {
         package[1..].find('@').map(|index| &package[..index + 1]).unwrap_or(package)
     } else {
@@ -1486,6 +1490,13 @@ mod tests {
             .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
         assert_eq!(report.candidates[0].startability, Startability::Failed);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn npm_list_fixture_extracts_scoped_and_unscoped_versions() {
+        assert_eq!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"1.2.3"}}}"#, "foo").as_deref(), Some("1.2.3"));
+        assert_eq!(parse_npm_list_version(br#"{"dependencies":{"@scope/foo":{"version":"4.5.6"}}}"#, "@scope/foo@4.5.6").as_deref(), Some("4.5.6"));
+        assert!(parse_npm_list_version(br#"{"dependencies":{"foo":{"version":"bad"}}}"#, "foo").is_none());
     }
 
     #[cfg(windows)]
