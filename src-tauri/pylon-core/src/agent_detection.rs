@@ -680,6 +680,7 @@ fn probe_diagnostic(
 async fn version_probe(
     detector_id: &str,
     executable: PathBuf,
+    version_args: &[String],
     budget: Duration,
 ) -> VersionProbeOutcome {
     if budget.is_zero() {
@@ -695,8 +696,14 @@ async fn version_probe(
         };
     }
     let mut command = tokio::process::Command::new(&executable);
+    // Catalog's empty argument list selects the standard version probe.
+    // Invocation args (e.g. `acp`) belong to session launch, never discovery.
+    if version_args.is_empty() {
+        command.arg("--version");
+    } else {
+        command.args(version_args);
+    }
     command
-        .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -713,7 +720,7 @@ async fn version_probe(
                     detector_id,
                     "version_probe_spawn_failed",
                     format!(
-                        "无法执行 {} --version: {error}",
+                        "无法执行 {} 版本探针: {error}",
                         executable.to_string_lossy()
                     ),
                     false,
@@ -740,7 +747,7 @@ async fn version_probe(
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_timeout",
-                    format!("{} --version 超时", executable.to_string_lossy()),
+                    format!("{} 版本探针超时", executable.to_string_lossy()),
                     true,
                 )),
             };
@@ -756,7 +763,7 @@ async fn version_probe(
                     detector_id,
                     "version_probe_wait_failed",
                     format!(
-                        "等待 {} --version 失败: {error}",
+                        "等待 {} 版本探针失败: {error}",
                         executable.to_string_lossy()
                     ),
                     true,
@@ -771,7 +778,7 @@ async fn version_probe(
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 "version_probe_non_zero",
-                format!("{} --version 返回 {status}", executable.to_string_lossy()),
+                format!("{} 版本探针返回 {status}", executable.to_string_lossy()),
                 false,
             )),
         };
@@ -794,7 +801,7 @@ async fn version_probe(
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 "version_probe_empty",
-                format!("{} --version 未返回版本文本", executable.to_string_lossy()),
+                format!("{} 版本探针未返回版本文本", executable.to_string_lossy()),
                 false,
             )),
         }
@@ -933,11 +940,12 @@ pub async fn detect_agent_runtime_candidates_inner(
                 .version_probe_budget
                 .min(deadline.saturating_duration_since(Instant::now()));
             async move {
+                let probe = version_probe(&detector_id, path, &rule.version_args, probe_budget).await;
                 (
                     rule,
                     located,
                     config,
-                    version_probe(&detector_id, path, probe_budget).await,
+                    probe,
                 )
             }
         })
@@ -1357,6 +1365,33 @@ mod tests {
             roots[16].join(&executable_names("peri")[0]),
         );
         assert!(!report.truncated, "精确文件名检查不应被搜索目录数量截断");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn version_probe_uses_catalog_arguments_and_standard_default() {
+        let root = fixture_root("version-args");
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        let (executable, args) = {
+            let path = root.join("probe.cmd");
+            std::fs::write(&path, "@echo off\r\necho %1 %2\r\n").unwrap();
+            (path, vec!["version".to_string(), "--numeric".to_string()])
+        };
+        #[cfg(unix)]
+        let (executable, args) = {
+            let path = root.join("probe.sh");
+            std::fs::write(&path, "printf '%s %s' \"$1\" \"$2\"\n").unwrap();
+            (PathBuf::from("/bin/sh"), vec![path.to_string_lossy().into_owned(), "version".into(), "--numeric".into()])
+        };
+        let result = version_probe("fixture", executable.clone(), &args, Duration::from_secs(2)).await;
+        assert_eq!(result.version.as_deref(), Some("version --numeric"));
+        assert_eq!(result.startability, Startability::Verified);
+        #[cfg(windows)]
+        {
+            let default = version_probe("fixture", executable, &[], Duration::from_secs(2)).await;
+            assert_eq!(default.version.as_deref(), Some("--version"));
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
