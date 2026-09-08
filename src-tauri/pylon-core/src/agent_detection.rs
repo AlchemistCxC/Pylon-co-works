@@ -6,6 +6,7 @@ use crate::agent_catalog::{
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -703,6 +704,15 @@ async fn version_probe(
     version_args: &[String],
     budget: Duration,
 ) -> VersionProbeOutcome {
+    let cache_key = std::fs::metadata(&executable).ok().and_then(|m| m.modified().ok()).map(|mtime| {
+        (path_key(&executable), version_args.to_vec(), mtime)
+    });
+    static CACHE: OnceLock<Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>> = OnceLock::new();
+    if let Some(key) = &cache_key {
+        if let Some(version) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().ok().and_then(|c| c.get(key).cloned()) {
+            return VersionProbeOutcome { version: Some(version), startability: Startability::Verified, diagnostic: None };
+        }
+    }
     if budget.is_zero() {
         return VersionProbeOutcome {
             version: None,
@@ -821,6 +831,11 @@ async fn version_probe(
             )),
         }
     } else {
+        if let (Some(key), Some(value)) = (&cache_key, &version) {
+            if let Ok(mut cache) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                cache.insert(key.clone(), value.clone());
+            }
+        }
         VersionProbeOutcome {
             version,
             startability: Startability::Verified,
