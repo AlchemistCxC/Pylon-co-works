@@ -91,6 +91,13 @@
 - 来源：同一锁定 commit 的 `src-tauri/src/commands/acp.rs::probe_cli_version_token`（stdout 解析失败后尝试 stderr）。目标为 `pylon-core/src/agent_detection.rs::version_probe`；保留 Pylon 的有界输出、进程树回收、预算、catalog 参数和缓存，删除“仅 stdout 为空才回退”的偏离路径。
 - 验证：`version_probe_uses_catalog_arguments_and_standard_default` 改为真实进程夹具，stdout 输出非版本提示、stderr 输出参数决定的版本，另断言非法参数导致非零退出；修复前失败、修复后通过。
 
+### A4 filesystem path containment
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/file_system_runtime.rs::ensure_path_allowed` 与 `canonical_target_path`。
+- 目标：`src-tauri/src/acp/fs_policy.rs::ensure_path_allowed`；保留空 roots unrestricted、canonical existing target、canonical parent for new writes、whole-component `starts_with` containment，错误映射为 Pylon 字符串边界。
+- 未迁入：codeg AppState、AgentType root registry、fs IO executor、安装/持久化；未来 responder 只消费该策略函数。
+- 证据：`path_policy_uses_component_containment_and_parent_for_new_writes`。
+
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/preflight.rs` 的 `parse_node_version`；Apache-2.0，沿用根 NOTICE 与许可证。
 - 目标：`src-tauri/pylon-core/src/agent_preflight.rs`，由 catalog Node/uv minimum 检查消费；解析函数按上游迁入，替换将非法分量转换为零的手写比较器。
 - Pylon 接缝：catalog `params.min` 和 `PreflightInputs`；缺失/非法版本不能证明满足要求。未迁上游 registry、AppState、探测缓存和安装动作。
