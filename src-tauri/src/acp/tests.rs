@@ -1922,7 +1922,11 @@ for line in sys.stdin:
         let script = r#"import json,sys,os
 with open(sys.argv[1],'w',encoding='utf-8') as f:
     f.write(os.environ.get('HERMES_HOME','')+'\n')
-print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}), flush=True)
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        break
 "#;
         let mut agent = crate::agent_config::AgentDef {
             name: "fake-hermes".to_string(),
@@ -1969,7 +1973,11 @@ print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}), flush=True)
         let script = r#"import json,sys,os
 with open(sys.argv[1],'w',encoding='utf-8') as f:
     f.write(os.environ.get('HERMES_HOME','<absent>')+'\n')
-print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}), flush=True)
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        break
 "#;
         let agent = crate::agent_config::AgentDef {
             name: "fake-hermes-plain".to_string(),
