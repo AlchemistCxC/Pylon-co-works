@@ -32,6 +32,7 @@ struct TerminalInstance {
     child: Mutex<ManagedChild>,
     snapshot: Mutex<TerminalSnapshot>,
     completion: watch::Sender<TerminalCompletion>,
+    reader_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl TerminalInstance {
@@ -43,6 +44,7 @@ impl TerminalInstance {
             child: Mutex::new(child),
             snapshot: Mutex::new(TerminalSnapshot::default()),
             completion,
+            reader_handles: Mutex::new(Vec::new()),
         })
     }
 
@@ -62,6 +64,19 @@ impl TerminalInstance {
         let _ = self
             .completion
             .send_replace(TerminalCompletion::Exited(status));
+    }
+
+    async fn drain_readers(&self) {
+        let handles = std::mem::take(&mut *self.reader_handles.lock().await);
+        for handle in handles {
+            let abort = handle.abort_handle();
+            if tokio::time::timeout(super::terminal_policy::READER_DRAIN_GRACE, handle)
+                .await
+                .is_err()
+            {
+                abort.abort();
+            }
+        }
     }
 
     async fn wait_for_exit(&self) -> Result<super::terminal_policy::TerminalExitStatus, String> {
@@ -128,6 +143,7 @@ impl TerminalRegistry {
             loop {
                 let status = watcher.child.lock().await.try_wait().ok().flatten();
                 if let Some(status) = status {
+                    watcher.drain_readers().await;
                     watcher
                         .mark_exited(super::terminal_policy::map_exit_status(status))
                         .await;
@@ -136,8 +152,13 @@ impl TerminalRegistry {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         });
-        spawn_reader(stdout, terminal.clone());
-        spawn_reader(stderr, terminal);
+        let stdout_reader = spawn_reader(stdout, terminal.clone());
+        let stderr_reader = spawn_reader(stderr, terminal.clone());
+        terminal
+            .reader_handles
+            .lock()
+            .await
+            .extend([stdout_reader, stderr_reader]);
         Ok(id)
     }
 
@@ -212,9 +233,12 @@ impl TerminalRegistry {
     }
 }
 
-fn spawn_reader<R: Read + Send + 'static>(mut reader: R, terminal: Arc<TerminalInstance>) {
+fn spawn_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    terminal: Arc<TerminalInstance>,
+) -> tokio::task::JoinHandle<()> {
     let handle = tokio::runtime::Handle::current();
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let mut pending = Vec::new();
         let mut buf = [0_u8; 8192];
         loop {
@@ -229,7 +253,7 @@ fn spawn_reader<R: Read + Send + 'static>(mut reader: R, terminal: Arc<TerminalI
                 Err(_) => break,
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
