@@ -205,30 +205,66 @@ pub(crate) fn prepared_line(backend: &PreparedRpcBackend) -> &str {
 pub(crate) async fn send_keep_rx_prepared(
     prepared: PreparedRpc,
 ) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
-    let PreparedRpcBackend::Legacy(legacy) = prepared.backend else {
-        return Err(AcpError::EngineUnsupported {
-            engine: "sdk",
-            operation: "send_keep_rx",
-        });
-    };
-    let LegacyPreparedRpc {
-        write_tx,
-        pending,
-        rx,
-        crashed,
-        line,
-        ..
-    } = legacy;
-    if let Err(error) = send_line(write_tx, line, &crashed).await {
-        remove_pending_from(&pending, prepared.id);
-        return Err(error);
+    match prepared.backend {
+        PreparedRpcBackend::Legacy(legacy) => {
+            let LegacyPreparedRpc {
+                write_tx,
+                pending,
+                rx,
+                crashed,
+                line,
+                ..
+            } = legacy;
+            if let Err(error) = send_line(write_tx, line, &crashed).await {
+                remove_pending_from(&pending, prepared.id);
+                return Err(error);
+            }
+            // A6：发送后复检 crashed——reader EOF 先 store 后 drain。
+            if crashed.load(std::sync::atomic::Ordering::Acquire) {
+                remove_pending_from(&pending, prepared.id);
+                return Err(AcpError::ConnectionClosed);
+            }
+            Ok(rx)
+        }
+        PreparedRpcBackend::Sdk(sdk) => {
+            // A1b：把 SDK 的响应回调转回 `oneshot::Receiver<RawMessage>`，
+            // 让 `wait_prompt_with_cancel` 的 legacy 机制（双超时/cancel/settle）原样复用。
+            let (ready_tx, ready_rx) = oneshot::channel();
+            sdk.outbound
+                .send(SdkOutbound::RequestKeepRx {
+                    method: sdk.method,
+                    params: sdk.params,
+                    ready: ready_tx,
+                })
+                .await
+                .map_err(|_| AcpError::ConnectionClosed)?;
+            let response_rx = ready_rx.await.map_err(|_| AcpError::ConnectionClosed)??;
+            let (out_tx, out_rx) = oneshot::channel();
+            tokio::spawn(async move {
+                let raw = match response_rx.await {
+                    Ok(Ok(value)) => RawMessage {
+                        id: None,
+                        method: None,
+                        kind: super::AcpKind::Response,
+                        result: Some(value),
+                        params: None,
+                        error: None,
+                    },
+                    Ok(Err(error)) => RawMessage {
+                        id: None,
+                        method: None,
+                        kind: super::AcpKind::Response,
+                        result: None,
+                        params: None,
+                        error: Some(serde_json::json!(error.to_string())),
+                    },
+                    Err(_) => return,
+                };
+                let _ = out_tx.send(raw);
+            });
+            Ok(out_rx)
+        }
     }
-    // A6：发送后复检 crashed——reader EOF 先 store 后 drain。
-    if crashed.load(std::sync::atomic::Ordering::Acquire) {
-        remove_pending_from(&pending, prepared.id);
-        return Err(AcpError::ConnectionClosed);
-    }
-    Ok(rx)
 }
 
 /// 发送 + 等待匹配响应（legacy 走写通道/pending；SDK 走 outbound 泵 + `block_task`）。
@@ -377,6 +413,14 @@ pub(crate) enum SdkOutbound {
         method: String,
         params: serde_json::Value,
         reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, AcpError>>,
+    },
+    /// A1b：发送后把响应接收器交回调用方（prompt 等待/取消语义复用 legacy 机制）。
+    RequestKeepRx {
+        method: String,
+        params: serde_json::Value,
+        ready: tokio::sync::oneshot::Sender<
+            Result<tokio::sync::oneshot::Receiver<Result<serde_json::Value, AcpError>>, AcpError>,
+        >,
     },
     /// 不需要响应的 JSON-RPC 通知。
     Notification {
@@ -606,6 +650,26 @@ pub(crate) fn spawn_sdk_client(
                                         }
                                         .await;
                                         let _ = reply.send(result);
+                                    }
+                                    SdkOutbound::RequestKeepRx { method, params, ready } => {
+                                        let result = async {
+                                            let message = UntypedMessage::new(&method, params)
+                                                .map_err(map_sdk_error)?;
+                                            let (resp_tx, resp_rx) = oneshot::channel();
+                                            task_cx.send_request(message).on_receiving_result(
+                                                move |response| {
+                                                    let mapped = response.map_err(map_sdk_error);
+                                                    async move {
+                                                        let _ = resp_tx.send(mapped);
+                                                        Ok(())
+                                                    }
+                                                },
+                                            )
+                                            .map_err(map_sdk_error)?;
+                                            Ok(resp_rx)
+                                        }
+                                        .await;
+                                        let _ = ready.send(result);
                                     }
                                 }
                                 Ok(())
@@ -997,33 +1061,6 @@ mod tests {
 
         bridge.abort();
         let _ = bridge.await;
-    }
-
-    /// D12 证据：SDK 后端的 `send_keep_rx()` 必须 typed fail-closed（不是 Child(String)）。
-    #[tokio::test]
-    async fn sdk_send_keep_rx_fails_closed() {
-        let (outbound_tx, _outbound_rx) = tokio::sync::mpsc::channel(1);
-        let rpc = super::super::jsonrpc::PreparedRpc {
-            id: 11,
-            backend: PreparedRpcBackend::Sdk(SdkPreparedRpc {
-                outbound: outbound_tx,
-                method: "session/prompt".to_string(),
-                params: serde_json::json!({"sessionId": "s-1"}),
-                line: "test-line".to_string(),
-                rpc_timeout: Duration::from_secs(1),
-            }),
-        };
-        let error = rpc
-            .send_keep_rx()
-            .await
-            .expect_err("sdk send_keep_rx must fail closed");
-        assert!(matches!(
-            error,
-            AcpError::EngineUnsupported {
-                engine: "sdk",
-                operation: "send_keep_rx"
-            }
-        ));
     }
 
     /// A1b 步骤 3 前置：SDK 的 `SentRequest` 被 drop 会自动发 `$/cancel_request`
