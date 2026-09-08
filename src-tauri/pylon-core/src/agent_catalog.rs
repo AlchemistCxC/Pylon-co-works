@@ -26,6 +26,14 @@ struct CatalogDetection {
     config_dirs: Vec<String>,
     #[serde(default)]
     config_evidence: Vec<CatalogConfigEvidence>,
+    #[serde(default)]
+    version_args: Vec<String>,
+    #[serde(default)]
+    package_manager: Option<String>,
+    #[serde(default)]
+    requires: Vec<String>,
+    #[serde(default)]
+    checks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

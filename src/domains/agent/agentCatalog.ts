@@ -19,6 +19,10 @@ interface CatalogDetection {
   invocations: CatalogInvocation[]
   configDirs: string[]
   configEvidence: CatalogConfigEvidence[]
+  versionArgs?: string[]
+  packageManager?: string
+  requires?: string[]
+  checks?: string[]
 }
 interface CatalogTool {
   name: string
@@ -106,6 +110,10 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
       if (fields.length === 0) throw new Error(`Agent Catalog ${provider}.detection.configEvidence.fields 不能为空`)
       return { relativePath, format: evidence.format, fields }
     })
+    const versionArgs = detection.versionArgs === undefined ? [] : stringList(detection.versionArgs, `${provider}.detection.versionArgs`)
+    const requires = detection.requires === undefined ? [] : stringList(detection.requires, `${provider}.detection.requires`)
+    const checks = detection.checks === undefined ? [] : stringList(detection.checks, `${provider}.detection.checks`)
+    if (detection.packageManager !== undefined && typeof detection.packageManager !== 'string') throw new Error(`Agent Catalog ${provider}.detection.packageManager 必须是字符串`)
     if (!Array.isArray(raw.tools)) throw new Error(`Agent Catalog ${provider}.tools 必须是数组`)
     const seenTools = new Set<string>()
     const tools = raw.tools.map((rawTool, toolIndex): CatalogTool => {
@@ -147,6 +155,10 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         invocations,
         configDirs: stringList(detection.configDirs, `${provider}.detection.configDirs`),
         configEvidence: parsedConfigEvidence,
+        versionArgs,
+        ...(detection.packageManager === undefined ? {} : { packageManager: nonEmpty(detection.packageManager, `${provider}.detection.packageManager`) }),
+        requires,
+        checks,
       },
       tools,
     }
