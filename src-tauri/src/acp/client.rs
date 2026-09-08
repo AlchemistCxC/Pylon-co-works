@@ -2,13 +2,13 @@ use super::*;
 use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use super::engine::{
-    AcpBackend, LegacyBackend, LegacyPreparedRpc, PreparedRpcBackend, ResponderHandle,
+    prepared_sdk_rpc, AcpBackend, AcpEngineKind, LegacyBackend, LegacyPreparedRpc,
+    PreparedRpcBackend, ResponderHandle, SdkOutbound,
 };
 
 pub struct AcpClient {
@@ -48,7 +48,7 @@ pub(crate) struct NotificationInbox {
 }
 
 impl NotificationInbox {
-    fn new(rx: mpsc::Receiver<ClassifiedMessage>) -> Self {
+    pub(crate) fn new(rx: mpsc::Receiver<ClassifiedMessage>) -> Self {
         Self {
             rx: Arc::new(tokio::sync::Mutex::new(rx)),
         }
@@ -154,16 +154,18 @@ impl AcpClient {
         }
     }
 
-    /// D11：legacy 后端访问器（A1a 只构造 legacy；A1c 收敛后删除）。
+    /// D11：legacy 后端访问器（仅 legacy 路径与 `#[cfg(test)]` 使用；A1c 收敛后删除）。
     pub(crate) fn legacy(&self) -> &LegacyBackend {
         match &self.backend {
             AcpBackend::Legacy(legacy) => legacy,
+            AcpBackend::Sdk(_) => unreachable!("legacy backend accessor used on sdk client"),
         }
     }
 
     pub(crate) fn legacy_mut(&mut self) -> &mut LegacyBackend {
         match &mut self.backend {
             AcpBackend::Legacy(legacy) => legacy,
+            AcpBackend::Sdk(_) => unreachable!("legacy backend accessor used on sdk client"),
         }
     }
 
@@ -173,11 +175,16 @@ impl AcpClient {
             AcpBackend::Legacy(legacy) => {
                 ResponderHandle::legacy(legacy.write_tx.clone(), self.crashed.clone())
             }
+            AcpBackend::Sdk(_) => ResponderHandle::Sdk,
         }
     }
 
     pub fn remove_pending(&self, id: u64) {
-        remove_pending_from(&self.legacy().pending, id);
+        match &self.backend {
+            AcpBackend::Legacy(legacy) => remove_pending_from(&legacy.pending, id),
+            // A1b：SDK 侧改走 `SentRequest::cancel`。
+            AcpBackend::Sdk(_) => {}
+        }
     }
 
     fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
@@ -231,19 +238,29 @@ impl AcpClient {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
         }
-        let (tx, rx) = oneshot::channel();
-        let (id, line) = self.register_request(method, &params, Some(tx))?;
-        Ok(PreparedRpc {
-            id,
-            backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
-                write_tx: self.legacy().write_tx.clone(),
-                pending: self.legacy().pending.clone(),
-                rx,
-                crashed: self.crashed.clone(),
-                line,
-                rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
-            }),
-        })
+        match &self.backend {
+            AcpBackend::Legacy(_) => {
+                let (tx, rx) = oneshot::channel();
+                let (id, line) = self.register_request(method, &params, Some(tx))?;
+                Ok(PreparedRpc {
+                    id,
+                    backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
+                        write_tx: self.legacy().write_tx.clone(),
+                        pending: self.legacy().pending.clone(),
+                        rx,
+                        crashed: self.crashed.clone(),
+                        line,
+                        rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+                    }),
+                })
+            }
+            AcpBackend::Sdk(sdk) => Ok(prepared_sdk_rpc(
+                sdk,
+                method,
+                params,
+                self.protocol.rpc_timeout(),
+            )?),
+        }
     }
 
     async fn call_async(
@@ -268,19 +285,29 @@ impl AcpClient {
         }
         // 先构造参数（可能因 block 格式失败），成功后再注册 pending，避免泄漏。
         let params = session_prompt_params(session_id, prompt)?;
-        let (tx, rx) = oneshot::channel();
-        let (id, line) = self.register_request(METHOD_SESSION_PROMPT, &params, Some(tx))?;
-        Ok(PreparedRpc {
-            id,
-            backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
-                write_tx: self.legacy().write_tx.clone(),
-                pending: self.legacy().pending.clone(),
-                rx,
-                crashed: self.crashed.clone(),
-                line,
-                rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
-            }),
-        })
+        match &self.backend {
+            AcpBackend::Legacy(_) => {
+                let (tx, rx) = oneshot::channel();
+                let (id, line) = self.register_request(METHOD_SESSION_PROMPT, &params, Some(tx))?;
+                Ok(PreparedRpc {
+                    id,
+                    backend: PreparedRpcBackend::Legacy(LegacyPreparedRpc {
+                        write_tx: self.legacy().write_tx.clone(),
+                        pending: self.legacy().pending.clone(),
+                        rx,
+                        crashed: self.crashed.clone(),
+                        line,
+                        rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+                    }),
+                })
+            }
+            AcpBackend::Sdk(sdk) => Ok(prepared_sdk_rpc(
+                sdk,
+                METHOD_SESSION_PROMPT,
+                params,
+                self.protocol.rpc_timeout(),
+            )?),
+        }
     }
 
     /// Kill the child process. Called before switching agents to prevent orphans.
@@ -290,8 +317,16 @@ impl AcpClient {
         if self.stderr_tail.tail_since(0, 1, 512).lines.is_empty() {
             tracing::debug!("ACP connection closing without stderr evidence");
         }
-        if let Some(task) = self.legacy_mut().writer_task.take() {
-            task.abort();
+        match &mut self.backend {
+            AcpBackend::Legacy(legacy) => {
+                if let Some(task) = legacy.writer_task.take() {
+                    task.abort();
+                }
+            }
+            AcpBackend::Sdk(sdk) => {
+                let _ = sdk.shutdown.send(true);
+                sdk.join.abort();
+            }
         }
         self.child.kill_and_wait()
     }
@@ -337,14 +372,30 @@ impl AcpClient {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
         }
-        let req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
-        let line = serde_json::to_string(&req)
-            .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
-        send_line(self.legacy().write_tx.clone(), line, &self.crashed).await
+        match &self.backend {
+            AcpBackend::Legacy(_) => {
+                let req = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    "params": params,
+                });
+                let line = serde_json::to_string(&req)
+                    .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
+                send_line(self.legacy().write_tx.clone(), line, &self.crashed).await
+            }
+            AcpBackend::Sdk(sdk) => {
+                let (reply_tx, reply_rx) = oneshot::channel();
+                sdk.outbound
+                    .send(SdkOutbound::Notification {
+                        method: method.to_string(),
+                        params,
+                        reply: reply_tx,
+                    })
+                    .await
+                    .map_err(|_| AcpError::ConnectionClosed)?;
+                reply_rx.await.unwrap_or(Err(AcpError::ConnectionClosed))
+            }
+        }
     }
 
     /// 应答 agent 发来的 JSON-RPC 请求（B9：session/request_permission）。
@@ -407,92 +458,16 @@ impl AcpClient {
         };
         match agent.transport.as_str() {
             "subprocess" => {
-                // 部署易用性：exe 写成路径形态（含分隔符）时先做存在性预检，
-                // 给出可行动的配置修改提示；裸命令名（PATH 查找）不做预检。
-                if (agent.exe.contains('/') || agent.exe.contains('\\'))
-                    && !std::path::Path::new(&agent.exe).is_file()
-                {
-                    return Err(AgentConnectFailure::preflight(
-                        "agent_executable_missing",
-                        format!(
-                            "agent {} 的 exe 路径不存在：{}（请在 设置 → Agent 中修改 agents.yaml 配置）",
-                            agent.name, agent.exe
-                        ),
-                    )
-                    .into());
-                }
-                // Hermes on Windows executes local tools through Git Bash.  Resolve and
-                // preflight the bundled runtime before spawning the ACP child; the helper is
-                // a no-op for every other provider/transport and never mutates Pylon's
-                // process-wide environment.
-                let hermes_runtime = crate::hermes_runtime::prepare(agent)
-                    .await
-                    .map_err(|error| AgentConnectFailure::preflight(error.code, error.message))?;
-                let mut cmd = Command::new(&agent.exe);
-                cmd.args(agent.command_args())
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-                if let Some(cwd) = &agent.cwd {
-                    cmd.current_dir(cwd);
-                }
-                for (k, v) in &agent.env {
-                    cmd.env(k, v);
-                }
-                if let Some(selection) = hermes_runtime.as_ref() {
-                    crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
-                }
-                // hermes_profile（方案 G 演进）：注入 HERMES_HOME=<profile 目录>，
-                // 确保 Hermes 使用指定 profile 的 provider/密钥（见 hermes.rs doc）。
-                if let Some(hermes_home) =
-                    crate::hermes::hermes_home_override(agent, base_dir.as_deref())
-                {
-                    cmd.env("HERMES_HOME", &hermes_home);
-                    tracing::info!(
-                        "agent {}: HERMES_HOME set to {} (hermes_profile)",
-                        agent.name,
-                        hermes_home
-                    );
-                }
-                let child = cmd
-                    .spawn()
-                    .map_err(|error| AgentConnectFailure::spawn(&agent.exe, error))?;
-                let mut child = ManagedChild::new(child);
-
-                let stdin = child
-                    .take_stdin()
-                    .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
-                let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
-                let crashed = Arc::new(AtomicBool::new(false));
-                let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-                    Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-                let (tx, rx) = broadcast::channel(BROADCAST_CAP);
-                let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_CHAN_CAP);
-                let active_replay_requests = Arc::new(Mutex::new(HashMap::new()));
+                // D11 ③：引擎选择在构造时读一次（非法值报错，无回退）。
+                let engine_kind = AcpEngineKind::from_env()?;
+                let mut child =
+                    super::engine::spawn_agent_child(agent, base_dir.as_deref()).await?;
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
-                // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
-                // 方案 2A：writer 持有结算句柄（watch/pending/tx），写失败统一结算。
-                // OBS-01：wire recorder 在 transport 边界记录（outbound writer / inbound reader）。
+                let crashed = Arc::new(AtomicBool::new(false));
                 // OBS-02：hub 以连接级 correlation context（含 clientGeneration）构造。
                 let wire_trace = AcpWireHub::for_agent(agent, client_generation);
-                let writer_task = spawn_writer_task(
-                    stdin,
-                    write_rx,
-                    &crashed,
-                    &crashed_watch,
-                    &pending,
-                    &tx,
-                    notification_tx.clone(),
-                    DEFAULT_WRITE_TIMEOUT_SECS,
-                    Some(wire_trace.clone()),
-                );
-                let stdout = BufReader::new(
-                    child
-                        .take_stdout()
-                        .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?,
-                );
 
-                // Drain stderr（防管道缓冲死锁）
+                // Drain stderr（防管道缓冲死锁；两后端共用）
                 let stderr = child
                     .take_stderr()
                     .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
@@ -505,31 +480,79 @@ impl AcpClient {
                     stderr_tail.clone(),
                 );
 
-                spawn_stdout_reader(
-                    stdout,
-                    pending.clone(),
-                    tx.clone(),
-                    notification_tx,
-                    &crashed,
-                    &crashed_watch,
-                    &runtime_logs,
-                    Some(wire_trace.clone()),
-                    active_replay_requests.clone(),
-                );
+                let backend = match engine_kind {
+                    AcpEngineKind::Legacy => {
+                        let stdin = child
+                            .take_stdin()
+                            .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
+                        let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
+                        let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+                            Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+                        let (tx, rx) = broadcast::channel(BROADCAST_CAP);
+                        let (notification_tx, notification_rx) =
+                            mpsc::channel(NOTIFICATION_CHAN_CAP);
+                        let active_replay_requests = Arc::new(Mutex::new(HashMap::new()));
+                        // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
+                        let writer_task = spawn_writer_task(
+                            stdin,
+                            write_rx,
+                            &crashed,
+                            &crashed_watch,
+                            &pending,
+                            &tx,
+                            notification_tx.clone(),
+                            DEFAULT_WRITE_TIMEOUT_SECS,
+                            Some(wire_trace.clone()),
+                        );
+                        let stdout = BufReader::new(child.take_stdout().map_err(|error| {
+                            AgentConnectFailure::spawn_setup(error.to_string())
+                        })?);
+                        spawn_stdout_reader(
+                            stdout,
+                            pending.clone(),
+                            tx.clone(),
+                            notification_tx,
+                            &crashed,
+                            &crashed_watch,
+                            &runtime_logs,
+                            Some(wire_trace.clone()),
+                            active_replay_requests.clone(),
+                        );
+                        AcpBackend::Legacy(LegacyBackend {
+                            write_tx,
+                            writer_task: Some(writer_task),
+                            next_id: Arc::new(AtomicU64::new(1)),
+                            pending,
+                            rx,
+                            notification_inbox: NotificationInbox::new(notification_rx),
+                            active_replay_requests,
+                        })
+                    }
+                    AcpEngineKind::Sdk => {
+                        let stdin = child
+                            .take_stdin()
+                            .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
+                        let stdout = child
+                            .take_stdout()
+                            .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
+                        let handles = super::engine::spawn_sdk_engine(
+                            agent,
+                            client_generation,
+                            stdin,
+                            stdout,
+                            wire_trace.clone(),
+                            crashed.clone(),
+                            crashed_watch.clone(),
+                        )?;
+                        AcpBackend::Sdk(handles.backend)
+                    }
+                };
 
                 let mut client = AcpClient {
                     child,
                     protocol: crate::hermes_runtime::effective_protocol(agent),
                     capability_registry: CapabilityRegistry::default(),
-                    backend: AcpBackend::Legacy(LegacyBackend {
-                        write_tx,
-                        writer_task: Some(writer_task),
-                        next_id: Arc::new(AtomicU64::new(1)),
-                        pending,
-                        rx,
-                        notification_inbox: NotificationInbox::new(notification_rx),
-                        active_replay_requests,
-                    }),
+                    backend,
                     crashed,
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
@@ -595,7 +618,10 @@ impl AcpClient {
 
     /// Obtain the one Kernel notification inbox for this connection generation.
     pub(crate) fn notification_inbox(&self) -> NotificationInbox {
-        self.legacy().notification_inbox.clone()
+        match &self.backend {
+            AcpBackend::Legacy(legacy) => legacy.notification_inbox.clone(),
+            AcpBackend::Sdk(sdk) => sdk.inbound.clone(),
+        }
     }
 }
 

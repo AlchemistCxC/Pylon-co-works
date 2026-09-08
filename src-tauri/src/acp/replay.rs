@@ -96,21 +96,28 @@ impl AcpClient {
         if self.crashed.load(Ordering::Acquire) {
             return Err(AcpError::ConnectionClosed);
         }
-        let mut requests =
-            self.legacy().active_replay_requests.lock().map_err(|_| {
-                AcpError::Child("active replay session registry poisoned".to_string())
-            })?;
+        let super::engine::AcpBackend::Legacy(legacy) = &self.backend else {
+            // A1a：SDK 后端的 replay 采集属 A3/A1b；先 typed fail-closed。
+            return Err(AcpError::EngineUnsupported {
+                engine: "sdk",
+                operation: "begin_replay_capture",
+            });
+        };
+        let mut requests = legacy
+            .active_replay_requests
+            .lock()
+            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?;
         if requests.values().any(|active| active == session_id) {
             return Err(AcpError::ReplayLoadInProgress);
         }
         // Keep receiver creation under the same mutex as registration. The
         // reader takes this lock before classifying each inbound message.
-        let rx = self.legacy().rx.resubscribe();
-        let request_id = self.legacy().next_id.fetch_add(1, Ordering::Relaxed);
+        let rx = legacy.rx.resubscribe();
+        let request_id = legacy.next_id.fetch_add(1, Ordering::Relaxed);
         requests.insert(request_id, session_id.to_string());
         drop(requests);
         Ok(ReplayCapture {
-            write_tx: self.legacy().write_tx.clone(),
+            write_tx: legacy.write_tx.clone(),
             request_id,
             session_id: session_id.to_string(),
             crashed: self.crashed.clone(),

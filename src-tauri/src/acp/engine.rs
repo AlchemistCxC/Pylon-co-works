@@ -20,20 +20,20 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
     ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, UntypedMessage,
 };
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::client::{ClassifiedMessage, NotificationInbox};
 use super::error::AcpError;
 use super::jsonrpc::{remove_pending_from, Pending, PreparedRpc, PENDING_SHARDS};
 use super::transport::send_line;
-use super::wire_trace::{AcpWireHub, WireDirection};
+use super::wire_trace::{AcpWireCapture, AcpWireHub, WireDirection};
 use super::RawMessage;
 
 /// D11：`AcpClient` 的内部后端。
@@ -43,6 +43,7 @@ use super::RawMessage;
 /// 上提为 `AcpClient` facade 字段。A1c 删 legacy 后本枚举收敛为单变体再删除。
 pub(crate) enum AcpBackend {
     Legacy(LegacyBackend),
+    Sdk(SdkBackend),
 }
 
 /// legacy（手写 JSON-RPC）后端的传输状态。
@@ -59,18 +60,35 @@ pub struct LegacyBackend {
     pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
 }
 
+/// SDK 后端（官方 `agent-client-protocol` 连接）的传输状态。
+///
+/// 出站经有界 `outbound` 队列交给 `cx.spawn` 泵；入站直接产出
+/// [`ClassifiedMessage`]，与 legacy 共用同一条 Kernel inbox 语义。
+pub(crate) struct SdkBackend {
+    pub(crate) outbound: mpsc::Sender<SdkOutbound>,
+    /// D12：Pylon 相关 id 的本地计数器（wire id 永不暴露）。
+    pub(crate) next_id: Arc<AtomicU64>,
+    pub(crate) inbound: NotificationInbox,
+    pub(crate) shutdown: watch::Sender<bool>,
+    pub(crate) join: tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>,
+}
+
 /// D11：后端中立应答句柄（在锁外使用，避免持锁等待写通道）。
 ///
 /// `write_tx` 封在本类型内部，不泄漏到 facade 公开 API；A1b 起 SDK 变体
 /// 改由 `Responder` 实现，A1a 阶段只构造 legacy。
-pub(crate) struct ResponderHandle {
-    write_tx: mpsc::Sender<String>,
-    crashed: Arc<AtomicBool>,
+pub(crate) enum ResponderHandle {
+    Legacy {
+        write_tx: mpsc::Sender<String>,
+        crashed: Arc<AtomicBool>,
+    },
+    /// A1a：SDK 应答尚未接线（A1b 用 `Responder` 实现）；typed fail-closed，不静默丢。
+    Sdk,
 }
 
 impl ResponderHandle {
     pub(crate) fn legacy(write_tx: mpsc::Sender<String>, crashed: Arc<AtomicBool>) -> Self {
-        Self { write_tx, crashed }
+        Self::Legacy { write_tx, crashed }
     }
 
     /// 应答 agent 发来的 JSON-RPC 请求。
@@ -79,8 +97,16 @@ impl ResponderHandle {
         request_id: super::RequestId,
         response: serde_json::Value,
     ) -> bool {
-        crate::permission::send_agent_response(self.write_tx, self.crashed, request_id, response)
-            .await
+        match self {
+            Self::Legacy { write_tx, crashed } => {
+                crate::permission::send_agent_response(write_tx, crashed, request_id, response)
+                    .await
+            }
+            Self::Sdk => {
+                tracing::warn!("acp sdk engine: respond_to_request not wired until A1b");
+                false
+            }
+        }
     }
 
     /// 以 JSON-RPC error 应答 agent 发来的请求。
@@ -90,14 +116,18 @@ impl ResponderHandle {
         rpc_code: i64,
         message: &str,
     ) -> bool {
-        crate::permission::send_agent_error(
-            self.write_tx,
-            self.crashed,
-            request_id,
-            rpc_code,
-            message,
-        )
-        .await
+        match self {
+            Self::Legacy { write_tx, crashed } => {
+                crate::permission::send_agent_error(
+                    write_tx, crashed, request_id, rpc_code, message,
+                )
+                .await
+            }
+            Self::Sdk => {
+                tracing::warn!("acp sdk engine: respond_with_error not wired until A1b");
+                false
+            }
+        }
     }
 }
 
@@ -134,23 +164,6 @@ pub(crate) struct SdkEngineConfig {
     pub name: String,
     /// 连接所属 client 代际（wire capture 用，与 legacy 一致）。
     pub client_generation: u64,
-}
-
-/// 一条入站原始帧（由 SDK dispatch handler 还原，投给 Pylon 既有消费链）。
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum SdkInbound {
-    /// agent → pylon 请求（method + params），需 Pylon 侧应答（A1b 的 Responder 化）。
-    Request {
-        method: String,
-        params: serde_json::Value,
-    },
-    /// agent → pylon 通知。
-    Notification {
-        method: String,
-        params: serde_json::Value,
-    },
-    /// 我方请求的响应。
-    Response { error: Option<String> },
 }
 
 /// D12：`PreparedRpc` 的后端专属状态（`id` 与 `line` 由 facade 持有）。
@@ -274,6 +287,85 @@ pub(crate) async fn complete_prepared(
     }
 }
 
+/// 启动子进程（两后端共用）：preflight + Hermes runtime + env/cwd + `ManagedChild`。
+///
+/// 进程归属不变（Windows Job Object / taskkill / Drop 均在 `ManagedChild`）。
+pub(crate) async fn spawn_agent_child(
+    agent: &crate::agent_config::AgentDef,
+    base_dir: Option<&std::path::Path>,
+) -> Result<super::ManagedChild, AcpError> {
+    use std::process::{Command, Stdio};
+
+    if (agent.exe.contains('/') || agent.exe.contains('\\'))
+        && !std::path::Path::new(&agent.exe).is_file()
+    {
+        return Err(super::error::AgentConnectFailure::preflight(
+            "agent_executable_missing",
+            format!(
+                "agent {} 的 exe 路径不存在：{}（请在 设置 → Agent 中修改 agents.yaml 配置）",
+                agent.name, agent.exe
+            ),
+        )
+        .into());
+    }
+    let hermes_runtime = crate::hermes_runtime::prepare(agent)
+        .await
+        .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
+    let mut cmd = Command::new(&agent.exe);
+    cmd.args(agent.command_args())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(cwd) = &agent.cwd {
+        cmd.current_dir(cwd);
+    }
+    for (k, v) in &agent.env {
+        cmd.env(k, v);
+    }
+    if let Some(selection) = hermes_runtime.as_ref() {
+        crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
+    }
+    if let Some(hermes_home) = crate::hermes::hermes_home_override(agent, base_dir) {
+        cmd.env("HERMES_HOME", &hermes_home);
+        tracing::info!(
+            "agent {}: HERMES_HOME set to {} (hermes_profile)",
+            agent.name,
+            hermes_home
+        );
+    }
+    let child = cmd
+        .spawn()
+        .map_err(|error| super::error::AgentConnectFailure::spawn(&agent.exe, error))?;
+    Ok(super::ManagedChild::new(child))
+}
+
+/// D12：SDK 后端的 `PreparedRpc` 构造（本地计数器分配 Pylon id，wire id 永不暴露）。
+pub(crate) fn prepared_sdk_rpc(
+    sdk: &SdkBackend,
+    method: &str,
+    params: serde_json::Value,
+    rpc_timeout_secs: u64,
+) -> Result<PreparedRpc, AcpError> {
+    let id = sdk.next_id.fetch_add(1, Ordering::Relaxed);
+    let line = serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params.clone()
+    }))
+    .map_err(|error| AcpError::Child(format!("serialize failed: {error}")))?;
+    Ok(PreparedRpc {
+        id,
+        backend: PreparedRpcBackend::Sdk(SdkPreparedRpc {
+            outbound: sdk.outbound.clone(),
+            method: method.to_string(),
+            params,
+            line,
+            rpc_timeout: std::time::Duration::from_secs(rpc_timeout_secs),
+        }),
+    })
+}
+
 /// 一条出站请求/通知（由 Pylon 既有 `prepare_rpc`/`prepare_prompt` 语义产生）。
 ///
 /// SDK 的 dispatch loop 是单任务串行，因此出站一律经 `cx.spawn` 在独立任务中发送；
@@ -304,21 +396,29 @@ pub(crate) fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
     AcpError::Rpc(error.to_string())
 }
 
-/// 把一条 SDK 非类型化消息还原为 Pylon 入站帧。
-pub(crate) fn classify_untyped(message: Dispatch<UntypedMessage, UntypedMessage>) -> SdkInbound {
-    match message {
-        Dispatch::Request(request, _responder) => SdkInbound::Request {
-            method: request.method().to_string(),
-            params: request.params().clone(),
-        },
-        Dispatch::Notification(notification) => SdkInbound::Notification {
-            method: notification.method().to_string(),
-            params: notification.params().clone(),
-        },
-        Dispatch::Response(result, _router) => SdkInbound::Response {
-            error: result.err().map(|error| error.to_string()),
-        },
-    }
+/// 把一条 SDK 非类型化消息还原为 Pylon 入站帧（`Response` 返回 `None`，
+/// 由 handler 内的 `ResponseRouter` 处理）。
+pub(crate) fn classify_untyped(
+    message: Dispatch<UntypedMessage, UntypedMessage>,
+) -> Option<ClassifiedMessage> {
+    let (method, params) = match message {
+        Dispatch::Request(request, _responder) => {
+            (request.method().to_string(), request.params().clone())
+        }
+        Dispatch::Notification(notification) => (
+            notification.method().to_string(),
+            notification.params().clone(),
+        ),
+        Dispatch::Response(_, _) => return None,
+    };
+    Some(ClassifiedMessage::live(RawMessage {
+        id: None,
+        kind: super::AcpKind::from_method(Some(&method)),
+        method: Some(method),
+        result: None,
+        params: Some(params),
+        error: None,
+    }))
 }
 
 /// 构造 SDK 侧 transport 与观测桥之间的四端 `Channel` 拓扑。
@@ -374,11 +474,12 @@ where
 /// `on_close` 置关闭信号；`shutdown` 触发时 `main_fn` 返回、连接收敛。
 pub(crate) fn spawn_sdk_client(
     config: SdkEngineConfig,
-    inbound_tx: tokio::sync::mpsc::Sender<SdkInbound>,
+    inbound_tx: tokio::sync::mpsc::Sender<ClassifiedMessage>,
     mut outbound_rx: tokio::sync::mpsc::Receiver<SdkOutbound>,
     transport: impl ConnectTo<Client> + 'static,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-    closed_tx: tokio::sync::watch::Sender<bool>,
+    crashed: Arc<AtomicBool>,
+    crashed_watch: watch::Sender<bool>,
 ) -> tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>> {
     tokio::spawn(async move {
         let result = Client
@@ -395,15 +496,16 @@ pub(crate) fn spawn_sdk_client(
                                 router.route_with_result(result)?;
                             }
                             request_or_notification => {
-                                let inbound = classify_untyped(request_or_notification);
-                                if let Err(error) = tx.try_send(inbound) {
-                                    match error {
-                                        tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                                            tracing::warn!(
-                                                "acp sdk engine: inbound queue full, dropping frame"
-                                            );
+                                if let Some(inbound) = classify_untyped(request_or_notification) {
+                                    if let Err(error) = tx.try_send(inbound) {
+                                        match error {
+                                            tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                                                tracing::warn!(
+                                                    "acp sdk engine: inbound queue full, dropping frame"
+                                                );
+                                            }
+                                            tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
                                         }
-                                        tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
                                     }
                                 }
                             }
@@ -414,9 +516,11 @@ pub(crate) fn spawn_sdk_client(
                 agent_client_protocol::on_receive_dispatch!(),
             )
             .on_close(move |_cx| {
-                let closed_tx = closed_tx.clone();
+                let crashed = crashed.clone();
+                let crashed_watch = crashed_watch.clone();
                 async move {
-                    let _ = closed_tx.send(true);
+                    crashed.store(true, Ordering::Release);
+                    let _ = crashed_watch.send(true);
                     Ok(())
                 }
             })
@@ -463,6 +567,77 @@ pub(crate) fn spawn_sdk_client(
     })
 }
 
+/// 出站队列容量（有界；满时调用方拿到 `ConnectionClosed` 而不是无限堆积）。
+const OUTBOUND_CHAN_CAP: usize = 256;
+
+/// SDK 引擎构造产物（backend + 本连接 wire capture）。
+pub(crate) struct SdkEngineHandles {
+    pub(crate) backend: SdkBackend,
+    pub(crate) wire: Arc<AcpWireCapture>,
+}
+
+/// 用 SDK 连接已由 Pylon spawn 的子进程（D1=①）。
+///
+/// 进程归属不变：子进程仍由 `ManagedChild`（Windows Job Object）持有；本函数只接
+/// 协议栈：std 管道 → `tokio::process::ChildStdin/Stdout::from_std`（非阻塞 + 注册
+/// runtime）→ `compat` → `ByteStreams` → 观测桥 → SDK client。
+pub(crate) fn spawn_sdk_engine(
+    agent: &crate::agent_config::AgentDef,
+    client_generation: u64,
+    stdin: std::process::ChildStdin,
+    stdout: std::process::ChildStdout,
+    wire: Arc<AcpWireCapture>,
+    crashed: Arc<AtomicBool>,
+    crashed_watch: watch::Sender<bool>,
+) -> Result<SdkEngineHandles, AcpError> {
+    let stdin = tokio::process::ChildStdin::from_std(stdin)
+        .map_err(|error| AcpError::Child(format!("sdk engine stdin setup failed: {error}")))?;
+    let stdout = tokio::process::ChildStdout::from_std(stdout)
+        .map_err(|error| AcpError::Child(format!("sdk engine stdout setup failed: {error}")))?;
+
+    let (sdk_end, inspect_left, inspect_right, child_end) = bridge_channels();
+
+    // 观测桥：逐帧写入 wire hub，原帧原样转发。
+    let bridge_wire = wire.clone();
+    tokio::spawn(async move {
+        let _ = run_wire_bridge(inspect_left, inspect_right, bridge_wire).await;
+    });
+
+    // child_end ↔ 子进程字节流。
+    let transport = byte_streams(stdout, stdin);
+    tokio::spawn(async move {
+        let _ = <Channel as ConnectTo<Client>>::connect_to(child_end, transport).await;
+    });
+
+    let (inbound_tx, inbound_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
+    let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CHAN_CAP);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let join = spawn_sdk_client(
+        SdkEngineConfig {
+            name: agent.name.clone(),
+            client_generation,
+        },
+        inbound_tx,
+        outbound_rx,
+        sdk_end,
+        shutdown_rx,
+        crashed,
+        crashed_watch,
+    );
+
+    Ok(SdkEngineHandles {
+        backend: SdkBackend {
+            outbound: outbound_tx,
+            next_id: Arc::new(AtomicU64::new(1)),
+            inbound: NotificationInbox::new(inbound_rx),
+            shutdown: shutdown_tx,
+            join,
+        },
+        wire,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,14 +664,16 @@ mod tests {
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let _outbound_tx = outbound_tx;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        let (closed_tx, mut closed_rx) = tokio::sync::watch::channel(false);
+        let crashed = Arc::new(AtomicBool::new(false));
+        let (crashed_watch, mut crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
             inbound_tx,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
-            closed_tx,
+            crashed.clone(),
+            crashed_watch,
         );
 
         let frame = serde_json::json!({
@@ -514,24 +691,23 @@ mod tests {
             .await
             .expect("inbound notification must arrive")
             .expect("inbound channel must stay open");
+        assert_eq!(inbound.raw.method.as_deref(), Some("session/update"));
         assert_eq!(
-            inbound,
-            SdkInbound::Notification {
-                method: "session/update".to_string(),
-                params: serde_json::json!({
-                    "sessionId": "s-1",
-                    "update": {"sessionUpdate": "agent_message_chunk"}
-                }),
-            }
+            inbound.raw.params,
+            Some(serde_json::json!({
+                "sessionId": "s-1",
+                "update": {"sessionUpdate": "agent_message_chunk"}
+            }))
         );
 
         // A1a 步骤 4 证据：agent 端关闭 → SDK on_close 置位。
         drop(agent_write);
-        tokio::time::timeout(Duration::from_secs(5), closed_rx.changed())
+        tokio::time::timeout(Duration::from_secs(5), crashed_rx.changed())
             .await
             .expect("on_close must fire after transport EOF")
-            .expect("closed watch must stay open");
-        assert!(*closed_rx.borrow());
+            .expect("crashed watch must stay open");
+        assert!(*crashed_rx.borrow());
+        assert!(crashed.load(Ordering::Acquire));
 
         let _ = shutdown_tx.send(true);
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
@@ -547,14 +723,15 @@ mod tests {
         let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        let (closed_tx, _closed_rx) = tokio::sync::watch::channel(false);
+        let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
             inbound_tx,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
-            closed_tx,
+            Arc::new(AtomicBool::new(false)),
+            crashed_watch,
         );
 
         // agent 端：读一条请求，按原 id 回一条 result；保持写端存活直到测试拿到响应，
@@ -616,14 +793,15 @@ mod tests {
         let (inbound_tx, mut inbound_rx) = tokio::sync::mpsc::channel(1);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-        let (closed_tx, _closed_rx) = tokio::sync::watch::channel(false);
+        let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
             inbound_tx,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
-            closed_tx,
+            Arc::new(AtomicBool::new(false)),
+            crashed_watch,
         );
 
         let (hold_tx, hold_rx) = tokio::sync::oneshot::channel::<()>();
@@ -680,12 +858,12 @@ mod tests {
 
         // 队列只保留 1 条，其余被丢帧（try_send 失败不影响转发）。
         let first = inbound_rx.recv().await.expect("first notification kept");
+        assert_eq!(first.raw.method.as_deref(), Some("session/update"));
         assert_eq!(
-            first,
-            SdkInbound::Notification {
-                method: "session/update".to_string(),
-                params: serde_json::json!({"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "index": 0}}),
-            }
+            first.raw.params,
+            Some(
+                serde_json::json!({"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "index": 0}})
+            )
         );
 
         let _ = hold_tx.send(());
