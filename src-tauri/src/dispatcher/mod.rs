@@ -126,7 +126,7 @@ fn apply_update_event_with_pet_policy(
     // Keep the ACP reducer alongside the legacy SessionInfo fields during the
     // migration. It emits no UI events; canonical commit/publication remains
     // governed by the existing routing transaction below.
-    let _ = session.acp_state.apply(&crate::acp::RawMessage {
+    let deltas = session.acp_state.apply(&crate::acp::RawMessage {
         id: None,
         method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
         kind: crate::acp::AcpKind::SessionUpdate,
@@ -134,6 +134,20 @@ fn apply_update_event_with_pet_policy(
         params: Some(serde_json::json!({"update": update})),
         error: None,
     });
+    // Typed reducer output is consumed here at the kernel boundary. Existing
+    // canonical/session updates below remain the publication authority; this
+    // adapter only mirrors reducer-owned scalar domains into the live session.
+    for delta in deltas {
+        match delta {
+            crate::acp::AcpStateDelta::Usage { used, size } => {
+                session.tokens_total = used;
+                session.context_size = size.unwrap_or(0);
+            }
+            crate::acp::AcpStateDelta::Mode { mode } => session.mode = Some(mode),
+            crate::acp::AcpStateDelta::Model { model } => session.model = model,
+            _ => {}
+        }
+    }
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
