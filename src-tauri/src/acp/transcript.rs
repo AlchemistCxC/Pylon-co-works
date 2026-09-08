@@ -40,22 +40,29 @@ pub struct Transcript {
 }
 
 pub fn parse_transcript(content: &str) -> Transcript {
-    let mut transcript = Transcript::default();
+    let mut out = Transcript::default();
     for line in content.lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if value.get("kind").and_then(|v| v.as_str()) == Some("header") {
-            if let Ok(header) = serde_json::from_value(value) {
-                transcript.header = Some(header);
-            }
+        let line = line.trim();
+        if line.is_empty() {
             continue;
         }
-        if let Ok(entry) = serde_json::from_value(value) {
-            transcript.entries.push(entry);
+        // A header is distinguished by its `kind` field, not its position.
+        if out.header.is_none() {
+            if let Some(header) = parse_header_line(line) {
+                out.header = Some(header);
+                continue;
+            }
+        }
+        if let Ok(entry) = serde_json::from_str::<TranscriptEntry>(line) {
+            out.entries.push(entry);
         }
     }
-    transcript
+    out
+}
+
+fn parse_header_line(line: &str) -> Option<TranscriptHeader> {
+    let header = serde_json::from_str::<TranscriptHeader>(line).ok()?;
+    (header.kind == "header" && header.v == TRANSCRIPT_SCHEMA_VERSION).then_some(header)
 }
 
 pub const MAX_CONTINUATION_DEPTH: usize = 512;
@@ -90,6 +97,20 @@ pub fn continuation_ancestors(mut current: String, headers: &std::collections::H
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parser_keeps_first_supported_header_without_losing_entries() {
+        let content = [
+            serde_json::json!({"v":99,"kind":"header","agent":"a","session_id":"future","cwd":".","started_at_ms":0}),
+            serde_json::json!({"t":1,"k":"prompt","p":[]}),
+            serde_json::json!({"v":1,"kind":"header","agent":"a","session_id":"first","cwd":".","started_at_ms":1}),
+            serde_json::json!({"v":1,"kind":"header","agent":"a","session_id":"second","cwd":".","started_at_ms":2}),
+            serde_json::json!({"t":3,"k":"turn_end","p":{"stopReason":"end_turn"}}),
+        ].iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+        let parsed = parse_transcript(&content);
+        assert_eq!(parsed.header.unwrap().session_id, "first");
+        assert_eq!(parsed.entries.iter().map(|entry| entry.t).collect::<Vec<_>>(), vec![1, 3]);
+    }
 
     #[test]
     fn parses_header_entries_and_skips_corrupt_lines() {
