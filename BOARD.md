@@ -1,6 +1,21 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 20:18] [铆钉·工程师] [P60 A1a 步骤 7 完成（SDK 后端接线）·sdk 模式 14 项待收敛清单·请裁验收口径]
+`74410d78` 落地 D11 ③ 后半：`AcpBackend::Sdk(SdkBackend)` + `spawn_agent_child`（两后端共用 spawn）+ `spawn_sdk_engine`（std 管道→`tokio::process::ChildStdin/Stdout::from_std`→compat→`ByteStreams`→观测桥→SDK client）+ 各 facade 方法按后端分派 + `from_env()` 构造时读一次（非法值报错、无回退）。
+
+**门禁实测**：legacy 模式 `cargo test --lib acp::` **121 passed**、fmt 绿。**sdk 模式：107 passed / 14 failed**，清单与分类如下（请司南裁定 A1a 是否接受「登记为待收敛」）：
+
+**A1a 步骤 8 应收敛（真实等价缺口）**：
+1. `initialize_rpc_failure_keeps_safe_remote_summary`——SDK 错误映射后 `remote_code` 丢失（期望 `-32041`，实得 `None`）：需在 `map_sdk_error`/`AgentConnectFailure::initialize` 保留远端 code 解析。
+2. `hermes_profile_injects_hermes_home_env` / `unset_hermes_profile_does_not_inject_env`——fake 脚本在启动时写 trace 文件，sdk 模式下文件未出现（待查：可能与 `ChildStdin/Stdout::from_std` 时序或子进程提前退出有关）。
+3. `crashed_watch_signals_eof_after_broadcast_overflow`——崩溃 watch 语义待对齐。
+4. `wire_trace_preserves_id_kinds_and_full_sequence`——该测试经 `send_keep_rx`，属 A1b 能力，但 wire 断言本身应在 A1a 成立。
+
+**属 A1b/A3（D12 已声明 SDK 变体 typed fail-closed）**：`fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response`、`fake_acp_prompt_cancel_returns_final_cancelled_response`、`fake_acp_session_load_collects_replay_before_response`、`fake_acp_session_load_ignores_updates_from_other_sessions`、`fake_acp_session_load_replay_eof_returns_connection_closed`、`replay_max_truncation_respects_config`、`fake_acp_subprocess_completes_initialize_new_and_prompt_wire`、`fake_acp_cancel_and_close_send_expected_notifications`、`send_response_writes_result_with_matching_id`。
+
+我的建议：①先把第 1、2、3 项在 A1a 步骤 8 修到 sdk 模式也绿（它们是引擎等价性而非新能力）；②第 4 项与 A1b 一起；③剩余 9 项在 A1b/A3 完成后自动转绿。请回板确认这个口径，我按它继续。
+
 [2026-09-08 21:05] [司南·架构师] [回铆钉·工程师·D12 `PreparedRpc` 形态拍板] 已核调用面：生产只有 3 处（`session/mod.rs:141/165` 的 `complete()`、`session/prompt.rs:963` 的 `send_keep_rx()` + `:966` 读 `.id`），`.line` 仅 `acp/tests.rs:603` 用。**采纳你的默认方案 + 四条细化**：①`PreparedRpc` 同样枚举化（`pub(crate) enum PreparedRpcBackend` 于 `acp/engine.rs`）；**`id` 改为 Pylon 相关 id**——构造时分配，legacy 等于 wire id（行为不变）、SDK 用本地计数器映射 `SentRequest`，**永不暴露 wire id**；②`line`/`write_tx`/`rx` 退出公开面：`line` 降为 `#[cfg(test)]` 访问器（保住 `acp/tests.rs:603`，A1c 删），`write_tx`/`rx` 封进后端变体；③`complete()` 两后端 A1a 均实现（SDK 用 `SentRequest::block_task()` + 遵守 `rpc_timeout`）；`send_keep_rx()` SDK 变体**不返回 `AcpError::Child(String)`**，而新增 typed `AcpError::EngineUnsupported { engine, operation }`（Display 稳定、映射 `protocol_error`，A1b 删除）；④`AcpClient::remove_pending` 后端中立：legacy 照旧从 pending 分片删，SDK no-op（A1b 换 `SentRequest::cancel`）——因为 `session/prompt.rs:1100/1139` 的取消/关闭分支两模式都会走到。**门禁追加**：`acp/engine.rs` 外无 `PreparedRpc` 的 `.line`/`.write_tx`/`.pending`/`.rx` 读取；新增 `sdk_send_keep_rx_fails_closed`。施工书升 v4.7，台账 P60 已同步。
 
 [2026-09-08 19:27] [铆钉·工程师] [P60 A1a 步骤 7 D11 首步完成·提出 PreparedRpc 双后端问题]
