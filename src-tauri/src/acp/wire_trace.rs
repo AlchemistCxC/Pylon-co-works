@@ -122,6 +122,7 @@ pub struct AcpWireHub {
     capacity: usize,
     canonical_correlations: Mutex<HashMap<u64, CanonicalCorrelation>>,
     inbound_ordinals: Mutex<VecDeque<u64>>,
+    inbound_ordinal_overflowed: AtomicBool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,6 +149,7 @@ impl AcpWireHub {
             capacity: capacity.max(1),
             canonical_correlations: Mutex::new(HashMap::new()),
             inbound_ordinals: Mutex::new(VecDeque::new()),
+            inbound_ordinal_overflowed: AtomicBool::new(false),
         })
     }
 
@@ -228,14 +230,21 @@ impl AcpWireHub {
             && msg_val.get("method").and_then(|value| value.as_str()).is_some()
         {
             if let Ok(mut ordinals) = self.inbound_ordinals.lock() {
-                if ordinals.len() >= self.capacity { ordinals.pop_front(); }
+                if self.inbound_ordinal_overflowed.load(Ordering::Acquire) { return; }
+                if ordinals.len() >= self.capacity {
+                    ordinals.clear();
+                    self.inbound_ordinal_overflowed.store(true, Ordering::Release);
+                    return;
+                }
                 ordinals.push_back(seq);
             }
         }
     }
 
     pub fn take_inbound_ordinal(&self) -> Option<u64> {
-        self.inbound_ordinals.lock().ok()?.pop_front()
+        let mut ordinals = self.inbound_ordinals.lock().ok()?;
+        if self.inbound_ordinal_overflowed.load(Ordering::Acquire) { return None; }
+        ordinals.pop_front()
     }
 
     /// 记录一条已序列化的 outbound 行（writer 边界调用；解析失败静默跳过）。
@@ -534,6 +543,17 @@ mod tests {
         hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","id":1,"result":{}}));
         hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}));
         assert_eq!(hub.take_inbound_ordinal(), Some(2));
+    }
+
+    #[test]
+    fn inbound_ordinal_overflow_invalidates_correlation_instead_of_shifting() {
+        let hub = hub();
+        for i in 0..9 {
+            hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":i}}));
+        }
+        assert_eq!(hub.take_inbound_ordinal(), None);
+        hub.record(WireDirection::AgentToPylon, &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":10}}));
+        assert_eq!(hub.take_inbound_ordinal(), None);
     }
 
     #[test]
