@@ -34,7 +34,10 @@ log = "0.4"
 # R2 错误类型化：PylonError Display/Error 由 derive 生成（DTO 序列化仍手写）
 thiserror = "2"
 # 官方 ACP schema（v1 + v2 类型全集）——消除手写协议参数构造
-agent-client-protocol-schema = "1.4"
+# A1a：1.4 → 1.7（session_resume 为标准；session_fork 在 unstable_session_fork 后）
+agent-client-protocol-schema = "1.7"
+# A1a：官方 SDK 连接引擎（D1=①）——引擎落点见施工书 §0（新 crate pylon-acp，纯逻辑不进主 crate）
+agent-client-protocol = "2.1.0"
 dashmap = "6.2.1"
 encoding_rs = "0.8.35"
 regex = "1.13.1"
