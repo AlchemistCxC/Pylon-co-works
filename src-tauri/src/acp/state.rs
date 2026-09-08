@@ -39,6 +39,7 @@ pub enum AcpStateDelta {
         request_id: Option<String>,
         tool_call_id: Option<String>,
     },
+    PermissionQueueDepth { depth: usize },
     Usage {
         used: u64,
         size: Option<u64>,
@@ -64,7 +65,7 @@ pub enum AcpStateDelta {
 pub struct AcpSessionState {
     pub messages: Vec<String>,
     pub tools: BTreeMap<String, serde_json::Value>,
-    pub pending_permission: Option<(String, String)>,
+    pub pending_permissions: Vec<(String, String)>,
     pub usage: Option<(u64, Option<u64>)>,
     pub plan: Option<serde_json::Value>,
     pub mode: Option<String>,
@@ -87,12 +88,13 @@ impl AcpSessionState {
             if let (Some(request_id), Some(tool_call_id)) =
                 (request_id.clone(), tool_call_id.clone())
             {
-                self.pending_permission = Some((request_id.clone(), tool_call_id.clone()));
+                self.pending_permissions
+                    .push((request_id.clone(), tool_call_id.clone()));
             }
             return vec![AcpStateDelta::PermissionRequested {
                 request_id,
                 tool_call_id,
-            }];
+            }, AcpStateDelta::PermissionQueueDepth { depth: self.pending_permissions.len() }];
         }
         if message.kind != AcpKind::SessionUpdate {
             return Vec::new();
