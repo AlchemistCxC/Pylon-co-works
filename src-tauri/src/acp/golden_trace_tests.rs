@@ -236,12 +236,16 @@ async fn drive_scenario(scenario: &str) -> Result<Vec<Vec<WireRecord>>, AcpError
                 .send_keep_rx()
                 .await?;
             let request_id = wait_for_permission_request(&client).await;
-            client
-                .send_response(
-                    request_id,
-                    serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}}),
-                )
-                .await?;
+            assert!(
+                client
+                    .responder()
+                    .respond(
+                        super::RequestId::String(request_id.to_string()),
+                        serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}}),
+                    )
+                    .await,
+                "golden trace responder must answer the permission request"
+            );
             let _ = tokio::time::timeout(Duration::from_secs(5), &mut rx).await;
         }
         "cancel" => {

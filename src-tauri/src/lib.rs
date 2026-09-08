@@ -18,10 +18,10 @@ mod error;
 mod export;
 mod gateway;
 mod gateway_cmds;
-/// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
-pub mod hook_bridge;
 mod hermes;
 mod hermes_runtime;
+/// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
+pub mod hook_bridge;
 mod lifecycle;
 mod logs_cmds;
 mod mcp;

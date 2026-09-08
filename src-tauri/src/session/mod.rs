@@ -407,7 +407,9 @@ impl AppState {
                             Ok(payload) => {
                                 emit_event(&window, crate::event_names::RUNTIME_LOG, payload)
                             }
-                            Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
+                            Err(error) => {
+                                tracing::warn!("serialize runtime log event failed: {error}")
+                            }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
@@ -1427,7 +1429,9 @@ for line in sys.stdin:
         assert_eq!(
             response["configOptions"]
                 .as_array()
-                .and_then(|options| options.iter().find(|option| option["id"] == "reasoning_effort"))
+                .and_then(|options| options
+                    .iter()
+                    .find(|option| option["id"] == "reasoning_effort"))
                 .and_then(|option| option.get("currentValue")),
             Some(&serde_json::json!("high"))
         );
@@ -1469,8 +1473,10 @@ for line in sys.stdin:
             .iter()
             .position(|method| *method == "session/set_config_option")
             .expect("reasoning config option must be sent");
-        assert!(new_index < model_index && model_index < mode_index && mode_index < reasoning_index,
-            "initial setting wire order must be new → model → mode → reasoning: {methods:?}");
+        assert!(
+            new_index < model_index && model_index < mode_index && mode_index < reasoning_index,
+            "initial setting wire order must be new → model → mode → reasoning: {methods:?}"
+        );
         let model_request = &requests[model_index];
         assert_eq!(model_request["params"]["sessionId"], "p28-session");
         assert_eq!(model_request["params"]["modelId"], "provider:new");
@@ -1723,10 +1729,20 @@ for line in sys.stdin:
         );
         let state = state_without_active_runtime();
 
-        let error = ensure_session_mapping(&state, &runtime, "source-a", None, "persona", ".", &[], None, &mut None)
-            .await
-            .err()
-            .expect("probing binding must not be reused by any backend caller");
+        let error = ensure_session_mapping(
+            &state,
+            &runtime,
+            "source-a",
+            None,
+            "persona",
+            ".",
+            &[],
+            None,
+            &mut None,
+        )
+        .await
+        .err()
+        .expect("probing binding must not be reused by any backend caller");
 
         assert_eq!(error.code(), "session_binding_unavailable");
         assert!(runtime.sessions.lock().unwrap().contains_key("source-a"));
@@ -1867,11 +1883,17 @@ for line in sys.stdin:
         assert!(timeout_entry.fields.contains_key("sessionId"));
         assert!(timeout_entry.fields.contains_key("agentId"));
         assert_eq!(
-            timeout_entry.fields.get("timeoutKind").and_then(|v| v.as_str()),
+            timeout_entry
+                .fields
+                .get("timeoutKind")
+                .and_then(|v| v.as_str()),
             Some("first-token")
         );
         assert_eq!(
-            timeout_entry.fields.get("timeoutBoundSecs").and_then(|v| v.as_u64()),
+            timeout_entry
+                .fields
+                .get("timeoutBoundSecs")
+                .and_then(|v| v.as_u64()),
             Some(1)
         );
         assert!(

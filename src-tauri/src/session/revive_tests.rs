@@ -45,11 +45,22 @@ for line in sys.stdin:
     .await
     .expect("revive must succeed");
 
-    assert_eq!(mapping.peri_id, "peri-original", "revived mapping keeps the persisted remote session id");
-    assert_eq!(mapping.is_first, false);
-    assert!(recreated.is_none(), "no recreation notice when the remote session is revived");
     assert_eq!(
-        runtime.sessions.lock().unwrap().get("local:revive").map(|s| s.peri_id.clone()),
+        mapping.peri_id, "peri-original",
+        "revived mapping keeps the persisted remote session id"
+    );
+    assert_eq!(mapping.is_first, false);
+    assert!(
+        recreated.is_none(),
+        "no recreation notice when the remote session is revived"
+    );
+    assert_eq!(
+        runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get("local:revive")
+            .map(|s| s.peri_id.clone()),
         Some("peri-original".to_string()),
         "in-memory slot is re-attached to the revived session"
     );
@@ -96,7 +107,11 @@ for line in sys.stdin:
     .expect("fallback creation must succeed");
 
     assert_eq!(mapping.peri_id, "fresh-session");
-    assert_eq!(recreated.as_deref(), Some("fresh-session"), "caller is told the session was recreated with a new remote id");
+    assert_eq!(
+        recreated.as_deref(),
+        Some("fresh-session"),
+        "caller is told the session was recreated with a new remote id"
+    );
 }
 
 /// 无持久化 peri_id（None）→ 直接新建，行为与旧版一致。
@@ -135,5 +150,8 @@ for line in sys.stdin:
     .expect("direct creation must succeed");
 
     assert_eq!(mapping.peri_id, "direct-new");
-    assert!(recreated.is_some(), "recreation notice is also emitted for the no-peri-id creation path");
+    assert!(
+        recreated.is_some(),
+        "recreation notice is also emitted for the no-peri-id creation path"
+    );
 }

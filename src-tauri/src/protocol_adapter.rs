@@ -302,9 +302,16 @@ pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
             // Split camelCase before the keyword probe; otherwise
             // `requestPermission` becomes one opaque word.
             let boundary = index > 0 && ch.is_ascii_uppercase();
-            [if boundary { ' ' } else { '\0' }, if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' }]
-                .into_iter()
-                .filter(|value| *value != '\0')
+            [
+                if boundary { ' ' } else { '\0' },
+                if ch.is_ascii_alphanumeric() {
+                    ch.to_ascii_lowercase()
+                } else {
+                    ' '
+                },
+            ]
+            .into_iter()
+            .filter(|value| *value != '\0')
         })
         .collect::<String>();
     let words = normalized.split_whitespace().collect::<Vec<_>>();
@@ -388,7 +395,11 @@ fn camel_case_method(method: &str) -> String {
 }
 
 fn dedup_sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
-    values.into_iter().collect::<BTreeSet<_>>().into_iter().collect()
+    values
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// Build the protocol catalog from the shared baseline, runtime registry, and
@@ -628,9 +639,15 @@ mod tests {
 
     #[test]
     fn interaction_method_probe_is_conservative() {
-        assert!(looks_like_interaction_method(Some("session/request_permission")));
-        assert!(looks_like_interaction_method(Some("session/request_question")));
-        assert!(looks_like_interaction_method(Some("claude/oauth/authorize")));
+        assert!(looks_like_interaction_method(Some(
+            "session/request_permission"
+        )));
+        assert!(looks_like_interaction_method(Some(
+            "session/request_question"
+        )));
+        assert!(looks_like_interaction_method(Some(
+            "claude/oauth/authorize"
+        )));
         // ACP client-request methods are interactions too, even though their
         // names do not contain the approval/question keywords.  Providers and
         // SDKs also emit camelCase spellings in a few extension envelopes.
@@ -646,7 +663,10 @@ mod tests {
             "session/requestPermission",
             "session/requestUserInput",
         ] {
-            assert!(looks_like_interaction_method(Some(method)), "{method} should be observable as an interaction");
+            assert!(
+                looks_like_interaction_method(Some(method)),
+                "{method} should be observable as an interaction"
+            );
         }
         assert!(!looks_like_interaction_method(Some("session/new")));
         assert!(!looks_like_interaction_method(Some("task/list")));
@@ -685,7 +705,10 @@ mod tests {
             .expect("hermes baseline must be present");
         assert!(hermes.catalog_known);
         assert!(hermes.adapter_registered);
-        assert_eq!(hermes.baseline.as_ref().map(|p| p.permission_requests), Some(false));
+        assert_eq!(
+            hermes.baseline.as_ref().map(|p| p.permission_requests),
+            Some(false)
+        );
         assert!(hermes
             .adapter_methods
             .iter()
@@ -712,8 +735,14 @@ mod tests {
         assert!(!custom.adapter_registered);
         assert_eq!(custom.configured_agent_ids, vec!["custom-agent"]);
         let serialized = serde_json::to_value(custom).expect("provider projection serializes");
-        assert!(serialized.get("exe").is_none(), "catalog must not expose executable paths");
-        assert!(serialized.get("env").is_none(), "catalog must not expose environment values");
+        assert!(
+            serialized.get("exe").is_none(),
+            "catalog must not expose executable paths"
+        );
+        assert!(
+            serialized.get("env").is_none(),
+            "catalog must not expose environment values"
+        );
     }
 
     #[test]

@@ -2,6 +2,34 @@ var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+// src/plugin-runtime/hooks/hookTypes.ts
+var HOOK_NAMES = [
+  "session.creating",
+  "session.created",
+  "session.loading",
+  "session.loaded",
+  "session.closing",
+  "session.closed",
+  "session.deleting",
+  "session.deleted",
+  "message.user.beforeSend",
+  "message.user.sent",
+  "message.user.sendFailed",
+  "message.received",
+  "message.agent.committed",
+  "agent.chunk",
+  "turn.started",
+  "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+  "tool.beforeCall",
+  "tool.started",
+  "tool.afterCall",
+  "tool.failed",
+  "context.beforeBuild",
+  "context.afterBuild"
+];
+
 // src/plugin-runtime/packageManifest.ts
 var PYLON_PLUGIN_API_MIN = "1.0";
 var PYLON_PLUGIN_API_LATEST = "1.2";
@@ -40,7 +68,7 @@ var HOT_SWAP_MODES = /* @__PURE__ */ new Set([
 var API_SUPPORTED_SET = new Set(PYLON_PLUGIN_API_SUPPORTED);
 var CAPABILITY_SET = new Set(PYLON_PLUGIN_CAPABILITIES);
 function removedFieldsFor(api) {
-  return api === PYLON_PLUGIN_API_LATEST ? ["trust", "contributes", "signature", "entry"] : ["trust", "capabilities", "contributes", "signature", "entry"];
+  return api === PYLON_PLUGIN_API_LATEST ? ["trust", "contributes", "signature", "entry"] : ["trust", "capabilities", "dangerousHooks", "contributes", "signature", "entry"];
 }
 function record(value, field) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -99,6 +127,19 @@ function parsePylonPluginManifest(source) {
       seen.add(capability);
     });
   }
+  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.dangerousHooks !== void 0) {
+    if (!Array.isArray(manifest.dangerousHooks) || manifest.dangerousHooks.some((value) => typeof value !== "string" || !value.trim())) {
+      throw new PluginManifestError("dangerousHooks", "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    manifest.dangerousHooks.forEach((hook, index) => {
+      if (!HOOK_NAMES.includes(hook)) {
+        throw new PluginManifestError(`dangerousHooks.${index}`, "\u672A\u77E5 hook \u951A\u70B9");
+      }
+      if (seen.has(hook)) throw new PluginManifestError(`dangerousHooks.${index}`, "hook \u91CD\u590D\u58F0\u660E");
+      seen.add(hook);
+    });
+  }
   if (typeof manifest.kind !== "string" || !KINDS.has(manifest.kind)) throw new Error("pylon-plugin.json kind \u65E0\u6548");
   const web = record(manifest.web, "web");
   if (typeof web.entry !== "string" || !web.entry.trim()) throw new Error("pylon-plugin.json \u7F3A\u5C11 web.entry");
@@ -142,6 +183,16 @@ function parsePylonPluginManifest(source) {
   }
   return manifest;
 }
+
+// src/plugin-runtime/management/pluginManagementTypes.ts
+var PluginManagementError = class extends Error {
+  constructor(code, pluginId, message) {
+    super(message);
+    this.code = code;
+    this.pluginId = pluginId;
+    this.name = "PluginManagementError";
+  }
+};
 
 // src/plugin-runtime/settings/settingsTargetGrammar.ts
 var NAMESPACES = /* @__PURE__ */ new Set(["theme", "kind", "slot", "suite", "plugin-page", "context-panel"]);
@@ -384,6 +435,7 @@ export {
   PYLON_PLUGIN_API_VERSION,
   PYLON_PLUGIN_CAPABILITIES,
   PYLON_PLUGIN_MANIFEST_FILE,
+  PluginManagementError,
   PluginStorageError,
   VISUAL_SEMANTIC_ROLE_TOKENS,
   VISUAL_SEMANTIC_TOKENS,

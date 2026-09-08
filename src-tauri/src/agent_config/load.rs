@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -334,4 +334,3 @@ pub(crate) fn parse_config_document(content: &str) -> Result<serde_yml::Value, C
     serde_yml::from_str::<serde_yml::Value>(content)
         .map_err(|error| ConfigError::Parse(format!("failed to parse agents.yaml: {error}")))
 }
-

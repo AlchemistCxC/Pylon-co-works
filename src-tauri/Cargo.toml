@@ -78,3 +78,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [profile.release]
 # 发布瘦身：去除符号表（实测 -18MB，零运行时影响）
 strip = true
+# 2026-09-07 Riccati：崩溃直接终止（桌面 app 无 FFI 抓 panic 场景），省异常展开表
+panic = "abort"
+# 跨 crate 死代码消除 + 内联（thin 相对 full 增量友好），体积/速度双收
+lto = "thin"

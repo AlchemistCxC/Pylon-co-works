@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -181,7 +181,11 @@ pub(crate) fn cleanup_stale_config_temps(path: &Path) {
     }
 }
 
-pub(crate) fn write_synced_temp(path: &Path, kind: &str, content: &[u8]) -> Result<PathBuf, std::io::Error> {
+pub(crate) fn write_synced_temp(
+    path: &Path,
+    kind: &str,
+    content: &[u8],
+) -> Result<PathBuf, std::io::Error> {
     let temp = unique_sibling(path, kind).map_err(std::io::Error::other)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -382,4 +386,3 @@ pub fn effective_config_path() -> Option<PathBuf> {
     }
     None
 }
-

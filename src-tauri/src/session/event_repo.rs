@@ -148,8 +148,7 @@ const INSERT_EVENT_SQL: &str = "INSERT INTO canonical_events
 const TOMBSTONE_STATE_SQL: &str = "SELECT state FROM deleted_sessions
      WHERE owner_key = ?1 OR (session_id = ?2 AND owner_scope = 'legacy')
      LIMIT 1";
-const MAX_SEQUENCE_SQL: &str =
-    "SELECT MAX(sequence) FROM canonical_events WHERE owner_key = ?1";
+const MAX_SEQUENCE_SQL: &str = "SELECT MAX(sequence) FROM canonical_events WHERE owner_key = ?1";
 
 fn is_journal_credential_key(key: &str, interaction_payload: bool) -> bool {
     let normalized = key
@@ -218,9 +217,7 @@ fn redact_journal_credentials(
 /// 返回 (截断后的 raw_payload, 入库 JSON 文本, 截断标记, 字节统计…)。
 /// 入库文本 = `raw_payload.to_string()`（serde_json 序列化确定 → 逐字节相等），
 /// 调用方直接绑定 INSERT，免二次全量序列化；retained_bytes 统计复用同一文本。
-fn retain_raw_payload(
-    raw: serde_json::Value,
-) -> (serde_json::Value, String, bool, i64, i64, i64) {
+fn retain_raw_payload(raw: serde_json::Value) -> (serde_json::Value, String, bool, i64, i64, i64) {
     let encoded = raw.to_string();
     let original = encoded.len() as i64;
     if encoded.len() <= MAX_CANONICAL_RAW_BYTES {
@@ -571,8 +568,14 @@ fn normalize_kernel_event(
     let identity = resolve_identity(update);
     // 借用已结束：原树 move 进 redact（纯函数，等价于原先的 clone 后重建，少一次整树拷贝）。
     let raw_for_storage = redact_journal_credentials(input.raw_payload, false);
-    let (raw_payload, raw_payload_json, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
-        retain_raw_payload(raw_for_storage);
+    let (
+        raw_payload,
+        raw_payload_json,
+        raw_truncated,
+        raw_original_bytes,
+        raw_retained_bytes,
+        raw_omitted_bytes,
+    ) = retain_raw_payload(raw_for_storage);
     Ok(CanonicalEventRow {
         event_id: format!("{owner_key}#{sequence}"),
         owner_key,
@@ -595,8 +598,18 @@ fn normalize_kernel_event(
         raw_payload_json,
         created_at: now_millis(),
         schema_version: 1,
-        provenance_origin: if input.recovery_import { "recovery-import" } else { "local-observed" }.to_string(),
-        provenance_trust: if input.recovery_import { "unverified" } else { "authoritative" }.to_string(),
+        provenance_origin: if input.recovery_import {
+            "recovery-import"
+        } else {
+            "local-observed"
+        }
+        .to_string(),
+        provenance_trust: if input.recovery_import {
+            "unverified"
+        } else {
+            "authoritative"
+        }
+        .to_string(),
         provenance_provider: Some(provenance_provider),
         provenance_import_id: input.recovery_import.then_some(provenance_import_id),
         raw_truncated,
@@ -685,7 +698,10 @@ pub(crate) fn parse_canonical_event(
     if !obj.contains_key("rawPayload") {
         problems.push("rawPayload 必填（unknown event 不得静默丢弃）".into());
     }
-    if !matches!(provenance_origin, "local-observed" | "optimistic-local" | "recovery-import" | "migration" | "plugin") {
+    if !matches!(
+        provenance_origin,
+        "local-observed" | "optimistic-local" | "recovery-import" | "migration" | "plugin"
+    ) {
         problems.push("provenance.origin 非法".into());
     }
     if !matches!(provenance_trust, "authoritative" | "unverified") {
@@ -716,13 +732,19 @@ pub(crate) fn parse_canonical_event(
 
     let event_type = event_type.expect("checked");
     let interaction_payload = event_type.starts_with("interaction.");
-    let (raw_payload, raw_payload_json, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
-        retain_raw_payload(redact_journal_credentials(
-            obj.get("rawPayload")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-            interaction_payload,
-        ));
+    let (
+        raw_payload,
+        raw_payload_json,
+        raw_truncated,
+        raw_original_bytes,
+        raw_retained_bytes,
+        raw_omitted_bytes,
+    ) = retain_raw_payload(redact_journal_credentials(
+        obj.get("rawPayload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        interaction_payload,
+    ));
 
     Ok(CanonicalEventRow {
         event_id,
@@ -745,11 +767,22 @@ pub(crate) fn parse_canonical_event(
         raw_payload,
         raw_payload_json,
         created_at: now_millis(),
-        schema_version: obj.get("schemaVersion").and_then(|v| v.as_i64()).unwrap_or(1),
+        schema_version: obj
+            .get("schemaVersion")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1),
         provenance_origin: provenance_origin.to_string(),
         provenance_trust: provenance_trust.to_string(),
-        provenance_provider: obj.get("provenance").and_then(|p| p.get("provider")).and_then(|v| v.as_str()).map(str::to_string),
-        provenance_import_id: obj.get("provenance").and_then(|p| p.get("importId")).and_then(|v| v.as_str()).map(str::to_string),
+        provenance_provider: obj
+            .get("provenance")
+            .and_then(|p| p.get("provider"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        provenance_import_id: obj
+            .get("provenance")
+            .and_then(|p| p.get("importId"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         raw_truncated,
         raw_original_bytes,
         raw_retained_bytes,
@@ -835,10 +868,9 @@ impl EventRepo {
         let tombstone_state: Option<String> = tx
             .prepare_cached(TOMBSTONE_STATE_SQL)
             .map_err(EventError::from)?
-            .query_row(
-                params![owner_key, events[0].local_session_id],
-                |row| row.get(0),
-            )
+            .query_row(params![owner_key, events[0].local_session_id], |row| {
+                row.get(0)
+            })
             .optional()
             .map_err(EventError::from)?
             .flatten();
@@ -870,37 +902,36 @@ impl EventRepo {
                 .prepare_cached(INSERT_EVENT_SQL)
                 .map_err(EventError::from)?
                 .execute(params![
-                        event.event_id,
-                        event.owner_key,
-                        event.profile_id,
-                        event.agent_id,
-                        event.local_session_id,
-                        event.remote_session_id,
-                        event.client_generation,
-                        event.sequence,
-                        event.occurred_at,
-                        event.received_at,
-                        event.event_type,
-                        event.payload_version,
-                        event.identity.as_ref().map(serde_json::Value::to_string),
-                        event
-                            .typed_payload
-                            .as_ref()
-                            .map(serde_json::Value::to_string),
-                        event.raw_payload_json.as_str(),
-                        event.created_at,
-                        event.schema_version,
-                        event.provenance_origin,
-                        event.provenance_trust,
-                        event.provenance_provider,
-                        event.provenance_import_id,
-                        event.raw_truncated,
-                        event.raw_original_bytes,
-                        event.raw_retained_bytes,
-                        event.raw_omitted_bytes,
-                        event.raw_truncation_reason,
-                    ],
-                )
+                    event.event_id,
+                    event.owner_key,
+                    event.profile_id,
+                    event.agent_id,
+                    event.local_session_id,
+                    event.remote_session_id,
+                    event.client_generation,
+                    event.sequence,
+                    event.occurred_at,
+                    event.received_at,
+                    event.event_type,
+                    event.payload_version,
+                    event.identity.as_ref().map(serde_json::Value::to_string),
+                    event
+                        .typed_payload
+                        .as_ref()
+                        .map(serde_json::Value::to_string),
+                    event.raw_payload_json.as_str(),
+                    event.created_at,
+                    event.schema_version,
+                    event.provenance_origin,
+                    event.provenance_trust,
+                    event.provenance_provider,
+                    event.provenance_import_id,
+                    event.raw_truncated,
+                    event.raw_original_bytes,
+                    event.raw_retained_bytes,
+                    event.raw_omitted_bytes,
+                    event.raw_truncation_reason,
+                ])
                 .map_err(EventError::from)?;
             if changed > 0 {
                 revision = revision.max(event.sequence);
@@ -984,9 +1015,8 @@ impl EventRepo {
                 event.raw_retained_bytes,
                 event.raw_omitted_bytes,
                 event.raw_truncation_reason,
-            ],
-        )
-        .map_err(EventError::from)?;
+            ])
+            .map_err(EventError::from)?;
         tx.commit().map_err(EventError::from)?;
         Ok(EventAppendResult {
             events: vec![event],
@@ -1280,7 +1310,11 @@ impl EventService {
                 return Ok(ReplayJournalIngestResult {
                     events: Vec::new(),
                     revision,
-                    status: if revision == 0 { "empty" } else { "already-imported" },
+                    status: if revision == 0 {
+                        "empty"
+                    } else {
+                        "already-imported"
+                    },
                 });
             }
             let mut events = Vec::with_capacity(replay_events.len());
@@ -1541,7 +1575,10 @@ mod tests {
         let event = &result.events[0];
         assert!(event.raw_truncated);
         assert!(event.raw_original_bytes > event.raw_retained_bytes);
-        assert_eq!(event.raw_omitted_bytes, event.raw_original_bytes - event.raw_retained_bytes);
+        assert_eq!(
+            event.raw_omitted_bytes,
+            event.raw_original_bytes - event.raw_retained_bytes
+        );
         assert_eq!(event.raw_truncation_reason.as_deref(), Some("size"));
         assert_eq!(event.typed_payload.as_ref().unwrap()["text"], "kept");
         assert_eq!(event.event_id, "[\"p1\",\"peri\",\"local:s1\"]#1");
@@ -1628,8 +1665,7 @@ mod tests {
             true
         );
         assert!(imported.events.iter().all(|event| {
-            event.provenance_origin == "recovery-import"
-                && event.provenance_trust == "unverified"
+            event.provenance_origin == "recovery-import" && event.provenance_trust == "unverified"
         }));
         let skipped = service
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
@@ -1748,8 +1784,14 @@ mod tests {
             .await
             .expect("list local journal");
         assert_eq!(page.events.len(), 1);
-        assert_eq!(page.events[0].typed_payload.as_ref().unwrap()["text"], "local");
-        assert!(page.events.iter().all(|event| event.event_type != "history.snapshot"));
+        assert_eq!(
+            page.events[0].typed_payload.as_ref().unwrap()["text"],
+            "local"
+        );
+        assert!(page
+            .events
+            .iter()
+            .all(|event| event.event_type != "history.snapshot"));
     }
 
     #[tokio::test]
@@ -1791,7 +1833,10 @@ mod tests {
             .await
             .expect("list journal");
         assert_eq!(page.events.len(), 1);
-        assert!(page.events.iter().all(|event| event.event_type != "history.snapshot"));
+        assert!(page
+            .events
+            .iter()
+            .all(|event| event.event_type != "history.snapshot"));
     }
 
     #[tokio::test]
@@ -2305,8 +2350,10 @@ mod tests {
             a_row.owner_key, b_row.owner_key,
             "双 Agent 同名 source → owner key 隔离"
         );
-        repo.append_events(std::slice::from_ref(&a_row), None).unwrap();
-        repo.append_events(std::slice::from_ref(&b_row), None).unwrap();
+        repo.append_events(std::slice::from_ref(&a_row), None)
+            .unwrap();
+        repo.append_events(std::slice::from_ref(&b_row), None)
+            .unwrap();
         let page_a = repo.list_events(&a_row.owner_key, None, 10).unwrap();
         let page_b = repo.list_events(&b_row.owner_key, None, 10).unwrap();
         assert_eq!(page_a.events.len(), 1);

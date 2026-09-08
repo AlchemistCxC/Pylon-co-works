@@ -478,7 +478,7 @@ impl BrowserManager {
             .or_else(|| {
                 parsed
                     .path_segments()
-                    .and_then(|segments| segments.last())
+                    .and_then(|mut segments| segments.next_back())
                     .filter(|name| !name.is_empty())
                     .map(|name| name.chars().take(160).collect::<String>())
             })
@@ -499,7 +499,8 @@ impl BrowserManager {
               anchor.remove();
               return JSON.stringify({{ ok: true, url, filename: name, status: 'started' }});
             }})()"#
-        )).await
+        ))
+        .await
     }
 
     /// 通过 CSS selector 或可见文本触发页面元素 click。
@@ -649,8 +650,8 @@ impl BrowserManager {
             .await
             .map_err(|_| "页面脚本响应超时".to_string())
             .and_then(|result| result.map_err(|_| "页面脚本响应通道已关闭".to_string()))?;
-        let encoded: Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("页面脚本返回值非法: {e}"))?;
+        let encoded: Value =
+            serde_json::from_str(&raw).map_err(|e| format!("页面脚本返回值非法: {e}"))?;
         if let Value::String(value) = encoded {
             serde_json::from_str(&value).map_err(|e| format!("页面脚本 JSON 非法: {e}"))
         } else {

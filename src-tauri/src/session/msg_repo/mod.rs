@@ -1,4 +1,4 @@
-﻿//! 会话仓库：SQLite 持久化（sessions / deleted_sessions / user_data /
+//! 会话仓库：SQLite 持久化（sessions / deleted_sessions / user_data /
 //! retention_policy / canonical_events）。
 //!
 //! 契约：
@@ -369,8 +369,6 @@ fn lock_err<E>(_: E) -> PylonError {
 /// - 幂等门控：以列存在性判定（新库 SCHEMA_SQL 已建新列，跳过 ALTER；旧库执行）。
 /// - 复合索引 INDEX(state, deleted_at) 不在本脚本（升版库在 ALTER 后由
 ///   DEL_02_TOMBSTONE_INDEX_SQL 统一补建——见 migrate()）。
-
-
 mod migrations;
 #[cfg(test)]
 mod tests;

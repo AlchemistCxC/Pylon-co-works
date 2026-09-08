@@ -209,8 +209,7 @@ impl SessionInfo {
             })
             .and_then(value_as_string)
             .or_else(|| {
-                find_config_option(&effective_options, "mode")
-                    .and_then(config_option_current_value)
+                find_config_option(&effective_options, "mode").and_then(config_option_current_value)
             })
             .or_else(|| {
                 response
@@ -277,7 +276,10 @@ impl SessionInfo {
         value: &serde_json::Value,
     ) {
         let mut authoritative = false;
-        if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
+        if let Some(options) = response
+            .get("configOptions")
+            .and_then(|value| value.as_array())
+        {
             if !(options.is_empty() && !self.config_options.is_empty()) {
                 self.config_options = options.clone();
                 self.apply_config_options(options);
@@ -445,7 +447,10 @@ mod tests {
             ]
         });
         let info = determine_model_surface(
-            response.get("configOptions").and_then(|v| v.as_array()).unwrap(),
+            response
+                .get("configOptions")
+                .and_then(|v| v.as_array())
+                .unwrap(),
             None,
         );
         assert_eq!(
@@ -565,7 +570,10 @@ mod tests {
             serde_json::json!({"id": "model-selection", "category": "model"}),
         ];
         let found = find_config_option(&options, "model").unwrap();
-        assert_eq!(found.get("id").and_then(value_as_string).as_deref(), Some("model-selection"));
+        assert_eq!(
+            found.get("id").and_then(value_as_string).as_deref(),
+            Some("model-selection")
+        );
     }
 
     // ── P56/D1.6：空回声保护 ──
@@ -616,22 +624,15 @@ mod tests {
     #[test]
     fn resolve_model_switch_target_prefers_explicit_declaration() {
         // 验收 8：显式 set_model_api 声明按声明路由（现状行为）。
-        let (target, config_id) = resolve_model_switch_target(
-            Some(SetModelApi::SetModel),
-            "model",
-            &ModelSurface::None,
-        )
-        .unwrap();
+        let (target, config_id) =
+            resolve_model_switch_target(Some(SetModelApi::SetModel), "model", &ModelSurface::None)
+                .unwrap();
         assert_eq!(target, crate::agent_config::ModelSwitchTarget::SetModel);
         assert_eq!(config_id, None);
 
         // 未声明 + key != "model"：既有路径不变。
-        let (target, config_id) = resolve_model_switch_target(
-            None,
-            "mode",
-            &ModelSurface::None,
-        )
-        .unwrap();
+        let (target, config_id) =
+            resolve_model_switch_target(None, "mode", &ModelSurface::None).unwrap();
         assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
         assert_eq!(config_id, None);
     }
@@ -697,12 +698,23 @@ fn semantic_aliases(wanted: &str) -> &'static [&'static str] {
         "model" | "models" | "model_id" | "modelid" => {
             &["model", "models", "model_id", "modelid", "model_selection"]
         }
-        "mode" | "modes" | "mode_id" | "modeid" => {
-            &["mode", "modes", "mode_id", "modeid", "permission_mode", "permissions_mode"]
-        }
-        "reason" | "reasoning" | "thinking" | "thought" | "effort" => {
-            &["reason", "reasoning", "reasoning_effort", "thinking", "thought", "thought_level", "effort"]
-        }
+        "mode" | "modes" | "mode_id" | "modeid" => &[
+            "mode",
+            "modes",
+            "mode_id",
+            "modeid",
+            "permission_mode",
+            "permissions_mode",
+        ],
+        "reason" | "reasoning" | "thinking" | "thought" | "effort" => &[
+            "reason",
+            "reasoning",
+            "reasoning_effort",
+            "thinking",
+            "thought",
+            "thought_level",
+            "effort",
+        ],
         _ => &[],
     }
 }
@@ -734,10 +746,7 @@ fn walk_value_as_string(value: &serde_json::Value, depth: usize, keys: &[&str]) 
     let object = value.as_object()?;
     for wanted in keys {
         let wanted = normalized_key(wanted);
-        let Some((_, nested)) = object
-            .iter()
-            .find(|(key, _)| normalized_key(key) == wanted)
-        else {
+        let Some((_, nested)) = object.iter().find(|(key, _)| normalized_key(key) == wanted) else {
             continue;
         };
         if let Some(result) = walk_value_as_string(nested, depth + 1, keys) {
@@ -754,9 +763,23 @@ pub(crate) fn value_as_string(value: &serde_json::Value) -> Option<String> {
         value,
         0,
         &[
-            "valueId", "value_id", "modelId", "model_id", "modeId", "mode_id", "id", "key",
-            "value", "currentValue", "current_value", "current", "selected", "selectedValue",
-            "selected_value", "name", "label",
+            "valueId",
+            "value_id",
+            "modelId",
+            "model_id",
+            "modeId",
+            "mode_id",
+            "id",
+            "key",
+            "value",
+            "currentValue",
+            "current_value",
+            "current",
+            "selected",
+            "selectedValue",
+            "selected_value",
+            "name",
+            "label",
         ],
     )
 }
@@ -769,8 +792,20 @@ pub(crate) fn value_as_machine_id(value: &serde_json::Value) -> Option<String> {
         value,
         0,
         &[
-            "valueId", "value_id", "modelId", "model_id", "modeId", "mode_id", "id", "key",
-            "value", "currentValue", "current_value", "current", "selected", "selectedValue",
+            "valueId",
+            "value_id",
+            "modelId",
+            "model_id",
+            "modeId",
+            "mode_id",
+            "id",
+            "key",
+            "value",
+            "currentValue",
+            "current_value",
+            "current",
+            "selected",
+            "selectedValue",
             "selected_value",
         ],
     )
@@ -792,8 +827,15 @@ fn config_option_current_value_with(
 ) -> Option<String> {
     let object = option.as_object()?;
     [
-        "currentValue", "current_value", "selectedValue", "selected_value", "selected", "value",
-        "current", "defaultValue", "default_value",
+        "currentValue",
+        "current_value",
+        "selectedValue",
+        "selected_value",
+        "selected",
+        "value",
+        "current",
+        "defaultValue",
+        "default_value",
     ]
     .iter()
     .find_map(|key| {
@@ -806,10 +848,10 @@ fn config_option_current_value_with(
                     .flat_map(char::to_lowercase)
                     .collect::<String>()
                     == key
-                    .replace(['-', ' '], "_")
-                    .chars()
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>()
+                        .replace(['-', ' '], "_")
+                        .chars()
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
             })
             .and_then(|(_, value)| extract(value))
     })
@@ -827,7 +869,10 @@ pub(crate) fn find_config_option<'a>(
     let aliases = semantic_aliases(&wanted);
     let is_alias = |candidate: &str| {
         let candidate = normalized_token(candidate);
-        candidate == wanted || aliases.iter().any(|alias| candidate == normalized_token(alias))
+        candidate == wanted
+            || aliases
+                .iter()
+                .any(|alias| candidate == normalized_token(alias))
     };
     // ① category 精确优先（协议语义判别字段；保持数组顺序取第一个命中）。
     if let Some(option) = options.iter().find(|option| {
@@ -845,7 +890,14 @@ pub(crate) fn find_config_option<'a>(
             return false;
         };
         [
-            "configId", "config_id", "optionId", "option_id", "id", "key", "name", "label",
+            "configId",
+            "config_id",
+            "optionId",
+            "option_id",
+            "id",
+            "key",
+            "name",
+            "label",
             "title",
         ]
         .iter()
@@ -860,18 +912,28 @@ pub(crate) fn config_option_key_matches(option_key: &str, semantic: &str) -> boo
     let wanted = normalized_token(semantic);
     let aliases = semantic_aliases(&wanted);
     let candidate = normalized_token(option_key);
-    candidate == wanted || aliases.iter().any(|alias| candidate == normalized_token(alias))
+    candidate == wanted
+        || aliases
+            .iter()
+            .any(|alias| candidate == normalized_token(alias))
 }
 
 /// P56/D1：选项身份（configId/config_id/optionId/option_id/id/key 的 machine-id-only
 /// 提取；不含 name——宣告 configId 不得降级为显示名）。
 fn config_option_identity(option: &serde_json::Value) -> Option<String> {
     let object = option.as_object()?;
-    ["configId", "config_id", "optionId", "option_id", "id", "key"]
-        .iter()
-        .filter_map(|field| object.get(*field))
-        .find_map(value_as_machine_id)
-        .filter(|id| !id.is_empty())
+    [
+        "configId",
+        "config_id",
+        "optionId",
+        "option_id",
+        "id",
+        "key",
+    ]
+    .iter()
+    .filter_map(|field| object.get(*field))
+    .find_map(value_as_machine_id)
+    .filter(|id| !id.is_empty())
 }
 
 /// P56/D1：select 选项宣告的 choice machine id 集合（保持宣告顺序、去重；
@@ -895,8 +957,15 @@ fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String> {
             return;
         };
         for key in [
-            "options", "choices", "values", "available", "items", "enum", "schema",
-            "optionValues", "option_values",
+            "options",
+            "choices",
+            "values",
+            "available",
+            "items",
+            "enum",
+            "schema",
+            "optionValues",
+            "option_values",
         ] {
             if let Some(nested) = object.get(key) {
                 collect(nested, depth + 1, seen);

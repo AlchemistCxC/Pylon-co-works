@@ -86,7 +86,10 @@ fn migrate_upgrades_v6_tombstone_to_latest_owner_state() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
     assert_eq!(version, SCHEMA_VERSION, "v6 库升版后必须等于当前版本");
-    assert_eq!(version, SCHEMA_VERSION, "v13 canonical envelope migration 必须保留 durable owner tombstone");
+    assert_eq!(
+        version, SCHEMA_VERSION,
+        "v13 canonical envelope migration 必须保留 durable owner tombstone"
+    );
 
     let cols: Vec<String> = {
         let mut stmt = conn

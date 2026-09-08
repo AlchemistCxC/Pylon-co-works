@@ -45,7 +45,6 @@ enum ProcessProtocol {
     Http,
 }
 
-
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
@@ -55,7 +54,6 @@ enum RestartPolicy {
     OnFailure,
     Always,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +90,6 @@ enum ShutdownMethod {
     Signal,
     Kill,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

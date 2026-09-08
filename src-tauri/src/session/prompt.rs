@@ -219,7 +219,13 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
             error_payload.clone(),
         );
     }
-    send_channel_terminal(state, runtime, &ctx.source, crate::event_names::SESSION_ERROR, error_payload);
+    send_channel_terminal(
+        state,
+        runtime,
+        &ctx.source,
+        crate::event_names::SESSION_ERROR,
+        error_payload,
+    );
     Ok(())
 }
 #[tauri::command(rename_all = "camelCase")]
@@ -527,7 +533,13 @@ async fn finalize_response<R: tauri::Runtime>(
             done_payload.clone(),
         );
     }
-    send_channel_terminal(state, runtime, source, crate::event_names::SESSION_DONE, done_payload);
+    send_channel_terminal(
+        state,
+        runtime,
+        source,
+        crate::event_names::SESSION_DONE,
+        done_payload,
+    );
     let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
     // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
     // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +
@@ -691,8 +703,16 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 ..Default::default()
             });
         }
-        if let Err(persistence_error) =
-            publish_prompt_failure(state, runtime, window, gateway, ctx, error, failure.as_ref()).await
+        if let Err(persistence_error) = publish_prompt_failure(
+            state,
+            runtime,
+            window,
+            gateway,
+            ctx,
+            error,
+            failure.as_ref(),
+        )
+        .await
         {
             tracing::error!(
                 code = persistence_error.code(),
@@ -784,10 +804,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         // （Hermes 无 provider/401 等均在此时失败）。错误同时进 runtime 日志带上下文。
         // 持久化 peri_id（Pylon 重启后内存映射为空）：优先 ACP session/load 复活
         // 原会话；仅当复活失败（远端会话已死）才新建，并向前端广播新会话事实。
-        let revived_peri_id = ctx
-            .known_peri_id
-            .clone()
-            .filter(|id| !id.is_empty());
+        let revived_peri_id = ctx.known_peri_id.clone().filter(|id| !id.is_empty());
         // Recreated-session notice is emitted after ensure returns (holding a
         // &dyn callback across the await would make the command future
         // non-Send); the callback is replaced by a plain Option<String> out.
@@ -955,7 +972,10 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let mut rx = match rpc.send_keep_rx().await {
         Ok(rx) => rx,
         Err(error) => {
-            *failure = Some(failure_for_acp_error(&error, Some(elapsed_millis(prompt_started_at))));
+            *failure = Some(failure_for_acp_error(
+                &error,
+                Some(elapsed_millis(prompt_started_at)),
+            ));
             let _ =
                 state.remove_session_if_matches(runtime, source, &flow.peri_id, flow.generation);
             return Err(PylonError::from(error));
@@ -1302,13 +1322,22 @@ mod tests {
         assert_eq!(row.provenance_origin, "local-observed");
         assert_eq!(row.provenance_trust, "authoritative");
         assert_eq!(row.provenance_provider.as_deref(), Some(agent_id));
-        assert_eq!(row.identity.as_ref().and_then(|identity| identity.get("messageId")), None);
+        assert_eq!(
+            row.identity
+                .as_ref()
+                .and_then(|identity| identity.get("messageId")),
+            None
+        );
 
         let page = event_service
             .list_events(owner_key, None, 100)
             .await
             .expect("list canonical rows");
-        assert_eq!(page.events.len(), 1, "one successful prompt produces one authoritative user row");
+        assert_eq!(
+            page.events.len(),
+            1,
+            "one successful prompt produces one authoritative user row"
+        );
         assert_eq!(page.events[0], row);
     }
 
@@ -1353,15 +1382,9 @@ for line in sys.stdin:
             known_peri_id: None,
             ..Default::default()
         };
-        send_prompt_core::<tauri::test::MockRuntime>(
-            &state,
-            &runtime,
-            None,
-            &gateway,
-            &context,
-        )
-        .await
-        .expect("prompt must succeed");
+        send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &context)
+            .await
+            .expect("prompt must succeed");
 
         let owner_key = serde_json::to_string(&[
             "profile-success",
@@ -1378,12 +1401,22 @@ for line in sys.stdin:
             .iter()
             .filter(|event| event.event_type == "user.message")
             .collect();
-        assert_eq!(user_rows.len(), 1, "successful send must commit one authoritative user row");
+        assert_eq!(
+            user_rows.len(),
+            1,
+            "successful send must commit one authoritative user row"
+        );
         let user = user_rows[0];
         assert_eq!(user.provenance_origin, "local-observed");
         assert_eq!(user.provenance_trust, "authoritative");
-        assert_eq!(user.provenance_provider.as_deref(), Some("prompt-success-agent"));
-        assert_eq!(user.identity, None, "client correlation is not canonical identity");
+        assert_eq!(
+            user.provenance_provider.as_deref(),
+            Some("prompt-success-agent")
+        );
+        assert_eq!(
+            user.identity, None,
+            "client correlation is not canonical identity"
+        );
     }
 
     #[test]
@@ -1472,14 +1505,11 @@ for line in sys.stdin:
             "hooks": ["message.user.beforeSend"]
         }));
         let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
-        window.listen(
-            crate::event_names::PYLON_HOOK_REQUEST,
-            move |event| {
-                let payload: serde_json::Value = serde_json::from_str(event.payload())
-                    .expect("hook request payload");
-                let _ = tx.send(payload);
-            },
-        );
+        window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+            let payload: serde_json::Value =
+                serde_json::from_str(event.payload()).expect("hook request payload");
+            let _ = tx.send(payload);
+        });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
             let request = rx.recv().expect("hook request must arrive");
@@ -1534,12 +1564,9 @@ for line in sys.stdin:
             "wire 出站必须携带 hook 改写产物"
         );
         // journal 证据：user.message 原文行不被改写（B7 rawPayload/typed 原文）。
-        let owner_key = serde_json::to_string(&[
-            "profile-hook",
-            "hook-dual-agent",
-            "local:hook-dual",
-        ])
-        .expect("owner key");
+        let owner_key =
+            serde_json::to_string(&["profile-hook", "hook-dual-agent", "local:hook-dual"])
+                .expect("owner key");
         let page = event_service
             .list_events(owner_key, None, 100)
             .await
@@ -1550,13 +1577,13 @@ for line in sys.stdin:
             .find(|event| event.event_type == "user.message")
             .expect("journal must contain the user.message row");
         assert_eq!(
-            user_row.typed_payload.as_ref().and_then(|payload| payload.get("text")),
+            user_row
+                .typed_payload
+                .as_ref()
+                .and_then(|payload| payload.get("text")),
             Some(&serde_json::json!("用户原始消息")),
             "journal 原文行必须保持用户原文（记原文契约）"
         );
-        assert!(
-            !trace.contains("用户原始消息"),
-            "wire 不应再出现用户原文"
-        );
+        assert!(!trace.contains("用户原始消息"), "wire 不应再出现用户原文");
     }
 }

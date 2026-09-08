@@ -413,7 +413,11 @@ fn agent_summary_payload_with_activation(
 
 /// registry 是否包含指定 agent（switch 前置存在性检查用，不克隆）。
 fn agent_exists_in_registry(state: &AppState, agent_id: &str) -> bool {
-    state.agents.lock().map(|agents| agents.contains_key(agent_id)).unwrap_or(false)
+    state
+        .agents
+        .lock()
+        .map(|agents| agents.contains_key(agent_id))
+        .unwrap_or(false)
 }
 
 /// 从 registry 读取指定 agent 定义（克隆）；不存在报 unknown agent（多处命令共用）。
@@ -744,10 +748,8 @@ pub(crate) mod mcp;
 
 // 拆分后的命令经此 re-export：tauri::generate_handler 与测试的 `use super::*` 路径不变。
 // `__cmd__*` 是 tauri::command 宏生成的隐藏项，必须一并 re-export 才能被 generate_handler 解析。
-pub(crate) use config_cmds::__tauri_command_name_agent_config_snapshot;
-pub(crate) use config_cmds::__tauri_command_name_initialize_agents_config;
-pub(crate) use config_cmds::__tauri_command_name_reload_agents;
-pub(crate) use config_cmds::__tauri_command_name_update_agents_config;
+#[cfg(test)]
+use crate::acp::{AgentConnectFailure, AgentConnectStage};
 #[allow(unused_imports)]
 pub(crate) use config_cmds::__cmd__agent_config_snapshot;
 #[allow(unused_imports)]
@@ -756,28 +758,30 @@ pub(crate) use config_cmds::__cmd__initialize_agents_config;
 pub(crate) use config_cmds::__cmd__reload_agents;
 #[allow(unused_imports)]
 pub(crate) use config_cmds::__cmd__update_agents_config;
+pub(crate) use config_cmds::__tauri_command_name_agent_config_snapshot;
+pub(crate) use config_cmds::__tauri_command_name_initialize_agents_config;
+pub(crate) use config_cmds::__tauri_command_name_reload_agents;
+pub(crate) use config_cmds::__tauri_command_name_update_agents_config;
 pub(crate) use config_cmds::{
     agent_config_snapshot, initialize_agents_config, reload_agents, update_agents_config,
 };
-pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
-pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
 #[allow(unused_imports)]
 pub(crate) use connection_test::__cmd__test_agent_candidate;
 #[allow(unused_imports)]
 pub(crate) use connection_test::__cmd__test_agent_connection;
-pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
+pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
+pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
 #[cfg(test)]
 use connection_test::connection_test_error_payload;
 #[cfg(test)]
 use connection_test::{candidate_stderr, AGENT_VALIDATION_TIMEOUT_SECS};
-#[cfg(test)]
-use crate::acp::{AgentConnectFailure, AgentConnectStage};
-pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
-pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
+pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
 #[allow(unused_imports)]
 pub(crate) use mcp::__cmd__get_mcp_servers;
 #[allow(unused_imports)]
 pub(crate) use mcp::__cmd__set_mcp_servers;
+pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
+pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
 pub(crate) use mcp::{get_mcp_servers, load_mcp_persisted, set_mcp_servers};
 
 #[cfg(test)]

@@ -1,9 +1,7 @@
-﻿
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
-
 
 /// 启动/加载配置的领域错误（R7/P2-1）。Display 透传原文案（前端/日志依赖文案
 /// 不变），code() 提供机器可读细分（前端分支依据，稳定不拼写变更）。
@@ -376,7 +374,9 @@ impl AcpProtocolConfig {
 /// D2 双格式反序列化：bool（true=set_model / false=config_option）或字符串
 /// （"set_model"/"config_option"/"none"）。未知值拒绝（E1：报错指明字段与可选值；
 /// agent id 上下文由 parse() 的逐 agent 反序列化包装补充）。
-pub(crate) fn deserialize_set_model_api<'de, D>(deserializer: D) -> Result<Option<SetModelApi>, D::Error>
+pub(crate) fn deserialize_set_model_api<'de, D>(
+    deserializer: D,
+) -> Result<Option<SetModelApi>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -400,7 +400,9 @@ where
 }
 
 /// D4 mcp_servers 字段形态反序列化：字符串 "always" | "omit_if_empty"。
-pub(crate) fn deserialize_mcp_servers_mode<'de, D>(deserializer: D) -> Result<McpServersMode, D::Error>
+pub(crate) fn deserialize_mcp_servers_mode<'de, D>(
+    deserializer: D,
+) -> Result<McpServersMode, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -825,4 +827,3 @@ pub fn config_revision_for_path(path: &Path) -> Result<String, ConfigError> {
         .map_err(|error| ConfigError::Read(format!("读取 {} 失败: {error}", path.display())))?;
     Ok(config_revision_for_bytes(&bytes))
 }
-

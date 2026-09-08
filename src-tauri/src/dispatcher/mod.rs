@@ -220,8 +220,10 @@ fn apply_update_event_with_pet_policy(
                     .or_else(|| update.get("id"))
                     .or_else(|| update.get("key"))
                     .and_then(|v| v.as_str());
-                let is_model_key = option_key.is_some_and(|key| config_option_key_matches(key, "model"));
-                let is_mode_key = option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
+                let is_model_key =
+                    option_key.is_some_and(|key| config_option_key_matches(key, "model"));
+                let is_mode_key =
+                    option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
                 let current = update
                     .get("currentValue")
                     .or_else(|| update.get("value"))
@@ -409,7 +411,10 @@ async fn handle_permission_request<R: tauri::Runtime>(
             params,
             "method_unsupported",
             -32601,
-            &format!("interaction method unsupported: {}", method.unwrap_or("<missing>")),
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
         )
         .await;
         return;
@@ -795,7 +800,9 @@ async fn handle_session_update<R: tauri::Runtime>(
             if !decision.mutate_session {
                 return true;
             }
-            pet_events.extend(apply_update_event_routed(session, update, variant, decision));
+            pet_events.extend(apply_update_event_routed(
+                session, update, variant, decision,
+            ));
             // Agents may advertise commands or mode changes asynchronously after
             // session/new or session/load. Persist the merged session snapshot so
             // a later reload retains those capabilities.
@@ -842,13 +849,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
     let input = routing_input;
     let decision = routing_decision;
-    let committed_event = match routing::commit_live_event(
-        &input,
-        decision,
-        event_service,
-    )
-    .await
-    {
+    let committed_event = match routing::commit_live_event(&input, decision, event_service).await {
         routing::CommitOutcome::Skipped => None,
         routing::CommitOutcome::MissingService => {
             tracing::error!(
@@ -1351,11 +1352,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    let reason = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                        "method_unsupported"
-                    } else {
-                        "provider_unsupported"
-                    };
+                    let reason =
+                        if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
+                            "method_unsupported"
+                        } else {
+                            "provider_unsupported"
+                        };
                     (
                         reason,
                         -32601,
@@ -1522,11 +1524,19 @@ mod tests {
             Ok(())
         });
         runtime.register_update_channel("local:s1", channel);
-        assert!(runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+        assert!(runtime
+            .update_channels
+            .lock()
+            .unwrap()
+            .contains_key("local:s1"));
 
         // 注册表语义：take 后不再持有（终帧注销路径依赖）。
         assert!(runtime.take_update_channel("local:s1").is_some());
-        assert!(!runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+        assert!(!runtime
+            .update_channels
+            .lock()
+            .unwrap()
+            .contains_key("local:s1"));
 
         // clear 语义（C7/generation bump 清理）。
         runtime.register_update_channel("local:s1", tauri::ipc::Channel::new(|_| Ok(())));
@@ -1725,7 +1735,11 @@ mod tests {
     #[test]
     fn acp_reducer_is_updated_without_emitting_ui_side_effects() {
         let mut session = crate::session::SessionInfo::new(
-            "peri-reducer".to_string(), String::new(), "cwd".to_string(), true, 1,
+            "peri-reducer".to_string(),
+            String::new(),
+            "cwd".to_string(),
+            true,
+            1,
         );
         let update = serde_json::json!({
             "sessionUpdate": "agent_message_chunk",
@@ -1738,15 +1752,19 @@ mod tests {
             false,
         );
         assert!(events.is_empty(), "text chunks do not create pet events");
-        assert_eq!(session.acp_state.seq, 1);
-        assert_eq!(session.acp_state.apply(&crate::acp::RawMessage {
-            id: None,
-            method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
-            kind: crate::acp::AcpKind::SessionUpdate,
-            result: None,
-            params: Some(serde_json::json!({"update": update})),
-            error: None,
-        }), vec![crate::acp::AcpStateDelta::Text { text: "hello".into() }]);
+        assert_eq!(
+            session.acp_state.apply(&crate::acp::RawMessage {
+                id: None,
+                method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
+                kind: crate::acp::AcpKind::SessionUpdate,
+                result: None,
+                params: Some(serde_json::json!({"update": update})),
+                error: None,
+            }),
+            vec![crate::acp::AcpStateDelta::Text {
+                text: "hello".into()
+            }]
+        );
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。
@@ -1851,8 +1869,14 @@ mod tests {
     #[test]
     fn session_info_update_consumes_models_current_model() {
         for (wire, expected) in [
-            (serde_json::json!({"currentModelId": "nous:hermes-4"}), "nous:hermes-4"),
-            (serde_json::json!({"current_model_id": "nous:hermes-3"}), "nous:hermes-3"),
+            (
+                serde_json::json!({"currentModelId": "nous:hermes-4"}),
+                "nous:hermes-4",
+            ),
+            (
+                serde_json::json!({"current_model_id": "nous:hermes-3"}),
+                "nous:hermes-3",
+            ),
         ] {
             let mut session = dispatcher_session();
             let update = serde_json::json!({

@@ -7,7 +7,6 @@ use super::*;
 use crate::error::PylonError;
 use crate::AppState;
 
-
 #[tauri::command]
 pub(crate) async fn reload_agents(
     state: tauri::State<'_, AppState>,

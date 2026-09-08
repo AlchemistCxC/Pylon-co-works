@@ -37,7 +37,8 @@ impl AgentContextKey {
 
 /// 单个 agent 的运行时状态（per-agent 隔离）。
 /// A3：per-source 流式更新通道注册表类型别名。
-pub type UpdateChannelMap = std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
+pub type UpdateChannelMap =
+    std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
 
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
@@ -111,11 +112,7 @@ impl AgentRuntime {
     /// B1：非破坏性向 source 的通道发一帧（不移除注册）。user echo 在 prompt
     /// 发送前产生，会话仍在途——绝不能用 take 语义（注销后 update 流断轨）。
     /// 返回 false = 未注册（调用方走广播兜底）。
-    pub fn send_update_frame(
-        &self,
-        source: &str,
-        frame: serde_json::Value,
-    ) -> bool {
+    pub fn send_update_frame(&self, source: &str, frame: serde_json::Value) -> bool {
         match self
             .update_channels
             .lock()

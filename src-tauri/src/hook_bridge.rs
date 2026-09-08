@@ -186,10 +186,7 @@ impl HookBridge {
         } else {
             return HookDispatchOutcome::Failed("Pylon hook pending lock poisoned".into());
         }
-        if let Err(error) = emitter.emit(
-            crate::event_names::PYLON_HOOK_REQUEST,
-            request.clone(),
-        ) {
+        if let Err(error) = emitter.emit(crate::event_names::PYLON_HOOK_REQUEST, request.clone()) {
             self.pending
                 .lock()
                 .ok()
@@ -220,7 +217,11 @@ impl HookBridge {
 
     /// 应答回程（`pylon_hook_respond`）。迟到/未知 requestId → Err（B3：不可能
     /// 命中其它请求——表按唯一 requestId 键控）。
-    pub(crate) fn respond(&self, request_id: &str, result: Result<Value, String>) -> Result<(), String> {
+    pub(crate) fn respond(
+        &self,
+        request_id: &str,
+        result: Result<Value, String>,
+    ) -> Result<(), String> {
         let sender = self
             .pending
             .lock()
@@ -240,7 +241,12 @@ impl HookBridge {
             .is_some()
     }
 
-    fn cancel<R: tauri::Runtime>(&self, emitter: &impl Emitter<R>, request_id: &str, reason: &str) -> bool {
+    fn cancel<R: tauri::Runtime>(
+        &self,
+        emitter: &impl Emitter<R>,
+        request_id: &str,
+        reason: &str,
+    ) -> bool {
         let pending = self.remove_pending(request_id);
         if pending {
             let _ = emitter.emit(
@@ -287,10 +293,7 @@ pub(crate) fn interpret_before_send_response(response: &Value) -> BeforeSendDeci
                 .to_string(),
         ),
         Some("continue") => {
-            let Some(blocks) = response
-                .pointer("/event/blocks")
-                .and_then(Value::as_array)
-            else {
+            let Some(blocks) = response.pointer("/event/blocks").and_then(Value::as_array) else {
                 return BeforeSendDecision::PassThrough;
             };
             if blocks.iter().all(|block| block.is_object()) {
@@ -324,10 +327,7 @@ pub(crate) fn interpret_message_received_response(
 ) -> MessageReceivedDecision {
     match response.get("action").and_then(Value::as_str) {
         Some("cancel") => MessageReceivedDecision::Drop,
-        Some("continue") => match response
-            .pointer("/event/content")
-            .and_then(Value::as_str)
-        {
+        Some("continue") => match response.pointer("/event/content").and_then(Value::as_str) {
             Some(content) => MessageReceivedDecision::Continue {
                 content: content.to_string(),
             },
@@ -352,9 +352,14 @@ pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<boo
 }
 
 /// D2 interaction 请求：仅显式 respond/cancel 产生短路动作，其余继续既有 reject。
-pub(crate) fn interpret_interaction_hook_response(response: &Value) -> Option<(&'static str, Value)> {
+pub(crate) fn interpret_interaction_hook_response(
+    response: &Value,
+) -> Option<(&'static str, Value)> {
     match response.get("action").and_then(Value::as_str) {
-        Some("respond") => response.get("output").cloned().map(|output| ("respond", output)),
+        Some("respond") => response
+            .get("output")
+            .cloned()
+            .map(|output| ("respond", output)),
         Some("cancel") => Some(("cancel", Value::Null)),
         _ => None,
     }
@@ -408,8 +413,7 @@ pub(crate) async fn message_received_hook_outcome<R: tauri::Runtime>(
         .await
     {
         HookDispatchOutcome::Answered(response) => {
-            let decision =
-                interpret_message_received_response(&response, &resolved.content);
+            let decision = interpret_message_received_response(&response, &resolved.content);
             if decision == MessageReceivedDecision::Drop {
                 rollback_ingest_seen(state, resolved);
                 tracing::info!(
@@ -449,9 +453,7 @@ fn rollback_ingest_seen(state: &crate::AppState, resolved: &crate::gateway::Reso
 
 #[tauri::command]
 pub(crate) async fn pylon_hook_ready(app: tauri::AppHandle) -> Result<(), String> {
-    app.state::<crate::AppState>()
-        .hook_bridge
-        .mark_started();
+    app.state::<crate::AppState>().hook_bridge.mark_started();
     Ok(())
 }
 
@@ -478,7 +480,9 @@ pub(crate) async fn hook_registry_sync(
     app: tauri::AppHandle,
     payload: Value,
 ) -> Result<(), String> {
-    app.state::<crate::AppState>().hook_bridge.sync_registry(&payload);
+    app.state::<crate::AppState>()
+        .hook_bridge
+        .sync_registry(&payload);
     Ok(())
 }
 
@@ -562,9 +566,7 @@ mod tests {
                 assert_eq!(response["event"]["blocks"][0]["text"], "rewritten");
                 // 应答后挂表必须清空（迟到重复应答会被拒）。
                 assert!(!bridge.has_registered_hook("nonexistent"));
-                assert!(bridge
-                    .respond("hook-late-1", Ok(Value::Null))
-                    .is_err());
+                assert!(bridge.respond("hook-late-1", Ok(Value::Null)).is_err());
             }
             other => panic!("expected Answered, got {other:?}"),
         }
@@ -594,7 +596,9 @@ mod tests {
             .await;
         let elapsed = started.elapsed();
         // 超时后必须已摘表：迟到应答被拒。
-        let request = rx.recv_timeout(Duration::from_secs(1)).expect("request emitted");
+        let request = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("request emitted");
         let request_id = request["requestId"].as_str().unwrap().to_string();
         assert!(
             bridge.respond(&request_id, Ok(Value::Null)).is_err(),
@@ -617,13 +621,17 @@ mod tests {
         let bridge = HookBridge::default();
         bridge.mark_started();
         bridge.sync_registry(&json!({ "hooks": [HOOK_MESSAGE_USER_BEFORE_SEND] }));
-        let result = bridge.dispatch::<tauri::test::MockRuntime>(
-            None,
-            HOOK_MESSAGE_USER_BEFORE_SEND,
-            "s",
-            json!({ "triggeredBy": { "depth": 2 } }),
-        ).await;
-        assert!(matches!(result, HookDispatchOutcome::Failed(message) if message.contains("depth limit")));
+        let result = bridge
+            .dispatch::<tauri::test::MockRuntime>(
+                None::<&tauri::Window<tauri::test::MockRuntime>>,
+                HOOK_MESSAGE_USER_BEFORE_SEND,
+                "s",
+                json!({ "triggeredBy": { "depth": 2 } }),
+            )
+            .await;
+        assert!(
+            matches!(result, HookDispatchOutcome::Failed(message) if message.contains("depth limit"))
+        );
     }
 
     /// B2/B6：ready 前与零注册锚点不派发（零 IPC）。
@@ -651,7 +659,9 @@ mod tests {
         // 无窗口：Failed → fail-open。
         let none: Option<&tauri::WebviewWindow<tauri::test::MockRuntime>> = None;
         assert!(matches!(
-            bridge.dispatch(none, HOOK_MESSAGE_USER_BEFORE_SEND, "s", json!({})).await,
+            bridge
+                .dispatch(none, HOOK_MESSAGE_USER_BEFORE_SEND, "s", json!({}))
+                .await,
             HookDispatchOutcome::Failed(_)
         ));
     }
@@ -659,7 +669,9 @@ mod tests {
     #[test]
     fn registry_sync_accepts_object_and_bare_array_shapes() {
         let bridge = HookBridge::default();
-        bridge.sync_registry(&json!({ "hooks": ["message.received", "message.user.beforeSend", 42] }));
+        bridge.sync_registry(
+            &json!({ "hooks": ["message.received", "message.user.beforeSend", 42] }),
+        );
         assert!(bridge.has_registered_hook("message.received"));
         assert!(bridge.has_registered_hook("message.user.beforeSend"));
         assert!(!bridge.has_registered_hook("turn.completed"));
@@ -710,26 +722,48 @@ mod tests {
                 &json!({ "action": "continue", "event": { "content": "cleaned" } }),
                 "dirty"
             ),
-            MessageReceivedDecision::Continue { content: "cleaned".into() }
+            MessageReceivedDecision::Continue {
+                content: "cleaned".into()
+            }
         );
         assert_eq!(
             interpret_message_received_response(&json!({ "action": "continue" }), "dirty"),
-            MessageReceivedDecision::Continue { content: "dirty".into() }
+            MessageReceivedDecision::Continue {
+                content: "dirty".into()
+            }
         );
     }
 
     #[test]
     fn permission_hook_interpretation_only_short_circuits_explicit_actions() {
-        assert_eq!(interpret_permission_hook_response(&json!({"action":"allow"})), Some(true));
-        assert_eq!(interpret_permission_hook_response(&json!({"action":"deny"})), Some(false));
-        assert_eq!(interpret_permission_hook_response(&json!({"action":"continue"})), None);
+        assert_eq!(
+            interpret_permission_hook_response(&json!({"action":"allow"})),
+            Some(true)
+        );
+        assert_eq!(
+            interpret_permission_hook_response(&json!({"action":"deny"})),
+            Some(false)
+        );
+        assert_eq!(
+            interpret_permission_hook_response(&json!({"action":"continue"})),
+            None
+        );
     }
 
     #[test]
     fn interaction_hook_interpretation_requires_explicit_response() {
-        assert_eq!(interpret_interaction_hook_response(&json!({"action":"continue"})), None);
-        assert_eq!(interpret_interaction_hook_response(&json!({"action":"cancel"})), Some(("cancel", Value::Null)));
-        assert_eq!(interpret_interaction_hook_response(&json!({"action":"respond","output":{"ok":true}})), Some(("respond", json!({"ok":true}))));
+        assert_eq!(
+            interpret_interaction_hook_response(&json!({"action":"continue"})),
+            None
+        );
+        assert_eq!(
+            interpret_interaction_hook_response(&json!({"action":"cancel"})),
+            Some(("cancel", Value::Null))
+        );
+        assert_eq!(
+            interpret_interaction_hook_response(&json!({"action":"respond","output":{"ok":true}})),
+            Some(("respond", json!({"ok":true})))
+        );
     }
 
     /// 验收 D1-④：message.received gate 丢弃平台消息，并对齐既有失败路径的
@@ -852,7 +886,10 @@ mod tests {
 
     impl FakeSeenAdapter {
         fn rolled_back(&self) -> Vec<String> {
-            self.rolled_back.lock().map(|list| list.clone()).unwrap_or_default()
+            self.rolled_back
+                .lock()
+                .map(|list| list.clone())
+                .unwrap_or_default()
         }
     }
 

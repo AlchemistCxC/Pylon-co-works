@@ -1561,7 +1561,9 @@ pub(crate) fn validate_install_url(raw: &str) -> Result<url::Url, PluginError> {
         )));
     }
     if parsed.host_str().map(str::is_empty).unwrap_or(true) {
-        return Err(PluginError::SourceInvalid("install url missing host".into()));
+        return Err(PluginError::SourceInvalid(
+            "install url missing host".into(),
+        ));
     }
     Ok(parsed)
 }
@@ -1637,8 +1639,8 @@ pub(crate) fn extract_zip_archive(
         let remaining = max_extract_bytes.saturating_sub(extracted_bytes);
         let mut limited = (&mut entry).take(remaining.saturating_add(1));
         let mut out = File::create(&target).map_err(|e| PluginError::Io(e.to_string()))?;
-        let written = std::io::copy(&mut limited, &mut out)
-            .map_err(|e| PluginError::Io(e.to_string()))?;
+        let written =
+            std::io::copy(&mut limited, &mut out).map_err(|e| PluginError::Io(e.to_string()))?;
         if written > remaining {
             return Err(PluginError::SourceInvalid(format!(
                 "zip extraction exceeds limit: > {max_extract_bytes}"
@@ -1749,7 +1751,8 @@ pub(crate) async fn download_install_zip(
             emit_install_progress(app, plugin_id, "downloading", bytes_total, bytes_done);
         }
     }
-    file.sync_all().map_err(|e| PluginError::Io(e.to_string()))?;
+    file.sync_all()
+        .map_err(|e| PluginError::Io(e.to_string()))?;
     emit_install_progress(app, plugin_id, "downloaded", Some(bytes_done), bytes_done);
     Ok(())
 }
@@ -1850,10 +1853,9 @@ pub(crate) async fn plugin_package_inspect_zip(
 ) -> Result<PluginPackageDescriptor, PylonError> {
     let zip_path = PathBuf::from(&zip_path);
     if !zip_path.is_absolute() || !zip_path.is_file() {
-        return Err(PluginError::SourceInvalid(
-            "zipPath must be an existing absolute file".into(),
-        )
-        .into());
+        return Err(
+            PluginError::SourceInvalid("zipPath must be an existing absolute file".into()).into(),
+        );
     }
     let work = unique_install_temp("pylon-plugin-inspect");
     let extract_dir = work.join("extracted");
@@ -2245,7 +2247,10 @@ mod tests {
         let payload = vec![0u8; 4096];
         write_test_zip(
             &zip_path,
-            &[("pylon-plugin.json", b"{\"schema\":1}"), ("blob.bin", &payload)],
+            &[
+                ("pylon-plugin.json", b"{\"schema\":1}"),
+                ("blob.bin", &payload),
+            ],
         );
         // 实际写入计费（review P0-1）：take 限幅截断后触发 size mismatch 或超限拒绝，
         // 两条路径都是 fail-closed（不信任中央目录声明值）
@@ -2288,13 +2293,23 @@ mod tests {
         ensure_layout_at(&store).unwrap();
         let state_before = fs::read_to_string(state_path(&store)).unwrap_or_default();
         let extracted = base.join("extracted");
-        extract_zip_archive(&zip_path, &extracted, MAX_INSTALL_ZIP_BYTES, MAX_INSTALL_EXTRACT_BYTES).unwrap();
+        extract_zip_archive(
+            &zip_path,
+            &extracted,
+            MAX_INSTALL_ZIP_BYTES,
+            MAX_INSTALL_EXTRACT_BYTES,
+        )
+        .unwrap();
         assert!(install_at(&store, &extracted, "p.demo").is_err());
         assert_eq!(
             fs::read_to_string(state_path(&store)).unwrap_or_default(),
             state_before
         );
-        assert!(packages(&store).join("p.demo").read_dir().map(|mut d| d.next().is_none()).unwrap_or(true));
+        assert!(packages(&store)
+            .join("p.demo")
+            .read_dir()
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true));
         fs::remove_dir_all(base).ok();
     }
 
@@ -2313,7 +2328,13 @@ mod tests {
         );
         ensure_layout_at(&store).unwrap();
         let extracted = base.join("extracted");
-        extract_zip_archive(&zip_path, &extracted, MAX_INSTALL_ZIP_BYTES, MAX_INSTALL_EXTRACT_BYTES).unwrap();
+        extract_zip_archive(
+            &zip_path,
+            &extracted,
+            MAX_INSTALL_ZIP_BYTES,
+            MAX_INSTALL_EXTRACT_BYTES,
+        )
+        .unwrap();
         let installed = install_at(&store, &extracted, "p.demo").unwrap();
         assert_eq!(installed.package.plugin_id, "p.demo");
         let state = read_state(&store).unwrap();
@@ -2357,8 +2378,10 @@ mod tests {
         // hops（previous().len()）= 已完成跳数 + 1：len == MAX 即第 5 跳仍放行，
         // len == MAX+1 即第 6 跳拒绝（实际允许 INSTALL_MAX_REDIRECTS 跳）
         assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS, "https").is_ok());
-        assert!(install_redirect_decision(INSTALL_MAX_REDIRECTS + 1, "https")
-            .eq(&Err("too many redirects")));
+        assert!(
+            install_redirect_decision(INSTALL_MAX_REDIRECTS + 1, "https")
+                .eq(&Err("too many redirects"))
+        );
         assert!(install_redirect_decision(0, "http").eq(&Err("redirect to non-https url")));
         assert!(install_redirect_decision(0, "ftp").eq(&Err("redirect to non-https url")));
     }

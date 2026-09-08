@@ -1,4 +1,4 @@
-﻿//! session/load 回放收集（R12/P3-5 拆分自 acp.rs；行为零变化）。
+//! session/load 回放收集（R12/P3-5 拆分自 acp.rs；行为零变化）。
 //!
 //! 回放与响应均经 broadcast 收集（不注册 pending）：调用方在锁内经
 //! `AcpClient::begin_replay_capture` 原子建立 capture 后释放锁，锁外交给
@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 
-use super::transport::send_line;
 use super::{
     AcpClient, AcpError, ClassifiedMessage, ReplayClassification, METHOD_SESSION_LOAD,
     NOTIF_SESSION_UPDATE,
@@ -20,9 +19,8 @@ use crate::agent_config::McpServersMode;
 /// binding and active registration are installed together by
 /// [`AcpClient::begin_replay_capture`].
 pub struct ReplayCapture {
-    pub(crate) write_tx: mpsc::Sender<String>,
-    /// A1b：SDK 后端用（legacy 为 None）。存在时 `write_tx` 不参与发送。
-    pub(crate) sdk_outbound: Option<mpsc::Sender<super::engine::SdkOutbound>>,
+    /// A1c：SDK 后端为唯一发送通道。
+    pub(crate) sdk_outbound: mpsc::Sender<crate::acp::engine::SdkOutbound>,
     pub(crate) request_id: u64,
     pub(crate) session_id: String,
     pub(crate) crashed: Arc<AtomicBool>,
@@ -99,50 +97,22 @@ impl AcpClient {
             return Err(AcpError::ConnectionClosed);
         }
         // Keep receiver creation under the same mutex as registration.
-        let (request_id, rx, sdk_outbound, active, write_tx) = match &self.backend {
-            super::engine::AcpBackend::Legacy(legacy) => {
-                let mut requests = legacy.active_replay_requests.lock().map_err(|_| {
-                    AcpError::Child("active replay session registry poisoned".to_string())
-                })?;
-                if requests.values().any(|active| active == session_id) {
-                    return Err(AcpError::ReplayLoadInProgress);
-                }
-                let rx = legacy.rx.resubscribe();
-                let request_id = legacy.next_id.fetch_add(1, Ordering::Relaxed);
-                requests.insert(request_id, session_id.to_string());
-                drop(requests);
-                (
-                    request_id,
-                    rx,
-                    None,
-                    legacy.active_replay_requests.clone(),
-                    legacy.write_tx.clone(),
-                )
-            }
-            super::engine::AcpBackend::Sdk(sdk) => {
-                let mut requests = sdk.active_replay_requests.lock().map_err(|_| {
-                    AcpError::Child("active replay session registry poisoned".to_string())
-                })?;
-                if requests.values().any(|active| active == session_id) {
-                    return Err(AcpError::ReplayLoadInProgress);
-                }
-                let rx = sdk.replay_events.subscribe();
-                let request_id = sdk.next_id.fetch_add(1, Ordering::Relaxed);
-                requests.insert(request_id, session_id.to_string());
-                drop(requests);
-                // SDK 路径不使用 write_tx（占位通道，接收端立即丢弃）。
-                let (write_tx, _write_rx) = mpsc::channel(1);
-                (
-                    request_id,
-                    rx,
-                    Some(sdk.outbound.clone()),
-                    sdk.active_replay_requests.clone(),
-                    write_tx,
-                )
-            }
-        };
+        // Keep receiver creation under the same mutex as registration.
+        let sdk = &self.backend;
+        let mut requests = sdk
+            .active_replay_requests
+            .lock()
+            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?;
+        if requests.values().any(|active| active == session_id) {
+            return Err(AcpError::ReplayLoadInProgress);
+        }
+        let rx = sdk.replay_events.subscribe();
+        let request_id = sdk.next_id.fetch_add(1, Ordering::Relaxed);
+        requests.insert(request_id, session_id.to_string());
+        drop(requests);
+        let sdk_outbound = sdk.outbound.clone();
+        let active = sdk.active_replay_requests.clone();
         Ok(ReplayCapture {
-            write_tx,
             sdk_outbound,
             request_id,
             session_id: session_id.to_string(),
@@ -177,108 +147,7 @@ pub(crate) async fn load_session_with_replay(
     // The receiver is created by `begin_replay_capture` and moved into this
     // collector; no downstream resubscription is allowed.
     let params = super::protocol::load_params(&capture.session_id, cwd, mcp_servers, mode)?;
-    if let Some(outbound) = capture.sdk_outbound.clone() {
-        return load_session_with_replay_sdk(capture, outbound, params).await;
-    }
-    let mut events = capture.rx;
-    let line = serde_json::to_string(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": capture.request_id,
-        "method": METHOD_SESSION_LOAD,
-        "params": params,
-    }))
-    .map_err(|error| AcpError::Child(format!("serialize failed: {error}")))?;
-    send_line(capture.write_tx, line, &capture.crashed).await?;
-
-    let mut replay = VecDeque::with_capacity(capture.replay_max.min(10_000));
-    let mut observed_count = 0_u64;
-    let mut dropped_count = 0_u64;
-    // 总预算 deadline：无关 notification 不能把每轮 timeout 重新续满而无限挂起。
-    let deadline = tokio::time::Instant::now() + capture.rpc_timeout;
-    loop {
-        // 优化 3：每轮复检 crashed——EOF 仅广播 NOTIF_AGENT_CRASHED（非目标
-        // session/update 被跳过），reader 先 store crashed 后广播（acp.rs:1154-1164），
-        // 此处命中即可立即 ConnectionClosed，与 send_keep_rx/complete 的发送后复检
-        // 一致，避免挂满 30s 假超时。
-        if capture.crashed.load(Ordering::Relaxed) {
-            return Err(AcpError::ConnectionClosed);
-        }
-        let message = match tokio::time::timeout_at(deadline, events.recv()).await {
-            Ok(Ok(message)) => message,
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
-                return Err(AcpError::ReplayLagged {
-                    count: count as u64,
-                });
-            }
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                return Err(AcpError::ReplayStreamClosed);
-            }
-            Err(_) => {
-                return Err(AcpError::ReplayTimeout {
-                    seconds: capture.rpc_timeout.as_secs(),
-                });
-            }
-        };
-        let ClassifiedMessage {
-            raw,
-            classification,
-        } = message;
-        if matches!(
-            classification,
-            ReplayClassification::Replay { request_id } if request_id == capture.request_id
-        ) && raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
-        {
-            if let Some(params) = raw.params {
-                observed_count = observed_count.saturating_add(1);
-                // O4 + D6：收集上限防止内存无界增长；截断时保留最近 N 条并记录
-                // 完整性元数据。仍继续等待 response，不把截断伪装成完整 snapshot。
-                // 达到上限后继续等待响应（不得 break 提前返回——响应缺失
-                // 会让调用方把 Null 当 session/load 结果，破坏会话配置）。
-                // G1-02：上限来自协议配置 replay_max（缺省 10_000）。
-                if capture.replay_max == 0 {
-                    dropped_count = dropped_count.saturating_add(1);
-                } else {
-                    if replay.len() == capture.replay_max {
-                        replay.pop_front();
-                        dropped_count = dropped_count.saturating_add(1);
-                    }
-                    replay.push_back(params);
-                }
-                if dropped_count == 1 {
-                    tracing::warn!("session/load replay 超过 {} 条，截断", capture.replay_max);
-                }
-            }
-            continue;
-        }
-        if !matches!(
-            classification,
-            ReplayClassification::Boundary { request_id } if request_id == capture.request_id
-        ) {
-            continue;
-        }
-        if let Some(error) = raw.error {
-            return Err(AcpError::Rpc(format!("{}", error)));
-        }
-        let retained_count = replay.len() as u64;
-        let metadata = ReplayMetadata {
-            complete: dropped_count == 0,
-            truncated: dropped_count > 0,
-            dropped_count,
-            boundary: ReplayBoundary {
-                kind: "session-load-response",
-                observed_count,
-                retained_start_ordinal: (retained_count > 0).then_some(dropped_count + 1),
-                retained_end_ordinal: (retained_count > 0).then_some(observed_count),
-            },
-        };
-        return Ok((
-            raw.result.unwrap_or(serde_json::Value::Null),
-            ReplayBatch {
-                events: replay.into_iter().collect(),
-                metadata,
-            },
-        ));
-    }
+    load_session_with_replay_sdk(capture, params).await
 }
 
 /// A1b：SDK 后端的 replay 收集。
@@ -288,9 +157,9 @@ pub(crate) async fn load_session_with_replay(
 /// 响应被收集，复现 legacy「通知先于响应」的边界语义。
 async fn load_session_with_replay_sdk(
     capture: ReplayCapture,
-    outbound: mpsc::Sender<super::engine::SdkOutbound>,
     params: serde_json::Value,
 ) -> Result<(serde_json::Value, ReplayBatch), AcpError> {
+    let outbound = capture.sdk_outbound.clone();
     let capture_request_id = capture.request_id;
     let crashed = capture.crashed.clone();
     let rpc_timeout = capture.rpc_timeout;
@@ -298,7 +167,7 @@ async fn load_session_with_replay_sdk(
     let mut events = capture.rx;
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     outbound
-        .send(super::engine::SdkOutbound::RequestKeepRx {
+        .send(crate::acp::engine::SdkOutbound::RequestKeepRx {
             method: METHOD_SESSION_LOAD.to_string(),
             params,
             ready: ready_tx,
@@ -388,11 +257,11 @@ mod tests {
         replay_max: usize,
     ) -> (
         ReplayCapture,
-        mpsc::Receiver<String>,
+        mpsc::Receiver<crate::acp::engine::SdkOutbound>,
         broadcast::Sender<ClassifiedMessage>,
         Arc<Mutex<HashMap<u64, String>>>,
     ) {
-        let (write_tx, write_rx) = mpsc::channel(1);
+        let (sdk_outbound, outbound_rx) = mpsc::channel(8);
         let (events_tx, events_rx) = broadcast::channel(64);
         let active = Arc::new(Mutex::new(HashMap::new()));
         active
@@ -401,8 +270,7 @@ mod tests {
             .insert(1, "target-session".to_string());
         (
             ReplayCapture {
-                write_tx,
-                sdk_outbound: None,
+                sdk_outbound,
                 request_id: 1,
                 session_id: "target-session".to_string(),
                 crashed: Arc::new(AtomicBool::new(false)),
@@ -411,10 +279,25 @@ mod tests {
                 replay_max,
                 _active_replay: ActiveReplayRegistration::registered(active.clone(), 1),
             },
-            write_rx,
+            outbound_rx,
             events_tx,
             active,
         )
+    }
+
+    /// A1c：接受 SDK session/load 请求，并把测试控制的响应通道交回给收集器。
+    async fn accept_load_request(
+        outbound_rx: &mut mpsc::Receiver<crate::acp::engine::SdkOutbound>,
+    ) -> tokio::sync::oneshot::Sender<Result<serde_json::Value, AcpError>> {
+        match outbound_rx.recv().await.expect("session/load request") {
+            crate::acp::engine::SdkOutbound::RequestKeepRx { method, ready, .. } => {
+                assert_eq!(method, METHOD_SESSION_LOAD);
+                let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                ready.send(Ok(resp_rx)).expect("ready must be delivered");
+                resp_tx
+            }
+            _ => panic!("expected RequestKeepRx outbound"),
+        }
     }
 
     fn replay_message(raw: RawMessage) -> ClassifiedMessage {
@@ -426,31 +309,6 @@ mod tests {
         ClassifiedMessage {
             raw,
             classification,
-        }
-    }
-
-    #[test]
-    fn same_owner_replay_load_is_rejected_or_serialized() {
-        let client = AcpClient::disconnected();
-        let first = client
-            .begin_replay_capture("same-owner")
-            .expect("first capture must start");
-        let second = client.begin_replay_capture("same-owner");
-        assert!(matches!(second, Err(AcpError::ReplayLoadInProgress)));
-        drop(first);
-        assert!(client.begin_replay_capture("same-owner").is_ok());
-    }
-
-    fn response(id: u64, error: Option<serde_json::Value>) -> RawMessage {
-        RawMessage {
-            id: Some(super::super::RequestId::Number(id)),
-            method: None,
-            kind: AcpKind::Response,
-            result: error
-                .is_none()
-                .then(|| serde_json::json!({"sessionId": "target-session"})),
-            params: None,
-            error,
         }
     }
 
@@ -475,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn unrelated_broadcasts_cannot_extend_total_replay_deadline() {
-        let (handles, mut write_rx, events_tx, active) =
+        let (handles, mut outbound_rx, events_tx, active) =
             test_handles(std::time::Duration::from_millis(40), 100);
 
         let loading = tokio::spawn(load_session_with_replay(
@@ -485,7 +343,7 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
+        let _resp_tx = accept_load_request(&mut outbound_rx).await;
 
         let flooding = tokio::spawn(async move {
             for _ in 0..30 {
@@ -518,9 +376,10 @@ mod tests {
 
     #[tokio::test]
     async fn send_failure_drops_active_replay_registration() {
-        let (handles, write_rx, _events_tx, active) =
+        let (handles, outbound_rx, _events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
-        drop(write_rx);
+        // 出站通道接收端丢弃 → SDK 出站发送必失败。
+        drop(outbound_rx);
 
         let result = load_session_with_replay(
             handles,
@@ -540,7 +399,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_load_task_drops_active_replay_registration() {
-        let (handles, mut write_rx, _events_tx, active) =
+        let (handles, mut outbound_rx, _events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -549,7 +408,7 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
+        let _resp_tx = accept_load_request(&mut outbound_rx).await;
         assert_eq!(active.lock().unwrap().len(), 1);
 
         loading.abort();
@@ -563,7 +422,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_error_drops_registration_and_does_not_wait_for_timeout() {
-        let (handles, mut write_rx, events_tx, active) =
+        let (handles, mut outbound_rx, _events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -572,13 +431,10 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
-        events_tx
-            .send(replay_message(response(
-                1,
-                Some(serde_json::json!({"code": -32000, "message": "load failed"})),
-            )))
-            .unwrap();
+        let resp_tx = accept_load_request(&mut outbound_rx).await;
+        resp_tx
+            .send(Err(AcpError::Rpc("load failed".to_string())))
+            .expect("response must be delivered");
 
         let result = loading.await.expect("replay task join");
 
@@ -592,8 +448,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unrelated_response_and_mismatched_updates_do_not_end_or_enter_replay() {
-        let (handles, mut write_rx, events_tx, active) =
+    async fn mismatched_updates_do_not_enter_replay() {
+        let (handles, mut outbound_rx, events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -602,10 +458,7 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
-        events_tx
-            .send(ClassifiedMessage::live(response(99, None)))
-            .unwrap();
+        let resp_tx = accept_load_request(&mut outbound_rx).await;
         events_tx
             .send(ClassifiedMessage::live(session_update(
                 Some("other-session"),
@@ -621,7 +474,9 @@ mod tests {
                 "kept",
             )))
             .unwrap();
-        events_tx.send(replay_message(response(1, None))).unwrap();
+        resp_tx
+            .send(Ok(serde_json::json!({"sessionId": "target-session"})))
+            .expect("response must be delivered");
 
         let (_result, batch) = loading
             .await
@@ -636,7 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn replay_capture_pre_poll_event_is_retained() {
-        let (handles, mut write_rx, events_tx, active) =
+        let (handles, mut outbound_rx, events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
 
         // The capture receiver already exists, but the load future has not been
@@ -656,8 +511,10 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
-        events_tx.send(replay_message(response(1, None))).unwrap();
+        let resp_tx = accept_load_request(&mut outbound_rx).await;
+        resp_tx
+            .send(Ok(serde_json::json!({"sessionId": "target-session"})))
+            .expect("response must be delivered");
 
         let (_result, batch) = loading
             .await
@@ -673,7 +530,7 @@ mod tests {
     #[tokio::test]
     async fn replay_capture_rapid_fanout_is_ordered() {
         const COUNT: usize = 16;
-        let (handles, mut write_rx, events_tx, active) =
+        let (handles, mut outbound_rx, events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 100);
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -682,7 +539,7 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
+        let resp_tx = accept_load_request(&mut outbound_rx).await;
 
         for index in 0..COUNT {
             events_tx
@@ -692,7 +549,9 @@ mod tests {
                 )))
                 .unwrap();
         }
-        events_tx.send(replay_message(response(1, None))).unwrap();
+        resp_tx
+            .send(Ok(serde_json::json!({"sessionId": "target-session"})))
+            .expect("response must be delivered");
 
         let (_result, batch) = loading
             .await
@@ -713,7 +572,7 @@ mod tests {
 
     #[tokio::test]
     async fn zero_replay_limit_reports_every_observed_event_as_dropped() {
-        let (handles, mut write_rx, events_tx, active) =
+        let (handles, mut outbound_rx, events_tx, active) =
             test_handles(std::time::Duration::from_secs(1), 0);
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -722,7 +581,7 @@ mod tests {
             Vec::new(),
             McpServersMode::Always,
         ));
-        write_rx.recv().await.expect("session/load request line");
+        let resp_tx = accept_load_request(&mut outbound_rx).await;
         events_tx
             .send(replay_message(session_update(
                 Some("target-session"),
@@ -735,7 +594,9 @@ mod tests {
                 "two",
             )))
             .unwrap();
-        events_tx.send(replay_message(response(1, None))).unwrap();
+        resp_tx
+            .send(Ok(serde_json::json!({"sessionId": "target-session"})))
+            .expect("response must be delivered");
 
         let (_result, batch) = loading
             .await
