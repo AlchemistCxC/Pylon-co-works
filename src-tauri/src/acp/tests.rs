@@ -938,8 +938,9 @@ sys.exit(0)
             .await
             .expect("flood fake ACP must initialize");
         let mut crashed_rx = client.crashed_receiver();
-        if crashed_rx.has_changed().unwrap_or(false) {
+        if *crashed_rx.borrow() {
             // 崩溃发生在订阅之前（connect 成功后立刻 EOF）——watch 保留最新值，直接可读
+            // （`has_changed()` 对新订阅者恒为 false，不能用于此判定）。
         } else {
             tokio::time::timeout(std::time::Duration::from_secs(5), crashed_rx.changed())
                 .await

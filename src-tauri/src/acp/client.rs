@@ -162,6 +162,7 @@ impl AcpClient {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn legacy_mut(&mut self) -> &mut LegacyBackend {
         match &mut self.backend {
             AcpBackend::Legacy(legacy) => legacy,
@@ -535,6 +536,7 @@ impl AcpClient {
                         let stdout = child
                             .take_stdout()
                             .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
+                        let pid = child.pid();
                         let handles = super::engine::spawn_sdk_engine(
                             agent,
                             client_generation,
@@ -544,6 +546,19 @@ impl AcpClient {
                             crashed.clone(),
                             crashed_watch.clone(),
                         )?;
+                        // 子进程退出是权威崩溃信号（SDK 的 EOF 语义在洪泛/批量场景不可靠）。
+                        if let Some(pid) = pid {
+                            let crashed = crashed.clone();
+                            let crashed_watch = crashed_watch.clone();
+                            if !ManagedChild::spawn_exit_watcher(pid, move || {
+                                crashed.store(true, std::sync::atomic::Ordering::Release);
+                                let _ = crashed_watch.send(true);
+                            }) {
+                                tracing::warn!(
+                                    "acp sdk engine: exit watcher unavailable for pid {pid}"
+                                );
+                            }
+                        }
                         AcpBackend::Sdk(handles.backend)
                     }
                 };
