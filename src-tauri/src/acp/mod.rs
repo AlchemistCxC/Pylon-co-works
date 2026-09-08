@@ -27,6 +27,7 @@ mod stderr;
 mod stderr_tail;
 pub(crate) use stderr_tail::StderrTail;
 mod state;
+pub mod transcript;
 #[allow(unused_imports)]
 pub use state::{AcpSessionState, AcpStateDelta};
 pub(crate) mod wire_trace;
