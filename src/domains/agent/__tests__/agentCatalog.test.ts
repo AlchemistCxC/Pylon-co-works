@@ -52,15 +52,15 @@ describe('Shared Agent Catalog', () => {
         configEvidence: [{ relativePath: 'config.yaml', format: 'yaml', fields: ['provider', 'model'] }],
       },
     }
-    expect(() => parseAgentCatalog({ schemaVersion: 1, providers: [minimum] })).not.toThrow()
-    expect(() => parseAgentCatalog({ schemaVersion: 1, providers: [{
+    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [minimum] })).not.toThrow()
+    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [{
       ...minimum,
       detection: { ...minimum.detection, configEvidence: [{ relativePath: '../secret', format: 'json', fields: ['token'] }] },
     }] })).toThrow(/配置目录内/)
   })
 
   it('rejects unsupported schema versions and duplicate providers', () => {
-    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [] })).toThrow(/schemaVersion/)
+    expect(() => parseAgentCatalog({ schemaVersion: 1, providers: [] })).toThrow(/schemaVersion/)
     const minimum = {
       displayName: 'A', protocol: 'acp',
       capabilities: { sessionUpdates: true, interactionEvents: true, permissionRequests: false, replay: true, responseMethods: [] },
@@ -68,7 +68,7 @@ describe('Shared Agent Catalog', () => {
       detection: { detectorId: 'a', priority: 1, invocations: [{ command: 'a', args: ['acp'] }], configDirs: [] },
       tools: [],
     }
-    expect(() => parseAgentCatalog({ schemaVersion: 1, providers: [
+    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [
       { ...minimum, provider: 'same' },
       { ...minimum, provider: 'same', detection: { ...minimum.detection, detectorId: 'b' } },
     ] })).toThrow(/provider 重复/)

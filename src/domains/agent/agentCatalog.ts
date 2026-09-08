@@ -40,7 +40,7 @@ interface CatalogProvider {
   detection: CatalogDetection
   tools: CatalogTool[]
 }
-interface CatalogDocument { schemaVersion: 1; providers: CatalogProvider[] }
+interface CatalogDocument { schemaVersion: 2; providers: CatalogProvider[] }
 
 const TOOL_KINDS = new Set<ToolKind>(['read', 'edit', 'execute', 'search', 'fetch', 'think', 'other'])
 const TOOL_ACTIONS = new Set<ToolAction>(['read', 'write', 'edit', 'search', 'execute', 'fetch', 'navigate', 'click', 'type', 'snapshot', 'delegate', 'plan', 'skill', 'unknown'])
@@ -63,7 +63,8 @@ function stringList(value: unknown, label: string): string[] {
 
 export function parseAgentCatalog(value: unknown): CatalogDocument {
   const root = object(value, 'root')
-  if (root.schemaVersion !== 1) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
+  if (root.schemaVersion !== 2) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
+  for (const key of Object.keys(root)) if (key !== 'schemaVersion' && key !== 'providers') throw new Error(`Agent Catalog 顶层字段未知：${key}`)
   if (!Array.isArray(root.providers) || root.providers.length === 0) throw new Error('Agent Catalog providers 不能为空')
   const seenProviders = new Set<string>()
   const seenDetectors = new Set<string>()
@@ -150,7 +151,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
       tools,
     }
   })
-  return { schemaVersion: 1, providers }
+  return { schemaVersion: 2, providers }
 }
 
 const catalog = parseAgentCatalog(rawCatalog)

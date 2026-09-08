@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 const CATALOG_JSON: &str = include_str!("../../../shared/agent-catalog.json");
-const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn shared_catalog_is_valid_and_excludes_rpc_only_pi() {
         let catalog = parse_catalog(CATALOG_JSON).expect("shared catalog must remain valid");
-        assert_eq!(catalog.schema_version, 1);
+        assert_eq!(catalog.schema_version, 2);
         assert_eq!(
             catalog
                 .providers
