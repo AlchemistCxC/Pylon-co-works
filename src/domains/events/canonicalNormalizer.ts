@@ -169,6 +169,20 @@ export function canonicalEventTypeFor(sessionUpdate: unknown, status: unknown): 
       return 'turn.completed'
     case 'error':
       return 'turn.failed'
+    case 'cancelled':
+      return 'turn.failed'
+    case 'usage_update':
+      return 'usage.updated'
+    case 'plan':
+      return 'plan.replaced'
+    case 'current_mode_update':
+      return 'session.mode-updated'
+    case 'session_info_update':
+      return 'session.model-updated'
+    case 'config_option_update':
+      return 'session.config-updated'
+    case 'available_commands_update':
+      return 'session.commands-updated'
     default:
       return 'unknown'
   }

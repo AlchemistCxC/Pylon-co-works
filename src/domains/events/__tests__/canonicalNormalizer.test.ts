@@ -137,7 +137,7 @@ describe('normalizeRawEvent（统一入口：live/replay/restart 三路径）', 
 
     const bare = normalizeRawEvent({ sessionUpdate: 'usage_update', used: 12 }, context(7))
     expect(bare.malformed).toBe(false)
-    expect(bare.event.eventType).toBe('unknown')
+    expect(bare.event.eventType).toBe('usage.updated')
     expect(bare.sessionUpdate).toBe('usage_update')
   })
 
