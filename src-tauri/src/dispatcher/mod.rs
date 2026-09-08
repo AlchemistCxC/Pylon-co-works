@@ -1752,7 +1752,7 @@ mod tests {
         assert_eq!(session.mode.as_deref(), Some("balanced"));
 
         let mut restored = serde_json::json!({});
-        let mut snapshot_only = session.clone();
+        let snapshot_only = session.clone();
         crate::session::restore_session_state(&snapshot_only, &mut restored);
         assert_eq!(
             restored["modes"]["currentModeId"],
