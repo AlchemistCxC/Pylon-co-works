@@ -7,6 +7,16 @@
 use pylon_core::agent_catalog::{self, CatalogAdaptation};
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudePolicy {
+    pub native_cmd: String,
+    pub native_label: String,
+    pub shared_config_dir: String,
+    pub steering_prompt_required_min_version: String,
+    pub subagent_transcript: bool,
+    pub jetbrains_air_session_failure: bool,
+}
+
 pub fn policy(provider: &str) -> Result<Option<CatalogAdaptation>, String> {
     agent_catalog::adaptation(provider)
 }
@@ -48,6 +58,24 @@ pub fn client_capabilities(provider: &str, mut base: Value) -> Result<Value, Str
     Ok(base)
 }
 
+pub fn claude_policy(provider: &str) -> Result<Option<ClaudePolicy>, String> {
+    let Some(policy) = policy(provider)? else { return Ok(None) };
+    let relation = policy.adapter_relation.ok_or("adaptation.adapterRelation missing")?;
+    let gates = policy.version_gates.ok_or("adaptation.versionGates missing")?;
+    let caps = policy.client_capabilities.ok_or("adaptation.clientCapabilities missing")?;
+    let string_field = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("adaptation field {key} missing"));
+    let meta = caps.get("meta").ok_or("adaptation.clientCapabilities.meta missing")?;
+    let air = meta.get("jetbrains.air").and_then(Value::as_object);
+    Ok(Some(ClaudePolicy {
+        native_cmd: string_field(&relation, "nativeCmd")?,
+        native_label: string_field(&relation, "nativeLabel")?,
+        shared_config_dir: string_field(&relation, "sharedConfigDir")?,
+        steering_prompt_required_min_version: string_field(&gates, "steeringPromptRequiredMinVersion")?,
+        subagent_transcript: meta.get("subagent-transcript").and_then(Value::as_bool).unwrap_or(false),
+        jetbrains_air_session_failure: air.is_some_and(|value| value.get("capabilities").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item.as_str() == Some("sessionFailure")))),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +99,13 @@ mod tests {
         let result = client_capabilities("claude-code", serde_json::json!({"_meta": {"peri.replay": true}})).unwrap();
         assert_eq!(result["_meta"]["peri.replay"], true);
         assert_eq!(result["_meta"]["subagent-transcript"], true);
+    }
+
+    #[test]
+    fn projects_declared_claude_policy_into_closed_shape() {
+        let policy = claude_policy("claude-code").unwrap().unwrap();
+        assert_eq!(policy.native_cmd, "claude");
+        assert_eq!(policy.steering_prompt_required_min_version, "0.65.0");
+        assert!(policy.subagent_transcript && policy.jetbrains_air_session_failure);
     }
 }
