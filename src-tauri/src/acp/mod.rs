@@ -6,6 +6,7 @@
 
 mod capabilities;
 mod client;
+mod engine;
 mod error;
 #[allow(unused_imports)]
 pub use capabilities::{CapabilityRegistry, CapabilityState};
