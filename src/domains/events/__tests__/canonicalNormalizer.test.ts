@@ -27,6 +27,13 @@ describe('canonicalEventTypeFor（wire → canonical 映射）', () => {
     ['tool_call_update', undefined, 'tool.call.updated'],
     ['done', undefined, 'turn.completed'],
     ['error', undefined, 'turn.failed'],
+    ['cancelled', undefined, 'turn.failed'],
+    ['usage_update', undefined, 'usage.updated'],
+    ['plan', undefined, 'plan.replaced'],
+    ['current_mode_update', undefined, 'session.mode-updated'],
+    ['session_info_update', undefined, 'session.model-updated'],
+    ['config_option_update', undefined, 'session.config-updated'],
+    ['available_commands_update', undefined, 'session.commands-updated'],
   ])('%s + %s → %s', (sessionUpdate, status, expected) => {
     expect(canonicalEventTypeFor(sessionUpdate, status)).toBe(expected)
   })
