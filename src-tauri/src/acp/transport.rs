@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, watch};
 
-use super::jsonrpc::{drain_pending, Pending, PENDING_SHARDS};
 use super::wire_trace::{AcpWireHub, WireDirection};
 use super::RequestId;
+use super::{drain_pending, Pending, PENDING_SHARDS};
 use super::{
     AcpError, AcpKind, ClassifiedMessage, RawMessage, ReplayClassification, NOTIF_AGENT_CRASHED,
 };

@@ -20,7 +20,6 @@ mod tests;
 
 mod process;
 pub(crate) use process::ManagedChild;
-mod jsonrpc;
 mod protocol;
 mod replay;
 pub(crate) use engine::RequestId;
@@ -31,11 +30,10 @@ mod state;
 #[allow(unused_imports)]
 pub use state::{AcpSessionState, AcpStateDelta};
 pub(crate) mod wire_trace;
+pub(crate) use engine::drain_pending;
 #[cfg(test)]
-pub(crate) use jsonrpc::drain_pending;
-#[cfg(test)]
-pub(crate) use jsonrpc::wait_prompt_with_cancel;
-pub(crate) use jsonrpc::{
+pub(crate) use engine::wait_prompt_with_cancel;
+pub(crate) use engine::{
     remove_pending_from, wait_prompt_with_recovery, Pending, PreparedRpc, PromptTimeoutKind,
     PromptWaitOutcome, PENDING_SHARDS,
 };
