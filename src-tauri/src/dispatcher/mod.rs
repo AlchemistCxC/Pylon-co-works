@@ -470,6 +470,57 @@ async fn handle_terminal_request(
     }
 }
 
+async fn handle_filesystem_request(
+    acp: &AcpLock,
+    method: &str,
+    request_id: crate::acp::RequestId,
+    params: Option<&serde_json::Value>,
+    runtime: crate::acp::file_system_runtime::FileSystemRuntime,
+) {
+    let object = params.and_then(serde_json::Value::as_object);
+    let result: Result<serde_json::Value, String> = match method {
+        "fs/read_text_file" => {
+            match object
+                .and_then(|p| p.get("path"))
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(path) => runtime
+                    .read_text_file(std::path::Path::new(path))
+                    .await
+                    .map(|content| serde_json::json!({"content": content})),
+                None => Err("fs/read_text_file requires path".to_string()),
+            }
+        }
+        "fs/write_text_file" => {
+            match (
+                object
+                    .and_then(|p| p.get("path"))
+                    .and_then(serde_json::Value::as_str),
+                object
+                    .and_then(|p| p.get("content"))
+                    .and_then(serde_json::Value::as_str),
+            ) {
+                (Some(path), Some(content)) => runtime
+                    .write_text_file(std::path::Path::new(path), content)
+                    .await
+                    .map(|_| serde_json::json!({})),
+                (None, _) => Err("fs/write_text_file requires path".to_string()),
+                (_, None) => Err("fs/write_text_file requires content".to_string()),
+            }
+        }
+        _ => Err("unsupported filesystem method".to_string()),
+    };
+    let responder = { acp.lock().await.responder() };
+    match result {
+        Ok(value) => {
+            let _ = responder.respond(request_id, value).await;
+        }
+        Err(error) => {
+            let _ = responder.respond_error(request_id, -32602, &error).await;
+        }
+    }
+}
+
 /// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
 /// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
 pub(crate) fn resolve_agent_provider(
@@ -1502,6 +1553,52 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 request_id,
                                 -32601,
                                 "host terminal tools are disabled for this agent",
+                            )
+                            .await;
+                    }
+                }
+                continue;
+            }
+            if matches!(
+                raw.method.as_deref(),
+                Some("fs/read_text_file") | Some("fs/write_text_file")
+            ) {
+                if let Some(request_id) = raw.id {
+                    let allowed = host_tools_policy
+                        .lock()
+                        .map(|policy| {
+                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                        })
+                        .unwrap_or(false);
+                    if allowed {
+                        let roots = host_tools_policy
+                            .lock()
+                            .ok()
+                            .and_then(|p| match *p {
+                                crate::acp::host_tools::HostToolsPolicy::HostStrict => raw
+                                    .params
+                                    .as_ref()
+                                    .and_then(|v| v.get("cwd"))
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(|p| vec![std::path::PathBuf::from(p)]),
+                                _ => Some(Vec::new()),
+                            })
+                            .unwrap_or_default();
+                        handle_filesystem_request(
+                            &acp,
+                            raw.method.as_deref().unwrap_or_default(),
+                            request_id,
+                            raw.params.as_ref(),
+                            crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
+                        )
+                        .await;
+                    } else {
+                        let responder = { acp.lock().await.responder() };
+                        let _ = responder
+                            .respond_error(
+                                request_id,
+                                -32601,
+                                "host filesystem tools are disabled for this agent",
                             )
                             .await;
                     }

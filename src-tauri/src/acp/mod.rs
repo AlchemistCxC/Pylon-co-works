@@ -8,6 +8,7 @@ mod capabilities;
 mod client;
 mod engine;
 mod error;
+pub mod file_system_runtime;
 pub mod fs_policy;
 pub mod host_tools;
 pub mod plan_policy;

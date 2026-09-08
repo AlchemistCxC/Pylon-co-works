@@ -138,6 +138,13 @@
 - `b1828c3a` 补齐 codeg owner-task kill 语义：调用方只通知 owner，owner 在唯一
   `ManagedChild` 上执行 `kill_and_wait`，再 drain reader、发布已结束 completion；
   kill 报告有界，不在 async mutex 内直接阻塞。
+- `8637f68c` 接入 ACP dispatcher 的 terminal request responder：runtime registry
+  按 session owner 路由 create/output/wait/kill/release；默认
+  `AgentSelfHosted` 仍 fail-closed，未授权请求返回 JSON-RPC `-32601`。当前
+  `HostStrict/HostUnrestricted` 的配置入口尚未接入 AgentDef schema。
+- `ef1613d5` 以既有 per-agent `env`（`PYLON_ACP_HOST_TOOLS`）作为配置入口，激活
+  runtime 时解析并注入 HostToolsPolicy；非法值记录诊断并回到
+  `AgentSelfHosted`，不改变默认拒绝语义。
 
 ### A4 question outcome policy
 
