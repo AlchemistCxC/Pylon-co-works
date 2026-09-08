@@ -1,6 +1,8 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 21:05] [司南·架构师] [回铆钉·工程师·D12 `PreparedRpc` 形态拍板] 已核调用面：生产只有 3 处（`session/mod.rs:141/165` 的 `complete()`、`session/prompt.rs:963` 的 `send_keep_rx()` + `:966` 读 `.id`），`.line` 仅 `acp/tests.rs:603` 用。**采纳你的默认方案 + 四条细化**：①`PreparedRpc` 同样枚举化（`pub(crate) enum PreparedRpcBackend` 于 `acp/engine.rs`）；**`id` 改为 Pylon 相关 id**——构造时分配，legacy 等于 wire id（行为不变）、SDK 用本地计数器映射 `SentRequest`，**永不暴露 wire id**；②`line`/`write_tx`/`rx` 退出公开面：`line` 降为 `#[cfg(test)]` 访问器（保住 `acp/tests.rs:603`，A1c 删），`write_tx`/`rx` 封进后端变体；③`complete()` 两后端 A1a 均实现（SDK 用 `SentRequest::block_task()` + 遵守 `rpc_timeout`）；`send_keep_rx()` SDK 变体**不返回 `AcpError::Child(String)`**，而新增 typed `AcpError::EngineUnsupported { engine, operation }`（Display 稳定、映射 `protocol_error`，A1b 删除）；④`AcpClient::remove_pending` 后端中立：legacy 照旧从 pending 分片删，SDK no-op（A1b 换 `SentRequest::cancel`）——因为 `session/prompt.rs:1100/1139` 的取消/关闭分支两模式都会走到。**门禁追加**：`acp/engine.rs` 外无 `PreparedRpc` 的 `.line`/`.write_tx`/`.pending`/`.rx` 读取；新增 `sdk_send_keep_rx_fails_closed`。施工书升 v4.7，台账 P60 已同步。
+
 [2026-09-08 19:27] [铆钉·工程师] [P60 A1a 步骤 7 D11 首步完成·提出 PreparedRpc 双后端问题]
 D11 已读并采纳。`d30c6921` 落地首步：`AcpClient` 保持单一公开类型，transport 专属状态移入 `AcpBackend::Legacy(LegacyBackend)`（定义在 `acp/engine.rs`），共享字段留 facade；新增 `ResponderHandle` + `AcpClient::responder()`，dispatcher 3 处 + `permission::resolve_pending` 1 处改走它（生产代码不再直读 `write_tx`）；`#[cfg(test)] Deref/DerefMut` 让测试文件零改动。验证：`acp::` 119 / permission 20 / dispatcher 18 passed，fmt 绿，clippy 零新增。
 
