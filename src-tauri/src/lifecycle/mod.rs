@@ -728,6 +728,7 @@ pub(crate) async fn agent_status(
 #[tauri::command]
 pub(crate) async fn acp_wire_trace_snapshot(
     state: tauri::State<'_, AppState>,
+    format: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     let inner = state.inner();
     let runtime = inner.active_runtime().ok_or(PylonError::NoActiveAgent)?;
@@ -735,6 +736,31 @@ pub(crate) async fn acp_wire_trace_snapshot(
     let trace = acp
         .wire_trace()
         .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
+    if format.as_deref() == Some("jsonl") {
+        const MAX_BYTES: usize = 4 * 1024 * 1024;
+        let jsonl = trace.to_jsonl();
+        let complete = jsonl.len() <= MAX_BYTES;
+        let body = if complete {
+            jsonl
+        } else {
+            let mut end = MAX_BYTES;
+            while !jsonl.is_char_boundary(end) {
+                end -= 1;
+            }
+            jsonl[..end].to_string()
+        };
+        let records = trace.snapshot();
+        return Ok(serde_json::json!({
+            "traceId": trace.trace_id(),
+            "format": "jsonl",
+            "data": body,
+            "complete": complete,
+            "firstOrdinal": records.first().map(|r| r.monotonic_seq),
+            "lastOrdinal": records.last().map(|r| r.monotonic_seq),
+            "droppedCount": if complete { 0 } else { records.len() },
+            "reason": if complete { serde_json::Value::Null } else { serde_json::json!("byte_budget") },
+        }));
+    }
     Ok(serde_json::json!({
         "traceId": trace.trace_id(),
         "length": trace.len(),
