@@ -63,6 +63,43 @@ pub fn decode_available_utf8(pending: &mut Vec<u8>) -> String {
     output
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellFamily {
+    PowerShell,
+    Cmd,
+    Posix,
+}
+
+pub fn classify_shell_family(shell: &str) -> ShellFamily {
+    let name = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    if name == "powershell" || name == "powershell.exe" || name == "pwsh" || name == "pwsh.exe" {
+        ShellFamily::PowerShell
+    } else if name == "cmd" || name == "cmd.exe" {
+        ShellFamily::Cmd
+    } else {
+        ShellFamily::Posix
+    }
+}
+
+/// Arguments for codeg's shell wrapper. The command line remains one argv
+/// element; callers must pass it to their existing process boundary.
+pub fn shell_wrapper_args(shell: &str, line: &str) -> Vec<String> {
+    match classify_shell_family(shell) {
+        ShellFamily::PowerShell => vec![
+            "-NoLogo".into(),
+            "-NoProfile".into(),
+            "-Command".into(),
+            line.into(),
+        ],
+        ShellFamily::Cmd => vec!["/D".into(), "/S".into(), "/C".into(), line.into()],
+        ShellFamily::Posix => vec!["-c".into(), line.into()],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +122,21 @@ mod tests {
         assert_eq!(decode_available_utf8(&mut pending), "");
         pending.extend([0x98, 0x80, b'!']);
         assert_eq!(decode_available_utf8(&mut pending), "😀!");
+    }
+
+    #[test]
+    fn shell_wrapper_preserves_one_argument_command_shape() {
+        assert_eq!(
+            classify_shell_family("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+            ShellFamily::PowerShell
+        );
+        assert_eq!(
+            shell_wrapper_args("cmd.exe", "echo hi"),
+            vec!["/D", "/S", "/C", "echo hi"]
+        );
+        assert_eq!(
+            shell_wrapper_args("/bin/sh", "printf hi"),
+            vec!["-c", "printf hi"]
+        );
     }
 }
