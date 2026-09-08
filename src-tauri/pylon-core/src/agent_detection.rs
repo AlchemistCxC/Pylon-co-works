@@ -856,7 +856,11 @@ async fn npm_global_version(package: &str) -> Option<String> {
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(5), command.output()).await.ok()?.ok()?;
     let document: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    let key = package.split('@').next().unwrap_or(package);
+    let key = if package.starts_with('@') {
+        package[1..].find('@').map(|index| &package[..index + 1]).unwrap_or(package)
+    } else {
+        package.split('@').next().unwrap_or(package)
+    };
     let value = document.get("dependencies")?.get(key)?.get("version")?.as_str()?;
     extract_version_token(value)
 }
