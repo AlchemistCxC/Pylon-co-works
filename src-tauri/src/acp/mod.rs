@@ -23,6 +23,7 @@ pub(crate) use process::ManagedChild;
 mod protocol;
 mod replay;
 pub(crate) use engine::RequestId;
+mod stderr;
 mod stderr_tail;
 mod transport;
 pub(crate) use stderr_tail::{summarize_parser_error, StderrTail};
@@ -45,9 +46,8 @@ pub use protocol::{
     session_set_mode_params, session_set_model_params, SessionUpdateVariant,
 };
 pub(crate) use replay::{load_session_with_replay, ReplayMetadata};
-pub(crate) use transport::{
-    send_line, spawn_stderr_reader, spawn_stdout_reader, spawn_writer_task, CrashReason,
-};
+pub(crate) use stderr::spawn_stderr_reader;
+pub(crate) use transport::{send_line, spawn_stdout_reader, spawn_writer_task, CrashReason};
 pub use transport::{
     BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP, WRITE_CHAN_CAP,
 };

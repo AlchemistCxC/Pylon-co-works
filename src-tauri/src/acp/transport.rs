@@ -276,6 +276,7 @@ pub(crate) fn spawn_writer_task(
 /// - 按物理行分类：跨行 pretty-printed JSON 首行无法解析为 Object → 默认 info，属行级
 ///   读取设计的固有限制（LOG-02 CR-104，行拼接留待评估）。
 /// - 返回 hub level 字符串（"error"/"warn"/"info"/"debug"）。
+#[allow(dead_code)] // A1c：已迁 stderr.rs，随 transport.rs 删除
 pub(crate) fn classify_stderr_level(line: &str) -> &'static str {
     // 1. 结构化 JSON 优先：`level` 字段权威（字符串 + 数字）
     if let Ok(serde_json::Value::Object(map)) =
@@ -328,6 +329,7 @@ pub(crate) fn classify_stderr_level(line: &str) -> &'static str {
 /// 与 classify_stderr_level 同源——"结构化 JSON stderr 必须优先解析"（§5.14）。
 /// 顶层 code 为 agent 自报码（agent 命名空间），与 Pylon wire_code（DEL-05）词汇分离，
 /// 不做文本臆测；嵌套 `err.code`/`error.code` 的提取留待后续结构化站点。
+#[allow(dead_code)] // A1c：已迁 stderr.rs，随 transport.rs 删除
 pub(crate) fn extract_stderr_code(line: &str) -> Option<String> {
     if let Ok(serde_json::Value::Object(map)) =
         serde_json::from_str::<serde_json::Value>(line.trim())
@@ -345,6 +347,7 @@ pub(crate) fn extract_stderr_code(line: &str) -> Option<String> {
 /// G1-05：stderr drain 线程启动（S3 拆分；防管道缓冲死锁）。
 /// clippy 2026-08-02：读失败即停（map_while）——stderr 一旦读失败后续必失败。
 /// OBS-02：correlation 随日志条目进入 hub（统一身份，禁只记 source）。
+#[allow(dead_code)] // A1c：已迁 stderr.rs，随 transport.rs 删除
 pub(crate) fn spawn_stderr_reader(
     stderr: std::process::ChildStderr,
     agent_name: &str,
