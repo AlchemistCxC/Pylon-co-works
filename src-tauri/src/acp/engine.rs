@@ -24,7 +24,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
-    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, UntypedMessage,
+    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, TransportBatchEntry,
+    TransportFrame, UntypedMessage,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -438,32 +439,70 @@ pub(crate) fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
 
 /// 运行观测桥：两个方向逐帧写入 `AcpWireHub`，原帧原样转发。
 ///
-/// 必须在独立任务中运行；`AcpWireHub::record` 为 infallible best-effort，
-/// 不会阻塞 SDK 的 dispatch loop。
+/// **自实现而非 SDK 的 `bridge_with_inspection`**：后者用 `try_join!` 等两个方向
+/// 都结束，子进程 EOF 不会传播给 SDK 侧（实测 `crashed_watch` 永不触发）；
+/// 这里任一方向结束即返回，两侧 sender 随之 drop，对端立即看到关闭。
+///
+/// 必须在独立任务中运行；`AcpWireHub::record` 为 infallible best-effort。
 pub(crate) async fn run_wire_bridge(
     inspect_left: Channel,
     inspect_right: Channel,
     hub: Arc<AcpWireHub>,
 ) -> Result<(), agent_client_protocol::Error> {
-    let to_agent_hub = hub.clone();
-    let to_pylon_hub = hub;
-    Channel::bridge_with_inspection(
-        inspect_left,
-        inspect_right,
-        move |message| {
-            if let Ok(value) = serde_json::to_value(message) {
-                to_agent_hub.record(WireDirection::PylonToAgent, &value);
+    use futures_util::StreamExt as _;
+
+    let Channel {
+        rx: mut left_rx,
+        tx: left_tx,
+    } = inspect_left;
+    let Channel {
+        rx: mut right_rx,
+        tx: right_tx,
+    } = inspect_right;
+    let to_agent = hub.clone();
+    let to_pylon = hub;
+
+    let left_to_right = async move {
+        while let Some(frame) = left_rx.next().await {
+            observe_frame(&frame, &to_agent, WireDirection::PylonToAgent);
+            if right_tx.unbounded_send(frame).is_err() {
+                break;
             }
-            Ok(())
-        },
-        move |message| {
-            if let Ok(value) = serde_json::to_value(message) {
-                to_pylon_hub.record(WireDirection::AgentToPylon, &value);
+        }
+    };
+    let right_to_left = async move {
+        while let Some(frame) = right_rx.next().await {
+            observe_frame(&frame, &to_pylon, WireDirection::AgentToPylon);
+            if left_tx.unbounded_send(frame).is_err() {
+                break;
             }
-            Ok(())
-        },
-    )
-    .await
+        }
+    };
+    tokio::select! {
+        _ = left_to_right => {},
+        _ = right_to_left => {},
+    }
+    Ok(())
+}
+
+/// 观测一条传输帧内的全部有效消息（batch 逐条）。
+fn observe_frame(frame: &TransportFrame, hub: &AcpWireHub, direction: WireDirection) {
+    let observe = |message: &agent_client_protocol::RawJsonRpcMessage| {
+        if let Ok(value) = serde_json::to_value(message) {
+            hub.record(direction, &value);
+        }
+    };
+    match frame {
+        TransportFrame::Single(message) => observe(message),
+        TransportFrame::Malformed { .. } => {}
+        TransportFrame::Batch(batch) => {
+            for entry in batch.entries() {
+                if let TransportBatchEntry::Message(message) = entry {
+                    observe(message);
+                }
+            }
+        }
+    }
 }
 
 /// 用 `tokio_util::compat::Compat` 把 tokio 读写半流适配成 SDK 需要的 futures 字节流。
@@ -486,6 +525,8 @@ pub(crate) fn spawn_sdk_client(
     crashed: Arc<AtomicBool>,
     crashed_watch: watch::Sender<bool>,
 ) -> tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>> {
+    let crashed_eof = crashed.clone();
+    let crashed_watch_eof = crashed_watch.clone();
     tokio::spawn(async move {
         let result = Client
             .builder()
@@ -534,6 +575,13 @@ pub(crate) fn spawn_sdk_client(
                 loop {
                     tokio::select! {
                         _ = shutdown.changed() => break,
+                        // 入站 EOF（子进程退出）等价 legacy reader 的崩溃信号：
+                        // SDK 的 on_close 只在错误关闭时回调，干净 EOF 需在此显式置位。
+                        _ = cx.incoming_closed() => {
+                            crashed_eof.store(true, Ordering::Release);
+                            let _ = crashed_watch_eof.send(true);
+                            break;
+                        }
                         outbound = outbound_rx.recv() => {
                             let Some(outbound) = outbound else { break };
                             let spawn_cx = cx.clone();
@@ -600,18 +648,21 @@ pub(crate) fn spawn_sdk_engine(
     let stdout = tokio::process::ChildStdout::from_std(stdout)
         .map_err(|error| AcpError::Child(format!("sdk engine stdout setup failed: {error}")))?;
 
-    let (sdk_end, inspect_left, inspect_right, child_end) = bridge_channels();
+    let (sdk_end, sdk_bridge_side) = Channel::duplex();
 
-    // 观测桥：逐帧写入 wire hub，原帧原样转发。
+    // 子进程字节流 → Channel（自持 relay，避免 SDK `Channel::connect_to` 的
+    // `try_join!` 在单向 EOF 时不传播关闭）。
+    let transport = byte_streams(stdout, stdin);
+    let (child_channel, child_future) =
+        <_ as ConnectTo<Client>>::into_channel_and_future(transport);
+
+    // 观测桥：逐帧写入 wire hub，原帧原样转发；任一方向结束即返回。
     let bridge_wire = wire.clone();
     tokio::spawn(async move {
-        let _ = run_wire_bridge(inspect_left, inspect_right, bridge_wire).await;
+        let _ = run_wire_bridge(sdk_bridge_side, child_channel, bridge_wire).await;
     });
-
-    // child_end ↔ 子进程字节流。
-    let transport = byte_streams(stdout, stdin);
     tokio::spawn(async move {
-        let _ = <Channel as ConnectTo<Client>>::connect_to(child_end, transport).await;
+        let _ = child_future.await;
     });
 
     let (inbound_tx, inbound_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
