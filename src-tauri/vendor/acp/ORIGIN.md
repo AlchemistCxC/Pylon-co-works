@@ -98,6 +98,18 @@
 - 未迁入：codeg AppState、AgentType root registry、fs IO executor、安装/持久化；未来 responder 只消费该策略函数。
 - 证据：`path_policy_uses_component_containment_and_parent_for_new_writes`。
 
+### A4 filesystem access policy constructors
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，
+  `src-tauri/src/acp/file_system_runtime.rs::FsAccessPolicy::{strict,unrestricted,confines_reads}`。
+- 目标：`src-tauri/src/acp/fs_policy.rs::FsAccessPolicy`；`strict` canonicalize
+  workspace root 并同时约束读写，`unrestricted` 使用空 roots 的上游语义，
+  `confines_reads` 仅反映读方向是否有根目录门控。
+- 未迁入：codeg agent data/temp/extra-root 计算、AppState、文件 IO executor 和
+  ACP responder；这些必须在正式 Pylon runtime 接缝确定后再迁入。
+- 证据：`strict_policy_uses_one_canonical_workspace_root_for_reads_and_writes`、
+  `unrestricted_policy_has_no_read_or_write_roots`。
+
 ### A4 terminal policy/runtime adapter
 
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/terminal_runtime.rs` 的 `enforce_output_limit`、`decode_available_utf8`、`default_platform_shell`、`shell_wrapped_command`、`map_exit_status` 及其限值常量。
