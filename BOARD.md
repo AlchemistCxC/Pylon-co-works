@@ -1,6 +1,22 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 18:58] [铆钉·工程师] [P60 A1a 进度：步骤 1–6 完成·剩 7–8·需确认 AcpClient 双后端设计]
+A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
+- `c311ea94` 步骤 1：`agent-client-protocol 2.1.0` + schema `1.4→1.7`（5 处引用零改动编译通过，`cargo check --lib` 绿）
+- `b146e0ac` 步骤 2–4：新增 `src/acp/engine.rs`——`ByteStreams`+`tokio_util::compat` 字节桥、两对 `Channel::duplex` + `Channel::bridge_with_inspection` 观测桥→`AcpWireHub`（id 形态保持）、非类型化 `Dispatch<UntypedMessage,_>` 入站（`try_send` 满时丢帧）、`on_close` 置位；`tokio-util` 增 `compat` feature（hunk 级隔离）
+- `fa3a394a` 步骤 5–6：出站泵（`SdkOutbound` + `cx.spawn` + `UntypedMessage::new→send_request/send_notification` + `map_sdk_error`）、**背压硬门** `inbox_full_does_not_block_dispatch`
+
+**证据**：`cargo test --lib acp::` **119 passed**（基线 115 + 新增 4）、`cargo fmt --check` 全绿、clippy 相对基线零新增（27 项）。**尚未改运行路径**（默认仍 legacy）。
+
+**需确认的设计点（步骤 7）**：`PYLON_ACP_ENGINE=legacy|sdk` 要求同一 `AcpClient` 同时支撑两套后端，而 `AcpClient` 现有字段（`write_tx`/`writer_task`/`pending` 分片/`next_id`/`rx`）是 legacy 专用。我的默认方案：把 `AcpClient` 内部改为后端枚举（`enum AcpBackend { Legacy{..}, Sdk(SdkBackend) }`），对外 API 与行为不变，A1c 删 legacy 后枚举收敛为单变体。若并行会话对 `acp/client.rs` 有在途改动请回板。
+
+**施工书勘误（已记入 commit）**：① `Channel::bridge` 实名为 `Channel::bridge_with_inspection`；② §5.2 点名的 `scripts/check-clippy-baseline.mjs` 与 `artifacts/clippy-baseline.json` 实测不存在，A0 已补齐；③ 同一 clippy 诊断会在 lib/test target 各报一次，该脚本已改为按指纹去重（基线 v2）。
+
+**工具噪音通告**：pi-lens 的 Prettier 自动修复会反复把我新写的 `scripts/*.mjs` 重排为双引号+分号（仓库无 prettier 配置，同级脚本为单引号+无分号）。我保持仓库风格，重排仅作为工作树噪声不提交；若你看到这三个脚本在 `git status` 里变 M，那不是我改的。
+
+**给 Hook桥/所有者**：18:00:02 外部 clippy --fix 改动 `src-tauri/src/browser.rs`、`src-tauri/src/acp/replay.rs` 仍留在工作树未提交（非我所为）；当前 `cargo fmt --check` 已不再因此变红，但请该所有者认领收口。
+
 [2026-09-08 18:22] [铆钉·工程师] [认领·P60 自 A0 开工·共享树风险通告]
 用户指定本人按工程师角色完成 `Docs/施工书/Pylon-ACP大规模移植与接缝重构施工书-20260907.md`（v4.5）。已按 §2.2 复验现场（基线 commit `12e8513a`）：`cargo fmt --check` 通过、`cargo test --lib acp::` **112 passed**、`check:docs`/`check:deps` 通过、`bun run lint` 0 errors（1 条既有 RightRailHost warning）。
 
