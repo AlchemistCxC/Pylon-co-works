@@ -27,6 +27,37 @@ pub struct QuestionSpec {
     pub options: Vec<QuestionOption>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionAnswerItem {
+    pub question_id: String,
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionAnswer {
+    #[serde(default)]
+    pub answers: Vec<QuestionAnswerItem>,
+    #[serde(default)]
+    pub declined: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionAnsweredItem {
+    pub question: String,
+    pub header: String,
+    pub multi_select: bool,
+    pub selected: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionOutcome {
+    #[serde(default)]
+    pub answers: Vec<QuestionAnsweredItem>,
+    #[serde(default)]
+    pub declined: bool,
+}
+
 pub fn parse_questions(arguments: &Value) -> Result<Vec<QuestionSpec>, String> {
     let arr = arguments
         .get("questions")
@@ -144,6 +175,53 @@ pub fn validate_specs(specs: &[QuestionSpec]) -> Result<(), String> {
     Ok(())
 }
 
+/// Build the bounded answer payload used by the upstream question bridge.
+/// Selection is capped while iterating, so hostile input cannot allocate an
+/// unbounded intermediate vector.
+pub fn build_outcome(questions: &[QuestionSpec], answer: &QuestionAnswer) -> QuestionOutcome {
+    if answer.declined {
+        return QuestionOutcome {
+            answers: Vec::new(),
+            declined: true,
+        };
+    }
+    let answers = questions
+        .iter()
+        .filter_map(|spec| {
+            let submitted = answer
+                .answers
+                .iter()
+                .find(|item| item.question_id == spec.id)?;
+            let cap = if spec.multi_select {
+                spec.options.len() + 1
+            } else {
+                1
+            };
+            let mut selected = Vec::with_capacity(cap);
+            for label in &submitted.labels {
+                if selected.len() == cap {
+                    break;
+                }
+                let trimmed = label.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                selected.push(trimmed.chars().take(MAX_QUESTION_TEXT_CHARS).collect());
+            }
+            (!selected.is_empty()).then_some(QuestionAnsweredItem {
+                question: spec.question.clone(),
+                header: spec.header.clone(),
+                multi_select: spec.multi_select,
+                selected,
+            })
+        })
+        .collect();
+    QuestionOutcome {
+        answers,
+        declined: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +255,40 @@ mod tests {
             options: vec![]
         }])
         .is_err());
+    }
+
+    #[test]
+    fn builds_bounded_outcome_and_preserves_decline() {
+        let spec = QuestionSpec {
+            id: "q1".into(),
+            question: "Pick".into(),
+            header: "Choice".into(),
+            multi_select: false,
+            options: vec![QuestionOption {
+                label: "A".into(),
+                description: String::new(),
+            }],
+        };
+        let outcome = build_outcome(
+            &[spec.clone()],
+            &QuestionAnswer {
+                answers: vec![QuestionAnswerItem {
+                    question_id: "q1".into(),
+                    labels: vec![" A ".into(), "B".into()],
+                }],
+                declined: false,
+            },
+        );
+        assert_eq!(outcome.answers[0].selected, vec!["A"]);
+        assert!(
+            build_outcome(
+                &[spec],
+                &QuestionAnswer {
+                    declined: true,
+                    ..Default::default()
+                }
+            )
+            .declined
+        );
     }
 }
