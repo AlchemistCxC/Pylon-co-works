@@ -21,6 +21,8 @@ use crate::agent_config::McpServersMode;
 /// [`AcpClient::begin_replay_capture`].
 pub struct ReplayCapture {
     pub(crate) write_tx: mpsc::Sender<String>,
+    /// A1b：SDK 后端用（legacy 为 None）。存在时 `write_tx` 不参与发送。
+    pub(crate) sdk_outbound: Option<mpsc::Sender<super::engine::SdkOutbound>>,
     pub(crate) request_id: u64,
     pub(crate) session_id: String,
     pub(crate) crashed: Arc<AtomicBool>,
@@ -96,38 +98,59 @@ impl AcpClient {
         if self.crashed.load(Ordering::Acquire) {
             return Err(AcpError::ConnectionClosed);
         }
-        let super::engine::AcpBackend::Legacy(legacy) = &self.backend else {
-            // A1a：SDK 后端的 replay 采集属 A3/A1b；先 typed fail-closed。
-            return Err(AcpError::EngineUnsupported {
-                engine: "sdk",
-                operation: "begin_replay_capture",
-            });
+        // Keep receiver creation under the same mutex as registration.
+        let (request_id, rx, sdk_outbound, active, write_tx) = match &self.backend {
+            super::engine::AcpBackend::Legacy(legacy) => {
+                let mut requests = legacy.active_replay_requests.lock().map_err(|_| {
+                    AcpError::Child("active replay session registry poisoned".to_string())
+                })?;
+                if requests.values().any(|active| active == session_id) {
+                    return Err(AcpError::ReplayLoadInProgress);
+                }
+                let rx = legacy.rx.resubscribe();
+                let request_id = legacy.next_id.fetch_add(1, Ordering::Relaxed);
+                requests.insert(request_id, session_id.to_string());
+                drop(requests);
+                (
+                    request_id,
+                    rx,
+                    None,
+                    legacy.active_replay_requests.clone(),
+                    legacy.write_tx.clone(),
+                )
+            }
+            super::engine::AcpBackend::Sdk(sdk) => {
+                let mut requests = sdk.active_replay_requests.lock().map_err(|_| {
+                    AcpError::Child("active replay session registry poisoned".to_string())
+                })?;
+                if requests.values().any(|active| active == session_id) {
+                    return Err(AcpError::ReplayLoadInProgress);
+                }
+                let rx = sdk.replay_events.subscribe();
+                let request_id = sdk.next_id.fetch_add(1, Ordering::Relaxed);
+                requests.insert(request_id, session_id.to_string());
+                drop(requests);
+                // SDK 路径不使用 write_tx（占位通道，接收端立即丢弃）。
+                let (write_tx, _write_rx) = mpsc::channel(1);
+                (
+                    request_id,
+                    rx,
+                    Some(sdk.outbound.clone()),
+                    sdk.active_replay_requests.clone(),
+                    write_tx,
+                )
+            }
         };
-        let mut requests = legacy
-            .active_replay_requests
-            .lock()
-            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?;
-        if requests.values().any(|active| active == session_id) {
-            return Err(AcpError::ReplayLoadInProgress);
-        }
-        // Keep receiver creation under the same mutex as registration. The
-        // reader takes this lock before classifying each inbound message.
-        let rx = legacy.rx.resubscribe();
-        let request_id = legacy.next_id.fetch_add(1, Ordering::Relaxed);
-        requests.insert(request_id, session_id.to_string());
-        drop(requests);
         Ok(ReplayCapture {
-            write_tx: legacy.write_tx.clone(),
+            write_tx,
+            sdk_outbound,
             request_id,
             session_id: session_id.to_string(),
             crashed: self.crashed.clone(),
             rx,
             rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
             replay_max: self.protocol.replay_max(),
-            _active_replay: ActiveReplayRegistration::registered(
-                self.legacy().active_replay_requests.clone(),
-                request_id,
-            ),
+            _active_replay: ActiveReplayRegistration::registered(active, request_id),
         })
     }
 }
@@ -153,8 +176,11 @@ pub(crate) async fn load_session_with_replay(
     }
     // The receiver is created by `begin_replay_capture` and moved into this
     // collector; no downstream resubscription is allowed.
-    let mut events = capture.rx;
     let params = super::protocol::load_params(&capture.session_id, cwd, mcp_servers, mode)?;
+    if let Some(outbound) = capture.sdk_outbound.clone() {
+        return load_session_with_replay_sdk(capture, outbound, params).await;
+    }
+    let mut events = capture.rx;
     let line = serde_json::to_string(&serde_json::json!({
         "jsonrpc": "2.0",
         "id": capture.request_id,
@@ -255,6 +281,103 @@ pub(crate) async fn load_session_with_replay(
     }
 }
 
+/// A1b：SDK 后端的 replay 收集。
+///
+/// 通知经 `replay_events` 收集（引擎已按进行中采集标记为 `Replay`）；响应经
+/// `RequestKeepRx` 的 oneshot 单独收口——`biased` select 保证已发布的通知先于
+/// 响应被收集，复现 legacy「通知先于响应」的边界语义。
+async fn load_session_with_replay_sdk(
+    capture: ReplayCapture,
+    outbound: mpsc::Sender<super::engine::SdkOutbound>,
+    params: serde_json::Value,
+) -> Result<(serde_json::Value, ReplayBatch), AcpError> {
+    let capture_request_id = capture.request_id;
+    let crashed = capture.crashed.clone();
+    let rpc_timeout = capture.rpc_timeout;
+    let replay_max = capture.replay_max;
+    let mut events = capture.rx;
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    outbound
+        .send(super::engine::SdkOutbound::RequestKeepRx {
+            method: METHOD_SESSION_LOAD.to_string(),
+            params,
+            ready: ready_tx,
+        })
+        .await
+        .map_err(|_| AcpError::ConnectionClosed)?;
+    let mut response_rx = ready_rx.await.map_err(|_| AcpError::ConnectionClosed)??;
+
+    let mut replay = VecDeque::with_capacity(replay_max.min(10_000));
+    let mut observed_count = 0_u64;
+    let mut dropped_count = 0_u64;
+    let deadline = tokio::time::Instant::now() + rpc_timeout;
+    loop {
+        if crashed.load(Ordering::Relaxed) {
+            return Err(AcpError::ConnectionClosed);
+        }
+        tokio::select! {
+            biased;
+            message = events.recv() => {
+                let message = match message {
+                    Ok(message) => message,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        return Err(AcpError::ReplayLagged { count })
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err(AcpError::ReplayStreamClosed)
+                    }
+                };
+                let ClassifiedMessage { raw, classification } = message;
+                if matches!(
+                    classification,
+                    ReplayClassification::Replay { request_id } if request_id == capture_request_id
+                ) && raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
+                {
+                    if let Some(params) = raw.params {
+                        observed_count = observed_count.saturating_add(1);
+                        if replay_max == 0 {
+                            dropped_count = dropped_count.saturating_add(1);
+                        } else {
+                            if replay.len() == replay_max {
+                                replay.pop_front();
+                                dropped_count = dropped_count.saturating_add(1);
+                            }
+                            replay.push_back(params);
+                        }
+                    }
+                }
+            }
+            response = &mut response_rx => {
+                let response = response.map_err(|_| AcpError::ConnectionClosed)??;
+                let retained_count = replay.len() as u64;
+                return Ok((
+                    response,
+                    ReplayBatch {
+                        events: replay.into_iter().collect(),
+                        metadata: ReplayMetadata {
+                            complete: dropped_count == 0,
+                            truncated: dropped_count > 0,
+                            dropped_count,
+                            boundary: ReplayBoundary {
+                                kind: "session-load-response",
+                                observed_count,
+                                retained_start_ordinal: (retained_count > 0)
+                                    .then_some(dropped_count + 1),
+                                retained_end_ordinal: (retained_count > 0).then_some(observed_count),
+                            },
+                        },
+                    },
+                ));
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err(AcpError::ReplayTimeout {
+                    seconds: rpc_timeout.as_secs(),
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +402,7 @@ mod tests {
         (
             ReplayCapture {
                 write_tx,
+                sdk_outbound: None,
                 request_id: 1,
                 session_id: "target-session".to_string(),
                 crashed: Arc::new(AtomicBool::new(false)),
