@@ -120,6 +120,34 @@
 - 适配：`TerminalExitStatus` 字段为 `exitCode`/`signal`；核验 schema 1.7 的 `schema::v1::TerminalExitStatus` 已存在，后续 responder 应直接映射到官方类型，不再新增第二个 wire DTO。
 - 证据：terminal policy 定向测试覆盖 UTF-8 partial chunk、字节截断、shell 参数、默认 shell、DTO 序列化；未将纯策略测试误标为完整 terminal runtime 验收。
 
+### A4 terminal registry seam
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，
+  `src-tauri/src/acp/terminal_runtime.rs::TerminalInstance` 的 completion、snapshot、
+  session ownership、release 顺序与 bounded output 语义。
+- 目标：`src-tauri/src/acp/terminal_runtime.rs`；registry 每个实例持有一个现有
+  `ManagedChild`，用 `watch::send_replace` 保留短命进程终态，所有操作先校验
+  session owner；不复制 codeg 的 AppState 或第二进程 owner。
+- 未迁入：subprocess spawn、stdout/stderr reader task、kill escalation、ACP
+  responder；本片是 registry seam，不是 A4 整片完成。
+- 证据：`registry_confines_operations_to_session_owner`、
+  `completion_watch_retains_exit_for_late_waiter`；提交 `44b47f84`。
+- `e3d22c29` 补齐 codeg `drain_readers` 语义：子进程已退出后先等待 reader
+  任务最多 `READER_DRAIN_GRACE`，再发布 completion；超时只 abort reader，不丢弃
+  已收到的 snapshot 输出。当前仍未接入 JSON-RPC responder。
+- `b1828c3a` 补齐 codeg owner-task kill 语义：调用方只通知 owner，owner 在唯一
+  `ManagedChild` 上执行 `kill_and_wait`，再 drain reader、发布已结束 completion；
+  kill 报告有界，不在 async mutex 内直接阻塞。
+
+### A4 question outcome policy
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，
+  `src-tauri/src/acp/question.rs::{QuestionAnswer,QuestionOutcome,build_outcome}`。
+- 目标：`src-tauri/src/acp/question_policy.rs`；保留 typed answer/outcome、declined
+  语义、单选/多选上限、空标签过滤与边遍历边截断。Pylon 不复制 codeg 的
+  `SessionState`/one-shot listener/UI 依赖。
+- 证据：`builds_bounded_outcome_and_preserves_decline` 及既有 parse/validate 测试。
+
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/preflight.rs` 的 `parse_node_version`；Apache-2.0，沿用根 NOTICE 与许可证。
 - 目标：`src-tauri/pylon-core/src/agent_preflight.rs`，由 catalog Node/uv minimum 检查消费；解析函数按上游迁入，替换将非法分量转换为零的手写比较器。
 - Pylon 接缝：catalog `params.min` 和 `PreflightInputs`；缺失/非法版本不能证明满足要求。未迁上游 registry、AppState、探测缓存和安装动作。
