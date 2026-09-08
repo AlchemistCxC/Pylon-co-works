@@ -79,7 +79,11 @@
           { "relativePath": "config.yml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] }
         ]
       },
-      "adaptation": null,
+      "adaptation": {
+        "adapterRelation": { "nativeCmd": "claude", "nativeLabel": "Claude Code CLI", "sharedConfigDir": "~/.claude", "extraDirs": [".local/bin", ".claude/local"], "docsUrl": "https://docs.codeg.app/guide/supported-agents#acp-adapters" },
+        "clientCapabilities": { "meta": { "subagent-transcript": true, "jetbrains.air": { "version": 1, "capabilities": ["sessionFailure"] } } },
+        "versionGates": { "steeringPromptRequiredMinVersion": "0.65.0", "goalControlOutOfBand": false, "cursorAcpBackend": false }
+      },
       "tools": [
         { "name": "read_file", "displayName": "Read File", "kind": "read", "action": "read", "summaryFields": ["path"] },
         { "name": "write_file", "displayName": "Write File", "kind": "edit", "action": "write", "summaryFields": ["path"] },

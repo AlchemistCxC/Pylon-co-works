@@ -18,7 +18,9 @@ describe('Shared Agent Catalog', () => {
   })
 
   it('defaults adaptation to null and rejects unknown policy names', () => {
-    expect(parseAgentCatalog(rawCatalog).providers.every(provider => provider.adaptation === null)).toBe(true)
+    const parsed = parseAgentCatalog(rawCatalog).providers
+    expect(parsed.slice(0, 2).every(provider => provider.adaptation === null)).toBe(true)
+    expect(parsed[2].adaptation).toMatchObject({ versionGates: { steeringPromptRequiredMinVersion: '0.65.0' } })
     const document = structuredClone(rawCatalog)
     document.providers[0].adaptation = { unsupported: true } as never
     expect(() => parseAgentCatalog(document)).toThrow(/未知字段/)
