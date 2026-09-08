@@ -17,6 +17,7 @@ import { FontContributionRegistry } from './fonts/fontContributionRegistry.ts'
 import { SessionCreationRegistry } from './session-creation/sessionCreationRegistry.ts'
 import { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts'
 import { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
+import { CcWidgetRegistry } from './cc-widget/ccWidgetRegistry.ts'
 import {
   setWorkspaceRegistryStore,
   WorkspaceRegistryStore,
@@ -59,6 +60,7 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
     interfaceModeRegistry: new InterfaceModeRegistry(),
     titlebarRegistry: new TitlebarRegistry(),
     workspaceRegistry,
+    ccWidgetRegistry: new CcWidgetRegistry(),
   })
   if (!options.workspaceRegistry) setWorkspaceRegistryStore(workspaceRegistry)
   return services
@@ -133,3 +135,4 @@ export function getFontContributionRegistry(): FontContributionRegistry { return
 export function getSessionCreationRegistry(): SessionCreationRegistry { return runtimeServices.sessionCreationRegistry }
 export function getInterfaceModeRegistry(): InterfaceModeRegistry { return runtimeServices.interfaceModeRegistry }
 export function getTitlebarRegistry(): TitlebarRegistry { return runtimeServices.titlebarRegistry }
+export function getCcWidgetRegistry(): CcWidgetRegistry { return runtimeServices.ccWidgetRegistry }

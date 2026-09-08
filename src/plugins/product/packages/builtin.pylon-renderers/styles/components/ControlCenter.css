@@ -4,14 +4,18 @@
   height:var(--cc-height,120px);
   min-height:var(--cc-min-height,64px);
   margin-top:auto;
+  margin-inline:var(--cc-margin-x,20px);
+  margin-bottom:var(--cc-margin-bottom,10px);
+  border-radius:var(--cc-radius,8px);
 }
 .cc-bg {
   position:absolute; bottom:0; left:0; right:0;
-  height:var(--cc-bg-height, var(--cc-height, 120px));
-  background:var(--cc-bg, transparent);
-  background-image:var(--cc-bg-image, none);
+  height:var(--cc-height, 120px);
+  background:color-mix(in srgb,var(--cc-surface, transparent) var(--cc-surface-opacity, 100%),transparent);
+  background-image:var(--cc-surface-image, none);
   background-size:cover;
   background-position:center;
+  border-radius:inherit;
   z-index:0;
 }
 .cc-body {
@@ -33,8 +37,19 @@
 .control-center:has(.mode-menu) .cc-body {
   overflow: visible;
 }
-.cc-input-slot { display:flex; align-items:flex-end; min-width:0; min-height:0; }
+.cc-input-slot {
+  position:absolute;
+  top:var(--cc-input-offset-top,10px);
+  left:var(--cc-input-margin-x,10px);
+  right:var(--cc-input-margin-x,10px);
+  height:var(--cc-input-height,30px);
+  display:flex; align-items:flex-end; min-width:0; min-height:0;
+  z-index:2;
+}
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
+/* The slot owns the themed height; retain the legacy shape above for older
+   structure guards while making the mounted widget fill that slot. */
+.cc-input-slot > .cc-widget { height:100%; }
 .cc-footer { display:contents; }
 .cc-footer-peri { display:flex; flex-direction:column; gap:5px; min-width:0; min-height:0; }
 .cc-footer-peri .cc-input-slot { flex:0 0 auto; }
@@ -140,7 +155,11 @@
   padding:2px calc(12px + var(--right-panel-inset, 0px)) 3px 12px; overflow:visible;
 }
 .control-center.cli-mode .cc-input-slot {
-  flex:0 0 auto;
+  position:absolute;
+  top:var(--cc-input-offset-top,10px);
+  left:var(--cc-input-margin-x,10px);
+  right:var(--cc-input-margin-x,10px);
+  height:var(--cc-input-height,30px);
   min-height:32px;
 }
 .control-center.cli-mode .cc-status-row {

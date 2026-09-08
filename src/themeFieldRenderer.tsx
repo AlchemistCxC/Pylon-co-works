@@ -382,8 +382,15 @@ export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: Zon
             })
             return { ...group, fields }
           })
-          .filter(group => group.fields.length > 0)
-        if (groups.length === 0) return null
+          // Input区 deliberately includes placeholder subsections for controls
+          // scheduled in later passes; keep their headings visible even when
+          // no fields have been migrated yet.
+          .filter(group => group.fields.length > 0 || section.heading === '输入区')
+        if (groups.length === 0) {
+          return section.heading
+            ? <h3 key={section.heading}>{section.heading}</h3>
+            : null
+        }
         return (
           <Fragment key={section.heading ?? si}>
             {section.heading && <h3>{section.heading}</h3>}

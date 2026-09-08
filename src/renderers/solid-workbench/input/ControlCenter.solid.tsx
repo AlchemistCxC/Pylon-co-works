@@ -11,6 +11,8 @@ import { resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenc
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
+import { toCssBackgroundImage } from '../../../backgroundImage.ts'
+import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
@@ -22,6 +24,25 @@ const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
 export function SolidControlCenter() {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
+  // ccSurfaceOpacity is stored as a 0–1 ratio. Keep accepting legacy
+  // snapshots that carried the old 0–100 value so previews/renderers do not
+  // briefly emit values such as 7200% while an older theme is being loaded.
+  const surfaceOpacityPercent = () => {
+    const value = appearance().ccSurfaceOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputSurfaceOpacityPercent = () => {
+    const value = appearance().inputSurfaceOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputBorderOpacityPercent = () => {
+    const value = appearance().inputBorderOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputHighlightOpacityPercent = () => {
+    const value = appearance().inputHighlightOpacity
+    return value > 1 ? value : value * 100
+  }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
   const [selected, setSelected] = createSignal<CcWidgetId>()
@@ -46,6 +67,13 @@ export function SolidControlCenter() {
   const modeOptions = () => resolveModeOptionEntries(runtime(), mode()).map(item => item.id)
   const profileModel = () => runtime().activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
   const emptyVisual = () => !input().sessionId || sessionEntering()
+  // The body surface is now represented by the cc-widget registration channel.
+  // Keep the existing host-rendered background implementation and CSS intact;
+  // this lookup is the minimal P2 consumer seam and remains HMR-safe because
+  // the registry snapshot is read at render time.
+  const ccSurfaceRegistered = () => getCcWidgetRegistry().getSnapshot().entries.some(
+    entry => entry.value.id === 'cc-surface',
+  )
   createEffect(() => {
     if (modelId() || !profileModel()) return
     setModelId(profileModel())
@@ -462,7 +490,36 @@ export function SolidControlCenter() {
     style={{
       '--cc-height': `${appearance().ccHeight}px`,
       '--cc-min-height': `${minHeight()}px`,
-      '--cc-bg-height': `${appearance().ccBgHeight}px`,
+      '--cc-margin-x': `${appearance().ccMarginX}px`,
+      '--cc-margin-bottom': `${appearance().ccMarginBottom}px`,
+      '--cc-radius': `${appearance().ccRadius}px`,
+      '--cc-surface-opacity': `${surfaceOpacityPercent()}%`,
+      '--cc-surface': appearance().ccBg || 'transparent',
+      '--cc-surface-image': toCssBackgroundImage(appearance().ccBgImage),
+      '--cc-input-offset-top': `${appearance().inputOffsetTop}px`,
+      '--cc-input-height': `${appearance().inputHeight}px`,
+      '--cc-input-margin-x': `${appearance().inputMarginX}px`,
+      '--cc-input-surface': appearance().inputSurfaceBg || 'transparent',
+      '--cc-input-surface-opacity': `${inputSurfaceOpacityPercent()}%`,
+      '--cc-input-focus-ring-enabled': appearance().inputFocusRingEnabled ? '1' : '0',
+      '--cc-input-focus-ring-color': appearance().inputFocusRingColor || 'var(--accent)',
+      '--cc-input-highlight-opacity': `${inputHighlightOpacityPercent()}%`,
+      '--cc-input-shadow-enabled': appearance().inputShadowEnabled ? '1' : '0',
+      '--cc-input-shadow': appearance().inputShadowEnabled
+        ? '0 9px 28px rgba(15,23,42,.08)'
+        : 'none',
+      // 光环独立于阴影（A6-1-FIX 1.3）：光环开启时只产出光环投影；关闭时不产出该变量，
+      // CSS 侧 hover/focus-within 回退到常态投影（阴影关闭即无变化）。常态阴影开关只控制 --cc-input-shadow。
+      '--cc-input-focus-ring-shadow': appearance().inputFocusRingEnabled
+        ? '0 9px 28px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--accent)) 55%, transparent)'
+        : undefined,
+      '--cc-input-radius': `${appearance().inputRadius}px`,
+      '--cc-input-border': appearance().inputBorder || 'transparent',
+      '--cc-input-border-width': `${appearance().inputBorderWidth}px`,
+      '--cc-input-border-opacity': `${inputBorderOpacityPercent()}%`,
+      '--cc-input-font-size': `${appearance().inputFontSize}px`,
+      '--cc-input-text': appearance().inputTextColor,
+      '--cc-input-placeholder': appearance().inputPlaceholder,
     }}
   >
     <Show when={appearance().ccEditMode}><div
@@ -481,7 +538,7 @@ export function SolidControlCenter() {
         workbench.appearance.dispatch({ type: 'set-cc-height', height: appearance().ccHeight + (event.key === 'ArrowUp' ? 4 : -4) })
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
-    <div class="cc-bg" />
+    <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>

@@ -222,7 +222,7 @@ export const THEME_FIELD_DEFS = {
 
   // ── cc ──
   ccHeight: {
-    ...N('cc', '中控区高度', 64, 400), default: 150,
+    ...N('cc', '中控区高度', 0, 500), default: 150,
     minFn: t => resolveCcMinHeight({
       inputMode: t.inputMode,
       footerLayout: t.footerLayout || 'free',
@@ -235,10 +235,13 @@ export const THEME_FIELD_DEFS = {
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
     }),
-  group: "外观风格",
+  group: "基础",
   },
-  ccBgHeight: { ...N('cc', '背景层高度', 64, 400), default: 150, group: "状态信息", },
-  ccBg: { ...C('cc', '中控区背景'), default: 'transparent', group: "外观风格", semanticRole: 'surface.panel', semanticSource: true },
+  ccMarginX: { ...N('cc', '左右边距（对称）', 0, 100), default: 15, group: "基础", unit: 'px', suffix: 'px' },
+  ccMarginBottom: { ...N('cc', '底边距', 0, 100), default: 15, group: "基础", unit: 'px', suffix: 'px' },
+  ccRadius: { ...N('cc', '圆角', 0, 30), default: 25, group: "基础", unit: 'px', suffix: 'px' },
+  ccBg: { ...C('cc', '中控区背景'), default: '#808080', group: "基础", },
+  ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "基础", percent: true, suffix: '%' },
   ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "外观风格", },
   ccStatusFontSize: { ...N('cc', '状态信息字号', 14, 20), default: 16, group: "状态信息", unit: 'px' },
   ccStyle: { ...S('cc', '用量显示方式', ['wave', 'bar', 'ring', 'numeric']), optionLabels: { wave: '活动波形', bar: '用量进度条', ring: '环形进度', numeric: '百分比数值' }, default: 'wave', group: "控件样式", },
@@ -247,16 +250,28 @@ export const THEME_FIELD_DEFS = {
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
   ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
+  // A6 输入区：本轮新增字段不投影 semanticRole/semanticSource；旧 inputBg 等字段保留。
+  inputOffsetTop: { ...N('cc', '输入栏上间距', 0, 120), default: 10, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-offset-top' },
+  inputHeight: { ...N('cc', '输入栏高度', 0, 200), default: 40, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-height' },
+  inputMarginX: { ...N('cc', '输入栏左右间距', 0, 120), default: 10, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-margin-x' },
+  inputSurfaceBg: { ...C('cc', '输入栏背景色'), default: '#FFFFFF', group: '输入栏', cssVar: '--cc-input-surface' },
+  inputSurfaceOpacity: { ...N('cc', '输入栏背景透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-surface-opacity' },
+  inputFocusRingEnabled: { ...S('cc', '焦点光环开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
+  inputFocusRingColor: { ...C('cc', '焦点光环颜色'), default: 'var(--accent)', group: '输入栏' },
+  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 0.05, group: '输入栏', percent: true, suffix: '%' },
+  inputShadowEnabled: { ...S('cc', '输入栏阴影开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
   inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入与状态", semanticRole: 'surface.raised', semanticSource: true },
   inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },
-  inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "输入与状态", semanticRole: 'content.text' },
-  inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: "输入与状态", semanticRole: 'content.muted' },
+  inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: '输入栏', cssVar: '--cc-input-text' },
+  inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: '输入栏', cssVar: '--cc-input-placeholder' },
   inputSendBg: { ...C('cc', '发送按钮背景'), default: 'rgba(0,0,0,0.10)', group: "输入与状态", semanticRole: 'surface.raised' },
   inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入与状态", semanticRole: 'stroke.default', semanticSource: true },
   inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入与状态", semanticRole: 'state.focusRing', semanticSource: true },
-  inputRadius: { ...N('cc', '输入栏圆角', 0, 28), default: 0, group: "输入与状态", unit: 'px', suffix: 'px' },
-  inputFocusRingWidth: { ...N('cc', '焦点光环', 0, 8), default: 0, group: "输入与状态", unit: 'px', suffix: 'px', advanced: true },
-  inputFontSize: { ...N('cc', '输入字号', 12, 22), tier: 'basic', default: 17, group: "输入与状态", unit: 'px' },
+  inputBorder: { ...C('cc', '输入栏边框色'), default: 'transparent', group: '输入栏', cssVar: '--cc-input-border' },
+  inputBorderWidth: { ...N('cc', '输入栏边框粗细', 0, 8), default: 1, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-border-width' },
+  inputBorderOpacity: { ...N('cc', '输入栏边框透明度', 0, 1, 0.05), default: 0, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-border-opacity' },
+  inputRadius: { ...N('cc', '输入栏圆角', 0, 28), default: 20, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-radius' },
+  inputFontSize: { ...N('cc', '输入字号', 12, 22), tier: 'basic', default: 17, group: '输入栏', unit: 'px', cssVar: '--cc-input-font-size' },
   inputMinHeight: { ...N('cc', '输入栏最小高度', 32, 120), default: 56, group: "输入与状态", unit: 'px', advanced: true },
   inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', control: 'segmented', group: "输入与状态", },
   inputVariant: { ...S('cc', '输入栏外观', ['cli', 'composer', 'compact', 'command']), optionLabels: { cli: '命令行', composer: '标准编辑器', compact: '紧凑输入', command: '命令面板' }, default: 'cli', syncOnChange: ['inputMode'], group: "控件样式", },
@@ -374,7 +389,14 @@ export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: re
     { heading: '工具调用', groups: [{ title: '指示器与连接线' }, { title: '用户标签', compact: true }, { title: '代码差异', defaultOpen: false }, { title: '等待动画' }] },
     { heading: '消息渲染', groups: [{ title: '风格', compact: true }, { title: '消息外观', compact: true }, { title: '助手标记', defaultOpen: false }, { title: '文件编辑器', defaultOpen: false }] },
   ],
-  cc: [{ groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '状态信息', defaultOpen: false }] }],
+  cc: [
+    { groups: [{ title: '基础' }] },
+    { heading: '输入区', groups: [{ title: '输入栏' }] },
+    { heading: '发送按钮', groups: [] },
+    { heading: '附件按钮', groups: [] },
+    { heading: '其他指示元素', groups: [] },
+    { groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '状态信息', defaultOpen: false }] },
+  ],
   right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }
 /** W2-13（F3-A）：快速层基础字段清单（来自 defs 单一真值，组件不硬编码） */
@@ -418,13 +440,14 @@ export function normalizeThemeValue(def: ThemeFieldDef, value: unknown): string 
  * 对持久化主题做全字段归一化（migrate 通用 pass）。
  * 跳过与 defs 类型不完全一致的历史字段（由调用方保留既有语义）：
  * - inputShowPlaceholder/inputShowHistoryHint：boolean 默认 + shown/hidden 枚举混用
+ * - inputFocusRingEnabled/inputShadowEnabled：迁移阶段兼容 boolean，归一化为 shown/hidden
  * - inputVariant：回退依赖 inputMode
  * - toolIndicator：有效值来自 widgetRegistry 动态选项（defs 仅是展示子集）
  */
 export function normalizeThemeState<T extends Record<string, unknown>>(state: T): T {
   const next = { ...state } as Record<string, unknown>
   for (const key of THEME_FIELD_KEYS) {
-    if (key === 'inputShowPlaceholder' || key === 'inputShowHistoryHint' || key === 'inputVariant' || key === 'toolIndicator') continue
+    if (key === 'inputShowPlaceholder' || key === 'inputShowHistoryHint' || key === 'inputFocusRingEnabled' || key === 'inputShadowEnabled' || key === 'inputVariant' || key === 'toolIndicator') continue
     const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
     if (def.default === undefined) continue
     if (next[key] === undefined) continue

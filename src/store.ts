@@ -56,7 +56,11 @@ export interface ThemeSettings {
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number
-  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFocusRingWidth: number; inputFontSize: number; inputMinHeight: number
+  inputOffsetTop: number; inputHeight: number; inputMarginX: number
+  inputSurfaceBg: string; inputSurfaceOpacity: number
+  inputBorder: string; inputBorderWidth: number; inputBorderOpacity: number
+  inputFocusRingEnabled: 'shown' | 'hidden'; inputFocusRingColor: string; inputHighlightOpacity: number; inputShadowEnabled: 'shown' | 'hidden'
+  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputMinHeight: number
   inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
@@ -90,9 +94,10 @@ export interface ThemeSettings {
   assistantDotImage: string
   footerLayout: 'free' | 'peri'
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
-  ccHeight: number; ccBgHeight: number; ccBg: string
+  ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
   ccStatusFontSize: number
+  ccMarginX: number; ccMarginBottom: number; ccRadius: number
   ccStyle: string
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
@@ -149,7 +154,7 @@ export const useStore = create<ThemeState>()(persist(
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
-    // D1：ccBgHeight 必须 ≥ ccHeight（背景不短于容器，与 setZoneField 漏斗同不变量）
+    // D1：ccHeight 经布局约束漏斗归一化。
     const ccHeight = clampCcHeight(height, {
       inputMode: state.inputMode,
       footerLayout: state.footerLayout,
@@ -162,7 +167,7 @@ export const useStore = create<ThemeState>()(persist(
       }),
       cliOverflowMode: state.cliOverflowMode,
     })
-    return { ccHeight, ccBgHeight: Math.max(state.ccBgHeight, ccHeight), ...markZoneCustom(state, 'cc') }
+    return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
   updateCcPlacement: (id, partial) => set(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
@@ -189,7 +194,6 @@ export const useStore = create<ThemeState>()(persist(
     return {
       ccHidden,
       ccHeight,
-      ccBgHeight: Math.max(state.ccBgHeight, ccHeight),
       ...markZoneCustom(state, 'cc'),
     }
   }),

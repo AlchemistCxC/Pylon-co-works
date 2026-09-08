@@ -12,7 +12,7 @@ function snapshotState() {
     theme: Object.fromEntries([
       'chatFontSize', 'chatFont', 'toolIndicator', 'toolIndicatorRun', 'toolIndicatorOk',
       'toolIndicatorErr', 'assistantDot', 'assistantDotGlyph', 'appliedPreset', 'custom',
-      'customPresets', 'ccHeight', 'ccBgHeight',
+      'customPresets', 'ccHeight',
     ].map(key => [key, (state as unknown as Record<string, unknown>)[key]])),
   }))
 }

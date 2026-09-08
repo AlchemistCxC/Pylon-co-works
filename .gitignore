@@ -49,3 +49,11 @@ codex.exe
 codex-code-mode-host.exe
 
 dist-plugin-devkit/
+
+# 本地 agent 施工约束（用户环境，不入库）
+AGENTS.md
+
+# 本地个人文件（用户环境，不入库）
+nodejs/
+public/
+*.html

@@ -172,7 +172,6 @@ function createBoundaryTheme(edge: 'min' | 'max'): ThemeSettings {
   }
   theme.ccLayout = cloneCcLayout(DEFAULTS.ccLayout)
   theme.ccHeight = Number.isFinite(theme.ccHeight) ? theme.ccHeight : DEFAULTS.ccHeight
-  theme.ccBgHeight = Math.max(theme.ccHeight, Number.isFinite(theme.ccBgHeight) ? theme.ccBgHeight : theme.ccHeight)
   return theme
 }
 

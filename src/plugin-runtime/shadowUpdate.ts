@@ -48,6 +48,7 @@ export class PluginContributionTransaction {
       sessionCreation: registries.sessionCreationRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       interfaceModes: registries.interfaceModeRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       titlebar: registries.titlebarRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      ccWidget: registries.ccWidgetRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
     }
   }
 

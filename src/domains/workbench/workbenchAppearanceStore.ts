@@ -119,7 +119,7 @@ export function reduceAppearanceCommand(
         }),
         cliOverflowMode: theme.cliOverflowMode,
       })
-      return { ...theme, ccHeight, ccBgHeight: Math.max(theme.ccBgHeight, ccHeight) }
+      return { ...theme, ccHeight }
     }
     case 'update-cc-placement':
       return { ...theme, ccLayout: updateCcPlacementState(theme.ccLayout, command.id, command.placement) }
@@ -145,7 +145,7 @@ function settleCcHeight(theme: ThemeSettings): ThemeSettings {
     }),
     cliOverflowMode: theme.cliOverflowMode,
   })
-  return { ...theme, ccHeight, ccBgHeight: Math.max(theme.ccBgHeight, ccHeight) }
+  return { ...theme, ccHeight }
 }
 
 export function snapshotRevision(snapshot: WorkbenchAppearanceSnapshot): number {

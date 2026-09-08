@@ -49,6 +49,22 @@ export interface WorkbenchAppearanceSnapshot {
   toolConnectorOpacity: number
   inputMode: string
   inputVariant: string
+  inputOffsetTop: number
+  inputHeight: number
+  inputMarginX: number
+  inputSurfaceBg: string
+  inputSurfaceOpacity: number
+  inputFocusRingEnabled: boolean
+  inputFocusRingColor: string
+  inputHighlightOpacity: number
+  inputShadowEnabled: boolean
+  inputBorder: string
+  inputBorderWidth: number
+  inputBorderOpacity: number
+  inputRadius: number
+  inputFontSize: number
+  inputTextColor: string
+  inputPlaceholder: string
   inputShowPlaceholder: boolean
   inputShowHistoryHint: boolean
   inputSubmitButtonMode: string
@@ -62,7 +78,12 @@ export interface WorkbenchAppearanceSnapshot {
   ccVariant: string
   ccStyle: string
   ccHeight: number
-  ccBgHeight: number
+  ccBg: string
+  ccBgImage: string
+  ccSurfaceOpacity: number
+  ccMarginX: number
+  ccMarginBottom: number
+  ccRadius: number
   ccLayout: CcLayoutV3
   ccHidden: readonly string[]
   ccScale: Readonly<Record<string, number>>
@@ -125,6 +146,22 @@ export function selectWorkbenchAppearance(
     toolConnectorOpacity: theme.toolConnectorOpacity,
     inputMode: theme.inputMode,
     inputVariant: theme.inputVariant,
+    inputOffsetTop: theme.inputOffsetTop,
+    inputHeight: theme.inputHeight,
+    inputMarginX: theme.inputMarginX,
+    inputSurfaceBg: theme.inputSurfaceBg,
+    inputSurfaceOpacity: theme.inputSurfaceOpacity,
+    inputFocusRingEnabled: theme.inputFocusRingEnabled !== 'hidden',
+    inputFocusRingColor: theme.inputFocusRingColor || 'var(--accent)',
+    inputHighlightOpacity: theme.inputHighlightOpacity,
+    inputShadowEnabled: theme.inputShadowEnabled !== 'hidden',
+    inputBorder: theme.inputBorder,
+    inputBorderWidth: theme.inputBorderWidth,
+    inputBorderOpacity: theme.inputBorderOpacity,
+    inputRadius: theme.inputRadius,
+    inputFontSize: theme.inputFontSize,
+    inputTextColor: theme.inputTextColor,
+    inputPlaceholder: theme.inputPlaceholder,
     inputShowPlaceholder: theme.inputShowPlaceholder !== false,
     inputShowHistoryHint: theme.inputShowHistoryHint !== false,
     inputSubmitButtonMode: theme.inputSubmitButtonMode,
@@ -138,7 +175,12 @@ export function selectWorkbenchAppearance(
     ccVariant: theme.ccVariant,
     ccStyle: theme.ccStyle,
     ccHeight: theme.ccHeight,
-    ccBgHeight: theme.ccBgHeight,
+    ccBg: theme.ccBg,
+    ccBgImage: theme.ccBgImage,
+    ccSurfaceOpacity: theme.ccSurfaceOpacity,
+    ccMarginX: theme.ccMarginX,
+    ccMarginBottom: theme.ccMarginBottom,
+    ccRadius: theme.ccRadius,
     ccLayout: cloneCcLayout(theme.ccLayout),
     ccHidden: [...theme.ccHidden],
     ccScale: { ...theme.ccScale },

@@ -82,7 +82,7 @@ import { themeDomainMigrate } from '../src/domains/theme/migration.ts'
 const migrateDefaults = {
   base: {
     inputMode: 'cli', inputVariant: 'cli', inputSubmitButtonMode: 'inline',
-    ccHeight: 150, ccBgHeight: 150, footerLayout: 'free', cliHintMode: 'full',
+    ccHeight: 150, footerLayout: 'free', cliHintMode: 'full',
     ccHidden: [], ccStyle: 'wave', cliOverflowMode: 'fixed-scroll',
   },
   appliedPreset: defaults.appliedPreset,

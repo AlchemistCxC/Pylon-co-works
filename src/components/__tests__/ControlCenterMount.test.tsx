@@ -95,26 +95,26 @@ describe('ControlCenter 带会话挂载（#185 回归）', () => {
   it('兼容中控恢复控件后同步抬高持久化高度', () => {
     useStore.setState({
       inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
-      ccHeight: 84, ccBgHeight: 84,
+      ccHeight: 84,
       ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'attach', 'tasks'],
     })
 
     useStore.getState().setCcHidden('pct', false)
     useStore.getState().setCcHidden('tokens', false)
 
-    expect(useStore.getState()).toMatchObject({ ccHeight: 109, ccBgHeight: 109 })
+      expect(useStore.getState()).toMatchObject({ ccHeight: 109 })
   })
 
   it('兼容中控切换 CLI 布局后同步抬高持久化高度', () => {
     useStore.setState({
       inputMode: 'default', inputVariant: 'composer', footerLayout: 'peri', cliHintMode: 'full',
-      ccHeight: 64, ccBgHeight: 64, ccEditMode: true,
+      ccHeight: 64, ccEditMode: true,
     })
     const { getByRole } = render(<ControlCenter sessionId="s1" />)
     fireEvent.click(getByRole('button', { name: '● 输入栏' }))
     fireEvent.click(getByRole('button', { name: '命令行' }))
 
-    expect(useStore.getState()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli', ccHeight: 109, ccBgHeight: 109 })
+      expect(useStore.getState()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli', ccHeight: 109 })
   })
 
   it('兼容中控控件拖拽只响应发起拖拽的 pointer', () => {

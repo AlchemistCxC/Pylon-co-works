@@ -138,6 +138,10 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
   state.inputShowPlaceholder = state.inputShowPlaceholder !== false
   state.inputShowHistoryHint = state.inputShowHistoryHint !== false
+  // These select fields historically accepted booleans. Persist the enum
+  // values now so the settings control always has a valid selected option.
+  state.inputFocusRingEnabled = state.inputFocusRingEnabled === false || state.inputFocusRingEnabled === 'hidden' ? 'hidden' : 'shown'
+  state.inputShadowEnabled = state.inputShadowEnabled === false || state.inputShadowEnabled === 'hidden' ? 'hidden' : 'shown'
   state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
     ? state.inputVariant
     : state.inputMode === 'cli' ? 'cli' : 'composer'
@@ -158,8 +162,6 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
     }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })
-  // D2：ccBgHeight ≥ ccHeight 不变量跨重启成立（与 setZoneField 漏斗/setCcHeight 一致）
-  state.ccBgHeight = Math.max(Number(state.ccBgHeight ?? 150), Number(state.ccHeight))
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state
 }

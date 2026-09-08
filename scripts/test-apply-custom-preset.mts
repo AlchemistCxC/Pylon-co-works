@@ -25,7 +25,6 @@ function makeState(customPresets: ThemePresetState['customPresets']): ThemePrese
     customPresets,
     ccLayout: DEFAULT_CC_LAYOUT,
     ccHeight: 150,
-    ccBgHeight: 150,
     inputMode: 'cli',
     footerLayout: 'free',
     cliHintMode: 'full',

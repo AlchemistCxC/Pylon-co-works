@@ -18,9 +18,14 @@ function section(source: string, name: string): string {
 
 // SettingsPreview must assemble the real visual components, while keeping the
 // preview boundary explicit: no direct backend/session-runtime wiring here.
-assert(preview.includes("import ControlCenter from './ControlCenter'"), 'preview must use the real ControlCenter')
+// The control-center surface is now mounted by the Solid preview seam; the
+// legacy React tree remains available for its own tests but is not imported by
+// this production preview.
+assert(preview.includes("createPreviewWorkbenchServices"), 'preview must create Solid preview services')
+assert(preview.includes("mountSolidControlCenterPreview"), 'preview must use the Solid control-center mount')
 assert(preview.includes("import GenerationFooter from './chat/GenerationFooter'"), 'preview must use the real GenerationFooter')
-assert(preview.includes('<ControlCenter sessionId={null} />'), 'preview ControlCenter must be isolated with sessionId={null}')
+assert(preview.includes('<div ref={ccHostRef} />'), 'preview must provide an isolated Solid control-center host')
+assert(!preview.includes("import ControlCenter from './ControlCenter'"), 'preview must not import the React ControlCenter')
 assert(preview.includes('<div className="pv-app" style={{ pointerEvents: \'none\' }}>'), 'preview must retain the visual pointer-events boundary')
 assert(!/\binvoke\s*\(/.test(preview), 'SettingsPreview must not call invoke()')
 assert(!/\blisten\s*\(/.test(preview), 'SettingsPreview must not call listen()')
@@ -33,7 +38,7 @@ assert(!/logical(?:ly)?\s*read[- ]?only|逻辑只读|side[- ]?effect[- ]?free/i.
 
 const previewApp = section(preview, 'function PreviewApp')
 const previewSpinner = section(preview, 'function PvSpinner')
-assert(previewApp.includes('<ControlCenter sessionId={null} />'), 'PreviewApp must render the real ControlCenter')
+assert(previewApp.includes('<div ref={ccHostRef} />'), 'PreviewApp must render the Solid control-center host')
 assert(previewSpinner.includes('<GenerationFooter running'), 'PreviewApp must render the real GenerationFooter path')
 
 // Guard the known real-component effects so this test documents the boundary

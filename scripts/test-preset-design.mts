@@ -32,7 +32,6 @@ assert.equal(claude.toolConnectorMode, 'none')
 assert.equal(claude.spinnerColor, '#D77757')
 assert.equal(claude.ccStyle, 'numeric')
 assert.equal(claude.ccHeight, 76)
-assert.equal(claude.ccBgHeight, 76)
 assert.equal(claude.cliLineColor, '#888888')
 
 assert.equal(glass.uiScheme, 'light')
@@ -56,7 +55,7 @@ assert.equal(amber.spinnerColor, '#ffb000')
 
 for (const field of [
   'ccHidden', 'ccScale',
-  'ccStyle', 'ccVariant', 'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
+  'ccStyle', 'ccVariant', 'ccHeight', 'ccBg', 'ccBgImage', 'ccSurfaceOpacity',
   'cliLinePadding', 'cliPromptColor', 'cliContentOffsetY', 'cliHintMode', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
 ]) {
   assert.equal(ZONE_FIELDS.cc.includes(field as never), true, `CC zone 缺少字段 ${field}`)
@@ -80,10 +79,7 @@ for (const preset of GLOBAL_PRESETS) {
   assert.equal(typeof expanded.cliPromptColor, 'string')
 }
 
-for (const preset of [glass, nord, tokyo, solarized, amber, matrix]) {
-  assert.equal(preset.ccHeight, 96)
-  assert.equal(preset.ccBgHeight, 96)
-}
+for (const preset of [glass, nord, tokyo, solarized, amber, matrix]) assert.equal(preset.ccHeight, 96)
 
 for (const preset of [claude, glass, nord, tokyo, solarized, amber, matrix]) {
   assert.equal(preset.cliLinePadding, 3, '经典终端预设必须保持紧凑命令行内边距')

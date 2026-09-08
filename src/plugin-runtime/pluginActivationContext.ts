@@ -43,6 +43,8 @@ import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/plug
 import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
 import { createPluginStorageApi } from './storage/pluginStorageApi.ts'
 import type { PluginStorageApi } from './storage/pluginStorageTypes.ts'
+import { createPluginCcWidgetApi, type PluginCcWidgetApi } from './cc-widget/pluginCcWidgetApi.ts'
+import type { CcWidgetContribution } from './cc-widget/ccWidgetTypes.ts'
 
 export interface PluginActivationTransactions {
   readonly application: PluginApplicationRegistryTransaction
@@ -62,6 +64,7 @@ export interface PluginActivationTransactions {
   readonly sessionCreation: SessionCreationRegistryTransaction
   readonly interfaceModes: RegistryTransaction<InterfaceModeContribution>
   readonly titlebar: RegistryTransaction<TitlebarContribution>
+  readonly ccWidget: RegistryTransaction<CcWidgetContribution>
 }
 
 export interface BuiltinPluginActivationContext {
@@ -88,6 +91,7 @@ export interface BuiltinPluginActivationContext {
   readonly titlebar: PluginTitlebarApi
   /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
   readonly storage: PluginStorageApi
+  readonly ccWidget: PluginCcWidgetApi
 }
 
 export type PluginActivationContextFactory = (
@@ -150,5 +154,6 @@ export function createPluginActivationContext(
       transactions?.titlebar,
     ),
     storage: createPluginStorageApi(identity),
+    ccWidget: createPluginCcWidgetApi(registries.ccWidgetRegistry, identity, scope, transactions?.ccWidget),
   }
 }

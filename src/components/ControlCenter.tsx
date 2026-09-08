@@ -30,7 +30,6 @@ const NO_HIDDEN_IDS: readonly string[] = []
 export default function ControlCenter({ sessionId }: Props) {
   const {
     rawCcHeight,
-    rawCcBgHeight,
     inputMode,
     rawSubmitButtonMode,
     rawHidden,
@@ -47,7 +46,6 @@ export default function ControlCenter({ sessionId }: Props) {
     setCcHeight,
   } = useStore(useShallow(s => ({
     rawCcHeight: s.ccHeight,
-    rawCcBgHeight: s.ccBgHeight,
     inputMode: s.inputMode,
     rawSubmitButtonMode: s.inputSubmitButtonMode,
     rawHidden: s.ccHidden,
@@ -64,7 +62,6 @@ export default function ControlCenter({ sessionId }: Props) {
     setCcHeight: s.setCcHeight,
   })))
   const ccHeight = rawCcHeight || 120
-  const ccBgHeight = rawCcBgHeight ?? ccHeight
   const submitButtonMode = rawSubmitButtonMode || 'inline'
   const hidden = rawHidden ?? NO_HIDDEN_IDS
   const ccVariant = rawCcVariant || 'terminal'
@@ -201,10 +198,6 @@ export default function ControlCenter({ sessionId }: Props) {
       style={{
         '--cc-height': `${ccHeight}px`,
         '--cc-min-height': `${minHeight}px`,
-        // 背景高度不得小于容器最小高：预设 ccBgHeight(76) 与 clamp 后的 ccHeight(84)
-        // 不一致时，背景短于容器会露出底部无背景条
-        // D2：漏斗/setCcHeight/migrate 已保证 ccBgHeight ≥ ccHeight ≥ minHeight，渲染期补丁移除
-        '--cc-bg-height': `${ccBgHeight}px`,
         '--cc-bg': ccBg,
         '--cc-bg-image': toCssBackgroundImage(ccBgImage),
       } as React.CSSProperties}>

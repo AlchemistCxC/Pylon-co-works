@@ -59,6 +59,7 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/sheets/history/HistorySheetView.tsx',
   'src/sheets/OverviewSheetView.tsx',
   'src/sheets/RuntimeSheetView.tsx',
+  'src/ui-demo/immersiveStore.ts',
   'src/userDataRepository.ts',
   'src/workspaceEntityStore.ts',
   'src/workspace-sheets/activateAgentSheet.ts',
