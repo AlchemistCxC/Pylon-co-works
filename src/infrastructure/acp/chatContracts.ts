@@ -110,7 +110,6 @@ export type SessionResponse = string | SessionResponseObject
 
 interface UpdateBase extends OptionalChatEventIdentity {
   _meta?: {
-    periReplay?: boolean
     inputTokens?: number
     outputTokens?: number
     cacheReadTokens?: number

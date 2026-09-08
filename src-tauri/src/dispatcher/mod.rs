@@ -1602,8 +1602,7 @@ mod tests {
                 crate::acp::SessionUpdateVariant::ConfigOptionUpdate,
             ),
         ];
-        for (label, mut update, variant) in cases {
-            update["_meta"] = serde_json::json!({"periReplay": true});
+        for (label, update, variant) in cases {
             let mut session = crate::session::SessionInfo::new(
                 "peri-c11".to_string(),
                 String::new(),
@@ -1627,7 +1626,6 @@ mod tests {
                 "{label}: replay must not change pet xp/bond/recent_events"
             );
 
-            update["_meta"] = serde_json::json!({"periReplay": false});
             let mut live_session = crate::session::SessionInfo::new(
                 "peri-c11".to_string(),
                 String::new(),

@@ -157,21 +157,8 @@ fn classify_active_replay_message(
     let Some(request_id) = request_id else {
         return ReplayClassification::Live;
     };
-    let Some(update) = params
-        .get_mut("update")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return ReplayClassification::Live;
-    };
-    let meta = update
-        .entry("_meta")
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    if !meta.is_object() {
-        *meta = serde_json::Value::Object(serde_json::Map::new());
-    }
-    if let Some(meta) = meta.as_object_mut() {
-        meta.insert("periReplay".to_string(), serde_json::Value::Bool(true));
-    }
+    // D6=②：不再注入 `_meta.periReplay`——typed classification 是唯一权威
+    // （dispatcher/pet/前端改读 `ClassifiedMessage.classification`）。
     ReplayClassification::Replay { request_id }
 }
 
@@ -631,10 +618,11 @@ mod tests {
             ReplayClassification::Replay { request_id: 7 }
         );
 
-        assert_eq!(
-            raw.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
-            true,
-            "session/load boundary, not provider-private metadata, must classify replay",
+        assert!(
+            raw.params.as_ref().unwrap()["update"]
+                .get("_meta")
+                .is_none(),
+            "D6=②：分类不得再注入 _meta.periReplay",
         );
     }
 
@@ -760,13 +748,13 @@ mod tests {
             })),
             error: None,
         };
-        classify_active_replay_message(&mut between_responses, &active);
+        let classification = classify_active_replay_message(&mut between_responses, &active);
 
         assert_eq!(active.lock().unwrap().len(), 1);
-        assert_eq!(
-            between_responses.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
-            true
-        );
+        assert!(matches!(
+            classification,
+            ReplayClassification::Replay { .. }
+        ));
     }
 
     #[test]

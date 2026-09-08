@@ -25,8 +25,8 @@ for line in sys.stdin:
     elif method == 'session/load' and replay_load:
         session_id=request['params']['sessionId']
         for update in [
-            {'sessionUpdate':'user_message_chunk','content':{'text':'persona\n\n---\n\nold question'},'_meta':{'periReplay':True}},
-            {'sessionUpdate':'agent_message_chunk','content':{'text':'old answer'},'_meta':{'periReplay':True}}
+            {'sessionUpdate':'user_message_chunk','content':{'text':'persona\n\n---\n\nold question'}},
+            {'sessionUpdate':'agent_message_chunk','content':{'text':'old answer'}}
         ]:
             print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':update}}), flush=True)
         response['result']={'loaded':True}
