@@ -98,6 +98,13 @@
 - 未迁入：codeg AppState、AgentType root registry、fs IO executor、安装/持久化；未来 responder 只消费该策略函数。
 - 证据：`path_policy_uses_component_containment_and_parent_for_new_writes`。
 
+### A4 terminal policy/runtime adapter
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/terminal_runtime.rs` 的 `enforce_output_limit`、`decode_available_utf8`、`default_platform_shell`、`shell_wrapped_command`、`map_exit_status` 及其限值常量。
+- 目标：`src-tauri/src/acp/terminal_policy.rs`。迁入纯输出预算、增量 UTF-8 解码、shell family/wrapper 参数、平台默认 shell 和 typed `TerminalExitStatus`；Pylon 保留既有 `ManagedChild` 作为进程所有者，未复制 codeg `TerminalRuntime`/AppState/协议 handler。
+- 适配：`TerminalExitStatus` 是 Pylon adapter DTO，字段为 `exitCode`/`signal`；官方 ACP schema 当前无同形标准 DTO，runtime 接线待后续 responder 施工片完成。
+- 证据：terminal policy 定向测试覆盖 UTF-8 partial chunk、字节截断、shell 参数、默认 shell、DTO 序列化；未将纯策略测试误标为完整 terminal runtime 验收。
+
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/preflight.rs` 的 `parse_node_version`；Apache-2.0，沿用根 NOTICE 与许可证。
 - 目标：`src-tauri/pylon-core/src/agent_preflight.rs`，由 catalog Node/uv minimum 检查消费；解析函数按上游迁入，替换将非法分量转换为零的手写比较器。
 - Pylon 接缝：catalog `params.min` 和 `PreflightInputs`；缺失/非法版本不能证明满足要求。未迁上游 registry、AppState、探测缓存和安装动作。
