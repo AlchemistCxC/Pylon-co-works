@@ -9,6 +9,7 @@ mod client;
 mod engine;
 pub mod host_tools;
 pub mod fs_policy;
+pub mod terminal_policy;
 mod error;
 #[allow(unused_imports)]
 pub use capabilities::{CapabilityRegistry, CapabilityState};
