@@ -38,6 +38,8 @@ export const CANONICAL_EVENT_TYPES = [
   'interaction.answered',
   'turn.completed',
   'turn.failed',
+  /** P55-D3：回合取消（用户 stop / 截断判死）——三态终态之一，与 completed/failed 同级。 */
+  'turn.cancelled',
   /** 完整 remote replay 的 append-only reconciliation checkpoint。 */
   'history.snapshot',
   'unknown',

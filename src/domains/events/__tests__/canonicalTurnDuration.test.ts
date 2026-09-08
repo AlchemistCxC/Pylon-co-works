@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal } from '../canonicalTurnDuration.ts'
 
-const row = (sequence: number, eventType: 'user.message' | 'turn.completed' | 'turn.failed', at: string) => ({
+const row = (
+  sequence: number,
+  eventType: 'user.message' | 'turn.completed' | 'turn.failed' | 'turn.cancelled',
+  at: string,
+) => ({
   sequence,
   eventType,
   occurredAt: at,
@@ -53,5 +57,24 @@ describe('deriveCanonicalTurnDuration', () => {
       row(1, 'user.message', ''),
       row(2, 'turn.completed', ''),
     ])).toBeUndefined()
+  })
+
+  // P55-D3：取消（用户 stop / 判死截断）是终态之一——封口本回合、可测时长、
+  // hasCanonicalTurnTerminal 认三态。
+  it('treats turn.cancelled as a terminal turn boundary', () => {
+    expect(deriveCanonicalTurnDuration([
+      row(1, 'user.message', '2026-09-03T00:00:10.000Z'),
+      row(2, 'turn.cancelled', '2026-09-03T00:00:12.750Z'),
+    ])).toEqual({
+      elapsedMs: 2750,
+      startedAt: Date.parse('2026-09-03T00:00:10.000Z'),
+      completedAt: Date.parse('2026-09-03T00:00:12.750Z'),
+      source: 'canonical-events',
+    })
+    expect(hasCanonicalTurnTerminal([{ eventType: 'turn.cancelled' }])).toBe(true)
+    expect(hasCanonicalTurnTerminal([
+      { eventType: 'user.message' },
+      { eventType: 'assistant.text.delta' },
+    ])).toBe(false)
   })
 })

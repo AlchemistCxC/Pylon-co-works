@@ -4,6 +4,17 @@
 use super::*;
 use crate::acp::{AcpError, PromptTimeoutKind};
 
+/// P55-D3：回合收口结局（turn.cancelled 判别）。`publish_prompt_failure` 依据
+/// 它决定 journal 落 `cancelled` 还是 `error`（wire `sessionUpdate` 值）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PromptOutcome {
+    /// 默认：失败（现状 `sessionUpdate:"error"` → `turn.failed`）。
+    #[default]
+    Failed,
+    /// 回合被取消（用户 stop / 截断后取消）→ `sessionUpdate:"cancelled"`。
+    Cancelled,
+}
+
 /// Additive failure provenance carried by `pylon:error`.  The legacy top-level
 /// `error` string remains the user-facing compatibility field; this structure
 /// lets the renderer distinguish a provider response from a local timeout or
@@ -11,6 +22,9 @@ use crate::acp::{AcpError, PromptTimeoutKind};
 #[derive(Debug, Clone, Default)]
 struct PromptFailureMetadata {
     source: &'static str,
+    /// P55-D3：收口结局。仅当 `Cancelled` 时向 failure JSON 输出
+    /// `"outcome":"cancelled"`（Failed 不输出字段，既有 failure JSON 逐字节不变）。
+    outcome: PromptOutcome,
     timeout_kind: Option<&'static str>,
     configured_timeout_secs: Option<u64>,
     triggered_timeout_secs: Option<u64>,
@@ -25,6 +39,12 @@ impl PromptFailureMetadata {
             "source".to_string(),
             serde_json::Value::String(self.source.to_string()),
         );
+        if self.outcome == PromptOutcome::Cancelled {
+            value.insert(
+                "outcome".to_string(),
+                serde_json::Value::String("cancelled".to_string()),
+            );
+        }
         if let Some(kind) = self.timeout_kind {
             value.insert(
                 "timeoutKind".to_string(),
@@ -187,8 +207,14 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
                 (owner, None)
             }
         };
+        // P55-D3：收口结局判别——failure.outcome=Cancelled 时 journal 落
+        // `sessionUpdate:"cancelled"`（event_repo 归一化为 turn.cancelled）；
+        // 其余保持 `error` → turn.failed。SESSION_ERROR 帧/Channel 终帧不变。
+        let cancelled = failure
+            .map(|failure| failure.outcome == PromptOutcome::Cancelled)
+            .unwrap_or(false);
         let mut update = serde_json::json!({
-            "sessionUpdate": "error",
+            "sessionUpdate": if cancelled { "cancelled" } else { "error" },
             "errorCode": error.code(),
             "error": error.to_string(),
         });
@@ -475,14 +501,14 @@ async fn finalize_response<R: tauri::Runtime>(
     let is_first = flow.is_first;
     let message_round = flow.message_round;
     crate::acp::prompt_stop_reason(&data).map_err(|error| {
-        let error = error.to_string();
+        let text = error.to_string();
         // M5 感知：refusal / max_turn 区分于普通失败
-        if error.contains("refused") {
+        if text.contains("refused") {
             let _ = state
                 .pet
                 .lock()
                 .map(|mut pet| crate::pet::on_refused(&mut pet));
-        } else if error.contains("max_turn") {
+        } else if text.contains("max_turn") {
             let _ = state
                 .pet
                 .lock()
@@ -493,7 +519,14 @@ async fn finalize_response<R: tauri::Runtime>(
                 .lock()
                 .map(|mut pet| crate::pet::on_error(&mut pet));
         }
-        error
+        // P55-D3（出口 1）：stopReason=cancelled → 结构化判别变体，不再与
+        // refusal/unsupported 混在同一 Protocol 字符串里；PET 感知保持原 else
+        // 分支（on_error）不变。上抛后 send_prompt_core 依此把 failure 标 Cancelled。
+        if text.contains("prompt cancelled") {
+            PylonError::PromptCancelled
+        } else {
+            PylonError::Protocol(text)
+        }
     })?;
     if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
         let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
@@ -682,14 +715,28 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     let mut failure = None;
     let result = send_prompt_core_impl(state, runtime, window, gateway, ctx, &mut failure).await;
     if let Err(error) = &result {
+        // P55-D3（出口 1 判别）：finalize_response 上抛的 `PromptCancelled` 表示
+        // provider 明确回 stopReason=cancelled——failure 标 Cancelled 后
+        // publish_prompt_failure 落 turn.cancelled（而非 turn.failed）。
+        let cancelled = matches!(error, PylonError::PromptCancelled);
         // Every known ACP boundary records its own provenance.  A validation
         // or setup error may happen before that boundary; preserve a stable
         // internal source rather than making the UI infer one from prose.
         if failure.is_none() {
             failure = Some(PromptFailureMetadata {
-                source: "internal",
+                source: if cancelled { "provider" } else { "internal" },
+                outcome: if cancelled {
+                    PromptOutcome::Cancelled
+                } else {
+                    PromptOutcome::Failed
+                },
                 ..Default::default()
             });
+        } else if cancelled {
+            // 防御：failure 已由内层分支设置但仍上抛 PromptCancelled——补标结局。
+            if let Some(meta) = failure.as_mut() {
+                meta.outcome = PromptOutcome::Cancelled;
+            }
         }
         if let Err(persistence_error) =
             publish_prompt_failure(state, runtime, window, gateway, ctx, error, failure.as_ref()).await
@@ -1167,8 +1214,12 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             };
             let timeout_secs = timeout_bound.as_secs().max(1);
             let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            // P55-D3（出口 2）：截断判死 → cancel + settle 超时，回合以取消收口
+            // （用户 stop 或 provider 无输出判死）。failure 标 Cancelled →
+            // publish_prompt_failure 落 turn.cancelled。
             *failure = Some(PromptFailureMetadata {
                 source: "prompt-timeout",
+                outcome: PromptOutcome::Cancelled,
                 timeout_kind: Some(timeout_label),
                 configured_timeout_secs: Some(protocol.prompt_timeout()),
                 triggered_timeout_secs: Some(timeout_secs),
@@ -1390,6 +1441,7 @@ for line in sys.stdin:
     fn prompt_failure_metadata_keeps_timeout_provenance_additive() {
         let metadata = PromptFailureMetadata {
             source: "prompt-timeout",
+            outcome: PromptOutcome::Failed,
             timeout_kind: Some("first-token"),
             configured_timeout_secs: Some(180),
             triggered_timeout_secs: Some(2),
@@ -1403,6 +1455,96 @@ for line in sys.stdin:
         assert_eq!(value["triggeredTimeoutSecs"], 2);
         assert_eq!(value["actualElapsedMs"], 2_041);
         assert!(value.get("providerMessage").is_none());
+        // P55-D3：Failed（默认）结局不输出 outcome 字段——failure JSON 逐字节兼容。
+        assert!(value.get("outcome").is_none());
+    }
+
+    /// P55-D3（验收①·出口 1 跨层）：provider 对 session/prompt 回
+    /// stopReason=cancelled → finalize_response 取消出口上抛结构化
+    /// `PylonError::PromptCancelled`（不再混入 protocol_error 字符串）→
+    /// send_prompt_core 把 failure 标 Cancelled → publish_prompt_failure 依
+    /// `sessionUpdate:"cancelled"` 落 journal 行 `turn.cancelled`（非 turn.failed）。
+    #[tokio::test]
+    async fn cancelled_stop_reason_commits_turn_cancelled_row() {
+        const SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'prompt-cancel-session'}
+    elif method == 'session/prompt':
+        response['result']={'stopReason':'cancelled'}
+    print(json.dumps(response), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("prompt-cancel-agent", SCRIPT);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            prompt_timeout_secs: Some(5),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("prompt-cancel-agent")
+            .with_agent(agent)
+            .with_runtime("prompt-cancel-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        let context = PromptContext {
+            source: "local:prompt-cancel".to_string(),
+            profile_id: Some("profile-cancel".to_string()),
+            content: "stop me".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        let result = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            &context,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(PylonError::PromptCancelled)),
+            "cancelled stop reason 必须上抛 PromptCancelled（结构化判别）"
+        );
+
+        let owner_key = serde_json::to_string(&[
+            "profile-cancel",
+            "prompt-cancel-agent",
+            "local:prompt-cancel",
+        ])
+        .expect("owner key");
+        let page = event_service
+            .list_events(owner_key, None, 100)
+            .await
+            .expect("list canonical rows");
+        let cancelled_rows: Vec<_> = page
+            .events
+            .iter()
+            .filter(|row| row.event_type == "turn.cancelled")
+            .collect();
+        assert_eq!(
+            cancelled_rows.len(),
+            1,
+            "取消回合必须落一条 turn.cancelled（而非 turn.failed）"
+        );
+        let row = &cancelled_rows[0];
+        assert_eq!(row.raw_payload["update"]["sessionUpdate"], "cancelled");
+        assert_eq!(row.raw_payload["update"]["errorCode"], "prompt_cancelled");
+        assert_eq!(row.raw_payload["update"]["failure"]["outcome"], "cancelled");
+        assert_eq!(
+            row.typed_payload.as_ref().unwrap()["code"],
+            "prompt_cancelled"
+        );
+        assert_eq!(row.raw_payload["update"]["failure"]["source"], "provider");
     }
 
     /// 验收 D1-②：beforeSend transform 改写 wire 出站，但 journal 的

@@ -39,7 +39,12 @@ export function deriveCanonicalTurnDuration(
       if (timestamp !== undefined && startedAt === undefined) startedAt = timestamp
       continue
     }
-    if (event.eventType !== 'turn.completed' && event.eventType !== 'turn.failed') continue
+    if (
+      event.eventType !== 'turn.completed' &&
+      event.eventType !== 'turn.failed' &&
+      // P55-D3：取消（用户 stop / 判死截断）是终态之一，封口本回合。
+      event.eventType !== 'turn.cancelled'
+    ) continue
     if (startedAt === undefined || timestamp === undefined || timestamp < startedAt) continue
     latest = {
       elapsedMs: timestamp - startedAt,
@@ -64,7 +69,13 @@ export function deriveCanonicalTurnDuration(
 export function hasCanonicalTurnTerminal(
   events: readonly Pick<CanonicalTurnBoundaryEvent, 'eventType'>[],
 ): boolean {
-  return events.some(event => event.eventType === 'turn.completed' || event.eventType === 'turn.failed')
+  return events.some(
+    event =>
+      event.eventType === 'turn.completed' ||
+      event.eventType === 'turn.failed' ||
+      // P55-D3：取消是终态之一（三态终态：completed | failed | cancelled）。
+      event.eventType === 'turn.cancelled',
+  )
 }
 
 function parseTimestamp(value: string | undefined): number | undefined {

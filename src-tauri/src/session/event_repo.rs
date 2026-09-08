@@ -504,6 +504,9 @@ fn normalize_kernel_event(
         Some("tool_call_update") => "tool.call.updated",
         Some("done") => "turn.completed",
         Some("error") => "turn.failed",
+        // P55-D3：回合取消（用户 stop / 截断判死）——prompt 两取消出口合成
+        // `sessionUpdate:"cancelled"`，归一化为同名 canonical 事件。
+        Some("cancelled") => "turn.cancelled",
         _ => "unknown",
     };
 
@@ -555,7 +558,10 @@ fn normalize_kernel_event(
             }
             typed_payload.insert("tool".to_string(), serde_json::Value::Object(tool));
         }
-        if session_update == Some("error") {
+        // P55-D3：cancelled 与 error 同级提取 code/error 进 typed_payload——
+        // 现状用户 stop 落 turn.failed 时投影依赖 code 诊断，turn.cancelled
+        // 不丢信息（事件类型本身区分终态语义，payload 仅承载诊断）。
+        if matches!(session_update, Some("error" | "cancelled")) {
             if let Some(code) = non_empty_string(update.get("errorCode")) {
                 typed_payload.insert("code".to_string(), serde_json::Value::String(code));
             }
@@ -1487,6 +1493,42 @@ mod tests {
         assert_eq!(event.event_type, "unknown");
         assert_eq!(event.typed_payload, None);
         assert_eq!(event.raw_payload, malformed);
+    }
+
+    #[test]
+    fn kernel_ingest_normalizes_cancelled_as_turn_cancelled() {
+        let repo = repo();
+        let raw = serde_json::json!({
+            "source": "local:s1",
+            "update": {
+                "sessionUpdate": "cancelled",
+                "errorCode": "prompt_cancelled",
+                "error": "prompt cancelled",
+                "failure": { "source": "provider", "outcome": "cancelled" }
+            }
+        });
+
+        let result = repo
+            .ingest_kernel_event(kernel_input(raw.clone()))
+            .expect("ingest");
+        let event = &result.events[0];
+
+        // P55-D3：取消回合归一化为 turn.cancelled（三态终态之一），
+        // 与 turn.completed/turn.failed 同级——不再落入 unknown/turn.failed。
+        assert_eq!(event.event_type, "turn.cancelled");
+        assert_eq!(result.revision, 1);
+        assert_eq!(event.sequence, 1);
+        assert_eq!(event.raw_payload, raw);
+        // P55-D3：code/error 与 error 分支同级提取（typed_payload 键名沿用
+        // `code`/`error`，turn.failed 诊断载荷不因事件改名而丢失）。
+        assert_eq!(
+            event.typed_payload.as_ref().unwrap()["code"],
+            "prompt_cancelled"
+        );
+        assert_eq!(
+            event.typed_payload.as_ref().unwrap()["error"],
+            "prompt cancelled"
+        );
     }
 
     #[test]

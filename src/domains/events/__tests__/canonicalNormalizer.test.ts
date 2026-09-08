@@ -27,6 +27,8 @@ describe('canonicalEventTypeFor（wire → canonical 映射）', () => {
     ['tool_call_update', undefined, 'tool.call.updated'],
     ['done', undefined, 'turn.completed'],
     ['error', undefined, 'turn.failed'],
+    // P55-D3：与 Rust event_repo 归一化对齐（三态终态）。
+    ['cancelled', undefined, 'turn.cancelled'],
   ])('%s + %s → %s', (sessionUpdate, status, expected) => {
     expect(canonicalEventTypeFor(sessionUpdate, status)).toBe(expected)
   })

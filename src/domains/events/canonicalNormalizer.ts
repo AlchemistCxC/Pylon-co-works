@@ -169,6 +169,9 @@ export function canonicalEventTypeFor(sessionUpdate: unknown, status: unknown): 
       return 'turn.completed'
     case 'error':
       return 'turn.failed'
+    // P55-D3：与 Rust event_repo 归一化对齐——取消回合映射为同名 canonical 事件。
+    case 'cancelled':
+      return 'turn.cancelled'
     default:
       return 'unknown'
   }

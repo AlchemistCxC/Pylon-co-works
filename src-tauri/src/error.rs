@@ -33,6 +33,11 @@ pub enum PylonError {
     Io(String),
     #[error("ACP protocol: {0}")]
     Protocol(String),
+    /// P55-D3（turn.cancelled）：stopReason=cancelled 的结构化判别——此前与
+    /// refusal/unsupported 混在同一 `Protocol` 字符串里，publish_prompt_failure
+    /// 无法区分取消与失败；本变体让取消语义可判别（wire code: prompt_cancelled）。
+    #[error("prompt cancelled")]
+    PromptCancelled,
     /// canonical ingest 错误保留 EventError 的稳定机器码，避免 prompt 路径降级成
     /// 泛化 protocol_error 而丢失 recoverability 分类。
     #[error("Canonical event error: {0}")]
@@ -90,6 +95,7 @@ impl PylonError {
             Self::Serialize(_) => "serialize_error",
             Self::Io(_) => "io_error",
             Self::Protocol(_) => "protocol_error",
+            Self::PromptCancelled => "prompt_cancelled",
             Self::CanonicalEvent(error) => error.code(),
             Self::MessagePersistence(error) => error.code(),
             Self::DatabaseFutureSchema { .. } => "database_future_schema",
