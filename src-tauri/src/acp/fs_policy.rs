@@ -1,4 +1,4 @@
-//! Codeg filesystem runtime limits and path-policy constants.
+//! Upstream filesystem runtime limits and path-policy constants.
 //! Execution remains owned by the existing Pylon permission/runtime boundary.
 
 use std::time::Duration;
@@ -17,7 +17,7 @@ pub fn write_size_allowed(size: usize) -> bool { size <= MAX_WRITE_BYTES }
 mod tests {
     use super::*;
     #[test]
-    fn codeg_limits_are_stable() {
+    fn upstream_limits_are_stable() {
         assert_eq!(MAX_CONCURRENT_OPS, 8);
         assert_eq!(IO_TIMEOUT, Duration::from_secs(30));
         assert!(read_size_allowed(MAX_FILE_SIZE_BYTES));

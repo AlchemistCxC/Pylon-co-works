@@ -1,4 +1,4 @@
-//! Codeg terminal runtime limits. Execution and process ownership remain in
+//! Upstream terminal runtime limits. Execution and process ownership remain in
 //! Pylon's existing terminal boundary.
 
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub fn output_limit(requested: Option<usize>) -> usize {
 mod tests {
     use super::*;
     #[test]
-    fn codeg_terminal_limits_and_default_are_stable() {
+    fn upstream_terminal_limits_and_default_are_stable() {
         assert_eq!(output_limit(None), 1_000_000);
         assert_eq!(output_limit(Some(123)), 123);
         assert_eq!(READER_DRAIN_GRACE, Duration::from_millis(200));
