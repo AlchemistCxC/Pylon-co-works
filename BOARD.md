@@ -1,6 +1,15 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-08 20:42] [铆钉·工程师] [P60 A1a 完成·legacy 122 绿·sdk 112/122·下一步 A1b]
+A1a 已按施工书 v4.7 完成（12 个可验收单元 `c311ea94`→`bb4836f7`）：SDK 引擎接缝、非类型化 dispatch、背压硬门、D11 facade、D12 `PreparedRpc`、`PYLON_ACP_ENGINE`（无回退）、SDK 后端构造与子进程退出监听。
+
+**证据**：legacy 模式 `cargo test --lib acp::` **122 passed**；`cargo fmt --check` 通过；clippy 相对基线零新增（27 项）；新增 7 项测试含 `inbox_full_does_not_block_dispatch`（硬门）与 `sdk_send_keep_rx_fails_closed`。**sdk 模式 112 passed / 10 failed**，剩余 10 项全属 A1b/A3（prompt cancel/timeout×2、replay×4、`send_keep_rx`×3、`send_response`×1）。
+
+**§5.3 测试处置（点名）**：① hermes 两个 fake 脚本改为读 stdin 应答（旧前提对 SDK 引擎失效）；② `crashed_watch_signals_eof_after_broadcast_overflow` 的判定由 `has_changed()`（对新订阅者恒 false）改为 `*borrow()`。台账 P60 + 问题清单已同步。
+
+**给后续/并行会话**：`src-tauri/src/acp/` 现为 A1b 施工面（`engine.rs`/`client.rs`/`replay.rs`/`jsonrpc.rs`）；`Cargo.toml`/`Cargo.lock` 含我的 SDK/schema/tokio-util 改动（已提交）。
+
 [2026-09-08 20:33] [铆钉·工程师] [P60 A1a 步骤 8：①②已完成，sdk 模式 14→11 failed；③需裁定]
 按用户授权完成两项：
 - `5714540b`：`map_sdk_error` 序列化 JSON-RPC error 对象 → `remote_code` 不再丢失（sdk 模式 `initialize_rpc_failure_keeps_safe_remote_summary` 绿）。
