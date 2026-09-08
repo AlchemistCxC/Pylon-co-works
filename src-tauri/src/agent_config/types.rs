@@ -369,6 +369,25 @@ impl AcpProtocolConfig {
             .clone()
             .unwrap_or_else(default_initialize_caps)
     }
+
+    /// Catalog-driven capabilities when the profile does not provide an
+    /// explicit override. Explicit YAML remains authoritative.
+    pub fn initialize_caps_for_provider(&self, provider: Option<&str>) -> serde_json::Value {
+        if self.initialize_caps.is_some() { return self.initialize_caps() }
+        let mut caps = default_initialize_caps();
+        let Some(provider) = provider else { return caps };
+        let Ok(Some(policy)) = crate::provider_adapter::field(provider, "clientCapabilities") else { return caps };
+        if let (Some(base), Some(extra)) = (caps.as_object_mut(), policy.as_object()) {
+            for (key, value) in extra {
+                if key == "_meta" {
+                    if let (Some(base_meta), Some(extra_meta)) = (base.get_mut("_meta").and_then(serde_json::Value::as_object_mut), value.as_object()) {
+                        base_meta.extend(extra_meta.clone());
+                    }
+                } else { base.insert(key.clone(), value.clone()); }
+            }
+        }
+        caps
+    }
 }
 
 /// D2 双格式反序列化：bool（true=set_model / false=config_option）或字符串

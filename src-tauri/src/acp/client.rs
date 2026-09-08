@@ -388,7 +388,7 @@ impl AcpClient {
                         METHOD_INITIALIZE,
                         serde_json::json!({
                             "protocolVersion": client.protocol.protocol_version(),
-                            "clientCapabilities": client.protocol.initialize_caps(),
+                            "clientCapabilities": client.protocol.initialize_caps_for_provider(agent.provider.as_deref()),
                             "clientInfo": client.protocol.client_info()
                         }),
                     )
