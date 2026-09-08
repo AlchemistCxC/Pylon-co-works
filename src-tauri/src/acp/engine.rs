@@ -70,6 +70,10 @@ pub(crate) struct SdkBackend {
     /// D12：Pylon 相关 id 的本地计数器（wire id 永不暴露）。
     pub(crate) next_id: Arc<AtomicU64>,
     pub(crate) inbound: NotificationInbox,
+    /// A1b：入站帧的 replay 观察扇出（legacy `rx` 的对应物）。
+    pub(crate) replay_events: broadcast::Sender<ClassifiedMessage>,
+    /// A1b：进行中的 replay 采集（Pylon id → sessionId），用于把匹配通知标记为 Replay。
+    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
     pub(crate) shutdown: watch::Sender<bool>,
     pub(crate) join: tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>,
 }
@@ -560,6 +564,10 @@ where
 
 /// 启动 SDK 客户端连接任务：非类型化 dispatch → 有界入站队列（满时丢帧不阻塞），
 /// `on_close` 置关闭信号；`shutdown` 触发时 `main_fn` 返回、连接收敛。
+#[allow(
+    clippy::too_many_arguments,
+    reason = "装配函数：参数量随 A1b replay 扇出增加；A1c 收敛后端后合并为结构体"
+)]
 pub(crate) fn spawn_sdk_client(
     config: SdkEngineConfig,
     inbound_tx: tokio::sync::mpsc::Sender<ClassifiedMessage>,
@@ -568,6 +576,8 @@ pub(crate) fn spawn_sdk_client(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     crashed: Arc<AtomicBool>,
     crashed_watch: watch::Sender<bool>,
+    replay_events: broadcast::Sender<ClassifiedMessage>,
+    active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
 ) -> tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>> {
     let crashed_eof = crashed.clone();
     let crashed_watch_eof = crashed_watch.clone();
@@ -578,6 +588,8 @@ pub(crate) fn spawn_sdk_client(
             .on_receive_dispatch(
                 move |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
                     let tx = inbound_tx.clone();
+                    let replay_events = replay_events.clone();
+                    let active_replay_requests = active_replay_requests.clone();
                     async move {
                         match message {
                             // 响应必须交回 SDK 的 SentRequest：若被 handler 认领而不路由，
@@ -586,8 +598,30 @@ pub(crate) fn spawn_sdk_client(
                                 router.route_with_result(result)?;
                             }
                             request_or_notification => {
-                                if let Some(inbound) = classify_untyped(request_or_notification) {
-                                    if let Err(error) = tx.try_send(inbound) {
+                                if let Some(mut classified) = classify_untyped(request_or_notification) {
+                                    // A1b：进行中的 replay 采集把匹配 sessionId 的通知
+                                    // 标记为 Replay（供 `load_session_with_replay` 收集）。
+                                    if let Some(session_id) = classified
+                                        .raw
+                                        .params
+                                        .as_ref()
+                                        .and_then(|params| params.get("sessionId"))
+                                        .and_then(serde_json::Value::as_str)
+                                    {
+                                        if let Ok(active) = active_replay_requests.lock() {
+                                            if let Some((request_id, _)) = active
+                                                .iter()
+                                                .find(|(_, id)| id.as_str() == session_id)
+                                            {
+                                                classified.classification =
+                                                    super::ReplayClassification::Replay {
+                                                        request_id: *request_id,
+                                                    };
+                                            }
+                                        }
+                                    }
+                                    let _ = replay_events.send(classified.clone());
+                                    if let Err(error) = tx.try_send(classified) {
                                         match error {
                                             tokio::sync::mpsc::error::TrySendError::Full(_) => {
                                                 tracing::warn!(
@@ -738,6 +772,9 @@ pub(crate) fn spawn_sdk_engine(
     let (inbound_tx, inbound_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
     let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CHAN_CAP);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (replay_events, _) = broadcast::channel(super::BROADCAST_CAP);
+    let active_replay_requests: Arc<Mutex<HashMap<u64, String>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let join = spawn_sdk_client(
         SdkEngineConfig {
@@ -750,6 +787,8 @@ pub(crate) fn spawn_sdk_engine(
         shutdown_rx,
         crashed,
         crashed_watch,
+        replay_events.clone(),
+        active_replay_requests.clone(),
     );
 
     Ok(SdkEngineHandles {
@@ -757,6 +796,8 @@ pub(crate) fn spawn_sdk_engine(
             outbound: outbound_tx,
             next_id: Arc::new(AtomicU64::new(1)),
             inbound: NotificationInbox::new(inbound_rx),
+            replay_events,
+            active_replay_requests,
             shutdown: shutdown_tx,
             join,
         },
@@ -800,6 +841,8 @@ mod tests {
             shutdown_rx,
             crashed.clone(),
             crashed_watch,
+            tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
         let frame = serde_json::json!({
@@ -858,6 +901,8 @@ mod tests {
             shutdown_rx,
             Arc::new(AtomicBool::new(false)),
             crashed_watch,
+            tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
         // agent 端：读一条请求，按原 id 回一条 result；保持写端存活直到测试拿到响应，
@@ -928,6 +973,8 @@ mod tests {
             shutdown_rx,
             Arc::new(AtomicBool::new(false)),
             crashed_watch,
+            tokio::sync::broadcast::channel(8).0,
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         );
 
         let (hold_tx, hold_rx) = tokio::sync::oneshot::channel::<()>();
@@ -1061,6 +1108,64 @@ mod tests {
 
         bridge.abort();
         let _ = bridge.await;
+    }
+
+    /// A1b 步骤 4 前置：进行中 replay 采集的 session 通知必须被标记为 Replay。
+    #[tokio::test]
+    async fn sdk_inbound_replay_notification_is_classified() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let (_, mut agent_write) = tokio::io::split(agent_io);
+
+        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
+        let _outbound_tx = outbound_tx;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
+        let (replay_tx, mut replay_rx) = tokio::sync::broadcast::channel(8);
+        let active: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        active.lock().unwrap().insert(42, "s-1".to_string());
+
+        let handle = spawn_sdk_client(
+            engine_config(),
+            inbound_tx,
+            outbound_rx,
+            byte_streams(client_read, client_write),
+            shutdown_rx,
+            Arc::new(AtomicBool::new(false)),
+            crashed_watch,
+            replay_tx,
+            active,
+        );
+
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "x"}}}
+        });
+        agent_write
+            .write_all(
+                format!(
+                    "{frame}
+"
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("agent write");
+        agent_write.flush().await.expect("agent flush");
+
+        let classified = tokio::time::timeout(Duration::from_secs(5), replay_rx.recv())
+            .await
+            .expect("broadcast must deliver")
+            .expect("broadcast must stay open");
+        assert!(matches!(
+            classified.classification,
+            super::super::ReplayClassification::Replay { request_id: 42 }
+        ));
+
+        let _ = shutdown_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
 
     /// A1b 步骤 3 前置：SDK 的 `SentRequest` 被 drop 会自动发 `$/cancel_request`
