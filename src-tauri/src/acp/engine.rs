@@ -729,6 +729,7 @@ pub(crate) fn spawn_sdk_engine(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::correlation::RuntimeCorrelation;
     use agent_client_protocol::schema::v1::RequestId;
     use agent_client_protocol::{RawJsonRpcMessage, TransportFrame};
     use std::time::Duration;
