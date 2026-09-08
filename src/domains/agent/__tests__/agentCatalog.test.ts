@@ -1,7 +1,32 @@
 import { describe, expect, it } from 'vitest'
 import { builtinAgentCatalog, parseAgentCatalog } from '../agentCatalog.ts'
+import rawCatalog from '../../../../shared/agent-catalog.json' with { type: 'json' }
+import detectionFixture from '../../../../shared/agent-catalog-detection.fixture.json' with { type: 'json' }
 
 describe('Shared Agent Catalog', () => {
+  it('parses structured v2 detection fields without changing their values', () => {
+    const document = structuredClone(rawCatalog)
+    Object.assign(document.providers[0].detection, detectionFixture)
+    expect(parseAgentCatalog(document).providers[0].detection).toMatchObject(detectionFixture)
+  })
+
+  it('defaults missing v2 detection extensions to an empty policy', () => {
+    const document = structuredClone(rawCatalog)
+    const detection = document.providers[0].detection as Record<string, unknown>
+    for (const key of Object.keys(detectionFixture)) delete detection[key]
+    expect(parseAgentCatalog(document).providers[0].detection).toMatchObject({ versionArgs: [], packageManager: null, requires: { node: null, uv: null }, checks: [] })
+  })
+
+  it.each([
+    { packageManager: 'npx' }, { requires: [] }, { checks: ['node-min'] },
+    { packageManager: { kind: 'npm' } }, { requires: { python: '3' } },
+    { checks: [{ ...detectionFixture.checks[0], kind: 'shell' }] },
+    { checks: [{ ...detectionFixture.checks[0], fix: { kind: 'execute', payload: 'command' } }] },
+  ])('rejects invalid detection policy %j', invalid => {
+    const document = structuredClone(rawCatalog)
+    Object.assign(document.providers[0].detection, invalid)
+    expect(() => parseAgentCatalog(document)).toThrow()
+  })
   it('projects one provider baseline into descriptors, detectors and tools', () => {
     expect(builtinAgentCatalog.providers()).toEqual(['peri', 'hermes', 'claude-code'])
     expect(builtinAgentCatalog.descriptors().map(entry => entry.provider)).toEqual(builtinAgentCatalog.providers())

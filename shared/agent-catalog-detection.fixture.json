@@ -1,0 +1,9 @@
+{
+  "versionArgs": ["--version"],
+  "packageManager": { "kind": "npx", "package": "@agentclientprotocol/claude-agent-acp@0.75.1", "cmd": "claude-agent-acp" },
+  "requires": { "node": "22.12.0", "uv": null },
+  "checks": [
+    { "id": "node-min", "label": "Node.js", "kind": "node-min", "params": { "min": "22.12.0" }, "fix": { "kind": "open-url", "payload": "https://nodejs.org" } },
+    { "id": "adapter-present", "label": "ACP adapter", "kind": "adapter-present", "params": {}, "fix": { "kind": "install-adapter", "payload": "@agentclientprotocol/claude-agent-acp@0.75.1" } }
+  ]
+}

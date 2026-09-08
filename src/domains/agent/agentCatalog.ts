@@ -19,10 +19,17 @@ interface CatalogDetection {
   invocations: CatalogInvocation[]
   configDirs: string[]
   configEvidence: CatalogConfigEvidence[]
-  versionArgs?: string[]
-  packageManager?: string
-  requires?: string[]
-  checks?: string[]
+  versionArgs: string[]
+  packageManager: { kind: 'npx' | 'uvx' | 'binary' | 'none'; package: string | null; cmd: string | null } | null
+  requires: { node: string | null; uv: string | null }
+  checks: CatalogCheck[]
+}
+interface CatalogCheck {
+  id: string
+  label: string
+  kind: 'node-min' | 'uv-min' | 'binary-present' | 'adapter-present' | 'config-evidence'
+  params: Record<string, unknown>
+  fix: { kind: 'open-url' | 'install-adapter' | 'install-uv'; payload: string } | null
 }
 interface CatalogTool {
   name: string
@@ -53,6 +60,46 @@ const INTERACTION_KINDS = new Set<InteractionKind>(['clarify', 'ask-question', '
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Agent Catalog ${label} 必须是对象`)
   return value as Record<string, unknown>
+}
+
+function strictObject(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
+  const parsed = object(value, label)
+  for (const key of Object.keys(parsed)) if (!keys.includes(key)) throw new Error(`Agent Catalog ${label} 未知字段：${key}`)
+  return parsed
+}
+
+function nullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new Error(`Agent Catalog ${label} 必须是字符串`)
+  return value
+}
+
+function detectionExtensions(detection: Record<string, unknown>): Pick<CatalogDetection, 'versionArgs' | 'packageManager' | 'requires' | 'checks'> {
+  let packageManager: CatalogDetection['packageManager'] = null
+  if (detection.packageManager !== undefined && detection.packageManager !== null) {
+    const manager = strictObject(detection.packageManager, 'packageManager', ['kind', 'package', 'cmd'])
+    if (!['npx', 'uvx', 'binary', 'none'].includes(String(manager.kind))) throw new Error('Agent Catalog packageManager.kind 非法')
+    packageManager = { kind: manager.kind as NonNullable<CatalogDetection['packageManager']>['kind'], package: nullableString(manager.package, 'packageManager.package'), cmd: nullableString(manager.cmd, 'packageManager.cmd') }
+  }
+  const requirements = detection.requires === undefined ? {} : strictObject(detection.requires, 'requires', ['node', 'uv'])
+  const rawChecks = detection.checks === undefined ? [] : detection.checks
+  if (!Array.isArray(rawChecks)) throw new Error('Agent Catalog checks 必须是数组')
+  const checks = rawChecks.map((value): CatalogCheck => {
+    const check = strictObject(value, 'check', ['id', 'label', 'kind', 'params', 'fix'])
+    if (!['node-min', 'uv-min', 'binary-present', 'adapter-present', 'config-evidence'].includes(String(check.kind))) throw new Error('Agent Catalog check.kind 非法')
+    if (typeof check.id !== 'string' || typeof check.label !== 'string') throw new Error('Agent Catalog check.id/label 必须是字符串')
+    let fix: CatalogCheck['fix'] = null
+    if (check.fix !== undefined && check.fix !== null) {
+      const rawFix = strictObject(check.fix, 'check.fix', ['kind', 'payload'])
+      if (!['open-url', 'install-adapter', 'install-uv'].includes(String(rawFix.kind))) throw new Error('Agent Catalog check.fix.kind 非法')
+      if (typeof rawFix.payload !== 'string') throw new Error('Agent Catalog check.fix.payload 必须是字符串')
+      fix = { kind: rawFix.kind as NonNullable<CatalogCheck['fix']>['kind'], payload: rawFix.payload }
+    }
+    return { id: check.id, label: check.label, kind: check.kind as CatalogCheck['kind'], params: object(check.params, 'check.params'), fix }
+  })
+  const versionArgs = detection.versionArgs === undefined ? [] : detection.versionArgs
+  if (!Array.isArray(versionArgs) || versionArgs.some(value => typeof value !== 'string')) throw new Error('Agent Catalog versionArgs 必须是字符串数组')
+  return { versionArgs: [...versionArgs], packageManager, requires: { node: nullableString(requirements.node, 'requires.node'), uv: nullableString(requirements.uv, 'requires.uv') }, checks }
 }
 
 function nonEmpty(value: unknown, label: string): string {
@@ -110,10 +157,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
       if (fields.length === 0) throw new Error(`Agent Catalog ${provider}.detection.configEvidence.fields 不能为空`)
       return { relativePath, format: evidence.format, fields }
     })
-    const versionArgs = detection.versionArgs === undefined ? [] : stringList(detection.versionArgs, `${provider}.detection.versionArgs`)
-    const requires = detection.requires === undefined ? [] : stringList(detection.requires, `${provider}.detection.requires`)
-    const checks = detection.checks === undefined ? [] : stringList(detection.checks, `${provider}.detection.checks`)
-    if (detection.packageManager !== undefined && typeof detection.packageManager !== 'string') throw new Error(`Agent Catalog ${provider}.detection.packageManager 必须是字符串`)
+    const extensions = detectionExtensions(detection)
     if (!Array.isArray(raw.tools)) throw new Error(`Agent Catalog ${provider}.tools 必须是数组`)
     const seenTools = new Set<string>()
     const tools = raw.tools.map((rawTool, toolIndex): CatalogTool => {
@@ -155,10 +199,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         invocations,
         configDirs: stringList(detection.configDirs, `${provider}.detection.configDirs`),
         configEvidence: parsedConfigEvidence,
-        versionArgs,
-        ...(detection.packageManager === undefined ? {} : { packageManager: nonEmpty(detection.packageManager, `${provider}.detection.packageManager`) }),
-        requires,
-        checks,
+        ...extensions,
       },
       tools,
     }

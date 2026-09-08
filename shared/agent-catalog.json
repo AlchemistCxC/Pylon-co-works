@@ -16,6 +16,10 @@
       "protocolDefaults": { "setModelApi": "config_option" },
       "detection": {
         "detectorId": "builtin.detector.peri",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [{ "command": "peri", "args": ["acp"] }],
         "configDirs": [".peri"],
@@ -59,6 +63,10 @@
       "protocolDefaults": { "setModelApi": "set_model" },
       "detection": {
         "detectorId": "builtin.detector.hermes",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [
           { "command": "hermes", "args": ["acp"] },
@@ -108,6 +116,10 @@
       "protocolDefaults": { "setModelApi": "config_option" },
       "detection": {
         "detectorId": "builtin.detector.claude-code",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [
           { "command": "ccb", "args": ["--acp"] },

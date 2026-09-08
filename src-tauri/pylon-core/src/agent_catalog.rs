@@ -29,11 +29,55 @@ struct CatalogDetection {
     #[serde(default)]
     version_args: Vec<String>,
     #[serde(default)]
-    package_manager: Option<String>,
+    package_manager: Option<CatalogPackageManager>,
     #[serde(default)]
-    requires: Vec<String>,
+    requires: CatalogRequirements,
     #[serde(default)]
-    checks: Vec<String>,
+    checks: Vec<CatalogCheck>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogPackageManagerKind { Npx, Uvx, Binary, None }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogPackageManager {
+    pub kind: CatalogPackageManagerKind,
+    pub package: Option<String>,
+    pub cmd: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogRequirements {
+    pub node: Option<String>,
+    pub uv: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogCheckKind { NodeMin, UvMin, BinaryPresent, AdapterPresent, ConfigEvidence }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogFixKind { OpenUrl, InstallAdapter, InstallUv }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogFix {
+    pub kind: CatalogFixKind,
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogCheck {
+    pub id: String,
+    pub label: String,
+    pub kind: CatalogCheckKind,
+    pub params: serde_json::Map<String, serde_json::Value>,
+    pub fix: Option<CatalogFix>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -144,6 +188,10 @@ pub struct AgentDetectionProfile {
     pub invocations: Vec<CatalogInvocation>,
     pub config_dirs: Vec<String>,
     pub config_evidence: Vec<CatalogConfigEvidence>,
+    pub version_args: Vec<String>,
+    pub package_manager: Option<CatalogPackageManager>,
+    pub requires: CatalogRequirements,
+    pub checks: Vec<CatalogCheck>,
 }
 
 static CATALOG: OnceLock<Result<CatalogDocument, String>> = OnceLock::new();
@@ -304,6 +352,10 @@ pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
             invocations: entry.detection.invocations.clone(),
             config_dirs: entry.detection.config_dirs.clone(),
             config_evidence: entry.detection.config_evidence.clone(),
+            version_args: entry.detection.version_args.clone(),
+            package_manager: entry.detection.package_manager.clone(),
+            requires: entry.detection.requires.clone(),
+            checks: entry.detection.checks.clone(),
         })
         .collect::<Vec<_>>();
     // Stable sort preserves catalog order for equal-priority providers.
@@ -357,6 +409,44 @@ pub fn protocol_profiles() -> Result<Vec<CatalogProtocolProfile>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detection_v2_fixture_and_empty_defaults() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../shared/agent-catalog-detection.fixture.json")).unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        let detection = document["providers"][0]["detection"].as_object_mut().unwrap();
+        detection.extend(fixture.as_object().unwrap().clone());
+        let parsed = parse_catalog(&document.to_string()).unwrap();
+        let policy = &parsed.providers[0].detection;
+        assert_eq!(serde_json::to_value(&policy.version_args).unwrap(), fixture["versionArgs"]);
+        assert_eq!(serde_json::to_value(&policy.package_manager).unwrap(), fixture["packageManager"]);
+        assert_eq!(serde_json::to_value(&policy.requires).unwrap(), fixture["requires"]);
+        assert_eq!(serde_json::to_value(&policy.checks).unwrap(), fixture["checks"]);
+        let detection = document["providers"][0]["detection"].as_object_mut().unwrap();
+        for key in fixture.as_object().unwrap().keys() { detection.remove(key); }
+        let parsed = parse_catalog(&document.to_string()).unwrap();
+        let policy = &parsed.providers[0].detection;
+        assert!(policy.version_args.is_empty() && policy.checks.is_empty());
+        assert!(policy.package_manager.is_none());
+        assert_eq!(serde_json::to_value(&policy.requires).unwrap(), serde_json::json!({"node": null, "uv": null}));
+    }
+
+    #[test]
+    fn detection_v2_rejects_wrong_shapes_and_unknown_kinds() {
+        for invalid in [
+            serde_json::json!({"packageManager": "npx"}),
+            serde_json::json!({"requires": []}),
+            serde_json::json!({"checks": ["node-min"]}),
+            serde_json::json!({"packageManager": {"kind": "npm"}}),
+            serde_json::json!({"requires": {"python": "3"}}),
+            serde_json::json!({"checks": [{"id":"x", "label":"x", "kind":"shell", "params":{}}]}),
+            serde_json::json!({"checks": [{"id":"x", "label":"x", "kind":"node-min", "params":{}, "fix":{"kind":"execute", "payload":"command"}}]}),
+        ] {
+            let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+            document["providers"][0]["detection"].as_object_mut().unwrap().extend(invalid.as_object().unwrap().clone());
+            assert!(parse_catalog(&document.to_string()).is_err(), "accepted {invalid}");
+        }
+    }
 
     #[test]
     fn shared_catalog_is_valid_and_excludes_rpc_only_pi() {
