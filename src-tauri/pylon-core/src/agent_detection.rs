@@ -815,8 +815,8 @@ async fn version_probe(
     }
     let stdout = stdout.unwrap_or_default();
     let stderr = stderr.unwrap_or_default();
-    let text = if stdout.is_empty() { stderr } else { stdout };
-    let version = extract_version_token(&String::from_utf8_lossy(&text)).map(|value| {
+    let version = extract_version_token(&String::from_utf8_lossy(&stdout))
+        .or_else(|| extract_version_token(&String::from_utf8_lossy(&stderr))).map(|value| {
         value.chars().take(160).collect::<String>()
     });
     if version.is_none() {
@@ -1449,22 +1449,26 @@ mod tests {
         #[cfg(windows)]
         let (executable, args) = {
             let path = root.join("probe.cmd");
-            std::fs::write(&path, "@echo off\r\necho 1.2.3\r\n").unwrap();
+            std::fs::write(&path, "@echo off\r\necho startup notice\r\nif \"%1 %2\"==\"version --numeric\" (\r\n  echo 1.2.3 1>&2\r\n  exit /b 0\r\n)\r\nif \"%1 %2\"==\"--version \" (\r\n  echo 2.3.4 1>&2\r\n  exit /b 0\r\n)\r\nexit /b 7\r\n").unwrap();
             (path, vec!["version".to_string(), "--numeric".to_string()])
         };
         #[cfg(unix)]
         let (executable, args) = {
             let path = root.join("probe.sh");
-            std::fs::write(&path, "printf '1.2.3\\n'\n").unwrap();
-            (PathBuf::from("/bin/sh"), vec![path.to_string_lossy().into_owned(), "version".into(), "--numeric".into()])
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(&path, "#!/bin/sh\necho 'startup notice'\ncase \"$*\" in\n'version --numeric') echo '1.2.3' >&2;;\n'--version') echo '2.3.4' >&2;;\n*) exit 7;;\nesac\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            (path, vec!["version".into(), "--numeric".into()])
         };
         let result = version_probe("fixture", executable.clone(), &args, Duration::from_secs(2)).await;
         assert_eq!(result.version.as_deref(), Some("1.2.3"));
         assert_eq!(result.startability, Startability::Verified);
-        #[cfg(windows)]
         {
-            let default = version_probe("fixture", executable, &[], Duration::from_secs(2)).await;
-            assert_eq!(default.version.as_deref(), Some("1.2.3"));
+            let default = version_probe("fixture", executable.clone(), &[], Duration::from_secs(2)).await;
+            assert_eq!(default.version.as_deref(), Some("2.3.4"));
+            let invalid = version_probe("fixture", executable, &["acp".into()], Duration::from_secs(2)).await;
+            assert_eq!(invalid.startability, Startability::Failed);
+            assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
         }
         std::fs::remove_dir_all(root).unwrap();
     }
