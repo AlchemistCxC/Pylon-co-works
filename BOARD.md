@@ -434,3 +434,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A3-2 完成：normalize_kernel_event 对 done 提取 stopReason/usage/model 到 typed_payload，payloadVersion 保持 1，明确不写 durationMs；新增 additive completion 测试与 7 variant 矩阵测试均通过。
 
 [2026-09-09 继续] [主施工员·工程师] A3-4 导出收口：生产 acp_wire_trace_snapshot(jsonl) 改为按完整 JSONL 行计量 4MiB 预算，不再字符截断半行；complete/firstOrdinal/lastOrdinal/droppedCount/reason 与保留记录一致。A3-2 completion typed payload 与测试已通过。
+
+[2026-09-09 继续] [主施工员·工程师] A3-2 补验：新增 turn.completed typed_payload 测试验证 stopReason/usage/model 保留、payloadVersion=1 且无 durationMs；定向测试通过。
