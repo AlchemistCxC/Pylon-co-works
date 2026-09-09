@@ -861,12 +861,40 @@ async fn revive_session_slot(
         state.protocol_for_runtime(runtime).mcp_servers,
     )
     .map_err(PylonError::Protocol)?;
-    let response = match state
-        .acp_rpc(runtime, crate::acp::METHOD_SESSION_LOAD, params)
-        .await
-    {
-        Ok(response) => response,
-        Err(error) => {
+    let resume_advertised = state
+        .active_runtime()
+        .and_then(|_| runtime.acp.try_lock().ok())
+        .and_then(|acp| acp.agent_capabilities().cloned())
+        .and_then(|caps| caps.get("sessionCapabilities").cloned())
+        .and_then(|caps| caps.get("resume").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false);
+    let response = if resume_advertised {
+        let resume_params = crate::acp::resume_params(
+            peri_id,
+            session_cwd,
+            wire_mcp_servers.to_vec(),
+        )
+        .map_err(PylonError::Protocol)?;
+        match state
+            .acp_rpc(runtime, crate::acp::METHOD_SESSION_RESUME, resume_params)
+            .await
+        {
+            Ok(response) => Some(response),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    let response = match response {
+        Some(response) => response,
+        None => {
+            let load_result = state
+                .acp_rpc(runtime, crate::acp::METHOD_SESSION_LOAD, params)
+                .await;
+            if let Ok(response) = load_result {
+                response
+            } else {
+            let error = "session resume/load failed";
             state.log_runtime_summary(
                 "info",
                 "session",
@@ -884,6 +912,7 @@ async fn revive_session_slot(
                 ]),
             );
             return Ok(None);
+            }
         }
     };
     state.ensure_generation(runtime, generation)?;

@@ -9,6 +9,7 @@ pub const METHOD_SESSION_NEW: &str = AGENT_METHOD_NAMES.session_new;
 pub const METHOD_SESSION_PROMPT: &str = AGENT_METHOD_NAMES.session_prompt;
 pub const METHOD_SESSION_CLOSE: &str = AGENT_METHOD_NAMES.session_close;
 pub const METHOD_SESSION_LOAD: &str = AGENT_METHOD_NAMES.session_load;
+pub const METHOD_SESSION_RESUME: &str = AGENT_METHOD_NAMES.session_resume;
 pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;
 pub const METHOD_SESSION_SET_MODE: &str = AGENT_METHOD_NAMES.session_set_mode;
 pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = AGENT_METHOD_NAMES.session_set_config_option;

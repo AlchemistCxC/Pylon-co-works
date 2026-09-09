@@ -10,6 +10,7 @@ use std::io::Read;
 
 use agent_client_protocol_schema::v1::{
     CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    ResumeSessionRequest,
     SessionConfigOptionValue, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 
@@ -323,6 +324,21 @@ pub(crate) fn load_params(
                 }
             }
         }
+    }
+    Ok(params)
+}
+
+/// session/resume parameters.  Resume is intentionally schema-backed; unlike
+/// load it has no provider-specific fields beyond the standard MCP list.
+pub(crate) fn resume_params(
+    session_id: &str,
+    cwd: &str,
+    mcp_servers: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let req = ResumeSessionRequest::new(session_id.to_string(), cwd.to_string());
+    let mut params = to_params(&req, "session/resume")?;
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
     }
     Ok(params)
 }

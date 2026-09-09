@@ -4,6 +4,7 @@
 //! to per-session channels. No lock contention between concurrent sessions.
 //! stderr is drained in a background thread to prevent pipe buffer deadlock.
 
+pub mod adapter;
 mod capabilities;
 mod client;
 mod engine;
@@ -45,7 +46,7 @@ pub(crate) use engine::{
 };
 pub use engine::{CrashReason, BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP};
 pub(crate) use protocol::{
-    load_params, prompt_blocks, prompt_stop_reason, session_id_from, session_prompt_params,
+    load_params, prompt_blocks, prompt_stop_reason, resume_params, session_id_from, session_prompt_params,
 };
 pub use protocol::{
     session_close_params, session_new_params, session_set_config_option_params,
