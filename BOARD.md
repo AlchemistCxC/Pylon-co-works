@@ -444,3 +444,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A-DETECT 复验：pylon-core preflight 已真实消费 catalog checks，NodeMin fail、UvMin warn、未知 provider fail-closed；新增 claude-code 状态矩阵测试，验证无安装副作用。preflight 定向 5 项全绿。
 
 [2026-09-09 继续] [主施工员·工程师] A-DETECT 复验纠偏：catalog 当前 checks 对三 provider 均为空，因此原拟 Node/uv 状态矩阵测试不具备真实输入，已删除该无效测试（未锁定行为）；保留 preflight parser/version/unknown-provider 4 项全绿，避免伪造 catalog 检查契约。
+
+[2026-09-09 继续] [主施工员·工程师] A-DETECT 设计点：pylon-detect CLI 当前把 binary/config evidence 传给 preflight，但未把 candidate version evidence 映射到 node/uv；catalog 三 provider 的 checks/requires 为空，无法安全猜测版本来源。需 catalog 明确 requires/checks 后再接版本分流；已保留只读检测与无安装边界，不伪造状态。
