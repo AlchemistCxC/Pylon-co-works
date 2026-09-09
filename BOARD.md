@@ -436,3 +436,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A3-4 导出收口：生产 acp_wire_trace_snapshot(jsonl) 改为按完整 JSONL 行计量 4MiB 预算，不再字符截断半行；complete/firstOrdinal/lastOrdinal/droppedCount/reason 与保留记录一致。A3-2 completion typed payload 与测试已通过。
 
 [2026-09-09 继续] [主施工员·工程师] A3-2 补验：新增 turn.completed typed_payload 测试验证 stopReason/usage/model 保留、payloadVersion=1 且无 durationMs；定向测试通过。
+
+[2026-09-09 继续] [主施工员·工程师] A-CATALOG 复验：Rust pylon-core 使用 deny_unknown_fields + schemaVersion=2 fail-closed，新增 v1 与未知顶层字段拒绝测试；shared catalog v2/默认 detection 已有双侧解析测试。catalog 定向通过。
