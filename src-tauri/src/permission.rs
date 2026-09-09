@@ -301,6 +301,18 @@ async fn resolve_pending(
         restore_pending(runtime, canonical_id, claimed);
         return false;
     }
+    // The pending entry carries the only reliable session binding.  Update the
+    // reducer only after the wire response commits, so a failed send remains
+    // retryable and cannot prematurely drain state.
+    if let Some(permission) = claimed.as_ref() {
+        if let Ok(mut sessions) = runtime.sessions.lock() {
+            if let Some(session) = sessions.get_mut(&permission.session_id) {
+                let _ = session
+                    .acp_state
+                    .resolve_permission(&canonical_id.to_string());
+            }
+        }
+    }
     true
 }
 
