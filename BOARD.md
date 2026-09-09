@@ -412,3 +412,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A1a/A1c review：当前 AcpClient 已收敛为单一 SdkBackend，未发现公开签名泄露 SDK 类型；cargo test --lib acp:: 129 passed。施工书早期 feature flag/legacy 要求已被后续 D11/A1c 收敛决策取代，未新增改动。
 
 [2026-09-09 继续] [主施工员·工程师] A2-state-core review：dispatcher 已消费 reducer delta，但仅 Usage 镜像到 SessionInfo；tool/permission/mode/model/plan 仍由旧事务处理，尚未满足施工书 A2 的逐域取代目标。继续施工需跨 SessionInfo 字段与 canonical 事务，当前范围契约不明确，先登记缺口，避免猜测改造。
+
+[2026-09-09 继续] [主施工员·工程师] A2 tool 域复验：SessionInfo 无独立 tool 字段/active_tool_calls，tool 状态唯一存于 AcpSessionState.tools；dispatcher apply 已调用并仅消费 Usage 镜像。state.rs 已有 tool output append parity 测试，故 tool 域无需重复迁移改动。
