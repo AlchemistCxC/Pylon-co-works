@@ -57,6 +57,12 @@ describe('Workbench event envelope schema', () => {
     if (result.ok) expect(result.value.event.type).toBe(expectedType)
   })
 
+  it('does not synthesize an interaction identity during migration', () => {
+    const result = migrateWorkbenchEnvelope({ owner: { localSessionId: 'session-1' }, sequence: 4, eventType: 'interaction.requested', rawPayload: { request: true }, typedPayload: {} })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.event.type).toBe('event.unknown')
+  })
+
   it.each([
     ['known text event', envelope()],
     ['unknown event', envelope({
