@@ -48,6 +48,21 @@ export function resolveRowToolConnectorStatus(message: Message | undefined): 'ok
 }
 
 /**
+ * 行描述符字段全等判定（P57 S2-R3）。文本 chunk 只应重建受影响行：其余行的
+ * renderMessage 包装引用（toRenderMessage WeakMap 复用）与全部标量字段相等时，
+ * 上层 items memo 可复用上个 MessageListItem 包装引用，PlainMessageList 行
+ * update 因此被引用相等门跳过。
+ */
+export function isSameChatRowDescriptor(left: ChatRowDescriptor, right: ChatRowDescriptor): boolean {
+  return left.renderMessage === right.renderMessage
+    && left.toolVisualState === right.toolVisualState
+    && left.showConnector === right.showConnector
+    && left.connectorStatus === right.connectorStatus
+    && left.connectorVisualState === right.connectorVisualState
+    && left.isSearchMatch === right.isSearchMatch
+}
+
+/**
  * 生成行描述符列表。纯函数：输入（消息列表 + lookups + 搜索命中 id）不变则输出不变。
  * 连接线从上一个连续 Tool 延伸，因此 follow 色也取上一个 Tool 的状态。
  */

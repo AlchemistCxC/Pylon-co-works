@@ -1,6 +1,6 @@
 import { toRenderMessage, type Message, type RenderDecision, type RenderMessage, renderDecisionKind } from './messageTypes.ts'
 
-export function prepareMessages(messages: Message[]): RenderMessage[] {
+export function prepareMessages(messages: readonly Message[]): RenderMessage[] {
   return messages.map(toRenderMessage)
 }
 

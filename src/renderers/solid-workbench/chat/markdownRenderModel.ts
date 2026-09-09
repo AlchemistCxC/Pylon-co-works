@@ -20,7 +20,14 @@ export interface MarkdownText {
 const renderModelCache = new Map<string, Promise<MarkdownRoot>>()
 const MAX_CACHE_ENTRIES = 128
 
-export function getMarkdownRenderModel(markdown: string): Promise<MarkdownRoot> {
+/**
+ * P57 S3-A11：`{ cache: false }` 绕过 LRU（流式增长尾块的中间态文本永不复用，
+ * 只会挤掉 stable 块的缓存条目）。签名向后兼容：不传 options 时行为不变。
+ */
+export function getMarkdownRenderModel(
+  markdown: string,
+  options: { readonly cache?: boolean } = {},
+): Promise<MarkdownRoot> {
   const cached = renderModelCache.get(markdown)
   if (cached) {
     renderModelCache.delete(markdown)
@@ -29,11 +36,13 @@ export function getMarkdownRenderModel(markdown: string): Promise<MarkdownRoot> 
   }
 
   const pending = buildMarkdownRenderModel(markdown)
-  renderModelCache.set(markdown, pending)
-  while (renderModelCache.size > MAX_CACHE_ENTRIES) {
-    const oldest = renderModelCache.keys().next().value
-    if (oldest === undefined) break
-    renderModelCache.delete(oldest)
+  if (options.cache !== false) {
+    renderModelCache.set(markdown, pending)
+    while (renderModelCache.size > MAX_CACHE_ENTRIES) {
+      const oldest = renderModelCache.keys().next().value
+      if (oldest === undefined) break
+      renderModelCache.delete(oldest)
+    }
   }
   return pending
 }

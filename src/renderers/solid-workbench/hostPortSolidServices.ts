@@ -2,7 +2,7 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { CancelResult, CommandResult, SendResult, WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
-import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import type { WorkbenchDocument, WorkbenchProjectionDiagnostic } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
 import type {
   WorkbenchCommandError,
@@ -12,11 +12,55 @@ import type {
 import type { SolidWorkbenchServices } from './workbenchContracts.ts'
 import { resolveDocumentOptionEntries } from './input/workbenchOptionCatalog.ts'
 
+/**
+ * P57 S2-R2：逐元素单槽 memo（{src,out}，命中条件 = length 相等 + 每项引用相等）。
+ *
+ * 红线契约：split readers（host.document / host.generation）的读数每个通知都照常
+ * 执行，memo 只以本次 `runtimeSnapshot(host)` 调用内真实读到的引用为键复用派生
+ * 结果——不缓存合并快照、不跳过读取，微任务合并与 revision 收敛语义
+ * （workbenchHostPort.test :44-99）不受影响。同一 document 引用下派生数组与
+ * 逐元素包装引用稳定，下游显示链 memo 才有稳定键。
+ */
+interface ElementMemoSlot<TIn, TOut> {
+  src: readonly TIn[] | undefined
+  out: readonly TOut[] | undefined
+}
+
+function memoMapped<TIn, TOut>(
+  slot: ElementMemoSlot<TIn, TOut>,
+  source: readonly TIn[],
+  map: (item: TIn) => TOut,
+): readonly TOut[] {
+  const previousSource = slot.src
+  const previousOut = slot.out
+  if (previousSource !== undefined && previousOut !== undefined && previousSource.length === source.length) {
+    let same = true
+    for (let index = 0; index < source.length; index += 1) {
+      if (previousSource[index] !== source[index]) {
+        same = false
+        break
+      }
+    }
+    if (same) return previousOut
+  }
+  const out = Object.freeze(source.map(map))
+  slot.src = source
+  slot.out = out
+  return out
+}
+
+const documentMessagesSlot: ElementMemoSlot<WorkbenchDocument['messages'][number], Message> = { src: undefined, out: undefined }
+let errorMemo: { src: readonly WorkbenchProjectionDiagnostic[] | undefined; out: string | null | undefined } = { src: undefined, out: undefined }
+const optionIdsSlots = new Map<string, { options: unknown; current: string | undefined; out: readonly string[] }>()
+
 function optionIds(
   document: WorkbenchDocument | undefined,
   kind: 'model' | 'mode',
   current: string | undefined,
 ): readonly string[] {
+  const options = document?.session.options
+  const slot = optionIdsSlots.get(kind)
+  if (slot && slot.options === options && slot.current === current) return slot.out
   const ids: string[] = []
   const seen = new Set<string>()
   for (const entry of resolveDocumentOptionEntries(document?.session.options, kind)) {
@@ -27,14 +71,24 @@ function optionIds(
   }
   const active = current?.trim() ?? ''
   if (active && !seen.has(active.toLowerCase())) ids.unshift(active)
-  return Object.freeze(ids)
+  const out = Object.freeze(ids)
+  optionIdsSlots.set(kind, { options, current, out })
+  return out
 }
 
 function documentMessages(document: WorkbenchDocument | undefined): readonly Message[] {
-  return document?.messages.map(message => ({
+  if (!document) return []
+  return memoMapped(documentMessagesSlot, document.messages, message => ({
     id: message.id, role: message.role, sender: message.source.provider,
     content: message.content, time: message.time, running: message.running,
-  })) ?? []
+  }))
+}
+
+function latestErrorDiagnostic(diagnostics: readonly WorkbenchProjectionDiagnostic[]): string | null {
+  if (errorMemo.src === diagnostics && errorMemo.out !== undefined) return errorMemo.out
+  const error = [...diagnostics].reverse().find(item => item.level === 'error')?.message ?? null
+  errorMemo = { src: diagnostics, out: error }
+  return error
 }
 
 function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
@@ -57,7 +111,7 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   // third-party Suite cannot render a mixed terminal+active snapshot.
   const terminal = terminalStatus || generation.summary !== null || generation.terminalFence !== undefined
   const generating = terminal ? false : generation.generating
-  const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
+  const error = document ? latestErrorDiagnostic(document.diagnostics) : null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
   return Object.freeze({

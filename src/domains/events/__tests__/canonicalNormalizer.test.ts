@@ -41,6 +41,23 @@ describe('canonicalEventTypeFor（wire → canonical 映射）', () => {
   it('未知 sessionUpdate 归 unknown（不丢）', () => {
     expect(canonicalEventTypeFor('future_update', undefined)).toBe('unknown')
   })
+
+  it('取消沿用 turn.failed，并保留 stopReason=cancelled', () => {
+    const result = normalizeRawEvent({ update: { sessionUpdate: 'cancelled' } }, context(2))
+    expect(result.event.eventType).toBe('turn.failed')
+    expect(result.event.typedPayload).toEqual({ stopReason: 'cancelled' })
+  })
+
+  it('完成事件保留 stopReason/usage/model additive payload，不写 durationMs', () => {
+    const result = normalizeRawEvent({ update: {
+      sessionUpdate: 'done', stopReason: 'end_turn', usage: { inputTokens: 2 }, model: 'hermes-1',
+    } }, context(3))
+    expect(result.event.eventType).toBe('turn.completed')
+    expect(result.event.typedPayload).toEqual({
+      stopReason: 'end_turn', usage: { inputTokens: 2 }, model: 'hermes-1',
+    })
+    expect(result.event.typedPayload).not.toHaveProperty('durationMs')
+  })
 })
 
 describe('resolveToolCallId（单一路径：root → content → _meta）', () => {

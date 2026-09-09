@@ -1,5 +1,5 @@
 import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
-import { buildChatRowDescriptors, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
+import { buildChatRowDescriptors, isSameChatRowDescriptor, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
@@ -9,7 +9,7 @@ import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
-import { INSTANT_LOCK_MS, SMOOTH_LOCK_MS } from '../../components/chat/scrollFollowState.ts'
+import { classifyScrollEvent, INSTANT_LOCK_MS, scrollTraceThreshold, SMOOTH_LOCK_MS, type ScrollWriteTrace } from '../../components/chat/scrollFollowModel.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
@@ -103,12 +103,91 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   // auto-follow microtask when the user chooses an explicit endpoint.
   let followLockUntil = 0
   let scrollActionRevision = 0
+  // P57 S1.1（R-C1）：写迹与 lastAutoFollowTop 必须分离——后者每个 snapshot revision
+  // 被置 undefined（新内容机会去重），复用它做判别会在风暴中失效。写迹只在
+  // 三处清除：用户输入模态、beginScrollAction、新写覆盖。
+  let lastProgrammaticWrite: ScrollWriteTrace | undefined
+  // P57 S1.3（R-C5）：smooth 跟随动画在途标志——期间 revision effect 不写 instant
+  // 打断动画；清除 = 连续 2 帧距 endpoint <0.5px 且锁过期（取晚者），或任何用户
+  // 取消路径。仅对回底动作置位（▲ 置 follow=false，applyFollow 本就不写）。
+  let smoothInFlight = false
+  let smoothWatchFrame: number | undefined
+  let smoothArrivalStreak = 0
   const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const scrollTraceThresholdPx = () => scrollTraceThreshold(typeof devicePixelRatio === 'number' ? devicePixelRatio : undefined)
+  const stopSmoothWatch = () => {
+    if (smoothWatchFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(smoothWatchFrame)
+    smoothWatchFrame = undefined
+    smoothArrivalStreak = 0
+  }
+  const beginSmoothWatch = () => {
+    stopSmoothWatch()
+    if (typeof requestAnimationFrame !== 'function') {
+      // 无帧泵的宿主（jsdom 未 mock rAF）不存在 smooth 动画，直接解除守卫。
+      smoothInFlight = false
+      return
+    }
+    const step = () => {
+      smoothWatchFrame = undefined
+      const viewport = chatViewport
+      if (!viewport || !smoothInFlight) return
+      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+      if (Math.abs(viewport.scrollTop - maxScroll) <= 0.5) smoothArrivalStreak += 1
+      else smoothArrivalStreak = 0
+      const lockExpired = now() >= followLockUntil
+      if ((smoothArrivalStreak >= 2 && lockExpired) || now() >= followLockUntil + SMOOTH_LOCK_MS) {
+        smoothInFlight = false
+        return
+      }
+      smoothWatchFrame = requestAnimationFrame(step)
+    }
+    smoothWatchFrame = requestAnimationFrame(step)
+  }
   const beginScrollAction = (nextFollowBottom: boolean, behavior: ScrollBehavior) => {
     scrollActionRevision += 1
     lastAutoFollowTop = undefined
+    lastProgrammaticWrite = undefined
+    smoothInFlight = behavior === 'smooth' && nextFollowBottom
     followLockUntil = now() + (behavior === 'smooth' ? SMOOTH_LOCK_MS : INSTANT_LOCK_MS)
+    if (smoothInFlight) beginSmoothWatch()
     setFollowBottom(nextFollowBottom)
+  }
+  // P57 S1.2：用户输入模态的取消路径（wheel 上滚 / touch 上滑判向 / viewport 键盘 /
+  // 滚动条轨道拖拽）统一走这里：清迹、解除 smooth 守卫、作废排队写入、取消跟随。
+  const cancelFollowForUserInput = () => {
+    scrollActionRevision += 1
+    lastProgrammaticWrite = undefined
+    smoothInFlight = false
+    stopSmoothWatch()
+    setFollowBottom(false)
+  }
+  // P57 S1.2 touch：touchstart 记起点，首个 |dY|>8px 判向；视口向上滚（指尖下滑）
+  // 才取消——不许 touchstart 即取消，误伤轻点。
+  let touchStartClientY: number | undefined
+  const handleViewportTouchStart = (event: TouchEvent) => {
+    touchStartClientY = event.touches[0]?.clientY
+  }
+  const handleViewportTouchMove = (event: TouchEvent) => {
+    if (touchStartClientY === undefined) return
+    const clientY = event.touches[0]?.clientY
+    if (clientY === undefined) return
+    const deltaY = clientY - touchStartClientY
+    if (Math.abs(deltaY) <= 8) return
+    touchStartClientY = undefined
+    // 指尖下滑（deltaY>8）= 视口向上滚 = 回看历史 → 取消；指尖上滑 → 位置判别自然恢复。
+    if (deltaY > 8) cancelFollowForUserInput()
+  }
+  // P57 S1.2 wheel：deltaY<0（视口上滚）取消跟随；deltaY>0 不干预；横滚（Shift+wheel，
+  // |ΔY|≤|ΔX|）忽略。passive 语义：绝不 preventDefault，不阻断自然滚动。
+  const handleViewportWheel = (event: WheelEvent) => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+    if (event.deltaY >= 0) return
+    cancelFollowForUserInput()
+  }
+  // P57 S1.2：viewport 键盘仅处理向上类按键（↑/PageUp/Home），不 preventDefault，
+  // 原生滚动照常；↓/PageDown/End 交给位置判别自然恢复。
+  const handleViewportKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') cancelFollowForUserInput()
   }
   onCleanup(() => {
     bottomAnchor = undefined
@@ -124,6 +203,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     bottomFollowFrame = undefined
     lastAutoFollowTop = undefined
     followedSnapshotRevision = undefined
+    lastProgrammaticWrite = undefined
+    smoothInFlight = false
+    stopSmoothWatch()
     connectorPort.destroy()
   })
   const document = () => snapshot().document
@@ -150,9 +232,13 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     // Legacy preview hosts still expose tool rows before their activity
     // projection is available. Preserve those non-text rows without merging
     // legacy assistant/reasoning rows back into the canonical stream.
-    return [...base, ...legacy.filter(message => message.role === 'tool')]
+    // (P57 S2-R3：base 是本 memo 新建数组，直接追加 legacy tool 行，省一次展开拷贝。)
+    for (const message of legacy) {
+      if (message.role === 'tool') base.push(message)
+    }
+    return base
   })
-  const renderMessages = createMemo(() => prepareMessages([...viewMessages()]))
+  const renderMessages = createMemo(() => prepareMessages(viewMessages()))
   const searchMatches = createMemo(() => {
     if (!searchQuery().trim()) return []
     return viewMessages().filter(message => messageMatchesQuery(message, searchQuery()))
@@ -163,10 +249,19 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     buildMessageLookups(viewMessages()),
     activeSearchMessageId(),
   ))
-  const items = createMemo<readonly MessageListItem[]>(() => descriptors().map(descriptor => ({
-    key: descriptor.key,
-    descriptor,
-  })))
+  // P57 S2-R3：items per-key 复用——descriptor 全字段相等时沿用上个 MessageListItem
+  // 引用，PlainMessageList 的引用相等门随之跳过行 update 与测量失效。
+  let lastItems: readonly MessageListItem[] = []
+  const items = createMemo<readonly MessageListItem[]>(() => {
+    const previousByKey = new Map(lastItems.map(item => [item.key, item]))
+    const next = descriptors().map(descriptor => {
+      const previous = previousByKey.get(descriptor.key)
+      if (previous && isSameChatRowDescriptor(previous.descriptor, descriptor)) return previous
+      return { key: descriptor.key, descriptor }
+    })
+    lastItems = next
+    return next
+  })
   const activityPlacement = createMemo(() => selectActivityTimelinePlacement(
     document(),
   ))
@@ -212,9 +307,15 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const updateBottomFollow = (viewport: HTMLDivElement) => {
     syncScrollRail(viewport)
-    if (now() < followLockUntil) return
-    const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
-    const atBottom = distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX
+    // P57 S1.3：锁判定改为「未到终点且未超时」——smooth 动画到达终点后位置判别
+    // 即刻恢复（follow 回 true），锁过期后反馈不再被吞。
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    const distanceToEndpoint = Math.max(0, maxScroll - viewport.scrollTop)
+    if (now() < followLockUntil && distanceToEndpoint > 0.5) return
+    // P57 S1.1（R-C1）：写迹命中（|scrollTop - trace.top| ≤ 阈值）= 自己的程序化写入
+    // 反馈——只刷 rail，不碰 followBottom、不清迹；否则按位置判别（现语义保留）。
+    if (classifyScrollEvent(viewport.scrollTop, lastProgrammaticWrite, scrollTraceThresholdPx()) === 'programmatic-feedback') return
+    const atBottom = distanceToEndpoint <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX
     if (!atBottom) lastAutoFollowTop = undefined
     setFollowBottom(atBottom)
   }
@@ -256,7 +357,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     } else {
       viewport.scrollTop = top
     }
-    if (behavior === 'auto') lastAutoFollowTop = top
+    if (behavior === 'auto') {
+      lastAutoFollowTop = top
+      // P57 S1.1：程序化写入覆盖写迹；由此产生的 scroll 反馈事件经 classifyScrollEvent
+      // 判为 programmatic-feedback，不再误关跟随。
+      lastProgrammaticWrite = { top, at: now() }
+    }
     syncScrollRail(viewport)
   }
 
@@ -272,6 +378,8 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const thumb = eventElement(event)?.closest<HTMLElement>('.solid-workbench-scroll-thumb')
     const track = thumb?.closest<HTMLElement>('.solid-workbench-scroll-track')
     if (!viewport || !(thumb instanceof HTMLElement) || !track) return
+    // P57 S1.2：拖拽滚动条属用户输入——清迹、解除 smooth 守卫、作废排队写入。
+    cancelFollowForUserInput()
 
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
     const trackHeight = track.getBoundingClientRect().height
@@ -311,6 +419,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const viewport = viewportFromAction(event)
     const track = targetElement?.closest<HTMLElement>('.solid-workbench-scroll-track')
     if (!viewport || !(track instanceof HTMLElement)) return
+    // P57 S1.2：轨道寻道属用户输入——同拖拽的取消语义；目标位置由 scroll 事件
+    // 的位置判别自然落相位。
+    cancelFollowForUserInput()
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
     const trackRect = track.getBoundingClientRect()
     const thumbHeight = scrollRailThumb().height
@@ -354,6 +465,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
         return
     }
     event.preventDefault()
+    // P57 S1.2（轨道键盘分支）：这是现存用户输入入口，各滚动分支同步按目标位置设
+    // follow（End 例外 → 回底）；同步清迹并解除 smooth 守卫，锁定写入的反馈事件。
+    beginScrollAction(Math.min(maxScroll, Math.max(0, target)) >= maxScroll - MESSAGE_LIST_BOTTOM_THRESHOLD_PX, 'auto')
     viewport.scrollTop = Math.min(maxScroll, Math.max(0, target))
     syncScrollRail(viewport)
   }
@@ -365,6 +479,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const applyFollow = () => {
       bottomFollowFrame = undefined
       bottomFollowQueued = false
+      // P57 S1.3（R-C5）：smooth 跟随动画在途时，风暴中的 revision effect 不得
+      // 写 instant 打断动画；守卫解除由 smooth watcher（到达判定）或用户取消路径。
+      if (smoothInFlight) return
       if (revision !== scrollActionRevision || !followBottom()) return
       if (chatViewport) scrollViewportToBottom(chatViewport, 'auto')
     }
@@ -481,6 +598,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             class="chat-view solid-workbench-chat solid-workbench-empty-chat-viewport"
             data-chat-viewport="scroll"
             onScroll={event => updateBottomFollow(event.currentTarget)}
+            onWheel={handleViewportWheel}
+            onTouchStart={handleViewportTouchStart}
+            onTouchMove={handleViewportTouchMove}
+            onKeyDown={handleViewportKeyDown}
           >
             <div class="solid-workbench-empty-space">
               <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
@@ -498,6 +619,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             class="chat-view solid-workbench-chat"
             data-chat-viewport="scroll"
             onScroll={event => updateBottomFollow(event.currentTarget)}
+            onWheel={handleViewportWheel}
+            onTouchStart={handleViewportTouchStart}
+            onTouchMove={handleViewportTouchMove}
+            onKeyDown={handleViewportKeyDown}
           >
             <div ref={node => { chatContent = node }} class="term">
               <SolidToolConnectorLayer edges={connectorEdges()} layoutPort={connectorPort} />

@@ -35,6 +35,12 @@
 .term-user-content > blockquote { margin-top:0; margin-bottom:0; }
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:var(--ui-space-2); padding:var(--ui-space-1) var(--ui-space-2); border-radius: 0; font-family:var(--mono); }
 .term-user .term-p { display:inline; margin:0; }
+/* R-B5 契约（P57 S3-R5）：user 正文的显式换行是输入意图。解析路径（CommonMark 把
+   单个 \n 折叠为空格）与纯文本回退路径（.term-plain-text pre-wrap）必须同为
+   pre-wrap，两路径行数才一致；反方向（把回退路径也改成 normal）= 一致地错，否决。
+   元素+类双写选择器用于捕获第三方 Suite 渲染的裸 <p>。 */
+.term-user p,
+.term-user .term-p { white-space: pre-wrap; }
 .term-user code { font-family:var(--mono); font-size:inherit; }
 
 .term-assistant { position:relative; padding:var(--ui-space-1) 0; white-space:normal; }
@@ -1009,6 +1015,13 @@
   background: var(--bg-input);
 }
 .term-code-line { min-height: 1.25em; line-height: 1.4; }
+/* R-B1 契约（P57 S3-R1）：三个代码域（term-ansi / streaming code / fenced code 内容 span）
+   统一「保留缩进 + 长行软折」。`.chat-view` overflow-x:hidden（:20）使横向 pre 方案
+   需要逐容器验证滚动协议，故采用 pre-wrap + anywhere（与 .term-ansi 生效版同语义）。 */
+.term-code-block .term-code-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; flex: 1 1 auto; }
+/* R-B8/A11（P57 S3-R8）：首次解析（从未 resolve）期间的解析骨架；min-height:1em
+   配合零高度阶跃目标（S5-R3），终态/首解析完成后由解析结果原子替换。 */
+.term-md-skeleton { min-height: 1em; }
 .term-blockquote { margin-block: var(--ui-space-2); border-left-color: var(--border-focus); }
 .term-link { text-underline-offset: 2px; }
 .term-link:focus-visible { outline: var(--line-width-2) solid var(--accent); outline-offset: 2px; }

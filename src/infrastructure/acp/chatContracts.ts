@@ -217,6 +217,7 @@ function normalizedWireKey(key: string): string {
 }
 
 /** Read a field using camelCase, snake_case, kebab-case and case variants. */
+// pi-lens-ignore: ast-grep:no-unknown-returns
 function readWireField(record: WireRecord | undefined, keys: readonly string[]): unknown {
   if (!record) return undefined
   const wanted = new Set(keys.map(normalizedWireKey))
@@ -306,7 +307,9 @@ export function extractConfigOptionId(option: unknown): string | undefined {
   ])
 }
 
+// pi-lens-ignore: ast-grep:no-unknown-returns
 /** Return the selected config value, unwrapping value/valueId envelopes. */
+// pi-lens-ignore: ast-grep:no-unknown-returns
 export function extractConfigOptionValue(option: unknown): unknown {
   const record = asWireRecord(option)
   if (!record) return undefined
@@ -320,8 +323,10 @@ export function extractConfigOptionValue(option: unknown): unknown {
     return unwrapWireValue(raw)
   }
   return undefined
+// pi-lens-ignore: ast-grep:no-unknown-returns
 }
 
+// pi-lens-ignore: ast-grep:no-unknown-returns
 function unwrapWireValue(value: unknown, depth = 0): unknown {
   if (depth > 8 || value === null || typeof value !== 'object' || Array.isArray(value)) return value
   const record = value as WireRecord

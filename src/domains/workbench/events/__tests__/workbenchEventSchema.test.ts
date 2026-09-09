@@ -30,9 +30,16 @@ function envelope(overrides: Partial<WorkbenchEventEnvelope> = {}): WorkbenchEve
 describe('Workbench event envelope schema', () => {
   it.each([
     ['tool.started', 'tool.started'],
+    ['tool.call.started', 'tool.started'],
+    ['tool.call.updated', 'tool.progress'],
+    ['tool.call.completed', 'tool.completed'],
+    ['tool.call.failed', 'tool.failed'],
     ['assistant.reasoning.delta', 'reasoning.delta'],
+    ['assistant.thinking.delta', 'reasoning.delta'],
     ['plan.replaced', 'plan.replaced'],
     ['usage.updated', 'usage.updated'],
+    ['turn.completed', 'session.completed'],
+    ['turn.failed', 'diagnostic.notice'],
     ['session.completed', 'session.completed'],
   ])('migrates %s into typed semantic event %s', (eventType, expectedType) => {
     const result = migrateWorkbenchEnvelope({
@@ -42,6 +49,24 @@ describe('Workbench event envelope schema', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.event.type).toBe(expectedType)
+  })
+
+  it('keeps additive completion fields and cancellation reason at the semantic seam', () => {
+    const completed = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 6, eventType: 'turn.completed', rawPayload: {},
+      typedPayload: { stopReason: 'end_turn', usage: { inputTokens: 2 }, model: 'hermes-1' },
+    })
+    expect(completed.ok).toBe(true)
+    if (completed.ok) expect(completed.value.event).toMatchObject({
+      type: 'session.completed', stopReason: 'end_turn', usage: { inputTokens: 2 }, model: 'hermes-1',
+    })
+
+    const cancelled = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 7, eventType: 'turn.failed', rawPayload: {},
+      typedPayload: { stopReason: 'cancelled' },
+    })
+    expect(cancelled.ok).toBe(true)
+    if (cancelled.ok) expect(cancelled.value.event).toMatchObject({ type: 'diagnostic.notice', code: 'turn.failed' })
   })
 
   it.each([
@@ -61,6 +86,17 @@ describe('Workbench event envelope schema', () => {
     const result = migrateWorkbenchEnvelope({ owner: { localSessionId: 'session-1' }, sequence: 4, eventType: 'interaction.requested', rawPayload: { request: true }, typedPayload: {} })
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.event.type).toBe('event.unknown')
+  })
+
+  it('maps canonical interaction.answered to a resolved interaction with response', () => {
+    const result = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 8, eventType: 'interaction.answered', rawPayload: {},
+      typedPayload: { interactionId: 'ask-1', response: { optionId: 'allow' } },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.event).toEqual({
+      type: 'interaction.resolved', interactionId: 'ask-1', response: { optionId: 'allow' },
+    })
   })
 
   it.each([['lifecycle.recovered'], ['diagnostic.notice']])('migrates %s without unknown fallback', eventType => {

@@ -94,4 +94,24 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.chat-empty\s*\{[^}]*min-height:100%;[^}]*width:100%;/s)
     expect(css).toMatch(/\.chat-empty\.agent-empty-state\s*\{[^}]*position:relative;/s)
   })
+
+  // P57 S3-R1（R-B1）：代码块内容 span 统一「保留缩进 + 长行软折」。
+  it('P57 S3-R1：.term-code-block .term-code-text 的 pre-wrap+anywhere 规则存在', () => {
+    const block = css.match(/\.term-code-block \.term-code-text\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(block).toContain('white-space: pre-wrap')
+    expect(block).toContain('overflow-wrap: anywhere')
+    expect(block).toContain('min-width: 0')
+    expect(block).toContain('flex: 1 1 auto')
+  })
+
+  // P57 S3-R5（R-B5）：user 正文双路径同 white-space 契约——元素+类双写选择器
+  // 用于捕获第三方 Suite 渲染的裸 <p>。
+  it('P57 S3-R5：.term-user p 与 .term-user .term-p 同为 pre-wrap', () => {
+    expect(css).toMatch(/\.term-user p,\s*\n\.term-user \.term-p\s*\{\s*white-space: pre-wrap;\s*\}/)
+  })
+
+  // P57 S3-R8（R-B8/A11）：首次解析骨架的最小高度契约（配合零高度阶跃目标）。
+  it('P57 S3-R8：.term-md-skeleton 解析骨架 min-height:1em 规则存在', () => {
+    expect(css).toMatch(/\.term-md-skeleton\s*\{[^}]*min-height:\s*1em;/)
+  })
 })

@@ -3,7 +3,7 @@ import { render } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
-import { createMessageListItems, type MessageListPort } from '../../../../domains/workbench/messageListPort.ts'
+import { createMessageListItems, type MessageListItem, type MessageListPort } from '../../../../domains/workbench/messageListPort.ts'
 import { PlainMessageList } from '../PlainMessageList.solid.tsx'
 
 function descriptor(message: Message): ChatRowDescriptor {
@@ -106,6 +106,46 @@ describe('PlainMessageList', () => {
 
     expect(result.container.querySelector('[data-message-id="m2"]')).toBe(row)
     expect(row).toHaveTextContent('two updated incrementally')
+  })
+
+  // P57 S2-R3：引用相等喂入零成本通过——不调用行 update（descriptor getter 不再
+  // 被读取）、不失效测量；引用变化的行照常更新。
+  it('引用相等的 setItems 跳过行 update 与测量失效', async () => {
+    let descriptorReads = 0
+    const tracked: MessageListItem = {
+      key: ITEMS[0]!.key,
+      get descriptor() {
+        descriptorReads += 1
+        return ITEMS[0]!.descriptor
+      },
+    }
+    let port: MessageListPort | undefined
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={[tracked, ITEMS[1]!]}
+        onPortReady={value => { port = value }}
+        renderItem={item => <span>{item.descriptor.renderMessage.message.content}</span>}
+      />
+    ))
+    const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
+    const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    const baselineRevision = container.dataset.measurementRevision
+    const baselineReads = descriptorReads
+
+    // 全等引用喂入（上层 items memo per-key 复用后的形态）
+    port!.setItems([tracked, ITEMS[1]!])
+    await nextFrame()
+    expect(container.dataset.measurementRevision).toBe(baselineRevision)
+    expect(descriptorReads).toBe(baselineReads)
+
+    // 引用变化喂入照常生效
+    const updated = descriptor({ ...ITEMS[1]!.descriptor.renderMessage.message, content: 'changed' })
+    port!.setItems([tracked, { key: updated.key, descriptor: updated }])
+    await nextFrame()
+    expect(container.dataset.measurementRevision).toBe(String(Number(baselineRevision) + 1))
+    expect(result.container.querySelector('[data-message-id="m2"]')).toHaveTextContent('changed')
+    // 未变化的 tracked 行不被牵连
+    expect(descriptorReads).toBe(baselineReads)
   })
 
   it('scrollTo 只通过 messageId 定位内部行，不暴露 DOM', async () => {

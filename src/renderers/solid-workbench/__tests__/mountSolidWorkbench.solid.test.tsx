@@ -8,6 +8,7 @@ import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from 
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
+import type { RenderSurface } from '../../../contracts/messageRenderer.ts'
 import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
@@ -30,7 +31,7 @@ afterEach(() => {
 })
 
 
-function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
+function mountPreview(capabilities?: WorkbenchCapabilitySnapshot, options: { reducedMotion?: boolean } = {}) {
   const host = document.createElement('div')
   document.body.append(host)
   hosts.push(host)
@@ -51,12 +52,117 @@ function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
       sessionId: 'preview-session',
       preview: true,
       rightInset: 24,
-      reducedMotion: true,
+      reducedMotion: options.reducedMotion ?? true,
     },
     services,
     hostPort,
   })
   return { host, services, lifecycle }
+}
+
+/**
+ * P57 S1.0 测试基建：可变滚动模型。scrollTop/scrollHeight/clientHeight 以
+ * getter/setter 透出同一份可变状态，测试可在「写入落地」与「反馈 scroll 事件
+ * 派发」之间操纵几何（表达真实浏览器的同帧竞态）。
+ */
+interface ScrollModel {
+  top: number
+  height: number
+  clientHeight: number
+}
+
+function createScrollModel(viewport: HTMLElement, initial: Partial<ScrollModel> = {}): ScrollModel {
+  const model: ScrollModel = {
+    top: initial.top ?? 0,
+    height: initial.height ?? 1_000,
+    clientHeight: initial.clientHeight ?? 300,
+  }
+  Object.defineProperty(viewport, 'scrollTop', {
+    configurable: true,
+    get: () => model.top,
+    set: (value: number) => { model.top = value },
+  })
+  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, get: () => model.height })
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, get: () => model.clientHeight })
+  return model
+}
+
+/** P57 S1.0 帧泵：requestAnimationFrame 回调可编程 flush（沿用既有 mock 模式）。 */
+interface FramePump {
+  enqueue(callback: () => void): void
+  flush(): void
+  pending(): number
+  clear(): void
+  dispose(): void
+}
+
+function createFramePump(): FramePump {
+  const previousRaf = globalThis.requestAnimationFrame
+  const previousCancel = globalThis.cancelAnimationFrame
+  let nextFrame = 0
+  const frames = new Map<number, FrameRequestCallback>()
+  globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+    const id = ++nextFrame
+    frames.set(id, callback)
+    return id
+  }) as typeof requestAnimationFrame
+  globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+  return {
+    enqueue(callback) { frames.set(++nextFrame, callback as FrameRequestCallback) },
+    flush() {
+      const pendingCallbacks = [...frames.values()]
+      frames.clear()
+      for (const callback of pendingCallbacks) callback(performance.now())
+    },
+    pending: () => frames.size,
+    clear() { frames.clear() },
+    dispose() {
+      frames.clear()
+      globalThis.requestAnimationFrame = previousRaf
+      globalThis.cancelAnimationFrame = previousCancel
+    },
+  }
+}
+
+/**
+ * P57 S1.0：scrollTo 落地 sink——instant/auto 写入立即落 top，并把反馈 scroll 事件
+ * 排入帧泵（与真实浏览器「写入 → 派发 scroll」同序，且可与几何操纵交错）。
+ */
+function installInstantScrollToSink(viewport: HTMLElement, model: ScrollModel, pump: FramePump) {
+  const scrollTo = vi.fn((options?: ScrollToOptions) => {
+    if (options?.top === undefined) return
+    model.top = options.top
+    pump.enqueue(() => viewport.dispatchEvent(new Event('scroll')))
+  })
+  Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo })
+  return scrollTo
+}
+
+/**
+ * P57 S1.0：可编程分帧动画 scrollTo（reducedMotion:false 变体专用）——smooth 写入
+ * 用固定帧数线性逼近 endpoint，每帧落一次 top 并派发 scroll 事件。
+ */
+function installAnimatedScrollTo(viewport: HTMLElement, model: ScrollModel, pump: FramePump, frames = 3) {
+  const scrollTo = vi.fn((options?: ScrollToOptions) => {
+    if (options?.top === undefined) return
+    if (options.behavior !== 'smooth') {
+      model.top = options.top
+      pump.enqueue(() => viewport.dispatchEvent(new Event('scroll')))
+      return
+    }
+    const from = model.top
+    const to = options.top
+    let step = 0
+    const advance = () => {
+      step += 1
+      model.top = from + (to - from) * (step / frames)
+      viewport.dispatchEvent(new Event('scroll'))
+      if (step < frames) pump.enqueue(advance)
+    }
+    pump.enqueue(advance)
+  })
+  Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo })
+  return scrollTo
 }
 
 describe('mountSolidWorkbench', () => {
@@ -168,43 +274,57 @@ describe('mountSolidWorkbench', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
   })
 
+  // P57 §6 点名改写（例外 1）：用户离开底部的入口从纯位置判别（fireEvent.scroll）
+  // 改为输入模态判别（wheel 上滚）；契约意图不变——用户离底后不抢滚动、▼ 一键恢复、
+  // 恢复后继续自动跟随。
   it('用户离开底部后不抢滚动，并可一键恢复自动跟随', async () => {
     const scrollIntoView = vi.fn()
-    const scrollTo = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: scrollIntoView,
     })
-    const { host, services } = mountPreview()
-    const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
-    Object.defineProperties(viewport, {
-      scrollTop: { value: 100, writable: true, configurable: true },
-      scrollHeight: { value: 1_000, configurable: true },
-      clientHeight: { value: 300, configurable: true },
-      scrollTo: { value: scrollTo, configurable: true },
-    })
+    const pump = createFramePump()
+    try {
+      const { host, services } = mountPreview()
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      const model = createScrollModel(viewport, { top: 700 })
+      const scrollTo = installInstantScrollToSink(viewport, model, pump)
 
-    fireEvent.scroll(viewport)
-    expect(await screen.findByRole('button', { name: '回到底部' })).toBeTruthy()
-    scrollIntoView.mockClear()
+      // 用户输入模态：wheel 上滚 → 取消跟随；随后的真实滚动落在离底位置。
+      fireEvent.wheel(viewport, { deltaY: -100 })
+      model.top = 100
+      fireEvent.scroll(viewport)
+      expect(await screen.findByRole('button', { name: '回到底部' })).toBeTruthy()
+      scrollIntoView.mockClear()
 
-    services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '用户上滚后的新输出', time: '10:00', running: true }] })
-    await Promise.resolve()
-    expect(scrollIntoView).not.toHaveBeenCalled()
+      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '用户上滚后的新输出', time: '10:00', running: true }] })
+      await Promise.resolve()
+      pump.flush()
+      expect(scrollIntoView).not.toHaveBeenCalled()
+      expect(scrollTo).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
-    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
-    // The rail action remains available as an explicit endpoint control after
-    // follow mode is restored; subsequent output should auto-follow again.
-    expect(screen.getByRole('button', { name: '回到底部' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
+      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      // The rail action remains available as an explicit endpoint control after
+      // follow mode is restored; subsequent output should auto-follow again.
+      expect(screen.getByRole('button', { name: '回到底部' })).toBeTruthy()
 
-    scrollIntoView.mockClear()
-    scrollTo.mockClear()
-    services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '恢复跟随后继续输出', time: '10:00', running: true }] })
-    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' }))
+      scrollIntoView.mockClear()
+      scrollTo.mockClear()
+      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '恢复跟随后继续输出', time: '10:00', running: true }] })
+      await Promise.resolve()
+      pump.flush()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    } finally {
+      pump.dispose()
+    }
   })
 
-  it('流式正文异步改变高度时，sticky 状态继续跟随底部', async () => {
+  // P57 §6 点名改写（例外 1）：「异步高度 sticky 续跟」补入写迹前提——auto 写入落地
+  // 后、反馈 scroll 事件派发前，同帧高度增长 >48px。旧位置判别会把这次竞态误判为
+  // 用户离底并关掉跟随；写迹判别保持 sticky 续跟（P57 验收 ①）。
+  it('auto 写入落地后同帧高度增长不再把 sticky 误判为离底', async () => {
     const previousResizeObserver = globalThis.ResizeObserver
     class MockResizeObserver {
       static instances: MockResizeObserver[] = []
@@ -216,49 +336,45 @@ describe('mountSolidWorkbench', () => {
       trigger() { this.callback([], this as unknown as ResizeObserver) }
     }
     globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+    const pump = createFramePump()
     try {
-      const scrollTo = vi.fn()
       const { host, services } = mountPreview()
       const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
-      Object.defineProperties(viewport, {
-        scrollTop: { value: 700, writable: true, configurable: true },
-        scrollHeight: { value: 1_000, configurable: true },
-        clientHeight: { value: 300, configurable: true },
-        scrollTo: { value: scrollTo, configurable: true },
-      })
+      const model = createScrollModel(viewport, { top: 700 })
+      const scrollTo = installInstantScrollToSink(viewport, model, pump)
       await Promise.resolve()
+      pump.flush()
       scrollTo.mockClear()
 
       const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
       expect(contentObserver).toBeTruthy()
-      // The resize signal represents a real async height change (for example
-      // a newly measured Markdown/image block), so the bottom endpoint moves.
-      Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
+      // 异步高度变化：follow 写入排队 → 帧内落地（写迹记录 top=800）。
+      model.height = 1_100
       contentObserver!.trigger()
-      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: 'auto' }))
+      pump.flush()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: 'auto' })
+      expect(model.top).toBe(800)
       scrollTo.mockClear()
-      // Repeated observer notifications at the same endpoint must not issue a
-      // second scroll write; this is the jitter regression guard.
-      contentObserver!.trigger()
+
+      // 写入落地与反馈 scroll 事件之间，内容又长高 >48px——真实浏览器的同帧竞态。
+      model.height = 1_300
+      pump.flush()
+      // 反馈事件按写迹判为 programmatic-feedback：跟随保持，不出现「抢滚动失效」。
+      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: 'sticky 续跟的新输出', time: '10:00', running: true }] })
       await Promise.resolve()
-      expect(scrollTo).not.toHaveBeenCalled()
+      pump.flush()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
       services.runtime.destroy()
     } finally {
+      pump.dispose()
       globalThis.ResizeObserver = previousResizeObserver
     }
   })
 
-  it('同一帧 outer follow 合并多次 ResizeObserver 通知，且离底取消排队写入', async () => {
-    const previousRaf = globalThis.requestAnimationFrame
-    const previousCancel = globalThis.cancelAnimationFrame
-    let nextFrame = 0
-    const frames = new Map<number, FrameRequestCallback>()
-    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-      const id = ++nextFrame
-      frames.set(id, callback)
-      return id
-    }) as typeof requestAnimationFrame
-    globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+  // P57 验收③（S1.3）：reducedMotion:false 变体下，▼ 的 smooth 动画分帧期间
+  // revision effect 不写 instant 打断动画；到达 endpoint（且锁过期，取晚者）后
+  // sticky 跟随恢复。
+  it('smooth 跟随动画期间 revision effect 不写 instant，到达 endpoint 后跟随恢复', async () => {
     const previousResizeObserver = globalThis.ResizeObserver
     class MockResizeObserver {
       static instances: MockResizeObserver[] = []
@@ -270,51 +386,230 @@ describe('mountSolidWorkbench', () => {
       trigger() { this.callback([], this as unknown as ResizeObserver) }
     }
     globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
-    const flushFrame = () => {
-      const pending = [...frames.values()]
-      frames.clear()
-      for (const callback of pending) callback(performance.now())
-    }
+    const pump = createFramePump()
     try {
-      const scrollTo = vi.fn()
+      const { host, services } = mountPreview(undefined, { reducedMotion: false })
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      const model = createScrollModel(viewport, { top: 100 })
+      const scrollTo = installAnimatedScrollTo(viewport, model, pump)
+
+      // 用户上滚离底（输入模态取消），▼ 触发 smooth 回底动画（3 帧线性逼近 700）。
+      fireEvent.wheel(viewport, { deltaY: -100 })
+      model.top = 100
+      fireEvent.scroll(viewport)
+      await Promise.resolve()
+      fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
+      expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'smooth' })
+      scrollTo.mockClear()
+
+      // 动画分帧期间流式内容推进：revision effect 排队的 applyFollow 被守卫吞掉。
+      pump.flush()
+      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '动画期间的新输出', time: '10:00', running: true }] })
+      await Promise.resolve()
+      pump.flush()
+      pump.flush()
+      pump.flush()
+      expect(model.top).toBe(700)
+      expect(scrollTo).not.toHaveBeenCalled()
+
+      // 到达判定（连续 2 帧距 endpoint <0.5px）与锁过期取晚者；解除后 sticky 恢复。
+      let resumeTick = 0
+      await waitFor(async () => {
+        pump.flush()
+        resumeTick += 1
+        services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: `到达后的输出 ${resumeTick}`, time: '10:00', running: true }] })
+        await Promise.resolve()
+        pump.flush()
+        expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
+      }, { timeout: 3_000, interval: 50 })
+      services.runtime.destroy()
+    } finally {
+      pump.dispose()
+      globalThis.ResizeObserver = previousResizeObserver
+    }
+  })
+
+  // P57 验收 2（S2-R3）：文本 chunk 只重建受影响行，其余行 DOM 身份稳定。
+  // （相邻同角色 assistant delta 会被 projector 合并，故第三行用 reasoning——
+  //   同样验证「未受影响行引用/身份稳定」。）
+  it('文本 chunk 只重建受影响行，其余行 DOM 身份不变', async () => {
+    const { host, services } = mountPreview()
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `reuse-${sequence}` }, identity,
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const base = projectWorkbench([
+      envelope(1, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '问题' }] }, { messageId: 'u1' }),
+      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '回答A' }] }, { messageId: 'a1' }),
+      envelope(3, { type: 'reasoning.delta', parts: [{ kind: 'text', text: '思考中' }] }, { messageId: 'r1' }),
+    ]).document
+    services.runtime.replaceDocument(base, { ownerKey: 'owner-preview', generation: 1 })
+    await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row')).toHaveLength(3))
+
+    const userId = base.messages.find(message => message.role === 'user')!.id
+    const aId = base.messages.find(message => message.content === '回答A')!.id
+    const rId = base.messages.find(message => message.content === '思考中')!.id
+    const userRow = host.querySelector<HTMLElement>(`[data-message-id="${userId}"]`)!
+    const rowA = host.querySelector<HTMLElement>(`[data-message-id="${aId}"]`)!
+    const rowR = host.querySelector<HTMLElement>(`[data-message-id="${rId}"]`)!
+
+    const chunked = reduceWorkbenchEvent(base, envelope(4, { type: 'reasoning.delta', parts: [{ kind: 'text', text: ' 思考' }] }, { messageId: 'r1' }))
+    services.runtime.replaceDocument(chunked, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(rowR).toHaveTextContent('思考中 思考'))
+    expect(host.querySelector(`[data-message-id="${userId}"]`)).toBe(userRow)
+    expect(host.querySelector(`[data-message-id="${aId}"]`)).toBe(rowA)
+    expect(host.querySelector(`[data-message-id="${rId}"]`)).toBe(rowR)
+  })
+
+  // P57 验收 2（S2-R5 方案 A）：payload/appearance 全等不调 surface.update；
+  // payload 引用变化才调用。revision 变化本身不触发 update（零契约变化）。
+  it('Slot surface 的 update 在 payload/appearance 全等时被浅比较门跳过', async () => {
+    const updateSpy = vi.fn()
+    const surface: RenderSurface = {
+      rendererId: 'test.gate',
+      kind: 'solid',
+      mount: container => {
+        const node = document.createElement('div')
+        node.className = 'test-gate-surface'
+        container.append(node)
+        return { mounted: true }
+      },
+      update: updateSpy,
+      destroy: () => {},
+      on: () => () => {},
+    }
+    const slot: RendererSlotContribution = {
+      id: 'test.gate.slot',
+      targetSuites: ['*'],
+      kinds: ['message.assistant'],
+      priority: 1,
+      fallback: false,
+      canRender: () => true,
+      createSurface: () => surface,
+    }
+    const slotEntry = {
+      ownerPluginId: 'test.gate', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: 1, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: {
+        ownerPluginId: 'test.gate', ownerRuntimeInstanceId: 'runtime',
+        contributionId: suite.id, layer: 'feature', priority: 1, value: suite,
+      } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map(),
+      slots: new Map([['message.assistant', [slotEntry]]]),
+      diagnostics: [],
+    }
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    mountSolidWorkbench({
+      host,
+      input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true },
+      services,
+      activation,
+    })
+
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `gate-${sequence}` }, identity,
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const base = projectWorkbench([
+      envelope(1, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '问题' }] }, { messageId: 'u1' }),
+      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '回答' }] }, { messageId: 'a1' }),
+    ]).document
+    services.runtime.replaceDocument(base, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelector('.test-gate-surface')).not.toBeNull())
+    // mount 后首个 effect 重跑会做一次幂等 update（首次门通过）；清零后按门语义断言。
+    await Promise.resolve()
+    await Promise.resolve()
+    updateSpy.mockClear()
+    expect(updateSpy).not.toHaveBeenCalled()
+
+    // 追加 interaction（显示相关但完全不触碰 assistant 消息的负载）：显示链照常
+    // 发表，assistant payload 引用经包装复用保持稳定 → update 被门跳过。
+    //（注意：追加 user/reasoning 行会合法 settle 运行中的 assistant，payload 真实变化。）
+    const frozenBase = services.runtime.getSnapshot().document!
+    const withInteraction = reduceWorkbenchEvent(frozenBase, envelope(3, { type: 'interaction.requested', interactionId: 'ask-1', request: { question: '继续?' } }, { interactionId: 'ask-1' }))
+    services.runtime.applyDocument(withInteraction, { ownerKey: 'owner-preview', generation: 1 })
+    await waitFor(() => expect(host.querySelector('[aria-label="交互"]')).not.toBeNull())
+    expect(updateSpy).not.toHaveBeenCalled()
+
+    // reasoning 行 settle 运行中的 assistant（running 翻转）→ payload 引用变化 →
+    // update 必须调用。
+    const withReasoning = reduceWorkbenchEvent(withInteraction, envelope(4, { type: 'reasoning.delta', parts: [{ kind: 'text', text: '思考' }] }, { messageId: 'r1' }))
+    services.runtime.applyDocument(withReasoning, { ownerKey: 'owner-preview', generation: 1 })
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled())
+    // a1 的 payload（running 翻转）必须真实到达 surface；fixture 行的合法更新不干扰断言。
+    const assistantRowNodeId = base.messages.find(message => message.content === '回答')!.id
+    expect(updateSpy.mock.calls.some(([, node]) => (node as { nodeId: string }).nodeId === assistantRowNodeId)).toBe(true)
+
+    // appearance 变化（稳定化键不同）→ update 调用。
+    updateSpy.mockClear()
+    const theme = structuredClone(DEFAULTS)
+    theme.userName = '改名用户'
+    services.appearance.setTheme(theme)
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled())
+  })
+
+  // P57 §6 点名改写（例外 1）：「同帧合并 + 离底取消排队写入」中取消路径从纯位置
+  // 判别改为输入模态判别（wheel 上滚作废排队写入）；同帧合并契约不变。
+  it('同一帧 outer follow 合并多次 ResizeObserver 通知，且用户输入取消排队写入', async () => {
+    const previousResizeObserver = globalThis.ResizeObserver
+    class MockResizeObserver {
+      static instances: MockResizeObserver[] = []
+      readonly observed = new Set<Element>()
+      constructor(private readonly callback: ResizeObserverCallback) { MockResizeObserver.instances.push(this) }
+      observe(element: Element) { this.observed.add(element) }
+      unobserve(element: Element) { this.observed.delete(element) }
+      disconnect() { this.observed.clear() }
+      trigger() { this.callback([], this as unknown as ResizeObserver) }
+    }
+    globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
+    const pump = createFramePump()
+    try {
       const { host, services } = mountPreview()
       const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
-      Object.defineProperties(viewport, {
-        scrollTop: { value: 700, writable: true, configurable: true },
-        scrollHeight: { value: 1_000, configurable: true },
-        clientHeight: { value: 300, configurable: true },
-        scrollTo: { value: scrollTo, configurable: true },
-      })
+      const model = createScrollModel(viewport, { top: 700 })
+      const scrollTo = installInstantScrollToSink(viewport, model, pump)
       await Promise.resolve()
-      flushFrame()
+      pump.flush()
       scrollTo.mockClear()
 
       const contentObserver = MockResizeObserver.instances.find(observer => observer.observed.has(host.querySelector('.term')!))
       expect(contentObserver).toBeTruthy()
-      Object.defineProperty(viewport, 'scrollHeight', { value: 1_100, configurable: true })
+      model.height = 1_100
       // Drop mount/connector work; the assertions below measure only this
       // content observer's same-frame follow request.
-      frames.clear()
+      pump.clear()
       contentObserver!.trigger()
       contentObserver!.trigger()
       contentObserver!.trigger()
       expect(scrollTo).not.toHaveBeenCalled()
-      expect(frames.size).toBe(1)
-      flushFrame()
+      expect(pump.pending()).toBe(1)
+      pump.flush()
       expect(scrollTo).toHaveBeenCalledTimes(1)
       expect(scrollTo).toHaveBeenLastCalledWith({ top: 800, behavior: 'auto' })
 
-      // A user scroll invalidates the queued action before its frame runs.
-      Object.defineProperty(viewport, 'scrollTop', { value: 100, writable: true, configurable: true })
-      Object.defineProperty(viewport, 'scrollHeight', { value: 1_200, configurable: true })
+      // A user scroll (wheel 上滚) invalidates the queued action before its
+      // frame runs（输入模态取消，滚动反馈不再需要位置判别兜底）。
+      model.top = 100
+      model.height = 1_200
       contentObserver!.trigger()
-      fireEvent.scroll(viewport)
-      flushFrame()
+      fireEvent.wheel(viewport, { deltaY: -100 })
+      pump.flush()
       expect(scrollTo).toHaveBeenCalledTimes(1)
       services.runtime.destroy()
     } finally {
-      globalThis.requestAnimationFrame = previousRaf
-      globalThis.cancelAnimationFrame = previousCancel
+      pump.dispose()
       globalThis.ResizeObserver = previousResizeObserver
     }
   })

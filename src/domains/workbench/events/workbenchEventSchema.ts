@@ -112,6 +112,7 @@ export interface SessionEvent {
   readonly status?: string
   readonly commands?: readonly JsonValue[]
   readonly options?: readonly JsonValue[]
+  readonly usage?: JsonValue
   readonly stopReason?: string
 }
 
@@ -356,9 +357,22 @@ function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValu
   if (eventType === 'user.message' || eventType === 'assistant.text.delta') {
     return { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
   }
-  if (eventType === 'assistant.reasoning.delta') return { type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
-  if (eventType === 'tool.started' || eventType === 'tool.progress' || eventType === 'tool.completed' || eventType === 'tool.failed') {
-    return { type: eventType, ...(typed.tool !== undefined ? { tool: typed.tool } : {}), ...(typed.progress !== undefined ? { progress: typed.progress } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  if (eventType === 'assistant.reasoning.delta' || eventType === 'assistant.thinking.delta') {
+    return { type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  }
+  const toolSemanticType: Record<string, ToolEvent['type']> = {
+    'tool.started': 'tool.started',
+    'tool.progress': 'tool.progress',
+    'tool.completed': 'tool.completed',
+    'tool.failed': 'tool.failed',
+    'tool.call.started': 'tool.started',
+    'tool.call.updated': 'tool.progress',
+    'tool.call.completed': 'tool.completed',
+    'tool.call.failed': 'tool.failed',
+  }
+  const toolType = toolSemanticType[eventType]
+  if (toolType) {
+    return { type: toolType, ...(typed.tool !== undefined ? { tool: typed.tool } : {}), ...(typed.progress !== undefined ? { progress: typed.progress } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
   }
   if (eventType === 'plan.replaced') return { type: 'plan.replaced', ...(Array.isArray(typed.entries) ? { entries: typed.entries } : {}) }
   if (eventType === 'plan.entry-updated') return { type: 'plan.entry-updated', ...(typed.entry !== undefined ? { entry: typed.entry } : {}) }
@@ -370,7 +384,29 @@ function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValu
     if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) return { type: eventType, interactionId: typed.interactionId }
     return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
   }
-  if (eventType === 'session.completed') return { type: 'session.completed', ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}) }
+  if (eventType === 'interaction.answered') {
+    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) {
+      return {
+        type: 'interaction.resolved',
+        interactionId: typed.interactionId,
+        ...(typed.response !== undefined ? { response: typed.response } : {}),
+      }
+    }
+    return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
+  }
+  if (eventType === 'turn.completed' || eventType === 'session.completed') return {
+    type: 'session.completed',
+    ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}),
+    ...(typed.usage !== undefined ? { usage: typed.usage } : {}),
+    ...(typeof typed.model === 'string' ? { model: typed.model } : {}),
+  }
+  if (eventType === 'turn.failed') return {
+    type: 'diagnostic.notice',
+    level: 'error',
+    message: typeof typed.error === 'string' ? typed.error : 'provider reported a cancelled or failed turn',
+    ...(typeof typed.code === 'string' ? { code: typed.code } : { code: 'turn.failed' }),
+    data: raw,
+  }
   if (eventType === 'session.model-updated') return { type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }
   if (eventType === 'session.mode-updated') return { type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }
   if (eventType === 'session.status-updated') return { type: 'session.status-updated', ...(typeof typed.status === 'string' ? { status: typed.status } : {}) }

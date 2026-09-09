@@ -381,12 +381,25 @@ function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSna
 }
 
 function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocument): WorkbenchDocument {
+  // P57 S2-R1b：全部元素与 previous 逐项引用相等时，直接返回 previousItems 原引用
+  //（已冻结）。此前 items.map 恒产生新数组 → snapshot 侧数组引用每事件必新，
+  // 一切数组引用 memo（legacy fields / 显示链包装）全部落空。
   const freezeItems = <T extends object>(
     items: readonly T[],
     previousItems?: readonly T[],
     freezeItem: (item: T) => T = item => Object.freeze({ ...item }) as T,
   ): readonly T[] => {
     if (items === previousItems && Object.isFrozen(items)) return items
+    if (previousItems !== undefined && Object.isFrozen(previousItems) && items.length === previousItems.length) {
+      let allSame = true
+      for (let index = 0; index < items.length; index += 1) {
+        if (items[index] !== previousItems[index]) {
+          allSame = false
+          break
+        }
+      }
+      if (allSame) return previousItems
+    }
     return Object.freeze(items.map((item, index) => item === previousItems?.[index] && Object.isFrozen(item)
       ? item
       : freezeItem(item)))
@@ -488,7 +501,33 @@ function freezeJsonValue(value: JsonValue): JsonValue {
   return value
 }
 
+// P57 S2-R1c：legacyFieldsFromDocument 模块级单槽 memo。输出字段来源横跨
+// messages/activities/diagnostics/session（v2 勘误：单键 document.messages 不够）。
+// session 键用输出实际消费的 status/model/mode 值而非对象引用——usage 类事件经
+// reduceUsage 会克隆 session 对象，引用键会使 memo 在目标场景恒失效；三者值不变
+// 时输出不变，单槽命中语义与四元组引用比较等价且更精确。数组每事件换新时键必
+// 失效，因此不用 WeakMap。
+let legacyFieldsMemo: {
+  readonly messages: unknown
+  readonly activities: unknown
+  readonly diagnostics: unknown
+  readonly sessionStatus: unknown
+  readonly sessionModel: unknown
+  readonly sessionMode: unknown
+  readonly value: Partial<WorkbenchRuntimeSnapshot>
+} | undefined
+
 function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
+  const memo = legacyFieldsMemo
+  if (memo !== undefined
+    && memo.messages === document.messages
+    && memo.activities === document.activities
+    && memo.diagnostics === document.diagnostics
+    && memo.sessionStatus === document.session.status
+    && memo.sessionModel === document.session.model
+    && memo.sessionMode === document.session.mode) {
+    return memo.value
+  }
   const messages: Message[] = document.messages.map(message => ({
     id: message.id,
     role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
@@ -521,8 +560,9 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
         runningActivity?.startedAt,
       ]) ?? generationStart
     : undefined
-  return {
-    messages,
+  const value: Partial<WorkbenchRuntimeSnapshot> = {
+    // memo 复用的数组必须先冻结：freezeSnapshot 对未冻结数组会逐次拷贝（引用失稳）。
+    messages: Object.freeze(messages),
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',
@@ -539,6 +579,16 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     thinkingStart: timestampOf(runningReasoning?.time),
     error,
   }
+  legacyFieldsMemo = {
+    messages: document.messages,
+    activities: document.activities,
+    diagnostics: document.diagnostics,
+    sessionStatus: document.session.status,
+    sessionModel: document.session.model,
+    sessionMode: document.session.mode,
+    value,
+  }
+  return value
 }
 
 /**

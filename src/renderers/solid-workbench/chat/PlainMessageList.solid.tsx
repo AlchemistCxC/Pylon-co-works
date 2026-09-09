@@ -47,18 +47,29 @@ export function PlainMessageList(props: PlainMessageListProps) {
   const port: MessageListPort = {
     setItems(nextItems) {
       if (destroyed) return
-      const previousRows = new Map(untrack(rows).map(row => [row.key, row]))
-      const nextRows = nextItems.map(item => {
-        const existing = previousRows.get(item.key)
+      const previousRows = untrack(rows)
+      const previousRowsByKey = new Map(previousRows.map(row => [row.key, row]))
+      let changed = false
+      const nextRows = nextItems.map((item, index) => {
+        const existing = previousRowsByKey.get(item.key)
         if (!existing) {
+          changed = true
           const entering = !seenKeys.has(item.key)
           seenKeys.add(item.key)
           return createStableMessageListRow(item, entering)
         }
-        existing.update(item)
+        // 顺序/裁剪也是结构变化；同 key 且同序才允许沿用既有行。
+        if (index >= previousRows.length || previousRows[index].key !== item.key) changed = true
+        // P57 S2-R3：引用相等门——当前 item 与行已应用的 item 全等时跳过 signal 写入，
+        // 零成本通过（上层 items memo 的 per-key 复用保证未变化行引用稳定）。
+        if (!existing.isCurrent(item)) {
+          existing.update(item)
+          changed = true
+        }
         return existing
       })
-      setItems([...nextItems])
+      if (!changed && nextItems.length === previousRows.length) return
+      setItems(nextItems)
       setRows(nextRows)
       invalidateMeasurements('items-changed')
     },
@@ -173,10 +184,13 @@ interface StableMessageListRow {
   readonly item: MessageListItem
   readonly entering: boolean
   update(item: MessageListItem): void
+  /** P57 S2-R3：当前已应用的 item 引用，供引用相等门跳过冗余 update。 */
+  isCurrent(item: MessageListItem): boolean
 }
 
 function createStableMessageListRow(initialItem: MessageListItem, entering = false): StableMessageListRow {
   const [current, setCurrent] = createSignal(initialItem)
+  let appliedItem = initialItem
   const item: MessageListItem = {
     get key() { return current().key },
     get descriptor() { return current().descriptor },
@@ -186,7 +200,11 @@ function createStableMessageListRow(initialItem: MessageListItem, entering = fal
     key: initialItem.key,
     item,
     entering,
-    update: setCurrent,
+    update(next) {
+      appliedItem = next
+      setCurrent(next)
+    },
+    isCurrent: next => appliedItem === next,
   }
 }
 

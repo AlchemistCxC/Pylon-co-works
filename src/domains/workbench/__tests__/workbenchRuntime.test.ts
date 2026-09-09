@@ -151,8 +151,7 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
-  it('deep-freezes renderer-facing canonical message payloads', () => {
-    const runtime = createPreviewWorkbenchRuntime(initial())
+  it('deep-freezes renderer-facing canonical message payloads', () => {    const runtime = createPreviewWorkbenchRuntime(initial())
     const document = projectWorkbench([createWorkbenchEnvelope({
       sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
       source: { provider: 'peri', sourceId: 'deep-freeze' }, identity: { messageId: 'm-1' },
@@ -167,6 +166,72 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(Object.isFrozen(message.parts[0])).toBe(true)
     expect(Object.isFrozen(message.identity)).toBe(true)
     expect(Object.isFrozen(message.source)).toBe(true)
+  })
+
+  it('P57 S2-R1b：freezeItems 全等透传返回 previous 数组原引用，内容变化仍产生新数组', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = projectWorkbench([
+      createWorkbenchEnvelope({
+        sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
+        source: { provider: 'peri', sourceId: 'reuse-a' }, identity: { messageId: 'm-1' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'alpha' }] },
+      }),
+      createWorkbenchEnvelope({
+        sessionId: 'session-a', sequence: 2, recordedAt: '2026-08-25T00:00:01.000Z',
+        source: { provider: 'peri', sourceId: 'reuse-b' }, identity: { messageId: 'm-2' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'beta' }] },
+      }),
+    ]).document
+
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const first = runtime.getSnapshot().document!.messages
+    const frozen = runtime.getSnapshot().document!
+
+    // 活路径（applyDocument 携带 previous）下的重投影典型形态：新数组、元素引用
+    // 逐项相等（usage 类事件未触碰 messages）→ freezeItems 全等透传。
+    runtime.applyDocument({ ...frozen, messages: [...frozen.messages] }, { ownerKey: 'owner-a', generation: 1 })
+    expect(runtime.getSnapshot().document!.messages).toBe(first)
+
+    // 内容真实变化仍产生新数组（R1b 不吞变更）。
+    runtime.applyDocument({ ...frozen, messages: frozen.messages.slice(0, -1) }, { ownerKey: 'owner-a', generation: 1 })
+    expect(runtime.getSnapshot().document!.messages).not.toBe(first)
+  })
+
+  it('P57 S2-R1c：usage 类事件间 legacy snapshot.messages 引用保持稳定', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
+      source: { provider: 'peri', sourceId: 'legacy-ref' }, identity: { messageId: 'm-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'stable' }] },
+    })]).document
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const legacyMessages = runtime.getSnapshot().messages
+    const documentMessages = runtime.getSnapshot().document!.messages
+    const frozen = runtime.getSnapshot().document!
+
+    // usage 类事件走活路径（applyDocument）→ messages 引用稳定 → legacy memo 命中
+    runtime.applyDocument({ ...frozen, session: { ...frozen.session, usage: { inputTokens: 7 } } }, { ownerKey: 'owner-a', generation: 1 })
+
+    expect(runtime.getSnapshot().document!.messages).toBe(documentMessages)
+    expect(runtime.getSnapshot().messages).toBe(legacyMessages)
+  })
+
+  it('P57 R1d 红线回归：usage slice 在 session.usage 变化时仍收到局部通知', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = createWorkbenchDocument('session-a')
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const usage = vi.fn()
+    runtime.subscribeSlice('usage', usage)
+
+    runtime.applyDocument({ ...document, session: { ...document.session, usage: { inputTokens: 9 } } }, { ownerKey: 'owner-a', generation: 1 })
+    expect(usage).toHaveBeenCalledTimes(1)
+
+    // session.usage 对象引用换新但数值不变（R1c/R1d 场景）→ slice 引用比较仍通知
+    runtime.applyDocument({ ...document, session: { ...document.session, usage: { inputTokens: 9 } } }, { ownerKey: 'owner-a', generation: 1 })
+    expect(usage).toHaveBeenCalledTimes(2)
   })
 
   it('destroy 幂等并停止后续通知', () => {

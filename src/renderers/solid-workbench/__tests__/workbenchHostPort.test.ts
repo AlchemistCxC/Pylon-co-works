@@ -98,6 +98,45 @@ describe('WorkbenchHostPort', () => {
     source.destroy()
   })
 
+  it('P57 S2-R2：同一 document 下 messages 逐元素复用；读取仍每次执行', () => {
+    const source = runtime()
+    const host = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    const services = createSolidWorkbenchServicesFromHostPort(host).runtime
+    const messageA: WorkbenchMessage = {
+      id: 'a', segmentId: 'a', role: 'assistant', content: 'one', parts: [], identity: {},
+      source: { provider: 'test', sourceId: 'a' }, sequence: 1, running: false, time: '2026-01-01T00:00:00.000Z',
+    }
+    const messageB: WorkbenchMessage = {
+      id: 'b', segmentId: 'b', role: 'assistant', content: 'two', parts: [], identity: {},
+      source: { provider: 'test', sourceId: 'b' }, sequence: 2, running: false, time: '2026-01-01T00:00:01.000Z',
+    }
+    source.replaceDocument({ ...source.getSnapshot().document!, messages: [messageA, messageB] }, { ownerKey: 'owner-a', generation: 1 })
+
+    // 同一 document 引用下的重复 getSnapshot：读取照常执行，派生数组与元素复用。
+    const first = services.getSnapshot()
+    const second = services.getSnapshot()
+    expect(second.messages).toBe(first.messages)
+    expect(second.messages[0]).toBe(first.messages[0])
+    expect(second.messages[1]).toBe(first.messages[1])
+
+    // 单元素内容变化：派生数组换新、内容更新（单槽 memo 未命中即全量重建）。
+    const frozenDocument = source.getSnapshot().document!
+    const [frozenA, frozenB] = frozenDocument.messages
+    source.replaceDocument({
+      ...frozenDocument,
+      messages: [frozenA, { ...frozenB, content: 'two updated' }],
+    }, { ownerKey: 'owner-a', generation: 1 })
+    const third = services.getSnapshot()
+    expect(third.messages).not.toBe(first.messages)
+    expect(third.messages[1]?.content).toBe('two updated')
+    source.destroy()
+  })
+
   it('exposes an immutable document reader and slice subscriptions', () => {
     const source = runtime()
     const host = createWorkbenchHostPort({

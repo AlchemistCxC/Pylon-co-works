@@ -72,7 +72,20 @@ export function renderDecisionKind(decision: RenderDecision): RenderDecision['ki
   }
 }
 
+// P57 S2-R3：RenderMessage 包装按 Message 引用复用。canonical 链路的 Message
+// 引用稳定性由 runtime 侧 freezeItems/legacyFields memo 保证；包装引用稳定后，
+// 行级 descriptor 字段比较才有稳定键，未变化行可零成本通过显示链。
+const renderMessageCache = new WeakMap<Message, RenderMessage>()
+
 export function toRenderMessage(message: Message): RenderMessage {
+  const cached = renderMessageCache.get(message)
+  if (cached) return cached
+  const built = toRenderMessageUncached(message)
+  renderMessageCache.set(message, built)
+  return built
+}
+
+function toRenderMessageUncached(message: Message): RenderMessage {
   if (message.sender === 'system' && message.role === 'assistant') {
     return { type: 'error', message }
   }

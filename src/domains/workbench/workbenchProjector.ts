@@ -272,8 +272,32 @@ export function projectWorkbench(
 ): ProjectionResult {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence || left.eventId.localeCompare(right.eventId))
   const initial = options.initialDocument ?? createWorkbenchDocument(sorted[0]?.sessionId ?? '')
-  const document = sorted.reduce(reduceWorkbenchEvent, initial)
-  return { document, diagnostics: document.diagnostics }
+  // P57 S2-R1e：批量回放入口用本地 Set 预去重，appliedEventIds 以共享可变数组按序追加、
+  // 末端一次冻结——把单事件路径 `includes` + spread 的 O(n²) 降到 O(n)（R-A6）。
+  // 公共形状 readonly string[] 不变；单事件 live 路径仍走 reduceWorkbenchEvent。
+  const applied = new Set(initial.appliedEventIds)
+  const appliedEventIds = [...initial.appliedEventIds]
+  let document = initial
+  for (const envelope of sorted) {
+    if (applied.has(envelope.eventId)) continue
+    applied.add(envelope.eventId)
+    appliedEventIds.push(envelope.eventId)
+    const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
+      ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
+      : envelope
+    let next: WorkbenchDocument = {
+      ...document,
+      revision: Math.max(document.revision, envelope.sequence),
+      appliedEventIds,
+      timeline: insertBySequence(document.timeline, timelineEntry(effective)),
+    }
+    next = reduceSemanticEvent(next, effective)
+    document = refreshOrphans(next)
+  }
+  return {
+    document: { ...document, appliedEventIds: Object.freeze([...appliedEventIds]) },
+    diagnostics: document.diagnostics,
+  }
 }
 
 export function selectTimeline(document: WorkbenchDocument): readonly WorkbenchTimelineEntry[] {
@@ -1114,6 +1138,7 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       ...(event.mode ? { mode: event.mode } : {}),
       ...(event.commands ? { commands: normalizeSessionCommands(event.commands) } : {}),
       ...(event.options ? { options: normalizeSessionConfigOptions(event.options) } : {}),
+      ...(event.usage !== undefined ? { usage: normalizeUsageSnapshot(event.usage, document.session.usage).value } : {}),
     },
   }
 }
@@ -1177,9 +1202,19 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 }
 
 function refreshOrphans(document: WorkbenchDocument): WorkbenchDocument {
+  // P57 S2-R1a：仅当某个带 parentId 的 activity 的 orphan 值实际变化时才克隆该节点；
+  // 没有任何变化时恒等返回输入 document。此前每个带 parentId 的节点无条件克隆，
+  // 恒产生新 activities 数组，放大了 freezeDeepSnapshot 每事件的全量深拷贝。
   const ids = new Set(document.activities.map(activity => activity.id))
-  const activities = document.activities.map(activity => activity.parentId ? { ...activity, orphan: !ids.has(activity.parentId) } : activity)
-  return activities === document.activities ? document : { ...document, activities }
+  let changed = false
+  const activities = document.activities.map(activity => {
+    if (!activity.parentId) return activity
+    const orphan = !ids.has(activity.parentId)
+    if (activity.orphan === orphan) return activity
+    changed = true
+    return { ...activity, orphan }
+  })
+  return changed ? { ...document, activities } : document
 }
 
 function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {

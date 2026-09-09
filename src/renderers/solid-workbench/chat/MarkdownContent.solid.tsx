@@ -39,6 +39,8 @@ export function MarkdownContent(props: MarkdownContentProps) {
 
 interface StreamingBlockRow {
   readonly id: number
+  /** P57 S3-A11：该行是否仍是增长尾块（尾块解析绕 LRU 缓存，稳定后恢复缓存）。 */
+  tail: boolean
   readonly text: string
   update(text: string): void
 }
@@ -52,7 +54,6 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   let stableRows: StreamingBlockRow[] = []
   let tailRow = createStreamingBlockRow(nextId++, '')
   const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
-
   const reset = (text: string, final: boolean) => {
     committedText = ''
     hiddenLeading = ''
@@ -86,6 +87,7 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
       // the row.  The shared `.term-p + .term-p` cadence below represents the
       // separator; strip it from the visible stable text to keep streaming
       // geometry identical to the completed Markdown path.
+      tailRow.tail = false
       tailRow.update(trimStableBlockDelimiter(block))
       stableRows.push(tailRow)
       committedText += block
@@ -101,6 +103,7 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
       : split.unstable
     tailRow.update(unstableText)
     if (final && split.unstable.length > 0) {
+      tailRow.tail = false
       stableRows.push(tailRow)
       committedText += split.unstable
       tailRow = createStreamingBlockRow(nextId++, '')
@@ -140,18 +143,21 @@ function trimStreamingDelimiterStart(text: string): string {
 
 function createStreamingBlockRow(id: number, initialText: string): StreamingBlockRow {
   const [text, setText] = createSignal(initialText)
-  return { id, get text() { return text() }, update: setText }
+  return { id, tail: true, get text() { return text() }, update: setText }
 }
 
 function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; inline?: boolean }) {
   const text = () => props.row.text
   const openCodeTail = createMemo(() => props.streaming() ? splitOpenCodeFenceTail(text()) : null)
+  // P57 S3-A11：增长尾块的中间态解析绕 LRU 缓存（同前缀同长度的文本永不再命中，
+  // 只会挤掉 stable 块的缓存条目）；行晋升为 stable 后恢复缓存。
+  const cacheModel = () => !props.row.tail
   return <Show
     when={openCodeTail() !== null}
-    fallback={<MarkdownSegment text={text} inline={props.inline} />}
+    fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} />}
   >
     <Show when={openCodeTail()?.prefix}>
-      {prefix => <MarkdownSegment text={prefix()} inline={props.inline} />}
+      {prefix => <MarkdownSegment text={prefix()} inline={props.inline} cache={cacheModel} />}
     </Show>
     <StreamingCodeBlock
       code={() => openCodeTail()?.code ?? ''}
@@ -171,29 +177,34 @@ function StreamingCodeBlock(props: { language: () => string | undefined; code: (
       <Index each={lines()}>{line => (
         <div class="term-code-line">
           <span class="term-code-gutter">│ </span>
-          <span>{line() || '\u00a0'}</span>
+          <span class="term-code-text">{line() || '\u00a0'}</span>
         </div>
       )}</Index>
     </div>
   )
 }
 
-/** 把一段文本解析为 markdown 渲染。streaming 稳定前缀复用 LRU 缓存，不重解析。 */
-function MarkdownSegment(props: { text: string | (() => string); inline?: boolean }) {
+/**
+ * 把一段文本解析为 markdown 渲染。streaming 稳定前缀复用 LRU 缓存，不重解析。
+ *
+ * P57 S3-R8（R-B8）：解析 pending 期间渲染 `model.latest`（上一次已解析模型），
+ * 不再回落到原始文本——流式尾块旧模型是同文本前缀，短暂滞后无感，而原始
+ * `**`/`` ` `` 标记不再泄漏到 DOM。仅首次解析（从未 resolve）渲染骨架。
+ */
+function MarkdownSegment(props: { text: string | (() => string); inline?: boolean; cache?: () => boolean }) {
   const text = () => typeof props.text === 'function' ? props.text() : props.text
   const shouldParse = () => !isPlainTextContent(text())
+  const useCache = () => props.cache?.() ?? true
   const [model] = createResource(
     () => shouldParse() ? text() : undefined,
-    getMarkdownRenderModel,
+    source => getMarkdownRenderModel(source, { cache: useCache() }),
   )
 
   return (
     <Show when={shouldParse()} fallback={props.inline
       ? <span class="term-p term-plain-text">{text()}</span>
       : <p class="term-p term-plain-text">{text()}</p>}>
-      <Show when={model()} fallback={props.inline
-        ? <span class="term-p term-plain-text">{text()}</span>
-        : <p class="term-p term-plain-text">{text()}</p>}>
+      <Show when={model.latest} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
         {root => <For each={root().children}>{node => <MarkdownNode node={node} />}</For>}
       </Show>
     </Show>
@@ -269,9 +280,9 @@ function CodeBlock(props: { language?: string; code: string }) {
             <span class="term-code-gutter">│ </span>
             <Show
               when={highlightedLines()?.[index()]}
-              fallback={<span>{line || '\u00a0'}</span>}
+              fallback={<span class="term-code-text">{line || '\u00a0'}</span>}
             >
-              {html => <span innerHTML={html()} />}
+              {html => <span class="term-code-text" innerHTML={html()} />}
             </Show>
           </div>
         )}</For>
