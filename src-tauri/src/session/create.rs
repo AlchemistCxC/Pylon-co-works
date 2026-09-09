@@ -870,13 +870,10 @@ async fn revive_session_slot(
         .map(|caps| crate::acp::resume_capability_advertised(&caps))
         .unwrap_or(false);
     let response = if resume_advertised {
-        let resume_params = crate::acp::resume_params(
-            peri_id,
-            session_cwd,
-        )
-        .map_err(PylonError::Protocol)?;
+        let resume_params =
+            crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
         match state
-            .acp_rpc(runtime, crate::acp::METHOD_SESSION_RESUME, resume_params)
+            .acp_rpc_generation_checked(runtime, crate::acp::METHOD_SESSION_RESUME, resume_params, generation)
             .await
         {
             Ok(response) => {
@@ -893,6 +890,7 @@ async fn revive_session_slot(
                 Some(response)
             }
             Err(error) => {
+                state.ensure_generation(runtime, generation)?;
                 tracing::info!(
                     target: "replay_trace",
                     owner = source,
@@ -913,8 +911,9 @@ async fn revive_session_slot(
         Some(response) => response,
         None => {
             let load_result = state
-                .acp_rpc(runtime, crate::acp::METHOD_SESSION_LOAD, params)
+                .acp_rpc_generation_checked(runtime, crate::acp::METHOD_SESSION_LOAD, params, generation)
                 .await;
+            state.ensure_generation(runtime, generation)?;
             if let Ok(response) = load_result {
                 tracing::info!(
                     target: "replay_trace",
@@ -939,23 +938,23 @@ async fn revive_session_slot(
                     "session/new recovery fallback"
                 );
                 let error = "session resume/load failed";
-            state.log_runtime_summary(
-                "info",
-                "session",
-                Some(source.to_string()),
-                "Session revive via session/load failed; falling back to session/new",
-                serde_json::Map::from_iter([
-                    (
-                        "periId".to_string(),
-                        serde_json::Value::String(peri_id.to_string()),
-                    ),
-                    (
-                        "error".to_string(),
-                        serde_json::Value::String(error.to_string()),
-                    ),
-                ]),
-            );
-            return Ok(None);
+                state.log_runtime_summary(
+                    "info",
+                    "session",
+                    Some(source.to_string()),
+                    "Session revive via session/load failed; falling back to session/new",
+                    serde_json::Map::from_iter([
+                        (
+                            "periId".to_string(),
+                            serde_json::Value::String(peri_id.to_string()),
+                        ),
+                        (
+                            "error".to_string(),
+                            serde_json::Value::String(error.to_string()),
+                        ),
+                    ]),
+                );
+                return Ok(None);
             }
         }
     };
