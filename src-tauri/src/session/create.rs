@@ -874,7 +874,6 @@ async fn revive_session_slot(
         let resume_params = crate::acp::resume_params(
             peri_id,
             session_cwd,
-            wire_mcp_servers.to_vec(),
         )
         .map_err(PylonError::Protocol)?;
         match state

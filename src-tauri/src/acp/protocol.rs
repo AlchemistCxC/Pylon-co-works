@@ -334,25 +334,20 @@ mod resume_tests {
     use serde_json::json;
 
     #[test]
-    fn resume_params_use_standard_session_id_cwd_and_mcp_servers() {
+    fn resume_params_use_standard_session_id_and_cwd() {
         assert_eq!(
-            resume_params("remote-1", "C:/work", vec![json!({"name":"x"})]).unwrap(),
-            json!({"sessionId":"remote-1", "cwd":"C:/work", "mcpServers":[{"name":"x"}]}),
+            resume_params("remote-1", "C:/work").unwrap(),
+            json!({"sessionId":"remote-1", "cwd":"C:/work"}),
         );
     }
 }
 
-/// session/resume parameters.  Resume is intentionally schema-backed; unlike
-/// load it has no provider-specific fields beyond the standard MCP list.
+/// session/resume parameters. Resume carries only standard identity and cwd;
+/// Pylon-specific MCP JSON is deliberately not sent through this schema.
 pub(crate) fn resume_params(
     session_id: &str,
     cwd: &str,
-    mcp_servers: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let req = ResumeSessionRequest::new(session_id.to_string(), cwd.to_string());
-    let mut params = to_params(&req, "session/resume")?;
-    if let Some(obj) = params.as_object_mut() {
-        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
-    }
-    Ok(params)
+    to_params(&req, "session/resume")
 }
