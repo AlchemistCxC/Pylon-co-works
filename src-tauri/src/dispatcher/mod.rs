@@ -172,25 +172,16 @@ fn apply_update_event_with_pet_policy(
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-            session.tokens_total = update
-                .get("used")
-                .or_else(|| update.get("value"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let (used, size) = session.acp_state.usage.unwrap_or((0, None));
+            session.tokens_total = used;
+            session.context_size = size.unwrap_or(0);
             if let Some(meta) = update.get("_meta") {
-                session.tokens_in = meta
-                    .get("inputTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                session.tokens_out = meta
-                    .get("outputTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                session.tokens_in = session.acp_state.usage_input.unwrap_or(0);
+                session.tokens_out = session.acp_state.usage_output.unwrap_or(0);
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
                 }
             }
-            session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
             if apply_pet {
                 pet_events.push(PetEvent::UsageUpdate(session.tokens_total));
             }
@@ -543,6 +534,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
     pending_permissions: &PermissionLock,
+    sessions: &SessionsLock,
     hook_bridge: &Arc<crate::hook_bridge::HookBridge>,
     provider: &str,
     agent_id: &str,
@@ -614,6 +606,19 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .await;
         return;
     };
+    // Reducer ownership is resolved by the protocol session id, never by the
+    // request id alone (request ids may be reused across sessions).
+    let remember_permission = |sessions: &SessionsLock| {
+        let _ = sessions.lock().map(|mut sessions| {
+            if let Some(session) = sessions.get_mut(&permission.session_id) {
+                let _ = session.acp_state.apply(&crate::acp::RawMessage {
+                    id: Some(request_id.clone()), method: Some("session/request_permission".into()),
+                    kind: crate::acp::AcpKind::PermissionRequest, result: None,
+                    params: params.cloned(), error: None,
+                });
+            }
+        });
+    };
     let mode = approval_mode
         .lock()
         .map(|m| m.clone())
@@ -673,6 +678,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
             .respond(request_id, permission_response(option_id))
             .await;
     } else {
+        remember_permission(sessions);
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id.clone(), permission.clone());
         });
@@ -1496,6 +1502,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         &client_generation,
                         &approval_mode,
                         &pending_permissions,
+                        &sessions,
                         &hook_bridge,
                         &provider,
                         &agent_id,
