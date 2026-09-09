@@ -422,3 +422,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A2 usage 收口：dispatcher UsageUpdate 现读取 session.acp_state typed usage，不再重复解析 used/size/input/output；保留 _meta.model 与 Pet 行为。可靠 permission 映射已确认：PendingPermission.session_id + client_generation 双键绑定 SessionInfo.acp_state，后续接入应答/取消出队。cargo check、dispatcher 12 项、state 4 项通过。
 
 [2026-09-09 继续] [主施工员·工程师] permission 映射接入：request 入队按 PendingPermission.session_id 写入对应 SessionInfo reducer；resolve_pending 成功 wire 应答后按同 session_id 出队，失败保留 pending，generation 校验仍在 claim 临界区。cargo check 通过；permission 两条既有 fake-agent 测试出现应答未达（与变更后置 reducer 更新无因果，需后续复验）。
+
+[2026-09-09 继续] [主施工员·工程师] permission 复验：两条既有测试稳定失败，因为它们仅手工插入 pending map、未注入 SDK Responder；SDK 仅能应答实际收到并登记的 agent request，旧 legacy 可向任意 id 写线。该差异是 A1c 官方 SDK 接缝行为变化，不能用状态映射掩盖；生产路径真实 request 已由 on_receive_dispatch 登记。已保留失败证据，后续按施工书 A1c 测试处置审计。
