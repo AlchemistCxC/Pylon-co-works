@@ -887,6 +887,8 @@ async fn revive_session_slot(
             Ok(response) => {
                 tracing::info!(
                     target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
                     recovery_method = "resume",
                     result = "success",
                     response_boundary = "observed",
@@ -898,6 +900,8 @@ async fn revive_session_slot(
             Err(error) => {
                 tracing::info!(
                     target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
                     recovery_method = "resume",
                     result = "fallback",
                     failure_class = ?error.resume_failure_class(),
