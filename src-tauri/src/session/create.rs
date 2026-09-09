@@ -865,10 +865,8 @@ async fn revive_session_slot(
         .acp
         .lock()
         .await
-        .agent_capabilities()
-        .cloned()
-        .map(|caps| crate::acp::resume_capability_advertised(&caps))
-        .unwrap_or(false);
+        .capabilities()
+        .supports_object(&["sessionCapabilities", "resume"]);
     let response = if resume_advertised {
         let resume_params =
             crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
