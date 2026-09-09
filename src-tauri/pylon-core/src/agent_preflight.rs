@@ -192,4 +192,28 @@ mod tests {
         assert!(version_at_least(Some("22.12.1"), Some("22.12.0")));
         assert!(!version_at_least(Some("20.0.0"), Some("22.0.0")));
     }
+
+    #[test]
+    fn catalog_checks_project_node_fail_and_uv_warn_without_install_side_effects() {
+        let result = evaluate(
+            "claude-code",
+            &PreflightInputs {
+                node_version: Some("20.0.0".into()),
+                uv_version: None,
+                binary_present: true,
+                adapter_present: true,
+                config_evidence: false,
+            },
+        )
+        .unwrap();
+        assert!(!result.passed);
+        assert!(result
+            .checks
+            .iter()
+            .any(|check| check.status == CheckStatus::Fail));
+        assert!(result
+            .checks
+            .iter()
+            .any(|check| check.status == CheckStatus::Warn));
+    }
 }
