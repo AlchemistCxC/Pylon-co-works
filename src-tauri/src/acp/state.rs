@@ -71,6 +71,8 @@ pub struct AcpSessionState {
     pub tools: BTreeMap<String, serde_json::Value>,
     pub pending_permissions: Vec<(String, String)>,
     pub usage: Option<(u64, Option<u64>)>,
+    pub usage_input: Option<u64>,
+    pub usage_output: Option<u64>,
     pub plan: Option<serde_json::Value>,
     pub mode: Option<String>,
     pub model: Option<String>,
@@ -193,6 +195,8 @@ impl AcpSessionState {
                     .and_then(|meta| meta.get("outputTokens"))
                     .and_then(serde_json::Value::as_u64);
                 self.usage = Some((used, size));
+                self.usage_input = input;
+                self.usage_output = output;
                 Some(AcpStateDelta::Usage {
                     used,
                     size,
@@ -340,6 +344,8 @@ mod tests {
             }]
         );
         assert_eq!(state.usage, Some((7, Some(100))));
+        assert_eq!(state.usage_input, None);
+        assert_eq!(state.usage_output, None);
     }
 
     #[test]
