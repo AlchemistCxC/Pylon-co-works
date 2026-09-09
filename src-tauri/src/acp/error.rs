@@ -212,6 +212,13 @@ pub(crate) enum RpcFailureKind {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeFailureClass {
+    Archived,
+    Busy,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RpcFailureDetails {
     pub(crate) code: Option<i64>,
@@ -220,6 +227,16 @@ pub(crate) struct RpcFailureDetails {
 }
 
 impl AcpError {
+    pub(crate) fn resume_failure_class(&self) -> ResumeFailureClass {
+        let text = self.to_string().to_ascii_lowercase();
+        if text.contains("archiv") || text.contains("expired") {
+            ResumeFailureClass::Archived
+        } else if text.contains("busy") || text.contains("in progress") {
+            ResumeFailureClass::Busy
+        } else {
+            ResumeFailureClass::Unavailable
+        }
+    }
     pub(crate) fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
         let Self::Rpc(raw) = self else {
             return None;
@@ -305,6 +322,18 @@ impl From<AgentConnectFailure> for AcpError {
 impl From<AcpError> for String {
     fn from(error: AcpError) -> Self {
         error.to_string()
+    }
+}
+
+#[cfg(test)]
+mod resume_failure_tests {
+    use super::{AcpError, ResumeFailureClass};
+
+    #[test]
+    fn classify_resume_failures_for_fallback_policy() {
+        assert_eq!(AcpError::Rpc("session archived".into()).resume_failure_class(), ResumeFailureClass::Archived);
+        assert_eq!(AcpError::Rpc("session busy".into()).resume_failure_class(), ResumeFailureClass::Busy);
+        assert_eq!(AcpError::ConnectionClosed.resume_failure_class(), ResumeFailureClass::Unavailable);
     }
 }
 

@@ -880,7 +880,17 @@ async fn revive_session_slot(
             .await
         {
             Ok(response) => Some(response),
-            Err(_) => None,
+            Err(error) => {
+                tracing::info!(
+                    target: "replay_trace",
+                    recovery_method = "resume",
+                    result = "fallback",
+                    failure_class = ?error.resume_failure_class(),
+                    response_boundary = "error",
+                    "session/resume recovery attempt"
+                );
+                None
+            }
         }
     } else {
         None
