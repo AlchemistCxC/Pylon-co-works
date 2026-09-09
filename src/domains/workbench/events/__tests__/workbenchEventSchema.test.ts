@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CANONICAL_SEMANTIC_PROJECTION_REGISTRY,
   createWorkbenchEnvelope,
   migrateWorkbenchEnvelope,
   parseWorkbenchEnvelope,
   type WorkbenchEventEnvelope,
 } from '../workbenchEventSchema.ts'
+import { CANONICAL_EVENT_TYPES } from '../../../events/eventSchema.ts'
+import type { JsonValue } from '../../content/contentPartSchema.ts'
 
 const source = { provider: 'peri', sourceId: 'wire-1', agentId: 'agent-1' } as const
 
@@ -28,6 +31,74 @@ function envelope(overrides: Partial<WorkbenchEventEnvelope> = {}): WorkbenchEve
 }
 
 describe('Workbench event envelope schema', () => {
+  it('has a renderer-facing projection vector for every canonical event type', () => {
+    const expectedTypes: Record<(typeof CANONICAL_EVENT_TYPES)[number], string> = {
+      'user.message': 'message.delta',
+      'assistant.text.delta': 'message.delta',
+      'assistant.thinking.delta': 'reasoning.delta',
+      'tool.call.started': 'tool.started',
+      'tool.call.updated': 'tool.progress',
+      'tool.call.completed': 'tool.completed',
+      'tool.call.failed': 'tool.failed',
+      'interaction.requested': 'interaction.requested',
+      'interaction.answered': 'interaction.resolved',
+      'turn.completed': 'session.completed',
+      'turn.failed': 'diagnostic.notice',
+      'usage.updated': 'usage.updated',
+      'plan.replaced': 'plan.replaced',
+      'session.mode-updated': 'session.mode-updated',
+      'session.model-updated': 'session.model-updated',
+      'session.config-updated': 'session.config-updated',
+      'session.commands-updated': 'session.commands-updated',
+      'history.snapshot': 'event.unknown',
+      unknown: 'event.unknown',
+    }
+    const fixtures: Record<string, { typed: Record<string, JsonValue>; text?: string }> = {
+      'user.message': { typed: { text: 'question' }, text: 'question' },
+      'assistant.text.delta': { typed: { text: 'answer' }, text: 'answer' },
+      'assistant.thinking.delta': { typed: { text: 'thinking' }, text: 'thinking' },
+      'tool.call.started': { typed: { tool: { name: 'Read' } } },
+      'tool.call.updated': { typed: { tool: { name: 'Read' }, progress: { percent: 50 } } },
+      'tool.call.completed': { typed: { tool: { name: 'Read' }, result: { ok: true } } },
+      'tool.call.failed': { typed: { tool: { name: 'Read' }, result: { ok: false } } },
+      'interaction.requested': { typed: { interactionId: 'ask-1' } },
+      'interaction.answered': { typed: { interactionId: 'ask-1', response: { optionId: 'allow' } } },
+      'turn.completed': { typed: { stopReason: 'end_turn', usage: { outputTokens: 2 }, model: 'model-1' } },
+      'turn.failed': { typed: { error: 'failed', code: 'turn.failed' } },
+      'usage.updated': { typed: { usage: { inputTokens: 3 } } },
+      'plan.replaced': { typed: { entries: [{ id: 'step-1', content: 'Inspect' }] } },
+      'session.mode-updated': { typed: { mode: 'auto' } },
+      'session.model-updated': { typed: { model: 'model-1' } },
+      'session.config-updated': { typed: { options: [{ id: 'reasoning', value: 'high' }] } },
+      'session.commands-updated': { typed: { commands: [{ name: '/compact' }] } },
+      'history.snapshot': { typed: { checkpoint: 'replay-1' } },
+      unknown: { typed: { future: true } },
+    }
+
+    for (const eventType of CANONICAL_EVENT_TYPES) {
+      const projection = CANONICAL_SEMANTIC_PROJECTION_REGISTRY[eventType]
+      expect(projection, `${eventType} registry entry`).toBeTypeOf('function')
+      const fixture = fixtures[eventType]!
+      const event = projection({ ...fixture, raw: { eventType, fixture: true } })
+      expect(event.type, `${eventType} semantic type`).toBe(expectedTypes[eventType])
+    }
+  })
+
+  it('keeps config and command payloads on their session semantic surfaces', () => {
+    const config = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 9, eventType: 'session.config-updated', rawPayload: {},
+      typedPayload: { options: [{ id: 'model', value: 'model-1' }] },
+    })
+    const commands = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 10, eventType: 'session.commands-updated', rawPayload: {},
+      typedPayload: { commands: [{ name: '/compact' }] },
+    })
+    expect(config.ok).toBe(true)
+    expect(commands.ok).toBe(true)
+    if (config.ok) expect(config.value.event).toEqual({ type: 'session.config-updated', options: [{ id: 'model', value: 'model-1' }] })
+    if (commands.ok) expect(commands.value.event).toEqual({ type: 'session.commands-updated', commands: [{ name: '/compact' }] })
+  })
+
   it.each([
     ['tool.started', 'tool.started'],
     ['tool.call.started', 'tool.started'],
