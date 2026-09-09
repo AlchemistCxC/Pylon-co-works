@@ -54,8 +54,7 @@ describe('WorkbenchProjector', () => {
     expect(migrated.ok).toBe(true)
     if (!migrated.ok) return
     const document = projectWorkbench([migrated.value]).document
-    expect(document.reasoning).toHaveLength(1)
-    expect(document.reasoning[0]?.content).toContain('thinking')
+    expect(document.messages.filter(message => message.role === 'reasoning').map(message => message.content)).toContain('thinking')
   })
   it('projects messages, timeline and unknown diagnostics through one pure reducer', () => {
     const events = [
