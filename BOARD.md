@@ -408,3 +408,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A1a review：现有 engine.rs 定向 7 项全绿，inbox 背压、wire id_kind、EOF/Responder/drop-cancel 均有测试；发现 bridge_channels 为本地双向转发实现，注释明确未调用 SDK bridge_with_inspection，施工书 A1a 步骤 3/4 仍未完全满足，需后续接入真实 SDK API。
 
 [2026-09-09 继续] [主施工员·工程师] A1a bridge 修复：run_wire_bridge 改用官方 Channel::bridge_with_inspection，observer 逐消息记录方向与 wire id_kind；acp::engine 7 项测试全绿。
+
+[2026-09-09 继续] [主施工员·工程师] A1a/A1c review：当前 AcpClient 已收敛为单一 SdkBackend，未发现公开签名泄露 SDK 类型；cargo test --lib acp:: 129 passed。施工书早期 feature flag/legacy 要求已被后续 D11/A1c 收敛决策取代，未新增改动。
