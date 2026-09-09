@@ -66,6 +66,43 @@ for line in sys.stdin:
     );
 }
 
+/// Advertised object capability → resume is attempted and load is not used.
+#[tokio::test]
+async fn ensure_session_mapping_resumes_without_replay_or_recreation() {
+    const FAKE_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'initialize':
+        response['result'] = {'agentCapabilities': {'sessionCapabilities': {'resume': {}}}}
+    elif method == 'session/resume':
+        response['result'] = {'sessionId': request['params']['sessionId']}
+    elif method == 'session/load':
+        raise SystemExit('load must not be called after successful resume')
+    elif method == 'session/new':
+        response['result'] = {'sessionId':'unexpected-new'}
+    print(json.dumps(response), flush=True)
+"#;
+    let agent = fake_acp_agent("resume-agent", FAKE_SCRIPT);
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("fake ACP must initialize");
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("resume-agent")
+        .with_agent(agent)
+        .with_runtime("resume-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let mapping = ensure_session_mapping(
+        &state, &runtime, "local:resume", Some("profile-r"), "persona", ".", &[],
+        Some("peri-resume"), &mut recreated,
+    ).await.expect("resume must succeed");
+    assert_eq!(mapping.peri_id, "peri-resume");
+    assert!(recreated.is_none());
+}
+
 /// session/load 失败（provider 端会话已死）→ 降级新建 + recreated 通知。
 #[tokio::test]
 async fn ensure_session_mapping_falls_back_to_new_with_notice_when_load_fails() {
