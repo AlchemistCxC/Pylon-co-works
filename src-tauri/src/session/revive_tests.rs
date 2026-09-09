@@ -5,6 +5,70 @@
 use super::*;
 use crate::test_utils::fake_acp_agent;
 
+#[tokio::test]
+async fn generation_change_during_recovery_rejects_success_and_failure_without_fallback() {
+    const SCRIPT: &str = r#"import json,sys,time,pathlib
+ready,release,method_to_wait,outcome=sys.argv[1:]
+seen=[]
+for line in sys.stdin:
+    request=json.loads(line); method=request.get('method')
+    result={}
+    error=None
+    if method == 'initialize':
+        result={'agentCapabilities':{'sessionCapabilities':{'resume':{}}}} if method_to_wait == 'session/resume' else {}
+    elif method.startswith('session/'):
+        seen.append(method)
+        if method == method_to_wait:
+            pathlib.Path(ready).touch()
+            deadline=time.monotonic()+10
+            while not pathlib.Path(release).exists():
+                if time.monotonic()>deadline: raise SystemExit('test barrier timed out')
+                time.sleep(0.01)
+            if outcome == 'error': error={'code':-32000,'message':'session unavailable'}
+        result={'sessionId':'remote-original'}
+    elif method == '_test/seen':
+        result={'methods':seen}
+    response={'jsonrpc':'2.0','id':request.get('id')}
+    response['error' if error else 'result']=error if error else result
+    print(json.dumps(response),flush=True)
+"#;
+    for method in ["session/resume", "session/load"] {
+        for outcome in ["success", "error"] {
+            let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let ready = std::env::temp_dir().join(format!("pylon-recovery-{}-{unique}.ready", std::process::id()));
+            let release = ready.with_extension("release");
+            let agent = crate::test_utils::fake_acp_agent_with(
+                "recovery-generation", SCRIPT,
+                vec![ready.to_string_lossy().into_owned(), release.to_string_lossy().into_owned(), method.into(), outcome.into()],
+                Default::default(),
+            );
+            let runtime = AgentRuntime::new_disconnected();
+            *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None).await.unwrap();
+            let state = crate::test_utils::TestStateBuilder::bare()
+                .with_active_agent("recovery-generation").with_agent(agent)
+                .with_runtime("recovery-generation", runtime.clone()).build();
+            let mut recreated = None;
+            let recover = ensure_session_mapping(&state, &runtime, "local:generation", Some("profile"), "", ".", &[], Some("remote-original"), &mut recreated);
+            let change_generation = async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while !ready.exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+                }).await.expect("agent must receive recovery request");
+                runtime.client_generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                std::fs::write(&release, b"release").unwrap();
+            };
+            let (result, ()) = tokio::join!(recover, change_generation);
+            let seen = state.acp_rpc(&runtime, "_test/seen", serde_json::json!({})).await.unwrap();
+            std::fs::remove_file(&ready).unwrap();
+            std::fs::remove_file(&release).unwrap();
+            let error = match result { Ok(_) => panic!("{method}/{outcome} unexpectedly succeeded"), Err(error) => error };
+            assert!(error.to_string().contains("stale ACP client generation"), "{method}/{outcome}: {error}");
+            assert_eq!(seen["methods"], serde_json::json!([method]), "no load/new fallback after generation changes");
+            assert!(recreated.is_none());
+            assert!(!runtime.sessions.lock().unwrap().contains_key("local:generation"));
+        }
+    }
+}
+
 /// session/load 命中（返回已存在 sessionId）→ 复用，不新建。
 #[tokio::test]
 async fn ensure_session_mapping_revives_via_session_load_before_creating() {
@@ -96,9 +160,18 @@ for line in sys.stdin:
         .build();
     let mut recreated = None;
     let mapping = ensure_session_mapping(
-        &state, &runtime, "local:resume", Some("profile-r"), "persona", ".", &[],
-        Some("peri-resume"), &mut recreated,
-    ).await.expect("resume must succeed");
+        &state,
+        &runtime,
+        "local:resume",
+        Some("profile-r"),
+        "persona",
+        ".",
+        &[],
+        Some("peri-resume"),
+        &mut recreated,
+    )
+    .await
+    .expect("resume must succeed");
     assert_eq!(mapping.peri_id, "peri-resume");
     assert!(recreated.is_none());
 }
@@ -120,13 +193,31 @@ for line in sys.stdin:
         raise SystemExit('new must not be called after load success')
     print(json.dumps(response),flush=True)
 "#;
-    let agent=fake_acp_agent("resume-load-agent",FAKE_SCRIPT);
-    let runtime=AgentRuntime::new_disconnected();
-    *runtime.acp.lock().await=crate::acp::AcpClient::connect_with_logs(&agent,None).await.expect("fake ACP must initialize");
-    let state=crate::test_utils::TestStateBuilder::bare().with_active_agent("resume-load-agent").with_agent(agent).with_runtime("resume-load-agent",runtime.clone()).build();
-    let mut recreated=None;
-    let mapping=ensure_session_mapping(&state,&runtime,"local:resume-load",Some("profile"),"persona",".",&[],Some("peri"),&mut recreated).await.expect("load fallback must succeed");
-    assert_eq!(mapping.peri_id,"peri");
+    let agent = fake_acp_agent("resume-load-agent", FAKE_SCRIPT);
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("fake ACP must initialize");
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("resume-load-agent")
+        .with_agent(agent)
+        .with_runtime("resume-load-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let mapping = ensure_session_mapping(
+        &state,
+        &runtime,
+        "local:resume-load",
+        Some("profile"),
+        "persona",
+        ".",
+        &[],
+        Some("peri"),
+        &mut recreated,
+    )
+    .await
+    .expect("load fallback must succeed");
+    assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
 
@@ -144,14 +235,32 @@ for line in sys.stdin:
         response['result']={'sessionId':'recreated-session'}
     print(json.dumps(response),flush=True)
 "#;
-    let agent=fake_acp_agent("resume-new-agent",FAKE_SCRIPT);
-    let runtime=AgentRuntime::new_disconnected();
-    *runtime.acp.lock().await=crate::acp::AcpClient::connect_with_logs(&agent,None).await.expect("fake ACP must initialize");
-    let state=crate::test_utils::TestStateBuilder::bare().with_active_agent("resume-new-agent").with_agent(agent).with_runtime("resume-new-agent",runtime.clone()).build();
-    let mut recreated=None;
-    let mapping=ensure_session_mapping(&state,&runtime,"local:resume-new",Some("profile"),"persona",".",&[],Some("peri"),&mut recreated).await.expect("new fallback must succeed");
-    assert_eq!(mapping.peri_id,"recreated-session");
-    assert_eq!(recreated.as_deref(),Some("recreated-session"));
+    let agent = fake_acp_agent("resume-new-agent", FAKE_SCRIPT);
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("fake ACP must initialize");
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("resume-new-agent")
+        .with_agent(agent)
+        .with_runtime("resume-new-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let mapping = ensure_session_mapping(
+        &state,
+        &runtime,
+        "local:resume-new",
+        Some("profile"),
+        "persona",
+        ".",
+        &[],
+        Some("peri"),
+        &mut recreated,
+    )
+    .await
+    .expect("new fallback must succeed");
+    assert_eq!(mapping.peri_id, "recreated-session");
+    assert_eq!(recreated.as_deref(), Some("recreated-session"));
 }
 
 #[tokio::test]
@@ -168,13 +277,31 @@ for line in sys.stdin:
         response['result']={'sessionId':request['params']['sessionId']}
     print(json.dumps(response),flush=True)
 "#;
-    let agent=fake_acp_agent("malformed-resume-agent",FAKE_SCRIPT);
-    let runtime=AgentRuntime::new_disconnected();
-    *runtime.acp.lock().await=crate::acp::AcpClient::connect_with_logs(&agent,None).await.expect("fake ACP must initialize");
-    let state=crate::test_utils::TestStateBuilder::bare().with_active_agent("malformed-resume-agent").with_agent(agent).with_runtime("malformed-resume-agent",runtime.clone()).build();
-    let mut recreated=None;
-    let mapping=ensure_session_mapping(&state,&runtime,"local:malformed",Some("profile"),"persona",".",&[],Some("peri"),&mut recreated).await.expect("load fallback must succeed");
-    assert_eq!(mapping.peri_id,"peri");
+    let agent = fake_acp_agent("malformed-resume-agent", FAKE_SCRIPT);
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("fake ACP must initialize");
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("malformed-resume-agent")
+        .with_agent(agent)
+        .with_runtime("malformed-resume-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let mapping = ensure_session_mapping(
+        &state,
+        &runtime,
+        "local:malformed",
+        Some("profile"),
+        "persona",
+        ".",
+        &[],
+        Some("peri"),
+        &mut recreated,
+    )
+    .await
+    .expect("load fallback must succeed");
+    assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
 
