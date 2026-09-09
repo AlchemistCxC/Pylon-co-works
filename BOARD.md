@@ -416,3 +416,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A2 tool 域复验：SessionInfo 无独立 tool 字段/active_tool_calls，tool 状态唯一存于 AcpSessionState.tools；dispatcher apply 已调用并仅消费 Usage 镜像。state.rs 已有 tool output append parity 测试，故 tool 域无需重复迁移改动。
 
 [2026-09-09 继续] [主施工员·工程师] A2 permission 域首片：AcpSessionState 新增 resolve_permission(request_id) typed queue-depth delta，覆盖应答/取消后的 reducer 出队语义；消费者接线仍需与 dispatcher session owner 对齐，未改变旧 pending_permissions 行为。state 定向 4 项通过。
+
+[2026-09-09 继续] [主施工员·工程师] A2 usage 域：AcpSessionState 新增 usage_input/usage_output，与 used/size 同步 reducer；保留旧 tuple 兼容，定向 state 4 项通过。permission reducer 接线因全局 pending map 缺 owner/session 关联，暂不强行改写，待可证明 owner 映射时继续。
