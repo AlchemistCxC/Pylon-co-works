@@ -219,14 +219,13 @@ async fn probe_unknown_session_continuity(
     if candidates.is_empty() {
         return;
     }
-    let load_capability = runtime
+    let load_supported = runtime
         .acp
         .lock()
         .await
-        .agent_capabilities()
-        .and_then(|capabilities| capabilities.get("loadSession"))
-        .and_then(serde_json::Value::as_bool);
-    if load_capability == Some(false) {
+        .capabilities()
+        .supports(&["loadSession"]);
+    if !load_supported {
         for candidate in candidates {
             let _ = crate::session_store::mark_detached_if_current(
                 runtime,
