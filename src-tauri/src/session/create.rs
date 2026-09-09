@@ -921,6 +921,16 @@ async fn revive_session_slot(
                 .acp_rpc(runtime, crate::acp::METHOD_SESSION_LOAD, params)
                 .await;
             if let Ok(response) = load_result {
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "load",
+                    result = "success",
+                    response_boundary = "observed",
+                    canonical_import = "none",
+                    "session/load recovery attempt"
+                );
                 response
             } else {
             let error = "session resume/load failed";
