@@ -53,6 +53,18 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
+
+/* Reading and input remain stable planes; only navigation carries display typography. */
+.app[data-interface-mode="tactical-blue"] .solid-agent-workbench { background:#05112840; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-chat { background:#041127a6; }
+.app[data-interface-mode="tactical-blue"] :is(.control-center,.solid-control-center) { border-top:2px solid #5cd9ff; background:#061830f5; box-shadow:0 -10px 40px #0003; }
+.app[data-interface-mode="tactical-blue"] :is(.input-bar,.input-area) { background:#07162dec; border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] :is(.input-textarea,.input-editor) { color:#edf6ff; caret-color:#83e9ff; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-state { background:transparent; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-title { font-size:clamp(26px,3.2vw,42px); font-weight:850; color:#b0f0ff; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-steps li { border-color:#517ba7; background:#091d3bd9; padding:18px; }
+.app[data-interface-mode="tactical-blue"] :is(.term-tool,.tool-call-card,.interaction-card,.permission-card) { background:#071b33f2; border-color:#538dbb; border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] .input-send { background:#83e7ff; color:#072449; }
 .solid-agent-workbench .solid-workbench-chat::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ── 聊天滚动轨道 ──
@@ -693,3 +705,23 @@
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot .model-menu { animation: none; }
 }
+
+
+/* Tactical workbench: decoration never writes scroll position or alters controls. */
+.app[data-interface-mode="tactical-blue"] .solid-agent-workbench { background:#05112840; color:#eef5ff; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-chat { background:#041127a6; }
+.app[data-interface-mode="tactical-blue"] .control-center { background:#061830f5; border-top:2px solid #5cd9ff; }
+.app[data-interface-mode="tactical-blue"] .input-textarea { color:#eef5ff; caret-color:#74e9ff; }
+.app[data-interface-mode="tactical-blue"] .input-textarea::placeholder { color:#a4b5cc; }
+.app[data-interface-mode="tactical-blue"] .term-code { background:#050d19; }
+/* The control-center widget host is flex; the composer itself is a full-width block. */
+.app[data-interface-mode="tactical-blue"] .cc-input-slot .input-bar { display:block; width:100%; height:auto; }
+.app[data-interface-mode="tactical-blue"] .input-bar .input-row { display:flex; width:100%; min-width:0; align-items:flex-end; }
+.app[data-interface-mode="tactical-blue"] .input-editor-stack { flex:1 1 0; min-width:0; }
+.app[data-interface-mode="tactical-blue"] .input-editor-stack .input-textarea { display:block; box-sizing:border-box; min-height:48px; line-height:1.6; padding:10px 12px; }
+.app[data-interface-mode="tactical-blue"] .input-btn.send { color:#071f45; background:#80e6ff; border-color:#80e6ff; border-radius:2px; box-shadow:none; }
+.app[data-interface-mode="tactical-blue"] .input-btn.stop { background:#442032; color:#ffc5cf; border-color:#ff8c99; }
+.app[data-interface-mode="tactical-blue"] .cc-footer-status-row { flex-wrap:wrap; gap:6px 0; font-size:12px; }
+.app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-primary,.cc-status-secondary,.cc-actions) { flex-wrap:wrap; max-width:100%; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .control-center { min-height:140px; height:auto; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .cc-body { height:auto; min-height:140px; }

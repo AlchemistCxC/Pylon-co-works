@@ -13,6 +13,7 @@ const EXPECTED = [
   'layout.inspect', 'layout.sidebar.set', 'layout.sidebar-width.set', 'layout.right-panel.set', 'layout.pet.set', 'layout.agent-sidebar.set',
   'workspace.sheet.focus', 'workspace.sheet.pin.toggle', 'workspace.sheet.close-others', 'workspace.sheet.close-right', 'workspace.sheet.reopen',
   'presentation.list', 'presentation.inspect', 'presentation.apply',
+  'interface.tactical-blue.activate',
   'plugin-settings.pages', 'plugin-settings.get', 'plugin-settings.set', 'plugin-settings.remove',
   'theme.inspect', 'theme.patch', 'theme.reset-zone', 'theme.reset', 'config.export', 'config.import.preflight',
   'skin.schema', 'skin.inspect', 'skin.draft.create', 'skin.draft.patch', 'skin.validate', 'skin.preview', 'skin.preview.patch',

@@ -17,6 +17,8 @@ import { recentPersistedSessions, type PersistedSessionSummary } from '../domain
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
+import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
 
 function relativeTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
@@ -39,6 +41,8 @@ function relativeTime(timestamp: number): string {
  * 挂载后的 controller lifecycle 承担——listener 就绪后才 load）。
  */
 export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+  const tactical = useInterfaceModeStore(state => state.interfaceMode === 'tactical-blue')
+  const [tacticalPanel, setTacticalPanel] = useState<TacticalPanel>('home')
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
@@ -207,7 +211,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <div className="overview-sheet">
+    <div className="overview-sheet" data-tactical-panel={tactical ? tacticalPanel : undefined}>
       {!ctx.sidebarCollapsed && (
         <aside className="overview-sidebar" aria-label="Overview 分区">
           <div className="overview-sidebar-head">
@@ -226,6 +230,21 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       )}
       <main className="overview-main">
       <div className="overview-shell">
+        {tactical && <>
+          {tacticalPanel === 'home' ? <TacticalCommandDeck
+            agents={agents.length} connected={connectedCount} workspaces={workspaces.length}
+            sessions={localRecent.length + persistedRecent.length} busy={switchingId !== null}
+            primaryLabel={localRecent[0] ? '继续行动' : activeAgentConfigured ? '开始行动' : '接入 Agent'}
+            primaryDescription={localRecent[0]?.name ?? (activeAgentConfigured ? `进入 ${activeAgentEntry?.name ?? activeAgent} 工作台` : '先配置一个 ACP 运行时')}
+            onPrimary={() => { if (localRecent[0]) void openKnownSession(localRecent[0]); else if (activeAgentConfigured && activeAgentEntry) void selectAgent(activeAgentEntry); else openAgentSettings() }}
+            onPanel={setTacticalPanel} onSettings={openAgentSettings}
+            onDiagnostics={() => ctx.openSheet({ kind: 'runtime', title: '运行诊断' })}
+          /> : <nav className="tactical-breadcrumb" aria-label="战术页面导航">
+            <button onClick={() => setTacticalPanel('home')}>← 返回指挥台</button>
+            <span>/</span><strong>{{ agents: 'Agent 编队', recent: '会话档案', workspaces: '工作区' }[tacticalPanel]}</strong>
+            <button onClick={openAgentSettings}>配置 Agent <ArrowUpRight size={14} aria-hidden="true" /></button>
+          </nav>}
+        </>}
         <section className="overview-hero" id="overview-home" aria-labelledby="overview-title">
           <div className="overview-hero-brand">
             <div className="overview-mark-stage">
@@ -365,7 +384,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
               <Folder size={17} aria-hidden="true" />
             </div>
             {workspaces.length === 0 ? (
-              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>从左栏创建第一个工作区</span></div>
+              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>{tactical ? '请先进入 Agent 工作台，在左栏创建第一个工作区。' : '从左栏创建第一个工作区'}</span></div>
             ) : (
               <div className="overview-workspace-list">
                 {[...workspaces].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, 5).map(workspace => {
