@@ -867,12 +867,7 @@ async fn revive_session_slot(
         .await
         .agent_capabilities()
         .cloned()
-        .and_then(|caps| caps.get("sessionCapabilities").cloned())
-        .and_then(|caps| {
-            caps.get("resume")
-                .filter(|resume| resume.is_object())
-                .map(|_| true)
-        })
+        .map(|caps| crate::acp::resume_capability_advertised(&caps))
         .unwrap_or(false);
     let response = if resume_advertised {
         let resume_params = crate::acp::resume_params(

@@ -351,3 +351,24 @@ pub(crate) fn resume_params(
     let req = ResumeSessionRequest::new(session_id.to_string(), cwd.to_string());
     to_params(&req, "session/resume")
 }
+
+pub(crate) fn resume_capability_advertised(capabilities: &serde_json::Value) -> bool {
+    capabilities
+        .get("sessionCapabilities")
+        .and_then(|session| session.get("resume"))
+        .is_some_and(serde_json::Value::is_object)
+}
+
+#[cfg(test)]
+mod resume_capability_tests {
+    use super::resume_capability_advertised;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_only_object_valued_resume_capability() {
+        assert!(resume_capability_advertised(&json!({"sessionCapabilities":{"resume":{}}})));
+        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{"resume":true}})));
+        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{}})));
+        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{"resume":null}})));
+    }
+}
