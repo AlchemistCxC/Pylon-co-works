@@ -127,7 +127,8 @@ mod tests {
     fn object_capabilities_are_distinguished_from_boolean_leaves() {
         let registry = CapabilityRegistry::from_initialize_response(&serde_json::json!({
             "agentCapabilities": {"sessionCapabilities": {"resume": {}}}
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(registry.supports_object(&["sessionCapabilities", "resume"]));
         assert!(!registry.supports(&["sessionCapabilities", "resume"]));
     }

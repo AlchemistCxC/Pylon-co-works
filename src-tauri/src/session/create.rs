@@ -873,7 +873,12 @@ async fn revive_session_slot(
         let resume_params =
             crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
         match state
-            .acp_rpc_generation_checked(runtime, crate::acp::METHOD_SESSION_RESUME, resume_params, generation)
+            .acp_rpc_generation_checked(
+                runtime,
+                crate::acp::METHOD_SESSION_RESUME,
+                resume_params,
+                generation,
+            )
             .await
         {
             Ok(response) => {
@@ -911,7 +916,12 @@ async fn revive_session_slot(
         Some(response) => response,
         None => {
             let load_result = state
-                .acp_rpc_generation_checked(runtime, crate::acp::METHOD_SESSION_LOAD, params, generation)
+                .acp_rpc_generation_checked(
+                    runtime,
+                    crate::acp::METHOD_SESSION_LOAD,
+                    params,
+                    generation,
+                )
                 .await;
             state.ensure_generation(runtime, generation)?;
             if let Ok(response) = load_result {
