@@ -328,6 +328,20 @@ pub(crate) fn load_params(
     Ok(params)
 }
 
+#[cfg(test)]
+mod resume_tests {
+    use super::resume_params;
+    use serde_json::json;
+
+    #[test]
+    fn resume_params_use_standard_session_id_cwd_and_mcp_servers() {
+        assert_eq!(
+            resume_params("remote-1", "C:/work", vec![json!({"name":"x"})]).unwrap(),
+            json!({"sessionId":"remote-1", "cwd":"C:/work", "mcpServers":[{"name":"x"}]}),
+        );
+    }
+}
+
 /// session/resume parameters.  Resume is intentionally schema-backed; unlike
 /// load it has no provider-specific fields beyond the standard MCP list.
 pub(crate) fn resume_params(
