@@ -306,7 +306,7 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
     );
     assert_eq!(
         page.events[1].typed_payload.as_ref().unwrap()["error"],
-        "ACP protocol: {\"code\":-32000,\"message\":\"provider unavailable\"}"
+        "ACP protocol: \"RPC error: {\\\"code\\\":-32000,\\\"message\\\":\\\"provider unavailable\\\"}\""
     );
     assert_eq!(
         page.events[1].typed_payload.as_ref().unwrap()["code"],
