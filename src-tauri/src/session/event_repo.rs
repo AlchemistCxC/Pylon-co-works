@@ -569,6 +569,13 @@ fn normalize_kernel_event(
                 typed_payload.insert("error".to_string(), serde_json::Value::String(error));
             }
         }
+        if session_update == Some("done") {
+            for field in ["stopReason", "usage", "model"] {
+                if let Some(value) = update.get(field) {
+                    typed_payload.insert(field.to_string(), value.clone());
+                }
+            }
+        }
     }
 
     let identity = resolve_identity(update);
@@ -1552,6 +1559,30 @@ mod tests {
                 .remove(0);
             assert_eq!(event.event_type, expected, "variant {variant}");
         }
+    }
+
+    #[test]
+    fn kernel_ingest_done_keeps_additive_completion_fields() {
+        let event = repo()
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "source": "local:s1",
+                "update": {
+                    "sessionUpdate": "done",
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 2, "outputTokens": 3},
+                    "model": "hermes-1"
+                }
+            })))
+            .expect("ingest")
+            .events
+            .remove(0);
+        assert_eq!(event.event_type, "turn.completed");
+        let typed = event.typed_payload.expect("typed completion payload");
+        assert_eq!(typed["stopReason"], "end_turn");
+        assert_eq!(typed["usage"]["outputTokens"], 3);
+        assert_eq!(typed["model"], "hermes-1");
+        assert_eq!(event.payload_version, 1);
+        assert!(!typed.as_object().unwrap().contains_key("durationMs"));
     }
 
     #[test]
