@@ -884,7 +884,17 @@ async fn revive_session_slot(
             .acp_rpc(runtime, crate::acp::METHOD_SESSION_RESUME, resume_params)
             .await
         {
-            Ok(response) => Some(response),
+            Ok(response) => {
+                tracing::info!(
+                    target: "replay_trace",
+                    recovery_method = "resume",
+                    result = "success",
+                    response_boundary = "observed",
+                    canonical_import = "none",
+                    "session/resume recovery attempt"
+                );
+                Some(response)
+            }
             Err(error) => {
                 tracing::info!(
                     target: "replay_trace",
