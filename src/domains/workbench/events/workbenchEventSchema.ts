@@ -366,7 +366,10 @@ function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValu
   if (eventType === 'goal.updated') return { type: 'goal.updated', ...(typed.goal !== undefined ? { goal: typed.goal } : {}), ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
   if (eventType === 'goal.cleared') return { type: 'goal.cleared', ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
   if (eventType === 'activity.started' || eventType === 'activity.progress' || eventType === 'activity.completed' || eventType === 'activity.failed' || eventType === 'activity.cancelled') return { type: eventType, ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }
-  if (eventType === 'interaction.requested' || eventType === 'interaction.resolved' || eventType === 'interaction.expired') return { type: eventType, interactionId: typeof typed.interactionId === 'string' ? typed.interactionId : `${eventType}:${String(sequenceFromRaw(raw))}` }
+  if (eventType === 'interaction.requested' || eventType === 'interaction.resolved' || eventType === 'interaction.expired') {
+    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) return { type: eventType, interactionId: typed.interactionId }
+    return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
+  }
   if (eventType === 'session.completed') return { type: 'session.completed', ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}) }
   if (eventType === 'session.model-updated') return { type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }
   if (eventType === 'session.mode-updated') return { type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }
@@ -374,7 +377,6 @@ function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValu
   return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false }
 }
 
-function sequenceFromRaw(raw: JsonValue): string { return typeof raw === 'object' && raw !== null && 'sequence' in raw ? String(raw.sequence) : 'unknown' }
 
 function parseSemanticEvent(value: unknown): SchemaResult<WorkbenchSemanticEvent> {
   if (!isRecord(value) || typeof value.type !== 'string') return failure([schemaIssue([], 'event.type', 'event object with type', value)])
