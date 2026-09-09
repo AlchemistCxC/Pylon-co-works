@@ -906,11 +906,12 @@ fn dispatch_tool_observe<R: tauri::Runtime>(
 /// D3-③：message.sealed 段状态机（锚点 #2）——当前 running assistant 段的
 /// 轻量跟踪（messageId + thought/text 上下文）。
 ///
-/// 本类型与判定函数是**契约就绪件**：wire 接线（在 handle_session_update 缝上
-/// 维护状态、封口时 spawn message.sealed 通知）待前端 HOOK_NAMES 词表裁决后
-/// 落地——词表现无 message.sealed（有语义不同的 message.agent.committed，
-/// 对应旧 GUI agent.reply.after），缺口头寸见台账升级登记。判定逻辑由单测
-/// 锚定（施工书 D3-3 与验收②：段边界四信号单测）。
+/// **终局裁决（2026-09-09，用户拍板，台账 #5）**：口径 B 收工——message.sealed /
+/// agent.status / context.threshold 三锚点**全部暂缓不接缝**，词表保留（#14 先例）；
+/// 片 C 就此封口，E/F 另立后续。本类型与判定函数作为**契约就绪件保留**
+/// （判定逻辑由单测锚定，施工书 D3-3 与验收②：段边界四信号单测），
+/// 将来如需接线（新增 HOOK_NAMES 词表 + handle_session_update 缝上 spawn
+/// message.sealed 通知）直接启用，无需重研。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct RunningSegment {
     /// 当前 running assistant 段的 messageId（None = 无 running 段）。
