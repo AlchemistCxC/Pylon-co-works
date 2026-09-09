@@ -763,21 +763,6 @@ mod tests {
         assert_eq!(permission.options[0].option_id, "ALLOW_ONCE");
     }
 
-    /// fake ACP：把收到的请求行追加写入 trace 文件并逐个应答（writer 不阻塞）。
-    fn trace_script(trace_path: &std::path::Path) -> String {
-        format!(
-            r#"import json,sys
-with open({trace:?}, 'a') as f:
-    for line in sys.stdin:
-        request = json.loads(line)
-        f.write(line)
-        f.flush()
-        print(json.dumps({{'jsonrpc':'2.0','id':request.get('id'),'result':{{}}}}), flush=True)
-"#,
-            trace = trace_path.to_string_lossy()
-        )
-    }
-
     #[tokio::test]
     async fn respond_permission_rejects_stale_generation() {
         let runtime = AgentRuntime::new_disconnected();
@@ -803,124 +788,19 @@ with open({trace:?}, 'a') as f:
 
     #[tokio::test]
     async fn respond_permission_stale_generation_never_reaches_client() {
-        let trace_path = std::env::temp_dir().join(format!(
-            "prism_perm_stale_{}_{}.jsonl",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&trace_path);
-        let agent = crate::test_utils::fake_acp_agent("fake-acp-perm", &trace_script(&trace_path));
-        let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
-            .await
-            .expect("fake ACP 必须初始化");
+        // A1c: SDK responder 只为真实 agent request 登记；代际拒绝保持 pending。
         let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = acp;
-
-        // 旧 generation（1）的挂起：不匹配 → 不应答且不发送
         runtime
             .pending_permissions
             .lock()
             .unwrap()
             .insert(RequestId::Number(7), parsed(1));
-        assert!(
-            !resolve_pending(&runtime, RequestId::Number(7), None, "allow_once").await,
-            "stale generation 必须拒绝"
-        );
+        assert!(!resolve_pending(&runtime, RequestId::Number(7), None, "allow_once").await);
         assert!(runtime
             .pending_permissions
             .lock()
             .unwrap()
             .contains_key(&RequestId::Number(7)));
-
-        // 当前 generation（0）的挂起：匹配 → 应答发送成功并清理
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(8), parsed(0));
-        assert!(
-            resolve_pending(&runtime, RequestId::Number(8), None, "allow_once").await,
-            "匹配 generation 必须应答"
-        );
-        assert!(!runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .contains_key(&RequestId::Number(8)));
-
-        // 等 fake ACP 把请求写入 trace 后回读断言（serde_json 紧凑序列化："id":8）
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if std::fs::read_to_string(&trace_path)
-                    .map(|trace| trace.contains("\"id\":8"))
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("匹配 generation 的应答必须到达客户端");
-
-        // R34：Cancelled 应答（空 option_id）——匹配身份 + tool_call_id 则发送
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(9), parsed(0));
-        assert!(
-            resolve_pending(&runtime, RequestId::Number(9), Some("call-1"), "").await,
-            "匹配的 cancel 必须应答"
-        );
-        // tool_call_id 不匹配（同 id 已被复用为其他工具调用）→ 拒绝应答且不发送
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(10), parsed(0));
-        assert!(
-            !resolve_pending(&runtime, RequestId::Number(10), Some("other-call"), "").await,
-            "tool_call_id 不匹配必须拒绝"
-        );
-        assert!(runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .contains_key(&RequestId::Number(10)));
-        // 等 cancel 应答写入 trace 后回读断言
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if std::fs::read_to_string(&trace_path)
-                    .map(|trace| trace.contains("\"id\":9"))
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("cancel 应答必须到达客户端");
-        let trace = std::fs::read_to_string(&trace_path).unwrap_or_default();
-        assert!(
-            trace.contains("\"outcome\":\"cancelled\""),
-            "cancel 应答必须是 Cancelled 形状: {trace}"
-        );
-        assert!(
-            !trace.contains("\"id\":7"),
-            "stale generation 应答不得写入新进程: {trace}"
-        );
-        assert!(
-            !trace.contains("\"id\":10"),
-            "tool_call_id 不匹配的应答不得发送: {trace}"
-        );
-
-        let _ = runtime.acp.lock().await.kill();
-        let _ = std::fs::remove_file(&trace_path);
     }
 
     #[test]
@@ -966,77 +846,7 @@ with open({trace:?}, 'a') as f:
         );
     }
 
-    #[tokio::test]
-    async fn string_id_pending_round_trip_echoes_original_variant() {
-        // ACP-01 验收：string id（"perm-1"）挂起请求用原 variant 应答——
-        // 响应 wire 的 id 必须是字符串（不能转成 number、不能当 0）。
-        let trace_path = std::env::temp_dir().join(format!(
-            "prism_perm_str_{}_{}.jsonl",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&trace_path);
-        let agent =
-            crate::test_utils::fake_acp_agent("fake-acp-perm-str", &trace_script(&trace_path));
-        let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
-            .await
-            .expect("fake ACP 必须初始化");
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = acp;
-
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::String("perm-1".to_string()), parsed(0));
-        assert!(
-            resolve_pending(
-                &runtime,
-                RequestId::String("perm-1".to_string()),
-                None,
-                "allow_once"
-            )
-            .await,
-            "string id 必须应答"
-        );
-        assert!(
-            !runtime
-                .pending_permissions
-                .lock()
-                .unwrap()
-                .contains_key(&RequestId::String("perm-1".to_string())),
-            "应答后必须清理"
-        );
-
-        // 等 fake ACP 把应答写入 trace 后回读断言：id 保持字符串形态。
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if let Some(line) = std::fs::read_to_string(&trace_path)
-                    .unwrap_or_default()
-                    .lines()
-                    .find(|line| line.contains("\"perm-1\""))
-                {
-                    let value: serde_json::Value = serde_json::from_str(line).unwrap();
-                    assert_eq!(
-                        value["id"],
-                        serde_json::json!("perm-1"),
-                        "响应必须回写 string id 原 variant"
-                    );
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("string id 应答必须到达客户端");
-
-        let _ = runtime.acp.lock().await.kill();
-        let _ = std::fs::remove_file(&trace_path);
-    }
-
+    // String-id wire echo is covered by acp::engine::sdk_responder_answers_agent_request.
     /// ACP-03（§5.6）：后端唯一计时/应答——超时请求结算后返回 outcome（前端
     /// permission.resolved 事件载荷）。A1c：legacy 写通道已删除，改由真实 SDK
     /// 连接登记 Responder（fake agent 发 id=7 的 permission 请求）——应答送达才结算。
