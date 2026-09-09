@@ -84,8 +84,7 @@ impl AcpSessionState {
     /// been committed; stale ids are harmless and produce no delta.
     pub fn resolve_permission(&mut self, request_id: &str) -> Option<AcpStateDelta> {
         let before = self.pending_permissions.len();
-        self.pending_permissions
-            .retain(|(id, _)| id != request_id);
+        self.pending_permissions.retain(|(id, _)| id != request_id);
         (before != self.pending_permissions.len()).then_some(AcpStateDelta::PermissionQueueDepth {
             depth: self.pending_permissions.len(),
         })

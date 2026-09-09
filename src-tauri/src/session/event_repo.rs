@@ -501,7 +501,10 @@ fn normalize_kernel_event(
         Some("tool_call_update") => "tool.call.updated",
         Some("done") => "turn.completed",
         Some("error") => "turn.failed",
-        Some("cancelled") => "turn.cancelled",
+        // Cancellation is a terminal turn failure with an explicit reason;
+        // keep one canonical failure family instead of inventing a second
+        // terminal event type that the semantic bridge cannot consume.
+        Some("cancelled") => "turn.failed",
         Some("usage_update") => "usage.updated",
         Some("plan") => "plan.replaced",
         Some("current_mode_update") => "session.mode-updated",
@@ -559,7 +562,7 @@ fn normalize_kernel_event(
             }
             typed_payload.insert("tool".to_string(), serde_json::Value::Object(tool));
         }
-        if session_update == Some("error") {
+        if session_update == Some("error") || session_update == Some("cancelled") {
             if let Some(code) = non_empty_string(update.get("errorCode")) {
                 typed_payload.insert("code".to_string(), serde_json::Value::String(code));
             }
@@ -567,6 +570,12 @@ fn normalize_kernel_event(
                 .or_else(|| non_empty_string(update.get("message")))
             {
                 typed_payload.insert("error".to_string(), serde_json::Value::String(error));
+            }
+            if session_update == Some("cancelled") {
+                typed_payload.insert(
+                    "stopReason".to_string(),
+                    serde_json::Value::String("cancelled".to_string()),
+                );
             }
         }
         if session_update == Some("done") {
@@ -1540,7 +1549,7 @@ mod tests {
     #[test]
     fn kernel_ingest_normalizes_extended_session_update_variants() {
         let cases = [
-            ("cancelled", "turn.cancelled"),
+            ("cancelled", "turn.failed"),
             ("usage_update", "usage.updated"),
             ("plan", "plan.replaced"),
             ("current_mode_update", "session.mode-updated"),

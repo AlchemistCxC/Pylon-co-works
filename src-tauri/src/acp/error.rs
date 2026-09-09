@@ -331,9 +331,18 @@ mod resume_failure_tests {
 
     #[test]
     fn classify_resume_failures_for_fallback_policy() {
-        assert_eq!(AcpError::Rpc("session archived".into()).resume_failure_class(), ResumeFailureClass::Archived);
-        assert_eq!(AcpError::Rpc("session busy".into()).resume_failure_class(), ResumeFailureClass::Busy);
-        assert_eq!(AcpError::ConnectionClosed.resume_failure_class(), ResumeFailureClass::Unavailable);
+        assert_eq!(
+            AcpError::Rpc("session archived".into()).resume_failure_class(),
+            ResumeFailureClass::Archived
+        );
+        assert_eq!(
+            AcpError::Rpc("session busy".into()).resume_failure_class(),
+            ResumeFailureClass::Busy
+        );
+        assert_eq!(
+            AcpError::ConnectionClosed.resume_failure_class(),
+            ResumeFailureClass::Unavailable
+        );
     }
 }
 

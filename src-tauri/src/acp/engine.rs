@@ -419,7 +419,11 @@ pub(crate) async fn run_wire_bridge(
     .await
 }
 
-fn observe_message(message: &agent_client_protocol::RawJsonRpcMessage, hub: &AcpWireHub, direction: WireDirection) {
+fn observe_message(
+    message: &agent_client_protocol::RawJsonRpcMessage,
+    hub: &AcpWireHub,
+    direction: WireDirection,
+) {
     if let Ok(value) = serde_json::to_value(message) {
         hub.record(direction, &value);
     }

@@ -84,6 +84,12 @@
 
 ## 6. 变更流程
 
+### ACP policy adapters
+
+- `src-tauri/src/acp/question_policy.rs`: adapted from codeg `acp/question.rs` at the locked commit; pure bounded question parsing/outcome logic only, with Pylon DTOs. Production consumer: `src-tauri/src/acp/adapter/private_ext`.
+- `src-tauri/src/acp/plan_policy.rs`: adapted from codeg `acp/plan_approval.rs` at the locked commit; pure plan request validation only. Production consumer: `src-tauri/src/acp/adapter/private_ext`.
+- Provider-specific adapters remain closed behind the adapter module and do not expose SDK types, AppState, persistence, or UI. Installation, login, and registry behavior are intentionally not migrated (D8).
+
 ### A-DETECT preflight 版本解析（生产代码摘取）
 
 ### A-DETECT 进程版本输出回退

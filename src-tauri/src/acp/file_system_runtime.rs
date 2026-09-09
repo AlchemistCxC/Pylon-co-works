@@ -76,7 +76,15 @@ mod tests {
     use super::*;
 
     fn root() -> PathBuf {
-        let path = std::env::temp_dir().join(format!("pylon-fs-runtime-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "pylon-fs-runtime-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         path
     }

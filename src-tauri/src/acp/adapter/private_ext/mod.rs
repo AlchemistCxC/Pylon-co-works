@@ -1,0 +1,72 @@
+//! Closed provider-specific parser/builder boundary.
+use crate::acp::{plan_policy, question_policy};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivateBridge {
+    GrokExtQuestions,
+    PiSelectAsk,
+    GrokExitPlan,
+}
+
+pub fn parse_questions(
+    bridge: PrivateBridge,
+    params: &Value,
+) -> Result<Vec<question_policy::QuestionSpec>, String> {
+    match bridge {
+        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
+            question_policy::parse_questions(params)
+        }
+        PrivateBridge::GrokExitPlan => Err("plan bridge does not accept questions".into()),
+    }
+}
+pub fn build_question_outcome(
+    bridge: PrivateBridge,
+    questions: &[question_policy::QuestionSpec],
+    answer: &question_policy::QuestionAnswer,
+) -> Result<Value, String> {
+    match bridge {
+        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
+            serde_json::to_value(question_policy::build_outcome(questions, answer))
+                .map_err(|e| e.to_string())
+        }
+        PrivateBridge::GrokExitPlan => Err("plan bridge does not accept question answers".into()),
+    }
+}
+pub fn parse_exit_plan(bridge: PrivateBridge, params: &Value) -> Result<(String, String), String> {
+    match bridge {
+        PrivateBridge::GrokExitPlan => plan_policy::parse_exit_plan_request(params),
+        _ => Err("question bridge does not accept plans".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn private_question_bridge_reuses_shared_policy() {
+        let questions = parse_questions(PrivateBridge::GrokExtQuestions, &serde_json::json!({"questions":[{"question":"Pick","header":"Choice","options":[{"label":"A"},{"label":"B"}]}]})).unwrap();
+        let answer = question_policy::QuestionAnswer {
+            answers: vec![question_policy::QuestionAnswerItem {
+                question_id: questions[0].id.clone(),
+                labels: vec!["A".into()],
+            }],
+            declined: false,
+        };
+        let outcome =
+            build_question_outcome(PrivateBridge::GrokExtQuestions, &questions, &answer).unwrap();
+        assert_eq!(outcome["answers"][0]["selected"][0], "A");
+    }
+    #[test]
+    fn private_plan_bridge_reuses_shared_policy() {
+        assert_eq!(
+            parse_exit_plan(
+                PrivateBridge::GrokExitPlan,
+                &serde_json::json!({"toolCallId":"t"})
+            )
+            .unwrap()
+            .1,
+            "t"
+        );
+    }
+}

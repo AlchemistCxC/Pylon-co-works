@@ -10,8 +10,8 @@ use std::io::Read;
 
 use agent_client_protocol_schema::v1::{
     CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest,
-    SessionConfigOptionValue, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    ResumeSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+    SetSessionModeRequest,
 };
 
 use super::AcpError;
@@ -344,10 +344,7 @@ mod resume_tests {
 
 /// session/resume parameters. Resume carries only standard identity and cwd;
 /// Pylon-specific MCP JSON is deliberately not sent through this schema.
-pub(crate) fn resume_params(
-    session_id: &str,
-    cwd: &str,
-) -> Result<serde_json::Value, String> {
+pub(crate) fn resume_params(session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
     let req = ResumeSessionRequest::new(session_id.to_string(), cwd.to_string());
     to_params(&req, "session/resume")
 }
@@ -366,9 +363,17 @@ mod resume_capability_tests {
 
     #[test]
     fn accepts_only_object_valued_resume_capability() {
-        assert!(resume_capability_advertised(&json!({"sessionCapabilities":{"resume":{}}})));
-        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{"resume":true}})));
-        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{}})));
-        assert!(!resume_capability_advertised(&json!({"sessionCapabilities":{"resume":null}})));
+        assert!(resume_capability_advertised(
+            &json!({"sessionCapabilities":{"resume":{}}})
+        ));
+        assert!(!resume_capability_advertised(
+            &json!({"sessionCapabilities":{"resume":true}})
+        ));
+        assert!(!resume_capability_advertised(
+            &json!({"sessionCapabilities":{}})
+        ));
+        assert!(!resume_capability_advertised(
+            &json!({"sessionCapabilities":{"resume":null}})
+        ));
     }
 }

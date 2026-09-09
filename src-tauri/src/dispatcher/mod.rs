@@ -612,9 +612,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
         let _ = sessions.lock().map(|mut sessions| {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
                 let _ = session.acp_state.apply(&crate::acp::RawMessage {
-                    id: Some(request_id.clone()), method: Some("session/request_permission".into()),
-                    kind: crate::acp::AcpKind::PermissionRequest, result: None,
-                    params: params.cloned(), error: None,
+                    id: Some(request_id.clone()),
+                    method: Some("session/request_permission".into()),
+                    kind: crate::acp::AcpKind::PermissionRequest,
+                    result: None,
+                    params: params.cloned(),
+                    error: None,
                 });
             }
         });
