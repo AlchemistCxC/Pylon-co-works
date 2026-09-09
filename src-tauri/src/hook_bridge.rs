@@ -41,6 +41,21 @@ pub(crate) const HOOK_MESSAGE_RECEIVED: &str = "message.received";
 pub(crate) const HOOK_PERMISSION_REQUEST: &str = "permission.request";
 /// 交互请求锚点名（#9，D2）——未被 adapter 识别的 interaction 类方法。
 pub(crate) const HOOK_INTERACTION_REQUEST: &str = "interaction.request";
+/// 回合收口锚点名（#4，D3-② observe）：provider 回合正常完成。
+pub(crate) const HOOK_TURN_COMPLETED: &str = "turn.completed";
+/// 回合收口锚点名（#4，D3-② observe）：回合失败（journal 落 turn.failed）。
+pub(crate) const HOOK_TURN_FAILED: &str = "turn.failed";
+/// 回合收口锚点名（#5，D3-② observe）：回合取消——turn.cancelled 为 D3-①
+/// 新事件（journal 落 sessionUpdate:"cancelled" → event_repo 归一化同名事件）。
+pub(crate) const HOOK_TURN_CANCELLED: &str = "turn.cancelled";
+/// 工具锚点名（#6，D3-② observe）：wire tool_call 到达。注意该行到达时工具
+/// 已执行——prevention 语义归 permission.request（#8），本锚点仅作通知。
+pub(crate) const HOOK_TOOL_BEFORE_CALL: &str = "tool.beforeCall";
+/// 工具锚点名（#7，D3-② observe）：tool_call_update status=completed。
+/// 载荷带 startedAt（D3-④：取自 tool_call 行到达时刻的内存记录）。
+pub(crate) const HOOK_TOOL_AFTER_CALL: &str = "tool.afterCall";
+/// 工具锚点名（#7，D3-② observe）：tool_call_update status=failed/error。
+pub(crate) const HOOK_TOOL_FAILED: &str = "tool.failed";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -465,6 +480,31 @@ pub(crate) async fn interaction_request_hook_outcome<R: tauri::Runtime, E: tauri
         HookDispatchOutcome::Failed(error) => {
             tracing::warn!("interaction.request hook dispatch failed (fail-open): {error}");
             InteractionHookDecision::FallThrough
+        }
+    }
+}
+
+/// D3-②：observe 效应派发（fire-and-forget）。
+///
+/// 调用方**必须**在 tokio::spawn 任务内调用（B1——dispatcher 主循环与
+/// prompt 收口路径零 await 桥；本函数只应由 spawn 包装的异步任务执行）。
+/// observe 语义：任何应答/错误都只记日志并丢弃结果——插件即使返回
+/// transform/cancel/send 也不产生副作用（notification-mode 拦截在 D4-4
+/// 前端层已落地，此处双保险只留 trace 级日志）。
+pub(crate) async fn dispatch_observe<R: tauri::Runtime, E: tauri::Emitter<R>>(
+    bridge: &HookBridge,
+    emitter: Option<&E>,
+    hook: &str,
+    session_id: &str,
+    payload: Value,
+) {
+    match bridge.dispatch(emitter, hook, session_id, payload).await {
+        HookDispatchOutcome::Answered(_) => {
+            tracing::trace!(hook, "observe hook answered (result discarded)");
+        }
+        HookDispatchOutcome::NotReady | HookDispatchOutcome::NotRegistered => {}
+        HookDispatchOutcome::Failed(error) => {
+            tracing::debug!(hook, error, "observe hook dispatch failed (ignored)");
         }
     }
 }

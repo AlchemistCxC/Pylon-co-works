@@ -235,6 +235,36 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
         if let Some(committed_event) = result.events.into_iter().next() {
             error_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
         }
+        // P55-D3-②：回合失败/取消 observe 锚点（#4/#5）——journal 落
+        // error/cancelled 行之后 spawn 派发（B1：零 await 桥）。cancelled 判别
+        // 与 journal sessionUpdate 同源，两出口（普通失败/取消）互斥、无双发。
+        // 与 journal 一致只在 profile 会话派发（平台会话无 GUI 钩子可达）。
+        let failure_anchor = if cancelled {
+            crate::hook_bridge::HOOK_TURN_CANCELLED
+        } else {
+            crate::hook_bridge::HOOK_TURN_FAILED
+        };
+        if state.hook_bridge.has_registered_hook(failure_anchor) {
+            let task_bridge = state.hook_bridge.clone();
+            let task_window = window.cloned();
+            let task_source = ctx.source.clone();
+            let observe_payload = serde_json::json!({
+                "source": ctx.source,
+                "outcome": if cancelled { "cancelled" } else { "failed" },
+                "code": error.code(),
+                "error": error.to_string(),
+            });
+            tokio::spawn(async move {
+                crate::hook_bridge::dispatch_observe(
+                    &task_bridge,
+                    task_window.as_ref(),
+                    failure_anchor,
+                    &task_source,
+                    observe_payload,
+                )
+                .await;
+            });
+        }
     }
     if let Some(window) = window {
         emit_event_all(
@@ -550,6 +580,31 @@ async fn finalize_response<R: tauri::Runtime>(
     .await?
     {
         done_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+    }
+    // P55-D3-②：turn.completed observe 锚点（#4）——回合正常收口、journal 落
+    // `done` 行之后 spawn 派发（B1：零 await 桥，不阻塞 done 帧/Channel 终帧）。
+    // 取消/失败不经过本缝（走 publish_prompt_failure 对应锚点）——两出口互斥。
+    if state
+        .hook_bridge
+        .has_registered_hook(crate::hook_bridge::HOOK_TURN_COMPLETED)
+    {
+        let task_bridge = state.hook_bridge.clone();
+        let task_window = window.cloned();
+        let task_source = source.clone();
+        let observe_payload = serde_json::json!({
+            "source": source,
+            "outcome": "completed",
+        });
+        tokio::spawn(async move {
+            crate::hook_bridge::dispatch_observe(
+                &task_bridge,
+                task_window.as_ref(),
+                crate::hook_bridge::HOOK_TURN_COMPLETED,
+                &task_source,
+                observe_payload,
+            )
+            .await;
+        });
     }
     if let Some(window) = window {
         emit_event_all(
@@ -1706,5 +1761,198 @@ for line in sys.stdin:
             !trace.contains("用户原始消息"),
             "wire 不应再出现用户原文"
         );
+    }
+
+    /// P55-D3-②：turn.completed observe 跨层——回合正常完成（fake ACP 回
+    /// end_turn）后，已注册的 turn.completed 钩子收到 {source, outcome} 载荷。
+    /// fire-and-forget：send_prompt_core 不等待钩子应答，测试在收到请求后
+    /// 再应答（与 beforeSend 的阻塞缝相反，无需独立 responder 任务）。
+    #[tokio::test]
+    async fn turn_completed_hook_observes_successful_round() {
+        use tauri::{Listener, Manager};
+        const SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'turn-observe-session'}
+    elif method == 'session/prompt':
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("turn-observe-agent", SCRIPT);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("turn-observe-agent")
+            .with_agent(agent)
+            .with_runtime("turn-observe-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let window = webview.as_ref().window();
+        let bridge = app.state::<AppState>().hook_bridge.clone();
+        bridge.mark_started();
+        bridge.sync_registry(&serde_json::json!({ "hooks": ["turn.completed"] }));
+        // 观察者钩子收到请求即进 rx；测试先断言载荷再应答（observe 结果丢弃）。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+        window.listen(
+            crate::event_names::PYLON_HOOK_REQUEST,
+            move |event| {
+                let payload: serde_json::Value = serde_json::from_str(event.payload())
+                    .expect("hook request payload");
+                let _ = tx.send(payload);
+            },
+        );
+
+        let context = PromptContext {
+            source: "local:turn-observe".to_string(),
+            profile_id: Some("profile-turn".to_string()),
+            content: "触发回合".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        send_prompt_core::<tauri::test::MockRuntime>(
+            app.state::<AppState>().inner(),
+            &runtime,
+            Some(&window),
+            &gateway,
+            &context,
+        )
+        .await
+        .expect("prompt must succeed");
+
+        let request = rx.recv().await.expect("turn.completed hook request must arrive");
+        assert_eq!(
+            request["hook"], "turn.completed",
+            "成功回合必须派发 turn.completed 观察钩子"
+        );
+        assert_eq!(request["payload"]["outcome"], "completed");
+        assert_eq!(request["payload"]["source"], "local:turn-observe");
+        let request_id = request["requestId"].as_str().unwrap().to_string();
+        bridge
+            .respond(
+                &request_id,
+                Ok(serde_json::json!({
+                    "action": "continue",
+                    "executed": 1,
+                    "skipped": 0,
+                })),
+            )
+            .expect("respond");
+    }
+
+    /// P55-D3-②：turn.cancelled observe 跨层——出口 1（provider 回
+    /// stopReason=cancelled）→ failure outcome=Cancelled → publish_prompt_failure
+    /// 落 cancelled journal 行后派发 turn.cancelled（与 journal 同源、互斥无双发）。
+    #[tokio::test]
+    async fn turn_cancelled_hook_observes_cancelled_round() {
+        use tauri::{Listener, Manager};
+        const SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'turn-cancel-observe-session'}
+    elif method == 'session/prompt':
+        response['result']={'stopReason':'cancelled'}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("turn-cancel-observe-agent", SCRIPT);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("turn-cancel-observe-agent")
+            .with_agent(agent)
+            .with_runtime("turn-cancel-observe-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let window = webview.as_ref().window();
+        let bridge = app.state::<AppState>().hook_bridge.clone();
+        bridge.mark_started();
+        bridge.sync_registry(&serde_json::json!({ "hooks": ["turn.cancelled"] }));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+        window.listen(
+            crate::event_names::PYLON_HOOK_REQUEST,
+            move |event| {
+                let payload: serde_json::Value = serde_json::from_str(event.payload())
+                    .expect("hook request payload");
+                let _ = tx.send(payload);
+            },
+        );
+
+        let context = PromptContext {
+            source: "local:turn-cancel-observe".to_string(),
+            profile_id: Some("profile-turn-cancel".to_string()),
+            content: "触发取消回合".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        let outcome = send_prompt_core::<tauri::test::MockRuntime>(
+            app.state::<AppState>().inner(),
+            &runtime,
+            Some(&window),
+            &gateway,
+            &context,
+        )
+        .await;
+        assert!(
+            outcome.is_err(),
+            "stopReason=cancelled 必须让回合以错误收口（PromptCancelled）"
+        );
+
+        let request = rx.recv().await.expect("turn.cancelled hook request must arrive");
+        assert_eq!(
+            request["hook"], "turn.cancelled",
+            "取消回合必须派发 turn.cancelled 观察钩子"
+        );
+        assert_eq!(request["payload"]["outcome"], "cancelled");
+        assert_eq!(request["payload"]["source"], "local:turn-cancel-observe");
+        let request_id = request["requestId"].as_str().unwrap().to_string();
+        bridge
+            .respond(
+                &request_id,
+                Ok(serde_json::json!({
+                    "action": "continue",
+                    "executed": 1,
+                    "skipped": 0,
+                })),
+            )
+            .expect("respond");
     }
 }

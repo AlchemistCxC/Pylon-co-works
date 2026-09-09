@@ -761,6 +761,212 @@ pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
 /// NOTIF_SESSION_UPDATE 处理（R8 自主循环拆分）：source 解析（重试循环）→ 代际
 /// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
 /// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
+
+/// tool 调用起始时刻的内存记录表（D3-④ 耗时数据源）。
+/// key = (source, toolCallId)；value = (wall-clock 毫秒, 工具名 title)。
+/// tool_call 到达时写入、tool_call_update 消费后移除；残留（update 永不
+/// 到达）随 dispatcher 生命周期结束自然回收——崩溃/重启后缺省无耗时。
+type ToolTimings = std::sync::Mutex<
+    std::collections::HashMap<(String, String), (u64, Option<String>)>,
+>;
+
+/// 当前时刻的 wall-clock 毫秒（startedAt/elapsed 载荷口径）。
+fn now_wall_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 从 tool 行提取 toolCallId（root → content → _meta 逐层，别名兼容——
+/// 与 event_repo.rs resolve_identity 同款字段表）。
+fn wire_tool_call_id(update: &serde_json::Value) -> Option<String> {
+    let content = update.get("content").and_then(serde_json::Value::as_object);
+    let meta = update.get("_meta").and_then(serde_json::Value::as_object);
+    for (root_first, record) in [
+        (true, update.as_object()),
+        (false, content),
+        (false, meta),
+    ] {
+        let _ = root_first;
+        if let Some(record) = record {
+            for alias in ["toolCallId", "tool_call_id", "toolUseId", "tool_use_id"] {
+                if let Some(value) = record.get(alias).and_then(serde_json::Value::as_str) {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// P55-D3-②/④：tool 类 live update 的 observe 派发（fire-and-forget）。
+/// 仅在非 replay 时调用（C11：回放不产生新副作用——pet 感知同门控）。
+/// `tool_call` → tool.beforeCall（observe 通知 + 记录 startedAt）；
+/// `tool_call_update` completed → tool.afterCall（载荷带耗时，D3-④）；
+/// failed/error → tool.failed。B1：只 spawn，主循环零 await 桥。
+#[allow(clippy::too_many_arguments)]
+fn dispatch_tool_observe<R: tauri::Runtime>(
+    hook_bridge: &std::sync::Arc<crate::hook_bridge::HookBridge>,
+    window: &tauri::WebviewWindow<R>,
+    tool_timings: &ToolTimings,
+    source: &str,
+    wire: &str,
+    update: &serde_json::Value,
+) {
+    let Some(call_id) = wire_tool_call_id(update) else {
+        return;
+    };
+    let title = update
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let key = (source.to_string(), call_id.clone());
+    match wire {
+        "tool_call" => {
+            // startedAt 记录服务于 afterCall 耗时（D3-④）——无论是否有
+            // beforeCall 注册都记录；update 永不到达的残留随 dispatcher
+            // 生命周期回收。
+            if let Ok(mut timings) = tool_timings.lock() {
+                timings.insert(key, (now_wall_ms(), title.clone()));
+            }
+            if hook_bridge
+                .has_registered_hook(crate::hook_bridge::HOOK_TOOL_BEFORE_CALL)
+            {
+                let task_bridge = hook_bridge.clone();
+                let task_window = window.clone();
+                let task_source = source.to_string();
+                let observe_payload = serde_json::json!({
+                    "source": source,
+                    "toolCallId": call_id,
+                    "name": title,
+                    "input": update.get("rawInput").cloned().unwrap_or(serde_json::Value::Null),
+                });
+                tokio::spawn(async move {
+                    crate::hook_bridge::dispatch_observe(
+                        &task_bridge,
+                        Some(&task_window),
+                        crate::hook_bridge::HOOK_TOOL_BEFORE_CALL,
+                        &task_source,
+                        observe_payload,
+                    )
+                    .await;
+                });
+            }
+        }
+        "tool_call_update" => {
+            let anchor = match update.get("status").and_then(serde_json::Value::as_str) {
+                Some("completed") => crate::hook_bridge::HOOK_TOOL_AFTER_CALL,
+                Some("failed") | Some("error") => crate::hook_bridge::HOOK_TOOL_FAILED,
+                // cancelled 等其余工具态：hook 词表无对应锚点（#7 表注：
+                // journal 亦不认 cancelled 工具态），不派发。
+                _ => return,
+            };
+            if !hook_bridge.has_registered_hook(anchor) {
+                return;
+            }
+            // D3-④：消费 startedAt 记录 → 载荷带 elapsedMs（saturating_sub）。
+            let started = tool_timings
+                .lock()
+                .ok()
+                .and_then(|mut timings| timings.remove(&key));
+            let (started_at_ms, recorded_name) = started.unwrap_or((0, None));
+            let elapsed_ms = if started_at_ms != 0 {
+                Some(now_wall_ms().saturating_sub(started_at_ms))
+            } else {
+                None
+            };
+            let task_bridge = hook_bridge.clone();
+            let task_window = window.clone();
+            let task_source = source.to_string();
+            let observe_payload = serde_json::json!({
+                "source": source,
+                "toolCallId": call_id,
+                "name": title.or(recorded_name),
+                "status": update.get("status"),
+                "startedAtMs": if started_at_ms != 0 { Some(started_at_ms) } else { None },
+                "elapsedMs": elapsed_ms,
+                "output": update.get("rawOutput").cloned().unwrap_or(serde_json::Value::Null),
+            });
+            tokio::spawn(async move {
+                crate::hook_bridge::dispatch_observe(
+                    &task_bridge,
+                    Some(&task_window),
+                    anchor,
+                    &task_source,
+                    observe_payload,
+                )
+                .await;
+            });
+        }
+        _ => {}
+    }
+}
+
+/// D3-③：message.sealed 段状态机（锚点 #2）——当前 running assistant 段的
+/// 轻量跟踪（messageId + thought/text 上下文）。
+///
+/// 本类型与判定函数是**契约就绪件**：wire 接线（在 handle_session_update 缝上
+/// 维护状态、封口时 spawn message.sealed 通知）待前端 HOOK_NAMES 词表裁决后
+/// 落地——词表现无 message.sealed（有语义不同的 message.agent.committed，
+/// 对应旧 GUI agent.reply.after），缺口头寸见台账升级登记。判定逻辑由单测
+/// 锚定（施工书 D3-3 与验收②：段边界四信号单测）。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct RunningSegment {
+    /// 当前 running assistant 段的 messageId（None = 无 running 段）。
+    pub(crate) message_id: Option<String>,
+    /// 段当前上下文：true = thought（agent_thought_chunk）、false = text。
+    pub(crate) in_thought: bool,
+}
+
+/// 段封口信号判定（施工书 D3-3 四信号）：
+/// 1. tool_call 到来（工具段边界）；2. 回合收口（done/error/cancelled）；
+/// 3. thought ↔ text 切换（agent_message_chunk ↔ agent_thought_chunk）；
+/// 4. 行携带的 messageId 与当前段不同。
+/// 无 running 段时无段可封（返回 false）。
+pub(crate) fn segment_seal_signal(
+    segment: &RunningSegment,
+    session_update: Option<&str>,
+    message_id: Option<&str>,
+) -> bool {
+    match session_update {
+        Some("tool_call") | Some("done") | Some("error") | Some("cancelled") => {
+            segment.message_id.is_some()
+        }
+        Some("agent_message_chunk") | Some("agent_thought_chunk") => {
+            if segment.message_id.is_none() {
+                return false;
+            }
+            // 信号 4：行带 messageId 且与当前段不同。
+            let id_changed = message_id
+                .is_some_and(|id| segment.message_id.as_deref() != Some(id));
+            // 信号 3：thought ↔ text 上下文切换。
+            let thought_switch =
+                segment.in_thought != (session_update == Some("agent_thought_chunk"));
+            id_changed || thought_switch
+        }
+        _ => false,
+    }
+}
+
+/// 内容行到达后推进段状态（text/thought 行更新 messageId/in_thought；
+/// 封口行由调用方先 reset 段再推进）。
+pub(crate) fn segment_advance(
+    segment: &mut RunningSegment,
+    session_update: Option<&str>,
+    message_id: Option<&str>,
+) {
+    match session_update {
+        Some("agent_message_chunk") | Some("agent_thought_chunk") => {
+            if let Some(id) = message_id {
+                segment.message_id = Some(id.to_string());
+            }
+            segment.in_thought = session_update == Some("agent_thought_chunk");
+        }
+        _ => {}
+    }
+}
+
 // clippy 2026-08-03：8 参为 R8 显式参数风格（window/gateway/sessions/pet/
 // client_generation/generation/mapping_ready/payload），与调用点逐参对应，
 // 结构体重构收益低。
@@ -778,6 +984,12 @@ async fn handle_session_update<R: tauri::Runtime>(
     generation: u64,
     mapping_ready: &tokio::sync::Notify,
     agent_id: &str,
+    // P55-D3-②：kernel hook 桥（tool.* observe 派发闸）——主循环闭包内
+    // 已 clone，经此传入 handle_session_update（D2 的 permission/interaction
+    // 缝走独立 handler 函数，无需此参）。
+    hook_bridge: &std::sync::Arc<crate::hook_bridge::HookBridge>,
+    // P55-D3-④：tool 起始时刻表（tool_call → tool_call_update 的耗时关联）。
+    tool_timings: &ToolTimings,
     event_service: Option<&Arc<crate::session::EventService>>,
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
@@ -1040,6 +1252,28 @@ async fn handle_session_update<R: tauri::Runtime>(
     if is_user_chunk {
         return true; // 原 :411 语义：user_message_chunk 不转发 emit_event_all
     }
+    // P55-D3-②：tool 类 observe 锚点（#6/#7）——live 事件才派发（C11 回放
+    // 守卫同 pet 感知）；内部只 spawn，主循环零 await 桥（B1）。payload 在此
+    // 处仍是原始 wire（source/canonicalEvent 注入在下方 publish 分支）。
+    if !is_replay {
+        if let Some(update) = payload.get("update") {
+            if let Some(wire) = update
+                .get("sessionUpdate")
+                .and_then(serde_json::Value::as_str)
+            {
+                if matches!(wire, "tool_call" | "tool_call_update") {
+                    dispatch_tool_observe(
+                        hook_bridge,
+                        window,
+                        tool_timings,
+                        &source,
+                        wire,
+                        update,
+                    );
+                }
+            }
+        }
+    }
     // D1/D7：Kernel routing 先完成 live canonical append，只有 committed result
     // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
     let input = routing_input;
@@ -1189,6 +1423,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let runtime_for_reconnect = runtime.clone();
     *task = Some(tokio::spawn(async move {
         let notification_inbox = acp.lock().await.notification_inbox();
+        // P55-D3-④：tool 起始时刻表（本 dispatcher 实例生命周期内有效——
+        // tool_call → tool_call_update 耗时关联；崩溃/重启后缺省无耗时）。
+        let tool_timings = ToolTimings::default();
         // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
         // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
         let mut crashed_rx = acp.lock().await.crashed_receiver();
@@ -1587,6 +1824,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 generation,
                 &runtime_for_reconnect.mapping_ready,
                 &agent_id,
+                &hook_bridge,
+                &tool_timings,
                 event_service.as_ref(),
                 message_service.as_ref(),
                 classification,
@@ -2376,6 +2615,270 @@ with open({trace:?}, 'a') as f:
                 0,
                 "缺 id 的畸形请求不得派发钩子（无法回写应答）"
             );
+        }
+
+        // ---- P55-D3-②/③/④：observe 派发（turn.* 走 prompt.rs 跨层测试；
+        // 本区覆盖 tool 锚点 + spawn 背压 + 段状态机判定） ----
+
+        /// 轮询 hook 调用记录直到出现指定锚点请求（5s 超时；监听器同步触发，
+        /// spawn 任务在 await 让出后被 poll——sleep 即让出）。
+        async fn wait_hook_call(
+            calls: &Arc<Mutex<Vec<serde_json::Value>>>,
+            needle_hook: &str,
+        ) -> serde_json::Value {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                if let Ok(calls) = calls.lock() {
+                    if let Some(call) = calls.iter().find(|c| c["hook"] == needle_hook) {
+                        return call.clone();
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "未收到 {needle_hook} observe 请求"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+
+        /// D3-②④：tool_call → tool.beforeCall（observe 载荷）；tool_call_update
+        /// completed → tool.afterCall 且载荷带 startedAtMs/elapsedMs（验收④）。
+        #[tokio::test]
+        async fn tool_before_and_after_call_observe_carries_elapsed() {
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["tool.beforeCall", "tool.afterCall"]);
+            let timings = ToolTimings::default();
+            let calls = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let sink = calls.clone();
+            window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(event.payload()).expect("hook request payload");
+                if let Ok(mut calls) = sink.lock() {
+                    calls.push(payload);
+                }
+            });
+
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-tool",
+                "tool_call",
+                &json!({"sessionUpdate": "tool_call", "toolCallId": "tool-t1", "title": "Read", "rawInput": "{\"path\":\"/etc/hosts\"}"}),
+            );
+            let before = wait_hook_call(&calls, "tool.beforeCall").await;
+            assert_eq!(before["sessionId"], "local:d3-tool");
+            assert_eq!(before["payload"]["toolCallId"], "tool-t1");
+            assert_eq!(before["payload"]["name"], "Read");
+
+            // 制造 ≥10ms 间隔后 complete → afterCall 载荷带真实耗时。
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-tool",
+                "tool_call_update",
+                &json!({"sessionUpdate": "tool_call_update", "toolCallId": "tool-t1", "status": "completed", "rawOutput": "{\"ok\":true}"}),
+            );
+            let after = wait_hook_call(&calls, "tool.afterCall").await;
+            assert_eq!(after["payload"]["toolCallId"], "tool-t1");
+            let started_at_ms = after["payload"]["startedAtMs"]
+                .as_u64()
+                .expect("afterCall 载荷必须带 startedAtMs（D3-④）");
+            let elapsed_ms = after["payload"]["elapsedMs"]
+                .as_u64()
+                .expect("afterCall 载荷必须带 elapsedMs（D3-④）");
+            assert!(started_at_ms > 0, "startedAtMs 必须是有效时间戳");
+            assert!(
+                elapsed_ms >= 10,
+                "elapsedMs 应反映 tool_call→tool_call_update 的真实间隔（≥10ms）：{elapsed_ms}"
+            );
+            assert_eq!(after["payload"]["status"], "completed");
+        }
+
+        /// D3-②：tool_call_update status=failed → tool.failed 锚点。
+        #[tokio::test]
+        async fn tool_failed_update_dispatches_tool_failed_hook() {
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["tool.failed"]);
+            let timings = ToolTimings::default();
+            let calls = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let sink = calls.clone();
+            window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(event.payload()).expect("hook request payload");
+                if let Ok(mut calls) = sink.lock() {
+                    calls.push(payload);
+                }
+            });
+
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-tool",
+                "tool_call",
+                &json!({"sessionUpdate": "tool_call", "toolCallId": "tool-f1", "title": "Bash"}),
+            );
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-tool",
+                "tool_call_update",
+                &json!({"sessionUpdate": "tool_call_update", "toolCallId": "tool-f1", "status": "failed"}),
+            );
+            let failed = wait_hook_call(&calls, "tool.failed").await;
+            assert_eq!(failed["payload"]["toolCallId"], "tool-f1");
+            assert_eq!(failed["payload"]["status"], "failed");
+            assert_eq!(
+                failed["hook"], "tool.failed",
+                "failed 工具态必须派发 tool.failed（而非 afterCall）"
+            );
+        }
+
+        /// D3 验收③（B1）：observe spawn 不阻塞——慢钩子（监听器只收集不应答，
+        /// 每个派发任务挂 pending 直到超时）下，后续事件照常派发：两个连续
+        /// tool_call 都到达监听器，第二个未被第一个的挂起阻塞。
+        #[tokio::test]
+        async fn observe_dispatch_does_not_block_under_slow_hook() {
+            let (app, window) = mock_app_and_window();
+            let bridge = bridge_ready(&app, &["tool.beforeCall"]);
+            let timings = ToolTimings::default();
+            let calls = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let sink = calls.clone();
+            window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(event.payload()).expect("hook request payload");
+                if let Ok(mut calls) = sink.lock() {
+                    calls.push(payload);
+                }
+                // 不应答：模拟慢钩子（派发任务将等到 3s 超时）。
+            });
+
+            // 两个 tool_call 连续到达（间隔 0）——若 observe 派发 await 桥，
+            // 第二个会等第一个应答/超时；spawn 语义下两者立即排队。
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-slow",
+                "tool_call",
+                &json!({"sessionUpdate": "tool_call", "toolCallId": "tool-s1"}),
+            );
+            dispatch_tool_observe(
+                &bridge,
+                &window,
+                &timings,
+                "local:d3-slow",
+                "tool_call",
+                &json!({"sessionUpdate": "tool_call", "toolCallId": "tool-s2"}),
+            );
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let count = calls
+                    .lock()
+                    .map(|calls| calls.iter().filter(|c| c["hook"] == "tool.beforeCall").count())
+                    .unwrap_or(0);
+                if count >= 2 {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "慢钩子不应阻塞后续派发：只收到 {count}/2 个 beforeCall 请求"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+
+        /// D3 验收②：message.sealed 段边界四信号单测（纯函数判定）。
+        mod segment_state {
+            use super::*;
+
+            fn segment(message_id: &str, in_thought: bool) -> RunningSegment {
+                RunningSegment {
+                    message_id: Some(message_id.to_string()),
+                    in_thought,
+                }
+            }
+
+            #[test]
+            fn no_running_segment_never_seals() {
+                let seg = RunningSegment::default();
+                assert!(!segment_seal_signal(&seg, Some("tool_call"), None), "无 running 段无段可封");
+                assert!(!segment_seal_signal(&seg, Some("agent_message_chunk"), Some("m1")));
+            }
+
+            #[test]
+            fn tool_call_and_turn_end_seal_segment() {
+                // 信号 1：tool_call 到来封口当前 text/thought 段。
+                assert!(segment_seal_signal(&segment("m1", false), Some("tool_call"), None));
+                // 信号 2：回合收口（done/error/cancelled）封口。
+                for wire in ["done", "error", "cancelled"] {
+                    assert!(
+                        segment_seal_signal(&segment("m1", true), Some(wire), None),
+                        "{wire} 必须封口段"
+                    );
+                }
+            }
+
+            #[test]
+            fn thought_text_switch_seals_segment() {
+                // 信号 3：text 段收到 thought 行（同 messageId）→ 切换封口。
+                assert!(segment_seal_signal(
+                    &segment("m1", false),
+                    Some("agent_thought_chunk"),
+                    Some("m1"),
+                ));
+                // 反向：thought 段收到 text 行 → 封口。
+                assert!(segment_seal_signal(
+                    &segment("m1", true),
+                    Some("agent_message_chunk"),
+                    Some("m1"),
+                ));
+                // 同上下文同段延续 → 不封口。
+                assert!(!segment_seal_signal(
+                    &segment("m1", false),
+                    Some("agent_message_chunk"),
+                    Some("m1"),
+                ));
+                assert!(!segment_seal_signal(
+                    &segment("m1", true),
+                    Some("agent_thought_chunk"),
+                    Some("m1"),
+                ));
+            }
+
+            #[test]
+            fn message_id_change_seals_segment() {
+                // 信号 4：行携带不同 messageId → 封口。
+                assert!(segment_seal_signal(
+                    &segment("m1", false),
+                    Some("agent_message_chunk"),
+                    Some("m2"),
+                ));
+                // 行不带 messageId → 视同延续（无法判变化）。
+                assert!(!segment_seal_signal(
+                    &segment("m1", false),
+                    Some("agent_message_chunk"),
+                    None,
+                ));
+            }
+
+            #[test]
+            fn advance_tracks_message_and_thought_context() {
+                let mut seg = RunningSegment::default();
+                segment_advance(&mut seg, Some("agent_message_chunk"), Some("m1"));
+                assert_eq!(seg.message_id.as_deref(), Some("m1"));
+                assert!(!seg.in_thought, "text 行应标记 in_thought=false");
+                segment_advance(&mut seg, Some("agent_thought_chunk"), Some("m1"));
+                assert!(seg.in_thought, "thought 行应标记 in_thought=true");
+                // 行不带 messageId：保留既有段 id，仅更新上下文。
+                segment_advance(&mut seg, Some("agent_message_chunk"), None);
+                assert_eq!(seg.message_id.as_deref(), Some("m1"));
+                assert!(!seg.in_thought);
+            }
         }
     }
 }
