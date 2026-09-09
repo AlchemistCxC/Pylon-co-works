@@ -418,3 +418,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A2 permission 域首片：AcpSessionState 新增 resolve_permission(request_id) typed queue-depth delta，覆盖应答/取消后的 reducer 出队语义；消费者接线仍需与 dispatcher session owner 对齐，未改变旧 pending_permissions 行为。state 定向 4 项通过。
 
 [2026-09-09 继续] [主施工员·工程师] A2 usage 域：AcpSessionState 新增 usage_input/usage_output，与 used/size 同步 reducer；保留旧 tuple 兼容，定向 state 4 项通过。permission reducer 接线因全局 pending map 缺 owner/session 关联，暂不强行改写，待可证明 owner 映射时继续。
+
+[2026-09-09 继续] [主施工员·工程师] A2 usage 收口：dispatcher UsageUpdate 现读取 session.acp_state typed usage，不再重复解析 used/size/input/output；保留 _meta.model 与 Pet 行为。可靠 permission 映射已确认：PendingPermission.session_id + client_generation 双键绑定 SessionInfo.acp_state，后续接入应答/取消出队。cargo check、dispatcher 12 项、state 4 项通过。
