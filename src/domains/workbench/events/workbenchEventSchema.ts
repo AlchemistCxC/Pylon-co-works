@@ -414,7 +414,7 @@ function isNamespacedKind(value: string): boolean {
 }
 
 const MESSAGE_EVENT_TYPES = new Set(['message.started', 'message.delta', 'message.completed'])
-const KNOWN_EVENT_TYPES = new Set([
+export const WORKBENCH_SEMANTIC_EVENT_TYPES = Object.freeze([
   ...MESSAGE_EVENT_TYPES,
   'reasoning.delta', 'reasoning.completed', 'reasoning.redacted',
   'tool.started', 'tool.progress', 'tool.completed', 'tool.failed',
@@ -426,7 +426,8 @@ const KNOWN_EVENT_TYPES = new Set([
   'lifecycle.retrying', 'lifecycle.compact-started', 'lifecycle.compact-completed', 'lifecycle.rewind-preview', 'lifecycle.rewind-completed', 'lifecycle.suspended', 'lifecycle.recovered',
   'assist.prediction', 'assist.file-suggestions', 'assist.queued-command',
   'diagnostic.updated', 'diagnostic.notice',
-])
+]) as readonly string[]
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(WORKBENCH_SEMANTIC_EVENT_TYPES)
 
 function isSemanticEvent(value: unknown): value is WorkbenchSemanticEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false
