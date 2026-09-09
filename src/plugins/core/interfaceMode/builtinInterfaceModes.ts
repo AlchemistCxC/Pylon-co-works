@@ -23,4 +23,15 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     chromeStyle: 'glyphs',
     workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
   }),
+  Object.freeze({
+    id: 'tactical-blue',
+    label: '蓝调战术',
+    description: '蓝黑战术网格、斜切视觉与完整 Agent 工作台',
+    icon: 'panels',
+    order: 30,
+    defaultPresentationProfileId: 'builtin.presentation.tactical-blue',
+    quickSwitchTargetId: 'modern-gui',
+    chromeStyle: 'icons',
+    workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
+  }),
 ])

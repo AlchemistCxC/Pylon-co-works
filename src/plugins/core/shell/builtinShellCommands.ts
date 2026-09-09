@@ -4,6 +4,8 @@ import type { PluginSettingValue } from '../../../plugin-runtime/settings/plugin
 import { THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
 import { useStore } from '../../../store.ts'
 import { buildExportPayload, preflightImportPayload } from '../../../configExportImport.ts'
+import { activateInterfaceMode } from '../../../application/transactions/activateInterfaceMode.ts'
+import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore.ts'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function text(value: unknown, key: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 必须是非空字符串`); return value.trim() }
@@ -11,6 +13,7 @@ function text(value: unknown, key: string): string { if (typeof value !== 'strin
 export function createBuiltinShellCommandDefinitions(): CommandDefinition[] {
   const base = 600
   return [
+    { id: 'interface.tactical-blue.activate', name: 'interface.tactical-blue.activate', description: '切换到可选的蓝调战术界面', priority: base + 20, execute: () => { activateInterfaceMode('tactical-blue'); return { interfaceMode: useInterfaceModeStore.getState().interfaceMode } } },
     { id: 'plugin-settings.pages', name: 'plugin-settings.pages', description: '列出插件设置页面贡献', priority: base, execute: () => getPluginSettingsPageRegistry().getSnapshot().entries.map(entry => ({ id: entry.contributionId, pluginId: entry.ownerPluginId, label: entry.value.label, description: entry.value.description, renderKind: entry.value.renderKind, order: entry.value.order })) },
     { id: 'plugin-settings.get', name: 'plugin-settings.get', description: '读取插件设置值；省略 key 返回该插件全部值', priority: base + 1, execute: ({ args }) => { const input = record(args); const pluginId = text(input.pluginId, 'pluginId'); return typeof input.key === 'string' ? { pluginId, key: input.key, value: getPluginSettingsStore().get(pluginId, input.key) } : { pluginId, values: getPluginSettingsStore().getSnapshot(pluginId) } } },
     { id: 'plugin-settings.set', name: 'plugin-settings.set', description: '写入插件命名空间设置值', permission: 'gate', priority: base + 2, execute: ({ args }) => { const input = record(args); const pluginId = text(input.pluginId, 'pluginId'); const key = text(input.key, 'key'); if (!('value' in input)) throw new Error('value 缺失'); getPluginSettingsStore().set(pluginId, key, input.value as PluginSettingValue); return { pluginId, key, value: getPluginSettingsStore().get(pluginId, key) } } },

@@ -8,6 +8,15 @@
   font-family: var(--font);
 }
 
+.app[data-interface-mode="tactical-blue"] .runtime-sheet { background:#05132ba6; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar { background:#091b37ed; border-right:1px solid #74c4fa55; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-head { border-left:3px solid #76e8ff; padding-left:16px; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-title { font-size:22px; font-weight:800; }
+.app[data-interface-mode="tactical-blue"] .runtime-main { background:#07172bcc; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row { min-height:44px; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row[aria-expanded="true"] { background:#164276; }
+.app[data-interface-mode="tactical-blue"] :is(.runtime-filter-input,.runtime-filter-select) { background:#071329; border-color:#527ea5; border-radius:2px; }
+
 .runtime-sidebar {
   width: var(--sheet-sidebar-width, 250px);
   flex: 0 0 var(--sheet-sidebar-width, 250px);
@@ -278,5 +287,8 @@
   .runtime-log-message { flex-basis: 100%; overflow-wrap: anywhere; }
   .runtime-log-detail { overflow-wrap: anywhere; }
 }
+.app[data-interface-mode="tactical-blue"] .runtime-sheet { --danger:#ff9bab; --warning:#ffda83; --tool-ok:#77e4b6; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-list { background:#091931e8; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-error { color:#ff9bab; }
 .app[data-interface-mode="modern-gui"] .runtime-filter-select,.app[data-interface-mode="modern-gui"] .runtime-filter-input,.app[data-interface-mode="modern-gui"] .runtime-clear{border-radius:9px}
 .app[data-interface-mode="modern-gui"] .runtime-diagnostics,.app[data-interface-mode="modern-gui"] .runtime-markers,.app[data-interface-mode="modern-gui"] .runtime-log-item{border-radius:12px}

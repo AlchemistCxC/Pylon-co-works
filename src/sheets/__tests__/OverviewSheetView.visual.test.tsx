@@ -6,6 +6,7 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
+import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve({})) }))
@@ -15,6 +16,7 @@ const sheet: SheetRecord = { id: 'overview', kind: 'overview', title: 'Overview'
 
 beforeEach(() => {
   resetStores()
+  useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
   useIdentityStore.setState({
     activeAgent: 'peri',
     agents: [
@@ -39,6 +41,21 @@ beforeEach(() => {
 })
 
 describe('Overview visual workbench', () => {
+  it('战术导航进入现有分区、返回，并通过 Sheet host 打开诊断', () => {
+    useInterfaceModeStore.setState({ interfaceMode: 'tactical-blue' })
+    const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
+    const { container } = render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
+    const identity = useIdentityStore.getState()
+    fireEvent.click(screen.getByRole('button', { name: /Agent 编队/ }))
+    expect(container.querySelector('.overview-sheet')).toHaveAttribute('data-tactical-panel', 'agents')
+    expect(screen.getByRole('button', { name: /Peri.*1 个会话.*已连接/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '← 返回指挥台' }))
+    expect(container.querySelector('.overview-sheet')).toHaveAttribute('data-tactical-panel', 'home')
+    fireEvent.click(screen.getByRole('button', { name: /运行诊断/ }))
+    expect(ctx.openSheet).toHaveBeenCalledWith({ kind: 'runtime', title: '运行诊断' })
+    expect(useIdentityStore.getState()).toBe(identity)
+  })
+
   it('projects runtime, session and workspace truth into actionable sections', () => {
     const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
     render(<OverviewSheetView sheet={sheet} ctx={ctx} />)

@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense, useRef, useSyncExternalStore } from 'react'
 import SheetLayout from './workspace-sheets/SheetLayout'
+import TacticalScene from './sheets/TacticalScene'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
 import { flushIdentityBackend, useIdentityStore } from './identityStore'
@@ -445,6 +446,7 @@ export default function App() {
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId}>
+      {interfaceMode === 'tactical-blue' && <TacticalScene />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}

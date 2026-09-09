@@ -271,3 +271,6 @@
   padding-inline:0;
   text-align:left;
 }
+/* Tactical composer and its creation options keep usable width with both rails open. */
+.app[data-interface-mode="tactical-blue"] .input-bar:not(.cli-mode) .input-btn.send { color:#06234b; background:#83e7ff; box-shadow:none; border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] .input-bar:not(.cli-mode) .input-btn.send:hover:not(:disabled) { background:#c3f5ff; color:#061a32; transform:translateY(-1px); }
