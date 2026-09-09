@@ -10,7 +10,7 @@ import {
   type WorkbenchDocument,
 } from '../workbenchProjector.ts'
 import { selectLegacyMessages } from '../workbenchLegacyFacade.ts'
-import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
 
 const base = {
   provider: 'peri',
@@ -40,6 +40,14 @@ function reduce(events: readonly WorkbenchEventEnvelope[]): WorkbenchDocument {
 }
 
 describe('WorkbenchProjector', () => {
+  it('projects a migrated canonical tool event through the shared semantic vector', () => {
+    const migrated = migrateWorkbenchEnvelope({ owner: { localSessionId: base.sessionId }, sequence: 1, eventType: 'tool.started', rawPayload: { tool: 'raw' }, typedPayload: { tool: { name: 'search' } } })
+    expect(migrated.ok).toBe(true)
+    if (!migrated.ok) return
+    const document = projectWorkbench([migrated.value]).document
+    expect(document.activities).toHaveLength(1)
+    expect(document.activities[0]?.status).toBe('running')
+  })
   it('projects messages, timeline and unknown diagnostics through one pure reducer', () => {
     const events = [
       envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'question' }] }),
@@ -73,6 +81,53 @@ describe('WorkbenchProjector', () => {
     expect(selectActivities(attached)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'tool-1', parentId: 'parent-1', orphan: false }),
     ]))
+  })
+
+  it('P57 S2-R1e：批量回放与逐事件折叠等价，appliedEventIds 形状不变（Set 预去重）', () => {
+    const events = Array.from({ length: 60 }, (_, index) => envelope(index + 1, {
+      type: 'message.delta',
+      role: 'assistant',
+      parts: [{ kind: 'text', text: `chunk-${index} ` }],
+    }, { messageId: 'm-1' }))
+    // 批内重复事件（同 eventId）必须只折叠一次
+    const batch = [...events, events[10]!, events[40]!]
+
+    const batched = projectWorkbench(batch).document
+    const folded = batch.reduce(reduceWorkbenchEvent, createWorkbenchDocument(base.sessionId))
+
+    expect(batched.appliedEventIds).toEqual(folded.appliedEventIds)
+    expect(Object.isFrozen(batched.appliedEventIds)).toBe(true)
+    expect(batched.messages).toEqual(folded.messages)
+    expect(selectTimeline(batched)).toEqual(selectTimeline(folded))
+    expect(batched.appliedEventIds).toHaveLength(60)
+
+    // 以批量结果为 initialDocument 重放同批事件：全部命中预去重，无新增
+    const replayed = projectWorkbench(batch, { initialDocument: batched }).document
+    expect(replayed.appliedEventIds).toEqual(batched.appliedEventIds)
+    expect(selectTimeline(replayed)).toEqual(selectTimeline(batched))
+  })
+
+  it('P57 S2-R1a：refreshOrphans 无 orphan 变化时恒等返回输入 document', () => {
+    const toolUpdate = envelope(1, {
+      type: 'tool.progress',
+      tool: { toolCallId: 'tool-orphan', name: 'read', semanticKind: 'tool.read', parentActivityId: 'parent-x' },
+    }, { toolCallId: 'tool-orphan' })
+    const first = reduceWorkbenchEvent(createWorkbenchDocument(base.sessionId), toolUpdate)
+    const orphaned = first.activities.find(activity => activity.id === 'tool-orphan')
+    expect(orphaned).toMatchObject({ orphan: true })
+
+    // 重放同一事件被 id 去重直接返回；这里验证 orphan 已稳定后再次折叠无副作用：
+    // 用未去重的新事件触发 refreshOrphans，orphan 不变 → activities 引用保持。
+    const noise = envelope(2, { type: 'usage.updated', usage: { inputTokens: 3 } })
+    const after = reduceWorkbenchEvent(first, noise)
+    expect(after.activities).toBe(first.activities)
+    expect(after).not.toBe(first)
+
+    // parent 到达 → orphan 翻转 → 才克隆
+    const parent = envelope(3, { type: 'activity.started', activityId: 'parent-x', activity: { title: 'parent' } }, { taskId: 'parent-x' })
+    const attached = reduceWorkbenchEvent(after, parent)
+    expect(attached.activities).not.toBe(after.activities)
+    expect(attached.activities.find(activity => activity.id === 'tool-orphan')).toMatchObject({ orphan: false })
   })
 
   it('resolves interactions, session state and turn failure deterministically', () => {
