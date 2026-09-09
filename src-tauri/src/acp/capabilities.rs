@@ -49,6 +49,19 @@ impl CapabilityRegistry {
         self.state(path) == CapabilityState::Supported
     }
 
+    /// Object-valued capabilities (for example `sessionCapabilities.resume`)
+    /// are advertised by presence of an object, not by a boolean leaf.
+    pub fn supports_object(&self, path: &[&str]) -> bool {
+        let mut value = self.raw.as_ref();
+        for key in path {
+            value = match value.and_then(serde_json::Value::as_object) {
+                Some(object) => object.get(*key),
+                None => None,
+            };
+        }
+        value.is_some_and(serde_json::Value::is_object)
+    }
+
     pub fn raw(&self) -> Option<&serde_json::Value> {
         self.raw.as_ref()
     }
@@ -108,5 +121,14 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.contains("必须为 object"));
+    }
+
+    #[test]
+    fn object_capabilities_are_distinguished_from_boolean_leaves() {
+        let registry = CapabilityRegistry::from_initialize_response(&serde_json::json!({
+            "agentCapabilities": {"sessionCapabilities": {"resume": {}}}
+        })).unwrap();
+        assert!(registry.supports_object(&["sessionCapabilities", "resume"]));
+        assert!(!registry.supports(&["sessionCapabilities", "resume"]));
     }
 }
