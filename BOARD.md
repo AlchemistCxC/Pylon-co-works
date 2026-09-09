@@ -438,3 +438,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A3-2 补验：新增 turn.completed typed_payload 测试验证 stopReason/usage/model 保留、payloadVersion=1 且无 durationMs；定向测试通过。
 
 [2026-09-09 继续] [主施工员·工程师] A-CATALOG 复验：Rust pylon-core 使用 deny_unknown_fields + schemaVersion=2 fail-closed，新增 v1 与未知顶层字段拒绝测试；shared catalog v2/默认 detection 已有双侧解析测试。catalog 定向通过。
+
+[2026-09-09 继续] [主施工员·工程师] A-ADAPT 复验：provider_adapter 无 provider switch，所有策略经 pylon-core agent_catalog adaptation(provider) 消费；未知字段/bridge fail-closed，claude policy 仅 catalog 投影。provider_adapter 5 项 + catalog 7 项全绿。
