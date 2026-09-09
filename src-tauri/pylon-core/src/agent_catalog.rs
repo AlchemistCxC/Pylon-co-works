@@ -538,6 +538,17 @@ mod tests {
     }
 
     #[test]
+    fn catalog_rejects_v1_and_unknown_top_level_fields() {
+        let mut v1: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        v1["schemaVersion"] = serde_json::json!(1);
+        assert!(parse_catalog(&v1.to_string()).is_err());
+
+        let mut unknown: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        unknown["unexpected"] = serde_json::json!(true);
+        assert!(parse_catalog(&unknown.to_string()).is_err());
+    }
+
+    #[test]
     fn catalog_drives_launch_aliases_and_protocol_baseline() {
         assert_eq!(
             provider_for_executable_stem("ccb").unwrap().as_deref(),
