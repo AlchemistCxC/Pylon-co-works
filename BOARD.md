@@ -430,3 +430,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A1c permission 测试处置完成：删除两条依赖 legacy 任意 id 写线的 fake-agent wire 断言；generation/pending 行为保留，string-id wire 回显由 engine::sdk_responder_answers_agent_request 覆盖。移除失效 trace helper。permission 8 项全绿，cargo fmt 通过。
 
 [2026-09-09 继续] [主施工员·工程师] A3-1 canonical 映射复验：Rust normalizer 已覆盖 cancelled/usage/plan/mode/model/config/commands 7 个扩展 variant；新增一条矩阵行为测试，验证目标 eventType 全部稳定。permission A1c 失效 legacy wire fixtures 已移除，定向 8 项全绿。
+
+[2026-09-09 继续] [主施工员·工程师] A3-2 完成：normalize_kernel_event 对 done 提取 stopReason/usage/model 到 typed_payload，payloadVersion 保持 1，明确不写 durationMs；新增 additive completion 测试与 7 variant 矩阵测试均通过。
