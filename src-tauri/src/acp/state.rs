@@ -77,6 +77,17 @@ pub struct AcpSessionState {
 }
 
 impl AcpSessionState {
+    /// Remove a resolved permission from the reducer-owned queue.  The caller
+    /// supplies the canonical request id after a response or cancellation has
+    /// been committed; stale ids are harmless and produce no delta.
+    pub fn resolve_permission(&mut self, request_id: &str) -> Option<AcpStateDelta> {
+        let before = self.pending_permissions.len();
+        self.pending_permissions
+            .retain(|(id, _)| id != request_id);
+        (before != self.pending_permissions.len()).then_some(AcpStateDelta::PermissionQueueDepth {
+            depth: self.pending_permissions.len(),
+        })
+    }
     /// Apply one raw ACP notification. Responses and unrelated notifications
     /// are intentionally no-ops. Unknown update variants remain observable as
     /// typed deltas so a newer Agent can be added without changing this state
@@ -367,5 +378,18 @@ mod tests {
             "rawOutput": "b"
         })));
         assert_eq!(state.tools["t1"]["rawOutput"], "ab");
+    }
+
+    #[test]
+    fn resolving_permission_updates_reducer_queue_depth() {
+        let mut state = AcpSessionState {
+            pending_permissions: vec![("7".into(), "tool-1".into())],
+            ..Default::default()
+        };
+        assert_eq!(
+            state.resolve_permission("7"),
+            Some(AcpStateDelta::PermissionQueueDepth { depth: 0 })
+        );
+        assert!(state.resolve_permission("missing").is_none());
     }
 }
