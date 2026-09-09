@@ -56,6 +56,15 @@ describe('WorkbenchProjector', () => {
     const document = projectWorkbench([migrated.value]).document
     expect(document.messages.filter(message => message.role === 'reasoning').map(message => message.content)).toContain('thinking')
   })
+
+  it('projects a migrated plan replacement into the shared plan surface', () => {
+    const migrated = migrateWorkbenchEnvelope({ owner: { localSessionId: base.sessionId }, sequence: 1, eventType: 'plan.replaced', rawPayload: {}, typedPayload: { entries: [{ id: 'step-1', title: 'Inspect', status: 'pending' }] } })
+    expect(migrated.ok).toBe(true)
+    if (!migrated.ok) return
+    const document = projectWorkbench([migrated.value]).document
+    expect(document.plan.entries).toHaveLength(1)
+    expect(document.plan.entries[0]).toMatchObject({ id: 'step-1', title: 'Inspect' })
+  })
   it('projects messages, timeline and unknown diagnostics through one pure reducer', () => {
     const events = [
       envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'question' }] }),
