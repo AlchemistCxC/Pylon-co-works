@@ -418,6 +418,16 @@ mod tests {
     }
 
     #[test]
+    fn stale_attach_cannot_rebind_replaced_owner() {
+        let rt = runtime();
+        insert(rt.as_ref(), "src", session("peri-old", 1), true, 100).unwrap();
+        insert(rt.as_ref(), "src", session("peri-new", 2), true, 100).unwrap();
+        let attached = mark_attached_if_current(rt.as_ref(), "src", "peri-old", 1, 1).unwrap();
+        assert!(!attached);
+        assert_eq!(snapshot(rt.as_ref()).unwrap()[0].1.peri_id, "peri-new");
+    }
+
+    #[test]
     fn unknown_activation_marks_old_bindings_probing_without_migrating_them() {
         let rt = runtime();
         insert(rt.as_ref(), "a", session("p-a", 7), true, 100).unwrap();
