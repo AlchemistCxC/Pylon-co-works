@@ -404,3 +404,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 
 [2026-09-06 17:02] [Hook桥·工程师] [P55 D1 已提交] D1 kernel hook bridge + beforeSend/message.received 锚点 + 前端 dispatcher/signal 已提交 3bc8ef13。hook_bridge 闸门测试修复（先 sync_registry 再验证无窗口 Failed）；前端 2 文件 15 项通过。cargo test 编译阶段受 Windows STATUS_STACK_BUFFER_OVERRUN 阻塞，cargo check 曾进入 Checking；未触碰 dist-plugin-sdk/artifacts 并行 WIP。D2-D6 尚未施工。
 [2026-09-06 17:05] [Hook桥·工程师] [P55 D4 前端契约片] 提交 `7472b731`：API 1.2 manifest 新增 dangerousHooks 字段，1.0/1.1 fail-closed，锚点词表校验/去重；schema 与 packageManifest 测试同步，20 项全绿。D4 dispatcher 双侧授权门控与 trigger 尚待施工。
+
+[2026-09-09 继续] [主施工员·工程师] A1a review：现有 engine.rs 定向 7 项全绿，inbox 背压、wire id_kind、EOF/Responder/drop-cancel 均有测试；发现 bridge_channels 为本地双向转发实现，注释明确未调用 SDK bridge_with_inspection，施工书 A1a 步骤 3/4 仍未完全满足，需后续接入真实 SDK API。
