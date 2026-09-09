@@ -743,26 +743,31 @@ pub(crate) async fn acp_wire_trace_snapshot(
         .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
     if format.as_deref() == Some("jsonl") {
         const MAX_BYTES: usize = 4 * 1024 * 1024;
-        let jsonl = trace.to_jsonl();
-        let complete = jsonl.len() <= MAX_BYTES;
-        let body = if complete {
-            jsonl
-        } else {
-            let mut end = MAX_BYTES;
-            while !jsonl.is_char_boundary(end) {
-                end -= 1;
-            }
-            jsonl[..end].to_string()
-        };
         let records = trace.snapshot();
+        let lines: Vec<String> = records
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap_or_else(|_| "{}".into()))
+            .collect();
+        let mut used = 0usize;
+        let mut kept = 0usize;
+        for (index, line) in lines.iter().enumerate() {
+            let extra = line.len() + usize::from(index > 0);
+            if used + extra > MAX_BYTES {
+                break;
+            }
+            used += extra;
+            kept += 1;
+        }
+        let complete = kept == lines.len();
+        let body = lines[..kept].join("\n");
         return Ok(serde_json::json!({
             "traceId": trace.trace_id(),
             "format": "jsonl",
             "data": body,
             "complete": complete,
             "firstOrdinal": records.first().map(|r| r.monotonic_seq),
-            "lastOrdinal": records.last().map(|r| r.monotonic_seq),
-            "droppedCount": if complete { 0 } else { records.len() },
+            "lastOrdinal": records.get(kept.saturating_sub(1)).map(|r| r.monotonic_seq),
+            "droppedCount": records.len().saturating_sub(kept),
             "reason": if complete { serde_json::Value::Null } else { serde_json::json!("byte_budget") },
         }));
     }
