@@ -442,3 +442,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A-ADAPT 复验：provider_adapter 无 provider switch，所有策略经 pylon-core agent_catalog adaptation(provider) 消费；未知字段/bridge fail-closed，claude policy 仅 catalog 投影。provider_adapter 5 项 + catalog 7 项全绿。
 
 [2026-09-09 继续] [主施工员·工程师] A-DETECT 复验：pylon-core preflight 已真实消费 catalog checks，NodeMin fail、UvMin warn、未知 provider fail-closed；新增 claude-code 状态矩阵测试，验证无安装副作用。preflight 定向 5 项全绿。
+
+[2026-09-09 继续] [主施工员·工程师] A-DETECT 复验纠偏：catalog 当前 checks 对三 provider 均为空，因此原拟 Node/uv 状态矩阵测试不具备真实输入，已删除该无效测试（未锁定行为）；保留 preflight parser/version/unknown-provider 4 项全绿，避免伪造 catalog 检查契约。
