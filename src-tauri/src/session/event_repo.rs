@@ -1531,6 +1531,30 @@ mod tests {
     }
 
     #[test]
+    fn kernel_ingest_normalizes_extended_session_update_variants() {
+        let cases = [
+            ("cancelled", "turn.cancelled"),
+            ("usage_update", "usage.updated"),
+            ("plan", "plan.replaced"),
+            ("current_mode_update", "session.mode-updated"),
+            ("session_info_update", "session.model-updated"),
+            ("config_option_update", "session.config-updated"),
+            ("available_commands_update", "session.commands-updated"),
+        ];
+        for (variant, expected) in cases {
+            let event = repo()
+                .ingest_kernel_event(kernel_input(serde_json::json!({
+                    "source": "local:s1",
+                    "update": { "sessionUpdate": variant }
+                })))
+                .expect("ingest")
+                .events
+                .remove(0);
+            assert_eq!(event.event_type, expected, "variant {variant}");
+        }
+    }
+
+    #[test]
     fn kernel_ingest_redacts_secret_interaction_values_before_raw_retention() {
         let credential = "c12-kernel-secret-value";
         let result = repo()
