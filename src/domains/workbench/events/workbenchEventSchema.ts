@@ -335,11 +335,9 @@ export function migrateWorkbenchEnvelope(value: unknown): SchemaResult<Workbench
     return failure([schemaIssue([], 'migration.legacy-shape', 'version zero semantic or canonical event', value)])
   }
   const eventType = typeof value.eventType === 'string' ? value.eventType : 'unknown'
-  const typed = isRecord(value.typedPayload) ? value.typedPayload : {}
+  const typed = (isRecord(value.typedPayload) ? value.typedPayload : {}) as Record<string, JsonValue>
   const text = typeof typed.text === 'string' ? typed.text : undefined
-  const event: WorkbenchSemanticEvent = eventType === 'user.message' || eventType === 'assistant.text.delta'
-    ? { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
-    : { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw: rawPayload, truncated: false }
+  const event: WorkbenchSemanticEvent = migrateCanonicalEvent(eventType, typed, text, rawPayload)
   const migrated = createWorkbenchEnvelope({
     sessionId,
     sequence,
@@ -352,6 +350,20 @@ export function migrateWorkbenchEnvelope(value: unknown): SchemaResult<Workbench
     eventId: typeof value.eventId === 'string' ? value.eventId : undefined,
   })
   return parseWorkbenchEnvelope(migrated)
+}
+
+function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValue>, text: string | undefined, raw: JsonValue): WorkbenchSemanticEvent {
+  if (eventType === 'user.message' || eventType === 'assistant.text.delta') {
+    return { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
+  }
+  if (eventType === 'assistant.reasoning.delta') return { type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  if (eventType === 'tool.started' || eventType === 'tool.progress' || eventType === 'tool.completed' || eventType === 'tool.failed') {
+    return { type: eventType, ...(typed.tool !== undefined ? { tool: typed.tool } : {}), ...(typed.progress !== undefined ? { progress: typed.progress } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  }
+  if (eventType === 'plan.replaced') return { type: 'plan.replaced', ...(Array.isArray(typed.entries) ? { entries: typed.entries } : {}) }
+  if (eventType === 'usage.updated') return { type: 'usage.updated', ...(typed.usage !== undefined ? { usage: typed.usage } : {}) }
+  if (eventType === 'session.completed') return { type: 'session.completed', ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}) }
+  return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false }
 }
 
 function parseSemanticEvent(value: unknown): SchemaResult<WorkbenchSemanticEvent> {

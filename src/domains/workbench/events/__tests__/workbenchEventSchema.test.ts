@@ -29,6 +29,22 @@ function envelope(overrides: Partial<WorkbenchEventEnvelope> = {}): WorkbenchEve
 
 describe('Workbench event envelope schema', () => {
   it.each([
+    ['tool.started', 'tool.started'],
+    ['assistant.reasoning.delta', 'reasoning.delta'],
+    ['plan.replaced', 'plan.replaced'],
+    ['usage.updated', 'usage.updated'],
+    ['session.completed', 'session.completed'],
+  ])('migrates %s into typed semantic event %s', (eventType, expectedType) => {
+    const result = migrateWorkbenchEnvelope({
+      owner: { localSessionId: 'session-1' }, sequence: 2, eventType,
+      rawPayload: { typed: true }, typedPayload: { text: 'x', entries: [], usage: { input: 1 }, stopReason: 'end' },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.event.type).toBe(expectedType)
+  })
+
+  it.each([
     ['known text event', envelope()],
     ['unknown event', envelope({
       event: {
