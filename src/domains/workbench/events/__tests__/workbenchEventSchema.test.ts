@@ -45,6 +45,19 @@ describe('Workbench event envelope schema', () => {
   })
 
   it.each([
+    ['plan.entry-updated', 'plan.entry-updated'],
+    ['goal.updated', 'goal.updated'],
+    ['activity.completed', 'activity.completed'],
+    ['session.model-updated', 'session.model-updated'],
+    ['session.mode-updated', 'session.mode-updated'],
+    ['session.status-updated', 'session.status-updated'],
+  ])('preserves typed migration for %s', (eventType, expectedType) => {
+    const result = migrateWorkbenchEnvelope({ owner: { localSessionId: 'session-1' }, sequence: 3, eventType, rawPayload: {}, typedPayload: { goalId: 'g', model: 'm', mode: 'auto', status: 'running', entry: {} } })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.event.type).toBe(expectedType)
+  })
+
+  it.each([
     ['known text event', envelope()],
     ['unknown event', envelope({
       event: {
