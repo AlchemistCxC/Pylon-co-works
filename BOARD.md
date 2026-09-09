@@ -424,3 +424,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] permission 映射接入：request 入队按 PendingPermission.session_id 写入对应 SessionInfo reducer；resolve_pending 成功 wire 应答后按同 session_id 出队，失败保留 pending，generation 校验仍在 claim 临界区。cargo check 通过；permission 两条既有 fake-agent 测试出现应答未达（与变更后置 reducer 更新无因果，需后续复验）。
 
 [2026-09-09 继续] [主施工员·工程师] permission 复验：两条既有测试稳定失败，因为它们仅手工插入 pending map、未注入 SDK Responder；SDK 仅能应答实际收到并登记的 agent request，旧 legacy 可向任意 id 写线。该差异是 A1c 官方 SDK 接缝行为变化，不能用状态映射掩盖；生产路径真实 request 已由 on_receive_dispatch 登记。已保留失败证据，后续按施工书 A1c 测试处置审计。
+
+[2026-09-09 继续] [主施工员·工程师] permission 测试处置调查：施工书明确允许改写 A1c 的旧 wire/responder 断言；当前两测手工 pending 无真实 SDK Responder，需改为 engine::Responder 夹具或真实 request 注入，不能简单忽略。生产映射与编译门禁已通过。
