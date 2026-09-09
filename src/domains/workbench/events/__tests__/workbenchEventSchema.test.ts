@@ -63,6 +63,12 @@ describe('Workbench event envelope schema', () => {
     if (result.ok) expect(result.value.event.type).toBe('event.unknown')
   })
 
+  it.each([['lifecycle.recovered'], ['diagnostic.notice']])('migrates %s without unknown fallback', eventType => {
+    const result = migrateWorkbenchEnvelope({ owner: { localSessionId: 'session-1' }, sequence: 5, eventType, rawPayload: {}, typedPayload: { reason: 'retry', level: 'info', message: 'ok' } })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.event.type).toBe(eventType)
+  })
+
   it.each([
     ['known text event', envelope()],
     ['unknown event', envelope({

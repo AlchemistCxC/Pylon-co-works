@@ -374,6 +374,8 @@ function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValu
   if (eventType === 'session.model-updated') return { type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }
   if (eventType === 'session.mode-updated') return { type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }
   if (eventType === 'session.status-updated') return { type: 'session.status-updated', ...(typeof typed.status === 'string' ? { status: typed.status } : {}) }
+  if (eventType === 'lifecycle.retrying' || eventType === 'lifecycle.compact-started' || eventType === 'lifecycle.compact-completed' || eventType === 'lifecycle.suspended' || eventType === 'lifecycle.recovered') return { type: eventType, ...(typeof typed.attempt === 'number' ? { attempt: typed.attempt } : {}), ...(typeof typed.reason === 'string' ? { reason: typed.reason } : {}), ...(typeof typed.summary === 'string' ? { summary: typed.summary } : {}) }
+  if (eventType === 'diagnostic.updated' || eventType === 'diagnostic.notice') return { type: eventType, ...(Array.isArray(typed.diagnostics) ? { diagnostics: typed.diagnostics } : {}), ...(typeof typed.level === 'string' && ['info', 'warning', 'error'].includes(typed.level) ? { level: typed.level as 'info' | 'warning' | 'error' } : {}), ...(typeof typed.message === 'string' ? { message: typed.message } : {}), ...(typeof typed.code === 'string' ? { code: typed.code } : {}) }
   return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false }
 }
 
