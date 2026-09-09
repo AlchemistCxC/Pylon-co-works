@@ -394,50 +394,35 @@ pub(crate) fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
 
 /// 运行观测桥：两个方向逐帧写入 `AcpWireHub`，原帧原样转发。
 ///
-/// **自实现而非 SDK 的 `bridge_with_inspection`**：后者用 `try_join!` 等两个方向
-/// 都结束，子进程 EOF 不会传播给 SDK 侧（实测 `crashed_watch` 永不触发）；
-/// 这里任一方向结束即返回，两侧 sender 随之 drop，对端立即看到关闭。
-///
-/// 必须在独立任务中运行；`AcpWireHub::record` 为 infallible best-effort。
+/// 使用 SDK 的 `bridge_with_inspection`，在 SDK 与子进程之间原样转发帧并
+/// 记录 wire capture。该 API 对 batch 内每条消息调用 observer，因此保留
+/// `RequestId` 的 number/string/null 形态。
 pub(crate) async fn run_wire_bridge(
     inspect_left: Channel,
     inspect_right: Channel,
     hub: Arc<AcpWireHub>,
 ) -> Result<(), agent_client_protocol::Error> {
-    use futures_util::StreamExt as _;
+    let outbound = hub.clone();
+    let inbound = hub;
+    Channel::bridge_with_inspection(
+        inspect_left,
+        inspect_right,
+        move |message| {
+            observe_message(message, &outbound, WireDirection::PylonToAgent);
+            Ok(())
+        },
+        move |message| {
+            observe_message(message, &inbound, WireDirection::AgentToPylon);
+            Ok(())
+        },
+    )
+    .await
+}
 
-    let Channel {
-        rx: mut left_rx,
-        tx: left_tx,
-    } = inspect_left;
-    let Channel {
-        rx: mut right_rx,
-        tx: right_tx,
-    } = inspect_right;
-    let to_agent = hub.clone();
-    let to_pylon = hub;
-
-    let left_to_right = async move {
-        while let Some(frame) = left_rx.next().await {
-            observe_frame(&frame, &to_agent, WireDirection::PylonToAgent);
-            if right_tx.unbounded_send(frame).is_err() {
-                break;
-            }
-        }
-    };
-    let right_to_left = async move {
-        while let Some(frame) = right_rx.next().await {
-            observe_frame(&frame, &to_pylon, WireDirection::AgentToPylon);
-            if left_tx.unbounded_send(frame).is_err() {
-                break;
-            }
-        }
-    };
-    tokio::select! {
-        _ = left_to_right => {},
-        _ = right_to_left => {},
+fn observe_message(message: &agent_client_protocol::RawJsonRpcMessage, hub: &AcpWireHub, direction: WireDirection) {
+    if let Ok(value) = serde_json::to_value(message) {
+        hub.record(direction, &value);
     }
-    Ok(())
 }
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
