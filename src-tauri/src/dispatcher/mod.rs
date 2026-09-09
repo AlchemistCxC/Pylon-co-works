@@ -1392,6 +1392,13 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                                 remaining_attempts -= 1;
                                                 continue;
                                             }
+                                            // Publish completion of the successful reconnect before
+                                            // leaving the worker. Callers observe Connected and the
+                                            // guard as one settled state; keeping the flag set here
+                                            // creates a race where a caller sees stale re-entry state.
+                                            reconnect_runtime
+                                                .auto_reconnect_active
+                                                .store(false, Ordering::Release);
                                             break;
                                         }
                                         Err(error) => {
