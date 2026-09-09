@@ -448,3 +448,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-09 继续] [主施工员·工程师] A-DETECT 设计点：pylon-detect CLI 当前把 binary/config evidence 传给 preflight，但未把 candidate version evidence 映射到 node/uv；catalog 三 provider 的 checks/requires 为空，无法安全猜测版本来源。需 catalog 明确 requires/checks 后再接版本分流；已保留只读检测与无安装边界，不伪造状态。
 
 [2026-09-09 继续] [主施工员·工程师] A4 安全策略定向复验：host_tools 3、file_system_runtime 2、terminal_runtime 4、permission 8 全部通过；默认 AgentSelfHosted、host opt-in、路径/大小/owner 隔离、终态 watch、generation/option 校验均保持。
+
+[2026-09-09 继续] [主施工员·工程师] A5 定向复验：CapabilityRegistry 3 项与 session::model 15 项全绿；未知/空/非 object fail-closed，model/config 仅发送宣告集合值，surface 路由与无广告拒绝保持。
