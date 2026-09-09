@@ -130,6 +130,30 @@ for line in sys.stdin:
     assert!(recreated.is_none());
 }
 
+#[tokio::test]
+async fn ensure_session_mapping_resume_and_load_failure_creates_new_session() {
+    const FAKE_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line); method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'initialize':
+        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+    elif method in ('session/resume','session/load'):
+        response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session unavailable'}}
+    elif method == 'session/new':
+        response['result']={'sessionId':'recreated-session'}
+    print(json.dumps(response),flush=True)
+"#;
+    let agent=fake_acp_agent("resume-new-agent",FAKE_SCRIPT);
+    let runtime=AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await=crate::acp::AcpClient::connect_with_logs(&agent,None).await.expect("fake ACP must initialize");
+    let state=crate::test_utils::TestStateBuilder::bare().with_active_agent("resume-new-agent").with_agent(agent).with_runtime("resume-new-agent",runtime.clone()).build();
+    let mut recreated=None;
+    let mapping=ensure_session_mapping(&state,&runtime,"local:resume-new",Some("profile"),"persona",".",&[],Some("peri"),&mut recreated).await.expect("new fallback must succeed");
+    assert_eq!(mapping.peri_id,"recreated-session");
+    assert_eq!(recreated.as_deref(),Some("recreated-session"));
+}
+
 /// session/load 失败（provider 端会话已死）→ 降级新建 + recreated 通知。
 #[tokio::test]
 async fn ensure_session_mapping_falls_back_to_new_with_notice_when_load_fails() {
