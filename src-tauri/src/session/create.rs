@@ -861,10 +861,12 @@ async fn revive_session_slot(
         state.protocol_for_runtime(runtime).mcp_servers,
     )
     .map_err(PylonError::Protocol)?;
-    let resume_advertised = state
-        .active_runtime()
-        .and_then(|_| runtime.acp.try_lock().ok())
-        .and_then(|acp| acp.agent_capabilities().cloned())
+    let resume_advertised = runtime
+        .acp
+        .lock()
+        .await
+        .agent_capabilities()
+        .cloned()
         .and_then(|caps| caps.get("sessionCapabilities").cloned())
         .and_then(|caps| caps.get("resume").and_then(serde_json::Value::as_bool))
         .unwrap_or(false);
