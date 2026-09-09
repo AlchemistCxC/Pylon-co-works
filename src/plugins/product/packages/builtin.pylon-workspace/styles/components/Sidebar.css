@@ -402,3 +402,6 @@
     opacity:.82;
   }
 }
+.app[data-interface-mode="tactical-blue"] .sidebar { background:#071831ed; border-right:1px solid #75c5f344; }
+.app[data-interface-mode="tactical-blue"] .sidebar :is(.session-item,.profile-item) { border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] .sidebar :is(.session-item.active,.profile-item.active) { background:#12457d; box-shadow:inset 3px 0 #69e1ff; }

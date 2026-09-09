@@ -22,3 +22,101 @@
 @media(max-width:760px){.overview-main{padding:18px}.overview-sidebar{width:190px;flex-basis:190px}.overview-hero{align-items:flex-start;flex-direction:column;min-height:0;padding:24px}.overview-hero::after{width:220px;height:220px}.overview-pulse{align-self:stretch;grid-template-columns:auto 1fr 1px 1fr 1px 1fr}.overview-agent-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-agent-card,.overview-agent-card:nth-child(3n){border-right:1px solid var(--stroke-subtle);border-top:1px solid var(--stroke-subtle)}.overview-agent-card:nth-child(odd){border-left:0}.overview-agent-card:nth-child(even){border-right:0}.overview-config-strip{align-items:flex-start;flex-direction:column}.overview-config-strip>div{grid-template-columns:1fr;gap:4px}}
 @media(max-width:520px){.overview-hero-brand{flex-direction:column}.overview-mark-stage{width:58px;height:58px;flex-basis:58px}.overview-brand-mark{width:42px;height:42px}.overview-title{font-size:28px}.overview-agent-grid{grid-template-columns:1fr}.overview-agent-card{border-right:0;border-top:1px solid var(--stroke-subtle)}.overview-session-row{grid-template-columns:30px minmax(0,1fr) 14px}.overview-session-row time{display:none}.overview-workspace-count{display:none}}
 .app[data-interface-mode="modern-gui"] .overview-sidebar nav button{border-radius:9px;border-left-width:1px}.app[data-interface-mode="modern-gui"] .overview-hero{border-radius:20px}.app[data-interface-mode="modern-gui"] .overview-section{border-radius:16px}.app[data-interface-mode="modern-gui"] .overview-agent-glyph,.app[data-interface-mode="modern-gui"] .overview-session-icon,.app[data-interface-mode="modern-gui"] .overview-folder-icon{border-radius:11px}
+
+
+/* Optional Tactical Blue: foreground navigation above a photographic scene. */
+.app[data-interface-mode="tactical-blue"] .overview-main { background:transparent; padding:24px clamp(22px,4vw,72px) 26px; }
+.app[data-interface-mode="tactical-blue"] :is(.overview-sidebar,.overview-hero,.overview-config-strip,.overview-config-editor) { display:none; }
+.app[data-interface-mode="tactical-blue"] .overview-shell { width:min(1520px,100%); }
+.app[data-interface-mode="tactical-blue"] .overview-sheet[data-tactical-panel="home"] :is(.overview-agent-section,.overview-content-grid) { display:none; }
+.app[data-interface-mode="tactical-blue"] .overview-sheet[data-tactical-panel="agents"] .overview-content-grid,
+.app[data-interface-mode="tactical-blue"] .overview-sheet[data-tactical-panel="recent"] :is(.overview-agent-section,.overview-workspace-section),
+.app[data-interface-mode="tactical-blue"] .overview-sheet[data-tactical-panel="workspaces"] :is(.overview-agent-section,.overview-recent-section) { display:none; }
+.app[data-interface-mode="tactical-blue"] .overview-content-grid { grid-template-columns:1fr; }
+.app[data-interface-mode="tactical-blue"] .overview-section { border-radius:2px; border:1px solid #658ee859; border-top:3px solid #72e7ff; background:#081636ed; box-shadow:12px 16px 0 #020b2945; }
+.app[data-interface-mode="tactical-blue"] .overview-section-heading { padding:24px; border-bottom:1px solid #779bcc40; }
+.app[data-interface-mode="tactical-blue"] .overview-section-heading h2 { font-size:24px; letter-spacing:.03em; }
+.app[data-interface-mode="tactical-blue"] .overview-kicker { color:#67deff; letter-spacing:.2em; }
+.app[data-interface-mode="tactical-blue"] .overview-agent-grid { grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }
+.app[data-interface-mode="tactical-blue"] .overview-agent-card { min-height:138px; padding:24px; border-color:#496b9c5c; transition:background 180ms,box-shadow 180ms; }
+.app[data-interface-mode="tactical-blue"] .overview-agent-card:is(:hover,.is-active) { background:#1555a45c; box-shadow:inset 4px 0 #69e4ff; }
+.app[data-interface-mode="tactical-blue"] .overview-agent-copy strong { font-size:17px; }
+.app[data-interface-mode="tactical-blue"] .overview-agent-glyph { background:#1474eb; color:#fff; border-radius:0; }
+.app[data-interface-mode="tactical-blue"] :is(.overview-session-row,.overview-workspace-row) { min-height:76px; padding:16px 24px; }
+.app[data-interface-mode="tactical-blue"] :is(.overview-session-row,.overview-workspace-row):hover { background:#1849789c; }
+.app[data-interface-mode="tactical-blue"] :is(.overview-session-copy,.overview-workspace-copy) strong { font-size:14px; }
+.app[data-interface-mode="tactical-blue"] :is(.overview-primary-action,.overview-secondary-action) { border-radius:0; min-height:42px; }
+.app[data-interface-mode="tactical-blue"] .overview-primary-action { color:#09265a; background:#a7edff; font-weight:800; }
+.app[data-interface-mode="tactical-blue"] .overview-secondary-action { color:#ecfaff; background:#103764; border:1px solid #64c9f2; }
+.tactical-deck { display:grid; grid-template-columns:minmax(210px,.8fr) minmax(420px,1.2fr); gap:30px; min-height:calc(100vh - 114px); position:relative; align-items:center; }
+.tactical-identity { min-height:440px; align-self:stretch; position:relative; display:flex; flex-direction:column; justify-content:flex-end; padding:30px 0 25px; }
+.tactical-channel { position:absolute; top:10px; left:0; color:#c3edff; font:10px var(--mono); letter-spacing:.16em; }
+.tactical-channel>span { display:inline-block; width:5px; height:5px; background:#69e2ff; margin-right:8px; }
+.tactical-identity-copy { margin-top:280px; max-width:320px; padding:20px; border-left:3px solid #47d9ff; background:#06132bc9; backdrop-filter:blur(8px); }
+.tactical-micro { display:block; font:700 10px/1.4 var(--mono); letter-spacing:.15em; }
+.tactical-identity-copy>.tactical-micro { color:#8beaff; font-size:9px; }
+.tactical-identity h1 { font-size:clamp(28px,3.4vw,48px); line-height:1.18; letter-spacing:-.04em; margin:16px 0; color:#fff; font-weight:900; }
+.tactical-identity em { color:#7deaff; font-style:normal; }
+.tactical-identity p { margin:0; color:#d7e7f6; font-size:12px; line-height:1.9; }
+.tactical-live { color:#c5e0f6; display:flex; gap:10px; align-items:center; font-size:11px; margin-top:18px; padding:10px 14px; width:fit-content; background:#081936c9; }
+.tactical-tiles { display:grid; grid-template-columns:1.15fr 1fr; grid-template-rows:150px 130px 120px 64px; gap:22px 16px; transform:rotate(-4deg); transform-origin:60% 50%; margin:20px 0 36px; }
+.tactical-tile { --tile-bg:#0757cbea; --tile-fg:#72eaff; position:relative; isolation:isolate; border:0; background:none; color:var(--tile-fg); text-align:left; padding:18px 20px; cursor:pointer; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:5px; transition:translate 180ms ease; }
+.tactical-tile:before { content:''; position:absolute; z-index:-1; inset:0; background:var(--tile-bg); clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%); box-shadow:inset 0 -3px #2e9dff; transition:filter 180ms; }
+.tactical-tile:hover:before,.tactical-tile:focus-visible:before { filter:brightness(1.3); }
+.tactical-tile:is(:hover,:focus-visible) { translate:5px -3px; }
+.tactical-tile:focus-visible { outline:3px solid #fff; outline-offset:5px; }
+.tactical-tile:active { translate:2px 1px; }
+.tactical-tile:disabled { opacity:.6; cursor:wait; }
+.tactical-tile .tactical-display { font-family:Impact,'Arial Narrow',var(--font); font-size:clamp(26px,3.5vw,54px); font-weight:900; font-stretch:condensed; font-style:italic; line-height:1; letter-spacing:-.04em; text-shadow:3px 4px 0 #001c69; white-space:nowrap; }
+.tactical-tile .tactical-action-label { color:#fff; font-size:13px; font-weight:750; letter-spacing:.12em; }
+.tactical-tile small { color:#c7e5ff; font-size:10px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tactical-tile>* { flex-shrink:0; }
+.tactical-tile .tactical-micro { font-size:8px; color:#b7dafa; }
+.tactical-tile-icon { position:absolute; right:16px; top:12px; opacity:.23; }
+.tactical-operation { grid-column:1/3; margin-left:10px; --tile-bg:#054ad0ec; padding:20px 28px; }
+.tactical-operation .tactical-display { font-size:clamp(58px,7.1vw,100px); color:#82efff; }
+.tactical-operation .tactical-action-label { position:absolute; right:26px; bottom:20px; background:#06172a; padding:6px 12px; }
+.tactical-operation small { max-width:58%; }
+.tactical-agents { margin-left:-8px; --tile-bg:#092c84e6; }
+.tactical-history { margin-top:14px; margin-bottom:-14px; --tile-bg:#061e58d9; }
+.tactical-workspaces { margin-left:-18px; --tile-bg:#0865d9eb; }
+.tactical-settings { margin-top:8px; margin-bottom:-8px; --tile-bg:#0d357fdd; }
+.tactical-settings>svg { position:absolute; top:16px; right:20px; opacity:.3; }
+.tactical-diagnostics { grid-column:1/3; margin-left:-24px; margin-right:12px; --tile-bg:#06162de8; flex-direction:row; align-items:center; justify-content:flex-start; gap:12px; color:#99e7ff; }
+.tactical-diagnostics strong { font-size:15px; color:#fff; }
+.tactical-diagnostics small { margin-left:auto; }
+.tactical-deck-footer { grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; gap:15px; padding:14px 0; border-top:1px solid #7cc3fa55; color:#c0d5ec; font:10px var(--mono); }
+.tactical-scene-settings { position:relative; z-index:3; }
+.tactical-scene-settings summary { padding:10px 14px; color:#b8edff; background:#07162be8; cursor:pointer; border:1px solid #74bde377; }
+.tactical-scene-options { position:absolute; bottom:calc(100% + 12px); right:0; width:280px; max-width:calc(100vw - 50px); padding:20px; color:#e8f5ff; background:#061329f5; border:1px solid #78dfff; box-shadow:0 16px 48px #0009; display:grid; gap:14px; font:12px var(--font); }
+.tactical-artwork-choices { display:flex; gap:8px; }
+.tactical-artwork-choices button { border:1px solid #5076a5; color:#c5e7ff; background:#12345e; padding:10px; cursor:pointer; font-size:11px; }
+.tactical-artwork-choices button[aria-pressed="true"] { background:#9beaff; color:#071d43; border-color:#fff; }
+.tactical-scene-options label:not(.tactical-motion-control) { display:grid; gap:8px; grid-template-columns:1fr auto; }
+.tactical-scene-options input[type="range"] { grid-column:1/-1; width:100%; }
+.tactical-motion-control { display:flex; align-items:center; gap:10px; }
+.tactical-scene-options small { color:#afc7e2; line-height:1.6; }
+.tactical-breadcrumb { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:8px 0 30px; padding:18px 0; color:#dcf1ff; border-bottom:1px solid #67dfff66; }
+.tactical-breadcrumb strong { font-size:24px; letter-spacing:.02em; }
+.tactical-breadcrumb button { display:flex; align-items:center; gap:8px; min-height:40px; padding:10px 16px; color:#dcf5ff; border:1px solid #75caf4; background:#0d2e61ef; cursor:pointer; }
+.tactical-breadcrumb button:last-child { margin-left:auto; }
+@media(prefers-reduced-motion:no-preference) {
+ .tactical-tile { animation:tactical-tile-in 440ms cubic-bezier(.16,1,.3,1) both; }
+ .tactical-agents { animation-delay:45ms; }.tactical-history { animation-delay:80ms; }.tactical-workspaces { animation-delay:110ms; }.tactical-settings { animation-delay:140ms; }.tactical-diagnostics { animation-delay:170ms; }
+ .app[data-interface-mode="tactical-blue"] .overview-sheet:not([data-tactical-panel="home"]) .overview-section { animation:tactical-panel-in 320ms ease-out both; }
+ @keyframes tactical-tile-in { from { opacity:0; transform:translate(28px,12px); } to { opacity:1; transform:translate(0,0); } }
+ @keyframes tactical-panel-in { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+}
+@media(max-width:950px) {
+ .tactical-deck { grid-template-columns:minmax(170px,.7fr) minmax(380px,1.3fr); gap:20px; }
+ .tactical-tiles { gap:18px 12px; grid-template-rows:170px 136px 130px 64px; }
+ .tactical-tile { padding:15px; }.tactical-tile .tactical-display { font-size:32px; }.tactical-operation .tactical-display { font-size:66px; }
+ .tactical-operation .tactical-action-label { position:static; width:fit-content; padding:3px 8px; font-size:11px; }
+ .tactical-operation small { max-width:100%; }.tactical-identity-copy { padding:16px; }
+}
+@media(max-width:680px) {
+ .tactical-deck { grid-template-columns:1fr; gap:18px; }
+ .tactical-identity { min-height:200px; padding:36px 0 0; }.tactical-identity-copy { margin:0; max-width:280px; padding:14px; }.tactical-identity h1 { font-size:28px; margin:8px 0; }.tactical-identity h1 br { display:none; }.tactical-identity p { display:none; }.tactical-live { margin-top:10px; }
+ .tactical-tiles { transform:rotate(-2deg); margin:12px 14px 20px; }.tactical-tile .tactical-display { font-size:clamp(23px,6vw,35px); }.tactical-operation .tactical-display { font-size:clamp(50px,12vw,72px); }
+ .tactical-breadcrumb strong { font-size:20px; }.tactical-breadcrumb button:last-child { margin-left:0; }
+}

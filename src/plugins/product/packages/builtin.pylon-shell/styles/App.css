@@ -817,3 +817,54 @@
     padding:0 var(--ui-control-compact) 0 var(--ui-space-2);
   }
 }
+
+
+/* Blue Tactical is a scoped appearance mode. It never changes session state. */
+body[data-interface-mode="tactical-blue"], .app[data-interface-mode="tactical-blue"] {
+  color-scheme: dark;
+  --accent: #65dfff !important; --text: #eef5ff !important; --text-dim: #a4b5cc !important;
+  --surface-canvas: #080f1e !important; --surface-panel: #101c30 !important;
+  --surface-overlay: #142139 !important; --surface-raised: #172640 !important;
+  --bg: #080f1e !important; --bg-panel: #101c30 !important; --bg-hover: #20395b !important;
+  --border: #314661 !important; --stroke-subtle: #2b405b !important;
+  --titlebar-bg: #080e19 !important; --titlebar-text: #f4f8ff !important;
+  --titlebar-text-muted: #a4b5cc !important; --sidebar-bg: #0c1728 !important;
+  --sidebar-text-color: #c2d0e3 !important; --chat-bg: #080f1e !important;
+  --chat-text-color: #eef5ff !important; --msg-text: #eef5ff !important;
+  --input-text-color: #eef5ff !important; --input-placeholder: #a4b5cc !important;
+  --cc-bg: #0b172b !important; --right-bg: #101c30 !important;
+  --success: #6be6ad; --danger: #ff8c99; --warning: #f7cb68;
+  --ui-radius-sm: 3px; --ui-radius-md: 4px; --ui-radius-lg: 6px;
+}
+.app[data-interface-mode="tactical-blue"] { --titlebar-h: 58px; background: #080f1e; }
+.app[data-interface-mode="tactical-blue"] .workspace-titlebar {
+  height:58px; min-height:58px; border-bottom:2px solid #2679ff;
+  background:linear-gradient(110deg,#0a1221 52%,#14365d 52.2%,#102139 75%,#090f1a 75.2%);
+}
+.app[data-interface-mode="tactical-blue"] .workspace-titlebar-sidebar { border-right-color:#314661; }
+.app[data-interface-mode="tactical-blue"] .workspace-titlebar button { min-height:36px; }
+.app[data-interface-mode="tactical-blue"] .sheet-tab { border-right-color:#30455e; }
+.app[data-interface-mode="tactical-blue"] .sheet-tab.active { color:#fff; background:#174998; box-shadow:inset 0 -3px #65dfff; }
+.app[data-interface-mode="tactical-blue"] .workspace-titlebar-entry-label { font-weight:700; letter-spacing:.08em; }
+.app[data-interface-mode="tactical-blue"] .workspace-menu { background:#12223b; color:#eef5ff; border:1px solid #476386; border-radius:3px; box-shadow:8px 8px 0 #03091399; }
+.app[data-interface-mode="tactical-blue"] .workspace-menu [role="menuitemradio"][aria-checked="true"] { background:#2363c2; color:white; }
+body[data-interface-mode="tactical-blue"] :is(button,a,input,textarea,select,[tabindex]):focus-visible { outline:2px solid #74e9ff; outline-offset:3px; }
+.app[data-interface-mode="tactical-blue"] .sheet-launcher-dialog { background:#101c30; color:#eef5ff; border-color:#4c7ca9; }
+body[data-interface-mode="tactical-blue"] :is(button,input,textarea,select) { accent-color:#65dfff; }
+@media(prefers-reduced-motion:no-preference) {
+  .app[data-interface-mode="tactical-blue"] .workspace-titlebar { animation:tactical-arrive 200ms ease-out; }
+  @keyframes tactical-arrive { from { opacity:.6; } to { opacity:1; } }
+}
+
+/* Scene assets are loaded only while TacticalScene is mounted. */
+.app[data-interface-mode="tactical-blue"] { isolation:isolate; background:#061333; }
+.tactical-scene { position:absolute; inset:0; overflow:hidden; z-index:-1; pointer-events:none; background:#061638; }
+.tactical-scene-art { position:absolute; inset:-16px; width:calc(100% + 32px); height:calc(100% + 32px); object-fit:cover; object-position:34% center; opacity:0; transform:translate(var(--scene-x,0px),var(--scene-y,0px)) scale(1.025); transition:opacity 700ms ease,transform 700ms ease-out; }
+.tactical-scene-art[data-visible="true"] { opacity:calc(var(--scene-opacity,.42) * .45); }
+.app[data-interface-mode="tactical-blue"]:has(.overview-sheet[data-tactical-panel="home"]) .tactical-scene-art[data-visible="true"] { opacity:var(--scene-opacity,.42); }
+.tactical-scene-shade { position:absolute; inset:0; background:linear-gradient(90deg,#0211230d 15%,#03103a70 48%,#041138c9 100%),linear-gradient(0deg,#031027c9,transparent 50%,#02226e33); }
+.app[data-interface-mode="tactical-blue"] .workspace-titlebar { background:#06152bd9; backdrop-filter:blur(16px); border-bottom:1px solid #73dbff70; }
+.app[data-interface-mode="tactical-blue"] :is(.sheet-layout,.sheet-main,.sheet-content,.main) { background-color:transparent; }
+.app[data-interface-mode="tactical-blue"] .workspace-menu { background:#071d40f5; }
+.tactical-scene[data-motion="off"] .tactical-scene-art { transition:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .tactical-scene-art { transition:none; transform:none; } .app[data-interface-mode="tactical-blue"] *,body[data-interface-mode="tactical-blue"] .settings * { animation:none !important; scroll-behavior:auto !important; } .tactical-tile { transition:none; } }
