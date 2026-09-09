@@ -933,7 +933,17 @@ async fn revive_session_slot(
                 );
                 response
             } else {
-            let error = "session resume/load failed";
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "new",
+                    result = "fallback",
+                    response_boundary = "not-observed",
+                    canonical_import = "none",
+                    "session/new recovery fallback"
+                );
+                let error = "session resume/load failed";
             state.log_runtime_summary(
                 "info",
                 "session",
