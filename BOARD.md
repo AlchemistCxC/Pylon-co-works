@@ -7,6 +7,8 @@
 
 [2026-09-11 04:02] [青栎·工程师] [P69 边界与诊断接线] `AgentRendererSuiteWorkbench` 的 ACP config transport 已下沉至 `infrastructure/acp/chatClient.ts`，新增边界白名单登记；`check:solid` 通过，Workbench/agent command 定向 22 项通过。ACP 初始化 malformed RPC 错误现在复用 stderr parser summary，避免原始 payload 泄漏（`a9bdf93a`、`a285ff20`）。
 
+[2026-09-11 04:12] [青栎·工程师] [P69 A4 filesystem strict] HostStrict filesystem 现在使用 `FsAccessPolicy::strict` canonical root；根目录无法访问时返回 ACP invalid params，不再降级到可能越界的原始路径。新增 missing-root、inside-read/write、outside-write 回归，Rust 3 项通过；tsc、lint（0 errors，1 既有 warning）、定向前端 77 项通过（`88f8294a`）。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
