@@ -31,6 +31,13 @@ impl FileSystemRuntime {
         }
     }
 
+    pub fn new_strict(workspace_root: &Path) -> Result<Self, String> {
+        Ok(Self {
+            policy: Arc::new(FsAccessPolicy::strict(workspace_root)?),
+            operations: Arc::new(Semaphore::new(MAX_CONCURRENT_OPS)),
+        })
+    }
+
     pub async fn read_text_file(&self, path: &Path) -> Result<String, String> {
         self.policy.check_read(path)?;
         let started = Instant::now();
@@ -121,6 +128,23 @@ mod tests {
             .is_err());
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[tokio::test]
+    async fn strict_constructor_rejects_missing_root_and_outside_writes() {
+        let root = root();
+        assert!(FileSystemRuntime::new_strict(&root.join("missing")).is_err());
+        let runtime = FileSystemRuntime::new_strict(&root.join(".")).unwrap();
+        let inside = root.join("inside.txt");
+        runtime.write_text_file(&inside, "inside").await.unwrap();
+        assert_eq!(runtime.read_text_file(&inside).await.unwrap(), "inside");
+        let outside = root.with_file_name(format!(
+            "{}-outside.txt",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(runtime.write_text_file(&outside, "denied").await.is_err());
+        assert!(!outside.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

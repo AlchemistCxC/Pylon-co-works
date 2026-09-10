@@ -1619,12 +1619,32 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 )
                                 .await;
                         } else {
+                            let filesystem = if strict {
+                                match crate::acp::file_system_runtime::FileSystemRuntime::new_strict(
+                                    &roots[0],
+                                ) {
+                                    Ok(filesystem) => filesystem,
+                                    Err(_) => {
+                                        let responder = { acp.lock().await.responder() };
+                                        let _ = responder
+                                            .respond_error(
+                                                request_id,
+                                                -32602,
+                                                "HostStrict filesystem workspace is inaccessible",
+                                            )
+                                            .await;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots)
+                            };
                             handle_filesystem_request(
                                 &acp,
                                 raw.method.as_deref().unwrap_or_default(),
                                 request_id,
                                 raw.params.as_ref(),
-                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
+                                filesystem,
                             )
                             .await;
                         }
