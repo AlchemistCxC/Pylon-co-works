@@ -1,6 +1,19 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 00:30] [拾烬·工程师] [工具链根因修复：行尾策略 + 外来自动格式化·影响所有 agent 的 diff] 用户要求把这两个干扰治本。两个独立缺陷均已根因修复，各一个提交：
+
+**① `d2eaa113` 行尾策略**：`.gitattributes` 只给 `.rs/.ts/.tsx/.json/.css/.html/.md/.toml` 钉了 `eol=lf`，其余文本类型交给 `text=auto`。本机 `core.eol=native` → 在 Windows 检出成 CRLF。已造成真实故障：A9 shadow parity 的 8/8 golden trace 假失败（见 `9be8c22d`）、以及 `pylon-plugin-sdk.js` 类「幽灵 modified」（索引 stat 缓存的是 449 个 CR 的旧尺寸）。补全登记并对工作树强制归一化 155 文件；`*.rc` 是 MSVC `rc.exe` 输入，**故意保留平台原生**。副作用：幽灵条目消失，该 .js 的「未提交改动」经核为纯行尾产物（内容 == HEAD）。
+**归一化安全措施**：仅触碰 `git diff` 与 `git diff --cached` 均干净的文件，每轮前后 diff WIP 集合验证一致。（坦白：本会话早些时候我曾用 `git checkout -- src/` 误回滚了 `chatMockData.ts`/`demoData.ts` 两个未提交 WIP，已逐字恢复并校验，现集合与开工基线完全一致。）
+
+**② `eb50fb3b` 外来自动格式化**：根因是 **pi-lens 自己的 "smart-default Prettier"** —— 项目无 prettier 配置时它仍格式化 `.ts/.tsx/.mts/.mjs/.js/.json`（只豁免 `.md/.html/.yaml`），而本仓风格是单引号无分号，于是双引号+分号+尾逗号覆盖了项目风格；它只保留缩进，不管引号。单会话内我编辑的 12 个文件曾产生约 1900 行假 diff。修法：`.pi-lens.json` 的 `format.enabled=false`（pi-lens 仅有的三个 project-scoped mutation 控制之一），**只关格式化**，LSP/诊断/规则/read-guard 全保留。
+**请其他 agent 知悉**：以后除非显式使用别的格式化器，你们的 diff 不会再被偷改。若你依赖于“保存即格式化”，请告诉我，我改成只对特定目录生效或撤销。
+**未采用 `.prettierrc` 方案的原因**：那只是让外来格式化器「碰巧」对齐风格，prettier 仍会重排本仓大量非 prettier 形态的手写换行，假 diff 会持续。
+
+**③ 同时报告（用户问的）后端编译期 warning**：`pylon (lib test) generated 5 warnings`，全为 dead_code，无一是本轮引入：`src/acp/adapter/private_ext/mod.rs:8` variant `PiSelectAsk` 从未构造；`continuation_ancestors` 函数未使用；常量 `WAIT_ERROR_IDLE_RETRY` / `SLOW_OPERATION_MS`（`src/acp/fs_policy.rs:12`）/ `MAX_CONTINUATION_DEPTH` 未使用。clippy 基线仍待全量跑完（`artifacts/clippy-baseline.json` 记录既有 33 条）。
+
+**④ 待裁定（未擅自静默门禁）**：pi-lens `no-unknown-returns` 在本仓命中 33 处，全是边界解码函数（`wireField`/`readWireField`/`parseJsonish`/`jsonSnapshot`/`freezeDeepValue`…），而该规则的建议正是「在 I/O 边界解码并返回命名类型」——这些函数**就是那个边界**。pi-lens 实现（`dist/clients/dispatch/rule-policy.js`）明确 `rules.<id>.disable` 是 **PROJECT-WIDE 且仅输出过滤**，无按路径粒度；用它换掉本轮那条批评会让其余 32 处对所有 agent 一并消失，属降低质量信号，故未做。三选一待用户拍板（已记入台账 P64）。
+
 [2026-09-11 00:12] [拾烬·工程师] [折光线并入主线·P62 关闭·跨平台门禁缺陷] 用户即折光，当场授权并入其悬挂线（基线 `13cbbdbd`、线尾 `8c42e4eb`，原无任何 ref 指向、只能经 reflog 找到）。
 
 **先建保护 ref `preserve/tactical-blue-8c42e4eb`**（防 GC，不回退，作现场存档）。清点 10 提交后判定真正需并入的只有 3 个（其余：`1447df1b` = 主线 `b6a85696` 同树哈希；`7c5f48a0` 已由我 `85400be7`+`02cbadf3` 等价重做；`8c42e4eb` 的 A2 对应主线 `9c64f02c`）：
