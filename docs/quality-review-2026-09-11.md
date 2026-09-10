@@ -9,6 +9,7 @@
 |优先级|发现与证据|本轮处理 / 后续验收|
 |---|---|---|
 |高|PluginScope 在关闭后先创建事件监听器/定时器，随后 `add()` 抛错，资源无法登记和回收|本轮修复，见下方确定性复现|
+|高|Rust 的 beforeSend 双轨测试在异步任务内同步阻塞接收，主线 CI 持续到接近六小时取消|本轮改用异步接收、显式超时和任务结果检查；见下方日志证据|
 |中|字体、界面模式、显示配置三个注册表复制相同的注册、影子事务、订阅、快照、查找逻辑|本轮收敛到一个内部实现，保留三个业务校验器|
 |高|[main CI 34440281962](https://github.com/AlchemistCxC/Pylon-co-works/actions/runs/34440281962)：前端 34 失败文件、16 失败测试，Rust 任务取消|已有 [#38](https://github.com/AlchemistCxC/Pylon-co-works/issues/38)。先修复测试 bootstrap 授权配置和迁移后的契约断言，再恢复可靠的整仓门禁|
 |高|CLI 权限应答仍发送 `permission`，见 `src/cli/pylonCliService.ts`|沿用 [#36](https://github.com/AlchemistCxC/Pylon-co-works/issues/36)，与服务端 `approval` 契约一起验收，不靠字符串替换后只测编译|
@@ -61,7 +62,23 @@ npx eslint src/plugin-runtime/
 
 额外门禁：`check:solid` 的 TypeScript 与前序架构检查通过，最终运行时边界检查在 `hookBridgeDispatcher.ts` 的未登记 direct invoke 处失败；`check:docs` 因依赖仓库外 `../Docs/Archive/渲染引擎施工/00-唯一入口台账.md` 而失败。这两个被检查文件和门禁脚本相对基线未修改。文档门禁应改为仓库内可复现的文档依赖，不能要求每个全新 clone 都有维护者的旁置目录。新报告自身的本地链接另作检查。
 
-本次不更改 Rust，未重跑原生构建或真实模型端到端验证；全仓发布状态仍受既有门禁阻塞。
+本次不更改 Rust 生产逻辑；Rust 修改仅限下面的测试夹具。本地未重跑原生构建或真实模型端到端验证，远端 Rust 验证以本 PR 的检查结果为准；全仓发布状态仍受既有前端门禁阻塞。
+
+## Rust CI 长时间阻塞的测试夹具
+
+同一基线的 [主线 Rust job](https://github.com/AlchemistCxC/Pylon-co-works/actions/runs/34440281962/job/102753700251) 日志在 2026-09-10 05:23:18 UTC 报告 `session::prompt::tests::before_send_hook_transform_rewrites_wire_but_journal_keeps_original has been running for over 60 seconds`，直到 11:14:42 UTC 才被取消。[本分支首轮 Rust job](https://github.com/AlchemistCxC/Pylon-co-works/actions/runs/34501636818/job/102953587180) 也在 16:31:23 UTC 出现相同提示。确认主线已有相同阻塞且本分支当时没有 Rust 差异后，主动取消了首轮任务以取得完整日志；取消不算通过。
+
+[测试源码](../src-tauri/src/session/prompt.rs) 原先在 `tokio::spawn(async move { ... })` 中调用 `std::sync::mpsc::Receiver::recv()`。`#[tokio::test]` 默认使用 [Tokio 单线程运行时](https://docs.rs/tokio/latest/tokio/attr.test.html)，同步等待会阻塞执行器，使同一运行时中的发送流程无法推进。问题发生在测试夹具，不据此推断生产 Hook 同样死锁。
+
+修复改用 Tokio 异步通道；等待 Hook 请求限定 5 秒，发送流程限定 15 秒，并检查 responder 的 JoinHandle 结果。保留原来对真实 fake-ACP wire 和 journal 的双轨断言：出站是改写后的文本，日志保留用户原文。没有跳过测试、改成多线程掩盖同步阻塞或放宽内容断言。
+
+复核该用例可执行 `cargo test --manifest-path src-tauri/Cargo.toml --lib before_send_hook_transform_rewrites_wire_but_journal_keeps_original -- --exact` 时需要完整模块名；更直接的筛选命令为：
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml --lib before_send_hook_transform_rewrites_wire_but_journal_keeps_original
+```
+
+CI 保持现有 Rust 测试命令和跳过组不变：`b11_inject_integration_tests`、`obs03_evidence_tests`、`p1_wire_regression_tests`。因此即使 CI 通过，也不能代表这些本地集成组已验证。
 
 ## 哪些开放协议适合成为插件
 
