@@ -1,6 +1,8 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 03:30] [青栎·工程师] [P69 继续施工] 已核实 Codeg 来源为本地固定副本 `F:\Hermes\profiles\riccati\workspace\pylon-survey-2026-09\codeg-src`，commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，未联网。新增 `fs_policy`→`FileSystemRuntime` 生产接线（`825da3e9`），Solid live reasoning 通过 `setConfigOption` 接线并失败回滚（`34db1984`），private interaction parser 接入 dispatcher fail-closed 校验（`69a6efb1`）。定向 Solid 12 项、Rust private bridge 2 项、filesystem 2 项通过；P60 仍有未接线模块待继续。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
@@ -639,4 +641,3 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-10 09:22] [主施工员·工程师] A2 usage/permission reducer consumer收口完成：提交 `9c64f02c`。移除 state.rs 模块级 dead_code 允许并压平 reducer clippy 分支；dispatcher 不再二次解析 UsageUpdate，Pet 与 SessionInfo 镜像均由 typed Usage delta 驱动；permission 入队显式消费 queue-depth delta，并保留 session owner 映射。定向：dispatcher 18、session::model 15、acp::state 4 全绿；cargo check --lib 通过。全量 Rust 曾被 prompt hook 测试长时间无输出并锁 linker，已终止，留作独立环境阻塞。
 
 [2026-09-11 03:08] [青栎·工程师] issue.md 追加修复进展：确认 Sidebar 跨 agent/profile 过滤放宽曾由本任务引入 mock 消失，已完全撤回。空态→mock→正文→离开→重入回归测试新增并通过；浏览器 lifecycle 不再清理 mock 快照，提交 88581063。模型成功切换现在由 AgentRendererSuiteWorkbench 将 ACP 空回声成功值投影进 WorkbenchDocument，提交 bc300393；模型/配置控件定向 21 项与 tsc 通过。P60 clippy 先接线 stderr_tail::mark 到 ACP 握手错误窗口，提交 ae576c83；其余 59 条仍是 P60 分片，未用 allow/删除掩盖。
-
