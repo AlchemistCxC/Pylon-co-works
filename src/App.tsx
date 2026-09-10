@@ -358,7 +358,6 @@ export default function App() {
     // Keep the browser/demo adapter out of production bundles.  Tauri
     // production must not merely skip the seed at runtime; the dynamic
     // import itself is development/mock-only.
-    if (!import.meta.env.DEV) return
     if (IS_TAURI && !isBrowserMockRuntime()) return
     if (demoSeededRef.current) return
     demoSeededRef.current = true
@@ -368,7 +367,7 @@ export default function App() {
       if (disposed) return
       runBrowserDemoSeed(setActiveSession, {
         withPermission: demoParams.get('demo-permission') === '1',
-        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : import.meta.env.DEV ? 'visual' : 'standard',
+        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : 'visual',
         reset: demoParams.get('demo-reset') === '1',
       })
       resolveRuntimeErrors({ key: 'app:browser-demo-bootstrap' })
