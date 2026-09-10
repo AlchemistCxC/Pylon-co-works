@@ -137,7 +137,7 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       <main className="history-main">
         <div className="file-main-kicker">HISTORY</div>
         <h2 className="file-main-title">存档会话（{paged.total}）</h2>
-        {exportError && <div className="file-tree-error" role="alert">{exportError}</div>}
+        {exportError && <div className="file-tree-error" role="alert">{exportError}{exportError.includes('归属不明') && <button type="button" className="template-apply" onClick={ctx.openProfileEdit}>打开 Agent 设置</button>}</div>}
         {replayError && <p className="file-section-hint history-error-reference" role="status">{replayError}</p>}
         <ul className="search-result-list">
           {paged.entries.map(entry => (

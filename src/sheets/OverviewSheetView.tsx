@@ -415,7 +415,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
         </section>
         {showConfigEditor && <div className="overview-config-editor"><AgentConfigEditor agentId={activeAgent} /></div>}
         {error && (errorIsValidation
-          ? <div className="overview-error" role="alert">{error}</div>
+          ? <div className="overview-error" role="alert">{error}{error.includes('归属不明') && <button type="button" className="settings-action" onClick={openAgentSettings}>打开 Agent 设置并选择归属</button>}</div>
           : <p className="overview-error overview-error-reference" role="status">操作失败，详情见右下角错误中心</p>)}
       </div>
       </main>
