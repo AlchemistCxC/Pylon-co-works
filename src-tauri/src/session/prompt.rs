@@ -1512,7 +1512,10 @@ for line in sys.stdin:
         bridge.sync_registry(&serde_json::json!({
             "hooks": ["message.user.beforeSend"]
         }));
-        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+        // 必须用 tokio 的无界通道：`#[tokio::test]` 默认 current_thread 运行时，
+        // tokio::spawn 的任务与 send_prompt_core 共用同一个 worker 线程；
+        // 若在此处对 std::sync::mpsc 做阻塞 recv，会占死该线程使 hook 事件永不发出（死锁）。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: serde_json::Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -1520,7 +1523,7 @@ for line in sys.stdin:
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let serde_json::Value::Object(ref mut map) = event {
