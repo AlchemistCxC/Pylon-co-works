@@ -9,6 +9,20 @@ pub enum PrivateBridge {
     GrokExitPlan,
 }
 
+/// Validate Codeg-compatible private interaction request shapes before the
+/// generic dispatcher rejects an unsupported bridge. This is deliberately a
+/// fail-closed parser seam: it never fabricates an answer or RPC response.
+pub fn validate_request(method: &str, params: &Value) -> Result<(), String> {
+    match method {
+        "_x.ai/ask_user_question" => {
+            parse_questions(PrivateBridge::GrokExtQuestions, params).map(|_| ())
+        }
+        "pi/select_ask" => parse_questions(PrivateBridge::PiSelectAsk, params).map(|_| ()),
+        "_x.ai/exit_plan_mode" => parse_exit_plan(PrivateBridge::GrokExitPlan, params).map(|_| ()),
+        _ => Ok(()),
+    }
+}
+
 pub fn parse_questions(
     bridge: PrivateBridge,
     params: &Value,
@@ -68,5 +82,24 @@ mod tests {
             .1,
             "t"
         );
+    }
+
+    #[test]
+    fn validates_only_known_private_wire_methods() {
+        assert!(validate_request(
+            "_x.ai/ask_user_question",
+            &serde_json::json!({"questions":[{"question":"Pick","header":"Choice","options":[{"label":"A"},{"label":"B"}]}]})
+        ).is_ok());
+        assert!(validate_request(
+            "_x.ai/exit_plan_mode",
+            &serde_json::json!({"toolCallId":"t"})
+        )
+        .is_ok());
+        assert!(validate_request("unknown/private", &serde_json::json!(null)).is_ok());
+        assert!(validate_request(
+            "_x.ai/ask_user_question",
+            &serde_json::json!({"questions":[]})
+        )
+        .is_err());
     }
 }
