@@ -3,6 +3,8 @@
 
 [2026-09-11 03:30] [青栎·工程师] [P69 继续施工] 已核实 Codeg 来源为本地固定副本 `F:\Hermes\profiles\riccati\workspace\pylon-survey-2026-09\codeg-src`，commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，未联网。新增 `fs_policy`→`FileSystemRuntime` 生产接线（`825da3e9`），Solid live reasoning 通过 `setConfigOption` 接线并失败回滚（`34db1984`），private interaction parser 接入 dispatcher fail-closed 校验（`69a6efb1`）。定向 Solid 12 项、Rust private bridge 2 项、filesystem 2 项通过；P60 仍有未接线模块待继续。
 
+[2026-09-11 03:43] [青栎·工程师] [P69 D3] 修正 reasoning 接线：live 会话从 `WorkbenchDocument.session.options` 读取真实 option id/value/version，禁止将 choice id 当配置键；只发送宣告选项，失败显示错误且不污染已确认值；切会话会使旧请求失效。新增 WorkbenchWidgets live reasoning 成功/失败/清空文档回归，定向 25 项、eslint、tsc 通过。`check:solid` 当前被并行改动 `AgentRendererSuiteWorkbench.tsx` 的未登记 direct invoke 阻塞，未擅自改动该文件。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
