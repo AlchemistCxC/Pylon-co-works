@@ -115,6 +115,11 @@
   ACP responder；这些必须在正式 Pylon runtime 接缝确定后再迁入。
 - 证据：`strict_policy_uses_one_canonical_workspace_root_for_reads_and_writes`、
   `unrestricted_policy_has_no_read_or_write_roots`。
+- 2026-09-11 接线（`825da3e9`、`88f8294a`）：FileSystemRuntime 读写消费
+  FsAccessPolicy、大小校验及慢操作阈值；dispatcher 的 HostStrict 分支使用
+  strict canonical 根目录。Pylon 有意对不可访问根目录返回错误，而非 fallback
+  原始根目录。新增 `strict_constructor_rejects_missing_root_and_outside_writes`。
+  此为文件路径策略接线，非完整 OS sandbox，也未证明 session owner/cwd 绑定完成。
 
 ### A4 terminal policy/runtime adapter
 
