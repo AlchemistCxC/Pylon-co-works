@@ -1,4 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/apmantza/pi-lens/master/docs/schema/pi-lens-config-v1.json",
-  "format": { "enabled": false }
+  "format": { "enabled": false },
+  "autofix": { "enabled": false }
 }
