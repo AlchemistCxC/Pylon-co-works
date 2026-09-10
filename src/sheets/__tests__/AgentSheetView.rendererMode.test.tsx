@@ -19,6 +19,7 @@ import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { invoke } from '@tauri-apps/api/core'
 import { clearErrors, getErrors } from '../../errorCenter.ts'
+import { messageStorageKey, persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
@@ -110,6 +111,24 @@ describe('AgentSheetView renderer mode context', () => {
   beforeEach(() => {
     resetStores()
     clearErrors()
+  })
+
+  it('从空态选择浏览器 mock 会话并重入时恢复消息且保留快照', async () => {
+    const mock = session('mock-from-empty', 'local:mock-from-empty')
+    useWorkspaceStore.setState({ workspaceSheets: { ...useWorkspaceStore.getState().workspaceSheets, activeSheetId: 'agent-sheet' } })
+    useIdentityStore.setState({ sessions: [mock], sessionsHydrated: true })
+    persistMessageSnapshot(mock.id, [{ id: 'mock-recovery-body', role: 'assistant', sender: 'peri', content: 'mock 从空态恢复的正文', time: '12:00' }], localStorage)
+    const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: null }} />)
+    await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    expect(screen.queryByText('mock 从空态恢复的正文')).toBeNull()
+
+    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
+    expect(await screen.findByText('mock 从空态恢复的正文')).toBeVisible()
+    expect(localStorage.getItem(messageStorageKey(mock.id))).toContain('mock 从空态恢复的正文')
+    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: null }} />)
+    await waitFor(() => expect(screen.queryByText('mock 从空态恢复的正文')).toBeNull())
+    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
+    expect(await screen.findByText('mock 从空态恢复的正文')).toBeVisible()
   })
 
   it('默认 Interface Mode 经 Renderer Suite Host 挂载内置 Solid Workbench', async () => {

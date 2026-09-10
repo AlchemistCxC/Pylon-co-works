@@ -104,6 +104,7 @@ const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { re
 
 export default function App() {
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
+  const hydrationStatus = useHydrationStore(state => state.status)
   const presentationProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   useSyncExternalStore(subscribeWorkspaceRegistry, getWorkspaceRegistrySnapshot, getWorkspaceRegistrySnapshot)
   const contextPanelSnapshot = useSyncExternalStore(
@@ -358,7 +359,9 @@ export default function App() {
     // Keep the browser/demo adapter out of production bundles.  Tauri
     // production must not merely skip the seed at runtime; the dynamic
     // import itself is development/mock-only.
+    if (!import.meta.env.DEV) return
     if (IS_TAURI && !isBrowserMockRuntime()) return
+    if (hydrationStatus !== 'ready') return
     if (demoSeededRef.current) return
     const demoParams = new URLSearchParams(window.location.search)
     void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
@@ -379,7 +382,7 @@ export default function App() {
       })
     })
     return undefined
-  }, [])
+  }, [hydrationStatus])
 
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))
   const skinRuntime = getSkinRuntime()
