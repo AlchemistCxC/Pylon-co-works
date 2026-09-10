@@ -1645,12 +1645,6 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // dedicated AcpKind/adapter exists.  Do not silently drop an identified
             // request: answer it with Method Not Found and surface a diagnostic event.
             if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
-                let private_validation = raw.method.as_deref().map(|method| {
-                    crate::acp::adapter::private_ext::validate_request(
-                        method,
-                        raw.params.as_ref().unwrap_or(&serde_json::Value::Null),
-                    )
-                });
                 let provider = agents
                     .lock()
                     .ok()
@@ -1660,14 +1654,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 // JSON-RPC response, but it is still surfaced as a malformed
                 // interaction so the UI/runtime log explains why no card can
                 // be acted on.  Do not silently drop official client requests.
-                let (reason_code, rpc_code, message) = if let Some(Err(error)) = private_validation
-                {
-                    (
-                        "invalid_private_payload",
-                        -32602,
-                        format!("invalid private interaction payload: {error}"),
-                    )
-                } else if raw.id.is_none() {
+                let (reason_code, rpc_code, message) = if raw.id.is_none() {
                     (
                         "missing_request_id",
                         -32600,
