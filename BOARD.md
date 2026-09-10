@@ -1,6 +1,23 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 01:53] [拾烬·工程师] [现场已收干净·check:all 全绿] 用户授权“收拾干净现场”并提权为唯一 agent。收尾动作：
+
+**① 未提交 WIP 全部收口（3 个提交）**：
+- `d9aac991` 版本号 1.5.9→1.6.0 四文件（package.json / Cargo.toml / Cargo.lock / tauri.conf.json）——长期滞留工作树，导致发行件与 git 历史版本不一致。
+- `9377624a` 两个修正：① 我上一轮的 `assert_eq!(exitCode, 7)` **本身有 flake**（`check:all` 抳出：隔离跑得 7、全量并发得 null）——`exitCode` 来自 `child.try_wait()` 的**尽力观测**，原 `is_null()` 与我的 `== 7` 各自只在一种时序下成立；改为不断言存在性、只锁定“一旦捕获到必须是真实退出码”；② `.pi-lens.json` 补 **`autofix.enabled: false`**。
+- `ab770035` 清 5 条既有 lint 阻塞 + `.gitignore` 补 `/artifacts/`。
+
+**❗ 重要发现（影响所有 agent）**：先前只关了 `format.enabled`，**漏关 `autofix.enabled`**——两者同为 pi-lens 三个 project-scoped mutation 控制。未关时 `rust-clippy` runner 会**静默改写源文件**：本轮发现 `src-tauri/src/acp/terminal_runtime.rs` 被自动改成 `let _ = handle.block_on(...)` → 无 `let _`（`append_output` 返回 unit）。已回退该改动并补关。**两条静默改源码路径现已成对关闭。**
+
+**② 现场清理**：回退 `terminal_runtime.rs` 意外改动；`.gitignore` 补 `/artifacts/`（负向保留被跟踪的 `clippy-baseline.json`）终止产物堆积；临时 worktree（`_verify-wt`/`_probe-wt`）与 `/tmp` 脚本已清；无未跟踪文件、无 `.orig/.rej/.bak`。
+
+**③ 门禁：`bun run check:all` 退出码 0**（check:frontend + check:rust + check:solid 三道全绿）；其中 `cargo test --lib` **913 passed / 0 failed / 4 ignored**（5.65s）。另 `check:bundle` 亦通过（1,552,141 / 1,600,000）。前端 473 文件 / 3041 项全绿。
+
+**④ 修正台账自身**：总览表曾因我改状态产生 P65 **重复行**，已删；全表 P 编号与清单 0–67 编号均已查重、锚点引用一致。
+
+**遗留工作已转登记**：P59（后端基建，待施工）、P60（ACP 移植，施工中）、P66（clippy 基线，63 条新增全在 P60 ACP 面）、P67（`no-unknown-returns` 跨域重构，含我三次实测失败证据）。各条详见台账。
+
 [2026-09-11 02:20] [拾烬·工程师] [P67 部分清偿·跨域披露·一条规则不可满足] 用户拍板“全修了”，对 pi-lens 两条阻塞规则逐条实测并**只做能诚实做到的**（`c9cb4265`）。
 
 **已修（3 文件）**：`jsonSnapshot`/`freezeDeepValue` 改泛型——二者是**保形**操作（冻结/克隆同一形状），原先 `unknown` 反而抹掉调用方类型；`freezeDeepValue` 改后 `freezeDeepSnapshot` 多余的 `as T` 直接消失。`selectSlice` 产物按 slice 名天然异构，**泛型实测 tsc 不通过**，改用命名联合 `WorkbenchSliceValue`。五处 `as unknown as` 补 `SAFETY:` 注释写明不变量（脱敏保形/增量构造期索引签名/只拷贝已存在字段/逐字段补齐）。
