@@ -7,7 +7,7 @@ import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSu
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
-import { resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
+import { resolveDocumentOptionEntries, resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
@@ -191,6 +191,18 @@ export function SolidControlCenter() {
       setSubmitError(error instanceof Error ? error.message : String(error)); return false
     } finally { setSubmitting(false) }
   }
+  const changeReasoningLevel = (next: string) => {
+    const previous = reasoningLevel()
+    setReasoningLevel(next)
+    if (emptyVisual()) return
+    const sessionId = input().sessionId
+    if (!sessionId) return
+    const option = resolveDocumentOptionEntries(runtime().document?.session.options, 'reasoning')[0]
+    const key = option?.id || 'reasoning'
+    void workbench.commands.setConfigOption(sessionId, key, next, { expectedValue: previous }).then(result => {
+      if (!result.ok) setReasoningLevel(previous)
+    })
+  }
   const emptyComposer = createMemo(() => !input().sessionId ? {
     onSubmit: createEmptySession,
     submitting,
@@ -318,7 +330,7 @@ export function SolidControlCenter() {
           draftValue={emptyVisual() ? modelId : undefined}
           onDraftChange={emptyVisual() ? setModelId : undefined}
           reasoningValue={reasoningLevel}
-          onReasoningChange={setReasoningLevel}
+          onReasoningChange={changeReasoningLevel}
           forceDropdown={emptyVisual()}
         />
       case 'mode':
