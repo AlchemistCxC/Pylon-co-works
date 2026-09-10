@@ -663,3 +663,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 03:47] [Riccati·架构师] PR #41 CI 归属判定（对照 `main` 自身 f21be0cb 的 run 34520602338）：前端从基线 34 failed/446 passed 收敛到 **1 failed/473 passed**，剩余 `scripts/legacy-runner.test.mts` （legacy group 3/4 内 normalizeAgentStatus 崩）为基线继承，非本 PR 引入；Rust 基线本身即有 2 项测试失败（`auto_reconnect_integration_tests::fake_acp_crash_triggers_auto_reconnect`、`session::prompt::tests::before_send_hook_transform_rewrites_wire_but_journal_keeps_original`），以上均未在本 PR 处理，未用 allow/删除掩盖。
 
 [2026-09-11 继续] [主施工员·工程师] 私有交互接线：提交 `c57c592b`，dispatcher 对 Codeg 兼容的 `_x.ai/ask_user_question`、`pi/select_ask`、`_x.ai/exit_plan_mode` 先走 typed policy fail-closed 校验，malformed payload 返回 `-32602`，未知方法仍保持既有 unsupported 语义；定向 3 项与 `cargo check --lib` 通过。
+
+[2026-09-11 继续] [主施工员·工程师] P60 小片：提交 `1e1eef3a`，session revive 改用 `CapabilityRegistry::supports_object` 作为 resume 决策源并保留旧投影 parity assertion；filesystem policy 的 roots/confines accessor 接入真实 check path，行为保持不变。
