@@ -300,10 +300,23 @@ impl AcpWireHub {
     /// replay evidence. Serialization failures are represented as a redacted
     /// sentinel line so exporting never perturbs the live transport.
     pub fn to_jsonl(&self) -> String {
-        self.snapshot()
-            .into_iter()
+        self.jsonl_for_records(&self.snapshot())
+    }
+
+    /// Take one coherent snapshot and export it. Callers that also expose
+    /// ordinal metadata must use this seam so body and metadata cannot drift
+    /// across concurrent ring-buffer writes.
+    pub fn snapshot_jsonl(&self) -> (Vec<WireRecord>, String) {
+        let records = self.snapshot();
+        let body = self.jsonl_for_records(&records);
+        (records, body)
+    }
+
+    fn jsonl_for_records(&self, records: &[WireRecord]) -> String {
+        records
+            .iter()
             .map(|record| {
-                serde_json::to_string(&record).unwrap_or_else(|_| {
+                serde_json::to_string(record).unwrap_or_else(|_| {
                     r#"{"error":"wire_record_serialization_failed"}"#.to_string()
                 })
             })
@@ -628,6 +641,27 @@ mod tests {
         let last: WireRecord = serde_json::from_str(lines[7]).unwrap();
         assert_eq!(first.monotonic_seq, 5);
         assert_eq!(last.monotonic_seq, 12);
+    }
+
+    #[test]
+    fn jsonl_snapshot_metadata_and_body_share_one_capture() {
+        let hub = hub();
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":1,"method":"session/prompt"}),
+        );
+        let (records, jsonl) = hub.snapshot_jsonl();
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":2,"method":"session/prompt"}),
+        );
+        let exported: Vec<WireRecord> = jsonl
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(exported, records);
+        assert_eq!(records.len(), 1);
+        assert_eq!(hub.snapshot().len(), 2);
     }
 
     #[test]
