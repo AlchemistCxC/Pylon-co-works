@@ -13,6 +13,8 @@
 
 [2026-09-11 04:34] [青栎·工程师] [P60 A6 resume policy consumer] `revive_session_slot` 现消费 `acp::resume_capability_advertised`（原先策略函数仅测试使用），保持 object-only fail-closed 后再选择 resume/load；恢复矩阵 8 项全绿，提交 `228af14d`。未触碰并行 `capabilities.rs`/revive fixture 改动。
 
+[2026-09-11 04:48] [青栎·工程师] [P60 A1 wire observation] SDK engine 的单条与 batch RawJsonRpcMessage 现在共用 `observe_message`，并统一经 `capture_request/capture_agent_message` 进入 wire hub；保留方向、脱敏、id-kind 与序号语义。engine 定向 7 项通过，提交 `4ec0f041`。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
