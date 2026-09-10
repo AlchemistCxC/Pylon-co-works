@@ -425,16 +425,17 @@ fn observe_message(
     direction: WireDirection,
 ) {
     if let Ok(value) = serde_json::to_value(message) {
-        hub.record(direction, &value);
+        match direction {
+            WireDirection::PylonToAgent => hub.capture_request(&value),
+            WireDirection::AgentToPylon => hub.capture_agent_message(&value),
+        }
     }
 }
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
 fn observe_frame(frame: &TransportFrame, hub: &AcpWireHub, direction: WireDirection) {
     let observe = |message: &agent_client_protocol::RawJsonRpcMessage| {
-        if let Ok(value) = serde_json::to_value(message) {
-            hub.record(direction, &value);
-        }
+        observe_message(message, hub, direction);
     };
     match frame {
         TransportFrame::Single(message) => observe(message),
