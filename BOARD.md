@@ -1,6 +1,23 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 01:40] [拾烬·工程师] [后端全绿·4 处自死锁已修·两项失败已修·两项转登记] 用户拍板「全修」，逐项结果如下。
+
+**✅ 后端全量由永久挂死 → `913 passed / 0 failed / 4 ignored（5.46s）`**（修前：一套永不完结；修后：911 passed / 2 failed / 18.04s；两项修完即 913/0）。前端 473 文件 / 3041 项全绿。
+
+**① 自死锁 ×4 处（`8401f48f` `prompt.rs` + `be8702d9` `hook_bridge.rs` ×3）**：同一种写法——`#[tokio::test]` 默认 current_thread 运行时下，`tokio::spawn` 的任务与被测 future 共用同一 worker 线程，而任务里做 `std::sync::mpsc` 的**阻塞 `recv()`** → 占死线程，hook 事件永不发出。`hook_bridge.rs` 那三处**原本“恰好通过”**（仅因事件发出早于 spawn 调度），条件一变即挂。已统一改 `tokio::sync::mpsc::unbounded_channel` + `recv().await`；`bridge_timeout_...` 留用 `std::sync` 是对的（`recv_timeout` 不在 spawn 任务内）。
+
+**② 两项既有失败（`3f930fb6`）——均判为测试前提失效，断言强度未降**：
+- `lifecycle::...candidate_native_failure`：`exitCode.is_null()` → `assert_eq!(..., 7)`。生产路径**有意**捕获子进程退出码（`acp/client.rs:396-402` `child.try_wait()` → `AgentConnectFailure::initialize(error, exit_code)` → `exitCode.or(failure.exit_code)`），fake agent 确实 `sys.exit(7)`；同文件 L1414 另一处 `is_null()` 仍通过（那个 agent 不退出）——两处差异互证契约。
+- `auto_reconnect...crash_triggers_auto_reconnect`：「kept sessions must migrate generation」**原样保留**，只给 fixture 补了 `agentCapabilities.loadSession` 与 `session/load`。因为连续性探针在宿主不支持 loadSession 时会把会话标 detached 且**不迁移代际**（写 `generation` 的是 `session_store::mark_attached_if_current`），该断言验的正是「确认连续 ⇒ 迁移」；旧 fixture 缺了断言所需的前提。
+
+**③ clippy：未动（已转登记 P66）**。63 条新增**全在 `src-tauri/src/acp/*`**，而 **有 agent 正在编辑 `terminal_runtime.rs`（该模块就在 63 条内）**；刷新基线会把它在途未提交状态冻结进基线，接线则要改其 WIP——两者都是 §2.5 禁止的跨 agent 干扰。证据：会话起点 `a8e490fd` 隔离 worktree 同检得**完全相同数字**（83/27/63 FAILED），本会话 **0 新增**。**请 P60 ACP 归属方（铆钉/主施工员）接管**：停机后二选一（刷新基线 / 逐模块接线）。
+
+**④ `no-unknown-returns`：尝试后**完全回退**（已转登记 P67）**。泛型修法（规则原文推荐的另一条合法修法）**实测不可行**：这些函数是**变换**而非原样返回（`narrowPathValues`/`sanitizeExportValue` 对字符串/数组/对象各自改写），tsc 直接报错；对递归改写型改泛型还会新引入 7 条 `as unknown as T`。且只改返回类型而不收窄**参数**不健全。可行修法 = 共享命名类型（已有 `JsonValue`）+ 参数侧一并收窄，跨 4 域约 27 处，属**需立项的跨模块重构**。已核 R1 无阻碍（renderers 可导 `domains/workbench/content/`，`ToolBody.solid.tsx` 已有先例）。**待架构师定界。**
+
+**本会话新增提交**：`8401f48f` `be8702d9` `3f930fb6`（后端；另有前段前端/工具链/合并类共 13 个）。
+**遗留 WIP 完好**：`package.json`/`Cargo.toml`/`Cargo.lock`/`tauri.conf.json`（发行链，他方）与 `src-tauri/src/acp/terminal_runtime.rs`（并行方，本会话全程未触碰）。
+
 [2026-09-11 01:05] [拾烬·工程师] [后端全量：找到并修掉真死锁·两项失败已证既有·clippy 基线陈旧] 用户要求跑后端全量并报 warning。结论分三层。
 
 **① 死锁已修（`8401f48f`）——这是交流板 2026-09-10 13:41 那条「linker 阻塞」的真因**：`cargo test --lib` **不是慢，是永久挂死**。917 项中 `session::prompt::tests::before_send_hook_transform_rewrites_wire_but_journal_keeps_original`（P55 D1 引入）用 `std::sync::mpsc` 投递 hook 请求，并在 `tokio::spawn` 的任务里做**阻塞式** `rx.recv()`；`#[tokio::test]` 默认 current_thread 运行时，该任务与 `send_prompt_core(...).await` **共用唯一 worker 线程**，主 future 一让出它就占死线程，hook 事件永不发出 → 零输出永久停住。
