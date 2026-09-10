@@ -147,6 +147,13 @@ impl AgentConnectFailure {
                     serde_json::Value::Array(value) => format!("array({} items)", value.len()),
                     serde_json::Value::Object(value) => format!("object({} keys)", value.len()),
                 });
+            } else {
+                // Keep malformed provider diagnostics bounded and payload-free
+                // using the same parser-error policy as stderr diagnostics.
+                failure.message = format!(
+                    "initialize RPC error: {}",
+                    crate::acp::stderr_tail::summarize_parser_error(raw)
+                );
             }
         }
         failure
