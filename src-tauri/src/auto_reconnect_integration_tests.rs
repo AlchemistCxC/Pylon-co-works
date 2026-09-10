@@ -4,14 +4,23 @@ use crate::agent_config::AgentDef;
 
 /// fake ACP 脚本：FAKE_MODE=crash 时响应首个请求（initialize）后立即退出
 /// → stdout EOF → 崩溃通知；FAKE_MODE=alive 时保持存活并响应请求。
+///
+/// initialize 必须声明 `loadSession`：重连后的会话连续性探针
+/// （probe_unknown_session_continuity）在宿主不支持 loadSession 时会把保留会话标为
+/// detached 而**不迁移代际**；本文件那条「kept sessions must migrate generation」
+/// 验的正是「确认连续后迁移」这条路径，故 fixture 需提供该能力。
 const FAKE_SCRIPT: &str = r#"import json,sys,os
 mode = os.environ.get('FAKE_MODE', 'alive')
 for line in sys.stdin:
     request = json.loads(line)
     response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     method = request.get('method')
-    if method == 'session/new':
+    if method == 'initialize':
+        response['result'] = {'agentCapabilities':{'loadSession':True}}
+    elif method == 'session/new':
         response['result'] = {'sessionId':'fake-session-1'}
+    elif method == 'session/load':
+        response['result'] = {'sessionId':request.get('params',{}).get('sessionId','fake-session-1')}
     elif method == 'session/prompt':
         response['result'] = {'stopReason':'end_turn'}
     print(json.dumps(response), flush=True)

@@ -1477,7 +1477,7 @@ sys.exit(7)
         assert_eq!(payload["ok"], false);
         assert_eq!(payload["error"]["code"], "agent_initialize_failed");
         assert_eq!(payload["error"]["stage"], "initialize");
-        assert!(payload["error"]["exitCode"].is_null());
+        assert_eq!(payload["error"]["exitCode"], 7);
         assert!(payload["error"]["stderr"]
             .as_str()
             .unwrap_or_default()
