@@ -172,12 +172,7 @@ fn apply_update_event_with_pet_policy(
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-            let (used, size) = session.acp_state.usage.unwrap_or((0, None));
-            session.tokens_total = used;
-            session.context_size = size.unwrap_or(0);
             if let Some(meta) = update.get("_meta") {
-                session.tokens_in = session.acp_state.usage_input.unwrap_or(0);
-                session.tokens_out = session.acp_state.usage_output.unwrap_or(0);
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
                 }
@@ -611,7 +606,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
     let remember_permission = |sessions: &SessionsLock| {
         let _ = sessions.lock().map(|mut sessions| {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
-                let _ = session.acp_state.apply(&crate::acp::RawMessage {
+                let deltas = session.acp_state.apply(&crate::acp::RawMessage {
                     id: Some(request_id.clone()),
                     method: Some("session/request_permission".into()),
                     kind: crate::acp::AcpKind::PermissionRequest,
@@ -619,6 +614,17 @@ async fn handle_permission_request<R: tauri::Runtime>(
                     params: params.cloned(),
                     error: None,
                 });
+                if let Some(depth) = deltas.iter().find_map(|delta| match delta {
+                    crate::acp::AcpStateDelta::PermissionQueueDepth { depth } => Some(*depth),
+                    _ => None,
+                }) {
+                    tracing::trace!(
+                        session_id = %permission.session_id,
+                        request_id = %request_id,
+                        depth,
+                        "ACP permission reducer queue updated"
+                    );
+                }
             }
         });
     };
@@ -2067,6 +2073,27 @@ mod tests {
                 text: "hello".into()
             }]
         );
+
+        let usage = serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 7,
+            "size": 100,
+            "_meta": {"inputTokens": 5, "outputTokens": 2},
+        });
+        let events = apply_update_event(
+            &mut session,
+            &usage,
+            Some(crate::acp::SessionUpdateVariant::UsageUpdate),
+            false,
+        );
+        assert!(matches!(events.as_slice(), [PetEvent::UsageUpdate(7)]));
+        assert_eq!(session.acp_state.usage, Some((7, Some(100))));
+        assert_eq!(session.acp_state.usage_input, Some(5));
+        assert_eq!(session.acp_state.usage_output, Some(2));
+        assert_eq!(session.tokens_total, 7);
+        assert_eq!(session.context_size, 100);
+        assert_eq!(session.tokens_in, 5);
+        assert_eq!(session.tokens_out, 2);
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。
