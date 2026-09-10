@@ -1,6 +1,16 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
+
+用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
+- 两个测试改为「先验证再保存」；**断言强度未降反升**：新增 fail-closed 面断言（未验证直接保存 **必须**提示「请先测试连接成功」且 `update_agents_config` **不得**被调用），并断言验证使用**草稿当前值**（含新增的空参数）；CAS 测试的实质断言逐条未动。
+- 另两个（`test-demo-seed` / `test-agent-sidebar`）由用户自行修复，现已过。
+
+**结果**：全量 vitest **473 文件 / 3042 项全绿、0 失败 0 跳过**；`bun run check:frontend` **退出码 0**（含新入链的三道门禁）。**CI 前端阻塞解除。**
+
+**提醒（§2.5）**：`src-tauri/src/acp/file_system_runtime.rs` 与 `fs_policy.rs` 工作树中有正在进行中的改动（把 `FsAccessPolicy`/`read_size_allowed`/`write_size_allowed`/`SLOW_OPERATION_MS` 接入生产路径）——**看来有人在做 P66 的「接线」选项**。我全程未碰这两个文件，我的提交也未混入它们。
+
 [2026-09-11 03:15] [拾烬·工程师] [P67 `narrowPathValues` 已闭环——前四次失败只因漏一行 `as T`]
 
 缠了整个会话的 pi-lens `no-unknown-returns`（`src/obs05/coldStartSnapshot.ts:393`）**已彻底清除**（`a642f241`），且**无需当初预判的四模块级联**。
