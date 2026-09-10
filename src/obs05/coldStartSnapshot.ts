@@ -390,23 +390,32 @@ export function buildColdStartArtifact(sources: ColdStartSources): ColdStartArti
  * 避免 '/help'、'/quote' 之类命令形态被误伤（redactAbsolutePath 对单段根路径也会收窄）。
  * 深拷贝纯函数，仅 DEV 取证路径执行。
  */
-export function narrowPathValues(value: unknown): unknown {
+/** 保形收窄：把“绝对路径形态”的字符串值改写为 `…/目录名`，其余类型原样递归。
+ *
+ *  类型上严格保形：string→string、array→同长数组、object→同键对象、其余恒等，
+ *  故 `T`（而非 `unknown`）才是精确契约——原先的 `unknown` 抹掉了调用方类型。
+ *  内部三处 `as T` 即表达该不变性：三个分支都返回与入参同形的值。 */
+export function narrowPathValues<T>(value: T): T {
   if (typeof value === 'string') {
     if (!/^[a-zA-Z]:[\\/]/.test(value) && !value.startsWith('/') && !value.startsWith('\\')) return value
     const trimmed = value.replace(/[\\/]+$/, '')
     const segments = trimmed.split(/[\\/]+/).filter(Boolean)
     if (segments.length < 2) return value
-    return `…/${segments[segments.length - 1]}`
+    // SAFETY: 改写后的仍是 string，与入参同型（本函数仅用于已解析的 JSON 树，
+    // 调用方传的是宽化为 string 的成员，不涉及字符串字面量类型）。
+    return `…/${segments[segments.length - 1]}` as T
   }
   if (Array.isArray(value)) {
-    return value.map(narrowPathValues)
+    // SAFETY: map 逐元素递归，长度与元素类型均不变，仍是同型数组。
+    return value.map(narrowPathValues) as T
   }
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       out[key] = narrowPathValues(child)
     }
-    return out
+    // SAFETY: 逐键递归、键集不变，仍是同型对象。
+    return out as T
   }
   return value
 }
