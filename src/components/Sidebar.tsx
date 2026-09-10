@@ -18,6 +18,7 @@ import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurfac
 import type { AgentSidebarMode } from '../plugin-runtime/sidebar/sidebarTypes.ts'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import { validateExportPath } from '../domains/history/persistedHistory.ts'
+import { IS_TAURI, isBrowserMockRuntime } from '../infrastructure/tauri/env.ts'
 
 const NO_GENERATING_SOURCES: readonly string[] = []
 
@@ -38,14 +39,17 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   const createWorkspace = useWorkspaceEntityStore(s => s.createWorkspace)
 
   const liveGeneratingSources = useRuntimeStore(s => s.liveGeneratingSources ?? NO_GENERATING_SOURCES)
+  const demoSessionSurface = !IS_TAURI || isBrowserMockRuntime()
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
 
   const ownSessions = useMemo(() => {
     return sessions
-      .filter(s => s.profileId === activeProfileId && s.agentId === activeAgent && !s.archivedAt)
+      // Browser/demo fixtures intentionally span agents and profiles so the mock
+      // conversation catalogue remains visible while previewing the shell.
+      .filter(s => (demoSessionSurface || (s.profileId === activeProfileId && s.agentId === activeAgent)) && !s.archivedAt)
       .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
-  }, [sessions, activeProfileId, activeAgent])
+  }, [sessions, activeProfileId, activeAgent, demoSessionSurface])
 
   const chatSessions = ownSessions.filter(s => !s.workspaceId)
   const workSessions = ownSessions.filter(s => !!s.workspaceId)
