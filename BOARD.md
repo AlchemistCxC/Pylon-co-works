@@ -1,6 +1,24 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 00:12] [拾烬·工程师] [折光线并入主线·P62 关闭·跨平台门禁缺陷] 用户即折光，当场授权并入其悬挂线（基线 `13cbbdbd`、线尾 `8c42e4eb`，原无任何 ref 指向、只能经 reflog 找到）。
+
+**先建保护 ref `preserve/tactical-blue-8c42e4eb`**（防 GC，不回退，作现场存档）。清点 10 提交后判定真正需并入的只有 3 个（其余：`1447df1b` = 主线 `b6a85696` 同树哈希；`7c5f48a0` 已由我 `85400be7`+`02cbadf3` 等价重做；`8c42e4eb` 的 A2 对应主线 `9c64f02c`）：
+
+- `3af54134` ← `6e090263` test(renderer) semantic document parity（干净）
+- `58e6f6a8` ← `1c5d1baa` feat(renderer) canonical 投影 registry（干净）
+- `5bb39664` ← `8dccd4ca` test(acp) A9 shadow parity（**唯一冲突**）
+
+**唯一冲突及裁定**：`productPluginTestBootstrap.ts`——折光版硬编码 `{pluginVersion:'1.0.0', apiVersion:'1.2'}`，主线版从第一方包 manifest 取真值。二者今日等价，**取主线版**（版本无法漂移，且已是 `check-acp-shadow` fixture 的直接依赖）。另在 `check-acp-shadow-parity.mjs` 补 `import { Buffer } from "node:buffer"`（原直接引全局，触发 no-undef）。
+
+**并入中发现并修复的真实缺陷 `9be8c22d`**：A9 新门禁在真实 Windows 检出上 8/8 golden trace 报“内容不一致”，逐字节核对**内容完全相同**——唯一差异是 CRLF。根因：`.gitattributes` 给 `*.json`/`*.md`/`*.ts`/`*.rs`/`*.toml` 都钉了 `eol=lf`，**偏偏漏了 `*.jsonl`**；`text=auto` 在 Windows 按 `core.eol=native` 把基线检出成 CRLF（`git ls-files --eol` 实测 `i/lf w/crlf`），而 Rust 生成器恒写 LF，`compareDirs` 做裸字节比较 → 必不一致。修：补 `*.jsonl text eol=lf`（根治）+ 比较前归一化 CRLF（兼容既有检出，与 `8dccd4ca` 在 provenance hash 已做的 LF 规范化同一思路）。**该门禁目前不在 CI/check:frontend 内，故 CI 不会因此红，但一旦接入就会红。**
+
+**P62 关闭（`d99e1bdc`）**：按架构师裁定选项①，把 `src/infrastructure/hooks/hookBridgeDispatcher.ts` 按基础设施 IPC 桥先例登记进 `DIRECT_INVOKE_ALLOWLIST`（与 `pylonCliBridge.ts`/`canonicalEventRepository.ts`/`skinHostPorts.ts` 同形态）。仍为「legacy allowlist，仅报告」，新增越界阻断未放松。
+
+**门禁（并入后全绿）**：全量 vitest **473 文件 / 3041 项 0 失败 0 跳过**（含折光新增 `workbenchEventSchema.test.ts` 32 项、`mountSolidWorkbench.solid.test.tsx` 75 项）；`cargo test --lib acp::` **135 passed / 0 failed**；`bun run check:acp-shadow` 退出码 0（`deterministic: true`）；`tsc -b` 0；`lint` 0 errors（1 条既有 RightRailHost warning）；`check:solid` 退出码 0；`check:frontend` 退出码 0。
+
+**提醒（环境）**：本工作树上有一个格式化器会把我编辑过的文件改成双引号+分号+尾逗号（仓风格是单引号无分号），产生约 1900 行假 diff；我已两次 `git checkout` 复原。请确认是否为编辑器保存 hook 或 prettier 配置，否则每位 agent 的 diff 都会混入假改动。
+
 [2026-09-10 23:41] [拾烬·工程师] [前端全量测试基线修复·含跨 agent 通告] 用户指派：找出并修复阻塞项目的 test 不通过项。
 
 **开工实测（Ru5t/Reflector @ `a8e490fd`）**：全量 vitest 479 文件 / 3044 项 → 16 失败 + 96 跳过（23 个 suite 报 `Product plugin test bootstrap failed: builtin.pylon-plugin-manager: 等待能力授权：plugin.management`）。
