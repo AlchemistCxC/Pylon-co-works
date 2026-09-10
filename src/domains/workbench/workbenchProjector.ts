@@ -252,6 +252,8 @@ export function reduceWorkbenchEvent(
   if (document.appliedEventIds.includes(envelope.eventId)) return document
   // C12：secret-bearing interaction 事件在进入任何投影面（timeline.data、interactions）前统一剥敏——
   // journal 投影的 timeline 与 document.interactions 共享同一脱敏结果
+  // SAFETY: redactInteractionEvent 是保形脱敏（只替换敏感叶子值，不增删键），结果仍是同一
+  // event.type 的 WorkbenchEventEnvelope；内层断言为适配其开放的 Record<string, unknown> 入参。
   const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
     ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
     : envelope
@@ -282,6 +284,7 @@ export function projectWorkbench(
     if (applied.has(envelope.eventId)) continue
     applied.add(envelope.eventId)
     appliedEventIds.push(envelope.eventId)
+    // SAFETY: 同上一处——redactInteractionEvent 保形，结果仍是同一 event.type 的 WorkbenchEventEnvelope。
     const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
       ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
       : envelope
@@ -797,6 +800,7 @@ function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: Wo
     ] as const) {
       const value = next[key]
       if (value !== undefined && filled[key] === undefined) {
+        // SAFETY: key 取自 next（与 filled 同形），value 即 next[key]；此处仅绕过增量构造期的索引签名。
         (filled as unknown as Record<string, unknown>)[key] = value
       }
     }
@@ -987,6 +991,7 @@ function c09RichFields(
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined) out[key] = value
   }
+  // SAFETY: out 只拷贝 next 中已存在的字段，故只可能携带该节点的合法键。
   return out as unknown as Partial<WorkbenchActivityNode>
 }
 
@@ -1005,6 +1010,7 @@ function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next
     if (key === 'status') continue
   }
   filled.orphan = next.orphan && Boolean(previous.parentId)
+  // SAFETY: filled 由 previous 起、经逐字段补齐后必含该节点的全部必需字段。
   return filled as unknown as WorkbenchActivityNode
 }
 
@@ -1436,7 +1442,7 @@ function findLastMessageIndex(
 }
 
 /** C04：把 normalized 字段冻结为可安全持有的 Json 快照（非 JSON 值降级为 undefined）。 */
-function jsonSnapshot(value: unknown): unknown {
+function jsonSnapshot<T>(value: T): T | undefined {
   if (value === undefined) return undefined
   try {
     return structuredClone(value)
