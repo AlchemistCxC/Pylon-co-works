@@ -9,6 +9,8 @@
 
 [2026-09-11 04:12] [青栎·工程师] [P69 A4 filesystem strict] HostStrict filesystem 现在使用 `FsAccessPolicy::strict` canonical root；根目录无法访问时返回 ACP invalid params，不再降级到可能越界的原始路径。新增 missing-root、inside-read/write、outside-write 回归，Rust 3 项通过；tsc、lint（0 errors，1 既有 warning）、定向前端 77 项通过（`88f8294a`）。
 
+[2026-09-11 04:22] [青栎·工程师] [P60 A3 wire export] 生产 `acp_wire_trace_snapshot(format=jsonl)` 现复用 `AcpWireHub::to_jsonl()`，统一脱敏序列化路径后再执行 4 MiB 行边界预算；不改变 `complete/firstOrdinal/lastOrdinal/droppedCount` 响应契约（`011956d5`）。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
