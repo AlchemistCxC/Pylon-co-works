@@ -143,6 +143,12 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
             return Err(error.into());
         }
     };
+    let host_env = agent
+        .env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    runtime.set_host_tools_policy(&host_env);
     // 本地 client epoch 与远端 Session continuity 分开表达。Unknown 不迁移旧映射；
     // replace 后由有界 probe 收敛，Invalidated 直接清除，Preserved 才直接迁移。
     let activation = ClientActivation {
@@ -213,14 +219,13 @@ async fn probe_unknown_session_continuity(
     if candidates.is_empty() {
         return;
     }
-    let load_capability = runtime
+    let load_supported = runtime
         .acp
         .lock()
         .await
-        .agent_capabilities()
-        .and_then(|capabilities| capabilities.get("loadSession"))
-        .and_then(serde_json::Value::as_bool);
-    if load_capability == Some(false) {
+        .capabilities()
+        .supports(&["loadSession"]);
+    if !load_supported {
         for candidate in candidates {
             let _ = crate::session_store::mark_detached_if_current(
                 runtime,
@@ -413,7 +418,11 @@ fn agent_summary_payload_with_activation(
 
 /// registry 是否包含指定 agent（switch 前置存在性检查用，不克隆）。
 fn agent_exists_in_registry(state: &AppState, agent_id: &str) -> bool {
-    state.agents.lock().map(|agents| agents.contains_key(agent_id)).unwrap_or(false)
+    state
+        .agents
+        .lock()
+        .map(|agents| agents.contains_key(agent_id))
+        .unwrap_or(false)
 }
 
 /// 从 registry 读取指定 agent 定义（克隆）；不存在报 unknown agent（多处命令共用）。
@@ -724,6 +733,7 @@ pub(crate) async fn agent_status(
 #[tauri::command]
 pub(crate) async fn acp_wire_trace_snapshot(
     state: tauri::State<'_, AppState>,
+    format: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     let inner = state.inner();
     let runtime = inner.active_runtime().ok_or(PylonError::NoActiveAgent)?;
@@ -731,6 +741,36 @@ pub(crate) async fn acp_wire_trace_snapshot(
     let trace = acp
         .wire_trace()
         .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
+    if format.as_deref() == Some("jsonl") {
+        const MAX_BYTES: usize = 4 * 1024 * 1024;
+        let records = trace.snapshot();
+        let lines: Vec<String> = records
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap_or_else(|_| "{}".into()))
+            .collect();
+        let mut used = 0usize;
+        let mut kept = 0usize;
+        for (index, line) in lines.iter().enumerate() {
+            let extra = line.len() + usize::from(index > 0);
+            if used + extra > MAX_BYTES {
+                break;
+            }
+            used += extra;
+            kept += 1;
+        }
+        let complete = kept == lines.len();
+        let body = lines[..kept].join("\n");
+        return Ok(serde_json::json!({
+            "traceId": trace.trace_id(),
+            "format": "jsonl",
+            "data": body,
+            "complete": complete,
+            "firstOrdinal": records.first().map(|r| r.monotonic_seq),
+            "lastOrdinal": records.get(kept.saturating_sub(1)).map(|r| r.monotonic_seq),
+            "droppedCount": records.len().saturating_sub(kept),
+            "reason": if complete { serde_json::Value::Null } else { serde_json::json!("byte_budget") },
+        }));
+    }
     Ok(serde_json::json!({
         "traceId": trace.trace_id(),
         "length": trace.len(),
@@ -744,10 +784,8 @@ pub(crate) mod mcp;
 
 // 拆分后的命令经此 re-export：tauri::generate_handler 与测试的 `use super::*` 路径不变。
 // `__cmd__*` 是 tauri::command 宏生成的隐藏项，必须一并 re-export 才能被 generate_handler 解析。
-pub(crate) use config_cmds::__tauri_command_name_agent_config_snapshot;
-pub(crate) use config_cmds::__tauri_command_name_initialize_agents_config;
-pub(crate) use config_cmds::__tauri_command_name_reload_agents;
-pub(crate) use config_cmds::__tauri_command_name_update_agents_config;
+#[cfg(test)]
+use crate::acp::{AgentConnectFailure, AgentConnectStage};
 #[allow(unused_imports)]
 pub(crate) use config_cmds::__cmd__agent_config_snapshot;
 #[allow(unused_imports)]
@@ -756,28 +794,30 @@ pub(crate) use config_cmds::__cmd__initialize_agents_config;
 pub(crate) use config_cmds::__cmd__reload_agents;
 #[allow(unused_imports)]
 pub(crate) use config_cmds::__cmd__update_agents_config;
+pub(crate) use config_cmds::__tauri_command_name_agent_config_snapshot;
+pub(crate) use config_cmds::__tauri_command_name_initialize_agents_config;
+pub(crate) use config_cmds::__tauri_command_name_reload_agents;
+pub(crate) use config_cmds::__tauri_command_name_update_agents_config;
 pub(crate) use config_cmds::{
     agent_config_snapshot, initialize_agents_config, reload_agents, update_agents_config,
 };
-pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
-pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
 #[allow(unused_imports)]
 pub(crate) use connection_test::__cmd__test_agent_candidate;
 #[allow(unused_imports)]
 pub(crate) use connection_test::__cmd__test_agent_connection;
-pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
+pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
+pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
 #[cfg(test)]
 use connection_test::connection_test_error_payload;
 #[cfg(test)]
 use connection_test::{candidate_stderr, AGENT_VALIDATION_TIMEOUT_SECS};
-#[cfg(test)]
-use crate::acp::{AgentConnectFailure, AgentConnectStage};
-pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
-pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
+pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
 #[allow(unused_imports)]
 pub(crate) use mcp::__cmd__get_mcp_servers;
 #[allow(unused_imports)]
 pub(crate) use mcp::__cmd__set_mcp_servers;
+pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
+pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
 pub(crate) use mcp::{get_mcp_servers, load_mcp_persisted, set_mcp_servers};
 
 #[cfg(test)]

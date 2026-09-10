@@ -20,12 +20,15 @@ import {
   extractConfigOptionId,
   extractConfigOptionValue,
 } from '../../../infrastructure/acp/chatContracts.ts'
+import { presentPromptFailure, type PromptFailurePresentationMetadata } from '../promptFailurePresentation.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
   id: 'acp',
   canNormalize: (_input, context) => !['hermes', 'claude', 'claude-code', 'peri'].includes(context.provider.toLowerCase()),
   normalize: normalizeAcpEvent,
 }
+
+const LIFECYCLE_STATUSES = new Set(['running', 'generating', 'thinking', 'responding', 'working', 'completed', 'error', 'failed', 'cancelled', 'degraded', 'idle', 'ready'])
 
 export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: NormalizeContext): NormalizeResult {
   const update = extractUpdate(input)
@@ -40,6 +43,27 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   // discriminator at the top level.  Flatten that transport envelope at the seam;
   // raw input is still retained unchanged by makeEnvelope for diagnostics.
   const effectiveUpdate = flattenAcpUpdate(update)
+  // A session info packet may carry both configuration mode and an explicit
+  // lifecycle status. They are independent semantic facts and must not be
+  // collapsed into one event (mode="running" is not lifecycle evidence).
+  if (canonicalSessionUpdate(effectiveUpdate) === 'session_info_update') {
+    const mode = typeof effectiveUpdate.mode === 'string'
+      ? effectiveUpdate.mode
+      : typeof effectiveUpdate.currentMode === 'string' ? effectiveUpdate.currentMode : undefined
+    const status = typeof effectiveUpdate.status === 'string'
+      && LIFECYCLE_STATUSES.has(effectiveUpdate.status.toLowerCase())
+      ? effectiveUpdate.status
+      : undefined
+    if (mode !== undefined && status !== undefined) {
+      return {
+        events: [
+          makeEnvelope({ type: 'session.mode-updated', mode }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
+          makeEnvelope({ type: 'session.status-updated', status }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
+        ],
+        diagnostics: [],
+      }
+    }
+  }
   const normalized = semanticEventForUpdate(effectiveUpdate, context)
   const event = makeEnvelope(normalized.event, input, context, update, {}, identityFromUpdate(effectiveUpdate))
   return { events: [event], diagnostics: normalized.diagnostics }
@@ -83,14 +107,39 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'config_option_update':
       return { event: { type: 'session.config-updated', options: normalizeConfigOptions(update) }, diagnostics }
     case 'session_info_update':
-      return { event: { type: 'session.status-updated', status: typeof update.mode === 'string' ? update.mode : 'updated' }, diagnostics }
+      // ACP's `mode` is configuration metadata (for example "running" can
+      // mean an execution mode), not lifecycle evidence. Only an explicit
+      // lifecycle status field from the allowlist may affect session status.
+      if (typeof update.mode === 'string' || typeof update.currentMode === 'string') {
+        return { event: { type: 'session.mode-updated', mode: String(update.mode ?? update.currentMode) }, diagnostics }
+      }
+      if (typeof update.status === 'string' && LIFECYCLE_STATUSES.has(update.status.toLowerCase())) {
+        return { event: { type: 'session.status-updated', status: update.status }, diagnostics }
+      }
+      return { event: { type: 'session.mode-updated', mode: undefined }, diagnostics }
     case 'done':
       return { event: { type: 'session.completed', stopReason: typeof update.stopReason === 'string' ? update.stopReason : undefined }, diagnostics }
     case 'error': {
       const message = typeof update.error === 'string' ? update.error : typeof update.message === 'string' ? update.message : typeof update.errorMessage === 'string' ? update.errorMessage : 'provider reported an error'
+      const failure = isRecord(update.failure)
+        ? update.failure as PromptFailurePresentationMetadata
+        : undefined
+      const presentation = presentPromptFailure(message, failure)
+      const detail = failure
+        ? toJsonValue({
+            failure,
+            ...(presentation.technicalMessage ? { technicalMessage: presentation.technicalMessage } : {}),
+          })
+        : undefined
       // The semantic code drives projector convergence. Provider-specific error
       // detail remains available in raw/normalizer diagnostics.
-      return { event: { type: 'diagnostic.notice', level: 'error', message, code: 'provider.error' }, diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', message, ['error'], true)] }
+      return {
+        event: {
+          type: 'diagnostic.notice', level: 'error', message: presentation.userSummary, code: 'provider.error',
+          ...(detail !== undefined ? { data: detail } : {}),
+        },
+        diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', presentation.userSummary, ['error'], true)],
+      }
     }
     default:
       diagnostics.push(createDiagnostic(context, update, 'wire.unknown', `unknown ACP session update: ${wireKind(update)}`, ['sessionUpdate'], true))

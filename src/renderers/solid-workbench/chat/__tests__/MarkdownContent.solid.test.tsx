@@ -85,11 +85,39 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     })
   })
 
+  it('流式首段的前导空行不渲染为可见空行（与解析路径剥前导空白一致）', async () => {
+    const [text, setText] = createSignal('\n\n开始输出')
+    const result = render(() => <MarkdownContent text={text()} streaming />)
+
+    await waitFor(() => expect(result.container).toHaveTextContent('开始输出'))
+    const blocks = [...result.container.querySelectorAll('.term-p')]
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(blocks[0]!.textContent?.startsWith('\n')).toBe(false)
+    expect(blocks.every(block => (block.textContent ?? '').length > 0)).toBe(true)
+
+    setText('\n\n开始输出\n\n第二段继续')
+    await waitFor(() => expect(result.container).toHaveTextContent('第二段继续'))
+    const grown = [...result.container.querySelectorAll('.term-p')]
+    expect(grown.every(block => (block.textContent ?? '').length > 0)).toBe(true)
+  })
+
   it('单行 fenced code 仍渲染为块级代码而不是 inline code', async () => {
     const { container } = render(() => <MarkdownContent text={'```ts\nconst x = 1\n```'} />)
     await waitFor(() => expect(container.querySelector('.term-code-block')).not.toBeNull())
     expect(container.querySelector('.term-code-block')).toHaveTextContent('const x = 1')
     expect(container.querySelector(':scope > .term-inline-code')).toBeNull()
+  })
+
+  it('内联代码保留独立代码字体/着色 class，普通英文仍是正文节点', async () => {
+    const { container } = render(() => <MarkdownContent text={'普通 English 与 `inline()` 混排'} />)
+    const inline = await waitFor(() => {
+      const node = container.querySelector('.term-inline-code')
+      if (!node) throw new Error('inline code not mounted')
+      return node
+    })
+    expect(inline).toHaveTextContent('inline()')
+    expect(inline.tagName).toBe('CODE')
+    expect(container.textContent).toContain('普通 English 与')
   })
 
   it('保留安全 Markdown 图片并拒绝可执行 source', async () => {
@@ -107,5 +135,57 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     const { container } = render(() => <MarkdownContent text="[main](src/main.ts#L12)" />)
     await waitFor(() => expect(container.querySelector('a')).not.toBeNull())
     expect(container.querySelector('a')).toHaveAttribute('href', 'src/main.ts#L12')
+  })
+
+  // P57 S3-R1（R-B1）：三处代码内容 span（流式代码块 + fenced code 回退/高亮）统一
+  // 携带 term-code-text 类——CSS contract 只读 CSS 文本，拦不住漏改 span，此处补
+  // DOM 类名断言。
+  it('P57 S3-R1：流式与终态代码块的每行内容 span 都带 term-code-text 类', async () => {
+    const streaming = render(() => (
+      <MarkdownContent text={'前置段落\n\n   ```js\nconst indent  = 4\nconst second = 2'} streaming />
+    ))
+    await waitFor(() => expect(streaming.container.querySelector('.term-code-block')).not.toBeNull())
+    for (const block of streaming.container.querySelectorAll('.term-code-block')) {
+      expect(block.querySelectorAll('.term-code-line').length).toBeGreaterThan(0)
+      for (const line of block.querySelectorAll('.term-code-line')) {
+        expect(line.querySelector('.term-code-text')).not.toBeNull()
+      }
+    }
+    streaming.unmount()
+
+    const final = render(() => <MarkdownContent text={'```js\nconst indent  = 4\n```'} />)
+    await waitFor(() => expect(final.container.querySelector('.term-code-block')).not.toBeNull())
+    await waitFor(() => expect(final.container.querySelector('.term-code-text')).not.toBeNull())
+    for (const block of final.container.querySelectorAll('.term-code-block')) {
+      for (const line of block.querySelectorAll('.term-code-line')) {
+        expect(line.querySelector('.term-code-text')).not.toBeNull()
+      }
+    }
+  })
+
+  // P57 S3-R5（R-B5）：user 文本双路径同构——带反引号（解析路径）与纯文本
+  // （回退路径）的多行文本渲染出相同数量的段，且文本内容都保留换行。
+  // （jsdom 不做级联计算，white-space 计算样式断言不可靠；此处锁定 DOM 形状，
+  //  pre-wrap 语义由 ChatView.css.test 的 contract 层锁定。）
+  it('P57 S3-R5：带反引号的多行 user 文本与纯文本路径段数一致', async () => {
+    const withBackticks = render(() => (
+      <div class="term-user"><div class="term-user-content">
+        <MarkdownContent text={'第一行 `code-a`\n第二行 `code-b`'} inline />
+      </div></div>
+    ))
+    await waitFor(() => expect(withBackticks.container.querySelector('p.term-p')).not.toBeNull())
+    const plain = render(() => (
+      <div class="term-user"><div class="term-user-content">
+        <MarkdownContent text={'第一行 plain\n第二行 plain'} inline />
+      </div></div>
+    ))
+    await waitFor(() => expect(plain.container.querySelector('.term-plain-text')).not.toBeNull())
+
+    const parsedSegments = withBackticks.container.querySelectorAll('.term-user p, .term-user .term-p')
+    const plainSegments = plain.container.querySelectorAll('.term-user p, .term-user .term-p')
+    expect(parsedSegments.length).toBe(plainSegments.length)
+    expect(parsedSegments.length).toBe(1)
+    expect(withBackticks.container.querySelector('p.term-p')?.textContent).toContain('\n')
+    expect(plain.container.querySelector('.term-plain-text')?.textContent).toContain('\n')
   })
 })

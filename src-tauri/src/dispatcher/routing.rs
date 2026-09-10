@@ -21,6 +21,7 @@ pub(crate) struct RoutingInput {
     pub(crate) variant: Option<SessionUpdateVariant>,
     pub(crate) replay_loading: bool,
     pub(crate) payload: serde_json::Value,
+    pub(crate) wire_ordinal: Option<u64>,
 }
 
 /// Side-effect policy decided once for an input event.
@@ -116,7 +117,10 @@ pub(crate) enum CommitOutcome {
     /// A committed outcome always carries the durable row that adapters may
     /// publish.  Keeping the row non-optional makes the C0-COMMIT invariant a
     /// type-level guarantee rather than a caller convention.
-    Committed(CanonicalEventRow),
+    Committed {
+        event: CanonicalEventRow,
+        revision: i64,
+    },
     Rejected(EventError),
 }
 
@@ -147,7 +151,10 @@ pub(crate) async fn commit_live_event(
         .await
     {
         Ok(result) => match result.events.into_iter().next() {
-            Some(event) => CommitOutcome::Committed(event),
+            Some(event) => CommitOutcome::Committed {
+                event,
+                revision: result.revision,
+            },
             None => CommitOutcome::Rejected(EventError::Invalid(
                 "canonical ingest committed no event".to_string(),
             )),
@@ -179,6 +186,7 @@ mod tests {
             variant,
             replay_loading,
             payload: serde_json::json!({"sessionId":"peri-s1"}),
+            wire_ordinal: None,
         }
     }
 

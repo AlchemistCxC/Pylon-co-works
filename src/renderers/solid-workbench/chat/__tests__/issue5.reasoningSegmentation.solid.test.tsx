@@ -76,14 +76,19 @@ describe('issue 5 reasoning segmentation regression', () => {
     expect(thought?.parts[0]).toMatchObject({ kind: 'text', text })
   })
 
-  it('live streamingThinking character updates remain one paragraph', async () => {
+  it('live canonical reasoning row character updates remain one paragraph', async () => {
     const host = document.createElement('div')
     document.body.append(host)
     const services = createPreviewWorkbenchServices()
     mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }, services })
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), { ownerKey: 'owner-preview', generation: 1 })
     const text = '这是一个连续的思考过程，不应该每几个字符换段。'
-    for (const char of [...text]) services.runtime.update({ streamingThinking: services.runtime.getSnapshot().streamingThinking + char, generating: true })
+    // P52 D5：逐字符流由 canonical running reasoning 行承载（transient 字段已删除）。
+    let acc = ''
+    for (const char of [...text]) {
+      acc += char
+      services.runtime.update({ messages: [{ id: 'm-think', role: 'reasoning', sender: 'peri', content: acc, time: '10:00', running: true }], generating: true })
+    }
     const body = await waitFor(() => {
       const found = host.querySelector('.solid-workbench-chat .term-reasoning-body')
       expect(found).not.toBeNull()
@@ -94,5 +99,51 @@ describe('issue 5 reasoning segmentation regression', () => {
     expect(body.querySelectorAll('p')).toHaveLength(1)
     services.destroy()
     host.remove()
+  })
+
+  it('coalesces open reasoning follow-bottom writes to one animation frame', async () => {
+    const previousRaf = globalThis.requestAnimationFrame
+    const previousCancel = globalThis.cancelAnimationFrame
+    let nextFrame = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    const writes: number[] = []
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = ++nextFrame
+      frames.set(id, callback)
+      return id
+    }) as typeof requestAnimationFrame
+    globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+    try {
+      const [text, setText] = createSignal('初始思考')
+      const result = render(() => <ReasoningBlock text={text()} running defaultCollapsed={false} />)
+      const body = await waitFor(() => {
+        const node = result.container.querySelector<HTMLDivElement>('.term-reasoning-body')
+        if (!node) throw new Error('reasoning body not mounted')
+        return node
+      })
+      let scrollHeight = 160
+      Object.defineProperties(body, {
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        clientHeight: { configurable: true, value: 80 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+      })
+      Object.defineProperty(body, 'scrollTop', {
+        configurable: true,
+        get: () => writes.at(-1) ?? 0,
+        set: value => { writes.push(value) },
+      })
+      setText('第一段思考内容')
+      scrollHeight = 200
+      setText('第二段思考内容继续')
+      scrollHeight = 240
+      await Promise.resolve()
+      expect(writes).toHaveLength(0)
+      for (const callback of frames.values()) callback(performance.now())
+      expect(writes).toHaveLength(1)
+      expect(writes[0]).toBe(160)
+    } finally {
+      globalThis.requestAnimationFrame = previousRaf
+      globalThis.cancelAnimationFrame = previousCancel
+    }
   })
 })

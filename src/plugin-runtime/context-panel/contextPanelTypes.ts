@@ -1,6 +1,7 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
 import type { RegistryEntry } from '../registry/types.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+import type { SettingsSchema, SettingsValueAdapter } from '../renderers/rendererSettingsTypes.ts'
 
 export interface ContextPanelContributionContext {
   readonly workspaceKind?: string
@@ -41,6 +42,9 @@ interface ContextPanelContributionBase {
   readonly defaultWidth?: number
   readonly settings?: ContextPanelSettingsContribution
   readonly when?: (context: ContextPanelContributionContext) => boolean
+  /** Optional Settings schema. A missing adapter keeps the panel opaque. */
+  readonly schema?: SettingsSchema
+  readonly valueAdapter?: SettingsValueAdapter
 }
 
 export interface FirstPartyContextPanelContribution extends ContextPanelContributionBase {

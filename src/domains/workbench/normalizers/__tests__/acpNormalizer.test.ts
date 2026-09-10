@@ -139,6 +139,23 @@ describe('ACP normalizer', () => {
     ]))
   })
 
+  it('uses a short summary for provider timeout prose while retaining technical metadata', () => {
+    const result = normalizeAcpEvent({
+      update: {
+        sessionUpdate: 'error',
+        error: 'ACP protocol: timed out after 180s (provider error)',
+        failure: {
+          source: 'provider', configuredTimeoutSecs: 180, actualElapsedMs: 24_000,
+          providerMessage: 'ACP protocol: timed out after 180s (provider error)',
+        },
+      },
+    }, context)
+    const event = result.events[0]?.event
+    expect(event).toMatchObject({ type: 'diagnostic.notice', message: 'Provider 返回错误', code: 'provider.error' })
+    expect((event as { data?: { failure?: { source?: string } } }).data?.failure?.source).toBe('provider')
+    expect(result.diagnostics[0]?.message).toBe('Provider 返回错误')
+  })
+
   it.each([
     ['tool_call', undefined],
     ['tool_call_update', 'completed'],
@@ -251,5 +268,28 @@ describe('ACP normalizer', () => {
         schema: { options: [{ value_id: 'low', name: 'Low' }, { value_id: 'high', name: 'High' }] },
       }],
     })
+  })
+
+  it('preserves explicit lifecycle status when session_info_update also carries mode', () => {
+    const result = normalizeAcpEvent({ update: {
+      sessionUpdate: 'session_info_update', mode: 'running', status: 'completed',
+    } }, context)
+    expect(result.events.map(item => item.event)).toEqual([
+      { type: 'session.mode-updated', mode: 'running' },
+      { type: 'session.status-updated', status: 'completed' },
+    ])
+    expect(new Set(result.events.map(item => item.eventId)).size).toBe(2)
+  })
+
+  it('keeps session_info_update mode out of lifecycle status', () => {
+    const result = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', mode: 'running', usage: { inputTokens: 2 } } }, context)
+    expect(result.events[0].event).toEqual({ type: 'session.mode-updated', mode: 'running' })
+  })
+
+  it('accepts only explicit allowlisted lifecycle status', () => {
+    const terminal = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', status: 'completed' } }, context)
+    expect(terminal.events[0].event).toEqual({ type: 'session.status-updated', status: 'completed' })
+    const unknown = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', status: 'mystery' } }, context)
+    expect(unknown.events[0].event.type).toBe('session.mode-updated')
   })
 })

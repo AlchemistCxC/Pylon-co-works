@@ -123,7 +123,8 @@ describe('PluginManager v2-only', () => {
     render(<PluginManager service={service as unknown as PackageInstallationService} />)
 
     expect(screen.getByRole('button', { name: '停用 builtin.pylon-shell' })).toBeDisabled()
-    expect(screen.getAllByText('产品运行必需')).toHaveLength(5)
+    // P53 D2（施工书 §6 例外 1）：第 6 包 builtin.pylon-plugin-manager 同为 product-required
+    expect(screen.getAllByText('产品运行必需')).toHaveLength(6)
   })
 
   it('shows degraded bootstrap failures and delegates explicit retry to the Kernel supervisor', async () => {
@@ -235,4 +236,55 @@ describe('PluginManager v2-only', () => {
     expect(await screen.findByText('重试清理 feature.cleanup-ui成功')).toBeInTheDocument()
     expect(runtime.snapshot().instances.some(value => value.identity.key === instance.identity.key)).toBe(false)
   })
+
+  // P53 D2：授权卡（capability-consent 失败 → 批准/拒绝 → grant store）
+  it('renders the capability consent card for capability-consent bootstrap failures and grants on approval', async () => {
+    const { getPluginCapabilityGrantStore, resetPluginCapabilityGrantStoreForTests } = await import(
+      '../../../plugin-runtime/management/pluginManagementWiring.ts'
+    )
+    resetPluginCapabilityGrantStoreForTests()
+    const failure = {
+      pluginId: 'builtin.pylon-plugin-manager',
+      stage: 'capability-consent' as const,
+      code: 'plugin_capability_denied',
+      message: '等待能力授权：plugin.management',
+      retryable: true,
+      pluginVersion: '1.0.0',
+      capabilities: ['plugin.management'],
+    }
+    const retryPlugin = vi.fn(async () => undefined)
+    // useSyncExternalStore 要求 getSnapshot 引用稳定：缓存快照对象，避免无限 re-render
+    const bootstrapSnapshot = {
+      kind: 'degraded' as const,
+      activePluginIds: [] as readonly string[],
+      failures: [failure],
+      skippedPluginIds: [] as readonly string[],
+    }
+    const bootstrap: KernelBootstrap = {
+      getSnapshot: () => bootstrapSnapshot,
+      subscribe: () => () => undefined,
+      startNormal: vi.fn(async () => undefined),
+      startSafeMode: vi.fn(async () => undefined),
+      retryPlugin,
+    }
+
+    render(<PluginManager
+      service={fakeService() as unknown as PackageInstallationService}
+      bootstrap={bootstrap}
+    />)
+
+    expect(screen.getByText('能力授权')).toBeInTheDocument()
+    expect(screen.getAllByText(/等待能力授权：plugin\.management/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: '批准 builtin.pylon-plugin-manager 的 plugin.management 能力' }))
+    await screen.findByText('已授权')
+    expect(getPluginCapabilityGrantStore().getGrant('builtin.pylon-plugin-manager', 'plugin.management', '1.0.0'))
+      .toEqual(expect.objectContaining({ pluginVersion: '1.0.0', apiVersion: '1.2' }))
+    expect(retryPlugin).toHaveBeenCalledWith('builtin.pylon-plugin-manager')
+    resetPluginCapabilityGrantStoreForTests()
+  })
+
+
+  // P53 默认页切换：宿主"插件管理"分区在管理器贡献存在时渲染包页面
+  //（renderSection 分支）——入口按钮已随默认页化移除，该行为由 Settings
+  // 域测试与浏览器反馈环覆盖。
 })

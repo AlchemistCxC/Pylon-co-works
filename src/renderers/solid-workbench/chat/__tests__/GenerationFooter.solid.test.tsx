@@ -291,6 +291,27 @@ describe('SolidGenerationFooter', () => {
     }
   })
 
+  it('终态缺少可靠耗时时显示不可用而不是 0s', () => {
+    const result = render(() => <SolidGenerationFooter
+      running={false}
+      tokenCount={0}
+      startTime={0}
+      summary={{
+        elapsedMs: 0,
+        tokenCount: 0,
+        completedFrame: '',
+        reason: 'done',
+        durationSource: 'unknown',
+        durationAvailable: false,
+      }}
+      appearance={APPEARANCE}
+      clock={createFakeWorkbenchClock(1_700_000_000_000)}
+    />)
+
+    expect(result.container.textContent).toContain('耗时不可用')
+    expect(result.container.textContent).not.toContain('处理耗时 0s')
+  })
+
   it('pause/resume/destroy 清理并恢复 timer，destroy 幂等', () => {
     const clock = createFakeWorkbenchClock(0)
     let lifecycle: GenerationFooterLifecycle | undefined

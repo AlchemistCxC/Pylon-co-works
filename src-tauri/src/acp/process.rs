@@ -141,6 +141,42 @@ impl ManagedChild {
         self.child.is_some()
     }
 
+    /// 监听子进程退出（不持有 `Child`，避免与 kill/Drop 争用句柄）。
+    ///
+    /// Windows：`OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject(INFINITE)`；
+    /// 其他平台暂不实现（返回 false）。用于 SDK 后端：SDK 的 EOF 语义在洪泛/
+    /// 批量场景不可靠，子进程退出才是权威崩溃信号。
+    pub(crate) fn spawn_exit_watcher(pid: u32, on_exit: impl FnOnce() + Send + 'static) -> bool {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+            use windows_sys::Win32::System::Threading::{
+                OpenProcess, WaitForSingleObject, INFINITE,
+            };
+            let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+            if handle.is_null() {
+                return false;
+            }
+            // HANDLE 是内核对象句柄（数值），以 isize 跨线程传递后还原。
+            let handle = handle as isize;
+            std::thread::spawn(move || {
+                let handle = handle as *mut core::ffi::c_void;
+                unsafe {
+                    WaitForSingleObject(handle, INFINITE);
+                    CloseHandle(handle);
+                }
+                on_exit();
+            });
+            true
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (pid, on_exit);
+            false
+        }
+    }
+
     /// Non-blocking process status used by supervisors that own their own
     /// protocol/event loops. `None` means the child is still running.
     pub(crate) fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, AcpError> {
@@ -228,5 +264,31 @@ impl Drop for ManagedChild {
         if let Err(error) = self.kill_and_wait() {
             tracing::warn!("cleanup ACP child: {}", error);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A1a 步骤 8：子进程退出监听必须触发（SDK 后端的权威崩溃信号）。
+    #[test]
+    fn exit_watcher_fires_on_process_exit() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn cmd");
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(
+            ManagedChild::spawn_exit_watcher(pid, move || {
+                let _ = tx.send(());
+            }),
+            "watcher must be available on windows"
+        );
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("exit watcher must fire");
+        let _ = child.wait();
     }
 }

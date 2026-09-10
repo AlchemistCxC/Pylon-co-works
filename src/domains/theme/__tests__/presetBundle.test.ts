@@ -11,6 +11,12 @@ describe('PresetBundle v2', () => {
     expect(presetCoverage(undefined).every(item => item.state === 'missing')).toBe(true)
   })
 
+  it('marks missing official providers as partial instead of implying complete coverage', () => {
+    const bundle = createPresetBundle({ id: 'official:test', name: 'Official', now: 1, source: 'builtin', theme: { accent: '#fff' } })
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.presentation')).toMatchObject({ state: 'missing', policy: 'partial' })
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.renderer-settings')).toMatchObject({ state: 'missing', policy: 'partial' })
+  })
+
   it('drops malformed contribution entries without dropping the envelope', () => {
     const bundle = normalizePresetBundle({
       manifestVersion: 2,
@@ -54,7 +60,7 @@ describe('PresetBundle v2', () => {
         two: { ownerPluginId: 'test', providerVersion: 1, policy: 'partial', payload: {} },
       },
     }, registry)
-    await expect(prepared.commit()).rejects.toThrow('commit failed')
+    await expect(prepared.commit()).rejects.toMatchObject({ providerId: 'two', phase: 'commit', message: 'commit failed' })
     expect(value).toBe('before')
   })
 
@@ -67,5 +73,34 @@ describe('PresetBundle v2', () => {
     const classified = markUnavailablePresetProviders(bundle, registry)
     expect(classified.unavailable?.['plugin.remote']).toEqual({ tone: 'amber' })
     expect(classified.contributions['plugin.remote']?.payload).toEqual({ tone: 'amber' })
+  })
+
+  it('waits for asynchronous provider commits before reporting completion', async () => {
+    let release!: () => void
+    const order: string[] = []
+    const registry = new PresetProviderRegistry()
+    registry.register({
+      id: 'async.provider', ownerPluginId: 'test', schemaVersion: 1, label: 'Async',
+      capture: () => ({}), defaults: () => ({}),
+      prepareApply: () => ({
+        summary: [],
+        commit: () => new Promise<void>(resolve => { order.push('started'); release = () => { order.push('released'); resolve() } }),
+        rollback: () => { order.push('rollback') },
+      }),
+    })
+    const prepared = preparePresetBundle({
+      manifestVersion: 2, id: 'async-bundle', name: 'Async', source: 'user',
+      contributions: { 'async.provider': { ownerPluginId: 'test', providerVersion: 1, policy: 'partial', payload: {} } },
+    }, registry)
+    const pending = Promise.resolve(prepared.commit())
+    await Promise.resolve()
+    expect(order).toEqual(['started'])
+    let settled = false
+    void pending.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release()
+    await pending
+    expect(order).toEqual(['started', 'released'])
   })
 })

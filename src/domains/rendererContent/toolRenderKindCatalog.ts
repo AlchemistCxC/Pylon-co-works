@@ -60,8 +60,18 @@ function toolSettings(_kindId: string): RendererSettingsSchema {
     groups: SHARED_TOOL_SETTINGS_SCHEMA.groups.map(group => ({
       ...group,
       fields: group.fields.map(field => {
-        if (field.key !== 'statusPalette' && field.key !== 'indicator') return field
-        return { ...field, optionTarget: `kind.${kindId}.${field.key}` }
+        const key = field.key ?? field.id ?? ''
+        const sharedTarget = `slot.builtin.solid.content.base.${key}`
+        const next = {
+          ...field,
+          semanticKey: `tool.${key}`,
+          scope: 'kind' as const,
+          inheritsFrom: sharedTarget,
+          deprecated: true,
+          aliases: [`kind.${kindId}.${key}`],
+        }
+        if (field.key !== 'statusPalette' && field.key !== 'indicator') return next
+        return { ...next, optionTarget: `kind.${kindId}.${field.key}` }
       }),
     })),
   }
@@ -117,6 +127,10 @@ const ids = [
   'tool.generic', 'tool.input', 'tool.progress', 'tool.output', 'tool.error',
   'tool.read', 'tool.edit', 'tool.search', 'tool.fetch', 'tool.execute',
 ] as const
+
+/** Explicit first-party IDs used by Settings compatibility routing. Third-party
+ * `tool.*` namespaces must remain normal contributions. */
+export const BUILTIN_TOOL_RENDER_KIND_IDS: ReadonlySet<string> = new Set(ids)
 
 export const BUILTIN_TOOL_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze(ids.map(id => Object.freeze({
   id,

@@ -40,9 +40,7 @@ struct ReplayImport {
 fn replay_journal_commit_outcome(status: &str) -> &'static str {
     match status {
         "imported" => "recovery-import-committed",
-        "already-imported" | "already-present" | "reconciled" => {
-            "recovery-import-already-present"
-        }
+        "already-imported" | "already-present" | "reconciled" => "recovery-import-already-present",
         "local-authoritative" => "local-journal-wins",
         "incomplete-not-imported" => "incomplete-preserved-runtime",
         "empty" => "empty",
@@ -115,13 +113,9 @@ pub(crate) async fn load_persisted_session(
     let handles = match runtime.acp.lock().await.begin_replay_capture(&peri_id) {
         Ok(handles) => handles,
         Err(error) => {
-            if let Err(restore_error) = restore_previous_slot(
-                &runtime,
-                &source,
-                &peri_id,
-                generation,
-                previous.clone(),
-            ) {
+            if let Err(restore_error) =
+                restore_previous_slot(&runtime, &source, &peri_id, generation, previous.clone())
+            {
                 tracing::error!(
                     source,
                     error = %restore_error,
@@ -160,7 +154,10 @@ pub(crate) async fn load_persisted_session(
                 } else {
                     let events = crate::session::event_service_of(state.inner())?;
                     let revision = events.revision(owner_key.clone()).await?;
-                    let status = if events.has_authoritative_local_events(owner_key.clone()).await? {
+                    let status = if events
+                        .has_authoritative_local_events(owner_key.clone())
+                        .await?
+                    {
                         "local-authoritative"
                     } else {
                         "incomplete-not-imported"
@@ -195,8 +192,14 @@ pub(crate) async fn load_persisted_session(
                     session.apply_session_response(&response);
                     if let Some(persisted) = &persisted_state {
                         if let Some(object) = persisted.as_object() {
-                            for (key, value) in object {
-                                session.snapshots.insert(key.clone(), value.clone());
+                            if let Some(value) = object.get("commands") {
+                                session.commands_snapshot = Some(value.clone());
+                            }
+                            if let Some(value) = object.get("usage") {
+                                session.usage_snapshot = Some(value.clone());
+                            }
+                            if let Some(value) = object.get("mode").and_then(|v| v.as_str()) {
+                                session.mode = Some(value.to_string());
                             }
                         }
                     }
@@ -218,13 +221,17 @@ pub(crate) async fn load_persisted_session(
             }
             let authority = match replay_journal_status {
                 "local-authoritative" => "local-journal",
-                "imported" | "already-imported" | "already-present" | "reconciled" => "recovery-import",
+                "imported" | "already-imported" | "already-present" | "reconciled" => {
+                    "recovery-import"
+                }
                 _ if canonical_revision > 0 => "recovery-import",
                 _ => "empty",
             };
             let journal_coverage = match replay_journal_status {
                 "local-authoritative" => "local-observed",
-                "imported" | "already-imported" | "already-present" | "reconciled" => "unverified-import",
+                "imported" | "already-imported" | "already-present" | "reconciled" => {
+                    "unverified-import"
+                }
                 _ if canonical_revision > 0 => "unverified-import",
                 _ => "empty",
             };

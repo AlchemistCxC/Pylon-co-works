@@ -9,6 +9,7 @@ import {
   THEME_SETTING_KEYS,
   type ThemeFieldKey,
 } from '../../themeFieldDefs.ts'
+import { resolveFontToken } from '../theme/themeCssSnapshot.ts'
 import type { ThemeSettings } from '../../store.ts'
 
 export const WORKBENCH_DATA_ATTRIBUTES = [
@@ -38,6 +39,7 @@ const WORKBENCH_THEME_KEYS = new Set<ThemeFieldKey>([
   ...THEME_SETTING_KEYS.filter(key => ['chat', 'cc'].includes(THEME_FIELD_DEFS[key].zone)),
   'accent',
   'globalFont',
+  'codeFont',
   'globalFontSize',
   'uiScheme',
   'userName',
@@ -50,6 +52,9 @@ const WORKBENCH_DERIVED_CSS_VARIABLES = [
   '--chat-bg-image',
   '--input-bg-image',
   '--status-bg-image',
+  '--global-font',
+  '--font',
+  '--mono',
   '--chat-font',
   '--msg-font',
   '--msg-text',
@@ -101,12 +106,16 @@ function resolveDataAttributes(theme: ThemeSettings): WorkbenchThemeFixture['dat
 
 function resolveCssVariables(theme: ThemeSettings): Record<string, string> {
   const state = theme as unknown as Record<string, unknown>
+  const globalFont = resolveFontToken(theme.globalFont)
   const variables: Record<string, string> = {
     '--chat-bg-image': toCssBackgroundImage(theme.chatBgImage),
     '--input-bg-image': toCssBackgroundImage(theme.inputBgImage),
     '--status-bg-image': toCssBackgroundImage(theme.statusBgImage),
-    '--chat-font': theme.chatFont === 'mono' ? 'var(--mono)' : theme.chatFont === 'serif' ? 'var(--serif)' : 'var(--font)',
-    '--msg-font': theme.msgFont === 'mono' ? 'var(--mono)' : theme.msgFont === 'serif' ? 'var(--serif)' : 'var(--font)',
+    '--global-font': globalFont,
+    '--font': globalFont,
+    '--mono': resolveFontToken(theme.codeFont ?? 'mono', 'code'),
+    '--chat-font': resolveFontToken(theme.chatFont),
+    '--msg-font': resolveFontToken(theme.msgFont),
     '--msg-text': theme.msgTextColor || 'var(--chat-text-color,var(--text))',
   }
 

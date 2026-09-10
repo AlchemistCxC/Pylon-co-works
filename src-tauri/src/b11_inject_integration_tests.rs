@@ -25,8 +25,8 @@ for line in sys.stdin:
     elif method == 'session/load' and replay_load:
         session_id=request['params']['sessionId']
         for update in [
-            {'sessionUpdate':'user_message_chunk','content':{'text':'persona\n\n---\n\nold question'},'_meta':{'periReplay':True}},
-            {'sessionUpdate':'agent_message_chunk','content':{'text':'old answer'},'_meta':{'periReplay':True}}
+            {'sessionUpdate':'user_message_chunk','content':{'text':'persona\n\n---\n\nold question'}},
+            {'sessionUpdate':'agent_message_chunk','content':{'text':'old answer'}}
         ]:
             print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':update}}), flush=True)
         response['result']={'loaded':True}
@@ -224,6 +224,7 @@ async fn gui_prompt_persists_user_and_done_before_publishing_terminal_state() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("prompt must send");
@@ -287,6 +288,7 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect_err("prompt must fail");
@@ -304,7 +306,7 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
     );
     assert_eq!(
         page.events[1].typed_payload.as_ref().unwrap()["error"],
-        "ACP protocol: {\"code\":-32000,\"message\":\"provider unavailable\"}"
+        "ACP protocol: \"RPC error: {\\\"code\\\":-32000,\\\"message\\\":\\\"provider unavailable\\\"}\""
     );
     assert_eq!(
         page.events[1].typed_payload.as_ref().unwrap()["code"],
@@ -414,6 +416,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("first message must send");
@@ -440,6 +443,7 @@ gateway:
         None,
         "继续".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,
@@ -494,6 +498,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("message must send");
@@ -540,6 +545,7 @@ gateway:
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("message must send without injection");
@@ -576,6 +582,7 @@ gateway:
         None,
         "/status".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,
@@ -636,6 +643,7 @@ gateway:
         None,
         "你好".to_string(),
         String::new(),
+        None,
         None,
         None,
         None,

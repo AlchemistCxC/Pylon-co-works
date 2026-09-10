@@ -112,6 +112,7 @@ export interface SessionEvent {
   readonly status?: string
   readonly commands?: readonly JsonValue[]
   readonly options?: readonly JsonValue[]
+  readonly usage?: JsonValue
   readonly stopReason?: string
 }
 
@@ -148,6 +149,8 @@ export interface DiagnosticEvent {
   readonly level?: 'info' | 'warning' | 'error'
   readonly message?: string
   readonly code?: string
+  /** Optional structured detail kept behind the default user-facing summary. */
+  readonly data?: JsonValue
 }
 
 export type WorkbenchSemanticEvent =
@@ -333,11 +336,9 @@ export function migrateWorkbenchEnvelope(value: unknown): SchemaResult<Workbench
     return failure([schemaIssue([], 'migration.legacy-shape', 'version zero semantic or canonical event', value)])
   }
   const eventType = typeof value.eventType === 'string' ? value.eventType : 'unknown'
-  const typed = isRecord(value.typedPayload) ? value.typedPayload : {}
+  const typed = (isRecord(value.typedPayload) ? value.typedPayload : {}) as Record<string, JsonValue>
   const text = typeof typed.text === 'string' ? typed.text : undefined
-  const event: WorkbenchSemanticEvent = eventType === 'user.message' || eventType === 'assistant.text.delta'
-    ? { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
-    : { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw: rawPayload, truncated: false }
+  const event: WorkbenchSemanticEvent = migrateCanonicalEvent(eventType, typed, text, rawPayload)
   const migrated = createWorkbenchEnvelope({
     sessionId,
     sequence,
@@ -351,6 +352,69 @@ export function migrateWorkbenchEnvelope(value: unknown): SchemaResult<Workbench
   })
   return parseWorkbenchEnvelope(migrated)
 }
+
+function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValue>, text: string | undefined, raw: JsonValue): WorkbenchSemanticEvent {
+  if (eventType === 'user.message' || eventType === 'assistant.text.delta') {
+    return { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
+  }
+  if (eventType === 'assistant.reasoning.delta' || eventType === 'assistant.thinking.delta') {
+    return { type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  }
+  const toolSemanticType: Record<string, ToolEvent['type']> = {
+    'tool.started': 'tool.started',
+    'tool.progress': 'tool.progress',
+    'tool.completed': 'tool.completed',
+    'tool.failed': 'tool.failed',
+    'tool.call.started': 'tool.started',
+    'tool.call.updated': 'tool.progress',
+    'tool.call.completed': 'tool.completed',
+    'tool.call.failed': 'tool.failed',
+  }
+  const toolType = toolSemanticType[eventType]
+  if (toolType) {
+    return { type: toolType, ...(typed.tool !== undefined ? { tool: typed.tool } : {}), ...(typed.progress !== undefined ? { progress: typed.progress } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
+  }
+  if (eventType === 'plan.replaced') return { type: 'plan.replaced', ...(Array.isArray(typed.entries) ? { entries: typed.entries } : {}) }
+  if (eventType === 'plan.entry-updated') return { type: 'plan.entry-updated', ...(typed.entry !== undefined ? { entry: typed.entry } : {}) }
+  if (eventType === 'usage.updated') return { type: 'usage.updated', ...(typed.usage !== undefined ? { usage: typed.usage } : {}) }
+  if (eventType === 'goal.updated') return { type: 'goal.updated', ...(typed.goal !== undefined ? { goal: typed.goal } : {}), ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
+  if (eventType === 'goal.cleared') return { type: 'goal.cleared', ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
+  if (eventType === 'activity.started' || eventType === 'activity.progress' || eventType === 'activity.completed' || eventType === 'activity.failed' || eventType === 'activity.cancelled') return { type: eventType, ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }
+  if (eventType === 'interaction.requested' || eventType === 'interaction.resolved' || eventType === 'interaction.expired') {
+    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) return { type: eventType, interactionId: typed.interactionId }
+    return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
+  }
+  if (eventType === 'interaction.answered') {
+    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) {
+      return {
+        type: 'interaction.resolved',
+        interactionId: typed.interactionId,
+        ...(typed.response !== undefined ? { response: typed.response } : {}),
+      }
+    }
+    return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
+  }
+  if (eventType === 'turn.completed' || eventType === 'session.completed') return {
+    type: 'session.completed',
+    ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}),
+    ...(typed.usage !== undefined ? { usage: typed.usage } : {}),
+    ...(typeof typed.model === 'string' ? { model: typed.model } : {}),
+  }
+  if (eventType === 'turn.failed') return {
+    type: 'diagnostic.notice',
+    level: 'error',
+    message: typeof typed.error === 'string' ? typed.error : 'provider reported a cancelled or failed turn',
+    ...(typeof typed.code === 'string' ? { code: typed.code } : { code: 'turn.failed' }),
+    data: raw,
+  }
+  if (eventType === 'session.model-updated') return { type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }
+  if (eventType === 'session.mode-updated') return { type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }
+  if (eventType === 'session.status-updated') return { type: 'session.status-updated', ...(typeof typed.status === 'string' ? { status: typed.status } : {}) }
+  if (eventType === 'lifecycle.retrying' || eventType === 'lifecycle.compact-started' || eventType === 'lifecycle.compact-completed' || eventType === 'lifecycle.suspended' || eventType === 'lifecycle.recovered') return { type: eventType, ...(typeof typed.attempt === 'number' ? { attempt: typed.attempt } : {}), ...(typeof typed.reason === 'string' ? { reason: typed.reason } : {}), ...(typeof typed.summary === 'string' ? { summary: typed.summary } : {}) }
+  if (eventType === 'diagnostic.updated' || eventType === 'diagnostic.notice') return { type: eventType, ...(Array.isArray(typed.diagnostics) ? { diagnostics: typed.diagnostics } : {}), ...(typeof typed.level === 'string' && ['info', 'warning', 'error'].includes(typed.level) ? { level: typed.level as 'info' | 'warning' | 'error' } : {}), ...(typeof typed.message === 'string' ? { message: typed.message } : {}), ...(typeof typed.code === 'string' ? { code: typed.code } : {}) }
+  return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false }
+}
+
 
 function parseSemanticEvent(value: unknown): SchemaResult<WorkbenchSemanticEvent> {
   if (!isRecord(value) || typeof value.type !== 'string') return failure([schemaIssue([], 'event.type', 'event object with type', value)])
@@ -386,7 +450,7 @@ function isNamespacedKind(value: string): boolean {
 }
 
 const MESSAGE_EVENT_TYPES = new Set(['message.started', 'message.delta', 'message.completed'])
-const KNOWN_EVENT_TYPES = new Set([
+export const WORKBENCH_SEMANTIC_EVENT_TYPES = Object.freeze([
   ...MESSAGE_EVENT_TYPES,
   'reasoning.delta', 'reasoning.completed', 'reasoning.redacted',
   'tool.started', 'tool.progress', 'tool.completed', 'tool.failed',
@@ -398,7 +462,8 @@ const KNOWN_EVENT_TYPES = new Set([
   'lifecycle.retrying', 'lifecycle.compact-started', 'lifecycle.compact-completed', 'lifecycle.rewind-preview', 'lifecycle.rewind-completed', 'lifecycle.suspended', 'lifecycle.recovered',
   'assist.prediction', 'assist.file-suggestions', 'assist.queued-command',
   'diagnostic.updated', 'diagnostic.notice',
-])
+]) as readonly string[]
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(WORKBENCH_SEMANTIC_EVENT_TYPES)
 
 function isSemanticEvent(value: unknown): value is WorkbenchSemanticEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false

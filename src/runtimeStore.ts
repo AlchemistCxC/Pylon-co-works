@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ConfigOption } from './infrastructure/acp/chatContracts.ts'
+import type { ConfigOption, ModelChoice } from './infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from './components/settings/agentTypes.ts'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState.ts'
@@ -10,7 +10,9 @@ import { toAgentContextKey } from './agentContext.ts'
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
 export interface SessionConfig {
   model?: string           // 当前 model 值
-  models?: string[]        // 可选 model 列表
+  models?: string[]        // 可选 model 列表（modelChoices 的 id 投影，兼容既有消费方）
+  /** P56/D3：宣告的模型选项（id/label 分离真源；id 为上 wire 的 machine id） */
+  modelChoices?: ModelChoice[]
   thinkingEffort?: string
   context1m?: boolean
   raw?: ConfigOption[]     // 原始 configOptions（兜底/调试）
@@ -41,7 +43,7 @@ interface RuntimeStoreState {
   agentStatuses: Record<string, AgentStatus>
   /**
    * OWNER-04：每会话绑定建立时的 agent generation 快照（load_persisted_session /
-   * new_session 成功时由 useSessionLifecycle 记录）。重连后 agentStatus.generation
+   * new_session 成功时由 agentWorkbenchLifecycle 记录）。重连后 agentStatus.generation
    * 递增，bindingState.refineBindingGeneration 依此判定 binding_stale——
    * 旧 binding 必须 Invalidated，不能继续发送旧 remote id（§5.9 rule 4）。
    */
@@ -50,7 +52,7 @@ interface RuntimeStoreState {
   sessionBindingHealth: Record<AgentContextKey, SessionBindingSnapshot | undefined>
   /**
    * CWD-03：会话原地 reload 令牌（rootPath 变更 → binding invalidate → close → load/new）。
-   * useSessionLifecycle 以 [sessionId, reloadToken] 为 effect 依赖；令牌递增即强制
+   * agentWorkbenchLifecycle 以 [sessionId, reloadToken] 为依赖；令牌递增即强制
    * 同会话重跑 load 路径（读取已同步的新 workdir/workspaceId，InputBar 恢复）。
    */
   sessionReloadTokens: Record<string, number>

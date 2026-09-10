@@ -15,8 +15,8 @@ describe('chat indicator alignment contract', () => {
     expect(chatCss).toContain('.app[data-interface-mode="terminal-like"] :is(')
     expect(chatCss).toContain('.term-assistant.has-dot > .term-assistant-dot')
     expect(chatCss).toContain('.term-tool-head > .term-tool-indicator')
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--chat-font,var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size,var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height,1\.35\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;[^}]*font-family\s*:\s*var\(--chat-font, var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size, var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height, 1\.35\)\s*;/s)
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--msg-font,var\(--chat-font,var\(--mono\)\)\)\s*;[^}]*font-size\s*:\s*var\(--msg-font-size,var\(--chat-font-size,var\(--font-size-lg\)\)\)\s*;[^}]*line-height\s*:\s*var\(--msg-line-height,var\(--chat-line-height,1\.35\)\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;[^}]*font-family\s*:\s*var\(--msg-font, var\(--chat-font, var\(--mono\)\)\)\s*;[^}]*font-size\s*:\s*var\(--msg-font-size, var\(--chat-font-size, var\(--font-size-lg\)\)\)\s*;[^}]*line-height\s*:\s*var\(--msg-line-height, var\(--chat-line-height, 1\.35\)\)\s*;/s)
     expect(chatCss).not.toMatch(/\.app\[data-interface-mode="terminal-like"\][^{}]*\{[^}]*scale\s*:/s)
   })
 
@@ -34,7 +34,7 @@ describe('chat indicator alignment contract', () => {
     // 指示器字号契约：助手标记与工具指示器同字体同字号（否则槽位渲染器的
     // 局部字号覆盖会静默缩小工具字形 —— 真实应用与开发模式不一致的根因）。
     expect(chatCss).toMatch(
-      /\.term-assistant\.has-dot > \.term-assistant-dot,\s*\.term-tool-indicator\s*\{[^}]*font-family\s*:\s*var\(--chat-font,\s*var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size,\s*var\(--font-size-lg\)\)\s*;/s,
+      /\.term-assistant\.has-dot > \.term-assistant-dot,\s*\.term-tool-indicator\s*\{[^}]*font-family\s*:\s*var\(--msg-font,\s*var\(--chat-font,\s*var\(--mono\)\)\)\s*;[^}]*font-size\s*:\s*var\(--msg-font-size,\s*var\(--chat-font-size,\s*var\(--font-size-lg\)\)\)\s*;/s,
     )
     // 槽位渲染器不得再用更高特异性的 inherit 链覆盖契约
     expect(chatCss).not.toContain('.solid-tool-invocation .term-tool-indicator')
@@ -42,5 +42,11 @@ describe('chat indicator alignment contract', () => {
 
   it('keeps ordered-list markers inside the reasoning scroll port', () => {
     expect(chatCss).toMatch(/\.term-reasoning-body\s+:is\(ol,ul\)\s*\{[^}]*padding-inline-start\s*:\s*2em\s*;/s)
+  })
+
+  it('pins the streaming accent bar to the message rail left edge', () => {
+    // 用户确认的左对齐口径：流式特效竖条与消息行左缘对齐，不伸出行外
+    // （此前 inset 左侧 -6px 使竖条悬在行外，视觉略偏左）。
+    expect(chatCss).toMatch(/\.term-row-assistant\[data-streaming="true"\]::after,\s*\.term-row-reasoning\[data-streaming="true"\]::after,\s*\.plain-message-list__row\[data-streaming="true"\] \.term-row-assistant::after\s*\{[^}]*inset\s*:\s*0 auto 0 0\s*;/s)
   })
 })

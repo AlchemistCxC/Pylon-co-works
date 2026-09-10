@@ -41,16 +41,43 @@ pub(crate) async fn set_config_option(
     let owner = SessionOwner::new(&agent_id, &source);
     let runtime = state.inner().resolve_owner_runtime(&owner)?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state.get_peri_id(&runtime, &source)?;
+    // P56/D1：会话状态一次读取（peri_id + 模型面 + 宣告 choices）——surface 路由与
+    // 发送校验都以「当次会话宣告」为准。
+    let (peri_id, model_surface, model_choices) = {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| PylonError::Protocol(e.to_string()))?;
+        let session = sessions
+            .get(&source)
+            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))?;
+        (
+            session.peri_id.clone(),
+            session.model_surface.clone(),
+            session.model_choices.clone(),
+        )
+    };
     // G2-03：D2 路由收敛——set_model_api 枚举三路（ConfigOption 默认 / SetModel /
-    // Disabled）；route() 收编了 key=="model" 特判（G1 交付，agent_config.rs）。
-    // 方案 4：路由按 target runtime 归属 agent 的 protocol 决定（protocol_for_runtime），
-    // 而非 active agent 的协议——多 runtime/agents 表与注册不同步时避免跨 runtime
-    // 读取错误协议策略；无 active runtime 时 require_runtime 已返回 no_active_agent。
-    let target = state
-        .protocol_for_runtime(&runtime)
-        .set_model_api()
-        .route(&key);
+    // Disabled）。方案 4：路由按 target runtime 归属 agent 的配置决定，而非 active
+    // agent——多 runtime/agents 表与注册不同步时避免跨 runtime 读取错误协议策略。
+    // P56/D1.3：显式 `set_model_api` 声明优先（现状行为，兼容优先；含 legacy 布尔
+    // 迁移与 catalog 默认——load.rs parse() 已把三者合并进 agent.acp.set_model_api，
+    // 该字段为 Some 即「声明态」）；未声明 → 按响应判定的 model_surface 路由
+    // （ConfigOption{config_id} → set_config_option（宣告 configId）/ ModelsState →
+    // set_model / None → model switching unavailable）。key != "model" 既有路径不变。
+    let declared = state
+        .agent_for_runtime(&runtime)
+        .and_then(|agent| agent.acp)
+        .and_then(|acp| acp.set_model_api);
+    let (target, advertised_config_id) =
+        resolve_model_switch_target(declared, &key, &model_surface)?;
+    // P56/D1.4：发送不变量——目标 model 值必须 ∈ 当次会话宣告的 choices；
+    // 不在列表 → 结构化错误（model_not_advertised + 宣告列表摘要），本地状态不变。
+    if key == "model" {
+        if let Some(model_id) = value.as_str() {
+            validate_model_advertised(model_id, &model_choices)?;
+        }
+    }
     let response = match target {
         crate::agent_config::ModelSwitchTarget::Disabled => {
             return Err(PylonError::Protocol("model switching disabled".to_string()));
@@ -69,33 +96,24 @@ pub(crate) async fn set_config_option(
                 .await?
         }
         crate::agent_config::ModelSwitchTarget::ConfigOption => {
+            // P56/D1.5：ConfigOption 通道统一使用宣告 configId（surface 路由给出）；
+            // 显式声明路径保持现状（前端语义 key 原样作 configId）。
+            let config_id = advertised_config_id.unwrap_or_else(|| key.clone());
             state
                 .inner()
                 .acp_rpc(
                     &runtime,
                     acp::METHOD_SESSION_SET_CONFIG_OPTION,
-                    acp::session_set_config_option_params(&peri_id, &key, &value)?,
+                    acp::session_set_config_option_params(&peri_id, &config_id, &value)?,
                 )
                 .await?
         }
     };
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
-        if let Some(options) = response
-            .get("configOptions")
-            .and_then(|value| value.as_array())
-        {
-            session.config_options = options.clone();
-            session.apply_config_options(options);
-        } else if key == "model" {
-            if let Some(value) = value.as_str() {
-                session.model = value.to_string();
-            }
-        } else if key == "mode" {
-            if let Some(value) = value.as_str() {
-                session.mode = Some(value.to_string());
-            }
-        }
+        // P56/D1.6：写回收敛——非空 configOptions 权威覆盖；空数组回声保护本地
+        // 宣告；其余语义键乐观写回。
+        session.apply_config_option_response(&response, &key, &value);
     })?;
     Ok(response)
 }

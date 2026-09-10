@@ -55,6 +55,18 @@ describe('browser visual QA dataset', () => {
     expect(packages.every(item => item.package.manifest.api === '1.0' && item.enabled === false)).toBe(true)
   })
 
+  it('provides an agent status snapshot for browser agent switching', async () => {
+    const initial = await mockInvokeCommand('agent_status') as { agentId?: string; status?: string }
+    expect(initial).toMatchObject({ agentId: 'peri', status: 'connected' })
+
+    await mockInvokeCommand('switch_agent', { name: 'pi' })
+    const switched = await mockInvokeCommand('agent_status') as { agentId?: string; status?: string }
+    expect(switched).toMatchObject({ agentId: 'pi', status: 'connecting' })
+
+    // Keep the module-level browser fixture deterministic for following tests.
+    await mockInvokeCommand('switch_agent', { name: 'peri' })
+  })
+
   it('keeps browser-mode Git mutations stateful for interaction QA', async () => {
     await mockInvokeCommand('git_stage', { paths: ['src/sheets/AgentSheetView.tsx'] })
     const staged = await mockInvokeCommand('git_status_with_branch') as { entries: Array<{ path: string; staged: boolean }> }

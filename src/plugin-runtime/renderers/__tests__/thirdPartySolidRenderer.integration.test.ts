@@ -14,6 +14,7 @@ import RendererSettingsPanel from '../../../components/settings/RendererSettings
 import { createRendererSettingsStore } from '../rendererSettingsStore.ts'
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
 import type { RenderSurface } from '../../../contracts/messageRenderer.ts'
+import { projectSettingsContributionCatalog } from '../../../components/settings/settingsContributionCatalog.ts'
 
 const PLUGIN_ID = 'example.solid-renderer'
 const SUITE_ID = `${PLUGIN_ID}.suite`
@@ -120,6 +121,16 @@ describe('third-party Solid renderer package', () => {
     expect(getRendererRegistry().snapshot().renderKinds.some(entry => entry.value.id === `${PLUGIN_ID}.note`)).toBe(true)
     expect(getRendererRegistry().snapshot().rendererSlots.some(entry => entry.value.id === `${PLUGIN_ID}.base`)).toBe(true)
     expect(getPresentationProfileRegistry().resolve(`${PLUGIN_ID}.profile`)?.value).toMatchObject({ interfaceMode: 'modern-gui' })
+  })
+
+  it('projects third-party schema fields and removes them atomically on uninstall', async () => {
+    await install()
+    const catalog = projectSettingsContributionCatalog({ rendererSnapshot: getRendererRegistry().snapshot() })
+    expect(catalog.records.some(record => record.ownerPluginId === PLUGIN_ID && record.fieldKey === 'density')).toBe(true)
+    const active = runtime!.snapshot().active.find(identity => identity.pluginId === PLUGIN_ID)
+    await runtime!.deactivate(active!.key)
+    const after = projectSettingsContributionCatalog({ rendererSnapshot: getRendererRegistry().snapshot() })
+    expect(after.records.some(record => record.ownerPluginId === PLUGIN_ID)).toBe(false)
   })
 
   it('uninstall disposes every Suite, Slot, kind and Profile contribution', async () => {

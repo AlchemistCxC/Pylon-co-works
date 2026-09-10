@@ -74,7 +74,7 @@ describe('GatewayRiskPanel Tauri 模式', () => {
       .mockRejectedValueOnce({ code: 'gateway_error', message: 'catalog 不可用' })
       .mockResolvedValueOnce(instances)
     render(<GatewayRiskPanel />)
-    const alert = await screen.findByRole('alert')
+    const alert = await screen.findByRole('status')
     expect(alert.textContent).toContain('读取 Gateway 实例失败')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => {

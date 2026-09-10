@@ -2,7 +2,91 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
-use crate::acp::AcpError;
+use crate::acp::{AcpError, PromptTimeoutKind};
+
+/// Additive failure provenance carried by `pylon:error`.  The legacy top-level
+/// `error` string remains the user-facing compatibility field; this structure
+/// lets the renderer distinguish a provider response from a local timeout or
+/// transport failure without parsing prose.
+#[derive(Debug, Clone, Default)]
+struct PromptFailureMetadata {
+    source: &'static str,
+    timeout_kind: Option<&'static str>,
+    configured_timeout_secs: Option<u64>,
+    triggered_timeout_secs: Option<u64>,
+    actual_elapsed_ms: Option<u64>,
+    provider_message: Option<String>,
+}
+
+impl PromptFailureMetadata {
+    fn to_json(&self) -> serde_json::Value {
+        let mut value = serde_json::Map::new();
+        value.insert(
+            "source".to_string(),
+            serde_json::Value::String(self.source.to_string()),
+        );
+        if let Some(kind) = self.timeout_kind {
+            value.insert(
+                "timeoutKind".to_string(),
+                serde_json::Value::String(kind.to_string()),
+            );
+        }
+        if let Some(seconds) = self.configured_timeout_secs {
+            value.insert(
+                "configuredTimeoutSecs".to_string(),
+                serde_json::Value::from(seconds),
+            );
+        }
+        if let Some(seconds) = self.triggered_timeout_secs {
+            value.insert(
+                "triggeredTimeoutSecs".to_string(),
+                serde_json::Value::from(seconds),
+            );
+        }
+        if let Some(elapsed) = self.actual_elapsed_ms {
+            value.insert(
+                "actualElapsedMs".to_string(),
+                serde_json::Value::from(elapsed),
+            );
+        }
+        if let Some(message) = self.provider_message.as_deref() {
+            value.insert(
+                "providerMessage".to_string(),
+                serde_json::Value::String(message.to_string()),
+            );
+        }
+        serde_json::Value::Object(value)
+    }
+}
+
+fn elapsed_millis(start: std::time::Instant) -> u64 {
+    start.elapsed().as_millis().min(u64::MAX as u128) as u64
+}
+
+fn failure_for_acp_error(error: &AcpError, elapsed_ms: Option<u64>) -> PromptFailureMetadata {
+    let (source, timeout_kind, triggered_timeout_secs) = match error {
+        AcpError::WriteTimeout => (
+            "write-timeout",
+            Some("write"),
+            Some(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS),
+        ),
+        AcpError::RpcTimeout => (
+            "rpc",
+            Some("rpc"),
+            Some(crate::agent_config::DEFAULT_RPC_TIMEOUT_SECS),
+        ),
+        AcpError::ConnectionClosed => ("connection", None, None),
+        _ => ("internal", None, None),
+    };
+    PromptFailureMetadata {
+        source,
+        timeout_kind,
+        triggered_timeout_secs,
+        actual_elapsed_ms: elapsed_ms,
+        provider_message: None,
+        ..Default::default()
+    }
+}
 
 /// A2/A3：向 source 已注册的流式通道发送终帧（done/error 信封）并注销注册。
 /// B1 扩展：user echo 也经此单轨化。未注册 → 返回 false（调用方走广播兜底）。
@@ -72,12 +156,16 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
     error: &PylonError,
+    failure: Option<&PromptFailureMetadata>,
 ) -> Result<(), PylonError> {
     let mut error_payload = serde_json::json!({
         "source": ctx.source,
         "code": error.code(),
         "error": error.to_string(),
     });
+    if let Some(failure) = failure {
+        error_payload["failure"] = failure.to_json();
+    }
     if let Some(profile_id) = ctx.profile_id.as_deref() {
         let agent_id = state.agent_id_for_runtime(runtime).ok_or_else(|| {
             PylonError::AgentRuntimeUnavailable {
@@ -99,6 +187,14 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
                 (owner, None)
             }
         };
+        let mut update = serde_json::json!({
+            "sessionUpdate": "error",
+            "errorCode": error.code(),
+            "error": error.to_string(),
+        });
+        if let Some(failure) = failure {
+            update["failure"] = failure.to_json();
+        }
         let result = event_service_of(state)?
             .ingest_event(
                 owner,
@@ -106,11 +202,7 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
                 state.current_generation(runtime),
                 serde_json::json!({
                     "source": ctx.source,
-                    "update": {
-                        "sessionUpdate": "error",
-                        "errorCode": error.code(),
-                        "error": error.to_string(),
-                    }
+                    "update": update,
                 }),
             )
             .await?;
@@ -127,7 +219,13 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
             error_payload.clone(),
         );
     }
-    send_channel_terminal(state, runtime, &ctx.source, crate::event_names::SESSION_ERROR, error_payload);
+    send_channel_terminal(
+        state,
+        runtime,
+        &ctx.source,
+        crate::event_names::SESSION_ERROR,
+        error_payload,
+    );
     Ok(())
 }
 #[tauri::command(rename_all = "camelCase")]
@@ -146,12 +244,14 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    peri_id: Option<String>,
 ) -> Result<String, PylonError> {
     // OWNER-02（§5.8）：显式 agentId 路由到 owner runtime——只要求 agent runtime 存在，
     // 不要求会话已存在（send_message 允许自动创建会话）；不存在 owner runtime →
     // agent_runtime_unavailable，绝不 fallback active runtime。
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
     // G2-05：PromptContext 内联构造（IPC 签名锁定；字段全部 move，零 clone）。
+    // peri_id：前端持久化的远端会话 id——内存映射缺失时优先 session/load 复活。
     let ctx = PromptContext {
         source,
         profile_id,
@@ -161,6 +261,7 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
         attachments,
         mcp_servers,
         cwd: None,
+        known_peri_id: peri_id,
     };
     send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
@@ -181,6 +282,7 @@ pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    peri_id: Option<String>,
     on_update: tauri::ipc::Channel<serde_json::Value>,
 ) -> Result<String, PylonError> {
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
@@ -194,6 +296,7 @@ pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
         attachments,
         mcp_servers,
         cwd: None,
+        known_peri_id: peri_id,
     };
     // 终帧/注销由收尾两路（finalize_response → DONE 帧 / publish_prompt_failure →
     // ERROR 帧）经 send_channel_terminal 完成，不绑本函数生命周期。
@@ -350,6 +453,11 @@ fn advance_round<R: tauri::Runtime>(flow: &mut PromptFlow<'_, R>) {
             // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
             session.last_response_round = session.inject_round;
             session.last_response_text.clear();
+            // R-t5：上一回合的 activity 不能被当前 prompt 当成“已经收到首个
+            // token”。清空后，wait_prompt_with_recovery 会从本次 outbound
+            // request 重新等待 first-token 边界；本回合的第一条 update 再写回
+            // `last_activity` 续命 idle budget。
+            session.last_activity = None;
         }
     }
 }
@@ -401,6 +509,14 @@ async fn finalize_response<R: tauri::Runtime>(
         state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
     }
     let mut done_payload = serde_json::json!({"source": source, "data": data});
+    let mut done_update = serde_json::json!({ "sessionUpdate": "done" });
+    if let Some(object) = data.as_object() {
+        for key in ["stopReason", "usage", "model"] {
+            if let Some(value) = object.get(key) {
+                done_update[key] = value.clone();
+            }
+        }
+    }
     if let Some(committed_event) = ingest_prompt_event(
         state,
         runtime,
@@ -409,7 +525,7 @@ async fn finalize_response<R: tauri::Runtime>(
         prompt_generation,
         serde_json::json!({
             "source": source,
-            "update": { "sessionUpdate": "done" },
+            "update": done_update,
         }),
     )
     .await?
@@ -425,7 +541,13 @@ async fn finalize_response<R: tauri::Runtime>(
             done_payload.clone(),
         );
     }
-    send_channel_terminal(state, runtime, source, crate::event_names::SESSION_DONE, done_payload);
+    send_channel_terminal(
+        state,
+        runtime,
+        source,
+        crate::event_names::SESSION_DONE,
+        done_payload,
+    );
     let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
     // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
     // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +
@@ -559,6 +681,9 @@ pub(crate) struct PromptContext {
     pub(crate) attachments: Option<Vec<String>>,
     pub(crate) mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
     pub(crate) cwd: Option<String>,
+    /// 持久化的远端会话 id（GUI send_message 透传；平台 ingest 无）。内存映射
+    /// 缺失时用于 ACP session/load 复活原会话，避免静默新建导致上下文丢失。
+    pub(crate) known_peri_id: Option<String>,
 }
 
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
@@ -574,10 +699,28 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
 ) -> Result<String, PylonError> {
-    let result = send_prompt_core_impl(state, runtime, window, gateway, ctx).await;
+    let mut failure = None;
+    let result = send_prompt_core_impl(state, runtime, window, gateway, ctx, &mut failure).await;
     if let Err(error) = &result {
-        if let Err(persistence_error) =
-            publish_prompt_failure(state, runtime, window, gateway, ctx, error).await
+        // Every known ACP boundary records its own provenance.  A validation
+        // or setup error may happen before that boundary; preserve a stable
+        // internal source rather than making the UI infer one from prose.
+        if failure.is_none() {
+            failure = Some(PromptFailureMetadata {
+                source: "internal",
+                ..Default::default()
+            });
+        }
+        if let Err(persistence_error) = publish_prompt_failure(
+            state,
+            runtime,
+            window,
+            gateway,
+            ctx,
+            error,
+            failure.as_ref(),
+        )
+        .await
         {
             tracing::error!(
                 code = persistence_error.code(),
@@ -598,6 +741,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     window: Option<&tauri::Window<R>>,
     gateway: &GatewayCore,
     ctx: &PromptContext,
+    failure: &mut Option<PromptFailureMetadata>,
 ) -> Result<String, PylonError> {
     // 解构 ctx 业务参数（引用形态，管线内只读；session_prompt 由 prepare_prompt_blocks
     // 经 flow.ctx 直接读取，不在本函数体内消费）。
@@ -666,6 +810,13 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         // 方案 I：session/new（建会话/复用）失败必须立即向前端广播 pylon:error，
         // 不能静默传播 Err——否则用户看到的是"消息滞留 + 生成指示器空转"而非明确错误
         // （Hermes 无 provider/401 等均在此时失败）。错误同时进 runtime 日志带上下文。
+        // 持久化 peri_id（Pylon 重启后内存映射为空）：优先 ACP session/load 复活
+        // 原会话；仅当复活失败（远端会话已死）才新建，并向前端广播新会话事实。
+        let revived_peri_id = ctx.known_peri_id.clone().filter(|id| !id.is_empty());
+        // Recreated-session notice is emitted after ensure returns (holding a
+        // &dyn callback across the await would make the command future
+        // non-Send); the callback is replaced by a plain Option<String> out.
+        let mut recreated_peri_id: Option<String> = None;
         let mapping = match ensure_session_mapping(
             state,
             runtime,
@@ -674,6 +825,8 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             persona,
             &session_cwd,
             &requested_mcp_servers,
+            revived_peri_id.as_deref(),
+            &mut recreated_peri_id,
         )
         .await
         {
@@ -694,6 +847,18 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                 return Err(PylonError::Protocol(message));
             }
         };
+        if let Some(new_peri_id) = &recreated_peri_id {
+            if let Some(window) = window {
+                crate::emit_event(
+                    window,
+                    "pylon:session-recreated",
+                    serde_json::json!({
+                        "source": source,
+                        "periId": new_peri_id,
+                    }),
+                );
+            }
+        }
         (mapping.peri_id, mapping.is_first)
     };
 
@@ -764,6 +929,43 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
         }
     }
+    // Start the monotonic prompt clock immediately before the outbound ACP
+    // request.  Setup/validation time is not presented as provider waiting
+    // time, while transport failures still retain a useful elapsed sample.
+    // P55-D1 #1：message.user.beforeSend 钩子缝（prepare_prompt_blocks 之后、
+    // 出站之前）。transform → 只改写 wire 出站 prompt_blocks（journal 原文行
+    // 已在上方 ingest_prompt_event 落库，B7 双轨）；gate → 返回拒绝错误；
+    // 超时/桥未就绪/前端无应答 → 放行原文（fail-open，对齐 Prism inject 先例）。
+    match crate::hook_bridge::before_send_hook_outcome(
+        state,
+        window,
+        source,
+        content,
+        &flow.prompt_blocks,
+    )
+    .await
+    {
+        crate::hook_bridge::BeforeSendDecision::PassThrough => {}
+        crate::hook_bridge::BeforeSendDecision::Transformed(blocks) => {
+            state.log_runtime_summary(
+                "info",
+                "hook",
+                Some(source.to_string()),
+                "message.user.beforeSend hook rewired outbound prompt",
+                serde_json::Map::from_iter([(
+                    "blockCount".to_string(),
+                    serde_json::Value::from(blocks.len()),
+                )]),
+            );
+            flow.prompt_blocks = blocks;
+        }
+        crate::hook_bridge::BeforeSendDecision::Blocked(reason) => {
+            return Err(PylonError::Protocol(format!(
+                "message.user.beforeSend hook blocked message: {reason}"
+            )));
+        }
+    }
+    let prompt_started_at = std::time::Instant::now();
     let rpc = {
         let acp = runtime.acp.lock().await;
         acp.prepare_prompt(&flow.peri_id, std::mem::take(&mut flow.prompt_blocks))?
@@ -778,6 +980,10 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let mut rx = match rpc.send_keep_rx().await {
         Ok(rx) => rx,
         Err(error) => {
+            *failure = Some(failure_for_acp_error(
+                &error,
+                Some(elapsed_millis(prompt_started_at)),
+            ));
             let _ =
                 state.remove_session_if_matches(runtime, source, &flow.peri_id, flow.generation);
             return Err(PylonError::from(error));
@@ -787,7 +993,6 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let peri_id_for_cancel = flow.peri_id.clone();
     // G2-06：超时参数化（per-agent 协议配置，缺省 300/30 = 现状常量值）。
     let protocol = state.protocol_for_runtime(runtime);
-    let prompt_timeout_secs = protocol.prompt_timeout();
     let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();
     let idle_timeout_secs = protocol.idle_timeout();
     let first_token_timeout_secs = protocol.first_token_timeout();
@@ -868,6 +1073,12 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
+                *failure = Some(PromptFailureMetadata {
+                    source: "provider",
+                    actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+                    provider_message: Some(error.clone()),
+                    ..Default::default()
+                });
                 let typed_error = AcpError::Rpc(error.clone());
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
                 // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
@@ -889,6 +1100,11 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
+            *failure = Some(PromptFailureMetadata {
+                source: "connection",
+                actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+                ..Default::default()
+            });
             runtime.acp.lock().await.remove_pending(flow.request_id);
             // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
             // session/load probe 收敛 Attached/Detached；删除会丢失待验证证据。
@@ -924,6 +1140,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         PromptWaitOutcome::CancelledAfterTimeout {
             response,
             cancel_error,
+            timeout_kind,
+            timeout_bound,
+            elapsed,
         } => {
             runtime.acp.lock().await.remove_pending(flow.request_id);
             if let Some(cancel_error) = cancel_error {
@@ -958,8 +1177,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     Err(error) => return Err(error.into()),
                 }
             }
-            // G2-06：超时文案参数化（缺省 300 时与旧文案逐字一致——session.rs:2108
-            // 负例表 "timed out after 300s" 依赖此不变量）。
+            // G2-06：超时文案必须使用真正触发的边界，而不是把 prompt 总预算
+            // 冒充成 idle/first-token 的实际等待时长。保留旧的前缀，兼容已有
+            // provider/前端按 "timed out after Ns" 的轻量解析。
             // 方案 I：区分"流式内容已到、终态缺失"与"完全无输出"——本回合是否收到过
             // assistant 内容（dispatcher 经 collect_response_chunk 写入 last_response_text）。
             let has_streamed_content = {
@@ -969,7 +1189,23 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     .map(|s| !s.last_response_text.trim().is_empty())
                     .unwrap_or(false)
             };
-            let error = format!("timed out after {prompt_timeout_secs}s");
+            let timeout_label = match timeout_kind {
+                PromptTimeoutKind::FirstToken => "first-token",
+                PromptTimeoutKind::Idle => "idle",
+            };
+            let timeout_secs = timeout_bound.as_secs().max(1);
+            let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            *failure = Some(PromptFailureMetadata {
+                source: "prompt-timeout",
+                timeout_kind: Some(timeout_label),
+                configured_timeout_secs: Some(protocol.prompt_timeout()),
+                triggered_timeout_secs: Some(timeout_secs),
+                actual_elapsed_ms: Some(actual_elapsed_ms),
+                ..Default::default()
+            });
+            let error = format!(
+                "timed out after {timeout_secs}s ({timeout_label} timeout; elapsed {actual_elapsed_ms}ms)"
+            );
             // M5 感知：超时 → 发呆（区别于普通失败）
             let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
             // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
@@ -990,6 +1226,18 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     (
                         "hasStreamedContent".to_string(),
                         serde_json::Value::Bool(has_streamed_content),
+                    ),
+                    (
+                        "timeoutKind".to_string(),
+                        serde_json::Value::String(timeout_label.to_string()),
+                    ),
+                    (
+                        "timeoutBoundSecs".to_string(),
+                        serde_json::Value::from(timeout_secs),
+                    ),
+                    (
+                        "actualElapsedMs".to_string(),
+                        serde_json::Value::from(actual_elapsed_ms),
                     ),
                     (
                         "requestId".to_string(),
@@ -1082,13 +1330,22 @@ mod tests {
         assert_eq!(row.provenance_origin, "local-observed");
         assert_eq!(row.provenance_trust, "authoritative");
         assert_eq!(row.provenance_provider.as_deref(), Some(agent_id));
-        assert_eq!(row.identity.as_ref().and_then(|identity| identity.get("messageId")), None);
+        assert_eq!(
+            row.identity
+                .as_ref()
+                .and_then(|identity| identity.get("messageId")),
+            None
+        );
 
         let page = event_service
             .list_events(owner_key, None, 100)
             .await
             .expect("list canonical rows");
-        assert_eq!(page.events.len(), 1, "one successful prompt produces one authoritative user row");
+        assert_eq!(
+            page.events.len(),
+            1,
+            "one successful prompt produces one authoritative user row"
+        );
         assert_eq!(page.events[0], row);
     }
 
@@ -1130,17 +1387,12 @@ for line in sys.stdin:
             source: "local:prompt-success".to_string(),
             profile_id: Some("profile-success".to_string()),
             content: "hello from send".to_string(),
+            known_peri_id: None,
             ..Default::default()
         };
-        send_prompt_core::<tauri::test::MockRuntime>(
-            &state,
-            &runtime,
-            None,
-            &gateway,
-            &context,
-        )
-        .await
-        .expect("prompt must succeed");
+        send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &context)
+            .await
+            .expect("prompt must succeed");
 
         let owner_key = serde_json::to_string(&[
             "profile-success",
@@ -1157,11 +1409,189 @@ for line in sys.stdin:
             .iter()
             .filter(|event| event.event_type == "user.message")
             .collect();
-        assert_eq!(user_rows.len(), 1, "successful send must commit one authoritative user row");
+        assert_eq!(
+            user_rows.len(),
+            1,
+            "successful send must commit one authoritative user row"
+        );
         let user = user_rows[0];
         assert_eq!(user.provenance_origin, "local-observed");
         assert_eq!(user.provenance_trust, "authoritative");
-        assert_eq!(user.provenance_provider.as_deref(), Some("prompt-success-agent"));
-        assert_eq!(user.identity, None, "client correlation is not canonical identity");
+        assert_eq!(
+            user.provenance_provider.as_deref(),
+            Some("prompt-success-agent")
+        );
+        assert_eq!(
+            user.identity, None,
+            "client correlation is not canonical identity"
+        );
+    }
+
+    #[test]
+    fn prompt_failure_metadata_keeps_timeout_provenance_additive() {
+        let metadata = PromptFailureMetadata {
+            source: "prompt-timeout",
+            timeout_kind: Some("first-token"),
+            configured_timeout_secs: Some(180),
+            triggered_timeout_secs: Some(2),
+            actual_elapsed_ms: Some(2_041),
+            provider_message: None,
+        };
+        let value = metadata.to_json();
+        assert_eq!(value["source"], "prompt-timeout");
+        assert_eq!(value["timeoutKind"], "first-token");
+        assert_eq!(value["configuredTimeoutSecs"], 180);
+        assert_eq!(value["triggeredTimeoutSecs"], 2);
+        assert_eq!(value["actualElapsedMs"], 2_041);
+        assert!(value.get("providerMessage").is_none());
+    }
+
+    /// 验收 D1-②：beforeSend transform 改写 wire 出站，但 journal 的
+    /// user.message 原文行不被改写（B7 双轨）。fake ACP 把收到的
+    /// session/prompt 请求原样写 trace 文件——wire 证据源。
+    #[tokio::test]
+    async fn before_send_hook_transform_rewrites_wire_but_journal_keeps_original() {
+        use tauri::{Listener, Manager};
+        const SCRIPT: &str = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'hook-dual-session'}
+    elif method == 'session/prompt':
+        trace.write(json.dumps(request)+'\n')
+        trace.flush()
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        let trace_path = std::env::temp_dir().join(format!(
+            "pylon-hook-dual-track-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_millis())
+                .unwrap_or(0),
+        ));
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "hook-dual-agent",
+            SCRIPT,
+            vec![trace_path.to_string_lossy().into_owned()],
+            std::collections::HashMap::new(),
+        );
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("hook-dual-agent")
+            .with_agent(agent)
+            .with_runtime("hook-dual-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+        let event_service = Arc::new(EventService::in_memory().expect("event service"));
+        *state.event_service.lock().expect("event service slot") = Some(event_service.clone());
+
+        // mock app + 窗口：hook 桥事件经 Listener 捕获，应答经 bridge.respond 回程。
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let window = webview.as_ref().window();
+        let bridge = app.state::<AppState>().hook_bridge.clone();
+        bridge.mark_started();
+        bridge.sync_registry(&serde_json::json!({
+            "hooks": ["message.user.beforeSend"]
+        }));
+        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+        window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
+            let payload: serde_json::Value =
+                serde_json::from_str(event.payload()).expect("hook request payload");
+            let _ = tx.send(payload);
+        });
+        let responder_bridge = bridge.clone();
+        tokio::spawn(async move {
+            let request = rx.recv().expect("hook request must arrive");
+            let request_id = request["requestId"].as_str().unwrap().to_string();
+            let mut event = request["payload"].clone();
+            if let serde_json::Value::Object(ref mut map) = event {
+                map.insert(
+                    "blocks".to_string(),
+                    serde_json::json!([{ "type": "text", "text": "改写后的出站文本" }]),
+                );
+            }
+            responder_bridge
+                .respond(
+                    &request_id,
+                    Ok(serde_json::json!({
+                        "action": "continue",
+                        "event": event,
+                        "executed": 1,
+                        "skipped": 0,
+                    })),
+                )
+                .expect("respond");
+        });
+
+        let context = PromptContext {
+            source: "local:hook-dual".to_string(),
+            profile_id: Some("profile-hook".to_string()),
+            content: "用户原始消息".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        send_prompt_core::<tauri::test::MockRuntime>(
+            app.state::<AppState>().inner(),
+            &runtime,
+            Some(&window),
+            &gateway,
+            &context,
+        )
+        .await
+        .expect("prompt must succeed");
+
+        // wire 证据：fake ACP 收到的 prompt 首块文本 = 改写后文本。
+        let trace = std::fs::read_to_string(&trace_path).expect("read prompt trace");
+        let _ = std::fs::remove_file(&trace_path);
+        let wire_request: serde_json::Value = trace
+            .lines()
+            .next()
+            .map(|line| serde_json::from_str(line).expect("trace line JSON"))
+            .expect("trace must capture session/prompt");
+        assert_eq!(
+            wire_request["params"]["prompt"][0]["text"], "改写后的出站文本",
+            "wire 出站必须携带 hook 改写产物"
+        );
+        // journal 证据：user.message 原文行不被改写（B7 rawPayload/typed 原文）。
+        let owner_key =
+            serde_json::to_string(&["profile-hook", "hook-dual-agent", "local:hook-dual"])
+                .expect("owner key");
+        let page = event_service
+            .list_events(owner_key, None, 100)
+            .await
+            .expect("list canonical rows");
+        let user_row = page
+            .events
+            .iter()
+            .find(|event| event.event_type == "user.message")
+            .expect("journal must contain the user.message row");
+        assert_eq!(
+            user_row
+                .typed_payload
+                .as_ref()
+                .and_then(|payload| payload.get("text")),
+            Some(&serde_json::json!("用户原始消息")),
+            "journal 原文行必须保持用户原文（记原文契约）"
+        );
+        assert!(!trace.contains("用户原始消息"), "wire 不应再出现用户原文");
     }
 }

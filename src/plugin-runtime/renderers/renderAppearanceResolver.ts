@@ -4,6 +4,10 @@ import type {
   RendererSettingsSchema,
 } from './rendererSettingsTypes.ts'
 import { settingFieldKey } from './rendererSettingsTypes.ts'
+import type { RendererSettingOption } from './rendererSettingsTypes.ts'
+import type { RegistryEntry } from '../registry/types.ts'
+import type { PluginSettingOptionsContribution } from '../settings/pluginSettingsTypes.ts'
+import { resolvePluginSettingOptions } from '../settings/pluginSettingOptionsRegistry.ts'
 
 export type RenderAppearanceSource = 'schema-default' | 'host-default' | 'kind-default' | 'profile' | 'user-override' | 'session-preview'
 
@@ -19,7 +23,7 @@ export interface RenderAppearanceResolveInput {
 }
 
 export interface RenderAppearanceDiagnostic {
-  readonly code: 'renderer.setting.invalid' | 'renderer.setting.unavailable'
+  readonly code: 'renderer.setting.invalid' | 'renderer.setting.unavailable' | 'renderer.setting.inheritance'
   readonly key: string
   readonly message: string
   readonly source: RenderAppearanceSource | 'unknown'
@@ -30,6 +34,18 @@ export interface RenderAppearanceResolution {
   readonly sources: Readonly<Record<string, RenderAppearanceSource>>
   readonly unavailable: Readonly<Record<string, RendererSettingValue>>
   readonly diagnostics: readonly RenderAppearanceDiagnostic[]
+}
+
+/** Single option/palette resolver shared by Settings, preview and production. */
+export function resolveFieldOptions(
+  field: RenderSettingField,
+  target: string,
+  entries: readonly RegistryEntry<PluginSettingOptionsContribution>[] = [],
+): readonly RendererSettingOption[] {
+  const base = field.type === 'choice' || field.type === 'multi-choice' ? field.options : []
+  if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return Object.freeze([])
+  const optionTarget = field.type === 'color' ? field.paletteTarget : field.optionTarget
+  return resolvePluginSettingOptions(optionTarget ?? target, base, entries)
 }
 
 function fieldsOf(schema: RendererSettingsSchema): Map<string, RenderSettingField> {
@@ -47,7 +63,11 @@ function validValue(field: RenderSettingField, value: RendererSettingValue, avai
       return (field.minSelected === undefined || value.length >= field.minSelected) && (field.maxSelected === undefined || value.length <= field.maxSelected)
     }
     case 'color':
-      return typeof value === 'string' && value.trim().length > 0
+      if (typeof value !== 'string' || value.trim().length === 0) return false
+      // A picker (or palette+picker) deliberately accepts arbitrary color
+      // values; palette-only fields are constrained to the dynamic palette.
+      if (field.presentation === 'picker' || field.presentation === 'palette+picker') return true
+      return !available || available.length === 0 || available.includes(value)
     case 'number':
       return typeof value === 'number' && Number.isFinite(value) && (field.min === undefined || value >= field.min) && (field.max === undefined || value <= field.max)
     case 'boolean':
@@ -65,6 +85,7 @@ function optionUnavailable(field: RenderSettingField, value: RendererSettingValu
   if (!available) return false
   if (field.type === 'choice') return typeof value === 'string' && !available.includes(value)
   if (field.type === 'multi-choice' && Array.isArray(value)) return value.some(item => typeof item === 'string' && !available.includes(item))
+  if (field.type === 'color' && field.presentation === 'palette') return typeof value === 'string' && !available.includes(value)
   return false
 }
 
@@ -99,6 +120,7 @@ export function resolveRenderAppearance(input: RenderAppearanceResolveInput): Re
             unavailable[key] = value
             diagnostics.push({ code: 'renderer.setting.unavailable', key, message: `设置字段 ${key} 的候选项已卸载，已保留原值`, source })
           } else {
+            unavailable[key] = value
             diagnostics.push({ code: 'renderer.setting.invalid', key, message: `设置字段 ${key} 的 ${source} 值无效，已回退`, source })
           }
         }
@@ -106,6 +128,9 @@ export function resolveRenderAppearance(input: RenderAppearanceResolveInput): Re
       }
       values[key] = value
       sources[key] = source
+      if (field.inheritsFrom && source !== 'schema-default') {
+        diagnostics.push({ code: 'renderer.setting.inheritance', key, message: `设置字段 ${key} 继承自 ${field.inheritsFrom}`, source })
+      }
     }
   }
   return Object.freeze({

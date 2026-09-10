@@ -46,7 +46,13 @@ fn response_string(value: &serde_json::Value) -> Option<String> {
 fn option_identity(option: &serde_json::Value) -> Option<String> {
     let object = option.as_object()?;
     let keys = [
-        "configId", "config_id", "optionId", "option_id", "id", "key", "name",
+        "configId",
+        "config_id",
+        "optionId",
+        "option_id",
+        "id",
+        "key",
+        "name",
     ];
     keys.into_iter().find_map(|wanted| {
         object
@@ -109,8 +115,15 @@ fn option_choices(option: &serde_json::Value) -> Vec<String> {
             return;
         };
         for key in [
-            "options", "choices", "values", "available", "enum", "items", "schema",
-            "optionValues", "option_values",
+            "options",
+            "choices",
+            "values",
+            "available",
+            "enum",
+            "items",
+            "schema",
+            "optionValues",
+            "option_values",
         ] {
             if let Some(nested) = object.get(key) {
                 collect(nested, depth + 1, out);
@@ -150,11 +163,23 @@ pub(crate) fn find_reasoning_option_id(
             None => return 0,
         };
         let mut score = 0;
-        for key in ["configId", "config_id", "optionId", "option_id", "id", "key"] {
+        for key in [
+            "configId",
+            "config_id",
+            "optionId",
+            "option_id",
+            "id",
+            "key",
+        ] {
             if let Some(value) = object.get(key).and_then(response_string) {
                 let token = comparable(&value);
                 if [
-                    "reasoning", "reasoningeffort", "thinking", "thought", "thoughtlevel", "effort",
+                    "reasoning",
+                    "reasoningeffort",
+                    "thinking",
+                    "thought",
+                    "thoughtlevel",
+                    "effort",
                 ]
                 .iter()
                 .any(|marker| token == *marker)
@@ -168,11 +193,23 @@ pub(crate) fn find_reasoning_option_id(
                 }
             }
         }
-        for key in ["category", "name", "label", "title", "description", "semantic"] {
+        for key in [
+            "category",
+            "name",
+            "label",
+            "title",
+            "description",
+            "semantic",
+        ] {
             if let Some(value) = object.get(key).and_then(response_string) {
                 let token = comparable(&value);
                 if [
-                    "reasoning", "reasoningeffort", "thinking", "thought", "thoughtlevel", "effort",
+                    "reasoning",
+                    "reasoningeffort",
+                    "thinking",
+                    "thought",
+                    "thoughtlevel",
+                    "effort",
                 ]
                 .iter()
                 .any(|marker| token == *marker)
@@ -202,35 +239,42 @@ pub(crate) fn find_reasoning_option_id(
         .iter()
         .enumerate()
         .filter_map(|(index, option)| {
-        let object = option.as_object()?;
-        let semantic = option_text(option);
-        let semantic_match = [
-            "reason", "reasoning", "think", "thinking", "thought", "effort", "推理", "思考",
-        ]
-        .iter()
-        .any(|marker| semantic.contains(marker));
-        let rank = score(option);
-        if !semantic_match && rank <= 0 {
-            return None;
-        }
-        let read_only = ["readOnly", "readonly", "read_only"]
-            .into_iter()
-            .any(|key| object.get(key).and_then(serde_json::Value::as_bool) == Some(true))
-            || object.get("editable").and_then(serde_json::Value::as_bool) == Some(false);
-        if read_only {
-            return None;
-        }
-        let id = option_identity(option)?;
-        let choices = option_choices(option);
-        if !choices.is_empty()
-            && !choices.iter().any(|choice| {
-                comparable(choice) == comparable(requested)
-            })
-        {
-            return None;
-        }
-        Some((rank.max(1), index, id))
-    })
+            let object = option.as_object()?;
+            let semantic = option_text(option);
+            let semantic_match = [
+                "reason",
+                "reasoning",
+                "think",
+                "thinking",
+                "thought",
+                "effort",
+                "推理",
+                "思考",
+            ]
+            .iter()
+            .any(|marker| semantic.contains(marker));
+            let rank = score(option);
+            if !semantic_match && rank <= 0 {
+                return None;
+            }
+            let read_only = ["readOnly", "readonly", "read_only"]
+                .into_iter()
+                .any(|key| object.get(key).and_then(serde_json::Value::as_bool) == Some(true))
+                || object.get("editable").and_then(serde_json::Value::as_bool) == Some(false);
+            if read_only {
+                return None;
+            }
+            let id = option_identity(option)?;
+            let choices = option_choices(option);
+            if !choices.is_empty()
+                && !choices
+                    .iter()
+                    .any(|choice| comparable(choice) == comparable(requested))
+            {
+                return None;
+            }
+            Some((rank.max(1), index, id))
+        })
         .collect();
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
     candidates.into_iter().next().map(|(_, _, id)| id)
@@ -271,7 +315,10 @@ fn set_response_current(response: &mut serde_json::Value, section: &str, key: &s
         .entry(section.to_string())
         .or_insert_with(|| serde_json::json!({}));
     if let Some(section_object) = section_value.as_object_mut() {
-        section_object.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+        section_object.insert(
+            key.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
     }
 }
 
@@ -285,8 +332,8 @@ fn set_config_option_current(response: &mut serde_json::Value, key: &str, value:
         return;
     };
     for option in options {
-        let matches = option_identity(option)
-            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(key));
+        let matches =
+            option_identity(option).is_some_and(|candidate| candidate.eq_ignore_ascii_case(key));
         if matches {
             if let Some(object) = option.as_object_mut() {
                 object.insert(
@@ -322,14 +369,83 @@ fn merge_config_setting_response(
     set_config_option_current(response, option_key, value);
 }
 
-fn advertised_config_option_id(response: &serde_json::Value, semantic: &str) -> Option<String> {
-    let options = response
-        .get("configOptions")
-        .or_else(|| response.get("config_options"))
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    super::find_config_option(options, semantic).and_then(option_identity)
+/// P56/D1：初值 model 下发计划（纯函数便于测试；执行侧见 apply_initial_session_options）。
+#[derive(Debug)]
+pub(crate) enum InitialModelAction {
+    /// 走 session/set_config_option（configId 用宣告值，D1.5）。
+    SendConfigOption { config_id: String },
+    /// 走 session/set_model（hermes unstable 通道，原样回发宣告 id）。
+    SendSetModel,
+    /// 跳过下发（未宣告模型面 / 目标不在宣告列表），不阻断建会话（D1.4）。
+    Skip { code: &'static str, message: String },
+}
+
+/// P56/D1.3/D1.4：初值 model 计划——显式 `set_model_api` 声明优先（现状通道语义；
+/// Disabled 声明保留现状硬错），未声明按响应判定的 model_surface 路由；两条通道
+/// 统一施加发送校验：目标 ∉ 宣告 choices（或无宣告面）→ Skip（warn 上报
+/// `model_not_advertised`），不再把裸 id 发上 wire。
+fn plan_initial_model(
+    response: &serde_json::Value,
+    model: &str,
+    declared: Option<crate::agent_config::SetModelApi>,
+) -> Result<InitialModelAction, PylonError> {
+    use crate::agent_config::ModelSwitchTarget;
+    let info = super::determine_model_surface(
+        response
+            .get("configOptions")
+            .or_else(|| response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+        response.get("models"),
+    );
+    let validate = |action: InitialModelAction| -> InitialModelAction {
+        if info.choices.is_empty() || info.choices.iter().any(|choice| choice == model) {
+            action
+        } else {
+            InitialModelAction::Skip {
+                code: "model_not_advertised",
+                message: format!(
+                    "Initial model {model:?} is not advertised by the ACP agent; skipped (advertised: [{}])",
+                    info.choices.join(", ")
+                ),
+            }
+        }
+    };
+    if let Some(api) = declared {
+        // 显式声明（现状行为，兼容优先）：Disabled 保留硬错；ConfigOption 声明在
+        // 选项未宣告时不再断会话（D1.4：初值路径跳过下发）。
+        return match api.route("model") {
+            ModelSwitchTarget::SetModel => Ok(validate(InitialModelAction::SendSetModel)),
+            ModelSwitchTarget::Disabled => Err(PylonError::Protocol(
+                "model switching disabled by agent configuration".to_string(),
+            )),
+            ModelSwitchTarget::ConfigOption => match info.surface {
+                super::ModelSurface::ConfigOption { config_id } => {
+                    Ok(validate(InitialModelAction::SendConfigOption { config_id }))
+                }
+                _ => Ok(InitialModelAction::Skip {
+                    code: "model_not_advertised",
+                    message: format!(
+                        "Initial model {model:?} skipped: model config option is not advertised by the ACP agent"
+                    ),
+                }),
+            },
+        };
+    }
+    // 未声明 → 按响应形状自适应路由。
+    match info.surface {
+        super::ModelSurface::ConfigOption { config_id } => {
+            Ok(validate(InitialModelAction::SendConfigOption { config_id }))
+        }
+        super::ModelSurface::ModelsState => Ok(validate(InitialModelAction::SendSetModel)),
+        super::ModelSurface::None => Ok(InitialModelAction::Skip {
+            code: "model_not_advertised",
+            message: format!(
+                "Initial model {model:?} skipped: the ACP agent advertises no model surface"
+            ),
+        }),
+    }
 }
 
 /// Apply the optional values selected in the empty-state control center.  The
@@ -347,69 +463,99 @@ async fn apply_initial_session_options(
     initial_reasoning: Option<&str>,
     initial_mode: Option<&str>,
 ) -> Result<(), PylonError> {
-    if let Some(model) = initial_model.map(str::trim).filter(|value| !value.is_empty()) {
-        let target = state
-            .protocol_for_runtime(runtime)
-            .set_model_api()
-            .route("model");
-        let (method, params) = match target {
-            crate::agent_config::ModelSwitchTarget::SetModel => (
-                acp::METHOD_SESSION_SET_MODEL,
-                acp::session_set_model_params(peri_id, model).map_err(PylonError::Protocol)?,
-            ),
-            crate::agent_config::ModelSwitchTarget::ConfigOption => {
-                let config_id = advertised_config_option_id(response, "model").ok_or_else(|| {
-                    PylonError::Protocol(
-                        "model config option is not advertised by the ACP agent".to_string(),
-                    )
-                })?;
-                (
-                    acp::METHOD_SESSION_SET_CONFIG_OPTION,
-                    acp::session_set_config_option_params(
-                        peri_id,
-                        &config_id,
-                        &serde_json::Value::String(model.to_string()),
-                    )
-                    .map_err(PylonError::Protocol)?,
-                )
-            },
-            crate::agent_config::ModelSwitchTarget::Disabled => {
-                return Err(PylonError::Protocol(
-                    "model switching disabled by agent configuration".to_string(),
-                ));
+    if let Some(model) = initial_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // P56/D1.3：显式 set_model_api 声明优先（含 legacy 布尔迁移与 catalog 默认
+        // ——load.rs parse() 合并结果，agent.acp.set_model_api 为 Some 即声明态）；
+        // 未声明按响应判定的 model_surface 路由。
+        let declared = state
+            .agent_for_runtime(runtime)
+            .and_then(|agent| agent.acp)
+            .and_then(|acp| acp.set_model_api);
+        // P56/D1.4：目标 ∉ 宣告 choices（或无宣告面）→ 跳过下发 + warn（code=
+        // model_not_advertised），不抛断会话（复用 reasoning_not_advertised 先例形状）。
+        match plan_initial_model(response, model, declared)? {
+            InitialModelAction::Skip { code, message } => {
+                tracing::warn!(source = source, requested = model, "{message}");
+                state.log_runtime_summary(
+                    "warn",
+                    "session",
+                    Some(source.to_string()),
+                    &message,
+                    serde_json::Map::from_iter([
+                        (
+                            "requested".to_string(),
+                            serde_json::Value::String(model.to_string()),
+                        ),
+                        (
+                            "code".to_string(),
+                            serde_json::Value::String(code.to_string()),
+                        ),
+                    ]),
+                );
             }
-        };
-        let setting_response = state
-            .acp_rpc_generation_checked(runtime, method, params, generation)
-            .await
-            .map_err(PylonError::from)?;
-        state
-            .ensure_generation(runtime, generation)
-            .map_err(PylonError::Protocol)?;
-        let model_option_key = if target == crate::agent_config::ModelSwitchTarget::ConfigOption {
-            advertised_config_option_id(response, "model").unwrap_or_else(|| "model".to_string())
-        } else {
-            "model".to_string()
-        };
-        merge_setting_response(
-            response,
-            setting_response,
-            "models",
-            "currentModelId",
-            &model_option_key,
-            model,
-        );
+            InitialModelAction::SendSetModel => {
+                let setting_response = state
+                    .acp_rpc_generation_checked(
+                        runtime,
+                        acp::METHOD_SESSION_SET_MODEL,
+                        acp::session_set_model_params(peri_id, model)
+                            .map_err(PylonError::Protocol)?,
+                        generation,
+                    )
+                    .await
+                    .map_err(PylonError::from)?;
+                state
+                    .ensure_generation(runtime, generation)
+                    .map_err(PylonError::Protocol)?;
+                merge_setting_response(
+                    response,
+                    setting_response,
+                    "models",
+                    "currentModelId",
+                    "model",
+                    model,
+                );
+            }
+            InitialModelAction::SendConfigOption { config_id } => {
+                let setting_response = state
+                    .acp_rpc_generation_checked(
+                        runtime,
+                        acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                        acp::session_set_config_option_params(
+                            peri_id,
+                            &config_id,
+                            &serde_json::Value::String(model.to_string()),
+                        )
+                        .map_err(PylonError::Protocol)?,
+                        generation,
+                    )
+                    .await
+                    .map_err(PylonError::from)?;
+                state
+                    .ensure_generation(runtime, generation)
+                    .map_err(PylonError::Protocol)?;
+                merge_setting_response(
+                    response,
+                    setting_response,
+                    "models",
+                    "currentModelId",
+                    &config_id,
+                    model,
+                );
+            }
+        }
     }
 
-    if let Some(mode) = initial_mode.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(mode) = initial_mode
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         let params = acp::session_set_mode_params(peri_id, mode).map_err(PylonError::Protocol)?;
         let setting_response = state
-            .acp_rpc_generation_checked(
-                runtime,
-                acp::METHOD_SESSION_SET_MODE,
-                params,
-                generation,
-            )
+            .acp_rpc_generation_checked(runtime, acp::METHOD_SESSION_SET_MODE, params, generation)
             .await
             .map_err(PylonError::from)?;
         state
@@ -425,7 +571,10 @@ async fn apply_initial_session_options(
         );
     }
 
-    if let Some(reasoning) = initial_reasoning.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(reasoning) = initial_reasoning
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         let options = response
             .get("configOptions")
             .or_else(|| response.get("config_options"))
@@ -451,12 +600,7 @@ async fn apply_initial_session_options(
             state
                 .ensure_generation(runtime, generation)
                 .map_err(PylonError::Protocol)?;
-            merge_config_setting_response(
-                response,
-                setting_response,
-                &option_id,
-                reasoning,
-            );
+            merge_config_setting_response(response, setting_response, &option_id, reasoning);
         } else {
             // Hermes currently exposes permission modes and model state, but
             // no ACP reasoning/thinking option.  Do not send a made-up config
@@ -472,8 +616,14 @@ async fn apply_initial_session_options(
                 Some(source.to_string()),
                 "Initial reasoning level was not advertised by the ACP agent; skipped",
                 serde_json::Map::from_iter([
-                    ("requested".to_string(), serde_json::Value::String(reasoning.to_string())),
-                    ("code".to_string(), serde_json::Value::String("reasoning_not_advertised".to_string())),
+                    (
+                        "requested".to_string(),
+                        serde_json::Value::String(reasoning.to_string()),
+                    ),
+                    (
+                        "code".to_string(),
+                        serde_json::Value::String("reasoning_not_advertised".to_string()),
+                    ),
                 ]),
             );
         }
@@ -593,9 +743,12 @@ async fn create_session_slot(
     })
 }
 
-/// G2-04：会话建立/复用——已有映射则复用（返回 is_first = !has_first_prompt），
-/// 否则走 create_session_slot（E7 拍板：自动建会话覆盖旧映射时 close 旧 peri，
-/// close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的幽灵映射）。
+/// G2-04：会话建立/复用——已有映射则复用（返回 is_first = !has_first_prompt）；
+/// 内存无映射但调用方带持久化 peri_id 时，先尝试 ACP 原生 session/load 复活
+/// 远端会话（用户决策：避免每次发送都新建导致 provider 会话列表臃肿、上下文
+/// 丢失）；复活失败才走 create_session_slot（E7 拍板：自动建会话覆盖旧映射时
+/// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
+/// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
 pub(crate) async fn ensure_session_mapping(
     state: &AppState,
@@ -605,6 +758,8 @@ pub(crate) async fn ensure_session_mapping(
     persona: &str,
     session_cwd: &str,
     wire_mcp_servers: &[serde_json::Value],
+    known_peri_id: Option<&str>,
+    recreated_peri_id: &mut Option<String>,
 ) -> Result<SessionMapping, PylonError> {
     let _creation_guard = runtime.session_creation.lock().await;
     if let Some(health) = runtime
@@ -646,7 +801,25 @@ pub(crate) async fn ensure_session_mapping(
             new_response: None,
         });
     }
-    create_session_slot(
+    // 内存无映射（Pylon 重启 / agent 重启清空）：优先用持久化 peri_id 走 ACP
+    // 原生 session/load 复活远端会话。复活成功则本消息续用原会话上下文，
+    // provider 会话列表不再因每次重启膨胀。
+    if let Some(peri_id) = known_peri_id.filter(|id| !id.is_empty()) {
+        if let Some(mapping) = revive_session_slot(
+            state,
+            runtime,
+            source,
+            peri_id,
+            profile_id,
+            session_cwd,
+            wire_mcp_servers,
+        )
+        .await?
+        {
+            return Ok(mapping);
+        }
+    }
+    let mapping = create_session_slot(
         state,
         runtime,
         source,
@@ -660,7 +833,186 @@ pub(crate) async fn ensure_session_mapping(
         None,
         true,
     )
-    .await
+    .await?;
+    // 上下文已断（远端会话死亡，本轮起是新会话）：前端需要知道新 peri_id
+    // 才能持久化并让后续 load 复活这条新会话。
+    *recreated_peri_id = Some(mapping.peri_id.clone());
+    Ok(mapping)
+}
+
+/// ACP 原生会话复活：session/load（普通 RPC，无 replay capture——历史由本地
+/// canonical journal 呈现，无需重放）成功后重建本地槽位并 Attached。
+/// 返回 Ok(None) = 复活不可行/失败，调用方降级新建；不返回 Err（错误留给
+/// 新建路径统一报告，避免双重报错）。
+async fn revive_session_slot(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    profile_id: Option<&str>,
+    session_cwd: &str,
+    wire_mcp_servers: &[serde_json::Value],
+) -> Result<Option<SessionMapping>, PylonError> {
+    let generation = state.current_generation(runtime);
+    let params = crate::acp::load_params(
+        peri_id,
+        session_cwd,
+        wire_mcp_servers.to_vec(),
+        state.protocol_for_runtime(runtime).mcp_servers,
+    )
+    .map_err(PylonError::Protocol)?;
+    let resume_advertised = runtime
+        .acp
+        .lock()
+        .await
+        .capabilities()
+        .supports_object(&["sessionCapabilities", "resume"]);
+    let response = if resume_advertised {
+        let resume_params =
+            crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
+        match state
+            .acp_rpc_generation_checked(
+                runtime,
+                crate::acp::METHOD_SESSION_RESUME,
+                resume_params,
+                generation,
+            )
+            .await
+        {
+            Ok(response) => {
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "resume",
+                    result = "success",
+                    response_boundary = "observed",
+                    canonical_import = "none",
+                    "session/resume recovery attempt"
+                );
+                Some(response)
+            }
+            Err(error) => {
+                state.ensure_generation(runtime, generation)?;
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "resume",
+                    result = "fallback",
+                    failure_class = ?error.resume_failure_class(),
+                    response_boundary = "error",
+                    "session/resume recovery attempt"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let response = match response {
+        Some(response) => response,
+        None => {
+            let load_result = state
+                .acp_rpc_generation_checked(
+                    runtime,
+                    crate::acp::METHOD_SESSION_LOAD,
+                    params,
+                    generation,
+                )
+                .await;
+            state.ensure_generation(runtime, generation)?;
+            if let Ok(response) = load_result {
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "load",
+                    result = "success",
+                    response_boundary = "observed",
+                    canonical_import = "none",
+                    "session/load recovery attempt"
+                );
+                response
+            } else {
+                tracing::info!(
+                    target: "replay_trace",
+                    owner = source,
+                    runtime_generation = generation,
+                    recovery_method = "new",
+                    result = "fallback",
+                    response_boundary = "not-observed",
+                    canonical_import = "none",
+                    "session/new recovery fallback"
+                );
+                let error = "session resume/load failed";
+                state.log_runtime_summary(
+                    "info",
+                    "session",
+                    Some(source.to_string()),
+                    "Session revive via session/load failed; falling back to session/new",
+                    serde_json::Map::from_iter([
+                        (
+                            "periId".to_string(),
+                            serde_json::Value::String(peri_id.to_string()),
+                        ),
+                        (
+                            "error".to_string(),
+                            serde_json::Value::String(error.to_string()),
+                        ),
+                    ]),
+                );
+                return Ok(None);
+            }
+        }
+    };
+    state.ensure_generation(runtime, generation)?;
+    let revived_peri_id =
+        crate::acp::session_id_from(&response).unwrap_or_else(|_| peri_id.to_string());
+    let mut session = SessionInfo::new(
+        revived_peri_id.clone(),
+        String::new(),
+        session_cwd.to_string(),
+        false,
+        generation,
+    );
+    session.profile_id = profile_id.map(str::to_string);
+    session.apply_session_response(&response);
+    let _replaced = replace_session_slot(
+        runtime,
+        source,
+        session,
+        true,
+        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+    )?;
+    let attached = crate::session_store::mark_attached_if_current(
+        runtime,
+        source,
+        &revived_peri_id,
+        generation,
+        generation,
+    )
+    .map_err(|error| PylonError::Protocol(error.to_string()))?;
+    if !attached {
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
+    }
+    state.log_runtime_summary(
+        "info",
+        "session",
+        Some(source.to_string()),
+        "Session revived via ACP session/load",
+        serde_json::Map::from_iter([(
+            "periId".to_string(),
+            serde_json::Value::String(revived_peri_id.clone()),
+        )]),
+    );
+    Ok(Some(SessionMapping {
+        peri_id: revived_peri_id,
+        is_first: false,
+        new_response: None,
+    }))
 }
 
 /// G2-02：load_persisted_session 失败恢复去重——锁 sessions → 复核映射
@@ -858,7 +1210,120 @@ mod initial_option_tests {
         );
         assert_eq!(response["models"]["currentModelId"], "openrouter:new");
         assert_eq!(response["modes"]["currentModeId"], "accept_edits");
-        assert_eq!(response["models"]["availableModels"][0]["modelId"], "openrouter:old");
-        assert_eq!(response["configOptions"][0]["currentValue"], "openrouter:new");
+        assert_eq!(
+            response["models"]["availableModels"][0]["modelId"],
+            "openrouter:old"
+        );
+        assert_eq!(
+            response["configOptions"][0]["currentValue"],
+            "openrouter:new"
+        );
+    }
+
+    // ── P56/D1.4：初值 model 下发校验（非宣告值跳过）──
+
+    #[test]
+    fn initial_model_plan_skips_values_outside_advertised_choices() {
+        // hermes 形态 fixture：宣告 choices=[nous:hermes-4]，profile.model=deepseek-v4-pro
+        // → 跳过下发（验收 2），code=model_not_advertised。
+        let response = json!({
+            "sessionId": "session-1",
+            "models": {
+                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
+                "currentModelId": "nous:hermes-4"
+            }
+        });
+        let action = plan_initial_model(&response, "deepseek-v4-pro", None).unwrap();
+        match action {
+            InitialModelAction::Skip { code, message } => {
+                assert_eq!(code, "model_not_advertised");
+                assert!(message.contains("nous:hermes-4"), "{message}");
+            }
+            other => panic!("expected Skip, got {other:?}"),
+        }
+        // 宣告列表内的值照常下发 set_model（现状行为回归保护）。
+        assert!(matches!(
+            plan_initial_model(&response, "nous:hermes-4", None).unwrap(),
+            InitialModelAction::SendSetModel
+        ));
+        // 未宣告任何模型面 → 直接跳过，不断会话。
+        let bare = json!({"sessionId": "session-1"});
+        assert!(matches!(
+            plan_initial_model(&bare, "deepseek-v4-pro", None).unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn initial_model_plan_routes_standard_config_option_channel() {
+        // 标准 ACP 形态：category=="model" 选项的宣告 configId 胜出（干扰选项不得
+        // 胜出，验收 3）；列表内的值走 set_config_option（宣告 configId）。
+        let response = json!({
+            "sessionId": "session-1",
+            "configOptions": [
+                {
+                    "id": "reasoning-effort",
+                    "description": "Reasoning effort for the model",
+                    "options": [{"valueId": "low"}],
+                    "currentValue": "low"
+                },
+                {
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-1", "name": "Model One"}],
+                    "currentValue": "m-1"
+                }
+            ]
+        });
+        match plan_initial_model(&response, "m-1", None).unwrap() {
+            InitialModelAction::SendConfigOption { config_id } => {
+                assert_eq!(config_id, "model-selection");
+            }
+            other => panic!("expected SendConfigOption, got {other:?}"),
+        }
+        // 非宣告值跳过（两通道校验一致）。
+        assert!(matches!(
+            plan_initial_model(&response, "bare-model-x", None).unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn initial_model_plan_keeps_explicit_declaration_semantics() {
+        // 显式 set_model_api: true 声明：未宣告列表时照常下发（现状兼容，验收 8）。
+        let bare = json!({"sessionId": "session-1"});
+        assert!(matches!(
+            plan_initial_model(
+                &bare,
+                "anything",
+                Some(crate::agent_config::SetModelApi::SetModel)
+            )
+            .unwrap(),
+            InitialModelAction::SendSetModel
+        ));
+        // 显式声明 + 有宣告列表：同样施加发送校验（通用不变量）。
+        let response = json!({
+            "sessionId": "session-1",
+            "models": {
+                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
+                "currentModelId": "nous:hermes-4"
+            }
+        });
+        assert!(matches!(
+            plan_initial_model(
+                &response,
+                "deepseek-v4-pro",
+                Some(crate::agent_config::SetModelApi::SetModel)
+            )
+            .unwrap(),
+            InitialModelAction::Skip { .. }
+        ));
+        // 显式 none 声明：保留现状硬错。
+        assert!(plan_initial_model(
+            &bare,
+            "anything",
+            Some(crate::agent_config::SetModelApi::None)
+        )
+        .is_err());
     }
 }

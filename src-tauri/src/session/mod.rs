@@ -79,6 +79,8 @@ mod del03_local_first_delete;
 // 的 {code,message} 稳定序列化 + 删除后迟到 evt_append wire code=event_session_deleted）。
 #[cfg(test)]
 mod del05_error_code_matrix;
+#[cfg(test)]
+mod revive_tests;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
@@ -405,7 +407,9 @@ impl AppState {
                             Ok(payload) => {
                                 emit_event(&window, crate::event_names::RUNTIME_LOG, payload)
                             }
-                            Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
+                            Err(error) => {
+                                tracing::warn!("serialize runtime log event failed: {error}")
+                            }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
@@ -945,6 +949,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:999".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -966,6 +971,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:123".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -998,6 +1004,7 @@ gateway:
             &PromptContext {
                 source: "qq:group:999".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1111,6 +1118,7 @@ for line in sys.stdin:
             attachments: Some(attachments),
             mcp_servers: None,
             cwd: None,
+            known_peri_id: None,
         };
         let result =
             send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &ctx)
@@ -1348,7 +1356,7 @@ for line in sys.stdin:
             'sessionId':'p28-session',
             'models':{
                 'currentModelId':'provider:old',
-                'availableModels':[{'modelId':'provider:old','name':'Old'}]
+                'availableModels':[{'modelId':'provider:old','name':'Old'},{'modelId':'provider:new','name':'New'}]
             },
             'modes':{
                 'currentModeId':'default',
@@ -1421,7 +1429,9 @@ for line in sys.stdin:
         assert_eq!(
             response["configOptions"]
                 .as_array()
-                .and_then(|options| options.iter().find(|option| option["id"] == "reasoning_effort"))
+                .and_then(|options| options
+                    .iter()
+                    .find(|option| option["id"] == "reasoning_effort"))
                 .and_then(|option| option.get("currentValue")),
             Some(&serde_json::json!("high"))
         );
@@ -1463,8 +1473,10 @@ for line in sys.stdin:
             .iter()
             .position(|method| *method == "session/set_config_option")
             .expect("reasoning config option must be sent");
-        assert!(new_index < model_index && model_index < mode_index && mode_index < reasoning_index,
-            "initial setting wire order must be new → model → mode → reasoning: {methods:?}");
+        assert!(
+            new_index < model_index && model_index < mode_index && mode_index < reasoning_index,
+            "initial setting wire order must be new → model → mode → reasoning: {methods:?}"
+        );
         let model_request = &requests[model_index];
         assert_eq!(model_request["params"]["sessionId"], "p28-session");
         assert_eq!(model_request["params"]["modelId"], "provider:new");
@@ -1717,10 +1729,20 @@ for line in sys.stdin:
         );
         let state = state_without_active_runtime();
 
-        let error = ensure_session_mapping(&state, &runtime, "source-a", None, "persona", ".", &[])
-            .await
-            .err()
-            .expect("probing binding must not be reused by any backend caller");
+        let error = ensure_session_mapping(
+            &state,
+            &runtime,
+            "source-a",
+            None,
+            "persona",
+            ".",
+            &[],
+            None,
+            &mut None,
+        )
+        .await
+        .err()
+        .expect("probing binding must not be reused by any backend caller");
 
         assert_eq!(error.code(), "session_binding_unavailable");
         assert!(runtime.sessions.lock().unwrap().contains_key("source-a"));
@@ -1759,6 +1781,7 @@ for line in sys.stdin:
             &PromptContext {
                 source: "i1-source".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1799,7 +1822,11 @@ for line in sys.stdin:
 "#;
         let mut agent = crate::test_utils::fake_acp_agent("i2-hang-agent", HANG_SCRIPT);
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
-            prompt_timeout_secs: Some(1),
+            // The configured prompt budget is intentionally much larger than
+            // the first-token bound.  The surfaced error must name the bound
+            // that actually fired, not blindly echo prompt_timeout_secs.
+            prompt_timeout_secs: Some(180),
+            first_token_timeout_secs: Some(1),
             cancel_settle_timeout_secs: Some(1),
             ..Default::default()
         });
@@ -1822,6 +1849,7 @@ for line in sys.stdin:
             &PromptContext {
                 source: "i2-source".to_string(),
                 content: "你好".to_string(),
+                known_peri_id: None,
                 ..Default::default()
             },
         )
@@ -1829,7 +1857,7 @@ for line in sys.stdin:
         .expect_err("prompt 挂起必须超时");
         assert!(
             error.to_string().contains("timed out after 1s"),
-            "超时文案必须参数化，实际: {error}"
+            "超时文案必须使用真正触发的 first-token 边界，而非 180s prompt 预算，实际: {error}"
         );
         assert!(
             start.elapsed().as_secs() < 10,
@@ -1854,6 +1882,28 @@ for line in sys.stdin:
         assert!(timeout_entry.fields.contains_key("requestId"));
         assert!(timeout_entry.fields.contains_key("sessionId"));
         assert!(timeout_entry.fields.contains_key("agentId"));
+        assert_eq!(
+            timeout_entry
+                .fields
+                .get("timeoutKind")
+                .and_then(|v| v.as_str()),
+            Some("first-token")
+        );
+        assert_eq!(
+            timeout_entry
+                .fields
+                .get("timeoutBoundSecs")
+                .and_then(|v| v.as_u64()),
+            Some(1)
+        );
+        assert!(
+            timeout_entry
+                .fields
+                .get("actualElapsedMs")
+                .and_then(|v| v.as_u64())
+                .is_some_and(|value| value >= 1_000),
+            "必须记录实际单调等待时长"
+        );
     }
 
     /// R-t5 回归（Bug 1）：agent 持续流式产出（agent_message_chunk）但迟迟不返回终态
@@ -1905,6 +1955,7 @@ for line in sys.stdin:
         let prompt_ctx = PromptContext {
             source: "s2-source".to_string(),
             content: "hello".to_string(),
+            known_peri_id: None,
             ..Default::default()
         };
 

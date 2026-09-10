@@ -1,5 +1,5 @@
 import type { ThemeSettings } from './store'
-import { THEME_SETTING_KEYS } from './themeFieldDefs.ts'
+import { THEME_PRESET_KEYS } from './themeFieldDefs.ts'
 import { adaptLegacyThemePreset, normalizePresetBundle, type PresetBundleV2, type PresetJsonValue } from './domains/theme/presetBundle.ts'
 
 export interface CustomPreset {
@@ -13,7 +13,7 @@ export interface CustomPreset {
 }
 
 // 白名单由 themeFields.ts 单一真值表生成（各 zone 字段并集）；本文件仅消费。
-const THEME_SETTINGS_KEY_SET = new Set<string>(THEME_SETTING_KEYS)
+const THEME_SETTINGS_KEY_SET = new Set<string>(THEME_PRESET_KEYS)
 
 const generatedCustomPresetIds = new Set<string>()
 

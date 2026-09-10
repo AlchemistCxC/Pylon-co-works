@@ -163,4 +163,21 @@ export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribu
     kindTokens: FOCUS_FLOW_KIND_TOKENS,
     assets: { assistantGlyph: '•', runningGlyph: '›', completedGlyph: '✓', failedGlyph: '!' },
   },
+  {
+    id: 'builtin.presentation.tactical-blue',
+    label: '蓝调战术 · 夜航',
+    description: '明日方舟与 P3R 视觉语言启发的原创工作台：清晰正文、战术工具卡与蓝色焦点。',
+    family: 'gui', interfaceMode: 'tactical-blue', order: 90,
+    tokens: {
+      ...EXECUTION_SURFACE_TOKENS,
+      msgLineHeight: 1.65, messageRadius: 3, inputRadius: 3,
+      messageUserBg: 'rgba(32,112,255,0.15)', messageAssistantBg: 'rgba(12,23,42,0.8)',
+      messageReasoningBg: 'rgba(73,212,245,0.06)', messageBorderColor: 'rgba(130,185,235,0.25)',
+      inputBg: 'rgba(8,19,37,0.94)', inputBorderColor: 'rgba(119,172,230,0.45)',
+      inputFocusBorder: '#63ddff',
+      assistantDotGlyph: '◆', toolIndicator: '◆', toolIndicatorGlow: 0,
+      toolConnectorStyle: 'solid', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
+    },
+    assets: { assistantGlyph: '◆', runningGlyph: '▶', completedGlyph: '✓', failedGlyph: '!' },
+  },
 ])

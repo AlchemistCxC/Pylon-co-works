@@ -3,9 +3,7 @@ import ReactDOM from 'react-dom/client'
 import KernelRoot from './kernel/KernelRoot'
 import { bindSkinPersistence, restoreSkinFromStorage } from './infrastructure/skin/skinRuntimeServices'
 import { installPylonCliBridge } from './cli/pylonCliBridge'
-// 内置终端等宽字体（西文），确保不依赖宿主机是否装 Cascadia Code
-import '@fontsource/jetbrains-mono/400.css'
-import '@fontsource/jetbrains-mono/700.css'
+import { installPylonHookBridge } from './infrastructure/hooks/hookBridgeDispatcher'
 import './index.css'
 // 浏览器模式假 Tauri 后端（静态演示全景）。必须在 env.ts（IS_TAURI）求值之后安装：
 // 本文件静态 import 已全部求值（App → env.ts 已冻结 IS_TAURI=false），此刻装 globals 安全。
@@ -52,6 +50,8 @@ const skinRestoreError = restoreSkinFromStorage()
 if (skinRestoreError) console.warn('pylon-skins 恢复失败', skinRestoreError)
 bindSkinPersistence()
 void installPylonCliBridge().catch(error => console.error('Pylon CLI bridge failed to start', error))
+// P55-D1：kernel hook 桥 dispatcher（Rust 锚点 → 插件 handler 应答回路）。
+void installPylonHookBridge().catch(error => console.error('Pylon hook bridge failed to start', error))
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -12,7 +12,7 @@ import { createSolidWorkbenchServicesFromHostPort } from '../hostPortSolidServic
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
-    sessionId: 's1', status: 'ready', messages: [], streamingText: '', streamingThinking: '', generating: false,
+    sessionId: 's1', status: 'ready', messages: [], generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '',
     availableModes: [], activeMode: '', canAttach: true, promptImage: false, error: null,
   })
@@ -58,6 +58,85 @@ describe('WorkbenchHostPort', () => {
     source.destroy()
   })
 
+  it('re-reads split document/generation readers until one revision pair converges', () => {
+    const source = runtime()
+    source.replaceDocument({
+      ...source.getSnapshot().document!,
+      revision: 2,
+      session: { ...source.getSnapshot().document!.session, status: 'completed' },
+    }, { ownerKey: 'owner-a', generation: 1 })
+    const base = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    let documentReads = 0
+    let generationReads = 0
+    const splitHost = {
+      ...base,
+      document: {
+        ...base.document,
+        getSnapshot: () => {
+          documentReads += 1
+          return documentReads === 1 ? { ...source.getSnapshot().document!, revision: 1 } : source.getSnapshot().document
+        },
+      },
+      generation: {
+        ...base.generation,
+        getSnapshot: () => {
+          generationReads += 1
+          return { ...base.generation.getSnapshot(), revision: 2, generating: true }
+        },
+      },
+    } as typeof base
+    const combined = createSolidWorkbenchServicesFromHostPort(splitHost).runtime.getSnapshot()
+    expect(combined.revision).toBe(2)
+    expect(combined.generating).toBe(false)
+    expect(documentReads).toBeGreaterThan(1)
+    expect(generationReads).toBeGreaterThan(1)
+    source.destroy()
+  })
+
+  it('P57 S2-R2：同一 document 下 messages 逐元素复用；读取仍每次执行', () => {
+    const source = runtime()
+    const host = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    const services = createSolidWorkbenchServicesFromHostPort(host).runtime
+    const messageA: WorkbenchMessage = {
+      id: 'a', segmentId: 'a', role: 'assistant', content: 'one', parts: [], identity: {},
+      source: { provider: 'test', sourceId: 'a' }, sequence: 1, running: false, time: '2026-01-01T00:00:00.000Z',
+    }
+    const messageB: WorkbenchMessage = {
+      id: 'b', segmentId: 'b', role: 'assistant', content: 'two', parts: [], identity: {},
+      source: { provider: 'test', sourceId: 'b' }, sequence: 2, running: false, time: '2026-01-01T00:00:01.000Z',
+    }
+    source.replaceDocument({ ...source.getSnapshot().document!, messages: [messageA, messageB] }, { ownerKey: 'owner-a', generation: 1 })
+
+    // 同一 document 引用下的重复 getSnapshot：读取照常执行，派生数组与元素复用。
+    const first = services.getSnapshot()
+    const second = services.getSnapshot()
+    expect(second.messages).toBe(first.messages)
+    expect(second.messages[0]).toBe(first.messages[0])
+    expect(second.messages[1]).toBe(first.messages[1])
+
+    // 单元素内容变化：派生数组换新、内容更新（单槽 memo 未命中即全量重建）。
+    const frozenDocument = source.getSnapshot().document!
+    const [frozenA, frozenB] = frozenDocument.messages
+    source.replaceDocument({
+      ...frozenDocument,
+      messages: [frozenA, { ...frozenB, content: 'two updated' }],
+    }, { ownerKey: 'owner-a', generation: 1 })
+    const third = services.getSnapshot()
+    expect(third.messages).not.toBe(first.messages)
+    expect(third.messages[1]?.content).toBe('two updated')
+    source.destroy()
+  })
+
   it('exposes an immutable document reader and slice subscriptions', () => {
     const source = runtime()
     const host = createWorkbenchHostPort({
@@ -72,7 +151,7 @@ describe('WorkbenchHostPort', () => {
     expect(Object.isFrozen(before)).toBe(true)
     const changed = vi.fn()
     const unsubscribe = host.document.subscribeSlice('messages', changed)
-    source.update({ streamingText: 'unrelated' })
+    source.update({ tokenCount: 1 })
     expect(changed).not.toHaveBeenCalled()
     const message: WorkbenchMessage = {
       id: 'new', segmentId: 'new', role: 'assistant', content: 'hello', parts: [], identity: {},
@@ -283,6 +362,23 @@ describe('WorkbenchHostPort', () => {
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
       code: 'command_rejected', phase: 'action', command: 'respondInteraction',
     }))
+  })
+
+  it('preserves a rejected send error instead of replacing it with a generic runtime rejection', async () => {
+    const commands = createFakeWorkbenchCommandFacade({
+      send: async () => ({ status: 'rejected', error: 'ACP protocol: timed out after 1s (first-token timeout)' }),
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { prompt: true },
+    })
+
+    await expect(host.commands.send('s1', { text: '自检工具' })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'command_rejected', message: 'ACP protocol: timed out after 1s (first-token timeout)' },
+    })
   })
 
   it('production Solid adapter preserves interaction expectedRevision through the Host port', async () => {

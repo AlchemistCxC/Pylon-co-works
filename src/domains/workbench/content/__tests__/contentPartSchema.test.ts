@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  contentPartFromDisplayHint,
   coalesceAdjacentDisplayTextParts,
   coalesceAdjacentReasoningParts,
   createUnknownContentPart,
@@ -8,6 +9,10 @@ import {
 } from '../contentPartSchema.ts'
 
 describe('ContentPart schema', () => {
+  it('derives displayHint into dotted kind and falls back for malformed hints', () => {
+    expect(contentPartFromDisplayHint({ displayKind: 'plugin.card', payload: { text: 'x' } })).toMatchObject({ kind: 'plugin.card', text: 'x' })
+    expect(contentPartFromDisplayHint({ displayKind: 'plugin.card', payload: 'bad' }).kind).toBe('unknown')
+  })
   it('coalesces only adjacent display text and preserves rich-content boundaries', () => {
     const code = { kind: 'code', text: 'const answer = 42', language: 'ts' } as const
     const parts = coalesceAdjacentDisplayTextParts([

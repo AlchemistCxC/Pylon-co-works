@@ -9,6 +9,7 @@ import { useStore } from '../../../store.ts'
 import { DEFAULT_INTERFACE_MODE, DEFAULT_INTERFACE_PROFILES, useInterfaceModeStore } from '../interfaceModeStore.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { useIdentityStore } from '../../../identityStore.ts'
 
 const registrations: AsyncDisposable[] = []
 
@@ -151,5 +152,23 @@ describe('Interface Mode contract', () => {
     expect(terminalThenModern).toEqual(resetThenModern)
     expect(terminalResetThenModern).toEqual(resetThenModern)
     expect(terminalModernThenReset).toEqual(resetThenModern)
+  })
+
+  it('蓝调战术沿用 Solid，切回原模式恢复输入，且不写入会话身份与用户配色', () => {
+    registerBuiltinAppearanceContributions()
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    const original = appearanceSnapshot()
+    const identity = useIdentityStore.getState()
+    const palette = { accent: useStore.getState().accent, chatBg: useStore.getState().chatBg }
+    expect(activateInterfaceMode('tactical-blue')).toBe(true)
+    expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.tactical-blue')
+    expect(useStore.getState().inputVariant).toBe('composer')
+    const mode = BUILTIN_INTERFACE_MODES.find(item => item.id === 'tactical-blue')!
+    expect(resolveInterfaceModeSuite(mode, undefined, ['builtin.solid']).activeSuiteId).toBe('builtin.solid')
+    expect(useIdentityStore.getState()).toBe(identity)
+    expect({ accent: useStore.getState().accent, chatBg: useStore.getState().chatBg }).toEqual(palette)
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    expect(appearanceSnapshot()).toEqual(original)
+    expect(useIdentityStore.getState()).toBe(identity)
   })
 })

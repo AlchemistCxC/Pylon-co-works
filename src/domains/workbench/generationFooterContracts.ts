@@ -1,4 +1,5 @@
 import type { SpinnerAppearanceSnapshot } from './appearance.ts'
+import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 
 export type GenerationPhase =
   | { kind: 'thinking' }
@@ -34,6 +35,16 @@ export interface GenerationSummary {
   tokenCount: number
   completedFrame: string
   reason: 'done' | 'cancelled' | 'error'
+  failure?: PromptFailureMetadata
+  durationSource?: 'live-monotonic' | 'canonical-events' | 'provider' | 'unknown'
+  durationAvailable?: boolean
+  /**
+   * Display-only restore: the summary was synthesized from the canonical
+   * journal after a bind/refresh instead of being observed live. It must not
+   * synthesize a terminal fence, or a later controller-driven generation
+   * cannot restart the indicator without a turn-epoch advance.
+   */
+  displayOnly?: boolean
 }
 
 export interface GenerationFooterInput {

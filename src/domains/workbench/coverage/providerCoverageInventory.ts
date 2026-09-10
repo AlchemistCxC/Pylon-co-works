@@ -57,7 +57,6 @@ export interface CoverageEvidence {
   readonly normalizer: CoverageEvidenceClaim
   readonly projector: CoverageEvidenceClaim
   readonly solidRenderer: CoverageEvidenceClaim
-  readonly reactFallback: CoverageEvidenceClaim
   readonly settingsSchema: CoverageEvidenceClaim
   readonly pluginLifecycle: CoverageEvidenceClaim
   readonly tests: CoverageEvidenceClaim

@@ -57,3 +57,8 @@ AGENTS.md
 nodejs/
 public/
 *.html
+
+dist-plugin-sdk/
+
+# pi agent 本地运行时状态（goals/tasks 快照，不入库）
+/.pi/

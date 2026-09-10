@@ -214,6 +214,8 @@ impl TestStateBuilder {
             data_dirs: self.data_dirs,
             plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
             pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
+            // P55：kernel hook 桥默认未 ready（测试经 bridge.mark_started() 显式开启）。
+            hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
         }
     }
 }

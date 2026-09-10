@@ -272,8 +272,32 @@ export function projectWorkbench(
 ): ProjectionResult {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence || left.eventId.localeCompare(right.eventId))
   const initial = options.initialDocument ?? createWorkbenchDocument(sorted[0]?.sessionId ?? '')
-  const document = sorted.reduce(reduceWorkbenchEvent, initial)
-  return { document, diagnostics: document.diagnostics }
+  // P57 S2-R1e：批量回放入口用本地 Set 预去重，appliedEventIds 以共享可变数组按序追加、
+  // 末端一次冻结——把单事件路径 `includes` + spread 的 O(n²) 降到 O(n)（R-A6）。
+  // 公共形状 readonly string[] 不变；单事件 live 路径仍走 reduceWorkbenchEvent。
+  const applied = new Set(initial.appliedEventIds)
+  const appliedEventIds = [...initial.appliedEventIds]
+  let document = initial
+  for (const envelope of sorted) {
+    if (applied.has(envelope.eventId)) continue
+    applied.add(envelope.eventId)
+    appliedEventIds.push(envelope.eventId)
+    const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
+      ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
+      : envelope
+    let next: WorkbenchDocument = {
+      ...document,
+      revision: Math.max(document.revision, envelope.sequence),
+      appliedEventIds,
+      timeline: insertBySequence(document.timeline, timelineEntry(effective)),
+    }
+    next = reduceSemanticEvent(next, effective)
+    document = refreshOrphans(next)
+  }
+  return {
+    document: { ...document, appliedEventIds: Object.freeze([...appliedEventIds]) },
+    diagnostics: document.diagnostics,
+  }
 }
 
 export function selectTimeline(document: WorkbenchDocument): readonly WorkbenchTimelineEntry[] {
@@ -496,6 +520,15 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
 
 function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    // A journal-earlier event arriving after the terminal one is out-of-order
+    // arrival, not a journal-late event; the sequence-ordered replay would
+    // still fold it, so the live path must not fence it out.
+    const journalEarlierThanFence = envelope.sequence < terminalSessionSequence(document)
+    const userTurnInProgress = role === 'user' && document.messages.at(-1)?.role === 'user' && document.messages.at(-1)?.running === true
+    if (role === 'user' && (event.type === 'message.started' || event.type === 'message.delta' || (event.type === 'message.completed' && userTurnInProgress))) document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
+    else if ((role !== 'user' || event.type === 'message.completed') && !journalEarlierThanFence) return addLateEventDiagnostic(document, envelope, 'late assistant event ignored after terminal fence')
+  }
   document = settleSupersededRunningMessages(document, role)
   const parts = event.parts ?? []
   const content = textFromParts(parts)
@@ -514,6 +547,7 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       ? true
       : providerIdentityKey(envelope.identity) !== ''
         && providerIdentityKey(envelope.identity) === providerIdentityKey(previous.identity)
+        || providerIdentityKey(envelope.identity) === '' && previous.running === true
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
   const duplicateIndex = role === 'user'
@@ -534,6 +568,37 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       } : message),
     }
   }
+  // Out-of-order arrival convergence: a journal-earlier text delta belongs to
+  // the sealed segment (its sequence precedes the terminal that sealed it).
+  // Fold it in instead of dropping it so the live document matches the
+  // sequence-ordered replay; the terminal state itself (running/duration) is
+  // not resurrected.
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+      ...previous,
+      content: previous.content + content,
+      parts: coalesceAdjacentDisplayTextParts([...previous.parts, ...parts]),
+    }]
+    return { ...document, messages: folded }
+  }
+  // A terminal segment is an absorption fence. A late delta may only start a
+  // new visible segment when the provider supplies an explicit, different
+  // turn identity; otherwise it belongs to the sealed turn and is ignored.
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)) {
+    const previousTurn = previous.identity.turnId
+    const incomingTurn = envelope.identity.turnId
+    const previousProvider = providerIdentityKey(previous.identity)
+    const incomingProvider = providerIdentityKey(envelope.identity)
+    const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
+    if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
+  }
+  // K03 guard: appending a journal-earlier delta after later text would
+  // corrupt segment order. Show it missing (with a diagnostic) until the next
+  // canonical refresh re-orders the journal.
+  if (append && previous && envelope.sequence < previous.sequence) {
+    return addOutOfOrderDiagnostic(document, envelope)
+  }
   const messages = append
     ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal }]
     : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
@@ -541,6 +606,13 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 }
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    // Journal-earlier events are out-of-order arrivals, not journal-late ones;
+    // the replay would still fold them (see reduceMessage).
+    if (!(envelope.sequence < terminalSessionSequence(document))) {
+      return addLateEventDiagnostic(document, envelope, 'late reasoning event ignored after terminal fence')
+    }
+  }
   document = settleSupersededRunningMessages(document, 'reasoning')
   const parts = event.parts ?? []
   // C01：redacted 时正文不保留原文（D06——raw 不进入 projection），只保留安全占位。
@@ -563,6 +635,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const append = previous !== undefined
     && previous.role === 'reasoning'
     && textStreamContinues(document, previous, envelope)
+    && !document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
     && (previous.running || (event.type !== 'reasoning.delta' && sameTerminalIdentity))
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
@@ -579,6 +652,34 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
       return { ...document, messages: [...document.messages.slice(0, -1), secured] }
     }
     return document
+  }
+  const hasToolBoundary = previous !== undefined && document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
+  // Out-of-order arrival convergence: fold a journal-earlier delta into the
+  // sealed reasoning segment instead of dropping it (see reduceMessage). The
+  // terminal state—running flag, duration, sequence—stays as sealed.
+  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary
+    && textStreamContinues(document, previous, envelope)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+      ...previous,
+      content: previous.content + content,
+      parts: coalesceAdjacentReasoningParts([...previous.parts, ...reasoningParts]),
+    }]
+    return { ...document, messages: folded }
+  }
+  if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary) {
+    const previousTurn = previous.identity.turnId
+    const incomingTurn = envelope.identity.turnId
+    const previousProvider = providerIdentityKey(previous.identity)
+    const incomingProvider = providerIdentityKey(envelope.identity)
+    const explicitProviderBoundary = incomingProvider !== '' && previousProvider !== '' && incomingProvider !== previousProvider
+    if ((!incomingTurn || !previousTurn || incomingTurn === previousTurn) && !explicitProviderBoundary) return document
+  }
+  // K03 guard: appending a journal-earlier delta after later reasoning text
+  // would corrupt order. Show it missing (with a diagnostic) until the next
+  // canonical refresh re-orders the journal.
+  if (append && previous && previous.running && envelope.sequence < previous.sequence) {
+    return addOutOfOrderDiagnostic(document, envelope)
   }
   // C01：时长 = 终态 occurredAt − 首个 delta occurredAt；append 段沿用首段时间基准。
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
@@ -618,6 +719,9 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
 }
 
 function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent): WorkbenchDocument {
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addLateEventDiagnostic(document, envelope, 'late tool event ignored after terminal fence')
+  }
   const tool = isRecord(event.tool) ? event.tool : {}
   const id = stringValue(tool.toolCallId) || envelope.identity.toolCallId || envelope.eventId
   const status = toolLifecycleStatus(event.type, stringValue(tool.status) || 'progress')
@@ -702,6 +806,9 @@ function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: Wo
 }
 
 function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent): WorkbenchDocument {
+  if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
+    return addLateEventDiagnostic(document, envelope, 'late activity event ignored after terminal fence')
+  }
   const id = event.activityId || envelope.identity.taskId || envelope.eventId
   const activity = isRecord(event.activity) ? event.activity : {}
   const patch = isRecord(event.patch) ? event.patch : {}
@@ -1001,9 +1108,20 @@ function reduceGoal(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
 
 function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: SessionEvent): WorkbenchDocument {
   const completedAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
+  const previousStatus = document.session.status
+  const requestedStatus = event.type === 'session.completed' ? 'completed' : event.status
+  const requestedLower = requestedStatus?.toLowerCase()
+  const previousLower = previousStatus.toLowerCase()
+  const terminalRegression = TERMINAL_SESSION_STATUSES.has(previousLower)
+    && requestedLower !== undefined && requestedLower !== previousLower
+  const nextStatus = requestedStatus && SESSION_LIFECYCLE_STATUSES.has(requestedLower ?? '')
+    && !terminalRegression
+    ? requestedStatus
+    : previousStatus
+  const settlesMessages = TERMINAL_SESSION_STATUSES.has(nextStatus.toLowerCase())
   return {
     ...document,
-    ...(event.type === 'session.completed' ? {
+    ...(settlesMessages ? {
       messages: document.messages.map(message => message.running ? {
         ...message,
         running: false,
@@ -1014,15 +1132,19 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     } : {}),
     session: {
       ...document.session,
-      status: event.type === 'session.completed' ? 'completed' : event.status ?? document.session.status,
+      status: nextStatus,
       ...(event.stopReason ? { stopReason: event.stopReason } : {}),
       ...(event.model ? { model: event.model } : {}),
       ...(event.mode ? { mode: event.mode } : {}),
       ...(event.commands ? { commands: normalizeSessionCommands(event.commands) } : {}),
       ...(event.options ? { options: normalizeSessionConfigOptions(event.options) } : {}),
+      ...(event.usage !== undefined ? { usage: normalizeUsageSnapshot(event.usage, document.session.usage).value } : {}),
     },
   }
 }
+
+const TERMINAL_SESSION_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled'])
+const SESSION_LIFECYCLE_STATUSES = new Set(['idle', 'loading', 'ready', 'degraded', 'running', 'generating', 'thinking', 'responding', 'working', ...TERMINAL_SESSION_STATUSES])
 
 function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
   if (event.type === 'assist.prediction') {
@@ -1066,9 +1188,11 @@ function reduceDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventE
 function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, code: string, message: string, level: 'info' | 'warning' | 'error', data?: unknown): WorkbenchDocument {
   const diagnostic = { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }
   const failedTurn = code === 'turn.failed' || code === 'provider.error'
+  const alreadyTerminal = TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())
+  const transitionToError = failedTurn && !alreadyTerminal
   return {
     ...document,
-    ...(failedTurn ? {
+    ...(transitionToError ? {
       messages: document.messages.map(item => item.running ? { ...item, running: false } : item),
       session: { ...document.session, status: 'error' },
     } : {}),
@@ -1078,9 +1202,19 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 }
 
 function refreshOrphans(document: WorkbenchDocument): WorkbenchDocument {
+  // P57 S2-R1a：仅当某个带 parentId 的 activity 的 orphan 值实际变化时才克隆该节点；
+  // 没有任何变化时恒等返回输入 document。此前每个带 parentId 的节点无条件克隆，
+  // 恒产生新 activities 数组，放大了 freezeDeepSnapshot 每事件的全量深拷贝。
   const ids = new Set(document.activities.map(activity => activity.id))
-  const activities = document.activities.map(activity => activity.parentId ? { ...activity, orphan: !ids.has(activity.parentId) } : activity)
-  return activities === document.activities ? document : { ...document, activities }
+  let changed = false
+  const activities = document.activities.map(activity => {
+    if (!activity.parentId) return activity
+    const orphan = !ids.has(activity.parentId)
+    if (activity.orphan === orphan) return activity
+    changed = true
+    return { ...activity, orphan }
+  })
+  return changed ? { ...document, activities } : document
 }
 
 function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {
@@ -1111,6 +1245,36 @@ function insertBySequence<T extends { sequence: number }>(items: readonly T[], i
     else high = middle
   }
   return [...items.slice(0, low), item, ...items.slice(low)]
+}
+
+function addLateEventDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, message: string): WorkbenchDocument {
+  if (document.diagnostics.some(item => item.code === 'late-event-after-terminal')) return document
+  return addDiagnostic(document, envelope, 'late-event-after-terminal', message, 'warning')
+}
+
+/**
+ * Sequence of the timeline entry that drove the session into a terminal
+ * status. Events with a smaller sequence that arrive afterwards are
+ * out-of-order arrivals of journal-earlier facts, not journal-late events;
+ * the sequence-ordered replay still folds them.
+ */
+function terminalSessionSequence(document: WorkbenchDocument): number {
+  let latest = Number.NEGATIVE_INFINITY
+  for (const entry of document.timeline) {
+    if (entry.kind !== 'session' || !isRecord(entry.data)) continue
+    const data = entry.data as { type?: unknown; status?: unknown }
+    const terminal = data.type === 'session.completed'
+      || (typeof data.status === 'string' && TERMINAL_SESSION_STATUSES.has(data.status.toLowerCase()))
+    if (terminal) latest = Math.max(latest, entry.sequence)
+  }
+  return latest
+}
+
+function addOutOfOrderDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
+  if (document.diagnostics.some(item => item.code === 'out-of-order-text-dropped')) return document
+  return addDiagnostic(document, envelope, 'out-of-order-text-dropped',
+    'journal-earlier text delta arrived after later text; dropped until the next canonical refresh re-orders', 'warning',
+    { sequence: envelope.sequence })
 }
 
 function updateTimeline(items: readonly WorkbenchTimelineEntry[], eventId: string, patch: Partial<WorkbenchTimelineEntry>): WorkbenchTimelineEntry[] {
@@ -1172,7 +1336,13 @@ function settleTextSegment(
   envelope: WorkbenchEventEnvelope,
   role: WorkbenchMessage['role'],
 ): WorkbenchDocument {
-  const index = findTerminalTargetIndex(document.messages, envelope.identity, role)
+  let index = findTerminalTargetIndex(document.messages, envelope.identity, role)
+  // An out-of-order (journal-earlier) terminal may target a segment the
+  // session fence already settled; fall back to the last role row so the
+  // resequence converges with the replay.
+  if (index < 0 && envelope.sequence < terminalSessionSequence(document)) {
+    index = findLastMessageIndex(document.messages, message => message.role === role)
+  }
   if (index < 0) return document
   const target = document.messages[index]!
   if (!target.running) return document
@@ -1185,7 +1355,11 @@ function settleTextSegment(
 }
 
 function settleReasoningSegment(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
-  const index = findTerminalTargetIndex(document.messages, envelope.identity, 'reasoning')
+  let index = findTerminalTargetIndex(document.messages, envelope.identity, 'reasoning')
+  const journalEarlierTerminal = envelope.sequence < terminalSessionSequence(document)
+  if (index < 0 && journalEarlierTerminal) {
+    index = findLastMessageIndex(document.messages, message => message.role === 'reasoning')
+  }
   if (index < 0) return document
   const target = document.messages[index]!
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
@@ -1193,7 +1367,10 @@ function settleReasoningSegment(document: WorkbenchDocument, envelope: Workbench
   const durationMs = Number.isFinite(terminalAt) && Number.isFinite(startedAt)
     ? Math.max(0, terminalAt - startedAt)
     : undefined
-  if (!target.running && (target.thoughtDurationMs !== undefined || durationMs === undefined)) return document
+  // A journal-earlier terminal is the authoritative first terminal for this
+  // segment in replay order: recompute the settled state it may have been
+  // sealed with by an out-of-order session fence.
+  if (!target.running && !journalEarlierTerminal && (target.thoughtDurationMs !== undefined || durationMs === undefined)) return document
   return {
     ...document,
     messages: document.messages.map((message, messageIndex) => messageIndex === index

@@ -12,7 +12,7 @@
  * 宣称 agent 已收到 response）。
  */
 
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { activeForAgent, type PermissionAction, type PermissionState } from '../../domains/permission/permissionState.ts'
 import type { PermissionOption, PermissionRequest } from '../../domains/permission/permissionTypes.ts'
 import { normalizeInteractionEnvelope } from '../../domains/activity/interaction.ts'
@@ -188,7 +188,15 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
       return
     }
     unlistenFn = stop
-  }).catch(error => reportRuntimeError('监听权限请求', error))
+    resolveRuntimeErrors({ key: 'acp:permission-listener' })
+  }).catch(error => {
+    if (!disposed) reportRuntimeError('监听权限请求', error, undefined, {
+      key: 'acp:permission-listener',
+      scope: { kind: 'app', id: 'permission' },
+      source: 'acp.permission',
+      recovery: { kind: 'open-runtime-log' },
+    })
+  })
 
   const choose = async (requestId: string, optionId: string) => {
     dispatch({ type: 'choose', agentId: currentAgentId(), requestId, optionId })

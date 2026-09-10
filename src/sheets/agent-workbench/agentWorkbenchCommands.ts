@@ -1,17 +1,16 @@
 import { invoke } from '@tauri-apps/api/core'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
-import { getChatController } from '../../components/chat/chatEventController.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
-import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
+import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { setSessionModel } from '../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../components/chat/sessionMode.ts'
 import { createInteractionResponseTransport } from '../../infrastructure/acp/interactionTransport.ts'
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../agentContext.ts'
 import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
-import { formatRuntimeError } from '../../runtimeError.ts'
+import { formatRuntimeError, reportRuntimeError } from '../../runtimeError.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
@@ -23,11 +22,14 @@ export interface AgentWorkbenchCommandDependencies {
   resolveSession(sessionId: string): Session | undefined
   resolvePersona(session: Session): string
   sendMessage(payload: SendMessagePayload): Promise<unknown>
+  /** P52 D4：controller React 状态面已死——乐观 echo 只有 document 侧投影。 */
   optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
   rejectOptimisticUser(source: string, clientMessageId: string): void
   optimisticDocument(source: string, content: string, clientMessageId: string): void
   rejectOptimisticDocument(source: string, clientMessageId: string): void
   nextClientMessageId(source: string): string
+  /** P52 D4：cancel 状态机由 facade 持有（原 controller requestCancel 迁入）。 */
+  requestCancel(source: string, agentId: string): void
   setModel(context: AgentContext, modelId: string): Promise<void>
   setMode(context: AgentContext, modeId: string): Promise<void>
   setConfigOption(context: AgentContext, key: string, value: unknown): Promise<void>
@@ -49,11 +51,19 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
       return collectProfilePersona(session.creationSnapshot) || profile?.persona || ''
     },
     sendMessage: payload => sendMessageWithStream(payload),
-    optimisticUser: (source, content, clientMessageId, options) => getChatController()?.sendOptimisticUser(source, content, clientMessageId, options),
-    rejectOptimisticUser: (source, clientMessageId) => getChatController()?.rejectOptimisticUser(source, clientMessageId),
+    optimisticUser: () => {},
+    rejectOptimisticUser: () => {},
     optimisticDocument: () => {},
     rejectOptimisticDocument: () => {},
     nextClientMessageId: source => `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    requestCancel: (source, agentId) => {
+      // P52 D4：原 controller requestCancel 状态机迁入。begin-cancel 去重
+      // （非生成态不调后端）由调用方 generating 守卫承担（footer 只在 running
+      // 时渲染 onStop）；后端取消结果的收敛由终帧（pylon:error cancelled）驱动。
+      void createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+        .cancelPrompt({ agentId, source })
+        .catch(error => { reportRuntimeError('取消生成', error) })
+    },
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
     setConfigOption: async (context, key, value) => {
@@ -98,6 +108,7 @@ export function createAgentWorkbenchCommandFacade(
   overrides: Partial<AgentWorkbenchCommandDependencies> = {},
 ): WorkbenchCommandFacade {
   const dependencies: AgentWorkbenchCommandDependencies = { ...productionDependencies(), ...overrides }
+  const sessionCreation = createWorkbenchSessionCreationStore()
   const send: WorkbenchCommandFacade['send'] = async (sessionId, command) => {
     const session = dependencies.resolveSession(sessionId)
     const content = command.text.trim()
@@ -122,11 +133,12 @@ export function createAgentWorkbenchCommandFacade(
     }
   }
   return {
+    sessionCreation,
     prompt: send, send,
     async cancel(sessionId) {
       const session = dependencies.resolveSession(sessionId)
       if (!session) return { status: 'rejected', error: 'session_not_found' }
-      getChatController()?.requestCancel(session.source)
+      dependencies.requestCancel(session.source, session.agentId)
       return { status: 'cancelled' }
     },
     async attach() { return [] },
@@ -159,28 +171,40 @@ export function createAgentWorkbenchCommandFacade(
       } catch (error) { return rejected(commandError(error)) }
     },
     async createSession(input) {
-      const created = await dependencies.createSession(input)
-      // Select the newly-created session before dispatching its first prompt.
-      // A streamed ACP response can take an arbitrary amount of time; waiting
-      // for `send` here leaves the empty-state workbench visible until the
-      // whole generation finishes.
-      dependencies.selectSession(created.sessionId)
-      if (input?.initialPrompt) {
-        const result = await send(created.sessionId, input.initialPrompt)
-        if (result.status === 'rejected') {
-          try {
-            await dependencies.discardSession(created.sessionId)
-          } finally {
-            // Do not leave the shell pointing at a session that was removed
-            // after a failed first request. SheetLayout will persist the
-            // cleared selection for the owning agent.
-            dependencies.selectSession(null)
-          }
-          throw new Error(result.error || '首条请求发送失败')
+      const attempt = sessionCreation.begin()
+      try {
+        const created = await dependencies.createSession(input)
+        if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+
+        // Selecting the local session is the end of the empty-state creation
+        // phase.  Do this before starting the potentially long first prompt so
+        // the renderer can switch to the normal chat surface immediately.
+        dependencies.selectSession(created.sessionId)
+        sessionCreation.markSessionSelected(attempt, created.sessionId)
+        if (input?.initialPrompt) {
+          sessionCreation.markPromptRunning(attempt, created.sessionId)
+          // The first prompt owns the ordinary generation footer.  Keep it
+          // detached from the creation command's completion promise so a slow
+          // provider cannot keep the empty-state progress animation alive.
+          const initialPromptOutcome = send(created.sessionId, input.initialPrompt)
+          void initialPromptOutcome.then(result => {
+            if (result.status === 'rejected') {
+              sessionCreation.markFailed(attempt, result.error || '首条请求发送失败', created.sessionId)
+              return
+            }
+            sessionCreation.markPromptTerminal(attempt, created.sessionId)
+          }, error => {
+            sessionCreation.markFailed(attempt, commandError(error), created.sessionId)
+          })
+          return { ...created, initialPromptOutcome }
+        } else {
+          sessionCreation.markPromptTerminal(attempt, created.sessionId)
         }
         return created
+      } catch (error) {
+        sessionCreation.markFailed(attempt, commandError(error), null)
+        throw error
       }
-      return created
     },
     async compact() { return rejected('production_command_not_connected') },
     async exportSession() { return rejected('production_command_not_connected') },

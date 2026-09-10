@@ -12,9 +12,39 @@ import { createWorkbenchHostPort } from './workbenchHostPort.ts'
 import type { WorkbenchHostPort, WorkbenchMountInput } from './workbenchContracts.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidServices.ts'
+import { canonicalTokenCount } from './solidWorkbenchProjectionSupport.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+
+/**
+ * P57 S2-R1d（第一步：渲染器侧门控）显示相关字段签名。
+ *
+ * usage/config 类 0 文本事件（timeline/appliedEventIds/session.usage 对象每事件换新）
+ * 在 R1a/R1b/R1c 之后所有显示消费引用全稳 → 签名全等 → 不向 Solid 显示链发表。
+ * usage 的显示消费是数值（canonicalTokenCount → footer tokenCount），因此数值变化
+ * 必然改变签名、必须放行；timeline 仅被纯标记空 div 消费，不进签名。
+ * runtime 契约零改动：slice 通知、revision 语义均不受影响。
+ */
+export function displayGateSignature(snapshot: WorkbenchRuntimeSnapshot): readonly unknown[] {
+  const document = snapshot.document
+  return [
+    snapshot.sessionId, snapshot.ownerKey, snapshot.generation, snapshot.turnEpoch,
+    snapshot.status, snapshot.error,
+    snapshot.generating, snapshot.generationStart, snapshot.lastTokenAt, snapshot.thinkingStart,
+    snapshot.generationPhase, snapshot.generationActivity, snapshot.summary,
+    snapshot.tokenCount,
+    canonicalTokenCount(document?.session.usage, snapshot.tokenCount),
+    snapshot.tasks, snapshot.messages,
+    snapshot.availableModels, snapshot.activeModel, snapshot.availableModes, snapshot.activeMode,
+    snapshot.canAttach, snapshot.promptImage, snapshot.terminalFence,
+    document?.messages, document?.activities, document?.diagnostics,
+    document?.interactions, document?.extensions, document?.systemErrors,
+    document?.lifecycle, document?.plan, document?.goal, document?.assist,
+    document?.session.status, document?.session.model, document?.session.mode,
+    document?.session.options, document?.session.commands,
+  ]
+}
 
 export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort, activation }: SolidWorkbenchMountInput & { activation?: RendererActivationSnapshot }): SolidWorkbenchLifecycle {
   let destroyed = false
@@ -56,11 +86,20 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     for (const listener of [...(listeners.get(event) ?? [])]) listener(payload)
   }
 
+  // P57 S2-R1d：渲染器侧 display-gate。runtime 通知照常到达，但仅当显示相关签名
+  // 变化时才把快照交给调度器/显示链；usage 数值变化改变签名、必然放行。
+  let lastPublishedSnapshot: WorkbenchRuntimeSnapshot | undefined = initialRuntimeSnapshot
   const unsubscribeRuntime = services.runtime.subscribe(() => {
     if (destroyed) return
     const snapshot = services.runtime.getSnapshot()
+    if (lastPublishedSnapshot !== undefined) {
+      const previous = displayGateSignature(lastPublishedSnapshot)
+      const next = displayGateSignature(snapshot)
+      if (previous.length === next.length && previous.every((value, index) => value === next[index])) return
+    }
     // Keep the scheduler's target current even while paused; resume() will
     // flush this latest snapshot in one deterministic publication.
+    lastPublishedSnapshot = snapshot
     publishRuntimeSnapshot(snapshot)
   })
   const unsubscribeAppearance = services.appearance.subscribe(() => {
@@ -75,6 +114,7 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     appearanceSnapshot,
     sessionUi: services.sessionUi,
     commands: services.commands,
+    sessionCreation: services.sessionCreation ?? services.commands.sessionCreation ?? hostPort.sessionCreation,
     hostPort,
     predictionProvider: createPredictionRouter({
       forkProvider: services.predictionProvider ?? hostPort.predictionProvider,
@@ -113,7 +153,9 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     resume() {
       if (destroyed || !paused) return
       paused = false
-      streamingDisplay.resume(services.runtime.getSnapshot())
+      const latest = services.runtime.getSnapshot()
+      lastPublishedSnapshot = latest
+      streamingDisplay.resume(latest)
       setAppearanceSnapshot(services.appearance.getSnapshot())
       setPausedSignal(false)
     },

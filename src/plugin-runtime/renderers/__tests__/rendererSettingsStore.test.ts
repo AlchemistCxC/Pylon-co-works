@@ -23,6 +23,13 @@ describe('renderer settings override store', () => {
     expect(restored.getSnapshot().sessionPreview).toEqual({})
   })
 
+  it('接受带编码 owner 与可选 plugin 段的结构化 target key', () => {
+    const store = createRendererSettingsStore()
+    const key = 'kind.plugin%2Eacme.acme%2Ewidgets%2Echart.status%2Ecolor'
+    store.setOverride(key, 'amber')
+    expect(store.getSnapshot().values[key]).toBe('amber')
+  })
+
   it('只清理当前字段的 session preview，不影响同一拖动会话中的其他字段', () => {
     const store = createRendererSettingsStore()
     store.setSessionPreview({

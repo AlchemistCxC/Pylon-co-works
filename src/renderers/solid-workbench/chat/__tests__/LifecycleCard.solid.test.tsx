@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@solidjs/testing-library'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createSignal } from 'solid-js'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from '../LifecycleCard.solid.tsx'
 import type { LifecycleState } from '../../../../domains/workbench/lifecycle/lifecycleModel.ts'
 
@@ -116,5 +117,28 @@ describe('SolidLifecycleCard (C13)', () => {
 
     expect(notice.getAllByText('canonical warning')).toHaveLength(1)
     expect(notice.container.querySelector('.system-notice-data')).toBeNull()
+  })
+
+  it('只隐藏 system error 的展示，不改变传入事实，并提供错误中心入口', () => {
+    const opened = vi.fn()
+    const error = render(() => <SolidSystemErrorCard
+      error={{ userSummary: 'canonical failure', recoverability: 'none' }}
+      onOpenDiagnostics={opened}
+      dismissible
+    />)
+    expect(error.container.querySelector('.system-error-card')).toBeTruthy()
+    error.getByRole('button', { name: '在错误中心查看' }).click()
+    expect(opened).toHaveBeenCalledOnce()
+    error.getByRole('button', { name: '隐藏' }).click()
+    expect(error.container.querySelector('.system-error-card')).toBeNull()
+  })
+
+  it('错误事实更换后重新显示此前隐藏的卡片', () => {
+    const [currentError, setCurrentError] = createSignal({ userSummary: 'first failure', recoverability: 'none' as const })
+    const error = render(() => <SolidSystemErrorCard error={currentError()} dismissible />)
+    error.getByRole('button', { name: '隐藏' }).click()
+    expect(error.container.querySelector('.system-error-card')).toBeNull()
+    setCurrentError({ userSummary: 'second failure', recoverability: 'none' })
+    expect(error.container.querySelector('.system-error-card')).toHaveTextContent('second failure')
   })
 })

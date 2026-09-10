@@ -38,6 +38,12 @@ export const CANONICAL_EVENT_TYPES = [
   'interaction.answered',
   'turn.completed',
   'turn.failed',
+  'usage.updated',
+  'plan.replaced',
+  'session.mode-updated',
+  'session.model-updated',
+  'session.config-updated',
+  'session.commands-updated',
   /** 完整 remote replay 的 append-only reconciliation checkpoint。 */
   'history.snapshot',
   'unknown',

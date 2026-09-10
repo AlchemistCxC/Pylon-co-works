@@ -172,7 +172,12 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
   const stabilize = (reason: ToolConnectorInvalidationReason) => {
     if (disposed) return
     invalidate(reason)
-    settleRemaining = Math.max(settleRemaining, 8)
+    // A resize/mutation notification can be produced by the layout pass that
+    // this settle loop itself schedules.  Do not restart the bounded window
+    // while it is active; otherwise one callback per frame turns the nominal
+    // eight-frame settle into an unbounded loop.
+    if (settleRemaining > 0 || settleFrame !== undefined) return
+    settleRemaining = 8
     if (settleFrame !== undefined || typeof requestAnimationFrame !== 'function') return
     const tick = () => {
       settleFrame = undefined
@@ -218,13 +223,16 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
     }
 
     if (typeof MutationObserver !== 'undefined') {
-      // Child/text mutations cover delayed renderer mounts and streaming text
-      // without observing connector style writes (which would self-trigger).
+      // Child mutations cover delayed renderer mounts.  Text-node updates from
+      // a streaming reasoning token are measured by the row/content
+      // ResizeObservers below; observing every characterData mutation here
+      // would restart the eight-frame connector settle loop on every token and
+      // compete with the chat auto-follow rail, producing visible jitter.
       mutationObserver = new MutationObserver(() => {
         syncObserved()
         stabilize('items-changed')
       })
-      mutationObserver.observe(term, { childList: true, subtree: true, characterData: true })
+      mutationObserver.observe(term, { childList: true, subtree: true })
 
       // Shell attributes represent sidebar/panel/layout changes.  They can
       // move the coordinate root while leaving its measured size unchanged.

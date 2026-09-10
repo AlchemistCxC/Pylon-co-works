@@ -107,10 +107,13 @@
   --global-bg-color: #e8e8ec;
   --font-system: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-serif-default: 'Iowan Old Style', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', Georgia, serif;
-  --font-mono-default: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* Windows VS Code's default editor stack is Consolas → Courier New.  Keep
+     CJK/cross-platform fallbacks after it so Latin code keeps the same metrics
+     while non-Latin text still has a usable glyph source. */
+  --font-mono-default: 'Consolas', 'Courier New', 'Cascadia Code', 'Cascadia Mono', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
   --font: var(--font-system);
   --serif: var(--font-serif-default);
-  /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
+  /* 终端等宽栈：Consolas/Courier 优先，CJK 与跨平台 fallback 随后。 */
   --mono: var(--font-mono-default);
   --type-interface-font: var(--global-font, var(--font-system));
   --type-interface-xs: var(--font-size-xs);

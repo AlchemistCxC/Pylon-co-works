@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { useIdentityStore } from '../../identityStore'
@@ -14,13 +14,19 @@ import { useIdentityStore } from '../../identityStore'
 export default function AgentConfigEditor({ agentId }: { agentId: string }) {
   const [config, setConfig] = useState('')
   const [status, setStatus] = useState<AgentConfigSaveStatus>({ kind: 'idle' })
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   const save = async () => {
     const validationError = validateAgentConfig(config)
     if (validationError) {
-      setStatus({ kind: 'error', message: validationError })
+      // Form validation is a local, actionable fact rather than a runtime
+      // failure. Keep its original message and assertive semantics; only
+      // transport/configuration failures are summarized in ErrorCenter.
+      setValidationError(validationError)
+      setStatus({ kind: 'idle' })
       return
     }
+    setValidationError(null)
     setStatus({ kind: 'saving' })
     try {
       const client = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
@@ -29,10 +35,18 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
       const list = await client.listAgents()
       useIdentityStore.getState().setAgents(list)
       setStatus({ kind: 'ok' })
+      resolveRuntimeErrors({ key: `agent-config:${agentId}` })
     } catch (error) {
       const classified = classifyAgentConfigSaveError(error)
       setStatus(classified)
-      if (classified.kind === 'error') reportRuntimeError('保存 Agent 配置', error)
+      if (classified.kind === 'error') {
+        reportRuntimeError('保存 Agent 配置', error, agentId, {
+          key: `agent-config:${agentId}`,
+          scope: { kind: 'agent', id: agentId },
+          source: 'settings.agent-config',
+          recovery: { kind: 'open-runtime-log', agentId },
+        })
+      }
     }
   }
 
@@ -41,7 +55,7 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
       <textarea
         className="agent-config-textarea"
         value={config}
-        onChange={event => { setConfig(event.target.value); setStatus({ kind: 'idle' }) }}
+        onChange={event => { setConfig(event.target.value); setValidationError(null); setStatus({ kind: 'idle' }) }}
         placeholder="粘贴 Agent 配置（YAML）…"
         rows={8}
         aria-label="Agent 配置"
@@ -53,7 +67,8 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
         {status.kind === 'blocked' && (
           <span className="agent-config-blocked" role="status">保存命令不可用：请检查应用版本是否包含 update_agents_config</span>
         )}
-        {status.kind === 'error' && <span className="agent-config-error" role="alert">{status.message}</span>}
+        {validationError && <span className="agent-config-error" role="alert">{validationError}</span>}
+        {status.kind === 'error' && <span className="agent-config-error" role="status">保存失败，详情见右下角错误中心</span>}
         {status.kind === 'ok' && <span className="agent-config-ok" role="status">配置已保存，Agent 列表已刷新</span>}
       </div>
     </div>

@@ -32,6 +32,18 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(container.querySelector('.term-tool-name')).toHaveTextContent('Read_file')
   })
 
+  it('marks command summaries and provider names as code semantics', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.execute"
+      appearance={{}}
+      snapshot={{ id: 'command-summary-font', name: 'terminal', kind: 'execute', status: 'completed', input: { command: 'npm test' } }}
+    />)
+
+    const summaries = [...container.querySelectorAll('.term-tool-summary')]
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]).toHaveClass('term-tool-summary-code')
+  })
+
   it('renders Hermes terminal/execute_code titles without leaking command text into the tool name', () => {
     const { container } = render(() => <>
       <SolidToolInvocationCard

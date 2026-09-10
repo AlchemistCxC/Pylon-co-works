@@ -1,0 +1,117 @@
+{
+  "method": "Execute actual production TypeScript after type stripping; mock only Tauri IPC, identity and HookRuntime. Not a native ACP end-to-end test.",
+  "results": [
+    {
+      "ref": "3127ee4336b30c3f349fd7fe6cb2b69923c4ef3e",
+      "hook": "message.user.beforeSend",
+      "sessionId": "local-session",
+      "handlerCalls": 1,
+      "response": {
+        "requestId": "test-0",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 1,
+          "skipped": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "ref": "3127ee4336b30c3f349fd7fe6cb2b69923c4ef3e",
+      "hook": "permission.request",
+      "sessionId": "local-session",
+      "handlerCalls": 0,
+      "response": {
+        "requestId": "test-1",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 0,
+          "skipped": 0
+        }
+      },
+      "warnings": [
+        "Pylon hook bridge received unknown anchor: permission.request"
+      ]
+    },
+    {
+      "ref": "3127ee4336b30c3f349fd7fe6cb2b69923c4ef3e",
+      "hook": "permission.request",
+      "sessionId": "remote-acp-session",
+      "handlerCalls": 0,
+      "response": {
+        "requestId": "test-2",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 0,
+          "skipped": 0
+        }
+      },
+      "warnings": [
+        "Pylon hook bridge received unknown anchor: permission.request"
+      ]
+    },
+    {
+      "ref": "39cad2925c59129d82aa217b6039a0b48d26a12d",
+      "hook": "message.user.beforeSend",
+      "sessionId": "local-session",
+      "handlerCalls": 1,
+      "response": {
+        "requestId": "test-3",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 1,
+          "skipped": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "ref": "39cad2925c59129d82aa217b6039a0b48d26a12d",
+      "hook": "permission.request",
+      "sessionId": "local-session",
+      "handlerCalls": 1,
+      "response": {
+        "requestId": "test-4",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 1,
+          "skipped": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "ref": "39cad2925c59129d82aa217b6039a0b48d26a12d",
+      "hook": "permission.request",
+      "sessionId": "remote-acp-session",
+      "handlerCalls": 0,
+      "response": {
+        "requestId": "test-5",
+        "result": {
+          "action": "continue",
+          "event": {
+            "test": true
+          },
+          "executed": 0,
+          "skipped": 0
+        }
+      },
+      "warnings": []
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import { useWorkspaceEntityStore } from '../workspaceEntityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
-import { getChatController } from './chat/chatEventController'
+import { getCanonicalEventFeed } from '../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from './chat/messagePersistence'
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -74,13 +74,13 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       markSessionDeleting: sessionId => {
         const target = sessions.find(session => session.id === sessionId)
         if (target) {
-          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+          getCanonicalEventFeed().discard(sessionDurableOwnerKey(target))
         }
       },
       markSessionDeleted: id => {
         const target = sessions.find(s => s.id === id)
         if (target) {
-          getChatController()?.discardCanonicalEvents(sessionDurableOwnerKey(target))
+          getCanonicalEventFeed().discard(sessionDurableOwnerKey(target))
         }
       },
       closeSession: s => sessionClient.closeSession({ agentId: s.agentId, source: s.source }),

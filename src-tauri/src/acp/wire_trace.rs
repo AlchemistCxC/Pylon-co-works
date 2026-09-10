@@ -15,6 +15,8 @@
 
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -110,6 +112,7 @@ pub struct WireRecord {
 /// 单 agent 的 wire trace 环形缓冲（容量上限，满时覆盖最旧）。
 /// OBS-02：持有完整连接级 correlation context（agentId/provider/source/
 /// clientGeneration 构造时固定）。
+#[derive(Debug)]
 pub struct AcpWireHub {
     correlation: RuntimeCorrelation,
     trace_id: String,
@@ -117,7 +120,23 @@ pub struct AcpWireHub {
     enabled: AtomicBool,
     records: Mutex<AllocRingBuffer<Arc<WireRecord>>>,
     capacity: usize,
+    canonical_correlations: Mutex<HashMap<u64, CanonicalCorrelation>>,
+    inbound_ordinals: Mutex<VecDeque<u64>>,
+    inbound_ordinal_overflowed: AtomicBool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalCorrelation {
+    pub event_id: String,
+    pub sequence: i64,
+    pub revision: i64,
+}
+
+/// Stable semantic name for the transport capture seam.  The hub remains the
+/// implementation so existing consumers keep compiling while new ACP code
+/// depends on the protocol-neutral capture vocabulary.
+pub type AcpWireCapture = AcpWireHub;
 
 impl AcpWireHub {
     pub fn new(correlation: RuntimeCorrelation, capacity: usize) -> Arc<Self> {
@@ -128,6 +147,9 @@ impl AcpWireHub {
             enabled: AtomicBool::new(true),
             records: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
+            canonical_correlations: Mutex::new(HashMap::new()),
+            inbound_ordinals: Mutex::new(VecDeque::new()),
+            inbound_ordinal_overflowed: AtomicBool::new(false),
         })
     }
 
@@ -166,19 +188,35 @@ impl AcpWireHub {
             .len()
     }
 
+    /// Store the repository's actual commit identity for a wire ordinal.
+    /// Values are supplied by EventService; no numeric inference occurs here.
+    pub fn record_canonical_commit(&self, ordinal: u64, correlation: CanonicalCorrelation) {
+        if let Ok(mut index) = self.canonical_correlations.lock() {
+            if index.len() >= self.capacity && !index.contains_key(&ordinal) {
+                if let Some(oldest) = index.keys().min().copied() {
+                    index.remove(&oldest);
+                }
+            }
+            index.insert(ordinal, correlation);
+        }
+    }
+
+    pub fn correlate(&self, ordinal: u64) -> Option<CanonicalCorrelation> {
+        self.canonical_correlations
+            .lock()
+            .ok()?
+            .get(&ordinal)
+            .cloned()
+    }
+
     /// 记录一条原始 JSON 报文（必须是在 u64 窄化**之前**的原始 Value）。
     /// infallible：任何内部失败都静默跳过，绝不阻断业务。
     pub fn record(&self, direction: WireDirection, msg_val: &serde_json::Value) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
-        let record = build_record(
-            &self.trace_id,
-            &self.correlation,
-            self.next_seq.fetch_add(1, Ordering::Relaxed),
-            direction,
-            msg_val,
-        );
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
+        let record = build_record(&self.trace_id, &self.correlation, seq, direction, msg_val);
         let mut records = self
             .records
             .lock()
@@ -188,6 +226,33 @@ impl AcpWireHub {
             records.dequeue();
         }
         records.enqueue(Arc::new(record));
+        if direction == WireDirection::AgentToPylon
+            && msg_val
+                .get("method")
+                .and_then(|value| value.as_str())
+                .is_some()
+        {
+            if let Ok(mut ordinals) = self.inbound_ordinals.lock() {
+                if self.inbound_ordinal_overflowed.load(Ordering::Acquire) {
+                    return;
+                }
+                if ordinals.len() >= self.capacity {
+                    ordinals.clear();
+                    self.inbound_ordinal_overflowed
+                        .store(true, Ordering::Release);
+                    return;
+                }
+                ordinals.push_back(seq);
+            }
+        }
+    }
+
+    pub fn take_inbound_ordinal(&self) -> Option<u64> {
+        let mut ordinals = self.inbound_ordinals.lock().ok()?;
+        if self.inbound_ordinal_overflowed.load(Ordering::Acquire) {
+            return None;
+        }
+        ordinals.pop_front()
     }
 
     /// 记录一条已序列化的 outbound 行（writer 边界调用；解析失败静默跳过）。
@@ -198,7 +263,10 @@ impl AcpWireHub {
         let Ok(msg_val) = serde_json::from_str::<serde_json::Value>(line) else {
             return;
         };
-        self.record(direction, &msg_val);
+        match direction {
+            WireDirection::PylonToAgent => self.capture_request(&msg_val),
+            WireDirection::AgentToPylon => self.capture_agent_message(&msg_val),
+        }
     }
 
     /// 当前全部记录快照（旧→新，monotonicSeq 严格递增）。
@@ -210,6 +278,37 @@ impl AcpWireHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         order_snapshot(records.iter().map(|record| (**record).clone()).collect())
+    }
+
+    /// Capture an outbound JSON-RPC request at the transport boundary.
+    pub fn capture_request(&self, message: &serde_json::Value) {
+        self.record(WireDirection::PylonToAgent, message);
+    }
+
+    /// Capture an inbound response or notification at the transport boundary.
+    pub fn capture_agent_message(&self, message: &serde_json::Value) {
+        self.record(WireDirection::AgentToPylon, message);
+    }
+
+    /// Compatibility-neutral snapshot name used by transcript/replay code.
+    #[allow(dead_code)]
+    pub fn records(&self) -> Vec<WireRecord> {
+        self.snapshot()
+    }
+
+    /// Export the bounded capture as deterministic JSONL for diagnostics and
+    /// replay evidence. Serialization failures are represented as a redacted
+    /// sentinel line so exporting never perturbs the live transport.
+    pub fn to_jsonl(&self) -> String {
+        self.snapshot()
+            .into_iter()
+            .map(|record| {
+                serde_json::to_string(&record).unwrap_or_else(|_| {
+                    r#"{"error":"wire_record_serialization_failed"}"#.to_string()
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -231,18 +330,9 @@ fn build_record(
         .and_then(|value| value.as_str())
         .map(|s| s.to_string());
     let (id_kind, id_value) = classify_id(msg_val.get("id"));
-    let params = msg_val
-        .get("params")
-        .cloned()
-        .map(sanitize_wire);
-    let result = msg_val
-        .get("result")
-        .cloned()
-        .map(sanitize_wire);
-    let error = msg_val
-        .get("error")
-        .cloned()
-        .map(sanitize_wire);
+    let params = msg_val.get("params").cloned().map(sanitize_wire);
+    let result = msg_val.get("result").cloned().map(sanitize_wire);
+    let error = msg_val.get("error").cloned().map(sanitize_wire);
     // 远端会话 id：best-effort 从 params/result 提取的 sessionId（原 session_id）。
     let remote_session_id = extract_first_string(msg_val, &["sessionId", "session_id"]);
     // periId：session/update 事件中 Agent 上报的会话 id（与 remoteSessionId 同为
@@ -446,6 +536,51 @@ mod tests {
     }
 
     #[test]
+    fn canonical_correlation_uses_explicit_repository_identity() {
+        let hub = hub();
+        assert_eq!(hub.correlate(7), None);
+        let value = CanonicalCorrelation {
+            event_id: "event-42".into(),
+            sequence: 9,
+            revision: 12,
+        };
+        hub.record_canonical_commit(7, value.clone());
+        assert_eq!(hub.correlate(7), Some(value));
+        assert_eq!(hub.correlate(8), None);
+    }
+
+    #[test]
+    fn inbound_ordinal_does_not_consume_response_as_notification() {
+        let hub = hub();
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","id":1,"result":{}}),
+        );
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}),
+        );
+        assert_eq!(hub.take_inbound_ordinal(), Some(2));
+    }
+
+    #[test]
+    fn inbound_ordinal_overflow_invalidates_correlation_instead_of_shifting() {
+        let hub = hub();
+        for i in 0..9 {
+            hub.record(
+                WireDirection::AgentToPylon,
+                &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":i}}),
+            );
+        }
+        assert_eq!(hub.take_inbound_ordinal(), None);
+        hub.record(
+            WireDirection::AgentToPylon,
+            &json!({"jsonrpc":"2.0","method":"session/update","params":{"i":10}}),
+        );
+        assert_eq!(hub.take_inbound_ordinal(), None);
+    }
+
+    #[test]
     fn disabled_trace_records_nothing() {
         let hub = hub();
         hub.set_enabled(false);
@@ -475,6 +610,24 @@ mod tests {
         assert_eq!(snap.len(), 8, "容量 8，满后覆盖最旧");
         assert_eq!(snap[0].id_value, Some(json!(2)), "最旧的 0、1 被覆盖");
         assert_eq!(snap[7].id_value, Some(json!(9)));
+    }
+
+    #[test]
+    fn jsonl_export_is_bounded_and_preserves_sequence() {
+        let hub = hub();
+        for id in 0..12u64 {
+            hub.record(
+                WireDirection::PylonToAgent,
+                &json!({"jsonrpc":"2.0","id":id,"method":"session/prompt","params":{}}),
+            );
+        }
+        let exported = hub.to_jsonl();
+        let lines: Vec<_> = exported.lines().collect();
+        assert_eq!(lines.len(), 8);
+        let first: WireRecord = serde_json::from_str(lines[0]).unwrap();
+        let last: WireRecord = serde_json::from_str(lines[7]).unwrap();
+        assert_eq!(first.monotonic_seq, 5);
+        assert_eq!(last.monotonic_seq, 12);
     }
 
     #[test]

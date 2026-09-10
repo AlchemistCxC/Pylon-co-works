@@ -58,7 +58,10 @@ pub(crate) fn connection_test_error_payload(error: &AcpError) -> serde_json::Val
 }
 
 /// 连接测试超时的 error payload（两处超时分支共用；字段与连接失败 payload 同形）。
-pub(crate) fn connection_timeout_payload(timeout_secs: u64, stderr: Option<String>) -> serde_json::Value {
+pub(crate) fn connection_timeout_payload(
+    timeout_secs: u64,
+    stderr: Option<String>,
+) -> serde_json::Value {
     serde_json::json!({
         "code": "agent_connection_timeout",
         "message": format!("连接测试超时（{timeout_secs}s）"),

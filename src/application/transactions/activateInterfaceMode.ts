@@ -56,10 +56,11 @@ export function interfaceModeIsUsable(mode: InterfaceModeContribution): boolean 
 }
 
 function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContribution, ports: InterfaceModeTransactionPorts): void {
-  applyPresentationProfile(profile, {
+  const result = applyPresentationProfile(profile, {
     setZoneField: (zone, patch, source) => ports.theme.getState().setZoneField(zone, patch, source),
     setActiveProfileId: profileId => ports.presentation.getState().setActiveProfileId(profileId),
   })
+  if (result.status === 'failed') throw new Error(result.message)
   ports.interfaceMode.getState().rememberProfile(mode, profile.id)
 }
 
@@ -89,7 +90,7 @@ export function activatePresentationProfile(profileId: string, ports: InterfaceM
   if (!profile) return false
   const mode = presentationProfileInterfaceMode(profile)
   if (!resolveActivatableMode(mode, ports)) return false
-  applyModeProfile(mode, profile, ports)
+  try { applyModeProfile(mode, profile, ports) } catch { return false }
   ports.interfaceMode.getState().setInterfaceMode(mode)
   return true
 }
@@ -103,7 +104,7 @@ export function activateInterfaceMode(mode: InterfaceMode, ports: InterfaceModeT
   const profile = registry.resolve(profileId)?.value
     ?? registry.getSnapshot().entries.find(entry => presentationProfileInterfaceMode(entry.value) === mode)?.value
   if (!profile) return false
-  applyModeProfile(mode, profile, ports)
+  try { applyModeProfile(mode, profile, ports) } catch { return false }
   state.setInterfaceMode(mode)
   return true
 }
@@ -120,8 +121,10 @@ export function resetThemeForActiveInterfaceMode(ports: InterfaceModeTransaction
     ?? registry.getSnapshot().entries.find(entry => presentationProfileInterfaceMode(entry.value) === mode)?.value
   if (!profile) return false
 
-  ports.theme.getState().resetTheme()
-  applyModeProfile(mode, profile, ports)
+  try {
+    ports.theme.getState().resetTheme()
+    applyModeProfile(mode, profile, ports)
+  } catch { return false }
   return true
 }
 

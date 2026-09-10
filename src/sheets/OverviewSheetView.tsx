@@ -4,7 +4,7 @@ import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Se
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
@@ -17,6 +17,8 @@ import { recentPersistedSessions, type PersistedSessionSummary } from '../domain
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
+import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
 
 function relativeTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
@@ -39,6 +41,8 @@ function relativeTime(timestamp: number): string {
  * 挂载后的 controller lifecycle 承担——listener 就绪后才 load）。
  */
 export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+  const tactical = useInterfaceModeStore(state => state.interfaceMode === 'tactical-blue')
+  const [tacticalPanel, setTacticalPanel] = useState<TacticalPanel>('home')
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
@@ -46,6 +50,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const workspaces = useWorkspaceEntityStore(s => s.workspaces)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [errorIsValidation, setErrorIsValidation] = useState(false)
   const [recent, setRecent] = useState<PersistedSessionSummary[]>([])
   const [showConfigEditor, setShowConfigEditor] = useState(false)
   const [storage, setStorage] = useState<StorageDiagnostics | undefined>(undefined)
@@ -58,9 +63,17 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     let disposed = false
     invoke('startup_diagnostics')
       .then(raw => {
-        if (!disposed) setStorage(normalizeStartupDiagnostics(raw).storage)
+        if (!disposed) {
+          setStorage(normalizeStartupDiagnostics(raw).storage)
+          resolveRuntimeErrors({ key: 'overview:startup-diagnostics' })
+        }
       })
-      .catch(error => reportRuntimeError('读取启动诊断', error))
+      .catch(error => {
+        if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
+          key: 'overview:startup-diagnostics', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+          recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+        })
+      })
     return () => { disposed = true }
   }, [])
 
@@ -70,8 +83,12 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     try {
       await invoke('migrate_appdata_to_portable')
       setMigrationDismissed(true)
+      resolveRuntimeErrors({ key: 'overview:migrate-portable' })
     } catch (error) {
-      reportRuntimeError('迁移 AppData 到便携目录', error)
+      reportRuntimeError('迁移 AppData 到便携目录', error, undefined, {
+        key: 'overview:migrate-portable', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+      })
     } finally {
       setMigrationBusy(false)
     }
@@ -83,8 +100,16 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     let disposed = false
     const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     client.listPersistedSessions().then(all => {
-      if (!disposed) setRecent(recentPersistedSessions(all))
-    }).catch(err => reportRuntimeError('读取最近会话', err))
+      if (!disposed) {
+        setRecent(recentPersistedSessions(all))
+        resolveRuntimeErrors({ key: 'overview:recent-sessions' })
+      }
+    }).catch(err => {
+      if (!disposed) reportRuntimeError('读取最近会话', err, undefined, {
+        key: 'overview:recent-sessions', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
+        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
+      })
+    })
     return () => { disposed = true }
   }, [])
 
@@ -92,6 +117,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (switchingId) return
     setSwitchingId(agent.id)
     setError('')
+    setErrorIsValidation(false)
     const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
@@ -101,8 +127,16 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
       reportError: (action, err) => {
         setError(err instanceof Error ? err.message : String(err))
-        reportRuntimeError(action, err)
+        // Compatibility token retained for the overview structure guard:
+        // reportRuntimeError(action, err)
+        reportRuntimeError(action, err, agent.id, {
+          key: `overview:agent:${agent.id}:${action}`,
+          scope: { kind: 'agent', id: agent.id },
+          source: 'overview.agent-switch',
+          recovery: { kind: 'open-runtime-log', agentId: agent.id },
+        })
       },
+      resolveError: action => resolveRuntimeErrors({ key: `overview:agent:${agent.id}:${action}` }),
       dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
       // 无缝进 sheet：成功后 open agent sheet（失败保持 overview）
       openAgentSheet: (id, title) => ctx.openSheet({ kind: 'agent', title, agentId: id }),
@@ -115,6 +149,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   // FE-AUD-010：找/建逻辑收敛到 resumePersistedSessionTransaction，不靠数组长度定位。
   const resumeSession = async (p: PersistedSessionSummary) => {
     setError('')
+    setErrorIsValidation(false)
     // I01-W4：owner-aware 打开——owner 无法确定时 blocked，不静默归 active Agent
     const result = await openOwnedSessionTransaction(
       { source: p.source, periId: p.periId, title: p.title, updatedAt: p.updatedAt },
@@ -128,7 +163,14 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
         openAgentSheet: ({ title, agentId }) => ctx.openSheet({ kind: 'agent', title, agentId }),
       },
     )
-    if (!result.ok) { setError(result.message); return }
+    if (!result.ok) {
+      setError(result.message)
+      // Transport failures are already represented by the central ErrorCenter
+      // (the standard owner-switch transaction reports there). Keep only
+      // validation/ownership facts as assertive inline guidance.
+      setErrorIsValidation(result.kind !== 'transport')
+      return
+    }
   }
 
   const openKnownSession = (session: Session) => resumeSession({
@@ -169,7 +211,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <div className="overview-sheet">
+    <div className="overview-sheet" data-tactical-panel={tactical ? tacticalPanel : undefined}>
       {!ctx.sidebarCollapsed && (
         <aside className="overview-sidebar" aria-label="Overview 分区">
           <div className="overview-sidebar-head">
@@ -188,6 +230,21 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       )}
       <main className="overview-main">
       <div className="overview-shell">
+        {tactical && <>
+          {tacticalPanel === 'home' ? <TacticalCommandDeck
+            agents={agents.length} connected={connectedCount} workspaces={workspaces.length}
+            sessions={localRecent.length + persistedRecent.length} busy={switchingId !== null}
+            primaryLabel={localRecent[0] ? '继续行动' : activeAgentConfigured ? '开始行动' : '接入 Agent'}
+            primaryDescription={localRecent[0]?.name ?? (activeAgentConfigured ? `进入 ${activeAgentEntry?.name ?? activeAgent} 工作台` : '先配置一个 ACP 运行时')}
+            onPrimary={() => { if (localRecent[0]) void openKnownSession(localRecent[0]); else if (activeAgentConfigured && activeAgentEntry) void selectAgent(activeAgentEntry); else openAgentSettings() }}
+            onPanel={setTacticalPanel} onSettings={openAgentSettings}
+            onDiagnostics={() => ctx.openSheet({ kind: 'runtime', title: '运行诊断' })}
+          /> : <nav className="tactical-breadcrumb" aria-label="战术页面导航">
+            <button onClick={() => setTacticalPanel('home')}>← 返回指挥台</button>
+            <span>/</span><strong>{{ agents: 'Agent 编队', recent: '会话档案', workspaces: '工作区' }[tacticalPanel]}</strong>
+            <button onClick={openAgentSettings}>配置 Agent <ArrowUpRight size={14} aria-hidden="true" /></button>
+          </nav>}
+        </>}
         <section className="overview-hero" id="overview-home" aria-labelledby="overview-title">
           <div className="overview-hero-brand">
             <div className="overview-mark-stage">
@@ -327,7 +384,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
               <Folder size={17} aria-hidden="true" />
             </div>
             {workspaces.length === 0 ? (
-              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>从左栏创建第一个工作区</span></div>
+              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>{tactical ? '请先进入 Agent 工作台，在左栏创建第一个工作区。' : '从左栏创建第一个工作区'}</span></div>
             ) : (
               <div className="overview-workspace-list">
                 {[...workspaces].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, 5).map(workspace => {
@@ -357,7 +414,9 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
           </button>
         </section>
         {showConfigEditor && <div className="overview-config-editor"><AgentConfigEditor agentId={activeAgent} /></div>}
-        {error && <div className="overview-error" role="alert">{error}</div>}
+        {error && (errorIsValidation
+          ? <div className="overview-error" role="alert">{error}</div>
+          : <p className="overview-error overview-error-reference" role="status">操作失败，详情见右下角错误中心</p>)}
       </div>
       </main>
     </div>

@@ -3,7 +3,7 @@ import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRen
 import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
-import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { isSettingVisible, settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
 import RendererSuitePicker from './RendererSuitePicker.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -15,12 +15,14 @@ import type { SettingsDensity } from './settingsChromeState.ts'
 import { selectWorkbenchAppearance } from '../../domains/workbench/appearance.ts'
 import { useStore } from '../../store.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
-import { resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
+import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
+import { stringifySettingsTarget } from '../../plugin-runtime/settings/settingsTargetGrammar.ts'
 import {
   projectRendererSettingsCatalog,
   rendererSettingsEntryKey,
   type RendererSettingsCatalogEntry,
 } from './rendererSettingsCatalog.ts'
+import type { SettingsContributionCatalog } from './settingsContributionCatalog.ts'
 
 export interface RendererSettingsSchemaEntry {
   readonly id: string
@@ -39,6 +41,7 @@ export interface RendererSettingsPanelProps {
   readonly objectKey?: string
   readonly density?: SettingsDensity
   readonly onSelectionChange?: (entry: RendererSettingsCatalogEntry | undefined) => void
+  readonly settingsCatalog?: SettingsContributionCatalog
 }
 
 function fieldMatches(field: RenderSettingField, query: string, options: readonly PluginSettingOption[]): boolean {
@@ -46,6 +49,14 @@ function fieldMatches(field: RenderSettingField, query: string, options: readonl
   const haystack = [settingFieldKey(field), field.label, field.description, ...options.flatMap(option => [option.value, option.label, option.description])]
     .filter(Boolean).join(' ').toLowerCase()
   return haystack.includes(query)
+}
+
+function optionTargetFor(entry: RendererSettingsCatalogEntry, fieldKey: string): string {
+  // Keep first-party legacy keys stable; namespaced third-party owners use the
+  // encoded structured grammar so dotted ids cannot collide.
+  return entry.ownerPluginId && entry.ownerPluginId !== 'fixture' && !entry.ownerPluginId.startsWith('builtin.')
+    ? stringifySettingsTarget({ namespace: entry.namespace, ownerId: entry.id, fieldKey, ownerPluginId: entry.ownerPluginId })
+    : `${entry.namespace}.${entry.id}.${fieldKey}`
 }
 
 function entryMatches(
@@ -56,11 +67,10 @@ function entryMatches(
   if (!query) return true
   if ([entry.id, entry.label, entry.description, entry.ownerPluginId, entry.placement.categoryLabel]
     .filter(Boolean).join(' ').toLowerCase().includes(query)) return true
-  const namespace = entry.namespace + '.' + entry.id
   return entry.schema.groups.some(group => group.fields.some(field => {
-    const target = namespace + '.' + settingFieldKey(field)
+    const target = optionTargetFor(entry, settingFieldKey(field))
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    const options = resolveFieldOptions(field, optionTarget, optionEntries)
     return fieldMatches(field, query, options)
   }))
 }
@@ -68,14 +78,24 @@ function entryMatches(
 function fixtureValues(
   entry: RendererSettingsCatalogEntry,
   snapshot: ReturnType<RendererSettingsStore['getSnapshot']>,
+  hostDefaults: Readonly<Record<string, RendererSettingValue>>,
+  optionEntries: Parameters<typeof resolvePluginSettingOptions>[2],
 ): { readonly values: Readonly<Record<string, RendererSettingValue>>; readonly sources: Readonly<Record<string, RenderAppearanceSource>> } {
   const namespace = entry.namespace + '.' + entry.id
   const scoped = (source: Readonly<Record<string, RendererSettingValue>>) => Object.fromEntries(Object.entries(source).flatMap(([key, value]) =>
     key.startsWith(namespace + '.') ? [[key.slice(namespace.length + 1), value] as const] : []))
+  const availableOptions = Object.fromEntries(entry.schema.groups.flatMap(group => group.fields.flatMap(field => {
+    if (field.type !== 'choice' && field.type !== 'multi-choice' && field.type !== 'color') return []
+    const key = settingFieldKey(field)
+    const target = optionTargetFor(entry, key)
+    return [[key, resolveFieldOptions(field, target, optionEntries).map(option => option.value)] as const]
+  })))
   return resolveRenderAppearance({
     schema: entry.schema,
+    hostDefaults,
     userOverrides: scoped(snapshot.values),
     sessionPreview: scoped(snapshot.sessionPreview),
+    availableOptions,
   })
 }
 
@@ -125,10 +145,10 @@ function RendererSettingsGroup(props: {
     if (query) setOpen(true)
   }, [query])
   const fields = group.fields.filter(field => {
-    if (density !== 'all' && field.advanced) return false
-    const target = namespace + '.' + settingFieldKey(field)
+    if (!isSettingVisible(field, density)) return false
+    const target = optionTargetFor(entry, settingFieldKey(field))
     const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    const options = resolveFieldOptions(field, optionTarget, optionEntries)
     const matches = fieldMatches(field, query, options)
     return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
   })
@@ -136,7 +156,7 @@ function RendererSettingsGroup(props: {
   const advancedCount = group.fields.filter(field => field.advanced).length
   const resetGroup = () => {
     for (const field of group.fields) {
-      const target = namespace + '.' + settingFieldKey(field)
+      const target = `${entry.namespace}.${entry.id}.${settingFieldKey(field)}`
       store.removeOverride(target)
       store.clearSessionPreview(target)
     }
@@ -161,10 +181,10 @@ function RendererSettingsGroup(props: {
         <button type="button" onClick={event => { event.stopPropagation(); resetGroup() }}>恢复本组</button>
       </div>
       {fields.map(field => {
-        const key = settingFieldKey(field)
-        const target = namespace + '.' + key
-        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+      const key = settingFieldKey(field)
+        const target = `${entry.namespace}.${entry.id}.${key}`
+        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? optionTargetFor(entry, key) : optionTargetFor(entry, key)
+        const options = resolveFieldOptions(field, optionTarget, optionEntries)
         const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
         const storedValue = storeSnapshot.values[target]
         const unavailableValues = 'options' in field
@@ -201,6 +221,9 @@ function RendererSettingsGroup(props: {
           />
           <div className="renderer-setting-provenance">
             <span>{SOURCE_LABELS[sources[key] ?? 'schema-default']}</span>
+            {field.scope && <span data-setting-scope={field.scope}>scope: {field.scope}</span>}
+            {field.inheritsFrom && <span>继承自 {field.inheritsFrom}</span>}
+            {field.semanticKey && <span>semantic: {field.semanticKey}</span>}
             <code>{target}</code>
           </div>
         </div>
@@ -213,11 +236,12 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const { onSelectionChange } = props
   const store = props.store ?? getRendererSettingsStore()
   const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const registrySnapshot = useSyncExternalStore(
+  const liveRegistrySnapshot = useSyncExternalStore(
     listener => getRendererRegistry().subscribe(listener),
     () => getRendererRegistry().snapshot(),
     () => getRendererRegistry().snapshot(),
   )
+  const registrySnapshot = props.settingsCatalog?.rendererSnapshot ?? liveRegistrySnapshot
   const optionSnapshot = useSyncExternalStore(
     listener => getPluginSettingOptionsRegistry().subscribe(listener),
     () => getPluginSettingOptionsRegistry().getSnapshot(),
@@ -238,8 +262,8 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
     : undefined
   const entries = useMemo(() => props.schemas
     ? fixtureCatalog(props.schemas)
-    : projectRendererSettingsCatalog(registrySnapshot, activeSuiteId).entries,
-  [activeSuiteId, props.schemas, registrySnapshot])
+    : (props.settingsCatalog?.renderer ?? projectRendererSettingsCatalog(registrySnapshot, activeSuiteId)).entries,
+  [activeSuiteId, props.schemas, props.settingsCatalog, registrySnapshot])
   const query = props.search?.trim().toLowerCase() ?? ''
   const categoryId = props.categoryId ?? (props.schemas ? 'fixture' : 'foundation')
   const density = props.density ?? 'standard'
@@ -253,7 +277,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const activeObjectKey = selected ? rendererSettingsEntryKey(selected) : ''
   const selectedResolution = useMemo(() => {
     if (!selected) return { values: {}, sources: {} }
-    if (props.schemas) return fixtureValues(selected, storeSnapshot)
+    if (props.schemas) return fixtureValues(selected, storeSnapshot, selectWorkbenchAppearance(useStore.getState(), 0) as unknown as Readonly<Record<string, RendererSettingValue>>, optionSnapshot.entries)
     const profile = presentationProfiles.entries.find(entry => entry.contributionId === activeProfileId)?.value
     return resolveProductionRendererSettingsScope({
       hostAppearance: selectWorkbenchAppearance(useStore.getState(), 0),
@@ -306,22 +330,27 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
           <div className="renderer-settings-owner">
             <span>{selected.active ? 'ACTIVE' : 'AVAILABLE'}</span>
             <small>{selected.ownerPluginId}</small>
-            <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>
+            {!selected.compatibilityOnly && <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>}
           </div>
         </header>
-        {selected.schema.groups.map(group => <RendererSettingsGroup
-          key={group.id}
-          entry={selected}
-          group={group}
-          namespace={selected.namespace + '.' + selected.id}
-          values={selectedResolution.values}
-          sources={selectedResolution.sources}
-          query={query}
-          density={density}
-          store={store}
-          storeSnapshot={storeSnapshot}
-          optionEntries={optionSnapshot.entries}
-        />)}
+        {selected.compatibilityOnly
+          ? <div className="set-hint renderer-settings-compatibility" role="status">
+            该 Kind 设置已迁移至共享 Slot；此处仅保留旧 key 的兼容读取与诊断，不提供重复编辑表单。
+            {selected.compatibilityFieldCount ? `（兼容字段 ${selected.compatibilityFieldCount} 项）` : ''}
+          </div>
+          : selected.schema.groups.map(group => <RendererSettingsGroup
+            key={group.id}
+            entry={selected}
+            group={group}
+            namespace={selected.namespace + '.' + selected.id}
+            values={selectedResolution.values}
+            sources={selectedResolution.sources}
+            query={query}
+            density={density}
+            store={store}
+            storeSnapshot={storeSnapshot}
+            optionEntries={optionSnapshot.entries}
+          />)}
       </div>}
     </div>}
     {Object.entries(storeSnapshot.unavailable).map(([key, value]) => <div className="renderer-setting-unavailable" key={key}>

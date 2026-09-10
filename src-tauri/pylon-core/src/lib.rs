@@ -9,4 +9,6 @@
 
 pub mod agent_catalog;
 pub mod agent_detection;
+pub mod agent_diagnostics;
+pub mod agent_preflight;
 pub mod cli_client;

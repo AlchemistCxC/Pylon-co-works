@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use crate::acp::RequestId;
 use crate::dispatcher::resolve_agent_provider;
@@ -205,88 +204,6 @@ pub(crate) fn pick_option(options: &[PermissionOption], prefer_reject: bool) -> 
     chosen.map(|option| option.option_id.as_str())
 }
 
-/// 锁外应答发送共享 helper（G3 §2.2.2）：构造 {jsonrpc,id,result} 信封 → 序列化 →
-/// 超时发送（方案 2B：超时值与 acp::DEFAULT_WRITE_TIMEOUT_SECS 单一来源）→
-/// 超时置 crashed（语义对齐 acp::send_line）。
-/// 收敛 dispatcher::send_direct_permission_response 与 resolve_pending 的锁外发送段
-/// （三份同形拷贝 → 一份）；调用方（resolve_pending）在返回 false 时恢复 pending。
-pub(crate) async fn send_agent_response(
-    write_tx: tokio::sync::mpsc::Sender<String>,
-    crashed: Arc<std::sync::atomic::AtomicBool>,
-    request_id: RequestId,
-    result: serde_json::Value,
-) -> bool {
-    if crashed.load(Ordering::Acquire) {
-        return false; // 已崩溃不发送（原两处同语义）
-    }
-    // ACP-01：untagged 序列化——Number(n) → "id": n、String(s) → "id": "s"，原 variant 回写。
-    let line = serde_json::json!({ "jsonrpc": "2.0", "id": request_id, "result": result });
-    let Ok(line) = serde_json::to_string(&line) else {
-        return false;
-    };
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS),
-        write_tx.send(line),
-    )
-    .await
-    {
-        Ok(Ok(())) => true,
-        Ok(Err(_)) => false,
-        Err(_) => {
-            tracing::warn!(
-                "ACP write timeout after {}s: connection presumed dead",
-                crate::acp::DEFAULT_WRITE_TIMEOUT_SECS
-            );
-            crashed.store(true, Ordering::Release);
-            false
-        }
-    }
-}
-
-/// ACP-04（§5.6）：协议错误应答——解析失败不属于可 approve/reject 的 pending
-/// permission，**不伪造 optionId**，按 ACP 标准发 JSON-RPC error 信封（-32602
-/// Invalid params），让 agent 按标准错误处理。与 [`send_agent_response`] 同发送
-/// 路径（锁外 send_line，10s 超时语义一致）；id 回显原始 variant（number/string）。
-pub(crate) async fn send_agent_error(
-    write_tx: tokio::sync::mpsc::Sender<String>,
-    crashed: Arc<std::sync::atomic::AtomicBool>,
-    request_id: RequestId,
-    code: i64,
-    message: &str,
-) -> bool {
-    if crashed.load(Ordering::Acquire) {
-        return false; // 已崩溃不发送（同 send_agent_response）
-    }
-    let line = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": { "code": code, "message": message },
-    });
-    let Ok(line) = serde_json::to_string(&line) else {
-        return false;
-    };
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS),
-        write_tx.send(line),
-    )
-    .await
-    {
-        Ok(Ok(())) => true,
-        Ok(Err(_)) => false,
-        Err(_) => {
-            tracing::warn!(
-                "ACP write timeout after {}s: connection presumed dead",
-                crate::acp::DEFAULT_WRITE_TIMEOUT_SECS
-            );
-            crashed.store(true, Ordering::Release);
-            false
-        }
-    }
-}
-
-/// R34：四路应答统一核心（由 respond_permission 演进——四路：应答 / cancel /
-/// resolve / 超时 全部收敛于此，单一临界区 + 锁外发送）。
-///
 /// 单临界区（P1-2 TOCTOU 修复）：acp 锁内查条目 + C4 generation 校验 +
 /// tool_call_id 校验 + 选项校验 + claim；锁外发送（O9：10s 超时，语义对齐
 /// acp::send_line），不再持 acp 锁 await。客户端替换（replace_agent_client）
@@ -339,7 +256,7 @@ async fn resolve_pending(
     option_id: &str,
 ) -> bool {
     // 锁内复核 + 取 write_tx 克隆 + claim（发送全部在锁外）。
-    let (write_tx, crashed, claimed, canonical_id) = {
+    let (responder, claimed, canonical_id) = {
         let acp = runtime.acp.lock().await;
         let mut pending = match runtime.pending_permissions.lock() {
             Ok(guard) => guard,
@@ -370,12 +287,7 @@ async fn resolve_pending(
         {
             return false;
         }
-        (
-            acp.write_tx.clone(),
-            acp.crashed.clone(),
-            pending.remove(&canonical_id),
-            canonical_id,
-        )
+        (acp.responder(), pending.remove(&canonical_id), canonical_id)
     };
     // 锁外发送（G3 §2.2.2 收敛）：构造应答 → send_agent_response（信封 + 序列化 +
     // 10s 超时 + crashed 预检/置位）。失败恢复 pending（保留可重试）；原 :190-194
@@ -385,9 +297,21 @@ async fn resolve_pending(
     } else {
         permission_response(option_id)
     };
-    if !send_agent_response(write_tx, crashed, canonical_id.clone(), outcome).await {
+    if !responder.respond(canonical_id.clone(), outcome).await {
         restore_pending(runtime, canonical_id, claimed);
         return false;
+    }
+    // The pending entry carries the only reliable session binding.  Update the
+    // reducer only after the wire response commits, so a failed send remains
+    // retryable and cannot prematurely drain state.
+    if let Some(permission) = claimed.as_ref() {
+        if let Ok(mut sessions) = runtime.sessions.lock() {
+            if let Some(session) = sessions.get_mut(&permission.session_id) {
+                let _ = session
+                    .acp_state
+                    .resolve_permission(&canonical_id.to_string());
+            }
+        }
     }
     true
 }
@@ -557,9 +481,10 @@ pub(crate) async fn interaction_list(
                 .map_err(|e| PylonError::Protocol(format!("agents lock poisoned: {e}")))?;
             resolve_agent_provider(&agents, &agent_id).unwrap_or_else(|| agent_id.clone())
         };
-        let pending = runtime.pending_permissions.lock().map_err(|e| {
-            PylonError::Protocol(format!("pending permissions lock poisoned: {e}"))
-        })?;
+        let pending = runtime
+            .pending_permissions
+            .lock()
+            .map_err(|e| PylonError::Protocol(format!("pending permissions lock poisoned: {e}")))?;
         for (request_id, permission) in pending.iter() {
             items.push(serde_json::json!({
                 "provider": provider,
@@ -838,21 +763,6 @@ mod tests {
         assert_eq!(permission.options[0].option_id, "ALLOW_ONCE");
     }
 
-    /// fake ACP：把收到的请求行追加写入 trace 文件并逐个应答（writer 不阻塞）。
-    fn trace_script(trace_path: &std::path::Path) -> String {
-        format!(
-            r#"import json,sys
-with open({trace:?}, 'a') as f:
-    for line in sys.stdin:
-        request = json.loads(line)
-        f.write(line)
-        f.flush()
-        print(json.dumps({{'jsonrpc':'2.0','id':request.get('id'),'result':{{}}}}), flush=True)
-"#,
-            trace = trace_path.to_string_lossy()
-        )
-    }
-
     #[tokio::test]
     async fn respond_permission_rejects_stale_generation() {
         let runtime = AgentRuntime::new_disconnected();
@@ -878,124 +788,19 @@ with open({trace:?}, 'a') as f:
 
     #[tokio::test]
     async fn respond_permission_stale_generation_never_reaches_client() {
-        let trace_path = std::env::temp_dir().join(format!(
-            "prism_perm_stale_{}_{}.jsonl",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&trace_path);
-        let agent = crate::test_utils::fake_acp_agent("fake-acp-perm", &trace_script(&trace_path));
-        let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
-            .await
-            .expect("fake ACP 必须初始化");
+        // A1c: SDK responder 只为真实 agent request 登记；代际拒绝保持 pending。
         let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = acp;
-
-        // 旧 generation（1）的挂起：不匹配 → 不应答且不发送
         runtime
             .pending_permissions
             .lock()
             .unwrap()
             .insert(RequestId::Number(7), parsed(1));
-        assert!(
-            !resolve_pending(&runtime, RequestId::Number(7), None, "allow_once").await,
-            "stale generation 必须拒绝"
-        );
+        assert!(!resolve_pending(&runtime, RequestId::Number(7), None, "allow_once").await);
         assert!(runtime
             .pending_permissions
             .lock()
             .unwrap()
             .contains_key(&RequestId::Number(7)));
-
-        // 当前 generation（0）的挂起：匹配 → 应答发送成功并清理
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(8), parsed(0));
-        assert!(
-            resolve_pending(&runtime, RequestId::Number(8), None, "allow_once").await,
-            "匹配 generation 必须应答"
-        );
-        assert!(!runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .contains_key(&RequestId::Number(8)));
-
-        // 等 fake ACP 把请求写入 trace 后回读断言（serde_json 紧凑序列化："id":8）
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if std::fs::read_to_string(&trace_path)
-                    .map(|trace| trace.contains("\"id\":8"))
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("匹配 generation 的应答必须到达客户端");
-
-        // R34：Cancelled 应答（空 option_id）——匹配身份 + tool_call_id 则发送
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(9), parsed(0));
-        assert!(
-            resolve_pending(&runtime, RequestId::Number(9), Some("call-1"), "").await,
-            "匹配的 cancel 必须应答"
-        );
-        // tool_call_id 不匹配（同 id 已被复用为其他工具调用）→ 拒绝应答且不发送
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(10), parsed(0));
-        assert!(
-            !resolve_pending(&runtime, RequestId::Number(10), Some("other-call"), "").await,
-            "tool_call_id 不匹配必须拒绝"
-        );
-        assert!(runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .contains_key(&RequestId::Number(10)));
-        // 等 cancel 应答写入 trace 后回读断言
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if std::fs::read_to_string(&trace_path)
-                    .map(|trace| trace.contains("\"id\":9"))
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("cancel 应答必须到达客户端");
-        let trace = std::fs::read_to_string(&trace_path).unwrap_or_default();
-        assert!(
-            trace.contains("\"outcome\":\"cancelled\""),
-            "cancel 应答必须是 Cancelled 形状: {trace}"
-        );
-        assert!(
-            !trace.contains("\"id\":7"),
-            "stale generation 应答不得写入新进程: {trace}"
-        );
-        assert!(
-            !trace.contains("\"id\":10"),
-            "tool_call_id 不匹配的应答不得发送: {trace}"
-        );
-
-        let _ = runtime.acp.lock().await.kill();
-        let _ = std::fs::remove_file(&trace_path);
     }
 
     #[test]
@@ -1041,85 +846,44 @@ with open({trace:?}, 'a') as f:
         );
     }
 
+    // String-id wire echo is covered by acp::engine::sdk_responder_answers_agent_request.
+    /// ACP-03（§5.6）：后端唯一计时/应答——超时请求结算后返回 outcome（前端
+    /// permission.resolved 事件载荷）。A1c：legacy 写通道已删除，改由真实 SDK
+    /// 连接登记 Responder（fake agent 发 id=7 的 permission 请求）——应答送达才结算。
     #[tokio::test]
-    async fn string_id_pending_round_trip_echoes_original_variant() {
-        // ACP-01 验收：string id（"perm-1"）挂起请求用原 variant 应答——
-        // 响应 wire 的 id 必须是字符串（不能转成 number、不能当 0）。
-        let trace_path = std::env::temp_dir().join(format!(
-            "prism_perm_str_{}_{}.jsonl",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&trace_path);
-        let agent =
-            crate::test_utils::fake_acp_agent("fake-acp-perm-str", &trace_script(&trace_path));
+    async fn timeout_settles_and_reports_outcome_with_live_responder() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    if method == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        print(json.dumps({'jsonrpc':'2.0','id':7,'method':'session/request_permission','params':{'sessionId':'s1','toolCallId':'tc-1','options':[{'optionId':'allow_once'},{'optionId':'reject_once'}]}}), flush=True)
+    else:
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-perm-timeout", script);
         let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
             .await
-            .expect("fake ACP 必须初始化");
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = acp;
-
-        runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::String("perm-1".to_string()), parsed(0));
-        assert!(
-            resolve_pending(
-                &runtime,
-                RequestId::String("perm-1".to_string()),
-                None,
-                "allow_once"
-            )
-            .await,
-            "string id 必须应答"
-        );
-        assert!(
-            !runtime
-                .pending_permissions
+            .expect("fake ACP must initialize");
+        // 等引擎登记 id=7 的 Responder（Pylon id = Number(7)）。
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if acp
+                .backend
+                .pending_requests
                 .lock()
                 .unwrap()
-                .contains_key(&RequestId::String("perm-1".to_string())),
-            "应答后必须清理"
-        );
-
-        // 等 fake ACP 把应答写入 trace 后回读断言：id 保持字符串形态。
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if let Some(line) = std::fs::read_to_string(&trace_path)
-                    .unwrap_or_default()
-                    .lines()
-                    .find(|line| line.contains("\"perm-1\""))
-                {
-                    let value: serde_json::Value = serde_json::from_str(line).unwrap();
-                    assert_eq!(
-                        value["id"],
-                        serde_json::json!("perm-1"),
-                        "响应必须回写 string id 原 variant"
-                    );
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                .contains_key(&RequestId::Number(7))
+            {
+                break;
             }
-        })
-        .await
-        .expect("string id 应答必须到达客户端");
-
-        let _ = runtime.acp.lock().await.kill();
-        let _ = std::fs::remove_file(&trace_path);
-    }
-
-    /// ACP-03（§5.6）：后端唯一计时/应答——超时请求结算后返回 outcome（前端
-    /// permission.resolved 事件载荷）。disconnected() 默认 drop 写接收端，发送
-    /// 必失败（恢复 pending）——须用存活通道 + 接收端保持作用域内，断言应答送达。
-    #[tokio::test]
-    async fn timeout_settles_and_reports_outcome_with_live_write_channel() {
-        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel(1);
-        let mut acp = crate::acp::AcpClient::disconnected();
-        acp.write_tx = write_tx;
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "engine must register the permission responder"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = acp;
         let agent_id = "timeout-agent";
@@ -1149,12 +913,7 @@ with open({trace:?}, 'a') as f:
             runtime.pending_permissions.lock().unwrap().is_empty(),
             "结算后 pending 必须清空"
         );
-        // 应答已送达（接收端存活——disconnected 默认 drop rx 会发送失败恢复 pending）
-        let line = write_rx.try_recv().expect("超时应答必须送达写通道");
-        assert!(
-            line.contains("reject_once"),
-            "应答必须回写 reject_once：{line}"
-        );
+        let _ = runtime.acp.lock().await.kill();
     }
 
     /// ACP-03：deadline 由后端单一来源（PERMISSION_REQUEST_TIMEOUT_SECS）——
@@ -1166,57 +925,5 @@ with open({trace:?}, 'a') as f:
             permission_deadline_ms(requested_at),
             1_722_500_000_000 + 300 * 1000
         );
-    }
-
-    /// ACP-04（§5.6）：send_agent_error 发 JSON-RPC error 信封，id 回显原始
-    /// variant（string/number），无 result/outcome；崩溃后不发送。
-    #[tokio::test]
-    async fn send_agent_error_emits_error_envelope_with_id_variant() {
-        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel(1);
-        let crashed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let ok = send_agent_error(
-            write_tx,
-            crashed.clone(),
-            RequestId::String("perm-e".to_string()),
-            -32602,
-            "invalid params: permission request 解析失败",
-        )
-        .await;
-        assert!(ok, "string id 错误应答必须发送");
-        let line: serde_json::Value =
-            serde_json::from_str(&write_rx.try_recv().expect("错误信封必须到达")).unwrap();
-        assert_eq!(line["jsonrpc"], "2.0");
-        assert_eq!(line["id"], "perm-e", "string id 必须回显原始 variant");
-        assert_eq!(line["error"]["code"], -32602);
-        assert!(line.get("result").is_none(), "错误应答不得携带 result");
-
-        // number id 回显 + 崩溃后不发送。
-        let (write_tx2, mut write_rx2) = tokio::sync::mpsc::channel(1);
-        let ok2 = send_agent_error(
-            write_tx2,
-            crashed.clone(),
-            RequestId::Number(9),
-            -32602,
-            "x",
-        )
-        .await;
-        assert!(ok2, "number id 错误应答必须发送");
-        let line2: serde_json::Value =
-            serde_json::from_str(&write_rx2.try_recv().expect("错误信封必须到达")).unwrap();
-        assert_eq!(line2["id"], 9, "number id 必须回显原始 variant");
-        drop(write_rx2);
-
-        crashed.store(true, std::sync::atomic::Ordering::Release);
-        let (write_tx3, write_rx3) = tokio::sync::mpsc::channel(1);
-        let ok3 = send_agent_error(
-            write_tx3,
-            crashed.clone(),
-            RequestId::Number(1),
-            -32602,
-            "x",
-        )
-        .await;
-        assert!(!ok3, "已崩溃不得发送");
-        drop(write_rx3);
     }
 }

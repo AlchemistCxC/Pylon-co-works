@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense, useRef, useSyncExternalStore } from 'react'
 import SheetLayout from './workspace-sheets/SheetLayout'
+import TacticalScene from './sheets/TacticalScene'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
 import { flushIdentityBackend, useIdentityStore } from './identityStore'
@@ -12,7 +13,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
-import { reportRuntimeError } from './runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError'
 import { resolveSheetRender } from './workspace-sheets/sheetRegistry.tsx'
 import {
   closeOtherWorkspaces,
@@ -26,14 +27,13 @@ import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
-import { getChatController } from './components/chat/chatEventController'
+import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
-import InteractionRejectionNotice from './components/InteractionRejectionNotice'
 import ErrorCenter from './components/ErrorCenter'
 import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog'
 import {
@@ -76,6 +76,14 @@ const getFontContributionSnapshot = () => fontContributionRegistry.getSnapshot()
 const interfaceModeRegistry = getInterfaceModeRegistry()
 const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
 const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
+
+// Bootstrap notification identity is application-scoped and intentionally
+// stable across retries/remounts. Keeping it outside the effect avoids
+// allocating a new matcher while a run is in flight.
+const bootstrapScope = { kind: 'app' as const, id: 'bootstrap' }
+const bootstrapKey = (action: string) => `bootstrap:${action}`
+const approvalModeScope = { kind: 'app' as const, id: 'approval-mode' }
+const approvalModeKey = (action: string) => `app:approval-mode:${action}`
 
 function LazyDialogFallback() {
   return (
@@ -179,11 +187,6 @@ export default function App() {
     }
   }, [])
 
-  // G0：Chat controller 应用级宿主——listener 随应用生命周期（卸载才 dispose）
-  useEffect(() => () => {
-    getChatController()?.dispose()
-  }, [])
-
   // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener
   const [bootstrapRetry, setBootstrapRetry] = useState(0)
   useEffect(() => {
@@ -215,9 +218,28 @@ export default function App() {
           const status = normalizeAgentStatus(event.payload, activeAgent)
           useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
         })
-        return () => { unlisten() }
+        // P51：后端 session/load 复活失败而新建会话时广播（Pylon 重启后首次发送）。
+        // 回写新 periId，使下一次发送/重启能继续复活这条新会话而不是再新建。
+        const unlistenRecreated = await listen<{ source: string; periId: string }>('pylon:session-recreated', event => {
+          const { source, periId } = event.payload
+          const session = useIdentityStore.getState().sessions.find(item => item.source === source)
+          if (session && session.periId !== periId) {
+            useIdentityStore.getState().setSessionPeriId(session.id, periId)
+          }
+        })
+        return () => { unlisten(); unlistenRecreated() }
       },
-      reportError: (action, error) => reportRuntimeError(action, error),
+      reportError: (action, error) => reportRuntimeError(action, error, undefined, {
+        key: bootstrapKey(action),
+        scope: bootstrapScope,
+        source: 'application.bootstrap',
+        recovery: { kind: 'open-runtime-log' },
+        recoveryAction: {
+          label: '重试启动',
+          run: () => setBootstrapRetry(value => value + 1),
+        },
+      }),
+      resolveError: action => resolveRuntimeErrors({ key: bootstrapKey(action), scope: bootstrapScope }),
       setStatus: (status, error) => useHydrationStore.getState().setStatus(status, error),
     })
     return bootstrapRun.dispose
@@ -228,11 +250,19 @@ export default function App() {
   useEffect(() => {
     if (!IS_TAURI || isBrowserMockRuntime()) return
     let disposed = false
+    const reportApprovalError = (action: string, error: unknown) => reportRuntimeError(action, error, undefined, {
+      key: approvalModeKey(action),
+      scope: approvalModeScope,
+      source: 'permission.approval-mode',
+      recovery: { kind: 'open-runtime-log' },
+    })
     const persisted = readPersistedApprovalMode()
     if (persisted) {
       useRuntimeStore.getState().setApprovalMode(persisted)
-      void runtimeClient.setApprovalMode(persisted).catch(error => {
-        if (!disposed) reportRuntimeError('恢复权限模式', error)
+      void runtimeClient.setApprovalMode(persisted).then(() => {
+        if (!disposed) resolveRuntimeErrors({ key: approvalModeKey('恢复权限模式'), scope: approvalModeScope })
+      }, error => {
+        if (!disposed) reportApprovalError('恢复权限模式', error)
       })
       return () => { disposed = true }
     }
@@ -242,8 +272,9 @@ export default function App() {
       if (!mode) return
       useRuntimeStore.getState().setApprovalMode(mode)
       persistApprovalMode(mode)
+      resolveRuntimeErrors({ key: approvalModeKey('读取权限模式'), scope: approvalModeScope })
     }).catch(error => {
-      if (!disposed) reportRuntimeError('读取权限模式', error)
+      if (!disposed) reportApprovalError('读取权限模式', error)
     })
     return () => { disposed = true }
   }, [])
@@ -331,14 +362,25 @@ export default function App() {
     if (IS_TAURI && !isBrowserMockRuntime()) return
     if (demoSeededRef.current) return
     demoSeededRef.current = true
+    let disposed = false
     const demoParams = new URLSearchParams(window.location.search)
     void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
+      if (disposed) return
       runBrowserDemoSeed(setActiveSession, {
         withPermission: demoParams.get('demo-permission') === '1',
         scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : import.meta.env.DEV ? 'visual' : 'standard',
         reset: demoParams.get('demo-reset') === '1',
       })
-    }).catch(error => reportRuntimeError('加载浏览器演示数据', error))
+      resolveRuntimeErrors({ key: 'app:browser-demo-bootstrap' })
+    }).catch(error => {
+      if (!disposed) reportRuntimeError('加载浏览器演示数据', error, undefined, {
+        key: 'app:browser-demo-bootstrap',
+        scope: { kind: 'app', id: 'browser-demo' },
+        source: 'app.browser-demo',
+        recovery: { kind: 'open-runtime-log' },
+      })
+    })
+    return () => { disposed = true }
   }, [])
 
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))
@@ -365,14 +407,17 @@ export default function App() {
 
   const appWindow = appWindowSingleton
   const drainBeforeClose = () => drainPersistentStateBeforeClose({
-    flushCanonical: () => getChatController()?.flushCanonicalEventsAsync() ?? Promise.resolve(),
+    flushCanonical: () => getCanonicalEventFeed().flushAsync(),
     flushIdentity: flushIdentityBackend,
   })
   const closeWindowWithFlush = async () => {
     try {
       await drainBeforeClose()
     } catch (error) {
-      reportRuntimeError('关闭前持久化失败，窗口已保持打开', error)
+      reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
+        key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
+        recovery: { kind: 'open-runtime-log' },
+      })
       return
     }
     await appWindow.destroy()
@@ -386,21 +431,22 @@ export default function App() {
       try {
         await drainBeforeClose()
       } catch (error) {
-        reportRuntimeError('关闭前持久化失败，窗口已保持打开', error)
+        reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
+          key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
+          recovery: { kind: 'open-runtime-log' },
+        })
         return
       }
       await win.destroy()
     }).then(fn => { unlisten = fn }).catch(error => console.error('注册窗口关闭 flush 失败', error))
     return () => { unlisten?.() }
   }, [])
-  // FE-AUD-005：bootstrap 降级提示（报告阶段 2.4：Agent 列表失败可重试，不清空本地工作区）
-  const hydrationStatus = useHydrationStore(state => state.status)
-  const hydrationError = useHydrationStore(state => state.error)
   const profilesOpen = showProfileEdit
   const settingsOpen = showSettings
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId}>
+      {interfaceMode === 'tactical-blue' && <TacticalScene />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}
@@ -443,12 +489,6 @@ export default function App() {
         onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => console.error('全屏切换失败', error))}
         onCloseWindow={() => void closeWindowWithFlush()}
       />
-      {hydrationStatus === 'degraded' && (
-        <div className="workspace-persist-warning" role="alert">
-          启动降级：{hydrationError ?? '读取 Agent 列表失败'}
-          <button type="button" className="template-apply" onClick={() => setBootstrapRetry(retry => retry + 1)}>重试</button>
-        </div>
-      )}
       {interfaceModeContribution.shellSurface?.placement === 'before-workspace' && (
         <IsolatedPluginSurface
           surfaceId={interfaceModeContribution.shellSurface.surfaceId}
@@ -472,7 +512,6 @@ export default function App() {
       </Suspense>
 
       <ErrorCenter />
-      <InteractionRejectionNotice />
       <SessionOwnerRecoveryDialog />
 
       {/* W1-03：布局段下移 SheetLayout（侧栏壳/主区/右栏壳 + profile 投影 effects） */}

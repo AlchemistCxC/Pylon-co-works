@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import GenerationFooter from './chat/GenerationFooter'
-import { resolveSpinnerFrames } from './chat/spinnerFrames'
+import { resolveSpinnerFrames, resolveSpinnerMarker } from './chat/spinnerFrames'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../domains/tool/toolPresentation'
 import { resolveToolIndicatorAssetForTone } from './chat/toolIndicatorAssets'
 import { toCssBackgroundImage } from '../backgroundImage'
+import { THEME_DEFAULTS, THEME_SETTING_KEYS } from '../themeFieldDefs'
+import { loadSettingsPreviewControlCenter, type SettingsPreviewControlCenterHandle } from '../renderers/solid-workbench/settingsPreviewControlCenterLoader.ts'
 import { useShallow } from 'zustand/react/shallow'
-import { createPreviewWorkbenchServices } from '../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
-import { loadSolidControlCenterPreview } from '../renderers/solid-workbench/loadSolidControlCenterPreview.ts'
-import { THEME_DEFAULTS, THEME_SETTING_KEYS } from '../themeFieldDefs.ts'
 
 interface Props { zone: string }
 
@@ -81,6 +79,52 @@ function localTemplateCcTheme(host: HTMLElement): Record<string, unknown> {
   return overrides
 }
 
+/**
+ * P52 D4：中控预览挂真实 SolidControlCenter（用户拍板弃静态占位）。
+ * 经 loader（import.meta.glob）加载 .solid 挂载文件；主题经 useStore 订阅实时
+ * 同步。加载失败回退静态 cc 壳（预览不因 Solid 面异常整页崩）。
+ */
+function PvSolidControlCenter() {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    let disposed = false
+    let handle: SettingsPreviewControlCenterHandle | undefined
+    let unsubscribeTheme: (() => void) | undefined
+    // 模板卡片局部变量优先于全局 store（保留 A 系列"模板预览读取局部中控变量"能力）
+    const themeSnapshot = () => ({
+      ...THEME_DEFAULTS,
+      ...Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]])),
+      ...localTemplateCcTheme(host),
+    }) as Parameters<NonNullable<typeof handle>['setTheme']>[0]
+    void loadSettingsPreviewControlCenter()
+      .then(({ mountSettingsPreviewControlCenter }) => {
+        if (disposed) return
+        handle = mountSettingsPreviewControlCenter(host)
+        handle.setTheme(themeSnapshot())
+        unsubscribeTheme = useStore.subscribe(() => {
+          handle?.setTheme(themeSnapshot())
+        })
+      })
+      .catch(() => { if (!disposed) setFailed(true) })
+    return () => {
+      disposed = true
+      unsubscribeTheme?.()
+      handle?.destroy()
+    }
+  }, [])
+  if (failed) return (
+    <div className="control-center cc-variant-peri" style={{ pointerEvents: 'none' }} aria-label="中控预览占位">
+      <div className="cc-status-secondary" />
+      <div className="cc-status-primary" />
+      <div className="cc-actions" />
+    </div>
+  )
+  return <div ref={hostRef} aria-label="Solid 中控预览" />
+}
+
 export default function SettingsPreview({ zone }: Props) {
   const [dims, setDims] = useState(() => ({
     w: typeof window === 'undefined' ? 1200 : window.innerWidth,
@@ -124,7 +168,6 @@ export default function SettingsPreview({ zone }: Props) {
 }
 
 function PreviewApp({ zone }: { zone: string }) {
-  const ccHostRef = useRef<HTMLDivElement>(null)
   const {
     rightBg,
     rightBgImage,
@@ -171,52 +214,6 @@ function PreviewApp({ zone }: { zone: string }) {
     '--right-transparency': rightTransparency,
     '--right-blur': `${rightBlur}px`,
   } as React.CSSProperties
-
-  useEffect(() => {
-    const host = ccHostRef.current
-    if (!host) return
-
-    const services = createPreviewWorkbenchServices()
-    const themeSnapshot = () => Object.fromEntries(
-      THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]]),
-    )
-    const applyTheme = () => {
-      services.appearance.setTheme({
-        ...THEME_DEFAULTS,
-        ...themeSnapshot(),
-        ...localTemplateCcTheme(host),
-      } as unknown as Parameters<typeof services.appearance.setTheme>[0])
-    }
-    applyTheme()
-    const unsubscribeTheme = useStore.subscribe(applyTheme)
-    let disposed = false
-    let destroyMount: (() => void) | undefined
-    const failMount = () => {
-      if (disposed) return
-      disposed = true
-      unsubscribeTheme()
-      services.destroy()
-      host.replaceChildren()
-    }
-
-    void loadSolidControlCenterPreview().then(module => {
-      if (disposed) return
-      try {
-        destroyMount = module.mountSolidControlCenterPreview({ host, services })
-      } catch {
-        failMount()
-      }
-    }).catch(failMount)
-
-    return () => {
-      if (disposed) return
-      disposed = true
-      unsubscribeTheme()
-      destroyMount?.()
-      services.destroy()
-      host.replaceChildren()
-    }
-  }, [])
 
   return (
     <div className="pv-app" style={{ pointerEvents: 'none' }}>
@@ -276,7 +273,7 @@ function PreviewApp({ zone }: { zone: string }) {
                 </div>
               </div>
             </div>
-            <div style={z('cc')}><div ref={ccHostRef} /></div>
+            <div style={z('cc')}><PvSolidControlCenter /></div>
           </div>
         </div>
 
@@ -314,6 +311,7 @@ function PvSpinner() {
     doneMode,
     cancelledMode,
     errorMode,
+    spinnerSize,
   } = useStore(useShallow(s => ({
     preset: s.spinnerFramePreset,
     customFrames: s.spinnerCustomFrames,
@@ -323,19 +321,31 @@ function PvSpinner() {
     doneMode: s.spinnerDoneMarkerMode,
     cancelledMode: s.spinnerCancelledMarkerMode,
     errorMode: s.spinnerErrorMarkerMode,
+    spinnerSize: s.spinnerSize,
   })))
   const frames = resolveSpinnerFrames(preset, customFrames)
-  const previewSummary = (reason: 'done' | 'cancelled' | 'error', completedFrame = '') => ({
-    elapsedMs: 3000,
-    tokenCount: 1200,
-    completedFrame,
-    reason,
-  })
+  // P52 D4：React GenerationFooter 已退役——预览用同一 resolveSpinnerMarker
+  // 呈现三终态标记（终态文案契约由 Solid footer 测试锁定，此处仅视觉预览）。
+  const markers = [
+    { reason: 'done' as const, mode: doneMode, marker: doneMarker, label: '生成完毕', cls: 'term-summary-done' },
+    { reason: 'cancelled' as const, mode: cancelledMode, marker: cancelledMarker, label: '已停止', cls: 'term-summary-cancelled' },
+    { reason: 'error' as const, mode: errorMode, marker: errorMarker, label: '处理失败', cls: 'term-summary-error' },
+  ]
   return <>
-    <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('done')} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('cancelled')} source={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('error')} source={null} />
+    <div className="term-spinner-row">
+      <div className="term-spinner" data-activity="active">
+        <span className="spinner-frame" style={{ fontSize: `${spinnerSize}px` }}>{frames[0]}</span>
+        <span className="spinner-meta">(<span>3s</span>)</span>
+      </div>
+    </div>
+    {markers.map(item => (
+      <div className={`term-summary ${item.cls}`} key={item.reason}>
+        <span className="term-summary-frame" style={{ fontSize: `${spinnerSize}px` }}>
+          {resolveSpinnerMarker(frames, item.mode, item.marker)}
+        </span>
+        <span>{item.label} 3s</span>
+      </div>
+    ))}
     <span className="term-preview-spinner-markers" aria-hidden="true">
       {doneMode}:{doneMarker} {cancelledMode}:{cancelledMarker} {errorMode}:{errorMarker}
     </span>
@@ -369,5 +379,5 @@ function PvTool({ name, input, status }: { name: string; input: string; status: 
   const safeGlowColor = glowColor || ''
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = safeGlow > 0 ? { textShadow: `0 0 ${safeGlow}px ${safeGlowColor || statusColor || 'currentColor'}` } : undefined
-  return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
+  return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary term-tool-summary-code"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
 }

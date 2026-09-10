@@ -1,0 +1,139 @@
+/* P53 D2 · 内嵌插件管理器面板样式（framework-free）。
+   只消费宿主视觉语义 token（VISUAL_SEMANTIC_TOKENS ABI），不复制宿主
+   透明度/阴影/动画毫秒值。挂载域为插件设置页容器。 */
+
+.pypm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--content-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.pypm-overview {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.pypm-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.pypm-group-title {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--content-muted);
+  text-transform: uppercase;
+}
+
+.pypm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pypm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.pypm-row:hover {
+  background: var(--state-hover-bg);
+}
+
+.pypm-row-title {
+  font-weight: 600;
+}
+
+.pypm-row-id {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  color: var(--content-muted);
+}
+
+.pypm-row-state {
+  font-size: 12px;
+  color: var(--content-muted);
+}
+
+.pypm-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.pypm-btn {
+  appearance: none;
+  border: 1px solid var(--border, transparent);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--content-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.pypm-btn:hover:not(:disabled) {
+  background: var(--state-hover-bg);
+}
+
+.pypm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pypm-btn.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pypm-btn.danger {
+  color: var(--danger, var(--accent));
+}
+
+.pypm-hint {
+  color: var(--content-muted);
+  font-size: 12px;
+}
+
+.pypm-log-line {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  color: var(--content-muted);
+}
+
+.pypm-consent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px dashed var(--border, currentColor);
+  background: var(--surface-panel);
+}
+
+.pypm-consent-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.pypm-consent-text {
+  margin: 0;
+  color: var(--content-muted);
+}

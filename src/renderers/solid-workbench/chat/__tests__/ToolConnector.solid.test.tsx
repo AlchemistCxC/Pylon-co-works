@@ -3,7 +3,7 @@ import { cleanup, render } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeToolConnectorLayoutPort } from '../../../../domains/workbench/fakeToolConnectorLayoutPort.ts'
 import { createToolConnectorLayoutPort } from '../../../../domains/workbench/toolConnectorLayoutPort.ts'
-import { SolidToolConnector } from '../ToolConnector.solid.tsx'
+import { SolidToolConnector, SolidToolConnectorLayer } from '../ToolConnector.solid.tsx'
 import { SolidToolCard } from '../ToolCard.solid.tsx'
 
 const APPEARANCE = {
@@ -122,6 +122,41 @@ describe('SolidToolConnector', () => {
     expect(ResizeObserverMock.instances[0]!.disconnect).toHaveBeenCalledTimes(1)
     port.destroy()
     expect(port.destroyed).toBe(true)
+  })
+
+  it('连续 ResizeObserver 回调不会重置有界 settle 窗口', () => {
+    const previousRaf = globalThis.requestAnimationFrame
+    const previousCancel = globalThis.cancelAnimationFrame
+    let nextFrame = 0
+    const frames = new Map<number, FrameRequestCallback>()
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const id = ++nextFrame
+      frames.set(id, callback)
+      return id
+    }) as typeof requestAnimationFrame
+    globalThis.cancelAnimationFrame = ((id: number) => { frames.delete(id) }) as typeof cancelAnimationFrame
+    try {
+      const port = createFakeToolConnectorLayoutPort()
+      const result = render(() => <div class="term"><SolidToolConnectorLayer edges={[]} layoutPort={port} /></div>)
+      const observer = ResizeObserverMock.instances.at(-1)!
+
+      // The layer starts one bounded settle run.  A callback arriving before
+      // each frame must invalidate, but must not extend that run indefinitely.
+      for (let frame = 0; frame < 8; frame += 1) {
+        observer.emit()
+        const pending = [...frames.values()]
+        expect(pending).toHaveLength(1)
+        frames.clear()
+        pending[0]!(performance.now())
+      }
+
+      expect(frames.size).toBe(0)
+      expect(port.invalidations.filter(reason => reason === 'manual')).toHaveLength(8)
+      result.unmount()
+    } finally {
+      globalThis.requestAnimationFrame = previousRaf
+      globalThis.cancelAnimationFrame = previousCancel
+    }
   })
 })
 

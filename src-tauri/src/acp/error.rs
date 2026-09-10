@@ -1,4 +1,3 @@
-﻿
 // ── Constants ──
 
 /// JSON-RPC method names used by the ACP protocol.
@@ -10,6 +9,7 @@ pub const METHOD_SESSION_NEW: &str = AGENT_METHOD_NAMES.session_new;
 pub const METHOD_SESSION_PROMPT: &str = AGENT_METHOD_NAMES.session_prompt;
 pub const METHOD_SESSION_CLOSE: &str = AGENT_METHOD_NAMES.session_close;
 pub const METHOD_SESSION_LOAD: &str = AGENT_METHOD_NAMES.session_load;
+pub const METHOD_SESSION_RESUME: &str = AGENT_METHOD_NAMES.session_resume;
 pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;
 pub const METHOD_SESSION_SET_MODE: &str = AGENT_METHOD_NAMES.session_set_mode;
 pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = AGENT_METHOD_NAMES.session_set_config_option;
@@ -57,7 +57,12 @@ pub struct AgentConnectFailure {
 }
 
 impl AgentConnectFailure {
-    pub(crate) fn new(stage: AgentConnectStage, code: &str, message: String, retryable: bool) -> Self {
+    pub(crate) fn new(
+        stage: AgentConnectStage,
+        code: &str,
+        message: String,
+        retryable: bool,
+    ) -> Self {
         Self {
             stage,
             code: code.to_string(),
@@ -207,6 +212,13 @@ pub(crate) enum RpcFailureKind {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeFailureClass {
+    Archived,
+    Busy,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RpcFailureDetails {
     pub(crate) code: Option<i64>,
@@ -215,6 +227,16 @@ pub(crate) struct RpcFailureDetails {
 }
 
 impl AcpError {
+    pub(crate) fn resume_failure_class(&self) -> ResumeFailureClass {
+        let text = self.to_string().to_ascii_lowercase();
+        if text.contains("archiv") || text.contains("expired") {
+            ResumeFailureClass::Archived
+        } else if text.contains("busy") || text.contains("in progress") {
+            ResumeFailureClass::Busy
+        } else {
+            ResumeFailureClass::Unavailable
+        }
+    }
     pub(crate) fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
         let Self::Rpc(raw) = self else {
             return None;
@@ -303,6 +325,27 @@ impl From<AcpError> for String {
     }
 }
 
+#[cfg(test)]
+mod resume_failure_tests {
+    use super::{AcpError, ResumeFailureClass};
+
+    #[test]
+    fn classify_resume_failures_for_fallback_policy() {
+        assert_eq!(
+            AcpError::Rpc("session archived".into()).resume_failure_class(),
+            ResumeFailureClass::Archived
+        );
+        assert_eq!(
+            AcpError::Rpc("session busy".into()).resume_failure_class(),
+            ResumeFailureClass::Busy
+        );
+        assert_eq!(
+            AcpError::ConnectionClosed.resume_failure_class(),
+            ResumeFailureClass::Unavailable
+        );
+    }
+}
+
 impl From<AcpError> for crate::error::PylonError {
     fn from(error: AcpError) -> Self {
         if matches!(&error, AcpError::ReplayLoadInProgress) {
@@ -360,4 +403,3 @@ pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
 pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
-

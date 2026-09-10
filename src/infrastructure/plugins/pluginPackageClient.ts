@@ -80,6 +80,18 @@ export function createPluginPackageClient(options: PluginPackageClientOptions) {
       transport.invoke('plugin_package_install', { sourcePath, expectedId }) as Promise<PluginPackageOperationResult>,
     update: (sourcePath: string, expectedId: string): Promise<PluginPackageOperationResult> =>
       transport.invoke('plugin_package_update', { sourcePath, expectedId }) as Promise<PluginPackageOperationResult>,
+    /** P53 D6：zip 安装包只读解析（不落库）。 */
+    inspectZip: (zipPath: string): Promise<PluginPackageDescriptor> =>
+      transport.invoke('plugin_package_inspect_zip', { zipPath }) as Promise<PluginPackageDescriptor>,
+    /** P53 D6：https zip 只读解析（不落库；仅 https、限重定向/超时/大小）。 */
+    inspectUrl: (url: string): Promise<PluginPackageDescriptor> =>
+      transport.invoke('plugin_package_inspect_url', { url }) as Promise<PluginPackageDescriptor>,
+    /** P53 D6：从本机 zip 安装（复用既有 stage/commit 事务与回滚）。 */
+    installFromZip: (zipPath: string, expectedId: string): Promise<PluginPackageOperationResult> =>
+      transport.invoke('plugin_install_from_zip', { zipPath, expectedId }) as Promise<PluginPackageOperationResult>,
+    /** P53 D6：从 https URL 安装（仅 https；限重定向/超时/大小）。 */
+    installFromUrl: (url: string, expectedId: string): Promise<PluginPackageOperationResult> =>
+      transport.invoke('plugin_install_from_url', { url, expectedId }) as Promise<PluginPackageOperationResult>,
     stage: (sourcePath: string, expectedId: string): Promise<PluginPackageOperationResult> =>
       transport.invoke('plugin_package_stage', { sourcePath, expectedId }) as Promise<PluginPackageOperationResult>,
     commitStage: (operationId: string): Promise<PluginPackageOperationResult> =>

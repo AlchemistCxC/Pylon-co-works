@@ -15,13 +15,13 @@ mod correlation;
 mod cwd;
 mod dispatcher;
 mod error;
-mod event_names;
 mod export;
 mod gateway;
 mod gateway_cmds;
-mod git;
 mod hermes;
 mod hermes_runtime;
+/// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
+pub mod hook_bridge;
 mod lifecycle;
 mod logs_cmds;
 mod mcp;
@@ -40,12 +40,12 @@ mod plugin_process;
 mod prism;
 mod prism_cmds;
 mod protocol_adapter;
+pub mod provider_adapter;
 pub mod pylon_cli;
 #[cfg(test)]
 mod real_acp_smoke;
 mod runtime;
 mod runtime_log;
-mod sanitize;
 mod session;
 #[cfg(test)]
 mod session_expiry_platform_tests;
@@ -55,10 +55,14 @@ mod session_store;
 mod startup;
 #[cfg(test)]
 mod test_utils;
-mod time;
-mod workspace;
 mod workspace_cmds;
 mod workspaces;
+
+// P58 阶段一拆分：event_names/sanitize/time/workspace/git 迁入 pylon-foundations
+// crate（纯逻辑：零 tauri / 零 AppState，只依赖第三方）。模块级重导出让既有
+// `crate::time::` 等路径继续解析，调用点零改动；pub(crate) 使库外暴露面与
+// 拆分前的私有 mod 一致。依赖方向铁律：foundations 不得引用回本 crate。
+pub(crate) use pylon_foundations::{event_names, git, sanitize, time, workspace};
 
 use acp::AcpClient;
 use agent_config::AgentDef;
@@ -238,6 +242,8 @@ pub(crate) struct AppState {
     pub(crate) plugin_processes: Arc<crate::plugin_process::PluginProcessSupervisor>,
     /// Stage 10: current-user local IPC bridge into the live Web Kernel.
     pub(crate) pylon_cli: Arc<crate::pylon_cli::PylonCliBridge>,
+    /// P55：kernel hook 桥（pending oneshot 挂表 + ready 握手 + registry 闸）。
+    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
 impl AppState {
@@ -273,6 +279,7 @@ pub(crate) struct AppStateHandles {
     /// ACP session-level snapshots (commands/mode) share the message DB and
     /// are persisted when providers update them asynchronously.
     pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
+    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
 /// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
@@ -328,6 +335,7 @@ impl AppStateHandles {
             approval_mode: state.approval_mode.clone(),
             event_service: state.event_service.clone(),
             message_service: state.message_service.clone(),
+            hook_bridge: state.hook_bridge.clone(),
         }
     }
 
@@ -483,12 +491,28 @@ impl AppStateHandles {
             return Err("new ACP client crashed before activation".to_string());
         }
 
+        // Retire the old dispatcher before touching the old client.  Aborting
+        // and awaiting the task closes the consumer side of the old inbox, so
+        // a kill-generated crash notification cannot schedule reconnect work
+        // after this replacement has begun.  This is the task-level half of
+        // the no-overlap invariant; the ACP process is synchronously killed
+        // below before the replacement is published.
+        let old_dispatcher = runtime
+            .notification_task
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(handle) = old_dispatcher {
+            handle.abort();
+            let _ = handle.await;
+        }
+
         // 优化-1：keep=false（手动 switch/reconnect）映射清空后，旧 source 的 prompt
         // 锁条目必须同步收敛（O1 语义，与 remove_session_if_matches/check_session_expiry
         // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
         // 旧 source 键，映射清空后在锁外逐个清理（锁序单向：sessions → prompt_locks）。
         // 方案 8：sessions 迁移委托 SessionStore（migrate_or_clear 返回旧 source 键）。
-        let (mut old_acp, stale_sources, probe_candidates) = {
+        let (stale_sources, probe_candidates) = {
             let mut acp = runtime.acp.lock().await;
             let new_generation = runtime
                 .client_generation
@@ -518,7 +542,16 @@ impl AppStateHandles {
                 } else {
                     Vec::new()
                 };
-            let old_acp = std::mem::replace(&mut *acp, new_acp);
+            // Retire the old process before exposing the replacement.  A plain
+            // `mem::replace` followed by a later kill leaves two live ACP
+            // instances during dispatcher startup and allows old stdout to
+            // race into the new generation.  The disconnected placeholder
+            // keeps the runtime fail-closed while the old process is drained.
+            let mut old_acp = std::mem::replace(&mut *acp, AcpClient::disconnected());
+            if let Err(error) = old_acp.kill() {
+                tracing::warn!("kill replaced agent before activation: {}", error);
+            }
+            *acp = new_acp;
             runtime
                 .client_generation
                 .store(new_generation, Ordering::Release);
@@ -538,15 +571,12 @@ impl AppStateHandles {
                 }
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
-            (old_acp, stale_sources, probe_candidates)
+            (stale_sources, probe_candidates)
         };
         // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
         // G2-08：lib.rs 本地 drop_stale_prompt_locks 删除，收敛为 runtime 方法。
         runtime.drop_prompt_locks(&stale_sources);
         start_notification_dispatcher(self, runtime, window);
-        if let Err(error) = old_acp.kill() {
-            tracing::warn!("kill replaced agent: {}", error);
-        }
         Ok(probe_candidates)
     }
 }
@@ -779,6 +809,7 @@ pub fn run() {
             data_dirs: Arc::new(OnceLock::new()),
             plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
             pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
+            hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,
@@ -829,6 +860,10 @@ pub fn run() {
                 crate::workspaces::workspace_restore,
                 crate::workspaces::workspace_update, crate::workspaces::workspace_delete,
                 crate::plugin_cmds::plugin_package_inspect,
+                crate::plugin_cmds::plugin_package_inspect_zip,
+                crate::plugin_cmds::plugin_package_inspect_url,
+                crate::plugin_cmds::plugin_install_from_zip,
+                crate::plugin_cmds::plugin_install_from_url,
                 crate::plugin_cmds::plugin_package_install,
                 crate::plugin_cmds::plugin_package_update,
                 crate::plugin_cmds::plugin_package_stage,
@@ -854,6 +889,9 @@ pub fn run() {
                 crate::pylon_cli::pylon_cli_ready,
                 crate::pylon_cli::pylon_cli_respond,
                 crate::pylon_cli::pylon_window_capture,
+                crate::hook_bridge::pylon_hook_ready,
+                crate::hook_bridge::pylon_hook_respond,
+                crate::hook_bridge::hook_registry_sync,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
                 crate::gateway_cmds::gateway_sessions,
                 crate::gateway_cmds::gateway_catalog,
@@ -1183,6 +1221,20 @@ pub fn run() {
                                 .and_then(|agents| agents.get(&agent_id).cloned())
                                 .and_then(|agent| agent.cwd);
                             // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
+                            // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
+                            // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
+                            // 既有失败路径的 rollback_seen 语义）；transform → 改写
+                            // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
+                            let content = match crate::hook_bridge::message_received_hook_outcome(
+                                state.inner(),
+                                window.as_ref(),
+                                &resolved,
+                            )
+                            .await
+                            {
+                                crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
+                                crate::hook_bridge::MessageReceivedDecision::Drop => return,
+                            };
                             if let Err(error) = send_prompt_core(
                                 state.inner(),
                                 &runtime,
@@ -1191,12 +1243,13 @@ pub fn run() {
                                 &crate::session::PromptContext {
                                     source: resolved.source.clone(),
                                     profile_id: None,
-                                    content: resolved.content.clone(),
+                                    content,
                                     persona: String::new(),
                                     session_prompt: None,
                                     attachments: None,
                                     mcp_servers: None,
                                     cwd: agent_cwd,
+                                    known_peri_id: None,
                                 },
                             ).await {
                                 tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);

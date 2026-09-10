@@ -14,6 +14,7 @@ import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
 import { useRightRailStore } from '../rightRailStore.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
@@ -137,16 +138,26 @@ export default function SheetLayout(props: SheetLayoutProps) {
   // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
   const workspacePersistError = useWorkspaceStore(s => s.lastPersistError)
   const identityPersistError = useIdentityStore(s => s.lastPersistError)
-  const persistWarning = (workspacePersistError ?? identityPersistError)
-    ? <div className="workspace-persist-warning" role="status">配置未能保存到本地存储（本次操作仅在内存生效）</div>
-    : null
+  useEffect(() => {
+    const message = workspacePersistError ?? identityPersistError
+    const matcher = { action: '保存本地配置', scope: { kind: 'app' as const, id: 'persistence' } }
+    if (!message) {
+      resolveRuntimeErrors(matcher)
+      return
+    }
+    reportRuntimeError('保存本地配置', new Error(message), undefined, {
+      scope: matcher.scope,
+      key: 'app:persistence',
+      source: 'persistence',
+      recovery: { kind: 'open-runtime-log' },
+    })
+  }, [workspacePersistError, identityPersistError])
 
   if (!activeSheet) {
     // W1-05：无 active sheet → 虚拟 overview 接管空态（不写入持久 sheet 数组）
     const overviewEntry = resolveSheetRender('overview')
     return (
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
-        {persistWarning}
         {overviewEntry ? <overviewEntry.component sheet={VIRTUAL_OVERVIEW_SHEET} ctx={ctx} state={overviewEntry.deserialize(undefined)} /> : <EmptySheetHost />}
         <RightRailHost sheet={null} ctx={ctx} activeAgent={activeAgent} />
       </div>
@@ -155,7 +166,6 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   return (
     <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
-      {persistWarning}
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
       {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && activeSheet.kind !== 'browser' && <SheetHost sheet={activeSheet} ctx={ctx} />}
       {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {

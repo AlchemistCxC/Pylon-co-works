@@ -1,0 +1,25 @@
+Pylon
+Copyright 2026 Pylon contributors
+
+This product includes software developed as part of the "codeg" project
+(source locked locally; upstream URL intentionally not recorded because the
+survey copy is the only authoritative source), and is licensed under the
+Apache License, Version 2.0 (see LICENSES/Apache-2.0.txt).
+
+  Locked commit: b2eec98ce8d082ad48803918dd9a21ab08d1d3d4
+  License:       Apache License, Version 2.0
+  Copyright:     codeg project authors (as declared by the locked source)
+
+Every file copied from codeg into this repository is registered, with its
+source path, sha256, license, modification summary and Pylon adapter, in
+src-tauri/vendor/acp/ORIGIN.md. Any modification made by Pylon to that code
+is recorded in the "modifications" field of the corresponding entry.
+
+---
+
+本产品包含来自 codeg 项目的 Apache-2.0 许可代码及其修改：
+
+- 锁定 commit：b2eec98ce8d082ad48803918dd9a21ab08d1d3d4
+- 许可证：Apache License 2.0（完整文本见 LICENSES/Apache-2.0.txt）
+- 逐文件来源、sha256、修改摘要与 Pylon adapter：src-tauri/vendor/acp/ORIGIN.md
+- 未在 ORIGIN.md 登记的 codeg 代码不得进入本仓库。

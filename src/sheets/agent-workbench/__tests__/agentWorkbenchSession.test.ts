@@ -23,16 +23,6 @@ function message(sequence: number, role: 'user' | 'assistant', text: string, ses
   })
 }
 
-function completedMessage(sequence: number, text: string, sessionId = 'local:a'): WorkbenchEventEnvelope {
-  return createWorkbenchEnvelope({
-    sessionId, sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
-    source: { provider: 'peri', sourceId: `completed-${sequence}` },
-    identity: { messageId: `completed-message-${sequence}` },
-    provenance: { origin: 'local-observed', trust: 'authoritative' },
-    event: { type: 'message.completed', role: 'assistant', parts: [{ kind: 'text', text }] },
-  })
-}
-
 function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<string, unknown> = {}) {
   const owner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
   return {
@@ -55,100 +45,125 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 
 describe('Agent Workbench canonical session runtime', () => {
   it('重启后 canonical 已完成消息仍显示完成态摘要', async () => {
-    const active = session('session-restored', 'local:restored')
-    const controller = {
-      subscribe: () => () => {},
-      getGenerating: () => false,
-      getStartTime: () => 0,
-      getLastActivityAt: () => undefined,
-      getGenerationPhase: () => undefined,
-      getGenerationActivity: () => undefined,
-      getThinkingStart: () => undefined,
-      getTokenCount: () => 12,
-      getSummary: () => undefined,
-      rejectOptimisticUser: () => {},
-    }
+    const active = session('session-restored', 'local:a')
     const service = createAgentWorkbenchSessionRuntime({
-      loadAll: async () => [completedMessage(1, '已恢复完成', active.source)],
+      loadAll: async () => [
+        canonicalRow(1, 'user_message_chunk', { content: { type: 'text', text: '已恢复请求' } }),
+        canonicalRow(2, 'done'),
+      ],
       subscribe: () => () => {},
-      chatController: () => controller,
     })
 
     await service.bind(active)
 
     expect(service.runtime.getSnapshot()).toMatchObject({
       generating: false,
-      summary: { reason: 'done', elapsedMs: 0, tokenCount: 12 },
+      summary: { reason: 'done', elapsedMs: 1000, tokenCount: 0 },
     })
     service.destroy()
   })
 
-  it('切换会话后从 source-scoped runtime 恢复生成指示器与迟滞时钟', async () => {
-    const live = new Map([
-      ['local:a', { generating: true, start: 1_000, last: 4_000 }],
-      ['local:b', { generating: false, start: 0, last: undefined }],
-    ])
-    const listeners = new Map<string, Set<() => void>>()
-    const controller = {
-      subscribe(source: string, listener: () => void) {
-        const group = listeners.get(source) ?? new Set()
-        group.add(listener); listeners.set(source, group)
-        return () => group.delete(listener)
-      },
-      getGenerating: (source: string) => live.get(source)?.generating ?? false,
-      getStartTime: (source: string) => live.get(source)?.start ?? 0,
-      getLastActivityAt: (source: string) => live.get(source)?.last,
-      getGenerationPhase: (source: string) => source === 'local:a' ? { kind: 'thinking' as const } : undefined,
-      getThinkingStart: (source: string) => source === 'local:a' ? 1_500 : undefined,
-      getTokenCount: () => 0,
-      getSummary: () => undefined,
-      rejectOptimisticUser: () => {},
-    }
+  it('bind without a turn epoch keeps a canonical terminal document closed against a stale late patch', async () => {
+    const active = session('session-restored-stale-controller', 'local:stale-controller')
     const service = createAgentWorkbenchSessionRuntime({
-      loadAll: async () => [], subscribe: () => () => {}, chatController: () => controller,
+      loadAll: async () => [
+        canonicalRow(1, 'user_message_chunk', { content: { type: 'text', text: '已完成请求' } }),
+        canonicalRow(2, 'done'),
+      ],
+      subscribe: () => () => {},
     })
 
-    await service.bind(session('session-a', 'local:a'))
+    await service.bind(active)
+
     expect(service.runtime.getSnapshot()).toMatchObject({
-      generating: true, generationStart: 1_000, lastTokenAt: 4_000,
-      generationPhase: { kind: 'thinking' }, thinkingStart: 1_500,
-    })
-    await service.bind(session('session-b', 'local:b'))
-    expect(service.runtime.getSnapshot()).toMatchObject({ generating: false, generationStart: 0 })
-    await service.bind(session('session-a', 'local:a'))
-    expect(service.runtime.getSnapshot()).toMatchObject({
-      generating: true, generationStart: 1_000, lastTokenAt: 4_000,
-      generationPhase: { kind: 'thinking' }, thinkingStart: 1_500,
+      generating: false,
+      document: { session: { status: 'completed' } },
     })
     service.destroy()
   })
 
-  it('canonical 活动态投影缺少运行行时仍保持 controller 的计时起点', async () => {
-    const active = session('session-clock', 'local:clock')
-    const controller = {
-      subscribe: () => () => {},
-      getGenerating: () => true,
-      getStartTime: () => 1_700_000_000_000,
-      getLastActivityAt: () => 1_700_000_012_000,
-      getGenerationPhase: () => ({ kind: 'thinking' as const }),
-      getGenerationActivity: () => undefined,
-      getThinkingStart: () => undefined,
-      getTokenCount: () => 0,
-      getSummary: () => undefined,
-      rejectOptimisticUser: () => {},
-    }
+  it('P52 D3：controller transient 桥已移除——canonical running 行是唯一流式显示', async () => {
+    const active = session('session-transient-bridge', 'local:transient-bridge')
     let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
     const service = createAgentWorkbenchSessionRuntime({
       loadAll: async () => [],
       subscribe: listener => { publish = listener; return () => { publish = undefined } },
-      chatController: () => controller,
     })
+
     await service.bind(active)
-    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_047_000)
 
     publish?.(createWorkbenchEnvelope({
       sessionId: active.source,
       sequence: 1,
+      recordedAt: '2026-08-22T00:00:00.100Z',
+      source: { provider: 'peri', sourceId: 's' },
+      identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '流式正文' }] },
+    }))
+
+    const snapshot = service.runtime.getSnapshot()
+    // 流式显示唯一主人 = canonical running 行（P52 D5：transient 字段已删除）。
+    expect(snapshot.document?.messages.some(message => message.running && message.content === '流式正文')).toBe(true)
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+
+  it('切换会话后从 TurnClock 恢复生成指示器与迟滞时钟', async () => {
+    const active = session('session-a', 'local:a')
+    const other = session('session-b', 'local:b')
+    let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      subscribe: listener => { publish = listener; return () => { publish = undefined } },
+    })
+
+    // source A 的回合起点：live user echo envelope 驱动 TurnClock.start
+    await service.bind(active)
+    publish?.(createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 1,
+      recordedAt: '1970-01-01T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'a-user' },
+      identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'A 回合' }] },
+    }))
+    expect(service.runtime.getSnapshot()).toMatchObject({ generating: true })
+    // 切到 B——指示器清零
+    await service.bind(other)
+    expect(service.runtime.getSnapshot()).toMatchObject({ generating: false, generationStart: 0 })
+    // 切回 A——TurnClock 按 source 恢复活动时钟（journal 读完成后 reconcile）
+    await service.bind(active)
+    expect(service.runtime.getSnapshot()).toMatchObject({ generating: true })
+    service.destroy()
+  })
+
+  it('canonical 活动态投影缺少运行行时仍保持 TurnClock 的计时起点', async () => {
+    const active = session('session-clock', 'local:clock')
+    let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      subscribe: listener => { publish = listener; return () => { publish = undefined } },
+    })
+    await service.bind(active)
+    // 回合起点：user echo envelope 驱动 TurnClock.start（Date.parse(recordedAt)）
+    publish?.(createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 1,
+      recordedAt: '2026-08-22T00:00:00.000Z',
+      source: { provider: 'peri', sourceId: 'clock-user' },
+      identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'tick' }] },
+    }))
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_047_000)
+
+    // 投影间隙：只有 transient session status、无 running 行——Date.now() 回退
+    // 不得把 startTime 拉到当前时刻（R2 preserveActiveGeneration 由 TurnClock 持值）
+    publish?.(createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 2,
       recordedAt: '2026-08-22T00:00:01.000Z',
       source: { provider: 'peri', sourceId: 'clock-status' },
       identity: {},
@@ -158,8 +173,6 @@ describe('Agent Workbench canonical session runtime', () => {
 
     expect(service.runtime.getSnapshot()).toMatchObject({
       generating: true,
-      generationStart: 1_700_000_000_000,
-      lastTokenAt: 1_700_000_012_000,
     })
     service.destroy()
   })
@@ -305,34 +318,26 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
-  it('发送被拒绝后 source runtime 通知不能让生成指示器复活', async () => {
-    let controllerGenerating = false
-    let sourceListener: (() => void) | undefined
+  it('发送被拒绝后时钟回滚：迟到的非文档证据不得经 updateRuntimeState 复活指示器', async () => {
     const active = session()
-    const controller = {
-      subscribe: (_source: string, listener: () => void) => { sourceListener = listener; return () => {} },
-      getGenerating: () => controllerGenerating,
-      getStartTime: () => controllerGenerating ? 1_000 : 0,
-      getLastActivityAt: () => controllerGenerating ? 1_000 : undefined,
-      getGenerationPhase: () => controllerGenerating ? { kind: 'thinking' as const } : undefined,
-      getThinkingStart: () => undefined,
-      getTokenCount: () => 0,
-      getSummary: () => undefined,
-      rejectOptimisticUser: () => { controllerGenerating = false },
-    }
     const service = createAgentWorkbenchSessionRuntime({
-      loadAll: async () => [], subscribe: () => () => {}, chatController: () => controller,
+      loadAll: async () => [],
+      subscribe: () => () => {},
       commands: {
         resolveSession: id => id === active.id ? active : undefined,
         resolvePersona: () => '', nextClientMessageId: () => 'client-reject-runtime',
-        optimisticUser: () => { controllerGenerating = true },
+        optimisticUser: () => {},
         sendMessage: async () => { throw new Error('offline') },
       },
     })
     await service.bind(active)
     await service.commands.send(active.id, { text: '发送失败' })
-    sourceListener?.()
-
+    // 发送被拒：乐观投影已撤销、TurnClock 已回滚、document 无 running 行。
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([])
+    // reconcileTurnClock 是唯一的时钟回写路径：无活动时钟的 source 在
+    // bind/refresh 后不得恢复 generating（区别于有活动时钟的切回恢复用例）。
+    await service.bind(active)
     expect(service.runtime.getSnapshot().generating).toBe(false)
     service.destroy()
   })
@@ -366,6 +371,101 @@ describe('Agent Workbench canonical session runtime', () => {
     live?.(message(2, 'assistant', 'world'))
     expect(service.runtime.getSnapshot().document).not.toBe(loadedDocument)
     expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+    service.destroy()
+  })
+
+  it('canonical refresh 吸收绑定后到达的工具终态', async () => {
+    const active = session('session-tool-refresh', 'local:tool-refresh')
+    const started = createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'tool-start' },
+      identity: { toolCallId: 'tool-refresh-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read', kind: 'read_file' } },
+    })
+    const completed = createWorkbenchEnvelope({
+      sessionId: active.source,
+      sequence: 2,
+      recordedAt: '2026-08-22T00:00:02.000Z',
+      source: { provider: 'peri', sourceId: 'tool-complete' },
+      identity: { toolCallId: 'tool-refresh-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', rawOutput: 'ok' } },
+    })
+    let rows: readonly unknown[] = [started]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      subscribe: () => () => {},
+    })
+
+    await service.bind(active)
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-1', status: 'running',
+    }))
+
+    rows = [started, completed]
+    await service.refresh(active)
+
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-1', status: 'completed',
+    }))
+    service.destroy()
+  })
+
+  it('刷新读取赢过仍在途的初始绑定读取，不被旧快照回写覆盖', async () => {
+    const active = session('session-tool-refresh-race', 'local:tool-refresh-race')
+    const started = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'tool-start-race' },
+      identity: { toolCallId: 'tool-refresh-race-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read' } },
+    })
+    const completed = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 2,
+      recordedAt: '2026-08-22T00:00:02.000Z',
+      source: { provider: 'peri', sourceId: 'tool-complete-race' },
+      identity: { toolCallId: 'tool-refresh-race-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', rawOutput: 'ok' } },
+    })
+    const lateMessage = createWorkbenchEnvelope({
+      sessionId: active.source, sequence: 3,
+      recordedAt: '2026-08-22T00:00:03.000Z',
+      source: { provider: 'peri', sourceId: 'message-after-bind-read' },
+      identity: { messageId: 'message-after-bind-read' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'late' }] },
+    })
+    let resolveInitial!: (rows: readonly unknown[]) => void
+    let resolveRefresh!: (rows: readonly unknown[]) => void
+    let publish: ((event: WorkbenchEventEnvelope) => void) | undefined
+    let calls = 0
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: () => calls++ === 0
+        ? new Promise(resolve => { resolveInitial = resolve })
+        : new Promise(resolve => { resolveRefresh = resolve }),
+      subscribe: listener => { publish = listener; return () => { publish = undefined } },
+    })
+
+    const binding = service.bind(active)
+    await Promise.resolve()
+    publish?.(lateMessage)
+    const refreshing = service.refresh(active)
+    resolveRefresh?.([started, completed])
+    await refreshing
+    resolveInitial?.([started])
+    await binding
+
+    expect(service.runtime.getSnapshot().document?.activities).toContainEqual(expect.objectContaining({
+      id: 'tool-refresh-race-1', status: 'completed',
+    }))
+    expect(service.runtime.getSnapshot().document?.messages).toContainEqual(expect.objectContaining({
+      content: 'late', role: 'assistant',
+    }))
     service.destroy()
   })
 

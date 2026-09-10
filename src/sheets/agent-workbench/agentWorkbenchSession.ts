@@ -1,5 +1,6 @@
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
+import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
@@ -10,9 +11,9 @@ import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/z
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
-import { getChatController, type ChatControllerHandle } from '../../components/chat/chatEventController.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
+import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
   extractChoiceId,
@@ -21,16 +22,15 @@ import {
   extractModeConfig,
   extractModelConfig,
   sessionResponseObject,
+  type PromptFailureMetadata,
   type SessionResponseObject,
 } from '../../infrastructure/acp/chatContracts.ts'
+import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
-  chatController?: () => Pick<ChatControllerHandle,
-    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'getGenerationActivity' | 'rejectOptimisticUser'
-    | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
 }
 
 /**
@@ -90,6 +90,22 @@ function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[]
   if (canonical !== undefined) return canonical
   const migrated = migrateWorkbenchEnvelope(value)
   return migrated.ok ? [migrated.value] : []
+}
+
+function canonicalBoundaryRows(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
+  return rows.filter((row): row is CanonicalTurnBoundaryEvent => (
+    isRecord(row)
+    && typeof row.sequence === 'number'
+    && typeof row.eventType === 'string'
+  ))
+}
+
+function canonicalDurationFromRows(rows: readonly unknown[]) {
+  return deriveCanonicalTurnDuration(canonicalBoundaryRows(rows))
+}
+
+function canonicalHasTerminalFromRows(rows: readonly unknown[]): boolean {
+  return hasCanonicalTurnTerminal(canonicalBoundaryRows(rows))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -343,9 +359,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
   const subscribe = dependencies.subscribe ?? defaults.subscribe
-  const chatController = () => dependencies.chatController?.() ?? getChatController()
   const runtime = createWorkbenchRuntime({
-    sessionId: null, status: 'idle', messages: [], streamingText: '', streamingThinking: '',
+    sessionId: null, status: 'idle', messages: [],
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
     availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false,
     promptImage: false, error: null, document: createWorkbenchDocument(''),
@@ -357,7 +372,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let boundSessionBindingKey: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
-    rejectOptimisticUser: (targetSource, clientMessageId) => chatController()?.rejectOptimisticUser(targetSource, clientMessageId),
+    // P52 D4：controller React 状态面死亡——乐观 echo 撤销只剩 document 侧投影。
     optimisticDocument: projectOptimisticUser,
     rejectOptimisticDocument: rejectOptimisticUser,
     resolveConfigOption(sessionId, key) {
@@ -394,11 +409,20 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let ownerKey: string | undefined
   let source: string | undefined
   let generation = 0
+  let turnEpoch = 0
   let loading = false
   let buffered: WorkbenchEventEnvelope[] = []
   let malformedCount = 0
   let destroyed = false
-  let unsubscribeSourceRuntime = () => {}
+  // A canonical replay can finish after this runtime's initial bind. Keep a
+  // separate, coalesced refresh seam so the same binding key does not make a
+  // later durable tool terminal event invisible (bind itself is intentionally
+  // idempotent for ordinary Session metadata updates).
+  let refreshInFlight: Promise<void> | null = null
+  // Every canonical read gets a monotonically increasing token. A bind read
+  // that started before a refresh (or before a new bind) must not publish its
+  // older snapshot after the newer read has won the race.
+  let canonicalReadEpoch = 0
   /** Responses from the atomic empty-state create transaction can arrive
    * before React has rebound the Workbench to the newly-added local Session.
    * Keep them keyed by local Session.id until that bind completes. */
@@ -413,41 +437,91 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }>>()
 
   const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
-    runtime.update({ ...patch, document: runtime.getSnapshot().document })
-  }
-
-  const syncSourceRuntime = (targetSource: string) => {
-    if (destroyed || source !== targetSource) return
-    const controller = chatController()
-    if (!controller) return
-    const generating = controller.getGenerating(targetSource)
-    const controllerSummary = controller.getSummary(targetSource)
-    const existingSummary = runtime.getSnapshot().summary
-    updateRuntimeState({
-      generating,
-      generationStart: generating ? controller.getStartTime(targetSource) : 0,
-      lastTokenAt: controller.getLastActivityAt(targetSource),
-      generationPhase: controller.getGenerationPhase(targetSource),
-      // Legacy controllers may not expose the activity axis. Write this
-      // field explicitly so a missing getter clears stale context from a
-      // previous session instead of leaving an old tool label behind.
-      generationActivity: controller.getGenerationActivity?.(targetSource),
-      thinkingStart: controller.getThinkingStart(targetSource),
-      tokenCount: controller.getTokenCount(targetSource),
-      // Keep the display-only restored terminal summary stable across later
-      // controller notifications that still have no in-memory summary.
-      summary: controllerSummary ?? (!generating && existingSummary?.reason === 'done' ? existingSummary : null),
+    const current = runtime.getSnapshot()
+    if (!current.document) {
+      runtime.update(patch)
+      return
+    }
+    const { document: _ignoredDocument, ...generationPatch } = patch
+    runtime.applyDocument(current.document, {
+      ownerKey,
+      generation,
+      preserveGeneration: false,
+      generationPatch,
     })
   }
 
-  const followSourceRuntime = (targetSource: string | undefined) => {
-    unsubscribeSourceRuntime()
-    unsubscribeSourceRuntime = () => {}
-    if (!targetSource) return
-    const controller = chatController()
-    if (!controller) return
-    syncSourceRuntime(targetSource)
-    unsubscribeSourceRuntime = controller.subscribe(targetSource, () => syncSourceRuntime(targetSource))
+  // P52 D3 TurnClock —— 生成时钟唯一主人（source 隔离，事件驱动）。
+  // 回合起点 = 发送入口（乐观投影）；终态 = feed 终帧（done/error/cancelled）
+  // 或 canonical 终态证据（bind/refresh 时 journal 已终态）；拒绝发送 = 回滚。
+  // bind 换源不销毁旧 source 的时钟（切回可恢复指示器，等价原 controller 的
+  // source-scoped runtime）；终态幂等：首个终态 wins（K03），后续只忽略。
+  // lastTokenAt 由每条该 source 的 canonical envelope 刷新（touch）——projector
+  // 的 append-delta 不更新 message.time，文档派生的 lastTokenAt 会停滞。
+  interface TurnClockEntry {
+    generationStart: number
+    lastTokenAt: number
+    terminal: boolean
+  }
+  const turnClocks = new Map<string, TurnClockEntry>()
+
+  const turnClockStart = (targetSource: string, at: number): void => {
+    turnClocks.set(targetSource, { generationStart: at, lastTokenAt: at, terminal: false })
+  }
+
+  /** 每条 live envelope 刷新活性；返回 undefined = 无活动回合（不写 patch）。 */
+  const turnClockTouch = (targetSource: string, at: number): number | undefined => {
+    const entry = turnClocks.get(targetSource)
+    if (!entry || entry.terminal) return undefined
+    entry.lastTokenAt = Math.max(entry.lastTokenAt, at)
+    return entry.lastTokenAt
+  }
+
+  /** 终帧到达：写 live 终态摘要（elapsed = 终点 - 本进程观察到的起点）。 */
+  const turnClockTerminal = (targetSource: string, reason: 'done' | 'cancelled' | 'error', at: number, failure?: PromptFailureMetadata): void => {
+    const entry = turnClocks.get(targetSource)
+    if (!entry || entry.terminal) return
+    entry.terminal = true
+    if (source !== targetSource) return
+    updateRuntimeState({
+      summary: {
+        elapsedMs: Math.max(0, at - entry.generationStart),
+        tokenCount: runtime.getSnapshot().tokenCount,
+        completedFrame: '',
+        reason,
+        ...(failure ? { failure } : {}),
+        durationSource: 'live-monotonic',
+        durationAvailable: true,
+      },
+    })
+  }
+
+  /** 发送被拒绝：活动回合回滚（后续帧不得复活指示器）。 */
+  const turnClockRollback = (targetSource: string): void => {
+    const entry = turnClocks.get(targetSource)
+    if (!entry || entry.terminal) return
+    turnClocks.delete(targetSource)
+  }
+
+  /** bind/refresh 发现 journal 已终态：封存时钟但不写摘要——展示由 displayOnly
+   * 恢复路径承担（elapsed 用 canonical 时长，不含离开会话的挂钟时间）。 */
+  const settleTurnClockFromDocument = (targetSource: string, hasTerminal: boolean): void => {
+    if (!hasTerminal) return
+    const entry = turnClocks.get(targetSource)
+    if (!entry || entry.terminal) return
+    entry.terminal = true
+  }
+
+  /** bind/refresh 后把活动时钟写回快照（覆盖投影间隙的 Date.now() 回退）。 */
+  const reconcileTurnClock = (targetSource: string): void => {
+    const entry = turnClocks.get(targetSource)
+    if (!entry || entry.terminal) return
+    updateRuntimeState({
+      generating: true,
+      generationStart: entry.generationStart,
+      lastTokenAt: entry.lastTokenAt,
+      summary: null,
+    })
   }
 
   function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
@@ -475,7 +549,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       envelope,
     })
     pendingOptimisticBySource.set(targetSource, existing)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    turnEpoch += 1
+    turnClockStart(targetSource, now)
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
       generationStart: now,
@@ -504,6 +580,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         && message.identity.interactionId === clientMessageId)),
     }
     runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
+    // P52 D3：发送被拒 = 回合回滚；若无其它在途乐观回合，时钟一并撤销，
+    // 后续迟到帧不得经 updateRuntimeState 复活指示器（原 controller 侧由
+    // reject-optimistic-user reducer 承担）。
+    if (remaining.length === 0) turnClockRollback(targetSource)
     const existingActivity = runtime.getSnapshot().generationActivity
     updateRuntimeState({
       generating: remaining.length > 0 || document.messages.some(message => message.running),
@@ -590,11 +670,38 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
 
   const applyLive = (incoming: WorkbenchEventEnvelope) => {
+    const currentBefore = runtime.getSnapshot().document
+    const priorUser = [...(currentBefore?.messages ?? [])].reverse().find(message => message.role === 'user')
+    const isUserStart = incoming.event.type === 'message.delta' && incoming.event.role === 'user'
+      && !(priorUser?.running === true)
+    const content = isUserStart ? (incoming.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('') : ''
+    const pending = pendingOptimisticBySource.get(incoming.sessionId) ?? []
+    const echoesOptimistic = pending.some(item => item.clientMessageId === incoming.identity.interactionId || item.content === content)
+    if (isUserStart && !echoesOptimistic) turnEpoch += 1
     const envelope = confirmPendingFromEnvelope(incoming)
+    const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
+    // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
+    // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
+    if (isUserStart && !echoesOptimistic) turnClockStart(envelope.sessionId, envelopeTime)
+    // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
+    turnClockTouch(envelope.sessionId, envelopeTime)
     if (loading) { buffered.push(envelope); return }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: isUserStart ? null : undefined, preserveGeneration: true })
   }
+  // P52 D3：feed 终帧信号 → TurnClock 终态（done/error；cancelled 映射 cancelled）。
+  // 时钟幂等：首个终态 wins；不在当前 source 的终帧只封存该 source 的时钟。
+  const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(signal => {
+    if (!signal.source) return
+    const payload = signal.payload as { cancelled?: unknown; failure?: unknown } | null
+    const reason: 'done' | 'cancelled' | 'error' = signal.kind === 'error'
+      ? (payload?.cancelled === true ? 'cancelled' : 'error')
+      : 'done'
+    const failure = signal.kind === 'error' && payload && typeof payload === 'object' && typeof payload.failure === 'object'
+      ? payload.failure as PromptFailureMetadata
+      : undefined
+    turnClockTerminal(signal.source, reason, Date.now(), failure)
+  })
   const unsubscribeEvents = subscribe(event => {
     if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return
     const candidate = event as { owner?: Parameters<typeof toCanonicalOwnerKey>[0]; sessionId?: unknown }
@@ -614,6 +721,113 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     }
   })
 
+  const refresh = async (session: Session | undefined): Promise<void> => {
+    if (destroyed || !session || !ownerKey || !boundSessionId || !source) return
+    const bindingKey = workbenchSessionBindingKey(session)
+    const refreshOwnerKey = ownerKey
+    const refreshSource = source
+    const refreshSessionId = boundSessionId
+    const refreshGeneration = generation
+    if (bindingKey !== boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
+    if (refreshInFlight) return refreshInFlight
+    const refreshEpoch = ++canonicalReadEpoch
+
+    const run = (async () => {
+      try {
+        const rows = await loadAll(refreshOwnerKey)
+        const canonicalDuration = canonicalDurationFromRows(rows)
+        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
+        // Session switches/rebinds invalidate the result. Do not let a late
+        // canonical read replace the document belonging to the new owner.
+        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
+          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
+          || canonicalReadEpoch !== refreshEpoch) return
+
+        let refreshMalformedCount = 0
+        const envelopes = rows.flatMap(row => {
+          const migrated = toWorkbenchEnvelopes(row)
+          if (migrated.length > 0) return migrated
+          refreshMalformedCount += 1
+          return []
+        })
+        // If refresh supersedes an initial bind read, fold events that arrived
+        // while that read was in flight into the winning projection and release
+        // the load buffer. Otherwise those events would remain stranded behind
+        // the invalidated bind promise.
+        const bufferedAtRefresh = buffered
+        const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
+        // Start from the live document so already-applied event ids remain
+        // idempotent while newly persisted terminal updates (for example a tool
+        // completion that raced the initial read) are folded in place.
+        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        const reconciled = withPendingOptimistic(refreshSource, projected)
+        const document = refreshMalformedCount > 0
+          ? withJournalDiagnostic(reconciled, refreshMalformedCount)
+          : reconciled
+        buffered = []
+        loading = false
+        runtime.replaceDocument(document, {
+          ownerKey: refreshOwnerKey,
+          generation: refreshGeneration,
+          sessionId: refreshSessionId,
+        })
+        if (refreshMalformedCount > 0) {
+          updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${refreshMalformedCount} 条事件无法迁移` })
+        } else {
+          updateRuntimeState({ status: 'ready', error: null })
+          // A successful canonical refresh is authoritative evidence that any
+          // earlier recoverable bind/replay notice for this session is stale.
+          // Resolve by stable key only; errors from other sessions remain.
+          resolveRuntimeErrors({ key: `session-recovery:${refreshSessionId}`, source: 'chat.session-recovery' })
+        }
+        // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
+        settleTurnClockFromDocument(refreshSource, canonicalHasTerminal)
+        reconcileTurnClock(refreshSource)
+        const settled = runtime.getSnapshot()
+        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
+          updateRuntimeState({
+            summary: {
+              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
+              tokenCount: settled.tokenCount,
+              completedFrame: '',
+              reason: 'done',
+              durationSource: canonicalDuration?.source ?? 'unknown',
+              durationAvailable: canonicalDuration !== undefined,
+              // Display-only restore: must not synthesize a terminal fence
+              // (see normalizeRuntimeSnapshot), or the next controller-driven
+              // generation cannot restart the indicator after a rebind.
+              displayOnly: true,
+            },
+          })
+        }
+      } catch (error) {
+        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
+          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
+          || canonicalReadEpoch !== refreshEpoch) return
+        const bufferedAfterFailure = buffered
+        buffered = []
+        loading = false
+        // A failed refresh may have superseded the initial bind read. Keep
+        // already-observed live/session-response events visible even though
+        // the canonical reload itself is degraded.
+        for (const envelope of bufferedAfterFailure) {
+          const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
+          runtime.applyDocument(reduceWorkbenchEvent(current, envelope), {
+            ownerKey: refreshOwnerKey,
+            generation: refreshGeneration,
+            preserveGeneration: true,
+          })
+        }
+        updateRuntimeState({ status: 'degraded', error: error instanceof Error ? error.message : String(error) })
+      }
+    })()
+    const pending = run.finally(() => {
+      if (refreshInFlight === pending) refreshInFlight = null
+    })
+    refreshInFlight = pending
+    return pending
+  }
+
   return {
     runtime, appearance, sessionUi, commands,
     /**
@@ -624,6 +838,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
      * effect runs; the response is buffered and consumed by bind().
      */
     applySessionResponse,
+    refresh,
     async bind(session: Session | undefined): Promise<void> {
       const nextBindingKey = workbenchSessionBindingKey(session)
       // Session objects are recreated for ordinary metadata updates (name,
@@ -634,17 +849,22 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       // dedicated lifecycle/reload-token seam instead of rebinding here.
       if (boundSessionBindingKey === nextBindingKey) return
       boundSessionBindingKey = nextBindingKey
+      // Invalidate any in-flight refresh for the previous binding. Its own
+      // epoch/key guard will make the eventual result a no-op; clearing the
+      // pointer lets the new binding schedule its own refresh immediately.
+      canonicalReadEpoch += 1
+      refreshInFlight = null
       const nextGeneration = ++generation
+      turnEpoch = 0
       boundSessionId = session?.id
       boundProvider = session?.agentId || 'acp'
       source = session?.source
-      followSourceRuntime(source)
       ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
       buffered = []
       malformedCount = 0
       loading = Boolean(session)
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
-        ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, sessionId: session?.id ?? null,
+        ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
       })
       if (session) {
         const pendingResponses = [
@@ -655,17 +875,23 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         pendingSessionResponses.delete(session.source)
         for (const response of pendingResponses) enqueueSessionResponse(response, session.id)
       }
+      // P52 D3：bind 重置读 TurnClock——时钟按 source 隔离，切回同 source 的
+      // 活动回合恢复（reconcileTurnClock 在 journal 读完成后执行）。
+      const activeClock = source ? turnClocks.get(source) : undefined
       updateRuntimeState({
         status: loading ? 'loading' : 'idle', error: null,
-        ...(source && chatController()?.getGenerating(source)
-          ? {}
+        ...(activeClock && !activeClock.terminal
+          ? { generating: true, generationStart: activeClock.generationStart, lastTokenAt: activeClock.lastTokenAt, summary: null }
           : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, summary: null }),
       })
-      if (source) syncSourceRuntime(source)
       if (!session || !ownerKey) return
       const loadingOwnerKey = ownerKey
+      const bindReadEpoch = canonicalReadEpoch
       await loadAll(loadingOwnerKey).then(rows => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
+        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
+          || canonicalReadEpoch !== bindReadEpoch) return
+        const canonicalDuration = canonicalDurationFromRows(rows)
+        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
           ? (() => {
             // Session snapshots historically used both the stable Session.id
@@ -690,32 +916,44 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         updateRuntimeState(malformedCount > 0
           ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
           : { status: 'ready', error: null })
-        syncSourceRuntime(session.source)
-        // A restarted process has no in-memory controller summary, while the
+        if (malformedCount === 0) {
+          resolveRuntimeErrors({ key: `session-recovery:${session.id}`, source: 'chat.session-recovery' })
+        }
+        // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
+        settleTurnClockFromDocument(session.source, canonicalHasTerminal)
+        reconcileTurnClock(session.source)
+        // A restarted process has no live terminal summary, while the
         // canonical document already contains the completed turn. Publish a
         // display-only done summary so the footer remains in its terminal
         // state instead of disappearing; this does not add a journal event.
         const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && (settled.document?.messages.length ?? 0) > 0) {
+        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
           updateRuntimeState({
             summary: {
-              elapsedMs: 0,
+              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
               tokenCount: settled.tokenCount,
               completedFrame: '',
               reason: 'done',
+              durationSource: canonicalDuration?.source ?? 'unknown',
+              durationAvailable: canonicalDuration !== undefined,
+              // Display-only restore: must not synthesize a terminal fence
+              // (see normalizeRuntimeSnapshot), or the next controller-driven
+              // generation cannot restart the indicator after a rebind.
+              displayOnly: true,
             },
           })
         }
       }).catch(error => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
+        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
+          || canonicalReadEpoch !== bindReadEpoch) return
         loading = false; buffered = []
         updateRuntimeState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
       })
     },
     destroy() {
       if (destroyed) return
-      destroyed = true; unsubscribeSourceRuntime(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
-      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
+      destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear()
     },
   }
 }

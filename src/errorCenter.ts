@@ -6,12 +6,32 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import type { RuntimeErrorDetail } from './runtimeError'
+import type {
+  RuntimeErrorDetail,
+  RuntimeErrorScope,
+  RuntimeErrorVisibility,
+} from './runtimeError'
+
+export type ErrorEntryState = 'active' | 'resolved' | 'dismissed'
+
+export type RuntimeErrorMatcher = {
+  key?: string
+  action?: string
+  code?: string
+  source?: string
+  visibility?: RuntimeErrorVisibility
+  scope?: RuntimeErrorScope | string
+} | ((entry: ErrorEntry) => boolean)
 
 export interface ErrorEntry extends RuntimeErrorDetail {
   id: number
+  /** Stable operation identity; display text is not used for resolution. */
+  key: string
   at: number
-  /** 报告 8.3：同指纹（action+message）出现次数/首次/最后时间——去重聚合 */
+  state: ErrorEntryState
+  resolvedAt?: number
+  dismissedAt?: number
+  /** 报告 8.3：同作用域/来源指纹的次数、首次与最后时间——去重聚合 */
   count: number
   firstAt: number
   lastAt: number
@@ -20,37 +40,130 @@ export interface ErrorEntry extends RuntimeErrorDetail {
 const MAX_ERRORS = 50
 let nextId = 1
 let errors: ErrorEntry[] = []
+let activeGlobalSnapshot: readonly ErrorEntry[] = Object.freeze([])
+let activeDiagnosticSnapshot: readonly ErrorEntry[] = Object.freeze([])
+let errorHistorySnapshot: readonly ErrorEntry[] = Object.freeze([])
 const listeners = new Set<() => void>()
 
 function emit(): void {
   for (const listener of listeners) listener()
 }
 
-function fingerprint(detail: RuntimeErrorDetail): string {
-  return `${detail.action}:${detail.code ?? ''}:${detail.message}`
+function scopeKey(scope: RuntimeErrorScope | undefined): string {
+  return scope ? `${scope.kind}:${scope.id}` : ''
+}
+
+function sameErrorScope(left: ErrorEntry, right: RuntimeErrorDetail): boolean {
+  return scopeKey(left.scope) === scopeKey(right.scope) && (left.source ?? '') === (right.source ?? '')
+}
+
+export function errorEntryKey(detail: RuntimeErrorDetail): string {
+  return detail.key ?? `${scopeKey(detail.scope)}:${detail.source ?? ''}:${detail.action}:${detail.code ?? ''}:${detail.message}`
+}
+
+function rebuildSnapshots(): void {
+  activeGlobalSnapshot = Object.freeze(errors.filter(entry => entry.state === 'active' && (entry.visibility ?? 'global') === 'global'))
+  activeDiagnosticSnapshot = Object.freeze(errors.filter(entry => entry.state === 'active' && entry.visibility === 'diagnostic'))
+  errorHistorySnapshot = Object.freeze([...errors])
+}
+
+function matches(entry: ErrorEntry, matcher: RuntimeErrorMatcher): boolean {
+  if (typeof matcher === 'function') return matcher(entry)
+  if (matcher.key !== undefined && entry.key !== matcher.key) return false
+  if (matcher.action !== undefined && entry.action !== matcher.action) return false
+  if (matcher.code !== undefined && entry.code !== matcher.code) return false
+  if (matcher.source !== undefined && entry.source !== matcher.source) return false
+  if (matcher.visibility !== undefined && (entry.visibility ?? 'global') !== matcher.visibility) return false
+  if (matcher.scope !== undefined) {
+    const expected = typeof matcher.scope === 'string' ? matcher.scope : scopeKey(matcher.scope)
+    if (scopeKey(entry.scope) !== expected) return false
+  }
+  return true
+}
+
+function withoutRecoveryAction(entry: ErrorEntry): Omit<ErrorEntry, 'recoveryAction'> {
+  const { recoveryAction: _recoveryAction, ...fact } = entry
+  void _recoveryAction
+  return fact
 }
 
 export function addError(detail: RuntimeErrorDetail): void {
   const now = Date.now()
-  const existing = errors.find(entry => fingerprint(entry) === fingerprint(detail))
+  const key = errorEntryKey(detail)
+  const incomingVisibility = detail.visibility ?? 'global'
+  // A diagnostic may be promoted to a visible failure, but a quiet replay
+  // diagnostic must never downgrade an already-visible failure that shares an
+  // operation key. Scope/source are part of the identity even when a caller
+  // supplies a shorthand key, preventing one session/provider from merging
+  // another session's notice.
+  const existing = errors.find(entry => entry.state === 'active'
+    && entry.key === key
+    && sameErrorScope(entry, detail)
+    && ((entry.visibility ?? 'global') === incomingVisibility
+      || (entry.visibility === 'diagnostic' && incomingVisibility === 'global')))
   if (existing) {
     errors = errors.map(entry => entry === existing
-      ? { ...entry, count: entry.count + 1, lastAt: now, at: now }
+      ? {
+        ...entry,
+        ...detail,
+        key,
+        count: entry.count + 1,
+        lastAt: now,
+        at: now,
+        state: 'active' as const,
+        resolvedAt: undefined,
+        dismissedAt: undefined,
+      }
       : entry)
+    rebuildSnapshots()
     emit()
     return
   }
-  errors = [{ id: nextId++, at: now, count: 1, firstAt: now, lastAt: now, ...detail }, ...errors].slice(0, MAX_ERRORS)
+  errors = [{
+    ...detail,
+    id: nextId++,
+    at: now,
+    count: 1,
+    firstAt: now,
+    lastAt: now,
+    key,
+    state: 'active' as const,
+    visibility: detail.visibility ?? 'global',
+    severity: detail.severity ?? 'error',
+  }, ...errors].slice(0, MAX_ERRORS)
+  rebuildSnapshots()
   emit()
 }
 
 export function clearErrors(): void {
-  errors = []
+  // "全部清除" is a presentation action. Keep the indexed facts so a
+  // Runtime/diagnostics surface can still explain what happened after the
+  // tray is hidden; a later event with the same key must create a fresh
+  // active entry instead of silently reviving the dismissed one.
+  const now = Date.now()
+  errors = errors.map(entry => entry.state === 'active' && (entry.visibility ?? 'global') === 'global'
+    ? { ...withoutRecoveryAction(entry), state: 'dismissed' as const, dismissedAt: now }
+    : entry)
+  rebuildSnapshots()
   emit()
 }
 
 export function dismissError(id: number): void {
-  errors = errors.filter(entry => entry.id !== id)
+  const now = Date.now()
+  errors = errors.map(entry => entry.id === id && entry.state === 'active'
+    ? { ...withoutRecoveryAction(entry), state: 'dismissed', dismissedAt: now }
+    : entry)
+  rebuildSnapshots()
+  emit()
+}
+
+/** Mark matching notifications resolved without deleting their audit history. */
+export function resolveRuntimeErrors(matcher: RuntimeErrorMatcher): void {
+  const now = Date.now()
+  errors = errors.map(entry => matches(entry, matcher) && entry.state === 'active'
+    ? { ...withoutRecoveryAction(entry), state: 'resolved', resolvedAt: now }
+    : entry)
+  rebuildSnapshots()
   emit()
 }
 
@@ -60,9 +173,26 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function getErrors(): readonly ErrorEntry[] {
-  return errors
+  return activeGlobalSnapshot
+}
+
+export function getDiagnosticErrors(): readonly ErrorEntry[] {
+  return activeDiagnosticSnapshot
+}
+
+export function getErrorHistory(): readonly ErrorEntry[] {
+  return errorHistorySnapshot
 }
 
 export function useErrors(): readonly ErrorEntry[] {
   return useSyncExternalStore(subscribe, getErrors)
+}
+
+export function useDiagnosticErrors(): readonly ErrorEntry[] {
+  return useSyncExternalStore(subscribe, getDiagnosticErrors)
+}
+
+/** Runtime Sheet seam: inspect resolved/dismissed facts without reviving them. */
+export function useErrorHistory(): readonly ErrorEntry[] {
+  return useSyncExternalStore(subscribe, getErrorHistory)
 }

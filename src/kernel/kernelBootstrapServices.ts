@@ -4,11 +4,12 @@ import {
   getPackageInstallationService,
   retryBuiltinPlugin,
 } from '../plugin-runtime/pluginCompositionRoot.ts'
+import { registerKernelBootstrapProvider } from '../plugin-runtime/management/pluginManagementWiring.ts'
 import { applicationRuntime } from '../application/applicationRuntimeServices.ts'
 import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
 import { createKernelBootstrap } from './kernelBootstrap.ts'
 
-export const kernelBootstrap = createKernelBootstrap({
+const bootstrap = createKernelBootstrap({
   bootstrapBuiltins,
   retryBuiltin: retryBuiltinPlugin,
   applicationMount: {
@@ -19,3 +20,7 @@ export const kernelBootstrap = createKernelBootstrap({
     ? getPackageInstallationService().emitActivationEvent('kernel.ready')
     : Promise.resolve({ activated: [], failed: [] }),
 })
+
+registerKernelBootstrapProvider(bootstrap)
+
+export const kernelBootstrap = bootstrap

@@ -53,6 +53,18 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
+
+/* Reading and input remain stable planes; only navigation carries display typography. */
+.app[data-interface-mode="tactical-blue"] .solid-agent-workbench { background:#05112840; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-chat { background:#041127a6; }
+.app[data-interface-mode="tactical-blue"] :is(.control-center,.solid-control-center) { border-top:2px solid #5cd9ff; background:#061830f5; box-shadow:0 -10px 40px #0003; }
+.app[data-interface-mode="tactical-blue"] :is(.input-bar,.input-area) { background:#07162dec; border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] :is(.input-textarea,.input-editor) { color:#edf6ff; caret-color:#83e9ff; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-state { background:transparent; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-title { font-size:clamp(26px,3.2vw,42px); font-weight:850; color:#b0f0ff; }
+.app[data-interface-mode="tactical-blue"] .agent-empty-steps li { border-color:#517ba7; background:#091d3bd9; padding:18px; }
+.app[data-interface-mode="tactical-blue"] :is(.term-tool,.tool-call-card,.interaction-card,.permission-card) { background:#071b33f2; border-color:#538dbb; border-radius:2px; }
+.app[data-interface-mode="tactical-blue"] .input-send { background:#83e7ff; color:#072449; }
 .solid-agent-workbench .solid-workbench-chat::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ── 聊天滚动轨道 ──
@@ -71,6 +83,70 @@
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+.solid-workbench-chat-shell {
+  /* The visual rail overlays this shell. Keep creation feedback centered in
+     the actual chat viewport, excluding the rail's occupied column. */
+  --creation-overlay-right-inset: var(--scroll-action-rail-width, 20px);
+}
+.solid-workbench-chat-shell.solid-workbench-empty-chat-shell {
+  --creation-overlay-right-inset: 0px;
+}
+.solid-workbench-creation-overlay-host {
+  position: absolute;
+  inset: 0 var(--creation-overlay-right-inset) 0 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--ui-space-4);
+  pointer-events: none;
+}
+.solid-workbench-creation-overlay-host[data-visible='false'] { visibility: hidden; }
+.solid-workbench-creation-overlay-host[data-reduced-motion='true'] .solid-workbench-creation-progress-bar { animation: none; }
+.solid-workbench-creation-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(100%, 360px);
+  max-width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface-panel, var(--bg-panel, transparent)) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  font: 500 var(--msg-font-size, var(--chat-font-size, var(--font-size-sm)))/
+    var(--msg-line-height, var(--chat-line-height, 1.35))
+    var(--msg-font, var(--chat-font, var(--mono)));
+  letter-spacing: .01em;
+  box-shadow: var(--shadow-soft, 0 4px 18px rgba(0, 0, 0, .12));
+}
+.solid-workbench-creation-progress-track {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 2px;
+  flex: 0 0 56px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.solid-workbench-creation-progress-bar {
+  position: absolute;
+  inset-block: 0;
+  left: -35%;
+  width: 35%;
+  background: var(--accent);
+  animation: solid-workbench-creation-progress 900ms ease-in-out infinite;
+}
+.solid-workbench-creation-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes solid-workbench-creation-progress {
+  from { transform: translateX(0); }
+  to { transform: translateX(380%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .solid-workbench-creation-progress-bar { animation: none; }
 }
 .solid-workbench-scroll-rail {
   position: absolute;
@@ -171,23 +247,27 @@
 .solid-workbench-timeline { margin: 8px 24px 0; }
 .solid-workbench-assist { margin: 8px 24px 0; }
 .solid-workbench-activities { margin: 8px 0 0; }
-.solid-workbench-activity-group { margin: 0 0 var(--chat-tool-gap, 5px); }
+.solid-workbench-activity-group {
+  margin: 0 0 var(--chat-tool-gap, 5px);
+  min-width: 0;
+}
 .solid-workbench-activity-group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-space-1);
-  width: 100%;
-  padding: var(--ui-space-1) 0;
-  color: var(--text-dim);
-  background: transparent;
-  border: 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  /* Keep the exact tool-card header geometry: indicator column, name,
+     summary and state suffix all participate in one nowrap flex row. */
+  align-items: baseline;
+  gap: 0;
 }
 .solid-workbench-activity-group-head:hover,
 .solid-workbench-activity-group-head:focus-visible { color: var(--text); }
 .solid-workbench-activity-group-items { display: grid; gap: var(--chat-tool-gap, 5px); }
+.solid-workbench-activity-group-body {
+  max-width: none;
+  margin-right: 0;
+  font-size: inherit;
+  line-height: inherit;
+  overflow: visible;
+  background: transparent;
+}
 .solid-workbench-interactions { margin: 8px 24px 0; }
 .solid-workbench-extensions { margin: 8px 24px 0; }
 .solid-workbench-usage,
@@ -355,59 +435,6 @@
 .solid-workbench-control-center-slot.is-empty.is-session-entering {
   animation: solid-empty-composer-to-dock 360ms cubic-bezier(.22,.8,.24,1) both;
 }
-.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) {
-  animation: solid-empty-create-pulse 900ms ease-in-out infinite alternate;
-}
-.solid-workbench-control-center-slot.is-session-creating:not(.is-session-entering) .cc-body { opacity: .82; }
-.cc-creation-progress {
-  position: absolute;
-  right: 12px;
-  bottom: 5px;
-  left: 12px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  pointer-events: none;
-  color: var(--text-dim);
-  font: 500 var(--font-size-2xs)/1 var(--mono);
-  letter-spacing: .02em;
-}
-.solid-workbench-control-center-slot.is-empty .cc-creation-progress {
-  right: auto;
-  left: 50%;
-  width: var(--cc-empty-content-width);
-  max-width: calc(100% - 24px);
-  transform: translateX(-50%);
-}
-.cc-creation-progress-track {
-  position: relative;
-  display: block;
-  width: 56px;
-  height: 2px;
-  flex: 0 0 56px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.cc-creation-progress-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -35%;
-  width: 35%;
-  background: var(--accent);
-  animation: solid-empty-create-progress 900ms ease-in-out infinite;
-}
-.cc-creation-progress-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@keyframes solid-empty-create-pulse {
-  from { transform: translateY(-50%) scale(.998); opacity: .88; }
-  to { transform: translateY(-50%) scale(1); opacity: 1; }
-}
-@keyframes solid-empty-create-progress {
-  from { transform: translateX(0); }
-  to { transform: translateX(380%); }
-}
 .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty:not(.is-session-entering):not(.is-session-creating) {
   animation: solid-empty-composer-enter 280ms ease both;
 }
@@ -430,8 +457,6 @@
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot { transition: none; }
   .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
-  .solid-workbench-control-center-slot.is-session-creating,
-  .cc-creation-progress-bar { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering
     :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
@@ -459,12 +484,19 @@
   border-top: 1px solid var(--border);
 }
 
-/* 空态消息流占位：不绘制第二套品牌/表单 UI，只为中控区提供居中空间。 */
+/* 空态消息流占位：聊天 viewport 自己提供几何参照，品牌标记与创建 overlay
+   不再以中控区或整个工作台的百分比定位。 */
+.solid-workbench-empty-chat-viewport {
+  position: relative;
+}
 .solid-workbench-empty-space {
   position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
   flex: 1;
 }
 .solid-workbench-empty-brand {
@@ -472,24 +504,45 @@
   top: clamp(10%, 8vh, 18%);
   left: 0;
   right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: auto;
+  min-height: 0;
   padding: 0 var(--ui-space-4);
   pointer-events: none;
 }
 .solid-workbench-empty-brand .agent-empty-lockup {
+  /* Center the complete visible lockup (mark + wordmark) as one unit.  The
+     previous full-width three-column grid centered only the SVG and left the
+     visible PYLON wordmark pulling the logo to the right. */
   display: inline-flex;
   align-items: center;
   gap: var(--ui-space-2);
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin-bottom: var(--ui-space-2);
-  padding: 0 var(--ui-space-2);
+  padding: 0;
   color: var(--accent);
 }
 .solid-workbench-empty-brand .agent-empty-brand {
+  flex: 0 0 48px;
   width: 48px;
   height: 48px;
   margin: 0;
 }
 .solid-workbench-empty-brand .agent-empty-brand .pylon-mark { width: 44px; height: 44px; }
 .solid-workbench-empty-brand .agent-empty-wordmark {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 48px - var(--ui-space-2));
+  margin-left: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
   font: 700 var(--font-size-sm)/1 var(--mono);
   letter-spacing: .24em;
@@ -652,3 +705,23 @@
 @media (prefers-reduced-motion: reduce) {
   .solid-workbench-control-center-slot .model-menu { animation: none; }
 }
+
+
+/* Tactical workbench: decoration never writes scroll position or alters controls. */
+.app[data-interface-mode="tactical-blue"] .solid-agent-workbench { background:#05112840; color:#eef5ff; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-chat { background:#041127a6; }
+.app[data-interface-mode="tactical-blue"] .control-center { background:#061830f5; border-top:2px solid #5cd9ff; }
+.app[data-interface-mode="tactical-blue"] .input-textarea { color:#eef5ff; caret-color:#74e9ff; }
+.app[data-interface-mode="tactical-blue"] .input-textarea::placeholder { color:#a4b5cc; }
+.app[data-interface-mode="tactical-blue"] .term-code { background:#050d19; }
+/* The control-center widget host is flex; the composer itself is a full-width block. */
+.app[data-interface-mode="tactical-blue"] .cc-input-slot .input-bar { display:block; width:100%; height:auto; }
+.app[data-interface-mode="tactical-blue"] .input-bar .input-row { display:flex; width:100%; min-width:0; align-items:flex-end; }
+.app[data-interface-mode="tactical-blue"] .input-editor-stack { flex:1 1 0; min-width:0; }
+.app[data-interface-mode="tactical-blue"] .input-editor-stack .input-textarea { display:block; box-sizing:border-box; min-height:48px; line-height:1.6; padding:10px 12px; }
+.app[data-interface-mode="tactical-blue"] .input-btn.send { color:#071f45; background:#80e6ff; border-color:#80e6ff; border-radius:2px; box-shadow:none; }
+.app[data-interface-mode="tactical-blue"] .input-btn.stop { background:#442032; color:#ffc5cf; border-color:#ff8c99; }
+.app[data-interface-mode="tactical-blue"] .cc-footer-status-row { flex-wrap:wrap; gap:6px 0; font-size:12px; }
+.app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-primary,.cc-status-secondary,.cc-actions) { flex-wrap:wrap; max-width:100%; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .control-center { min-height:140px; height:auto; }
+.app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .cc-body { height:auto; min-height:140px; }

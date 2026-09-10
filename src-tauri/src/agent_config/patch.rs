@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -357,4 +357,3 @@ pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<Str
     }
     Ok(agents.keys().min().cloned())
 }
-

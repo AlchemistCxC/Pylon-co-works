@@ -72,7 +72,16 @@ export function BuiltinSolidContentSlot(props: {
   const booleanSetting = (key: string, fallback: boolean) => typeof props.appearance[key] === 'boolean'
     ? props.appearance[key] as boolean
     : fallback
+  const isProseKind = () => kind() === 'content.text'
+    || kind() === 'content.markdown'
+    || kind() === 'content.reasoning'
+    || kind() === 'content.redacted-reasoning'
   const fontFamily = () => {
+    // Conversation prose always starts from the message rail.  A legacy
+    // renderer snapshot may still carry `fontFamily: mono`; treating that as
+    // the default here is what caused ordinary English to inherit code
+    // metrics.  An explicit per-kind user/session override remains honored.
+    if (isProseKind() && !explicitProseTypographySetting('fontFamily')) return 'inherit'
     switch (props.appearance.fontFamily) {
       case 'mono': return 'var(--mono)'
       case 'sans': return 'var(--font)'
@@ -82,8 +91,12 @@ export function BuiltinSolidContentSlot(props: {
   }
   const contentStyle = () => ({
     'font-family': fontFamily(),
-    'font-size': explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit',
-    'line-height': String(numberSetting('lineHeight', 1.6)),
+    'font-size': isProseKind()
+      ? (explicitProseTypographySetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit')
+      : (explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit'),
+    'line-height': isProseKind() && !explicitProseTypographySetting('lineHeight')
+      ? 'inherit'
+      : String(numberSetting('lineHeight', 1.6)),
     'max-width': `${numberSetting('maxWidth', 1600)}px`,
   })
   const explicitKindSetting = (key: string) => {
@@ -96,6 +109,35 @@ export function BuiltinSolidContentSlot(props: {
     const source = (kindSources as Record<string, unknown>)[key]
     return source === 'profile' || source === 'user-override' || source === 'session-preview'
   }
+  const explicitProseTypographySetting = (key: string) => {
+    const renderSettings = props.appearance.renderSettings
+    // Direct callers may intentionally provide a numeric value without the
+    // production source metadata; preserve that compatibility seam.
+    if (!renderSettings || typeof renderSettings !== 'object' || Array.isArray(renderSettings)) {
+      const direct = props.appearance[key]
+      // The catalog defaults (14px / 1.6) are indistinguishable from a
+      // legacy snapshot that merely copied host values. Treat those defaults
+      // as inherited; non-default direct values remain an explicit override.
+      return typeof direct === 'number'
+        && ((key === 'fontSize' && direct !== 14) || (key === 'lineHeight' && direct !== 1.6))
+    }
+    const sources = (renderSettings as Record<string, unknown>).sources
+    if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return false
+    const kindSources = (sources as Record<string, unknown>).kind
+    if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return false
+    const source = (kindSources as Record<string, unknown>)[key]
+    if (source === undefined) return false
+    // Profile kind tokens may intentionally tune numeric prose metrics (for
+    // example a larger reading size), so keep those values visible to the
+    // Slot.  A profile-provided font family is different: ordinary prose must
+    // continue to inherit the message rail even when a legacy/profile snapshot
+    // carries a mono family; code semantics opt into mono at their own nodes.
+    return source === 'user-override' || source === 'session-preview'
+      || (source === 'profile' && key !== 'fontFamily')
+  }
+  const optionalTypographySetting = (key: string, fallback: number) => (
+    explicitProseTypographySetting(key) ? numberSetting(key, fallback) : undefined
+  )
 
   return (
     <div
@@ -139,8 +181,8 @@ export function BuiltinSolidContentSlot(props: {
           foreground={stringSetting('foreground', 'var(--text-dim)')}
           background={stringSetting('background', 'transparent')}
           borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
-          fontSize={numberSetting('fontSize', 13)}
-          lineHeight={numberSetting('lineHeight', 1.6)}
+          fontSize={optionalTypographySetting('fontSize', 13)}
+          lineHeight={optionalTypographySetting('lineHeight', 1.6)}
           defaultCollapsed={booleanSetting('defaultCollapsed', true)}
           maxHeight={numberSetting('maxHeight', 320)}
           runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}
@@ -157,8 +199,8 @@ export function BuiltinSolidContentSlot(props: {
           foreground={stringSetting('foreground', 'var(--text-dim)')}
           background={stringSetting('background', 'transparent')}
           borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
-          fontSize={numberSetting('fontSize', 13)}
-          lineHeight={numberSetting('lineHeight', 1.6)}
+          fontSize={optionalTypographySetting('fontSize', 13)}
+          lineHeight={optionalTypographySetting('lineHeight', 1.6)}
           defaultCollapsed={booleanSetting('defaultCollapsed', true)}
           maxHeight={numberSetting('maxHeight', 320)}
           runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}
@@ -390,6 +432,8 @@ export function BuiltinSolidContentSlot(props: {
             appearance={lifecycleAppearance(props.appearance, stringSetting, booleanSetting)}
             onRetry={can('message.retry') ? () => execute('message.retry', undefined) : undefined}
             onRecover={can('session.recover') ? strategy => execute('session.recover', { strategy }) : undefined}
+            onOpenDiagnostics={() => execute('diagnostics.open', undefined)}
+            dismissible
           />}
         </Show>
       </Match>

@@ -4,7 +4,7 @@ import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
 import { invoke } from '@tauri-apps/api/core'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import type { AgentContext } from '../../agentContext'
 import { toAgentContextKey } from '../../agentContext'
 
@@ -38,11 +38,17 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
     patch(value)
     try {
       await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setConfigOption({ agentId: context.agentId, source: context.source, key: id, value })
+      resolveRuntimeErrors({ key: `session-config:${toAgentContextKey(context)}:${id}` })
     } catch (error) {
       if (latestReqRef.current[id] !== seq) return
       patch(previous)
-      const detail = reportRuntimeError(`更新配置 ${id}`, error)
-      setErrors(state => ({ ...state, [id]: detail.message }))
+      reportRuntimeError(`更新配置 ${id}`, error, context.agentId, {
+        key: `session-config:${toAgentContextKey(context)}:${id}`,
+        scope: { kind: 'operation', id: `session-config:${toAgentContextKey(context)}:${id}` },
+        source: 'chat.config-option',
+        recovery: { kind: 'open-runtime-log', sessionId: context.source },
+      })
+      setErrors(state => ({ ...state, [id]: '保存失败，详情见右下角错误中心' }))
     } finally {
       if (latestReqRef.current[id] === seq) setPending(state => ({ ...state, [id]: false }))
     }
@@ -53,7 +59,7 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
       <span className="set-row-label">{option.label}</span>
       <ConfigOptionField option={option} disabled={pending[option.id] === true} onChange={value => update(option.id, value)} />
       {pending[option.id] && <span className="set-hint" role="status">保存中…</span>}
-      {errors[option.id] && <span className="set-hint" role="alert">{errors[option.id]}</span>}
+      {errors[option.id] && <span className="set-hint" role="status">{errors[option.id]}（详情见右下角错误中心）</span>}
     </div>)}
   </div>
 }

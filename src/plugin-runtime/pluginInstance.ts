@@ -1,6 +1,7 @@
 import type { PluginIdentity } from './pluginIdentity.ts'
 import type { PluginCleanupError, PluginScopeDisposeResult } from './pluginScope.ts'
 import { createPluginActivationTransaction } from './pluginTransaction.ts'
+import type { BuiltinPluginDefinition } from './pluginRuntime.ts'
 import {
   type BuiltinPluginActivationContext,
   type PluginActivationContextFactory,
@@ -35,10 +36,11 @@ export async function activateBuiltinPlugin(
   identity: PluginIdentity,
   activate: BuiltinPluginActivate,
   createContext: PluginActivationContextFactory,
+  definition?: BuiltinPluginDefinition,
 ): Promise<PluginInstance> {
   const transaction = createPluginActivationTransaction(identity)
   try {
-    await activate(createContext(identity, transaction.scope))
+    await activate(createContext(identity, transaction.scope, undefined, definition))
     return {
       identity,
       scope: transaction.commit(),

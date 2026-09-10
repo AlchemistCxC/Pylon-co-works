@@ -1,10 +1,12 @@
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
+import type { PylonPluginCapability } from '../../plugin-runtime/packageManifest.ts'
 import type { FirstPartyProductPackage } from './firstPartyProductPackage.ts'
 import shellPackage from './packages/builtin.pylon-shell/entry.ts'
 import workspacePackage from './packages/builtin.pylon-workspace/entry.ts'
 import renderersPackage from './packages/builtin.pylon-renderers/entry.ts'
 import agentAdaptersPackage from './packages/builtin.pylon-agent-adapters/entry.ts'
 import toolsPackage from './packages/builtin.pylon-tools/entry.ts'
+import pluginManagerPackage from './packages/builtin.pylon-plugin-manager/entry.ts'
 
 const FIRST_PARTY_PRODUCT_PACKAGES: readonly FirstPartyProductPackage[] = Object.freeze([
   shellPackage,
@@ -12,6 +14,7 @@ const FIRST_PARTY_PRODUCT_PACKAGES: readonly FirstPartyProductPackage[] = Object
   renderersPackage,
   agentAdaptersPackage,
   toolsPackage,
+  pluginManagerPackage,
 ])
 
 function orderByDependencies(packages: readonly FirstPartyProductPackage[]): FirstPartyProductPackage[] {
@@ -66,6 +69,10 @@ export function createBuiltinProductPluginDefinitions(): readonly BuiltinPluginD
     optionalDependencies: Object.freeze({ ...pkg.manifest.optionalDependencies }),
     conflicts: Object.freeze([...pkg.manifest.conflicts]),
     activationEvents: Object.freeze([...pkg.manifest.activation.events]),
+    // manifest 解析已保证词表封闭；窄化到 capability 字面量类型
+    capabilities: pkg.manifest.capabilities
+      ? Object.freeze([...pkg.manifest.capabilities] as readonly PylonPluginCapability[])
+      : undefined,
     hotSwapMode: pkg.manifest.hotSwap.mode,
     drainTimeoutMs: pkg.manifest.hotSwap.drainTimeoutMs,
   })))

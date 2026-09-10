@@ -20,6 +20,8 @@ export interface SendMessagePayload {
   persona: string
   sessionPrompt: string
   attachments: string[]
+  /** 持久化的远端会话 id：Pylon 重启后内存映射为空时，后端先 session/load 复活原会话。 */
+  periId?: string
 }
 
 export interface CancelPromptPayload {

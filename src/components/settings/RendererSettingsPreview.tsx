@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPreviewWorkbenchServices } from '../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { THEME_DEFAULTS } from '../../themeFieldDefs.ts'
 import { THEME_SETTING_KEYS } from '../../themeFieldDefs.ts'
 import { useStore } from '../../store.ts'
-import { getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
+import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RendererSettingsCatalogEntry } from './rendererSettingsCatalog.ts'
+import type { SettingsContributionCatalog } from './settingsContributionCatalog.ts'
 
 function contributionForEntry(entry: RendererSettingsCatalogEntry, catalog: RendererRegistrySnapshot) {
   if (entry.namespace === 'kind') return catalog.renderKinds.find(item => item.value.id === entry.id)?.value
@@ -119,13 +120,21 @@ export default function RendererSettingsPreview(props: {
   readonly entry?: RendererSettingsCatalogEntry
   readonly catalog: RendererRegistrySnapshot
   readonly activeSuiteId?: string
+  readonly settingsCatalog?: SettingsContributionCatalog
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewState, setPreviewState] = useState<PreviewState>('default')
   const profileId = usePresentationPreferenceStore(state => state.activeProfileId)
-  const previewSuiteId = props.entry ? previewSuiteForEntry(props.entry, props.catalog, props.activeSuiteId) : undefined
-  const previewKind = props.entry ? pickPreviewKind(props.entry, props.catalog, previewSuiteId) : ''
+  const optionRegistry = getPluginSettingOptionsRegistry()
+  const optionSnapshot = useSyncExternalStore(
+    listener => optionRegistry.subscribe(listener),
+    () => optionRegistry.getSnapshot(),
+    () => optionRegistry.getSnapshot(),
+  )
+  const rendererSnapshot = props.settingsCatalog?.rendererSnapshot ?? props.catalog
+  const previewSuiteId = props.entry ? previewSuiteForEntry(props.entry, rendererSnapshot, props.activeSuiteId) : undefined
+  const previewKind = props.entry ? pickPreviewKind(props.entry, rendererSnapshot, previewSuiteId) : ''
   const previewStateOptions = useMemo(() => previewStates(previewKind), [previewKind])
   const effectivePreviewState = previewStateOptions.some(option => option.id === previewState)
     ? previewState
@@ -147,16 +156,16 @@ export default function RendererSettingsPreview(props: {
       services.appearance.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() } as unknown as Parameters<typeof services.appearance.setTheme>[0])
       refreshSurface()
     })
-    const activeSuite = props.catalog.rendererSuites.find(item => item.value.id === previewSuiteId)?.value
+    const activeSuite = rendererSnapshot.rendererSuites.find(item => item.value.id === previewSuiteId)?.value
     const kind = previewKind
-    const slot = pickSlot(kind, props.catalog, previewSuiteId, entry.namespace === 'slot' ? entry.id : undefined)
+    const slot = pickSlot(kind, rendererSnapshot, previewSuiteId, entry.namespace === 'slot' ? entry.id : undefined)
     if (!slot) {
       setError(`没有找到可渲染 ${kind} 的 Slot`)
       services.destroy()
       unsubscribeTheme()
       return
     }
-    const variant = previewPayload(kind, fixtureForKind(kind, props.catalog), effectivePreviewState)
+    const variant = previewPayload(kind, fixtureForKind(kind, rendererSnapshot), effectivePreviewState)
     const node: RenderNodeSnapshot = {
       nodeId: `settings-preview:${entry.namespace}:${entry.id}`,
       kind,
@@ -167,12 +176,13 @@ export default function RendererSettingsPreview(props: {
     const profile = getPresentationProfileRegistry().resolve(profileId)?.value
     const resolvedAppearance: RenderAppearanceSnapshot = resolveProductionRenderAppearance({
       hostAppearance: services.appearance.getSnapshot(),
-      catalog: props.catalog,
+      catalog: rendererSnapshot,
       settings: getRendererSettingsStore().getSnapshot(),
       suiteId: previewSuiteId ?? activeSuite?.id ?? '',
       slotId: slot.value.id,
       kind,
       profileKindTokens: profile?.kindTokens?.[kind],
+      optionEntries: optionSnapshot.entries,
     })
     const commands: RenderCommandPort = {
       execute: async command => {
@@ -192,12 +202,13 @@ export default function RendererSettingsPreview(props: {
         try {
           const nextAppearance = resolveProductionRenderAppearance({
             hostAppearance: services.appearance.getSnapshot() as never,
-            catalog: props.catalog,
+            catalog: rendererSnapshot,
             settings: getRendererSettingsStore().getSnapshot(),
             suiteId: previewSuiteId ?? activeSuite?.id ?? '',
             slotId: slot.value.id,
             kind,
             profileKindTokens: profile?.kindTokens?.[kind],
+            optionEntries: optionSnapshot.entries,
           })
           surface.update(handle, node, nextAppearance)
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
@@ -220,7 +231,7 @@ export default function RendererSettingsPreview(props: {
       services.destroy()
       host.replaceChildren()
     }
-  }, [effectivePreviewState, previewKind, previewSuiteId, props.catalog, props.entry, profileId])
+  }, [effectivePreviewState, optionSnapshot.entries, previewKind, previewSuiteId, props.catalog, props.entry, profileId, rendererSnapshot])
 
   if (!props.entry) return <div className="renderer-settings-preview-empty">选择一个渲染对象查看真实示例。</div>
   return <div className="renderer-settings-preview">

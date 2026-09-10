@@ -99,7 +99,7 @@ export const THEME_FIELD_DEFS = {
   globalFont: { ...S('global', '界面字体', ['system', 'serif', 'mono']), optionLabels: {
     system: '系统无衬线', serif: '阅读衬线', mono: '等宽代码体',
   }, default: 'system', group: "字体", control: 'fontPicker', fontRole: 'interface', allowCustomOptions: true, hint: '应用导航、设置与普通界面的字体；代码和路径仍保留等宽体' },
-  codeFont: { ...S('global', '代码与路径字体', ['mono']), optionLabels: { mono: 'JetBrains Mono' }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'code', allowCustomOptions: true, hint: '代码、路径与终端输出专用；插件可以贡献新的等宽字体' },
+  codeFont: { ...S('global', '代码与路径字体', ['mono']), optionLabels: { mono: 'Consolas（VS Code 默认）' }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'code', allowCustomOptions: true, hint: '代码、路径与终端输出专用；插件可以贡献新的等宽字体' },
   globalFontSize: { ...N('global', '基础字号', 12, 24), tier: 'basic', default: 18, group: "字体", unit: 'px' },
   globalBgImage: { ...T('global', '背景图'), default: '', control: 'bgImage', group: "玻璃效果", },
   globalBgColor: { ...C('global', '背景底色'), tier: 'basic', default: '#e8e8ec', group: "玻璃效果", hint: '背景图或透明材质下方使用的基础颜色', semanticRole: 'surface.canvas', semanticSource: true },
@@ -113,7 +113,9 @@ export const THEME_FIELD_DEFS = {
   // 布局显隐并入 global zone（布局骨架组渲染在全局 tab），layout zone 无独立 tab/预设
   showTabBar: { ...B('global', '工作区标签栏'), default: true, group: "布局骨架" },
   showSidebar: { ...B('global', '左侧栏'), default: true, group: "布局骨架" },
-  showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hint: '隐藏工作区标签栏、左侧栏和宠物，可得到只保留聊天内容的单栏视图' },
+  // Compatibility value retained for legacy theme/preset payloads; the
+  // editable owner is workspaceStore's dedicated Pet section.
+  showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hidden: true, hint: '由工作区 › 宠物统一编辑；旧主题值仅作兼容读取' },
 
   // ── sidebar ──
   sidebarBg: { ...C('sidebar', '侧栏背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
@@ -358,6 +360,13 @@ export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone:
     zone: THEME_FIELD_DEFS[key].zone,
     owner: THEME_FIELD_OWNER_OVERRIDES[key] ?? 'theme',
   })])) as Record<ThemeFieldKey, { readonly zone: ZoneName; readonly owner: ThemeFieldOwner }>,
+)
+
+/** Preset-owned Theme fields. Workspace/right-rail authorities remain
+ * persisted for compatibility but are never captured or overwritten by a
+ * Theme preset. */
+export const THEME_PRESET_KEYS: readonly ThemeFieldKey[] = THEME_SETTING_KEYS.filter(key =>
+  THEME_FIELD_OWNERS[key].owner === 'theme',
 )
 
 /** cssVar 注入表：--xxx → 字段名（供 App.tsx 循环注入） */

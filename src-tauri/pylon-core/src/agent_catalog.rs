@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 const CATALOG_JSON: &str = include_str!("../../../shared/agent-catalog.json");
-const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+const SUPPORTED_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -26,6 +26,73 @@ struct CatalogDetection {
     config_dirs: Vec<String>,
     #[serde(default)]
     config_evidence: Vec<CatalogConfigEvidence>,
+    #[serde(default)]
+    version_args: Vec<String>,
+    #[serde(default)]
+    package_manager: Option<CatalogPackageManager>,
+    #[serde(default)]
+    requires: CatalogRequirements,
+    #[serde(default)]
+    checks: Vec<CatalogCheck>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogPackageManagerKind {
+    Npx,
+    Uvx,
+    Binary,
+    None,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogPackageManager {
+    pub kind: CatalogPackageManagerKind,
+    pub package: Option<String>,
+    pub cmd: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogRequirements {
+    pub node: Option<String>,
+    pub uv: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogCheckKind {
+    NodeMin,
+    UvMin,
+    BinaryPresent,
+    AdapterPresent,
+    ConfigEvidence,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogFixKind {
+    OpenUrl,
+    InstallAdapter,
+    InstallUv,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogFix {
+    pub kind: CatalogFixKind,
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogCheck {
+    pub id: String,
+    pub label: String,
+    pub kind: CatalogCheckKind,
+    pub params: serde_json::Map<String, serde_json::Value>,
+    pub fix: Option<CatalogFix>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -117,7 +184,26 @@ struct CatalogProvider {
     interaction_kinds: Vec<String>,
     protocol_defaults: CatalogProtocolDefaults,
     detection: CatalogDetection,
+    #[serde(default)]
+    adaptation: Option<CatalogAdaptation>,
     tools: Vec<CatalogTool>,
+}
+
+/// Declarative provider adaptation policy. The nested shapes are intentionally
+/// retained as JSON values until A-ADAPT assigns each consumer its closed
+/// strategy enum; unknown top-level policy names are rejected now.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogAdaptation {
+    pub adapter_relation: Option<serde_json::Value>,
+    pub client_capabilities: Option<serde_json::Value>,
+    pub prompt_capabilities: Option<serde_json::Value>,
+    pub launch_env: Option<serde_json::Value>,
+    pub version_gates: Option<serde_json::Value>,
+    pub session_establishment: Option<serde_json::Value>,
+    pub config_adaptation: Option<serde_json::Value>,
+    pub mcp: Option<serde_json::Value>,
+    pub interaction_bridges: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +222,10 @@ pub struct AgentDetectionProfile {
     pub invocations: Vec<CatalogInvocation>,
     pub config_dirs: Vec<String>,
     pub config_evidence: Vec<CatalogConfigEvidence>,
+    pub version_args: Vec<String>,
+    pub package_manager: Option<CatalogPackageManager>,
+    pub requires: CatalogRequirements,
+    pub checks: Vec<CatalogCheck>,
 }
 
 static CATALOG: OnceLock<Result<CatalogDocument, String>> = OnceLock::new();
@@ -296,6 +386,10 @@ pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
             invocations: entry.detection.invocations.clone(),
             config_dirs: entry.detection.config_dirs.clone(),
             config_evidence: entry.detection.config_evidence.clone(),
+            version_args: entry.detection.version_args.clone(),
+            package_manager: entry.detection.package_manager.clone(),
+            requires: entry.detection.requires.clone(),
+            checks: entry.detection.checks.clone(),
         })
         .collect::<Vec<_>>();
     // Stable sort preserves catalog order for equal-priority providers.
@@ -321,6 +415,16 @@ pub fn set_model_api_default(provider: &str) -> Result<Option<CatalogSetModelApi
         .iter()
         .find(|entry| entry.provider.eq_ignore_ascii_case(provider))
         .map(|entry| entry.protocol_defaults.set_model_api))
+}
+
+/// Return the single declarative adaptation policy for a provider. Consumers
+/// must interpret this projection; no provider-specific behavior lives here.
+pub fn adaptation(provider: &str) -> Result<Option<CatalogAdaptation>, String> {
+    Ok(catalog()?
+        .providers
+        .iter()
+        .find(|entry| entry.provider.eq_ignore_ascii_case(provider))
+        .and_then(|entry| entry.adaptation.clone()))
 }
 
 /// Return the protocol baseline in stable shared-catalog order.
@@ -351,9 +455,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn detection_v2_fixture_and_empty_defaults() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../shared/agent-catalog-detection.fixture.json"
+        ))
+        .unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        let detection = document["providers"][0]["detection"]
+            .as_object_mut()
+            .unwrap();
+        detection.extend(fixture.as_object().unwrap().clone());
+        let parsed = parse_catalog(&document.to_string()).unwrap();
+        let policy = &parsed.providers[0].detection;
+        assert_eq!(
+            serde_json::to_value(&policy.version_args).unwrap(),
+            fixture["versionArgs"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.package_manager).unwrap(),
+            fixture["packageManager"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.requires).unwrap(),
+            fixture["requires"]
+        );
+        assert_eq!(
+            serde_json::to_value(&policy.checks).unwrap(),
+            fixture["checks"]
+        );
+        let detection = document["providers"][0]["detection"]
+            .as_object_mut()
+            .unwrap();
+        for key in fixture.as_object().unwrap().keys() {
+            detection.remove(key);
+        }
+        let parsed = parse_catalog(&document.to_string()).unwrap();
+        let policy = &parsed.providers[0].detection;
+        assert!(policy.version_args.is_empty() && policy.checks.is_empty());
+        assert!(policy.package_manager.is_none());
+        assert_eq!(
+            serde_json::to_value(&policy.requires).unwrap(),
+            serde_json::json!({"node": null, "uv": null})
+        );
+    }
+
+    #[test]
+    fn detection_v2_rejects_wrong_shapes_and_unknown_kinds() {
+        for invalid in [
+            serde_json::json!({"packageManager": "npx"}),
+            serde_json::json!({"requires": []}),
+            serde_json::json!({"checks": ["node-min"]}),
+            serde_json::json!({"packageManager": {"kind": "npm"}}),
+            serde_json::json!({"requires": {"python": "3"}}),
+            serde_json::json!({"checks": [{"id":"x", "label":"x", "kind":"shell", "params":{}}]}),
+            serde_json::json!({"checks": [{"id":"x", "label":"x", "kind":"node-min", "params":{}, "fix":{"kind":"execute", "payload":"command"}}]}),
+        ] {
+            let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+            document["providers"][0]["detection"]
+                .as_object_mut()
+                .unwrap()
+                .extend(invalid.as_object().unwrap().clone());
+            assert!(
+                parse_catalog(&document.to_string()).is_err(),
+                "accepted {invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn shared_catalog_is_valid_and_excludes_rpc_only_pi() {
         let catalog = parse_catalog(CATALOG_JSON).expect("shared catalog must remain valid");
-        assert_eq!(catalog.schema_version, 1);
+        assert_eq!(catalog.schema_version, 2);
         assert_eq!(
             catalog
                 .providers
@@ -363,6 +535,17 @@ mod tests {
             ["peri", "hermes", "claude-code"]
         );
         assert!(catalog.providers.iter().all(|entry| entry.provider != "pi"));
+    }
+
+    #[test]
+    fn catalog_rejects_v1_and_unknown_top_level_fields() {
+        let mut v1: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        v1["schemaVersion"] = serde_json::json!(1);
+        assert!(parse_catalog(&v1.to_string()).is_err());
+
+        let mut unknown: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        unknown["unexpected"] = serde_json::json!(true);
+        assert!(parse_catalog(&unknown.to_string()).is_err());
     }
 
     #[test]
@@ -387,14 +570,32 @@ mod tests {
     fn protocol_projection_is_serializable_and_keeps_catalog_order() {
         let profiles = protocol_profiles().expect("protocol baseline must parse");
         assert_eq!(
-            profiles.iter().map(|entry| entry.provider.as_str()).collect::<Vec<_>>(),
+            profiles
+                .iter()
+                .map(|entry| entry.provider.as_str())
+                .collect::<Vec<_>>(),
             ["peri", "hermes", "claude-code"]
         );
-        let hermes = profiles.iter().find(|entry| entry.provider == "hermes").unwrap();
+        let hermes = profiles
+            .iter()
+            .find(|entry| entry.provider == "hermes")
+            .unwrap();
         assert!(!hermes.permission_requests);
         assert_eq!(hermes.set_model_api, CatalogSetModelApi::SetModel);
         let json = serde_json::to_value(&profiles).expect("projection must serialize");
         assert_eq!(json[0]["displayName"], "Peri");
         assert_eq!(json[1]["setModelApi"], "set_model");
+    }
+
+    #[test]
+    fn adaptation_policy_is_empty_until_declared_and_provider_scoped() {
+        assert!(adaptation("peri").unwrap().is_none());
+        assert!(adaptation("missing").unwrap().is_none());
+        let claude = adaptation("claude-code").unwrap().unwrap();
+        assert_eq!(
+            claude.version_gates.unwrap()["steeringPromptRequiredMinVersion"],
+            "0.65.0"
+        );
+        assert_eq!(claude.adapter_relation.unwrap()["nativeCmd"], "claude");
     }
 }

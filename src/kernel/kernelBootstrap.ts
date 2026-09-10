@@ -2,7 +2,7 @@ import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
 import { reportRuntimeError } from '../runtimeError.ts'
 
-export type PluginBootstrapStage = 'activate' | 'dependency' | 'user-packages' | 'mount'
+export type PluginBootstrapStage = 'activate' | 'dependency' | 'capability-consent' | 'user-packages' | 'mount'
 
 export interface PluginBootstrapFailure {
   readonly pluginId: string
@@ -10,6 +10,9 @@ export interface PluginBootstrapFailure {
   readonly code: string
   readonly message: string
   readonly retryable: boolean
+  /** capability-consent 专属：授权卡据此绑定 grant 的版本失效语义。 */
+  readonly pluginVersion?: string
+  readonly capabilities?: readonly string[]
 }
 
 export interface BuiltinBootstrapResult {
@@ -33,7 +36,13 @@ export interface KernelBootstrapActions {
   bootstrapBuiltins(mode: 'normal' | 'safe-mode'): Promise<BuiltinBootstrapResult>
   initializeUserPackages(): Promise<{
     activated: readonly string[]
-    failed: readonly { pluginId: string; message: string }[]
+    failed: readonly {
+      pluginId: string
+      message: string
+      code?: string
+      version?: string
+      capabilities?: readonly string[]
+    }[]
   }>
   /** @deprecated Use applicationMount. Retained for compatibility during the migration window. */
   mountApplication?: (applicationId: string) => void
@@ -148,9 +157,11 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
       ...packages.failed.map(failure => Object.freeze({
         pluginId: failure.pluginId,
         stage: 'user-packages' as const,
-        code: 'user_plugin_initialization_failed',
+        code: failure.code ?? 'user_plugin_initialization_failed',
         message: failure.message,
         retryable: true,
+        ...(failure.version ? { pluginVersion: failure.version } : {}),
+        ...(failure.capabilities ? { capabilities: failure.capabilities } : {}),
       })),
     ]
     const allActivePluginIds = Object.freeze([...new Set([

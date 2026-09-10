@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../identityStore.ts'
 import { useIdentityStore } from '../../identityStore.ts'
+import { useRuntimeStore } from '../../runtimeStore.ts'
 import { RendererSuiteHost } from '../../host/renderer-suite/rendererSuiteHost.ts'
 import { resolveRendererActivation } from '../../plugin-runtime/renderers/rendererActivationResolver.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
@@ -12,9 +13,16 @@ import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
-import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
-import ReactWorkbenchFatalFallback, { type WorkbenchFatalFailure } from './ReactWorkbenchFatalFallback.tsx'
-import type { ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { AgentWorkbenchLifecycle } from './agentWorkbenchLifecycle.ts'
+
+export interface WorkbenchFatalFailure {
+  readonly suiteId: string
+  readonly pluginId?: string
+  readonly phase: string
+  readonly message: string
+  readonly retained?: boolean
+}
+
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
@@ -22,6 +30,7 @@ import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -134,16 +143,65 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const fallbackChainRef = useRef<Set<string>>(new Set())
   const automaticRetryRef = useRef<{ key?: string; attempts: number }>({ attempts: 0 })
   const automaticRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reportedRuntimeErrorRef = useRef<string | null>(null)
+  const reportedRuntimeErrorKeyRef = useRef<string | null>(null)
+  const reportedSuiteErrorKeyRef = useRef<string | null>(null)
+  const retrySolidRef = useRef<() => void>(() => {})
   const visibilityRef = useRef(input.visibility)
   inputRef.current = input; catalogRef.current = catalog
 
-  const headlessSetters = useMemo<ChatSessionSetters>(() => {
-    const ignore = () => {}
-    return { setMessages: ignore, setStreamingText: ignore, setStreamingThinking: ignore, setGenerating: ignore, setGenerationPhase: ignore, setSummary: ignore, setLastTokenAt: ignore }
-  }, [])
-
   const sessionBindingKey = workbenchSessionBindingKey(session)
-  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey])
+  useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, sessionBindingKey, session])
+  // Recoverable bind/refresh failures are application notifications, not a
+  // second banner in the chat surface. Publish one scoped entry and let the
+  // central tray own its visibility and dismissal.
+  useEffect(() => {
+    const scope = session
+      ? { kind: 'session' as const, id: session.id }
+      : { kind: 'sheet' as const, id: props.sheet.id }
+    const runtimeErrorKey = session
+      ? `workbench-runtime:session:${session.id}`
+      : `workbench-runtime:sheet:${props.sheet.id}`
+    let disposed = false
+    const previousRuntimeErrorKey = reportedRuntimeErrorKeyRef.current
+    if (previousRuntimeErrorKey && previousRuntimeErrorKey !== runtimeErrorKey) {
+      resolveRuntimeErrors({ key: previousRuntimeErrorKey, source: 'workbench.runtime' })
+      reportedRuntimeErrorKeyRef.current = null
+      reportedRuntimeErrorRef.current = null
+    }
+    const observe = () => {
+      if (disposed) return
+      const current = sessionRuntime.runtime.getSnapshot()
+      const failed = (current.status === 'error' || current.status === 'degraded') && Boolean(current.error)
+      if (!failed) {
+        reportedRuntimeErrorRef.current = null
+        reportedRuntimeErrorKeyRef.current = null
+        resolveRuntimeErrors({ key: runtimeErrorKey, source: 'workbench.runtime' })
+        return
+      }
+      const message = current.error!
+      const signature = `${scope.kind}:${scope.id}:${message}`
+      if (reportedRuntimeErrorRef.current === signature) return
+      reportedRuntimeErrorRef.current = signature
+      reportedRuntimeErrorKeyRef.current = runtimeErrorKey
+      reportRuntimeError('工作台运行时', new Error(message), session?.agentId, {
+        key: runtimeErrorKey,
+        scope,
+        source: 'workbench.runtime',
+        recovery: { kind: 'open-runtime-log', sessionId: session?.id },
+        recoveryAction: {
+          label: '重试会话恢复',
+          run: () => session ? sessionRuntime.bind(session) : undefined,
+        },
+      })
+    }
+    observe()
+    const unsubscribe = sessionRuntime.runtime.subscribe(observe)
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [props.sheet.id, session?.id, session?.agentId, sessionRuntime, session])
   useEffect(() => {
     const pickWorkspaceFolder = async () => {
       const selected = await open({ directory: true, multiple: false, title: '选择工作区文件夹' })
@@ -381,73 +439,51 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       setFailure({ suiteId: 'builtin.solid', phase: 'resolve', message: error instanceof Error ? error.message : String(error) }); setFatal(true)
     }
   }
-  const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
-    detail: { domain: 'appearance', section: 'renderers' },
-  }))
+  retrySolidRef.current = retrySolid
+
+  // A retained/fallback Suite is recoverable application state. Keep its
+  // diagnostic in the central tray instead of rendering a second banner in
+  // the chat surface; fatal fallback remains the explicit blocking UI below.
+  useEffect(() => {
+    const scope = session
+      ? { kind: 'session' as const, id: session.id }
+      : { kind: 'sheet' as const, id: props.sheet.id }
+    const previousKey = reportedSuiteErrorKeyRef.current
+    if (fatal || !failure) {
+      if (previousKey) resolveRuntimeErrors({ key: previousKey })
+      reportedSuiteErrorKeyRef.current = null
+      return
+    }
+    const key = `renderer-suite:${props.sheet.id}:${session?.id ?? 'none'}:${failure.suiteId}:${failure.phase}`
+    if (previousKey && previousKey !== key) resolveRuntimeErrors({ key: previousKey })
+    if (previousKey === key) return
+    reportedSuiteErrorKeyRef.current = key
+    const message = `${failure.suiteId} / ${failure.phase} / ${failure.message}`
+    reportRuntimeError('Renderer Suite 回退', new Error(message), session?.agentId, {
+      key,
+      scope,
+      source: 'renderer-suite',
+      recovery: { kind: 'open-runtime-log', sessionId: session?.id, suiteId: failure.suiteId },
+      recoveryAction: { label: '重试 Solid', run: () => retrySolidRef.current() },
+    })
+  }, [failure, fatal, props.sheet.id, session, session?.id, session?.agentId])
   const openDiagnostics = () => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))
-  const openFallbackMedia = (part: ImageContentPart) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    const target = part.sourceKind === 'path' ? { path: part.source } : { uri: part.source }
-    void host.commands.openResource(input.sessionId, target)
-  }
-  const downloadFallbackMedia = (part: ImageContentPart) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    void host.commands.openResource(input.sessionId, { ...part, disposition: 'download' })
-  }
-  const openFallbackInteractionUrl = (url: string) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
-    void host.commands.openResource(input.sessionId, { uri: url })
-  }
-  const copyFallbackInteractionUrl = (url: string) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('clipboardWrite')) return
-    void host.commands.copy(input.sessionId, url)
-  }
-  const retryFallbackMessage = () => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('retry')) return
-    void host.commands.retry(input.sessionId)
-  }
-  const recoverFallbackSession = (strategy: 'reload-plugin' | 'reimport') => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('recovery')) return
-    void host.commands.recover(input.sessionId, strategy)
-  }
-  const respondFallbackInteraction = (interactionId: string, response: unknown, options?: { expectedRevision?: number }) => {
-    const host = hostPortRef.current
-    if (!host || !input.sessionId || !host.capabilities.has('interactionResponse')) return
-    return host.commands.respondInteraction(input.sessionId, interactionId, response, options)
-  }
 
   return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}
     onClickCapture={event => { openFileLinkFromEvent(event, props.ctx.activeSession) }}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
-    {fatal && failure && hostPortRef.current && <ReactWorkbenchFatalFallback document={hostPortRef.current.document} failure={failure}
-      onRetry={retrySolid}
-      onSelectSuite={selectSuite}
-      onOpenDiagnostics={openDiagnostics}
-      onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
-      onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
-      onOpenInteractionUrl={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
-      onCopyInteractionUrl={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
-      onOpenResource={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
-      onCopyResource={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
-      onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
-      onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
-      onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}
-    {!fatal && failure && <div className="renderer-suite-fallback-banner" role="status"
-      data-failed-suite-id={failure.suiteId} data-failed-plugin-id={failure.pluginId} data-failure-phase={failure.phase}>
-      {failure.retained ? 'Suite 候选未生效，继续使用健康实例' : 'Suite 已安全回退'}：{failure.suiteId} / {failure.phase} / {failure.message}
-      <div className="renderer-suite-fallback-actions">
+    {fatal && failure && <section className="renderer-suite-fatal-banner" role="alert"
+      aria-label="Renderer suite fatal banner" data-suite-id={failure.suiteId} data-failure-phase={failure.phase}>
+      <strong>渲染引擎失败</strong>
+      <span>{failure.suiteId} · {failure.phase}</span>
+      {failure.pluginId && <span>{failure.pluginId}</span>}
+      <span>{failure.message}</span>
+      <div className="renderer-suite-fatal-actions">
         <button type="button" onClick={retrySolid}>重试 Solid</button>
-        <button type="button" onClick={selectSuite}>切换 Suite</button>
         <button type="button" onClick={openDiagnostics}>打开诊断</button>
       </div>
-    </div>}
-    {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions} setters={headlessSetters}
+    </section>}
+     {isActiveSheet && <ActiveAgentSessionLifecycle session={session} sessions={sessions}
       selectSession={props.ctx.selectSession} sessionRuntime={sessionRuntime} />}
   </div>
 }
@@ -455,15 +491,36 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
 function ActiveAgentSessionLifecycle(props: {
   session: Session | undefined
   sessions: readonly Session[]
-  setters: ChatSessionSetters
   selectSession(id: string | null): void
   sessionRuntime: ReturnType<typeof createAgentWorkbenchSessionRuntime>
 }) {
-  const lifecycle = useSessionLifecycle(props.session?.id ?? null, props.sessions, props.setters, props.selectSession)
+  const lifecycleRef = useRef<AgentWorkbenchLifecycle | null>(null)
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new AgentWorkbenchLifecycle()
+    // Canonical replay can discover a terminal tool event after the initial
+    // bind; refresh the same owner document when the load chain completes.
+    lifecycleRef.current.onCanonicalRefresh = (session) => { void props.sessionRuntime.refresh(session) }
+  }
+  const lifecycle = lifecycleRef.current
+  const sessionRef = useRef(props.session)
+  sessionRef.current = props.session
+  // CWD-03：reload 令牌变化 = 同会话 workdir/workspace 变更 → 重跑激活链。
+  const reloadKey = props.session ? `${props.session.agentId}\u0000${props.session.source}` : undefined
+  const reloadToken = useRuntimeStore(state => reloadKey ? state.sessionReloadTokens[reloadKey] : undefined)
   useEffect(() => {
-    if (props.session && lifecycle.canonicalRefresh?.sessionId === props.session.id) void props.sessionRuntime.bind(props.session)
-  }, [props.sessionRuntime, props.session?.id, lifecycle.canonicalRefresh])
-  return lifecycle.recoveryFailure
-    ? <div className="renderer-suite-recovery-banner" role="alert">会话恢复失败：{lifecycle.recoveryFailure.message}</div>
-    : null
+    const session = sessionRef.current
+    if (!session) return
+    const reloadRef = { current: reloadToken }
+    void lifecycle.activate(session, {
+      reloadToken,
+      isCurrent: () => sessionRef.current?.id === session.id && reloadRef.current === reloadToken,
+    })
+  }, [lifecycle, props.session?.id, reloadToken])
+  // prune：移除已删除会话的 load generation 记录。
+  useEffect(() => {
+    lifecycle.prune(props.sessions.map(session => session.source))
+  }, [lifecycle, props.sessions])
+  // Recovery failures are reported with a session scope; the application
+  // ErrorCenter is the single ordinary-error presentation.
+  return null
 }

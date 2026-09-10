@@ -16,6 +16,8 @@ export interface SwitchAgentDeps {
   fetchAgentStatus: () => Promise<AgentStatusPayload>
   applyAgentStatus: (agentId: string, status: AgentStatus) => void
   reportError: (action: string, error: unknown) => void
+  /** Resolve only the operation notifications owned by this caller. */
+  resolveError?: (action: string) => void
   dispatchSwitched: () => void
   /** 切换后聚焦该 Agent 的 sheet（Settings 场景可不传） */
   openAgentSheet?: (agentId: string, name: string) => void
@@ -32,11 +34,13 @@ export async function switchAgentTransaction(
     deps.reportError('切换 Agent', error)
     return { ok: false, kind: 'transport', message: error instanceof Error ? error.message : '切换 Agent 失败', cause: error }
   }
+  deps.resolveError?.('切换 Agent')
   deps.resetRuntime()
   deps.setActiveAgent(agentId)
   try {
     const snapshot = normalizeAgentStatus(await deps.fetchAgentStatus(), agentId)
     deps.applyAgentStatus(agentId, snapshot)
+    deps.resolveError?.('对账 Agent 状态')
   } catch (error) {
     deps.reportError('对账 Agent 状态', error)
   }

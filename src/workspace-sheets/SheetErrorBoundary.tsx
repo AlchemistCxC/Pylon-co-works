@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeDiagnostic, resolveRuntimeErrors } from '../runtimeError.ts'
 
 interface Props { children: ReactNode; sheetId: string }
 interface State { error: Error | null }
@@ -16,7 +16,15 @@ export default class SheetErrorBoundary extends Component<Props, State> {
   static getDerivedStateFromError(error: Error): State { return { error } }
 
   componentDidCatch(error: Error, _info: ErrorInfo) {
-    reportRuntimeError('Sheet 渲染失败', error)
+    // The blocking Sheet fallback is already the authoritative presentation.
+    // Keep the technical fact queryable without creating a second global tray
+    // notification for the same crash.
+    reportRuntimeDiagnostic('Sheet 渲染失败', error, undefined, {
+      key: `sheet-render:${this.props.sheetId}`,
+      scope: { kind: 'sheet', id: this.props.sheetId },
+      source: 'sheet.boundary',
+      recovery: { kind: 'open-runtime-log', sheetId: this.props.sheetId },
+    })
   }
 
   render() {
@@ -26,7 +34,10 @@ export default class SheetErrorBoundary extends Component<Props, State> {
           <div className="sheet-empty-kicker">SHEET ERROR</div>
           <h2>此 Sheet 渲染失败</h2>
           <p>{this.state.error.message}</p>
-          <button type="button" className="template-apply" onClick={() => this.setState({ error: null })}>重试</button>
+          <button type="button" className="template-apply" onClick={() => {
+            resolveRuntimeErrors({ key: `sheet-render:${this.props.sheetId}` })
+            this.setState({ error: null })
+          }}>重试</button>
         </div>
       )
     }

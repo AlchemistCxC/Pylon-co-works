@@ -13,6 +13,8 @@ export function setSessionModel(context: AgentContext, nextModel: string): Promi
     nextModel,
     previousModel,
     writeModel: model => useRuntimeStore.getState().setSessionConfig(context, { model }),
+    // P56/D3：切换响应的权威回声覆盖乐观值（hermes 空回声无可提取则不触发）。
+    applyResponseConfig: config => useRuntimeStore.getState().setSessionConfig(context, config),
     invokeSet: (targetSource, model) => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setConfigOption({
       // OWNER-02：Session owner 显式 agentId（从 AgentContext 读取）。
       agentId: context.agentId,

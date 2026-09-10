@@ -1,5 +1,5 @@
 import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
-import { buildChatRowDescriptors, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
+import { buildChatRowDescriptors, isSameChatRowDescriptor, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
@@ -9,9 +9,9 @@ import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
-import { INSTANT_LOCK_MS, SMOOTH_LOCK_MS } from '../../components/chat/scrollFollowState.ts'
+import { classifyScrollEvent, INSTANT_LOCK_MS, scrollTraceThreshold, SMOOTH_LOCK_MS, type ScrollWriteTrace } from '../../components/chat/scrollFollowModel.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
-import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
+import { ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
 import { SolidToolConnectorLayer, type SolidToolConnectorEdge, type ToolConnectorAppearance } from './chat/ToolConnector.solid.tsx'
@@ -21,20 +21,22 @@ import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidW
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
-import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
+import { resolveToolIndicatorGlyph, SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 import { SolidProcessActivity } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
-import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
+import { messageMatchesQuery } from '../../components/chat/messageSearchIndex.ts'
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
+import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
 import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
+import type { WorkbenchSessionCreationSnapshot } from '../../domains/workbench/workbenchCommandFacade.ts'
 
 // Compatibility export for the existing interaction kind contract/tests.
 export { interactionRenderKind } from './solidWorkbenchProjectionSupport.ts'
@@ -65,6 +67,18 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const [messageListPort, setMessageListPort] = createSignal<import('../../domains/workbench/messageListPort.ts').MessageListPort>()
   const [followBottom, setFollowBottom] = createSignal(true)
   const sessionId = () => props.context.input().sessionId
+  const sessionCreationReader = () => props.context.sessionCreation ?? props.context.commands.sessionCreation
+  const [sessionCreation, setSessionCreation] = createSignal<WorkbenchSessionCreationSnapshot>(
+    sessionCreationReader()?.getSnapshot() ?? { phase: 'idle', sessionId: null, error: null, attempt: 0 },
+  )
+  onMount(() => {
+    const reader = sessionCreationReader()
+    if (!reader) return
+    const sync = () => setSessionCreation(reader.getSnapshot())
+    sync()
+    onCleanup(reader.subscribe(sync))
+  })
+  const creationProgressVisible = () => sessionCreation().phase === 'creating-session' && !sessionId()
   const [searchQuery] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-query', '')
   const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
   let bottomAnchor: HTMLDivElement | undefined
@@ -79,17 +93,101 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     trackHeight: 0,
   })
   let followedSessionId: string | null | undefined
+  let bottomFollowQueued = false
+  let bottomFollowFrame: number | undefined
+  let lastAutoFollowTop: number | undefined
+  let followedSnapshotRevision: number | undefined
   // Programmatic scrolls emit the same `scroll` events as user input. Keep
   // those feedback events from briefly flipping the follow state while a
   // button animation is in flight, and invalidate any already queued
   // auto-follow microtask when the user chooses an explicit endpoint.
   let followLockUntil = 0
   let scrollActionRevision = 0
+  // P57 S1.1（R-C1）：写迹与 lastAutoFollowTop 必须分离——后者每个 snapshot revision
+  // 被置 undefined（新内容机会去重），复用它做判别会在风暴中失效。写迹只在
+  // 三处清除：用户输入模态、beginScrollAction、新写覆盖。
+  let lastProgrammaticWrite: ScrollWriteTrace | undefined
+  // P57 S1.3（R-C5）：smooth 跟随动画在途标志——期间 revision effect 不写 instant
+  // 打断动画；清除 = 连续 2 帧距 endpoint <0.5px 且锁过期（取晚者），或任何用户
+  // 取消路径。仅对回底动作置位（▲ 置 follow=false，applyFollow 本就不写）。
+  let smoothInFlight = false
+  let smoothWatchFrame: number | undefined
+  let smoothArrivalStreak = 0
   const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const scrollTraceThresholdPx = () => scrollTraceThreshold(typeof devicePixelRatio === 'number' ? devicePixelRatio : undefined)
+  const stopSmoothWatch = () => {
+    if (smoothWatchFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(smoothWatchFrame)
+    smoothWatchFrame = undefined
+    smoothArrivalStreak = 0
+  }
+  const beginSmoothWatch = () => {
+    stopSmoothWatch()
+    if (typeof requestAnimationFrame !== 'function') {
+      // 无帧泵的宿主（jsdom 未 mock rAF）不存在 smooth 动画，直接解除守卫。
+      smoothInFlight = false
+      return
+    }
+    const step = () => {
+      smoothWatchFrame = undefined
+      const viewport = chatViewport
+      if (!viewport || !smoothInFlight) return
+      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+      if (Math.abs(viewport.scrollTop - maxScroll) <= 0.5) smoothArrivalStreak += 1
+      else smoothArrivalStreak = 0
+      const lockExpired = now() >= followLockUntil
+      if ((smoothArrivalStreak >= 2 && lockExpired) || now() >= followLockUntil + SMOOTH_LOCK_MS) {
+        smoothInFlight = false
+        return
+      }
+      smoothWatchFrame = requestAnimationFrame(step)
+    }
+    smoothWatchFrame = requestAnimationFrame(step)
+  }
   const beginScrollAction = (nextFollowBottom: boolean, behavior: ScrollBehavior) => {
     scrollActionRevision += 1
+    lastAutoFollowTop = undefined
+    lastProgrammaticWrite = undefined
+    smoothInFlight = behavior === 'smooth' && nextFollowBottom
     followLockUntil = now() + (behavior === 'smooth' ? SMOOTH_LOCK_MS : INSTANT_LOCK_MS)
+    if (smoothInFlight) beginSmoothWatch()
     setFollowBottom(nextFollowBottom)
+  }
+  // P57 S1.2：用户输入模态的取消路径（wheel 上滚 / touch 上滑判向 / viewport 键盘 /
+  // 滚动条轨道拖拽）统一走这里：清迹、解除 smooth 守卫、作废排队写入、取消跟随。
+  const cancelFollowForUserInput = () => {
+    scrollActionRevision += 1
+    lastProgrammaticWrite = undefined
+    smoothInFlight = false
+    stopSmoothWatch()
+    setFollowBottom(false)
+  }
+  // P57 S1.2 touch：touchstart 记起点，首个 |dY|>8px 判向；视口向上滚（指尖下滑）
+  // 才取消——不许 touchstart 即取消，误伤轻点。
+  let touchStartClientY: number | undefined
+  const handleViewportTouchStart = (event: TouchEvent) => {
+    touchStartClientY = event.touches[0]?.clientY
+  }
+  const handleViewportTouchMove = (event: TouchEvent) => {
+    if (touchStartClientY === undefined) return
+    const clientY = event.touches[0]?.clientY
+    if (clientY === undefined) return
+    const deltaY = clientY - touchStartClientY
+    if (Math.abs(deltaY) <= 8) return
+    touchStartClientY = undefined
+    // 指尖下滑（deltaY>8）= 视口向上滚 = 回看历史 → 取消；指尖上滑 → 位置判别自然恢复。
+    if (deltaY > 8) cancelFollowForUserInput()
+  }
+  // P57 S1.2 wheel：deltaY<0（视口上滚）取消跟随；deltaY>0 不干预；横滚（Shift+wheel，
+  // |ΔY|≤|ΔX|）忽略。passive 语义：绝不 preventDefault，不阻断自然滚动。
+  const handleViewportWheel = (event: WheelEvent) => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+    if (event.deltaY >= 0) return
+    cancelFollowForUserInput()
+  }
+  // P57 S1.2：viewport 键盘仅处理向上类按键（↑/PageUp/Home），不 preventDefault，
+  // 原生滚动照常；↓/PageDown/End 交给位置判别自然恢复。
+  const handleViewportKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') cancelFollowForUserInput()
   }
   onCleanup(() => {
     bottomAnchor = undefined
@@ -100,28 +198,49 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     stopScrollRailDrag = undefined
     followLockUntil = 0
     scrollActionRevision += 1
+    bottomFollowQueued = false
+    if (bottomFollowFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(bottomFollowFrame)
+    bottomFollowFrame = undefined
+    lastAutoFollowTop = undefined
+    followedSnapshotRevision = undefined
+    lastProgrammaticWrite = undefined
+    smoothInFlight = false
+    stopSmoothWatch()
     connectorPort.destroy()
   })
   const document = () => snapshot().document
+  const displayDocument = createMemo(() => {
+    // Ownership is resolved once, at the message-list seam. Keep the canonical
+    // document intact for activity placement, diagnostics and other readers.
+    return document()
+  })
+  // P52 D5：transient 流字段已死（D3 后无生产写入者）——canonical running 行
+  // 是唯一流式显示；此前的 transient 兜底 memo 与 appendTransient 注入随之退役。
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
-    const projected = document()?.messages
-    // Legacy preview fixtures still contain tool rows that A04 represents as
-    // activity nodes. Keep those rows until the content cards consume activity
-    // slices; all canonical document messages take precedence otherwise.
-    if (legacy.some(message => message.role === 'tool')) return legacy
-    return projected?.map(toSolidMessage) ?? legacy
+    const projected = displayDocument()?.messages
+    // Canonical document messages are the sole owner whenever available. The
+    // legacy list remains only as a compatibility fallback for preview hosts
+    // that have not mounted a WorkbenchDocument yet (including legacy tool
+    // rows); mixing the two lists would reintroduce duplicate stream owners.
+    const canonical = projected ?? []
+    if (canonical.length === 0 && legacy.length > 0) return legacy
+    const legacyToolIds = new Set(legacy.filter(message => message.role === 'tool').map(message => message.id))
+    const base = canonical
+      .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
+      .map(toSolidMessage)
+    // Legacy preview hosts still expose tool rows before their activity
+    // projection is available. Preserve those non-text rows without merging
+    // legacy assistant/reasoning rows back into the canonical stream.
+    // (P57 S2-R3：base 是本 memo 新建数组，直接追加 legacy tool 行，省一次展开拷贝。)
+    for (const message of legacy) {
+      if (message.role === 'tool') base.push(message)
+    }
+    return base
   })
-  const renderMessages = createMemo(() => prepareMessages([...viewMessages()]))
+  const renderMessages = createMemo(() => prepareMessages(viewMessages()))
   const searchMatches = createMemo(() => {
     if (!searchQuery().trim()) return []
-    if (!snapshot().messages.some(message => message.role === 'tool') && document()) {
-      return document()!.messages.filter(message => searchValuesMatchQuery([
-        message.source.provider,
-        message.content,
-        message.parts,
-      ], searchQuery()))
-    }
     return viewMessages().filter(message => messageMatchesQuery(message, searchQuery()))
   })
   const activeSearchMessageId = createMemo(() => searchMatches()[searchIndex()]?.id)
@@ -130,12 +249,21 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     buildMessageLookups(viewMessages()),
     activeSearchMessageId(),
   ))
-  const items = createMemo<readonly MessageListItem[]>(() => descriptors().map(descriptor => ({
-    key: descriptor.key,
-    descriptor,
-  })))
+  // P57 S2-R3：items per-key 复用——descriptor 全字段相等时沿用上个 MessageListItem
+  // 引用，PlainMessageList 的引用相等门随之跳过行 update 与测量失效。
+  let lastItems: readonly MessageListItem[] = []
+  const items = createMemo<readonly MessageListItem[]>(() => {
+    const previousByKey = new Map(lastItems.map(item => [item.key, item]))
+    const next = descriptors().map(descriptor => {
+      const previous = previousByKey.get(descriptor.key)
+      if (previous && isSameChatRowDescriptor(previous.descriptor, descriptor)) return previous
+      return { key: descriptor.key, descriptor }
+    })
+    lastItems = next
+    return next
+  })
   const activityPlacement = createMemo(() => selectActivityTimelinePlacement(
-    snapshot().messages.some(message => message.role === 'tool') ? undefined : document(),
+    document(),
   ))
   const connectorEdges = createMemo<readonly SolidToolConnectorEdge[]>(() => mergeToolConnectorEdges(
     buildLegacyToolConnectorEdges(descriptors(), appearance()),
@@ -179,9 +307,17 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const updateBottomFollow = (viewport: HTMLDivElement) => {
     syncScrollRail(viewport)
-    if (now() < followLockUntil) return
-    const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
-    setFollowBottom(distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX)
+    // P57 S1.3：锁判定改为「未到终点且未超时」——smooth 动画到达终点后位置判别
+    // 即刻恢复（follow 回 true），锁过期后反馈不再被吞。
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    const distanceToEndpoint = Math.max(0, maxScroll - viewport.scrollTop)
+    if (now() < followLockUntil && distanceToEndpoint > 0.5) return
+    // P57 S1.1（R-C1）：写迹命中（|scrollTop - trace.top| ≤ 阈值）= 自己的程序化写入
+    // 反馈——只刷 rail，不碰 followBottom、不清迹；否则按位置判别（现语义保留）。
+    if (classifyScrollEvent(viewport.scrollTop, lastProgrammaticWrite, scrollTraceThresholdPx()) === 'programmatic-feedback') return
+    const atBottom = distanceToEndpoint <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX
+    if (!atBottom) lastAutoFollowTop = undefined
+    setFollowBottom(atBottom)
   }
 
   const eventElement = (event?: Event) => {
@@ -199,15 +335,34 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
   const scrollViewportToBottom = (viewport: HTMLDivElement, behavior: ScrollBehavior) => {
     const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    // ResizeObserver/content effects can request the same endpoint several
+    // times in one stream tick. Avoid repeating an already-applied auto write;
+    // repeated writes fight browser scroll anchoring and are perceived as
+    // vertical jitter in a live reasoning stream. The first request is kept so
+    // a newly mounted viewport still gets an explicit endpoint assignment.
+    if (behavior === 'auto' && lastAutoFollowTop !== undefined
+      && Math.abs(lastAutoFollowTop - top) <= 0.5
+      && Math.abs(viewport.scrollTop - top) <= 0.5) {
+      syncScrollRail(viewport)
+      return
+    }
     if (typeof viewport.scrollTo === 'function') {
       viewport.scrollTo({ top, behavior })
+      // `scrollTo({ behavior: 'smooth' })` owns the animation.  Assigning
+      // scrollTop immediately afterwards cancels that animation and produces
+      // the visible jump reported during a live thinking stream.  For the
+      // auto-follow path, retain the synchronous assignment only when the
+      // endpoint actually differs (jsdom/test hosts often stub scrollTo).
+      if (behavior === 'auto' && Math.abs(viewport.scrollTop - top) > 0.5) viewport.scrollTop = top
     } else {
       viewport.scrollTop = top
     }
-    // Keep the model in sync immediately as well. Native scrollTo updates
-    // asynchronously for smooth scrolling, while jsdom/test hosts may only
-    // expose a spy; assigning the endpoint makes the follow state deterministic.
-    viewport.scrollTop = top
+    if (behavior === 'auto') {
+      lastAutoFollowTop = top
+      // P57 S1.1：程序化写入覆盖写迹；由此产生的 scroll 反馈事件经 classifyScrollEvent
+      // 判为 programmatic-feedback，不再误关跟随。
+      lastProgrammaticWrite = { top, at: now() }
+    }
     syncScrollRail(viewport)
   }
 
@@ -223,6 +378,8 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const thumb = eventElement(event)?.closest<HTMLElement>('.solid-workbench-scroll-thumb')
     const track = thumb?.closest<HTMLElement>('.solid-workbench-scroll-track')
     if (!viewport || !(thumb instanceof HTMLElement) || !track) return
+    // P57 S1.2：拖拽滚动条属用户输入——清迹、解除 smooth 守卫、作废排队写入。
+    cancelFollowForUserInput()
 
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
     const trackHeight = track.getBoundingClientRect().height
@@ -262,6 +419,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const viewport = viewportFromAction(event)
     const track = targetElement?.closest<HTMLElement>('.solid-workbench-scroll-track')
     if (!viewport || !(track instanceof HTMLElement)) return
+    // P57 S1.2：轨道寻道属用户输入——同拖拽的取消语义；目标位置由 scroll 事件
+    // 的位置判别自然落相位。
+    cancelFollowForUserInput()
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
     const trackRect = track.getBoundingClientRect()
     const thumbHeight = scrollRailThumb().height
@@ -305,16 +465,31 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
         return
     }
     event.preventDefault()
+    // P57 S1.2（轨道键盘分支）：这是现存用户输入入口，各滚动分支同步按目标位置设
+    // follow（End 例外 → 回底）；同步清迹并解除 smooth 守卫，锁定写入的反馈事件。
+    beginScrollAction(Math.min(maxScroll, Math.max(0, target)) >= maxScroll - MESSAGE_LIST_BOTTOM_THRESHOLD_PX, 'auto')
     viewport.scrollTop = Math.min(maxScroll, Math.max(0, target))
     syncScrollRail(viewport)
   }
 
   const queueBottomFollow = () => {
     const revision = scrollActionRevision
-    queueMicrotask(() => {
+    if (bottomFollowQueued) return
+    bottomFollowQueued = true
+    const applyFollow = () => {
+      bottomFollowFrame = undefined
+      bottomFollowQueued = false
+      // P57 S1.3（R-C5）：smooth 跟随动画在途时，风暴中的 revision effect 不得
+      // 写 instant 打断动画；守卫解除由 smooth watcher（到达判定）或用户取消路径。
+      if (smoothInFlight) return
       if (revision !== scrollActionRevision || !followBottom()) return
       if (chatViewport) scrollViewportToBottom(chatViewport, 'auto')
-    })
+    }
+    // ResizeObserver/content effects can arrive several times before a paint.
+    // Coalesce all of them into one endpoint write per frame; this prevents the
+    // browser's scroll anchoring from fighting a microtask-per-character loop.
+    if (typeof requestAnimationFrame === 'function') bottomFollowFrame = requestAnimationFrame(applyFollow)
+    else queueMicrotask(applyFollow)
   }
 
   const scrollToTop = (event?: Event) => {
@@ -353,7 +528,16 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   })
   createEffect(() => {
     sessionId()
-    snapshot()
+    const currentSnapshot = snapshot()
+    // A new runtime revision is a fresh content opportunity even when the
+    // computed bottom offset happens to be numerically identical (for example
+    // jsdom or a fixed-height viewport).  Allow one follow write for it, while
+    // still suppressing duplicate ResizeObserver callbacks for the same
+    // revision.
+    if (currentSnapshot.revision !== followedSnapshotRevision) {
+      followedSnapshotRevision = currentSnapshot.revision
+      lastAutoFollowTop = undefined
+    }
     queueMicrotask(() => syncScrollRail())
     if (!followBottom()) return
     queueBottomFollow()
@@ -399,26 +583,46 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-session-id={props.context.input().sessionId ?? undefined}
       data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
+      data-creation-state={sessionCreation().phase}
       style={{
         '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px`,
         '--input-font-size': 'var(--chat-font-size)',
       }}
       aria-label="Solid Agent Workbench"
     >
-      <Show when={snapshot().status === 'error'}>
-        <div class="solid-workbench-runtime-error" role="alert">{snapshot().error || '工作台运行时错误'}</div>
-      </Show>
       <Show
         when={props.context.input().sessionId}
-        fallback={<div class="solid-workbench-empty-space">
-          <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+        fallback={<div class="solid-workbench-chat-shell solid-workbench-empty-chat-shell" data-chat-viewport="empty">
+          <div
+            ref={node => { chatViewport = node }}
+            class="chat-view solid-workbench-chat solid-workbench-empty-chat-viewport"
+            data-chat-viewport="scroll"
+            onScroll={event => updateBottomFollow(event.currentTarget)}
+            onWheel={handleViewportWheel}
+            onTouchStart={handleViewportTouchStart}
+            onTouchMove={handleViewportTouchMove}
+            onKeyDown={handleViewportKeyDown}
+          >
+            <div class="solid-workbench-empty-space">
+              <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+            </div>
+          </div>
+          <CreationOverlayHost
+            visible={creationProgressVisible()}
+            reducedMotion={props.context.input().reducedMotion === true}
+          />
         </div>}
       >
-        <div class="solid-workbench-chat-shell">
+        <div class="solid-workbench-chat-shell" data-chat-viewport="session">
           <div
             ref={node => { chatViewport = node }}
             class="chat-view solid-workbench-chat"
+            data-chat-viewport="scroll"
             onScroll={event => updateBottomFollow(event.currentTarget)}
+            onWheel={handleViewportWheel}
+            onTouchStart={handleViewportTouchStart}
+            onTouchMove={handleViewportTouchMove}
+            onKeyDown={handleViewportKeyDown}
           >
             <div ref={node => { chatContent = node }} class="term">
               <SolidToolConnectorLayer edges={connectorEdges()} layoutPort={connectorPort} />
@@ -453,17 +657,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   queueBottomFollow()
                 }}
               />
-              <Show when={snapshot().streamingThinking}>
-                {text => <div class="term-row term-row-reasoning" data-render-type="reasoning" data-streaming="true">
-                  <ReasoningBlock text={text()} running />
-                </div>}
-              </Show>
-              <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
-              <Show when={snapshot().streamingText}>
-                {text => <div class="term-row term-row-assistant" data-render-type="assistant" data-streaming="true">
-                  <AssistantContent text={text()} appearance={appearance()} streaming />
-                </div>}
-              </Show>
+              <WorkbenchDocumentSurface document={displayDocument()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
               <SolidGenerationFooter
                 running={snapshot().generating}
                 // The runtime snapshot carries the document and live
@@ -497,6 +691,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             />
             <div ref={bottomAnchor} class="solid-workbench-bottom-anchor" aria-hidden="true" />
           </div>
+          <CreationOverlayHost
+            visible={creationProgressVisible()}
+            reducedMotion={props.context.input().reducedMotion === true}
+          />
           <div class="solid-workbench-scroll-rail" role="group" aria-label="聊天滚动导航">
             <button
               type="button"
@@ -625,6 +823,8 @@ function WorkbenchDocumentSurface(props: {
                 onRecover={props.sessionId && props.context.hostPort?.capabilities.has('recovery')
                   ? strategy => { void props.commands.recover(props.sessionId!, strategy) }
                   : undefined}
+                onOpenDiagnostics={() => { void fallbackRenderCommands(props.context).execute({ type: 'diagnostics.open' }) }}
+                dismissible
               />}
             />
           )}</For>
@@ -728,6 +928,10 @@ function WorkbenchDocumentSurface(props: {
 function visibleDiagnostics(document: WorkbenchDocument) {
   const errorEventIds = new Set(document.systemErrors.flatMap(error => error.eventId ? [error.eventId] : []))
   return document.diagnostics.filter(diagnostic => !errorEventIds.has(diagnostic.eventId))
+}
+
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, character => `%${character.charCodeAt(0).toString(16).padStart(4, '0')}%`)
 }
 
 function CanonicalActivitySlot(props: {
@@ -927,12 +1131,20 @@ function CanonicalActivityList(props: {
       return existing
     }))
   })
+  // Group wrappers must keep a stable identity across streaming revisions.
+  // `groupAdjacentToolActivities` returns fresh objects per tick, and Solid's
+  // <For> reconciles by reference — feeding it fresh groups would remount the
+  // whole expanded group subtree on every paced snapshot (the remount storm
+  // behind the expanded-tool-group jitter) and destroy scroll anchoring.
+  const stableGroups = new Map<string, StableActivityGroupRow>()
   const groupedRows = createMemo(() => {
     const currentRows = rows()
+    const rowById = new Map(currentRows.map(row => [row.activity.id, row]))
     const groups = groupAdjacentToolActivities(currentRows.map(row => row.activity))
     const firstById = new Map(groups.map(group => [group.items[0]!.id, group]))
     const consumed = new Set<string>()
-    const units: Array<StableActivityRow | AdjacentToolActivityGroup> = []
+    const liveGroupIds = new Set<string>()
+    const units: Array<StableActivityRow | StableActivityGroupRow> = []
     for (const row of currentRows) {
       if (consumed.has(row.activity.id)) continue
       const group = firstById.get(row.activity.id)
@@ -940,23 +1152,33 @@ function CanonicalActivityList(props: {
         units.push(row)
         continue
       }
-      units.push(group)
+      const memberRows = group.items
+        .map(item => rowById.get(item.id))
+        .filter((member): member is StableActivityRow => member !== undefined)
+      const stable = stableGroups.get(group.groupId) ?? createStableActivityGroupRow(group.groupId)
+      stable.update(group, memberRows)
+      stableGroups.set(group.groupId, stable)
+      liveGroupIds.add(group.groupId)
+      units.push(stable)
       // Skip the remaining members; they are rendered inside the group row.
       for (const member of group.items) consumed.add(member.id)
+    }
+    for (const groupId of [...stableGroups.keys()]) {
+      if (!liveGroupIds.has(groupId)) stableGroups.delete(groupId)
     }
     return units
   })
   return <Show when={rows().length > 0 ? props.document : undefined}>
     {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={rows().length}>
       <For each={groupedRows()}>{unit => {
-        if ('items' in unit) {
+        if ('memberRows' in unit) {
           return <CanonicalActivityGroup
-            group={unit}
+            row={unit}
             document={document()}
             context={props.context}
             connectorPort={props.connectorPort}
-            open={expandedGroups()[unit.groupId] === true}
-            onToggle={() => setExpandedGroups(previous => ({ ...previous, [unit.groupId]: !previous[unit.groupId] }))}
+            open={expandedGroups()[unit.key] === true}
+            onToggle={() => setExpandedGroups(previous => ({ ...previous, [unit.key]: !previous[unit.key] }))}
           />
         }
         return <CanonicalActivitySlot
@@ -971,35 +1193,133 @@ function CanonicalActivityList(props: {
 }
 
 function CanonicalActivityGroup(props: {
-  group: AdjacentToolActivityGroup
+  row: StableActivityGroupRow
   document: WorkbenchDocument
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
   open: boolean
   onToggle: () => void
 }) {
-  const label = () => props.group.items[0]?.title || props.group.toolKey
-  return <section class="solid-workbench-activity-group" data-activity-group={props.group.groupId} data-count={props.group.count}>
+  // A group is a display projection only.  Its indicator/status are derived
+  // from the final member so a mixed run settles to the same visual state as
+  // the last ordinary tool card (rather than the group's aggregate `mixed`).
+  const group = () => props.row.group
+  const lastActivity = () => group().items.at(-1)!
+  const lastSnapshot = () => toolInvocationSnapshot(props.document, lastActivity().id)
+  const toolAppearance = () => resolveToolActivityAppearance(lastActivity(), props.context)
+  const state = () => {
+    const snapshot = lastSnapshot()
+    return normalizeToolStatus(snapshot?.status ?? snapshot?.result?.status ?? lastActivity().status)
+  }
+  const hasOutput = () => {
+    const result = lastSnapshot()?.result
+    return result !== undefined && (
+      result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
+    )
+  }
+  const presentation = () => toolStatePresentation(state(), hasOutput())
+  const label = () => {
+    const snapshot = lastSnapshot()
+    return snapshot?.title
+      || snapshot?.canonicalName
+      || snapshot?.name
+      || '未知工具'
+  }
+  const indicatorMode = () => stringAppearanceSetting(toolAppearance(), 'indicator', 'glyph')
+  const indicatorGlyph = () => resolveToolIndicatorGlyph(indicatorMode(), presentation().tone, toolAppearance())
+  const bodyId = () => `solid-tool-group-${safeDomId(group().groupId)}`
+  const renderKind = () => activityRenderKind(lastActivity(), props.context)
+  const statusPalette = () => stringAppearanceSetting(toolAppearance(), 'statusPalette', 'semantic')
+  const density = () => stringAppearanceSetting(toolAppearance(), 'density', 'comfortable')
+  return <article
+    class="term-tool solid-workbench-activity-group"
+    role="status"
+    aria-label={`工具：${capitalizeToolName(label())}，${group().count} 次调用，${presentation().label}`}
+    data-content-kind="tool.group"
+    data-activity-group={group().groupId}
+    data-count={group().count}
+    data-tool-state={presentation().state}
+    data-status-label={presentation().label}
+    data-status={presentation().tone}
+    data-status-palette={statusPalette()}
+    data-density={density() === 'compact' ? 'compact' : 'comfortable'}
+    data-kind={renderKind()}
+    data-reduced-motion={props.context.input().reducedMotion ? 'true' : 'false'}
+    style={{
+      color: stringAppearanceSetting(toolAppearance(), 'foreground', 'var(--text)'),
+      background: stringAppearanceSetting(toolAppearance(), 'background', 'transparent'),
+      'border-color': stringAppearanceSetting(toolAppearance(), 'borderColor', 'var(--border)'),
+      'max-width': `${numberAppearanceSetting(toolAppearance(), 'maxWidth', 960)}px`,
+    }}
+    data-group-status={group().status}
+    data-last-tool-status={lastActivity().status}
+  >
     <button
-      class="solid-workbench-activity-group-head"
+      class="term-tool-head solid-workbench-activity-group-head"
       type="button"
       aria-expanded={props.open}
+      aria-controls={bodyId()}
       onClick={props.onToggle}
     >
-      <span>{capitalizeToolName(label())}</span>
-      <span> · {props.group.count} 次调用 · {props.group.status === 'mixed' ? '状态混合' : props.group.status}</span>
+      <Show when={indicatorMode() !== 'none'}>
+        <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">{indicatorGlyph()}</span>
+      </Show>
+      <span class="term-tool-name">{capitalizeToolName(label())}</span>
+      <span class="term-tool-summary"> ({group().count} 次调用)</span>
+      <span class="term-tool-state-label"> — {presentation().label}</span>
     </button>
     <Show when={props.open}>
-      <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
-        <For each={props.group.items}>{activity => <CanonicalActivitySlot
-          activity={activity}
+      <div id={bodyId()} class="term-tool-body solid-workbench-activity-group-body">
+        <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
+        {/* Members render through stable rows so streaming revisions update
+            the member slots in place instead of remounting the subtree. */}
+        <For each={props.row.memberRows}>{memberRow => <CanonicalActivitySlot
+          activity={memberRow.activity}
           document={props.document}
           context={props.context}
           connectorPort={props.connectorPort}
         />}</For>
+        </div>
       </div>
     </Show>
-  </section>
+  </article>
+}
+
+function resolveToolActivityAppearance(
+  activity: WorkbenchActivityNode,
+  context: SolidWorkbenchContextValue,
+): Readonly<Record<string, unknown>> {
+  const kind = activityRenderKind(activity, context)
+  const slotId = resolveActivitySlotId(kind, context) ?? 'builtin.solid.content.base'
+  return context.hostPort?.appearance.resolve?.({
+    kind,
+    suiteId: context.activation?.suite.value.id ?? 'builtin.solid',
+    slotId,
+  }) ?? { ...context.appearanceSnapshot() }
+}
+
+function stringAppearanceSetting(appearance: Readonly<Record<string, unknown>>, key: string, fallback: string): string {
+  return typeof appearance[key] === 'string' ? appearance[key] as string : fallback
+}
+
+function numberAppearanceSetting(appearance: Readonly<Record<string, unknown>>, key: string, fallback: number): number {
+  return typeof appearance[key] === 'number' && Number.isFinite(appearance[key] as number)
+    ? appearance[key] as number
+    : fallback
+}
+
+function resolveActivitySlotId(kind: string, context: SolidWorkbenchContextValue): string | undefined {
+  const activation = context.activation
+  if (!activation) return undefined
+  const visited = new Set<string>()
+  let current: string | undefined = kind
+  while (current && !visited.has(current)) {
+    visited.add(current)
+    const candidate = activation.slots.get(current)?.find(entry => entry.value.kinds.includes(current!))
+    if (candidate) return candidate.value.id
+    current = activation.kinds.get(current)?.value.fallbackKind
+  }
+  return undefined
 }
 
 /**
@@ -1026,6 +1346,31 @@ function createStableActivityRow(key: string, initialActivity: WorkbenchActivity
   }
 }
 
+/**
+ * Stable identity for an aggregated tool group. `groupAdjacentToolActivities`
+ * rebuilds groups on every streaming revision; feeding those fresh objects to
+ * `<For>` (reference-keyed) would remount the expanded group's whole subtree
+ * per paced snapshot. The wrapper keeps the unit identity stable and exposes
+ * the rebuilt group plus the member STABLE rows, so member slots update in
+ * place.
+ */
+interface StableActivityGroupRow {
+  readonly key: string
+  readonly group: AdjacentToolActivityGroup
+  readonly memberRows: readonly StableActivityRow[]
+  update(group: AdjacentToolActivityGroup, memberRows: readonly StableActivityRow[]): void
+}
+
+function createStableActivityGroupRow(key: string): StableActivityGroupRow {
+  const [current, setCurrent] = createSignal<{ group: AdjacentToolActivityGroup; memberRows: readonly StableActivityRow[] }>()
+  return {
+    key,
+    get group() { return current()!.group },
+    get memberRows() { return current()?.memberRows ?? [] },
+    update: (group, memberRows) => setCurrent({ group, memberRows }),
+  }
+}
+
 /** Brand-only empty-state layer. The control center remains the sole input
  * surface; this block provides recognition without duplicating instructions,
  * context rows, or creation controls. */
@@ -1046,6 +1391,23 @@ function WorkbenchEmptyBrand(props: { workspaceMode: 'work' | 'chat' }) {
     </div>
     <div class="agent-empty-eyebrow">{model().eyebrow}</div>
     <h2 class="agent-empty-title">{model().title}</h2>
+  </div>
+}
+
+/** Creation feedback belongs to the chat viewport, not the control-center layout. */
+function CreationOverlayHost(props: { visible: boolean; reducedMotion: boolean }) {
+  return <div
+    class="solid-workbench-creation-overlay-host"
+    data-creation-overlay-host
+    data-visible={props.visible ? 'true' : 'false'}
+    data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
+  >
+    <Show when={props.visible}>
+      <div class="solid-workbench-creation-progress" data-creation-progress role="status" aria-label="正在创建会话" aria-live="polite">
+        <span class="solid-workbench-creation-progress-track" aria-hidden="true"><span class="solid-workbench-creation-progress-bar" /></span>
+        <span class="solid-workbench-creation-progress-label">正在建立会话…</span>
+      </div>
+    </Show>
   </div>
 }
 

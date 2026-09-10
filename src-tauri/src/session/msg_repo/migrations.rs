@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 const DEL_02_TOMBSTONE_UPGRADE_SQL: &str = r#"
 ALTER TABLE deleted_sessions ADD COLUMN owner_key TEXT NOT NULL DEFAULT '["*","*","legacy"]';
@@ -676,4 +676,3 @@ pub(crate) fn connect(conn: &mut Connection) -> Result<(), PylonError> {
         .map_err(repo_err)?;
     validate_schema_manifest(conn)
 }
-

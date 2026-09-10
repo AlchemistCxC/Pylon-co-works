@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Archive, ChevronFirst, ChevronLast } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { useIdentityStore } from '../../identityStore'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'
@@ -24,15 +24,26 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
   const [raw, setRaw] = useState<unknown>(null)
   const [page, setPage] = useState(1)
   const [exportError, setExportError] = useState('')
+  const [replayError, setReplayError] = useState('')
 
   useEffect(() => {
     let disposed = false
     const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     client.listPersistedSessions().then(value => {
-      if (!disposed) setRaw(value)
-    }).catch(error => reportRuntimeError('读取存档会话', error))
+      if (!disposed) {
+        setRaw(value)
+        resolveRuntimeErrors({ key: `history:${_sheet.id}:list` })
+      }
+    }).catch(error => {
+      if (!disposed) reportRuntimeError('读取存档会话', error, undefined, {
+        key: `history:${_sheet.id}:list`,
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'history.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
+    })
     return () => { disposed = true }
-  }, [])
+  }, [_sheet.id])
 
   const paged = useMemo(() => pagePersistedSessions(raw, page), [raw, page])
   const sidebarPages = useMemo(() => {
@@ -42,21 +53,38 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
 
   const exportSession = async (periId: string) => {
     setExportError('')
+    setReplayError('')
     // OWNER-02：export owner agentId 从 Session owner 解析（identityStore 按 periId 定位），
     // 绝不取 activeAgent；未定位到 owner 时明确报错（不静默 fallback 串线）。
     const owner = useIdentityStore.getState().sessions.find(s => s.periId === periId)
     if (!owner) { setExportError('无法确定会话归属 Agent，请先在会话中打开再导出'); return }
-    const outputPath = await save({ defaultPath: `session-${periId}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] })
+    let outputPath: string | null
+    try {
+      outputPath = await save({ defaultPath: `session-${periId}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }] })
+    } catch (error) {
+      reportRuntimeError('打开导出保存对话框', error, undefined, {
+        key: `history:${_sheet.id}:export-dialog`,
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'history.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
+      return
+    }
     if (!outputPath) return
     const validation = validateExportPath(outputPath)
     if (validation) { setExportError(validation); return }
     try {
       const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
       await client.exportSession({ agentId: owner.agentId, periId, format: 'markdown', outputPath })
+      resolveRuntimeErrors({ key: `history:${_sheet.id}:export:${periId}` })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setExportError(message)
-      reportRuntimeError('导出会话', error)
+      setExportError('')
+      reportRuntimeError('导出会话', error, undefined, {
+        key: `history:${_sheet.id}:export:${periId}`,
+        scope: { kind: 'sheet', id: _sheet.id },
+        source: 'history.sheet',
+        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
+      })
     }
   }
 
@@ -64,6 +92,7 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
   // FE-AUD-010），进入只读姿态后开 agent sheet；load 由 ChatView 挂载后的 lifecycle 承担
   const openReplay = async (entry: PersistedSessionSummary) => {
     setExportError('')
+    setReplayError('')
     if (!entry.periId) return
     // I01-W4：owner-aware 打开——owner 无法确定（存档无归属）时 blocked，不静默归 active Agent
     const result = await openOwnedSessionTransaction(
@@ -78,7 +107,14 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
         openAgentSheet: ({ title, agentId }) => ctx.openSheet({ kind: 'agent', title, agentId }),
       },
     )
-    if (!result.ok) { setExportError(result.message); return }
+    if (!result.ok) {
+      // Owner-switch transport failures are already recorded in the central
+      // tray by createStandardSwitchAgent. Keep a quiet contextual status;
+      // ownership/validation facts remain assertive and actionable here.
+      if (result.kind === 'transport') setReplayError('回放失败，详情见右下角错误中心')
+      else setExportError(result.message)
+      return
+    }
     useReplayPostureStore.getState().enter(result.value)
   }
 
@@ -102,6 +138,7 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
         <div className="file-main-kicker">HISTORY</div>
         <h2 className="file-main-title">存档会话（{paged.total}）</h2>
         {exportError && <div className="file-tree-error" role="alert">{exportError}</div>}
+        {replayError && <p className="file-section-hint history-error-reference" role="status">{replayError}</p>}
         <ul className="search-result-list">
           {paged.entries.map(entry => (
             <li key={entry.id}>

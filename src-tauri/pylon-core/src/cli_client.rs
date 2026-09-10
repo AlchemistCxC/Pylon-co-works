@@ -25,7 +25,10 @@ pub fn unix_socket_path() -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/tmp/pylon-{uid}.sock"))
 }
 
-pub(crate) async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, value: &Value) -> Result<(), String> {
+pub(crate) async fn write_frame<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    value: &Value,
+) -> Result<(), String> {
     let mut frame = serde_json::to_vec(value).map_err(|error| error.to_string())?;
     frame.push(b'\n');
     writer
@@ -35,7 +38,9 @@ pub(crate) async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, value: &V
     writer.flush().await.map_err(|error| error.to_string())
 }
 
-pub(crate) async fn read_frame<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Result<Value, String> {
+pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+) -> Result<Value, String> {
     let mut frame = Vec::new();
     let read = reader
         .take(MAX_FRAME_BYTES + 1)

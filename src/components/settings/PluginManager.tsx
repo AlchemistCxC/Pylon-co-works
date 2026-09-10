@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   getBuiltinPluginIds,
   getBuiltinPluginCriticality,
@@ -12,6 +12,8 @@ import type { InstalledPluginPackage } from '../../infrastructure/plugins/plugin
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.tsx'
 
 const LOG_LIMIT = 12
 
@@ -21,12 +23,16 @@ const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
   'builtin.pylon-shell': '应用外壳',
   'builtin.pylon-tools': '工具字典',
   'builtin.pylon-workspace': '工作区与 Sheet',
+  'builtin.pylon-plugin-manager': '插件管理器',
   'builtin.skin': '主题与皮肤',
 }
 
 export interface PluginManagerProps {
   service?: PackageInstallationService
   pickDirectory?: () => Promise<string | null>
+  /** P53 D6：zip / URL 安装源选择器（默认 tauri dialog / prompt）。 */
+  pickZipFile?: () => Promise<string | null>
+  promptUrl?: () => Promise<string | null>
   bootstrap?: KernelBootstrap
 }
 
@@ -34,6 +40,24 @@ async function pickPluginDirectory(): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ directory: true, multiple: false, title: '选择 api=1.0 插件包' })
   return typeof selected === 'string' ? selected : null
+}
+
+/** P53 D6：选择本机 zip 安装包。 */
+async function pickPluginZip(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    multiple: false,
+    title: '选择插件 zip 包',
+    filters: [{ name: '插件包', extensions: ['zip'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+/** P53 D6：输入 https 安装源 URL。 */
+async function promptPluginUrl(): Promise<string | null> {
+  const input = window.prompt('输入插件包 https URL（仅支持 https）')
+  const trimmed = input?.trim()
+  return trimmed ? trimmed : null
 }
 
 function cleanupResultMessage(result: PluginDeactivateResult): string {
@@ -46,6 +70,8 @@ function cleanupResultMessage(result: PluginDeactivateResult): string {
 export default function PluginManager({
   service: serviceProp,
   pickDirectory = pickPluginDirectory,
+  pickZipFile = pickPluginZip,
+  promptUrl = promptPluginUrl,
   bootstrap = kernelBootstrap,
 }: PluginManagerProps = {}) {
   const runtime = getPluginRuntime()
@@ -73,6 +99,7 @@ export default function PluginManager({
   const [installed, setInstalled] = useState<InstalledPluginPackage[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [log, setLog] = useState<string[]>([])
+  const reportedBootstrapKeysRef = useRef<Map<string, string>>(new Map())
 
   const appendLog = useCallback((line: string) => {
     setLog(previous => [...previous.slice(-(LOG_LIMIT - 1)), line])
@@ -84,13 +111,47 @@ export default function PluginManager({
       return
     }
     setInstalled(await service.list())
+    resolveRuntimeErrors({ key: 'plugin-manager:list' })
   }, [nativePackagesAvailable, service])
 
   useEffect(() => {
     if (!nativePackagesAvailable) return
     void refresh()
-      .catch(error => appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`))
+      .catch(error => {
+        appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`)
+        reportRuntimeError('读取 API 1.0 插件包', error, undefined, {
+          key: 'plugin-manager:list', scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      })
   }, [appendLog, nativePackagesAvailable, refresh, service])
+
+  // Plugin bootstrap failures are recoverable runtime facts. Keep the retry
+  // affordance in this panel, but publish one scoped notification so the
+  // ordinary error presentation still lives in the central tray.
+  useEffect(() => {
+    const failures = bootstrapSnapshot.kind === 'degraded' ? bootstrapSnapshot.failures : []
+    const nextKeys = new Map<string, string>()
+    for (const failure of failures) {
+      const key = `plugin-bootstrap:${failure.pluginId}:${failure.stage}`
+      nextKeys.set(key, failure.message)
+      if (reportedBootstrapKeysRef.current.get(key) === failure.message) continue
+      reportRuntimeError('启动插件', new Error(failure.message), undefined, {
+        key,
+        scope: { kind: 'operation', id: `plugin:${failure.pluginId}` },
+        source: 'kernel.plugin-bootstrap',
+        metadata: { pluginId: failure.pluginId, stage: failure.stage, code: failure.code },
+        recovery: { kind: 'open-runtime-log', suiteId: failure.pluginId },
+        recoveryAction: failure.retryable
+          ? { label: `重试 ${failure.pluginId}`, run: () => bootstrap.retryPlugin(failure.pluginId) }
+          : undefined,
+      })
+    }
+    for (const key of reportedBootstrapKeysRef.current.keys()) {
+      if (!nextKeys.has(key)) resolveRuntimeErrors({ key })
+    }
+    reportedBootstrapKeysRef.current = nextKeys
+  }, [bootstrap, bootstrapSnapshot])
 
   const run = async (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
     if (busy) return
@@ -98,9 +159,21 @@ export default function PluginManager({
     try {
       const result = await task()
       appendLog(result.ok ? `${label}成功` : `${label}失败：${result.message ?? '未知错误'}`)
+      if (result.ok) {
+        resolveRuntimeErrors({ key: `plugin-manager:${label}` })
+      } else {
+        reportRuntimeError(label, new Error(result.message ?? '未知错误'), undefined, {
+          key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      }
       await refresh()
     } catch (error) {
       appendLog(`${label}失败：${error instanceof Error ? error.message : String(error)}`)
+      reportRuntimeError(label, error, undefined, {
+        key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
+        recovery: { kind: 'open-runtime-log' },
+      })
     } finally {
       setBusy(null)
     }
@@ -111,6 +184,21 @@ export default function PluginManager({
     const sourcePath = await pickDirectory()
     if (!sourcePath) return
     await run('安装/更新', () => service.installOrUpdate(sourcePath))
+  }
+
+  // P53 D6：zip / URL 安装源（三选入口；仅 https 且复用同一事务）
+  const installFromZip = async () => {
+    if (!nativePackagesAvailable) return
+    const zipPath = await pickZipFile()
+    if (!zipPath) return
+    await run('从 zip 安装', () => service.installOrUpdateFromZip(zipPath))
+  }
+
+  const installFromUrl = async () => {
+    if (!nativePackagesAvailable) return
+    const url = await promptUrl()
+    if (!url) return
+    await run('从 URL 安装', () => service.installOrUpdateFromUrl(url))
   }
 
   const activeById = useMemo(
@@ -131,6 +219,19 @@ export default function PluginManager({
   )
   const builtinIds = getBuiltinPluginIds()
   const packageIds = installed.map(item => item.package.pluginId).sort()
+  // P53 D2：授权卡数据源 = builtin capability-consent 失败 + user-packages 阶段的
+  // plugin_capability_denied（review B P1-1：外置包授权通路——否则外置 capability 包
+  // 永远无法经宿主 UI 获得授权）
+  const pendingConsent = bootstrapSnapshot.kind === 'degraded'
+    ? bootstrapSnapshot.failures
+      .filter(failure => failure.code === 'plugin_capability_denied')
+      .map(failure => ({
+        pluginId: failure.pluginId,
+        pluginVersion: failure.pluginVersion ?? '0.0.0',
+        capabilities: failure.capabilities ?? ['plugin.management'],
+        message: failure.message,
+      }))
+    : []
 
   const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
     await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
@@ -249,6 +350,7 @@ export default function PluginManager({
       <div className="set-hint">
         Pylon Plugin API {PYLON_PLUGIN_API_VERSION}；安装、停用、启用与热更新全部由统一 Runtime 执行。
       </div>
+      <PluginCapabilityConsentCard pending={pendingConsent} bootstrap={bootstrap} />
       <div className="plugin-overview" aria-label="插件概览">
         <span><strong>{snapshot.active.length}</strong> 个运行中</span>
         <span><strong>{installed.length}</strong> 个用户插件</span>
@@ -264,7 +366,7 @@ export default function PluginManager({
         <div className="set-group" aria-label="插件启动故障">
           <div className="set-group-title" aria-expanded="true">启动故障</div>
           {bootstrapSnapshot.failures.map(failure => (
-            <div className="plugin-row" key={`${failure.pluginId}:${failure.stage}`} role="alert">
+            <div className="plugin-row" key={`${failure.pluginId}:${failure.stage}`} role="status">
               <span className="plugin-row-id">{failure.pluginId}</span>
               <span className="set-hint">{failure.stage} · {failure.message}</span>
               {failure.retryable && (
@@ -292,6 +394,12 @@ export default function PluginManager({
         <div className="set-preset-row">
           <button type="button" className="ps-btn primary sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installOrUpdate()}>
             {busy === '安装/更新' ? '处理中…' : '安装/更新 api=1.0 包…'}
+          </button>
+          <button type="button" className="ps-btn sm" aria-label="从 zip 安装" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installFromZip()}>
+            {busy === '从 zip 安装' ? '处理中…' : '从 zip 安装…'}
+          </button>
+          <button type="button" className="ps-btn sm" aria-label="从 URL 安装" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installFromUrl()}>
+            {busy === '从 URL 安装' ? '处理中…' : '从 URL 安装…'}
           </button>
           <button type="button" className="ps-btn sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void refresh().catch(error => appendLog(String(error)))}>
             刷新

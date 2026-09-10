@@ -57,6 +57,15 @@ describe('ISSUE-13 W2 当前域内 section 导航', () => {
     expect(screen.getByText('当前尺寸')).toBeInTheDocument()
   })
 
+  it('showPet 只有工作区 › 宠物一个可编辑入口，旧主题字段不再重复渲染', () => {
+    const view = render(<Settings />)
+    expect(screen.queryByText('桌面宠物')).toBeNull()
+    view.unmount()
+    render(<Settings initialDomain="workspace" />)
+    fireEvent.click(navButton('宠物'))
+    expect(screen.getByRole('button', { name: /宠物显示中|宠物已隐藏/ })).toBeInTheDocument()
+  })
+
   it('切到 Agent 与连接 → 分区为 Agent/会话/Gateway；选 Agent 渲染当前 Agent 区', () => {
     render(<Settings initialDomain="agents-connections" />)
     for (const section of ['Agent', '会话', 'Gateway']) {

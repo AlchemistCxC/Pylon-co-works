@@ -46,10 +46,37 @@
 | `sdk/pylon-plugin-manifest.schema.json` | `pylon-plugin.json` 校验/补全 schema |
 | `starter/no-build/` | 纯 JS 起步插件 |
 | `starter/typescript/` | TS + esbuild 起步插件（含预构建产物） |
+| `starter/manager-demo/` | 外置插件管理器示例（api 1.2 + 能力声明 + 用户授权，含预构建产物） |
 | `docs/` | 开发者版 / 用户版说明书、CLI 命令表、设置选项贡献 |
 | `verify.mjs` | 自检：结构完整性 + SDK 导出 + 类型探针（需 Node ≥ 18） |
 
 自检：`node verify.mjs`（可选；通过会打印 PASS 清单，包含两个 exports 入口和声明树检查）。
+
+## 能力声明与用户授权（API 1.2，starter/manager-demo）
+
+API 1.2 起插件可在 manifest 声明**宿主能力**（封闭词表，当前只有 `plugin.management`），
+经用户在宿主「设置 → 插件」页批准后，activation context 才会装配对应的增强 API：
+
+```jsonc
+// pylon-plugin.json
+{
+  "api": "1.2",
+  "capabilities": ["plugin.management"]
+}
+```
+
+- **门控语义**：未声明或未授权时 `context.management` 属性**不存在**（不是空对象）；
+  授权后每次 API 调用现查授权，失效即抛 typed 错误（`management_not_authorized`）。
+- **授权生命周期**：host-owned 存储；插件 `version` 变更后旧授权失效须重新批准；
+  卸载时授权自动回收；拒绝则插件保持"等待授权"状态（不报错，可稍后批准）。
+- **`plugin.management` 能提供什么**：只读（已安装清单 / runtime 概览 / bootstrap 概览 /
+  契约诊断 / 贡献面透视）与管理操作（启停 / 重载 / 卸载 / 安装 / 内置组件启停）。
+  目标为调用者自身的管理操作会被拒绝（`management_self_locked`）；
+  product-required 内置包不可停用（`management_product_required`）。
+- **manager-demo 就是一个完整样例**：同一套纯 DOM 管理面板以内嵌
+  （`builtin.pylon-plugin-manager`，随宿主启动）与外置（本示例，目录安装）两种形态运行；
+  未授权时面板显示授权引导而非报错，批准后经宿主"重试"自然激活。
+  安装路径：设置 → 插件 → 安装/更新包 → 选择 `starter/manager-demo/` 目录。
 
 ## 测试你的插件（可选，需要 Node）
 
@@ -72,7 +99,8 @@ await ctx.__commands.execute('your.command.id', { /* args */ })
 
 ## 契约速查
 
-- 清单：`schema: 1`、`api: "1.0" | "1.1"`（1.1 才有 `context.storage`）、kind 十选一；
+- 清单：`schema: 1`、`api: "1.0" | "1.1" | "1.2"`（1.1 才有 `context.storage`；1.2 才有
+  `capabilities` 能力声明与用户授权）、kind 十选一；
 - 生命周期：`activate` / `deactivate`（可选 `prepare` / `suspend` / `resume`）；
 - 所有副作用（定时器 / 事件监听）走 `context.scope.*`，停用时自动回收；
 - 样式：选择器以插件前缀类名限定，颜色间距用宿主语义 token（§6.4.2）；

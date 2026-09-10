@@ -3,6 +3,7 @@ import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/re
 import type { RendererSettingsPlacement, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { buildSettingsSearchIndex, RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
 import type { SettingsSearchItem } from '../../settingsDomains.ts'
+import { BUILTIN_TOOL_RENDER_KIND_IDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 
 export type RendererSettingsNamespace = 'kind' | 'suite' | 'slot'
 
@@ -16,6 +17,9 @@ export interface RendererSettingsCatalogEntry {
   readonly placement: RendererSettingsPlacement
   readonly active: boolean
   readonly fieldCount: number
+  /** Legacy Kind schemas retained for migration/diagnostics, never editable in the normal form. */
+  readonly compatibilityOnly?: boolean
+  readonly compatibilityFieldCount?: number
 }
 
 export interface RendererSettingsCatalogCategory {
@@ -94,6 +98,10 @@ export function probeSettingsRegistries(
 
 function fieldCount(schema: RendererSettingsSchema): number {
   return schema.groups.reduce((count, group) => count + group.fields.length, 0)
+}
+
+function visibleFieldCount(schema: RendererSettingsSchema, compatibilityOnly: boolean): number {
+  return compatibilityOnly ? 0 : fieldCount(schema)
 }
 
 function technicalPlacement(objectOrder: number): RendererSettingsPlacement {
@@ -175,8 +183,10 @@ export function buildRendererSettingsCatalog(
     // schema. Keep every original Kind addressable in Advanced Catalog, while
     // the normal Tool Activity category presents the shared Slot once.
     active: (supportedKinds ? supportedKinds.has(entry.value.id) : true)
-      && !entry.value.id.startsWith('tool.'),
-    fieldCount: fieldCount(entry.value.settings),
+      && !BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id),
+    compatibilityOnly: BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id),
+    fieldCount: visibleFieldCount(entry.value.settings, BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id)),
+    compatibilityFieldCount: BUILTIN_TOOL_RENDER_KIND_IDS.has(entry.value.id) ? fieldCount(entry.value.settings) : undefined,
   }] : [])
 
   return Object.freeze([...suiteEntries, ...slotEntries, ...kindEntries].sort((a, b) =>

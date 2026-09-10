@@ -158,7 +158,6 @@ function settingsSchemaRefs(item: CoverageItemDraft): readonly string[] {
 function rendererTestRefs(item: CoverageItemDraft): readonly string[] {
   const semantic = `${item.semanticEvent} ${item.renderKind}`
   const refs = new Set(fixtureRefs(item))
-  refs.add('src/sheets/agent-workbench/__tests__/ReactWorkbenchFatalFallback.test.tsx')
   refs.add('src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx')
   if (semantic.includes('tool.')) refs.add('src/renderers/solid-workbench/chat/__tests__/ToolInvocationCard.solid.test.tsx')
   if (semantic.includes('activity.')) refs.add('src/renderers/solid-workbench/chat/content/__tests__/SubagentCard.solid.test.tsx')
@@ -207,7 +206,6 @@ function closeEvidence(item: CoverageItemDraft, transportStatus: TransportStatus
       normalizer: notApplicable(downstreamReason),
       projector: notApplicable(downstreamReason),
       solidRenderer: notApplicable(downstreamReason),
-      reactFallback: notApplicable(downstreamReason),
       settingsSchema: notApplicable(downstreamReason),
       pluginLifecycle: notApplicable(downstreamReason),
       tests: notApplicable(downstreamReason),
@@ -228,7 +226,6 @@ function closeEvidence(item: CoverageItemDraft, transportStatus: TransportStatus
     normalizer: verified(normalizers, semanticNote),
     projector: verified(['src/domains/workbench/workbenchProjector.ts'], semanticNote),
     solidRenderer: verified(solidRendererRefs(item), semanticNote),
-    reactFallback: verified(['src/sheets/agent-workbench/ReactWorkbenchFatalFallback.tsx'], semanticNote),
     settingsSchema: verified(settingsSchemaRefs(item), item.renderKind || 'surface settings are resolved by the active Suite'),
     pluginLifecycle: verified([
       'src/renderers/solid-workbench/builtinSolidRendererSuite.ts',

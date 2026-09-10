@@ -2,7 +2,6 @@ import { selectActivityDisplayOrder, type WorkbenchActivityNode, type WorkbenchD
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
-
 export function canonicalTokenCount(
   usage: WorkbenchDocument['session']['usage'],
   fallback: number,
@@ -83,8 +82,15 @@ export function interactionRenderKind(interaction: WorkbenchInteraction): string
   }
 }
 
+// P57 S2-R3：显示链包装复用。键是冻结的 WorkbenchMessage（引用稳定性由
+// workbenchRuntime freezeItems 的全等短路保证）；同一冻结条目重复包装是
+// 每-chunk O(n) 放大器，WeakMap 命中后引用跨 revision 稳定。
+const solidMessageCache = new WeakMap<WorkbenchDocument['messages'][number], Message>()
+
 export function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message {
-  return {
+  const cached = solidMessageCache.get(message)
+  if (cached) return cached
+  const wrapped: Message = {
     id: message.id,
     role: message.role === 'user' ? 'user' : message.role === 'reasoning' ? 'reasoning' : 'assistant',
     sender: message.source.provider,
@@ -97,4 +103,6 @@ export function toSolidMessage(message: WorkbenchDocument['messages'][number]): 
     redactedReason: message.redactedReason,
     semanticParts: message.parts,
   } as Message & { semanticParts: readonly ContentPart[] }
+  solidMessageCache.set(message, wrapped)
+  return wrapped
 }

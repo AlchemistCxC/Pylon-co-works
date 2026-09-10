@@ -169,6 +169,20 @@ export function canonicalEventTypeFor(sessionUpdate: unknown, status: unknown): 
       return 'turn.completed'
     case 'error':
       return 'turn.failed'
+    case 'cancelled':
+      return 'turn.failed'
+    case 'usage_update':
+      return 'usage.updated'
+    case 'plan':
+      return 'plan.replaced'
+    case 'current_mode_update':
+      return 'session.mode-updated'
+    case 'session_info_update':
+      return 'session.model-updated'
+    case 'config_option_update':
+      return 'session.config-updated'
+    case 'available_commands_update':
+      return 'session.commands-updated'
     default:
       return 'unknown'
   }
@@ -194,6 +208,18 @@ export function normalizeRawEvent(raw: unknown, context: CanonicalNormalizeConte
   if (sessionUpdate === 'error') {
     const error = nonEmptyString(update?.error) ?? nonEmptyString(update?.message)
     if (error) typedPayload.error = error
+  }
+  if (sessionUpdate === 'cancelled') {
+    // Cancellation is represented by the canonical failure family. Keep the
+    // reason in typed payload so replay can distinguish it without parsing
+    // provider text.
+    typedPayload.stopReason = 'cancelled'
+  }
+  if (sessionUpdate === 'done') {
+    // D5: completion metadata is additive and keeps payloadVersion stable.
+    for (const field of ['stopReason', 'usage', 'model'] as const) {
+      if (update?.[field] !== undefined) typedPayload[field] = update[field]
+    }
   }
   const event = createCanonicalEvent({
     owner: context.owner,

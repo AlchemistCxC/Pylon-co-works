@@ -1,7 +1,7 @@
 import { Fragment, useState, useSyncExternalStore } from 'react'
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { ThemeSettings } from './store'
-import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
+import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_FIELD_OWNERS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
 import { readCollapsed, writeCollapsed, type CollapseMap } from './components/settings/settingsChromeState.ts'
 import { resolveBackgroundImage } from './backgroundImage'
@@ -376,6 +376,7 @@ export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: Zon
             const fields = THEME_FIELD_KEYS.filter(key => {
               const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
               return def.zone === zone && def.group === group.title && !def.hidden
+                && THEME_FIELD_OWNERS[key].owner === 'theme'
                 && (density !== 'basic' || def.tier === 'basic')
                 && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
                 && (!searching || def.label.toLowerCase().includes(query))

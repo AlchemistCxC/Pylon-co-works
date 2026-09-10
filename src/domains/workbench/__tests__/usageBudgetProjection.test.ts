@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 import { projectWorkbench, selectSessionSurface } from '../workbenchProjector.ts'
+import { migrateWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 
 /**
  * C14 RED：session.usage / budget / config / commands 投影契约（DIC-C14-01）。
@@ -22,6 +23,15 @@ const envelope = (sequence: number, event: Parameters<typeof createWorkbenchEnve
   })
 
 describe('C14 usage/budget/config/commands projection', () => {
+  it('projects a migrated canonical usage update without fabricating absent fields', () => {
+    const migrated = migrateWorkbenchEnvelope({ owner: { localSessionId: 'session-1' }, sequence: 1, eventType: 'usage.updated', rawPayload: {}, typedPayload: { usage: { inputTokens: 120, outputTokens: 80 } } })
+    expect(migrated.ok).toBe(true)
+    if (!migrated.ok) return
+    const usage = selectSessionSurface(projectWorkbench([migrated.value]).document).usage as Record<string, unknown>
+    expect(usage.inputTokens).toBe(120)
+    expect(usage.outputTokens).toBe(80)
+    expect(usage.contextTokens).toBeUndefined()
+  })
   it('narrows partial usage into structured fields without fabricating zeros', () => {
     const { document } = projectWorkbench([
       envelope(1, {

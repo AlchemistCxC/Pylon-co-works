@@ -19,6 +19,17 @@ interface CatalogDetection {
   invocations: CatalogInvocation[]
   configDirs: string[]
   configEvidence: CatalogConfigEvidence[]
+  versionArgs: string[]
+  packageManager: { kind: 'npx' | 'uvx' | 'binary' | 'none'; package: string | null; cmd: string | null } | null
+  requires: { node: string | null; uv: string | null }
+  checks: CatalogCheck[]
+}
+interface CatalogCheck {
+  id: string
+  label: string
+  kind: 'node-min' | 'uv-min' | 'binary-present' | 'adapter-present' | 'config-evidence'
+  params: Record<string, unknown>
+  fix: { kind: 'open-url' | 'install-adapter' | 'install-uv'; payload: string } | null
 }
 interface CatalogTool {
   name: string
@@ -38,9 +49,21 @@ interface CatalogProvider {
   interactionKinds: InteractionKind[]
   protocolDefaults: { setModelApi: 'config_option' | 'set_model' | 'none' }
   detection: CatalogDetection
+  adaptation: CatalogAdaptation | null
   tools: CatalogTool[]
 }
-interface CatalogDocument { schemaVersion: 1; providers: CatalogProvider[] }
+interface CatalogAdaptation {
+  adapterRelation: Record<string, unknown> | null
+  clientCapabilities: Record<string, unknown> | null
+  promptCapabilities: Record<string, unknown> | null
+  launchEnv: unknown[] | null
+  versionGates: Record<string, unknown> | null
+  sessionEstablishment: Record<string, unknown> | null
+  configAdaptation: Record<string, unknown> | null
+  mcp: Record<string, unknown> | null
+  interactionBridges: unknown[] | null
+}
+interface CatalogDocument { schemaVersion: 2; providers: CatalogProvider[] }
 
 const TOOL_KINDS = new Set<ToolKind>(['read', 'edit', 'execute', 'search', 'fetch', 'think', 'other'])
 const TOOL_ACTIONS = new Set<ToolAction>(['read', 'write', 'edit', 'search', 'execute', 'fetch', 'navigate', 'click', 'type', 'snapshot', 'delegate', 'plan', 'skill', 'unknown'])
@@ -49,6 +72,54 @@ const INTERACTION_KINDS = new Set<InteractionKind>(['clarify', 'ask-question', '
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Agent Catalog ${label} 必须是对象`)
   return value as Record<string, unknown>
+}
+
+function strictObject(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
+  const parsed = object(value, label)
+  for (const key of Object.keys(parsed)) if (!keys.includes(key)) throw new Error(`Agent Catalog ${label} 未知字段：${key}`)
+  return parsed
+}
+
+function nullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new Error(`Agent Catalog ${label} 必须是字符串`)
+  return value
+}
+
+function detectionExtensions(detection: Record<string, unknown>): Pick<CatalogDetection, 'versionArgs' | 'packageManager' | 'requires' | 'checks'> {
+  let packageManager: CatalogDetection['packageManager'] = null
+  if (detection.packageManager !== undefined && detection.packageManager !== null) {
+    const manager = strictObject(detection.packageManager, 'packageManager', ['kind', 'package', 'cmd'])
+    if (!['npx', 'uvx', 'binary', 'none'].includes(String(manager.kind))) throw new Error('Agent Catalog packageManager.kind 非法')
+    packageManager = { kind: manager.kind as NonNullable<CatalogDetection['packageManager']>['kind'], package: nullableString(manager.package, 'packageManager.package'), cmd: nullableString(manager.cmd, 'packageManager.cmd') }
+  }
+  const requirements = detection.requires === undefined ? {} : strictObject(detection.requires, 'requires', ['node', 'uv'])
+  const rawChecks = detection.checks === undefined ? [] : detection.checks
+  if (!Array.isArray(rawChecks)) throw new Error('Agent Catalog checks 必须是数组')
+  const checks = rawChecks.map((value): CatalogCheck => {
+    const check = strictObject(value, 'check', ['id', 'label', 'kind', 'params', 'fix'])
+    if (!['node-min', 'uv-min', 'binary-present', 'adapter-present', 'config-evidence'].includes(String(check.kind))) throw new Error('Agent Catalog check.kind 非法')
+    if (typeof check.id !== 'string' || typeof check.label !== 'string') throw new Error('Agent Catalog check.id/label 必须是字符串')
+    let fix: CatalogCheck['fix'] = null
+    if (check.fix !== undefined && check.fix !== null) {
+      const rawFix = strictObject(check.fix, 'check.fix', ['kind', 'payload'])
+      if (!['open-url', 'install-adapter', 'install-uv'].includes(String(rawFix.kind))) throw new Error('Agent Catalog check.fix.kind 非法')
+      if (typeof rawFix.payload !== 'string') throw new Error('Agent Catalog check.fix.payload 必须是字符串')
+      fix = { kind: rawFix.kind as NonNullable<CatalogCheck['fix']>['kind'], payload: rawFix.payload }
+    }
+    return { id: check.id, label: check.label, kind: check.kind as CatalogCheck['kind'], params: object(check.params, 'check.params'), fix }
+  })
+  const versionArgs = detection.versionArgs === undefined ? [] : detection.versionArgs
+  if (!Array.isArray(versionArgs) || versionArgs.some(value => typeof value !== 'string')) throw new Error('Agent Catalog versionArgs 必须是字符串数组')
+  return { versionArgs: [...versionArgs], packageManager, requires: { node: nullableString(requirements.node, 'requires.node'), uv: nullableString(requirements.uv, 'requires.uv') }, checks }
+}
+
+function adaptationPolicy(value: unknown, label: string): CatalogAdaptation | null {
+  if (value === undefined || value === null) return null
+  const raw = strictObject(value, label, ['adapterRelation', 'clientCapabilities', 'promptCapabilities', 'launchEnv', 'versionGates', 'sessionEstablishment', 'configAdaptation', 'mcp', 'interactionBridges'])
+  const objectOrNull = (field: string): Record<string, unknown> | null => raw[field] === undefined || raw[field] === null ? null : object(raw[field], `${label}.${field}`)
+  const arrayOrNull = (field: string): unknown[] | null => raw[field] === undefined || raw[field] === null ? null : (Array.isArray(raw[field]) ? raw[field] as unknown[] : (() => { throw new Error(`Agent Catalog ${label}.${field} 必须是数组`) })())
+  return { adapterRelation: objectOrNull('adapterRelation'), clientCapabilities: objectOrNull('clientCapabilities'), promptCapabilities: objectOrNull('promptCapabilities'), launchEnv: arrayOrNull('launchEnv'), versionGates: objectOrNull('versionGates'), sessionEstablishment: objectOrNull('sessionEstablishment'), configAdaptation: objectOrNull('configAdaptation'), mcp: objectOrNull('mcp'), interactionBridges: arrayOrNull('interactionBridges') }
 }
 
 function nonEmpty(value: unknown, label: string): string {
@@ -63,7 +134,8 @@ function stringList(value: unknown, label: string): string[] {
 
 export function parseAgentCatalog(value: unknown): CatalogDocument {
   const root = object(value, 'root')
-  if (root.schemaVersion !== 1) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
+  if (root.schemaVersion !== 2) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
+  for (const key of Object.keys(root)) if (key !== 'schemaVersion' && key !== 'providers') throw new Error(`Agent Catalog 顶层字段未知：${key}`)
   if (!Array.isArray(root.providers) || root.providers.length === 0) throw new Error('Agent Catalog providers 不能为空')
   const seenProviders = new Set<string>()
   const seenDetectors = new Set<string>()
@@ -83,6 +155,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
     const protocolDefaults = object(raw.protocolDefaults, `${provider}.protocolDefaults`)
     if (!['config_option', 'set_model', 'none'].includes(String(protocolDefaults.setModelApi))) throw new Error(`Agent Catalog ${provider}.protocolDefaults.setModelApi 非法`)
     const detection = object(raw.detection, `${provider}.detection`)
+    const adaptation = adaptationPolicy(raw.adaptation, `${provider}.adaptation`)
     const detectorId = nonEmpty(detection.detectorId, `${provider}.detection.detectorId`)
     if (seenDetectors.has(detectorId)) throw new Error(`Agent Catalog detectorId 重复：${detectorId}`)
     seenDetectors.add(detectorId)
@@ -105,6 +178,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
       if (fields.length === 0) throw new Error(`Agent Catalog ${provider}.detection.configEvidence.fields 不能为空`)
       return { relativePath, format: evidence.format, fields }
     })
+    const extensions = detectionExtensions(detection)
     if (!Array.isArray(raw.tools)) throw new Error(`Agent Catalog ${provider}.tools 必须是数组`)
     const seenTools = new Set<string>()
     const tools = raw.tools.map((rawTool, toolIndex): CatalogTool => {
@@ -146,11 +220,13 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         invocations,
         configDirs: stringList(detection.configDirs, `${provider}.detection.configDirs`),
         configEvidence: parsedConfigEvidence,
+        ...extensions,
       },
+      adaptation,
       tools,
     }
   })
-  return { schemaVersion: 1, providers }
+  return { schemaVersion: 2, providers }
 }
 
 const catalog = parseAgentCatalog(rawCatalog)

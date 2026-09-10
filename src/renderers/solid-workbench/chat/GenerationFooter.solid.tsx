@@ -415,7 +415,7 @@ function GenerationSummaryView(props: { input: GenerationFooterInput; marker: st
         <div class={`term-summary term-summary-${summary().reason}`}>
           <span class="term-summary-frame" style={{ 'font-size': `${props.input.appearance.size}px` }}>{props.marker}</span>
           <span>
-            {summary().reason === 'cancelled' ? '已停止' : summary().reason === 'error' ? '处理失败' : '处理耗时'} {formatElapsed(summary().elapsedMs)}
+            {summary().reason === 'cancelled' ? '已停止' : summary().reason === 'error' ? '处理失败' : '处理耗时'} {formatSummaryElapsed(summary())}
           </span>
         </div>
       )}
@@ -426,6 +426,12 @@ function GenerationSummaryView(props: { input: GenerationFooterInput; marker: st
 export function formatElapsed(elapsedMs: number): string {
   const elapsed = Math.floor(Math.max(0, elapsedMs) / 1000)
   return elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`
+}
+
+function formatSummaryElapsed(summary: GenerationFooterInput['summary'] extends infer T
+  ? Exclude<T, null>
+  : never): string {
+  return summary.durationAvailable === false ? '耗时不可用' : formatElapsed(summary.elapsedMs)
 }
 
 export function formatTokens(value: number): string {

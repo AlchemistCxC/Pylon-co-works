@@ -4,6 +4,21 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const solidRoot = resolve(projectRoot, 'src/renderers/solid-workbench')
+// P52 D5 结构门禁：过渡态退役后，生产 Solid/Workbench 路径禁止引用已删除的
+// legacy controller 模块与 transient 流字段（canonical running 行是唯一流式显示）。
+const retiredModules = [
+  'chatEventController',
+  'useChatRuntimeSnapshot',
+  'useSessionLifecycle',
+  'horizontalSubscription',
+  'sessionRuntimeStore',
+]
+const retiredFieldPattern = /\bstreaming(?:Text|Thinking|Identity)\b/
+const retiredFieldRoots = [
+  resolve(projectRoot, 'src/renderers/solid-workbench'),
+  resolve(projectRoot, 'src/sheets/agent-workbench'),
+  resolve(projectRoot, 'src/domains/workbench'),
+]
 const forbiddenPackages = [
   'react',
   'react-dom',
@@ -21,6 +36,13 @@ for (const file of await walk(solidRoot)) {
   const source = await readFile(file, 'utf8')
   const displayPath = relative(projectRoot, file).replaceAll('\\', '/')
   const imports = collectModuleSpecifiers(source)
+
+  const retiredModule = retiredModules.find(name => specifierNamesModule(imports, name))
+  if (retiredModule) violations.push(`${displayPath}: 禁止引用已退役的 legacy 模块 ${retiredModule}（P52 过渡态已删除）`)
+
+  if (retiredFieldRoots.some(root => file.startsWith(root)) && retiredFieldPattern.test(source)) {
+    violations.push(`${displayPath}: transient 流字段（streamingText/streamingThinking/streamingIdentity）已随 P52 D5 删除，canonical running 行是唯一流式显示`)
+  }
 
   for (const specifier of imports) {
     const forbiddenPackage = forbiddenPackages.find(name => specifier === name || specifier.startsWith(`${name}/`))
@@ -56,6 +78,14 @@ function collectModuleSpecifiers(source) {
     for (const match of source.matchAll(pattern)) values.push(match[1])
   }
   return values
+}
+
+/** The import points at `.../name.ts(x)` (or extension-less) for a retired module. */
+function specifierNamesModule(imports, name) {
+  return imports.some(specifier => {
+    const base = specifier.replace(/\.(ts|tsx|mts|js|mjs|jsx)$/, '')
+    return base === `./${name}` || base === `../${name}` || base.endsWith(`/${name}`)
+  })
 }
 
 function looksLikeSolidJsx(source) {

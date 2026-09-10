@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
 import { invoke } from '@tauri-apps/api/core'
 import type { AdapterInstance } from '../../infrastructure/tauri/gatewayClient'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 // FE-AUD-008：typed client 收口 gateway 域 command literal
 const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
@@ -35,6 +36,7 @@ export default function GatewayRiskPanel() {
   const [instances, setInstances] = useState<AdapterInstance[] | null>(null)
   const [loading, setLoading] = useState(IS_TAURI)
   const [error, setError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
 
   const reload = () => {
     if (!IS_TAURI) {
@@ -47,13 +49,28 @@ export default function GatewayRiskPanel() {
     setError(null)
     gatewayClient
       .instances()
-      .then(list => setInstances(list))
-      .catch(cause => setError(`读取 Gateway 实例失败：${errorMessage(cause)}`))
-      .finally(() => setLoading(false))
+      .then(list => {
+        if (!mountedRef.current) return
+        setInstances(list)
+        resolveRuntimeErrors({ key: 'settings:gateway-risk:instances' })
+      })
+      .catch(cause => {
+        if (!mountedRef.current) return
+        setError(`读取 Gateway 实例失败：${errorMessage(cause)}`)
+        reportRuntimeError('读取 Gateway 实例', cause, undefined, {
+          key: 'settings:gateway-risk:instances',
+          scope: { kind: 'app', id: 'settings-gateway' },
+          source: 'settings.gateway-risk',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      })
+      .finally(() => { if (mountedRef.current) setLoading(false) })
   }
 
   useEffect(() => {
+    mountedRef.current = true
     reload()
+    return () => { mountedRef.current = false }
   }, [])
 
   const configuredCount = instances?.filter(i => i.credentialStatus === 'configured').length ?? 0
@@ -67,7 +84,7 @@ export default function GatewayRiskPanel() {
         <div className="set-hint">Gateway 管理需要 Tauri 后端。</div>
       ) : error ? (
         <>
-          <div className="set-hint" role="alert">{error}</div>
+          <div className="set-hint" role="status">{error}（详情见右下角错误中心）</div>
           <div className="set-preset-row">
             <button type="button" className="ps-btn sm" onClick={reload}>重试</button>
           </div>

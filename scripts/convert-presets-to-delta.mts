@@ -6,8 +6,8 @@
  * `{...THEME_DEFAULTS, ...delta}`（一键换装 = 干净全量换装）。
  *
  * 用法：
- *   node --experimental-strip-types scripts/convert-presets-to-delta.mts --check
- *   node --experimental-strip-types scripts/convert-presets-to-delta.mts --write
+ *   bun scripts/convert-presets-to-delta.mts --check
+ *   bun scripts/convert-presets-to-delta.mts --write
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'

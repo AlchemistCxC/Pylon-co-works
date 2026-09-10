@@ -1,5 +1,5 @@
 import type { RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { THEME_SETTING_KEYS } from '../../themeFieldDefs.ts'
+import { THEME_PRESET_KEYS } from '../../themeFieldDefs.ts'
 
 export type PresetJsonValue = null | boolean | number | string | readonly PresetJsonValue[] | { readonly [key: string]: PresetJsonValue }
 
@@ -52,7 +52,7 @@ export interface PresetCoverage {
   readonly explicit: number
   readonly defaulted: number
   readonly unavailable: number
-  readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing'
+  readonly state: 'explicit' | 'defaulted' | 'unavailable' | 'missing' | 'excluded'
   readonly policy?: 'complete' | 'partial'
 }
 
@@ -60,6 +60,39 @@ export interface PresetChangeSummary {
   readonly providerId: string
   readonly label: string
   readonly changed: number
+}
+
+export type PresetApplyResult =
+  | {
+      readonly status: 'applied'
+      readonly id: string
+      readonly providers: readonly string[]
+      readonly revision: number
+      readonly unavailable?: readonly string[]
+    }
+  | {
+      readonly status: 'failed'
+      readonly id: string
+      readonly failedProvider: string
+      readonly message: string
+      readonly rolledBack: boolean
+      readonly revision: number
+    }
+
+/** Error enriched with the provider/phase that rejected a bundle operation. */
+export class PresetProviderTransactionError extends Error {
+  readonly providerId: string
+  readonly phase: 'prepare' | 'commit'
+  readonly cause: unknown
+
+  constructor(providerId: string, phase: 'prepare' | 'commit', cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    super(message)
+    this.name = 'PresetProviderTransactionError'
+    this.providerId = providerId
+    this.phase = phase
+    this.cause = cause
+  }
 }
 
 export interface PresetPreparedApply {
@@ -112,17 +145,23 @@ export function preparePresetBundle(
   scope?: PresetCaptureScope,
 ): PreparedPresetBundle {
   const prepared: PresetPreparedApply[] = []
+  const preparedProviderIds: string[] = []
   const summaries: PresetChangeSummary[] = []
   try {
     for (const [providerId, contribution] of Object.entries(bundle.contributions)) {
       const provider = registry.resolve(providerId)
       if (!provider) continue
-      const payload = provider.migrate && contribution.providerVersion !== provider.schemaVersion
-        ? provider.migrate(contribution.providerVersion, contribution.payload)
-        : contribution.payload
-      const item = provider.prepareApply(payload, { policy: contribution.policy, scope, bundleId: bundle.id })
-      prepared.push(item)
-      summaries.push(...item.summary)
+      try {
+        const payload = provider.migrate && contribution.providerVersion !== provider.schemaVersion
+          ? provider.migrate(contribution.providerVersion, contribution.payload)
+          : contribution.payload
+        const item = provider.prepareApply(payload, { policy: contribution.policy, scope, bundleId: bundle.id })
+        prepared.push(item)
+        preparedProviderIds.push(providerId)
+        summaries.push(...item.summary)
+      } catch (error) {
+        throw new PresetProviderTransactionError(providerId, 'prepare', error)
+      }
     }
   } catch (error) {
     // Best effort rollback; preserve the original prepare error.
@@ -138,7 +177,12 @@ export function preparePresetBundle(
     commit: async () => {
       if (settled) return
       try {
-        for (const item of prepared) await item.commit()
+        for (let index = 0; index < prepared.length; index += 1) {
+          try { await prepared[index]!.commit() }
+          catch (error) {
+            throw new PresetProviderTransactionError(preparedProviderIds[index] ?? 'unknown', 'commit', error)
+          }
+        }
         settled = true
       } catch (error) {
         for (let index = prepared.length - 1; index >= 0; index--) {
@@ -251,6 +295,7 @@ export function createPresetBundle(input: {
   theme: PresetJsonValue
   renderer?: RendererPresetPayload
   presentation?: PresentationPresetPayload
+  source?: PresetBundleV2['source']
 }): PresetBundleV2 {
   const contributions: Record<string, PresetContribution> = {
     'builtin.theme': { ownerPluginId: 'builtin.pylon-shell', providerVersion: 1, policy: 'complete', payload: input.theme },
@@ -265,7 +310,7 @@ export function createPresetBundle(input: {
     manifestVersion: 2,
     id: input.id,
     name: input.name,
-    source: 'user' as const,
+    source: input.source ?? 'user',
     createdAt: input.createdAt ?? input.now,
     updatedAt: input.now,
     contributions: Object.freeze(contributions),
@@ -285,11 +330,11 @@ function coverageCounts(providerId: string, contribution: PresetContribution | u
     : Object.keys(unavailableRecord).length
   if (!contribution) return { explicit: 0, defaulted: 0, unavailable }
   if (providerId === 'builtin.theme') {
-    const known = new Set<string>(THEME_SETTING_KEYS as readonly string[])
+    const known = new Set<string>(THEME_PRESET_KEYS as readonly string[])
     const explicit = Object.keys(payload).filter(key => known.has(key)).length
     return {
       explicit,
-      defaulted: contribution.policy === 'complete' ? Math.max(0, THEME_SETTING_KEYS.length - explicit) : 0,
+      defaulted: contribution.policy === 'complete' ? Math.max(0, THEME_PRESET_KEYS.length - explicit) : 0,
       unavailable,
     }
   }
@@ -311,7 +356,7 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
     'builtin.presentation': 'Presentation',
     'builtin.renderer-settings': 'Renderer overrides',
   }
-  return Object.entries(labels).map(([id, label]) => {
+  const coverage: PresetCoverage[] = Object.entries(labels).map(([id, label]) => {
     const contribution = bundle?.contributions[id]
     const unavailablePayload = bundle?.unavailable?.[id]
     const counts = coverageCounts(id, contribution, unavailablePayload)
@@ -330,7 +375,12 @@ export function presetCoverage(bundle: PresetBundleV2 | undefined): readonly Pre
       label,
       ...counts,
       state,
-      ...(contribution ? { policy: contribution.policy } : {}),
+      ...(contribution ? { policy: contribution.policy } : bundle?.source === 'builtin' ? { policy: 'partial' as const } : {}),
     }
   })
+  // Plugin Page/Context Panel schemas have no approved preset provider in
+  // this bundle version; make that exclusion visible to avoid implying that
+  // Theme/Renderer providers captured plugin-owned values.
+  if (bundle) coverage.push({ id: 'plugin-schema', providerId: 'plugin-schema', label: 'Plugin schema', explicit: 0, defaulted: 0, unavailable: 0, state: 'excluded', policy: 'partial' })
+  return coverage
 }

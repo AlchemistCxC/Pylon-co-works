@@ -60,6 +60,17 @@ export function getToolSummary(toolName: string, input: unknown): string {
   return getKindToolSummary(toolName, input)
 }
 
+/** Whether a compact tool-header summary represents a path, command, URL, or
+ * search expression and should therefore opt into the code font. Human-facing
+ * summaries from unknown/other tools remain on the message rail. */
+export function toolSummaryUsesCodeFont(kind: ToolKind): boolean {
+  return kind === 'read'
+    || kind === 'edit'
+    || kind === 'execute'
+    || kind === 'search'
+    || kind === 'fetch'
+}
+
 export type ToolConnectorStatus = 'ok' | 'err' | 'run'
 
 export interface ConnectorColors {

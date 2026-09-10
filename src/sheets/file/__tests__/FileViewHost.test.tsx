@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileViewHost from '../FileViewHost'
 import { fileTabKey, type FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
+import { waitForFileEditor } from './codeMirrorTestUtils.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -34,12 +35,13 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
     })
   })
 
-  it('file 模式：渲染 FileTabView + 发令栏 + 状态栏，read 经 typed client 带 source/相对路径', async () => {
+  it('file 模式：打开后直接保持编辑态，read 经 typed client 带 source/相对路径', async () => {
     const { container } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     await waitFor(() => expect(fileViewOf(container)).not.toBeNull())
     expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
     expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
-    expect(screen.getByText('const x = 1')).toBeTruthy()
+    expect(await waitForFileEditor('const x = 1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
     expect(screen.getByText('1 行')).toBeTruthy()
     expect(screen.getAllByText('ws-a').length).toBeGreaterThan(0)
   })

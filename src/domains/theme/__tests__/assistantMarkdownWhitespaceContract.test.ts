@@ -28,4 +28,12 @@ describe('assistant Markdown whitespace contract', () => {
     expect(chatCss).toMatch(/\.term-plain-text\s*\{[^}]*white-space\s*:\s*pre-wrap/s)
     expect(chatCss).toMatch(/\.term-assistant\s+p\s*,\s*\.term-assistant\s+\.term-p\s*\{[^}]*white-space\s*:\s*pre-wrap/s)
   })
+
+  it('aligns the reasoning fast path with parsed soft-break semantics', () => {
+    // Inside the reasoning body the parsed path has no pre-wrap scope, so a
+    // single source newline collapses to a space (CommonMark). The plain fast
+    // path must agree, otherwise a streaming reasoning tail flips between the
+    // two geometries on every tick (shattered lines + height oscillation).
+    expect(chatCss).toMatch(/\.term-reasoning-body\s+\.term-plain-text\s*\{[^}]*white-space\s*:\s*normal/s)
+  })
 })

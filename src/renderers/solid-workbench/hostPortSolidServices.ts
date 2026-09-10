@@ -2,7 +2,7 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { CancelResult, CommandResult, SendResult, WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
-import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import type { WorkbenchDocument, WorkbenchProjectionDiagnostic } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
 import type {
   WorkbenchCommandError,
@@ -12,11 +12,55 @@ import type {
 import type { SolidWorkbenchServices } from './workbenchContracts.ts'
 import { resolveDocumentOptionEntries } from './input/workbenchOptionCatalog.ts'
 
+/**
+ * P57 S2-R2：逐元素单槽 memo（{src,out}，命中条件 = length 相等 + 每项引用相等）。
+ *
+ * 红线契约：split readers（host.document / host.generation）的读数每个通知都照常
+ * 执行，memo 只以本次 `runtimeSnapshot(host)` 调用内真实读到的引用为键复用派生
+ * 结果——不缓存合并快照、不跳过读取，微任务合并与 revision 收敛语义
+ * （workbenchHostPort.test :44-99）不受影响。同一 document 引用下派生数组与
+ * 逐元素包装引用稳定，下游显示链 memo 才有稳定键。
+ */
+interface ElementMemoSlot<TIn, TOut> {
+  src: readonly TIn[] | undefined
+  out: readonly TOut[] | undefined
+}
+
+function memoMapped<TIn, TOut>(
+  slot: ElementMemoSlot<TIn, TOut>,
+  source: readonly TIn[],
+  map: (item: TIn) => TOut,
+): readonly TOut[] {
+  const previousSource = slot.src
+  const previousOut = slot.out
+  if (previousSource !== undefined && previousOut !== undefined && previousSource.length === source.length) {
+    let same = true
+    for (let index = 0; index < source.length; index += 1) {
+      if (previousSource[index] !== source[index]) {
+        same = false
+        break
+      }
+    }
+    if (same) return previousOut
+  }
+  const out = Object.freeze(source.map(map))
+  slot.src = source
+  slot.out = out
+  return out
+}
+
+const documentMessagesSlot: ElementMemoSlot<WorkbenchDocument['messages'][number], Message> = { src: undefined, out: undefined }
+let errorMemo: { src: readonly WorkbenchProjectionDiagnostic[] | undefined; out: string | null | undefined } = { src: undefined, out: undefined }
+const optionIdsSlots = new Map<string, { options: unknown; current: string | undefined; out: readonly string[] }>()
+
 function optionIds(
   document: WorkbenchDocument | undefined,
   kind: 'model' | 'mode',
   current: string | undefined,
 ): readonly string[] {
+  const options = document?.session.options
+  const slot = optionIdsSlots.get(kind)
+  if (slot && slot.options === options && slot.current === current) return slot.out
   const ids: string[] = []
   const seen = new Set<string>()
   for (const entry of resolveDocumentOptionEntries(document?.session.options, kind)) {
@@ -27,32 +71,61 @@ function optionIds(
   }
   const active = current?.trim() ?? ''
   if (active && !seen.has(active.toLowerCase())) ids.unshift(active)
-  return Object.freeze(ids)
+  const out = Object.freeze(ids)
+  optionIdsSlots.set(kind, { options, current, out })
+  return out
 }
 
 function documentMessages(document: WorkbenchDocument | undefined): readonly Message[] {
-  return document?.messages.map(message => ({
+  if (!document) return []
+  return memoMapped(documentMessagesSlot, document.messages, message => ({
     id: message.id, role: message.role, sender: message.source.provider,
     content: message.content, time: message.time, running: message.running,
-  })) ?? []
+  }))
+}
+
+function latestErrorDiagnostic(diagnostics: readonly WorkbenchProjectionDiagnostic[]): string | null {
+  if (errorMemo.src === diagnostics && errorMemo.out !== undefined) return errorMemo.out
+  const error = [...diagnostics].reverse().find(item => item.level === 'error')?.message ?? null
+  errorMemo = { src: diagnostics, out: error }
+  return error
 }
 
 function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
-  const document = host.document.getSnapshot()
+  // Document and generation are legacy split readers. Read them as a pair and
+  // retry when their revisions disagree so a subscriber cannot observe a
+  // terminal document alongside the previous active generation tick.
+  let document = host.document.getSnapshot()
+  let generation = host.generation.getSnapshot()
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const documentRevision = document?.revision
+    const generationRevision = generation.revision
+    if (documentRevision === undefined || generationRevision === undefined || documentRevision === generationRevision) break
+    document = host.document.getSnapshot()
+    generation = host.generation.getSnapshot()
+  }
   const messages = documentMessages(document)
-  const generation = host.generation.getSnapshot()
-  const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
+  const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
+  // A terminal fence/summary is stronger than a stale controller flag. Once
+  // observed, clear active-only metadata in the same host projection so a
+  // third-party Suite cannot render a mixed terminal+active snapshot.
+  const terminal = terminalStatus || generation.summary !== null || generation.terminalFence !== undefined
+  const generating = terminal ? false : generation.generating
+  const error = document ? latestErrorDiagnostic(document.diagnostics) : null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
   return Object.freeze({
-    revision: document?.revision ?? 0, sessionId: document?.sessionId || null,
+    revision: generation.revision ?? document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
-    streamingText: '', streamingThinking: '', generating: generation.generating,
-    generationStart: generation.generationStart, lastTokenAt: generation.lastTokenAt,
+    generating,
+    generationStart: generating ? generation.generationStart : 0,
+    lastTokenAt: generating ? generation.lastTokenAt : undefined,
     tokenCount: generation.tokenCount, summary: generation.summary,
-    generationPhase: generation.generationPhase,
-    generationActivity: generation.generationActivity,
-    thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
+    generationPhase: generating ? generation.generationPhase : undefined,
+    generationActivity: generating ? generation.generationActivity : undefined,
+    thinkingStart: generating ? generation.thinkingStart : undefined, tasks: document?.plan.entries ?? Object.freeze([]),
+    turnEpoch: generation.turnEpoch,
+    terminalFence: generation.terminalFence,
     // Keep the host-port projection provider-neutral: ACP choices are carried
     // in the canonical session option surface, not in renderer-local stores.
     // A third-party Suite therefore sees the same model/mode catalogue as the
@@ -65,7 +138,6 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
 
 function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
   const slice = (name: WorkbenchRuntimeSlice): unknown => {
-    if (name === 'streaming') return { text: '', thinking: '' }
     if (name === 'capabilities') return { canAttach: host.capabilities.has('attach'), promptImage: false }
     if (name === 'tasks') return host.document.getSnapshot()?.plan.entries ?? []
     return host.document.getSlice(name as never)
@@ -177,5 +249,5 @@ function createCommands(host: WorkbenchHostPort): WorkbenchCommandFacade {
 }
 
 export function createSolidWorkbenchServicesFromHostPort(host: WorkbenchHostPort): SolidWorkbenchServices {
-  return Object.freeze({ runtime: createRuntime(host), appearance: createAppearance(host), sessionUi: createSessionUi(host), commands: createCommands(host), hostPort: host, predictionProvider: host.predictionProvider })
+  return Object.freeze({ runtime: createRuntime(host), appearance: createAppearance(host), sessionUi: createSessionUi(host), commands: createCommands(host), sessionCreation: host.sessionCreation, hostPort: host, predictionProvider: host.predictionProvider })
 }

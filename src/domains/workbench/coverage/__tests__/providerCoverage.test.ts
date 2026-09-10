@@ -362,7 +362,7 @@ describe('C16 provider coverage inventory', () => {
   it('逐项记录可验证的全链 evidence，source-only 显式记录不可达原因', () => {
     const downstream = [
       'identity', 'provenance', 'normalizer', 'projector', 'solidRenderer',
-      'reactFallback', 'settingsSchema', 'pluginLifecycle', 'tests',
+      'settingsSchema', 'pluginLifecycle', 'tests',
     ] as const
 
     for (const item of allCoverageItems()) {

@@ -27,6 +27,89 @@ export interface CommandResult {
   error?: string
 }
 
+/**
+ * Display-only lifecycle for an empty-state session creation request.
+ *
+ * Session selection and the first prompt intentionally have different
+ * completion boundaries: selecting the local session ends the empty-state
+ * creation animation, while the prompt continues through the normal
+ * generation footer.  This reader keeps that distinction observable without
+ * putting UI state in the canonical journal.
+ */
+export type WorkbenchSessionCreationPhase =
+  | 'idle'
+  | 'creating-session'
+  | 'session-selected'
+  | 'prompt-running'
+  | 'prompt-terminal'
+  | 'creation-failed'
+
+export interface WorkbenchSessionCreationSnapshot {
+  readonly phase: WorkbenchSessionCreationPhase
+  readonly sessionId: string | null
+  readonly error: string | null
+  readonly attempt: number
+}
+
+export interface WorkbenchSessionCreationReader {
+  getSnapshot(): WorkbenchSessionCreationSnapshot
+  subscribe(listener: () => void): () => void
+}
+
+export interface WorkbenchSessionCreationStore extends WorkbenchSessionCreationReader {
+  begin(): number
+  markSessionSelected(attempt: number, sessionId: string): void
+  markPromptRunning(attempt: number, sessionId: string): void
+  markPromptTerminal(attempt: number, sessionId: string): void
+  markFailed(attempt: number, error: string, sessionId?: string | null): void
+}
+
+/** Create a small ephemeral lifecycle store for command/UI coordination. */
+export function createWorkbenchSessionCreationStore(): WorkbenchSessionCreationStore {
+  let snapshot: WorkbenchSessionCreationSnapshot = Object.freeze({
+    phase: 'idle', sessionId: null, error: null, attempt: 0,
+  })
+  const listeners = new Set<() => void>()
+  const publish = (next: WorkbenchSessionCreationSnapshot) => {
+    snapshot = Object.freeze(next)
+    for (const listener of [...listeners]) listener()
+  }
+  const transition = (
+    attempt: number,
+    phase: WorkbenchSessionCreationPhase,
+    sessionId: string | null,
+    error: string | null = null,
+  ) => {
+    if (attempt !== snapshot.attempt) return
+    if (snapshot.phase === phase && snapshot.sessionId === sessionId && snapshot.error === error) return
+    publish({ phase, sessionId, error, attempt })
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    begin() {
+      const attempt = snapshot.attempt + 1
+      publish({ phase: 'creating-session', sessionId: null, error: null, attempt })
+      return attempt
+    },
+    markSessionSelected(attempt, sessionId) {
+      transition(attempt, 'session-selected', sessionId)
+    },
+    markPromptRunning(attempt, sessionId) {
+      transition(attempt, 'prompt-running', sessionId)
+    },
+    markPromptTerminal(attempt, sessionId) {
+      transition(attempt, 'prompt-terminal', sessionId)
+    },
+    markFailed(attempt, error, sessionId = snapshot.sessionId) {
+      transition(attempt, 'creation-failed', sessionId, error)
+    },
+  }
+}
+
 export interface WorkbenchCommandCapabilities {
   readonly prompt?: boolean
   readonly cancel?: boolean
@@ -50,12 +133,20 @@ export interface SessionCreateInput {
   initialPrompt?: SendCommand
 }
 
+export interface SessionCreateResult {
+  readonly sessionId: string
+  /** Settles independently after the session-selected boundary. */
+  readonly initialPromptOutcome?: Promise<SendResult>
+}
+
 export interface ExportSessionInput {
   format: 'json' | 'markdown'
   destination?: string
 }
 
 export interface WorkbenchCommandFacade {
+  /** Optional host-owned reader for the empty-state creation lifecycle. */
+  readonly sessionCreation?: WorkbenchSessionCreationReader
   /** Semantic prompt command; send remains as a compatibility alias. */
   prompt(sessionId: string, command: SendCommand): Promise<SendResult>
   send(sessionId: string, command: SendCommand): Promise<SendResult>
@@ -63,7 +154,7 @@ export interface WorkbenchCommandFacade {
   attach(sessionId: string): Promise<readonly WorkbenchAttachment[]>
   setModel(sessionId: string, modelId: string): Promise<CommandResult>
   setMode(sessionId: string, modeId: string): Promise<CommandResult>
-  createSession(input?: SessionCreateInput): Promise<{ sessionId: string }>
+  createSession(input?: SessionCreateInput): Promise<SessionCreateResult>
   compact(sessionId: string): Promise<CommandResult>
   exportSession(sessionId: string, input: ExportSessionInput): Promise<CommandResult>
   clearSession(sessionId: string): Promise<CommandResult>
@@ -80,14 +171,19 @@ export interface WorkbenchCommandFacade {
   recover(sessionId: string, strategy?: string): Promise<CommandResult>
 }
 
+/** Keys whose values are callable command methods (excludes optional readers). */
+export type WorkbenchCommandMethodKey = {
+  [K in keyof WorkbenchCommandFacade]-?: WorkbenchCommandFacade[K] extends (...args: infer _Args) => infer _Result ? K : never
+}[keyof WorkbenchCommandFacade]
+
 export interface WorkbenchCommandCall {
-  command: keyof WorkbenchCommandFacade
+  command: WorkbenchCommandMethodKey
   args: readonly unknown[]
 }
 
 export interface FakeWorkbenchCommandFacade extends WorkbenchCommandFacade {
   readonly calls: readonly WorkbenchCommandCall[]
-  setHandler<K extends keyof WorkbenchCommandFacade>(
+  setHandler<K extends WorkbenchCommandMethodKey>(
     command: K,
     handler: WorkbenchCommandFacade[K],
   ): void
@@ -162,17 +258,41 @@ export function createFakeWorkbenchCommandFacade(
 ): FakeWorkbenchCommandFacade {
   const calls: WorkbenchCommandCall[] = []
   const handlers: WorkbenchCommandFacade = { ...defaultHandlers, ...overrides }
+  const sessionCreation = createWorkbenchSessionCreationStore()
 
-  const invoke = async <K extends keyof WorkbenchCommandFacade>(
+  const invoke = async <K extends WorkbenchCommandMethodKey>(
     command: K,
     args: Parameters<WorkbenchCommandFacade[K]>,
   ): Promise<Awaited<ReturnType<WorkbenchCommandFacade[K]>>> => {
     calls.push({ command, args })
     const handler = handlers[command] as (...values: Parameters<WorkbenchCommandFacade[K]>) => ReturnType<WorkbenchCommandFacade[K]>
+    if (command === 'createSession') {
+      const attempt = sessionCreation.begin()
+      try {
+        const result = await handler(...args) as Awaited<ReturnType<WorkbenchCommandFacade[K]>>
+        const sessionId = result && typeof result === 'object' && 'sessionId' in result
+          && typeof (result as { sessionId?: unknown }).sessionId === 'string'
+          ? (result as { sessionId: string }).sessionId
+          : ''
+        if (sessionId) {
+          sessionCreation.markSessionSelected(attempt, sessionId)
+          const input = args[0] as SessionCreateInput | undefined
+          if (input?.initialPrompt) sessionCreation.markPromptRunning(attempt, sessionId)
+          else sessionCreation.markPromptTerminal(attempt, sessionId)
+        } else {
+          sessionCreation.markFailed(attempt, '会话创建未返回有效标识', null)
+        }
+        return result
+      } catch (error) {
+        sessionCreation.markFailed(attempt, error instanceof Error ? error.message : String(error), null)
+        throw error
+      }
+    }
     return await handler(...args) as Awaited<ReturnType<WorkbenchCommandFacade[K]>>
   }
 
   return {
+    sessionCreation,
     get calls() {
       return calls
     },

@@ -19,8 +19,6 @@ export function createPreviewWorkbenchServices(): PreviewWorkbenchServices {
     sessionId: 'preview-session',
     status: 'ready',
     messages: [...WORKBENCH_MESSAGE_FIXTURE.messages],
-    streamingText: WORKBENCH_MESSAGE_FIXTURE.streaming.text,
-    streamingThinking: WORKBENCH_MESSAGE_FIXTURE.streaming.thinking,
     generating: true,
     generationPhase: { kind: 'responding' },
     generationStart: 1_000,

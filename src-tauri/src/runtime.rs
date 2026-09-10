@@ -37,7 +37,8 @@ impl AgentContextKey {
 
 /// 单个 agent 的运行时状态（per-agent 隔离）。
 /// A3：per-source 流式更新通道注册表类型别名。
-pub type UpdateChannelMap = std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
+pub type UpdateChannelMap =
+    std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
 
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
@@ -62,6 +63,8 @@ pub struct AgentRuntime {
     /// per-source 流式更新通道（Channel 化重构 A1）：send_message 注册、终帧/C7/generation
     /// bump 注销。dispatcher 对已注册 source 走 Channel 推送并跳过 WebView 广播（A3）。
     pub update_channels: Arc<UpdateChannelMap>,
+    pub terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
+    pub host_tools_policy: Arc<Mutex<crate::acp::host_tools::HostToolsPolicy>>,
 }
 
 impl AgentRuntime {
@@ -81,7 +84,22 @@ impl AgentRuntime {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
+            terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),
+            host_tools_policy: Arc::new(Mutex::new(
+                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
+            )),
         })
+    }
+
+    pub fn set_host_tools_policy(&self, runtime_env: &std::collections::BTreeMap<String, String>) {
+        let policy = crate::acp::host_tools::HostToolsPolicy::parse_env(runtime_env)
+            .unwrap_or_else(|error| {
+                tracing::warn!("invalid host tools policy; using agent self-hosted: {error}");
+                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+            });
+        if let Ok(mut current) = self.host_tools_policy.lock() {
+            *current = policy;
+        }
     }
 
     /// A1：注册 source 的流式更新通道（send_message 携带 Channel 时调用）。
@@ -111,11 +129,7 @@ impl AgentRuntime {
     /// B1：非破坏性向 source 的通道发一帧（不移除注册）。user echo 在 prompt
     /// 发送前产生，会话仍在途——绝不能用 take 语义（注销后 update 流断轨）。
     /// 返回 false = 未注册（调用方走广播兜底）。
-    pub fn send_update_frame(
-        &self,
-        source: &str,
-        frame: serde_json::Value,
-    ) -> bool {
+    pub fn send_update_frame(&self, source: &str, frame: serde_json::Value) -> bool {
         match self
             .update_channels
             .lock()
@@ -271,6 +285,24 @@ mod tests {
             b.client_generation
                 .load(std::sync::atomic::Ordering::Acquire),
             0
+        );
+    }
+
+    #[test]
+    fn host_tools_policy_defaults_closed_and_accepts_explicit_host_mode() {
+        let runtime = AgentRuntime::new_disconnected();
+        assert_eq!(
+            *runtime.host_tools_policy.lock().unwrap(),
+            crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+        );
+        let env = std::collections::BTreeMap::from([(
+            crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
+            "host".to_string(),
+        )]);
+        runtime.set_host_tools_policy(&env);
+        assert_eq!(
+            *runtime.host_tools_policy.lock().unwrap(),
+            crate::acp::host_tools::HostToolsPolicy::HostStrict
         );
     }
 

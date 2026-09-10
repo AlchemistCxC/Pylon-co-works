@@ -1,4 +1,5 @@
-.chat-empty { flex:1; }
+.chat-empty { flex:1; min-width:0; min-height:100%; width:100%; }
+.chat-empty.agent-empty-state { box-sizing:border-box; position:relative; }
 .agent-empty-state { box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; padding:var(--ui-space-6); color:var(--text); text-align:center; }
 .agent-empty-brand { position:relative; display:grid; place-items:center; width:68px; height:68px; margin-bottom:var(--ui-space-4); color:var(--accent); }
 .agent-empty-brand::before,
@@ -34,6 +35,12 @@
 .term-user-content > blockquote { margin-top:0; margin-bottom:0; }
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:var(--ui-space-2); padding:var(--ui-space-1) var(--ui-space-2); border-radius: 0; font-family:var(--mono); }
 .term-user .term-p { display:inline; margin:0; }
+/* R-B5 契约（P57 S3-R5）：user 正文的显式换行是输入意图。解析路径（CommonMark 把
+   单个 \n 折叠为空格）与纯文本回退路径（.term-plain-text pre-wrap）必须同为
+   pre-wrap，两路径行数才一致；反方向（把回退路径也改成 normal）= 一致地错，否决。
+   元素+类双写选择器用于捕获第三方 Suite 渲染的裸 <p>。 */
+.term-user p,
+.term-user .term-p { white-space: pre-wrap; }
 .term-user code { font-family:var(--mono); font-size:inherit; }
 
 .term-assistant { position:relative; padding:var(--ui-space-1) 0; white-space:normal; }
@@ -46,9 +53,10 @@
 }
 .term-row-reasoning {
   min-width:0;
-  /* Thought is machine-side annotation: keep it on the chat/terminal rail,
-     independently of the selectable Markdown body font. */
-  font-family:var(--chat-font,var(--mono));
+  /* Thought is part of the conversation: use the same message typography as
+     user/assistant rows.  Code blocks and inline code opt back into --mono
+     below, so ordinary English remains readable in the chat face. */
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
   color:var(--msg-text,var(--chat-text-color,var(--text)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.35));
 }
@@ -105,6 +113,9 @@
 @keyframes pylon-reasoning-shimmer { to { background-position:-200% 0; } }
 .term-reasoning-body { padding:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-4); border-left:var(--line-width-1) solid color-mix(in srgb, var(--border) 72%, transparent); margin:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-1); max-height:320px; overflow-y:auto; overscroll-behavior:contain; }
 .term-reasoning-body :is(ol,ul) { box-sizing:border-box; margin-inline:0; padding-inline-start:2em; }
+.term-reasoning-body .term-plain-text { white-space:normal; }
+/* 上面这条对齐流式纯文本回退与解析路径的软换行语义：思考体内单个换行折叠为空格
+   （与 CommonMark 解析一致）；assistant 上下文两条路径均为 pre-wrap，不受影响。 */
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-file-card { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:var(--ui-space-2); width:min(100%,960px); padding:var(--ui-space-2); border:var(--line-width-1) solid var(--border); border-radius:var(--message-radius,0); }
@@ -448,7 +459,7 @@
   width:100%; min-height:var(--input-min-height,56px); margin-top:var(--ui-space-2);
   background:var(--input-bg,var(--bg-input)); border:var(--line-width-1) solid var(--border);
   border-radius: 0; padding:var(--ui-space-3) var(--ui-space-4); cursor:pointer; text-align:left;
-  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--font)); font-size:var(--input-font-size, var(--font-size-xl));
+  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--input-font-size, var(--font-size-xl));
 }
 .replay-continue-bar:hover { border-color:var(--input-focus-border,var(--border-focus)); }
 .replay-continue-hint { opacity:0.6; }
@@ -534,7 +545,14 @@
    结构同 CC AssistantTextMessage：flex row 圆点列 + 内容列（.term-assistant-body），
    圆点与首行共享 line box → 同基线对齐；首内容块 margin-top 归零
    （CC Markdown column gap 只在块之间，首块无上间距，圆点贴首行）。 */
-.term-assistant.has-dot { position:relative; display:flex; align-items:flex-start; }
+.term-assistant.has-dot {
+  position:relative;
+  display:flex;
+  flex-wrap:nowrap;
+  align-items:flex-start;
+  width:100%;
+  min-width:0;
+}
 .app[data-message-layout="claude"] { --dot-col-width: 1.6em; }
 /* 统一指示列（claude 布局）：助手/thinking/工具 内容列一律从 1.6em 起——
    无圆点助手也占指示列（内容与工具名/thinking 对齐），不再贴左缘 */
@@ -559,7 +577,10 @@
   align-self:flex-start;
   margin-top:0.1em;
 }
-.term-assistant.has-dot > .term-assistant-body { flex:1; min-width:0; }
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  min-width:0;
+}
 .term-assistant.has-dot > .term-assistant-body > :first-child { margin-top:0; }
 .term-assistant.has-dot > .term-assistant-body > :first-child > :first-child,
 .term-assistant.has-dot > .term-assistant-body > :first-child > :first-child > :first-child { margin-top:0; }
@@ -726,18 +747,18 @@
    （terminal-like 模式的同款钉定见下方 :729 区块与 P1 对齐测试。） */
 .term-assistant.has-dot > .term-assistant-dot,
 .term-tool-indicator {
-  font-family: var(--chat-font, var(--mono));
-  font-size: var(--chat-font-size, var(--font-size-lg));
+  font-family: var(--msg-font, var(--chat-font, var(--mono)));
+  font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)));
 }
-/* Terminal-like 的 marker 以 ChatView 字号解析固定列；隔离 content kind 的字号/字体覆盖，
+/* Terminal-like 的 marker 以消息轨字号解析固定列；隔离 content kind 的字号/字体覆盖，
    避免 canonical Tool 的 1.6em 与助手 marker 在不同上下文中换算成不同像素宽度。 */
 .app[data-interface-mode="terminal-like"] :is(
   .term-assistant.has-dot > .term-assistant-dot
 ) {
   display: inline-flex;
-  font-family: var(--chat-font,var(--mono));
-  font-size: var(--chat-font-size,var(--font-size-lg));
-  line-height: var(--chat-line-height,1.35);
+  font-family: var(--msg-font,var(--chat-font,var(--mono)));
+  font-size: var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+  line-height: var(--msg-line-height,var(--chat-line-height,1.35));
   width: var(--dot-col-width, 1.6em);
   flex: 0 0 var(--dot-col-width, 1.6em);
   justify-content: flex-start;
@@ -748,11 +769,11 @@
   /* Keep the same fixed gutter and natural marker size as the assistant marker. */
   justify-content: flex-start;
   text-align: left;
-  /* Tool labels use the mono face, but the glyph itself must match the
-     preview/chat rail.  Mono fonts commonly draw ●/✱ noticeably smaller. */
-  font-family: var(--chat-font, var(--mono));
-  font-size: var(--chat-font-size, var(--font-size-lg));
-  line-height: var(--chat-line-height, 1.35);
+  /* The glyph follows the message rail too; otherwise this more-specific rule
+     silently overrides the shared B1 typography declared at the file tail. */
+  font-family: var(--msg-font, var(--chat-font, var(--mono)));
+  font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)));
+  line-height: var(--msg-line-height, var(--chat-line-height, 1.35));
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {
@@ -994,6 +1015,13 @@
   background: var(--bg-input);
 }
 .term-code-line { min-height: 1.25em; line-height: 1.4; }
+/* R-B1 契约（P57 S3-R1）：三个代码域（term-ansi / streaming code / fenced code 内容 span）
+   统一「保留缩进 + 长行软折」。`.chat-view` overflow-x:hidden（:20）使横向 pre 方案
+   需要逐容器验证滚动协议，故采用 pre-wrap + anywhere（与 .term-ansi 生效版同语义）。 */
+.term-code-block .term-code-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; flex: 1 1 auto; }
+/* R-B8/A11（P57 S3-R8）：首次解析（从未 resolve）期间的解析骨架；min-height:1em
+   配合零高度阶跃目标（S5-R3），终态/首解析完成后由解析结果原子替换。 */
+.term-md-skeleton { min-height: 1em; }
 .term-blockquote { margin-block: var(--ui-space-2); border-left-color: var(--border-focus); }
 .term-link { text-underline-offset: 2px; }
 .term-link:focus-visible { outline: var(--line-width-2) solid var(--accent); outline-offset: 2px; }
@@ -1001,7 +1029,6 @@
 .term-spinner-row {
   gap: var(--ui-space-3);
   padding: var(--ui-space-1) 0;
-  transform: translateX(-4px);
 }
 .term-spinner { padding-block: var(--ui-space-1); }
 .spinner-glimmer-core { animation:spinner-glimmer-sweep 3200ms linear infinite; }
@@ -1177,7 +1204,8 @@
 .system-notice-data > summary { cursor: pointer; color: var(--lifecycle-muted-foreground, var(--text-dim)); }
 .lifecycle-technical > summary:focus-visible,
 .system-notice-data > summary:focus-visible,
-.lifecycle-actions button:focus-visible {
+.lifecycle-actions button:focus-visible,
+.system-error-card-actions button:focus-visible {
   outline: var(--line-width-2) solid var(--accent);
   outline-offset: 2px;
 }
@@ -1206,6 +1234,17 @@
   cursor: pointer;
 }
 .lifecycle-actions button:hover { border-color: var(--lifecycle-severity-color, var(--accent)); background: var(--bg-hover); }
+.system-error-card-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.system-error-card-actions button {
+  min-height: var(--ui-control-compact);
+  padding: 0 var(--ui-space-3);
+  border: var(--line-width-1) solid var(--border);
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.system-error-card-actions button:hover { border-color: var(--lifecycle-severity-color, var(--accent)); background: var(--bg-hover); }
 :is(.lifecycle-card,.system-error-card,.system-notice-card)[data-density="compact"] {
   gap: var(--ui-space-1);
   padding: var(--ui-space-2);
@@ -1862,7 +1901,7 @@
 .app[data-interface-mode="terminal-like"] {
   /* Keep the marker close to its label while retaining one shared action
      spine for Thought, tools and assistant markers. */
-  --agent-marker-col: calc(var(--chat-font-size, 15px) * 1.25);
+  --agent-marker-col: calc(var(--msg-font-size, var(--chat-font-size, 15px)) * 1.25);
 }
 .app[data-interface-mode="terminal-like"] .term {
   --dot-col-width: var(--agent-marker-col);
@@ -1871,7 +1910,7 @@
   padding-left: var(--agent-marker-col);
 }
 .app[data-interface-mode="terminal-like"] .term-reasoning-head {
-  min-height: calc(var(--chat-font-size, 15px) * var(--chat-line-height, 1.4));
+  min-height: calc(var(--msg-font-size, var(--chat-font-size, 15px)) * var(--msg-line-height, var(--chat-line-height, 1.4)));
 }
 .app[data-interface-mode="terminal-like"] .term-tool-head > .term-tool-indicator,
 .app[data-interface-mode="terminal-like"] .term-assistant.has-dot > .term-assistant-dot,
@@ -1913,7 +1952,8 @@
 /* ── Terminal-like type roles ──
    The presentation profile supplies a readable default for human prose while
    the existing font pickers remain the source of truth for both columns.
-   Prefixes/markers are machine labels, so they stay aligned to the mono rail. */
+   User prefixes remain machine labels on the mono rail. Assistant/tool
+   indicators follow the message font so their glyphs match the adjacent copy. */
 .app[data-interface-mode="terminal-like"] :is(
   .term-user-prefix,
   .term-user-name,
@@ -1926,12 +1966,51 @@
   .term-tool,
   .term-tool-head
 ) {
-  /* Tool names and status are machine annotations: follow the selectable
-     code/path font, independently of the prose and Thought choices. */
-  font-family:var(--mono);
+  /* The header is ordinary readable copy.  Only explicit code/path/output
+     surfaces use the mono face, keeping mixed English labels from looking
+     wider than the surrounding conversation. */
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
 }
 .app[data-interface-mode="terminal-like"] .term-row-reasoning {
-  font-family:var(--chat-font,var(--mono));
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+}
+.app[data-interface-mode="terminal-like"] :is(
+  .term-tool-body,
+  .term-tool-body pre,
+  .term-tool-body code,
+  .term-code-block,
+  .term-ansi,
+  .tool-object-inspector
+) {
+  font-family:var(--mono);
+}
+/* A grouped row owns a term-tool shell around its expanded child cards. Keep
+   the child cards' own tone/state selectors authoritative so the final member
+   color does not bleed into every expanded member. */
+.solid-workbench-activity-group-body .term-tool[data-status="ok"] > .term-tool-head .term-tool-name {
+  color:var(--tool-ok,#1e9646);
+}
+.solid-workbench-activity-group-body .term-tool[data-status="err"] > .term-tool-head .term-tool-name {
+  color:var(--tool-err,#be2828);
+}
+.solid-workbench-activity-group-body .term-tool[data-status="run"] > .term-tool-head .term-tool-name {
+  color:var(--tool-run,#3b82f6);
+}
+.solid-workbench-activity-group-body .term-tool[data-tool-state="queued"] > .term-tool-head > .term-tool-indicator {
+  opacity:0.46;
+}
+.solid-workbench-activity-group-body .term-tool[data-tool-state="cancelled"] > .term-tool-head > .term-tool-indicator {
+  opacity:0.52;
+  filter:saturate(0.25);
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="ok"] > .term-tool-head .term-tool-name {
+  color:var(--state-success,var(--tool-ok,var(--accent)));
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="err"] > .term-tool-head .term-tool-name {
+  color:var(--state-danger,var(--tool-err,var(--danger)));
+}
+.app[data-interface-mode="terminal-like"] .solid-workbench-activity-group-body .term-tool[data-status="run"] > .term-tool-head .term-tool-name {
+  color:var(--accent,var(--tool-run));
 }
 /* Collapsed thought rows are a label-only rail, but their header must occupy
    the same vertical inset as the expanded state.  Removing this padding only
@@ -1997,7 +2076,8 @@
 .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
   content:'';
   position:absolute;
-  inset:0 auto 0 -6px;
+  /* 与消息轨左缘对齐（用户确认：此前 -6px 伸出行外，视觉略偏左）。 */
+  inset:0 auto 0 0;
   width:2px;
   pointer-events:none;
   background:var(--accent);
@@ -2019,3 +2099,79 @@
     background:none;
   }
 }
+
+/* B1 authoritative tail: profile-specific rules above may set compact tool
+   body metrics, but they must not change the message rail's font or marker
+   geometry. */
+.term-tool-body {
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+  font-size:inherit;
+  line-height:var(--msg-line-height,var(--chat-line-height,1.35));
+}
+.term-tool-body .term-tool-prose,
+.term-tool-body .term-tool-label {
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+}
+.term-tool-body :is(.term-tool-summary-code,.term-file-path,.term-file-range,.term-file-preview,.term-terminal-body,.term-log-entries,.term-ansi,.term-code-block,.tool-object-inspector,pre,code) {
+  font-family:var(--mono);
+}
+.term-tool-summary-code { font-family:var(--mono); }
+.term-tool-head,
+.term-tool-name,
+.term-tool-summary,
+.term-tool-state-label,
+.term-tool-suffix,
+.term-tool-duration,
+.term-tool-label,
+.term-spinner-row,
+.term-spinner-row .term-spinner,
+.term-spinner-row .spinner-frame,
+.term-spinner-row .spinner-verb,
+.term-spinner-row .spinner-context,
+.term-spinner-row .spinner-meta,
+.term-spinner-row .spinner-activity {
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+}
+.term-spinner-row { align-items:baseline; margin-left:0; transform:none; }
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  width:auto;
+  max-width:100%;
+}
+/* Full-width terminal rails can use a zero basis to ignore a transient Slot's
+   max-content contribution. Bubble rows remain auto-sized so the body keeps
+   its intrinsic width instead of collapsing the entire bubble to the marker. */
+.app[data-message-layout="classic"] .term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 0;
+  width:0;
+}
+.term-reasoning-body { min-width:0; width:100%; }
+.term-spinner-row .spinner-frame {
+  flex:0 0 var(--dot-col-width,var(--agent-marker-col,1.6em));
+  width:var(--dot-col-width,var(--agent-marker-col,1.6em));
+  min-width:var(--dot-col-width,var(--agent-marker-col,1.6em));
+  text-align:left;
+  font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+}
+.term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child,
+.term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child > :first-child {
+  margin-block-start:0;
+}
+.plain-message-list__row[data-entry="new"][data-streaming="true"],
+.plain-message-list__row[data-entry="new"][data-streaming="true"]::after {
+  /* A streaming row is updated in place; an entry transform on every
+     transient segment would look like the whole chat is jumping vertically. */
+  animation:none;
+}
+.term-assistant.has-dot > .term-assistant-dot,
+.term-assistant.has-dot > .term-assistant-dot-img,
+.term-tool-head > .term-tool-indicator {
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+  font-size:var(--msg-font-size,var(--chat-font-size,var(--font-size-lg)));
+  line-height:var(--msg-line-height,var(--chat-line-height,1.35));
+}
+
+/* Explicit path/command summaries are code semantics even though the
+   containing tool header follows the message rail. Keep this rule after the
+   broad header typography so it cannot be shadowed by the final cascade. */
+.term-tool-summary-code { font-family:var(--mono); }

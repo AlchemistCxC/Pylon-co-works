@@ -40,6 +40,20 @@ export interface StreamingDisplayScheduler {
   dispose(): void
 }
 
+/** Renderer safety net: never publish an impossible terminal combination. */
+export function cohereDisplaySnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
+  if (snapshot.summary === null && snapshot.terminalFence === undefined) return snapshot
+  if (!snapshot.generating && snapshot.generationStart === 0 && snapshot.generationPhase === undefined && snapshot.generationActivity === undefined && snapshot.thinkingStart === undefined) return snapshot
+  return {
+    ...snapshot,
+    generating: false,
+    generationStart: 0,
+    generationPhase: undefined,
+    generationActivity: undefined,
+    thinkingStart: undefined,
+  }
+}
+
 type DisplayMessage = {
   readonly id: string
   readonly role: string
@@ -169,6 +183,8 @@ export function createStreamingDisplayScheduler(
 
   const push = (snapshot: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
+    snapshot = cohereDisplaySnapshot(snapshot)
+    if (displayed !== undefined) snapshot = preserveDisplayedPrefix(displayed, snapshot)
     target = snapshot
     if (displayed === undefined) {
       publishSnapshot(snapshot)
@@ -199,7 +215,7 @@ export function createStreamingDisplayScheduler(
 
   const flush = (snapshot?: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
-    if (snapshot !== undefined) target = snapshot
+    if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
     if (target === undefined) return
     clearTimer()
     publishSnapshot(target)
@@ -244,6 +260,45 @@ export function createStreamingDisplayScheduler(
   return { push, flush, pause, resume, dispose }
 }
 
+/**
+ * Canonical and compatibility streams may briefly publish different-length
+ * prefixes for the same running row. Do not make the display retract while
+ * the newer canonical snapshot is still active; retain the longer displayed
+ * prefix until a later snapshot catches up (or a terminal snapshot arrives).
+ */
+function preserveDisplayedPrefix(
+  displayed: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+): WorkbenchRuntimeSnapshot {
+  if (!next.generating
+    || displayed.sessionId !== next.sessionId
+    || displayed.ownerKey !== next.ownerKey
+    || displayed.generation !== next.generation
+    || displayed.turnEpoch !== next.turnEpoch) return next
+  const messages = preserveMessagePrefixes(displayed.messages, next.messages)
+  const document = displayed.document && next.document
+    ? { ...next.document, messages: preserveMessagePrefixes(displayed.document.messages, next.document.messages) as WorkbenchDocument['messages'] }
+    : next.document
+  return {
+    ...next,
+    messages,
+    ...(document ? { document } : {}),
+  }
+}
+
+function preserveMessagePrefixes<T extends DisplayMessage>(
+  displayed: readonly T[],
+  next: readonly T[],
+): readonly T[] {
+  const displayedById = new Map(displayed.map(message => [message.id, message]))
+  return next.map(message => {
+    const previous = displayedById.get(message.id)
+    if (!previous || previous.role !== message.role || !message.running || message.content.length >= previous.content.length) return message
+    if (!previous.content.startsWith(message.content)) return message
+    return previous
+  })
+}
+
 function isTerminalTransition(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
   if (current.sessionId !== next.sessionId || current.ownerKey !== next.ownerKey) return false
   if (next.summary !== null && next.summary !== current.summary) return true
@@ -259,7 +314,6 @@ function defaultNow(): number {
 }
 
 function hasActiveTextStream(snapshot: WorkbenchRuntimeSnapshot): boolean {
-  if (snapshot.streamingText.length > 0 || snapshot.streamingThinking.length > 0) return true
   return snapshot.messages.some(message => (
     (message.role === 'assistant' || message.role === 'reasoning') && message.running === true
   )) || Boolean(snapshot.document?.messages.some(message => (
@@ -271,8 +325,6 @@ function hasPendingTextGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
-  if (isPrefixGrowth(current.streamingText, next.streamingText)
-    || isPrefixGrowth(current.streamingThinking, next.streamingThinking)) return true
   if (messageListHasPendingGrowth(current.messages, next.messages)) return true
   if (current.document && next.document
     && messageListHasPendingGrowth(current.document.messages, next.document.messages)) return true
@@ -289,7 +341,8 @@ function requiresImmediateFlush(
 ): boolean {
   if (current.sessionId !== next.sessionId
     || current.ownerKey !== next.ownerKey
-    || current.generation !== next.generation) return true
+    || current.generation !== next.generation
+    || current.turnEpoch !== next.turnEpoch) return true
   if (current.document?.sessionId !== next.document?.sessionId) return true
   if (next.status === 'error' || next.summary !== null && next.summary !== current.summary) return true
 
@@ -299,18 +352,12 @@ function requiresImmediateFlush(
 
   if (hasNonPrefixMessageChange(current.messages, next.messages)) return true
   if (current.document && next.document && hasNonPrefixMessageChange(current.document.messages, next.document.messages)) return true
-  if (hasNonPrefixStringChange(current.streamingText, next.streamingText)
-    || hasNonPrefixStringChange(current.streamingThinking, next.streamingThinking)) return true
 
   const pending = hasPendingTextGrowth(current, next)
   // A terminal text snapshot must never wait for the next timer. This also
   // covers “assistant finished, tool is still running” projections.
   if (pending && (!hasActiveTextStream(next) || next.generating === false)) return true
   return false
-}
-
-function hasNonPrefixStringChange(current: string, next: string): boolean {
-  return current.length > 0 && next !== current && !next.startsWith(current)
 }
 
 function hasNonPrefixMessageChange<T extends DisplayMessage>(
@@ -383,11 +430,7 @@ function interpolateSnapshot(
       ? interpolateMessageList([], target.document.messages, budget)
       : { messages: [], pending: false }
 
-  const streamingText = advancePrefix(current.streamingText, target.streamingText, budget).value
-  const streamingThinking = advancePrefix(current.streamingThinking, target.streamingThinking, budget).value
   const pending = legacy.pending || documentProgress.pending
-    || streamingText !== target.streamingText
-    || streamingThinking !== target.streamingThinking
 
   if (!pending) return { snapshot: target, pending: false }
 
@@ -401,8 +444,6 @@ function interpolateSnapshot(
     snapshot: {
       ...target,
       messages: legacy.messages,
-      streamingText,
-      streamingThinking,
       ...(document ? { document } : {}),
     },
     pending: true,
@@ -441,15 +482,26 @@ function partialTextParts(
   if (parts === undefined) return undefined
   if (visibleText.length === 0) return []
 
-  // A stream can contain rich parts, but exposing the target parts while only
-  // part of `content` is visible would leak the not-yet-rendered tail through
-  // a semantic Slot. During the short partial window use one safe Markdown
-  // text part; the terminal tick restores the canonical parts object.
-  const preferred = parts.find(part => (
-    part.kind === 'markdown' || part.kind === 'text' || part.kind === 'reasoning' || part.kind === 'thinking'
-  ))
-  const kind = preferred?.kind === 'text' ? 'text' : 'markdown'
-  return [{ kind, text: visibleText }]
+  // Keep the canonical block kinds during interpolation. Replacing a rich
+  // multi-part message with one synthetic markdown part changes paragraph/
+  // code-block geometry on every terminal handoff, which is visible as a
+  // height jump. Clip only text-bearing parts to the visible prefix and do
+  // not expose later rich parts until their text range is reached.
+  const textKinds = new Set(['text', 'markdown', 'code', 'ansi', 'reasoning', 'thinking'])
+  let remaining = visibleText.length
+  const clipped: ContentPart[] = []
+  for (const part of parts) {
+    if (!textKinds.has(part.kind) || typeof (part as { text?: unknown }).text !== 'string') {
+      if (remaining > 0) continue
+      break
+    }
+    const text = (part as { text: string }).text
+    const take = Math.min(remaining, text.length)
+    if (take > 0) clipped.push({ ...part, text: text.slice(0, take) } as ContentPart)
+    remaining -= take
+    if (remaining <= 0) break
+  }
+  return clipped
 }
 
 function advancePrefix(current: string, target: string, budget: number): PrefixAdvance {

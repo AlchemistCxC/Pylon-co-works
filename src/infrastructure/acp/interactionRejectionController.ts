@@ -1,4 +1,4 @@
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 export interface InteractionRejection {
   provider: string
@@ -74,7 +74,13 @@ export function createInteractionRejectionController(
     reportRuntimeError('处理 Agent 交互请求', {
       code: `interaction_${rejection.reasonCode}`,
       message: rejection.message,
-    }, rejection.agentId)
+    }, rejection.agentId, {
+      source: 'acp.interaction',
+      scope: rejection.sessionId
+        ? { kind: 'session', id: rejection.sessionId }
+        : rejection.agentId ? { kind: 'agent', id: rejection.agentId } : { kind: 'app', id: 'interaction' },
+      recovery: { kind: 'open-runtime-log', sessionId: rejection.sessionId },
+    })
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent<InteractionRejection>('pylon:interaction-rejected', { detail: rejection }))
     }
@@ -82,8 +88,21 @@ export function createInteractionRejectionController(
 
   deps.listen<unknown>('pylon:interaction-rejected', event => onPayload(event.payload)).then(stop => {
     if (disposed) stop()
-    else unlisten = stop
-  }).catch(error => reportRuntimeError('监听交互拒绝事件', error))
+    else {
+      unlisten = stop
+      resolveRuntimeErrors({ key: 'acp:interaction-listener' })
+    }
+  }).catch(error => {
+    // Listener setup can reject after the owning App has unmounted (for
+    // example during a StrictMode/remount probe). Do not surface that stale
+    // transport rejection as a fresh user error.
+    if (!disposed) reportRuntimeError('监听交互拒绝事件', error, undefined, {
+      key: 'acp:interaction-listener',
+      scope: { kind: 'app', id: 'interaction' },
+      source: 'acp.interaction',
+      recovery: { kind: 'open-runtime-log' },
+    })
+  })
 
   return {
     dispose: async () => {
@@ -97,4 +116,3 @@ export function createInteractionRejectionController(
     },
   }
 }
-

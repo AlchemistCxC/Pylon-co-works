@@ -1,8 +1,10 @@
-#[cfg_attr(not(test), allow(unused_imports))] // 后三项仅测试目标消费（bin 内测试模块 + 回归测试）
+#[cfg_attr(not(test), allow(unused_imports))]
+// 后三项仅测试目标消费（bin 内测试模块 + 回归测试）
 use pylon_core::agent_detection::{
     detect_agent_runtime_candidates, AgentDetectionOptions, AgentDetectionReport,
     AgentRuntimeCandidate, IdentityConfidence, ProtocolAvailability, Startability,
 };
+use pylon_core::{agent_diagnostics, agent_preflight};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -170,8 +172,35 @@ fn main() {
     };
     match runtime.block_on(detect_agent_runtime_candidates(options)) {
         Ok(report) => {
+            let diagnostics = agent_diagnostics::report(!report.candidates.is_empty(), &[]);
+            let preflight = report
+                .candidates
+                .iter()
+                .filter_map(|candidate| {
+                    agent_preflight::evaluate(
+                        &candidate.provider,
+                        &agent_preflight::PreflightInputs {
+                            binary_present: candidate.startability != Startability::Failed,
+                            config_evidence: candidate
+                                .evidence
+                                .iter()
+                                .any(|e| e.kind == "config-fields"),
+                            ..Default::default()
+                        },
+                    )
+                    .ok()
+                })
+                .collect::<Vec<_>>();
             if json_output {
-                println!("{}", serde_json::to_string(&report).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "report": report,
+                        "diagnostics": diagnostics,
+                        "preflight": preflight
+                    }))
+                    .unwrap()
+                );
             } else {
                 print!("{}", human_output(&report));
             }

@@ -13,7 +13,10 @@ use crate::lifecycle::do_connect_and_replace;
 use crate::permission::{permission_response, pick_option, PendingPermission};
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
-use crate::session::{extract_tool_file_name, value_as_string, SessionInfo};
+use crate::session::{
+    config_option_key_matches, extract_tool_file_name, value_as_machine_id, value_as_string,
+    SessionInfo,
+};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
@@ -90,6 +93,9 @@ impl PetEvent {
 /// 感知事件（按收集顺序）。调用方持有 sessions 锁时调用、锁外逐条应用。
 /// C11：回放（is_replay）事件仅同步 session 状态（tokens/title/model/mode），
 /// 不产出任何宠物感知事件。
+/// 生产路径已由 38dad290 全量改走 apply_update_event_routed（typed kernel seam）；
+/// 本布尔包装仅剩 C11 宠物策略 characterization 测试消费，故 cfg(test)。
+#[cfg(test)]
 fn apply_update_event(
     session: &mut crate::session::SessionInfo,
     update: &serde_json::Value,
@@ -117,28 +123,65 @@ fn apply_update_event_with_pet_policy(
     variant: Option<crate::acp::SessionUpdateVariant>,
     apply_pet: bool,
 ) -> Vec<PetEvent> {
+    // Keep the ACP reducer alongside the legacy SessionInfo fields during the
+    // migration. It emits no UI events; canonical commit/publication remains
+    // governed by the existing routing transaction below.
+    let deltas = session.acp_state.apply(&crate::acp::RawMessage {
+        id: None,
+        method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
+        kind: crate::acp::AcpKind::SessionUpdate,
+        result: None,
+        params: Some(serde_json::json!({"update": update})),
+        error: None,
+    });
+    // Typed reducer output is consumed here at the kernel boundary. Existing
+    // canonical/session updates below remain the publication authority; this
+    // adapter only mirrors reducer-owned scalar domains into the live session.
+    for delta in deltas {
+        match delta {
+            crate::acp::AcpStateDelta::Usage {
+                used,
+                size,
+                input,
+                output,
+            } => {
+                session.tokens_total = used;
+                session.context_size = size.unwrap_or(0);
+                if let Some(input) = input {
+                    session.tokens_in = input;
+                }
+                if let Some(output) = output {
+                    session.tokens_out = output;
+                }
+            }
+            // Mode/model remain handled by the existing event transaction below;
+            // consuming them here would suppress its change detection.
+            crate::acp::AcpStateDelta::Mode { .. }
+            | crate::acp::AcpStateDelta::Model { .. }
+            | crate::acp::AcpStateDelta::PermissionQueueDepth { .. }
+            | crate::acp::AcpStateDelta::PermissionRequested { .. }
+            | crate::acp::AcpStateDelta::Text { .. }
+            | crate::acp::AcpStateDelta::Reasoning { .. }
+            | crate::acp::AcpStateDelta::UserText { .. }
+            | crate::acp::AcpStateDelta::ToolStarted { .. }
+            | crate::acp::AcpStateDelta::ToolUpdated { .. }
+            | crate::acp::AcpStateDelta::Plan { .. }
+            | crate::acp::AcpStateDelta::Unknown { .. } => {}
+        }
+    }
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-            session.tokens_total = update
-                .get("used")
-                .or_else(|| update.get("value"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let (used, size) = session.acp_state.usage.unwrap_or((0, None));
+            session.tokens_total = used;
+            session.context_size = size.unwrap_or(0);
             if let Some(meta) = update.get("_meta") {
-                session.tokens_in = meta
-                    .get("inputTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                session.tokens_out = meta
-                    .get("outputTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                session.tokens_in = session.acp_state.usage_input.unwrap_or(0);
+                session.tokens_out = session.acp_state.usage_output.unwrap_or(0);
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
                 }
             }
-            session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
             if apply_pet {
                 pet_events.push(PetEvent::UsageUpdate(session.tokens_total));
             }
@@ -171,22 +214,48 @@ fn apply_update_event_with_pet_policy(
             if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
                 session.title = title.to_string();
             }
+            // P56/D2.3：payload 带 models.currentModelId（camelCase/snake_case）时更新
+            // session.model（对齐 usage_update._meta.model 现状——hermes 未来若推此
+            // 通道即可消费；machine-id-only 提取，显示名不当 id）。
+            if let Some(model) = update
+                .get("models")
+                .and_then(|models| {
+                    models
+                        .get("currentModelId")
+                        .or_else(|| models.get("current_model_id"))
+                        .or_else(|| models.get("currentModel"))
+                        .or_else(|| models.get("current_model"))
+                        .or_else(|| models.get("current"))
+                })
+                .and_then(value_as_machine_id)
+            {
+                session.model = model;
+            }
         }
         Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
             if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
                 session.config_options = options.clone();
                 session.apply_config_options(options);
             } else {
+                // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
+                // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
+                // 子串包含猜测）。
                 let option_key = update
-                    .get("id")
+                    .get("configId")
+                    .or_else(|| update.get("config_id"))
+                    .or_else(|| update.get("id"))
                     .or_else(|| update.get("key"))
                     .and_then(|v| v.as_str());
+                let is_model_key =
+                    option_key.is_some_and(|key| config_option_key_matches(key, "model"));
+                let is_mode_key =
+                    option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
                 let current = update
                     .get("currentValue")
                     .or_else(|| update.get("value"))
                     .and_then(value_as_string);
-                match (option_key, current) {
-                    (Some("model"), Some(model)) => {
+                if is_model_key {
+                    if let Some(model) = current {
                         // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
                         // model 为空必误判 changed（对齐 usage/tool 全部门控）。
                         let changed = session.model != model;
@@ -195,7 +264,8 @@ fn apply_update_event_with_pet_policy(
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
                     }
-                    (Some("mode"), Some(mode)) => {
+                } else if is_mode_key {
+                    if let Some(mode) = current {
                         let changed = session.mode.as_deref() != Some(mode.as_str());
                         session.mode = Some(mode.clone());
                         if changed && apply_pet {
@@ -203,7 +273,6 @@ fn apply_update_event_with_pet_policy(
                             pet_events.push(PetEvent::ModeChanged(mode));
                         }
                     }
-                    _ => {}
                 }
             }
         }
@@ -212,9 +281,7 @@ fn apply_update_event_with_pet_policy(
                 .get("availableCommands")
                 .or_else(|| update.get("commands"))
             {
-                session
-                    .snapshots
-                    .insert("commands".to_string(), commands.clone());
+                session.commands_snapshot = Some(commands.clone());
             }
         }
         Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate) => {
@@ -229,9 +296,6 @@ fn apply_update_event_with_pet_policy(
                 // well as the typed field; session/load restores snapshots before the
                 // response is rebuilt, so this survives agents that only emit updates
                 // after session/new or session/load.
-                session
-                    .snapshots
-                    .insert("mode".to_string(), serde_json::Value::String(mode.clone()));
                 session.mode = Some(mode.clone());
                 if changed && apply_pet {
                     pet_events.push(PetEvent::ModeChanged(mode));
@@ -269,11 +333,11 @@ async fn reject_interaction_request<R: tauri::Runtime>(
 ) {
     let request_id_text = request_id.as_ref().map(ToString::to_string);
     let response_sent = if let Some(id) = request_id {
-        let (write_tx, crashed) = {
+        let responder = {
             let acp = acp.lock().await;
-            (acp.write_tx.clone(), acp.crashed.clone())
+            acp.responder()
         };
-        crate::permission::send_agent_error(write_tx, crashed, id, rpc_code, message).await
+        responder.respond_error(id, rpc_code, message).await
     } else {
         false
     };
@@ -312,6 +376,142 @@ async fn reject_interaction_request<R: tauri::Runtime>(
     );
 }
 
+async fn handle_terminal_request(
+    acp: &AcpLock,
+    registry: &crate::acp::terminal_runtime::TerminalRegistry,
+    method: &str,
+    request_id: crate::acp::RequestId,
+    params: Option<&serde_json::Value>,
+) {
+    let object = params.and_then(serde_json::Value::as_object);
+    let session_id = object
+        .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let result = match method {
+        "terminal/create" => {
+            let command = match object
+                .and_then(|p| p.get("command"))
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(command) => command,
+                None => return {
+                    let responder = { acp.lock().await.responder() };
+                    let _ = responder.respond_error(request_id, -32602, "terminal/create requires command").await;
+                },
+            };
+            let args = object
+                .and_then(|p| p.get("args"))
+                .and_then(serde_json::Value::as_array)
+                .map(|args| args.iter().filter_map(serde_json::Value::as_str).map(str::to_owned).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let line = shell_words::join(std::iter::once(command.to_owned()).chain(args));
+            let cwd = object
+                .and_then(|p| p.get("cwd"))
+                .and_then(serde_json::Value::as_str)
+                .map(std::path::Path::new);
+            let limit = object
+                .and_then(|p| p.get("outputByteLimit"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            registry
+                .create_shell(session_id.to_owned(), None, &line, cwd, limit)
+                .await
+                .map(|terminal_id| serde_json::json!({"terminalId": terminal_id}))
+        }
+        "terminal/output" => registry
+            .snapshot(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|snapshot| serde_json::json!({"output": snapshot.output, "truncated": snapshot.truncated})),
+        "terminal/wait_for_exit" | "terminal/waitForExit" => registry
+            .wait_for_exit(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|status| serde_json::json!({"exitStatus": status})),
+        "terminal/kill" => registry
+            .kill(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|_| serde_json::json!({})),
+        "terminal/release" => registry
+            .release(
+                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                session_id,
+            )
+            .await
+            .map(|_| serde_json::json!({})),
+        _ => Err("unsupported terminal method".to_string()),
+    };
+    match result {
+        Ok(value) => {
+            let responder = { acp.lock().await.responder() };
+            let _ = responder.respond(request_id, value).await;
+        }
+        Err(error) => {
+            let responder = { acp.lock().await.responder() };
+            let _ = responder.respond_error(request_id, -32602, &error).await;
+        }
+    }
+}
+
+async fn handle_filesystem_request(
+    acp: &AcpLock,
+    method: &str,
+    request_id: crate::acp::RequestId,
+    params: Option<&serde_json::Value>,
+    runtime: crate::acp::file_system_runtime::FileSystemRuntime,
+) {
+    let object = params.and_then(serde_json::Value::as_object);
+    let result: Result<serde_json::Value, String> = match method {
+        "fs/read_text_file" => {
+            match object
+                .and_then(|p| p.get("path"))
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(path) => runtime
+                    .read_text_file(std::path::Path::new(path))
+                    .await
+                    .map(|content| serde_json::json!({"content": content})),
+                None => Err("fs/read_text_file requires path".to_string()),
+            }
+        }
+        "fs/write_text_file" => {
+            match (
+                object
+                    .and_then(|p| p.get("path"))
+                    .and_then(serde_json::Value::as_str),
+                object
+                    .and_then(|p| p.get("content"))
+                    .and_then(serde_json::Value::as_str),
+            ) {
+                (Some(path), Some(content)) => runtime
+                    .write_text_file(std::path::Path::new(path), content)
+                    .await
+                    .map(|_| serde_json::json!({})),
+                (None, _) => Err("fs/write_text_file requires path".to_string()),
+                (_, None) => Err("fs/write_text_file requires content".to_string()),
+            }
+        }
+        _ => Err("unsupported filesystem method".to_string()),
+    };
+    let responder = { acp.lock().await.responder() };
+    match result {
+        Ok(value) => {
+            let _ = responder.respond(request_id, value).await;
+        }
+        Err(error) => {
+            let _ = responder.respond_error(request_id, -32602, &error).await;
+        }
+    }
+}
+
 /// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
 /// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
 pub(crate) fn resolve_agent_provider(
@@ -334,6 +534,8 @@ async fn handle_permission_request<R: tauri::Runtime>(
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
     pending_permissions: &PermissionLock,
+    sessions: &SessionsLock,
+    hook_bridge: &Arc<crate::hook_bridge::HookBridge>,
     provider: &str,
     agent_id: &str,
     method: Option<&str>,
@@ -367,7 +569,10 @@ async fn handle_permission_request<R: tauri::Runtime>(
             params,
             "method_unsupported",
             -32601,
-            &format!("interaction method unsupported: {}", method.unwrap_or("<missing>")),
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
         )
         .await;
         return;
@@ -401,10 +606,44 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .await;
         return;
     };
+    // Reducer ownership is resolved by the protocol session id, never by the
+    // request id alone (request ids may be reused across sessions).
+    let remember_permission = |sessions: &SessionsLock| {
+        let _ = sessions.lock().map(|mut sessions| {
+            if let Some(session) = sessions.get_mut(&permission.session_id) {
+                let _ = session.acp_state.apply(&crate::acp::RawMessage {
+                    id: Some(request_id.clone()),
+                    method: Some("session/request_permission".into()),
+                    kind: crate::acp::AcpKind::PermissionRequest,
+                    result: None,
+                    params: params.cloned(),
+                    error: None,
+                });
+            }
+        });
+    };
     let mode = approval_mode
         .lock()
         .map(|m| m.clone())
         .unwrap_or_else(|_| "default".to_string());
+    if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
+        .dispatch(Some(window), "permission.request", &permission.session_id, serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "requestId": request_id.to_string(),
+            "payload": { "title": permission.title, "prompt": permission.prompt, "options": permission.options }
+        }))
+        .await
+    {
+        if let Some(allow) = crate::hook_bridge::interpret_permission_hook_response(&response) {
+            let option = pick_option(&permission.options, !allow);
+            if let Some(option_id) = option {
+                let responder = { let acp = acp.lock().await; acp.responder() };
+                responder.respond(request_id, permission_response(option_id)).await;
+                return;
+            }
+        }
+    }
     if matches!(mode.as_str(), "bypass" | "auto") {
         tracing::info!(
             "权限模式 {mode}：自动批准工具调用 {}",
@@ -434,18 +673,15 @@ async fn handle_permission_request<R: tauri::Runtime>(
             return;
         };
         // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
-        let (write_tx, crashed) = {
+        let responder = {
             let acp = acp.lock().await;
-            (acp.write_tx.clone(), acp.crashed.clone())
+            acp.responder()
         };
-        crate::permission::send_agent_response(
-            write_tx,
-            crashed,
-            request_id,
-            permission_response(option_id),
-        )
-        .await;
+        responder
+            .respond(request_id, permission_response(option_id))
+            .await;
     } else {
+        remember_permission(sessions);
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id.clone(), permission.clone());
         });
@@ -523,6 +759,8 @@ async fn handle_session_update<R: tauri::Runtime>(
     event_service: Option<&Arc<crate::session::EventService>>,
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
+    wire_ordinal: Option<u64>,
+    wire: Option<Arc<crate::acp::AcpWireCapture>>,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -681,6 +919,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             variant,
             replay_loading,
             payload: payload.clone(),
+            wire_ordinal,
         };
         let decision = routing::decide(&input);
         routing_input = input;
@@ -739,7 +978,9 @@ async fn handle_session_update<R: tauri::Runtime>(
             if !decision.mutate_session {
                 return true;
             }
-            pet_events.extend(apply_update_event_routed(session, update, variant, decision));
+            pet_events.extend(apply_update_event_routed(
+                session, update, variant, decision,
+            ));
             // Agents may advertise commands or mode changes asynchronously after
             // session/new or session/load. Persist the merged session snapshot so
             // a later reload retains those capabilities.
@@ -753,13 +994,17 @@ async fn handle_session_update<R: tauri::Runtime>(
                 )
             {
                 if let Some(owner) = durable_owner.clone() {
-                    let snapshot = serde_json::Value::Object(
-                        session
-                            .snapshots
-                            .iter()
-                            .map(|(key, value)| (key.clone(), value.clone()))
-                            .collect(),
-                    );
+                    let mut snapshot = serde_json::Map::new();
+                    if let Some(commands) = &session.commands_snapshot {
+                        snapshot.insert("commands".into(), commands.clone());
+                    }
+                    if let Some(usage) = &session.usage_snapshot {
+                        snapshot.insert("usage".into(), usage.clone());
+                    }
+                    if let Some(mode) = &session.mode {
+                        snapshot.insert("mode".into(), serde_json::Value::String(mode.clone()));
+                    }
+                    let snapshot = serde_json::Value::Object(snapshot);
                     session_state_to_persist = Some((owner, snapshot));
                 }
             }
@@ -786,13 +1031,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
     let input = routing_input;
     let decision = routing_decision;
-    let committed_event = match routing::commit_live_event(
-        &input,
-        decision,
-        event_service,
-    )
-    .await
-    {
+    let committed_event = match routing::commit_live_event(&input, decision, event_service).await {
         routing::CommitOutcome::Skipped => None,
         routing::CommitOutcome::MissingService => {
             tracing::error!(
@@ -803,7 +1042,19 @@ async fn handle_session_update<R: tauri::Runtime>(
             );
             return true;
         }
-        routing::CommitOutcome::Committed(event) => Some(event),
+        routing::CommitOutcome::Committed { event, revision } => {
+            if let (Some(ordinal), Some(wire)) = (input.wire_ordinal, wire.as_ref()) {
+                wire.record_canonical_commit(
+                    ordinal,
+                    crate::acp::CanonicalCorrelation {
+                        event_id: event.event_id.clone(),
+                        sequence: event.sequence,
+                        revision,
+                    },
+                );
+            }
+            Some(event)
+        }
         routing::CommitOutcome::Rejected(error) => {
             log_canonical_ingest_error(&error, agent_id, &source);
             return true;
@@ -916,7 +1167,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         .lock()
         .ok()
         .and_then(|slot| slot.clone());
+    let hook_bridge = handles.hook_bridge.clone();
     let pending_permissions = runtime.pending_permissions.clone();
+    let terminal_registry = runtime.terminal_registry.clone();
+    let host_tools_policy = runtime.host_tools_policy.clone();
     let agent_id = handles
         .runtimes
         .all_with_ids()
@@ -963,6 +1217,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let reconnect_epoch = reconnect_epoch.clone();
             let event_service_slot = event_service_slot.clone();
             let message_service_slot = message_service_slot.clone();
+            let hook_bridge = hook_bridge.clone();
             move |reason: String| {
                 let agent_runtime = agent_runtime.clone();
                 let pet = pet.clone();
@@ -977,6 +1232,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 let reconnect_epoch = reconnect_epoch.clone();
                 let event_service_slot = event_service_slot.clone();
                 let message_service_slot = message_service_slot.clone();
+                let hook_bridge = hook_bridge.clone();
                 async move {
                     // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
                     let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -998,6 +1254,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         approval_mode: approval_mode.clone(),
                         event_service: event_service_slot.clone(),
                         message_service: message_service_slot.clone(),
+                        hook_bridge: hook_bridge.clone(),
                     };
                     emit_event(
                         &window,
@@ -1144,6 +1401,13 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                                 remaining_attempts -= 1;
                                                 continue;
                                             }
+                                            // Publish completion of the successful reconnect before
+                                            // leaving the worker. Callers observe Connected and the
+                                            // guard as one settled state; keeping the flag set here
+                                            // creates a race where a caller sees stale re-entry state.
+                                            reconnect_runtime
+                                                .auto_reconnect_active
+                                                .store(false, Ordering::Release);
                                             break;
                                         }
                                         Err(error) => {
@@ -1183,6 +1447,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // watch 通道只携带 bool 不携带 reason → 缺省 stdout_closed（订阅前 EOF 场景）
             handle_crash(crate::acp::CrashReason::StdoutClosed.as_str().to_string()).await;
         }
+        let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1206,6 +1471,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let crate::acp::ClassifiedMessage {
                 raw,
                 classification,
+                wire_ordinal,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1239,6 +1505,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         &client_generation,
                         &approval_mode,
                         &pending_permissions,
+                        &sessions,
+                        &hook_bridge,
                         &provider,
                         &agent_id,
                         raw.method.as_deref(),
@@ -1270,6 +1538,101 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 }
                 continue;
             }
+            if matches!(
+                raw.method.as_deref(),
+                Some("terminal/create")
+                    | Some("terminal/output")
+                    | Some("terminal/wait_for_exit")
+                    | Some("terminal/waitForExit")
+                    | Some("terminal/kill")
+                    | Some("terminal/release")
+            ) {
+                if let Some(request_id) = raw.id {
+                    if host_tools_policy
+                        .lock()
+                        .map(|policy| {
+                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                        })
+                        .unwrap_or(false)
+                    {
+                        handle_terminal_request(
+                            &acp,
+                            &terminal_registry,
+                            raw.method.as_deref().unwrap_or_default(),
+                            request_id,
+                            raw.params.as_ref(),
+                        )
+                        .await;
+                    } else {
+                        let responder = { acp.lock().await.responder() };
+                        let _ = responder
+                            .respond_error(
+                                request_id,
+                                -32601,
+                                "host terminal tools are disabled for this agent",
+                            )
+                            .await;
+                    }
+                }
+                continue;
+            }
+            if matches!(
+                raw.method.as_deref(),
+                Some("fs/read_text_file") | Some("fs/write_text_file")
+            ) {
+                if let Some(request_id) = raw.id {
+                    let allowed = host_tools_policy
+                        .lock()
+                        .map(|policy| {
+                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                        })
+                        .unwrap_or(false);
+                    if allowed {
+                        let strict = host_tools_policy
+                            .lock()
+                            .map(|p| {
+                                matches!(*p, crate::acp::host_tools::HostToolsPolicy::HostStrict)
+                            })
+                            .unwrap_or(false);
+                        let roots = raw
+                            .params
+                            .as_ref()
+                            .and_then(|v| v.get("cwd"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(|p| vec![std::path::PathBuf::from(p)])
+                            .unwrap_or_default();
+                        if strict && roots.is_empty() {
+                            let responder = { acp.lock().await.responder() };
+                            let _ = responder
+                                .respond_error(
+                                    request_id,
+                                    -32602,
+                                    "HostStrict filesystem requests require cwd",
+                                )
+                                .await;
+                        } else {
+                            handle_filesystem_request(
+                                &acp,
+                                raw.method.as_deref().unwrap_or_default(),
+                                request_id,
+                                raw.params.as_ref(),
+                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
+                            )
+                            .await;
+                        }
+                    } else {
+                        let responder = { acp.lock().await.responder() };
+                        let _ = responder
+                            .respond_error(
+                                request_id,
+                                -32601,
+                                "host filesystem tools are disabled for this agent",
+                            )
+                            .await;
+                    }
+                }
+                continue;
+            }
             // Providers may expose a new approval/question/oauth method before a
             // dedicated AcpKind/adapter exists.  Do not silently drop an identified
             // request: answer it with Method Not Found and surface a diagnostic event.
@@ -1290,11 +1653,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    let reason = if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                        "method_unsupported"
-                    } else {
-                        "provider_unsupported"
-                    };
+                    let reason =
+                        if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
+                            "method_unsupported"
+                        } else {
+                            "provider_unsupported"
+                        };
                     (
                         reason,
                         -32601,
@@ -1352,6 +1716,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 event_service.as_ref(),
                 message_service.as_ref(),
                 classification,
+                wire_ordinal,
+                wire_trace.clone(),
                 payload,
             )
             .await
@@ -1461,11 +1827,19 @@ mod tests {
             Ok(())
         });
         runtime.register_update_channel("local:s1", channel);
-        assert!(runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+        assert!(runtime
+            .update_channels
+            .lock()
+            .unwrap()
+            .contains_key("local:s1"));
 
         // 注册表语义：take 后不再持有（终帧注销路径依赖）。
         assert!(runtime.take_update_channel("local:s1").is_some());
-        assert!(!runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+        assert!(!runtime
+            .update_channels
+            .lock()
+            .unwrap()
+            .contains_key("local:s1"));
 
         // clear 语义（C7/generation bump 清理）。
         runtime.register_update_channel("local:s1", tauri::ipc::Channel::new(|_| Ok(())));
@@ -1541,8 +1915,7 @@ mod tests {
                 crate::acp::SessionUpdateVariant::ConfigOptionUpdate,
             ),
         ];
-        for (label, mut update, variant) in cases {
-            update["_meta"] = serde_json::json!({"periReplay": true});
+        for (label, update, variant) in cases {
             let mut session = crate::session::SessionInfo::new(
                 "peri-c11".to_string(),
                 String::new(),
@@ -1566,7 +1939,6 @@ mod tests {
                 "{label}: replay must not change pet xp/bond/recent_events"
             );
 
-            update["_meta"] = serde_json::json!({"periReplay": false});
             let mut live_session = crate::session::SessionInfo::new(
                 "peri-c11".to_string(),
                 String::new(),
@@ -1606,7 +1978,7 @@ mod tests {
             "command advertisement is not a pet event"
         );
         assert_eq!(
-            session.snapshots["commands"][0]["name"],
+            session.commands_snapshot.as_ref().unwrap()[0]["name"],
             serde_json::json!("compact")
         );
 
@@ -1636,7 +2008,7 @@ mod tests {
         );
         assert!(replay_events.is_empty());
         assert_eq!(
-            session.snapshots["commands"][0]["name"],
+            session.commands_snapshot.as_ref().unwrap()[0]["name"],
             serde_json::json!("reload")
         );
 
@@ -1654,12 +2026,46 @@ mod tests {
         assert_eq!(session.mode.as_deref(), Some("balanced"));
 
         let mut restored = serde_json::json!({});
-        let mut snapshot_only = session.clone();
-        snapshot_only.mode = None;
+        let snapshot_only = session.clone();
         crate::session::restore_session_state(&snapshot_only, &mut restored);
         assert_eq!(
             restored["modes"]["currentModeId"],
             serde_json::json!("balanced")
+        );
+    }
+
+    #[test]
+    fn acp_reducer_is_updated_without_emitting_ui_side_effects() {
+        let mut session = crate::session::SessionInfo::new(
+            "peri-reducer".to_string(),
+            String::new(),
+            "cwd".to_string(),
+            true,
+            1,
+        );
+        let update = serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"text": "hello"}
+        });
+        let events = apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
+            false,
+        );
+        assert!(events.is_empty(), "text chunks do not create pet events");
+        assert_eq!(
+            session.acp_state.apply(&crate::acp::RawMessage {
+                id: None,
+                method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
+                kind: crate::acp::AcpKind::SessionUpdate,
+                result: None,
+                params: Some(serde_json::json!({"update": update})),
+                error: None,
+            }),
+            vec![crate::acp::AcpStateDelta::Text {
+                text: "hello".into()
+            }]
         );
     }
 
@@ -1690,5 +2096,116 @@ mod tests {
             None,
             "未知 agent 无 provider"
         );
+    }
+
+    // ── P56/D2：单值 config_option_update 键归一化 + session_info_update models 消费 ──
+
+    fn dispatcher_session() -> crate::session::SessionInfo {
+        crate::session::SessionInfo::new(
+            "peri-p56".to_string(),
+            String::new(),
+            "cwd".to_string(),
+            true,
+            1,
+        )
+    }
+
+    /// 验收 7：单值 config_option_update 以 `configId`（camelCase）推送 → 更新
+    /// session.model；snake_case `config_id` 与归一化别名同效。
+    #[test]
+    fn config_option_update_reads_config_id_key_and_normalizes() {
+        for key in ["configId", "config_id"] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "config_option_update",
+                key: "model",
+                "currentValue": "nous:hermes-4",
+            });
+            let events = apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+                false,
+            );
+            assert_eq!(session.model, "nous:hermes-4", "key {key} must be read");
+            assert!(
+                matches!(events.as_slice(), [PetEvent::ModelChanged(model)] if model == "nous:hermes-4"),
+                "model change must stay a pet event"
+            );
+        }
+        // 归一化：model_selection / MODEL 均精确命中 model 语义键。
+        for key in ["model_selection", "MODEL"] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "config_option_update",
+                "configId": key,
+                "currentValue": "m-1",
+            });
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+                false,
+            );
+            assert_eq!(session.model, "m-1", "normalized key {key} must match");
+        }
+        // 无语义键的 update 不误写 model。
+        let mut session = dispatcher_session();
+        session.model = "keep".to_string();
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "reasoning_effort",
+            "currentValue": "low",
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "keep");
+    }
+
+    /// P56/D2.3：session_info_update 带 models.currentModelId（camel/snake）→
+    /// 更新 session.model（对齐 usage _meta.model 现状；hermes 未来推此通道即消费）。
+    #[test]
+    fn session_info_update_consumes_models_current_model() {
+        for (wire, expected) in [
+            (
+                serde_json::json!({"currentModelId": "nous:hermes-4"}),
+                "nous:hermes-4",
+            ),
+            (
+                serde_json::json!({"current_model_id": "nous:hermes-3"}),
+                "nous:hermes-3",
+            ),
+        ] {
+            let mut session = dispatcher_session();
+            let update = serde_json::json!({
+                "sessionUpdate": "session_info_update",
+                "models": wire,
+            });
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+                false,
+            );
+            assert_eq!(session.model, expected);
+        }
+        // 显示名-only 的 current 不得进入 typed 字段（machine-id-only）。
+        let mut session = dispatcher_session();
+        session.model = "keep".to_string();
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {"currentModelId": {"name": "Display Only"}},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+            false,
+        );
+        assert_eq!(session.model, "keep");
     }
 }

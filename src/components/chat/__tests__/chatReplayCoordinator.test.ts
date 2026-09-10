@@ -35,15 +35,15 @@ function result(overrides: Partial<PersistedSessionLoadResult> = {}): PersistedS
   }
 }
 
-function row(sequence: number, provenance?: CanonicalEventRow['provenance']): CanonicalEventRow {
+function row(sequence: number, provenance?: CanonicalEventRow['provenance'], eventType: CanonicalEventRow['eventType'] = 'user.message', at = '2026-09-02T00:00:00.000Z'): CanonicalEventRow {
   return {
     eventId: `owner#${sequence}`,
     owner: { profileId: 'profile', agentId: 'agent', localSessionId: 'source' },
     clientGeneration: 1,
     sequence,
-    occurredAt: '2026-09-02T00:00:00.000Z',
-    receivedAt: '2026-09-02T00:00:00.000Z',
-    eventType: 'user.message',
+    occurredAt: at,
+    receivedAt: at,
+    eventType,
     payloadVersion: 1,
     typedPayload: { text: `message-${sequence}` },
     rawPayload: {},
@@ -99,6 +99,19 @@ describe('ReplayLoadCoordinator', () => {
 
     expect(outcome).toMatchObject({ authority: 'local-journal', canonicalRevision: 4, commit: 'canonical-projection' })
     expect(controller.calls).toEqual(['begin', 'seed', 'canonical', 'finish'])
+  })
+
+  it('exposes canonical turn duration for restart-safe terminal summaries', async () => {
+    const controller = adapter()
+    const coordinator = new ReplayLoadCoordinator(controller)
+    const outcome = await coordinator.load(request(result({ authority: 'local-journal' }), {
+      rows: [
+        row(1, { origin: 'local-observed', trust: 'authoritative' }, 'user.message', '2026-09-02T00:00:10.000Z'),
+        row(2, { origin: 'local-observed', trust: 'authoritative' }, 'turn.completed', '2026-09-02T00:00:13.250Z'),
+      ],
+    }))
+
+    expect(outcome?.canonicalDuration).toMatchObject({ elapsedMs: 3250, source: 'canonical-events' })
   })
 
   it('uses replay only when metadata is complete and no local journal rows exist', async () => {

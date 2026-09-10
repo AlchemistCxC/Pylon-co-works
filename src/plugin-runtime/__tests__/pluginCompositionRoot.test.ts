@@ -15,10 +15,21 @@ describe('Plugin composition root bootstrap boundary', () => {
 
     const result = await composition.bootstrapBuiltins('normal')
 
-    expect(result.failures).toEqual([])
-    expect(result.activePluginIds).toEqual(composition.getBuiltinPluginIds())
+    // P53 D2（施工书 §6 例外 1）：管理器包声明 plugin.management，未授权时
+    // normal bootstrap 进 capability-consent 可重试失败（同意流），其余五包正常激活
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        pluginId: 'builtin.pylon-plugin-manager',
+        stage: 'capability-consent',
+        code: 'plugin_capability_denied',
+        retryable: true,
+      }),
+    ])
+    const expectedActive = composition.getBuiltinPluginIds()
+      .filter(id => id !== 'builtin.pylon-plugin-manager')
+    expect(result.activePluginIds).toEqual(expectedActive)
     expect(composition.getPluginRuntime().snapshot().active.map(item => item.pluginId).sort())
-      .toEqual(composition.getBuiltinPluginIds())
+      .toEqual(expectedActive)
   })
 
   it('safe mode deactivates user and product plugin instances without changing package intent', async () => {
@@ -43,6 +54,9 @@ describe('Plugin composition root bootstrap boundary', () => {
 
     const result = await composition.retryBuiltinPlugin('builtin.pylon-shell')
 
+    // P53 D2（施工书 §6 例外 1 点名改写）：第 6 包 builtin.pylon-plugin-manager
+    // 与 shell 闭包无依赖关系，safe-mode shell 选择下保持 skipped（其激活
+    // 走 kernel.ready 正常 boot + capability 同意流）；builtin.skin skip 断言语义不变。
     expect(result.activePluginIds).toEqual([
       'builtin.pylon-agent-adapters',
       'builtin.pylon-renderers',
@@ -50,7 +64,7 @@ describe('Plugin composition root bootstrap boundary', () => {
       'builtin.pylon-tools',
       'builtin.pylon-workspace',
     ])
-    expect(result.skippedPluginIds).toEqual(['builtin.skin'])
+    expect(result.skippedPluginIds).toEqual(['builtin.pylon-plugin-manager', 'builtin.skin'])
   })
 
   it('wires hook disable-plugin policy to the single product runtime', async () => {

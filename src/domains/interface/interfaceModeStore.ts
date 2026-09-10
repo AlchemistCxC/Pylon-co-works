@@ -5,6 +5,7 @@ export type InterfaceMode = string
 
 export const DEFAULT_INTERFACE_MODE: InterfaceMode = 'modern-gui'
 export const DEFAULT_INTERFACE_PROFILES: Readonly<Record<string, string>> = Object.freeze({
+  'tactical-blue': 'builtin.presentation.tactical-blue',
   'modern-gui': 'builtin.presentation.modern-gui',
   'terminal-like': 'builtin.presentation.terminal-classic',
 })

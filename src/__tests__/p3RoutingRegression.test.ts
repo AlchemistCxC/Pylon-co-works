@@ -164,7 +164,7 @@ describe('OWNER-05 P3 路由回归矩阵', () => {
     useRuntimeStore.getState().setAgentStatus('hermes', status('hermes', 'connected', 6))
     expect(isBindingLocked(deriveBinding('s1'))).toBe(true)
 
-    // load_persisted_session/new_session 成功 → useSessionLifecycle 记录当前 generation
+    // load_persisted_session/new_session 成功 → agentWorkbenchLifecycle 记录当前 generation
     useRuntimeStore.getState().setBindingGeneration({ agentId: 'hermes', source: s.source }, 6)
     expect(deriveBinding('s1')).toEqual({ kind: 'binding_ready', agentId: 'hermes', sessionId: 's1' })
     expect(isBindingLocked(deriveBinding('s1'))).toBe(false)

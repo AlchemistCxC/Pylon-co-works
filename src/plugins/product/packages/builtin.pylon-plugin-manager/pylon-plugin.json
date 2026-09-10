@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../../shared/pylon-plugin-manifest.schema.json",
+  "schema": 1,
+  "id": "builtin.pylon-plugin-manager",
+  "name": "Pylon Plugin Manager",
+  "version": "1.0.0",
+  "api": "1.2",
+  "kind": "feature",
+  "capabilities": ["plugin.management"],
+  "web": { "entry": "./entry.ts", "styles": [] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 5000 }
+}

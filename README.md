@@ -25,22 +25,22 @@ Pylon 是一个基于 ACP（Agent Client Protocol）的桌面 Agent 工作台。
 
 ### 2.2 从源码运行
 
-需要 Node.js（建议 LTS）、Rust stable、Tauri 2 依赖和 Windows WebView2。安装依赖：
+需要 Bun（≥1.4，负责依赖安装与脚本）、Node.js（建议 LTS，作为 Vite/Vitest 进程宿主）、Rust stable、Tauri 2 依赖和 Windows WebView2。安装依赖：
 
 ```bash
-npm install
+bun install
 ```
 
 启动前端浏览器预览（不连接真实 Agent）：
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 启动 Tauri 开发应用：
 
 ```bash
-npm run tauri dev
+bun run tauri dev
 ```
 
 浏览器预览使用内置 mock 消息，适合检查终端风格、消息间距、工具卡和响应式布局；它不会模拟真实 ACP 生命周期。
@@ -54,7 +54,7 @@ PortableGit。使用 Hermes 时不需要在目标电脑另外安装 Git、Bash�
 不会继承这套路径或环境。
 
 源码仓库不提交 PortableGit 二进制树。构建 Windows 便携版前运行
-`python scripts/prepare_hermes_runtime.py`（`npm run release:portable` 会自动运行），
+`python scripts/prepare_hermes_runtime.py`（`bun run release:portable` 会自动运行），
 脚本会按 `src-tauri/resources/runtime/portable-git.json` 中的版本、下载地址和
 SHA-256 校验并准备完整目录。运行时缺失或不完整时，打包应直接失败，不能生成一个
 看似可用但无法启动 Hermes 的包。
@@ -115,7 +115,7 @@ Pylon 当前提供终端风格和现代 GUI 等界面模式。聊天的语义结
 
 开发插件请从 `@pylon/plugin-sdk`（`src/sdk/`）入手：`definePlugin` 定义生命周期，全量宿主契约类型 + `createSettingsSurface` 等纯函数 helper 都从 SDK 引用，打包时经路径别名内联进插件 bundle。可运行的起步示例见 `examples/web-plugins/hello-starter`（manifest + SDK 入口 + scoped styles + 构建脚本，装进“设置 → 插件”即可跑）。
 
-SDK 由同一源码提供两种发行形态：运行 `npm run build:plugin-sdk` 生成正常版
+SDK 由同一源码提供两种发行形态：运行 `bun run build:plugin-sdk` 生成正常版
 `dist-plugin-sdk/normal/`（`@pylon/plugin-sdk`、`@pylon/plugin-sdk/testing`、完整类型树，
 供 TypeScript/Node 构建工具消费）；Windows 发行包内的
 `resources/sdk/` 是离线版（单文件浏览器 ESM + manifest schema，不需要 Node 或源码）。
@@ -154,27 +154,27 @@ Gateway 是可选的消息转发层：外部平台的消息进入 Gateway 后映
 常用命令：
 
 ```bash
-npm run lint                 # ESLint
-npm test                     # Vitest 全量
-npm run test:frontend       # 前端测试入口
-npm run build               # TypeScript + Vite 构建
-npm run check:frontend      # lint、覆盖率、构建与生产排除检查
-npm run check:solid         # Solid 工作台边界与契约检查
-npm run check:rust          # Rust 单元测试与构建
-npm run check:all           # 前端、Rust、Solid 全量检查
-npm run build:plugin-sdk    # 生成正常版与离线版 SDK
-npm run release:portable    # 构建 Tauri 便携版
+bun run lint                 # ESLint
+bun run test                 # Vitest 全量
+bun run test:frontend        # 前端测试入口
+bun run build                # TypeScript + Vite 构建
+bun run check:frontend       # lint、覆盖率、构建与生产排除检查
+bun run check:solid          # Solid 工作台边界与契约检查
+bun run check:rust           # Rust 单元测试与构建
+bun run check:all            # 前端、Rust、Solid 全量检查
+bun run build:plugin-sdk     # 生成正常版与离线版 SDK
+bun run release:portable     # 构建 Tauri 便携版
 ```
 
 按区域运行测试：
 
 ```bash
-npx vitest run src/components/chat
-npx vitest run src/sheets/agent-workbench
-npx vitest run src/domains/theme
+bun run test src/components/chat
+bun run test src/sheets/agent-workbench
+bun run test src/domains/theme
 ```
 
-提交前至少运行 `npm run lint`、相关区域测试和 `npm run build`。改动渲染器时再运行 `npm run check:solid`；改动 Rust/Tauri 时再运行 `npm run check:rust`。
+提交前至少运行 `bun run lint`、相关区域测试和 `bun run build`。改动渲染器时再运行 `bun run check:solid`；改动 Rust/Tauri 时再运行 `bun run check:rust`。
 
 开发调试：主题字段的写入来源可在控制台用 `window.__pylonSettingProvenance.recent()` / `.last('字段名')` 追溯（手动编辑、预设、呈现风格等贡献者互可区分）；设置信息架构的一致性不变量由 `src/domains/theme/__tests__/settingsTraceability.test.ts` 锁定。
 
@@ -184,7 +184,7 @@ npx vitest run src/domains/theme
 和 Agent 检测器，最后生成 ZIP、SHA-256 校验文件和内容 manifest：
 
 ```bash
-npm run release:portable
+bun run release:portable
 ```
 
 默认流程要求把 Microsoft WebView2 Evergreen Bootstrapper 放在

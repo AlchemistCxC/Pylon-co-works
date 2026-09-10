@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { PluginSettingsPageRegistry } from '../pluginSettingsRegistry.ts'
 import { PluginSettingsStore } from '../pluginSettingsStore.ts'
+import { validatePluginSettingOptionsContribution } from '../pluginSettingOptionsRegistry.ts'
 
 describe('plugin settings contracts', () => {
   beforeEach(() => localStorage.clear())
@@ -36,4 +37,65 @@ describe('plugin settings contracts', () => {
     expect(b).not.toHaveBeenCalled()
     expect(localStorage.getItem('pylon-plugin-settings-v1')).toContain('plugin.a')
   })
+
+  it('accepts multi-segment legacy Kind targets without truncating owner identity', () => {
+    expect(() => validatePluginSettingOptionsContribution({
+      id: 'plugin.palette', target: 'kind.acme.widgets.chart.accent', upsert: [{ value: 'amber' }],
+    })).not.toThrow()
+  })
+
+  it('rejects a schema adapter whose namespace or owner identity is not host-scoped', () => {
+    const registry = new PluginSettingsPageRegistry()
+    expect(() => registry.register(createPluginIdentity('plugin.demo', 'runtime'), {
+      id: 'page.settings', label: 'Settings', renderKind: 'isolated-surface', surfaceId: 'surface',
+      schema: { schemaVersion: 1, groups: [] },
+      valueAdapter: { namespace: 'context-panel', ownerPluginId: 'plugin.other', contributionId: 'page.settings' } as never,
+    })).toThrow(/adapter namespace/)
+  })
+
+  it('normalizes structured targets to an unambiguous legacy string', () => {
+    const normalized = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.structured', target: { namespace: 'kind', ownerId: 'acme.widgets.chart', fieldKey: 'accent' }, upsert: [{ value: 'amber' }],
+    })
+    expect(normalized.target).toBe('kind.acme%2Ewidgets%2Echart.accent')
+  })
+
+  it('preserves ownerPluginId and Theme compatibility when normalizing targets', () => {
+    const normalized = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.owner',
+      target: { namespace: 'kind', ownerPluginId: 'plugin.acme', ownerId: 'acme.widgets.chart', fieldKey: 'accent' },
+      upsert: [{ value: 'amber' }],
+    })
+    expect(normalized.target).toBe('kind.plugin%2Eacme.acme%2Ewidgets%2Echart.accent')
+    const theme = validatePluginSettingOptionsContribution({
+      id: 'plugin.palette.theme',
+      target: { namespace: 'theme', ownerId: 'theme', fieldKey: 'accent' },
+      upsert: [{ value: 'amber' }],
+    })
+    expect(theme.target).toBe('theme.accent')
+  })
 })
+
+describe('PluginSettingsStore snapshot stability (React #185 regression)', () => {
+  it('returns a reference-stable empty snapshot for namespaces that never wrote values', async () => {
+    const { PluginSettingsStore } = await import('../pluginSettingsStore.ts')
+    const store = new PluginSettingsStore()
+    const a = store.getSnapshot('never.written')
+    const b = store.getSnapshot('never.written')
+    expect(a).toBe(b)
+  })
+
+  it('keeps the stable empty snapshot distinct from real values and does not resurrect', async () => {
+    const { PluginSettingsStore } = await import('../pluginSettingsStore.ts')
+    const store = new PluginSettingsStore()
+    const empty = store.getSnapshot('plugin.x')
+    store.set('plugin.x', 'key', 'value')
+    expect(store.getSnapshot('plugin.x')).not.toBe(empty)
+    expect(store.getSnapshot('plugin.x')).toEqual({ key: 'value' })
+    store.remove('plugin.x', 'key')
+    expect(store.getSnapshot('plugin.x')).toEqual({})
+    // remove 后回到稳定空快照（与初始空快照同源）
+    expect(store.getSnapshot('plugin.x')).toBe(store.getSnapshot('plugin.x'))
+  })
+})
+

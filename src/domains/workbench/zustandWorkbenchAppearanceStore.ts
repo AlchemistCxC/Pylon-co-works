@@ -1,12 +1,19 @@
 import { useStore } from '../../store.ts'
+import { useWorkspaceStore } from '../../workspaceStore.ts'
 import type { AppearanceCommand, WorkbenchAppearanceStore } from './appearance.ts'
 import { createVanillaWorkbenchAppearanceStore } from './workbenchAppearanceStore.ts'
 
 export function createZustandWorkbenchAppearanceStore(): WorkbenchAppearanceStore {
+  const readTheme = () => ({ ...useStore.getState(), showPet: useWorkspaceStore.getState().showPet })
   return createVanillaWorkbenchAppearanceStore(
     {
-      getState: () => useStore.getState(),
-      subscribe: listener => useStore.subscribe((state, previousState) => listener(state, previousState)),
+      getState: readTheme,
+      subscribe: listener => {
+        const notify = () => { const next = readTheme(); listener(next, next) }
+        const unsubscribeTheme = useStore.subscribe(notify)
+        const unsubscribeWorkspace = useWorkspaceStore.subscribe(notify)
+        return () => { unsubscribeTheme(); unsubscribeWorkspace() }
+      },
     },
     dispatchAppearanceCommand,
   )

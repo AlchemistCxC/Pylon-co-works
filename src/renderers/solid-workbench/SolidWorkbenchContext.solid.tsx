@@ -2,6 +2,7 @@ import { createContext, useContext, type Accessor } from 'solid-js'
 import type { WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
+import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
@@ -16,6 +17,8 @@ export interface SolidWorkbenchContextValue {
   appearanceSnapshot: Accessor<WorkbenchAppearanceSnapshot>
   sessionUi: SessionUiStore
   commands: WorkbenchCommandFacade
+  /** Host-owned, display-only creation phase reader. */
+  sessionCreation?: WorkbenchSessionCreationReader
   /** Present for mounted Suite adapters; legacy unit fixtures may omit it. */
   hostPort?: WorkbenchHostPort
   paused: Accessor<boolean>

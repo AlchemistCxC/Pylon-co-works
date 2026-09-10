@@ -6,6 +6,16 @@ import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { SolidWorkbenchContextValue } from '../SolidWorkbenchContext.solid.tsx'
 import { normalizeWorkbenchMountInput } from '../workbenchContracts.ts'
 
+/** appearance 是每 tick 重建的对象；用稳定化键做浅比较（键排序 + 值稳定序列化）。 */
+function appearanceStableKey(appearance: RenderAppearanceSnapshot): string {
+  const entries = Object.entries(appearance).filter(([, value]) => value !== undefined)
+  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+  return JSON.stringify(entries.map(([key, value]) => {
+    if (typeof value === 'function') return [key, 'function:' + String(value)]
+    try { return [key, JSON.stringify(value) ?? String(value)] } catch { return [key, String(value)] }
+  }))
+}
+
 export function SolidRendererSlotHost(props: {
   candidates: readonly RegistryEntry<RendererSlotContribution>[]
   node: RenderNodeSnapshot
@@ -84,6 +94,7 @@ export function SolidRendererSlotHost(props: {
     unsubscribeError(); unsubscribeError = () => {}
     unsubscribeAction(); unsubscribeAction = () => {}
     surface = undefined; handle = undefined; surfaceMounted = false; currentEntry = undefined
+    lastAppliedUpdate = undefined
     if (mountedSurface && wasMounted) {
       try { mountedSurface.destroy(mountedHandle) } catch (error) {
         report('renderer.slot.destroy.failed', error, 'destroy', mountedEntry)
@@ -157,8 +168,18 @@ export function SolidRendererSlotHost(props: {
     if (!recovered) props.context.reportRendererError?.(error)
   }
 
+  /** P57 S2-R5：浅比较门记录的上次已应用 update 签名（appearance 用稳定化键）。 */
+  let lastAppliedUpdate: {
+    nodeId: string
+    kind: string
+    payload: unknown
+    streaming: boolean | undefined
+    appearanceKey: string
+  } | undefined
+
   onMount(() => {
     if (!mountFrom(0)) props.context.reportRendererError?.(new Error(`Renderer Slot 候选耗尽：${props.node.kind}`))
+    lastAppliedUpdate = undefined
   })
 
   createEffect(() => {
@@ -170,8 +191,22 @@ export function SolidRendererSlotHost(props: {
       slotId: currentEntry?.value.id ?? '',
     }) ?? { ...hostAppearance } as RenderAppearanceSnapshot
     if (!surface || !surfaceMounted) return
+    // P57 S2-R5 方案 A：nodeId/kind/payload 引用/streaming 全等时跳过 surface.update
+    //（零契约变化：update 不被调用，revision 不推进给 surface）。payload 引用稳定性
+    // 由显示链包装复用（toRenderMessage/toSolidMessage WeakMap）保证。appearance 是
+    // 每 tick 重建的对象，用稳定化键比较。
+    const appearanceKey = appearanceStableKey(appearance)
+    if (lastAppliedUpdate !== undefined
+      && lastAppliedUpdate.nodeId === node.nodeId
+      && lastAppliedUpdate.kind === node.kind
+      && lastAppliedUpdate.payload === node.payload
+      && lastAppliedUpdate.streaming === node.streaming
+      && lastAppliedUpdate.appearanceKey === appearanceKey) return
     const resolvedNode = currentKind === node.kind ? node : { ...node, kind: currentKind }
-    try { surface.update(handle, resolvedNode, appearance) } catch (error) { recover(error, 'update') }
+    try {
+      surface.update(handle, resolvedNode, appearance)
+      lastAppliedUpdate = { nodeId: node.nodeId, kind: node.kind, payload: node.payload, streaming: node.streaming, appearanceKey }
+    } catch (error) { recover(error, 'update') }
   })
 
   onCleanup(() => {

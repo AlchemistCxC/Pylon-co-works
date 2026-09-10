@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPreviewWorkbenchRuntime, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
+import { createPreviewWorkbenchRuntime, mergeWorkbenchRuntimeSnapshot, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
 import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
@@ -27,6 +27,96 @@ function initial() {
 }
 
 describe('createPreviewWorkbenchRuntime', () => {
+  it('原子合并终态时强制收敛 generation invariant 并封存 fence', () => {
+    const runtime = createPreviewWorkbenchRuntime({ ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4, generating: true, generationStart: 10 })
+    const terminal = { ...createWorkbenchDocument('session-a'), revision: 9, session: { ...createWorkbenchDocument('session-a').session, status: 'completed' } }
+    runtime.applyDocument(terminal, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: false, summary: null, turnEpoch: 4, terminalFence: { turnEpoch: 4 } })
+    expect(runtime.getSnapshot().generationStart).toBe(0)
+  })
+
+  it('canonical terminal document cannot be revived by a stale controller patch', () => {
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4,
+      generating: true, generationStart: 10,
+    })
+    const terminal = {
+      ...createWorkbenchDocument('session-a'),
+      revision: 9,
+      session: { ...createWorkbenchDocument('session-a').session, status: 'completed' as const },
+    }
+    runtime.applyDocument(terminal, {
+      ownerKey: 'owner-a', generation: 1,
+      generationPatch: { generating: true, generationStart: 999, summary: null },
+    })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: false, terminalFence: { turnEpoch: 4 } })
+    expect(runtime.getSnapshot().generationStart).toBe(0)
+  })
+
+  it('keeps a terminal document closed even when the binding has no turn epoch', () => {
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1,
+      generating: true, generationStart: 10,
+    })
+    const terminal = {
+      ...createWorkbenchDocument('session-a'),
+      revision: 9,
+      session: { ...createWorkbenchDocument('session-a').session, status: 'completed' as const },
+    }
+    runtime.applyDocument(terminal, { ownerKey: 'owner-a', generation: 1 })
+    runtime.applyDocument(terminal, {
+      ownerKey: 'owner-a', generation: 1,
+      generationPatch: { generating: true, generationStart: 999 },
+    })
+    expect(runtime.getSnapshot().generating).toBe(false)
+    expect(runtime.getSnapshot().terminalFence).toBeUndefined()
+  })
+
+  it('does not infer a terminal fence from a completed text row before a delayed tool start', () => {
+    const make = (sequence: number, event: 'message.delta' | 'message.completed' | 'tool.started') => createWorkbenchEnvelope({
+      sessionId: 'session-a', sequence, recordedAt: `2026-08-22T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: 'source-a' }, identity: { messageId: 'message-a', toolCallId: event === 'tool.started' ? 'tool-a' : undefined },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: event === 'tool.started'
+        ? { type: event, tool: { toolCallId: 'tool-a', name: 'Read' } }
+        : { type: event, role: 'assistant', parts: event === 'message.delta' ? [{ kind: 'text', text: 'answer' }] : [] },
+    })
+    const textDone = projectWorkbench([make(1, 'message.delta'), make(2, 'message.completed')]).document
+    const runtime = createPreviewWorkbenchRuntime({
+      ...initial(), ownerKey: 'owner-a', generation: 1, turnEpoch: 4,
+      generating: true, generationStart: 10,
+    })
+    runtime.applyDocument(textDone, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: true })
+    expect(runtime.getSnapshot().terminalFence).toBeUndefined()
+    const withTool = projectWorkbench([make(1, 'message.delta'), make(2, 'message.completed'), make(3, 'tool.started')]).document
+    runtime.applyDocument(withTool, { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
+    expect(runtime.getSnapshot()).toMatchObject({ generating: true })
+  })
+
+  it('新 turnEpoch 清除旧 summary/fence，late active patch 不能复活旧回合', () => {
+    const base = { ...initial(), revision: 0, ownerKey: 'owner-a', generation: 1, turnEpoch: 2, generating: false, summary: { elapsedMs: 1, tokenCount: 1, completedFrame: '', reason: 'done' as const }, terminalFence: { turnEpoch: 2 } }
+    const next = mergeWorkbenchRuntimeSnapshot(base, { turnEpoch: 3, generationPatch: { generating: true, generationStart: 100 } })
+    expect(next).toMatchObject({ turnEpoch: 3, generating: true, summary: null })
+    expect(next.terminalFence).toBeUndefined()
+  })
+
+  it('旧 turnEpoch patch 不能回退当前回合或清除 terminal fence', () => {
+    const base = {
+      ...initial(), revision: 0, ownerKey: 'owner-a', generation: 1, turnEpoch: 5,
+      generating: false, summary: { elapsedMs: 9, tokenCount: 2, completedFrame: '', reason: 'done' as const },
+      terminalFence: { ownerKey: 'owner-a', turnEpoch: 5, sequence: 12 },
+    }
+    const next = mergeWorkbenchRuntimeSnapshot(base, {
+      turnEpoch: 4,
+      terminalFence: null,
+      generationPatch: { generating: true, generationStart: 100 },
+    })
+    expect(next.turnEpoch).toBe(5)
+    expect(next.terminalFence).toMatchObject({ turnEpoch: 5, sequence: 12 })
+    expect(next.summary).toMatchObject({ reason: 'done' })
+    expect(next.generating).toBe(false)
+  })
   it('暴露只读 document view，并按 slice 局部通知', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const messages = vi.fn()
@@ -36,7 +126,7 @@ describe('createPreviewWorkbenchRuntime', () => {
 
     expect(runtime.getSnapshot().document).toBeDefined()
     expect(Object.isFrozen(runtime.getSnapshot().document)).toBe(true)
-    runtime.update({ streamingText: 'token' })
+    runtime.update({ tokenCount: 1 })
     expect(messages).not.toHaveBeenCalled()
     expect(usage).not.toHaveBeenCalled()
     runtime.update({ messages: [{ id: 'm1', role: 'assistant', sender: 'peri', content: 'hello', time: '10:00' }] })
@@ -61,8 +151,7 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
-  it('deep-freezes renderer-facing canonical message payloads', () => {
-    const runtime = createPreviewWorkbenchRuntime(initial())
+  it('deep-freezes renderer-facing canonical message payloads', () => {    const runtime = createPreviewWorkbenchRuntime(initial())
     const document = projectWorkbench([createWorkbenchEnvelope({
       sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
       source: { provider: 'peri', sourceId: 'deep-freeze' }, identity: { messageId: 'm-1' },
@@ -77,6 +166,72 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(Object.isFrozen(message.parts[0])).toBe(true)
     expect(Object.isFrozen(message.identity)).toBe(true)
     expect(Object.isFrozen(message.source)).toBe(true)
+  })
+
+  it('P57 S2-R1b：freezeItems 全等透传返回 previous 数组原引用，内容变化仍产生新数组', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = projectWorkbench([
+      createWorkbenchEnvelope({
+        sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
+        source: { provider: 'peri', sourceId: 'reuse-a' }, identity: { messageId: 'm-1' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'alpha' }] },
+      }),
+      createWorkbenchEnvelope({
+        sessionId: 'session-a', sequence: 2, recordedAt: '2026-08-25T00:00:01.000Z',
+        source: { provider: 'peri', sourceId: 'reuse-b' }, identity: { messageId: 'm-2' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'beta' }] },
+      }),
+    ]).document
+
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const first = runtime.getSnapshot().document!.messages
+    const frozen = runtime.getSnapshot().document!
+
+    // 活路径（applyDocument 携带 previous）下的重投影典型形态：新数组、元素引用
+    // 逐项相等（usage 类事件未触碰 messages）→ freezeItems 全等透传。
+    runtime.applyDocument({ ...frozen, messages: [...frozen.messages] }, { ownerKey: 'owner-a', generation: 1 })
+    expect(runtime.getSnapshot().document!.messages).toBe(first)
+
+    // 内容真实变化仍产生新数组（R1b 不吞变更）。
+    runtime.applyDocument({ ...frozen, messages: frozen.messages.slice(0, -1) }, { ownerKey: 'owner-a', generation: 1 })
+    expect(runtime.getSnapshot().document!.messages).not.toBe(first)
+  })
+
+  it('P57 S2-R1c：usage 类事件间 legacy snapshot.messages 引用保持稳定', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
+      source: { provider: 'peri', sourceId: 'legacy-ref' }, identity: { messageId: 'm-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'stable' }] },
+    })]).document
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const legacyMessages = runtime.getSnapshot().messages
+    const documentMessages = runtime.getSnapshot().document!.messages
+    const frozen = runtime.getSnapshot().document!
+
+    // usage 类事件走活路径（applyDocument）→ messages 引用稳定 → legacy memo 命中
+    runtime.applyDocument({ ...frozen, session: { ...frozen.session, usage: { inputTokens: 7 } } }, { ownerKey: 'owner-a', generation: 1 })
+
+    expect(runtime.getSnapshot().document!.messages).toBe(documentMessages)
+    expect(runtime.getSnapshot().messages).toBe(legacyMessages)
+  })
+
+  it('P57 R1d 红线回归：usage slice 在 session.usage 变化时仍收到局部通知', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = createWorkbenchDocument('session-a')
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const usage = vi.fn()
+    runtime.subscribeSlice('usage', usage)
+
+    runtime.applyDocument({ ...document, session: { ...document.session, usage: { inputTokens: 9 } } }, { ownerKey: 'owner-a', generation: 1 })
+    expect(usage).toHaveBeenCalledTimes(1)
+
+    // session.usage 对象引用换新但数值不变（R1c/R1d 场景）→ slice 引用比较仍通知
+    runtime.applyDocument({ ...document, session: { ...document.session, usage: { inputTokens: 9 } } }, { ownerKey: 'owner-a', generation: 1 })
+    expect(usage).toHaveBeenCalledTimes(2)
   })
 
   it('destroy 幂等并停止后续通知', () => {
@@ -118,9 +273,9 @@ describe('createPreviewWorkbenchRuntime', () => {
     const listener = vi.fn()
     runtime.subscribe(listener)
 
-    // 多次模拟流式 tick：只改 streamingText / tokenCount。
+    // 多次模拟流式 tick：只改 tokenCount（P52 D5 后 canonical 行更新走 applyDocument）。
     for (let t = 1; t <= 50; t++) {
-      runtime.update({ streamingText: `token-${t}`, tokenCount: t })
+      runtime.update({ tokenCount: t })
     }
 
     expect(listener).toHaveBeenCalledTimes(50)

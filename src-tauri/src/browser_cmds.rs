@@ -147,7 +147,9 @@ pub(crate) async fn browser_click(
     if selector.as_deref().unwrap_or_default().trim().is_empty()
         && text.as_deref().unwrap_or_default().trim().is_empty()
     {
-        return Err(PylonError::Protocol("selector 或 text 至少提供一个".to_string()));
+        return Err(PylonError::Protocol(
+            "selector 或 text 至少提供一个".to_string(),
+        ));
     }
     state
         .browser

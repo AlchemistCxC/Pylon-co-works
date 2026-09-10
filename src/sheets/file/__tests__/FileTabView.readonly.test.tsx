@@ -50,11 +50,11 @@ describe('FileTabView 只读代码反馈缝', () => {
     expect(document.querySelectorAll('.file-tab-gutter-line')).toHaveLength(3)
   })
 
-  it('文件 provider 返回损坏响应时显示可诊断错误，不永久停在空白视图', async () => {
+  it('文件 provider 返回损坏响应时转入中央错误中心，不永久停在空白视图', async () => {
     invoke.mockResolvedValue({ invalid: true })
     render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('文件读取响应异常')
+    expect(await screen.findByRole('status')).toHaveTextContent('文件读取失败')
     expect(document.querySelector('.file-tab-code')).toBeNull()
   })
 })

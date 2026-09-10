@@ -1,6 +1,6 @@
 [package]
 name = "pylon"
-version = "1.5.2"
+version = "1.5.9"
 edition = "2021"
 description = "Prism Desktop - AI Agent GUI"
 default-run = "pylon"
@@ -34,18 +34,23 @@ log = "0.4"
 # R2 错误类型化：PylonError Display/Error 由 derive 生成（DTO 序列化仍手写）
 thiserror = "2"
 # 官方 ACP schema（v1 + v2 类型全集）——消除手写协议参数构造
-agent-client-protocol-schema = "1.4"
+# A1a：1.4 → 1.7（session_resume 为标准；session_fork 在 unstable_session_fork 后）
+agent-client-protocol-schema = "1.7"
+# A1a：官方 SDK 连接引擎（D1=①）——引擎落点见施工书 §0（新 crate pylon-acp，纯逻辑不进主 crate）
+agent-client-protocol = "2.1.0"
 dashmap = "6.2.1"
 encoding_rs = "0.8.35"
 regex = "1.13.1"
 backon = "1.6.0"
-tokio-util = { version = "0.7.19", features = ["rt"] }
+shell-words = "1.1"
+tokio-util = { version = "0.7.19", features = ["rt", "compat"] }
 ringbuffer = "0.16.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 serde_yml = "0.0.13"
 sha2 = "0.10"
 pylon-core = { path = "pylon-core" }
+pylon-foundations = { path = "pylon-foundations" }
 chrono = "0.4.45"
 windows-sys = { version = "0.61.2", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 libc = "0.2"
@@ -57,6 +62,8 @@ rusqlite = { version = "0.40", default-features = false, features = ["bundled", 
 # I12-W3：Gateway 凭据 AES-256-GCM envelope 与主密钥归零（用户 2026-08-11 授权新增）
 aes-gcm = "0.10"
 zeroize = { version = "1", features = ["derive"] }
+# P53 D6：zip/URL 安装源（仅 deflate，避免无用编解码器）
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -72,3 +79,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [profile.release]
 # 发布瘦身：去除符号表（实测 -18MB，零运行时影响）
 strip = true
+# 2026-09-07 Riccati：崩溃直接终止（桌面 app 无 FFI 抓 panic 场景），省异常展开表
+panic = "abort"
+# 跨 crate 死代码消除 + 内联（thin 相对 full 增量友好），体积/速度双收
+lto = "thin"

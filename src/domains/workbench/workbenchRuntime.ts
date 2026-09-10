@@ -18,7 +18,7 @@ export type WorkbenchTaskEntry = PlanEntry | PlanEntryV2
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
   | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics' | 'extensions'
-  | 'config' | 'commands' | 'tasks' | 'streaming' | 'capabilities'
+  | 'config' | 'commands' | 'tasks' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
   revision: number
@@ -27,10 +27,12 @@ export interface WorkbenchRuntimeSnapshot {
   ownerKey?: string
   /** Agent/runtime generation associated with the current owner. */
   generation?: number
+  /** Runtime-local turn identity; never persisted to provider/canonical wire. */
+  turnEpoch?: number
+  /** Terminal absorption fence for the current owner/turn. */
+  terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
   messages: readonly Message[]
-  streamingText: string
-  streamingThinking: string
   generating: boolean
   generationPhase?: GenerationPhase
   /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */
@@ -50,6 +52,22 @@ export interface WorkbenchRuntimeSnapshot {
   error: string | null
   /** A04 projection view; legacy fields remain compatibility selectors for the current Solid adapter. */
   document?: WorkbenchDocument
+}
+
+export interface WorkbenchTerminalFence {
+  readonly ownerKey?: string
+  readonly turnEpoch: number
+  readonly eventId?: string
+  readonly sequence?: number
+  readonly arrivalOrdinal?: number
+}
+
+export interface WorkbenchRuntimeMergeInput {
+  readonly document?: WorkbenchDocument
+  readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>
+  readonly terminalFence?: WorkbenchTerminalFence | null
+  readonly turnEpoch?: number
+  readonly preserveGeneration?: boolean
 }
 
 export interface WorkbenchRuntime {
@@ -76,12 +94,16 @@ export interface WorkbenchDocumentApplyOptions {
   readonly sessionId?: string | null
   /**
    * Keep the host-owned generation clock while applying a document projection.
-   * The canonical document and the live controller are separate streams; a
+   * The canonical document and the live TurnClock are separate streams; a
    * projection can briefly omit running rows (or their timestamps) while a
    * turn is still active.  Callers that own an authoritative live generation
    * reader set this flag so that gap cannot reset elapsed time.
    */
   readonly preserveGeneration?: boolean
+  /** Optional atomic turn/generation metadata committed with this document. */
+  readonly turnEpoch?: number
+  readonly terminalFence?: WorkbenchTerminalFence | null
+  readonly generationPatch?: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>
 }
 
 /** Mutable document runtime used by production composition and preview fixtures. */
@@ -91,12 +113,20 @@ export function createWorkbenchRuntime(
   let revision = 0
   let activeOwnerKey = initial.ownerKey
   let activeGeneration = initial.generation
-  let snapshot = freezeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) })
+  let snapshot = freezeSnapshot(normalizeRuntimeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) }))
+  // Provenance of `snapshot.document`.  Documents derived here from legacy
+  // snapshot fields (preview fixtures, legacy-only hosts) may keep rebuilding on
+  // legacy patches.  Documents that entered through applyDocument/replaceDocument
+  // (or a setSnapshot carrying one) are authoritative projections; update()
+  // must never silently replace them — that path drops activities,
+  // interactions, extensions and semantic parts, and zeroes message sequences.
+  let documentLegacyDerived = initial.document === undefined
   const listeners = new Set<() => void>()
   const sliceListeners = new Map<WorkbenchRuntimeSlice, Set<() => void>>()
   let destroyed = false
 
   const publish = (next: WorkbenchRuntimeSnapshot) => {
+    next = normalizeRuntimeSnapshot(next)
     if (destroyed || runtimeSnapshotsEqual(snapshot, next)) return
     const previous = snapshot
     revision += 1
@@ -130,27 +160,40 @@ export function createWorkbenchRuntime(
       }
     },
     setSnapshot(next) {
+      documentLegacyDerived = next.document === undefined
       publish(next)
     },
     update(patch) {
       const next = { ...snapshot, ...patch, revision }
       if (!Object.prototype.hasOwnProperty.call(patch, 'document') && legacyDocumentFields.some(field => Object.prototype.hasOwnProperty.call(patch, field))) {
-        next.document = documentFromLegacy(next)
+        if (documentLegacyDerived) {
+          next.document = documentFromLegacy(next)
+        } else {
+          console.warn('[workbench-runtime] update() 忽略 legacy 字段对 canonical document 的重建；document 只能经 applyDocument/replaceDocument 变更')
+        }
+      } else if (Object.prototype.hasOwnProperty.call(patch, 'document')) {
+        documentLegacyDerived = false
       }
       publish(next)
     },
     applyDocument(document, options = {}) {
       if (!acceptDocument(options)) return
+      documentLegacyDerived = false
       const nextDocument = freezeDocument(document, snapshot.document)
-      const legacy = legacyFieldsFromDocument(nextDocument)
-      const stableLegacy = options.preserveGeneration
-        ? preserveActiveGeneration(snapshot, legacy)
-        : legacy
-      publish({
-        ...snapshot,
-        ...stableLegacy,
+      const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
-        sessionId: nextDocument.sessionId || snapshot.sessionId,
+        preserveGeneration: options.preserveGeneration,
+        turnEpoch: options.turnEpoch,
+        terminalFence: options.terminalFence,
+        generationPatch: options.generationPatch,
+      })
+      publish({
+        ...merged,
+        // The canonical document is keyed by provider source while the host
+        // runtime sessionId is the stable bound Session.id. Applying a live
+        // projection must not silently replace the host identity with the
+        // document's source id; replaceDocument is the explicit identity seam.
+        sessionId: snapshot.sessionId ?? nextDocument.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
         generation: options.generation ?? activeGeneration,
       })
@@ -158,16 +201,21 @@ export function createWorkbenchRuntime(
     replaceDocument(document, options = {}) {
       const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
+      documentLegacyDerived = false
       const nextDocument = freezeDocument(document)
-      const legacy = legacyFieldsFromDocument(nextDocument)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
+      const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
+        document: nextDocument,
+        turnEpoch: options.turnEpoch,
+        terminalFence: options.terminalFence,
+        generationPatch: options.generationPatch,
+      })
       publish({
-        ...snapshot,
-        ...legacy,
+        ...merged,
         // Replacing the owner/session starts a fresh ephemeral activity
         // timeline. Also clear it for an idle replacement so a stale tool
         // label can never survive a bind or terminal snapshot.
-        ...(ownerChanged || sessionChanged || !legacy.generating ? { generationActivity: undefined } : {}),
+        ...(ownerChanged || sessionChanged || !merged.generating ? { generationActivity: undefined } : {}),
         document: nextDocument,
         sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId,
         ownerKey: options.ownerKey ?? activeOwnerKey,
@@ -187,6 +235,8 @@ export function createWorkbenchRuntime(
     const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
     if (ownerChanged && !replace) return false
     if (options.generation !== undefined && activeGeneration !== undefined && options.generation < activeGeneration && !(replace && ownerChanged)) return false
+    if (options.turnEpoch !== undefined && snapshot.turnEpoch !== undefined
+      && options.turnEpoch < snapshot.turnEpoch && !(replace && ownerChanged)) return false
     if (replace && options.ownerKey !== undefined) activeOwnerKey = options.ownerKey
     if (replace && options.generation !== undefined) activeGeneration = options.generation
     return true
@@ -205,15 +255,15 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
   // Bug4（2026-08-20）：弃用全量 JSON.stringify 深比较——流式高频 tick 会对整个含全部历史消息
   // 的 snapshot 做一次 O(总字节) 序列化，消息越多越慢（实测 1000 条 ≈1.4ms/tick，成为流式卡顿
   // 源头）。改为逐字段浅比较：messages/tasks/availableModels 等数组字段在 freezeSnapshot 下引用
-  // 稳定，引用相同即视为一致（避免把"仅 streamingText 变化"误当成整包变化）。
+  // 稳定，引用相同即视为一致。
   return (
     left.sessionId === right.sessionId &&
     left.ownerKey === right.ownerKey &&
     left.generation === right.generation &&
+    left.turnEpoch === right.turnEpoch &&
+    terminalFencesEqual(left.terminalFence, right.terminalFence) &&
     left.status === right.status &&
     left.messages === right.messages &&
-    left.streamingText === right.streamingText &&
-    left.streamingThinking === right.streamingThinking &&
     left.generating === right.generating &&
     left.generationPhase === right.generationPhase &&
     left.generationActivity === right.generationActivity &&
@@ -234,20 +284,122 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
   )
 }
 
+function terminalFencesEqual(left: WorkbenchTerminalFence | undefined, right: WorkbenchTerminalFence | undefined): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.ownerKey === right.ownerKey && left.turnEpoch === right.turnEpoch
+    && left.eventId === right.eventId && left.sequence === right.sequence && left.arrivalOrdinal === right.arrivalOrdinal
+}
+
+/** Atomically reconcile canonical document and generation metadata. */
+export function mergeWorkbenchRuntimeSnapshot(
+  previous: WorkbenchRuntimeSnapshot,
+  input: WorkbenchRuntimeMergeInput,
+): WorkbenchRuntimeSnapshot {
+  const document = input.document ?? previous.document
+  const projected = document ? legacyFieldsFromDocument(document) : {}
+  const stable = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
+  const rawPatch = input.generationPatch ?? {}
+  const requestedEpoch = input.turnEpoch ?? rawPatch.turnEpoch
+  const previousEpoch = previous.turnEpoch
+  // turnEpoch is a monotonic runtime-local fence. A stale clock/document
+  // callback may still arrive after a new turn has started, but it must not
+  // roll the epoch back or clear the newer turn's terminal state.
+  const epochIsOlder = requestedEpoch !== undefined && previousEpoch !== undefined && requestedEpoch < previousEpoch
+  const epochIsNew = requestedEpoch !== undefined && (previousEpoch === undefined || requestedEpoch > previousEpoch)
+  const effectiveEpoch = epochIsOlder ? previousEpoch : requestedEpoch ?? previousEpoch
+  const documentIsTerminal = document !== undefined && hasTerminalDocumentState(document)
+  const patchWithoutControl = { ...(epochIsOlder ? {} : rawPatch) }
+  delete (patchWithoutControl as { turnEpoch?: number }).turnEpoch
+  delete (patchWithoutControl as { terminalFence?: WorkbenchTerminalFence | null }).terminalFence
+  const inferredFence = document && hasTerminalDocumentState(document) && previous.generating && previous.turnEpoch !== undefined && previous.terminalFence === undefined
+    ? { ownerKey: previous.ownerKey, turnEpoch: previous.turnEpoch, sequence: document.revision }
+    : undefined
+  const candidate: WorkbenchRuntimeSnapshot = {
+    ...previous,
+    ...(document ? { ...stable, document, sessionId: document.sessionId || previous.sessionId } : {}),
+    ...patchWithoutControl,
+    ...(effectiveEpoch !== undefined ? { turnEpoch: effectiveEpoch } : {}),
+    ...(epochIsNew
+      ? { terminalFence: undefined }
+      : input.terminalFence === null && !epochIsOlder
+        ? { terminalFence: undefined }
+        : input.terminalFence && !epochIsOlder && input.terminalFence.turnEpoch >= (effectiveEpoch ?? 0)
+          ? { terminalFence: input.terminalFence }
+          : inferredFence ? { terminalFence: inferredFence } : {}),
+  }
+  if (epochIsNew) {
+    candidate.summary = null
+    candidate.terminalFence = undefined
+  }
+  // A canonical terminal projection is authoritative for the current turn.
+  // A late clock patch (TurnClock reconcile, optimistic rollback) can arrive
+  // with a stale active flag; never let that patch resurrect the spinner or
+  // active-only metadata.
+  if (documentIsTerminal && !epochIsNew) {
+    candidate.generating = false
+    candidate.generationStart = 0
+    candidate.generationPhase = undefined
+    candidate.generationActivity = undefined
+    candidate.thinkingStart = undefined
+    if (candidate.terminalFence === undefined && effectiveEpoch !== undefined) {
+      candidate.terminalFence = { ownerKey: candidate.ownerKey, turnEpoch: effectiveEpoch }
+    }
+  } else if (!documentIsTerminal && !epochIsOlder && stable.generating === true && input.document !== undefined && previous.terminalFence !== undefined) {
+    // The fence above outlives the evidence that set it as soon as the next
+    // canonical projection carries a running turn (for example the user echo
+    // after a rebind, or an assistant continuation without a new user turn).
+    // A stale fence in that state pins the indicator terminal forever.
+    candidate.summary = null
+    candidate.terminalFence = undefined
+  }
+  return normalizeRuntimeSnapshot(candidate)
+}
+
+function normalizeRuntimeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
+  if (snapshot.summary !== null || snapshot.terminalFence !== undefined) {
+    // A display-only restored summary must not synthesize a terminal fence:
+    // the fence is only cleared by a turn-epoch advance or an explicit null,
+    // so a synthesized one would pin the indicator terminal and block the
+    // next TurnClock-driven generation from restarting it.
+    const synthesizedFence = snapshot.summary?.displayOnly === true
+      ? undefined
+      : snapshot.turnEpoch !== undefined ? { ownerKey: snapshot.ownerKey, turnEpoch: snapshot.turnEpoch } : undefined
+    const terminalFence = snapshot.terminalFence ?? synthesizedFence
+    return { ...snapshot, generating: false, generationStart: 0, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, ...(terminalFence ? { terminalFence } : {}) }
+  }
+  if (snapshot.generating) return { ...snapshot, summary: null, terminalFence: undefined }
+  return snapshot
+}
+
 function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
   if (!Object.isFrozen(snapshot.messages)) snapshot.messages = Object.freeze([...snapshot.messages])
   if (!Object.isFrozen(snapshot.tasks)) snapshot.tasks = Object.freeze([...snapshot.tasks])
   if (snapshot.document && !Object.isFrozen(snapshot.document)) snapshot.document = freezeDocument(snapshot.document)
+  if (snapshot.terminalFence && !Object.isFrozen(snapshot.terminalFence)) snapshot.terminalFence = Object.freeze({ ...snapshot.terminalFence })
   return Object.freeze(snapshot)
 }
 
 function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocument): WorkbenchDocument {
+  // P57 S2-R1b：全部元素与 previous 逐项引用相等时，直接返回 previousItems 原引用
+  //（已冻结）。此前 items.map 恒产生新数组 → snapshot 侧数组引用每事件必新，
+  // 一切数组引用 memo（legacy fields / 显示链包装）全部落空。
   const freezeItems = <T extends object>(
     items: readonly T[],
     previousItems?: readonly T[],
     freezeItem: (item: T) => T = item => Object.freeze({ ...item }) as T,
   ): readonly T[] => {
     if (items === previousItems && Object.isFrozen(items)) return items
+    if (previousItems !== undefined && Object.isFrozen(previousItems) && items.length === previousItems.length) {
+      let allSame = true
+      for (let index = 0; index < items.length; index += 1) {
+        if (items[index] !== previousItems[index]) {
+          allSame = false
+          break
+        }
+      }
+      if (allSame) return previousItems
+    }
     return Object.freeze(items.map((item, index) => item === previousItems?.[index] && Object.isFrozen(item)
       ? item
       : freezeItem(item)))
@@ -349,7 +501,33 @@ function freezeJsonValue(value: JsonValue): JsonValue {
   return value
 }
 
+// P57 S2-R1c：legacyFieldsFromDocument 模块级单槽 memo。输出字段来源横跨
+// messages/activities/diagnostics/session（v2 勘误：单键 document.messages 不够）。
+// session 键用输出实际消费的 status/model/mode 值而非对象引用——usage 类事件经
+// reduceUsage 会克隆 session 对象，引用键会使 memo 在目标场景恒失效；三者值不变
+// 时输出不变，单槽命中语义与四元组引用比较等价且更精确。数组每事件换新时键必
+// 失效，因此不用 WeakMap。
+let legacyFieldsMemo: {
+  readonly messages: unknown
+  readonly activities: unknown
+  readonly diagnostics: unknown
+  readonly sessionStatus: unknown
+  readonly sessionModel: unknown
+  readonly sessionMode: unknown
+  readonly value: Partial<WorkbenchRuntimeSnapshot>
+} | undefined
+
 function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
+  const memo = legacyFieldsMemo
+  if (memo !== undefined
+    && memo.messages === document.messages
+    && memo.activities === document.activities
+    && memo.diagnostics === document.diagnostics
+    && memo.sessionStatus === document.session.status
+    && memo.sessionModel === document.session.model
+    && memo.sessionMode === document.session.mode) {
+    return memo.value
+  }
   const messages: Message[] = document.messages.map(message => ({
     id: message.id,
     role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
@@ -364,7 +542,10 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     : document.session.status === 'completed' ? 'ready' : 'ready'
   const runningMessages = document.messages.filter(message => message.running)
   const runningActivity = [...document.activities].reverse().find(activity => !isTerminalActivityStatus(activity.status))
-  const generating = runningMessages.length > 0 || runningActivity !== undefined || isActiveSessionStatus(document.session.status)
+  // Lifecycle status alone is not evidence of an active turn. Require a
+  // running message/activity so mode strings and stale status cannot revive
+  // a completed generation.
+  const generating = runningMessages.length > 0 || runningActivity !== undefined
   const runningReasoning = [...runningMessages].reverse().find(message => message.role === 'reasoning')
   const lastRunningMessage = runningMessages.at(-1)
   const generationStart = generating
@@ -379,8 +560,9 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
         runningActivity?.startedAt,
       ]) ?? generationStart
     : undefined
-  return {
-    messages,
+  const value: Partial<WorkbenchRuntimeSnapshot> = {
+    // memo 复用的数组必须先冻结：freezeSnapshot 对未冻结数组会逐次拷贝（引用失稳）。
+    messages: Object.freeze(messages),
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',
@@ -397,22 +579,35 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     thinkingStart: timestampOf(runningReasoning?.time),
     error,
   }
+  legacyFieldsMemo = {
+    messages: document.messages,
+    activities: document.activities,
+    diagnostics: document.diagnostics,
+    sessionStatus: document.session.status,
+    sessionModel: document.session.model,
+    sessionMode: document.session.mode,
+    value,
+  }
+  return value
 }
 
 /**
  * Reconcile a canonical document projection with the host's live generation
- * clock.  `legacyFieldsFromDocument` is intentionally deterministic, but an
- * in-flight projection may contain no running message/activity (or may carry
- * a transient session status).  Falling back to `Date.now()` in that window
- * makes the footer jump back to 0–1s.  The live controller remains the source
- * of truth for the active turn, so retain its ephemeral fields until it
- * explicitly publishes the terminal state.
+ * clock (P52 D3: the clock owner is the session TurnClock).  `legacyFieldsFromDocument`
+ * is intentionally deterministic, but an in-flight projection may contain no
+ * running message/activity (or may carry a transient session status).  Falling
+ * back to `Date.now()` in that window makes the footer jump back to 0–1s.
+ * The TurnClock remains the source of truth for the active turn, so retain its
+ * ephemeral fields until it explicitly publishes the terminal state.
  */
 function preserveActiveGeneration(
   previous: WorkbenchRuntimeSnapshot,
   projected: Partial<WorkbenchRuntimeSnapshot>,
+  document?: WorkbenchDocument,
 ): Partial<WorkbenchRuntimeSnapshot> {
   if (!previous.generating) return projected
+  if (previous.summary !== null || previous.terminalFence !== undefined) return projected
+  if (document && hasTerminalDocumentState(document)) return projected
   return {
     ...projected,
     generating: true,
@@ -424,12 +619,20 @@ function preserveActiveGeneration(
   }
 }
 
-function isTerminalActivityStatus(status: string): boolean {
-  return ['completed', 'failed', 'error', 'cancelled', 'killed', 'timeout'].includes(status.toLowerCase())
+function hasTerminalDocumentState(document: WorkbenchDocument): boolean {
+  const status = document.session.status.toLowerCase()
+  // Only an explicit lifecycle terminal event is sufficient evidence. A
+  // completed assistant/reasoning row is not: providers may emit a delayed
+  // tool.started for the same turn, and inferring a fence from a temporary
+  // text-only gap would stop the footer before that tool is observed.
+  return ['completed', 'error', 'cancelled', 'failed'].includes(status)
+    || document.timeline.some(entry => entry.kind === 'session'
+      && typeof entry.status === 'string'
+      && ['completed', 'error', 'cancelled', 'failed'].includes(entry.status.toLowerCase()))
 }
 
-function isActiveSessionStatus(status: string): boolean {
-  return ['running', 'generating', 'thinking', 'responding', 'working'].includes(status.toLowerCase())
+function isTerminalActivityStatus(status: string): boolean {
+  return ['completed', 'failed', 'error', 'cancelled', 'killed', 'timeout'].includes(status.toLowerCase())
 }
 
 function timestampOf(value: string | undefined): number | undefined {
@@ -466,13 +669,11 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'assist': return document?.assist
     case 'diagnostics': return document?.diagnostics ?? []
     case 'tasks': return snapshot.tasks
-    case 'streaming': return { text: snapshot.streamingText, thinking: snapshot.streamingThinking }
     case 'capabilities': return { canAttach: snapshot.canAttach, promptImage: snapshot.promptImage }
   }
 }
 
 function sliceChanged(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): boolean {
-  if (slice === 'streaming') return left.streamingText !== right.streamingText || left.streamingThinking !== right.streamingThinking
   if (slice === 'capabilities') return left.canAttach !== right.canAttach || left.promptImage !== right.promptImage
   return selectSlice(left, slice) !== selectSlice(right, slice)
 }

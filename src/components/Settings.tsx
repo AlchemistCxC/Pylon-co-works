@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useSyncExternalStore, useId, useLayoutEffect, useRef } from 'react'
-import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { GROUP_ORDER } from '../themeFieldDefs'
@@ -12,10 +11,11 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import { useWorkspaceStore } from '../workspaceStore'
-import { pickCustomPresetTheme } from '../customPresets'
+import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
+import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
-import { reportRuntimeError } from '../runtimeError'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
 import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings/agentTypes'
@@ -32,16 +32,17 @@ import InputPredictionSettingsPanel from './settings/InputPredictionSettingsPane
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
-import { projectRendererSettingsCatalog } from './settings/rendererSettingsCatalog.ts'
 import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
+import { projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
-import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
+import { useRightRailStore } from '../rightRailStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
@@ -197,12 +198,34 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => contextPanelRegistry.getSnapshot(),
     () => contextPanelRegistry.getSnapshot(),
   ).entries
+  const pluginSettingsStore = getPluginSettingsStore()
   const rendererRegistry = getRendererRegistry()
   const rendererRegistrySnapshot = useSyncExternalStore(
     listener => rendererRegistry.subscribe(listener),
     () => rendererRegistry.snapshot(),
     () => rendererRegistry.snapshot(),
   )
+  const activeRendererSuiteId = (() => {
+    const modeId = useInterfaceModeStore.getState().interfaceMode
+    const mode = getInterfaceModeRegistry().resolve(modeId)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === modeId)
+    return mode?.workbench.renderKind === 'renderer-suite'
+      ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
+      : undefined
+  })()
+  const pluginPagesForCatalog = useMemo(() => pluginSettingsPages.map(entry => {
+    if (!entry.value.schema || entry.value.valueAdapter) return entry
+    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'plugin-page' }) } }
+  }), [pluginSettingsPages, pluginSettingsStore])
+  const contextPanelsForCatalog = useMemo(() => contextPanelEntries.map(entry => {
+    if (!entry.value.schema || entry.value.valueAdapter) return entry
+    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'context-panel' }) } }
+  }), [contextPanelEntries, pluginSettingsStore])
+  const settingsContributionCatalog = useMemo(() => projectSettingsContributionCatalog({
+    rendererSnapshot: rendererRegistrySnapshot,
+    activeSuiteId: activeRendererSuiteId,
+    pluginPages: pluginPagesForCatalog,
+    contextPanels: contextPanelsForCatalog,
+  }), [activeRendererSuiteId, rendererRegistrySnapshot, pluginPagesForCatalog, contextPanelsForCatalog])
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
     initialIntent.pluginPageId ?? null,
   )
@@ -214,12 +237,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
   const [customPresetFeedback, setCustomPresetFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [applyingPresetId, setApplyingPresetId] = useState<string | null>(null)
+  const presetApplyRequest = useRef(0)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnectPending, setReconnectPending] = useState(false)
   const [reconnectCommandError, setReconnectCommandError] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
   const [dictFeedback, setDictFeedback] = useState<string | null>(null)
   const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
+
+  const reportSettingsError = (action: string, error: unknown, agentId?: string) => reportRuntimeError(action, error, agentId, {
+    key: `settings:${action}:${agentId ?? 'app'}`,
+    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
+    source: 'settings',
+    recovery: { kind: 'open-runtime-log', agentId },
+  })
+  const resolveSettingsError = (action: string, agentId?: string) => resolveRuntimeErrors({
+    key: `settings:${action}:${agentId ?? 'app'}`,
+  })
 
   // 施工文档 §5.3：Settings 宿主消费 open-settings 事件（ErrorCenter/Overview 恢复入口）。
   useEffect(() => {
@@ -239,17 +274,49 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     applyGlobalPresetTransaction(name)
   }
 
+  const applyCustomPresetTransaction = (requestedId: string): Promise<PresetApplyResult> =>
+    applyCustomPreset(normalizeCustomPresetId(requestedId))
+
+  const applyCustomPresetFromSettings = async (requestedId: string): Promise<PresetApplyResult> => {
+    const id = normalizeCustomPresetId(requestedId)
+    const request = ++presetApplyRequest.current
+    setApplyingPresetId(id)
+    setCustomPresetFeedback(null)
+    try {
+      const result = await applyCustomPreset(id)
+      if (request !== presetApplyRequest.current) return result
+      if (result.status === 'applied') {
+        resolveRuntimeErrors({ key: `preset:${id}` })
+        resolveSettingsError('应用自定义预设')
+        setCustomPresetFeedback({
+          kind: 'success',
+          message: result.unavailable && result.unavailable.length > 0
+            ? `自定义预设已应用（不可用提供者：${result.unavailable.join('、')}）`
+            : '自定义预设已应用',
+        })
+      } else {
+        setCustomPresetFeedback({
+          kind: 'error',
+          message: `自定义预设应用失败（${result.failedProvider}）：${result.message}`,
+        })
+      }
+      return result
+    } catch (error) {
+      const detail = reportSettingsError('应用自定义预设', error)
+      const result: PresetApplyResult = {
+        status: 'failed', id, failedProvider: 'unknown', message: detail.message, rolledBack: false, revision: request,
+      }
+      if (request === presetApplyRequest.current) setCustomPresetFeedback({ kind: 'error', message: `自定义预设应用失败：${detail.message}` })
+      return result
+    } finally {
+      if (request === presetApplyRequest.current) setApplyingPresetId(null)
+    }
+  }
+
   // 改单个字段 — 标记当前 section 对应的 zone 为 custom（非主题 section 回退 global）
   const onSettingChange = (partial: Partial<ThemeSettings>) => {
     const zone = sectionZone(activeSection) || 'global'
     setZoneField(zone, partial)
-  }
-  // 助手头像：Tauri 文件选择 → 存路径到 assistantDotImage（zone=chat）
-  const pickAssistantAvatar = async () => {
-    if (!IS_TAURI) return
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const selected = await open({ multiple: false, filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }] })
-    if (selected) setZoneField('chat', { assistantDotImage: selected as string })
   }
   // 声明式字段渲染上下文（骨架 3）：纯字段组由 themeFieldRenderer 自动渲染
   const renderCtx = { t, onChange: onSettingChange, search: searchQuery }
@@ -273,6 +340,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     const isOverwrite = Boolean(id)
     try {
       const savedId = saveCustomPreset(name, id)
+      resolveSettingsError(isOverwrite ? '覆盖自定义预设' : '保存自定义预设')
       setCustomPresetFeedback({
         kind: 'success',
         message: isOverwrite ? '自定义预设已覆盖' : '自定义预设已保存',
@@ -280,7 +348,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       return savedId
     } catch (error) {
       const action = isOverwrite ? '覆盖自定义预设' : '保存自定义预设'
-      const detail = reportRuntimeError(action, error)
+      const detail = reportSettingsError(action, error)
       setCustomPresetFeedback({ kind: 'error', message: `${action}失败：${detail.message}` })
       return undefined
     }
@@ -304,7 +372,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       setActiveAgent: id => setActiveAgent(id),
       fetchAgentStatus: () => agentClient.agentStatus(),
       applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
-      reportError: (action, error) => reportRuntimeError(action, error),
+      reportError: (action, error) => reportSettingsError(action, error, agentId),
+      resolveError: action => resolveSettingsError(action, agentId),
       dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
     })
     setSwitchingAgentId(null)
@@ -321,11 +390,37 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       applySnapshot: snapshot => setAgentStatus(targetAgent, snapshot),
     })
     if (result.commandError !== undefined) {
-      const detail = reportRuntimeError('重连 Agent', result.commandError)
-      setReconnectCommandError(detail.message)
+      const reconciledStatus = useRuntimeStore.getState().agentStatuses[targetAgent]
+      const recovered = reconciledStatus?.status === 'connected'
+        || reconciledStatus?.status === 'connecting'
+        || reconciledStatus?.status === 'reconnecting'
+      if (recovered) {
+        // The command may reject because reconnect is already in progress;
+        // an authoritative connected/starting snapshot means there is no
+        // active failure to show. Keep the provider text diagnostic-only.
+        reportRuntimeDiagnostic('重连 Agent', result.commandError, targetAgent, {
+          key: `settings:重连 Agent:${targetAgent}`,
+          scope: { kind: 'agent', id: targetAgent },
+          source: 'settings.reconnect',
+          metadata: { reconciledStatus: reconciledStatus.status },
+        })
+        resolveSettingsError('重连 Agent', targetAgent)
+      } else {
+        // Compatibility token retained for the reconnect structure guard:
+        // reportRuntimeError('重连 Agent', result.commandError)
+        const detail = reportSettingsError('重连 Agent', result.commandError, targetAgent)
+        setReconnectCommandError(detail.message)
+      }
+    } else {
+      resolveSettingsError('重连 Agent', targetAgent)
     }
     if (result.reconciliationError !== undefined) {
-      reportRuntimeError('对账 Agent 状态', result.reconciliationError)
+      reportSettingsError('对账 Agent 状态', result.reconciliationError, targetAgent)
+    } else {
+      // A rejected reconnect command can still reconcile successfully against
+      // the authoritative status snapshot; that success must retire any old
+      // reconciliation notice as well.
+      resolveSettingsError('对账 Agent 状态', targetAgent)
     }
     setReconnectPending(false)
   }
@@ -341,9 +436,12 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       applyToolDictionaryThroughPort(getPluginServiceRegistry(), dictionary)
       const providerCount = Object.keys(dictionary as Record<string, unknown> ?? {}).length
       setDictFeedback(providerCount > 0 ? `工具归一化字典已加载（${providerCount} 个 provider）` : '工具归一化字典为空，已使用内置 fallback')
+      resolveSettingsError('重载 Agent 配置')
     } catch (error) {
-      setDictFeedback('工具归一化字典加载失败')
-      reportRuntimeError('重载 Agent 配置', error)
+      setDictFeedback('工具归一化字典加载失败，详情见右下角错误中心')
+      // Compatibility token retained for the reload structure guard:
+      // reportRuntimeError('重载 Agent 配置', error)
+      reportSettingsError('重载 Agent 配置', error)
     } finally { setReloading(false) }
   }
 
@@ -383,13 +481,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const navGroupsFor = (section: SettingsSectionId): readonly { readonly id: string; readonly label: string }[] => {
     // Renderer 的三级项由 owner placement 投影成稳定语义类别；完整 object graph 留在高级目录。
     if (section === 'renderers') {
-      const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value
-        ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
-      const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
-        ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
-        : undefined
-      const projection = projectRendererSettingsCatalog(rendererRegistrySnapshot, activeSuiteId)
-      return projection.categories.map(category => ({ id: category.id, label: category.label }))
+      return settingsContributionCatalog.categories.map(category => ({ id: category.id, label: category.label }))
     }
     const zone = sectionZone(section)
     if (!zone) return []
@@ -405,22 +497,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     // 显式引用依赖项：它们是缓存失效信号（B2），非数据来源——抑制 exhaustive-deps
     void quickSearchOpen
     void rendererRegistrySnapshot.revision
-    try {
-      const snapshot = getRendererRegistry().snapshot()
-      return [...buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries), ...projectRendererSettingsCatalog(snapshot).searchItems]
-    } catch { return buildSettingsSearchIndex(undefined, pluginSettingsPages, contextPanelEntries) }
-  }, [quickSearchOpen, rendererRegistrySnapshot.revision, pluginSettingsPages, contextPanelEntries])
+    void settingsContributionCatalog.revision
+    return settingsContributionCatalog.searchItems
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
       setActiveDomain('appearance')
       setActiveSection('right')
       setActivePluginPageId(null)
+      useRightRailStore.getState().setActivePanel(item.contextPanelId)
+      useRightRailStore.getState().setCollapsed(false)
+      if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.pluginPageId) {
       setActiveDomain('plugins')
       setActiveSection('pluginManager')
       setActivePluginPageId(item.pluginPageId)
+      if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.rendererRoute) {
@@ -467,7 +561,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'templates':
         return (
           <Group title="模板库">
-            <TemplateLibrary onApply={applyGlobalPreset} onRestore={applyGlobalPreset} />
+            <TemplateLibrary onApply={applyGlobalPreset} onRestore={applyGlobalPreset} onCustomApply={applyCustomPresetTransaction} />
           </Group>
         )
       case 'pet':
@@ -512,8 +606,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                   onClick={() => {
                     const id = saveCustomPresetFromSettings(customPresetName)
                     if (id) {
-                      applyCustomPreset(id)
-                      setCustomPresetName('')
+                      void applyCustomPresetFromSettings(id).then(result => {
+                        if (result.status === 'applied') setCustomPresetName('')
+                      })
                     }
                   }}>保存当前</button>
               </div>
@@ -525,7 +620,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
               )}
               {customPresets.length > 0 && <div className="set-custom-presets">
                 {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
-                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} disabled={applyingPresetId !== null} aria-busy={applyingPresetId === preset.id || undefined} onClick={() => { void applyCustomPresetFromSettings(preset.id) }}>{preset.name}</button>
                   <button type="button" className="ps-btn sm" onClick={() => { void saveCustomPresetFromSettings(preset.name, preset.id) }}>覆盖</button>
                   <button type="button" className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
                 </div>)}
@@ -538,7 +633,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'sidebar':
         return (
           <>
-            {!isSearching && <h3>左侧栏</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.sidebar}</h3>}
             {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>
@@ -552,23 +647,13 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           </>
         )
       case 'renderers':
-        return <RendererSettingsPanel search={searchQuery} categoryId={rendererCategoryId} objectKey={rendererObjectKey} density={density} onSelectionChange={setRendererPreviewEntry} />
+        return <RendererSettingsPanel search={searchQuery} categoryId={rendererCategoryId} objectKey={rendererObjectKey} density={density} settingsCatalog={settingsContributionCatalog} onSelectionChange={setRendererPreviewEntry} />
       case 'cc':
         return (
           <>
-            {!isSearching && <h3>中控区</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.cc}</h3>}
             {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="cc" ctx={renderCtx} density={density} />
-            {!isSearching && (
-              <Group title="助手头像">
-                <div className="set-preset-row">
-                  <button type="button" className="ps-btn sm" onClick={() => void pickAssistantAvatar()}>选择图片文件…</button>
-                  {useStore.getState().assistantDotImage && (
-                    <button type="button" className="ps-btn sm" onClick={() => useStore.getState().setZoneField('chat', { assistantDotImage: '' })}>清除</button>
-                  )}
-                </div>
-              </Group>
-            )}
             {!isSearching && <Group title="布局编辑">
               <button type="button" className="ps-btn primary"
                 onClick={() => {
@@ -585,7 +670,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       case 'right':
         return (
           <>
-            {!isSearching && <h3>右侧栏</h3>}
+            {!isSearching && <h3>{SETTINGS_SECTION_LABELS.right}</h3>}
             {!isSearching && <ZonePresetRow zone="right" activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="right" ctx={renderCtx} density={density} />
           </>
@@ -614,8 +699,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                 <div><dt>传输方式</dt><dd>{currentStatus.transport || '未报告'}</dd></div>
                 <div><dt>工作目录</dt><dd title={currentStatus.cwd}>{currentStatus.cwd || '跟随会话'}</dd></div>
               </dl>
+              {/* This is an authoritative Agent status fact, not a dismissible
+                  runtime toast; keep the alert semantics for assistive tech. */}
               {currentStatus.recentError && <div className="agent-settings-notice error" role="alert">最近错误：{currentStatus.recentError}</div>}
-              {reconnectCommandError && <div className="agent-settings-notice error" role="alert">重连失败：{reconnectCommandError}</div>}
+              {reconnectCommandError && <div className="agent-settings-notice error" role="status">重连失败，详情见右下角错误中心</div>}
               {dictFeedback && <div className="agent-settings-notice" role="status">{dictFeedback}</div>}
             </section>
             <Group title="切换 Agent">
@@ -657,9 +744,12 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         return <GatewayRiskPanel />
       case 'prediction':
         return <InputPredictionSettingsPanel />
-      case 'pluginManager':
-        // M12：插件管理页（列表只读 core；signed/dev 停用；本地包安装；日志）
-        return <PluginManager />
+      case 'pluginManager': {
+        // P53：插件管理默认进入管理器插件提供的页面（贡献存在时）；
+        // 包未激活/未授权时贡献不存在，回落宿主基础页（承载能力授权卡）。
+        const managerPage = pluginSettingsPages.find(entry => entry.contributionId === 'pylon-plugin-manager')
+        return managerPage ? <PluginSettingsPageHost pageId={managerPage.contributionId} /> : <PluginManager />
+      }
     }
   }
 
@@ -797,10 +887,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <div className="settings-preview-pane">
             <div className="settings-preview-label">{activeSection === 'renderers' ? 'Renderer fixture' : '实时预览'}</div>
             {activeSection === 'renderers'
-              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} activeSuiteId={(() => {
-                const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
-                return mode?.workbench.renderKind === 'renderer-suite' ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId : undefined
-              })()} />
+              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} settingsCatalog={settingsContributionCatalog} activeSuiteId={activeRendererSuiteId} />
               : <SettingsPreview zone={previewZone!} />}
           </div>
         )}

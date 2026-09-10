@@ -16,7 +16,7 @@ afterEach(() => {
 
 function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAULTS> = {}) {
   const services = createPreviewWorkbenchServices()
-  services.runtime.update({ generating: false, streamingText: '', streamingThinking: '' })
+  services.runtime.update({ generating: false })
   const theme = structuredClone(DEFAULTS)
   services.appearance.setTheme({ ...theme, ...themePatch })
   servicesList.push(services)

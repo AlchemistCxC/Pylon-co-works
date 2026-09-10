@@ -1,6 +1,6 @@
 ﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 1.4.1
+> 适用版本：Pylon 1.5.9
 >
 > 生产契约：Plugin API 1.0，`pylon-plugin.json` schema 1
 
@@ -484,7 +484,7 @@ onError?(error, input) → fallback | rethrow
 
 工具渲染器可提供 summary、search text、output label 和 diff candidate 判断。代码高亮器返回 HTML 字符串或 `null`。
 
-Renderer Engine 与视觉风格正交。用户可在“设置 → 外观 → 终端”选择消息渲染引擎；`auto` 按 `priority / fallback / canRender` 解析。宿主向 `RenderSurface.mount/update` 同时提供语义 `messageProps`、可序列化 `appearance` 和兼容第一方 React facade 的 `component/componentProps`。外置渲染器应消费语义载荷，不应执行宿主 React Component。
+Renderer Engine 与视觉风格正交。用户可在“设置 → 外观 → 渲染器”选择消息渲染引擎（Renderer Suite 选择器，呈现偏好持久化）；`auto` 按 `priority / fallback / canRender` 解析。宿主向 `RenderSurface.mount/update` 同时提供语义 `messageProps`、可序列化 `appearance` 和兼容第一方 React facade 的 `component/componentProps`。外置渲染器应消费语义载荷，不应执行宿主 React Component。
 
 ### 6.4.1 Presentation Profile（渲染风格）
 
@@ -860,7 +860,7 @@ context.storage.clear()
 
 #### 6.11.4 SDK 发行形态
 
-SDK 由 `npm run build:plugin-sdk` 从同一源码同时生成两种形态：
+SDK 由 `bun run build:plugin-sdk` 从同一源码同时生成两种形态：
 
 - **正常版**：`dist-plugin-sdk/normal/`，包含 `pylon-plugin-sdk.js`、
   `testing.js`、完整 `types/` 声明树和 `package.json` exports。将其复制进插件
@@ -1162,7 +1162,7 @@ operation inspect / logs / cancel
 event log
 ```
 
-内置第一方插件当前注册 65 个可执行 Command，覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格/渲染器、插件设置、主题/配置预检、完整 Skin 闭环和 Browser Sheet 控制面。运行时事实以以下命令为准：
+内置第一方插件当前注册 64 个可执行 Command，覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格、插件设置、主题/配置预检、完整 Skin 闭环和 Browser Sheet 控制面。运行时事实以以下命令为准：
 
 ```powershell
 pylon-cli command list --executable true --json

@@ -3,9 +3,7 @@ import { useIdentityStore } from '../../identityStore'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { toAgentContextKey } from '../../agentContext'
 import { useSessionUiState} from '../chat/sessionUiState'
-import { useChatRuntimeSnapshot } from '../chat/useChatRuntimeSnapshot'
-import { messageMatchesQuery, searchValuesMatchQuery } from '../chat/messageSearchIndex'
-import { getChatController } from '../chat/chatEventController'
+import { searchValuesMatchQuery } from '../chat/messageSearchIndex'
 import MessageSearchBar from '../chat/MessageSearchBar'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes'
@@ -85,22 +83,16 @@ export default function AgentContextPanel({ sheet, ctx }: { sheet: SheetRecord; 
     }
   }, [hostPort, legacySearchIndex, legacySearchQuery, sessionId])
 
-  // FE-AUD-012：横向订阅消息版本戳——消息 append 立即进入右栏搜索计数（不再只读一次）。
-  // version 是必要依赖（变化时重读消息），eslint 误判为多余（组件已因 version 重渲染）
-  const { version } = useChatRuntimeSnapshot(source)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const legacyMessages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source, version])
+  // P52 D4：controller legacy 消息回退已退役——搜索命中只来自当前 Sheet 发布的
+  // Workbench Host Port（canonical document）；无 Host Port 时无命中。
   const matches = useMemo(() => {
-    if (!searchQuery.trim()) return []
-    if (hostPort) {
-      return (hostDocument?.messages ?? []).filter(message => searchValuesMatchQuery([
-        message.source.provider,
-        message.content,
-        message.parts,
-      ], searchQuery))
-    }
-    return legacyMessages.filter(message => messageMatchesQuery(message, searchQuery))
-  }, [hostDocument, hostPort, legacyMessages, searchQuery])
+    if (!searchQuery.trim() || !hostPort) return []
+    return (hostDocument?.messages ?? []).filter(message => searchValuesMatchQuery([
+      message.source.provider,
+      message.content,
+      message.parts,
+    ], searchQuery))
+  }, [hostDocument, hostPort, searchQuery])
   const setSearchQuery = (value: string) => {
     setLegacySearchQuery(value)
     hostPort?.sessionUi.set('search-query', value)

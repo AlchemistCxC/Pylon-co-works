@@ -20,6 +20,7 @@ import { isStructuredContentKind, SolidStructuredContent } from './content/Struc
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { capitalizeToolName } from '../../../components/chat/toolPresentationModel.ts'
+import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'
 import { buildToolRenderModel } from '../../../domains/tool/toolPresentation.ts'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
@@ -104,12 +105,12 @@ export function SolidToolInvocationCard(props: {
       onClick={collapse.toggle}>
       <Show when={stringSetting(props.appearance, 'indicator', 'glyph') !== 'none'}>
         <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">
-          {indicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone, props.appearance)}
+          {resolveToolIndicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone, props.appearance)}
         </span>
       </Show>
       <span class="term-tool-name">{displayName()}</span>
-      <Show when={providerName()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
-      <Show when={summary()}>{value => <span class="term-tool-summary"> ({value()})</span>}</Show>
+      <Show when={providerName()}>{value => <span class="term-tool-summary term-tool-summary-code"> ({value()})</span>}</Show>
+      <Show when={summary()}>{value => <span class={`term-tool-summary${toolSummaryUsesCodeFont(renderModel().kind) ? ' term-tool-summary-code' : ''}`}> ({value()})</span>}</Show>
       <span class="term-tool-suffix"> — {presentation().label}</span>
       <Show when={duration()}>{value => <span class="term-tool-duration"> · {value()}</span>}</Show>
     </button>
@@ -153,7 +154,7 @@ export function ToolContentPart(props: { part: ContentPart; appearance?: RenderA
     return <SolidAnsiBlock text={props.part.text} />
   }
   if ((props.part.kind === 'text' || props.part.kind === 'markdown') && 'text' in props.part && typeof props.part.text === 'string') {
-    return <div class={props.class} data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
+    return <div class={`term-tool-prose${props.class ? ` ${props.class}` : ''}`} data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
   }
   if (props.part.kind === 'file-reference' || props.part.kind === 'file-selection' || props.part.kind === 'document' || props.part.kind === 'resource') {
     const canOpen = props.commands?.canExecute?.('resource.open') === true
@@ -270,7 +271,9 @@ function formatDuration(value: number | undefined): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`
 }
 
-function indicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err', appearance: RenderAppearanceSnapshot): string {
+/** Shared with aggregate activity headers so indicator mode/asset resolution
+ * cannot drift from the ordinary tool card. */
+export function resolveToolIndicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err', appearance: RenderAppearanceSnapshot): string {
   if (indicator === 'dot') return '•'
   if (indicator !== 'glyph') return indicator
   return resolveToolIndicatorAssetForTone(tone, {

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "providers": [
     {
       "provider": "peri",
@@ -16,6 +16,10 @@
       "protocolDefaults": { "setModelApi": "config_option" },
       "detection": {
         "detectorId": "builtin.detector.peri",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [{ "command": "peri", "args": ["acp"] }],
         "configDirs": [".peri"],
@@ -25,6 +29,7 @@
           { "relativePath": "settings.json", "format": "json", "fields": ["provider", "model", "models"] }
         ]
       },
+      "adaptation": null,
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["path", "file_path"] },
         { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["path", "file_path"] },
@@ -59,6 +64,10 @@
       "protocolDefaults": { "setModelApi": "set_model" },
       "detection": {
         "detectorId": "builtin.detector.hermes",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [
           { "command": "hermes", "args": ["acp"] },
@@ -70,6 +79,7 @@
           { "relativePath": "config.yml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] }
         ]
       },
+      "adaptation": null,
       "tools": [
         { "name": "read_file", "displayName": "Read File", "kind": "read", "action": "read", "summaryFields": ["path"] },
         { "name": "write_file", "displayName": "Write File", "kind": "edit", "action": "write", "summaryFields": ["path"] },
@@ -108,6 +118,10 @@
       "protocolDefaults": { "setModelApi": "config_option" },
       "detection": {
         "detectorId": "builtin.detector.claude-code",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": null, "uv": null },
+        "checks": [],
         "priority": 100,
         "invocations": [
           { "command": "ccb", "args": ["--acp"] },
@@ -118,6 +132,11 @@
         "configEvidence": [
           { "relativePath": "settings.json", "format": "json", "fields": ["model", "apiKeyHelper", "env.ANTHROPIC_API_KEY", "permissions"] }
         ]
+      },
+      "adaptation": {
+        "adapterRelation": { "nativeCmd": "claude", "nativeLabel": "Claude Code CLI", "sharedConfigDir": "~/.claude", "extraDirs": [".local/bin", ".claude/local"], "docsUrl": "https://docs.codeg.app/guide/supported-agents#acp-adapters" },
+        "clientCapabilities": { "meta": { "subagent-transcript": true, "jetbrains.air": { "version": 1, "capabilities": ["sessionFailure"] } } },
+        "versionGates": { "steeringPromptRequiredMinVersion": "0.65.0", "goalControlOutOfBand": false, "cursorAcpBackend": false }
       },
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["file_path", "path"] },
