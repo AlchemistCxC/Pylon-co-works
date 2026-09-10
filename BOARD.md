@@ -627,3 +627,6 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 
 [2026-09-09 继续] [主施工员·工程师] A5 定向复验：CapabilityRegistry 3 项与 session::model 15 项全绿；未知/空/非 object fail-closed，model/config 仅发送宣告集合值，surface 路由与无广告拒绝保持。
 [2026-09-10 09:22] [主施工员·工程师] A2 usage/permission reducer consumer收口完成：提交 `9c64f02c`。移除 state.rs 模块级 dead_code 允许并压平 reducer clippy 分支；dispatcher 不再二次解析 UsageUpdate，Pet 与 SessionInfo 镜像均由 typed Usage delta 驱动；permission 入队显式消费 queue-depth delta，并保留 session owner 映射。定向：dispatcher 18、session::model 15、acp::state 4 全绿；cargo check --lib 通过。全量 Rust 曾被 prompt hook 测试长时间无输出并锁 linker，已终止，留作独立环境阻塞。
+
+[2026-09-11 03:08] [青栎·工程师] issue.md 追加修复进展：确认 Sidebar 跨 agent/profile 过滤放宽曾由本任务引入 mock 消失，已完全撤回。空态→mock→正文→离开→重入回归测试新增并通过；浏览器 lifecycle 不再清理 mock 快照，提交 88581063。模型成功切换现在由 AgentRendererSuiteWorkbench 将 ACP 空回声成功值投影进 WorkbenchDocument，提交 bc300393；模型/配置控件定向 21 项与 tsc 通过。P60 clippy 先接线 stderr_tail::mark 到 ACP 握手错误窗口，提交 ae576c83；其余 59 条仍是 P60 分片，未用 allow/删除掩盖。
+
