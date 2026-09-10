@@ -1,6 +1,23 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 02:20] [拾烬·工程师] [P67 部分清偿·跨域披露·一条规则不可满足] 用户拍板“全修了”，对 pi-lens 两条阻塞规则逐条实测并**只做能诚实做到的**（`c9cb4265`）。
+
+**已修（3 文件）**：`jsonSnapshot`/`freezeDeepValue` 改泛型——二者是**保形**操作（冻结/克隆同一形状），原先 `unknown` 反而抹掉调用方类型；`freezeDeepValue` 改后 `freezeDeepSnapshot` 多余的 `as T` 直接消失。`selectSlice` 产物按 slice 名天然异构，**泛型实测 tsc 不通过**，改用命名联合 `WorkbenchSliceValue`。五处 `as unknown as` 补 `SAFETY:` 注释写明不变量（脱敏保形/增量构造期索引签名/只拷贝已存在字段/逐字段补齐）。
+
+**未修（实测不可行，已登记 P67）**：变换型函数（`narrowPathValues`/`sanitizeExportValue`/`redactSensitiveInteractionPayload` 等）对 string/array/record **各自改写**、并非原样返回，泛型无法声称返回 `T`（首轮尝试已实证 tsc 报错）；真修法是“共享命名类型 + 参数侧一并收窄”（只改返回类型不健全），跨 workbench/renderers/infrastructure/plugin-runtime/obs/sdk 四域。
+
+**❗ 一条规则不可满足（建议上报 pi-lens 上游）**：`require-safety-comment-for-as-unknown-as` 对 `src/obs05/coldStartSnapshot.ts` 的 188/193 两处**在本仓常用写法下无法满足**。已用主动重扫（`mode=full`）实测定位到规则的**注释锚点边界**：
+- ✅ 可行：加在 `const x = (v as unknown as T).f`（`lexical_declaration`）之上——实测 L185 因此停报；
+- ❌ 不可行：加在 `if ((v as unknown as T).f) return`（cast 嵌在 `if` 条件内）之上；
+- ❌ 不可行：加在 `;(v as unknown as T).f = true`（前导 `;` 被解析为 `empty_statement`，注释错锚）之上。
+
+这与规则自述的 placement contract 一致（“only checks one level up from the assertion and one level up from its immediate containing statement”）。要满足需把这两处**改写成 `const` 中转变量**——属对他域的无关重构，已评估后放弃，并把 obs05 **完整回退到 HEAD**（保持他域零改动）。若本仓要长期启用该规则，需上游修正错位锚点或在本仓 `rules` 适配。
+
+**跨域披露（§2.5）**：`c9cb4265` 触及 `src/domains/workbench/**` 与 `src/renderers/solid-workbench/**`。两份文件在本会话开始时无任何未提交改动，未与原属方冲突；若你们正要在这些文件上动工，请以 `c9cb4265` 为基线。
+
+**校验**：`tsc -b` 0；`lint` 0 errors；`vitest` 473 文件 / 3041 项全绿；`check:solid` 0；`lens_diagnostics mode=all severity=error` 对本会话编辑文件 **0 阻塞**。
+
 [2026-09-11 01:40] [拾烬·工程师] [后端全绿·4 处自死锁已修·两项失败已修·两项转登记] 用户拍板「全修」，逐项结果如下。
 
 **✅ 后端全量由永久挂死 → `913 passed / 0 failed / 4 ignored（5.46s）`**（修前：一套永不完结；修后：911 passed / 2 failed / 18.04s；两项修完即 913/0）。前端 473 文件 / 3041 项全绿。
