@@ -360,26 +360,25 @@ export default function App() {
     // import itself is development/mock-only.
     if (IS_TAURI && !isBrowserMockRuntime()) return
     if (demoSeededRef.current) return
-    demoSeededRef.current = true
-    let disposed = false
     const demoParams = new URLSearchParams(window.location.search)
     void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
-      if (disposed) return
+      if (demoSeededRef.current) return
       runBrowserDemoSeed(setActiveSession, {
         withPermission: demoParams.get('demo-permission') === '1',
         scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : 'visual',
         reset: demoParams.get('demo-reset') === '1',
       })
+      demoSeededRef.current = true
       resolveRuntimeErrors({ key: 'app:browser-demo-bootstrap' })
     }).catch(error => {
-      if (!disposed) reportRuntimeError('加载浏览器演示数据', error, undefined, {
+      if (!demoSeededRef.current) reportRuntimeError('加载浏览器演示数据', error, undefined, {
         key: 'app:browser-demo-bootstrap',
         scope: { kind: 'app', id: 'browser-demo' },
         source: 'app.browser-demo',
         recovery: { kind: 'open-runtime-log' },
       })
     })
-    return () => { disposed = true }
+    return undefined
   }, [])
 
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))
