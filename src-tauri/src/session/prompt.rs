@@ -1522,8 +1522,11 @@ for line in sys.stdin:
             let _ = tx.send(payload);
         });
         let responder_bridge = bridge.clone();
-        tokio::spawn(async move {
-            let request = rx.recv().await.expect("hook request must arrive");
+        let responder = tokio::spawn(async move {
+            let request = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("hook request timed out")
+                .expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let serde_json::Value::Object(ref mut map) = event {
@@ -1552,15 +1555,20 @@ for line in sys.stdin:
             known_peri_id: None,
             ..Default::default()
         };
-        send_prompt_core::<tauri::test::MockRuntime>(
-            app.state::<AppState>().inner(),
-            &runtime,
-            Some(&window),
-            &gateway,
-            &context,
+        tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            send_prompt_core::<tauri::test::MockRuntime>(
+                app.state::<AppState>().inner(),
+                &runtime,
+                Some(&window),
+                &gateway,
+                &context,
+            ),
         )
         .await
+        .expect("hook transform prompt timed out")
         .expect("prompt must succeed");
+        responder.await.expect("hook responder must succeed");
 
         // wire 证据：fake ACP 收到的 prompt 首块文本 = 改写后文本。
         let trace = std::fs::read_to_string(&trace_path).expect("read prompt trace");
