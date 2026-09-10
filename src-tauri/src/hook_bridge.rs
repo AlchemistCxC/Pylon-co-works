@@ -525,7 +525,9 @@ mod tests {
         let (app, window) = mock_app_with_state();
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_USER_BEFORE_SEND]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // tokio 无界通道：`#[tokio::test]` 默认 current_thread 运行时，spawn 的任务与
+        // 被测 future 共用同一个 worker 线程；若在任务里阻塞 recv 会占死线程（死锁）。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -534,7 +536,7 @@ mod tests {
 
         let responder_bridge = bridge.clone();
         let responder = tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -778,7 +780,9 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // 同 bridge_roundtrip：必须用 tokio 通道，避免 current_thread 运行时下
+        // spawn 任务阻塞 recv 占死 worker 线程。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -786,7 +790,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -825,7 +829,9 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // 同 bridge_roundtrip：必须用 tokio 通道，避免 current_thread 运行时下
+        // spawn 任务阻塞 recv 占死 worker 线程。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -833,7 +839,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let Value::Object(ref mut map) = event {
