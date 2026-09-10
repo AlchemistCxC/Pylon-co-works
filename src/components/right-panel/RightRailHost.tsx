@@ -26,7 +26,7 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   const setWidth = useRightRailStore(state => state.setWidth)
   const setBackground = useRightRailStore(state => state.setBackground)
   const [dragWidth, setDragWidth] = useState<number | null>(null)
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null)
   const panelSnapshot = useSyncExternalStore(subscribe, snapshot, snapshot)
   const shellContext = {
     workspaceKind: sheet?.kind,
@@ -43,27 +43,10 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
     setBackground(createBackgroundPresentation(backgroundImage, width, background?.sizing ?? 'fill'))
   }, [backgroundImage, background?.src, background?.sizing, setBackground, width])
 
-  useEffect(() => {
-    if (!dragRef.current) return
-    const onMove = (event: PointerEvent) => {
-      const drag = dragRef.current
-      if (!drag) return
-      const next = clampRightRailWidth(drag.startWidth + drag.startX - event.clientX)
-      setDragWidth(next)
-    }
-    const onUp = () => {
-      if (!dragRef.current) return
-      const next = dragWidth ?? width
-      setWidth(next)
-      dragRef.current = null
-      setDragWidth(null)
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
-  }, [dragWidth, setWidth, width])
+  const cancelDrag = () => {
+    dragRef.current = null
+    setDragWidth(null)
+  }
 
   // Keep the rail mounted while collapsed. The application-level host owns
   // the rail lifetime; retaining the DOM lets the shell animate its width and
@@ -73,7 +56,7 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   const renderedWidth = dragWidth ?? width
   const maxWidth = Math.min(RIGHT_RAIL_MAX_WIDTH, Math.max(RIGHT_RAIL_MIN_WIDTH, window.innerWidth - 360))
   return (
-    <div className={`right-rail-host${collapsed ? ' is-collapsed' : ''}`} data-collapsed={collapsed ? 'true' : 'false'} aria-hidden={collapsed ? 'true' : undefined} data-background-sizing={background?.sizing ?? 'fill'} style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px`, '--right-bg-image': background?.src ? `url(${JSON.stringify(background.src)})` : 'var(--right-bg-image, none)' } as CSSProperties}>
+    <div className={`right-rail-host${collapsed ? ' is-collapsed' : ''}${dragWidth !== null ? ' is-resizing' : ''}`} data-collapsed={collapsed ? 'true' : 'false'} aria-hidden={collapsed ? 'true' : undefined} data-background-sizing={background?.sizing ?? 'fill'} style={{ '--right-rail-width': `${Math.min(renderedWidth, maxWidth)}px`, '--right-bg-image': background?.src ? `url(${JSON.stringify(background.src)})` : 'var(--right-bg-image, none)' } as CSSProperties}>
       <div
         className="right-rail-resize-handle"
         role="separator"
@@ -83,11 +66,26 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
         aria-valuenow={Math.min(renderedWidth, maxWidth)}
         tabIndex={collapsed ? -1 : 0}
         onPointerDown={event => {
-          if (collapsed) return
+          if (collapsed || event.button !== 0 || dragRef.current) return
           event.preventDefault()
-          dragRef.current = { startX: event.clientX, startWidth: width }
+          dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: Math.min(width, maxWidth) }
+          setDragWidth(Math.min(width, maxWidth))
           event.currentTarget.setPointerCapture?.(event.pointerId)
         }}
+        onPointerMove={event => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId) return
+          if (collapsed) { cancelDrag(); return }
+          setDragWidth(Math.min(maxWidth, clampRightRailWidth(drag.startWidth + drag.startX - event.clientX)))
+        }}
+        onPointerUp={event => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId) return
+          if (!collapsed) setWidth(Math.min(maxWidth, clampRightRailWidth(drag.startWidth + drag.startX - event.clientX)))
+          cancelDrag()
+        }}
+        onPointerCancel={event => { if (dragRef.current?.pointerId === event.pointerId) cancelDrag() }}
+        onLostPointerCapture={event => { if (dragRef.current?.pointerId === event.pointerId) cancelDrag() }}
         onKeyDown={event => {
           if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
             event.preventDefault()
