@@ -1394,6 +1394,13 @@ gateway:
         );
         tracing::subscriber::set_global_default(subscriber)
             .expect("本测试是唯一注册全局 subscriber 的测试");
+        // tracing 把每个 callsite 的 `Interest` 缓存在 callsite 自身：若本测试的短路
+        // `warn!` callsite 在装上捕获 subscriber **之前**已被并行的其他测试命中
+        // （此时全局无 subscriber → `NoSubscriber` 返回 `Interest::never()`），该
+        // callsite 会被永久缓存为禁用，本测试便收不到任何告警——实测 10 次全量里失败 1 次
+        // （隔离跑 10/10 通过，证实是并行顺序依赖而非断言逻辑错）。
+        // 重建缓存强制按当前 subscriber 重新评估所有 callsite，消除该顺序依赖。
+        tracing::callsite::rebuild_interest_cache();
         let core = core_with_route();
         let adapter = test_adapter(core);
         adapter.dead_targets.lock().unwrap().insert(

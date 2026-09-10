@@ -129,6 +129,27 @@ async fn fake_acp_crash_triggers_auto_reconnect() {
     .await
     .expect("auto-reconnect must restore Connected within 15s");
 
+    // 会话代际迁移由**异步**的连续性探针完成（`probe_unknown_session_continuity` 在
+    // 重连后 spawn），故 Connected 并不等于迁移已完成——全量并发跑时它还在飞。
+    // 这里轮询等它落定，而非在 Connected 后立即断言（否则是竞态：隔离跑稳过、
+    // 全量负载下失败）。
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let migrated = runtime
+                .sessions
+                .lock()
+                .ok()
+                .and_then(|sessions| sessions.get("source-a").map(|session| session.generation))
+                == Some(1);
+            if migrated {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("kept sessions must migrate generation within 15s");
+
     // 断言：generation +1、sessions 保留且迁移到新代际、防重入标志释放
     assert_eq!(
         runtime.client_generation.load(Ordering::Acquire),
