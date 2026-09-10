@@ -52,8 +52,8 @@
     {
       "vendoredPath": "src-tauri/vendor/acp/acp_transcript.rs",
       "sourcePath": "src-tauri/src/acp_transcript.rs",
-      "sha256": "bebcae80beb8ccb0fcd3984cd3e347d77a5c7751615bc37dfaa950d1622ac002",
-      "modifications": "逐字副本，未修改。Pylon 侧（A3）只取纯算法 parse_transcript / read_chain_in / continuation_ancestors_in / compact_batch，且只作取证导出，不建第二 durable store（D2=①）。",
+      "sha256": "49c489cac79a1a2281a39d09c8ca1f6a448a278354601026d4080cd384fa7376",
+      "modifications": "逐字副本，仅行尾按仓库 .gitattributes 正规化为 LF。Pylon 侧（A3）只取纯算法 parse_transcript / read_chain_in / continuation_ancestors_in / compact_batch，且只作取证导出，不建第二 durable store（D2=①）。",
       "consumer": "A3 → src-tauri/src/acp/transcript.rs",
       "unmigratedDeps": [
         "crate::paths::codeg_acp_transcripts_root()",

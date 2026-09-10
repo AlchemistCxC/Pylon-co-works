@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A0：Pylon 现有 ACP 的 golden trace 基线生成/校验入口。
+// A0/A9：Pylon ACP golden trace 基线生成/校验入口。
 //
 // 用法：
 //   node scripts/generate-acp-golden-trace.mjs           # 重新生成基线并写入 src-tauri/tests/golden-traces/
@@ -11,6 +11,7 @@
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -104,7 +105,11 @@ try {
       throw new Error(`缺少已提交基线目录：${relative(root, baselineDir)}`);
     compareDirs(runA, baselineDir, "基线校验");
   } else {
-    rmSync(baselineDir, { recursive: true, force: true });
+    // 只替换生成的 JSONL，保留目录内的 README 等 provenance 文档。
+    mkdirSync(baselineDir, { recursive: true });
+    for (const name of readdirSync(baselineDir)) {
+      if (name.endsWith(".jsonl")) rmSync(resolve(baselineDir, name), { force: true });
+    }
     for (const name of files)
       cpSync(resolve(runA, name), resolve(baselineDir, name));
   }
