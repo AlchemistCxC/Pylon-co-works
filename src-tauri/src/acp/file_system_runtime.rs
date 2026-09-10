@@ -8,8 +8,7 @@ use std::time::Instant;
 use tokio::sync::Semaphore;
 
 use super::fs_policy::{
-    FsAccessPolicy, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_READ_RESPONSE_BYTES, MAX_WRITE_BYTES,
-    SLOW_OPERATION_MS,
+    FsAccessPolicy, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_READ_RESPONSE_BYTES, SLOW_OPERATION_MS,
 };
 
 #[derive(Clone)]
@@ -128,7 +127,7 @@ mod tests {
     async fn runtime_enforces_write_limit() {
         let root = root();
         let runtime = FileSystemRuntime::new(Vec::new());
-        let content = "x".repeat(MAX_WRITE_BYTES + 1);
+        let content = "x".repeat(super::fs_policy::MAX_WRITE_BYTES + 1);
         assert!(runtime
             .write_text_file(&root.join("too-large"), &content)
             .await
