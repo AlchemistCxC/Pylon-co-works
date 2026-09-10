@@ -1,6 +1,39 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 03:15] [拾烬·工程师] [P67 `narrowPathValues` 已闭环——前四次失败只因漏一行 `as T`]
+
+缠了整个会话的 pi-lens `no-unknown-returns`（`src/obs05/coldStartSnapshot.ts:393`）**已彻底清除**（`a642f241`），且**无需当初预判的四模块级联**。
+
+**关键发现（我自己之前的诊断错了）**：我把 `narrowPathValues` 归为“变换型函数”（理由：它对字符串改写），据此断言泛型不可行。**这是误判**——它**类型上严格保形**：string→string、array→同长数组、object→同键对象、其余恒等。所以 `T` 才是精确契约，原先的 `unknown` 只是抹掉调用方类型。
+
+**前四次失败的真正原因**：泛型尝试中**字符串分支漏了 `as T`**（该分支返回新构造的字符串，TS 无法自行证明其仍属 `T`）。仅此一处。修复即 `<T>(value: T): T` + 三个保形分支各一处 `as T` + `SAFETY:` 注释写明不变性。
+
+**这不是绕过规则**：规则自身文档就把“泛型保持 pass-through 契约精确”列为合法修法，且所断言的是**真实成立**的结构不变性。
+
+**验证**：`tsc -b` 0；`obs04–07` 定向 4 文件 / 91 项通过；主动重扫 `lens_diagnostics mode=full severity=error` 对该文件 **0 错误**。
+
+**残余**：真·变换型函数（`sanitizeExportValue`、`redactSensitiveInteractionPayload` 等——它们确实丢键/改写，无法用泛型）仍未动，已记台账 P67。
+
+**教训（写给后人）**：我四次用“专家口吻”断言此路不通，实际上**第五次就通了，代价只有一行**。把“我试过但失败”写成“这条路不可行”是危险的——应当区分“已证伪”与“我没做对”。
+
+[2026-09-11 03:00] [拾烬·工程师] [两个 CI 级 flake 已修·当前红面归属已隔离] 用户授权继续。本轮最重要的产物是一个**真正在阻塞 CI 的 flake**：
+
+**✅ `b0d8b161` 修两个全量负载下的 flake**（CI 的 Rust job 直接跑 `cargo test --lib`，所以它们随机打红 CI）：
+- `gateway::qq::tests::dead_target_short_circuit_warn_is_throttled_to_one_per_second`：**全量 10 次失败 1 次**、隔离 10/10 过。根因是 tracing 把每个 callsite 的 `Interest` **缓存在 callsite 自身**——该断言涉及的短路 `warn!` callsite 被并行测试先命中（`group:123` 在 L1261/1288/1320/1444/1464 都调 `deliver_text`），此时全局无 subscriber → `NoSubscriber` 返回 `Interest::never()` → callsite 被**永久缓存为禁用**；随后本测试装上捕获 subscriber 也收不到事件。修：`set_global_default` 后调 `tracing::callsite::rebuild_interest_cache()`。**修后全量 15 轮连过**。
+- `auto_reconnect_integration_tests::fake_acp_crash_triggers_auto_reconnect`：我上一轮（`3f930fb6`）只补了 fixture 的 `loadSession`，却仍在 `Connected` 时**立即**断言 generation——而迁移由**异步** spawn 的 `probe_unknown_session_continuity` 完成（失败耗时 5.63s、未等满超时，正说明断言早于迁移）。修：加轮询等待落定再断言。
+
+**⚠️ 因果重要**：那个 `gateway/qq` flake 自 `0a644827`（2026-08-20 公开快照）即存在，**因为后端套件此前永久挂死、从未跑完过而被掩藏多年**（死锁已在 `8401f48f` 修掉）。这类“从未跑完所以无人知道”的隐藏失败，正是修死锁的最大回报。
+**方法论教训（我本轮两次重犯，已录台账）**：修“失败测试”必须先判它是**确定性失败**还是**竞态**；且竞态修复**必须在全量负载下多轮验证**——隔离跑通过不构成证据。我两次都在隔离条件下验而误判已修。
+
+**当前唯一红面：4 项，全部属用户进行中的改动（非本轮引入，我未动）**。严格因果隔离：接线前 `check:frontend` 已含 `test:coverage`（它是失败源）；我的接线只新增 `check:first-party-styles`/`check:bundle`/`build:solid-smoke` 三个**纯静态检查**（不跑 vitest），三者单独实测均通过。
+| 失败 | 断言 | 对应改动 |
+|---|---|---|
+| `test-demo-seed.mts:93` | 要求 `App.tsx` 含 `if (!import.meta.env.DEV) return` | 该行被删（`a0a9b684`）|
+| `test-agent-sidebar.mts:23` | 要求 `Sidebar.tsx` 的 profile/agent/archived filter | `Sidebar.tsx` 被改 |
+| `AgentRuntimePanel.default` ×2 | 期望 `update_agents_config`，实得 `detect_agent_runtimes` | settings 流程被改 |
+**一条待归属的事实**：实测删掉那行 `DEV` 守卫后**生产包仍干净**（`dist/assets` 无可疑 chunk；`grep -rl runBrowserDemoSeed dist/` 无结果）。即断言锁的是“编译期移除”这一**机制**，机制变了但结果恰好仍成立——改断言还是恢复守卫，属用户决策。
+
 [2026-09-11 02:26] [拾烬·工程师] [孤儿门禁已入链条·P66 部分清偿·一个发现需拍板]
 
 **① 孤儿门禁：已修好并接入（P68，两提交）**。仓库有 4 个门禁脚本**无任何链条调用**，其中一个**已静默失效**：`check:first-party-styles` 报 P53 D2 新增的第 6 个 first-party 包 `builtin.pylon-plugin-manager` 的 CSS 未登记（两处漏登 + 快照测试卡 28 项）。
