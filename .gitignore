@@ -51,5 +51,9 @@ codex-code-mode-host.exe
 dist-plugin-devkit/
 dist-plugin-sdk/
 
+# 临时产物目录（测试/静态分析输出）。唯一被跟踪的是 clippy 基线，用负向模式保留。
+/artifacts/
+!/artifacts/clippy-baseline.json
+
 # pi agent 本地运行时状态（goals/tasks 快照，不入库）
 /.pi/

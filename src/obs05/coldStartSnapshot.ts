@@ -182,15 +182,18 @@ export function createIpcTrace(): IpcTrace {
  */
 export function installIpcTraceWrapper(trace: IpcTrace): boolean {
   if (typeof window === 'undefined') return false
+  // SAFETY: `__TAURI_INTERNALS__` 由运行时注入，不在 DOM lib 类型内，故按实际形状探测。
   const internals = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__
   if (!internals || typeof internals.invoke !== 'function') return false
-  const original = internals.invoke as (cmd: string, args?: unknown, options?: unknown) => Promise<unknown>
-  if ((original as unknown as { __obs05Wrapped?: boolean }).__obs05Wrapped) return true
+  /** 幂等标记是本模块自加的私有属性，不属于被包装函数的类型，故并入局部别名。 */
+  type WrappedInvoke = ((cmd: string, args?: unknown, options?: unknown) => Promise<unknown>) & { __obs05Wrapped?: boolean }
+  const original = internals.invoke as WrappedInvoke
+  if (original.__obs05Wrapped) return true
   const wrapped = ((cmd: string, args?: unknown, options?: unknown) => {
     trace.push(cmd, args)
     return original(cmd, args, options)
-  }) as typeof original
-  ;(wrapped as unknown as { __obs05Wrapped?: boolean }).__obs05Wrapped = true
+  }) as WrappedInvoke
+  wrapped.__obs05Wrapped = true
   internals.invoke = wrapped
   return true
 }
