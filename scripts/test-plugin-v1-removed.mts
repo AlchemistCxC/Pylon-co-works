@@ -3,11 +3,22 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
+/** 已解析的 JSON 边界值（本守卫内部只做结构断言，不建领域模型）。 */
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
+// 结构化读取保持 fail-closed：解析失败带路径抛出，绝不静默回落（否则守卫会假绿）。
+const readJson = (path: string): JsonValue => {
+  const text = readFileSync(path, 'utf8')
+  try {
+    return JSON.parse(text) as JsonValue
+  } catch (error) {
+    throw new Error(`${path} JSON 解析失败：${error instanceof Error ? error.message : String(error)}`, { cause: error })
+  }
+}
 // This file is also executed by the strip-only Node legacy runner.  Consume
 // the shared manifest schema here instead of importing the runtime parser
 // (which intentionally uses richer TypeScript syntax) so the guard remains
 // executable in both Node and Vitest.
-const manifestSchema = JSON.parse(readFileSync(join(root, 'shared/pylon-plugin-manifest.schema.json'), 'utf8')) as {
+const manifestSchema = readJson(join(root, 'shared/pylon-plugin-manifest.schema.json')) as {
   properties?: { api?: { enum?: unknown[] } }
 }
 const supportedPluginApiVersions = manifestSchema.properties?.api?.enum
@@ -39,7 +50,7 @@ const walk = (directory: string): string[] => readdirSync(directory)
 
 for (const base of ['examples', 'src/plugins/product/packages']) {
   for (const path of walk(join(root, base)).filter(path => path.endsWith('pylon-plugin.json'))) {
-    const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    const manifest = readJson(path) as Record<string, unknown>
     assert.equal(manifest.schema, 1, `${path} 必须使用 schema 1`)
     assert.ok(
       typeof manifest.api === 'string'
@@ -47,7 +58,10 @@ for (const base of ['examples', 'src/plugins/product/packages']) {
       `${path} 必须使用受支持的 Plugin API（${supportedPluginApiVersions.join('/')}）`,
     )
     assert.equal(typeof (manifest.web as { entry?: unknown } | undefined)?.entry, 'string', `${path} 必须声明 web.entry`)
-    for (const deleted of ['trust', 'capabilities', 'contributes', 'signature', 'entry']) {
+    const deletedFields = manifest.api === '1.2'
+      ? ['trust', 'contributes', 'signature', 'entry']
+      : ['trust', 'capabilities', 'dangerousHooks', 'contributes', 'signature', 'entry']
+    for (const deleted of deletedFields) {
       assert.equal(deleted in manifest, false, `${path} 不得保留旧字段 ${deleted}`)
     }
   }
