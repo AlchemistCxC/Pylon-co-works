@@ -73,6 +73,14 @@ function generateInto(dir) {
   }
 }
 
+/** 比较前统一换行：
+ *  Windows 检出（`.gitattributes` 的 `text=auto`）会把基线读成 CRLF，而生成器恒写 LF；
+ *  这是行尾差异而非内容差异。本仓 `core.autocrlf=false`，故统一为 LF 后做逐字节比较。
+ *  根治在 `.gitattributes` 的 `*.jsonl text eol=lf`；此处的归一化是对既有检出的兼容。 */
+function normalizeEol(text) {
+  return text.replace(/\r\n/g, "\n");
+}
+
 function compareDirs(left, right, label) {
   const leftFiles = readdirSync(left)
     .filter((name) => name.endsWith(".jsonl"))
@@ -86,8 +94,8 @@ function compareDirs(left, right, label) {
     );
   }
   for (const name of leftFiles) {
-    const a = readFileSync(resolve(left, name), "utf8");
-    const b = readFileSync(resolve(right, name), "utf8");
+    const a = normalizeEol(readFileSync(resolve(left, name), "utf8"));
+    const b = normalizeEol(readFileSync(resolve(right, name), "utf8"));
     if (a !== b) throw new Error(`${label}: ${name} 内容不一致`);
   }
   return leftFiles;
