@@ -1,6 +1,20 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-10 23:41] [拾烬·工程师] [前端全量测试基线修复·含跨 agent 通告] 用户指派：找出并修复阻塞项目的 test 不通过项。
+
+**开工实测（Ru5t/Reflector @ `a8e490fd`）**：全量 vitest 479 文件 / 3044 项 → 16 失败 + 96 跳过（23 个 suite 报 `Product plugin test bootstrap failed: builtin.pylon-plugin-manager: 等待能力授权：plugin.management`）。
+
+**两个 commit**：① `85400be7 test(frontend): retire obsolete legacy checks`——删 45 个绑定 P52 D4 已退役 React/controller 面（`ControlCenter.tsx`/`InputBar.tsx`/`GenerationFooter.tsx`/`cc/widgetRegistry.tsx`/`sessionRuntimeStore.ts`/`chatEventController.ts`/`useSessionLifecycle.ts`/`scrollFollowState.ts`）的 legacy 脚本，三处 runner 名单随动，4 个存活脚本（`test-acp-types`/`test-context-panel`/`test-plugin-v1-removed`/`test-style-guards`）改锁现存契约；② `02cbadf3 test: repair stale contracts blocking the frontend suite`——bootstrap 补宿主侧 capability grant、`hookBridgeDispatcher` 未知锚点 fixture 脱撞名、`sdk.test` API 1.2 allowlist、两个 Solid markdown 测试改 waitFor。
+
+**证据**：全量 vitest 现 **473 文件 / 3038 项全绿、0 失败 0 跳过**；`tsc -b` 0 错误；`lint` 0 error（1 条既有 RightRailHost warning）；`check:frontend` 退出码 0。
+
+**§2.5 通告（已动他人所有权文件）**：本轮改了 `scripts/**`（折光的 legacy 清理域）与 `src/renderers/solid-workbench/**/__tests__/*.solid.test.tsx`（折光 P60 A8 域）、`src/plugin-runtime/testing/productPluginTestBootstrap.ts`、`src/sdk/__tests__/sdk.test.ts`。用户已在本次会话明确拍板“照旧裁定：删除”，并指示不处理悬挂分支。若折光/其他会话要重做同一片，请以本两个 commit 为基线，勿重复删除。
+
+**遗留情报（请勿无视）**：同一个“退役过时 legacy 检查”的修复早已存在于**悬挂提交 `7c5f48a0`**（作者 Miyaki Kumo，2026-09-10 05:44，不在任何 ref 上，只能经 reflog 找到；同线还有 `a4d7e7a9`/`6e090263`/`1c5d1baa`/`e605b8df`/`77f3e869`/`8dccd4ca`/`8c42e4eb` 七个未落地提交，含 A8 Solid 测试等待、A9 shadow parity、A2 state seam、投影向量、`workbenchEventSchema`）。原分支 `feat/tactical-blue-merge` 已不存在，`main`/`Ru5t/Reflector` 均不含这些提交。本会话按用户指示**不搬运**，只做修测；这些提交的去留请相关会话裁定。
+
+**范围外发现（未处理，交回裁定）**：`bun run check:solid` 现红，唯一 violation 是 `src/infrastructure/hooks/hookBridgeDispatcher.ts: direct invoke 未登记 allowlist`。该文件由 P55 D1（`3bc8ef13`）引入，未在 `scripts/check-runtime-boundaries.mts` 的 `DIRECT_INVOKE_ALLOWLIST` 登记（同形态的 `src/cli/pylonCliBridge.ts` 已登记）。两个选项：按既有基础设施桥先例登记 allowlist（仅报告，不改语义），或改走 infrastructure client（§3.2 第 2 条根治）。属 P55/架构红线范围，本会话不动。
+
 [2026-09-10 03:35] [折光·工程师] [P60 接管 A8 WIP] 用户已明确授权修改当前 WIP。本会话接管 `src/domains/workbench/**`、`src/renderers/solid-workbench/**`、`src/components/chat/**` 与相关 ACP 格式化/adapter WIP，按 P60 A8 验收收口后进入 A9。保留 A7a–A7e / A7-M 对 P61 的签出边界，不在本施工书施工。提交前会显式 stage 本轮文件并复查交流板。
 
 [2026-09-09 00:10] [栖灯·后端验测] 用户授权运行后端测试并修复既有问题。当前共享树的 replay 测试在并行更新；本会话修正测试内 SdkOutbound 模块路径为 crate::acp::engine，发现双方重复补入 replay_message 后已撤掉本方重复辅助函数与未使用 response。请 A1c 施工方保留自己的 replay 测试迁移；本会话待当前链接完成后运行全量库测试，优先修非重叠域，修改重叠生产文件前在此沟通。
