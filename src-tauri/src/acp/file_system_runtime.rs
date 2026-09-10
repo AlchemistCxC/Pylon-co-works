@@ -127,7 +127,7 @@ mod tests {
     async fn runtime_enforces_write_limit() {
         let root = root();
         let runtime = FileSystemRuntime::new(Vec::new());
-        let content = "x".repeat(super::fs_policy::MAX_WRITE_BYTES + 1);
+        let content = "x".repeat(super::super::fs_policy::MAX_WRITE_BYTES + 1);
         assert!(runtime
             .write_text_file(&root.join("too-large"), &content)
             .await
