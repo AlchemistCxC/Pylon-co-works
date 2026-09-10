@@ -54,7 +54,7 @@ export class PluginScope {
   }
 
   add<T extends PluginResourceDisposable>(resource: T, metadata: PluginResourceMetadata = {}): T {
-    if (this.closing) throw new Error(`PluginScope 已释放：${this.ownerKey}`)
+    this.assertOpen()
     const resourceId = metadata.resourceId ?? `${this.ownerKey}:resource-${++this.resourceSequence}`
     if (this.resources.some(record => record.resourceId === resourceId)) {
       throw new Error(`PluginScope resourceId 重复：${resourceId}`)
@@ -73,6 +73,7 @@ export class PluginScope {
     listener: EventListenerOrEventListenerObject,
     options?: boolean | AddEventListenerOptions,
   ): () => void {
+    this.assertOpen()
     target.addEventListener(type, listener, options)
     let removed = false
     const remove = () => {
@@ -85,6 +86,7 @@ export class PluginScope {
   }
 
   setTimeout(handler: TimerHandler, timeout?: number, ...args: unknown[]): ReturnType<typeof setTimeout> {
+    this.assertOpen()
     const handle = globalThis.setTimeout(handler, timeout, ...args)
     this.add(() => globalThis.clearTimeout(handle), { label: 'timeout' })
     // DOM lib 返回 number、node 类型环境（vite 的 @types/node peer）返回 Timeout：
@@ -93,12 +95,14 @@ export class PluginScope {
   }
 
   setInterval(handler: TimerHandler, timeout?: number, ...args: unknown[]): ReturnType<typeof setInterval> {
+    this.assertOpen()
     const handle = globalThis.setInterval(handler, timeout, ...args)
     this.add(() => globalThis.clearInterval(handle), { label: 'interval' })
     return handle as unknown as ReturnType<typeof setInterval>
   }
 
   createAbortController(): AbortController {
+    this.assertOpen()
     const controller = new AbortController()
     this.add(
       () => controller.abort(`PluginScope disposed: ${this.ownerKey}`),
@@ -120,6 +124,10 @@ export class PluginScope {
       if (this.disposal === operation) this.disposal = undefined
     })
     return operation
+  }
+
+  private assertOpen(): void {
+    if (this.closing) throw new Error(`PluginScope 已释放：${this.ownerKey}`)
   }
 
   private async performDispose(): Promise<PluginScopeDisposeResult> {

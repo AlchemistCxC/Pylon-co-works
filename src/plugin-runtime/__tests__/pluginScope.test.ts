@@ -2,6 +2,37 @@ import { describe, expect, it, vi } from 'vitest'
 import { PluginScope } from '../pluginScope'
 
 describe('PluginScope', () => {
+  it.each(['closing', 'disposed'] as const)('does not acquire resources when scope is %s', async state => {
+    vi.useFakeTimers()
+    const scope = new PluginScope(`test@${state}`)
+    let finishCleanup!: () => void
+    scope.add(() => new Promise<void>(resolve => { finishCleanup = resolve }))
+    const disposal = scope.dispose()
+    const target = new EventTarget()
+    const listener = vi.fn()
+    const timer = vi.fn()
+    try {
+      if (state === 'disposed') {
+        finishCleanup()
+        await disposal
+      }
+      expect(() => scope.listen(target, 'ping', listener)).toThrow('已释放')
+      expect(() => scope.setTimeout(timer, 10)).toThrow('已释放')
+      expect(() => scope.setInterval(timer, 10)).toThrow('已释放')
+      expect(() => scope.createAbortController()).toThrow('已释放')
+      target.dispatchEvent(new Event('ping'))
+      await vi.advanceTimersByTimeAsync(20)
+      expect({ listenerCalls: listener.mock.calls.length, timerCalls: timer.mock.calls.length,
+        pendingTimers: vi.getTimerCount() }).toEqual({ listenerCalls: 0, timerCalls: 0, pendingTimers: 0 })
+    } finally {
+      target.removeEventListener('ping', listener)
+      finishCleanup()
+      await disposal
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
   it('disposeNow waits for async disposal and returns stable cleanup errors', async () => {
     let rejectDisposal!: (error: Error) => void
     const scope = new PluginScope('builtin.test@async-dispose')
