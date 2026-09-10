@@ -1,6 +1,31 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 02:26] [拾烬·工程师] [孤儿门禁已入链条·P66 部分清偿·一个发现需拍板]
+
+**① 孤儿门禁：已修好并接入（P68，两提交）**。仓库有 4 个门禁脚本**无任何链条调用**，其中一个**已静默失效**：`check:first-party-styles` 报 P53 D2 新增的第 6 个 first-party 包 `builtin.pylon-plugin-manager` 的 CSS 未登记（两处漏登 + 快照测试卡 28 项）。
+先修好它（`26e87d36`，**补登记而非放宽校验**：owner 词表 + ownership 条目 + 快照 28→29），再接入链条（按依赖落点）：
+- `check:frontend` += `check:first-party-styles` 与 `build:solid-smoke`，以及 `check:bundle`（须在 `build` **之后**，它读 `dist/assets`）；
+- `check:rust` += `check:acp-shadow`（需 cargo，实测 7.9s）；
+- `.github/workflows/ci.yml` 的 Rust job 同步加（CI 内联 cargo，不跑 `bun run check:rust`）。
+四个门禁单独实测 ✅（1.8/0.5/1.2/7.9s），接入后 **`check:all` 退出码 0**。
+
+**② P66：先清 4 条非 dead_code 诊断（`3bfec891`）**：`let_unit_value`（terminal_runtime）、`cloned_ref_to_slice_refs`（question_policy 测试）、`items_after_test_module`（error.rs 测试模块移到文件末尾）、`too_many_arguments`（dispatcher/mod.rs:526，按同文件 L316/L751 既有模式加 allow 并注明理由）。新增 63 → **59**，**非 dead_code 类 4 → 0**。`cargo test --lib` 913 passed。
+
+**❗ ③ 剩余 59 条经施工书核对：不是死代码，是 P60 待接线的分片目标**。逐模块证据：
+- `question_policy.rs` 16 ← 施工书 §376「`question.rs` 的 `parse_questions`/`validate_specs`/`build_outcome`…」（A4）
+- `transcript.rs` 12 ← §290/§298/§333/§356「纯算法迁入、仅取证导出」（A3）
+- `terminal_policy.rs` 7 ← §372「新增 `terminal.rs`」+ 预算常量（A4）
+- `stderr_tail.rs` 6 ← §92/§185「保留」（A4）
+- `adapter/private_ext/mod.rs` 5 ← §376「provider 私有 parser 迁入 `acp/adapter/private_ext/`」（A4）
+- `fs_policy.rs` 5 ← §372/§376/§384「策略枚举 + 常量」（A4）
+- `plan_policy.rs` 4 ← §376「`plan_approval.rs` 全部」（A4）
+
+且这些模块**已是部分接线状态**（question_policy 7 处生产调用点、terminal_policy 10 处），未接线的另一半属各片的**施工步骤**。
+**所以：“清理”（删除）会摧毁 P60 已迁入的工作；“接线”= 执行 A3/A4 切片（功能施工，有自己的验收矩阵）——两者都不是一次清理能完成的。** 三种处置（接线 / 逐模块 allow(dead_code)+注明 / 刷新基线）已录台账 P66，**待用户或架构师拍板**；未擅自删除任何 P60 工件。
+
+**④ P67（`no-unknown-returns`）**：不动（不在本次批准范围）。已四次实测定位完整级联链（obs04 `sanitizeExportValue` → obs05 工件类型 → obs06/obs07），卡点是 `IpcTrace.push(cmd, args: unknown)` 这个真·未知边界，需设计决策。四次尝试均已回退，涉事文件与 HEAD 字字相同。
+
 [2026-09-11 01:53] [拾烬·工程师] [现场已收干净·check:all 全绿] 用户授权“收拾干净现场”并提权为唯一 agent。收尾动作：
 
 **① 未提交 WIP 全部收口（3 个提交）**：
