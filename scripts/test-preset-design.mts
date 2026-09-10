@@ -69,7 +69,7 @@ for (const preset of GLOBAL_PRESETS) {
   assert.equal('ccCliCustomized' in preset.theme, false, '预设不得携带废弃 ccCliCustomized')
   assert.equal('ccPositions' in preset.theme, false, '预设不得携带废弃 ccPositions')
   assert.equal(expanded.ccStatusFontSize, 16)
-  assert.equal(expanded.inputFontSize, 17)
+  assert.equal(expanded.inputFontSize, 15)
   assert.equal(expanded.cliLineWidth, 2)
   assert.equal(Number.isFinite(expanded.cliLinePadding), true)
   assert.equal((expanded.cliLinePadding as number) >= 0, true)

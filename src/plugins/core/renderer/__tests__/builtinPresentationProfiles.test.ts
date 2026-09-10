@@ -46,6 +46,7 @@ describe('built-in terminal-like presentation profiles', () => {
     expect(BUILTIN_PRESENTATION_PROFILES.find(profile => profile.id === 'builtin.presentation.modern-gui')).toMatchObject({
       family: 'gui',
       interfaceMode: 'modern-gui',
+      tokens: { inputRadius: 20 },
     })
   })
 

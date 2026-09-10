@@ -1,4 +1,4 @@
-.input-bar { position:relative; width:100%; }
+.input-bar { position:relative; width:100%; height:100%; }
 /* 错误浮层：绝对定位，不占布局流（否则出现/消失会把 CLI 输入栏上下推移） */
 .input-error {
   position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px;
@@ -51,7 +51,7 @@
 .queued-message-clear { margin-top:5px; font-size:12px; }
 .app[data-ui-scheme="dark"] .command-palette { --command-bg:#1e1e2e; }
 
-.input-row { display:flex; min-width:0; align-items:flex-end; gap:var(--ui-space-2); }
+.input-row { display:flex; width:100%; height:100%; min-width:0; align-items:stretch; gap:var(--ui-space-2); }
 
 .input-btn {
   background:color-mix(in srgb,var(--cc-input-surface,var(--bg-panel)) var(--cc-input-surface-opacity,100%),transparent); border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent);
@@ -72,11 +72,13 @@
   border-radius:var(--cc-input-radius,var(--input-radius,0)); padding:12px 16px; color:var(--cc-input-text,var(--input-text-color,var(--text)));
   /* Conversation copy and the composer share the message-font role. Code,
      command names and paths opt into --mono below. */
-  font-family:var(--msg-font,var(--font)); font-size:var(--cc-input-font-size,var(--input-font-size,17px)); line-height:1.6;
-  resize:none; outline:none; min-height:var(--cc-input-height,var(--input-min-height,56px)); max-height:240px;
+  font-family:var(--msg-font,var(--font)); font-size:var(--cc-input-font-size,var(--input-font-size,15px)); line-height:var(--cc-input-line-height,1);
+  resize:none; outline:none; overflow-y:hidden; scrollbar-width:none;
+  min-height:calc(var(--cc-input-font-size,var(--input-font-size,15px)) * (1 + var(--cc-input-line-height,1)) + 18px); max-height:240px;
 }
+.input-textarea::-webkit-scrollbar { display:none; }
 .input-editor-stack {
-  position:relative; flex:1; min-width:0;
+  position:relative; flex:1; width:100%; height:100%; min-width:0;
   background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent);
 }
 .input-ghost-suggestion {
@@ -107,7 +109,7 @@
   border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent);
   border-radius:var(--cc-input-radius,var(--input-radius,12px));
   background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent);
-  box-shadow:var(--cc-input-shadow,0 9px 28px rgba(15,23,42,.08));
+  box-shadow:none;
   transition:border-color 160ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 /* 输入栏顶部白色高光（A6-1-FIX 1.2，用户公式）：
@@ -119,21 +121,16 @@
 @supports (mask-composite: intersect) {
   .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode)::before {
     content:'';
-    position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    position:absolute; inset:0; box-sizing:border-box; border-radius:inherit; pointer-events:none; z-index:2;
     background:#fff;
-    opacity:var(--cc-input-highlight-opacity,5%);
-    padding:calc(var(--cc-input-height,var(--input-min-height,56px)) * 0.05);
-    mask-image:linear-gradient(to bottom,#000 30%,transparent 50%),linear-gradient(#000 0 0),radial-gradient(closest-side,#000 0 calc(100% - var(--cc-input-height,var(--input-min-height,56px)) * 0.05),rgba(0,0,0,.5) 100%);
-    mask-clip:border-box,content-box,border-box;
-    mask-composite:intersect,exclude,add;
+    opacity:var(--cc-input-highlight-opacity,var(--input-highlight-opacity,100%));
+    padding:2px;
+    mask:linear-gradient(#000 0 0) border-box, linear-gradient(#000 0 0) content-box;
+    mask-composite:exclude;
   }
 }
 /* hover/聚焦光环（A6-1-FIX 1.3）：经典版式的可视盒是 .input-row，光环挂在行上；
    fallback 链为 光环 → 常态投影，光环关闭时 hover 不变色，常态阴影开关不影响光环。 */
-.input-bar:not(.cli-mode) .input-row:hover,
-.input-bar:not(.cli-mode) .input-row:focus-within {
-  box-shadow:var(--cc-input-focus-ring-shadow,var(--cc-input-shadow,0 9px 28px rgba(15,23,42,.08)));
-}
 /* Composer 也保持静态外框；键盘焦点仍在 textarea 内，可见的是 caret。 */
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-composer-meta {
   display:flex;
@@ -162,19 +159,21 @@
    置于扁平化规则之后以同权重后到胜出；fallback 链同上（光环 → 常态投影）。 */
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode):hover,
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode):focus-within {
-  box-shadow:var(--cc-input-focus-ring-shadow,var(--cc-input-shadow,0 9px 28px rgba(15,23,42,.08)));
+  box-shadow:none;
 }
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-textarea {
-  min-height:48px;
+  height:100%;
+  min-height:0;
   max-height:220px;
   padding:10px 9px 8px;
   border:0;
   border-radius:0;
   background:transparent;
   font-size:var(--cc-input-font-size,var(--input-font-size,14px));
-  line-height:1.5;
+  line-height:var(--cc-input-line-height,1);
   box-shadow:none;
 }
+.input-bar[data-expanded="true"] .input-textarea { max-height:none; }
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-btn {
   width:36px;
   height:36px;

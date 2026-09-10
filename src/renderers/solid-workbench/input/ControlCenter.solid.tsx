@@ -479,6 +479,9 @@ export function SolidControlCenter() {
       {appearance().cliHintMode === 'full' && <span class="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
     </div>
     : null
+  // Keep empty-state/edit-mode controls available for session setup and layout
+  // editing; hide the legacy status widgets from the active conversation view.
+  const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
 
   return <div
     class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
@@ -506,18 +509,19 @@ export function SolidControlCenter() {
       '--cc-input-highlight-opacity': `${inputHighlightOpacityPercent()}%`,
       '--cc-input-shadow-enabled': appearance().inputShadowEnabled ? '1' : '0',
       '--cc-input-shadow': appearance().inputShadowEnabled
-        ? '0 9px 28px rgba(15,23,42,.08)'
+        ? '0 10px 30px rgba(15,23,42,.22)'
         : 'none',
       // 光环独立于阴影（A6-1-FIX 1.3）：光环开启时只产出光环投影；关闭时不产出该变量，
       // CSS 侧 hover/focus-within 回退到常态投影（阴影关闭即无变化）。常态阴影开关只控制 --cc-input-shadow。
       '--cc-input-focus-ring-shadow': appearance().inputFocusRingEnabled
-        ? '0 9px 28px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--accent)) 55%, transparent)'
+        ? '0 -4px 24px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--input-focus-ring-color, var(--accent))) 55%, transparent)'
         : undefined,
       '--cc-input-radius': `${appearance().inputRadius}px`,
       '--cc-input-border': appearance().inputBorder || 'transparent',
       '--cc-input-border-width': `${appearance().inputBorderWidth}px`,
       '--cc-input-border-opacity': `${inputBorderOpacityPercent()}%`,
       '--cc-input-font-size': `${appearance().inputFontSize}px`,
+      '--cc-input-line-height': appearance().inputLineHeight,
       '--cc-input-text': appearance().inputTextColor,
       '--cc-input-placeholder': appearance().inputPlaceholder,
     }}
@@ -539,16 +543,17 @@ export function SolidControlCenter() {
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
     <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
+    <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
         <div class="cc-footer-status">
-          <div class="cc-footer-status-row">{statusSlots()}</div>
+          <Show when={showStatusSlots()}>{statusSlots()}</Show>
           {commandHint()}
         </div>
       </div> : <>
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
-        <div class="cc-status-row">{statusSlots()}{commandHint()}</div>
+        <div class="cc-status-row"><Show when={showStatusSlots()}>{statusSlots()}</Show>{commandHint()}</div>
       </>}
     </div>
     <Show when={submitting() && !sessionEntering()}>

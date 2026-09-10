@@ -598,21 +598,15 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
 
-  it('中控状态分隔符只出现在实际可见控件之间，不产生前导中点', async () => {
+  it('中控状态行关闭旧控件，仅保留命令提示', async () => {
     const { host } = mountPreview()
     const row = await waitFor(() => {
       const value = host.querySelector<HTMLElement>('.cc-status-row')
       expect(value).not.toBeNull()
       return value!
     })
-    const widgets = [...row.querySelectorAll('[data-widget-id]')]
-    const separators = [...row.querySelectorAll<HTMLElement>('.cc-widget-separator')]
-    expect(widgets.length).toBeGreaterThan(0)
-    expect(separators).toHaveLength(widgets.length - 1)
-    expect(row.querySelector('[data-separator-index="0"]')).toBeNull()
-    expect(separators.map(item => item.dataset.separatorIndex)).toEqual(
-      Array.from({ length: widgets.length - 1 }, (_, index) => String(index + 1)),
-    )
+    expect(row.querySelector('[data-widget-id]')).toBeNull()
+    expect(row.querySelector('.cc-widget-separator')).toBeNull()
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {
@@ -641,7 +635,7 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
-    expect(screen.getByRole('button', { name: '添加附件' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '添加附件' })).toBeNull()
     expect(screen.queryByLabelText('输入快捷键提示')).toBeNull()
     expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.querySelectorAll('.input-textarea')).toHaveLength(1)
@@ -850,10 +844,11 @@ describe('mountSolidWorkbench', () => {
     theme.inputSubmitButtonMode = 'inline'
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
     expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
     expect(host.querySelector('.cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toBeNull()
-    expect(screen.getAllByRole('button', { name: '停止生成' })).toHaveLength(1)
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     theme.inputSubmitButtonMode = 'external'
     theme.ccHidden = ['attach']
@@ -861,10 +856,10 @@ describe('mountSolidWorkbench', () => {
     theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('.cc-actions [data-widget-id="send"]')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
     expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
-    expect(Array.from(host.querySelectorAll('.cc-actions [data-widget-id]')).map(node => node.getAttribute('data-widget-id')))
-      .toEqual(['send', 'model'])
+    expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
+    expect(host.querySelector('[data-widget-id="model"]')).toBeNull()
 
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
@@ -884,17 +879,18 @@ describe('mountSolidWorkbench', () => {
     theme.ccHidden = ['send']
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('[data-widget-id="attach"]')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
-    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toHaveAttribute('aria-label', '停止生成')
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
     expect(host.querySelector('.input-btn.attach')).toBeNull()
 
     theme.ccHidden = ['attach']
     services.appearance.setTheme(theme)
-    await waitFor(() => expect(host.querySelector('[data-widget-id="send"]')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
     expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
-    expect(host.querySelector('.input-btn.attach')).toHaveAttribute('aria-label', '添加附件')
+    expect(host.querySelector('.input-btn.attach')).toBeNull()
   })
 
   it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {
@@ -1215,7 +1211,7 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
     expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
     expect(host.textContent).not.toContain('↓ 8 tokens')
-    expect(host.querySelector('[data-widget-id="tokens"]')).toHaveTextContent('8/—')
+    expect(host.querySelector('[data-widget-id="tokens"]')).toBeNull()
     expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 

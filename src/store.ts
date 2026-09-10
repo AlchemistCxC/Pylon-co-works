@@ -60,7 +60,7 @@ export interface ThemeSettings {
   inputSurfaceBg: string; inputSurfaceOpacity: number
   inputBorder: string; inputBorderWidth: number; inputBorderOpacity: number
   inputFocusRingEnabled: 'shown' | 'hidden'; inputFocusRingColor: string; inputHighlightOpacity: number; inputShadowEnabled: 'shown' | 'hidden'
-  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputMinHeight: number
+  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
   inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string

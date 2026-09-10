@@ -1,6 +1,6 @@
 import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, setCcScaleState, updateCcPlacementState } from '../../ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
+import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
 import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
@@ -119,14 +119,14 @@ export function reduceAppearanceCommand(
         }),
         cliOverflowMode: theme.cliOverflowMode,
       })
-      return { ...theme, ccHeight }
+      return settleCcInputBounds({ ...theme, ccHeight }, 'ccHeight')
     }
     case 'update-cc-placement':
       return { ...theme, ccLayout: updateCcPlacementState(theme.ccLayout, command.id, command.placement) }
     case 'set-cc-property':
       return typeof command.value === 'number' && !Number.isFinite(command.value)
         ? theme
-        : settleCcHeight({ ...theme, [command.key]: command.value })
+        : settleCcInputBounds({ ...theme, [command.key]: command.value }, command.key)
     case 'reset-cc-layout':
       return { ...theme, ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT) }
   }
@@ -146,6 +146,22 @@ function settleCcHeight(theme: ThemeSettings): ThemeSettings {
     cliOverflowMode: theme.cliOverflowMode,
   })
   return { ...theme, ccHeight }
+}
+
+function settleCcInputBounds(theme: ThemeSettings, changedKey: string): ThemeSettings {
+  const next = clampInputTypography({ ...theme }, changedKey)
+  if (changedKey === 'ccHeight') {
+    next.ccHeight = Math.min(400, Math.max(next.ccHeight, next.inputOffsetTop + next.inputHeight))
+    return next
+  }
+  if (next.inputHeight + next.inputOffsetTop > next.ccHeight) {
+    if (changedKey === 'inputHeight') {
+      next.inputHeight = Math.max(0, next.ccHeight - next.inputOffsetTop)
+    } else if (changedKey === 'inputOffsetTop') {
+      next.inputOffsetTop = Math.max(0, next.ccHeight - next.inputHeight)
+    }
+  }
+  return settleCcHeight(next)
 }
 
 export function snapshotRevision(snapshot: WorkbenchAppearanceSnapshot): number {

@@ -25,6 +25,8 @@ describe('selectWorkbenchAppearance', () => {
       ccMarginBottom: 15,
       ccRadius: 25,
       inputHeight: 40,
+      inputFontSize: 15,
+      inputLineHeight: '1',
       inputSurfaceBg: '#FFFFFF',
       inputSurfaceOpacity: 1,
       inputRadius: 20,
@@ -194,6 +196,110 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     expect(store.getSnapshot()).toMatchObject({ ccHeight: 160, modelVariant: 'minimal' })
     expect(store.getSnapshot().ccProperties.modelVariant).toBe('minimal')
     expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 48, offsetY: -16 })
+    store.destroy()
+  })
+
+  it('clamps the edited input dimension against control-center height', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({ ccHeight: 150, inputOffsetTop: 20, inputHeight: 100 }))
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 200 })
+    expect(store.getSnapshot()).toMatchObject({ inputOffsetTop: 20, inputHeight: 130 })
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputOffsetTop', value: 140 })
+    expect(store.getSnapshot()).toMatchObject({ inputHeight: 130, inputOffsetTop: 20 })
+
+    store.dispatch({ type: 'set-cc-height', height: 100 })
+    expect(store.getSnapshot().ccHeight).toBe(150)
+    store.destroy()
+  })
+
+  it('applies input typography clamp priority and the height floor', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({ ccHeight: 150, inputHeight: 40, inputFontSize: 16, inputLineHeight: '1' }))
+    store.dispatch({ type: 'set-cc-property', key: 'inputFontSize', value: 16 })
+    expect(store.getSnapshot()).toMatchObject({ inputFontSize: 15, inputLineHeight: '1' })
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputLineHeight', value: '1.5' })
+    expect(store.getSnapshot().inputLineHeight).toBe('1')
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 25 })
+    expect(store.getSnapshot().inputHeight).toBeGreaterThanOrEqual(30)
+    store.destroy()
+  })
+
+  it('preserves fitting default typography and clamps each edit direction', () => {
+    const defaults = theme({ inputHeight: 40, inputFontSize: 15, inputLineHeight: '1' })
+    const store = createStaticWorkbenchAppearanceStore(defaults)
+
+    // Default 15/1/40 already fits and must not be downgraded to line-height 0.5.
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 40 })
+    expect(store.getSnapshot()).toMatchObject({ inputFontSize: 15, inputLineHeight: '1', inputHeight: 40 })
+
+    // Changing the font size preserves the selected line height while reducing
+    // the size to the largest fitting integer.
+    store.dispatch({ type: 'set-cc-property', key: 'inputFontSize', value: 16 })
+    expect(store.getSnapshot()).toMatchObject({ inputFontSize: 15, inputLineHeight: '1', inputHeight: 40 })
+
+    // Changing line height lowers the line-height first when the new value does
+    // not fit, then falls back to font-size only if necessary.
+    store.dispatch({ type: 'set-cc-property', key: 'inputLineHeight', value: '1.5' })
+    expect(store.getSnapshot()).toMatchObject({ inputFontSize: 15, inputLineHeight: '1', inputHeight: 40 })
+
+    store.setTheme(theme({ inputHeight: 40, inputFontSize: 18, inputLineHeight: '1.5' }))
+    store.dispatch({ type: 'set-cc-height', height: 149 })
+    expect(store.getSnapshot()).toMatchObject({ inputLineHeight: '0.5', inputFontSize: 18, inputHeight: 40 })
+    store.destroy()
+  })
+
+  it('raises input height against the effective-area floor without changing typography', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({
+      ccHeight: 150,
+      inputOffsetTop: 5,
+      inputHeight: 25,
+      inputFontSize: 15,
+      inputLineHeight: '1',
+    }))
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 25 })
+    expect(store.getSnapshot()).toMatchObject({ inputHeight: 38, inputFontSize: 15, inputLineHeight: '1' })
+
+    store.setTheme(theme({
+      ccHeight: 150,
+      inputOffsetTop: 5,
+      inputHeight: 25,
+      inputFontSize: 18,
+      inputLineHeight: '0.5',
+    }))
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 25 })
+    expect(store.getSnapshot()).toMatchObject({ inputHeight: 34, inputFontSize: 18, inputLineHeight: '0.5' })
+    store.destroy()
+  })
+
+  it('raises control-center height to contain the input bounds', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({
+      ccHeight: 25,
+      inputOffsetTop: 10,
+      inputHeight: 38,
+      inputFontSize: 15,
+      inputLineHeight: '1',
+    }))
+
+    store.dispatch({ type: 'set-cc-height', height: 25 })
+    // The control-center's existing structural minimum (64px) still applies;
+    // the input-bound requirement is satisfied because 64 >= 10 + 38.
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 64, inputHeight: 38, inputFontSize: 15, inputLineHeight: '1' })
+    store.destroy()
+  })
+
+  it('uses the strict effective-area floor for fractional typography occupancy', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({
+      ccHeight: 150,
+      inputHeight: 22,
+      inputFontSize: 15,
+      inputLineHeight: '0.5',
+    }))
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 22 })
+    expect(store.getSnapshot()).toMatchObject({ inputHeight: 29, inputFontSize: 15, inputLineHeight: '0.5' })
     store.destroy()
   })
 

@@ -16,6 +16,7 @@ import type { CcLayoutV3 } from '../../ccLayoutState.ts'
 import { normalizeCcLayout } from '../../ccLayoutState.ts'
 import {
   clampCcHeight,
+  clampInputTypography,
   resolveVisibleStatusWidgetCount,
   type CcFooterLayout,
   type CcHintMode,
@@ -127,6 +128,21 @@ export function applyInputVariantInvariant(
 export function setZoneFieldReducer(state: ThemePresetState, zone: string, partial: Record<string, unknown>): ThemePresetPatch {
   // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
   const patch = applyInputVariantInvariant(partial, state)
+
+  if (zone === 'cc' && ('inputHeight' in patch || 'inputOffsetTop' in patch || 'inputFontSize' in patch || 'inputLineHeight' in patch)) {
+    const merged = clampInputTypography({ ...state, ...patch } as ThemePresetState & { inputHeight: number; inputFontSize: number; inputLineHeight: string; inputOffsetTop: number })
+    if ('inputFontSize' in patch) patch.inputFontSize = merged.inputFontSize
+    if ('inputLineHeight' in patch) patch.inputLineHeight = merged.inputLineHeight
+    if ('inputHeight' in patch || 'inputFontSize' in patch || 'inputLineHeight' in patch) patch.inputHeight = merged.inputHeight
+    const ccHeight = Number(merged.ccHeight)
+    const inputHeight = Number(merged.inputHeight)
+    const inputOffsetTop = Number(merged.inputOffsetTop)
+    if (Number.isFinite(ccHeight) && Number.isFinite(inputHeight) && Number.isFinite(inputOffsetTop)
+      && inputHeight + inputOffsetTop > ccHeight) {
+      if ('inputHeight' in patch) patch.inputHeight = Math.max(0, ccHeight - inputOffsetTop)
+      else patch.inputOffsetTop = Math.max(0, ccHeight - inputHeight)
+    }
+  }
 
   // cc 高度不变量：高度或影响最小高的结构字段被写时整组收敛。
   // 属性面板/设置页恢复控件或切换 CLI 布局后，状态高度必须与 CSS 实际最小高一致。

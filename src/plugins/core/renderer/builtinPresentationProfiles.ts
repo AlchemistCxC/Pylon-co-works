@@ -56,7 +56,7 @@ export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribu
       msgLineHeight: 1.65, messageUserBg: 'rgba(59,130,246,0.14)', messageAssistantBg: 'rgba(148,163,184,0.10)',
       messageReasoningBg: 'rgba(99,102,241,0.07)', messageBorderColor: 'rgba(99,102,241,0.20)', messageRadius: 16,
       inputMode: 'default', inputVariant: 'composer', inputBg: 'rgba(148,163,184,0.10)',
-      inputBorderColor: 'rgba(148,163,184,0.26)', inputFocusBorder: 'rgba(99,102,241,0.74)', inputRadius: 16,
+      inputBorderColor: 'rgba(148,163,184,0.26)', inputFocusBorder: 'rgba(99,102,241,0.74)', inputRadius: 20,
       ccVariant: 'glass', assistantDot: true, assistantDotGlyph: '◆', toolIndicator: '◆', toolIndicatorGlow: 3,
       toolConnectorMode: 'none', spinnerFramePreset: 'orbit', spinnerVerbSet: 'analysis', cliHintMode: 'hidden', footerLayout: 'peri',
     },

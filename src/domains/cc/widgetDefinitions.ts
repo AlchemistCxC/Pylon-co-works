@@ -56,7 +56,7 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'section', title: '输入栏设置' },
     { kind: 'color', key: 'inputBg', label: '背景色' },
     { kind: 'color', key: 'inputTextColor', label: '文字色' },
-    { kind: 'number', key: 'inputFontSize', label: '字号', min: 12, max: 22, step: 0.1 },
+    { kind: 'number', key: 'inputFontSize', label: '字号', min: 12, max: 22, step: 1 },
     { kind: 'number', key: 'inputMinHeight', label: '最小高度', min: 36, max: 120, step: 0.1 },
     {
       kind: 'chips', key: 'inputMode', label: '模式',

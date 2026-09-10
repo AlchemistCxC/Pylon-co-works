@@ -17,4 +17,9 @@ describe('non-classic composer visual contract', () => {
     expect(css).toContain('[data-interface-mode="modern-gui"] .modern-command-dock .input-bar:not(.cli-mode)')
     expect(css).toContain(':not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode)')
   })
+
+  it('clips composer shadow and focus ring independently without clipping popovers', () => {
+    expect(css).not.toMatch(/\.input-bar:not\(\.cli-mode\)\s*\{[^}]*clip-path:/s)
+    expect(css).toMatch(/\.command-palette\s*\{[^}]*position:absolute/s)
+  })
 })

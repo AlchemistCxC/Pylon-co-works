@@ -63,6 +63,7 @@ export interface WorkbenchAppearanceSnapshot {
   inputBorderOpacity: number
   inputRadius: number
   inputFontSize: number
+  inputLineHeight: string
   inputTextColor: string
   inputPlaceholder: string
   inputShowPlaceholder: boolean
@@ -160,6 +161,7 @@ export function selectWorkbenchAppearance(
     inputBorderOpacity: theme.inputBorderOpacity,
     inputRadius: theme.inputRadius,
     inputFontSize: theme.inputFontSize,
+    inputLineHeight: theme.inputLineHeight,
     inputTextColor: theme.inputTextColor,
     inputPlaceholder: theme.inputPlaceholder,
     inputShowPlaceholder: theme.inputShowPlaceholder !== false,

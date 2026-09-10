@@ -25,7 +25,7 @@ afterEach(() => {
 })
 afterAll(() => { void modelCommand.dispose() })
 
-function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider) {
+function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider, inInputSlot = false) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ sessionId, generating: false, streamingText: '', streamingThinking: '' })
   const theme = structuredClone(DEFAULTS)
@@ -56,7 +56,9 @@ function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' =
     })
     return (
       <SolidWorkbenchContext.Provider value={context}>
-        <SolidInputBar predictionProvider={predictionProvider} />
+        {inInputSlot
+          ? <div class="control-center" style="--cc-height:150px"><div class="cc-input-slot" style="--cc-input-height:40px;--cc-input-offset-top:10px"><SolidInputBar predictionProvider={predictionProvider} /></div></div>
+          : <SolidInputBar predictionProvider={predictionProvider} />}
       </SolidWorkbenchContext.Provider>
     )
   })
@@ -67,10 +69,35 @@ function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' =
       setActiveSessionId(nextSessionId)
       services.runtime.update({ sessionId: nextSessionId })
     },
+    slot: inInputSlot ? document.querySelector<HTMLElement>('.cc-input-slot') : undefined,
+    controlCenter: inInputSlot ? document.querySelector<HTMLElement>('.control-center') : undefined,
   }
 }
 
 describe('SolidInputBar', () => {
+  it('temporarily expands upward to three times the static input height without writing to appearance', async () => {
+    const { services, textarea, slot, controlCenter } = renderInput('session-a', 'composer', undefined, true)
+    expect(slot).toBeTruthy()
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 100 })
+
+    fireEvent.input(textarea, { target: { value: '第一行\n第二行' } })
+    await waitFor(() => expect(slot?.style.height).toBe('100px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('60px')
+    expect(services.appearance.getSnapshot().inputHeight).toBe(40)
+
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 500 })
+    fireEvent.input(textarea, { target: { value: '更多内容' } })
+    await waitFor(() => expect(slot?.style.height).toBe('120px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('80px')
+    expect(textarea.style.overflowY).toBe('auto')
+    expect(services.appearance.getSnapshot().inputHeight).toBe(40)
+
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 40 })
+    fireEvent.input(textarea, { target: { value: '保留一行' } })
+    await waitFor(() => expect(slot?.style.height).toBe('40px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('')
+  })
+
   it('Enter 发送，Shift+Enter 与 IME composition 不发送', async () => {
     const { services, textarea } = renderInput()
     fireEvent.input(textarea, { target: { value: '正常消息' } })
@@ -207,7 +234,7 @@ describe('SolidInputBar', () => {
     services.commands.setHandler('attach', vi.fn(async () => [
       { id: 'a', path: 'C:/a.txt', name: 'a.txt' },
     ]))
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
     expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
 
     services.commands.reset()
@@ -385,7 +412,7 @@ describe('SolidInputBar', () => {
       { id: 'a-copy', path: 'C:/a.txt', name: 'a.txt' },
     ]))
 
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
     expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
     expect(screen.getAllByText(/a\.txt/)).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '移除附件 a.txt' }))
@@ -398,7 +425,7 @@ describe('SolidInputBar', () => {
     const { services, switchSession } = renderInput()
     services.commands.setHandler('attach', vi.fn(() => attachPromise))
 
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
     await waitFor(() => expect(services.commands.calls[0]?.command).toBe('attach'))
     switchSession('session-b')
     resolveAttach?.([{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }])

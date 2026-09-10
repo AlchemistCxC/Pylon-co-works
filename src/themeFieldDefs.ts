@@ -258,7 +258,7 @@ export const THEME_FIELD_DEFS = {
   inputSurfaceOpacity: { ...N('cc', '输入栏背景透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-surface-opacity' },
   inputFocusRingEnabled: { ...S('cc', '焦点光环开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
   inputFocusRingColor: { ...C('cc', '焦点光环颜色'), default: 'var(--accent)', group: '输入栏' },
-  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 0.05, group: '输入栏', percent: true, suffix: '%' },
+  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%' },
   inputShadowEnabled: { ...S('cc', '输入栏阴影开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
   inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入与状态", semanticRole: 'surface.raised', semanticSource: true },
   inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },
@@ -271,7 +271,8 @@ export const THEME_FIELD_DEFS = {
   inputBorderWidth: { ...N('cc', '输入栏边框粗细', 0, 8), default: 1, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-border-width' },
   inputBorderOpacity: { ...N('cc', '输入栏边框透明度', 0, 1, 0.05), default: 0, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-border-opacity' },
   inputRadius: { ...N('cc', '输入栏圆角', 0, 28), default: 20, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-radius' },
-  inputFontSize: { ...N('cc', '输入字号', 12, 22), tier: 'basic', default: 17, group: '输入栏', unit: 'px', cssVar: '--cc-input-font-size' },
+  inputFontSize: { ...N('cc', '输入字号', 12, 22, 1), tier: 'basic', default: 15, group: '输入栏', unit: 'px', cssVar: '--cc-input-font-size' },
+  inputLineHeight: { ...S('cc', '输入行距', ['0.5', '1', '1.5']), default: '1', group: '输入栏', cssVar: '--cc-input-line-height' },
   inputMinHeight: { ...N('cc', '输入栏最小高度', 32, 120), default: 56, group: "输入与状态", unit: 'px', advanced: true },
   inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', control: 'segmented', group: "输入与状态", },
   inputVariant: { ...S('cc', '输入栏外观', ['cli', 'composer', 'compact', 'command']), optionLabels: { cli: '命令行', composer: '标准编辑器', compact: '紧凑输入', command: '命令面板' }, default: 'cli', syncOnChange: ['inputMode'], group: "控件样式", },
@@ -363,7 +364,7 @@ export const THEME_FIELD_OWNERS: Readonly<Record<ThemeFieldKey, { readonly zone:
 export const THEME_CSS_VAR_MAP: Readonly<Record<string, ThemeFieldKey>> = THEME_FIELD_KEYS.reduce((acc, key) => {
   const def = THEME_FIELD_DEFS[key]
   if (def.noCssVar) return acc
-  if (def.type === 'color' || def.type === 'number') {
+  if (def.type === 'color' || def.type === 'number' || key === 'inputLineHeight') {
     const cssVar = def.cssVar ?? `--${key.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`
     acc[cssVar] = key
   }
