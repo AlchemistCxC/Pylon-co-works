@@ -3,30 +3,38 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::Semaphore;
 
 use super::fs_policy::{
-    ensure_path_allowed, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_FILE_SIZE_BYTES,
-    MAX_READ_RESPONSE_BYTES, MAX_WRITE_BYTES,
+    FsAccessPolicy, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_READ_RESPONSE_BYTES, MAX_WRITE_BYTES,
+    SLOW_OPERATION_MS,
 };
 
 #[derive(Clone)]
 pub struct FileSystemRuntime {
-    roots: Arc<Vec<PathBuf>>,
+    policy: Arc<FsAccessPolicy>,
     operations: Arc<Semaphore>,
 }
 
 impl FileSystemRuntime {
     pub fn new(roots: Vec<PathBuf>) -> Self {
         Self {
-            roots: Arc::new(roots),
+            policy: Arc::new(if roots.is_empty() {
+                FsAccessPolicy::unrestricted()
+            } else {
+                // Callers provide already-resolved workspace roots; retain the
+                // existing fail-closed behavior if policy construction fails.
+                FsAccessPolicy::from_roots(roots)
+            }),
             operations: Arc::new(Semaphore::new(MAX_CONCURRENT_OPS)),
         }
     }
 
     pub async fn read_text_file(&self, path: &Path) -> Result<String, String> {
-        ensure_path_allowed(path, &self.roots, false)?;
+        self.policy.check_read(path)?;
+        let started = Instant::now();
         let permit = self
             .operations
             .clone()
@@ -37,7 +45,7 @@ impl FileSystemRuntime {
             .await
             .map_err(|_| "filesystem metadata timed out".to_string())?
             .map_err(|e| e.to_string())?;
-        if metadata.len() > MAX_FILE_SIZE_BYTES {
+        if !super::fs_policy::read_size_allowed(metadata.len()) {
             return Err("file exceeds maximum size".to_string());
         }
         let content = tokio::time::timeout(IO_TIMEOUT, tokio::fs::read_to_string(path))
@@ -48,12 +56,16 @@ impl FileSystemRuntime {
         if content.len() > MAX_READ_RESPONSE_BYTES {
             return Err("read response exceeds maximum size".to_string());
         }
+        if started.elapsed().as_millis() > SLOW_OPERATION_MS {
+            tracing::debug!(path = %path.display(), "slow ACP filesystem read");
+        }
         Ok(content)
     }
 
     pub async fn write_text_file(&self, path: &Path, content: &str) -> Result<(), String> {
-        ensure_path_allowed(path, &self.roots, true)?;
-        if content.len() > MAX_WRITE_BYTES {
+        self.policy.check_write(path)?;
+        let started = Instant::now();
+        if !super::fs_policy::write_size_allowed(content.len()) {
             return Err("write content exceeds maximum size".to_string());
         }
         let permit = self
@@ -67,6 +79,9 @@ impl FileSystemRuntime {
             .map_err(|_| "filesystem write timed out".to_string())?
             .map_err(|e| e.to_string())?;
         drop(permit);
+        if started.elapsed().as_millis() > SLOW_OPERATION_MS {
+            tracing::debug!(path = %path.display(), "slow ACP filesystem write");
+        }
         Ok(())
     }
 }
