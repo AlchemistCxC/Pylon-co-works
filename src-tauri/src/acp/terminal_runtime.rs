@@ -270,7 +270,7 @@ fn spawn_reader<R: Read + Send + 'static>(
                     pending.extend_from_slice(&buf[..n]);
                     let text = String::from_utf8_lossy(&pending).into_owned();
                     pending.clear();
-                    let _ = handle.block_on(terminal.append_output(&text));
+                    handle.block_on(terminal.append_output(&text));
                 }
                 Err(_) => break,
             }

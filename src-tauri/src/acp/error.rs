@@ -325,27 +325,6 @@ impl From<AcpError> for String {
     }
 }
 
-#[cfg(test)]
-mod resume_failure_tests {
-    use super::{AcpError, ResumeFailureClass};
-
-    #[test]
-    fn classify_resume_failures_for_fallback_policy() {
-        assert_eq!(
-            AcpError::Rpc("session archived".into()).resume_failure_class(),
-            ResumeFailureClass::Archived
-        );
-        assert_eq!(
-            AcpError::Rpc("session busy".into()).resume_failure_class(),
-            ResumeFailureClass::Busy
-        );
-        assert_eq!(
-            AcpError::ConnectionClosed.resume_failure_class(),
-            ResumeFailureClass::Unavailable
-        );
-    }
-}
-
 impl From<AcpError> for crate::error::PylonError {
     fn from(error: AcpError) -> Self {
         if matches!(&error, AcpError::ReplayLoadInProgress) {
@@ -403,3 +382,24 @@ pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
 pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
+
+#[cfg(test)]
+mod resume_failure_tests {
+    use super::{AcpError, ResumeFailureClass};
+
+    #[test]
+    fn classify_resume_failures_for_fallback_policy() {
+        assert_eq!(
+            AcpError::Rpc("session archived".into()).resume_failure_class(),
+            ResumeFailureClass::Archived
+        );
+        assert_eq!(
+            AcpError::Rpc("session busy".into()).resume_failure_class(),
+            ResumeFailureClass::Busy
+        );
+        assert_eq!(
+            AcpError::ConnectionClosed.resume_failure_class(),
+            ResumeFailureClass::Unavailable
+        );
+    }
+}

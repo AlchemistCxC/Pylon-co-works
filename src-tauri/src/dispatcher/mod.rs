@@ -523,6 +523,8 @@ pub(crate) fn resolve_agent_provider(
 /// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
 /// P0-3（R2-WI03）：provider-scoped adapter dispatch——未注册 provider 明确
 /// unsupported + runtime log 可观察，不生成 RPC；classify 非 interaction 同样丢弃。
+/// 参数多为各锁/上下文的按引用透传（与同文件 L316/L751 同类），故保留显式形参。
+#[allow(clippy::too_many_arguments)]
 async fn handle_permission_request<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     acp: &AcpLock,
