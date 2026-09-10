@@ -665,3 +665,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 继续] [主施工员·工程师] 私有交互接线：提交 `c57c592b`，dispatcher 对 Codeg 兼容的 `_x.ai/ask_user_question`、`pi/select_ask`、`_x.ai/exit_plan_mode` 先走 typed policy fail-closed 校验，malformed payload 返回 `-32602`，未知方法仍保持既有 unsupported 语义；定向 3 项与 `cargo check --lib` 通过。
 
 [2026-09-11 继续] [主施工员·工程师] P60 小片：提交 `1e1eef3a`，session revive 改用 `CapabilityRegistry::supports_object` 作为 resume 决策源并保留旧投影 parity assertion；filesystem policy 的 roots/confines accessor 接入真实 check path，行为保持不变。
+
+[2026-09-11 继续] [主施工员·工程师] Codeg 对照调查：`continuation_ancestors` 的真实消费者是 transcript 持久化与 conversation bind；Pylon 当前没有同等 transcript owner，`question/plan` 也缺少可挂起并等待 UI 应答的 private bridge seam。已确认不能仅为消除 clippy dead_code 强行接入平行体系；继续寻找现有 owner seam。
