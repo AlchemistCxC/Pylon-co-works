@@ -172,12 +172,7 @@ fn apply_update_event_with_pet_policy(
     let mut pet_events: Vec<PetEvent> = Vec::new();
     match variant {
         Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-            let (used, size) = session.acp_state.usage.unwrap_or((0, None));
-            session.tokens_total = used;
-            session.context_size = size.unwrap_or(0);
             if let Some(meta) = update.get("_meta") {
-                session.tokens_in = session.acp_state.usage_input.unwrap_or(0);
-                session.tokens_out = session.acp_state.usage_output.unwrap_or(0);
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
                 }
@@ -528,6 +523,8 @@ pub(crate) fn resolve_agent_provider(
 /// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
 /// P0-3（R2-WI03）：provider-scoped adapter dispatch——未注册 provider 明确
 /// unsupported + runtime log 可观察，不生成 RPC；classify 非 interaction 同样丢弃。
+/// 参数多为各锁/上下文的按引用透传（与同文件 L316/L751 同类），故保留显式形参。
+#[allow(clippy::too_many_arguments)]
 async fn handle_permission_request<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     acp: &AcpLock,
@@ -611,7 +608,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
     let remember_permission = |sessions: &SessionsLock| {
         let _ = sessions.lock().map(|mut sessions| {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
-                let _ = session.acp_state.apply(&crate::acp::RawMessage {
+                let deltas = session.acp_state.apply(&crate::acp::RawMessage {
                     id: Some(request_id.clone()),
                     method: Some("session/request_permission".into()),
                     kind: crate::acp::AcpKind::PermissionRequest,
@@ -619,6 +616,17 @@ async fn handle_permission_request<R: tauri::Runtime>(
                     params: params.cloned(),
                     error: None,
                 });
+                if let Some(depth) = deltas.iter().find_map(|delta| match delta {
+                    crate::acp::AcpStateDelta::PermissionQueueDepth { depth } => Some(*depth),
+                    _ => None,
+                }) {
+                    tracing::trace!(
+                        session_id = %permission.session_id,
+                        request_id = %request_id,
+                        depth,
+                        "ACP permission reducer queue updated"
+                    );
+                }
             }
         });
     };
@@ -1637,6 +1645,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // dedicated AcpKind/adapter exists.  Do not silently drop an identified
             // request: answer it with Method Not Found and surface a diagnostic event.
             if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
+                let private_validation = raw.method.as_deref().map(|method| {
+                    crate::acp::adapter::private_ext::validate_request(
+                        method,
+                        raw.params.as_ref().unwrap_or(&serde_json::Value::Null),
+                    )
+                });
                 let provider = agents
                     .lock()
                     .ok()
@@ -1646,7 +1660,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 // JSON-RPC response, but it is still surfaced as a malformed
                 // interaction so the UI/runtime log explains why no card can
                 // be acted on.  Do not silently drop official client requests.
-                let (reason_code, rpc_code, message) = if raw.id.is_none() {
+                let (reason_code, rpc_code, message) = if let Some(Err(error)) = private_validation
+                {
+                    (
+                        "invalid_private_payload",
+                        -32602,
+                        format!("invalid private interaction payload: {error}"),
+                    )
+                } else if raw.id.is_none() {
                     (
                         "missing_request_id",
                         -32600,
@@ -2067,6 +2088,27 @@ mod tests {
                 text: "hello".into()
             }]
         );
+
+        let usage = serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 7,
+            "size": 100,
+            "_meta": {"inputTokens": 5, "outputTokens": 2},
+        });
+        let events = apply_update_event(
+            &mut session,
+            &usage,
+            Some(crate::acp::SessionUpdateVariant::UsageUpdate),
+            false,
+        );
+        assert!(matches!(events.as_slice(), [PetEvent::UsageUpdate(7)]));
+        assert_eq!(session.acp_state.usage, Some((7, Some(100))));
+        assert_eq!(session.acp_state.usage_input, Some(5));
+        assert_eq!(session.acp_state.usage_output, Some(2));
+        assert_eq!(session.tokens_total, 7);
+        assert_eq!(session.context_size, 100);
+        assert_eq!(session.tokens_in, 5);
+        assert_eq!(session.tokens_out, 2);
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。

@@ -285,7 +285,7 @@ mod tests {
             is_secret: false,
         };
         let outcome = build_outcome(
-            &[spec.clone()],
+            std::slice::from_ref(&spec),
             &QuestionAnswer {
                 answers: vec![QuestionAnswerItem {
                     question_id: "q1".into(),

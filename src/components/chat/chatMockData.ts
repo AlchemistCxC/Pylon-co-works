@@ -14,7 +14,7 @@ const TEST_OUTPUT = [
   'test-message-persistence.mts  PASS',
   'test-tool-status.mts          PASS',
   'test-spinner-frames.mts       PASS',
-  'test-thought-block-visual.mts PASS',
+  'reasoning renderer regression PASS',
   '5 suites passed · 0 failed',
 ].join('\n')
 

@@ -12,22 +12,13 @@ import { pathToFileURL } from 'node:url'
 const scriptsDir = resolve(process.cwd(), 'scripts')
 const legacyLoader = pathToFileURL(resolve(scriptsDir, 'legacy-ts-loader.mjs')).href
 const EXCLUDED = new Set([
-  'test-profile-prompt-visibility.mts',
   // 已迁入 Vitest 直跑（*.test.mts 由 vitest 自身收集，legacy-runner 不再 spawn）：
-  'test-session-runtime-store.test.mts',
-  'test-session-runtime-store-fuzz.test.mts',
   'test-replay-state.test.mts',
-  'test-replay-termination.test.mts',
-  'test-replay-tool-settlement.test.mts',
-  'test-chat-regression-contract.test.mts',
-  'test-settings-layout.test.mts',
   'test-sheet-persistence.mts',
   'test-sheet-persistence.test.mts',
   // 这些脚本会经过包含 parameter property 的产品模块；Node strip-only 无法转译，
   // 由 legacy-plugin-runtime-compat.test.mts 在 Vitest 中保留原断言执行。
-  'test-normalizer.mts',
   'test-session-runtime.mts',
-  'test-compact-transaction.mts',
   'test-sheet-persistence-v2.mts',
   'test-tool-presentation-model.mts',
   'test-sheet-registry.mts',

@@ -4,14 +4,23 @@ use crate::agent_config::AgentDef;
 
 /// fake ACP 脚本：FAKE_MODE=crash 时响应首个请求（initialize）后立即退出
 /// → stdout EOF → 崩溃通知；FAKE_MODE=alive 时保持存活并响应请求。
+///
+/// initialize 必须声明 `loadSession`：重连后的会话连续性探针
+/// （probe_unknown_session_continuity）在宿主不支持 loadSession 时会把保留会话标为
+/// detached 而**不迁移代际**；本文件那条「kept sessions must migrate generation」
+/// 验的正是「确认连续后迁移」这条路径，故 fixture 需提供该能力。
 const FAKE_SCRIPT: &str = r#"import json,sys,os
 mode = os.environ.get('FAKE_MODE', 'alive')
 for line in sys.stdin:
     request = json.loads(line)
     response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     method = request.get('method')
-    if method == 'session/new':
+    if method == 'initialize':
+        response['result'] = {'agentCapabilities':{'loadSession':True}}
+    elif method == 'session/new':
         response['result'] = {'sessionId':'fake-session-1'}
+    elif method == 'session/load':
+        response['result'] = {'sessionId':request.get('params',{}).get('sessionId','fake-session-1')}
     elif method == 'session/prompt':
         response['result'] = {'stopReason':'end_turn'}
     print(json.dumps(response), flush=True)
@@ -119,6 +128,27 @@ async fn fake_acp_crash_triggers_auto_reconnect() {
     })
     .await
     .expect("auto-reconnect must restore Connected within 15s");
+
+    // 会话代际迁移由**异步**的连续性探针完成（`probe_unknown_session_continuity` 在
+    // 重连后 spawn），故 Connected 并不等于迁移已完成——全量并发跑时它还在飞。
+    // 这里轮询等它落定，而非在 Connected 后立即断言（否则是竞态：隔离跑稳过、
+    // 全量负载下失败）。
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let migrated = runtime
+                .sessions
+                .lock()
+                .ok()
+                .and_then(|sessions| sessions.get("source-a").map(|session| session.generation))
+                == Some(1);
+            if migrated {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("kept sessions must migrate generation within 15s");
 
     // 断言：generation +1、sessions 保留且迁移到新代际、防重入标志释放
     assert_eq!(

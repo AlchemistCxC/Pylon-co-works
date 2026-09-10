@@ -435,6 +435,7 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     : Object.freeze(document.extensions.map(extension => Object.freeze({
       ...extension,
       payload: freezeJsonValue(extension.payload),
+      // SAFETY: content part 按 contentPartSchema 构造，本就是 JSON；freezeJsonValue 保形返回。
       fallback: Object.freeze(extension.fallback.map(part => freezeJsonValue(part as unknown as JsonValue))) as typeof extension.fallback,
       identity: Object.freeze({ ...extension.identity }),
       source: Object.freeze({ ...extension.source }),
@@ -468,13 +469,15 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
 }
 
 function freezeDeepSnapshot<T extends object>(value: T): T {
-  return freezeDeepValue(value) as T
+  return freezeDeepValue(value)
 }
 
-function freezeDeepValue(value: unknown): unknown {
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue))
+/** 深冻结是**保形**操作（只把同一形状里的对象/数组替换为冻结副本），
+ *  故 `T` 即最精确的契约——原先的 `unknown` 反而抹掉了调用方类型。 */
+function freezeDeepValue<T>(value: T): T {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue)) as T
   if (value && typeof value === 'object') {
-    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)])))
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)]))) as T
   }
   return value
 }
@@ -651,7 +654,30 @@ function lastTimestamp(values: readonly (string | undefined)[]): number | undefi
   return timestamps.length > 0 ? Math.max(...timestamps) : undefined
 }
 
-function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): unknown {
+type WorkbenchDocumentSlice = NonNullable<WorkbenchRuntimeSnapshot['document']>
+
+/** `selectSlice` 的全部可能产物（按 slice 名分派）。
+ *  运行时按名取值天然是异构的，故用命名联合表达；调用方经 `getSlice<T>` 收窄。 */
+type WorkbenchSliceValue =
+  | WorkbenchRuntimeSnapshot['document']
+  | WorkbenchDocumentSlice['timeline']
+  | WorkbenchRuntimeSnapshot['messages']
+  | WorkbenchDocumentSlice['messages']
+  | WorkbenchDocumentSlice['activities']
+  | WorkbenchDocumentSlice['interactions']
+  | WorkbenchDocumentSlice['extensions']
+  | WorkbenchDocumentSlice['session']
+  | WorkbenchDocumentSlice['session']['usage']
+  | WorkbenchDocumentSlice['session']['options']
+  | WorkbenchDocumentSlice['session']['commands']
+  | ReturnType<typeof selectPlan>
+  | ReturnType<typeof selectGoal>
+  | WorkbenchDocumentSlice['assist']
+  | WorkbenchDocumentSlice['diagnostics']
+  | WorkbenchRuntimeSnapshot['tasks']
+  | { canAttach: WorkbenchRuntimeSnapshot['canAttach']; promptImage: WorkbenchRuntimeSnapshot['promptImage'] }
+
+function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): WorkbenchSliceValue {
   const document = snapshot.document
   switch (slice) {
     case 'document': return document

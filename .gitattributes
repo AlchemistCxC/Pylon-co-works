@@ -1,9 +1,36 @@
+# 行尾策略：文本文件一律以 LF 入库与检出。
+# 背景：仓库在 Windows 上 core.eol=native；未在此登记的文本类型会被检出成 CRLF，
+# 造成两类真实故障（2026-09-10）：
+#   1. 逐字节比较的门禁假失败 —— A9 shadow parity 的 8/8 golden trace（*.jsonl）；
+#   2. 内容相同却长期显示为 modified 的「幽灵改动」。
+# 新增文本类文件时请在此登记对应扩展名。
 * text=auto
+
+# 源码 / 脚本
 *.rs text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.mts text eol=lf
+*.c text eol=lf
+*.py text eol=lf
+
+# 数据 / 文档 / 配置
 *.json text eol=lf
+*.jsonl text eol=lf
 *.css text eol=lf
 *.html text eol=lf
 *.md text eol=lf
 *.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.lock text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
+
+# 例外：*.rc 是 Windows 资源脚本（MSVC rc.exe 输入），保持平台原生行尾，不登记。

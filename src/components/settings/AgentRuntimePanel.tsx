@@ -162,6 +162,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const [savingId, setSavingId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<Record<string, string>>({})
+  const [verifiedDrafts, setVerifiedDrafts] = useState<Record<string, string>>({})
   const [showCreate, setShowCreate] = useState(false)
   const [createDraft, setCreateDraft] = useState({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -438,6 +439,11 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     if (savingId) return
     const invalid = invocationError(draft.exe, draft.args)
     if (invalid) { setFeedback(invalid); return }
+    const fingerprint = JSON.stringify({ name: draft.name.trim(), provider: draft.provider.trim(), exe: draft.exe.trim(), args: draft.args })
+    if (verifiedDrafts[agentId] !== fingerprint) {
+      setFeedback('请先测试连接成功，再保存配置变更。')
+      return
+    }
     setSavingId(agentId)
     setFeedback(null)
     try {
@@ -450,6 +456,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       })
       await refreshAgents()
       setEditingId(null)
+      setVerifiedDrafts(current => { const next = { ...current }; delete next[agentId]; return next })
       setConfigConflict(false)
       setFeedback(null)
       resolvePanelError('保存 Agent 字段', agentId)
@@ -509,6 +516,26 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     } finally {
       setTestingId(null)
     }
+  }
+
+  const testDraftConnection = async (agentId: string) => {
+    if (testingId) return
+    const invalid = invocationError(draft.exe, draft.args)
+    if (invalid) { setFeedback(invalid); return }
+    setTestingId(agentId)
+    try {
+      const result = await agentClient.testAgentCandidate(agentId, {
+        name: draft.name.trim(), provider: draft.provider.trim(), transport: 'subprocess', exe: draft.exe.trim(), args: [...draft.args],
+      })
+      if (!result.ok) throw new Error(result.error?.message ?? '连接失败')
+      const fingerprint = JSON.stringify({ name: draft.name.trim(), provider: draft.provider.trim(), exe: draft.exe.trim(), args: draft.args })
+      setVerifiedDrafts(current => ({ ...current, [agentId]: fingerprint }))
+      setTestResult(current => ({ ...current, [agentId]: `连接成功（${result.durationMs}ms），现在可以保存` }))
+      setFeedback(null)
+    } catch (error) {
+      setVerifiedDrafts(current => { const next = { ...current }; delete next[agentId]; return next })
+      setTestResult(current => ({ ...current, [agentId]: `连接失败：${error instanceof Error ? error.message : String(error)}` }))
+    } finally { setTestingId(null) }
   }
 
   const restartRuntime = async (agentId: string) => {
@@ -621,6 +648,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
               {isEditing ? (
                 <>
                   <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={() => saveEdit(agent.id)}>{savingId === agent.id ? '保存中…' : '保存'}</button>
+                  <button className="ps-btn sm" type="button" disabled={testingId !== null || savingId !== null} onClick={() => void testDraftConnection(agent.id)}>{testingId === agent.id ? '测试中…' : '先测试连接'}</button>
                   <button className="ps-btn sm" type="button" disabled={savingId !== null} onClick={() => setEditingId(null)}>取消</button>
                 </>
               ) : (

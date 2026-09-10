@@ -39,7 +39,7 @@ function persistTree(tree: StorageTree): void {
   }
 }
 
-function cloneValue(value: unknown, field: string): unknown {
+function cloneValue<T>(value: T, field: string): T {
   try {
     return structuredClone(value)
   } catch (error) {

@@ -31,6 +31,9 @@ import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { invoke } from '@tauri-apps/api/core'
+import { createChatClient } from '../../infrastructure/acp/chatClient.ts'
+import { setSessionModel } from '../../components/chat/sessionModel.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -77,6 +80,20 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         })
       },
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
+      setModel: async (context, modelId) => {
+        await setSessionModel(context, modelId)
+        // The ACP set_model response may be empty (Hermes). Mirror the
+        // successful command into the Workbench document so Solid renders the
+        // new value immediately instead of waiting for a later load/rebind.
+        sessionRuntimeRef.current?.applySessionResponse({
+          models: { currentModelId: modelId, availableModels: [{ modelId }] },
+        }, context.source)
+      },
+      setConfigOption: async (context, key, value) => {
+        await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+          .setConfigOption({ agentId: context.agentId, source: context.source, key, value })
+        sessionRuntimeRef.current?.applySessionResponse({ configOptions: [{ id: key, value }] }, context.source)
+      },
       discardSession: discardAgentWorkbenchSession,
       async openResource(session, resource) {
         if (openResourceInFileSheet(session.id, resource)) return

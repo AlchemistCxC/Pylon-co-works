@@ -9,6 +9,21 @@ pub enum PrivateBridge {
     GrokExitPlan,
 }
 
+/// Validate provider-private interaction payloads at the dispatcher boundary.
+/// The dispatcher still fails closed for unsupported private methods, but it
+/// now consumes the migrated Codeg-compatible parsers instead of dropping
+/// malformed requests before diagnostics can explain them.
+pub fn validate_request(method: &str, params: &Value) -> Result<(), String> {
+    match method {
+        "grok/ask_user_question" => {
+            parse_questions(PrivateBridge::GrokExtQuestions, params).map(|_| ())
+        }
+        "pi/select_ask" => parse_questions(PrivateBridge::PiSelectAsk, params).map(|_| ()),
+        "grok/exit_plan_mode" => parse_exit_plan(PrivateBridge::GrokExitPlan, params).map(|_| ()),
+        _ => Ok(()),
+    }
+}
+
 pub fn parse_questions(
     bridge: PrivateBridge,
     params: &Value,

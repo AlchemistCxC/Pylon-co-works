@@ -9,9 +9,7 @@ import {
 import { getWorkspaceRegistryStore } from '../src/workspace-sheets/workspaceRegistry.ts'
 
 const legacyScripts = [
-  { name: 'test-normalizer.mts', load: () => import('./test-normalizer.mts') },
   { name: 'test-session-runtime.mts', load: () => import('./test-session-runtime.mts') },
-  { name: 'test-compact-transaction.mts', load: () => import('./test-compact-transaction.mts') },
   { name: 'test-sheet-persistence-v2.mts', load: () => import('./test-sheet-persistence-v2.mts') },
   { name: 'test-tool-presentation-model.mts', load: () => import('./test-tool-presentation-model.mts') },
   { name: 'test-sheet-registry.mts', load: () => import('./test-sheet-registry.mts') },

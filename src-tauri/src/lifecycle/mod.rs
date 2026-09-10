@@ -1477,7 +1477,13 @@ sys.exit(7)
         assert_eq!(payload["ok"], false);
         assert_eq!(payload["error"]["code"], "agent_initialize_failed");
         assert_eq!(payload["error"]["stage"], "initialize");
-        assert!(payload["error"]["exitCode"].is_null());
+        // exitCode 是「initialize 失败那个瞬间子进程是否已被回收」的**尽力观测**
+        // （`acp/client.rs` 的 `child.try_wait()`）：已回收则必为真实退出码 7，尚未回收
+        // 则为 null。该时序随负载浮动（隔离跑常为 7、全量并发跑常为 null），
+        // 故不断言其存在性，只锁定「一旦捕获到，必须就是子进程的真实退出码」。
+        if let Some(code) = payload["error"]["exitCode"].as_i64() {
+            assert_eq!(code, 7, "captured exit code must be the child's real exit code");
+        }
         assert!(payload["error"]["stderr"]
             .as_str()
             .unwrap_or_default()

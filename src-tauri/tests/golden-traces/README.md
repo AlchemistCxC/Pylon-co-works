@@ -1,12 +1,12 @@
-# ACP golden trace 基线（A0）
+# ACP golden trace 基线（A0/A9）
 
-本目录是 **P60/A0** 建立的「换引擎前」Pylon 手写 ACP 的 wire 时序基线，用于
-A1c（旧路径删除前）与 A9（shadow parity）的逐场景比对。
+本目录是 **P60/A0** 建立、在 A1c 收敛 SDK 后由 A9 重新生成的 ACP wire 时序基线。
+当前唯一运行实现是官方 SDK engine；基线用于 A9 的重复运行、协议顺序与资源边界验收。
 
 ## 生成与校验
 
 ```powershell
-node scripts/generate-acp-golden-trace.mjs           # 重新生成并覆盖本目录
+node scripts/generate-acp-golden-trace.mjs           # 重新生成 JSONL（保留本 README）
 node scripts/generate-acp-golden-trace.mjs --check   # 只校验：两遍运行一致 + 与已提交基线一致
 ```
 
@@ -34,6 +34,8 @@ node scripts/generate-acp-golden-trace.mjs --check   # 只校验：两遍运行�
 
 - 保留：`direction` / `method` / `idKind` / `idValue` / `params` / `result` / `error` /
   `status` / `remoteSessionId` / `toolCallId` 等协议事实；
+- `idValue` 在每条连接内按首次出现顺序归一化（number=`1..N`，string=`wire-1..N`），
+  保留 `idKind` 与请求/响应关联，避免 SDK UUID 造成机器相关差异；
 - 丢弃：`traceId`、`timestamp`（机器相关，无法逐字节复现）；
 - 补身份三轴：`owner`（durable session owner key）、`generation`（`clientGeneration`）、
   `ordinal`（= `monotonicSeq`），另加 `scenario` 与 `connection`（连接序号，reconnect 为 1/2）。
@@ -42,6 +44,6 @@ node scripts/generate-acp-golden-trace.mjs --check   # 只校验：两遍运行�
 
 ## 纪律
 
-- 本目录是基线，不是运行时代码；不得为了让 A1 新引擎跑绿而改基线。
-- 若因**新契约**必须变更基线，须在该片施工书验收项中点名，并在台账记录
-  「旧基线 → 新基线」的差异摘要与理由。
+- 本目录是基线，不是运行时代码；不得为了让单次运行跑绿而改基线。
+- A1c 删除 legacy 并启用 SDK 属于已批准的新实现契约；因此本次基线更新须在 A9 台账记录
+  「旧 legacy 基线 → SDK 基线」的差异摘要与理由。

@@ -189,8 +189,10 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     prompt.mockRestore()
   })
 
-  it('编辑现有 Agent 时保存参数数组并预览后端追加的 effective 参数', async () => {
+  it('编辑现有 Agent 时先测试连接再保存参数数组，并预览后端追加的 effective 参数', async () => {
     invoke.mockImplementation((command: string) => {
+      // 新契约（5b43c183：require verified agent edits）：保存前必须先测试连接成功。
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
       if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
       if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
       if (command === 'list_agents') return Promise.resolve([])
@@ -204,6 +206,20 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     expect(within(periCard).getByText('peri acp "work space" --model demo')).toBeInTheDocument()
     fireEvent.change(within(periCard).getByLabelText('peri 参数 2'), { target: { value: 'new work space' } })
     fireEvent.click(within(periCard).getByRole('button', { name: '添加参数' }))
+
+    // 未验证直接保存 → 拒绝并提示先测试（新契约的 fail-closed 面）
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+
+    // 验证使用**草稿当前值**（含新增的空参数）
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', {
+      agentId: 'peri',
+      agent: { name: 'Peri', provider: '', transport: 'subprocess', exe: 'peri', args: ['acp', 'new work space', ''] },
+    }))
+    expect(await within(periCard).findByText(/连接成功/)).toBeInTheDocument()
+
     fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', {
@@ -411,6 +427,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {
     let snapshotCalls = 0
     invoke.mockImplementation((command: string) => {
+      // 新契约（5b43c183）：CAS 冲突路径同样需先通过连接验证才能到达保存。
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
       if (command === 'agent_config_snapshot') {
         snapshotCalls += 1
         return Promise.resolve({ revision: `rev-${snapshotCalls}`, agents: [] })
@@ -427,6 +445,9 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
     const nameInput = within(periCard).getByLabelText('Agent name') as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: 'Peri draft' } })
+    // 先验证（新契约），否则保存会被 fail-closed 拒绝，到不了 CAS 冲突分支。
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', expect.anything()))
     fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText(/配置已被其他进程修改/)).toBeInTheDocument()

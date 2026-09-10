@@ -3,6 +3,7 @@ export const FIRST_PARTY_STYLE_OWNERS = [
   'builtin.pylon-shell',
   'builtin.pylon-workspace',
   'builtin.pylon-renderers',
+  'builtin.pylon-plugin-manager',
   'solid-smoke',
 ] as const
 
@@ -41,6 +42,7 @@ const entry = (
 const SHELL_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-shell/styleAssets.ts'
 const WORKSPACE_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-workspace/styleAssets.ts'
 const RENDERER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-renderers/styleAssets.ts'
+const MANAGER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-plugin-manager/styleAssets.ts'
 
 /**
  * 第一方 CSS 的唯一 ownership 真值。
@@ -85,6 +87,8 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层：suite 挂载几何 + 生产中控槽位'),
+
+  entry('src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css', 'builtin.pylon-plugin-manager', 'plugin-scope', [MANAGER_STYLE_ASSETS], '第 6 个 first-party 包（P53 D2）的 framework-free 管理面板样式'),
 
   entry('src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css', 'solid-smoke', 'smoke-only', [
     'src/renderers/solid-workbench/smoke/browserSmoke.solid.tsx',

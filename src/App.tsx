@@ -104,6 +104,7 @@ const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { re
 
 export default function App() {
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
+  const hydrationStatus = useHydrationStore(state => state.status)
   const presentationProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   useSyncExternalStore(subscribeWorkspaceRegistry, getWorkspaceRegistrySnapshot, getWorkspaceRegistrySnapshot)
   const contextPanelSnapshot = useSyncExternalStore(
@@ -360,28 +361,28 @@ export default function App() {
     // import itself is development/mock-only.
     if (!import.meta.env.DEV) return
     if (IS_TAURI && !isBrowserMockRuntime()) return
+    if (hydrationStatus !== 'ready') return
     if (demoSeededRef.current) return
-    demoSeededRef.current = true
-    let disposed = false
     const demoParams = new URLSearchParams(window.location.search)
     void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
-      if (disposed) return
+      if (demoSeededRef.current) return
       runBrowserDemoSeed(setActiveSession, {
         withPermission: demoParams.get('demo-permission') === '1',
-        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : import.meta.env.DEV ? 'visual' : 'standard',
+        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : 'visual',
         reset: demoParams.get('demo-reset') === '1',
       })
+      demoSeededRef.current = true
       resolveRuntimeErrors({ key: 'app:browser-demo-bootstrap' })
     }).catch(error => {
-      if (!disposed) reportRuntimeError('加载浏览器演示数据', error, undefined, {
+      if (!demoSeededRef.current) reportRuntimeError('加载浏览器演示数据', error, undefined, {
         key: 'app:browser-demo-bootstrap',
         scope: { kind: 'app', id: 'browser-demo' },
         source: 'app.browser-demo',
         recovery: { kind: 'open-runtime-log' },
       })
     })
-    return () => { disposed = true }
-  }, [])
+    return undefined
+  }, [hydrationStatus])
 
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))
   const skinRuntime = getSkinRuntime()

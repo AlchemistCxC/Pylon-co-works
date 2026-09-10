@@ -375,6 +375,7 @@ impl AcpClient {
                     wire_trace: Some(wire_trace),
                     stderr_tail: stderr_tail.clone(),
                 };
+                let stderr_mark = stderr_tail.mark();
                 // Initialize——G1-03：握手三段全部来自协议配置（覆盖制，缺省 = 现状
                 // 现值，wire 逐字节不变）：clientCapabilities（D1，agents.yaml
                 // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
@@ -400,7 +401,7 @@ impl AcpClient {
                             .flatten()
                             .and_then(|status| status.code());
                         let mut failure = AgentConnectFailure::initialize(error, exit_code);
-                        let tail = stderr_tail.tail_since(0, 8, 2048);
+                        let tail = stderr_tail.tail_since(stderr_mark, 8, 2048);
                         if !tail.lines.is_empty() {
                             failure.stderr_excerpt = Some(tail.lines.join("\n"));
                         }
@@ -415,7 +416,7 @@ impl AcpClient {
                         Ok(registry) => registry,
                         Err(message) => {
                             let mut failure = AgentConnectFailure::capability(message);
-                            let tail = stderr_tail.tail_since(0, 8, 2048);
+                            let tail = stderr_tail.tail_since(stderr_mark, 8, 2048);
                             if !tail.lines.is_empty() {
                                 failure.stderr_excerpt = Some(tail.lines.join("\n"));
                             }

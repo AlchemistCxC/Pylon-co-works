@@ -14,7 +14,7 @@
  * 框架无关（无 React hooks）：宿主 AgentRendererSuiteWorkbench 以 bind 效应驱动。
  */
 import { invoke } from '@tauri-apps/api/core'
-import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
+import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
@@ -70,9 +70,9 @@ export class AgentWorkbenchLifecycle {
   /** 当前绑定会话变更（宿主 bind 效应调用）：跑 new/load 链。
    * 返回值仅作时序信号；错误经 ErrorCenter 呈现。 */
   async activate(session: Session, options: { reloadToken?: number; isCurrent?: () => boolean }): Promise<AgentWorkbenchLifecycleOutcome | undefined> {
-    if (!IS_TAURI) {
-      // 浏览器 Dev 是纯视觉预览：无 canonical SQLite，不走桌面恢复链路。
-      clearMessageStorage(session.id, localStorage)
+    if (!IS_TAURI || isBrowserMockRuntime()) {
+      // Browser sessions restore these snapshots in sessionRuntime.bind().
+      // Only the desktop canonical migration may discard legacy snapshots.
       return { kind: 'placeholder-read' }
     }
     const context = sessionContext(session)

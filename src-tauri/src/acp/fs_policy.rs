@@ -21,6 +21,13 @@ pub struct FsAccessPolicy {
 }
 
 impl FsAccessPolicy {
+    pub(crate) fn from_roots(roots: Vec<PathBuf>) -> Self {
+        Self {
+            read_roots: roots.clone(),
+            write_roots: roots,
+        }
+    }
+
     pub fn strict(workspace_root: &Path) -> Result<Self, String> {
         let root = std::fs::canonicalize(workspace_root)
             .map_err(|e| format!("cannot access {}: {e}", workspace_root.display()))?;

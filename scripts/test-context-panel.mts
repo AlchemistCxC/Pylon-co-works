@@ -27,7 +27,7 @@ assert.match(shadow, /contextPanel: registries\.contextPanelRegistry\.beginShado
 
 const agentPanel = readFileSync(new URL('../src/components/right-panel/AgentContextPanel.tsx', import.meta.url), 'utf8')
 assert.match(agentPanel, /useSessionUiState\(sessionId, 'search-query'/, 'Agent 搜索必须复用 sessionUiState')
-assert.match(agentPanel, /getChatController\(\)\?\.getMessages\(source\)/, '消息快照必须经 handle.getMessages')
+assert.match(agentPanel, /useHostDocument\(hostPort\)/, '消息快照必须经当前 Workbench Host Port')
 assert.match(agentPanel, /useWorkspaceStore\(s => s\.touchedFiles\)/, 'Agent 关联必须读 touchedFiles')
 assert.match(agentPanel, /touchedFilesRecord\[toAgentContextKey\(touchedContext\)\]/, 'Agent 关联必须使用 context key')
 assert.match(agentPanel, /import MessageSearchBar/, 'Agent 搜索必须复用 MessageSearchBar')

@@ -69,6 +69,11 @@ jobs:
       - name: Rust 测试与构建（check:rust）
         run: cd src-tauri && cargo test --lib -- --skip b11_inject_integration_tests --skip obs03_evidence_tests --skip p1_wire_regression_tests && cargo build
 
+      # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
+      # 依赖刚构建的 test 二进制与 spawn fake agent 回环，故放在 Rust job（不是前端 job）。
+      - name: ACP shadow parity（check:acp-shadow）
+        run: bun run check:acp-shadow
+
       # ISSUE-20 W2：clippy 按项目 toolchain；不设 -D warnings（既有 33 条警告基线，独立清理）
       - name: clippy
         run: cd src-tauri && cargo clippy --lib

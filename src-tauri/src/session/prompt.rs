@@ -1512,6 +1512,9 @@ for line in sys.stdin:
         bridge.sync_registry(&serde_json::json!({
             "hooks": ["message.user.beforeSend"]
         }));
+        // 必须用 tokio 的无界通道：`#[tokio::test]` 默认 current_thread 运行时，
+        // tokio::spawn 的任务与 send_prompt_core 共用同一个 worker 线程；
+        // 若在此处对 std::sync::mpsc 做阻塞 recv，会占死该线程使 hook 事件永不发出（死锁）。
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: serde_json::Value =
