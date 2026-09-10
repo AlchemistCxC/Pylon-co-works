@@ -744,10 +744,7 @@ pub(crate) async fn acp_wire_trace_snapshot(
     if format.as_deref() == Some("jsonl") {
         const MAX_BYTES: usize = 4 * 1024 * 1024;
         let records = trace.snapshot();
-        let lines: Vec<String> = records
-            .iter()
-            .map(|record| serde_json::to_string(record).unwrap_or_else(|_| "{}".into()))
-            .collect();
+        let lines: Vec<String> = trace.to_jsonl().lines().map(str::to_owned).collect();
         let mut used = 0usize;
         let mut kept = 0usize;
         for (index, line) in lines.iter().enumerate() {
