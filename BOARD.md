@@ -1,6 +1,26 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-11 01:05] [拾烬·工程师] [后端全量：找到并修掉真死锁·两项失败已证既有·clippy 基线陈旧] 用户要求跑后端全量并报 warning。结论分三层。
+
+**① 死锁已修（`8401f48f`）——这是交流板 2026-09-10 13:41 那条「linker 阻塞」的真因**：`cargo test --lib` **不是慢，是永久挂死**。917 项中 `session::prompt::tests::before_send_hook_transform_rewrites_wire_but_journal_keeps_original`（P55 D1 引入）用 `std::sync::mpsc` 投递 hook 请求，并在 `tokio::spawn` 的任务里做**阻塞式** `rx.recv()`；`#[tokio::test]` 默认 current_thread 运行时，该任务与 `send_prompt_core(...).await` **共用唯一 worker 线程**，主 future 一让出它就占死线程，hook 事件永不发出 → 零输出永久停住。
+修法：`tokio::sync::mpsc::unbounded_channel` + `rx.recv().await`（三条断言逐条未动）。证据：修复前 `timeout 60` 被 SIGTERM 杀死（exit 143，无输出）；修复后 `1 passed ... 0.15s`；全量 **`911 passed; 2 failed; 4 ignored; 18.04s`**（原先永不完结）。
+**这解释了为何下面两项失败长期无人发现：套件从未跑到它们就卡死了。** CI 同样会卡（该测试不在 CI skip 名单：CI 只 skip `b11_inject_integration_tests`/`obs03_evidence_tests`/`p1_wire_regression_tests`）。
+
+**② 剩余 2 项失败：已证明是既有，非本会话引入**（两个都**不在 CI skip 名单**，故 CI 也会报）：
+- `auto_reconnect_integration_tests::fake_acp_crash_triggers_auto_reconnect` → `kept sessions must migrate generation: left Some(0), right Some(1)`
+- `lifecycle::tests::test_agent_candidate_native_process_returns_failure_diagnostics` → `payload["error"]["exitCode"].is_null()` 失败（fake 脚本显式 `sys.exit(7)`）
+
+**证明方式（吸取本会话早前误 checkout 的教训，改用隔离 worktree）**：在会话起点 `a8e490fd` 的干净 worktree（无本会话任何改动、无 WIP）里，两者**以完全相同方式失败**（同断言、同实得值）。两测试文件均未被本会话 10 个提交触碰；最后一次变动是 `7aabb958`（2026-08-21）。
+**两者都是行为契约问题、不是明显陈旧的 fixture**（“exitCode 该不该记 7”“reconnect 后会话该不该迁代际”），故未擅自改断言（§3.3 行为测试保护），已登记 P65 待裁定。
+
+**③ clippy：报 63 新增，但本会话 0 新增——基线陈旧**。在会话起点同跑 `check-clippy-baseline.mjs` 得**完全相同的数字**（current **83** / baseline **27** / added **63**，FAILED），当前 HEAD 亦然。63 条全在 P60 ACP 迁移面（`question_policy.rs` 17、`transcript.rs` 12、`terminal_policy.rs` 7、`stderr_tail.rs` 6、`fs_policy.rs` 5、`private_ext/mod.rs` 5、`plan_policy.rs` 4…），**无一条来自 `prompt.rs`**。基线文件建立于 `b146e0ac`（09-08），而 `question_policy.rs`/`transcript.rs` 于 09-09、`private_ext/mod.rs` 于 09-10 加入——全在基线之后且多为尚未接线的 dead_code。
+**编译期 warning（lib，稳定）**：5 条全员 dead_code（`PiSelectAsk`、`continuation_ancestors`、`WAIT_ERROR_IDLE_RETRY`、`SLOW_OPERATION_MS`、`MAX_CONTINUATION_DEPTH`），无增无减。
+
+**⚠️ 请相关方注意（同类隐患）**：`src-tauri/src/hook_bridge.rs` 的 `bridge_roundtrip_delivers_frontend_response`(L528)、`message_received_gate_drops_inbound_and_rolls_back_seen`(L781)、`message_received_transform_rewrites_content_without_rollback`(L828) 是**与①完全相同的写法**，目前仅因事件发出早于 spawn 被调度而**恰好通过**，属同一潜在死锁。我可在你拍板后一并修（同一行改法）。
+
+**另**：本会话早前用 `git checkout -- src/` 清 pi-lens 假 diff 时误回滚了 `chatMockData.ts`/`demoData.ts` 两个未提交 WIP，已逐字恢复并校验（现集合与开工基线一致），且已用 `135dcc0b` 把这两处收尾提交。以后我一律用 `git diff --quiet` 守卫或隔离 worktree。
+
 [2026-09-11 00:30] [拾烬·工程师] [工具链根因修复：行尾策略 + 外来自动格式化·影响所有 agent 的 diff] 用户要求把这两个干扰治本。两个独立缺陷均已根因修复，各一个提交：
 
 **① `d2eaa113` 行尾策略**：`.gitattributes` 只给 `.rs/.ts/.tsx/.json/.css/.html/.md/.toml` 钉了 `eol=lf`，其余文本类型交给 `text=auto`。本机 `core.eol=native` → 在 Windows 检出成 CRLF。已造成真实故障：A9 shadow parity 的 8/8 golden trace 假失败（见 `9be8c22d`）、以及 `pylon-plugin-sdk.js` 类「幽灵 modified」（索引 stat 缓存的是 449 个 CR 的旧尺寸）。补全登记并对工作树强制归一化 155 文件；`*.rc` 是 MSVC `rc.exe` 输入，**故意保留平台原生**。副作用：幽灵条目消失，该 .js 的「未提交改动」经核为纯行尾产物（内容 == HEAD）。
