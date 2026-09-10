@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tokio::sync::{watch, Mutex, Notify};
 
 use super::terminal_policy::{
-    default_platform_shell, enforce_output_limit, shell_wrapper_args, TerminalCompletion,
-    DEFAULT_OUTPUT_BYTE_LIMIT,
+    decode_available_utf8, default_platform_shell, enforce_output_limit,
+    output_limit as resolve_output_limit, shell_wrapper_args, TerminalCompletion,
 };
 use super::ManagedChild;
 
@@ -137,7 +137,7 @@ impl TerminalRegistry {
         let mut child = ManagedChild::new(command.spawn().map_err(|e| e.to_string())?);
         let stdout = child.take_stdout().map_err(|e| e.to_string())?;
         let stderr = child.take_stderr().map_err(|e| e.to_string())?;
-        let limit = output_limit.unwrap_or(DEFAULT_OUTPUT_BYTE_LIMIT as usize);
+        let limit = resolve_output_limit(output_limit);
         let id = self.insert(session_id, limit, child).await;
         let terminal = self
             .terminals
@@ -268,8 +268,7 @@ fn spawn_reader<R: Read + Send + 'static>(
                 Ok(0) => break,
                 Ok(n) => {
                     pending.extend_from_slice(&buf[..n]);
-                    let text = String::from_utf8_lossy(&pending).into_owned();
-                    pending.clear();
+                    let text = decode_available_utf8(&mut pending);
                     handle.block_on(terminal.append_output(&text));
                 }
                 Err(_) => break,
