@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@solidjs/testing-library'
+import { cleanup, render, screen, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
@@ -49,7 +49,7 @@ describe('first-class structured content', () => {
     expect(container.textContent).not.toContain('"current"')
   })
 
-  it('renders canonical nested list parts through their rich presenters', () => {
+  it('renders canonical nested list parts through their rich presenters', async () => {
     const { container } = renderSlot('content.list', {
       kind: 'list', title: '检查结果', items: [
         { kind: 'markdown', text: '**通过**' },
@@ -59,7 +59,8 @@ describe('first-class structured content', () => {
     })
 
     expect(screen.getByRole('region', { name: '列表' })).toHaveTextContent('检查结果3 项')
-    expect(screen.getByText('**通过**')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('通过')).toBeTruthy(), { timeout: 10_000 })
+    expect(screen.getByText('通过').tagName).toBe('STRONG')
     expect(container.querySelector('.term-code-block')).toHaveTextContent('const ok = true')
     expect(container.querySelector('.tool-object-inspector')).toHaveTextContent('/workspace/report.md')
   })
@@ -79,7 +80,7 @@ describe('first-class structured content', () => {
     expect(json.container.querySelector('.solid-content-unknown')).toBeNull()
   })
 
-  it('recursively renders tool-result parts and presents lifecycle metadata without JSON noise', () => {
+  it('recursively renders tool-result parts and presents lifecycle metadata without JSON noise', async () => {
     const { container } = renderSlot('content.tool-result', {
       kind: 'tool-result', name: 'Search', status: 'completed', latencyMs: 42,
       parts: [
@@ -91,7 +92,11 @@ describe('first-class structured content', () => {
     expect(screen.getByRole('region', { name: '工具结果' })).toHaveTextContent('Search')
     expect(screen.getByRole('region', { name: '工具结果' })).toHaveTextContent('已完成')
     expect(screen.getByRole('region', { name: '工具结果' })).toHaveTextContent('42ms')
-    expect(screen.getByText('找到 **2** 项')).toBeTruthy()
+    await waitFor(() => {
+      const paragraph = container.querySelector('.term-tool-prose p')
+      expect(paragraph).toHaveTextContent('找到 2 项')
+    }, { timeout: 10_000 })
+    expect(container.querySelector('.term-tool-prose strong')).toHaveTextContent('2')
     expect(screen.getByRole('button', { name: '/workspace/a.ts' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: '工具元数据' })).toBeNull()
     expect(container.textContent).not.toContain('"parts"')
