@@ -861,12 +861,12 @@ async fn revive_session_slot(
         state.protocol_for_runtime(runtime).mcp_servers,
     )
     .map_err(PylonError::Protocol)?;
-    let resume_advertised = runtime
-        .acp
-        .lock()
-        .await
-        .capabilities()
-        .supports_object(&["sessionCapabilities", "resume"]);
+    let resume_advertised = {
+        let acp = runtime.acp.lock().await;
+        crate::acp::resume_capability_advertised(
+            acp.capabilities().raw().unwrap_or(&serde_json::Value::Null),
+        )
+    };
     let response = if resume_advertised {
         let resume_params =
             crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
