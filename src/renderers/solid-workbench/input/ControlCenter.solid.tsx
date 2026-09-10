@@ -509,12 +509,12 @@ export function SolidControlCenter() {
       '--cc-input-highlight-opacity': `${inputHighlightOpacityPercent()}%`,
       '--cc-input-shadow-enabled': appearance().inputShadowEnabled ? '1' : '0',
       '--cc-input-shadow': appearance().inputShadowEnabled
-        ? '0 10px 30px rgba(15,23,42,.22)'
+        ? '0 0 30px rgba(15,23,42,.22)'
         : 'none',
       // 光环独立于阴影（A6-1-FIX 1.3）：光环开启时只产出光环投影；关闭时不产出该变量，
       // CSS 侧 hover/focus-within 回退到常态投影（阴影关闭即无变化）。常态阴影开关只控制 --cc-input-shadow。
       '--cc-input-focus-ring-shadow': appearance().inputFocusRingEnabled
-        ? '0 -4px 24px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--input-focus-ring-color, var(--accent))) 55%, transparent)'
+        ? '0 0 24px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--input-focus-ring-color, var(--accent))) 55%, transparent)'
         : undefined,
       '--cc-input-radius': `${appearance().inputRadius}px`,
       '--cc-input-border': appearance().inputBorder || 'transparent',
