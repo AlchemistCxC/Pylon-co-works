@@ -403,6 +403,11 @@ pub struct AgentProviderEvidence {
     /// (npm global metadata, which the executable probe cannot provide). The
     /// direct executable probe wins when it produced a version.
     pub adapter_version: Option<String>,
+    /// What a newly started process would see on PATH but this process does not.
+    /// A machine fact (read once per scan), not a per-provider one — but attached
+    /// per provider so a diagnosis can explain a located executable that the app
+    /// cannot otherwise reach.
+    pub path_gap: crate::agent_diagnostics::PathGapReport,
 }
 
 /// Bounded, read-only search for one command name across the same roots a
@@ -616,6 +621,7 @@ fn provider_evidence(
         node: ToolVersion::default(),
         uv: ToolVersion::default(),
         adapter_version: None,
+        path_gap: crate::agent_diagnostics::PathGapReport::default(),
     }
 }
 
@@ -1532,9 +1538,20 @@ pub async fn detect_agent_runtime_candidates_inner(
     } else {
         ToolVersion::default()
     };
+    // Read once per scan, like the runtime tools above: the PATH a new process
+    // would see is a property of the machine and of when this process started,
+    // not of any one provider. The reading itself lives in
+    // `agent_diagnostics` — the module that already owns environment evidence —
+    // rather than a second implementation here.
+    let path_gap = crate::agent_diagnostics::persisted_path_gap();
     for provider in &mut providers {
         provider.node = node.clone();
         provider.uv = uv.clone();
+        // Machine fact: read once and attach to every provider, for the same
+        // reason Node is. Only a diagnosis reads it, and it answers the question
+        // a status name cannot — whether a located executable is somewhere this
+        // process can actually reach.
+        provider.path_gap = path_gap.clone();
     }
     for provider in &mut providers {
         let Some(rule) = rules.iter().find(|r| r.provider == provider.provider) else {

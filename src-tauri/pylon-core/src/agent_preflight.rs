@@ -4,6 +4,11 @@ use crate::agent_catalog::{
     self, AgentDetectionProfile, CatalogCheckKind, CatalogFixKind, CatalogVersionEvidence,
     CatalogVersionGate, CatalogVersionGateId,
 };
+// One `PathGapReport` for the whole crate: environment evidence already has an
+// owner (`agent_diagnostics`), and a second definition here would be the start of
+// a parallel system. Imported rather than redefined so the field type below is
+// that same type.
+use crate::agent_diagnostics::PathGapReport;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -44,6 +49,10 @@ pub struct PreflightResult {
     /// Adapter-vs-vendor-CLI explainer, present only for wrapper providers.
     pub adapter: Option<AdapterEvidence>,
     pub checks: Vec<CheckItem>,
+    /// Why this provider is in `status`, in the closed diagnosis vocabulary.
+    /// A consumer renders this instead of inventing wording from `status`
+    /// alone, which cannot tell "absent" from "present but unreachable".
+    pub cause: DiagnosticCause,
 }
 
 /// A1 稳定状态。新增值必须同时出现在 `detect`/`adapterMissing` 矩阵测试里。
@@ -141,6 +150,221 @@ pub struct PreflightInputs {
     /// A declared `minVersion` gate is only satisfied when this is present and
     /// parseable — an unreadable version never proves the floor.
     pub adapter_version: Option<String>,
+    /// Where the ACP entry point was located and whether that place is on the
+    /// process PATH. Present so a diagnosis can name the path instead of saying
+    /// "not found" about a file that was in fact found.
+    pub acp_location: CommandLocation,
+    /// What a freshly started process would see on PATH but this process does
+    /// not. See [`PathGapReport`]; this is the Windows form of Codeg's
+    /// login-shell probe, which that source skips on Windows entirely.
+    pub path_gap: PathGapReport,
+}
+
+/// Where a located ACP entry point lives, and whether the app can reach it
+/// without an explicit path.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandLocation {
+    /// Absolute path of the located ACP command. `None` means nothing was found.
+    pub path: Option<String>,
+    /// Whether that location is on the process PATH. A command found outside it
+    /// still launches via a saved absolute path, but it is the explanation for
+    /// "I installed it and Pylon still says not installed".
+    pub on_app_path: bool,
+}
+
+/// How serious a diagnosis is. Mirrors the source's four-level verdict scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticLevel {
+    /// Everything this provider needs is present and reachable.
+    Ok,
+    /// Not installed, but that is a normal state — nothing is broken.
+    Info,
+    /// Something may be wrong but cannot be proven from here.
+    Warn,
+    /// A definitive obstacle with an actionable fix.
+    Fail,
+}
+
+/// **Why** a provider is in the state it is in — the question a state name
+/// cannot answer.
+///
+/// A status such as `notInstalled` is read by users as "Pylon is broken" even
+/// when the executable is sitting in a directory the app cannot see. This is the
+/// closed vocabulary that distinguishes those cases, so the UI can say
+/// "restart Pylon" instead of "please install".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticCause {
+    pub level: DiagnosticLevel,
+    /// Closed vocabulary; asserted by test so a new cause cannot reach a
+    /// consumer untranslated.
+    pub code: String,
+    /// One actionable sentence. States observed facts, never a guess.
+    pub summary: String,
+}
+
+/// The diagnosis vocabulary. Every value is a distinct, actionable situation.
+pub const DIAGNOSTIC_CODES: &[&str] = &[
+    "ok",
+    "ok_absolute_path",
+    "ok_native_cli_absent",
+    "not_installed",
+    "config_only",
+    "node_missing",
+    "node_too_old",
+    "node_unreadable",
+    "adapter_missing",
+    "adapter_missing_native_present",
+    "path_gap_restart_required",
+];
+
+/// Explain why a provider is in the state `evaluate` reported.
+///
+/// Pure over catalog data plus observed inputs, so the CLI and the settings
+/// panel cannot disagree — the same reason Codeg gives its verdict function.
+///
+/// Ordering matters: a located ACP entry point settles every other question
+/// (including where it lives), and Node problems only matter for a provider that
+/// actually declares a Node floor, so an unrelated missing Node never gets
+/// blamed for an agent that does not use it.
+pub fn diagnose(
+    rule: &crate::agent_catalog::AgentDetectionProfile,
+    inputs: &PreflightInputs,
+) -> DiagnosticCause {
+    let acp_present = inputs.acp_present || inputs.adapter_present;
+    if acp_present {
+        // Found, and therefore launchable. NOT being on PATH is deliberately not
+        // a complaint: a configured agent stores the absolute path and launches
+        // from it, so warning here fires on every working install and dilutes the
+        // diagnosis until real problems stop reading as problems. The location is
+        // still named, because it explains why another tool may not see the same
+        // command.
+        if rule.adapter_relation.is_some() && !inputs.native_present {
+            return cause(
+                DiagnosticLevel::Ok,
+                "ok_native_cli_absent",
+                "ACP 适配器可直接解析，可以启动；未找到它包装的官方 CLI（仅信息，不阻塞）。"
+                    .to_string(),
+            );
+        }
+        if inputs.acp_location.on_app_path {
+            return cause(
+                DiagnosticLevel::Ok,
+                "ok",
+                "该 Agent 的命令可以直接解析，环境正常。".to_string(),
+            );
+        }
+        return cause(
+            DiagnosticLevel::Ok,
+            "ok_absolute_path",
+            format!(
+                "该 Agent 可用：命令位于 {}，不在 PATH 上（Pylon 以保存的绝对路径启动）。",
+                inputs.acp_location.path.as_deref().unwrap_or("未知路径")
+            ),
+        );
+    }
+
+    // Nothing found from here on. Node blocks an npm-distributed provider's
+    // install outright, so it outranks the remaining explanations.
+    if let Some(min) = rule
+        .requires
+        .node
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        match &inputs.node {
+            ToolVersion::Absent => {
+                return cause(
+                    DiagnosticLevel::Fail,
+                    "node_missing",
+                    format!("该 Agent 以 npm 包分发，需要 Node.js >= {min}，但未检测到 Node.js。"),
+                )
+            }
+            ToolVersion::Known(version) if !version_at_least(Some(version), Some(min)) => {
+                return cause(
+                    DiagnosticLevel::Fail,
+                    "node_too_old",
+                    format!("当前 Node.js {version} 低于该 Agent 要求的 >= {min}。"),
+                )
+            }
+            ToolVersion::Unknown => {
+                return cause(
+                    DiagnosticLevel::Warn,
+                    "node_unreadable",
+                    format!("未能读取 Node.js 版本，无法确认是否满足 >= {min}。"),
+                )
+            }
+            ToolVersion::Known(_) => {}
+        }
+    }
+
+    if rule.adapter_relation.is_some() {
+        // The single most reported "bug": the user has the vendor CLI and reads
+        // "not installed" as the app failing to see it. Answer what they are
+        // actually asking.
+        if inputs.native_present {
+            return cause(
+                DiagnosticLevel::Info,
+                "adapter_missing_native_present",
+                "已找到你自装的官方 CLI，但 Pylon 启动的是另一个 ACP 适配器，该适配器尚未安装。"
+                    .to_string(),
+            );
+        }
+        return cause(
+            DiagnosticLevel::Info,
+            "adapter_missing",
+            "该 Agent 需要单独的 ACP 适配器，目前未安装。".to_string(),
+        );
+    }
+
+    if inputs.config_evidence || inputs.shared_config_present {
+        return cause(
+            DiagnosticLevel::Warn,
+            "config_only",
+            "只找到配置文件、未找到可执行文件；请指定可执行文件路径。".to_string(),
+        );
+    }
+
+    // The gap is the explanation for a NEGATIVE result — this is the one place it
+    // is actionable rather than noise. It is also the exact case Codeg reports as
+    // `terminal_only_path`: the command resolves somewhere, but not in the PATH
+    // this process inherited.
+    if inputs.path_gap.has_gap() {
+        let count = inputs.path_gap.missing_from_app_path.len();
+        let first = inputs
+            .path_gap
+            .missing_from_app_path
+            .first()
+            .map(String::as_str)
+            .unwrap_or("未知目录");
+        return cause(
+            DiagnosticLevel::Warn,
+            "path_gap_restart_required",
+            format!(
+                "未检测到该 Agent；但你的 PATH 中有 {count} 个目录是本进程看不到的（如 {first}）。若你刚安装过它，重启 Pylon 即可。"
+            ),
+        );
+    }
+
+    cause(
+        DiagnosticLevel::Info,
+        "not_installed",
+        "未检测到该 Agent；请先安装，或在下方手动添加。".to_string(),
+    )
+}
+
+fn cause(level: DiagnosticLevel, code: &str, summary: String) -> DiagnosticCause {
+    debug_assert!(
+        DIAGNOSTIC_CODES.contains(&code),
+        "诊断码必须属于封闭词汇表: {code}"
+    );
+    DiagnosticCause {
+        level,
+        code: code.to_string(),
+        summary,
+    }
 }
 
 /// Evaluate one runtime requirement against observed tool evidence.
@@ -409,6 +633,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
             && checks.iter().all(|check| check.status != CheckStatus::Fail),
         adapter,
         checks,
+        cause: diagnose(&rule, inputs),
     })
 }
 
@@ -440,6 +665,18 @@ pub fn from_detection(
             .find(|item| item.kind == "version")
             .map(|item| item.detail.clone())
     });
+    // The located ACP entry point and whether the app's PATH reaches it. Taken
+    // from the evidence hits (the scan's own view), so the diagnosis describes
+    // the same file the candidate list shows.
+    let acp_hit = evidence
+        .acp_commands
+        .iter()
+        .find(|hit| hit.source == "path")
+        .or_else(|| evidence.acp_commands.first());
+    let acp_location = CommandLocation {
+        path: acp_hit.map(|hit| hit.path.clone()),
+        on_app_path: evidence.acp_commands.iter().any(|hit| hit.source == "path"),
+    };
     evaluate(
         &evidence.provider,
         &PreflightInputs {
@@ -461,6 +698,8 @@ pub fn from_detection(
             node: evidence.node.clone(),
             uv: evidence.uv.clone(),
             adapter_version: adapter_version.or_else(|| evidence.adapter_version.clone()),
+            acp_location,
+            path_gap: evidence.path_gap.clone(),
         },
     )
 }
@@ -542,6 +781,7 @@ mod tests {
                 node: crate::agent_preflight::ToolVersion::default(),
                 uv: crate::agent_preflight::ToolVersion::default(),
                 adapter_version: None,
+                path_gap: crate::agent_preflight::PathGapReport::default(),
             };
         let candidate = |version: Option<&str>| AgentRuntimeCandidate {
             candidate_id: "c".into(),
@@ -618,6 +858,174 @@ mod tests {
     /// 理由见 `PreflightStatus::NativeMissing` 的文档：从 Codeg 迁来的 wrapper relation
     /// 不总是真依赖（Pylon 的 `claude-code` 实际是 `ccb`），把它当门禁会把今天可用的
     /// 配置报成坏的。本测试把「状态可报、启动不受影响」这一对事实钉在一起。
+    /// C3：诊断必须回答「为什么」，而不只是复述状态名。
+    ///
+    /// 本测试同时钉住三件事：（a）封闭词汇表，（b）各级别与成因的对应关系，
+    /// （c）**已完成定位的 provider 不得被报成问题**——这是本片最重要的回归护栏，
+    /// 因为「不在 PATH 上」对已配置的 agent 是正常状态（存的即绝对路径），
+    /// 向它发警告会让每次刷新都出现假警报，进而稀释真实问题的可见度。
+    #[test]
+    fn diagnosis_explains_the_cause_instead_of_restating_the_state() {
+        let rules = crate::agent_catalog::detection_profiles().unwrap();
+        let rule = |provider: &str| {
+            rules
+                .iter()
+                .find(|r| r.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} 必须在 catalog 中"))
+                .clone()
+        };
+        let gap = |dirs: &[&str]| PathGapReport {
+            missing_from_app_path: dirs.iter().map(|d| (*d).to_string()).collect(),
+            observed: true,
+        };
+        let base = PreflightInputs::default();
+
+        // 未声明 requires 且不是 wrapper 的 provider（peri）：用最干净的面。
+        let bare = rule("peri");
+
+        // 1）可直接解析 → ok/Ok。
+        let found = PreflightInputs {
+            acp_present: true,
+            adapter_present: true,
+            acp_location: CommandLocation {
+                path: Some("C:/bin/peri.exe".into()),
+                on_app_path: true,
+            },
+            ..base.clone()
+        };
+        let cause = diagnose(&bare, &found);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Ok, "ok")
+        );
+
+        // 2）找到了、但不在 app PATH 上 → 仍是 Ok。不得因「不在 PATH」而报警。
+        let off_path = PreflightInputs {
+            acp_location: CommandLocation {
+                path: Some("F:/tools/peri.exe".into()),
+                on_app_path: false,
+            },
+            ..found.clone()
+        };
+        let cause = diagnose(&bare, &off_path);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Ok, "ok_absolute_path"),
+            "已定位的 provider 不得被报成警告"
+        );
+        assert!(
+            cause.summary.contains("F:/tools/peri.exe"),
+            "原因必须点名路径"
+        );
+
+        // 3）即使 PATH 缺口恰好解释了这个位置，正面结果也不改判。
+        let off_path_with_gap = PreflightInputs {
+            path_gap: gap(&["F:/tools"]),
+            ..off_path.clone()
+        };
+        assert_eq!(
+            diagnose(&bare, &off_path_with_gap).level,
+            DiagnosticLevel::Ok
+        );
+
+        // 4）什么都没找到 + 观察到非空 PATH 缺口 → 这是缺口的**唯一**可行动场景，
+        //    也正是 Codeg 的 `terminal_only_path` 所答的那个问题。
+        let missing = PreflightInputs {
+            path_gap: gap(&["C:/Users/me/AppData/Roaming/npm"]),
+            ..base.clone()
+        };
+        let cause = diagnose(&bare, &missing);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Warn, "path_gap_restart_required")
+        );
+        assert!(cause.summary.contains("重启 Pylon"), "必须给出可行动动作");
+        assert!(cause.summary.contains("npm"), "必须点名至少一个缺口目录");
+
+        // 5）什么都没找到、缺口已观察但为空 → not_installed/Info。
+        let no_gap = PreflightInputs {
+            path_gap: gap(&[]),
+            ..base.clone()
+        };
+        assert_eq!(diagnose(&bare, &no_gap).code, "not_installed");
+
+        // 6）缺口**未观察**（读不到持久化 PATH）不等于「无缺口」：不得因此声称
+        //    用户环境没问题，也不得把未知当成缺口而误报重启。
+        let unobserved = PreflightInputs {
+            path_gap: PathGapReport::default(),
+            ..base.clone()
+        };
+        assert_eq!(diagnose(&bare, &unobserved).code, "not_installed");
+        assert!(!PathGapReport::default().has_gap());
+
+        // 7）wrapper：官方 CLI 在、适配器不在 → 正是最常被当成「Pylon 坏了」的情形。
+        let wrapper = rule("claude-code");
+        let native_only = PreflightInputs {
+            native_present: true,
+            ..base.clone()
+        };
+        let cause = diagnose(&wrapper, &native_only);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Info, "adapter_missing_native_present")
+        );
+        assert_eq!(diagnose(&wrapper, &base).code, "adapter_missing");
+
+        // 8）npx provider 的 Node 问题优先于其它解释（Node 直接阻断安装）。
+        //    codex 声明了 requires.node = 20.0.0。
+        let npx = rule("codex");
+        let no_node = PreflightInputs {
+            node: ToolVersion::Absent,
+            ..base.clone()
+        };
+        let cause = diagnose(&npx, &no_node);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Fail, "node_missing")
+        );
+        assert!(cause.summary.contains("20.0.0"), "必须点名下限");
+
+        let old_node = PreflightInputs {
+            node: ToolVersion::Known("18.0.0".into()),
+            ..base.clone()
+        };
+        assert_eq!(diagnose(&npx, &old_node).code, "node_too_old");
+
+        // 版本读不出是 Warn，不得升级为确定失败。
+        let unreadable = PreflightInputs {
+            node: ToolVersion::Unknown,
+            ..base.clone()
+        };
+        let cause = diagnose(&npx, &unreadable);
+        assert_eq!(
+            (cause.level, cause.code.as_str()),
+            (DiagnosticLevel::Warn, "node_unreadable")
+        );
+
+        // Node 达标 → 回落到安装面结论，不被 Node 分支截走。
+        let ok_node = PreflightInputs {
+            node: ToolVersion::Known("26.7.0".into()),
+            ..base.clone()
+        };
+        assert_eq!(diagnose(&npx, &ok_node).code, "adapter_missing");
+
+        // 9）封闭词汇表：上述所有产出都必须在表内，且表内每条都有一个产出者。
+        for (rule, inputs) in [
+            (bare.clone(), found),
+            (bare.clone(), off_path),
+            (bare.clone(), missing),
+            (bare.clone(), no_gap),
+            (wrapper, native_only),
+            (npx, no_node),
+        ] {
+            let code = diagnose(&rule, &inputs).code;
+            assert!(
+                DIAGNOSTIC_CODES.contains(&code.as_str()),
+                "诊断码 {code} 不在封闭词汇表内"
+            );
+        }
+    }
+
     #[test]
     fn native_missing_is_reported_without_gating_the_launch_plan() {
         let profile = crate::agent_catalog::provider_profile("claude-code").unwrap();
@@ -642,6 +1050,7 @@ mod tests {
                 node: ToolVersion::Known("26.7.0".into()),
                 uv: ToolVersion::default(),
                 adapter_version: None,
+                path_gap: crate::agent_preflight::PathGapReport::default(),
             },
             &[],
         )
