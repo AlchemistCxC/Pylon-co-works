@@ -44,7 +44,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     render(<AgentRuntimePanel />)
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', {
-      detectorIds: ['builtin.detector.claude-code', 'builtin.detector.hermes', 'builtin.detector.peri'],
+      detectorIds: ['builtin.detector.claude-code', 'builtin.detector.codex', 'builtin.detector.hermes', 'builtin.detector.peri'],
     }))
   })
 

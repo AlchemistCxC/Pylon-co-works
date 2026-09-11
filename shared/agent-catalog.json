@@ -168,6 +168,40 @@
         { "name": "Skill", "aliases": ["SkillTool"], "displayName": "Skill", "kind": "read", "action": "skill", "summaryFields": ["skill", "query"], "capabilities": ["skill"] },
         { "name": "LocalMemoryRecall", "aliases": ["Memory"], "displayName": "Memory", "kind": "read", "action": "read", "summaryFields": ["action", "store", "key"], "capabilities": ["memory", "read-only"] }
       ]
+    },
+    {
+      "provider": "codex",
+      "displayName": "Codex CLI",
+      "protocol": "acp",
+      "capabilities": {
+        "sessionUpdates": true,
+        "interactionEvents": true,
+        "permissionRequests": true,
+        "replay": true,
+        "responseMethods": []
+      },
+      "interactionKinds": ["ask-question", "approval"],
+      "protocolDefaults": { "setModelApi": "config_option" },
+      "detection": {
+        "detectorId": "builtin.detector.codex",
+        "versionArgs": [],
+        "packageManager": null,
+        "requires": { "node": "20.0.0", "uv": null },
+        "checks": [],
+        "priority": 100,
+        "invocations": [
+          { "command": "codex-acp", "args": [] }
+        ],
+        "configDirs": [".codex"],
+        "configEvidence": []
+      },
+      "adaptation": {
+        "adapterRelation": { "nativeCmd": "codex", "nativeLabel": "Codex CLI", "sharedConfigDir": "~/.codex", "extraDirs": [".local/bin"], "docsUrl": "https://docs.codeg.app/guide/supported-agents#acp-adapters" },
+        "versionGates": { "goalControlOutOfBand": true },
+        "sessionEstablishment": { "order": ["load", "new"] }
+      },
+      "launch": { "kind": "path", "command": "codex-acp", "args": [] },
+      "tools": []
     }
   ]
 }

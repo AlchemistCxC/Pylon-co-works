@@ -55,6 +55,8 @@ describe('Shared Agent Catalog', () => {
       { kind: 'path', command: 'peri', args: ['acp'], env: [], cwdPolicy: null },
       { kind: 'path', command: 'hermes', args: ['acp'], env: [], cwdPolicy: null },
       { kind: 'path', command: 'ccb', args: ['--acp'], env: [], cwdPolicy: null },
+      // A5①：codex 的 ACP 入口是适配器 codex-acp（无参数）。
+      { kind: 'path', command: 'codex-acp', args: [], env: [], cwdPolicy: null },
     ])
   })
 
@@ -90,10 +92,13 @@ describe('Shared Agent Catalog', () => {
     expect(() => parseAgentCatalog(document)).toThrow()
   })
   it('projects one provider baseline into descriptors, detectors and tools', () => {
-    expect(builtinAgentCatalog.providers()).toEqual(['peri', 'hermes', 'claude-code'])
+    expect(builtinAgentCatalog.providers()).toEqual(['peri', 'hermes', 'claude-code', 'codex'])
     expect(builtinAgentCatalog.descriptors().map(entry => entry.provider)).toEqual(builtinAgentCatalog.providers())
     expect(builtinAgentCatalog.detectors().map(entry => entry.provider)).toEqual(builtinAgentCatalog.providers())
-    expect(new Set(builtinAgentCatalog.tools().map(entry => entry.provider))).toEqual(new Set(builtinAgentCatalog.providers()))
+    // codex 目前不声明工具表（无真源可依），因此它可能不出现在 tools() 里；
+    // 其余 provider 必须齐全。
+    expect(new Set(builtinAgentCatalog.tools().map(entry => entry.provider)))
+      .toEqual(new Set(['peri', 'hermes', 'claude-code']))
   })
 
   it('keeps every detector on an explicit ACP invocation', () => {
@@ -101,6 +106,7 @@ describe('Shared Agent Catalog', () => {
       { id: 'builtin.detector.peri', provider: 'peri', protocol: 'acp', priority: 100 },
       { id: 'builtin.detector.hermes', provider: 'hermes', protocol: 'acp', priority: 100 },
       { id: 'builtin.detector.claude-code', provider: 'claude-code', protocol: 'acp', priority: 100 },
+      { id: 'builtin.detector.codex', provider: 'codex', protocol: 'acp', priority: 100 },
     ])
   })
 
@@ -129,7 +135,7 @@ describe('Shared Agent Catalog', () => {
   })
 
   it('validates structured config evidence without exposing it as a second detector registry', () => {
-    expect(builtinAgentCatalog.detectors()).toHaveLength(3)
+    expect(builtinAgentCatalog.detectors()).toHaveLength(4)
     const minimum = {
       provider: 'fixture', displayName: 'Fixture', protocol: 'acp',
       capabilities: { sessionUpdates: true, interactionEvents: true, permissionRequests: false, replay: true, responseMethods: [] },

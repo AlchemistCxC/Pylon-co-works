@@ -14,6 +14,7 @@ describe('agent detector DTO', () => {
       { id: 'builtin.detector.peri', provider: 'peri', protocol: 'acp', priority: 100 },
       { id: 'builtin.detector.hermes', provider: 'hermes', protocol: 'acp', priority: 100 },
       { id: 'builtin.detector.claude-code', provider: 'claude-code', protocol: 'acp', priority: 100 },
+      { id: 'builtin.detector.codex', provider: 'codex', protocol: 'acp', priority: 100 },
     ])
     expect(BUILTIN_AGENT_DETECTORS.some(detector => detector.provider === 'pi')).toBe(false)
   })

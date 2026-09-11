@@ -1479,6 +1479,7 @@ mod tests {
                 "builtin.detector.peri",
                 "builtin.detector.hermes",
                 "builtin.detector.claude-code",
+                "builtin.detector.codex",
             ],
         );
         assert_eq!(
@@ -1496,6 +1497,21 @@ mod tests {
             ["--acp"],
             "Claude Code 的 ACP 入口必须显式带 --acp"
         );
+        // A5①：codex 是第二个 wrapper。ACP 入口是适配器 `codex-acp`，
+        // 而 vendor CLI `codex` 只作为 adapterRelation 的探测证据。
+        let codex = rules
+            .iter()
+            .find(|rule| rule.provider == "codex")
+            .expect("codex 必须在 catalog 中");
+        assert_eq!(codex.invocations[0].command, "codex-acp");
+        assert!(codex.invocations[0].args.is_empty());
+        let relation = codex
+            .adapter_relation
+            .as_ref()
+            .expect("codex 必须声明 adapter relation");
+        assert_eq!(relation.native_cmd, "codex");
+        assert_eq!(relation.shared_config_dir, "~/.codex");
+        assert_eq!(relation.extra_dirs, vec![".local/bin"]);
         assert!(
             rules.iter().all(|rule| rule.provider != "pi"),
             "pi --mode rpc 是私有 JSONL RPC，不得伪装成 ACP runtime",
@@ -1708,6 +1724,65 @@ mod tests {
         assert!(!home.join(".claude").exists());
         assert_eq!(std::fs::read_dir(&home).unwrap().count(), before);
         assert_eq!(std::fs::read_dir(&search).unwrap().count(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A5①：codex 的 wrapper 双证据。本机真实状态是「vendor CLI 在、ACP 适配器
+    /// 不在」（`codex` 已装、`codex-acp` 未装），必须产出可行动的 `adapterMissing`。
+    #[tokio::test]
+    async fn codex_wrapper_reports_adapter_missing_with_native_cli_present() {
+        let root = fixture_root("codex-adapter-missing");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        // 只有 vendor CLI `codex`，没有适配器 `codex-acp`。
+        std::fs::write(
+            search.join(&executable_names("codex")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.codex".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(
+            report.candidates.is_empty(),
+            "适配器不存在，不应有 ACP 候选"
+        );
+        let evidence = &report.providers[0];
+        assert_eq!(evidence.provider, "codex");
+        assert!(evidence.adapter_relation_declared);
+        assert!(evidence.acp_commands.is_empty());
+        assert_eq!(evidence.native_commands.len(), 1);
+        assert!(evidence.shared_config_present);
+
+        // 同一份证据经共享映射得到可行动状态（与设置页/CLI 一致）。
+        let preflight =
+            crate::agent_preflight::from_detection(evidence, &report.candidates).unwrap();
+        assert_eq!(
+            preflight.status,
+            crate::agent_preflight::PreflightStatus::AdapterMissing
+        );
+        assert!(!preflight.passed);
+        assert_eq!(
+            crate::agent_preflight::action_code(preflight.status),
+            "install-acp-adapter"
+        );
+        let adapter = preflight.adapter.expect("codex 是 wrapper");
+        assert_eq!(adapter.native_cmd, "codex");
+        assert_eq!(adapter.native_label, "Codex CLI");
+        assert_eq!(adapter.shared_config_dir, "~/.codex");
+        // 两侧证据必须分开：vendor CLI 已找到、ACP 适配器未找到。
+        assert!(adapter.native_present);
+        assert!(!adapter.acp_present);
+        assert!(adapter.shared_config_present);
 
         std::fs::remove_dir_all(root).unwrap();
     }

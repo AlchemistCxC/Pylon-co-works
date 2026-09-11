@@ -1157,13 +1157,14 @@ mod tests {
     fn shared_catalog_is_valid_and_excludes_rpc_only_pi() {
         let catalog = parse_catalog(CATALOG_JSON).expect("shared catalog must remain valid");
         assert_eq!(catalog.schema_version, 3);
+        // A5①：catalog 新增 codex（wrapper relation + 双证据探测）。列表仍为精确断言。
         assert_eq!(
             catalog
                 .providers
                 .iter()
                 .map(|entry| entry.provider.as_str())
                 .collect::<Vec<_>>(),
-            ["peri", "hermes", "claude-code"]
+            ["peri", "hermes", "claude-code", "codex"]
         );
         assert!(catalog.providers.iter().all(|entry| entry.provider != "pi"));
     }
@@ -1339,7 +1340,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.provider.as_str())
                 .collect::<Vec<_>>(),
-            ["peri", "hermes", "claude-code"]
+            ["peri", "hermes", "claude-code", "codex"]
         );
         let hermes = profiles
             .iter()
