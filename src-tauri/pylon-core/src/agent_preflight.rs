@@ -50,9 +50,23 @@ pub struct PreflightResult {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PreflightStatus {
-    /// Nothing found: neither the ACP entry point nor the provider evidence.
+    /// Wrapper provider whose ACP entry point exists but whose vendor CLI was not
+    /// found.
+    ///
+    /// **Informational, not blocking** — that is the A5① decision, and the reason
+    /// is that the migrated Codeg relation is not always a real dependency:
+    /// Pylon's `claude-code` entry is `ccb`, not the npm adapter Codeg's
+    /// `nativeCmd: "claude"` was written for, and this host runs that
+    /// configuration today. Treating the relation as a gate would report a working
+    /// setup as broken and make Pylon (which is not Codeg's adapter installer)
+    /// demand an install the user may not need. Whether a wrapper can really speak
+    /// ACP is proven by the connection test, never by the presence of a second
+    /// CLI; the launch planner keeps starting the ACP entry and records this only
+    /// as a diagnostic. A vendor CLI that is genuinely a hard dependency belongs
+    /// in that provider's own `checks`, not in this state.
     NativeMissing,
     /// Wrapper provider whose vendor CLI was found but whose ACP adapter was not.
+    /// This one IS actionable: nothing exists that can speak ACP.
     AdapterMissing,
     /// ACP entry point present, declared version gate satisfied.
     Installed,
@@ -528,6 +542,56 @@ mod tests {
         peri_evidence.provider = "peri".into();
         let result = from_detection(&peri_evidence, &[]).unwrap();
         assert_eq!(result.status, PreflightStatus::Installed);
+    }
+
+    /// A5① 裁定的行为契约：`NativeMissing` 是**信息性**状态，不得改变可启动性。
+    ///
+    /// 理由见 `PreflightStatus::NativeMissing` 的文档：从 Codeg 迁来的 wrapper relation
+    /// 不总是真依赖（Pylon 的 `claude-code` 实际是 `ccb`），把它当门禁会把今天可用的
+    /// 配置报成坏的。本测试把「状态可报、启动不受影响」这一对事实钉在一起。
+    #[test]
+    fn native_missing_is_reported_without_gating_the_launch_plan() {
+        let profile = crate::agent_catalog::provider_profile("claude-code").unwrap();
+        let detection = crate::agent_launch_plan::LaunchDetection {
+            resolved_executable: None,
+            acp_present: true,
+            native_present: false,
+        };
+        // 1）preflight 如实报 NativeMissing。
+        let preflight = from_detection(
+            &crate::agent_detection::AgentProviderEvidence {
+                provider: "claude-code".into(),
+                detector_id: "builtin.detector.claude-code".into(),
+                adapter_relation_declared: true,
+                acp_commands: vec![crate::agent_detection::AgentEvidenceHit {
+                    kind: "acp-command".into(),
+                    path: "C:/x/ccb.cmd".into(),
+                    source: "path".into(),
+                }],
+                native_commands: Vec::new(),
+                shared_config_present: true,
+            },
+            &[],
+        )
+        .unwrap();
+        assert_eq!(preflight.status, PreflightStatus::NativeMissing);
+        // 2）同一个检测结果下，launch plan 仍可生成且诊断带 codable 原因。
+        let plan = crate::agent_launch_plan::plan_launch(
+            "claude-code",
+            profile.as_ref(),
+            &detection,
+            &crate::agent_launch_plan::LaunchOverrides::default(),
+        )
+        .expect("NativeMissing 不得阻止生成 launch plan");
+        assert_eq!(plan.executable, "ccb");
+        assert_eq!(plan.args, vec!["--acp"]);
+        assert!(
+            plan.diagnostics
+                .iter()
+                .any(|item| item.code == "native-cli-not-found"),
+            "必须留下可诊断痕迹: {:?}",
+            plan.diagnostics
+        );
     }
 
     #[test]

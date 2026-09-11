@@ -1987,3 +1987,86 @@ for line in sys.stdin:
         "per-agent env 必须到达适配器进程"
     );
 }
+
+/// A5① Claude 侧连接 fixture：catalog 声明的 client capabilities 必须**真实出现在
+/// `initialize` 请求里**，而不只是存在于目录中。
+///
+/// 与 Codex 的 fixture（vendor CLI 不进 argv）互补：Claude 是唯一同时声明了
+/// `clientCapabilities` 与带下限版本 gate 的 provider，所以这里断言的是「声明
+/// 落到 wire」，并同时证明该声明是 **provider 作用域**的——没有声明的 provider
+/// 只拿到 Pylon 默认 caps。
+#[tokio::test]
+async fn claude_wrapper_puts_declared_client_capabilities_on_the_wire() {
+    /// 用给定 provider 连接一次 fake 适配器，返回它真实收到的 `initialize` params。
+    async fn capture_initialize_params(provider: &str, tag: &str) -> serde_json::Value {
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-{tag}-init-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        with open(sys.argv[1],'w',encoding='utf-8') as f:
+            f.write(json.dumps(request.get('params',{})))
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        break
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: tag.to_string(),
+            provider: Some(provider.to_string()),
+            transport: "subprocess".to_string(),
+            exe: crate::test_utils::test_python_exe().to_string(),
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake 适配器必须完成 initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let raw = std::fs::read_to_string(&trace_path).expect("read initialize params");
+        std::fs::remove_file(&trace_path).ok();
+        serde_json::from_str(raw.trim()).expect("initialize params 是 JSON")
+    }
+
+    let claude = capture_initialize_params("claude-code", "claude-caps").await;
+    let caps = &claude["clientCapabilities"];
+    // Pylon 默认 caps 仍在（声明是合并，不是替换）。
+    assert_eq!(caps["tokenStats"], serde_json::json!(true));
+    assert_eq!(caps["_meta"]["peri.replay"], serde_json::json!(true));
+    // catalog 声明抵达 wire：`_meta` 内嵌的布尔与嵌套对象都逐字段一致。
+    assert_eq!(
+        caps["_meta"]["subagent-transcript"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        caps["_meta"]["jetbrains.air"],
+        serde_json::json!({"version": 1, "capabilities": ["sessionFailure"]})
+    );
+    // 握手另外两段仍来自协议配置（protocolVersion 是数值，不是字符串）。
+    assert_eq!(claude["clientInfo"]["name"], serde_json::json!("Pylon"));
+    assert!(claude["protocolVersion"].is_u64());
+
+    // provider 作用域：未声明 caps 的 provider 拿到的只有默认 `_meta` 键。
+    let hermes = capture_initialize_params("hermes", "hermes-caps").await;
+    let hermes_meta = hermes["clientCapabilities"]["_meta"]
+        .as_object()
+        .expect("_meta 是对象");
+    assert!(
+        !hermes_meta.contains_key("subagent-transcript"),
+        "未声明的 provider 不得继承他人声明: {hermes_meta:?}"
+    );
+    assert!(!hermes_meta.contains_key("jetbrains.air"));
+    assert!(hermes_meta.contains_key("peri.replay"));
+}

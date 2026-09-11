@@ -299,6 +299,51 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     }))
   })
 
+  /**
+   * A5① Claude 侧候选渲染：wrapper provider 的候选必须展示自己的 ACP 入口与身份，
+   * 且不得把 vendor CLI 当成可导入的候选执行文件。
+   */
+  it('把 claude-code wrapper 候选渲染成适配器入口，而不是 vendor CLI', async () => {
+    const claude = {
+      candidateId: 'detected:ccb', detectorId: 'builtin.detector.claude-code', provider: 'claude-code',
+      suggestedAgentId: 'claude-code', name: 'Claude Code',
+      executable: 'F:\\A-I\\Agent\\bin\\ccb.cmd', args: ['--acp'],
+      evidence: [{ kind: 'path', detail: 'F:\\A-I\\Agent\\bin\\ccb.cmd' }],
+      identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
+    }
+    invoke.mockImplementation((command: string) => command === 'detect_agent_runtimes'
+      ? Promise.resolve({
+        candidates: [claude], diagnostics: [], elapsedMs: 2, truncated: false,
+        providers: [{
+          provider: 'claude-code', detectorId: 'builtin.detector.claude-code',
+          adapterRelationDeclared: true,
+          acpCommands: [{ kind: 'acp-command', path: 'F:\\A-I\\Agent\\bin\\ccb.cmd', source: 'path' }],
+          nativeCommands: [],
+          sharedConfigPresent: true,
+        }],
+        preflight: [{
+          provider: 'claude-code', status: 'nativeMissing', passed: false,
+          adapter: {
+            nativeCmd: 'claude', nativeLabel: 'Claude Code CLI', nativePresent: false, acpPresent: true,
+            sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+          },
+          checks: [],
+        }],
+      })
+      : Promise.resolve(null))
+    render(<AgentRuntimePanel />)
+
+    // 候选行列出 provider 与置信度，展开后默认填 ACP 入口 `ccb --acp`。
+    const row = await screen.findByRole('button', { name: /Claude Code.*claude-code/ })
+    fireEvent.click(row)
+    expect(screen.getByLabelText('Claude Code executable')).toHaveValue('F:\\A-I\\Agent\\bin\\ccb.cmd')
+    expect(screen.getByLabelText('Claude Code provider')).toHaveValue('claude-code')
+    // 候选执行文件不得被替换成 vendor CLI `claude`。
+    expect(screen.getByLabelText('Claude Code executable')).not.toHaveValue('claude')
+    // 同一屏上 wrapper 两侧证据分开，且安装状态给出可行动原因。
+    expect(within(await screen.findByLabelText('本机 Agent 安装状态')).getByText(/缺官方 CLI/)).toBeInTheDocument()
+  })
+
   it('多个候选使用紧凑选择列表，仅展开当前候选的高级参数', async () => {
     const makeCandidate = (id: string, name: string) => ({
       candidateId: `detected:${id}`, detectorId: 'detector.test', provider: id,
