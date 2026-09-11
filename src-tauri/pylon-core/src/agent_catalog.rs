@@ -308,6 +308,54 @@ fn unix_only_argument(command: &str, arg: &str) -> bool {
         && matches!(arg, "-c" | "-lc" | "--command")
 }
 
+/// One validator for interaction-bridge declarations, shared with the Codeg
+/// profile transform so both entry points enforce one method/parser contract.
+pub(crate) fn validate_interaction_bridges(
+    provider: &str,
+    bridges: &[CatalogInteractionBridge],
+) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    for bridge in bridges {
+        if bridge.method.trim().is_empty() {
+            return Err(format!(
+                "Agent Catalog {provider}.adaptation.interactionBridges.method 不能为空"
+            ));
+        }
+        if !seen.insert(bridge.method.clone()) {
+            return Err(format!(
+                "Agent Catalog {provider}.adaptation.interactionBridges.method 重复: {}",
+                bridge.method
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_launch_env_entry(
+    provider: &str,
+    entry: &CatalogLaunchEnv,
+) -> Result<(), String> {
+    if !env_name_is_valid(&entry.name) {
+        return Err(format!(
+            "Agent Catalog {provider}.launch env name 非法: {}",
+            entry.name
+        ));
+    }
+    if env_name_requests_secret(&entry.name) {
+        return Err(format!(
+            "Agent Catalog {provider} 不得声明凭据类 env: {}",
+            entry.name
+        ));
+    }
+    if entry.value.trim().is_empty() {
+        return Err(format!(
+            "Agent Catalog {provider}.launch env value 不能为空: {}",
+            entry.name
+        ));
+    }
+    Ok(())
+}
+
 impl CatalogLaunchProfile {
     /// Windows-only launch boundary. A profile that cannot be launched as a
     /// plain Windows child process must be rejected here rather than at spawn
@@ -332,24 +380,7 @@ impl CatalogLaunchProfile {
             }
         }
         for entry in &self.env {
-            if !env_name_is_valid(&entry.name) {
-                return Err(format!(
-                    "Agent Catalog {provider}.launch.env.name 非法: {}",
-                    entry.name
-                ));
-            }
-            if env_name_requests_secret(&entry.name) {
-                return Err(format!(
-                    "Agent Catalog {provider}.launch.env 不得声明凭据: {}",
-                    entry.name
-                ));
-            }
-            if entry.value.trim().is_empty() {
-                return Err(format!(
-                    "Agent Catalog {provider}.launch.env.value 不能为空: {}",
-                    entry.name
-                ));
-            }
+            validate_launch_env_entry(provider, entry)?;
         }
         Ok(())
     }
@@ -589,6 +620,93 @@ pub struct PylonAgentProfile {
     pub adapter_relation: Option<CatalogAdapterRelation>,
     pub version_gates: Vec<CatalogVersionGate>,
     pub session_establishment: CatalogSessionEstablishmentPolicy,
+    /// A3: declared client capabilities (typed reads, provider payload kept as data).
+    pub client_capabilities: Option<CatalogClientCapabilities>,
+    /// A3: declared launch environment additions, validated like the recipe env.
+    pub launch_env: Vec<CatalogLaunchEnv>,
+    /// A3: closed private-interaction bridges. An empty list means the provider
+    /// declares no catalog-level bridge restriction.
+    pub interaction_bridges: Vec<CatalogInteractionBridge>,
+}
+
+/// Closed bridge identity. One enum for both the catalog declaration and the
+/// adapter that consumes it, so an unknown parser name cannot be "handled" by
+/// a second, looser matching table.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogBridgeId {
+    GrokExtQuestions,
+    PiSelectAsk,
+    GrokExitPlan,
+    CodexElicitation,
+}
+
+/// One catalog-declared private interaction bridge.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogInteractionBridge {
+    pub method: String,
+    pub parser: CatalogBridgeId,
+}
+
+/// Declared client capabilities. The payload is provider DATA — arbitrary
+/// extension keys such as `_meta.jetbrains.air` — so it stays a map rather than
+/// a set of invented strategy ids; readers use the typed accessors below instead
+/// of parsing JSON at the call site.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct CatalogClientCapabilities {
+    declarations: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CatalogClientCapabilities {
+    /// Validated from a catalog object: every key must be a boolean flag or an
+    /// object payload. Anything else is a shape the merge step cannot apply.
+    pub(crate) fn from_value(provider: &str, value: &serde_json::Value) -> Result<Self, String> {
+        let object = value.as_object().ok_or_else(|| {
+            format!("Agent Catalog {provider}.adaptation.clientCapabilities 必须是对象")
+        })?;
+        for (key, entry) in object {
+            if key.trim().is_empty() {
+                return Err(format!(
+                    "Agent Catalog {provider}.adaptation.clientCapabilities 含空键"
+                ));
+            }
+            if !(entry.is_boolean() || entry.is_object()) {
+                return Err(format!(
+                    "Agent Catalog {provider}.adaptation.clientCapabilities.{key} 必须是 boolean 或对象"
+                ));
+            }
+        }
+        Ok(Self {
+            declarations: object.clone(),
+        })
+    }
+
+    pub fn declarations(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.declarations
+    }
+
+    /// Declared boolean flag (`subagent-transcript` style). Codeg's shape nests
+    /// these inside the provider `meta` payload, so both places are honored.
+    pub fn flag(&self, key: &str) -> Option<bool> {
+        self.declarations
+            .get(key)
+            .and_then(serde_json::Value::as_bool)
+            .or_else(|| {
+                self.meta()
+                    .and_then(|meta| meta.get(key))
+                    .and_then(serde_json::Value::as_bool)
+            })
+    }
+
+    /// Provider-specific extension payload (`_meta` / `meta`).
+    pub fn meta(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.declarations
+            .get("_meta")
+            .or_else(|| self.declarations.get("meta"))
+            .and_then(serde_json::Value::as_object)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -778,6 +896,9 @@ struct ProjectedAdaptation {
     adapter_relation: Option<CatalogAdapterRelation>,
     version_gates: Vec<CatalogVersionGate>,
     session_establishment: Option<CatalogSessionEstablishmentPolicy>,
+    client_capabilities: Option<CatalogClientCapabilities>,
+    launch_env: Vec<CatalogLaunchEnv>,
+    interaction_bridges: Vec<CatalogInteractionBridge>,
 }
 
 fn project_adaptation(
@@ -802,6 +923,39 @@ fn project_adaptation(
             parse_policy(provider, "sessionEstablishment", value)?;
         validate_session_establishment(provider, &policy)?;
         projected.session_establishment = Some(policy);
+    }
+    if let Some(value) = &adaptation.client_capabilities {
+        projected.client_capabilities =
+            Some(CatalogClientCapabilities::from_value(provider, value)?);
+    }
+    if let Some(value) = &adaptation.launch_env {
+        let entries: Vec<CatalogLaunchEnv> = parse_policy(provider, "launchEnv", value)?;
+        // 复用 launch recipe 的 env 校验：名称必须合法且不得声明凭据。
+        for entry in &entries {
+            validate_launch_env_entry(provider, entry)?;
+        }
+        projected.launch_env = entries;
+    }
+    if let Some(value) = &adaptation.interaction_bridges {
+        let bridges: Vec<CatalogInteractionBridge> =
+            parse_policy(provider, "interactionBridges", value)?;
+        validate_interaction_bridges(provider, &bridges)?;
+        projected.interaction_bridges = bridges;
+    }
+    // 尚无消费者的策略块（promptCapabilities/configAdaptation/mcp）只做形状校验：
+    // 没有消费者就不发明策略 id（否则是投机 schema），但已声明就得是对象。
+    for (name, value) in [
+        ("promptCapabilities", &adaptation.prompt_capabilities),
+        ("configAdaptation", &adaptation.config_adaptation),
+        ("mcp", &adaptation.mcp),
+    ] {
+        if let Some(value) = value {
+            if !value.is_object() {
+                return Err(format!(
+                    "Agent Catalog {provider}.adaptation.{name} 必须是对象"
+                ));
+            }
+        }
     }
     Ok(projected)
 }
@@ -898,6 +1052,9 @@ pub fn provider_profile(provider: &str) -> Result<Option<PylonAgentProfile>, Str
         adapter_relation: adaptation.adapter_relation,
         version_gates: adaptation.version_gates,
         session_establishment: adaptation.session_establishment.unwrap_or_default(),
+        client_capabilities: adaptation.client_capabilities,
+        launch_env: adaptation.launch_env,
+        interaction_bridges: adaptation.interaction_bridges,
     }))
 }
 
@@ -1193,6 +1350,99 @@ mod tests {
         let json = serde_json::to_value(&profiles).expect("projection must serialize");
         assert_eq!(json[0]["displayName"], "Peri");
         assert_eq!(json[1]["setModelApi"], "set_model");
+    }
+
+    #[test]
+    fn catalog_rejects_interaction_bridge_secret_env_and_capability_shapes() {
+        // 未知 parser id：强投影即拒（没有第二张宽松的字符串表）。
+        let mut unknown_parser: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        unknown_parser["providers"][2]["adaptation"]["interactionBridges"] =
+            serde_json::json!([{ "method": "future/m", "parser": "future" }]);
+        let document = parse_catalog(&unknown_parser.to_string()).unwrap();
+        assert!(project_adaptation(
+            &document.providers[2].provider,
+            document.providers[2].adaptation.as_ref()
+        )
+        .is_err());
+
+        // 重复 method 必须拒绝（否则“声明集合”是不确定的）。
+        let mut duplicate: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        duplicate["providers"][2]["adaptation"]["interactionBridges"] = serde_json::json!([
+            { "method": "pi/select_ask", "parser": "pi_select_ask" },
+            { "method": "pi/select_ask", "parser": "grok_ext_questions" }
+        ]);
+        let document = parse_catalog(&duplicate.to_string()).unwrap();
+        assert!(project_adaptation(
+            &document.providers[2].provider,
+            document.providers[2].adaptation.as_ref()
+        )
+        .is_err());
+
+        // launchEnv 不得声明凭据类名称，也不得给空值。
+        for entry in [
+            serde_json::json!([{ "name": "ANTHROPIC_API_KEY", "value": "x" }]),
+            serde_json::json!([{ "name": "1BAD", "value": "x" }]),
+            serde_json::json!([{ "name": "OK", "value": "  " }]),
+        ] {
+            let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+            document["providers"][0]["adaptation"] = serde_json::json!({ "launchEnv": entry });
+            let parsed = parse_catalog(&document.to_string()).unwrap();
+            assert!(
+                project_adaptation(
+                    &parsed.providers[0].provider,
+                    parsed.providers[0].adaptation.as_ref()
+                )
+                .is_err(),
+                "accepted {entry}"
+            );
+        }
+
+        // clientCapabilities 只接受 boolean / object 值。
+        for invalid in [
+            serde_json::json!("nope"),
+            serde_json::json!({ "flag": "yes" }),
+            serde_json::json!({ "flag": [1, 2] }),
+        ] {
+            let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+            document["providers"][0]["adaptation"] =
+                serde_json::json!({ "clientCapabilities": invalid });
+            let parsed = parse_catalog(&document.to_string()).unwrap();
+            assert!(
+                project_adaptation(
+                    &parsed.providers[0].provider,
+                    parsed.providers[0].adaptation.as_ref()
+                )
+                .is_err(),
+                "accepted {invalid}"
+            );
+        }
+
+        // 已声明但无消费者的策略块必须是对象（没有消费者就不发明策略 id）。
+        let mut non_object: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        non_object["providers"][0]["adaptation"] = serde_json::json!({ "mcp": ["x"] });
+        let parsed = parse_catalog(&non_object.to_string()).unwrap();
+        assert!(project_adaptation(
+            &parsed.providers[0].provider,
+            parsed.providers[0].adaptation.as_ref()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn declared_capabilities_keep_provider_payload_as_data() {
+        let profile = provider_profile("claude-code").unwrap().unwrap();
+        let capabilities = profile.client_capabilities.expect("claude 声明了 caps");
+        // 已声明的布尔旗标与 meta 内嵌旗标都能读到。
+        assert_eq!(capabilities.flag("subagent-transcript"), Some(true));
+        assert_eq!(capabilities.flag("missing-flag"), None);
+        assert!(capabilities
+            .meta()
+            .is_some_and(|meta| meta.contains_key("jetbrains.air")));
+        // 非 wrapper provider 不声明 caps，也不声明 bridge。
+        let peri = provider_profile("peri").unwrap().unwrap();
+        assert!(peri.client_capabilities.is_none());
+        assert!(peri.interaction_bridges.is_empty());
+        assert!(peri.launch_env.is_empty());
     }
 
     #[test]

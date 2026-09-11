@@ -14,9 +14,9 @@
 //! `src-tauri/vendor/acp/ORIGIN.md`.
 
 use crate::agent_catalog::{
-    CatalogAdapterRelation, CatalogLaunchCwdPolicy, CatalogLaunchEnv, CatalogLaunchKind,
-    CatalogLaunchProfile, CatalogSessionEstablishmentPolicy, CatalogVersionGate,
-    CatalogVersionGates, PylonAgentProfile,
+    CatalogAdapterRelation, CatalogClientCapabilities, CatalogInteractionBridge,
+    CatalogLaunchCwdPolicy, CatalogLaunchEnv, CatalogLaunchKind, CatalogLaunchProfile,
+    CatalogSessionEstablishmentPolicy, CatalogVersionGate, CatalogVersionGates, PylonAgentProfile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -111,6 +111,15 @@ pub struct CodegAgentProfile {
     pub session_establishment: Option<CatalogSessionEstablishmentPolicy>,
     #[serde(default)]
     pub cwd_policy: Option<CatalogLaunchCwdPolicy>,
+    /// A3: declared client capabilities (provider payload stays data).
+    #[serde(default)]
+    pub client_capabilities: Option<serde_json::Value>,
+    /// A3: declared launch environment additions.
+    #[serde(default)]
+    pub launch_env: Option<Vec<CatalogLaunchEnv>>,
+    /// A3: declared private-interaction bridges (closed parser ids).
+    #[serde(default)]
+    pub interaction_bridges: Option<Vec<CatalogInteractionBridge>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,6 +339,21 @@ pub fn transform_profile(
             reparsed
         }
     };
+    let client_capabilities = match &source.client_capabilities {
+        None => None,
+        Some(value) => Some(
+            CatalogClientCapabilities::from_value(&source.provider, value)
+                .map_err(ProfileTransformError::InvalidField)?,
+        ),
+    };
+    let launch_env = source.launch_env.clone().unwrap_or_default();
+    for entry in &launch_env {
+        crate::agent_catalog::validate_launch_env_entry(&source.provider, entry)
+            .map_err(ProfileTransformError::InvalidField)?;
+    }
+    let interaction_bridges = source.interaction_bridges.clone().unwrap_or_default();
+    crate::agent_catalog::validate_interaction_bridges(&source.provider, &interaction_bridges)
+        .map_err(ProfileTransformError::InvalidField)?;
     Ok(PylonAgentProfile {
         provider: source.provider.clone(),
         display_name: source.display_name.clone(),
@@ -337,6 +361,9 @@ pub fn transform_profile(
         adapter_relation: source.adapter_relation.clone(),
         version_gates,
         session_establishment,
+        client_capabilities,
+        launch_env,
+        interaction_bridges,
     })
 }
 
@@ -363,6 +390,7 @@ pub fn transform_profiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_catalog::CatalogBridgeId;
 
     fn profile(json: serde_json::Value) -> CodegAgentProfile {
         serde_json::from_value(json).expect("fixture 必须是合法 CodegAgentProfile")
@@ -632,6 +660,70 @@ mod tests {
             bad_id.unwrap_err(),
             ProfileTransformError::InvalidProviderId(".hidden".into())
         );
+    }
+
+    #[test]
+    fn codeg_dto_carries_closed_capabilities_env_and_bridges() {
+        // A3：三个新策略块从 Codeg DTO 进入 Pylon profile 时过同一套校验。
+        let mut fixture = claude_wrapper();
+        fixture["clientCapabilities"] = serde_json::json!({
+            "meta": { "subagent-transcript": true }
+        });
+        fixture["launchEnv"] =
+            serde_json::json!([{ "name": "CLAUDE_CODE_ENTRYPOINT", "value": "acp" }]);
+        fixture["interactionBridges"] = serde_json::json!([
+            { "method": "_x.ai/ask_user_question", "parser": "grok_ext_questions" }
+        ]);
+        let transformed = transform_profile(&profile(fixture)).unwrap();
+        assert_eq!(
+            transformed
+                .client_capabilities
+                .as_ref()
+                .and_then(|caps| caps.flag("subagent-transcript")),
+            Some(true)
+        );
+        assert_eq!(transformed.launch_env.len(), 1);
+        assert_eq!(transformed.launch_env[0].name, "CLAUDE_CODE_ENTRYPOINT");
+        assert_eq!(transformed.interaction_bridges.len(), 1);
+        assert_eq!(
+            transformed.interaction_bridges[0].parser,
+            CatalogBridgeId::GrokExtQuestions
+        );
+
+        // 未知 parser 在 DTO 边界即被拒（没有第二张宽松的字符串表）。
+        let mut unknown_parser = claude_wrapper();
+        unknown_parser["interactionBridges"] =
+            serde_json::json!([{ "method": "m", "parser": "future" }]);
+        assert!(serde_json::from_value::<CodegAgentProfile>(unknown_parser).is_err());
+
+        // 关凭据、重复 method、错误 caps 形状必须在转换层拒绝。
+        for (key, invalid) in [
+            (
+                "launchEnv",
+                serde_json::json!([{ "name": "OPENAI_API_KEY", "value": "x" }]),
+            ),
+            (
+                "interactionBridges",
+                serde_json::json!([
+                    { "method": "m", "parser": "pi_select_ask" },
+                    { "method": "m", "parser": "pi_select_ask" }
+                ]),
+            ),
+            ("clientCapabilities", serde_json::json!({ "flag": "yes" })),
+        ] {
+            let mut bad = claude_wrapper();
+            bad[key] = invalid.clone();
+            assert!(
+                transform_profile(&profile(bad)).is_err(),
+                "accepted {key}={invalid}"
+            );
+        }
+
+        // 三块都不声明时保持空值，而不是凭空生成策略。
+        let bare = transform_profile(&profile(claude_wrapper())).unwrap();
+        assert!(bare.client_capabilities.is_none());
+        assert!(bare.launch_env.is_empty());
+        assert!(bare.interaction_bridges.is_empty());
     }
 
     #[test]
