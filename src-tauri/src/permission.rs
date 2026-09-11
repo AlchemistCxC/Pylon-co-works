@@ -436,7 +436,7 @@ pub(crate) async fn respond_interaction(
     let request_id = crate::acp::RequestId::from_echo_string(&identity.request_id);
     if let Some(pending) = runtime
         .private_interactions
-        .take(&request_id)
+        .get(&request_id)
         .map_err(PylonError::Protocol)?
     {
         if pending.session_id != identity.session_id
@@ -447,11 +447,9 @@ pub(crate) async fn respond_interaction(
         let response = match pending.bridge {
             crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
             | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
-                let questions = crate::acp::adapter::private_ext::parse_questions(
-                    pending.bridge,
-                    &pending.params,
-                )
-                .map_err(PylonError::Protocol)?;
+                let questions = pending.question_specs.ok_or_else(|| {
+                    PylonError::Protocol("private question request lost validated specs".into())
+                })?;
                 let answer_value = answer
                     .values
                     .clone()
@@ -480,6 +478,7 @@ pub(crate) async fn respond_interaction(
                 "private interaction response failed".into(),
             ));
         }
+        let _ = runtime.private_interactions.take(&request_id);
         return Ok(());
     }
     adapter

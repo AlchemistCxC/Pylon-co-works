@@ -14,6 +14,7 @@ pub(crate) struct PendingPrivateInteraction {
     pub method: String,
     pub bridge: crate::acp::adapter::private_ext::PrivateBridge,
     pub params: serde_json::Value,
+    pub question_specs: Option<Vec<crate::acp::question_policy::QuestionSpec>>,
     pub client_generation: u64,
 }
 
@@ -36,6 +37,14 @@ impl PrivateInteractionOwner {
     }
     pub(crate) fn take(&self, id: &RequestId) -> Result<Option<PendingPrivateInteraction>, String> {
         Ok(self.pending.lock().map_err(|e| e.to_string())?.remove(id))
+    }
+    pub(crate) fn get(&self, id: &RequestId) -> Result<Option<PendingPrivateInteraction>, String> {
+        Ok(self
+            .pending
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(id)
+            .cloned())
     }
     pub(crate) fn cancel_all(&self) {
         if let Ok(mut pending) = self.pending.lock() {
@@ -61,6 +70,7 @@ mod tests {
             method: "pi/select_ask".into(),
             bridge: crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk,
             params: serde_json::json!({}),
+            question_specs: None,
             client_generation: 3,
         };
         owner.insert(RequestId::Number(1), item).unwrap();

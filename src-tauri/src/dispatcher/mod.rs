@@ -1696,6 +1696,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     };
                     if let Some(bridge) = bridge {
                         let params = raw.params.clone().unwrap_or(serde_json::Value::Null);
+                        let question_specs = match bridge {
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
+                            | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
+                                crate::acp::adapter::private_ext::parse_questions(bridge, &params)
+                                    .ok()
+                            }
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => None,
+                        };
                         let session_id = params
                             .get("sessionId")
                             .and_then(|v| v.as_str())
@@ -1711,6 +1719,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     method: method.to_string(),
                                     bridge,
                                     params: params.clone(),
+                                    question_specs,
                                     client_generation: generation,
                                 },
                             );
