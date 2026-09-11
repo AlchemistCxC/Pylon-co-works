@@ -54,6 +54,7 @@ export const BUILTIN_CC_SEND_BUTTON_CONTRIBUTION: CcWidgetContribution = Object.
     { kind: 'theme-field', key: 'inputSubmitButtonMode', label: '位置' },
     { kind: 'theme-field', key: 'sendButtonColor', label: '颜色' },
     { kind: 'theme-field', key: 'sendButtonRadius', label: '圆角' },
+    { kind: 'theme-field', key: 'sendButtonBorderColor', label: '边框' },
   ]),
 })
 

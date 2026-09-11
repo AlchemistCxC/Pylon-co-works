@@ -26,7 +26,8 @@
   width:var(--cc-send-size,32px);
   height:var(--cc-send-size,32px);
   padding:0;
-  border:0;
+  box-sizing:border-box;
+  border:calc(var(--cc-send-size,32px) * 0.05) solid var(--cc-send-border-color,rgba(255,255,255,.5));
   border-radius:var(--cc-send-radius,50%);
   background:var(--cc-send-color,#000);
   color:transparent;

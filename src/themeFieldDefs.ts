@@ -269,6 +269,7 @@ export const THEME_FIELD_DEFS = {
   inputSendBg: { ...C('cc', '发送按钮背景'), default: 'rgba(0,0,0,0.10)', group: "输入与状态", semanticRole: 'surface.raised' },
   sendButtonColor: { ...C('cc', '发送按钮颜色'), default: '#000000', group: '发送按钮', noCssVar: true },
   sendButtonRadius: { ...S('cc', '发送按钮圆角', ['0', '0.25', '0.33', '0.5']), optionLabels: { '0': '直角', '0.25': '四分之一', '0.33': '三分之一', '0.5': '圆形' }, default: '0.5', group: '发送按钮', noCssVar: true },
+  sendButtonBorderColor: { ...S('cc', '发送按钮边框', ['white', 'black']), optionLabels: { white: '纯白', black: '纯黑' }, default: 'white', group: '发送按钮', noCssVar: true },
   inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入与状态", semanticRole: 'stroke.default', semanticSource: true },
   inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入与状态", semanticRole: 'state.focusRing', semanticSource: true },
   inputBorder: { ...C('cc', '输入栏边框色'), default: 'transparent', group: '输入栏', cssVar: '--cc-input-border' },

@@ -71,6 +71,7 @@ export interface WorkbenchAppearanceSnapshot {
   inputSubmitButtonMode: string
   sendButtonColor: string
   sendButtonRadius: string
+  sendButtonBorderColor: string
   modelVariant: string
   modeVariant: string
   sendVariant: string
@@ -171,6 +172,7 @@ export function selectWorkbenchAppearance(
     inputSubmitButtonMode: theme.inputSubmitButtonMode,
     sendButtonColor: theme.sendButtonColor,
     sendButtonRadius: theme.sendButtonRadius,
+    sendButtonBorderColor: theme.sendButtonBorderColor,
     modelVariant: theme.modelVariant,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,

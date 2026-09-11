@@ -159,6 +159,7 @@ describe('mountSolidControlCenterPreview', () => {
     theme.inputMarginX = 16
     theme.sendButtonColor = '#123456'
     theme.sendButtonRadius = '0.25'
+    expect(theme.sendButtonBorderColor).toBe('white')
     services.appearance.setTheme(theme)
 
     try {
@@ -172,11 +173,13 @@ describe('mountSolidControlCenterPreview', () => {
       expect(controlCenter?.style.getPropertyValue('--cc-send-size')).toBe('calc(var(--cc-input-height) * 0.8)')
       expect(controlCenter?.style.getPropertyValue('--cc-send-color')).toBe('#123456')
       expect(controlCenter?.style.getPropertyValue('--cc-send-radius')).toBe('25%')
+      expect(controlCenter?.style.getPropertyValue('--cc-send-border-color')).toBe('rgba(255,255,255,.5)')
       expect(controlCenter?.style.getPropertyValue('--cc-input-text-right-inset')).toContain('0.9')
 
-      services.appearance.setTheme({ ...theme, inputSubmitButtonMode: 'external' })
+      services.appearance.setTheme({ ...theme, sendButtonBorderColor: 'black', inputSubmitButtonMode: 'external' })
       await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).toHaveAttribute('data-mode', 'external'))
       expect(controlCenter?.style.getPropertyValue('--cc-send-size')).toBe('calc(var(--cc-input-height) * 1)')
+      expect(controlCenter?.style.getPropertyValue('--cc-send-border-color')).toBe('rgba(0,0,0,.5)')
       expect(controlCenter?.style.getPropertyValue('--cc-input-text-right-inset')).toBe('var(--cc-input-text-inset-x, 5%)')
 
       services.appearance.setTheme({ ...theme, inputSubmitButtonMode: 'hidden' })
