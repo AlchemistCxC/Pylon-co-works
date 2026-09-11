@@ -450,14 +450,30 @@ pub(crate) async fn respond_interaction(
                 let questions = pending.question_specs.ok_or_else(|| {
                     PylonError::Protocol("private question request lost validated specs".into())
                 })?;
-                let answer_value = answer
-                    .values
-                    .clone()
-                    .unwrap_or_else(|| serde_json::json!({}));
-                let answer: crate::acp::question_policy::QuestionAnswer =
-                    serde_json::from_value(answer_value).map_err(|e| {
-                        PylonError::Protocol(format!("invalid question answer: {e}"))
-                    })?;
+                let values = answer.values.clone().unwrap_or_default();
+                let answers = questions
+                    .iter()
+                    .filter_map(|spec| {
+                        values.get(&spec.id).map(|value| {
+                            let labels = match value {
+                                serde_json::Value::String(label) => vec![label.clone()],
+                                serde_json::Value::Array(items) => items
+                                    .iter()
+                                    .filter_map(|item| item.as_str().map(str::to_owned))
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            crate::acp::question_policy::QuestionAnswerItem {
+                                question_id: spec.id.clone(),
+                                labels,
+                            }
+                        })
+                    })
+                    .collect();
+                let answer = crate::acp::question_policy::QuestionAnswer {
+                    answers,
+                    declined: answer.option_id.as_deref() == Some("declined"),
+                };
                 crate::acp::adapter::private_ext::build_question_outcome(
                     pending.bridge,
                     &questions,
