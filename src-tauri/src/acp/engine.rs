@@ -356,6 +356,17 @@ fn publish_inbound(
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
     tx: &mpsc::Sender<ClassifiedMessage>,
 ) {
+    // A replay response is the deterministic boundary of the load operation.
+    // Keep this classification on the transport message itself so observers
+    // do not have to infer it from the response channel.
+    if let Some(super::RequestId::Number(id)) = classified.raw.id.as_ref() {
+        if let Ok(active) = active_replay_requests.lock() {
+            if active.contains_key(id) {
+                classified.classification =
+                    super::ReplayClassification::Boundary { request_id: *id };
+            }
+        }
+    }
     if let Some(session_id) = classified
         .raw
         .params
@@ -364,10 +375,14 @@ fn publish_inbound(
         .and_then(serde_json::Value::as_str)
     {
         if let Ok(active) = active_replay_requests.lock() {
-            if let Some((request_id, _)) = active.iter().find(|(_, id)| id.as_str() == session_id) {
-                classified.classification = super::ReplayClassification::Replay {
-                    request_id: *request_id,
-                };
+            if classified.classification == super::ReplayClassification::Live {
+                if let Some((request_id, _)) =
+                    active.iter().find(|(_, id)| id.as_str() == session_id)
+                {
+                    classified.classification = super::ReplayClassification::Replay {
+                        request_id: *request_id,
+                    };
+                }
             }
         }
     }

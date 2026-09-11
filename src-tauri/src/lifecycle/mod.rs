@@ -746,10 +746,23 @@ pub(crate) async fn acp_wire_trace_snapshot(
         return serde_json::to_value(trace.snapshot_jsonl(MAX_BYTES))
             .map_err(|error| PylonError::Acp(format!("wire JSONL export failed: {error}")));
     }
+    let records = trace.snapshot();
+    let canonical_correlations: Vec<_> = records
+        .iter()
+        .filter_map(|record| {
+            trace.correlate(record.monotonic_seq).map(|correlation| {
+                serde_json::json!({
+                    "ordinal": record.monotonic_seq,
+                    "correlation": correlation,
+                })
+            })
+        })
+        .collect();
     Ok(serde_json::json!({
         "traceId": trace.trace_id(),
         "length": trace.len(),
-        "records": trace.snapshot(),
+        "records": records,
+        "canonicalCorrelations": canonical_correlations,
     }))
 }
 
