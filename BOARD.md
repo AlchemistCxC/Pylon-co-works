@@ -680,3 +680,4 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 继续] [主施工员·工程师] replay/wire 接线：transport 发布处将匹配 session/load 响应标记为 `ReplayClassification::Boundary`；`acp_wire_trace_snapshot` 读取路径同时消费并返回已登记的 canonical correlation，避免已有观测数据只写不读。engine 定向 7 项通过，继续审计剩余 transcript/terminal owner 缺口。
 [2026-09-11 继续] [主施工员·工程师] terminal kill 收口：owner 先请求 graceful termination，等待 `KILL_ESCALATE_GRACE` 后再调用既有进程树强制回收；Unix 使用 SIGTERM，Windows 保留现有 job/taskkill 语义。terminal_runtime 7 项与 cargo check --lib 通过。
 [2026-09-11 继续] [主施工员·工程师] 边界修正：项目明确 Windows-only，上一条提及 Unix SIGTERM 不适用；实现已移除 Unix 分支，仅保留 Windows Child/job/taskkill 路径与 escalation grace。
+[2026-09-11 继续] [主施工员·工程师] 按产品决策收口：删除未接入 canonical/session 生产链的 `src-tauri/src/acp/transcript.rs` 及模块声明；移除重复的 Registry output wrapper、wire `record_line` 字符串入口和未接线 interaction hook interpreter。Codeg vendor transcript 仅保留为对照 provenance，不参与编译。cargo check --lib 通过；clippy 已无 dead-code，剩余为既有结构/测试 lint。
