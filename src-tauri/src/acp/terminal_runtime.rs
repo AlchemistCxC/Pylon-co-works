@@ -231,6 +231,8 @@ impl TerminalRegistry {
                         };
                         let _ = tokio::task::spawn_blocking(move || {
                             let mut child = child;
+                            let _ = child.terminate_gracefully();
+                            std::thread::sleep(super::terminal_policy::KILL_ESCALATE_GRACE);
                             child.kill_and_wait()
                         }).await;
                         watcher.drain_readers().await;
