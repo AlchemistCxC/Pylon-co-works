@@ -37,6 +37,15 @@ import sys
 import zipfile
 from pathlib import Path
 
+# 标准输出固定为 UTF-8：Windows 上 stdout 默认走宿主 locale 编码，CI runner 是 cp1252，
+# 而发行包内路径含中文（docs/说明书/...），直接 print 这些路径会抛 UnicodeEncodeError。
+# 实测 release CI 在 zip/sha256/manifest 都已写出之后，崩在清单打印上（run 34594629111），
+# 导致 verify_zip 从未执行。本地控制台能编码中文、CI 不能 —— 属 locale 依赖型缺陷，
+# 故在脚本内固定编码，不依赖调用方设置 PYTHONIOENCODING。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 SRC_TAURI_DIR = REPO_DIR / "src-tauri"
