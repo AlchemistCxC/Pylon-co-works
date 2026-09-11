@@ -1576,7 +1576,14 @@ for line in sys.stdin:
         let wire_request: serde_json::Value = trace
             .lines()
             .next()
-            .map(|line| serde_json::from_str(line).expect("trace line JSON"))
+            .map(|line| {
+                // 带原文的诊断：本测试此前在 CI 上只报"trace line JSON: lone leading
+                // surrogate..."，看不到子进程实际写了什么（子进程 locale 相关），
+                // 失败时把该行原文打出来，避免再次盲猜。
+                serde_json::from_str(line).unwrap_or_else(|error| {
+                    panic!("trace line JSON: {error}; raw={line}")
+                })
+            })
             .expect("trace must capture session/prompt");
         assert_eq!(
             wire_request["params"]["prompt"][0]["text"], "改写后的出站文本",
