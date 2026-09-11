@@ -188,31 +188,15 @@ impl ManagedChild {
             .map_err(|error| AcpError::Child(format!("try_wait failed: {error}")))
     }
 
-    /// Request graceful termination while retaining ownership for escalation.
-    /// Unix sends SIGTERM; Windows falls back to the platform's Child::kill,
-    /// whose job-object/taskkill path already terminates the process tree.
+    /// Request termination while retaining ownership for escalation. The
+    /// Windows job-object/taskkill path terminates the complete process tree.
     pub(crate) fn terminate_gracefully(&mut self) -> Result<(), AcpError> {
         let Some(child) = self.child.as_mut() else {
             return Ok(());
         };
-        #[cfg(unix)]
-        {
-            let pid = child.id() as libc::pid_t;
-            let result = unsafe { libc::kill(pid, libc::SIGTERM) };
-            if result != 0 {
-                return Err(AcpError::Child(format!(
-                    "graceful terminate failed: {}",
-                    std::io::Error::last_os_error()
-                )));
-            }
-            Ok(())
-        }
-        #[cfg(not(unix))]
-        {
-            child
-                .kill()
-                .map_err(|error| AcpError::Child(format!("terminate failed: {error}")))
-        }
+        child
+            .kill()
+            .map_err(|error| AcpError::Child(format!("terminate failed: {error}")))
     }
 
     /// Windows：`taskkill /T /F` 递归杀进程树（job 挂接失败时的兜底——job 成功
