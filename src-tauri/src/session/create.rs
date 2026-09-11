@@ -909,7 +909,7 @@ async fn revive_session_slot(
                     runtime_generation = generation,
                     recovery_method = "resume",
                     result = "fallback",
-                    failure_class = ?error.resume_failure_class(),
+                    failure_class = ?error.recovery_failure_class(),
                     response_boundary = "error",
                     "session/resume recovery attempt"
                 );
@@ -944,13 +944,18 @@ async fn revive_session_slot(
                 );
                 response
             } else {
+                // A3：回退到 `new` 也是回退，必须与 resume 分支一样带上 typed reason；
+                // 旧行为在此丢弃了 load 错误，使 `resume -> load -> new` 链条中
+                // 最后一次回退没有可诊断的原因。
                 tracing::info!(
                     target: "replay_trace",
                     owner = source,
                     runtime_generation = generation,
                     recovery_method = "new",
                     result = "fallback",
-                    response_boundary = "not-observed",
+                    failed_method = "load",
+                    failure_class = ?load_result.as_ref().err().map(|error| error.recovery_failure_class()),
+                    response_boundary = "error",
                     canonical_import = "none",
                     "session/new recovery fallback"
                 );
