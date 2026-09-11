@@ -260,7 +260,7 @@ export const THEME_FIELD_DEFS = {
   inputSurfaceOpacity: { ...N('cc', '输入栏背景透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-surface-opacity' },
   inputFocusRingEnabled: { ...S('cc', '焦点光环开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
   inputFocusRingColor: { ...C('cc', '焦点光环颜色'), default: 'var(--accent)', group: '输入栏' },
-  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%' },
+  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 0, group: '输入栏', percent: true, suffix: '%' },
   inputShadowEnabled: { ...S('cc', '输入栏阴影开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
   inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入与状态", semanticRole: 'surface.raised', semanticSource: true },
   inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },

@@ -121,19 +121,23 @@
   transition:border-color 160ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 /* 输入栏顶部白色高光（A6-1-FIX 1.2，用户公式）：
-   向内延伸的纯白边框，外缘与输入栏外缘重合，宽度 = 输入栏高度设置值(--cc-input-height) × 5%；
+   向内延伸的纯白边框，宽度 = 输入栏高度设置值(--cc-input-height) × 5%；
    径向透明度：外缘 0.5 → 内缘 1；叠加 Y 系数（顶=1a，底=0）：
    Y≥0.7a → 1，0.5a~0.7a 线性过渡，Y≤0.5a → 0；最终透明度 = 径向透明度 × Y 系数 × --cc-input-highlight-opacity（整体强度）。
-   实现：::before 纯白层 × 三层 mask —— Y 渐变 ∩（实心内容盒 exclude 径向渐变全盒 = 向内环）；
-   径向 mask 在环内缘保持 alpha=1，向外缘过渡至 alpha=0.5。 */
+   实现：::before 纯白层 × mask exclude（全盒 减 内容盒 = 向内环）；
+   Y 系数由 background 的线性渐变承担，整体强度由 opacity 承担。
+   环的圆角必须按边框内缘修正（radius − border-width）：::before 的定位盒是
+   .input-bar 的 padding-box，若沿用 inherit 的外缘圆角，环在四角会压到边框上，
+   表现为「调高光透明度时边框跟着变」，故此处不 inherit。 */
 @supports (mask-composite: intersect) {
   .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode)::before {
     content:'';
-    position:absolute; inset:0; box-sizing:border-box; border-radius:inherit; pointer-events:none; z-index:2;
-    background:#fff;
-    opacity:var(--cc-input-highlight-opacity,var(--input-highlight-opacity,100%));
-    padding:2px;
-    mask:linear-gradient(#000 0 0) border-box, linear-gradient(#000 0 0) content-box;
+    position:absolute; inset:0; box-sizing:border-box; pointer-events:none; z-index:2;
+    border-radius:max(0px, calc(var(--cc-input-radius,var(--input-radius,12px)) - var(--cc-input-border-width,1px)));
+    background:linear-gradient(to bottom, #fff 0%, rgba(255,255,255,0.5) 60%, rgba(255,255,255,0) 100%);
+    opacity:var(--cc-input-highlight-opacity,0);
+    padding:calc(var(--cc-input-height,40px) * 0.05);
+    mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     mask-composite:exclude;
   }
 }

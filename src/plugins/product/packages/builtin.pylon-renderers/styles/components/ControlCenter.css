@@ -93,6 +93,11 @@
 .control-center:has(.cc-send-button[data-mode="external"]) .cc-input-slot {
   right:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) + var(--cc-input-margin-x,10px));
 }
+/* 影子盒（阴影/焦点光环的载体）必须跟随外置让位，否则它的右端仍按 margin-x 铺满，
+   阴影与光环会画到按钮所在的那一段，视觉上表现为输入栏右侧多出一块发亮的区域。 */
+.control-center:has(.cc-send-button[data-mode="external"]) .cc-input-shadow-clip::before {
+  right:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) + var(--cc-input-margin-x,10px));
+}
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
 /* The slot owns the themed height; mounted widgets fill it. */
 .cc-input-slot > .cc-widget { height:100%; }
