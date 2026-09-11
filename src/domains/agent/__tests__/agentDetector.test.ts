@@ -30,6 +30,11 @@ describe('agent detector DTO', () => {
     ])).toEqual(['first', 'later'])
   })
 
+  /**
+   * 前提变更（§3.3 例外 1）：检测报告新增 `providers`/`preflight` 两个字段，
+   * 旧断言未含它们。断言改为显式要求两者存在且为空数组（严格程度不降：
+   * 从“四个字段相等”变为“六个字段相等”）。
+   */
   it('normalizes candidates and diagnostics as one report without conflating identity and ACP state', () => {
     expect(normalizeAgentDetectionReport({
       candidates: [{
@@ -42,12 +47,58 @@ describe('agent detector DTO', () => {
       truncated: false,
     })).toEqual({
       candidates: [expect.objectContaining({ identityConfidence: 'high', startability: 'not_tested', protocolAvailability: 'not_tested' })],
+      providers: [],
+      preflight: [],
       diagnostics: [{ code: 'version_probe_timeout', stage: 'version_probe', detectorId: 'fixture', message: 'timeout', retryable: true }],
       elapsedMs: 101,
       truncated: false,
     })
     expect(normalizeAgentDetectionReport({ candidates: 'corrupt', diagnostics: [null], elapsedMs: -1, truncated: 'yes' })).toEqual({
-      candidates: [], diagnostics: [], elapsedMs: 0, truncated: false,
+      candidates: [], providers: [], preflight: [], diagnostics: [], elapsedMs: 0, truncated: false,
     })
+  })
+
+  /** A4：双证据与安装状态必须严格归一化，不可解释的输入一律丢弃。 */
+  it('normalizes per-provider evidence and preflight, dropping unexplainable states', () => {
+    const report = normalizeAgentDetectionReport({
+      candidates: [],
+      diagnostics: [],
+      elapsedMs: 2,
+      truncated: false,
+      providers: [
+        {
+          provider: 'claude-code', detectorId: 'builtin.detector.claude-code', adapterRelationDeclared: true,
+          acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }, { path: 'no-kind' }],
+          nativeCommands: [],
+          sharedConfigPresent: true,
+        },
+        { provider: '', detectorId: 'x', adapterRelationDeclared: false, acpCommands: [], nativeCommands: [], sharedConfigPresent: false },
+        { provider: 'missing-flag', detectorId: 'x', acpCommands: [], nativeCommands: [] },
+        // 子数组形状错误 → 整行丢弃：形状不可信的行不能拿去解释安装状态。
+        { provider: 'corrupt-commands', detectorId: 'x', adapterRelationDeclared: true, acpCommands: 'corrupt', nativeCommands: [], sharedConfigPresent: false },
+      ],
+      preflight: [
+        {
+          provider: 'claude-code', status: 'nativeMissing', passed: false,
+          adapter: { nativeCmd: 'claude', nativeLabel: 'Claude Code CLI', nativePresent: false, acpPresent: true, sharedConfigDir: '~/.claude', sharedConfigPresent: true },
+          checks: [{ checkId: 'version-gate:steering-prompt-required', label: 'adapter version', status: 'PASS', message: 'm', fixes: [] }, { checkId: 'bad', status: 'NOPE' }],
+        },
+        { provider: 'future', status: 'somethingNew', passed: false, checks: [] },
+        { provider: 'no-passed', status: 'installed', checks: [] },
+      ],
+    })
+    // 只有一条 provider 证据合法（空 provider / 缺 flag / 子数组形状错误的都丢弃），
+    // 且非法 hit 被逐条过滤。
+    expect(report.providers).toEqual([{
+      provider: 'claude-code', detectorId: 'builtin.detector.claude-code', adapterRelationDeclared: true,
+      acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }],
+      nativeCommands: [],
+      sharedConfigPresent: true,
+    }])
+    // 未知状态与缺 passed 的条目被丢弃；非法 check 也被丢弃。
+    expect(report.preflight).toHaveLength(1)
+    expect(report.preflight[0]).toMatchObject({ provider: 'claude-code', status: 'nativeMissing', passed: false })
+    expect(report.preflight[0].checks).toHaveLength(1)
+    expect(report.preflight[0].adapter?.nativeCmd).toBe('claude')
   })
 })

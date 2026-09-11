@@ -339,6 +339,70 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
     })
 }
 
+/// Build the preflight result for one provider from detector output.
+///
+/// One shared mapping for both consumers (the `pylon-detect` CLI and the
+/// settings panel): computing it twice is exactly how a settings page ends up
+/// with a second, drifting candidate/preflight set.
+pub fn from_detection(
+    evidence: &crate::agent_detection::AgentProviderEvidence,
+    candidates: &[crate::agent_detection::AgentRuntimeCandidate],
+) -> Result<PreflightResult, String> {
+    let acp_present = !evidence.acp_commands.is_empty();
+    let native_present = !evidence.native_commands.is_empty();
+    let provider_candidates: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| candidate.provider == evidence.provider)
+        .collect();
+    let config_evidence = provider_candidates.iter().any(|candidate| {
+        candidate
+            .evidence
+            .iter()
+            .any(|item| item.kind == "config-fields")
+    });
+    let adapter_version = provider_candidates.iter().find_map(|candidate| {
+        candidate
+            .evidence
+            .iter()
+            .find(|item| item.kind == "version")
+            .map(|item| item.detail.clone())
+    });
+    evaluate(
+        &evidence.provider,
+        &PreflightInputs {
+            // A wrapper's "binary" is the vendor CLI it wraps; a native ACP
+            // provider's entry point and ACP command are the same executable.
+            binary_present: if evidence.adapter_relation_declared {
+                native_present
+            } else {
+                acp_present
+            },
+            adapter_present: acp_present,
+            acp_present,
+            native_present,
+            config_evidence,
+            shared_config_present: evidence.shared_config_present,
+            adapter_version,
+            ..Default::default()
+        },
+    )
+}
+
+/// Actionable, locale-free reason code for a non-installed status.
+///
+/// The frontend owns the wording; this is the closed vocabulary it switches on,
+/// so a new state cannot reach the UI as an untranslated mystery.
+pub fn action_code(status: PreflightStatus) -> &'static str {
+    match status {
+        PreflightStatus::Installed => "none",
+        PreflightStatus::AdapterMissing => "install-acp-adapter",
+        PreflightStatus::NativeMissing => "install-vendor-cli",
+        PreflightStatus::VersionTooOld => "upgrade-acp-adapter",
+        PreflightStatus::ConfigOnly => "provide-executable",
+        PreflightStatus::NotInstalled => "install-agent",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +430,106 @@ mod tests {
     fn unknown_provider_fails_closed() {
         assert!(evaluate("missing", &PreflightInputs::default()).is_err());
     }
+    /// A4：设置页与 CLI 消费同一份映射（同一 provider 证据 → 同一 PreflightResult）。
+    #[test]
+    fn detection_evidence_maps_to_one_shared_preflight_result() {
+        use crate::agent_detection::{
+            AgentDetectionEvidence, AgentProviderEvidence, AgentRuntimeCandidate,
+            IdentityConfidence, ProtocolAvailability, Startability,
+        };
+        let evidence =
+            |acp: &[&str], native: &[&str], declared: bool, shared: bool| AgentProviderEvidence {
+                provider: "claude-code".into(),
+                detector_id: "builtin.detector.claude-code".into(),
+                adapter_relation_declared: declared,
+                acp_commands: acp
+                    .iter()
+                    .map(|path| crate::agent_detection::AgentEvidenceHit {
+                        kind: "acp-command".into(),
+                        path: (*path).to_string(),
+                        source: "path".into(),
+                    })
+                    .collect(),
+                native_commands: native
+                    .iter()
+                    .map(|path| crate::agent_detection::AgentEvidenceHit {
+                        kind: "native-command".into(),
+                        path: (*path).to_string(),
+                        source: "known-path".into(),
+                    })
+                    .collect(),
+                shared_config_present: shared,
+            };
+        let candidate = |version: Option<&str>| AgentRuntimeCandidate {
+            candidate_id: "c".into(),
+            detector_id: "builtin.detector.claude-code".into(),
+            provider: "claude-code".into(),
+            suggested_agent_id: "claude-code".into(),
+            name: "Claude Code".into(),
+            executable: "ccb".into(),
+            args: vec!["--acp".into()],
+            evidence: version
+                .map(|version| {
+                    vec![AgentDetectionEvidence {
+                        kind: "version".into(),
+                        detail: version.to_string(),
+                    }]
+                })
+                .unwrap_or_default(),
+            identity_confidence: IdentityConfidence::Medium,
+            startability: Startability::NotTested,
+            protocol_availability: ProtocolAvailability::NotTested,
+            already_imported_agent_id: None,
+            warnings: Vec::new(),
+        };
+
+        // wrapper 在、vendor CLI 不在（本机真实状态）→ nativeMissing + 可行动码
+        let result = from_detection(
+            &evidence(&["C:/x/ccb.cmd"], &[], true, true),
+            &[candidate(Some("0.75.1"))],
+        )
+        .unwrap();
+        assert_eq!(result.status, PreflightStatus::NativeMissing);
+        assert_eq!(action_code(result.status), "install-vendor-cli");
+
+        // vendor CLI 在、wrapper 不在 → adapterMissing
+        let result = from_detection(&evidence(&[], &["C:/x/claude.exe"], true, true), &[]).unwrap();
+        assert_eq!(result.status, PreflightStatus::AdapterMissing);
+        assert_eq!(action_code(result.status), "install-acp-adapter");
+
+        // 两者均在、版本达标 → installed
+        let result = from_detection(
+            &evidence(&["C:/x/ccb.cmd"], &["C:/x/claude.exe"], true, true),
+            &[candidate(Some("0.75.1"))],
+        )
+        .unwrap();
+        assert_eq!(result.status, PreflightStatus::Installed);
+        assert_eq!(action_code(result.status), "none");
+
+        // 版本不足 → versionTooOld
+        let result = from_detection(
+            &evidence(&["C:/x/ccb.cmd"], &["C:/x/claude.exe"], true, true),
+            &[candidate(Some("0.64.2"))],
+        )
+        .unwrap();
+        assert_eq!(result.status, PreflightStatus::VersionTooOld);
+        assert_eq!(action_code(result.status), "upgrade-acp-adapter");
+
+        // 只有配置 → configOnly；什么都没有 → notInstalled
+        let result = from_detection(&evidence(&[], &[], true, true), &[]).unwrap();
+        assert_eq!(result.status, PreflightStatus::ConfigOnly);
+        assert_eq!(action_code(result.status), "provide-executable");
+        let result = from_detection(&evidence(&[], &[], true, false), &[]).unwrap();
+        assert_eq!(result.status, PreflightStatus::NotInstalled);
+        assert_eq!(action_code(result.status), "install-agent");
+
+        // 非 wrapper provider 不因缺原生 CLI 被判 nativeMissing。
+        let mut peri_evidence = evidence(&["C:/x/peri.exe"], &[], false, false);
+        peri_evidence.provider = "peri".into();
+        let result = from_detection(&peri_evidence, &[]).unwrap();
+        assert_eq!(result.status, PreflightStatus::Installed);
+    }
+
     #[test]
     fn version_gate_is_semver_ordered() {
         assert!(version_at_least(Some("22.12.1"), Some("22.12.0")));

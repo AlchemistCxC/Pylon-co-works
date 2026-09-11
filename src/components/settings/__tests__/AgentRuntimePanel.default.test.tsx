@@ -496,4 +496,88 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     expect(await screen.findByText(/重启 Agent runtime失败/)).toBeInTheDocument()
     expect(screen.getByText(/配置：待重启生效/)).toBeInTheDocument()
   })
+
+  /**
+   * A4 验收：安装状态与可行动原因。nativeMissing 必须能解释「适配器在、官方 CLI
+   * 不在」，而不是只说一句“未验证”。数据来自后端 preflight，不在组件里重新推断。
+   */
+  it('把后端 preflight 渲染成可行动的安装状态，而不是空白或“未验证”', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [],
+          diagnostics: [],
+          elapsedMs: 3,
+          truncated: false,
+          providers: [{
+            provider: 'claude-code',
+            detectorId: 'builtin.detector.claude-code',
+            adapterRelationDeclared: true,
+            acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }],
+            nativeCommands: [],
+            sharedConfigPresent: true,
+          }],
+          preflight: [{
+            provider: 'claude-code',
+            status: 'nativeMissing',
+            passed: false,
+            adapter: {
+              nativeCmd: 'claude', nativeLabel: 'Claude Code CLI',
+              nativePresent: false, acpPresent: true,
+              sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+            },
+            checks: [{ checkId: 'version-gate:steering-prompt-required', label: 'adapter version', status: 'PASS', message: 'adapter version >= 0.65.0', fixes: [] }],
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('claude-code')).toBeInTheDocument()
+    expect(within(section).getByText('缺官方 CLI')).toBeInTheDocument()
+    expect(within(section).getByText(/未找到该适配器包装的官方 CLI/)).toBeInTheDocument()
+    // wrapper 两侧证据分开呈现：ACP 已找到、官方 CLI 未找到。
+    expect(within(section).getByText(/ACP：已找到 · Claude Code CLI（claude）：未找到/)).toBeInTheDocument()
+    // 只有非 PASS 的 check 才展开；PASS 的版本 gate 不占位。
+    expect(within(section).queryByText(/adapter version >= 0.65.0/)).toBeNull()
+  })
+
+  /** 已安装的 provider 不给可行动原因，避免噪声。 */
+  it('已安装的 provider 不显示故障原因', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+          providers: [],
+          preflight: [{ provider: 'peri', status: 'installed', passed: true, adapter: null, checks: [] }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('已安装')).toBeInTheDocument()
+    expect(within(section).queryByText(/请先安装|请升级|请指定/)).toBeNull()
+  })
+
+  /** 不可解释的状态不得渲染成看起来正常的行（归一化阶段即丢弃）。 */
+  it('未知安装状态不会渲染成空白行', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+          providers: [],
+          preflight: [{ provider: 'future', status: 'somethingNew', passed: false, checks: [] }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    expect(await screen.findByText(/未发现可自动配置的 ACP Agent/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('本机 Agent 安装状态')).toBeNull()
+  })
 })

@@ -404,4 +404,28 @@ export const builtinAgentCatalog = Object.freeze({
     }
     return null
   },
+  /**
+   * Catalog-derived fill-in hint for the executable field.
+   *
+   * A provider-specific `switch` here used to hardcode hermes/peri wording, so
+   * every new provider needed a component change (A4: no component-level
+   * provider switch). The hint is now built from the same catalog data the
+   * launcher consumes: the declared launch command, the declared wrapper
+   * relation, and the config dir detection reads.
+   */
+  executableHint(provider: string | null | undefined): string {
+    const entry = catalog.providers.find(candidate => candidate.provider === (provider ?? '').trim().toLowerCase())
+    if (!entry) {
+      return 'exe 填 Agent 可执行文件绝对路径；PATH 内的命令也可只填命令名。'
+    }
+    const parts = [`exe 填 ${entry.launch.command}（PATH 内可只填命令名）或其绝对路径`]
+    const relation = entry.adaptation?.adapterRelation ?? null
+    if (relation) {
+      parts.push(`这是 ACP wrapper：启动 ${entry.launch.command}，用户自装的 ${relation.nativeLabel}（${relation.nativeCmd}）仅作探测证据`)
+    }
+    if (entry.detection.configDirs.length > 0) {
+      parts.push(`配置探测读 ${entry.detection.configDirs.join(' / ')}`)
+    }
+    return `${parts.join('；')}。`
+  },
 })

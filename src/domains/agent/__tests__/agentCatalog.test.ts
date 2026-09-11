@@ -31,6 +31,25 @@ describe('Shared Agent Catalog', () => {
     expect(() => parseAgentCatalog(document)).toThrow(/未知字段/)
   })
 
+  it('derives the executable hint from catalog data instead of a provider switch', () => {
+    // A4：新增 provider 只需改 catalog，不需改组件。
+    const claude = builtinAgentCatalog.executableHint('claude-code')
+    expect(claude).toMatch(/ccb/)
+    expect(claude).toMatch(/ACP wrapper/)
+    expect(claude).toMatch(/Claude Code CLI/)
+    expect(claude).toMatch(/配置探测读 \.claude/)
+    // 大小写与空白不敏感；未知 provider 落到通用文案。
+    expect(builtinAgentCatalog.executableHint('  CLAUDE-CODE ')).toBe(claude)
+    const generic = builtinAgentCatalog.executableHint('future-agent')
+    expect(generic).not.toMatch(/ccb/)
+    expect(generic).toMatch(/绝对路径/)
+    expect(builtinAgentCatalog.executableHint(null)).toBe(generic)
+    // 每一条 catalog provider 都能给出非空提示。
+    for (const provider of builtinAgentCatalog.providers()) {
+      expect(builtinAgentCatalog.executableHint(provider).length).toBeGreaterThan(0)
+    }
+  })
+
   it('carries a Windows-only launch recipe for every provider', () => {
     expect(parseAgentCatalog(rawCatalog).providers.map(provider => provider.launch)).toEqual([
       { kind: 'path', command: 'peri', args: ['acp'], env: [], cwdPolicy: null },

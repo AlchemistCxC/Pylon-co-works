@@ -180,46 +180,7 @@ fn main() {
                 .providers
                 .iter()
                 .filter_map(|evidence| {
-                    let acp_present = !evidence.acp_commands.is_empty();
-                    let native_present = !evidence.native_commands.is_empty();
-                    let candidates = report
-                        .candidates
-                        .iter()
-                        .filter(|candidate| candidate.provider == evidence.provider)
-                        .collect::<Vec<_>>();
-                    let config_evidence = candidates.iter().any(|candidate| {
-                        candidate
-                            .evidence
-                            .iter()
-                            .any(|item| item.kind == "config-fields")
-                    });
-                    let adapter_version = candidates.iter().find_map(|candidate| {
-                        candidate
-                            .evidence
-                            .iter()
-                            .find(|item| item.kind == "version")
-                            .map(|item| item.detail.clone())
-                    });
-                    agent_preflight::evaluate(
-                        &evidence.provider,
-                        &agent_preflight::PreflightInputs {
-                            // wrapper 的「binary」就是它包装的 vendor CLI；
-                            // 非 wrapper 的入口与 ACP 命令是同一个可执行文件。
-                            binary_present: if evidence.adapter_relation_declared {
-                                native_present
-                            } else {
-                                acp_present
-                            },
-                            adapter_present: acp_present,
-                            acp_present,
-                            native_present,
-                            config_evidence,
-                            shared_config_present: evidence.shared_config_present,
-                            adapter_version,
-                            ..Default::default()
-                        },
-                    )
-                    .ok()
+                    agent_preflight::from_detection(evidence, &report.candidates).ok()
                 })
                 .collect::<Vec<_>>();
             if json_output {
