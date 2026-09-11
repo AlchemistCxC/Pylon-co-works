@@ -571,6 +571,7 @@ impl AppStateHandles {
                     tracing::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
                 }
             }
+            runtime.private_interactions.cancel_all();
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             (stale_sources, probe_candidates)
         };
