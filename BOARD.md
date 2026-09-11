@@ -671,3 +671,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 继续] [主施工员·工程师] 用户授权新增 owner。提交 `d006df7c` + `0962dc97` + `caaf6afd` + `e83c3c11`：新增 runtime-scoped `PrivateInteractionOwner`，接入 Codeg 兼容 question/plan 请求的校验→挂起→统一 `respond_interaction`→ACP 回写闭环；重连清理旧代请求；question specs 在入队时保存，避免应答时重新 mint id。`cargo check --lib` 通过，owner/private-ext 定向测试通过。
 
 [2026-09-11 继续] [主施工员·工程师] 前端接线提交 `6f8c069e`：private question 使用 `ask-user` 事件分类，plan approval 使用 `approval.request`，planContent 投影为可见 prompt；interaction normalization 定向测试 18 项通过。
+
+[2026-09-11 继续] [主施工员·工程师] 应答闭环修正提交 `4f45c497`：前端 values 按稳定 question id 映射到后端 `QuestionAnswer`，不再把 values 当作可直接反序列化的结构；后端保留已验证 specs，重复应答仍由 owner 单次 claim 保护。`cargo check --lib` 通过。
