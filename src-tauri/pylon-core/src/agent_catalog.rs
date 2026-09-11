@@ -60,7 +60,7 @@ pub struct CatalogRequirements {
     pub uv: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CatalogCheckKind {
     NodeMin,
@@ -70,7 +70,7 @@ pub enum CatalogCheckKind {
     ConfigEvidence,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CatalogFixKind {
     OpenUrl,
@@ -960,6 +960,75 @@ fn project_adaptation(
     Ok(projected)
 }
 
+/// Runtime checks derived from a provider's declared `requires`.
+///
+/// The catalog may state `requires.node` / `requires.uv` without spelling out the
+/// matching check. Codeg builds exactly these items in
+/// `acp/preflight.rs::build_node_version_check` (Node fix = OpenUrl
+/// `https://nodejs.org/`; uv fix = InstallUv with an empty payload), so a
+/// declared requirement must become a visible check rather than staying inert
+/// data — before this projection, `requires` was parsed and projected but read
+/// by nothing, so a catalog Node floor produced no state at all.
+///
+/// A declared check of the same kind wins: a provider that spells out its own
+/// node/uv check is not given a duplicate. That is also what keeps the detection
+/// fixture byte-stable.
+fn runtime_requirement_checks(
+    requires: &CatalogRequirements,
+    declared: &[CatalogCheck],
+) -> Vec<CatalogCheck> {
+    let mut checks = declared.to_vec();
+    let present =
+        |checks: &[CatalogCheck], kind: CatalogCheckKind| checks.iter().any(|c| c.kind == kind);
+    let mut synthesize =
+        |kind: CatalogCheckKind, id: &str, label: &str, min: &str, fix: CatalogFix| {
+            if present(&checks, kind) {
+                return;
+            }
+            let mut params = serde_json::Map::new();
+            params.insert("min".into(), serde_json::Value::String(min.to_string()));
+            checks.push(CatalogCheck {
+                id: id.to_string(),
+                label: label.to_string(),
+                kind,
+                params,
+                fix: Some(fix),
+            });
+        };
+    let trimmed_min = |value: &Option<String>| -> Option<String> {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    if let Some(min) = trimmed_min(&requires.node) {
+        synthesize(
+            CatalogCheckKind::NodeMin,
+            "node-min",
+            "Node.js",
+            &min,
+            CatalogFix {
+                kind: CatalogFixKind::OpenUrl,
+                payload: "https://nodejs.org/".into(),
+            },
+        );
+    }
+    if let Some(min) = trimmed_min(&requires.uv) {
+        synthesize(
+            CatalogCheckKind::UvMin,
+            "uv-min",
+            "uv",
+            &min,
+            CatalogFix {
+                kind: CatalogFixKind::InstallUv,
+                payload: String::new(),
+            },
+        );
+    }
+    checks
+}
+
 pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
     let document = catalog()?;
     let mut profiles = Vec::with_capacity(document.providers.len());
@@ -976,7 +1045,7 @@ pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
             version_args: entry.detection.version_args.clone(),
             package_manager: entry.detection.package_manager.clone(),
             requires: entry.detection.requires.clone(),
-            checks: entry.detection.checks.clone(),
+            checks: runtime_requirement_checks(&entry.detection.requires, &entry.detection.checks),
             adapter_relation: adaptation.adapter_relation,
             version_gates: adaptation.version_gates,
         });
@@ -1192,6 +1261,90 @@ mod tests {
         let mut document: serde_json::Value = serde_json::from_str(CATALOG_JSON).unwrap();
         document["providers"][0]["launch"] = launch;
         document
+    }
+
+    /// B0：catalog 声明的 `requires` 变成**可见检查**（修复「解析并投影但无人读」的缺口）。
+    ///
+    /// 三件事一起锁：合成规则、真源 fix 载荷、以及「未声明就不新增检查」的既有前提。
+    #[test]
+    fn declared_runtime_requirements_become_visible_checks() {
+        // 只声明 requires.node → 合成 node-min，fix 与 Codeg 真源一致。
+        let node = runtime_requirement_checks(
+            &CatalogRequirements {
+                node: Some("20.0.0".into()),
+                uv: None,
+            },
+            &[],
+        );
+        assert_eq!(node.len(), 1);
+        assert_eq!(node[0].id, "node-min");
+        assert_eq!(node[0].kind, CatalogCheckKind::NodeMin);
+        assert_eq!(node[0].params["min"], "20.0.0");
+        let fix = node[0].fix.as_ref().expect("合成检查必须带 fix");
+        assert_eq!(fix.kind, CatalogFixKind::OpenUrl);
+        assert_eq!(fix.payload, "https://nodejs.org/");
+
+        // requires.uv → uv-min，fix = InstallUv + 空载荷（真源如此）。
+        let uv = runtime_requirement_checks(
+            &CatalogRequirements {
+                node: None,
+                uv: Some("0.5.0".into()),
+            },
+            &[],
+        );
+        assert_eq!(uv.len(), 1);
+        assert_eq!(uv[0].kind, CatalogCheckKind::UvMin);
+        let fix = uv[0].fix.as_ref().expect("合成检查必须带 fix");
+        assert_eq!(fix.kind, CatalogFixKind::InstallUv);
+        assert_eq!(fix.payload, "");
+
+        // 已显式声明同种检查 → 不重复产出，且顺序保持声明优先。
+        let declared = vec![CatalogCheck {
+            id: "node-min".into(),
+            label: "Node.js".into(),
+            kind: CatalogCheckKind::NodeMin,
+            params: serde_json::Map::new(),
+            fix: None,
+        }];
+        let merged = runtime_requirement_checks(
+            &CatalogRequirements {
+                node: Some("22.12.0".into()),
+                uv: None,
+            },
+            &declared,
+        );
+        assert_eq!(merged.len(), 1, "显式声明同种检查时不得重复产出");
+        assert_eq!(merged[0].id, "node-min");
+
+        // 空/空白 requires 不产生任何检查。
+        assert!(runtime_requirement_checks(
+            &CatalogRequirements {
+                node: Some("   ".into()),
+                uv: None,
+            },
+            &[]
+        )
+        .is_empty());
+
+        // 真实 catalog：codex 声明了 node 下限，未声明 requires 的 provider 不受影响。
+        let profiles = detection_profiles().expect("catalog 必须可解析");
+        let codex = profiles
+            .iter()
+            .find(|profile| profile.provider == "codex")
+            .expect("codex 必须在 catalog 中");
+        assert!(codex.checks.iter().any(
+            |check| check.kind == CatalogCheckKind::NodeMin && check.params["min"] == "20.0.0"
+        ));
+        for provider in ["peri", "hermes", "claude-code"] {
+            let profile = profiles
+                .iter()
+                .find(|profile| profile.provider == provider)
+                .expect("provider 必须在 catalog 中");
+            assert!(
+                profile.checks.is_empty(),
+                "{provider} 未声明 requires 且未声明 checks，不得新增检查项"
+            );
+        }
     }
 
     #[test]

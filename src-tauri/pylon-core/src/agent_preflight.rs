@@ -96,10 +96,32 @@ pub struct AdapterEvidence {
     pub docs_url: Option<String>,
 }
 
+/// Observed state of a tool a provider's launch depends on (Node.js, uv).
+///
+/// A two-state `Option<String>` cannot express the real distinction the source
+/// makes: "we looked and the tool is not installed" is a hard failure, while
+/// "the tool is there but we could not read its version" is not. Collapsing them
+/// would either fabricate a violation or hide a genuine one.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase", tag = "state", content = "version")]
+pub enum ToolVersion {
+    /// The tool's executable was not found. A provider requiring it cannot run.
+    Absent,
+    /// The executable was found but its version could not be read (probe failed,
+    /// timed out, exited non-zero, or printed nothing version-shaped).
+    ///
+    /// This is the `Default` on purpose: a caller that never probed must not
+    /// claim either "absent" (a fabricated failure) or a satisfying version (a
+    /// fabricated pass).
+    #[default]
+    Unknown,
+    Known(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PreflightInputs {
-    pub node_version: Option<String>,
-    pub uv_version: Option<String>,
+    pub node: ToolVersion,
+    pub uv: ToolVersion,
     /// Native/vendor executable evidence (catalog `binary-present`).
     pub binary_present: bool,
     /// ACP adapter executable evidence; for a wrapper provider this is the ACP
@@ -119,6 +141,50 @@ pub struct PreflightInputs {
     /// A declared `minVersion` gate is only satisfied when this is present and
     /// parseable — an unreadable version never proves the floor.
     pub adapter_version: Option<String>,
+}
+
+/// Evaluate one runtime requirement against observed tool evidence.
+///
+/// Mirrors the Codeg source (`acp/preflight.rs::build_node_version_check`): a
+/// definitively missing tool FAILS, an unreadable version WARNS, and an observed
+/// version is compared against the declared minimum. The message states the
+/// observed fact, never a guess.
+fn required_tool_status(
+    tool: &ToolVersion,
+    minimum: Option<&str>,
+    label: &str,
+) -> (CheckStatus, String) {
+    // No declared floor means there is nothing to violate. Returning Fail here
+    // would fabricate a violation out of an absent requirement, so the check is
+    // explicitly vacuous instead. (Unreachable from the catalog path, where a
+    // check is only synthesized when a minimum is declared — this keeps the pure
+    // function total and honest for any other caller.)
+    let Some(minimum) = minimum else {
+        return (CheckStatus::Pass, format!("{label} 未声明下限"));
+    };
+    match tool {
+        ToolVersion::Absent => (
+            CheckStatus::Fail,
+            format!("未检测到 {label}（需要 >= {minimum}）"),
+        ),
+        ToolVersion::Unknown => (
+            CheckStatus::Warn,
+            format!("无法读取 {label} 版本（需要 >= {minimum}）"),
+        ),
+        ToolVersion::Known(version) => {
+            if version_at_least(Some(version), Some(minimum)) {
+                (
+                    CheckStatus::Pass,
+                    format!("{label} {version} 满足 >= {minimum}"),
+                )
+            } else {
+                (
+                    CheckStatus::Fail,
+                    format!("{label} {version} 低于要求的 >= {minimum}"),
+                )
+            }
+        }
+    }
 }
 
 /// Pure, total mapping from evidence to the stable provider status.
@@ -245,27 +311,15 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
         .iter()
         .map(|check| {
             let (status, message) = match check.kind {
-                CatalogCheckKind::NodeMin => (
-                    if version_at_least(
-                        inputs.node_version.as_deref(),
-                        check.params.get("min").and_then(|v| v.as_str()),
-                    ) {
-                        CheckStatus::Pass
-                    } else {
-                        CheckStatus::Fail
-                    },
-                    "Node.js version",
+                CatalogCheckKind::NodeMin => required_tool_status(
+                    &inputs.node,
+                    check.params.get("min").and_then(|v| v.as_str()),
+                    "Node.js",
                 ),
-                CatalogCheckKind::UvMin => (
-                    if version_at_least(
-                        inputs.uv_version.as_deref(),
-                        check.params.get("min").and_then(|v| v.as_str()),
-                    ) {
-                        CheckStatus::Pass
-                    } else {
-                        CheckStatus::Warn
-                    },
-                    "uv version",
+                CatalogCheckKind::UvMin => required_tool_status(
+                    &inputs.uv,
+                    check.params.get("min").and_then(|v| v.as_str()),
+                    "uv",
                 ),
                 CatalogCheckKind::BinaryPresent => (
                     if inputs.binary_present {
@@ -273,7 +327,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
                     } else {
                         CheckStatus::Fail
                     },
-                    "native binary",
+                    "native binary".to_string(),
                 ),
                 CatalogCheckKind::AdapterPresent => (
                     if inputs.adapter_present {
@@ -281,7 +335,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
                     } else {
                         CheckStatus::Fail
                     },
-                    "ACP adapter",
+                    "ACP adapter".to_string(),
                 ),
                 CatalogCheckKind::ConfigEvidence => (
                     if inputs.config_evidence {
@@ -289,7 +343,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
                     } else {
                         CheckStatus::Fail
                     },
-                    "configuration evidence",
+                    "configuration evidence".to_string(),
                 ),
             };
             let fixes = if status == CheckStatus::Pass {
@@ -313,7 +367,7 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
                 check_id: check.id.clone(),
                 label: check.label.clone(),
                 status,
-                message: message.into(),
+                message,
                 fixes,
             }
         })
@@ -347,7 +401,12 @@ pub fn evaluate(provider: &str, inputs: &PreflightInputs) -> Result<PreflightRes
     Ok(PreflightResult {
         provider: provider.into(),
         status,
-        passed: status == PreflightStatus::Installed,
+        // `passed` means "everything this provider needs is satisfied": the
+        // install state is `installed` AND no required check failed. A failed
+        // required runtime (e.g. Node too old) therefore cannot be reported as a
+        // passing preflight while the status stays about installation.
+        passed: status == PreflightStatus::Installed
+            && checks.iter().all(|check| check.status != CheckStatus::Fail),
         adapter,
         checks,
     })
@@ -396,8 +455,12 @@ pub fn from_detection(
             native_present,
             config_evidence,
             shared_config_present: evidence.shared_config_present,
-            adapter_version,
-            ..Default::default()
+            // Node/uv come from the machine-level probe. The direct executable
+            // probe wins the adapter version; npm global metadata is the fallback
+            // the probe cannot supply.
+            node: evidence.node.clone(),
+            uv: evidence.uv.clone(),
+            adapter_version: adapter_version.or_else(|| evidence.adapter_version.clone()),
         },
     )
 }
@@ -473,6 +536,12 @@ mod tests {
                     })
                     .collect(),
                 shared_config_present: shared,
+                // These two callers exercise install-state mapping only, so the
+                // machine-level tool evidence stays at "not measured" — the
+                // Default that must not claim absent or a version.
+                node: crate::agent_preflight::ToolVersion::default(),
+                uv: crate::agent_preflight::ToolVersion::default(),
+                adapter_version: None,
             };
         let candidate = |version: Option<&str>| AgentRuntimeCandidate {
             candidate_id: "c".into(),
@@ -570,6 +639,9 @@ mod tests {
                 }],
                 native_commands: Vec::new(),
                 shared_config_present: true,
+                node: ToolVersion::Known("26.7.0".into()),
+                uv: ToolVersion::default(),
+                adapter_version: None,
             },
             &[],
         )
@@ -592,6 +664,163 @@ mod tests {
             "必须留下可诊断痕迹: {:?}",
             plan.diagnostics
         );
+    }
+
+    /// B0：`requires` 的状态语义与 Codeg 真源逐条对齐。
+    ///
+    /// 关键区分：**未找到** = Fail（真实且可修）；**存在但版本读不出** = Warn
+    /// （不得当作违规）；**版本已知且过旧** = Fail。
+    ///
+    /// 备注：`PreflightInputs::default()` 的 `ToolVersion` 是 `Unknown`，不是
+    /// `Absent`——「没探测过」既不能冒充缺失（伪造失败）也不能冒充满足（伪造通过）。
+    #[test]
+    fn required_runtime_tool_status_matches_the_source_semantics() {
+        assert_eq!(
+            required_tool_status(&ToolVersion::Absent, Some("22.0.0"), "Node.js"),
+            (
+                CheckStatus::Fail,
+                "未检测到 Node.js（需要 >= 22.0.0）".into()
+            )
+        );
+        assert_eq!(
+            required_tool_status(&ToolVersion::Unknown, Some("22.0.0"), "Node.js").0,
+            CheckStatus::Warn
+        );
+        assert_eq!(
+            required_tool_status(
+                &ToolVersion::Known("22.19.0".into()),
+                Some("22.19.0"),
+                "Node.js"
+            )
+            .0,
+            CheckStatus::Pass,
+            "恰好等于下限必须通过（kimi 的 22.19.0 即此情形）"
+        );
+        assert_eq!(
+            required_tool_status(
+                &ToolVersion::Known("22.18.0".into()),
+                Some("22.19.0"),
+                "Node.js"
+            )
+            .0,
+            CheckStatus::Fail
+        );
+        // 版本存在但不可解析（如 `v22`）也不得通过要求。
+        assert_eq!(
+            required_tool_status(&ToolVersion::Known("22".into()), Some("22.0.0"), "Node.js").0,
+            CheckStatus::Fail
+        );
+        // 未声明下限：已知版本无法被证明满足，但也不构成违规。
+        assert_eq!(
+            required_tool_status(&ToolVersion::Known("22.0.0".into()), None, "uv").0,
+            CheckStatus::Pass
+        );
+    }
+
+    /// B0：Node 缺失/过旧时 `codex` 必须给出**可见的**失败与可行动 fix，
+    /// 而不是像此前那样「已安装、passed=true」。
+    ///
+    /// 最强形式：安装面**全部满足**（状态为 `Installed`），仅运行时工具不满足——此时
+    /// `passed` 必须为 false，证明必需运行时检查真的参与了结论；同时 `status` 仍是
+    /// `Installed`，证明运行时问题没有被伪装成安装问题。
+    #[test]
+    fn codex_without_a_sufficient_node_fails_its_required_runtime_check() {
+        let installed = PreflightInputs {
+            acp_present: true,
+            adapter_present: true,
+            binary_present: true,
+            native_present: true,
+            ..Default::default()
+        };
+
+        // 安装面满足 + Node 不存在 → node-min Fail，fix 指向 nodejs.org，passed=false。
+        let absent = evaluate(
+            "codex",
+            &PreflightInputs {
+                node: ToolVersion::Absent,
+                ..installed.clone()
+            },
+        )
+        .unwrap();
+        assert_eq!(absent.status, PreflightStatus::Installed);
+        let node_min = absent
+            .checks
+            .iter()
+            .find(|check| check.check_id == "node-min")
+            .expect("codex 声明了 requires.node，必须产出 node-min");
+        assert_eq!(node_min.status, CheckStatus::Fail);
+        assert!(node_min
+            .fixes
+            .iter()
+            .any(|fix| fix.kind == "open-url" && fix.payload == "https://nodejs.org/"));
+        assert!(
+            !absent.passed,
+            "必需运行时失败时 preflight 不得报 passed（此处安装面全部满足）"
+        );
+
+        // Node 版本低于下限 → Fail
+        let too_old = evaluate(
+            "codex",
+            &PreflightInputs {
+                node: ToolVersion::Known("18.0.0".into()),
+                ..installed.clone()
+            },
+        )
+        .unwrap();
+        assert!(!too_old.passed);
+        assert!(too_old
+            .checks
+            .iter()
+            .any(|check| check.check_id == "node-min" && check.status == CheckStatus::Fail));
+
+        // 读不出版本 → Warn，不得构成 passed=false（不得伪造违规）
+        let unreadable = evaluate(
+            "codex",
+            &PreflightInputs {
+                node: ToolVersion::Unknown,
+                ..installed.clone()
+            },
+        )
+        .unwrap();
+        assert!(unreadable.passed, "版本不可读不得被当作违规");
+        assert!(unreadable
+            .checks
+            .iter()
+            .any(|check| check.check_id == "node-min" && check.status == CheckStatus::Warn));
+
+        // Node 满足 → Pass 且 passed=true
+        let satisfied = evaluate(
+            "codex",
+            &PreflightInputs {
+                node: ToolVersion::Known("26.7.0".into()),
+                ..installed
+            },
+        )
+        .unwrap();
+        assert!(satisfied.passed);
+        assert!(satisfied
+            .checks
+            .iter()
+            .any(|check| check.check_id == "node-min" && check.status == CheckStatus::Pass));
+
+        // 未声明 requires 的 provider 不得凭空多出检查项（现有行为不变）。
+        for provider in ["peri", "hermes"] {
+            let result = evaluate(
+                provider,
+                &PreflightInputs {
+                    acp_present: true,
+                    binary_present: true,
+                    node: ToolVersion::Absent,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(
+                result.checks.is_empty(),
+                "{provider} 未声明 requires，不得新增检查项"
+            );
+            assert!(result.passed);
+        }
     }
 
     #[test]

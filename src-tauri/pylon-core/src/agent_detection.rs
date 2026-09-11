@@ -2,6 +2,7 @@
 use crate::agent_catalog::{
     AgentDetectionProfile, CatalogConfigEvidence, CatalogConfigFormat, CatalogInvocation,
 };
+use crate::agent_preflight::ToolVersion;
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -392,6 +393,16 @@ pub struct AgentProviderEvidence {
     /// config/credential dir may contain secrets, so the detector reports that
     /// it was seen, not where or what was in it.
     pub shared_config_present: bool,
+    /// Node.js state on this machine. Probed once per scan and attached to every
+    /// provider, because the tool is a machine fact and not a per-provider one;
+    /// only providers whose catalog `requires` names Node read it.
+    pub node: ToolVersion,
+    /// uv state on this machine; see `node`.
+    pub uv: ToolVersion,
+    /// The provider's own installed version when a local source could supply it
+    /// (npm global metadata, which the executable probe cannot provide). The
+    /// direct executable probe wins when it produced a version.
+    pub adapter_version: Option<String>,
 }
 
 /// Bounded, read-only search for one command name across the same roots a
@@ -456,6 +467,48 @@ fn shared_config_present(
     home.join(relative).is_dir()
 }
 
+/// Find one command by name across the given roots. Returns the resolved path
+/// when the command exists, `None` otherwise. Pure filesystem lookup.
+fn locate_command_path(command: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+    for root in roots {
+        for name in executable_names(command) {
+            let candidate = root.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Measure one required runtime tool (Node.js / uv).
+///
+/// Bounded and read-only: a plain executable lookup plus the same managed
+/// version probe the provider search uses (timeout, output cap, process-tree
+/// cleanup). No install, no cache write, no environment mutation.
+///
+/// The three outcomes are deliberately distinct — a missing tool is `Absent`
+/// (a real, fixable failure) while an unreadable version is `Unknown` (never
+/// reported as a violation).
+async fn probe_tool_version(
+    command: &str,
+    version_args: &[String],
+    roots: &[PathBuf],
+    budget: Duration,
+) -> ToolVersion {
+    let Some(path) = locate_command_path(command, roots) else {
+        return ToolVersion::Absent;
+    };
+    if budget.is_zero() {
+        return ToolVersion::Unknown;
+    }
+    let outcome = version_probe("builtin.tool", path, version_args, budget).await;
+    match outcome.version {
+        Some(version) => ToolVersion::Known(version),
+        None => ToolVersion::Unknown,
+    }
+}
+
 /// ACP + vendor-CLI evidence for one provider. The native side is probed only
 /// when the catalog declares an adapter relation, which is the only case where
 /// a second CLI is part of the story.
@@ -496,6 +549,12 @@ fn provider_evidence(
         acp_commands,
         native_commands,
         shared_config_present: shared_config_present(rule.adapter_relation.as_ref(), explicit_home),
+        // Runtime tools and the provider package version are machine facts that
+        // need an async probe (and an npm query). This sync scan phase leaves
+        // them at "not measured"; the caller fills them in.
+        node: ToolVersion::default(),
+        uv: ToolVersion::default(),
+        adapter_version: None,
     }
 }
 
@@ -1042,36 +1101,47 @@ async fn version_probe(
 
 type ConfiguredRuntimes = HashMap<String, (String, String, Vec<String>)>;
 
-/// Codeg's read-only local-version path: consult npm global metadata before
-/// falling back to the catalog-controlled executable probe. No install or
-/// cache mutation is performed.
-pub async fn detect_local_version(provider: &str) -> Option<String> {
-    let rule = crate::agent_catalog::detection_profiles()
-        .ok()?
-        .into_iter()
-        .find(|rule| rule.provider == provider)?;
-    if let Some(manager) = &rule.package_manager {
-        if matches!(
-            manager.kind,
-            crate::agent_catalog::CatalogPackageManagerKind::Npx
-        ) {
-            if let Some(package) = manager.package.as_deref() {
-                if let Some(version) = npm_global_version(package).await {
-                    return Some(version);
-                }
-            }
-        }
+/// Whether a catalog requirement actually constrains anything.
+fn requires_tool(value: &Option<String>) -> bool {
+    value
+        .as_deref()
+        .is_some_and(|declared| !declared.trim().is_empty())
+}
+
+/// Whether the npm-global version source should be consulted for this provider.
+///
+/// Both conditions matter: the direct executable probe is authoritative and has
+/// already run, so the fallback is only worth a process spawn when that probe
+/// produced nothing AND a declared gate actually consumes the value. Without the
+/// second condition every scan would pay for an npm query whose result nobody
+/// reads.
+fn needs_npm_version_fallback(
+    rule: &AgentDetectionProfile,
+    candidate_version: Option<&str>,
+) -> bool {
+    candidate_version.is_none()
+        && rule.version_gates.iter().any(|gate| {
+            gate.evidence == crate::agent_catalog::CatalogVersionEvidence::AdapterAgentInfoVersion
+        })
+}
+
+/// npm global metadata version for a provider whose catalog entry ships as an npm
+/// package.
+///
+/// This is the unique half of Codeg's `detect_local_version`: the
+/// executable-probe fallback in that function is redundant at every call site
+/// here, because the caller only asks when the candidate probe ran against the
+/// resolved executable and produced no version. Keeping the fallback would
+/// re-spawn a probe that has already failed. No install, no cache mutation.
+async fn npm_global_package_version(rule: &AgentDetectionProfile) -> Option<String> {
+    let manager = rule.package_manager.as_ref()?;
+    if !matches!(
+        manager.kind,
+        crate::agent_catalog::CatalogPackageManagerKind::Npx
+    ) {
+        return None;
     }
-    let located = find_rule(&rule, None).into_iter().next()?;
-    let budget = Duration::from_secs(2);
-    version_probe(
-        &rule.detector_id,
-        located.executable,
-        &rule.version_args,
-        budget,
-    )
-    .await
-    .version
+    npm_global_version(manager.package.as_deref()?).await
 }
 
 async fn npm_global_version(package: &str) -> Option<String> {
@@ -1156,6 +1226,9 @@ pub async fn detect_agent_runtime_candidates_inner(
         .cloned()
         .collect::<Vec<_>>();
     let search_roots = options.search_roots.clone();
+    // The runtime-tool probe runs after the scan, so it needs its own handle on
+    // the roots (the scan closure takes ownership of the original).
+    let tool_roots = search_roots.clone();
     let home_dir = options.home_dir.clone();
     let scan_budget = deadline.saturating_duration_since(Instant::now());
     let discovered = tokio::time::timeout(
@@ -1364,21 +1437,53 @@ pub async fn detect_agent_runtime_candidates_inner(
     // A version-gated provider whose declared minimum cannot be proven from the
     // discovered evidence is reported here rather than silently accepted.
     let mut providers = providers;
+    // Node.js / uv are machine facts, not per-provider ones: probe each at most
+    // once per scan, and only when a detected provider actually declares a
+    // requirement for it. A scan limited to providers needing neither spawns
+    // nothing extra.
+    let mut needs_node = false;
+    let mut needs_uv = false;
+    for provider in &providers {
+        let Some(rule) = rules.iter().find(|rule| rule.provider == provider.provider) else {
+            continue;
+        };
+        needs_node |= requires_tool(&rule.requires.node);
+        needs_uv |= requires_tool(&rule.requires.uv);
+    }
+    let tool_budget = limits
+        .version_probe_budget
+        .min(deadline.saturating_duration_since(Instant::now()));
+    let tool_roots = match tool_roots.as_deref() {
+        Some(roots) => dedup_roots(controlled_roots(Some(roots))),
+        None => controlled_roots(None),
+    };
+    let node = if needs_node {
+        probe_tool_version("node", &[], &tool_roots, tool_budget).await
+    } else {
+        ToolVersion::default()
+    };
+    let uv = if needs_uv {
+        probe_tool_version("uv", &[], &tool_roots, tool_budget).await
+    } else {
+        ToolVersion::default()
+    };
+    for provider in &mut providers {
+        provider.node = node.clone();
+        provider.uv = uv.clone();
+    }
     for provider in &mut providers {
         let Some(rule) = rules.iter().find(|r| r.provider == provider.provider) else {
             continue;
         };
-        let Some(gate) = rule
+        let Some(minimum) = rule
             .version_gates
             .iter()
             .find(|gate| gate.min_version.is_some())
+            .and_then(|gate| gate.min_version.as_deref())
         else {
             continue;
         };
-        let Some(minimum) = gate.min_version.as_deref() else {
-            continue;
-        };
-        let observed: Option<String> = candidates
+        let candidate_version: Option<String> = candidates
             .iter()
             .filter(|candidate| candidate.provider == provider.provider)
             .find_map(|candidate| {
@@ -1388,13 +1493,15 @@ pub async fn detect_agent_runtime_candidates_inner(
                     .find(|item| item.kind == "version")
                     .map(|item| item.detail.clone())
             });
+        // The direct executable probe is authoritative; npm global metadata is the
+        // one source it cannot supply, and is consulted only when a gate actually
+        // consumes the value.
+        if needs_npm_version_fallback(rule, candidate_version.as_deref()) {
+            provider.adapter_version = npm_global_package_version(rule).await;
+        }
+        let observed = candidate_version.or_else(|| provider.adapter_version.clone());
         if let Some(version) = observed {
             if !crate::agent_preflight::version_at_least(Some(&version), Some(minimum)) {
-                provider.acp_commands.push(AgentEvidenceHit {
-                    kind: "version-below-minimum".into(),
-                    path: version.clone(),
-                    source: minimum.to_string(),
-                });
                 diagnostics.push(AgentDetectionDiagnostic {
                     code: "adapter_version_below_declared_minimum".into(),
                     stage: "version".into(),
@@ -1441,6 +1548,32 @@ mod tests {
         ))
     }
 
+    /// 写入一个名为 `command` 的假可执行文件；`version` 为 `None` 时以非零退出，
+    /// 模拟「存在但读不出」（与 `make_hanging_executable` 同一夹具手法）。
+    fn plant_version_tool(root: &Path, command: &str, version: Option<&str>) {
+        std::fs::create_dir_all(root).unwrap();
+        #[cfg(windows)]
+        {
+            let path = root.join(format!("{command}.cmd"));
+            let body = match version {
+                Some(version) => format!("@echo off\r\necho {version}\r\nexit /b 0\r\n"),
+                None => "@echo off\r\nexit /b 7\r\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root.join(command);
+            let body = match version {
+                Some(version) => format!("#!/bin/sh\necho '{version}'\n"),
+                None => "#!/bin/sh\nexit 7\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
     fn make_hanging_executable(root: &Path, command: &str) -> PathBuf {
         #[cfg(windows)]
         {
@@ -1458,6 +1591,100 @@ mod tests {
             std::fs::set_permissions(&path, permissions).unwrap();
             path
         }
+    }
+
+    /// B0/缺口1：npm 全局元数据版本源只有在「声明的 gate 真的消费版本」且直接
+    /// 探针未给出版本时才被咨询（否则每次扫描都会白跑一次 npm）。
+    ///
+    /// 这是对**接线判定**的断言，与机器上装了什么无关。
+    #[test]
+    fn npm_version_fallback_is_gate_and_probe_conditioned() {
+        let rules = crate::agent_catalog::detection_profiles().unwrap();
+        let rule = |provider: &str| {
+            rules
+                .iter()
+                .find(|rule| rule.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} 必须在 catalog 中"))
+                .clone()
+        };
+        // claude-code 的 gate 以「适配器版本」为证据，因此需要版本值。
+        assert!(needs_npm_version_fallback(&rule("claude-code"), None));
+        // 直接探针已经给出版本 → 不再花一次 npm 查询。
+        assert!(!needs_npm_version_fallback(
+            &rule("claude-code"),
+            Some("0.75.1")
+        ));
+        // codex 的 gate 是静态策略（goalControlOutOfBand），不消费版本。
+        assert!(!needs_npm_version_fallback(&rule("codex"), None));
+        // 完全没有 gate 的 provider。
+        assert!(!needs_npm_version_fallback(&rule("peri"), None));
+    }
+
+    /// B0：运行时工具探针（Node/uv）的三态与无副作用。
+    ///
+    /// 三态是关键：存在→Known、存在但读不出→Unknown（不是违规）、不存在→Absent。
+    #[tokio::test]
+    async fn runtime_tool_probe_maps_known_unknown_and_absent() {
+        let root = fixture_root("tool-probe");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 1）存在且可读 → Known
+        let readable = root.join("readable");
+        plant_version_tool(&readable, "node", Some("22.19.0"));
+        assert_eq!(
+            probe_tool_version(
+                "node",
+                &[],
+                std::slice::from_ref(&readable),
+                Duration::from_secs(2)
+            )
+            .await,
+            ToolVersion::Known("22.19.0".into())
+        );
+
+        // 2）存在但不可读 → Unknown
+        let unreadable = root.join("unreadable");
+        plant_version_tool(&unreadable, "node", None);
+        assert_eq!(
+            probe_tool_version(
+                "node",
+                &[],
+                std::slice::from_ref(&unreadable),
+                Duration::from_secs(2)
+            )
+            .await,
+            ToolVersion::Unknown
+        );
+
+        // 3）不存在 → Absent
+        assert_eq!(
+            probe_tool_version("node", &[], &[root.join("missing")], Duration::from_secs(2)).await,
+            ToolVersion::Absent
+        );
+
+        // 4）预算耗尽 → Unknown（不启动探针，也不假装读到版本）
+        assert_eq!(
+            probe_tool_version("node", &[], std::slice::from_ref(&readable), Duration::ZERO).await,
+            ToolVersion::Unknown
+        );
+
+        // 5）无安装副作用：探针不创建任何文件
+        let clean = root.join("clean");
+        std::fs::create_dir_all(&clean).unwrap();
+        let _ = probe_tool_version(
+            "node",
+            &[],
+            std::slice::from_ref(&clean),
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!(
+            std::fs::read_dir(&clean).unwrap().count(),
+            0,
+            "工具探针不得创建任何文件/目录"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
