@@ -268,20 +268,6 @@ impl AcpWireHub {
         ordinals.pop_front()
     }
 
-    /// 记录一条已序列化的 outbound 行（writer 边界调用；解析失败静默跳过）。
-    pub fn record_line(&self, direction: WireDirection, line: &str) {
-        if !self.enabled.load(Ordering::Relaxed) {
-            return;
-        }
-        let Ok(msg_val) = serde_json::from_str::<serde_json::Value>(line) else {
-            return;
-        };
-        match direction {
-            WireDirection::PylonToAgent => self.capture_request(&msg_val),
-            WireDirection::AgentToPylon => self.capture_agent_message(&msg_val),
-        }
-    }
-
     /// 当前全部记录快照（旧→新，monotonicSeq 严格递增）。
     /// CR-001：seq 在 records 锁外分配，并发下 enqueue 落序可能偏离 seq 序——
     /// 快照返回前按 monotonicSeq 排齐，消费方可直接依赖 seq 全序。
@@ -762,22 +748,6 @@ mod tests {
         assert_eq!(snap[0].method.as_deref(), Some("session/prompt"));
         assert_eq!(snap[0].remote_session_id.as_deref(), Some("s-1"));
         assert_eq!(snap[0].tool_call_id.as_deref(), Some("tc-9"));
-    }
-
-    #[test]
-    fn record_line_parses_and_records_outbound_json() {
-        let hub = hub();
-        let line = r#"{"jsonrpc":"2.0","id":5,"method":"session/new","params":{"cwd":"."}}"#;
-        hub.record_line(WireDirection::PylonToAgent, line);
-        let snap = hub.snapshot();
-        assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].id_kind, WireIdKind::Number);
-        assert_eq!(snap[0].id_value, Some(json!(5)));
-        assert_eq!(snap[0].method.as_deref(), Some("session/new"));
-        assert_eq!(snap[0].direction, WireDirection::PylonToAgent);
-        // 非法行静默跳过
-        hub.record_line(WireDirection::PylonToAgent, "not-json{");
-        assert_eq!(hub.snapshot().len(), 1);
     }
 
     #[test]
