@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "providers": [
     {
       "provider": "peri",
@@ -29,7 +29,10 @@
           { "relativePath": "settings.json", "format": "json", "fields": ["provider", "model", "models"] }
         ]
       },
-      "adaptation": null,
+      "adaptation": {
+        "sessionEstablishment": { "order": ["resume", "load", "new"] }
+      },
+      "launch": { "kind": "path", "command": "peri", "args": ["acp"] },
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["path", "file_path"] },
         { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["path", "file_path"] },
@@ -79,7 +82,10 @@
           { "relativePath": "config.yml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] }
         ]
       },
-      "adaptation": null,
+      "adaptation": {
+        "sessionEstablishment": { "order": ["resume", "load", "new"] }
+      },
+      "launch": { "kind": "path", "command": "hermes", "args": ["acp"] },
       "tools": [
         { "name": "read_file", "displayName": "Read File", "kind": "read", "action": "read", "summaryFields": ["path"] },
         { "name": "write_file", "displayName": "Write File", "kind": "edit", "action": "write", "summaryFields": ["path"] },
@@ -136,8 +142,10 @@
       "adaptation": {
         "adapterRelation": { "nativeCmd": "claude", "nativeLabel": "Claude Code CLI", "sharedConfigDir": "~/.claude", "extraDirs": [".local/bin", ".claude/local"], "docsUrl": "https://docs.codeg.app/guide/supported-agents#acp-adapters" },
         "clientCapabilities": { "meta": { "subagent-transcript": true, "jetbrains.air": { "version": 1, "capabilities": ["sessionFailure"] } } },
-        "versionGates": { "steeringPromptRequiredMinVersion": "0.65.0", "goalControlOutOfBand": false, "cursorAcpBackend": false }
+        "versionGates": { "steeringPromptRequiredMinVersion": "0.65.0", "goalControlOutOfBand": false, "cursorAcpBackend": false },
+        "sessionEstablishment": { "order": ["resume", "load", "new"] }
       },
+      "launch": { "kind": "path", "command": "ccb", "args": ["--acp"] },
       "tools": [
         { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["file_path", "path"] },
         { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["file_path", "path"] },

@@ -17,13 +17,47 @@ describe('Shared Agent Catalog', () => {
     expect(parseAgentCatalog(document).providers[0].detection).toMatchObject({ versionArgs: [], packageManager: null, requires: { node: null, uv: null }, checks: [] })
   })
 
-  it('defaults adaptation to null and rejects unknown policy names', () => {
+  it('projects closed adaptation policy and rejects unknown policy names', () => {
     const parsed = parseAgentCatalog(rawCatalog).providers
-    expect(parsed.slice(0, 2).every(provider => provider.adaptation === null)).toBe(true)
-    expect(parsed[2].adaptation).toMatchObject({ versionGates: { steeringPromptRequiredMinVersion: '0.65.0' } })
+    expect(parsed.slice(0, 2).every(provider => provider.adaptation?.adapterRelation === null)).toBe(true)
+    expect(parsed.slice(0, 2).every(provider => provider.adaptation?.sessionEstablishment.order.join(',') === 'resume,load,new')).toBe(true)
+    expect(parsed[2].adaptation?.versionGates).toEqual([
+      { id: 'steering-prompt-required', minVersion: '0.65.0', enabled: true, evidence: 'adapter-agent-info-version' },
+      { id: 'goal-control-out-of-band', minVersion: null, enabled: false, evidence: 'static-policy' },
+      { id: 'cursor-acp-backend', minVersion: null, enabled: false, evidence: 'launch-recipe' },
+    ])
     const document = structuredClone(rawCatalog)
     document.providers[0].adaptation = { unsupported: true } as never
     expect(() => parseAgentCatalog(document)).toThrow(/未知字段/)
+  })
+
+  it('carries a Windows-only launch recipe for every provider', () => {
+    expect(parseAgentCatalog(rawCatalog).providers.map(provider => provider.launch)).toEqual([
+      { kind: 'path', command: 'peri', args: ['acp'], env: [], cwdPolicy: null },
+      { kind: 'path', command: 'hermes', args: ['acp'], env: [], cwdPolicy: null },
+      { kind: 'path', command: 'ccb', args: ['--acp'], env: [], cwdPolicy: null },
+    ])
+  })
+
+  it.each([
+    { kind: 'deno', command: 'x' },
+    { kind: 'path', command: 'C:\\tools\\agent.exe' },
+    { kind: 'path', command: 'agent', args: ['/bin/sh', '-c', 'agent'] },
+    { kind: 'path', command: 'sh', args: ['-c', 'agent'] },
+    { kind: 'path', command: 'agent', args: ['--signal', 'SIGTERM'] },
+    { kind: 'path', command: 'agent', env: [{ name: 'ANTHROPIC_API_KEY', value: 'x' }] },
+    { kind: 'path', command: 'agent', shellExpansion: true },
+  ])('rejects a launch recipe that is not a plain Windows child %j', invalid => {
+    const document = structuredClone(rawCatalog)
+    document.providers[0].launch = invalid as never
+    expect(() => parseAgentCatalog(document)).toThrow()
+  })
+
+  it('rejects an undeclared launch recipe and older schemas', () => {
+    const document = structuredClone(rawCatalog)
+    document.providers[0].launch = null as never
+    expect(() => parseAgentCatalog(document)).toThrow(/launch 未声明/)
+    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [] })).toThrow(/schemaVersion/)
   })
 
   it.each([
@@ -81,13 +115,14 @@ describe('Shared Agent Catalog', () => {
       provider: 'fixture', displayName: 'Fixture', protocol: 'acp',
       capabilities: { sessionUpdates: true, interactionEvents: true, permissionRequests: false, replay: true, responseMethods: [] },
       interactionKinds: [], protocolDefaults: { setModelApi: 'config_option' }, tools: [],
+      launch: { kind: 'path', command: 'fixture', args: ['acp'] },
       detection: {
         detectorId: 'fixture', priority: 1, invocations: [{ command: 'fixture', args: ['acp'] }], configDirs: ['.fixture'],
         configEvidence: [{ relativePath: 'config.yaml', format: 'yaml', fields: ['provider', 'model'] }],
       },
     }
-    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [minimum] })).not.toThrow()
-    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [{
+    expect(() => parseAgentCatalog({ schemaVersion: 3, providers: [minimum] })).not.toThrow()
+    expect(() => parseAgentCatalog({ schemaVersion: 3, providers: [{
       ...minimum,
       detection: { ...minimum.detection, configEvidence: [{ relativePath: '../secret', format: 'json', fields: ['token'] }] },
     }] })).toThrow(/配置目录内/)
@@ -99,10 +134,11 @@ describe('Shared Agent Catalog', () => {
       displayName: 'A', protocol: 'acp',
       capabilities: { sessionUpdates: true, interactionEvents: true, permissionRequests: false, replay: true, responseMethods: [] },
       interactionKinds: [], protocolDefaults: { setModelApi: 'config_option' },
+      launch: { kind: 'path', command: 'a', args: ['acp'] },
       detection: { detectorId: 'a', priority: 1, invocations: [{ command: 'a', args: ['acp'] }], configDirs: [] },
       tools: [],
     }
-    expect(() => parseAgentCatalog({ schemaVersion: 2, providers: [
+    expect(() => parseAgentCatalog({ schemaVersion: 3, providers: [
       { ...minimum, provider: 'same' },
       { ...minimum, provider: 'same', detection: { ...minimum.detection, detectorId: 'b' } },
     ] })).toThrow(/provider 重复/)

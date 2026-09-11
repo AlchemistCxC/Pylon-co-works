@@ -84,6 +84,22 @@
 
 ## 6. 变更流程
 
+### A0 catalog schema v3 与 Codeg profile 转换（非逐字副本）
+
+- 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`
+  - `src-tauri/src/acp/registry.rs`：`registry_id_for` / `from_registry_id`（registry id 与 wire 名分离）、`AcpAdapterRelation` 与 `acp_adapter_relation`（native cmd、shared config dir、extra dirs、docs url）、`steering_prompt_required_min_version` / `goal_control_is_out_of_band` / `uses_cursor_acp_backend`（版本与静态 gate）。
+  - `src-tauri/src/acp/custom_registry.rs`：`CustomAgentDef` 的「closed kind + 每通道可选载荷」形状与 `validate` 的 `MissingChannel` 前提、`derive_command_name` / `resolved_cmd`。
+  - `src-tauri/src/acp/preflight.rs`：`AdapterInfo`（adapter 与 vendor CLI 的证据分离）仅作对照，A0 不迁探测实现。
+- 目标：`src-tauri/pylon-core/src/agent_catalog.rs` 的 schema v3 强类型 projection（`CatalogLaunchProfile`/`CatalogAdapterRelation`/`CatalogVersionGate`/`CatalogSessionEstablishmentPolicy` + `provider_profile`），以及新模块 `src-tauri/pylon-core/src/agent_profile_transform.rs`（`CodegAgentProfile -> PylonAgentProfile`，纯转换、无 IO）。
+- 适配差异：
+  - `derive_command_name` 按上游算法逐句迁入，未改语义（含 npm scope/版本后缀与 PEP 508 extras/specifier 剥离）。
+  - 通道 kind 由 codeg 的 `npx`/`uvx`/`binary` 映射为 Pylon `npm`/`uvx`/`path`；`path` 是当前唯一有 Windows 启动实现的策略。
+  - codeg 的静态键版本 gate（`steeringPromptRequiredMinVersion` 等）在 A0 被闭成带 `evidence` 来源的 `CatalogVersionGate`；未知 gate 名 fail-closed，不再只存在于注释。
+  - Windows-only：任何 `/bin`、`/usr` 等 POSIX 系统路径、shell `-c` 调用或 `SIGTERM`/`SIGKILL` 参数一律拒绝（`UnsafeWindowsArgument`），不生成 Unix argv。
+  - profile 不得携带明文凭据：`launch.env` 名称命中 `*_API_KEY`/`*_TOKEN`/`*_SECRET` 等即拒绝。
+- 未迁入：`AgentDistribution` 的下载 URL/`sha256`/`platforms`、安装与解压、`binary_cache`、`antigravity_login`、`remote_registry`/`custom_registry` 的数据库持久化、codeg 的 wire `AgentType` 与 `AppState`（DTO 只接受已脱敏、可序列化的 profile；不接受 `AgentType`、DB 连接或 UI state）。
+- 证据：`pylon-core` 定向 `agent_catalog`（13 项）与 `agent_profile_transform`（7 项）全绿；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml --lib` 45 项全绿；前端 `src/domains/agent/__tests__/agentCatalog.test.ts` 同 commit 覆盖 schema v3 拒绝与 launch 校验。
+
 ### ACP policy adapters
 
 - `src-tauri/src/acp/question_policy.rs`: adapted from codeg `acp/question.rs` at the locked commit; pure bounded question parsing/outcome logic only, with Pylon DTOs. Production consumer: `src-tauri/src/acp/adapter/private_ext`.

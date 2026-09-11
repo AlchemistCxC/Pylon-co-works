@@ -214,9 +214,15 @@ mod tests {
         assert_eq!(gates["steeringPromptRequiredMinVersion"], "0.65.0");
     }
 
+    /// A0 起三个内置 provider 都声明了 `sessionEstablishment`，因此旧断言
+    /// `policy("peri").is_none()` 的前提已失效。新断言口径：未声明 provider 仍为
+    /// None；只声明 sessionEstablishment 的 provider 不得凭空出现 wrapper/gate 策略。
     #[test]
-    fn empty_provider_is_empty_and_unknown_field_fails_closed() {
-        assert!(policy("peri").unwrap().is_none());
+    fn undeclared_provider_is_empty_and_unknown_field_fails_closed() {
+        assert!(policy("missing").unwrap().is_none());
+        let peri = policy("peri").unwrap().unwrap();
+        assert!(peri.adapter_relation.is_none());
+        assert!(peri.version_gates.is_none());
         assert!(field("claude-code", "providerSpecificHack").is_err());
     }
 
