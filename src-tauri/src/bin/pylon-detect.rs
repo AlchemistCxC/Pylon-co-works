@@ -9,12 +9,12 @@ use serde_json::json;
 use std::path::PathBuf;
 
 fn usage() -> &'static str {
-    "usage: pylon-detect [--json] [--detector <id>] [--home <path>] [--search-root <path>]\n       pylon-detect help | --help\n       pylon-detect --version"
+    "usage: pylon-detect [--json] [--detector <id>] [--home <path>] [--search-root <path>]\n       pylon-detect --diagnose\n       pylon-detect help | --help\n       pylon-detect --version"
 }
 
 fn help() -> String {
     format!(
-        "Pylon Agent Detector — discover supported local ACP runtimes\n\n{}\n\nOptions:\n  --json                 Emit a stable JSON document\n  --detector <id>        Limit detection to one detector; repeatable\n  --home <path>          Override the home used for config evidence\n  --search-root <path>   Search only this executable directory; repeatable\n\nConfiguration values are never emitted. Evidence includes paths and matched field names only.\n",
+        "Pylon Agent Detector — discover supported local ACP runtimes\n\n{}\n\nOptions:\n  --json                 Emit a stable JSON document\n  --detector <id>        Limit detection to one detector; repeatable\n  --home <path>          Override the home used for config evidence\n  --search-root <path>   Search only this executable directory; repeatable\n  --diagnose             Print a copyable environment + per-provider report\n\nConfiguration values are never emitted. Evidence includes paths and matched field names only.\n",
         usage()
     )
 }
@@ -25,6 +25,7 @@ enum CliAction {
     Version,
     Detect {
         json_output: bool,
+        diagnose_only: bool,
         detector_ids: Vec<String>,
         home_dir: Option<PathBuf>,
         search_roots: Vec<PathBuf>,
@@ -39,6 +40,7 @@ fn parse_raw(raw: &[String]) -> Result<CliAction, String> {
         return Ok(CliAction::Version);
     }
     let mut json_output = false;
+    let mut diagnose_only = false;
     let mut detector_ids = Vec::new();
     let mut home_dir = None;
     let mut search_roots = Vec::new();
@@ -47,6 +49,10 @@ fn parse_raw(raw: &[String]) -> Result<CliAction, String> {
         match raw[index].as_str() {
             "--json" => {
                 json_output = true;
+                index += 1;
+            }
+            "--diagnose" => {
+                diagnose_only = true;
                 index += 1;
             }
             "--detector" => {
@@ -74,13 +80,18 @@ fn parse_raw(raw: &[String]) -> Result<CliAction, String> {
     }
     Ok(CliAction::Detect {
         json_output,
+        diagnose_only,
         detector_ids,
         home_dir,
         search_roots,
     })
 }
 
-fn human_output(report: &AgentDetectionReport) -> String {
+fn human_output(
+    report: &AgentDetectionReport,
+    preflight: &[agent_preflight::PreflightResult],
+    diagnostics: &agent_diagnostics::DiagnosticsReport,
+) -> String {
     let mut output = if report.candidates.is_empty() {
         "No supported Agent runtimes detected.\n".into()
     } else {
@@ -130,6 +141,77 @@ fn human_output(report: &AgentDetectionReport) -> String {
     if report.truncated {
         output.push_str("\nResult truncated.\n");
     }
+    output.push_str(&provider_causes(preflight));
+    output.push_str(&environment_section(diagnostics));
+    output
+}
+
+/// Per-provider cause lines: the answer to "why does Pylon not see it?".
+///
+/// This is the part the text output used to drop entirely — the preflight was
+/// computed for every provider and then only emitted under `--json`, so the
+/// human-readable path showed candidates with no explanation of the ones that
+/// were missing.
+fn provider_causes(preflight: &[agent_preflight::PreflightResult]) -> String {
+    if preflight.is_empty() {
+        return String::new();
+    }
+    let mut output = String::from("\nProvider status:\n");
+    for entry in preflight {
+        output.push_str(&format!(
+            "  {:<14} {:<16} [{}] {}\n",
+            entry.provider,
+            entry.status.as_str(),
+            entry.cause.level.as_str(),
+            entry.cause.summary
+        ));
+    }
+    output
+}
+
+/// Environment evidence: the copyable part, and the section that answers "works
+/// in my terminal but not in the app".
+///
+/// Values are the allow-listed, credential-masked set from `agent_diagnostics` —
+/// never an arbitrary environment dump. It does contain absolute paths (that is
+/// what makes a PATH gap diagnosable), so it is not anonymous.
+fn environment_section(diagnostics: &agent_diagnostics::DiagnosticsReport) -> String {
+    let mut output = format!(
+        "\nEnvironment:\n  verdict: {}\n",
+        diagnostics.verdict.as_str()
+    );
+    output.push_str(&format!(
+        "  app PATH entries: {}\n",
+        diagnostics.path_entries.len()
+    ));
+    let gap = agent_diagnostics::persisted_path_gap();
+    if !gap.observed {
+        output.push_str("  PATH gap: unknown (persisted PATH could not be read)\n");
+    } else {
+        output.push_str(&format!(
+            "  PATH gap: {} dir(s) a new process would have but this one does not\n",
+            gap.missing_from_app_path.len()
+        ));
+        for dir in &gap.missing_from_app_path {
+            output.push_str(&format!("    + {dir}\n"));
+        }
+    }
+    output
+}
+
+/// `--diagnose`: only the diagnosis, no candidate dump. This is the artifact a
+/// user pastes into a report.
+fn diagnostics_output(
+    diagnostics: &agent_diagnostics::DiagnosticsReport,
+    preflight: &[agent_preflight::PreflightResult],
+) -> String {
+    let mut output = String::from("Pylon environment diagnostics\n");
+    output.push_str(&environment_section(diagnostics));
+    output.push_str(&provider_causes(preflight));
+    output.push_str("\nEnvironment variables (allow-listed; credential-looking values masked):\n");
+    for (key, value) in &diagnostics.environment {
+        output.push_str(&format!("  {key}={value}\n"));
+    }
     output
 }
 
@@ -141,7 +223,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let (json_output, detector_ids, home_dir, search_roots) = match action {
+    let (json_output, diagnose_only, detector_ids, home_dir, search_roots) = match action {
         CliAction::Help => {
             print!("{}", help());
             return;
@@ -152,10 +234,17 @@ fn main() {
         }
         CliAction::Detect {
             json_output,
+            diagnose_only,
             detector_ids,
             home_dir,
             search_roots,
-        } => (json_output, detector_ids, home_dir, search_roots),
+        } => (
+            json_output,
+            diagnose_only,
+            detector_ids,
+            home_dir,
+            search_roots,
+        ),
     };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -193,8 +282,10 @@ fn main() {
                     }))
                     .unwrap()
                 );
+            } else if diagnose_only {
+                print!("{}", diagnostics_output(&diagnostics, &preflight));
             } else {
-                print!("{}", human_output(&report));
+                print!("{}", human_output(&report, &preflight, &diagnostics));
             }
         }
         Err(error) => {
@@ -241,6 +332,7 @@ mod tests {
             .unwrap(),
             CliAction::Detect {
                 json_output: true,
+                diagnose_only: false,
                 detector_ids: vec![
                     "builtin.detector.hermes".into(),
                     "builtin.detector.peri".into(),
@@ -248,6 +340,26 @@ mod tests {
                 home_dir: Some(PathBuf::from("fixture-home")),
                 search_roots: vec![PathBuf::from("bin-a"), PathBuf::from("bin-b")],
             }
+        );
+    }
+
+    /// `--diagnose` 是可复制的诊断报告开关，与 `--json` 各自独立。
+    #[test]
+    fn diagnose_is_parsed_as_its_own_mode() {
+        assert_eq!(
+            parse_raw(&strings(&["--diagnose"])).unwrap(),
+            CliAction::Detect {
+                json_output: false,
+                diagnose_only: true,
+                detector_ids: Vec::new(),
+                home_dir: None,
+                search_roots: Vec::new(),
+            }
+        );
+        // 默认（未给 --diagnose）仍是普通文本输出。
+        assert_eq!(
+            parse_raw(&strings(&[])).unwrap_or(CliAction::Help),
+            CliAction::Help
         );
     }
 
@@ -286,14 +398,41 @@ mod tests {
             already_imported_agent_id: None,
             warnings: Vec::new(),
         };
-        let output = human_output(&AgentDetectionReport {
-            candidates: vec![candidate],
-            providers: Vec::new(),
-            diagnostics: Vec::new(),
-            elapsed_ms: 5,
-            truncated: false,
-        });
+        let output = human_output(
+            &AgentDetectionReport {
+                candidates: vec![candidate],
+                providers: Vec::new(),
+                diagnostics: Vec::new(),
+                elapsed_ms: 5,
+                truncated: false,
+            },
+            &[],
+            &agent_diagnostics::report(true, &[]),
+        );
         assert!(output.contains("config.yaml [provider, model]"));
         assert!(!output.contains("api_key"));
+    }
+
+    /// C4：文本输出必须展示每个 provider 的**原因**，而不是算完只发 JSON。
+    ///
+    /// 这条测试锁的是一个真实缺口：`preflight` 原本在非 JSON 路径上被完整计算出
+    /// 来却直接丢弃，于是“人读的那条路径”只列候选，对缺失的 provider 一言不发。
+    #[test]
+    fn text_output_reports_the_cause_for_providers_that_are_not_installable() {
+        let preflight = agent_preflight::evaluate(
+            "claude-code",
+            &agent_preflight::PreflightInputs {
+                acp_present: true,
+                native_present: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let output = provider_causes(&[preflight]);
+        assert!(output.contains("claude-code"), "必须点名 provider");
+        assert!(
+            output.contains("ok") && output.contains("ACP"),
+            "必须给出可读原因: {output}"
+        );
     }
 }

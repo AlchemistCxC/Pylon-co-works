@@ -89,6 +89,21 @@ pub enum PreflightStatus {
     NotInstalled,
 }
 
+impl PreflightStatus {
+    /// The serde spelling of this state, so text output and JSON agree and a
+    /// consumer cannot see two different names for one state.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PreflightStatus::NativeMissing => "nativeMissing",
+            PreflightStatus::AdapterMissing => "adapterMissing",
+            PreflightStatus::Installed => "installed",
+            PreflightStatus::VersionTooOld => "versionTooOld",
+            PreflightStatus::ConfigOnly => "configOnly",
+            PreflightStatus::NotInstalled => "notInstalled",
+        }
+    }
+}
+
 /// Wrapper evidence: the vendor CLI the user installs themselves and the ACP
 /// adapter Pylon launches. Deliberately structured, no prose — the frontend owns
 /// the wording, and detection already reports the paths.
@@ -185,6 +200,18 @@ pub enum DiagnosticLevel {
     Warn,
     /// A definitive obstacle with an actionable fix.
     Fail,
+}
+
+impl DiagnosticLevel {
+    /// The serde spelling; see [`PreflightStatus::as_str`].
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DiagnosticLevel::Ok => "ok",
+            DiagnosticLevel::Info => "info",
+            DiagnosticLevel::Warn => "warn",
+            DiagnosticLevel::Fail => "fail",
+        }
+    }
 }
 
 /// **Why** a provider is in the state it is in — the question a state name

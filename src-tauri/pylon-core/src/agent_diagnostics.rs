@@ -37,6 +37,17 @@ pub enum DiagnosticsVerdict {
     MissingRuntime,
 }
 
+impl DiagnosticsVerdict {
+    /// The serde spelling, so text output and JSON cannot name one verdict twice.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DiagnosticsVerdict::Ready => "ready",
+            DiagnosticsVerdict::PathMismatch => "path_mismatch",
+            DiagnosticsVerdict::MissingRuntime => "missing_runtime",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PathGapReport {
