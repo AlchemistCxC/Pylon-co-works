@@ -101,6 +101,15 @@ describe('InteractionRequest 规范化', () => {
     expect(result?.questions[0]).toMatchObject({ id: 'approval', question: '危险命令' })
   })
 
+  it('plan approval 将 planContent 投影为可见问题文本', () => {
+    const result = normalizeInteractionRequest({
+      eventType: 'approval.request',
+      payload: { requestId: 'plan-1', planContent: '# Plan\n1. verify' },
+    })
+    expect(result).toMatchObject({ kind: 'approval', identity: { requestId: 'plan-1' } })
+    expect(result?.questions[0]).toMatchObject({ question: '# Plan\n1. verify' })
+  })
+
   it('approval 保留危险上下文供 renderer 消费，不读取 provider raw', () => {
     const result = normalizeInteractionRequest({
       eventType: 'approval.request',

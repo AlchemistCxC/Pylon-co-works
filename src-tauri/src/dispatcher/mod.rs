@@ -1728,7 +1728,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 crate::event_names::INTERACTION,
                                 serde_json::json!({
                                     "provider": provider, "agentId": agent_id, "sessionId": session_id,
-                                    "eventType": "interaction.requested", "requestId": request_id.to_string(),
+                                    "eventType": if matches!(bridge, crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan) { "approval.request" } else { "ask-user" }, "requestId": request_id.to_string(),
                                     "clientGeneration": generation, "payload": params,
                                 }),
                             );
