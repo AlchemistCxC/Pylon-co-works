@@ -69,6 +69,16 @@ pub(crate) fn fake_acp_agent_with(
 ) -> AgentDef {
     let mut args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
     args.extend(extra_args);
+    // fake ACP 子进程通过 stdin/stdout 说 UTF-8 的 JSON-RPC 线（真实 ACP wire 即 UTF-8）。
+    // Python 默认按宿主 locale 解 stdin，而 CI runner 的 locale 是 cp1252：中文 payload
+    // 的 UTF-8 字节里 0x81/0x8D/0x8F/0x90/0x9D 在 cp1252 未定义，被 surrogateescape 成
+    // 孤代理（\udcXX）；子进程再 json.dumps 写进 trace，Rust 侧 serde_json 读回即报
+    // "lone leading surrogate in hex escape"（run 34597826814 实证，列 223）。
+    // 本地不复现是因为开发机 locale 是 cp936/UTF-8（能整字节解码，只是 mojibake）。
+    // 固定子进程 stdio 编码，测试行为就不再随宿主 locale 变化；显式传同名变量者可覆盖。
+    let mut env = env;
+    env.entry("PYTHONIOENCODING".to_string())
+        .or_insert_with(|| "utf-8".to_string());
     AgentDef {
         name: name.to_string(),
         provider: None,
