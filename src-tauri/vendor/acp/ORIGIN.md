@@ -108,6 +108,20 @@
 
 ### A-DETECT preflight 版本解析（生产代码摘取）
 
+### 父书勘误 1+2：requires 状态分级与 npm 全局版本源（2026-09-11，`12100cfb`）
+
+- 来源：锁定 commit `b2eec98…`
+  - `src-tauri/src/acp/preflight.rs::build_node_version_check`：Node 状态分级与 fix 载荷的真源（`current_version` 为 `None` 时判 **Fail**「Cannot determine Node.js version」；两侧都可解析时比较；任一侧不可解析时判 **Warn**；过旧时 Fail + `FixActionKind::OpenUrl`，`payload = "https://nodejs.org/"`）。
+  - 同文件 `build_uv_version_check` / `check_uv_environment`：uv 的 fix 为 `FixActionKind::InstallUv` + **空载荷**。
+  - 同文件 `check_npm_environment`（npm 全局元数据读取路径）：即 Pylon 原先迁入的本地版本查询。
+- 目标：`pylon-core/src/agent_catalog.rs::runtime_requirement_checks`（`requires` → 可见检查）、`pylon-core/src/agent_preflight.rs::required_tool_status` + `ToolVersion`（三态语义）、`pylon-core/src/agent_detection.rs::probe_tool_version` / `npm_global_package_version`。
+- 适配差异：
+  - 上游把「未安装」与「探测失败」合并为 `Option<&str>::None` 单一 Fail；Pylon 拆成 `ToolVersion::{Absent, Unknown}`（未找到 = Fail，读不出 = Warn），因为二者对用户的意义不同（前者可安装修复，后者只是未能证明）。
+  - 上游的 `detect_local_version` 等价路径（npm 全局元数据 → 回退可执行探针）在 Pylon 里**回退半边与候选探针重复**（调用方只在候选探针失败后才问），故只保留 npm 半边（`npm_global_package_version`）并加 gate-conditioned 触发。
+  - 检查项 id 采用 `node-min` / `uv-min`；`requires` 与显式 `checks` 同种时以显式者为准，不重复产出。
+- 未迁入：`clear_npm_env_cache`、npm env 缓存、安装动作、`resolve_uvx_command` 的 uvx 启动路径。
+- 证据：`declared_runtime_requirements_become_visible_checks`、`required_runtime_tool_status_matches_the_source_semantics`、`codex_without_a_sufficient_node_fails_its_required_runtime_check`、`runtime_tool_probe_maps_known_unknown_and_absent`、`npm_version_fallback_is_gate_and_probe_conditioned`；本机 `pylon-detect --json` 实测 `codex` 产出 `node-min(PASS)`（Node 26.7.0 vs 声明下限 20.0.0）。
+
 ### A-DETECT 进程版本输出回退
 
 - 来源：同一锁定 commit 的 `src-tauri/src/commands/acp.rs::probe_cli_version_token`（stdout 解析失败后尝试 stderr）。目标为 `pylon-core/src/agent_detection.rs::version_probe`；保留 Pylon 的有界输出、进程树回收、预算、catalog 参数和缓存，删除“仅 stdout 为空才回退”的偏离路径。
