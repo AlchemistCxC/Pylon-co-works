@@ -393,7 +393,7 @@ pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
         })
         .collect::<Vec<_>>();
     // Stable sort preserves catalog order for equal-priority providers.
-    profiles.sort_by(|left, right| right.priority.cmp(&left.priority));
+    profiles.sort_by_key(|profile| std::cmp::Reverse(profile.priority));
     Ok(profiles)
 }
 

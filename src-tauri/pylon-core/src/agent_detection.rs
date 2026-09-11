@@ -106,23 +106,12 @@ impl Default for AgentDetectionLimits {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentDetectionOptions {
     pub detector_ids: Option<Vec<String>>,
     pub home_dir: Option<PathBuf>,
     pub search_roots: Option<Vec<PathBuf>>,
     pub limits: AgentDetectionLimits,
-}
-
-impl Default for AgentDetectionOptions {
-    fn default() -> Self {
-        Self {
-            detector_ids: None,
-            home_dir: None,
-            search_roots: None,
-            limits: AgentDetectionLimits::default(),
-        }
-    }
 }
 
 fn path_key(path: &Path) -> String {
@@ -707,6 +696,9 @@ fn probe_diagnostic(
     }
 }
 
+/// 版本探针缓存：(规范化路径, 版本参数, mtime) → 版本字符串。
+type VersionProbeCache = Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>;
+
 async fn version_probe(
     detector_id: &str,
     executable: PathBuf,
@@ -717,8 +709,7 @@ async fn version_probe(
         .ok()
         .and_then(|m| m.modified().ok())
         .map(|mtime| (path_key(&executable), version_args.to_vec(), mtime));
-    static CACHE: OnceLock<Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<VersionProbeCache> = OnceLock::new();
     if let Some(key) = &cache_key {
         if let Some(version) = CACHE
             .get_or_init(|| Mutex::new(HashMap::new()))
@@ -914,8 +905,8 @@ async fn npm_global_version(package: &str) -> Option<String> {
 
 fn parse_npm_list_version(bytes: &[u8], package: &str) -> Option<String> {
     let document: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let key = if package.starts_with('@') {
-        package[1..]
+    let key = if let Some(stripped) = package.strip_prefix('@') {
+        stripped
             .find('@')
             .map(|index| &package[..index + 1])
             .unwrap_or(package)

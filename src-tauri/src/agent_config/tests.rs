@@ -938,7 +938,7 @@ fn agent_patch_replaces_target_and_preserves_others() {
     let agents = parse(&patched).unwrap();
     assert_eq!(agents["peri"].name, "Peri2");
     assert_eq!(agents["hermes"].name, "Hermes");
-    assert_eq!(agents["hermes"].default, true);
+    assert!(agents["hermes"].default);
 }
 
 #[test]

@@ -545,9 +545,8 @@ mod tests {
             .expect("remove");
         let store =
             crate::gateway::credentials::CredentialStore::open(&app_data).expect("reopen store");
-        assert_eq!(
-            store.has_credentials("qq", "bot-a").expect("has"),
-            false,
+        assert!(
+            !store.has_credentials("qq", "bot-a").expect("has"),
             "凭据随实例删除"
         );
         let _ = std::fs::remove_dir_all(&app_data);

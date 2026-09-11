@@ -113,7 +113,7 @@ for line in sys.stdin:
         mapping.peri_id, "peri-original",
         "revived mapping keeps the persisted remote session id"
     );
-    assert_eq!(mapping.is_first, false);
+    assert!(!mapping.is_first);
     assert!(
         recreated.is_none(),
         "no recreation notice when the remote session is revived"
