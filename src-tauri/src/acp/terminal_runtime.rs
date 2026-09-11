@@ -18,6 +18,27 @@ use super::terminal_policy::{
 };
 use super::ManagedChild;
 
+const PROCESS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Codeg's error-only retry state. A healthy running process has no deadline;
+/// after persistent wait errors we publish unknown completion once, but retain
+/// the child and keep reaping at the slower idle cadence.
+struct WaitRetry {
+    deadline: Option<tokio::time::Instant>,
+    backoff: std::time::Duration,
+    published_unknown: bool,
+}
+
+impl Default for WaitRetry {
+    fn default() -> Self {
+        Self {
+            deadline: None,
+            backoff: PROCESS_POLL_INTERVAL,
+            published_unknown: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TerminalSnapshot {
     pub output: String,
@@ -37,6 +58,57 @@ struct TerminalInstance {
 }
 
 impl TerminalInstance {
+    async fn observe_process_status(
+        &self,
+        status: Result<Option<std::process::ExitStatus>, super::AcpError>,
+        retry: &mut WaitRetry,
+        now: tokio::time::Instant,
+    ) -> Option<std::time::Duration> {
+        use super::terminal_policy::{
+            next_wait_retry_backoff, WAIT_ERROR_BUDGET, WAIT_ERROR_IDLE_RETRY,
+        };
+        match status {
+            Ok(Some(status)) => {
+                if !retry.published_unknown {
+                    self.drain_readers().await;
+                    self.mark_exited(super::terminal_policy::map_exit_status(status))
+                        .await;
+                }
+                None
+            }
+            Ok(None) => {
+                // try_wait differs from Codeg's blocking wait: None is a
+                // successful observation, not another wait error.
+                retry.deadline = None;
+                retry.backoff = PROCESS_POLL_INTERVAL;
+                Some(if retry.published_unknown {
+                    WAIT_ERROR_IDLE_RETRY
+                } else {
+                    PROCESS_POLL_INTERVAL
+                })
+            }
+            Err(error) => {
+                let deadline = *retry.deadline.get_or_insert(now + WAIT_ERROR_BUDGET);
+                if !retry.published_unknown && now >= deadline {
+                    retry.published_unknown = true;
+                    tracing::error!(%error, "terminal wait error budget exhausted; owner continues reaping");
+                    self.append_output(
+                        "\n[terminal exit status unavailable: could not reap the process]\n",
+                    )
+                    .await;
+                    self.drain_readers().await;
+                    self.mark_exited(super::terminal_policy::TerminalExitStatus::default())
+                        .await;
+                }
+                if retry.published_unknown {
+                    Some(WAIT_ERROR_IDLE_RETRY)
+                } else {
+                    retry.backoff = next_wait_retry_backoff(retry.backoff);
+                    Some(retry.backoff)
+                }
+            }
+        }
+    }
     fn new(session_id: String, output_limit: usize, child: ManagedChild) -> Arc<Self> {
         let (completion, _) = watch::channel(TerminalCompletion::Running);
         Arc::new(Self {
@@ -148,6 +220,8 @@ impl TerminalRegistry {
             .expect("terminal inserted before readers start");
         let watcher = terminal.clone();
         tokio::spawn(async move {
+            let mut poll_delay = PROCESS_POLL_INTERVAL;
+            let mut retry = WaitRetry::default();
             loop {
                 tokio::select! {
                     _ = watcher.kill.notified() => {
@@ -163,12 +237,11 @@ impl TerminalRegistry {
                         watcher.mark_exited(super::terminal_policy::TerminalExitStatus::default()).await;
                         break;
                     }
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
-                        let status = watcher.child.lock().await.try_wait().ok().flatten();
-                        if let Some(status) = status {
-                            watcher.drain_readers().await;
-                            watcher.mark_exited(super::terminal_policy::map_exit_status(status)).await;
-                            break;
+                    _ = tokio::time::sleep(poll_delay) => {
+                        let status = watcher.child.lock().await.try_wait();
+                        match watcher.observe_process_status(status, &mut retry, tokio::time::Instant::now()).await {
+                            Some(delay) => poll_delay = delay,
+                            None => break,
                         }
                     }
                 }
@@ -281,6 +354,94 @@ fn spawn_reader<R: Read + Send + 'static>(
 mod tests {
     use super::*;
     use crate::acp::terminal_policy::TerminalExitStatus;
+
+    #[tokio::test]
+    async fn healthy_long_running_terminal_has_no_error_deadline() {
+        let instance = TerminalInstance::new("session-a".into(), 1024, ManagedChild::empty());
+        let mut retry = WaitRetry::default();
+        let now = tokio::time::Instant::now();
+        for elapsed in [0, 31, 300, 3600] {
+            assert_eq!(
+                instance
+                    .observe_process_status(
+                        Ok(None),
+                        &mut retry,
+                        now + std::time::Duration::from_secs(elapsed)
+                    )
+                    .await,
+                Some(PROCESS_POLL_INTERVAL)
+            );
+            assert_eq!(*instance.completion.borrow(), TerminalCompletion::Running);
+            assert!(retry.deadline.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_wait_errors_back_off_then_publish_unknown_once_and_keep_reaping() {
+        use super::super::terminal_policy::{
+            WAIT_ERROR_BUDGET, WAIT_ERROR_IDLE_RETRY, WAIT_RETRY_MAX_BACKOFF,
+        };
+        let instance = TerminalInstance::new("session-a".into(), 1024, ManagedChild::empty());
+        let mut retry = WaitRetry::default();
+        let now = tokio::time::Instant::now();
+        let failure = || Err(super::super::AcpError::Child("injected wait error".into()));
+        let mut previous = PROCESS_POLL_INTERVAL;
+        for _ in 0..20 {
+            let delay = instance
+                .observe_process_status(failure(), &mut retry, now)
+                .await
+                .unwrap();
+            assert!(delay >= previous && delay <= WAIT_RETRY_MAX_BACKOFF);
+            previous = delay;
+            assert_eq!(*instance.completion.borrow(), TerminalCompletion::Running);
+        }
+        let deadline = now + WAIT_ERROR_BUDGET;
+        assert_eq!(
+            instance
+                .observe_process_status(failure(), &mut retry, deadline)
+                .await,
+            Some(WAIT_ERROR_IDLE_RETRY)
+        );
+        assert_eq!(
+            instance.wait_for_exit().await.unwrap(),
+            TerminalExitStatus::default()
+        );
+        let output = instance.snapshot.lock().await.output.clone();
+        assert!(output.contains("could not reap"));
+        assert_eq!(
+            instance
+                .observe_process_status(failure(), &mut retry, deadline + WAIT_ERROR_IDLE_RETRY)
+                .await,
+            Some(WAIT_ERROR_IDLE_RETRY)
+        );
+        assert_eq!(instance.snapshot.lock().await.output, output);
+    }
+
+    #[tokio::test]
+    async fn successful_poll_resets_transient_wait_error_budget() {
+        let instance = TerminalInstance::new("session-a".into(), 1024, ManagedChild::empty());
+        let mut retry = WaitRetry::default();
+        let now = tokio::time::Instant::now();
+        instance
+            .observe_process_status(
+                Err(super::super::AcpError::Child("transient".into())),
+                &mut retry,
+                now,
+            )
+            .await;
+        instance
+            .observe_process_status(Ok(None), &mut retry, now)
+            .await;
+        instance
+            .observe_process_status(
+                Err(super::super::AcpError::Child("later".into())),
+                &mut retry,
+                now + std::time::Duration::from_secs(60),
+            )
+            .await;
+        assert_eq!(*instance.completion.borrow(), TerminalCompletion::Running);
+        assert_eq!(retry.backoff, PROCESS_POLL_INTERVAL * 2);
+    }
 
     #[tokio::test]
     async fn registry_confines_operations_to_session_owner() {
