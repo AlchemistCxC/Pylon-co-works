@@ -53,8 +53,8 @@
       "vendoredPath": "src-tauri/vendor/acp/acp_transcript.rs",
       "sourcePath": "src-tauri/src/acp_transcript.rs",
       "sha256": "49c489cac79a1a2281a39d09c8ca1f6a448a278354601026d4080cd384fa7376",
-      "modifications": "逐字副本，仅行尾按仓库 .gitattributes 正规化为 LF。Pylon 侧（A3）只取纯算法 parse_transcript / read_chain_in / continuation_ancestors_in / compact_batch，且只作取证导出，不建第二 durable store（D2=①）。",
-      "consumer": "A3 → src-tauri/src/acp/transcript.rs",
+      "modifications": "逐字副本，仅行尾按仓库 .gitattributes 正规化为 LF。保留作为 Codeg 对照来源；Pylon 不编译、不接入该 transcript 路径，canonical_events 是唯一会话历史权威。",
+      "consumer": null,
       "unmigratedDeps": [
         "crate::paths::codeg_acp_transcripts_root()",
         "crate::models::message::{MessageTurn, TurnRole, ContentBlock}",

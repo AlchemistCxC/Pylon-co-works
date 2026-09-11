@@ -291,16 +291,6 @@ impl TerminalRegistry {
         Ok(terminal)
     }
 
-    pub async fn append_output(
-        &self,
-        id: &str,
-        session_id: &str,
-        text: &str,
-    ) -> Result<(), String> {
-        self.find(id, session_id).await?.append_output(text).await;
-        Ok(())
-    }
-
     pub async fn snapshot(&self, id: &str, session_id: &str) -> Result<TerminalSnapshot, String> {
         Ok(self
             .find(id, session_id)
@@ -452,10 +442,8 @@ mod tests {
             .insert("session-a".into(), 4, ManagedChild::empty())
             .await;
         assert!(registry.snapshot(&id, "session-b").await.is_err());
-        assert!(registry
-            .append_output(&id, "session-a", "abcde")
-            .await
-            .is_ok());
+        let instance = registry.find(&id, "session-a").await.unwrap();
+        instance.append_output("abcde").await;
         let snapshot = registry.snapshot(&id, "session-a").await.unwrap();
         assert_eq!(snapshot.output, "bcde");
         assert_eq!(snapshot.output_base_offset, 1);
