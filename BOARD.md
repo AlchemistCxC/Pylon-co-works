@@ -678,3 +678,4 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 
 [2026-09-11 继续] [主施工员·工程师] P60 terminal policy 接线提交 `8ed32d4c`：生产 terminal owner 现在消费 `next_wait_retry_backoff`、`WAIT_ERROR_BUDGET`、`WAIT_ERROR_IDLE_RETRY`，仅对 `try_wait` 错误启动预算；健康运行不受 30s 截止影响，预算耗尽只发布一次 unknown 状态并保留 owner 继续回收。新增 3 个 retry/长任务回归，terminal_runtime 7 项通过。
 [2026-09-11 继续] [主施工员·工程师] replay/wire 接线：transport 发布处将匹配 session/load 响应标记为 `ReplayClassification::Boundary`；`acp_wire_trace_snapshot` 读取路径同时消费并返回已登记的 canonical correlation，避免已有观测数据只写不读。engine 定向 7 项通过，继续审计剩余 transcript/terminal owner 缺口。
+[2026-09-11 继续] [主施工员·工程师] terminal kill 收口：owner 先请求 graceful termination，等待 `KILL_ESCALATE_GRACE` 后再调用既有进程树强制回收；Unix 使用 SIGTERM，Windows 保留现有 job/taskkill 语义。terminal_runtime 7 项与 cargo check --lib 通过。
