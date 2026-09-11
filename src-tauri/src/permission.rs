@@ -440,6 +440,9 @@ pub(crate) async fn respond_interaction(
         .map_err(PylonError::Protocol)?
     {
         if pending.session_id != identity.session_id
+            || pending.provider != identity.provider
+            || pending.agent_id != identity.agent_id
+            || pending.method.is_empty()
             || pending.client_generation != identity.client_generation
         {
             return Err(PylonError::Protocol("stale interaction identity".into()));
@@ -482,6 +485,11 @@ pub(crate) async fn respond_interaction(
                 .map_err(PylonError::Protocol)?
             }
             crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                let _ = crate::acp::adapter::private_ext::parse_exit_plan(
+                    pending.bridge,
+                    &pending.params,
+                )
+                .map_err(PylonError::Protocol)?;
                 crate::acp::plan_policy::approval_response(
                     answer.option_id.as_deref().unwrap_or("keep_planning"),
                     answer.text.as_deref().unwrap_or(""),
