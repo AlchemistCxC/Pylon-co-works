@@ -473,7 +473,7 @@ pub(crate) async fn respond_interaction(
             }
         };
         let responder = { runtime.acp.lock().await.responder() };
-        if !responder.respond(request_id, response).await {
+        if !responder.respond(request_id.clone(), response).await {
             return Err(PylonError::Protocol(
                 "private interaction response failed".into(),
             ));
