@@ -407,6 +407,85 @@ pub struct AgentProviderEvidence {
 
 /// Bounded, read-only search for one command name across the same roots a
 /// candidate search uses. Never spawns anything.
+/// Where a located executable came from.
+///
+/// C2: shared by the candidate scan and the evidence scan, which label these
+/// differently — the evidence side reports presence only (every root hit is
+/// `known-path`), while the candidate side distinguishes an on-PATH root (it
+/// warns when an off-PATH executable is about to be saved as an absolute path).
+/// Both keep their own vocabulary; only the disk walk is shared.
+enum FoundVia {
+    /// A searched directory; `true` when that directory came from the process PATH.
+    Root { on_path: bool },
+    /// The Windows `App Paths` registry entry (never a PATH root).
+    Registry { source: String },
+}
+
+/// The root set for one provider: the process PATH plus its controlled
+/// additions, then the provider's own declared platform roots.
+///
+/// C2: computed in one place. The candidate scan and the evidence scan each
+/// built their own copy of this expression, so the two walks could disagree
+/// about where a provider is allowed to live.
+fn resolve_roots(rule: &AgentDetectionProfile, search_roots: Option<&[PathBuf]>) -> Vec<PathBuf> {
+    let include_platform_roots = search_roots.is_none();
+    dedup_roots(
+        controlled_roots(search_roots)
+            .into_iter()
+            .chain(provider_roots(rule, include_platform_roots))
+            .collect(),
+    )
+}
+
+/// Every `roots × executable_names(command)` hit, plus the Windows `App Paths`
+/// registry entry when platform roots are in play.
+///
+/// C2: the one place a command lookup touches the disk. PATH membership is
+/// resolved once per scan rather than once per candidate, which is what the
+/// previous candidate loop did by re-splitting PATH for every file it tested.
+fn scan_roots(
+    roots: &[PathBuf],
+    command: &str,
+    include_registry: bool,
+) -> Vec<(PathBuf, FoundVia)> {
+    let on_path: HashSet<String> = std::env::var_os("PATH")
+        .map(|value| {
+            std::env::split_paths(&value)
+                .map(|path| path_key(&path))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut found = Vec::new();
+    for root in roots {
+        let root_on_path = on_path.contains(&path_key(root));
+        for name in executable_names(command) {
+            let candidate = root.join(name);
+            if candidate.is_file() {
+                found.push((
+                    candidate,
+                    FoundVia::Root {
+                        on_path: root_on_path,
+                    },
+                ));
+            }
+        }
+    }
+    if include_registry {
+        #[cfg(windows)]
+        found.extend(
+            app_path_candidates(&CatalogInvocation {
+                command: command.to_string(),
+                args: Vec::new(),
+            })
+            .into_iter()
+            .map(|(path, source)| (path, FoundVia::Registry { source })),
+        );
+        #[cfg(not(windows))]
+        let _ = include_registry;
+    }
+    found
+}
+
 fn locate_command(
     command: &str,
     roots: &[PathBuf],
@@ -414,34 +493,21 @@ fn locate_command(
 ) -> Vec<AgentEvidenceHit> {
     let mut hits: Vec<AgentEvidenceHit> = Vec::new();
     let mut seen = HashSet::new();
-    let mut push = |path: PathBuf, source: String| {
-        let key = path_key(&path);
-        if seen.insert(key) {
-            hits.push(AgentEvidenceHit {
-                kind: "native-command".into(),
-                path: path.to_string_lossy().to_string(),
-                source,
-            });
+    for (path, via) in scan_roots(roots, command, include_registry) {
+        if !seen.insert(path_key(&path)) {
+            continue;
         }
-    };
-    for root in roots {
-        for name in executable_names(command) {
-            let candidate = root.join(name);
-            if candidate.is_file() {
-                push(candidate, "known-path".into());
-            }
-        }
-    }
-    if include_registry {
-        #[cfg(windows)]
-        for (path, source) in app_path_candidates(&CatalogInvocation {
-            command: command.to_string(),
-            args: Vec::new(),
-        }) {
-            push(path, source);
-        }
-        #[cfg(not(windows))]
-        let _ = include_registry;
+        // Evidence reports presence, not how it was found: every root hit is
+        // `known-path` here even when the root is on PATH.
+        let source = match via {
+            FoundVia::Root { .. } => "known-path".to_string(),
+            FoundVia::Registry { source } => source,
+        };
+        hits.push(AgentEvidenceHit {
+            kind: "native-command".into(),
+            path: path.to_string_lossy().to_string(),
+            source,
+        });
     }
     hits
 }
@@ -518,12 +584,7 @@ fn provider_evidence(
     explicit_home: Option<&Path>,
 ) -> AgentProviderEvidence {
     let include_registry = search_roots.is_none();
-    let roots = dedup_roots(
-        controlled_roots(search_roots)
-            .into_iter()
-            .chain(provider_roots(rule, include_registry))
-            .collect(),
-    );
+    let roots = resolve_roots(rule, search_roots);
     let mut acp_commands: Vec<AgentEvidenceHit> = Vec::new();
     let mut seen = HashSet::new();
     for invocation in &rule.invocations {
@@ -573,36 +634,16 @@ fn find_rule(
     let include_platform_roots = search_roots.is_none();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
-    let roots = dedup_roots(
-        controlled_roots(search_roots)
-            .into_iter()
-            .chain(provider_roots(rule, include_platform_roots))
-            .collect(),
-    );
+    let roots = resolve_roots(rule, search_roots);
     for (alias_index, invocation) in rule.invocations.iter().enumerate() {
-        let mut locations = Vec::new();
-        for root in &roots {
-            for name in executable_names(&invocation.command) {
-                let candidate = root.join(name);
-                if candidate.is_file() {
-                    locations.push((
-                        candidate,
-                        if std::env::var_os("PATH")
-                            .map(|value| std::env::split_paths(&value).any(|path| path == *root))
-                            .unwrap_or(false)
-                        {
-                            "path".into()
-                        } else {
-                            "known-path".into()
-                        },
-                    ));
-                }
-            }
-        }
-        if include_platform_roots {
-            locations.extend(app_path_candidates(invocation));
-        }
-        for (candidate, source) in locations {
+        for (candidate, via) in scan_roots(&roots, &invocation.command, include_platform_roots) {
+            // `FoundVia` is moved into the match, so each arm must produce an
+            // owned label — borrowing the registry's `source` would dangle.
+            let source = match via {
+                FoundVia::Root { on_path: true } => "path".to_string(),
+                FoundVia::Root { on_path: false } => "known-path".to_string(),
+                FoundVia::Registry { source } => source,
+            };
             let original = candidate.clone();
             let (executable, launcher_evidence, warnings) =
                 match resolve_stdio_executable(&candidate) {
@@ -780,6 +821,7 @@ fn extract_version_token(text: &str) -> Option<String> {
     None
 }
 
+#[derive(Clone)]
 struct VersionProbeOutcome {
     version: Option<String>,
     startability: Startability,
@@ -942,8 +984,23 @@ fn probe_diagnostic(
 }
 
 /// 版本探针缓存：(规范化路径, 版本参数, mtime) → 版本字符串。
-type VersionProbeCache = Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>;
+/// One probe result per (executable, arguments, mtime).
+///
+/// The whole outcome is cached, not just the version: a CLI that does not
+/// understand `--version` fails identically on every refresh, so remembering
+/// nothing meant re-spawning it every time. A cached failure keeps its
+/// diagnostic, so the second refresh reports the same reason as the first
+/// rather than a bare failure.
+///
+/// Keyed by mtime so upgrading a CLI is a miss rather than a stale hit, which
+/// also means each upgrade leaves its predecessor behind. Bounded and dropped
+/// wholesale when full — it is a cache, and re-probing is always correct.
+type VersionProbeCache =
+    Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), VersionProbeOutcome>>;
 
+const MAX_VERSION_PROBE_CACHE_ENTRIES: usize = 64;
+
+/// Cached wrapper around [`probe_version_uncached`].
 async fn version_probe(
     detector_id: &str,
     executable: PathBuf,
@@ -955,20 +1012,15 @@ async fn version_probe(
         .and_then(|m| m.modified().ok())
         .map(|mtime| (path_key(&executable), version_args.to_vec(), mtime));
     static CACHE: OnceLock<VersionProbeCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(key) = &cache_key {
-        if let Some(version) = CACHE
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .ok()
-            .and_then(|c| c.get(key).cloned())
-        {
-            return VersionProbeOutcome {
-                version: Some(version),
-                startability: Startability::Verified,
-                diagnostic: None,
-            };
+        if let Some(cached) = cache.lock().ok().and_then(|c| c.get(key).cloned()) {
+            return cached;
         }
     }
+    // Budget exhaustion describes the caller's remaining deadline, not a fact
+    // about the executable. Caching it would freeze "we ran out of time" into
+    // "this CLI reports no version" for as long as the binary is unchanged.
     if budget.is_zero() {
         return VersionProbeOutcome {
             version: None,
@@ -981,7 +1033,25 @@ async fn version_probe(
             )),
         };
     }
-    let mut command = tokio::process::Command::new(&executable);
+    let outcome = probe_version_uncached(detector_id, &executable, version_args, budget).await;
+    if let Some(key) = &cache_key {
+        if let Ok(mut cache) = cache.lock() {
+            if cache.len() >= MAX_VERSION_PROBE_CACHE_ENTRIES {
+                cache.clear();
+            }
+            cache.insert(key.clone(), outcome.clone());
+        }
+    }
+    outcome
+}
+
+async fn probe_version_uncached(
+    detector_id: &str,
+    executable: &Path,
+    version_args: &[String],
+    budget: Duration,
+) -> VersionProbeOutcome {
+    let mut command = tokio::process::Command::new(executable);
     // Catalog's empty argument list selects the standard version probe.
     // Invocation args (e.g. `acp`) belong to session launch, never discovery.
     if version_args.is_empty() {
@@ -1086,11 +1156,6 @@ async fn version_probe(
             )),
         }
     } else {
-        if let (Some(key), Some(value)) = (&cache_key, &version) {
-            if let Ok(mut cache) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock() {
-                cache.insert(key.clone(), value.clone());
-            }
-        }
         VersionProbeOutcome {
             version,
             startability: Startability::Verified,
@@ -2163,6 +2228,183 @@ mod tests {
             assert_eq!(invalid.startability, Startability::Failed);
             assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// C1：失败也必须进缓存，而且缓存是**按 key** 而不是全局「记住最后一次」。
+    ///
+    /// 断言方式是「子进程真的只启动了一次」：夹具每次运行都往自身目录的
+    /// `count.txt` 追加一行。仅断言「两次返回值相同」是抓不到这个缺陷的——旧实现
+    /// 每次都返回同样的失败，只是白跑一次子进程，因此这个断言必须数进程。
+    ///
+    /// 计数文件用 `%~dp0` / `dirname "$0"` 定位（而不是把临时路径嵌进脚本），
+    /// 既避开带空格的路径，也让两个夹具能各自独立计数。
+    #[tokio::test]
+    async fn a_failed_version_probe_is_cached_like_a_successful_one() {
+        let root = fixture_root("probe-failure-cache");
+        let failing_dir = root.join("failing");
+        let working_dir = root.join("working");
+        std::fs::create_dir_all(&failing_dir).unwrap();
+        std::fs::create_dir_all(&working_dir).unwrap();
+        let failing = plant_counting_probe(&failing_dir, "probe", None);
+        let working = plant_counting_probe(&working_dir, "probe", Some("9.9.9"));
+
+        // 第一次：真的跑了，失败带诊断。
+        let first = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(first.startability, Startability::Failed);
+        assert_eq!(
+            first.diagnostic.as_ref().map(|d| d.code.as_str()),
+            Some("version_probe_non_zero")
+        );
+
+        // 第二次：命中缓存——不但结果相同，而且**诊断还在**（缓存的失败必须保留
+        // 理由，否则第二次刷新只会看到一个没有原因的失败）。
+        let second = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(second.startability, Startability::Failed);
+        assert_eq!(
+            second.diagnostic.as_ref().map(|d| d.code.as_str()),
+            Some("version_probe_non_zero"),
+            "缓存的失败必须带着与首次相同的诊断"
+        );
+
+        // 成功路径同样只跑一次。
+        let ok = version_probe("fixture", working.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(ok.version.as_deref(), Some("9.9.9"));
+        let ok_again = version_probe("fixture", working.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(ok_again.version.as_deref(), Some("9.9.9"));
+
+        let runs = |dir: &Path| {
+            std::fs::read_to_string(dir.join("count.txt"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        assert_eq!(
+            runs(&failing_dir),
+            1,
+            "失败的探针不得在每次刷新时重回子进程"
+        );
+        assert_eq!(runs(&working_dir), 1, "成功的探针不得重复启动子进程");
+        // 两个夹具各自只跑一次，证明缓存是按 key 存而不是只记住最后一次。
+        assert_eq!(
+            runs(&failing_dir) + runs(&working_dir),
+            2,
+            "缓存必须按 (路径, 参数, mtime) 分键，不得互相驱逐"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 安置一个每次运行都向自身目录的 `count.txt` 追加一行的探针夹具。
+    ///
+    /// `version` 为 `None` 时以非零退出，模拟「存在但不认 --version」。
+    fn plant_counting_probe(dir: &Path, name: &str, version: Option<&str>) -> PathBuf {
+        #[cfg(windows)]
+        {
+            let path = dir.join(format!("{name}.cmd"));
+            let body = match version {
+                Some(version) => format!(
+                    "@echo off\r\n>>\"%~dp0count.txt\" echo x\r\necho {version}\r\nexit /b 0\r\n"
+                ),
+                None => "@echo off\r\n>>\"%~dp0count.txt\" echo x\r\nexit /b 3\r\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+            path
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.join(name);
+            let count = "echo x >> \"$(dirname \"$0\")/count.txt\"\n";
+            let body = match version {
+                Some(version) => format!("#!/bin/sh\n{count}echo '{version}'\n"),
+                None => format!("#!/bin/sh\n{count}exit 3\n"),
+            };
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+    }
+
+    /// C2：候选扫描与证据扫描必须看到**同一组**可执行文件。
+    ///
+    /// 两者以前各自算一份 roots、各自走一遭文件系统，所以可以互相矛盾。现在共用
+    /// `resolve_roots` + `scan_roots`；这条测试把「不再矛盾」钉成断言，并同时钉住两
+    /// 侧各自**不同**的来源词汇（候选区分 path/known-path，证据只报 known-path）。
+    #[tokio::test]
+    async fn candidate_and_evidence_scans_agree_on_what_exists() {
+        let root = fixture_root("scan-agreement");
+        let on_path = root.join("on-path");
+        let off_path = root.join("off-path");
+        std::fs::create_dir_all(&on_path).unwrap();
+        std::fs::create_dir_all(&off_path).unwrap();
+        // peri 与 hermes 两个 provider 各放一个 ACP 入口，其中一个在 PATH 上。
+        std::fs::write(on_path.join(&executable_names("peri")[0]), b"fixture").unwrap();
+        std::fs::write(off_path.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        // 只用夹具目录作为搜索根，不引入真实 PATH 条目：本机装了 peri 时会把真实
+        // 安装拖进断言，测试就不再确定。`on_path`/`off_path` 都在临时目录下，因此
+        // 两者都必然不在进程 PATH 上。
+        let roots = vec![on_path.clone(), off_path.clone()];
+        let options = AgentDetectionOptions {
+            detector_ids: Some(vec![
+                "builtin.detector.peri".into(),
+                "builtin.detector.hermes".into(),
+            ]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(roots),
+            limits: AgentDetectionLimits {
+                version_probe_budget: Duration::from_millis(50),
+                ..AgentDetectionLimits::default()
+            },
+        };
+        let report = detect_agent_runtime_candidates(options).await.unwrap();
+
+        for provider in ["peri", "hermes"] {
+            let evidence = report
+                .providers
+                .iter()
+                .find(|evidence| evidence.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} 必须有 provider 证据"));
+            let candidates = report
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.provider == provider)
+                .collect::<Vec<_>>();
+
+            let evidence_paths = evidence
+                .acp_commands
+                .iter()
+                .map(|hit| path_key(Path::new(&hit.path)))
+                .collect::<HashSet<_>>();
+            let candidate_paths = candidates
+                .iter()
+                .map(|candidate| path_key(Path::new(&candidate.executable)))
+                .collect::<HashSet<_>>();
+            assert_eq!(
+                evidence_paths, candidate_paths,
+                "{provider}: 候选与证据必须定位到同一组可执行文件"
+            );
+            // 证据侧的词汇：根命中一律 known-path。
+            for hit in &evidence.acp_commands {
+                assert_eq!(
+                    hit.source, "known-path",
+                    "{provider}: 证据只报存在性，不区分是否在 PATH 上"
+                );
+            }
+        }
+        // 候选侧的词汇：显式根列表里的目录都不是进程 PATH，所以标 known-path 并带
+        // 「不在 PATH」警告；这锁住了 C2 不得顺手把两侧标签合并成一种。
+        let peri = report
+            .candidates
+            .iter()
+            .find(|candidate| candidate.provider == "peri")
+            .unwrap();
+        assert_eq!(peri.evidence[0].kind, "known-path");
+        assert!(
+            peri.warnings.iter().any(|w| w.contains("不在当前 PATH")),
+            "候选侧必须保留 off-PATH 警告"
+        );
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
