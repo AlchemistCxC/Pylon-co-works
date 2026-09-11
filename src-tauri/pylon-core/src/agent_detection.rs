@@ -35,6 +35,10 @@ pub struct AgentDetectionDiagnostic {
 #[serde(rename_all = "camelCase")]
 pub struct AgentDetectionReport {
     pub candidates: Vec<AgentRuntimeCandidate>,
+    /// Dual ACP/vendor-CLI evidence per selected provider. Present even when a
+    /// provider has no ACP candidate, which is what makes `adapterMissing`
+    /// observable instead of indistinguishable from "provider absent".
+    pub providers: Vec<AgentProviderEvidence>,
     pub diagnostics: Vec<AgentDetectionDiagnostic>,
     pub elapsed_ms: u64,
     pub truncated: bool,
@@ -202,11 +206,50 @@ fn provider_roots(rule: &AgentDetectionProfile, include_platform_roots: bool) ->
     if !include_platform_roots {
         return Vec::new();
     }
+    // A1: adapter-relation extra dirs are probed after the platform roots, in
+    // catalog order. Codeg's own Claude entry lists `.local/bin` and
+    // `.claude/local` because a GUI app's PATH commonly lacks the vendor
+    // installer's target; the relation is data, so the order comes from it.
+    let mut roots: Vec<PathBuf> = rule
+        .adapter_relation
+        .as_ref()
+        .map(|relation| {
+            relation
+                .extra_dirs
+                .iter()
+                .filter_map(|dir| home_relative_dir(dir))
+                .collect()
+        })
+        .unwrap_or_default();
     let Some(local) = std::env::var_os("LOCALAPPDATA") else {
-        return Vec::new();
+        return roots;
     };
     let root = PathBuf::from(local).join("Programs").join(&rule.provider);
-    vec![root.clone(), root.join("bin")]
+    roots.push(root.clone());
+    roots.push(root.join("bin"));
+    roots
+}
+
+/// Expand one catalog-declared home-relative dir (`~/.claude/local`) against the
+/// user profile. Returns `None` when the entry is not home-relative, so a
+/// malformed relation cannot make detection read an arbitrary absolute path.
+fn home_relative_dir(declared: &str) -> Option<PathBuf> {
+    let trimmed = declared.trim();
+    let relative = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+        .unwrap_or(trimmed);
+    if relative.is_empty() || Path::new(relative).is_absolute() {
+        return None;
+    }
+    if Path::new(relative)
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let home = resolved_home_dir(None)?;
+    Some(home.join(relative))
 }
 
 #[cfg(windows)]
@@ -321,30 +364,173 @@ struct LocatedRuntime {
     warnings: Vec<String>,
 }
 
+/// One located executable on the ACP or the vendor-CLI side of a provider.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEvidenceHit {
+    pub kind: String,
+    pub path: String,
+    pub source: String,
+}
+
+/// Per-provider dual evidence, emitted for every selected provider whether or
+/// not an ACP candidate exists.
+///
+/// This is what makes `adapterMissing` observable: a wrapper provider whose ACP
+/// command is absent still has a probe result here, so preflight can tell the
+/// user whether the vendor CLI they already installed was actually found.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderEvidence {
+    pub provider: String,
+    pub detector_id: String,
+    /// True when the catalog declares an adapter relation for this provider.
+    pub adapter_relation_declared: bool,
+    pub acp_commands: Vec<AgentEvidenceHit>,
+    pub native_commands: Vec<AgentEvidenceHit>,
+    /// Presence only — never the path and never a file's contents. The shared
+    /// config/credential dir may contain secrets, so the detector reports that
+    /// it was seen, not where or what was in it.
+    pub shared_config_present: bool,
+}
+
+/// Bounded, read-only search for one command name across the same roots a
+/// candidate search uses. Never spawns anything.
+fn locate_command(
+    command: &str,
+    roots: &[PathBuf],
+    include_registry: bool,
+) -> Vec<AgentEvidenceHit> {
+    let mut hits: Vec<AgentEvidenceHit> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |path: PathBuf, source: String| {
+        let key = path_key(&path);
+        if seen.insert(key) {
+            hits.push(AgentEvidenceHit {
+                kind: "native-command".into(),
+                path: path.to_string_lossy().to_string(),
+                source,
+            });
+        }
+    };
+    for root in roots {
+        for name in executable_names(command) {
+            let candidate = root.join(name);
+            if candidate.is_file() {
+                push(candidate, "known-path".into());
+            }
+        }
+    }
+    if include_registry {
+        #[cfg(windows)]
+        for (path, source) in app_path_candidates(&CatalogInvocation {
+            command: command.to_string(),
+            args: Vec::new(),
+        }) {
+            push(path, source);
+        }
+        #[cfg(not(windows))]
+        let _ = include_registry;
+    }
+    hits
+}
+
+fn shared_config_present(
+    relation: Option<&crate::agent_catalog::CatalogAdapterRelation>,
+    explicit_home: Option<&Path>,
+) -> bool {
+    let Some(relation) = relation else {
+        return false;
+    };
+    let declared = relation.shared_config_dir.trim();
+    let relative = declared
+        .strip_prefix("~/")
+        .or_else(|| declared.strip_prefix("~\\"))
+        .unwrap_or(declared);
+    if relative.is_empty() || Path::new(relative).is_absolute() {
+        return false;
+    }
+    let Some(home) = resolved_home_dir(explicit_home) else {
+        return false;
+    };
+    home.join(relative).is_dir()
+}
+
+/// ACP + vendor-CLI evidence for one provider. The native side is probed only
+/// when the catalog declares an adapter relation, which is the only case where
+/// a second CLI is part of the story.
+fn provider_evidence(
+    rule: &AgentDetectionProfile,
+    search_roots: Option<&[PathBuf]>,
+    explicit_home: Option<&Path>,
+) -> AgentProviderEvidence {
+    let include_registry = search_roots.is_none();
+    let roots = dedup_roots(
+        controlled_roots(search_roots)
+            .into_iter()
+            .chain(provider_roots(rule, include_registry))
+            .collect(),
+    );
+    let mut acp_commands: Vec<AgentEvidenceHit> = Vec::new();
+    let mut seen = HashSet::new();
+    for invocation in &rule.invocations {
+        for hit in locate_command(&invocation.command, &roots, include_registry) {
+            let key = format!("{}|", hit.path);
+            if seen.insert(key) {
+                acp_commands.push(AgentEvidenceHit {
+                    kind: "acp-command".into(),
+                    ..hit
+                });
+            }
+        }
+    }
+    let native_commands = rule
+        .adapter_relation
+        .as_ref()
+        .map(|relation| locate_command(&relation.native_cmd, &roots, include_registry))
+        .unwrap_or_default();
+    AgentProviderEvidence {
+        provider: rule.provider.clone(),
+        detector_id: rule.detector_id.clone(),
+        adapter_relation_declared: rule.adapter_relation.is_some(),
+        acp_commands,
+        native_commands,
+        shared_config_present: shared_config_present(rule.adapter_relation.as_ref(), explicit_home),
+    }
+}
+
+fn dedup_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    roots
+        .into_iter()
+        .filter(|root| seen.insert(path_key(root)))
+        .collect()
+}
+
 fn find_rule(
     rule: &AgentDetectionProfile,
     search_roots: Option<&[PathBuf]>,
 ) -> Vec<LocatedRuntime> {
-    let path_roots = controlled_roots(search_roots);
     let include_platform_roots = search_roots.is_none();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
+    let roots = dedup_roots(
+        controlled_roots(search_roots)
+            .into_iter()
+            .chain(provider_roots(rule, include_platform_roots))
+            .collect(),
+    );
     for (alias_index, invocation) in rule.invocations.iter().enumerate() {
         let mut locations = Vec::new();
-        for root in path_roots
-            .iter()
-            .cloned()
-            .chain(provider_roots(rule, include_platform_roots))
-        {
+        for root in &roots {
             for name in executable_names(&invocation.command) {
                 let candidate = root.join(name);
                 if candidate.is_file() {
                     locations.push((
                         candidate,
-                        if path_roots.iter().any(|path| path == &root)
-                            && std::env::var_os("PATH")
-                                .map(|value| std::env::split_paths(&value).any(|path| path == root))
-                                .unwrap_or(false)
+                        if std::env::var_os("PATH")
+                            .map(|value| std::env::split_paths(&value).any(|path| path == *root))
+                            .unwrap_or(false)
                         {
                             "path".into()
                         } else {
@@ -972,24 +1158,30 @@ pub async fn detect_agent_runtime_candidates_inner(
     let search_roots = options.search_roots.clone();
     let home_dir = options.home_dir.clone();
     let scan_budget = deadline.saturating_duration_since(Instant::now());
-    let scanned = tokio::time::timeout(
+    let discovered = tokio::time::timeout(
         scan_budget,
         tokio::task::spawn_blocking(move || {
             let mut discovered = Vec::new();
+            let mut providers = Vec::new();
             for rule in selected_rules {
                 let located = find_rule(&rule, search_roots.as_deref());
                 let config = config_evidence(&rule, home_dir.as_deref());
+                providers.push(provider_evidence(
+                    &rule,
+                    search_roots.as_deref(),
+                    home_dir.as_deref(),
+                ));
                 discovered.extend(
                     located
                         .into_iter()
                         .map(|located| (rule.clone(), located, config.clone())),
                 );
             }
-            discovered
+            (discovered, providers)
         }),
     )
     .await;
-    let mut discovered = match scanned {
+    let (mut discovered, providers) = match discovered {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => return Err(format!("Agent detection scan task failed: {error}")),
         Err(_) => {
@@ -1002,6 +1194,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             });
             return Ok(AgentDetectionReport {
                 candidates: Vec::new(),
+                providers: Vec::new(),
                 diagnostics,
                 elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                 truncated: true,
@@ -1164,12 +1357,60 @@ pub async fn detect_agent_runtime_candidates_inner(
         });
         ranked_candidates.truncate(limits.max_candidates);
     }
-    let candidates = ranked_candidates
+    let candidates: Vec<AgentRuntimeCandidate> = ranked_candidates
         .into_iter()
         .map(|(candidate, ..)| candidate)
         .collect();
+    // A version-gated provider whose declared minimum cannot be proven from the
+    // discovered evidence is reported here rather than silently accepted.
+    let mut providers = providers;
+    for provider in &mut providers {
+        let Some(rule) = rules.iter().find(|r| r.provider == provider.provider) else {
+            continue;
+        };
+        let Some(gate) = rule
+            .version_gates
+            .iter()
+            .find(|gate| gate.min_version.is_some())
+        else {
+            continue;
+        };
+        let Some(minimum) = gate.min_version.as_deref() else {
+            continue;
+        };
+        let observed: Option<String> = candidates
+            .iter()
+            .filter(|candidate| candidate.provider == provider.provider)
+            .find_map(|candidate| {
+                candidate
+                    .evidence
+                    .iter()
+                    .find(|item| item.kind == "version")
+                    .map(|item| item.detail.clone())
+            });
+        if let Some(version) = observed {
+            if !crate::agent_preflight::version_at_least(Some(&version), Some(minimum)) {
+                provider.acp_commands.push(AgentEvidenceHit {
+                    kind: "version-below-minimum".into(),
+                    path: version.clone(),
+                    source: minimum.to_string(),
+                });
+                diagnostics.push(AgentDetectionDiagnostic {
+                    code: "adapter_version_below_declared_minimum".into(),
+                    stage: "version".into(),
+                    detector_id: Some(provider.detector_id.clone()),
+                    message: format!(
+                        "{} 的版本 {version} 低于 catalog 声明的下限 {minimum}",
+                        provider.provider
+                    ),
+                    retryable: true,
+                });
+            }
+        }
+    }
     Ok(AgentDetectionReport {
         candidates,
+        providers,
         diagnostics,
         elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         truncated: discovered_truncated || candidates_truncated,
@@ -1364,6 +1605,109 @@ mod tests {
             .evidence
             .iter()
             .any(|item| item.kind == "config-fields"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A1 验收：wrapper provider 的 ACP 与原生 CLI 证据分开展开，且即使 ACP
+    /// 候选缺失也会产出 provider 级证据（这是 `adapterMissing` 可观察的前提）。
+    #[tokio::test]
+    async fn wrapper_evidence_separates_acp_from_native_cli() {
+        let root = fixture_root("adapter-relation");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        // 只有原生 CLI，没有 wrapper 可执行文件。
+        std::fs::write(
+            search.join(&executable_names("claude")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(
+            report.candidates.is_empty(),
+            "wrapper 命令不存在，不应有候选"
+        );
+        assert_eq!(report.providers.len(), 1);
+        let evidence = &report.providers[0];
+        assert_eq!(evidence.provider, "claude-code");
+        assert!(evidence.adapter_relation_declared);
+        assert!(evidence.acp_commands.is_empty());
+        assert_eq!(evidence.native_commands.len(), 1);
+        assert_eq!(
+            Path::new(&evidence.native_commands[0].path)
+                .file_stem()
+                .and_then(|stem| stem.to_str()),
+            Some("claude")
+        );
+        assert!(evidence.shared_config_present);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 非 wrapper provider 不探测第二 CLI，也不报共享配置目录存在。
+    #[tokio::test]
+    async fn native_acp_provider_has_no_second_cli_evidence() {
+        let root = fixture_root("native-evidence");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        std::fs::write(
+            search.join(&executable_names("peri")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.peri".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        let evidence = &report.providers[0];
+        assert!(!evidence.adapter_relation_declared);
+        assert!(evidence.native_commands.is_empty());
+        assert!(!evidence.shared_config_present);
+        assert_eq!(evidence.acp_commands.len(), 1);
+        assert_eq!(evidence.acp_commands[0].kind, "acp-command");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A1 零安装副作用：探测只读，不创建目录。
+    #[tokio::test]
+    async fn evidence_scan_has_no_install_side_effects() {
+        let root = fixture_root("no-side-effects");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        let before = std::fs::read_dir(&home).unwrap().count();
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home.clone()),
+            search_roots: Some(vec![search.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(report.candidates.is_empty());
+        // 既不建 `~/.claude`，也不建任何缓存/安装目录。
+        assert!(!home.join(".claude").exists());
+        assert_eq!(std::fs::read_dir(&home).unwrap().count(), before);
+        assert_eq!(std::fs::read_dir(&search).unwrap().count(), 0);
 
         std::fs::remove_dir_all(root).unwrap();
     }

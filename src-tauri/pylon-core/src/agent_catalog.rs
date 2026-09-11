@@ -611,6 +611,13 @@ pub struct AgentDetectionProfile {
     pub package_manager: Option<CatalogPackageManager>,
     pub requires: CatalogRequirements,
     pub checks: Vec<CatalogCheck>,
+    /// A1: declared when this provider's ACP entry wraps a separate vendor CLI.
+    /// Detection uses the native command and extra dirs as additional evidence;
+    /// preflight uses it to tell `adapterMissing` from `nativeMissing`.
+    pub adapter_relation: Option<CatalogAdapterRelation>,
+    /// A1: declared version gates, projected to closed identities. Empty when
+    /// the provider declares none.
+    pub version_gates: Vec<CatalogVersionGate>,
 }
 
 static CATALOG: OnceLock<Result<CatalogDocument, String>> = OnceLock::new();
@@ -762,11 +769,49 @@ fn catalog() -> Result<&'static CatalogDocument, String> {
     }
 }
 
+/// Adaptation policies read out of the catalog's untyped adaptation block.
+///
+/// One reader for both `detection_profiles` and `provider_profile`: an unknown
+/// strategy fails closed here instead of reaching a consumer as loose JSON.
+#[derive(Debug, Clone, Default)]
+struct ProjectedAdaptation {
+    adapter_relation: Option<CatalogAdapterRelation>,
+    version_gates: Vec<CatalogVersionGate>,
+    session_establishment: Option<CatalogSessionEstablishmentPolicy>,
+}
+
+fn project_adaptation(
+    provider: &str,
+    adaptation: Option<&CatalogAdaptation>,
+) -> Result<ProjectedAdaptation, String> {
+    let mut projected = ProjectedAdaptation::default();
+    let Some(adaptation) = adaptation else {
+        return Ok(projected);
+    };
+    if let Some(value) = &adaptation.adapter_relation {
+        let relation: CatalogAdapterRelation = parse_policy(provider, "adapterRelation", value)?;
+        validate_adapter_relation(provider, &relation)?;
+        projected.adapter_relation = Some(relation);
+    }
+    if let Some(value) = &adaptation.version_gates {
+        let gates: CatalogVersionGates = parse_policy(provider, "versionGates", value)?;
+        projected.version_gates = gates.to_gates(provider)?;
+    }
+    if let Some(value) = &adaptation.session_establishment {
+        let policy: CatalogSessionEstablishmentPolicy =
+            parse_policy(provider, "sessionEstablishment", value)?;
+        validate_session_establishment(provider, &policy)?;
+        projected.session_establishment = Some(policy);
+    }
+    Ok(projected)
+}
+
 pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
-    let mut profiles = catalog()?
-        .providers
-        .iter()
-        .map(|entry| AgentDetectionProfile {
+    let document = catalog()?;
+    let mut profiles = Vec::with_capacity(document.providers.len());
+    for entry in &document.providers {
+        let adaptation = project_adaptation(&entry.provider, entry.adaptation.as_ref())?;
+        profiles.push(AgentDetectionProfile {
             detector_id: entry.detection.detector_id.clone(),
             provider: entry.provider.clone(),
             display_name: entry.display_name.clone(),
@@ -778,8 +823,10 @@ pub fn detection_profiles() -> Result<Vec<AgentDetectionProfile>, String> {
             package_manager: entry.detection.package_manager.clone(),
             requires: entry.detection.requires.clone(),
             checks: entry.detection.checks.clone(),
-        })
-        .collect::<Vec<_>>();
+            adapter_relation: adaptation.adapter_relation,
+            version_gates: adaptation.version_gates,
+        });
+    }
     // Stable sort preserves catalog order for equal-priority providers.
     profiles.sort_by_key(|profile| std::cmp::Reverse(profile.priority));
     Ok(profiles)
@@ -843,34 +890,14 @@ pub fn provider_profile(provider: &str) -> Result<Option<PylonAgentProfile>, Str
         .clone()
         .ok_or_else(|| format!("Agent Catalog {}.launch 未声明", entry.provider))?;
     launch.validate(&entry.provider)?;
-    let mut adapter_relation = None;
-    let mut version_gates = Vec::new();
-    let mut session_establishment = CatalogSessionEstablishmentPolicy::default();
-    if let Some(adaptation) = &entry.adaptation {
-        if let Some(value) = &adaptation.adapter_relation {
-            let relation: CatalogAdapterRelation =
-                parse_policy(&entry.provider, "adapterRelation", value)?;
-            validate_adapter_relation(&entry.provider, &relation)?;
-            adapter_relation = Some(relation);
-        }
-        if let Some(value) = &adaptation.version_gates {
-            let gates: CatalogVersionGates = parse_policy(&entry.provider, "versionGates", value)?;
-            version_gates = gates.to_gates(&entry.provider)?;
-        }
-        if let Some(value) = &adaptation.session_establishment {
-            let policy: CatalogSessionEstablishmentPolicy =
-                parse_policy(&entry.provider, "sessionEstablishment", value)?;
-            validate_session_establishment(&entry.provider, &policy)?;
-            session_establishment = policy;
-        }
-    }
+    let adaptation = project_adaptation(&entry.provider, entry.adaptation.as_ref())?;
     Ok(Some(PylonAgentProfile {
         provider: entry.provider.clone(),
         display_name: entry.display_name.clone(),
         launch,
-        adapter_relation,
-        version_gates,
-        session_establishment,
+        adapter_relation: adaptation.adapter_relation,
+        version_gates: adaptation.version_gates,
+        session_establishment: adaptation.session_establishment.unwrap_or_default(),
     }))
 }
 

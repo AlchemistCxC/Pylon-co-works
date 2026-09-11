@@ -173,18 +173,49 @@ fn main() {
     match runtime.block_on(detect_agent_runtime_candidates(options)) {
         Ok(report) => {
             let diagnostics = agent_diagnostics::report(!report.candidates.is_empty(), &[]);
+            // A1：preflight 按 **provider** 展开，而不是只按已发现的候选。覆盖
+            // `adapterMissing`/`configOnly` 这类「没有 ACP 候选但仍需要给用户一个可
+            // 行动结论」的情形。
             let preflight = report
-                .candidates
+                .providers
                 .iter()
-                .filter_map(|candidate| {
+                .filter_map(|evidence| {
+                    let acp_present = !evidence.acp_commands.is_empty();
+                    let native_present = !evidence.native_commands.is_empty();
+                    let candidates = report
+                        .candidates
+                        .iter()
+                        .filter(|candidate| candidate.provider == evidence.provider)
+                        .collect::<Vec<_>>();
+                    let config_evidence = candidates.iter().any(|candidate| {
+                        candidate
+                            .evidence
+                            .iter()
+                            .any(|item| item.kind == "config-fields")
+                    });
+                    let adapter_version = candidates.iter().find_map(|candidate| {
+                        candidate
+                            .evidence
+                            .iter()
+                            .find(|item| item.kind == "version")
+                            .map(|item| item.detail.clone())
+                    });
                     agent_preflight::evaluate(
-                        &candidate.provider,
+                        &evidence.provider,
                         &agent_preflight::PreflightInputs {
-                            binary_present: candidate.startability != Startability::Failed,
-                            config_evidence: candidate
-                                .evidence
-                                .iter()
-                                .any(|e| e.kind == "config-fields"),
+                            // wrapper 的「binary」就是它包装的 vendor CLI；
+                            // 非 wrapper 的入口与 ACP 命令是同一个可执行文件。
+                            binary_present: if evidence.adapter_relation_declared {
+                                native_present
+                            } else {
+                                acp_present
+                            },
+                            adapter_present: acp_present,
+                            acp_present,
+                            native_present,
+                            config_evidence,
+                            shared_config_present: evidence.shared_config_present,
+                            adapter_version,
                             ..Default::default()
                         },
                     )
@@ -296,6 +327,7 @@ mod tests {
         };
         let output = human_output(&AgentDetectionReport {
             candidates: vec![candidate],
+            providers: Vec::new(),
             diagnostics: Vec::new(),
             elapsed_ms: 5,
             truncated: false,

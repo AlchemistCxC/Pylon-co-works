@@ -615,7 +615,12 @@ mod tests {
             transform_profiles(&[one.clone(), two]).unwrap_err(),
             ProfileTransformError::DuplicateProviderId("future".into())
         );
-        assert_eq!(transform_profiles(std::slice::from_ref(&one)).unwrap().len(), 1);
+        assert_eq!(
+            transform_profiles(std::slice::from_ref(&one))
+                .unwrap()
+                .len(),
+            1
+        );
 
         let bad_id = transform_profile(&profile(serde_json::json!({
             "provider": ".hidden",
