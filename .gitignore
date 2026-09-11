@@ -4,6 +4,7 @@ src-tauri/target/
 src-tauri/tests-harness/target/
 src-tauri/pet-core/target/
 src-tauri/pylon-core/target/
+src-tauri/pylon-foundations/target/
 *.log
 .DS_Store
 *.tsbuildinfo
