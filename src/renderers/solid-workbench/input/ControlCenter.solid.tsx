@@ -7,7 +7,7 @@ import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSu
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
-import { resolveDocumentOptionEntries, resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
+import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
@@ -53,14 +53,6 @@ export function SolidControlCenter() {
   createEffect(() => {
     if (mode() || !runtime().activeMode) return
     setMode(runtime().activeMode || modeOptions()[0] || 'default')
-  })
-  createEffect(() => {
-    // Restored ACP config options arrive with the Workbench document after
-    // session/load. Keep the model dropdown's reasoning label aligned with
-    // that provider-selected value, but never overwrite an empty-state draft.
-    if (!input().sessionId) return
-    const restored = resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning')
-    if (restored && restored !== reasoningLevel()) setReasoningLevel(restored)
   })
   createEffect(() => {
     const options = emptyWorkspaces()
@@ -191,18 +183,6 @@ export function SolidControlCenter() {
       setSubmitError(error instanceof Error ? error.message : String(error)); return false
     } finally { setSubmitting(false) }
   }
-  const changeReasoningLevel = (next: string) => {
-    const previous = reasoningLevel()
-    setReasoningLevel(next)
-    if (emptyVisual()) return
-    const sessionId = input().sessionId
-    if (!sessionId) return
-    const option = resolveDocumentOptionEntries(runtime().document?.session.options, 'reasoning')[0]
-    const key = option?.id || 'reasoning'
-    void workbench.commands.setConfigOption(sessionId, key, next, { expectedValue: previous }).then(result => {
-      if (!result.ok) setReasoningLevel(previous)
-    })
-  }
   const emptyComposer = createMemo(() => !input().sessionId ? {
     onSubmit: createEmptySession,
     submitting,
@@ -329,8 +309,8 @@ export function SolidControlCenter() {
         return <SolidModelWidget
           draftValue={emptyVisual() ? modelId : undefined}
           onDraftChange={emptyVisual() ? setModelId : undefined}
-          reasoningValue={reasoningLevel}
-          onReasoningChange={changeReasoningLevel}
+          reasoningValue={emptyVisual() ? reasoningLevel : undefined}
+          onReasoningChange={emptyVisual() ? setReasoningLevel : undefined}
           forceDropdown={emptyVisual()}
         />
       case 'mode':

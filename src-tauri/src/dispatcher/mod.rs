@@ -1179,6 +1179,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let pending_permissions = runtime.pending_permissions.clone();
     let terminal_registry = runtime.terminal_registry.clone();
     let host_tools_policy = runtime.host_tools_policy.clone();
+    let private_interactions = runtime.private_interactions.clone();
     let agent_id = handles
         .runtimes
         .all_with_ids()
@@ -1619,12 +1620,32 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 )
                                 .await;
                         } else {
+                            let filesystem = if strict {
+                                match crate::acp::file_system_runtime::FileSystemRuntime::new_strict(
+                                    &roots[0],
+                                ) {
+                                    Ok(filesystem) => filesystem,
+                                    Err(_) => {
+                                        let responder = { acp.lock().await.responder() };
+                                        let _ = responder
+                                            .respond_error(
+                                                request_id,
+                                                -32602,
+                                                "HostStrict filesystem workspace is inaccessible",
+                                            )
+                                            .await;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots)
+                            };
                             handle_filesystem_request(
                                 &acp,
                                 raw.method.as_deref().unwrap_or_default(),
                                 request_id,
                                 raw.params.as_ref(),
-                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots),
+                                filesystem,
                             )
                             .await;
                         }
@@ -1645,17 +1666,76 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // dedicated AcpKind/adapter exists.  Do not silently drop an identified
             // request: answer it with Method Not Found and surface a diagnostic event.
             if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
+                let provider = agents
+                    .lock()
+                    .ok()
+                    .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
+                    .unwrap_or_else(|| "unknown".to_string());
                 let private_validation = raw.method.as_deref().map(|method| {
                     crate::acp::adapter::private_ext::validate_request(
                         method,
                         raw.params.as_ref().unwrap_or(&serde_json::Value::Null),
                     )
                 });
-                let provider = agents
-                    .lock()
-                    .ok()
-                    .and_then(|agents| resolve_agent_provider(&agents, &agent_id))
-                    .unwrap_or_else(|| "unknown".to_string());
+                if let (Some(request_id), Some(method), Ok(())) = (
+                    raw.id.clone(),
+                    raw.method.as_deref(),
+                    private_validation.clone().unwrap_or(Ok(())),
+                ) {
+                    let bridge = match method {
+                        "_x.ai/ask_user_question" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions)
+                        }
+                        "pi/select_ask" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk)
+                        }
+                        "_x.ai/exit_plan_mode" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
+                        }
+                        _ => None,
+                    };
+                    if let Some(bridge) = bridge {
+                        let params = raw.params.clone().unwrap_or(serde_json::Value::Null);
+                        let question_specs = match bridge {
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
+                            | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
+                                crate::acp::adapter::private_ext::parse_questions(bridge, &params)
+                                    .ok()
+                            }
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => None,
+                        };
+                        let session_id = params
+                            .get("sessionId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        if !session_id.is_empty() {
+                            let _ = private_interactions.insert(
+                                request_id.clone(),
+                                crate::private_interaction::PendingPrivateInteraction {
+                                    provider: provider.clone(),
+                                    agent_id: agent_id.clone(),
+                                    session_id: session_id.clone(),
+                                    method: method.to_string(),
+                                    bridge,
+                                    params: params.clone(),
+                                    question_specs,
+                                    client_generation: generation,
+                                },
+                            );
+                            emit_event(
+                                &window,
+                                crate::event_names::INTERACTION,
+                                serde_json::json!({
+                                    "provider": provider, "agentId": agent_id, "sessionId": session_id,
+                                    "eventType": if matches!(bridge, crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan) { "approval.request" } else { "ask-user" }, "requestId": request_id.to_string(),
+                                    "clientGeneration": generation, "payload": params,
+                                }),
+                            );
+                            continue;
+                        }
+                    }
+                }
                 // A request-shaped interaction without an id cannot receive a
                 // JSON-RPC response, but it is still surfaced as a malformed
                 // interaction so the UI/runtime log explains why no card can

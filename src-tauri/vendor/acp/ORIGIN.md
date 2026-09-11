@@ -53,8 +53,8 @@
       "vendoredPath": "src-tauri/vendor/acp/acp_transcript.rs",
       "sourcePath": "src-tauri/src/acp_transcript.rs",
       "sha256": "49c489cac79a1a2281a39d09c8ca1f6a448a278354601026d4080cd384fa7376",
-      "modifications": "逐字副本，仅行尾按仓库 .gitattributes 正规化为 LF。Pylon 侧（A3）只取纯算法 parse_transcript / read_chain_in / continuation_ancestors_in / compact_batch，且只作取证导出，不建第二 durable store（D2=①）。",
-      "consumer": "A3 → src-tauri/src/acp/transcript.rs",
+      "modifications": "逐字副本，仅行尾按仓库 .gitattributes 正规化为 LF。保留作为 Codeg 对照来源；Pylon 不编译、不接入该 transcript 路径，canonical_events 是唯一会话历史权威。",
+      "consumer": null,
       "unmigratedDeps": [
         "crate::paths::codeg_acp_transcripts_root()",
         "crate::models::message::{MessageTurn, TurnRole, ContentBlock}",
@@ -115,6 +115,11 @@
   ACP responder；这些必须在正式 Pylon runtime 接缝确定后再迁入。
 - 证据：`strict_policy_uses_one_canonical_workspace_root_for_reads_and_writes`、
   `unrestricted_policy_has_no_read_or_write_roots`。
+- 2026-09-11 接线（`825da3e9`、`88f8294a`）：FileSystemRuntime 读写消费
+  FsAccessPolicy、大小校验及慢操作阈值；dispatcher 的 HostStrict 分支使用
+  strict canonical 根目录。Pylon 有意对不可访问根目录返回错误，而非 fallback
+  原始根目录。新增 `strict_constructor_rejects_missing_root_and_outside_writes`。
+  此为文件路径策略接线，非完整 OS sandbox，也未证明 session owner/cwd 绑定完成。
 
 ### A4 terminal policy/runtime adapter
 

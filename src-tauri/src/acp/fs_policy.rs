@@ -59,11 +59,14 @@ impl FsAccessPolicy {
     }
 
     pub fn check_read(&self, path: &Path) -> Result<(), String> {
-        ensure_path_allowed(path, &self.read_roots, false)
+        if !self.confines_reads() {
+            return Ok(());
+        }
+        ensure_path_allowed(path, self.read_roots(), false)
     }
 
     pub fn check_write(&self, path: &Path) -> Result<(), String> {
-        ensure_path_allowed(path, &self.write_roots, true)
+        ensure_path_allowed(path, self.write_roots(), true)
     }
 }
 

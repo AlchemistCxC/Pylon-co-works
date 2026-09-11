@@ -743,38 +743,26 @@ pub(crate) async fn acp_wire_trace_snapshot(
         .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
     if format.as_deref() == Some("jsonl") {
         const MAX_BYTES: usize = 4 * 1024 * 1024;
-        let records = trace.snapshot();
-        let lines: Vec<String> = records
-            .iter()
-            .map(|record| serde_json::to_string(record).unwrap_or_else(|_| "{}".into()))
-            .collect();
-        let mut used = 0usize;
-        let mut kept = 0usize;
-        for (index, line) in lines.iter().enumerate() {
-            let extra = line.len() + usize::from(index > 0);
-            if used + extra > MAX_BYTES {
-                break;
-            }
-            used += extra;
-            kept += 1;
-        }
-        let complete = kept == lines.len();
-        let body = lines[..kept].join("\n");
-        return Ok(serde_json::json!({
-            "traceId": trace.trace_id(),
-            "format": "jsonl",
-            "data": body,
-            "complete": complete,
-            "firstOrdinal": records.first().map(|r| r.monotonic_seq),
-            "lastOrdinal": records.get(kept.saturating_sub(1)).map(|r| r.monotonic_seq),
-            "droppedCount": records.len().saturating_sub(kept),
-            "reason": if complete { serde_json::Value::Null } else { serde_json::json!("byte_budget") },
-        }));
+        return serde_json::to_value(trace.snapshot_jsonl(MAX_BYTES))
+            .map_err(|error| PylonError::Acp(format!("wire JSONL export failed: {error}")));
     }
+    let records = trace.snapshot();
+    let canonical_correlations: Vec<_> = records
+        .iter()
+        .filter_map(|record| {
+            trace.correlate(record.monotonic_seq).map(|correlation| {
+                serde_json::json!({
+                    "ordinal": record.monotonic_seq,
+                    "correlation": correlation,
+                })
+            })
+        })
+        .collect();
     Ok(serde_json::json!({
         "traceId": trace.trace_id(),
         "length": trace.len(),
-        "records": trace.snapshot(),
+        "records": records,
+        "canonicalCorrelations": canonical_correlations,
     }))
 }
 
@@ -1482,7 +1470,10 @@ sys.exit(7)
         // 则为 null。该时序随负载浮动（隔离跑常为 7、全量并发跑常为 null），
         // 故不断言其存在性，只锁定「一旦捕获到，必须就是子进程的真实退出码」。
         if let Some(code) = payload["error"]["exitCode"].as_i64() {
-            assert_eq!(code, 7, "captured exit code must be the child's real exit code");
+            assert_eq!(
+                code, 7,
+                "captured exit code must be the child's real exit code"
+            );
         }
         assert!(payload["error"]["stderr"]
             .as_str()

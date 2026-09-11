@@ -356,6 +356,17 @@ fn publish_inbound(
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
     tx: &mpsc::Sender<ClassifiedMessage>,
 ) {
+    // A replay response is the deterministic boundary of the load operation.
+    // Keep this classification on the transport message itself so observers
+    // do not have to infer it from the response channel.
+    if let Some(super::RequestId::Number(id)) = classified.raw.id.as_ref() {
+        if let Ok(active) = active_replay_requests.lock() {
+            if active.contains_key(id) {
+                classified.classification =
+                    super::ReplayClassification::Boundary { request_id: *id };
+            }
+        }
+    }
     if let Some(session_id) = classified
         .raw
         .params
@@ -364,10 +375,14 @@ fn publish_inbound(
         .and_then(serde_json::Value::as_str)
     {
         if let Ok(active) = active_replay_requests.lock() {
-            if let Some((request_id, _)) = active.iter().find(|(_, id)| id.as_str() == session_id) {
-                classified.classification = super::ReplayClassification::Replay {
-                    request_id: *request_id,
-                };
+            if classified.classification == super::ReplayClassification::Live {
+                if let Some((request_id, _)) =
+                    active.iter().find(|(_, id)| id.as_str() == session_id)
+                {
+                    classified.classification = super::ReplayClassification::Replay {
+                        request_id: *request_id,
+                    };
+                }
             }
         }
     }
@@ -425,16 +440,17 @@ fn observe_message(
     direction: WireDirection,
 ) {
     if let Ok(value) = serde_json::to_value(message) {
-        hub.record(direction, &value);
+        match direction {
+            WireDirection::PylonToAgent => hub.capture_request(&value),
+            WireDirection::AgentToPylon => hub.capture_agent_message(&value),
+        }
     }
 }
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
 fn observe_frame(frame: &TransportFrame, hub: &AcpWireHub, direction: WireDirection) {
     let observe = |message: &agent_client_protocol::RawJsonRpcMessage| {
-        if let Ok(value) = serde_json::to_value(message) {
-            hub.record(direction, &value);
-        }
+        observe_message(message, hub, direction);
     };
     match frame {
         TransportFrame::Single(message) => observe(message),

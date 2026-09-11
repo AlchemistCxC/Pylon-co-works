@@ -433,6 +433,78 @@ pub(crate) async fn respond_interaction(
     let runtime = state.runtimes.get(&identity.agent_id).ok_or_else(|| {
         PylonError::Protocol(format!("agent runtime not found: {}", identity.agent_id))
     })?;
+    let request_id = crate::acp::RequestId::from_echo_string(&identity.request_id);
+    if let Some(pending) = runtime
+        .private_interactions
+        .get(&request_id)
+        .map_err(PylonError::Protocol)?
+    {
+        if pending.session_id != identity.session_id
+            || pending.provider != identity.provider
+            || pending.agent_id != identity.agent_id
+            || pending.method.is_empty()
+            || pending.client_generation != identity.client_generation
+        {
+            return Err(PylonError::Protocol("stale interaction identity".into()));
+        }
+        let response = match pending.bridge {
+            crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
+            | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
+                let questions = pending.question_specs.ok_or_else(|| {
+                    PylonError::Protocol("private question request lost validated specs".into())
+                })?;
+                let values = answer.values.clone().unwrap_or_default();
+                let answers = questions
+                    .iter()
+                    .filter_map(|spec| {
+                        values.get(&spec.id).map(|value| {
+                            let labels = match value {
+                                serde_json::Value::String(label) => vec![label.clone()],
+                                serde_json::Value::Array(items) => items
+                                    .iter()
+                                    .filter_map(|item| item.as_str().map(str::to_owned))
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            crate::acp::question_policy::QuestionAnswerItem {
+                                question_id: spec.id.clone(),
+                                labels,
+                            }
+                        })
+                    })
+                    .collect();
+                let answer = crate::acp::question_policy::QuestionAnswer {
+                    answers,
+                    declined: answer.option_id.as_deref() == Some("declined"),
+                };
+                crate::acp::adapter::private_ext::build_question_response(
+                    pending.bridge,
+                    &questions,
+                    &answer,
+                )
+                .map_err(PylonError::Protocol)?
+            }
+            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                let _ = crate::acp::adapter::private_ext::parse_exit_plan(
+                    pending.bridge,
+                    &pending.params,
+                )
+                .map_err(PylonError::Protocol)?;
+                crate::acp::plan_policy::approval_response(
+                    answer.option_id.as_deref().unwrap_or("keep_planning"),
+                    answer.text.as_deref().unwrap_or(""),
+                )
+            }
+        };
+        let responder = { runtime.acp.lock().await.responder() };
+        if !responder.respond(request_id.clone(), response).await {
+            return Err(PylonError::Protocol(
+                "private interaction response failed".into(),
+            ));
+        }
+        let _ = runtime.private_interactions.take(&request_id);
+        return Ok(());
+    }
     adapter
         .respond_interaction(&runtime, &identity, &kind, &answer)
         .await

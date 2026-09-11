@@ -138,6 +138,19 @@ pub struct CanonicalCorrelation {
 /// depends on the protocol-neutral capture vocabulary.
 pub type AcpWireCapture = AcpWireHub;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WireJsonlSnapshot {
+    pub trace_id: String,
+    pub format: &'static str,
+    pub data: String,
+    pub complete: bool,
+    pub first_ordinal: Option<u64>,
+    pub last_ordinal: Option<u64>,
+    pub dropped_count: usize,
+    pub reason: Option<&'static str>,
+}
+
 impl AcpWireHub {
     pub fn new(correlation: RuntimeCorrelation, capacity: usize) -> Arc<Self> {
         Arc::new(Self {
@@ -255,20 +268,6 @@ impl AcpWireHub {
         ordinals.pop_front()
     }
 
-    /// 记录一条已序列化的 outbound 行（writer 边界调用；解析失败静默跳过）。
-    pub fn record_line(&self, direction: WireDirection, line: &str) {
-        if !self.enabled.load(Ordering::Relaxed) {
-            return;
-        }
-        let Ok(msg_val) = serde_json::from_str::<serde_json::Value>(line) else {
-            return;
-        };
-        match direction {
-            WireDirection::PylonToAgent => self.capture_request(&msg_val),
-            WireDirection::AgentToPylon => self.capture_agent_message(&msg_val),
-        }
-    }
-
     /// 当前全部记录快照（旧→新，monotonicSeq 严格递增）。
     /// CR-001：seq 在 records 锁外分配，并发下 enqueue 落序可能偏离 seq 序——
     /// 快照返回前按 monotonicSeq 排齐，消费方可直接依赖 seq 全序。
@@ -296,19 +295,38 @@ impl AcpWireHub {
         self.snapshot()
     }
 
-    /// Export the bounded capture as deterministic JSONL for diagnostics and
-    /// replay evidence. Serialization failures are represented as a redacted
-    /// sentinel line so exporting never perturbs the live transport.
-    pub fn to_jsonl(&self) -> String {
-        self.snapshot()
-            .into_iter()
-            .map(|record| {
-                serde_json::to_string(&record).unwrap_or_else(|_| {
-                    r#"{"error":"wire_record_serialization_failed"}"#.to_string()
-                })
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+    /// Take one coherent snapshot and export it. Callers that also expose
+    /// ordinal metadata must use this seam so body and metadata cannot drift
+    /// across concurrent ring-buffer writes.
+    pub fn snapshot_jsonl(&self, max_bytes: usize) -> WireJsonlSnapshot {
+        let records = self.snapshot();
+        let mut data = String::new();
+        let mut kept = 0;
+        for record in &records {
+            let line = serde_json::to_string(record)
+                .unwrap_or_else(|_| r#"{"error":"wire_record_serialization_failed"}"#.to_string());
+            let extra = line.len().saturating_add(usize::from(kept > 0));
+            if extra > max_bytes.saturating_sub(data.len()) {
+                break;
+            }
+            if kept > 0 {
+                data.push('\n');
+            }
+            data.push_str(&line);
+            kept += 1;
+        }
+        let retained = &records[..kept];
+        let complete = kept == records.len();
+        WireJsonlSnapshot {
+            trace_id: self.trace_id().to_owned(),
+            format: "jsonl",
+            data,
+            complete,
+            first_ordinal: retained.first().map(|record| record.monotonic_seq),
+            last_ordinal: retained.last().map(|record| record.monotonic_seq),
+            dropped_count: records.len() - kept,
+            reason: (!complete).then_some("byte_budget"),
+        }
     }
 }
 
@@ -621,13 +639,78 @@ mod tests {
                 &json!({"jsonrpc":"2.0","id":id,"method":"session/prompt","params":{}}),
             );
         }
-        let exported = hub.to_jsonl();
-        let lines: Vec<_> = exported.lines().collect();
+        let exported = hub.snapshot_jsonl(usize::MAX);
+        let lines: Vec<_> = exported.data.lines().collect();
         assert_eq!(lines.len(), 8);
         let first: WireRecord = serde_json::from_str(lines[0]).unwrap();
         let last: WireRecord = serde_json::from_str(lines[7]).unwrap();
         assert_eq!(first.monotonic_seq, 5);
         assert_eq!(last.monotonic_seq, 12);
+    }
+
+    #[test]
+    fn jsonl_snapshot_metadata_and_body_share_one_capture() {
+        let hub = hub();
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":1,"method":"session/prompt"}),
+        );
+        let snapshot = hub.snapshot_jsonl(usize::MAX);
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":2,"method":"session/prompt"}),
+        );
+        let exported: Vec<WireRecord> = snapshot
+            .data
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(
+            snapshot.first_ordinal,
+            exported.first().map(|row| row.monotonic_seq)
+        );
+        assert_eq!(
+            snapshot.last_ordinal,
+            exported.last().map(|row| row.monotonic_seq)
+        );
+        assert!(snapshot.complete);
+        assert_eq!(snapshot.dropped_count, 0);
+        assert_eq!(hub.snapshot().len(), 2);
+    }
+
+    #[test]
+    fn jsonl_byte_budget_retains_complete_lines_and_matching_ordinals() {
+        let hub = hub();
+        let empty = hub.snapshot_jsonl(0);
+        assert!(empty.complete);
+        assert_eq!(empty.first_ordinal, None);
+        assert_eq!(empty.last_ordinal, None);
+        hub.record(WireDirection::PylonToAgent, &json!({"id":1,"params":{"text":"中文"}}));
+        hub.record(WireDirection::PylonToAgent, &json!({"id":2,"params":{"text":"更多"}}));
+        let all = hub.snapshot_jsonl(usize::MAX);
+        let first_line = all.data.lines().next().unwrap();
+        let none = hub.snapshot_jsonl(first_line.len() - 1);
+        assert!(none.data.is_empty());
+        assert_eq!(none.first_ordinal, None);
+        assert_eq!(none.last_ordinal, None);
+        assert_eq!(none.dropped_count, 2);
+        assert_eq!(none.reason, Some("byte_budget"));
+        let one = hub.snapshot_jsonl(first_line.len());
+        assert_eq!(one.data, first_line);
+        assert_eq!(one.first_ordinal, Some(1));
+        assert_eq!(one.last_ordinal, Some(1));
+        assert_eq!(one.dropped_count, 1);
+        assert!(!one.complete);
+        let exact = hub.snapshot_jsonl(all.data.len());
+        assert_eq!(exact.data, all.data);
+        assert!(exact.complete);
+        assert_eq!(exact.last_ordinal, Some(2));
+        assert_eq!(exact.reason, None);
+        let payload = serde_json::to_value(none).unwrap();
+        assert!(payload["firstOrdinal"].is_null());
+        assert!(payload["lastOrdinal"].is_null());
+        assert_eq!(payload["format"], "jsonl");
     }
 
     #[test]
@@ -665,22 +748,6 @@ mod tests {
         assert_eq!(snap[0].method.as_deref(), Some("session/prompt"));
         assert_eq!(snap[0].remote_session_id.as_deref(), Some("s-1"));
         assert_eq!(snap[0].tool_call_id.as_deref(), Some("tc-9"));
-    }
-
-    #[test]
-    fn record_line_parses_and_records_outbound_json() {
-        let hub = hub();
-        let line = r#"{"jsonrpc":"2.0","id":5,"method":"session/new","params":{"cwd":"."}}"#;
-        hub.record_line(WireDirection::PylonToAgent, line);
-        let snap = hub.snapshot();
-        assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].id_kind, WireIdKind::Number);
-        assert_eq!(snap[0].id_value, Some(json!(5)));
-        assert_eq!(snap[0].method.as_deref(), Some("session/new"));
-        assert_eq!(snap[0].direction, WireDirection::PylonToAgent);
-        // 非法行静默跳过
-        hub.record_line(WireDirection::PylonToAgent, "not-json{");
-        assert_eq!(hub.snapshot().len(), 1);
     }
 
     #[test]

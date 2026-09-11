@@ -5,8 +5,11 @@ import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from './t
 /** Registry for contributions whose validated value owns its identity and ordering. */
 export class ValidatedContributionRegistry<T extends { readonly id: string; readonly order?: number }> {
   private readonly registry = new ReactiveRegistryStore<T>()
+  private readonly validateContribution: (contribution: T) => T
 
-  constructor(private readonly validateContribution: (contribution: T) => T) {}
+  constructor(validateContribution: (contribution: T) => T) {
+    this.validateContribution = validateContribution
+  }
 
   register(owner: PluginIdentity, contribution: T): AsyncDisposable {
     const normalized = this.validateContribution(contribution)

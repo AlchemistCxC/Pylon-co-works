@@ -3,6 +3,20 @@
 
 [2026-09-11 03:30] [青栎·工程师] [P69 继续施工] 已核实 Codeg 来源为本地固定副本 `F:\Hermes\profiles\riccati\workspace\pylon-survey-2026-09\codeg-src`，commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，未联网。新增 `fs_policy`→`FileSystemRuntime` 生产接线（`825da3e9`），Solid live reasoning 通过 `setConfigOption` 接线并失败回滚（`34db1984`），private interaction parser 接入 dispatcher fail-closed 校验（`69a6efb1`）。定向 Solid 12 项、Rust private bridge 2 项、filesystem 2 项通过；P60 仍有未接线模块待继续。
 
+[2026-09-11 03:43] [青栎·工程师] [P69 D3] 修正 reasoning 接线：live 会话从 `WorkbenchDocument.session.options` 读取真实 option id/value/version，禁止将 choice id 当配置键；只发送宣告选项，失败显示错误且不污染已确认值；切会话会使旧请求失效。新增 WorkbenchWidgets live reasoning 成功/失败/清空文档回归，定向 25 项、eslint、tsc 通过。`check:solid` 当前被并行改动 `AgentRendererSuiteWorkbench.tsx` 的未登记 direct invoke 阻塞，未擅自改动该文件。
+
+[2026-09-11 04:02] [青栎·工程师] [P69 边界与诊断接线] `AgentRendererSuiteWorkbench` 的 ACP config transport 已下沉至 `infrastructure/acp/chatClient.ts`，新增边界白名单登记；`check:solid` 通过，Workbench/agent command 定向 22 项通过。ACP 初始化 malformed RPC 错误现在复用 stderr parser summary，避免原始 payload 泄漏（`a9bdf93a`、`a285ff20`）。
+
+[2026-09-11 04:12] [青栎·工程师] [P69 A4 filesystem strict] HostStrict filesystem 现在使用 `FsAccessPolicy::strict` canonical root；根目录无法访问时返回 ACP invalid params，不再降级到可能越界的原始路径。新增 missing-root、inside-read/write、outside-write 回归，Rust 3 项通过；tsc、lint（0 errors，1 既有 warning）、定向前端 77 项通过（`88f8294a`）。
+
+[2026-09-11 04:22] [青栎·工程师] [P60 A3 wire export] 生产 `acp_wire_trace_snapshot(format=jsonl)` 现复用 `AcpWireHub::to_jsonl()`，统一脱敏序列化路径后再执行 4 MiB 行边界预算；不改变 `complete/firstOrdinal/lastOrdinal/droppedCount` 响应契约（`011956d5`）。
+
+[2026-09-11 04:34] [青栎·工程师] [P60 A6 resume policy consumer] `revive_session_slot` 现消费 `acp::resume_capability_advertised`（原先策略函数仅测试使用），保持 object-only fail-closed 后再选择 resume/load；恢复矩阵 8 项全绿，提交 `228af14d`。未触碰并行 `capabilities.rs`/revive fixture 改动。
+
+[2026-09-11 04:48] [青栎·工程师] [P60 A1 wire observation] SDK engine 的单条与 batch RawJsonRpcMessage 现在共用 `observe_message`，并统一经 `capture_request/capture_agent_message` 进入 wire hub；保留方向、脱敏、id-kind 与序号语义。engine 定向 7 项通过，提交 `4ec0f041`。
+
+[2026-09-11 05:06] [青栎·工程师] [P60 A3 export contract] 发现并修复生产 JSONL 导出的双 snapshot 竞态；新增 `WireJsonlSnapshot` typed DTO，body/ordinal/dropped/reason 来自同一次 ring snapshot，预算按 UTF-8 字节且只保留完整行。新增空预算、精确行边界、多字节和 metadata 对齐测试；wire_trace 16 项通过，tsc/lint 通过（lint 0 errors，1 既有 warning），提交 `6b246ddd`。
+
 [2026-09-11 03:20] [拾烬·工程师] [CI 前端已转绿·按新契约改写 2 个测试]
 
 用户确认 `AgentRuntimePanel` 的 2 项失败是**新行为契约**（`5b43c183`：编辑 Agent 后**必须先「先测试连接」成功**才能保存；`saveEdit` 用 `verifiedDrafts[agentId] !== fingerprint` fail-closed 拦截）。按 §3.3 例外 1 改写测试（`29fd45c5`）：
@@ -647,3 +661,23 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 03:47] [Riccati·架构师] 追认一处分支 tip 编译失败并修复：`69a6efb1` 把 `MAX_WRITE_BYTES` 从 `file_system_runtime.rs` 顶部 `use` 移除后，在 `mod tests` 内写成 `super::fs_policy::MAX_WRITE_BYTES`——但该处 `super` 是文件模块 `crate::acp::file_system_runtime`，路径少一层，`cargo test --lib` 报 `E0433: cannot find fs_policy in super`（CI run 34521242510 实证）。改为 `super::super::fs_policy::MAX_WRITE_BYTES`（与 `acp::engine` 测试模块既有的 `super::super::wire_trace::*` 深度一致），仅动测试代码，写限额断言未改；已用最小复现工程确认 broken/fixed 两版行为。提交 79f10d16。
 
 [2026-09-11 03:47] [Riccati·架构师] PR #41 CI 归属判定（对照 `main` 自身 f21be0cb 的 run 34520602338）：前端从基线 34 failed/446 passed 收敛到 **1 failed/473 passed**，剩余 `scripts/legacy-runner.test.mts` （legacy group 3/4 内 normalizeAgentStatus 崩）为基线继承，非本 PR 引入；Rust 基线本身即有 2 项测试失败（`auto_reconnect_integration_tests::fake_acp_crash_triggers_auto_reconnect`、`session::prompt::tests::before_send_hook_transform_rewrites_wire_but_journal_keeps_original`），以上均未在本 PR 处理，未用 allow/删除掩盖。
+
+[2026-09-11 继续] [主施工员·工程师] 私有交互接线：提交 `c57c592b`，dispatcher 对 Codeg 兼容的 `_x.ai/ask_user_question`、`pi/select_ask`、`_x.ai/exit_plan_mode` 先走 typed policy fail-closed 校验，malformed payload 返回 `-32602`，未知方法仍保持既有 unsupported 语义；定向 3 项与 `cargo check --lib` 通过。
+
+[2026-09-11 继续] [主施工员·工程师] P60 小片：提交 `1e1eef3a`，session revive 改用 `CapabilityRegistry::supports_object` 作为 resume 决策源并保留旧投影 parity assertion；filesystem policy 的 roots/confines accessor 接入真实 check path，行为保持不变。
+
+[2026-09-11 继续] [主施工员·工程师] Codeg 对照调查：`continuation_ancestors` 的真实消费者是 transcript 持久化与 conversation bind；Pylon 当前没有同等 transcript owner，`question/plan` 也缺少可挂起并等待 UI 应答的 private bridge seam。已确认不能仅为消除 clippy dead_code 强行接入平行体系；继续寻找现有 owner seam。
+
+[2026-09-11 继续] [主施工员·工程师] 用户授权新增 owner。提交 `d006df7c` + `0962dc97` + `caaf6afd` + `e83c3c11`：新增 runtime-scoped `PrivateInteractionOwner`，接入 Codeg 兼容 question/plan 请求的校验→挂起→统一 `respond_interaction`→ACP 回写闭环；重连清理旧代请求；question specs 在入队时保存，避免应答时重新 mint id。`cargo check --lib` 通过，owner/private-ext 定向测试通过。
+
+[2026-09-11 继续] [主施工员·工程师] 前端接线提交 `6f8c069e`：private question 使用 `ask-user` 事件分类，plan approval 使用 `approval.request`，planContent 投影为可见 prompt；interaction normalization 定向测试 18 项通过。
+
+[2026-09-11 继续] [主施工员·工程师] 应答闭环修正提交 `4f45c497`：前端 values 按稳定 question id 映射到后端 `QuestionAnswer`，不再把 values 当作可直接反序列化的结构；后端保留已验证 specs，重复应答仍由 owner 单次 claim 保护。`cargo check --lib` 通过。
+
+[2026-09-11 继续] [主施工员·工程师] Codeg wire parity 提交 `e45e790d`：Grok question 回写 `{outcome:accepted, answers:<question text>, partial_answers:{}}`，decline 回写 `skip_interview`；pi select 回写 `{optionId}`/`{cancelled:true}`，不再使用内部 QuestionOutcome 形状。private_ext 4 项测试通过。
+
+[2026-09-11 继续] [主施工员·工程师] P60 terminal policy 接线提交 `8ed32d4c`：生产 terminal owner 现在消费 `next_wait_retry_backoff`、`WAIT_ERROR_BUDGET`、`WAIT_ERROR_IDLE_RETRY`，仅对 `try_wait` 错误启动预算；健康运行不受 30s 截止影响，预算耗尽只发布一次 unknown 状态并保留 owner 继续回收。新增 3 个 retry/长任务回归，terminal_runtime 7 项通过。
+[2026-09-11 继续] [主施工员·工程师] replay/wire 接线：transport 发布处将匹配 session/load 响应标记为 `ReplayClassification::Boundary`；`acp_wire_trace_snapshot` 读取路径同时消费并返回已登记的 canonical correlation，避免已有观测数据只写不读。engine 定向 7 项通过，继续审计剩余 transcript/terminal owner 缺口。
+[2026-09-11 继续] [主施工员·工程师] terminal kill 收口：owner 先请求 graceful termination，等待 `KILL_ESCALATE_GRACE` 后再调用既有进程树强制回收；Unix 使用 SIGTERM，Windows 保留现有 job/taskkill 语义。terminal_runtime 7 项与 cargo check --lib 通过。
+[2026-09-11 继续] [主施工员·工程师] 边界修正：项目明确 Windows-only，上一条提及 Unix SIGTERM 不适用；实现已移除 Unix 分支，仅保留 Windows Child/job/taskkill 路径与 escalation grace。
+[2026-09-11 继续] [主施工员·工程师] 按产品决策收口：删除未接入 canonical/session 生产链的 `src-tauri/src/acp/transcript.rs` 及模块声明；移除重复的 Registry output wrapper、wire `record_line` 字符串入口和未接线 interaction hook interpreter。Codeg vendor transcript 仅保留为对照 provenance，不参与编译。cargo check --lib 通过；clippy 已无 dead-code，剩余为既有结构/测试 lint。

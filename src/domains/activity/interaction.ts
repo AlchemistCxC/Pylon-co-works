@@ -215,7 +215,7 @@ function questionsFrom(payload: Record<string, unknown>, kind: InteractionKind):
   const question = normalizeQuestion(payload, 0)
   if (question) return [question]
   if (kind === 'approval') {
-    const prompt = firstString(payload.description, payload.command, payload.prompt)
+    const prompt = firstString(payload.description, payload.command, payload.prompt, payload.planContent, payload.plan)
     return prompt ? [{
       id: 'approval',
       question: prompt,
