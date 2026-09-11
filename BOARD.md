@@ -675,3 +675,5 @@ A0 已收（`7758534a`）。A1a 已完成三个可验收单元：
 [2026-09-11 继续] [主施工员·工程师] 应答闭环修正提交 `4f45c497`：前端 values 按稳定 question id 映射到后端 `QuestionAnswer`，不再把 values 当作可直接反序列化的结构；后端保留已验证 specs，重复应答仍由 owner 单次 claim 保护。`cargo check --lib` 通过。
 
 [2026-09-11 继续] [主施工员·工程师] Codeg wire parity 提交 `e45e790d`：Grok question 回写 `{outcome:accepted, answers:<question text>, partial_answers:{}}`，decline 回写 `skip_interview`；pi select 回写 `{optionId}`/`{cancelled:true}`，不再使用内部 QuestionOutcome 形状。private_ext 4 项测试通过。
+
+[2026-09-11 继续] [主施工员·工程师] P60 terminal policy 接线提交 `8ed32d4c`：生产 terminal owner 现在消费 `next_wait_retry_backoff`、`WAIT_ERROR_BUDGET`、`WAIT_ERROR_IDLE_RETRY`，仅对 `try_wait` 错误启动预算；健康运行不受 30s 截止影响，预算耗尽只发布一次 unknown 状态并保留 owner 继续回收。新增 3 个 retry/长任务回归，terminal_runtime 7 项通过。
