@@ -74,9 +74,26 @@ jobs:
       - name: ACP shadow parity（check:acp-shadow）
         run: bun run check:acp-shadow
 
-      # ISSUE-20 W2：clippy 按项目 toolchain；不设 -D warnings（既有 33 条警告基线，独立清理）
-      - name: clippy
-        run: cd src-tauri && cargo clippy --lib
+      # ISSUE-20 W2 + P66：clippy 按项目 toolchain，仍不设 -D warnings——门禁语义是
+      # 「相对 artifacts/clippy-baseline.json 零新增」（scripts/check-clippy-baseline.mjs，
+      # 指纹带 crate 限定 + 处数计数）。
+      # 四个 crate 必须分别以 --manifest-path 起跑：从 src-tauri 跑 `cargo clippy -p pylon-core`
+      # 会把 path 依赖当依赖编译，lint 静默不上报（实测 0 警告），子 crate 将完全脱离门禁。
+      - name: clippy（4 crate + 基线门禁）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src-tauri
+          failed=0
+          run_crate() {
+            cargo clippy --manifest-path "$1" --all-targets --message-format=json > "../artifacts/clippy-$2.json" 2> "../artifacts/clippy-$2.err"
+            node ../scripts/check-clippy-baseline.mjs "../artifacts/clippy-$2.json" ../artifacts/clippy-baseline.json --crate="$2" --crate-dir="$3" || failed=1
+          }
+          run_crate Cargo.toml pylon src-tauri
+          run_crate pylon-core/Cargo.toml pylon-core src-tauri/pylon-core
+          run_crate pylon-foundations/Cargo.toml pylon-foundations src-tauri/pylon-foundations
+          run_crate pet-core/Cargo.toml pet-core src-tauri/pet-core
+          exit $failed
 
       # 必要 bundle（debug 二进制），不上传 secret/data
       - name: 上传 debug 构建产物
