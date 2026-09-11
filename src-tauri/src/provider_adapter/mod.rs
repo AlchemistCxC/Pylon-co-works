@@ -146,6 +146,80 @@ mod tests {
             .is_none());
     }
 
+    /// A3 裁定的 request 基线：声明的 caps 与实际发出的 `initialize`
+    /// clientCapabilities **逐字段**一致。
+    ///
+    /// 裁决理由：本片不新建第二套 trace 基建（P60 A0 的 golden trace 已经是 ACP
+    /// wire 层的权威基线），而是把“逐策略 request/response”钉在**真实发送入口**上：
+    /// 基线用生产函数 `initialize_caps_for_provider` 构造，与 `acp/client.rs` 握手
+    /// 用的是同一个。既不复制 trace 基设，又把契约锁在代码与断言里。
+    #[test]
+    fn initialize_client_capabilities_request_baseline_is_exact() {
+        use crate::agent_config::AcpProtocolConfig;
+        let protocol = AcpProtocolConfig::default();
+
+        // 显式 YAML 覆盖优先：catalog 不参与合并。
+        let explicit = AcpProtocolConfig {
+            initialize_caps: Some(serde_json::json!({"tokenStats": false})),
+            ..AcpProtocolConfig::default()
+        };
+        assert_eq!(
+            explicit
+                .initialize_caps_for_provider(Some("claude-code"))
+                .unwrap(),
+            serde_json::json!({"tokenStats": false})
+        );
+
+        // 无 provider：只有 Pylon 默认 caps，不含任何 provider 声明。
+        let default_caps = serde_json::json!({
+            "tokenStats": true,
+            "_meta": {
+                "peri.tokenStats": true,
+                "peri.skillNames": true,
+                "peri.replay": true
+            }
+        });
+        assert_eq!(
+            protocol.initialize_caps_for_provider(None).unwrap(),
+            default_caps
+        );
+
+        // 未声明 caps 的 provider：与默认逐字节相同（不得凭空注入）。
+        assert_eq!(
+            protocol.initialize_caps_for_provider(Some("peri")).unwrap(),
+            default_caps
+        );
+
+        // claude-code：默认 `_meta` 与声明 `_meta` 合并（默认保留、声明胜出），
+        // 声明的新键进入 `_meta`。这是发给 agent 的真实 request 形状。
+        assert_eq!(
+            protocol
+                .initialize_caps_for_provider(Some("claude-code"))
+                .unwrap(),
+            serde_json::json!({
+                "tokenStats": true,
+                "_meta": {
+                    "peri.tokenStats": true,
+                    "peri.skillNames": true,
+                    "peri.replay": true,
+                    "subagent-transcript": true,
+                    "jetbrains.air": {
+                        "version": 1,
+                        "capabilities": ["sessionFailure"]
+                    }
+                }
+            })
+        );
+
+        // 未知 provider 不当成错误：目录里没有它，就没有声明可合并。
+        assert_eq!(
+            protocol
+                .initialize_caps_for_provider(Some("future-agent"))
+                .unwrap(),
+            default_caps
+        );
+    }
+
     #[test]
     fn client_capabilities_merge_preserves_default_meta() {
         let result = client_capabilities(
@@ -190,6 +264,36 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(bridge.parser, CatalogBridgeId::PiSelectAsk);
+    }
+
+    /// A3 裁定 (a) 的显式契约：**未声明 = 不额外限制**，而不是“未声明 = 禁用”。
+    ///
+    /// 裁决理由：Pylon 的私有桥（grok/pi）按施工书 §1.2 在拥有独立 runtime
+    /// owner 之前不进 catalog，所以今天 catalog 里的 bridge 声明是空集。若把
+    /// “空集”读成“全部禁用”，会当场切断已经能用且已有 owner 的私有交互；而声明
+    /// 真的产生约束的路径必须靠封闭 `CatalogBridgeId` + owner 存在性兜住，不能靠
+    /// “没写就不准用”这种隐式规则。
+    ///
+    /// 本测试把三件事一起钉死：
+    /// 1. catalog 未声明任何 bridge 时 `interaction_bridge` 返回 None（不报错）；
+    /// 2. 声明存在时能正常解析；
+    /// 3. 不在声明列表里的方法不被推断成任何 bridge。
+    #[test]
+    fn absent_declaration_means_no_extra_restriction_not_denial() {
+        // 1. 本仓 catalog 今天对 claude-code 没有 bridge 声明。
+        assert!(interaction_bridge("claude-code", "pi/select_ask")
+            .unwrap()
+            .is_none());
+        // 2/3. 声明面本身仍能正确解析与收窄。
+        let declared = vec![CatalogInteractionBridge {
+            method: "pi/select_ask".into(),
+            parser: CatalogBridgeId::PiSelectAsk,
+        }];
+        assert_eq!(
+            declared_bridge(&declared, "pi/select_ask"),
+            Some(CatalogBridgeId::PiSelectAsk)
+        );
+        assert_eq!(declared_bridge(&declared, "_x.ai/ask_user_question"), None);
     }
 
     /// 声明只能“收窄”：未声明的方法不得被推断成任何 bridge。

@@ -372,16 +372,23 @@ impl AcpProtocolConfig {
 
     /// Catalog-driven capabilities when the profile does not provide an
     /// explicit override. Explicit YAML remains authoritative.
-    pub fn initialize_caps_for_provider(&self, provider: Option<&str>) -> serde_json::Value {
+    ///
+    /// A3：声明的 client capabilities 若形状非法，这里**上抛**而不是静默回退到
+    /// 默认 caps。静默回退会把“声明非法”伪装成“协商成功”，而 capabilities 是
+    /// 握手契约的一部分：拼错的 providers 声明必须当场可见，而不是发一份不完整
+    /// 的 caps 上去。
+    pub fn initialize_caps_for_provider(
+        &self,
+        provider: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         if self.initialize_caps.is_some() {
-            return self.initialize_caps();
+            return Ok(self.initialize_caps());
         }
         let caps = default_initialize_caps();
         let Some(provider) = provider else {
-            return caps;
+            return Ok(caps);
         };
         crate::provider_adapter::client_capabilities(provider, caps)
-            .unwrap_or_else(|_| default_initialize_caps())
     }
 }
 

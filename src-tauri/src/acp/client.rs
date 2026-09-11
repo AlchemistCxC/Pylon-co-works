@@ -381,12 +381,23 @@ impl AcpClient {
                 // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
                 // Hermes 忽略无害）、protocolVersion（H3）、clientInfo（H4）。
                 // 差异适配表见 acp.rs 头部注释与手册 §3.3。
+                // A3：caps 合并失败即连接失败（不静默用默认 caps 继续握手）。
+                let client_capabilities = client
+                    .protocol
+                    .initialize_caps_for_provider(agent.provider.as_deref())
+                    .map_err(|message| {
+                        let failure = AgentConnectFailure::preflight(
+                            "agent_client_capabilities_invalid",
+                            message,
+                        );
+                        AcpError::from(failure)
+                    })?;
                 let initialize_response = match client
                     .call_async(
                         METHOD_INITIALIZE,
                         serde_json::json!({
                             "protocolVersion": client.protocol.protocol_version(),
-                            "clientCapabilities": client.protocol.initialize_caps_for_provider(agent.provider.as_deref()),
+                            "clientCapabilities": client_capabilities,
                             "clientInfo": client.protocol.client_info()
                         }),
                     )
