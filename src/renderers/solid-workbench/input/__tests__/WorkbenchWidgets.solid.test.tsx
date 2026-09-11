@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULTS } from '../../../../domains/theme/themeDefaults.ts'
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
-import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from '../WorkbenchWidgets.solid.tsx'
+import { SolidAttachWidget, SolidCcSendButton, SolidModeWidget, SolidModelWidget } from '../WorkbenchWidgets.solid.tsx'
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
 
@@ -170,19 +170,23 @@ describe('Solid Workbench widgets', () => {
     expect(await screen.findByText('mode denied')).toBeTruthy()
   })
 
-  it('Send variant 派发输入事件；生成中改走 cancel facade', async () => {
+  it('注册发送底层块复用发送/停止语义且支持禁用', async () => {
     const sendEvent = vi.fn()
     window.addEventListener('pylon:solid-input-send', sendEvent)
-    const services = renderWidget(() => <SolidSendWidget />, { sendVariant: 'square' })
-    const sendButton = screen.getByRole('button', { name: '发送消息' })
-    expect(sendButton.className).toBe('cc-send-square')
-    fireEvent.click(sendButton)
+    const services = renderWidget(() => <SolidCcSendButton mode="inline" />)
+    const button = screen.getByRole('button', { name: '发送消息' })
+    fireEvent.click(button)
     expect(sendEvent).toHaveBeenCalledTimes(1)
 
     services.runtime.update({ generating: true })
     await waitFor(() => expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '停止生成' }))
     await waitFor(() => expect(services.commands.calls[0]?.command).toBe('cancel'))
+
+    cleanup()
+    const disabledServices = renderWidget(() => <SolidCcSendButton mode="external" disabled />)
+    expect(screen.getByRole('button')).toBeDisabled()
+    disabledServices.destroy()
     window.removeEventListener('pylon:solid-input-send', sendEvent)
   })
 

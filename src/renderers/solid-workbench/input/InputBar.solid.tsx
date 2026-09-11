@@ -22,8 +22,6 @@ export interface QueuedWorkbenchMessage {
 }
 
 export interface SolidInputBarProps {
-  externalSend?: boolean
-  externalAttach?: boolean
   disabled?: boolean
   /** Optional LLM provider; requests are debounced, cancellable and rate limited. */
   predictionProvider?: InputPredictionProvider

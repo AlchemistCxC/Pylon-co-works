@@ -1,12 +1,12 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatTokenCount } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isExternalSubmitMode, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import type { CcSlot, CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
-import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
+import { SolidAttachWidget, SolidCcSendButton, SolidModeWidget, SolidModelWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveDocumentOptionValue, resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
@@ -74,6 +74,14 @@ export function SolidControlCenter() {
   const ccSurfaceRegistered = () => getCcWidgetRegistry().getSnapshot().entries.some(
     entry => entry.value.id === 'cc-surface',
   )
+  const ccSendButtonRegistered = () => getCcWidgetRegistry().getSnapshot().entries.some(
+    entry => entry.value.id === 'cc-send-button',
+  )
+  let controlCenterElement: HTMLDivElement | undefined
+  const sendButtonMode = () => {
+    if (appearance().ccHidden.includes('send')) return undefined
+    return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
+  }
   createEffect(() => {
     if (modelId() || !profileModel()) return
     setModelId(profileModel())
@@ -244,12 +252,6 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  const externalButtonMode = () => isExternalSubmitMode({
-    inputMode: appearance().inputMode,
-    submitButtonMode: appearance().inputSubmitButtonMode,
-  })
-  const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
-  const externalAttach = () => externalButtonMode() && !appearance().ccHidden.includes('attach')
   const hiddenWidgetIds = () => !emptyVisual()
     ? appearance().ccHidden
     : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]
@@ -263,7 +265,9 @@ export function SolidControlCenter() {
     // for terminal-classic, whose normal session chrome hides context chips.
     presentationProfileId: input().sessionId ? input().presentationProfileId : undefined,
   })
-  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
+  // The registered cc-send-button owns the send block; keep the legacy id in
+  // layout/theme data for compatibility without mounting its old renderer.
+  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => id !== 'send' && isWidgetVisible(id, visibilityContext())))
   const minHeight = () => resolveCcMinHeight({
     inputMode: appearance().inputMode,
     footerLayout: appearance().footerLayout,
@@ -284,7 +288,7 @@ export function SolidControlCenter() {
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
-        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
+        return <SolidInputBar disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
       case 'session':
         return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
@@ -356,7 +360,7 @@ export function SolidControlCenter() {
           forceDropdown={emptyVisual()}
         />
       case 'send':
-        return <SolidSendWidget disabled={readonly()} />
+        return null
       case 'attach':
         return <SolidAttachWidget disabled={readonly()} />
       case 'tasks': {
@@ -497,7 +501,21 @@ export function SolidControlCenter() {
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
 
+  onMount(() => {
+    const slot = controlCenterElement?.querySelector<HTMLElement>('.cc-input-slot')
+    if (!slot) return
+    const update = () => {
+      const width = slot.getBoundingClientRect().width || slot.clientWidth
+      if (width > 0) controlCenterElement?.style.setProperty('--cc-input-text-inset-x', `${width * 0.05}px`)
+    }
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update)
+    observer?.observe(slot)
+    onCleanup(() => observer?.disconnect())
+  })
+
   return <div
+    ref={node => { controlCenterElement = node }}
     class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
     data-creation-state={sessionEntering() ? 'entering' : submitting() ? 'creating' : undefined}
@@ -538,6 +556,12 @@ export function SolidControlCenter() {
       '--cc-input-line-height': appearance().inputLineHeight,
       '--cc-input-text': appearance().inputTextColor,
       '--cc-input-placeholder': appearance().inputPlaceholder,
+      '--cc-send-size': `calc(var(--cc-input-height) * ${sendButtonMode() === 'inline' ? '0.8' : '1'})`,
+      '--cc-send-color': appearance().sendButtonColor,
+      '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
+      '--cc-input-text-right-inset': sendButtonMode() === 'inline'
+        ? 'calc(var(--cc-input-height) * 0.9 + var(--cc-input-text-inset-x, 5%))'
+        : 'var(--cc-input-text-inset-x, 5%)',
     }}
   >
     <Show when={appearance().ccEditMode}><div
@@ -557,6 +581,7 @@ export function SolidControlCenter() {
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
     <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
+    <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('send')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">

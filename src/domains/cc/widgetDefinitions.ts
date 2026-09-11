@@ -174,8 +174,7 @@ export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
 
 /**
  * 外部按钮模式（send/attach 独立 widget 渲染的前提）：非 CLI + submitButtonMode=external。
- * 单一真值：isWidgetVisible 与 ControlCenter 的 InputBar externalSend/externalAttach 传参
- * 共同消费，改判定一处即可。
+ * 单一真值：isWidgetVisible 统一消费此判定，改判定一处即可。
  */
 export function isExternalSubmitMode(ctx: Pick<WidgetVisibilityCtx, 'inputMode' | 'submitButtonMode'>): boolean {
   return ctx.inputMode !== 'cli' && ctx.submitButtonMode === 'external'

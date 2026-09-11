@@ -34,7 +34,7 @@ export const BUILTIN_CC_SURFACE_CONTRIBUTION: CcWidgetContribution = Object.free
   id: 'cc-surface',
   label: '中控本体背景板',
   category: 'surface',
-  render: { kind: 'host-renderer', rendererKey: 'cc-surface' },
+  render: { kind: 'host-renderer' as const, rendererKey: 'cc-surface' },
   propertyFields: Object.freeze([
     { kind: 'theme-field', key: 'ccHeight', label: '中控区高度' },
     { kind: 'theme-field', key: 'ccMarginX', label: '左右边距' },
@@ -45,9 +45,22 @@ export const BUILTIN_CC_SURFACE_CONTRIBUTION: CcWidgetContribution = Object.free
   ]),
 })
 
-/** Registered builtin contributions. P2 intentionally exposes only the body surface. */
+export const BUILTIN_CC_SEND_BUTTON_CONTRIBUTION: CcWidgetContribution = Object.freeze({
+  id: 'cc-send-button',
+  label: '发送按钮',
+  category: 'action',
+  render: { kind: 'host-renderer' as const, rendererKey: 'cc-send-button' },
+  propertyFields: Object.freeze([
+    { kind: 'theme-field', key: 'inputSubmitButtonMode', label: '位置' },
+    { kind: 'theme-field', key: 'sendButtonColor', label: '颜色' },
+    { kind: 'theme-field', key: 'sendButtonRadius', label: '圆角' },
+  ]),
+})
+
+/** Registered builtin contributions exposed through the CC widget channel. */
 export const BUILTIN_CC_WIDGET_CONTRIBUTIONS = Object.freeze([
   BUILTIN_CC_SURFACE_CONTRIBUTION,
+  BUILTIN_CC_SEND_BUTTON_CONTRIBUTION,
 ] as const)
 
 export type BuiltinCcWidgetId = typeof CC_WIDGET_IDS[number]

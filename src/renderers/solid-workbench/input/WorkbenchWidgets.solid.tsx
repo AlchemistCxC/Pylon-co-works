@@ -357,30 +357,26 @@ export function SolidReasoningWidget(props: { value: () => string; onChange: (va
   </label>
 }
 
-export function SolidSendWidget(props: { disabled?: boolean } = {}) {
+/** First-batch host renderer: the registered send block intentionally has no
+ * glyph or effect layer. Submission/cancellation semantics stay shared with
+ * the legacy widget facade. */
+export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 'external' }) {
   const workbench = useSolidWorkbench()
-  const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
-  const variant = () => appearance().sendVariant || 'icon'
-  const className = () => variant() === 'minimal' ? 'cc-send-minimal' : variant() === 'square' ? 'cc-send-square' : 'cc-send-icon'
-  const scale = () => appearance().ccScale.send ?? 100
   const send = () => window.dispatchEvent(new CustomEvent('pylon:solid-input-send'))
   const cancel = () => {
     const sessionId = workbench.input().sessionId
     if (sessionId) void workbench.commands.cancel(sessionId)
   }
-
-  return (
-    <button
-      type="button"
-      disabled={props.disabled}
-      class={className()}
-      style={{ 'font-size': `${scale()}%` }}
-      title={runtime().generating ? '停止生成' : 'Send (Enter)'}
-      aria-label={runtime().generating ? '停止生成' : '发送消息'}
-      onClick={() => runtime().generating ? cancel() : send()}
-    >{runtime().generating ? '■' : '↑'}</button>
-  )
+  return <button
+    type="button"
+    class="cc-send-button"
+    data-mode={props.mode}
+    disabled={props.disabled}
+    title={runtime().generating ? '停止生成' : '发送'}
+    aria-label={runtime().generating ? '停止生成' : '发送消息'}
+    onClick={() => runtime().generating ? cancel() : send()}
+  />
 }
 
 export function SolidAttachWidget(props: { disabled?: boolean } = {}) {

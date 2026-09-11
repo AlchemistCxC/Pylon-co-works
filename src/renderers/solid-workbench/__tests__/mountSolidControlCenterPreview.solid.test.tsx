@@ -4,6 +4,9 @@ import { waitFor } from '@solidjs/testing-library'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { mountSolidControlCenterPreview } from '../__fixtures__/mountSolidControlCenterPreview.solid.tsx'
+import { createBuiltinCcWidgetPluginDefinition } from '../../../plugins/core/cc/builtinCcWidgetPlugin.ts'
+import { TestPluginRuntime } from '../../../plugin-runtime/testing/pluginRuntimeHarness.ts'
+import { getRuntimeServices } from '../../../plugin-runtime/runtimeServices.ts'
 
 const cleanups: Array<() => void> = []
 
@@ -141,5 +144,48 @@ describe('mountSolidControlCenterPreview', () => {
       expect(controlCenter?.style.getPropertyValue('--cc-input-focus-ring-shadow')).toBe('')
       expect(controlCenter?.style.getPropertyValue('--cc-input-shadow')).toBe('none')
     })
+  })
+
+  it('注册发送控件后按位置渲染底层块，hidden 时不渲染并注入几何变量', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputSubmitButtonMode = 'inline'
+    theme.inputHeight = 50
+    theme.inputOffsetTop = 12
+    theme.inputMarginX = 16
+    theme.sendButtonColor = '#123456'
+    theme.sendButtonRadius = '0.25'
+    services.appearance.setTheme(theme)
+
+    try {
+      expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries.map(entry => entry.value.id)).toContain('cc-send-button')
+      const destroy = mountSolidControlCenterPreview({ host, services })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(controlCenter).not.toBeNull()
+      const button = controlCenter?.querySelector<HTMLButtonElement>('.cc-send-button')
+      expect(button).not.toBeNull()
+      expect(button).toHaveAttribute('data-mode', 'inline')
+      expect(controlCenter?.style.getPropertyValue('--cc-send-size')).toBe('calc(var(--cc-input-height) * 0.8)')
+      expect(controlCenter?.style.getPropertyValue('--cc-send-color')).toBe('#123456')
+      expect(controlCenter?.style.getPropertyValue('--cc-send-radius')).toBe('25%')
+      expect(controlCenter?.style.getPropertyValue('--cc-input-text-right-inset')).toContain('0.9')
+
+      services.appearance.setTheme({ ...theme, inputSubmitButtonMode: 'external' })
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).toHaveAttribute('data-mode', 'external'))
+      expect(controlCenter?.style.getPropertyValue('--cc-send-size')).toBe('calc(var(--cc-input-height) * 1)')
+      expect(controlCenter?.style.getPropertyValue('--cc-input-text-right-inset')).toBe('var(--cc-input-text-inset-x, 5%)')
+
+      services.appearance.setTheme({ ...theme, inputSubmitButtonMode: 'hidden' })
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).toBeNull())
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
   })
 })

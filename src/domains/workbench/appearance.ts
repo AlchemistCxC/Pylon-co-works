@@ -69,6 +69,8 @@ export interface WorkbenchAppearanceSnapshot {
   inputShowPlaceholder: boolean
   inputShowHistoryHint: boolean
   inputSubmitButtonMode: string
+  sendButtonColor: string
+  sendButtonRadius: string
   modelVariant: string
   modeVariant: string
   sendVariant: string
@@ -167,6 +169,8 @@ export function selectWorkbenchAppearance(
     inputShowPlaceholder: theme.inputShowPlaceholder !== false,
     inputShowHistoryHint: theme.inputShowHistoryHint !== false,
     inputSubmitButtonMode: theme.inputSubmitButtonMode,
+    sendButtonColor: theme.sendButtonColor,
+    sendButtonRadius: theme.sendButtonRadius,
     modelVariant: theme.modelVariant,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,

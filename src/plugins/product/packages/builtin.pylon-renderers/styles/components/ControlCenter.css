@@ -18,6 +18,24 @@
   border-radius:inherit;
   z-index:0;
 }
+.cc-send-button {
+  position:absolute;
+  top:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+  right:var(--cc-input-offset-top,10px);
+  z-index:3;
+  width:var(--cc-send-size,32px);
+  height:var(--cc-send-size,32px);
+  padding:0;
+  border:0;
+  border-radius:var(--cc-send-radius,50%);
+  background:var(--cc-send-color,#000);
+  color:transparent;
+  cursor:pointer;
+}
+.cc-send-button[data-mode="inline"] {
+  right:calc(var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+}
+.cc-send-button:disabled { cursor:default; }
 .cc-input-shadow-clip {
   position:absolute; inset:0; z-index:1; pointer-events:none;
   clip-path:inset(0 round var(--cc-radius,8px));
@@ -65,6 +83,9 @@
   right:var(--cc-input-margin-x,10px);
   display:flex; align-items:flex-end; width:auto; height:var(--cc-input-height); min-width:0; min-height:0;
   z-index:2;
+}
+.control-center:has(.cc-send-button[data-mode="external"]) .cc-input-slot {
+  right:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) + var(--cc-input-margin-x,10px));
 }
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
 /* The slot owns the themed height; mounted widgets fill it. */

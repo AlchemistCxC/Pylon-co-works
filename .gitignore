@@ -58,6 +58,9 @@ nodejs/
 public/
 *.html
 
+# 本地 bun 运行时（项目本地便携工具）
+bun/
+
 dist-plugin-sdk/
 
 # pi agent 本地运行时状态（goals/tasks 快照，不入库）

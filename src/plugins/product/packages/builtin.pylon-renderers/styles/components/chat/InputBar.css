@@ -69,7 +69,7 @@
 .input-textarea {
   flex:1; min-width:0; background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent); border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent);
   background-image:var(--input-bg-image,none); background-size:cover; background-position:center;
-  border-radius:var(--cc-input-radius,var(--input-radius,0)); padding:12px 16px; color:var(--cc-input-text,var(--input-text-color,var(--text)));
+  border-radius:var(--cc-input-radius,var(--input-radius,0)); padding:12px var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%)) 12px var(--cc-input-text-inset-x,5%); color:var(--cc-input-text,var(--input-text-color,var(--text)));
   /* Conversation copy and the composer share the message-font role. Code,
      command names and paths opt into --mono below. */
   font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--cc-input-font-size,var(--input-font-size,15px)); line-height:var(--cc-input-line-height,var(--msg-line-height,var(--chat-line-height,1.35)));
@@ -83,12 +83,20 @@
 }
 .input-ghost-suggestion {
   position:absolute; inset:0; pointer-events:none; z-index:0;
-  padding:9px 10px; white-space:pre-wrap; overflow:hidden;
+  padding:9px var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%)) 9px var(--cc-input-text-inset-x,5%); white-space:pre-wrap; overflow:hidden;
   color:var(--text-placeholder,var(--text)); opacity:.48;
   line-height:var(--msg-line-height,var(--chat-line-height,1.35)); font:inherit;
 }
 .input-ghost-prefix { visibility:hidden; }
 .input-editor-stack .input-textarea { position:relative; z-index:1; width:100%; background:transparent; }
+.cc-input-slot .input-bar .input-textarea {
+  padding-left:var(--cc-input-text-inset-x,5%);
+  padding-right:var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%));
+}
+.cc-input-slot .input-bar .input-ghost-suggestion {
+  padding-left:var(--cc-input-text-inset-x,5%);
+  padding-right:var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%));
+}
 /* 输入焦点由插入光标表达；不要因为输入而改变整栏边框或投射焦点光环。
    焦点光环由 .input-bar 级的 hover/focus-within 光环机制（--cc-input-focus-ring-shadow）承担。 */
 .input-textarea:focus { border-color:color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent); }

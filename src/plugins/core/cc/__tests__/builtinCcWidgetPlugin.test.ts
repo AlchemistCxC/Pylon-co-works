@@ -4,12 +4,15 @@ import { TestPluginRuntime } from '../../../../plugin-runtime/testing/pluginRunt
 import { getRuntimeServices } from '../../../../plugin-runtime/runtimeServices.ts'
 
 describe('builtin cc widget plugin', () => {
-  it('registers only the builtin body surface on activation', async () => {
+  it('registers the builtin surface and send button on activation', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
-    expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries).toHaveLength(1)
-    expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries[0].value.id).toBe('cc-surface')
-    await runtime.deactivate(instance.identity.key)
+    try {
+      expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries).toHaveLength(2)
+      expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries.map(entry => entry.value.id)).toEqual(['cc-send-button', 'cc-surface'])
+    } finally {
+      await runtime.deactivate(instance.identity.key)
+    }
     expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries).toHaveLength(0)
   })
 })
