@@ -29,7 +29,9 @@ pub fn parse_questions(
 ) -> Result<Vec<question_policy::QuestionSpec>, String> {
     match bridge {
         PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
-            question_policy::parse_questions(params)
+            let specs = question_policy::parse_questions(params)?;
+            question_policy::validate_specs(&specs)?;
+            Ok(specs)
         }
         PrivateBridge::GrokExitPlan => Err("plan bridge does not accept questions".into()),
     }

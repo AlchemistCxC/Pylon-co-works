@@ -39,6 +39,7 @@ mod plugin_cmds;
 mod plugin_process;
 mod prism;
 mod prism_cmds;
+mod private_interaction;
 mod protocol_adapter;
 pub mod provider_adapter;
 pub mod pylon_cli;

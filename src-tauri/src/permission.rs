@@ -433,6 +433,55 @@ pub(crate) async fn respond_interaction(
     let runtime = state.runtimes.get(&identity.agent_id).ok_or_else(|| {
         PylonError::Protocol(format!("agent runtime not found: {}", identity.agent_id))
     })?;
+    let request_id = crate::acp::RequestId::from_echo_string(&identity.request_id);
+    if let Some(pending) = runtime
+        .private_interactions
+        .take(&request_id)
+        .map_err(PylonError::Protocol)?
+    {
+        if pending.session_id != identity.session_id
+            || pending.client_generation != identity.client_generation
+        {
+            return Err(PylonError::Protocol("stale interaction identity".into()));
+        }
+        let response = match pending.bridge {
+            crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
+            | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
+                let questions = crate::acp::adapter::private_ext::parse_questions(
+                    pending.bridge,
+                    &pending.params,
+                )
+                .map_err(PylonError::Protocol)?;
+                let answer_value = answer
+                    .values
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let answer: crate::acp::question_policy::QuestionAnswer =
+                    serde_json::from_value(answer_value).map_err(|e| {
+                        PylonError::Protocol(format!("invalid question answer: {e}"))
+                    })?;
+                crate::acp::adapter::private_ext::build_question_outcome(
+                    pending.bridge,
+                    &questions,
+                    &answer,
+                )
+                .map_err(PylonError::Protocol)?
+            }
+            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                crate::acp::plan_policy::approval_response(
+                    answer.option_id.as_deref().unwrap_or("keep_planning"),
+                    answer.text.as_deref().unwrap_or(""),
+                )
+            }
+        };
+        let responder = { runtime.acp.lock().await.responder() };
+        if !responder.respond(request_id, response).await {
+            return Err(PylonError::Protocol(
+                "private interaction response failed".into(),
+            ));
+        }
+        return Ok(());
+    }
     adapter
         .respond_interaction(&runtime, &identity, &kind, &answer)
         .await
