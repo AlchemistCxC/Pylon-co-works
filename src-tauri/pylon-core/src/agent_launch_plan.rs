@@ -333,6 +333,172 @@ mod tests {
     use super::*;
     use crate::agent_catalog;
 
+    /// A2 golden fixture（可检查的基线，而非只存在于断言里的期望值）。
+    ///
+    /// 每个用例都逐字段断言 executable / argv 顺序 / cwd / env 顺序与值 / 来源 /
+    /// 诊断码；带 `diagnosticMessages` 的用例额外断言诊断文本——这是「敏感值
+    /// 脱敏」的可检查凭据（只出现名称与 withheld，不出现任何值）。
+    #[test]
+    fn launch_plan_golden_fixture_matches_every_case() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../shared/agent-launch-plan.fixture.json"
+        ))
+        .expect("launch plan fixture 必须是合法 JSON");
+        let cases = fixture["cases"].as_array().expect("cases 是数组");
+        assert!(!cases.is_empty(), "fixture 不得为空");
+        for case in cases {
+            let name = case["name"].as_str().expect("case.name");
+            let provider = case["provider"].as_str().expect("case.provider");
+            let detection_json = &case["detection"];
+            let detection = LaunchDetection {
+                resolved_executable: detection_json
+                    .get("resolvedExecutable")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                acp_present: detection_json
+                    .get("acpPresent")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                native_present: detection_json
+                    .get("nativePresent")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            };
+            let overrides_json = &case["overrides"];
+            let overrides = LaunchOverrides {
+                executable: overrides_json
+                    .get("executable")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                args: overrides_json.get("args").and_then(|value| {
+                    value.as_array().map(|items| {
+                        items
+                            .iter()
+                            .map(|item| item.as_str().unwrap_or_default().to_string())
+                            .collect()
+                    })
+                }),
+                cwd: overrides_json
+                    .get("cwd")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                env: overrides_json
+                    .get("env")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|pairs| {
+                        pairs
+                            .iter()
+                            .map(|pair| {
+                                let pair = pair.as_array().expect("env 条目是 [name, value]");
+                                (
+                                    pair[0].as_str().expect("env name").to_string(),
+                                    pair[1].as_str().expect("env value").to_string(),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                runtime_env: Vec::new(),
+            };
+            let profile = crate::agent_catalog::provider_profile(provider)
+                .unwrap_or_else(|error| panic!("{name}: catalog 解析失败: {error}"))
+                .unwrap_or_else(|| panic!("{name}: {provider} 必须在 catalog 中"));
+            let plan = plan_launch(provider, Some(&profile), &detection, &overrides)
+                .unwrap_or_else(|error| panic!("{name}: plan_launch 失败: {error}"));
+            let expected = &case["expected"];
+            assert_eq!(
+                serde_json::json!(plan.executable),
+                expected["executable"],
+                "{name}: executable"
+            );
+            assert_eq!(
+                serde_json::json!(plan.args),
+                expected["args"],
+                "{name}: argv 顺序"
+            );
+            assert_eq!(serde_json::json!(plan.cwd), expected["cwd"], "{name}: cwd");
+            assert_eq!(
+                serde_json::json!(plan
+                    .env
+                    .iter()
+                    .map(|(name, value)| serde_json::json!([name, value]))
+                    .collect::<Vec<_>>()),
+                expected["env"],
+                "{name}: env 顺序与值"
+            );
+            let expected_source = match expected["source"].as_str().expect("expected.source") {
+                "explicit" => LaunchPlanSource::Explicit,
+                "catalogRecipe" => LaunchPlanSource::CatalogRecipe,
+                other => panic!("{name}: 未知 source {other}"),
+            };
+            assert_eq!(plan.source, expected_source, "{name}: source");
+            let codes: Vec<&str> = plan
+                .diagnostics
+                .iter()
+                .map(|item| item.code.as_str())
+                .collect();
+            let expected_codes: Vec<&str> = expected["diagnosticCodes"]
+                .as_array()
+                .expect("expected.diagnosticCodes")
+                .iter()
+                .map(|item| item.as_str().unwrap_or_default())
+                .collect();
+            assert_eq!(codes, expected_codes, "{name}: 诊断码");
+            if let Some(messages) = expected
+                .get("diagnosticMessages")
+                .and_then(|v| v.as_array())
+            {
+                let rendered = serde_json::to_string(&plan.diagnostics).expect("诊断可序列化");
+                for message in messages {
+                    let message = message.as_str().expect("diagnosticMessages 是字符串");
+                    assert!(
+                        rendered.contains(message),
+                        "{name}: 诊断必须包含 {message:?}，实际 {rendered}"
+                    );
+                }
+                // 脱敏的精确断言：每个 env 条目必须恰好对应一条「名称 + withheld」
+                // 诊断。用精确消息而不是“消息不含值”的子串断言：短值（如 "a"）会
+                // 命中 "applied" 而产生假阳性，而精确等值已经严格强于子串检查——
+                // 消息被完全指定，值不可能出现在里面。
+                for (env_name, _) in &plan.env {
+                    let upper = env_name.to_ascii_uppercase();
+                    let secret = [
+                        "API_KEY",
+                        "APIKEY",
+                        "TOKEN",
+                        "SECRET",
+                        "PASSWORD",
+                        "PASSWD",
+                        "CREDENTIAL",
+                    ]
+                    .iter()
+                    .any(|needle| upper.contains(needle));
+                    let expected_message = format!(
+                        "env {env_name} applied ({})",
+                        if secret {
+                            "secret value withheld"
+                        } else {
+                            "value withheld"
+                        }
+                    );
+                    assert!(
+                        plan.diagnostics
+                            .iter()
+                            .any(|item| item.message == expected_message),
+                        "{name}: 缺少精确脱敏诊断 {expected_message:?}，实际 {rendered}"
+                    );
+                }
+                // 泄漏反例：有辨识度的值一旦出现在诊断里就判红（用长值避免假阳性）。
+                for (_, env_value) in plan.env.iter().filter(|(_, value)| value.len() >= 8) {
+                    assert!(
+                        !rendered.contains(env_value.as_str()),
+                        "{name}: env 值 {env_value:?} 泄漏进诊断 {rendered}"
+                    );
+                }
+            }
+        }
+    }
+
     fn overrides_for_agent(exe: &str, args: &[&str]) -> LaunchOverrides {
         LaunchOverrides {
             executable: Some(exe.into()),

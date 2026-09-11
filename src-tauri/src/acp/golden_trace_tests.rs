@@ -24,7 +24,24 @@ use super::wire_trace::{WireDirection, WireIdKind, WireRecord};
 use super::{AcpClient, AcpError, METHOD_SESSION_LOAD, METHOD_SESSION_NEW};
 
 /// A0 固定场景清单（顺序即基线文件生成顺序，对应施工书 §A0 步骤 4）。
-pub(crate) const SCENARIOS: [&str; 8] = [
+pub(crate) const SCENARIOS: [&str; 10] = [
+    "initialize",
+    "new_load",
+    "prompt",
+    "tool",
+    "permission",
+    "done_error",
+    "cancel",
+    "reconnect",
+    // A5①：wrapper provider 的基线。这两个场景带真实 `provider`，把
+    // catalog 声明的 clientCapabilities 与实际启动路径一起钉进 wire 基线。
+    "wrapper_claude",
+    "wrapper_codex",
+];
+
+/// 施工书 §A0 步骤 4 点名的 8 个场景。与 [`SCENARIOS`] 的前缀断言对齐：
+/// 新增场景只允许追加，不得删改这 8 个。
+const CONSTRUCTION_BOOK_SCENARIOS: [&str; 8] = [
     "initialize",
     "new_load",
     "prompt",
@@ -34,6 +51,15 @@ pub(crate) const SCENARIOS: [&str; 8] = [
     "cancel",
     "reconnect",
 ];
+
+/// A5① wrapper 场景 → catalog provider。`None` = 不带 provider 的基线场景。
+fn scenario_provider(scenario: &str) -> Option<&'static str> {
+    match scenario {
+        "wrapper_claude" => Some("claude-code"),
+        "wrapper_codex" => Some("codex"),
+        _ => None,
+    }
+}
 
 /// 基线使用的 durable owner（真实 `DurableSessionOwner`，不是占位字符串）。
 const OWNER_PARTS: (&str, &str, &str) = ("golden-profile", "fake-acp-golden", "local:golden");
@@ -112,7 +138,16 @@ fn trace_dir() -> Option<PathBuf> {
 fn golden_agent(scenario: &str) -> crate::agent_config::AgentDef {
     let mut env = std::collections::HashMap::new();
     env.insert("GOLDEN_SCENARIO".to_string(), scenario.to_string());
-    crate::test_utils::fake_acp_agent_with("fake-acp-golden", GOLDEN_AGENT_SCRIPT, Vec::new(), env)
+    let mut agent = crate::test_utils::fake_acp_agent_with(
+        "fake-acp-golden",
+        GOLDEN_AGENT_SCRIPT,
+        Vec::new(),
+        env,
+    );
+    // A5①：wrapper 场景带真实 provider，使 catalog 声明的 clientCapabilities 与
+    // provider 身份一起进入 wire 基线；其余场景保持 provider = None（P60 基线不变）。
+    agent.provider = scenario_provider(scenario).map(str::to_string);
+    agent
 }
 
 fn owner_key() -> String {
@@ -305,6 +340,12 @@ async fn drive_scenario(scenario: &str) -> Result<Vec<Vec<WireRecord>>, AcpError
             second.kill()?;
             return Ok(records);
         }
+        // A5①：wrapper provider 走完整的 initialize → session/new → prompt，
+        // 与真实会话同一条路径（都经 `spawn_agent_child` 的 LaunchPlan）。
+        "wrapper_claude" | "wrapper_codex" => {
+            new_session(&client).await?;
+            let _ = prompt(&client).await;
+        }
         other => panic!("unknown golden scenario: {other}"),
     }
 
@@ -337,21 +378,42 @@ async fn golden_trace_baseline_generation() {
 }
 
 /// 场景清单与施工书 §A0 步骤 4 的 8 个场景逐项对齐（常驻断言，不依赖环境变量）。
+///
+/// A5① 追加了两个 wrapper 场景，所以这里断言的是「施工书 8 场景是 SCENARIOS 的
+/// 前缀」而不是「SCENARIOS 就是这 8 个」——前缀断言仍然禁止删改/重排原 8 场景，
+/// 只是允许向后追加（严格程度不降）。
 #[test]
 fn golden_trace_scenarios_match_construction_book() {
     assert_eq!(
-        SCENARIOS,
-        [
-            "initialize",
-            "new_load",
-            "prompt",
-            "tool",
-            "permission",
-            "done_error",
-            "cancel",
-            "reconnect",
-        ]
+        &SCENARIOS[..CONSTRUCTION_BOOK_SCENARIOS.len()],
+        &CONSTRUCTION_BOOK_SCENARIOS[..]
     );
+    assert_eq!(SCENARIOS.len(), CONSTRUCTION_BOOK_SCENARIOS.len() + 2);
+}
+
+/// A5① 验收：wrapper 场景必须带真实 provider，否则基线里就看不出声明是 provider
+/// 作用域的（`initialize` 的 `clientCapabilities` 会与无 provider 场景同形）。
+#[test]
+fn wrapper_scenarios_carry_their_catalog_provider() {
+    assert_eq!(scenario_provider("wrapper_claude"), Some("claude-code"));
+    assert_eq!(scenario_provider("wrapper_codex"), Some("codex"));
+    for scenario in CONSTRUCTION_BOOK_SCENARIOS {
+        assert_eq!(
+            scenario_provider(scenario),
+            None,
+            "{scenario} 必须保持无 provider"
+        );
+    }
+    // 带 provider 的场景必须真的能在 catalog 里解析出 profile。
+    for scenario in ["wrapper_claude", "wrapper_codex"] {
+        let provider = scenario_provider(scenario).expect("wrapper 场景必须有 provider");
+        assert!(
+            crate::agent_catalog::provider_profile(provider)
+                .expect("catalog 必须可解析")
+                .is_some(),
+            "{provider} 必须在 catalog 中"
+        );
+    }
 }
 
 /// 归一化必须去掉机器相关字段、保留身份轴。

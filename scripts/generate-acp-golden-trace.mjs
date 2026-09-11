@@ -37,6 +37,9 @@ const SCENARIOS = [
   "done_error",
   "cancel",
   "reconnect",
+  // A5①：wrapper provider 基线（带真实 provider，见 golden_trace_tests.rs）。
+  "wrapper_claude",
+  "wrapper_codex",
 ];
 
 function generateInto(dir) {
