@@ -589,6 +589,75 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     expect(within(section).queryByText(/adapter version >= 0.65.0/)).toBeNull()
   })
 
+  /**
+   * C3：原因用后端下发的 `cause.summary`（本机实测），而不是只看状态名的静态文案。
+   *
+   * 静态文案对 `notInstalled` 只会说“请先安装”，而本机真实原因可能是“装在了
+   * Pylon 看不见的目录”。这条测试把“面板消费 cause”钉住。
+   */
+  it('优先渲染后端下发的本机原因，而不是只看状态名的静态文案', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+          preflight: [{
+            provider: 'gemini',
+            status: 'notInstalled',
+            passed: false,
+            adapter: null,
+            checks: [],
+            cause: {
+              level: 'warn',
+              code: 'path_gap_restart_required',
+              summary: '未检测到该 Agent；但你的 PATH 中有 1 个目录是本进程看不到的（如 C:\\Users\\me\\AppData\\Roaming\\npm）。若你刚安装过它，重启 Pylon 即可。',
+            },
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText(/重启 Pylon 即可/)).toBeInTheDocument()
+    // 静态文案不得同时出现：两者并存会给出互相矛盾的行动建议。
+    expect(within(section).queryByText('未检测到该 Agent；请先安装，或在下方手动添加')).toBeNull()
+  })
+
+  /**
+   * C3：`level === 'ok'` 时不占行。
+   *
+   * 工作正常的 provider 不需要用户读任何东西；否则每个正常项都带一行解释，
+   * 真实问题就会被噪声淹没。
+   */
+  it('level 为 ok 的本机原因不占行，避免给正常 provider 加噪声', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+          preflight: [{
+            provider: 'peri',
+            status: 'installed',
+            passed: true,
+            adapter: null,
+            checks: [],
+            cause: {
+              level: 'ok',
+              code: 'ok_absolute_path',
+              summary: '该 Agent 可用：命令位于 F:\\A-I\\Agent\\bin\\peri.cmd，不在 PATH 上。',
+            },
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('peri')).toBeInTheDocument()
+    expect(within(section).queryByText(/不在 PATH 上/)).toBeNull()
+  })
+
   /** 已安装的 provider 不给可行动原因，避免噪声。 */
   it('已安装的 provider 不显示故障原因', async () => {
     invoke.mockImplementation((command: string) => {

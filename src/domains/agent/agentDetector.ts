@@ -83,12 +83,51 @@ export interface AgentAdapterEvidence {
   docsUrl?: string | null
 }
 
+/**
+ * Why a provider is in `status` — the backend's closed diagnosis vocabulary.
+ *
+ * A status name cannot distinguish "not installed" from "installed somewhere
+ * this process cannot see", and users read the second as the app being broken.
+ * `summary` is a ready-to-render actionable sentence produced by the same pure
+ * function the CLI uses, so panel and CLI cannot disagree.
+ */
+export interface AgentDiagnosticCause {
+  level: AgentDiagnosticLevel
+  code: string
+  summary: string
+}
+
+export type AgentDiagnosticLevel = 'ok' | 'info' | 'warn' | 'fail'
+
+const DIAGNOSTIC_LEVELS: readonly AgentDiagnosticLevel[] = ['ok', 'info', 'warn', 'fail']
+
+/**
+ * Normalize the diagnosis. An unrecognized level is dropped rather than
+ * rendered: a cause the UI cannot rank must not reach the user as a silently
+ * mis-coloured severity. Dropping it makes the panel fall back to the static
+ * status wording, which is strictly better than a wrong-level blank.
+ */
+function normalizeDiagnosticCause(raw: unknown): AgentDiagnosticCause | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Partial<AgentDiagnosticCause>
+  if (!DIAGNOSTIC_LEVELS.includes(value.level as AgentDiagnosticLevel)) return null
+  if (typeof value.code !== 'string' || value.code.trim().length === 0) return null
+  if (typeof value.summary !== 'string' || value.summary.trim().length === 0) return null
+  return {
+    level: value.level as AgentDiagnosticLevel,
+    code: value.code,
+    summary: value.summary,
+  }
+}
+
 export interface AgentProviderPreflight {
   provider: string
   status: AgentInstallStatus
   passed: boolean
   adapter?: AgentAdapterEvidence | null
   checks: AgentPreflightCheck[]
+  /** Present when the backend explained why; absent otherwise. */
+  cause?: AgentDiagnosticCause | null
 }
 
 /**
@@ -227,6 +266,7 @@ function normalizeProviderPreflight(raw: unknown): AgentProviderPreflight[] {
       passed: value.passed,
       adapter: normalizedAdapter,
       checks: normalizePreflightChecks(value.checks),
+      cause: normalizeDiagnosticCause(value.cause),
     }]
   })
 }

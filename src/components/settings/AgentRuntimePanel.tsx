@@ -132,12 +132,21 @@ function installStatusClass(status: AgentInstallStatus): string {
 /**
  * A4：安装状态区。每个 provider 一行，非 installed 必须给可行动原因
  * （文案由前端拥有，状态词表由后端封闭；未知名不会渲染成空白）。
+ *
+ * C3：原因优先用后端下发的 `cause.summary`——它是**本机实测**的原因（如
+ * “某目录不在 PATH 上”），而静态文案只能说状态名，无法区分“没装”和
+ * “装了但本进程看不见”。`level === 'ok'` 时不占行：该 provider 工作正常，
+ * 无需用户读任何东西，而其信息量已由下方状态与 adapter 行给出。
+ * 没有 cause 时回退到静态文案，保证任何状态都不会渲染成空白。
  */
 function AgentInstallStatusList({ preflight }: { preflight: readonly AgentProviderPreflight[] }) {
   if (preflight.length === 0) return null
   return <div className="agent-install-status" aria-label="本机 Agent 安装状态">
     {preflight.map(entry => {
-      const reason = agentInstallStatusReason(entry.status)
+      const cause = entry.cause
+      const reason = cause
+        ? (cause.level === 'ok' ? '' : cause.summary)
+        : agentInstallStatusReason(entry.status)
       const adapter = entry.adapter
       return <div key={entry.provider} className={`agent-install-row ${installStatusClass(entry.status)}`} role="status">
         <span><strong>{entry.provider}</strong><small>{agentInstallStatusLabel(entry.status)}</small></span>
