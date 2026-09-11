@@ -474,7 +474,7 @@ pub(crate) async fn respond_interaction(
                     answers,
                     declined: answer.option_id.as_deref() == Some("declined"),
                 };
-                crate::acp::adapter::private_ext::build_question_outcome(
+                crate::acp::adapter::private_ext::build_question_response(
                     pending.bridge,
                     &questions,
                     &answer,

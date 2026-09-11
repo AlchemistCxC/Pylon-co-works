@@ -36,15 +36,42 @@ pub fn parse_questions(
         PrivateBridge::GrokExitPlan => Err("plan bridge does not accept questions".into()),
     }
 }
-pub fn build_question_outcome(
+/// Serialize the provider-specific response shape documented by Codeg. Grok
+/// correlates answers by question text; pi expects an option id (or cancelled).
+pub fn build_question_response(
     bridge: PrivateBridge,
     questions: &[question_policy::QuestionSpec],
     answer: &question_policy::QuestionAnswer,
 ) -> Result<Value, String> {
+    let outcome = question_policy::build_outcome(questions, answer);
     match bridge {
-        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
-            serde_json::to_value(question_policy::build_outcome(questions, answer))
-                .map_err(|e| e.to_string())
+        PrivateBridge::GrokExtQuestions => {
+            if outcome.declined {
+                return Ok(serde_json::json!({"outcome":"skip_interview"}));
+            }
+            let mut answers = serde_json::Map::new();
+            for item in outcome.answers {
+                let value = if item.multi_select {
+                    Value::Array(item.selected.into_iter().map(Value::String).collect())
+                } else if let Some(label) = item.selected.into_iter().next() {
+                    Value::String(label)
+                } else {
+                    continue;
+                };
+                answers.insert(item.question, value);
+            }
+            Ok(serde_json::json!({"outcome":"accepted","answers":answers,"partial_answers":{}}))
+        }
+        PrivateBridge::PiSelectAsk => {
+            let option = outcome
+                .answers
+                .first()
+                .and_then(|item| item.selected.first())
+                .cloned();
+            Ok(match option {
+                Some(option_id) => serde_json::json!({"optionId": option_id}),
+                None => serde_json::json!({"cancelled":true}),
+            })
         }
         PrivateBridge::GrokExitPlan => Err("plan bridge does not accept question answers".into()),
     }
@@ -70,8 +97,8 @@ mod tests {
             declined: false,
         };
         let outcome =
-            build_question_outcome(PrivateBridge::GrokExtQuestions, &questions, &answer).unwrap();
-        assert_eq!(outcome["answers"][0]["selected"][0], "A");
+            build_question_response(PrivateBridge::GrokExtQuestions, &questions, &answer).unwrap();
+        assert_eq!(outcome["answers"]["Pick"], "A");
     }
     #[test]
     fn private_plan_bridge_reuses_shared_policy() {
@@ -103,5 +130,23 @@ mod tests {
             &serde_json::json!({"questions":[]})
         )
         .is_err());
+    }
+
+    #[test]
+    fn builds_codeg_provider_response_shapes() {
+        let questions = parse_questions(PrivateBridge::GrokExtQuestions, &serde_json::json!({"questions":[{"question":"Pick","header":"Choice","options":[{"label":"A"},{"label":"B"}]}]})).unwrap();
+        let answer = question_policy::QuestionAnswer {
+            answers: vec![question_policy::QuestionAnswerItem {
+                question_id: questions[0].id.clone(),
+                labels: vec!["A".into()],
+            }],
+            declined: false,
+        };
+        let grok =
+            build_question_response(PrivateBridge::GrokExtQuestions, &questions, &answer).unwrap();
+        assert_eq!(grok["outcome"], "accepted");
+        assert_eq!(grok["answers"]["Pick"], "A");
+        let pi = build_question_response(PrivateBridge::PiSelectAsk, &questions, &answer).unwrap();
+        assert_eq!(pi["optionId"], "A");
     }
 }
