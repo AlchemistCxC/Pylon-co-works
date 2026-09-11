@@ -79,20 +79,21 @@ jobs:
       # 指纹带 crate 限定 + 处数计数）。
       # 四个 crate 必须分别以 --manifest-path 起跑：从 src-tauri 跑 `cargo clippy -p pylon-core`
       # 会把 path 依赖当依赖编译，lint 静默不上报（实测 0 警告），子 crate 将完全脱离门禁。
+      # 不 cd：cargo 的诊断文件路径始终相对**各包根**生成，而脚本按**仓库根**解析 json
+      # 参数，所以全用仓库根相对路径，两边基准才一致。
       - name: clippy（4 crate + 基线门禁）
         shell: bash
         run: |
           set -euo pipefail
-          cd src-tauri
           failed=0
           run_crate() {
-            cargo clippy --manifest-path "$1" --all-targets --message-format=json > "../artifacts/clippy-$2.json" 2> "../artifacts/clippy-$2.err"
-            node ../scripts/check-clippy-baseline.mjs "../artifacts/clippy-$2.json" ../artifacts/clippy-baseline.json --crate="$2" --crate-dir="$3" || failed=1
+            cargo clippy --manifest-path "$1" --all-targets --message-format=json > "artifacts/clippy-$2.json" 2> "artifacts/clippy-$2.err"
+            node scripts/check-clippy-baseline.mjs "artifacts/clippy-$2.json" artifacts/clippy-baseline.json --crate="$2" --crate-dir="$3" || failed=1
           }
-          run_crate Cargo.toml pylon src-tauri
-          run_crate pylon-core/Cargo.toml pylon-core src-tauri/pylon-core
-          run_crate pylon-foundations/Cargo.toml pylon-foundations src-tauri/pylon-foundations
-          run_crate pet-core/Cargo.toml pet-core src-tauri/pet-core
+          run_crate src-tauri/Cargo.toml pylon src-tauri
+          run_crate src-tauri/pylon-core/Cargo.toml pylon-core src-tauri/pylon-core
+          run_crate src-tauri/pylon-foundations/Cargo.toml pylon-foundations src-tauri/pylon-foundations
+          run_crate src-tauri/pet-core/Cargo.toml pet-core src-tauri/pet-core
           exit $failed
 
       # 必要 bundle（debug 二进制），不上传 secret/data
