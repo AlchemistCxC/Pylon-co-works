@@ -560,6 +560,7 @@ export function SolidControlCenter() {
       '--cc-send-color': appearance().sendButtonColor,
       '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
       '--cc-send-border-color': appearance().sendButtonBorderColor === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)',
+      '--cc-send-icon-color': appearance().sendButtonIconColor === 'black' ? '#000' : appearance().sendButtonIconColor === 'gray' ? 'rgba(0,0,0,.5)' : '#fff',
       '--cc-input-text-right-inset': sendButtonMode() === 'inline'
         ? 'calc(var(--cc-input-height) * 0.9 + var(--cc-input-text-inset-x, 5%))'
         : 'var(--cc-input-text-inset-x, 5%)',

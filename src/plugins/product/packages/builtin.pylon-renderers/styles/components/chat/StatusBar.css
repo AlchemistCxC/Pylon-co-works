@@ -62,16 +62,18 @@
   .status-bar button { transition:none!important; }
 }
 
-/* ── Send / Attach widget variants ── */
-.cc-send-icon, .cc-send-square, .cc-send-minimal,
+/* ── Attach widget variants ──
+   注：send 侧已由 cc-send-button 接管。旧的 .cc-send-icon 选择器会撞上
+   新图标 SVG（给它铺圆灰底），已摘除；.cc-send-square/minimal 暂无使用者。 */
+.cc-send-square, .cc-send-minimal,
 .cc-attach-icon, .cc-attach-square, .cc-attach-minimal {
   display:flex; align-items:center; justify-content:center; border:none; cursor:pointer;
   font-family:var(--mono); transition:background 0.15s, color 0.15s;
 }
-.cc-send-icon, .cc-attach-icon {
+.cc-attach-icon {
   border-radius: 50%; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
 }
-.cc-send-icon:hover, .cc-attach-icon:hover { background:rgba(0,0,0,0.18); }
+.cc-attach-icon:hover { background:rgba(0,0,0,0.18); }
 .cc-send-square, .cc-attach-square {
   border-radius: 0; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
 }

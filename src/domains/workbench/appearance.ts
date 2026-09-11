@@ -72,6 +72,10 @@ export interface WorkbenchAppearanceSnapshot {
   sendButtonColor: string
   sendButtonRadius: string
   sendButtonBorderColor: string
+  sendButtonIcon: string
+  sendButtonIconGenerating: string
+  sendButtonIconRound: string
+  sendButtonIconColor: string
   modelVariant: string
   modeVariant: string
   sendVariant: string
@@ -173,6 +177,10 @@ export function selectWorkbenchAppearance(
     sendButtonColor: theme.sendButtonColor,
     sendButtonRadius: theme.sendButtonRadius,
     sendButtonBorderColor: theme.sendButtonBorderColor,
+    sendButtonIcon: theme.sendButtonIcon,
+    sendButtonIconGenerating: theme.sendButtonIconGenerating,
+    sendButtonIconRound: theme.sendButtonIconRound,
+    sendButtonIconColor: theme.sendButtonIconColor,
     modelVariant: theme.modelVariant,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,

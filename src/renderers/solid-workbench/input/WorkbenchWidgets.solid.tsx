@@ -357,16 +357,31 @@ export function SolidReasoningWidget(props: { value: () => string; onChange: (va
   </label>
 }
 
-/** First-batch host renderer: the registered send block intentionally has no
- * glyph or effect layer. Submission/cancellation semantics stay shared with
- * the legacy widget facade. */
+/** First-batch host renderer: the registered send block includes its icon layer;
+ * the effect layer (highlight/shadow) is still pending. */
 export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 'external' }) {
   const workbench = useSolidWorkbench()
+  const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
   const send = () => window.dispatchEvent(new CustomEvent('pylon:solid-input-send'))
   const cancel = () => {
     const sessionId = workbench.input().sessionId
     if (sessionId) void workbench.commands.cancel(sessionId)
+  }
+  const icon = () => runtime().generating ? appearance().sendButtonIconGenerating : appearance().sendButtonIcon
+  const round = () => appearance().sendButtonIconRound === 'on'
+  const iconClass = () => {
+    const value = icon()
+    const solid = value === 'triangle' || value === 'square'
+    return `cc-send-icon ${solid ? 'cc-send-icon--solid' : 'cc-send-icon--stroke'}${round() && !solid ? ' cc-send-icon--round' : ''}${value === 'triangle' ? ' cc-send-icon--lg' : ''}${value === 'double-arrow' ? ' cc-send-icon--double' : ''}`
+  }
+  const path = () => {
+    const value = icon()
+    if (value === 'arrow') return 'M12 20 V4.5 M5.3 11.2 L12 4.5 L18.7 11.2'
+    if (value === 'double-arrow') return 'M6.5 11 L12 6.5 L17.5 11 M6.5 17.5 L12 13 L17.5 17.5'
+    if (value === 'cross') return 'M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5'
+    if (value === 'triangle') return round() ? 'M10.94 9.31 A1.5 1.5 0 0 1 13.06 9.31 L16.94 13.19 A1.5 1.5 0 0 1 15.88 15.75 L8.12 15.75 A1.5 1.5 0 0 1 7.06 13.19 Z' : 'M12 8.25 L19.5 15.75 H4.5 Z'
+    return round() ? 'M7.5 6 H16.5 A1.5 1.5 0 0 1 18 7.5 V16.5 A1.5 1.5 0 0 1 16.5 18 H7.5 A1.5 1.5 0 0 1 6 16.5 V7.5 A1.5 1.5 0 0 1 7.5 6 Z' : 'M6 6 H18 V18 H6 Z'
   }
   return <button
     type="button"
@@ -376,7 +391,7 @@ export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 
     title={runtime().generating ? '停止生成' : '发送'}
     aria-label={runtime().generating ? '停止生成' : '发送消息'}
     onClick={() => runtime().generating ? cancel() : send()}
-  />
+  ><svg viewBox="0 0 24 24" class={iconClass()} aria-hidden="true"><path d={path()} /></svg></button>
 }
 
 export function SolidAttachWidget(props: { disabled?: boolean } = {}) {

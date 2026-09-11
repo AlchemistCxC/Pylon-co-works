@@ -30,9 +30,14 @@
   border:calc(var(--cc-send-size,32px) * 0.05) solid var(--cc-send-border-color,rgba(255,255,255,.5));
   border-radius:var(--cc-send-radius,50%);
   background:var(--cc-send-color,#000);
-  color:transparent;
   cursor:pointer;
 }
+.cc-send-icon { width:60%; height:60%; pointer-events:none; }
+.cc-send-icon--lg { width:80%; height:80%; }
+.cc-send-icon--stroke { fill:none; stroke:var(--cc-send-icon-color,#fff); stroke-width:2.2; }
+.cc-send-icon--double { width:70%; height:70%; stroke-width:2.6; }
+.cc-send-icon--stroke.cc-send-icon--round { stroke-linejoin:round; stroke-linecap:round; }
+.cc-send-icon--solid { fill:var(--cc-send-icon-color,#fff); stroke:none; }
 .cc-send-button[data-mode="inline"] {
   right:calc(var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
 }
