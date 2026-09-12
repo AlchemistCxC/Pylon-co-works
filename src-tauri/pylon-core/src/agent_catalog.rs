@@ -887,6 +887,25 @@ fn catalog() -> Result<&'static CatalogDocument, String> {
     }
 }
 
+/// Content revision of the compiled-in catalog (FNV-1a over the raw JSON).
+///
+/// The catalog is `include_str!`-ed, so this is stable for one binary build and
+/// changes whenever the catalog content does. Detection snapshots key their
+/// cache on it: a build with a different catalog must never be served evidence
+/// recorded against the previous one.
+static CATALOG_REVISION: OnceLock<String> = OnceLock::new();
+
+pub fn catalog_revision() -> &'static str {
+    CATALOG_REVISION.get_or_init(|| {
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in CATALOG_JSON.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("fnv1a-{hash:016x}")
+    })
+}
+
 /// Adaptation policies read out of the catalog's untyped adaptation block.
 ///
 /// One reader for both `detection_profiles` and `provider_profile`: an unknown

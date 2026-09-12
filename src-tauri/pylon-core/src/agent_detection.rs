@@ -1614,6 +1614,132 @@ pub async fn detect_agent_runtime_candidates(
     detect_agent_runtime_candidates_inner(options, &HashMap::new()).await
 }
 
+// ── B0：DetectionSnapshot（不可变证据快照）与缓存策略 ──
+
+/// Immutable detection evidence for one completed scan.
+///
+/// A snapshot merges everything the settings page needs to reason about a
+/// provider — candidates, version probes, wrapper/native/shared-config
+/// evidence, and the preflight verdicts derived from them — and stamps it with
+/// the time it was taken plus the catalog revision it was recorded against.
+/// Consumers treat it as read-only evidence; nothing may mutate a snapshot
+/// after assembly, which is what makes caching by identity safe.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectionSnapshot {
+    /// Unix epoch milliseconds at assembly time.
+    pub taken_at_ms: u64,
+    /// Content revision of the catalog the scan ran against (see
+    /// [`crate::agent_catalog::catalog_revision`]).
+    pub catalog_revision: String,
+    /// Fingerprint of the search roots the scan used (see
+    /// [`search_roots_fingerprint`]).
+    pub search_fingerprint: String,
+    #[serde(flatten)]
+    pub report: AgentDetectionReport,
+    /// One preflight verdict per selected provider, computed by the same
+    /// `from_detection` mapping the `pylon-detect` CLI uses — a snapshot
+    /// consumer never re-derives it, so panel and CLI cannot disagree.
+    pub preflight: Vec<crate::agent_preflight::PreflightResult>,
+}
+
+/// How trustworthy a completed scan is, which decides how long its snapshot
+/// may be served from cache.
+///
+/// Three states, not two: a scan that errored (`Failure`) and a scan that
+/// completed but degraded — truncated, or carrying retryable diagnostics such
+/// as a version-probe timeout (`Unknown`) — must both be re-attempted far
+/// sooner than a clean scan, but they are different facts and are reported as
+/// different facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectionOutcome {
+    Success,
+    Failure,
+    Unknown,
+}
+
+impl DetectionOutcome {
+    pub fn classify(result: &Result<AgentDetectionReport, String>) -> Self {
+        match result {
+            Err(_) => Self::Failure,
+            Ok(report) => {
+                if report.truncated || report.diagnostics.iter().any(|d| d.retryable) {
+                    Self::Unknown
+                } else {
+                    Self::Success
+                }
+            }
+        }
+    }
+
+    /// Failures are cached briefly (retry soon), clean results longer, degraded
+    /// ones in between. Codeg caches only passing checks; this keeps that
+    /// intent while adding the expiry Codeg never had.
+    pub fn ttl(self) -> Duration {
+        match self {
+            Self::Success => Duration::from_secs(600),
+            Self::Unknown => Duration::from_secs(60),
+            Self::Failure => Duration::from_secs(15),
+        }
+    }
+}
+
+/// Fingerprint the roots a scan would search: the same controlled-root
+/// derivation the scan itself uses (so a fingerprint hit implies the scan
+/// really saw these roots), hashed in order — root order affects candidate
+/// priority, so two orderings of the same roots are not the same search. The
+/// NUL separator keeps adjacent roots from aliasing into one another.
+pub fn search_roots_fingerprint(search_roots: Option<&[PathBuf]>) -> String {
+    let mut input = String::new();
+    for root in controlled_roots(search_roots) {
+        input.push_str(&path_key(&root));
+        input.push('\u{0}');
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a-{hash:016x}")
+}
+
+/// Unix epoch milliseconds right now; the caller-visible timestamp half of a
+/// snapshot. Kept separate from the monotonic clock the cache layer uses so
+/// tests can pin either one independently.
+pub fn unix_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+/// Assemble the immutable snapshot for one completed scan. The preflight
+/// verdicts are computed here — by the shared `from_detection` mapping — so
+/// every consumer of a snapshot sees the same conclusions. `search_roots` must
+/// be the same value the scan was given, so the fingerprint describes the
+/// search that actually ran.
+pub fn assemble_detection_snapshot(
+    report: AgentDetectionReport,
+    taken_at_ms: u64,
+    search_roots: Option<&[PathBuf]>,
+) -> DetectionSnapshot {
+    let preflight = report
+        .providers
+        .iter()
+        .filter_map(|evidence| {
+            crate::agent_preflight::from_detection(evidence, &report.candidates).ok()
+        })
+        .collect();
+    DetectionSnapshot {
+        taken_at_ms,
+        catalog_revision: crate::agent_catalog::catalog_revision().to_string(),
+        search_fingerprint: search_roots_fingerprint(search_roots),
+        report,
+        preflight,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2533,6 +2659,333 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // ── B0：DetectionSnapshot 组装、缓存策略与快照级 fixture ──
+
+    #[test]
+    fn search_roots_fingerprint_tracks_the_controlled_roots() {
+        let left = fixture_root("fingerprint-left");
+        let right = fixture_root("fingerprint-right");
+        std::fs::create_dir_all(&left).unwrap();
+        std::fs::create_dir_all(&right).unwrap();
+
+        let a = search_roots_fingerprint(Some(std::slice::from_ref(&left)));
+        let b = search_roots_fingerprint(Some(&[left.clone(), right.clone()]));
+        let reordered = search_roots_fingerprint(Some(&[right.clone(), left.clone()]));
+        assert_eq!(
+            a,
+            search_roots_fingerprint(Some(std::slice::from_ref(&left))),
+            "同 roots 必须同指纹"
+        );
+        assert_ne!(a, b, "roots 集合不同必须产生不同指纹");
+        assert_ne!(
+            b, reordered,
+            "顺序影响候选优先级，顺序不同的搜索不是同一搜索"
+        );
+
+        std::fs::remove_dir_all(left).unwrap();
+        std::fs::remove_dir_all(right).unwrap();
+    }
+
+    #[test]
+    fn outcome_classifies_and_orders_ttls() {
+        let clean = AgentDetectionReport {
+            candidates: Vec::new(),
+            providers: Vec::new(),
+            diagnostics: Vec::new(),
+            elapsed_ms: 0,
+            truncated: false,
+        };
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(clean.clone())),
+            DetectionOutcome::Success
+        );
+
+        let mut truncated = clean.clone();
+        truncated.truncated = true;
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(truncated)),
+            DetectionOutcome::Unknown
+        );
+
+        let mut retryable = clean.clone();
+        retryable.diagnostics.push(AgentDetectionDiagnostic {
+            code: "version_probe_timeout".into(),
+            stage: "version_probe".into(),
+            detector_id: None,
+            message: "探针超时".into(),
+            retryable: true,
+        });
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(retryable)),
+            DetectionOutcome::Unknown
+        );
+
+        assert_eq!(
+            DetectionOutcome::classify(&Err("catalog invalid".to_string())),
+            DetectionOutcome::Failure
+        );
+
+        assert!(
+            DetectionOutcome::Failure.ttl() < DetectionOutcome::Unknown.ttl(),
+            "失败必须比 degraded 更快重试"
+        );
+        assert!(
+            DetectionOutcome::Unknown.ttl() < DetectionOutcome::Success.ttl(),
+            "degraded 必须比干净结果更快重试"
+        );
+    }
+
+    async fn snapshot_for(
+        detector_ids: Vec<&str>,
+        root: &Path,
+        home: &Path,
+        limits: AgentDetectionLimits,
+    ) -> DetectionSnapshot {
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(detector_ids.into_iter().map(String::from).collect()),
+            home_dir: Some(home.to_path_buf()),
+            search_roots: Some(vec![root.to_path_buf()]),
+            limits,
+        })
+        .await
+        .unwrap();
+        assemble_detection_snapshot(report, 1_700_000_000_000, Some(&[root.to_path_buf()]))
+    }
+
+    /// B0 fixture：未安装——空 roots + 空 home，每个 provider 都有快照证据且
+    /// preflight 结论为 notInstalled（裸机不会被报成更具体的状态）。
+    #[tokio::test]
+    async fn snapshot_fixture_machine_with_nothing_installed() {
+        let root = fixture_root("snapshot-empty");
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri", "builtin.detector.claude-code"],
+            &root,
+            &home,
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        assert_eq!(
+            snapshot.catalog_revision,
+            crate::agent_catalog::catalog_revision()
+        );
+        assert!(snapshot.taken_at_ms > 0);
+        assert_eq!(snapshot.report.candidates.len(), 0);
+        assert!(
+            snapshot.report.providers.len() >= 2,
+            "未安装也要产出 provider 证据"
+        );
+        assert!(
+            snapshot
+                .preflight
+                .iter()
+                .all(|verdict| verdict.status
+                    == crate::agent_preflight::PreflightStatus::NotInstalled)
+        );
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::Success
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：版本超时——探针超时是 retryable 诊断，快照 outcome 必须是
+    /// Unknown（degraded），不是 Success。
+    #[tokio::test]
+    async fn snapshot_fixture_version_timeout_is_degraded() {
+        let root = fixture_root("snapshot-timeout");
+        std::fs::create_dir_all(&root).unwrap();
+        make_hanging_executable(&root, "peri");
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri"],
+            &root,
+            &root.join("home"),
+            AgentDetectionLimits {
+                total_budget: Duration::from_millis(500),
+                version_probe_budget: Duration::from_millis(100),
+                ..AgentDetectionLimits::default()
+            },
+        )
+        .await;
+
+        assert!(snapshot
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::Unknown
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：PATH 缺口——候选在搜索 roots 内但不在进程 PATH 上，快照必须
+    /// 保留该警告（导入会保存绝对路径这一事实不可丢失）。
+    #[tokio::test]
+    async fn snapshot_fixture_off_path_candidate_keeps_warning() {
+        let root = fixture_root("snapshot-path-gap");
+        std::fs::create_dir_all(&root).unwrap();
+        plant_version_tool(&root, "peri", Some("1.0.0"));
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri"],
+            &root,
+            &root.join("home"),
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        // fixture roots 不在进程 PATH 上（fixture_root 是独立临时目录）；
+        // 若宿主机 PATH 恰好含该临时目录，此断言退化为验证警告存在与否的任一形态，
+        // 因此断言「有版本证据的候选存在」并在非 PATH 情况下携带警告。
+        let candidate = snapshot
+            .report
+            .candidates
+            .iter()
+            .find(|candidate| candidate.provider == "peri")
+            .expect("peri 候选必须存在");
+        assert!(candidate
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == "version"));
+        let on_path = candidate
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == "path");
+        if !on_path {
+            assert!(candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("不在当前 PATH")));
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：wrapper/native 双证据 + 版本门槛——`ccb` 与 `claude` 同时在
+    /// 场，快照必须同时携带两侧证据、宣告 adapter relation，且 preflight 以
+    /// installed 收尾（版本 0.75.1 高于 0.65.0 门槛）。
+    #[tokio::test]
+    async fn snapshot_fixture_wrapper_dual_evidence_installs() {
+        let root = fixture_root("snapshot-dual");
+        let home = root.join("home");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let search = root.join("bin");
+        plant_version_tool(&search, "ccb", Some("0.75.1"));
+        std::fs::write(
+            search.join(&executable_names("claude")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        // 快照指纹必须描述真实搜索的 roots，而不是进程默认 roots。
+        let snapshot = assemble_detection_snapshot(report, 42, Some(std::slice::from_ref(&search)));
+
+        let evidence = snapshot
+            .report
+            .providers
+            .iter()
+            .find(|evidence| evidence.provider == "claude-code")
+            .expect("claude-code provider 证据");
+        assert!(evidence.adapter_relation_declared);
+        assert!(!evidence.acp_commands.is_empty(), "ACP 侧（ccb）必须有证据");
+        assert!(
+            !evidence.native_commands.is_empty(),
+            "原生侧（claude）必须有证据"
+        );
+        assert_eq!(
+            snapshot.search_fingerprint,
+            search_roots_fingerprint(Some(std::slice::from_ref(&search)))
+        );
+        let verdict = snapshot
+            .preflight
+            .iter()
+            .find(|verdict| verdict.provider == "claude-code")
+            .expect("claude-code preflight 结论");
+        assert_eq!(
+            verdict.status,
+            crate::agent_preflight::PreflightStatus::Installed
+        );
+        assert!(verdict
+            .adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.native_present && adapter.acp_present));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：配置仅存在——共享配置目录在、可执行文件不在，preflight 必须
+    /// 报 configOnly 而不是 notInstalled。
+    #[tokio::test]
+    async fn snapshot_fixture_config_only_without_executables() {
+        let root = fixture_root("snapshot-config-only");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.claude-code"],
+            &search,
+            &home,
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        let verdict = snapshot
+            .preflight
+            .iter()
+            .find(|verdict| verdict.provider == "claude-code")
+            .expect("claude-code preflight 结论");
+        assert_eq!(
+            verdict.status,
+            crate::agent_preflight::PreflightStatus::ConfigOnly
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：路径不可访问——搜索 root 指向一个普通文件（无法当目录枚举），
+    /// 扫描不得 panic、不得整报失败，只是该 root 无候选。
+    #[tokio::test]
+    async fn snapshot_fixture_inaccessible_root_is_not_an_error() {
+        let root = fixture_root("snapshot-inaccessible");
+        std::fs::create_dir_all(&root).unwrap();
+        let not_a_dir = root.join("blocker.txt");
+        std::fs::write(&not_a_dir, b"this is a regular file").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.peri".into()]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![not_a_dir.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await;
+
+        let report = report.expect("不可访问的 root 不是错误，只是没有候选");
+        assert!(report.candidates.is_empty());
+        let snapshot = assemble_detection_snapshot(report, 7, Some(&[not_a_dir]));
+        assert_eq!(snapshot.report.candidates.len(), 0);
+
         std::fs::remove_dir_all(root).unwrap();
     }
 }

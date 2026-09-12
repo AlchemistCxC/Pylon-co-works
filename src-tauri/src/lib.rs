@@ -836,6 +836,7 @@ pub fn run() {
                 crate::lifecycle::test_agent_candidate,
                 crate::protocol_adapter::protocol_adapter_catalog,
                 crate::agent_detection::detect_agent_runtimes,
+                crate::agent_detection::cancel_detection_refresh,
                 crate::permission::approve_tool_call, crate::permission::respond_interaction, crate::permission::set_approval_mode,
                 crate::permission::get_approval_mode, crate::permission::interaction_list,
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
