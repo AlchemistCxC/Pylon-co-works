@@ -67,47 +67,10 @@ pub struct AdapterCatalogItem {
 }
 
 /// 内置平台 catalog（契约冻结）：qq = built-in；wechat = 未安装（稳定不可用）。
-/// 平台新增时在此登记；实例/生命周期一律不在此层（D-01 分离）。
+/// 平台清单单一真源在 [`crate::gateway::platform_registry`]（P78：catalog/factory/
+/// env 引导三合一）；本函数仅委托导出，wire 形状由下方测试锁定。
 pub fn builtin_catalog() -> Vec<AdapterCatalogItem> {
-    vec![
-        AdapterCatalogItem {
-            platform: "qq".into(),
-            label: "QQ".into(),
-            availability: PlatformAvailability::BuiltIn,
-            credential_fields: vec![
-                CredentialField {
-                    key: "appId".into(),
-                    label: "App ID".into(),
-                    secret: false,
-                    required: true,
-                },
-                CredentialField {
-                    key: "clientSecret".into(),
-                    label: "Client Secret".into(),
-                    secret: true,
-                    required: true,
-                },
-            ],
-            capabilities: AdapterCapabilities {
-                deliver_text: true,
-                deliver_event: true,
-                ingest: true,
-                max_message_len: 4000,
-            },
-        },
-        AdapterCatalogItem {
-            platform: "wechat".into(),
-            label: "微信".into(),
-            availability: PlatformAvailability::NotInstalled,
-            credential_fields: Vec::new(),
-            capabilities: AdapterCapabilities {
-                deliver_text: false,
-                deliver_event: false,
-                ingest: false,
-                max_message_len: 0,
-            },
-        },
-    ]
+    crate::gateway::platform_registry::catalog_items()
 }
 
 #[cfg(test)]

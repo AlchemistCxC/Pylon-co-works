@@ -21,6 +21,7 @@ pub mod catalog;
 pub mod credentials;
 pub mod instance;
 pub mod instance_store;
+pub(crate) mod platform_registry;
 pub mod qq;
 pub mod route;
 pub mod truncate;
