@@ -7,6 +7,7 @@ import { createWorkbenchDocument } from '../../../../domains/workbench/workbench
 import { normalizeSessionConfigOptions } from '../../../../domains/workbench/session/sessionSurface.ts'
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
+import type { SolidWorkbenchInput } from '../../workbenchContracts.ts'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from '../WorkbenchWidgets.solid.tsx'
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -16,7 +17,7 @@ afterEach(() => {
   for (const services of servicesList.splice(0)) services.destroy()
 })
 
-function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAULTS> = {}) {
+function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAULTS> = {}, inputPatch: Partial<SolidWorkbenchInput> = {}) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ generating: false })
   const theme = structuredClone(DEFAULTS)
@@ -25,7 +26,7 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
   const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())
   const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
   const context: SolidWorkbenchContextValue = {
-    input: () => ({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }),
+    input: () => ({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, ...inputPatch }),
     runtime: services.runtime,
     runtimeSnapshot,
     appearance: services.appearance,
@@ -121,6 +122,56 @@ describe('Solid Workbench widgets', () => {
     expect(screen.getByRole('option', { name: 'xhigh' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
     services.destroy()
+  })
+
+  it('空态 draft 候选 = 所属 agent 宣告集合，不回落硬编码兜底（issue #53）', async () => {
+    const services = renderWidget(
+      () => <SolidModelWidget
+        forceDropdown
+        draftValue={() => 'kimi-k2'}
+        onDraftChange={() => {}}
+        reasoningValue={() => 'medium'}
+        onReasoningChange={() => {}}
+      />,
+      { modelVariant: 'dropdown' },
+      { sessionId: null, agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }, { id: 'glm-5', label: 'GLM · 5' }] },
+    )
+    services.runtime.update({ availableModels: [], activeModel: '' })
+    const trigger = await screen.findByRole('button', { name: /kimi-k2/ })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('option', { name: 'Kimi K2' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'GLM · 5' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'deepseek-v4-flash' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'deepseek-v4-pro' })).toBeNull()
+    services.destroy()
+  })
+
+  it('空态无任何宣告数据时降级为空候选，仅保留草稿值且不崩（issue #53 A4）', async () => {
+    const services = renderWidget(
+      () => <SolidModelWidget
+        forceDropdown
+        draftValue={() => 'my-default-model'}
+        onDraftChange={() => {}}
+      />,
+      { modelVariant: 'dropdown' },
+      { sessionId: null, agentAdvertisedModels: [] },
+    )
+    services.runtime.update({ availableModels: [], activeModel: '' })
+    fireEvent.click(await screen.findByRole('button', { name: /my-default-model/ }))
+    const menu = screen.getByRole('listbox', { name: '模型列表' })
+    expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual(['my-default-model'])
+    services.destroy()
+  })
+
+  it('有会话时不并入 agent 宣告集合，协商快照保持权威（issue #53 A2）', async () => {
+    renderWidget(
+      () => <SolidModelWidget />,
+      { modelVariant: 'dropdown' },
+      { agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }] },
+    )
+    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
+    expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'Kimi K2' })).toBeNull()
   })
 
   it('模型/模式弹层支持 Escape 与外部点击关闭，并把焦点还给触发器', async () => {
