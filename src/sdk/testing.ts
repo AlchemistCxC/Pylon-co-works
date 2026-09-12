@@ -86,7 +86,7 @@ function recordingApi<T extends object>(member: string, log: MockRecordedCall[])
   })
 }
 
-function cloneMockValue(value: unknown, field: string): unknown {
+function cloneMockValue<T>(value: T, field: string): T {
   try {
     return structuredClone(value)
   } catch (error) {
@@ -235,9 +235,13 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     },
     invoke: dispatchHooks,
   }
-  const cloneNamespace = (value: Record<string, unknown>): Record<string, unknown> => (
-    JSON.parse(JSON.stringify(value)) as Record<string, unknown>
-  )
+  const cloneNamespace = (value: Record<string, unknown>): Record<string, unknown> => {
+    try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+    } catch (error) {
+    throw new Error('mock storage namespace must be JSON-serializable', { cause: error })
+    }
+  }
   const sessions: PluginSessionsApi = {
     getPluginMetadata: sessionId => cloneNamespace(sessionMeta.get(sessionId) ?? {}),
     setPluginMetadata: (sessionId, patch) => {

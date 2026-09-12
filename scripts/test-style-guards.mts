@@ -17,10 +17,10 @@ assert.match(chatCss, /\.term-row-error\s*\{/, '消息渲染失败行必须有�
 // 来源：test-browser-mock-spinner.mts
 assert.match(chatCss, /\.term-user code \{ font-family:var\(--mono\); font-size:inherit; \}/, '用户代码块保持等宽字体')
 
-// 来源：test-queued-message-ui.mts
+// 待发送队列样式契约（原 legacy guard 已退役）
 assert.match(inputCss, /\.queued-message-list/, '待发送队列必须声明列表样式')
 
-// 来源：test-input-variants.mts
+// 输入变体样式契约（原 legacy guard 已退役）
 assert.match(inputCss, /\.input-bar\.input-variant-compact/, 'compact 变体必须有样式')
 assert.match(inputCss, /\.input-bar\.input-variant-command/, 'command 变体必须有样式')
 

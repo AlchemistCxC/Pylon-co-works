@@ -39,6 +39,7 @@ mod plugin_cmds;
 mod plugin_process;
 mod prism;
 mod prism_cmds;
+mod private_interaction;
 mod protocol_adapter;
 pub mod provider_adapter;
 pub mod pylon_cli;
@@ -570,6 +571,7 @@ impl AppStateHandles {
                     tracing::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
                 }
             }
+            runtime.private_interactions.cancel_all();
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             (stale_sources, probe_candidates)
         };
@@ -834,6 +836,7 @@ pub fn run() {
                 crate::lifecycle::test_agent_candidate,
                 crate::protocol_adapter::protocol_adapter_catalog,
                 crate::agent_detection::detect_agent_runtimes,
+                crate::agent_detection::cancel_detection_refresh,
                 crate::permission::approve_tool_call, crate::permission::respond_interaction, crate::permission::set_approval_mode,
                 crate::permission::get_approval_mode, crate::permission::interaction_list,
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,

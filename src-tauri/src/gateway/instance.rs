@@ -912,19 +912,19 @@ pub(crate) mod tests {
         }
     }
 
+    /// 测试工厂的创建闭包签名（把 `AdapterFactory::create` 的三参形态装箱为可共享闭包）。
+    type FakeCreateFn = dyn Fn(
+            &InstanceState,
+            CancellationToken,
+            InstanceNotifier,
+        ) -> Result<(Arc<dyn PlatformAdapter>, BoxRunFuture), GatewayInstanceError>
+        + Send
+        + Sync;
+
     pub(crate) struct FakeFactory {
         platform: &'static str,
         calls: Arc<AtomicUsize>,
-        create: Arc<
-            dyn Fn(
-                    &InstanceState,
-                    CancellationToken,
-                    InstanceNotifier,
-                )
-                    -> Result<(Arc<dyn PlatformAdapter>, BoxRunFuture), GatewayInstanceError>
-                + Send
-                + Sync,
-        >,
+        create: Arc<FakeCreateFn>,
     }
 
     impl AdapterFactory for FakeFactory {

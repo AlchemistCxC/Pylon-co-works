@@ -6,6 +6,7 @@
  */
 import { ClientTransport } from './agentClient'
 import type { Channel } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 
 /** B1：流式帧信封（与 src/components/chat/streamChannel.ts 的 StreamFrame 同构）。 */
 export type StreamFrame = { event: 'pylon:update' | 'pylon:done' | 'pylon:error' | 'pylon:user'; payload: unknown }
@@ -53,6 +54,14 @@ export function createChatClient(transport: ClientTransport) {
     setConfigOption: (payload: SetConfigOptionPayload): Promise<unknown> => transport.invoke('set_config_option', payload),
     setMode: (payload: SetModePayload): Promise<unknown> => transport.invoke('set_mode', payload),
   }
+}
+
+/** Renderer-safe bridge for the desktop transport.  Tauri remains an
+ * infrastructure concern; Workbench hosts consume the typed client only. */
+export function createTauriChatClient() {
+  return createChatClient({
+    invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+  })
 }
 
 export type ChatClient = ReturnType<typeof createChatClient>

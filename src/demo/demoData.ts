@@ -11,6 +11,7 @@ import type { WorkspaceBackendEntry } from '../infrastructure/tauri/workspaceCon
 import type { RuntimeLogEntry } from '../domains/runtime/runtimeLogs.ts'
 import type { GatewayStatus, GatewayRoute } from '../infrastructure/tauri/gatewayContracts.ts'
 import type { GitStatusEntry, GitCommit } from '../infrastructure/tauri/gitContracts.ts'
+import type { SessionResponseObject } from '../infrastructure/acp/chatContracts.ts'
 
 const DAY = 86_400_000
 const now = Date.now()
@@ -126,7 +127,7 @@ export function buildDemoMessages(sessionId: string): Message[] {
           contentBlocks: [DIFF_BLOCK],
         }),
         reasoning('构建绿、diff 已生成。顺手确认一下改动面没有波及 ChatView 本身（方案 B 否决，只锁输入面）。', 7),
-        assistant('完成。改动集中在 `AgentSheetView`：\n\n- 姿态激活时隐藏 `ControlCenter`（无 send/attach/cancel 路径），渲染「只读回放 · 点击继续」占位条\n- 点击占位条 `clear()` 姿态转 live\n- 离开该会话自动清姿态\n\n```ts\n{isReplay ? <ReplayContinueBar /> : <ControlCenter sessionId={ctx.activeSession} />}\n```\n\n`npx tsc --noEmit` 通过，守卫测试 `test-history-replay` 全绿。', 8),
+        assistant('完成。改动集中在 `AgentSheetView`：\n\n- 姿态激活时隐藏 `ControlCenter`（无 send/attach/cancel 路径），渲染「只读回放 · 点击继续」占位条\n- 点击占位条 `clear()` 姿态转 live\n- 离开该会话自动清姿态\n\n```ts\n{isReplay ? <ReplayContinueBar /> : <ControlCenter sessionId={ctx.activeSession} />}\n```\n\n`npx tsc --noEmit` 通过，回放行为回归全绿。', 8),
       ]
   }
 }
@@ -408,7 +409,9 @@ export function buildDemoPermissionRequest() {
 
 // ── 会话恢复响应（new_session / load_persisted_session）─────────────────
 
-export function buildSessionResponse(args: Record<string, unknown>): unknown {
+// 返回形状是已知的领域对象（sessionId + configOptions），故声明为真实的 wire 类型
+// 而不是 `unknown`；`unknown` 只在解码完成前才是正确类型。
+export function buildSessionResponse(args: Record<string, unknown>): SessionResponseObject {
   return {
     sessionId: typeof args.periId === 'string' ? args.periId : 'peri-demo-new',
     configOptions: [

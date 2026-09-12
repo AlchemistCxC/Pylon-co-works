@@ -19,7 +19,7 @@ import { runUserMessageBeforeHook, runSessionBoundaryHook } from '../application
 import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
 import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
-import { runSessionPreflight } from '../plugins/core/sessionCreation/sessionPreflight.ts'
+import { requestNewSession } from '../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { provisionAgentTransaction } from '../application/transactions/provisionAgentTransaction.ts'
 
@@ -186,17 +186,10 @@ export function createCliSessionControlPort(): SessionControlPort {
         throwIfAborted(signal)
         const current = useIdentityStore.getState()
         const profile = current.profiles.find(value => value.id === session.profileId)
-        const preflight = await runSessionPreflight(session, signal)
-        const response = await sessionClient.newSession({
-          agentId: session.agentId,
-          profileId: session.profileId,
-          source: session.source,
+        const response = await requestNewSession(session, sessionClient, () => ({
           persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
-          cwd: session.workdir || undefined,
-          workspaceId: session.workspaceId,
           model: profile?.model,
-          ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
-        })
+        }), signal)
         throwIfAborted(signal)
         const remoteId = responseSessionId(response)
         if (remoteId) useIdentityStore.getState().setSessionPeriId(session.id, remoteId)

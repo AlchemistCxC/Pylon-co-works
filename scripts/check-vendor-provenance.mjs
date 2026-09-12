@@ -4,12 +4,12 @@
 // 校验面：
 //   1. ORIGIN.md 的 ```json provenance 块可解析，且声明了 source.licenseFile/noticeFile；
 //   2. 许可证文本与 NOTICE 存在；
-//   3. 每个登记文件的 sha256 与 vendor/ 下的实际副本一致；
+//   3. 每个登记文本文件按 LF 正规化后的 sha256 与 vendor/ 下的实际副本一致；
 //   4. vendor/acp/ 下不存在未登记的源码文件（ORIGIN.md 除外）；
 //   5. Pylon 自身源码（src-tauri/src）不出现 codeg 产品命名穿透（非注释代码）。
 //
 // 可选：设置 PYLON_CODEG_SRC=<path>（或默认调研副本存在）时，额外校验锁定 commit
-// 与源文件 sha256。CI 无调研副本时跳过该段，只校验仓库内可复验事实。
+// 与源文件 LF-normalized sha256。CI 无调研副本时跳过该段，只校验仓库内可复验事实。
 //
 // 用法：node scripts/check-vendor-provenance.mjs [--json]
 
@@ -33,7 +33,8 @@ const DEFAULT_CODEG_SRC =
   "F:/Hermes/profiles/riccati/workspace/pylon-survey-2026-09/codeg-src";
 
 function sha256(path) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  const normalized = readFileSync(path, "utf8").replaceAll("\r\n", "\n");
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
 // 1. ORIGIN.md 存在且含机器可读块

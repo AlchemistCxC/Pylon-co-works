@@ -1,6 +1,4 @@
-import type { PluginIdentity } from '../pluginIdentity.ts'
-import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
-import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
+import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { FontContribution, FontRole } from './fontContributionTypes.ts'
 
 const FONT_ROLES = new Set<FontRole>(['interface', 'content', 'code'])
@@ -22,37 +20,6 @@ export function validateFontContribution(contribution: FontContribution): FontCo
   return Object.freeze({ ...contribution, roles: Object.freeze(roles) })
 }
 
-export class FontContributionRegistry {
-  private readonly registry = new ReactiveRegistryStore<FontContribution>()
-
-  register(owner: PluginIdentity, contribution: FontContribution): AsyncDisposable {
-    const normalized = validateFontContribution(contribution)
-    return this.registry.register(owner, normalized, {
-      contributionId: normalized.id,
-      priority: normalized.order,
-    })
-  }
-
-  beginShadowTransaction(
-    owner: PluginIdentity,
-    replacingRuntimeInstanceId: string,
-  ): RegistryTransaction<FontContribution> {
-    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    return {
-      ...transaction,
-      register: (contribution, options) => {
-        const normalized = validateFontContribution(contribution)
-        return transaction.register(normalized, {
-          ...options,
-          contributionId: normalized.id,
-          priority: normalized.order,
-        })
-      },
-    }
-  }
-
-  subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }
-  getSnapshot(): RegistrySnapshot<FontContribution> { return this.registry.getSnapshot() }
-  resolve(id: string) { return this.registry.getSnapshot().entries.find(entry => entry.contributionId === id) }
+export class FontContributionRegistry extends ValidatedContributionRegistry<FontContribution> {
+  constructor() { super(validateFontContribution) }
 }
-

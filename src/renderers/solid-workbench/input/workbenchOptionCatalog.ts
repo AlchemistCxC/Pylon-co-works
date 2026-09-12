@@ -168,8 +168,8 @@ function optionKind(option: SessionConfigOption): WorkbenchOptionKind | undefine
     .join(' ')
   const combined = `${id} ${label} ${normalizedKey(rawText)}`
   if (MODEL_KEYS.has(id) || /(?:model|llm|模型)/i.test(combined)) return 'model'
-  if (MODE_KEYS.has(id) || /(?:mode|permission|approval|权限模式|模式|权限)/i.test(combined)) return 'mode'
   if (/(reason|think|thinking|effort|推理|思考)/i.test(combined)) return 'reasoning'
+  if (MODE_KEYS.has(id) || /(?:mode|permission|approval|权限模式|模式|权限)/i.test(combined)) return 'mode'
   return undefined
 }
 

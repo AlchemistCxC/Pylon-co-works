@@ -8,6 +8,7 @@ import {
   type SchemaIssue,
   type SchemaResult,
 } from '../content/contentPartSchema.ts'
+import type { CanonicalEventType } from '../../events/eventSchema.ts'
 
 export type { JsonValue, SchemaIssue, SchemaResult }
 
@@ -353,66 +354,116 @@ export function migrateWorkbenchEnvelope(value: unknown): SchemaResult<Workbench
   return parseWorkbenchEnvelope(migrated)
 }
 
-function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValue>, text: string | undefined, raw: JsonValue): WorkbenchSemanticEvent {
-  if (eventType === 'user.message' || eventType === 'assistant.text.delta') {
-    return { type: 'message.delta', role: eventType === 'user.message' ? 'user' : 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }
-  }
-  if (eventType === 'assistant.reasoning.delta' || eventType === 'assistant.thinking.delta') {
-    return { type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
-  }
-  const toolSemanticType: Record<string, ToolEvent['type']> = {
-    'tool.started': 'tool.started',
-    'tool.progress': 'tool.progress',
-    'tool.completed': 'tool.completed',
-    'tool.failed': 'tool.failed',
-    'tool.call.started': 'tool.started',
-    'tool.call.updated': 'tool.progress',
-    'tool.call.completed': 'tool.completed',
-    'tool.call.failed': 'tool.failed',
-  }
-  const toolType = toolSemanticType[eventType]
-  if (toolType) {
-    return { type: toolType, ...(typed.tool !== undefined ? { tool: typed.tool } : {}), ...(typed.progress !== undefined ? { progress: typed.progress } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }
-  }
-  if (eventType === 'plan.replaced') return { type: 'plan.replaced', ...(Array.isArray(typed.entries) ? { entries: typed.entries } : {}) }
-  if (eventType === 'plan.entry-updated') return { type: 'plan.entry-updated', ...(typed.entry !== undefined ? { entry: typed.entry } : {}) }
-  if (eventType === 'usage.updated') return { type: 'usage.updated', ...(typed.usage !== undefined ? { usage: typed.usage } : {}) }
-  if (eventType === 'goal.updated') return { type: 'goal.updated', ...(typed.goal !== undefined ? { goal: typed.goal } : {}), ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
-  if (eventType === 'goal.cleared') return { type: 'goal.cleared', ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }
-  if (eventType === 'activity.started' || eventType === 'activity.progress' || eventType === 'activity.completed' || eventType === 'activity.failed' || eventType === 'activity.cancelled') return { type: eventType, ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }
-  if (eventType === 'interaction.requested' || eventType === 'interaction.resolved' || eventType === 'interaction.expired') {
-    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) return { type: eventType, interactionId: typed.interactionId }
-    return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
-  }
-  if (eventType === 'interaction.answered') {
+export interface CanonicalSemanticProjectionInput {
+  readonly typed: Record<string, JsonValue>
+  readonly text?: string
+  readonly raw: JsonValue
+}
+
+export type CanonicalSemanticProjection = (input: CanonicalSemanticProjectionInput) => WorkbenchSemanticEvent
+
+function unknownCanonicalProjection(eventType: string): CanonicalSemanticProjection {
+  return ({ raw }) => ({ type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false })
+}
+
+function interactionProjection(eventType: 'interaction.requested' | 'interaction.resolved' | 'interaction.expired'): CanonicalSemanticProjection {
+  return ({ typed, raw }) => {
     if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) {
       return {
-        type: 'interaction.resolved',
+        type: eventType,
         interactionId: typed.interactionId,
-        ...(typed.response !== undefined ? { response: typed.response } : {}),
       }
     }
     return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType} without interaction id`, raw, truncated: false }
   }
-  if (eventType === 'turn.completed' || eventType === 'session.completed') return {
-    type: 'session.completed',
-    ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}),
-    ...(typed.usage !== undefined ? { usage: typed.usage } : {}),
-    ...(typeof typed.model === 'string' ? { model: typed.model } : {}),
-  }
-  if (eventType === 'turn.failed') return {
-    type: 'diagnostic.notice',
-    level: 'error',
-    message: typeof typed.error === 'string' ? typed.error : 'provider reported a cancelled or failed turn',
-    ...(typeof typed.code === 'string' ? { code: typed.code } : { code: 'turn.failed' }),
-    data: raw,
-  }
-  if (eventType === 'session.model-updated') return { type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }
-  if (eventType === 'session.mode-updated') return { type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }
-  if (eventType === 'session.status-updated') return { type: 'session.status-updated', ...(typeof typed.status === 'string' ? { status: typed.status } : {}) }
-  if (eventType === 'lifecycle.retrying' || eventType === 'lifecycle.compact-started' || eventType === 'lifecycle.compact-completed' || eventType === 'lifecycle.suspended' || eventType === 'lifecycle.recovered') return { type: eventType, ...(typeof typed.attempt === 'number' ? { attempt: typed.attempt } : {}), ...(typeof typed.reason === 'string' ? { reason: typed.reason } : {}), ...(typeof typed.summary === 'string' ? { summary: typed.summary } : {}) }
-  if (eventType === 'diagnostic.updated' || eventType === 'diagnostic.notice') return { type: eventType, ...(Array.isArray(typed.diagnostics) ? { diagnostics: typed.diagnostics } : {}), ...(typeof typed.level === 'string' && ['info', 'warning', 'error'].includes(typed.level) ? { level: typed.level as 'info' | 'warning' | 'error' } : {}), ...(typeof typed.message === 'string' ? { message: typed.message } : {}), ...(typeof typed.code === 'string' ? { code: typed.code } : {}) }
-  return { type: 'event.unknown', originalType: eventType, summary: `Migrated ${eventType}`, raw, truncated: false }
+}
+
+function toolProjection(type: ToolEvent['type']): CanonicalSemanticProjection {
+  return ({ typed, text }) => ({
+    type,
+    ...(typed.tool !== undefined ? { tool: typed.tool } : {}),
+    ...(typed.progress !== undefined ? { progress: typed.progress } : {}),
+    ...(typed.result !== undefined ? { result: typed.result } : {}),
+    ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}),
+  })
+}
+
+function lifecycleProjection(type: LifecycleEvent['type']): CanonicalSemanticProjection {
+  return ({ typed }) => ({
+    type,
+    ...(typeof typed.attempt === 'number' ? { attempt: typed.attempt } : {}),
+    ...(typeof typed.reason === 'string' ? { reason: typed.reason } : {}),
+    ...(typeof typed.summary === 'string' ? { summary: typed.summary } : {}),
+  })
+}
+
+function diagnosticProjection(type: DiagnosticEvent['type']): CanonicalSemanticProjection {
+  return ({ typed }) => ({
+    type,
+    ...(Array.isArray(typed.diagnostics) ? { diagnostics: typed.diagnostics } : {}),
+    ...(typeof typed.level === 'string' && ['info', 'warning', 'error'].includes(typed.level) ? { level: typed.level as 'info' | 'warning' | 'error' } : {}),
+    ...(typeof typed.message === 'string' ? { message: typed.message } : {}),
+    ...(typeof typed.code === 'string' ? { code: typed.code } : {}),
+  })
+}
+
+/**
+ * Canonical→semantic projection registry.  The registry is the only place
+ * where a canonical event name selects a renderer-facing semantic shape;
+ * adding a canonical kind therefore requires one entry and one vector test.
+ * Unknown/checkpoint rows deliberately use the raw-preserving fallback.
+ */
+export const CANONICAL_SEMANTIC_PROJECTION_REGISTRY: Readonly<Record<string, CanonicalSemanticProjection>> & Readonly<Record<CanonicalEventType, CanonicalSemanticProjection>> = Object.freeze({
+  'user.message': ({ text }) => ({ type: 'message.delta', role: 'user', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
+  'assistant.text.delta': ({ text }) => ({ type: 'message.delta', role: 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
+  'assistant.reasoning.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
+  'assistant.thinking.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
+  'tool.started': toolProjection('tool.started'),
+  'tool.progress': toolProjection('tool.progress'),
+  'tool.completed': toolProjection('tool.completed'),
+  'tool.failed': toolProjection('tool.failed'),
+  'tool.call.started': toolProjection('tool.started'),
+  'tool.call.updated': toolProjection('tool.progress'),
+  'tool.call.completed': toolProjection('tool.completed'),
+  'tool.call.failed': toolProjection('tool.failed'),
+  'plan.replaced': ({ typed }) => ({ type: 'plan.replaced', ...(Array.isArray(typed.entries) ? { entries: typed.entries } : {}) }),
+  'plan.entry-updated': ({ typed }) => ({ type: 'plan.entry-updated', ...(typed.entry !== undefined ? { entry: typed.entry } : {}) }),
+  'usage.updated': ({ typed }) => ({ type: 'usage.updated', ...(typed.usage !== undefined ? { usage: typed.usage } : {}) }),
+  'goal.updated': ({ typed }) => ({ type: 'goal.updated', ...(typed.goal !== undefined ? { goal: typed.goal } : {}), ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }),
+  'goal.cleared': ({ typed }) => ({ type: 'goal.cleared', ...(typeof typed.goalId === 'string' ? { goalId: typed.goalId } : {}) }),
+  'activity.started': ({ typed }) => ({ type: 'activity.started', ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }),
+  'activity.progress': ({ typed }) => ({ type: 'activity.progress', ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }),
+  'activity.completed': ({ typed }) => ({ type: 'activity.completed', ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }),
+  'activity.failed': ({ typed }) => ({ type: 'activity.failed', ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }),
+  'activity.cancelled': ({ typed }) => ({ type: 'activity.cancelled', ...(typed.activity !== undefined ? { activity: typed.activity } : {}), ...(typed.result !== undefined ? { result: typed.result } : {}), ...(typed.error !== undefined ? { error: typed.error } : {}) }),
+  'interaction.requested': interactionProjection('interaction.requested'),
+  'interaction.resolved': interactionProjection('interaction.resolved'),
+  'interaction.expired': interactionProjection('interaction.expired'),
+  'interaction.answered': ({ typed, raw }) => {
+    if (typeof typed.interactionId === 'string' && typed.interactionId.length > 0) return { type: 'interaction.resolved', interactionId: typed.interactionId, ...(typed.response !== undefined ? { response: typed.response } : {}) }
+    return { type: 'event.unknown', originalType: 'interaction.answered', summary: 'Migrated interaction.answered without interaction id', raw, truncated: false }
+  },
+  'turn.completed': ({ typed }) => ({ type: 'session.completed', ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}), ...(typed.usage !== undefined ? { usage: typed.usage } : {}), ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }),
+  'session.completed': ({ typed }) => ({ type: 'session.completed', ...(typeof typed.stopReason === 'string' ? { stopReason: typed.stopReason } : {}), ...(typed.usage !== undefined ? { usage: typed.usage } : {}), ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }),
+  'turn.failed': ({ typed, raw }) => ({ type: 'diagnostic.notice', level: 'error', message: typeof typed.error === 'string' ? typed.error : 'provider reported a cancelled or failed turn', ...(typeof typed.code === 'string' ? { code: typed.code } : { code: 'turn.failed' }), data: raw }),
+  'session.model-updated': ({ typed }) => ({ type: 'session.model-updated', ...(typeof typed.model === 'string' ? { model: typed.model } : {}) }),
+  'session.mode-updated': ({ typed }) => ({ type: 'session.mode-updated', ...(typeof typed.mode === 'string' ? { mode: typed.mode } : {}) }),
+  'session.status-updated': ({ typed }) => ({ type: 'session.status-updated', ...(typeof typed.status === 'string' ? { status: typed.status } : {}) }),
+  'session.config-updated': ({ typed }) => ({ type: 'session.config-updated', ...(Array.isArray(typed.options) ? { options: typed.options } : {}) }),
+  'session.commands-updated': ({ typed }) => ({ type: 'session.commands-updated', ...(Array.isArray(typed.commands) ? { commands: typed.commands } : {}) }),
+  'lifecycle.retrying': lifecycleProjection('lifecycle.retrying'),
+  'lifecycle.compact-started': lifecycleProjection('lifecycle.compact-started'),
+  'lifecycle.compact-completed': lifecycleProjection('lifecycle.compact-completed'),
+  'lifecycle.suspended': lifecycleProjection('lifecycle.suspended'),
+  'lifecycle.recovered': lifecycleProjection('lifecycle.recovered'),
+  'diagnostic.updated': diagnosticProjection('diagnostic.updated'),
+  'diagnostic.notice': diagnosticProjection('diagnostic.notice'),
+  unknown: unknownCanonicalProjection('unknown'),
+  'history.snapshot': unknownCanonicalProjection('history.snapshot'),
+})
+
+function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValue>, text: string | undefined, raw: JsonValue): WorkbenchSemanticEvent {
+  return (CANONICAL_SEMANTIC_PROJECTION_REGISTRY[eventType] ?? unknownCanonicalProjection(eventType))({ typed, text, raw })
 }
 
 

@@ -44,7 +44,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     render(<AgentRuntimePanel />)
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', {
-      detectorIds: ['builtin.detector.claude-code', 'builtin.detector.hermes', 'builtin.detector.peri'],
+      detectorIds: ['builtin.detector.claude-code', 'builtin.detector.codex', 'builtin.detector.hermes', 'builtin.detector.peri'],
     }))
   })
 
@@ -189,8 +189,10 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     prompt.mockRestore()
   })
 
-  it('编辑现有 Agent 时保存参数数组并预览后端追加的 effective 参数', async () => {
+  it('编辑现有 Agent 时先测试连接再保存参数数组，并预览后端追加的 effective 参数', async () => {
     invoke.mockImplementation((command: string) => {
+      // 新契约（5b43c183：require verified agent edits）：保存前必须先测试连接成功。
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
       if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
       if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
       if (command === 'list_agents') return Promise.resolve([])
@@ -204,6 +206,20 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     expect(within(periCard).getByText('peri acp "work space" --model demo')).toBeInTheDocument()
     fireEvent.change(within(periCard).getByLabelText('peri 参数 2'), { target: { value: 'new work space' } })
     fireEvent.click(within(periCard).getByRole('button', { name: '添加参数' }))
+
+    // 未验证直接保存 → 拒绝并提示先测试（新契约的 fail-closed 面）
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+
+    // 验证使用**草稿当前值**（含新增的空参数）
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', {
+      agentId: 'peri',
+      agent: { name: 'Peri', provider: '', transport: 'subprocess', exe: 'peri', args: ['acp', 'new work space', ''] },
+    }))
+    expect(await within(periCard).findByText(/连接成功/)).toBeInTheDocument()
+
     fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', {
@@ -281,6 +297,51 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       },
       expectedRevision: 'rev-1',
     }))
+  })
+
+  /**
+   * A5① Claude 侧候选渲染：wrapper provider 的候选必须展示自己的 ACP 入口与身份，
+   * 且不得把 vendor CLI 当成可导入的候选执行文件。
+   */
+  it('把 claude-code wrapper 候选渲染成适配器入口，而不是 vendor CLI', async () => {
+    const claude = {
+      candidateId: 'detected:ccb', detectorId: 'builtin.detector.claude-code', provider: 'claude-code',
+      suggestedAgentId: 'claude-code', name: 'Claude Code',
+      executable: 'F:\\A-I\\Agent\\bin\\ccb.cmd', args: ['--acp'],
+      evidence: [{ kind: 'path', detail: 'F:\\A-I\\Agent\\bin\\ccb.cmd' }],
+      identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
+    }
+    invoke.mockImplementation((command: string) => command === 'detect_agent_runtimes'
+      ? Promise.resolve({
+        candidates: [claude], diagnostics: [], elapsedMs: 2, truncated: false,
+        providers: [{
+          provider: 'claude-code', detectorId: 'builtin.detector.claude-code',
+          adapterRelationDeclared: true,
+          acpCommands: [{ kind: 'acp-command', path: 'F:\\A-I\\Agent\\bin\\ccb.cmd', source: 'path' }],
+          nativeCommands: [],
+          sharedConfigPresent: true,
+        }],
+        preflight: [{
+          provider: 'claude-code', status: 'nativeMissing', passed: false,
+          adapter: {
+            nativeCmd: 'claude', nativeLabel: 'Claude Code CLI', nativePresent: false, acpPresent: true,
+            sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+          },
+          checks: [],
+        }],
+      })
+      : Promise.resolve(null))
+    render(<AgentRuntimePanel />)
+
+    // 候选行列出 provider 与置信度，展开后默认填 ACP 入口 `ccb --acp`。
+    const row = await screen.findByRole('button', { name: /Claude Code.*claude-code/ })
+    fireEvent.click(row)
+    expect(screen.getByLabelText('Claude Code executable')).toHaveValue('F:\\A-I\\Agent\\bin\\ccb.cmd')
+    expect(screen.getByLabelText('Claude Code provider')).toHaveValue('claude-code')
+    // 候选执行文件不得被替换成 vendor CLI `claude`。
+    expect(screen.getByLabelText('Claude Code executable')).not.toHaveValue('claude')
+    // 同一屏上 wrapper 两侧证据分开，且安装状态给出可行动原因。
+    expect(within(await screen.findByLabelText('本机 Agent 安装状态')).getByText(/缺官方 CLI/)).toBeInTheDocument()
   })
 
   it('多个候选使用紧凑选择列表，仅展开当前候选的高级参数', async () => {
@@ -408,9 +469,109 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     })
   })
 
+  /** B1：验证期间可取消；取消后在途结果不落地，保存仍被 fail-closed 挡住。 */
+  it('草稿验证可取消，取消后旧结果不落地且保存仍被拒绝', async () => {
+    let finishTest: ((value: { ok: boolean; agentId: string; durationMs: number }) => void) | undefined
+    const testPending = new Promise<{ ok: boolean; agentId: string; durationMs: number }>(resolve => { finishTest = resolve })
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return testPending
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+
+    // 验证中：出现取消验证按钮，保存被禁用。
+    expect(within(periCard).getByRole('button', { name: '取消验证' })).toBeInTheDocument()
+    expect(within(periCard).getByRole('button', { name: '保存' })).toBeDisabled()
+
+    fireEvent.click(within(periCard).getByRole('button', { name: '取消验证' }))
+    // 取消后：回到可编辑，验证按钮恢复。
+    expect(within(periCard).getByRole('button', { name: '先测试连接' })).toBeInTheDocument()
+
+    // 在途结果此刻到达：不得落地为已验证。
+    finishTest?.({ ok: true, agentId: 'peri', durationMs: 5 })
+    await waitFor(() => expect(testPending).resolves.toBeTruthy())
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
+  /** B1：验证成功后修改任一草稿字段，旧验证立即失效，必须重新验证才能保存。 */
+  it('验证成功后再改草稿字段必须重新验证才能保存', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 9 })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    expect(await within(periCard).findByText(/连接成功/)).toBeInTheDocument()
+
+    // 改 name：验证作废。
+    fireEvent.change(within(periCard).getByLabelText('Agent name'), { target: { value: 'Peri draft' } })
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
+  /** B1：连接测试返回的启动计划与结果一并展示（与真实 spawn 同源，env 已掩码）。 */
+  it('草稿验证成功后展示后端下发的启动计划', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return Promise.resolve({
+        ok: true, agentId: 'peri', durationMs: 7,
+        launchPlan: { provider: 'peri', executable: 'peri', argv: ['peri', 'acp'], cwd: null, env: [{ name: 'PERI_TOKEN', value: 'value withheld' }], diagnostics: [] },
+      })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    expect(await within(periCard).findByText(/启动计划：peri acp（env 值已隐藏）/)).toBeInTheDocument()
+    expect(within(periCard).queryByText(/value withheld/)).toBeNull()
+  })
+
+  /** B1：自定义 profile 复用 Codeg 规则——id 借用内置 provider 名而 provider 另指他处时拒绝创建。 */
+  it('新建 Agent 拒绝内置 provider id 冲突并给出可行动原因', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: '新建 Agent' }))
+    fireEvent.change(screen.getByLabelText('新建 Agent id'), { target: { value: 'peri' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent name'), { target: { value: 'Fake Peri' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent exe'), { target: { value: 'C:\\fake\\peri.exe' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent provider'), { target: { value: 'hermes' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(await screen.findByText(/与内置 provider 同名/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
   it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {
     let snapshotCalls = 0
     invoke.mockImplementation((command: string) => {
+      // 新契约（5b43c183）：CAS 冲突路径同样需先通过连接验证才能到达保存。
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
       if (command === 'agent_config_snapshot') {
         snapshotCalls += 1
         return Promise.resolve({ revision: `rev-${snapshotCalls}`, agents: [] })
@@ -427,6 +588,9 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
     const nameInput = within(periCard).getByLabelText('Agent name') as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: 'Peri draft' } })
+    // 先验证（新契约），否则保存会被 fail-closed 拒绝，到不了 CAS 冲突分支。
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', expect.anything()))
     fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText(/配置已被其他进程修改/)).toBeInTheDocument()
@@ -474,5 +638,158 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
     expect(await screen.findByText(/重启 Agent runtime失败/)).toBeInTheDocument()
     expect(screen.getByText(/配置：待重启生效/)).toBeInTheDocument()
+  })
+
+  /**
+   * A4 验收：安装状态与可行动原因。nativeMissing 必须能解释「适配器在、官方 CLI
+   * 不在」，而不是只说一句“未验证”。数据来自后端 preflight，不在组件里重新推断。
+   */
+  it('把后端 preflight 渲染成可行动的安装状态，而不是空白或“未验证”', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [],
+          diagnostics: [],
+          elapsedMs: 3,
+          truncated: false,
+          providers: [{
+            provider: 'claude-code',
+            detectorId: 'builtin.detector.claude-code',
+            adapterRelationDeclared: true,
+            acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }],
+            nativeCommands: [],
+            sharedConfigPresent: true,
+          }],
+          preflight: [{
+            provider: 'claude-code',
+            status: 'nativeMissing',
+            passed: false,
+            adapter: {
+              nativeCmd: 'claude', nativeLabel: 'Claude Code CLI',
+              nativePresent: false, acpPresent: true,
+              sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+            },
+            checks: [{ checkId: 'version-gate:steering-prompt-required', label: 'adapter version', status: 'PASS', message: 'adapter version >= 0.65.0', fixes: [] }],
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('claude-code')).toBeInTheDocument()
+    expect(within(section).getByText('缺官方 CLI')).toBeInTheDocument()
+    expect(within(section).getByText(/未找到该适配器包装的官方 CLI/)).toBeInTheDocument()
+    // wrapper 两侧证据分开呈现：ACP 已找到、官方 CLI 未找到。
+    expect(within(section).getByText(/ACP：已找到 · Claude Code CLI（claude）：未找到/)).toBeInTheDocument()
+    // 只有非 PASS 的 check 才展开；PASS 的版本 gate 不占位。
+    expect(within(section).queryByText(/adapter version >= 0.65.0/)).toBeNull()
+  })
+
+  /**
+   * C3：原因用后端下发的 `cause.summary`（本机实测），而不是只看状态名的静态文案。
+   *
+   * 静态文案对 `notInstalled` 只会说“请先安装”，而本机真实原因可能是“装在了
+   * Pylon 看不见的目录”。这条测试把“面板消费 cause”钉住。
+   */
+  it('优先渲染后端下发的本机原因，而不是只看状态名的静态文案', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+          preflight: [{
+            provider: 'gemini',
+            status: 'notInstalled',
+            passed: false,
+            adapter: null,
+            checks: [],
+            cause: {
+              level: 'warn',
+              code: 'path_gap_restart_required',
+              summary: '未检测到该 Agent；但你的 PATH 中有 1 个目录是本进程看不到的（如 C:\\Users\\me\\AppData\\Roaming\\npm）。若你刚安装过它，重启 Pylon 即可。',
+            },
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText(/重启 Pylon 即可/)).toBeInTheDocument()
+    // 静态文案不得同时出现：两者并存会给出互相矛盾的行动建议。
+    expect(within(section).queryByText('未检测到该 Agent；请先安装，或在下方手动添加')).toBeNull()
+  })
+
+  /**
+   * C3：`level === 'ok'` 时不占行。
+   *
+   * 工作正常的 provider 不需要用户读任何东西；否则每个正常项都带一行解释，
+   * 真实问题就会被噪声淹没。
+   */
+  it('level 为 ok 的本机原因不占行，避免给正常 provider 加噪声', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+          preflight: [{
+            provider: 'peri',
+            status: 'installed',
+            passed: true,
+            adapter: null,
+            checks: [],
+            cause: {
+              level: 'ok',
+              code: 'ok_absolute_path',
+              summary: '该 Agent 可用：命令位于 F:\\A-I\\Agent\\bin\\peri.cmd，不在 PATH 上。',
+            },
+          }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('peri')).toBeInTheDocument()
+    expect(within(section).queryByText(/不在 PATH 上/)).toBeNull()
+  })
+
+  /** 已安装的 provider 不给可行动原因，避免噪声。 */
+  it('已安装的 provider 不显示故障原因', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+          providers: [],
+          preflight: [{ provider: 'peri', status: 'installed', passed: true, adapter: null, checks: [] }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const section = await screen.findByLabelText('本机 Agent 安装状态')
+    expect(within(section).getByText('已安装')).toBeInTheDocument()
+    expect(within(section).queryByText(/请先安装|请升级|请指定/)).toBeNull()
+  })
+
+  /** 不可解释的状态不得渲染成看起来正常的行（归一化阶段即丢弃）。 */
+  it('未知安装状态不会渲染成空白行', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') {
+        return Promise.resolve({
+          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+          providers: [],
+          preflight: [{ provider: 'future', status: 'somethingNew', passed: false, checks: [] }],
+        })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    expect(await screen.findByText(/未发现可自动配置的 ACP Agent/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('本机 Agent 安装状态')).toBeNull()
   })
 })

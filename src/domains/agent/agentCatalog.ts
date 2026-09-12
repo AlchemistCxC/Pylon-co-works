@@ -41,6 +41,26 @@ interface CatalogTool {
   outputLabel?: 'lines' | 'matches' | 'changed-lines'
   capabilities?: string[]
 }
+interface CatalogLaunchProfile {
+  kind: 'path' | 'uvx' | 'npm'
+  command: string
+  args: string[]
+  env: { name: string; value: string }[]
+  cwdPolicy: 'workspace' | 'provider-config' | 'inherit' | null
+}
+interface CatalogAdapterRelation {
+  nativeCmd: string
+  nativeLabel: string
+  sharedConfigDir: string
+  extraDirs: string[]
+  docsUrl: string | null
+}
+interface CatalogVersionGate {
+  id: 'steering-prompt-required' | 'goal-control-out-of-band' | 'cursor-acp-backend'
+  minVersion: string | null
+  enabled: boolean
+  evidence: 'adapter-agent-info-version' | 'launch-recipe' | 'static-policy'
+}
 interface CatalogProvider {
   provider: string
   displayName: string
@@ -50,20 +70,28 @@ interface CatalogProvider {
   protocolDefaults: { setModelApi: 'config_option' | 'set_model' | 'none' }
   detection: CatalogDetection
   adaptation: CatalogAdaptation | null
+  launch: CatalogLaunchProfile
   tools: CatalogTool[]
 }
 interface CatalogAdaptation {
-  adapterRelation: Record<string, unknown> | null
+  adapterRelation: CatalogAdapterRelation | null
   clientCapabilities: Record<string, unknown> | null
   promptCapabilities: Record<string, unknown> | null
   launchEnv: unknown[] | null
-  versionGates: Record<string, unknown> | null
-  sessionEstablishment: Record<string, unknown> | null
+  versionGates: CatalogVersionGate[]
+  sessionEstablishment: { order: string[] }
   configAdaptation: Record<string, unknown> | null
   mcp: Record<string, unknown> | null
   interactionBridges: unknown[] | null
 }
-interface CatalogDocument { schemaVersion: 2; providers: CatalogProvider[] }
+interface CatalogDocument { schemaVersion: 3; providers: CatalogProvider[] }
+
+const LAUNCH_KINDS = new Set<CatalogLaunchProfile['kind']>(['path', 'uvx', 'npm'])
+const LAUNCH_CWD_POLICIES = new Set<NonNullable<CatalogLaunchProfile['cwdPolicy']>>(['workspace', 'provider-config', 'inherit'])
+const SESSION_METHODS = new Set(['resume', 'load', 'new'])
+const POSIX_SYSTEM_PATH_PREFIXES = ['/bin/', '/sbin/', '/usr/', '/etc/', '/dev/', '/lib/', '/opt/', '/tmp/', '/var/']
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+const SECRET_ENV_NEEDLES = ['API_KEY', 'APIKEY', 'TOKEN', 'SECRET', 'PASSWORD', 'PASSWD', 'CREDENTIAL']
 
 const TOOL_KINDS = new Set<ToolKind>(['read', 'edit', 'execute', 'search', 'fetch', 'think', 'other'])
 const TOOL_ACTIONS = new Set<ToolAction>(['read', 'write', 'edit', 'search', 'execute', 'fetch', 'navigate', 'click', 'type', 'snapshot', 'delegate', 'plan', 'skill', 'unknown'])
@@ -119,7 +147,18 @@ function adaptationPolicy(value: unknown, label: string): CatalogAdaptation | nu
   const raw = strictObject(value, label, ['adapterRelation', 'clientCapabilities', 'promptCapabilities', 'launchEnv', 'versionGates', 'sessionEstablishment', 'configAdaptation', 'mcp', 'interactionBridges'])
   const objectOrNull = (field: string): Record<string, unknown> | null => raw[field] === undefined || raw[field] === null ? null : object(raw[field], `${label}.${field}`)
   const arrayOrNull = (field: string): unknown[] | null => raw[field] === undefined || raw[field] === null ? null : (Array.isArray(raw[field]) ? raw[field] as unknown[] : (() => { throw new Error(`Agent Catalog ${label}.${field} 必须是数组`) })())
-  return { adapterRelation: objectOrNull('adapterRelation'), clientCapabilities: objectOrNull('clientCapabilities'), promptCapabilities: objectOrNull('promptCapabilities'), launchEnv: arrayOrNull('launchEnv'), versionGates: objectOrNull('versionGates'), sessionEstablishment: objectOrNull('sessionEstablishment'), configAdaptation: objectOrNull('configAdaptation'), mcp: objectOrNull('mcp'), interactionBridges: arrayOrNull('interactionBridges') }
+  // A0：三个已有生产消费者的策略在此闭成强类型；其余字段仍留待 A3 接线。
+  return {
+    adapterRelation: adapterRelationProjection(raw.adapterRelation, `${label}.adapterRelation`),
+    clientCapabilities: objectOrNull('clientCapabilities'),
+    promptCapabilities: objectOrNull('promptCapabilities'),
+    launchEnv: arrayOrNull('launchEnv'),
+    versionGates: versionGatesProjection(raw.versionGates, `${label}.versionGates`),
+    sessionEstablishment: { order: sessionEstablishmentProjection(raw.sessionEstablishment, `${label}.sessionEstablishment`) },
+    configAdaptation: objectOrNull('configAdaptation'),
+    mcp: objectOrNull('mcp'),
+    interactionBridges: arrayOrNull('interactionBridges'),
+  }
 }
 
 function nonEmpty(value: unknown, label: string): string {
@@ -132,9 +171,110 @@ function stringList(value: unknown, label: string): string[] {
   return value.map(item => item.trim()).filter(Boolean)
 }
 
+function relativeDir(value: unknown, label: string): string {
+  const raw = nonEmpty(value, label)
+  const stripped = raw.startsWith('~/') || raw.startsWith('~\\') ? raw.slice(2) : raw
+  if (!stripped || stripped.startsWith('/') || /^[A-Za-z]:[\\/]/.test(stripped) || stripped.split(/[\\/]/).includes('..')) {
+    throw new Error(`Agent Catalog ${label} 必须是配置目录内的相对路径`)
+  }
+  return raw
+}
+
+/**
+ * Schema v3 launch recipe. Windows-only by contract: a profile that cannot be
+ * launched as a plain Windows child process is rejected while parsing, not at
+ * spawn time.
+ */
+function launchProfile(value: unknown, provider: string): CatalogLaunchProfile {
+  const label = `${provider}.launch`
+  const raw = strictObject(value, label, ['kind', 'command', 'args', 'env', 'cwdPolicy'])
+  if (!LAUNCH_KINDS.has(raw.kind as CatalogLaunchProfile['kind'])) throw new Error(`Agent Catalog ${label}.kind 非法`)
+  const command = nonEmpty(raw.command, `${label}.command`)
+  if (command.includes('/') || command.includes('\\')) throw new Error(`Agent Catalog ${label}.command 必须是 PATH 可解析的可执行名`)
+  const args = raw.args === undefined ? [] : stringList(raw.args, `${label}.args`)
+  for (const arg of args) {
+    if (POSIX_SYSTEM_PATH_PREFIXES.some(prefix => arg.startsWith(prefix))) throw new Error(`Agent Catalog ${label}.args 含 Unix-only 参数：${arg}`)
+    if (arg.includes('SIGTERM') || arg.includes('SIGKILL')) throw new Error(`Agent Catalog ${label}.args 含 Unix-only 参数：${arg}`)
+    if (/^(sh|bash|zsh|dash|ksh)$/i.test(command) && ['-c', '-lc', '--command'].includes(arg)) throw new Error(`Agent Catalog ${label}.args 含 Unix-only 参数：${arg}`)
+  }
+  const rawEnv = raw.env === undefined ? [] : raw.env
+  if (!Array.isArray(rawEnv)) throw new Error(`Agent Catalog ${label}.env 必须是数组`)
+  const env = rawEnv.map((entry, index): { name: string; value: string } => {
+    const parsed = strictObject(entry, `${label}.env[${index}]`, ['name', 'value'])
+    const name = nonEmpty(parsed.name, `${label}.env.name`)
+    if (!ENV_NAME_PATTERN.test(name)) throw new Error(`Agent Catalog ${label}.env.name 非法：${name}`)
+    if (SECRET_ENV_NEEDLES.some(needle => name.toUpperCase().includes(needle))) throw new Error(`Agent Catalog ${label}.env 不得声明凭据：${name}`)
+    return { name, value: nonEmpty(parsed.value, `${label}.env.value`) }
+  })
+  let cwdPolicy: CatalogLaunchProfile['cwdPolicy'] = null
+  if (raw.cwdPolicy !== undefined && raw.cwdPolicy !== null) {
+    if (!LAUNCH_CWD_POLICIES.has(raw.cwdPolicy as NonNullable<CatalogLaunchProfile['cwdPolicy']>)) throw new Error(`Agent Catalog ${label}.cwdPolicy 非法`)
+    cwdPolicy = raw.cwdPolicy as NonNullable<CatalogLaunchProfile['cwdPolicy']>
+  }
+  return { kind: raw.kind as CatalogLaunchProfile['kind'], command, args, env, cwdPolicy }
+}
+
+/** Closed adapter-relation projection; `null` when the provider is not a wrapper. */
+function adapterRelationProjection(value: unknown, label: string): CatalogAdapterRelation | null {
+  if (value === undefined || value === null) return null
+  const raw = strictObject(value, label, ['nativeCmd', 'nativeLabel', 'sharedConfigDir', 'extraDirs', 'docsUrl'])
+  const extraDirs = raw.extraDirs === undefined ? [] : stringList(raw.extraDirs, `${label}.extraDirs`)
+  for (const dir of extraDirs) relativeDir(dir, `${label}.extraDirs`)
+  return {
+    nativeCmd: nonEmpty(raw.nativeCmd, `${label}.nativeCmd`),
+    nativeLabel: nonEmpty(raw.nativeLabel, `${label}.nativeLabel`),
+    sharedConfigDir: relativeDir(raw.sharedConfigDir, `${label}.sharedConfigDir`),
+    extraDirs,
+    docsUrl: raw.docsUrl === undefined || raw.docsUrl === null ? null : nonEmpty(raw.docsUrl, `${label}.docsUrl`),
+  }
+}
+
+/**
+ * Closed version-gate projection. Codeg's declaration is a flat map; `null`
+ * fields mean "not declared here" and an unknown key fails closed rather than
+ * becoming a gate nobody can evaluate.
+ */
+function versionGatesProjection(value: unknown, label: string): CatalogVersionGate[] {
+  if (value === undefined || value === null) return []
+  const raw = strictObject(value, label, ['steeringPromptRequiredMinVersion', 'goalControlOutOfBand', 'cursorAcpBackend'])
+  const gates: CatalogVersionGate[] = []
+  if (raw.steeringPromptRequiredMinVersion !== undefined && raw.steeringPromptRequiredMinVersion !== null) {
+    const min = nonEmpty(raw.steeringPromptRequiredMinVersion, `${label}.steeringPromptRequiredMinVersion`)
+    if (!/^\d+(\.\d+)*$/.test(min)) throw new Error(`Agent Catalog ${label}.steeringPromptRequiredMinVersion 非法：${min}`)
+    gates.push({ id: 'steering-prompt-required', minVersion: min, enabled: true, evidence: 'adapter-agent-info-version' })
+  }
+  if (raw.goalControlOutOfBand !== undefined && raw.goalControlOutOfBand !== null) {
+    if (typeof raw.goalControlOutOfBand !== 'boolean') throw new Error(`Agent Catalog ${label}.goalControlOutOfBand 必须是 boolean`)
+    gates.push({ id: 'goal-control-out-of-band', minVersion: null, enabled: raw.goalControlOutOfBand, evidence: 'static-policy' })
+  }
+  if (raw.cursorAcpBackend !== undefined && raw.cursorAcpBackend !== null) {
+    if (typeof raw.cursorAcpBackend !== 'boolean') throw new Error(`Agent Catalog ${label}.cursorAcpBackend 必须是 boolean`)
+    gates.push({ id: 'cursor-acp-backend', minVersion: null, enabled: raw.cursorAcpBackend, evidence: 'launch-recipe' })
+  }
+  if (gates.length === 0) throw new Error(`Agent Catalog ${label} 不能为空对象`)
+  return gates
+}
+
+/** `resume -> load -> new` order must end at `new` and repeat nothing. */
+function sessionEstablishmentProjection(value: unknown, label: string): string[] {
+  if (value === undefined || value === null) return ['resume', 'load', 'new']
+  const raw = strictObject(value, label, ['order'])
+  const order = stringList(raw.order, `${label}.order`)
+  if (order.length === 0) throw new Error(`Agent Catalog ${label}.order 不能为空`)
+  if (order[order.length - 1] !== 'new') throw new Error(`Agent Catalog ${label}.order 必须以 new 收尾`)
+  if (new Set(order).size !== order.length) throw new Error(`Agent Catalog ${label}.order 不能重复`)
+  for (const method of order) if (!SESSION_METHODS.has(method)) throw new Error(`Agent Catalog ${label}.order 非法：${method}`)
+  return order
+}
+
+/**
+ * Layer the closed v3 policies onto the raw adaptation block so consumers read
+ * typed values instead of re-deriving meaning from untyped JSON.
+ */
+
 export function parseAgentCatalog(value: unknown): CatalogDocument {
   const root = object(value, 'root')
-  if (root.schemaVersion !== 2) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
+  if (root.schemaVersion !== 3) throw new Error(`Agent Catalog schemaVersion 不支持：${String(root.schemaVersion)}`)
   for (const key of Object.keys(root)) if (key !== 'schemaVersion' && key !== 'providers') throw new Error(`Agent Catalog 顶层字段未知：${key}`)
   if (!Array.isArray(root.providers) || root.providers.length === 0) throw new Error('Agent Catalog providers 不能为空')
   const seenProviders = new Set<string>()
@@ -156,6 +296,8 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
     if (!['config_option', 'set_model', 'none'].includes(String(protocolDefaults.setModelApi))) throw new Error(`Agent Catalog ${provider}.protocolDefaults.setModelApi 非法`)
     const detection = object(raw.detection, `${provider}.detection`)
     const adaptation = adaptationPolicy(raw.adaptation, `${provider}.adaptation`)
+    if (raw.launch === undefined || raw.launch === null) throw new Error(`Agent Catalog ${provider}.launch 未声明`)
+    const launch = launchProfile(raw.launch, provider)
     const detectorId = nonEmpty(detection.detectorId, `${provider}.detection.detectorId`)
     if (seenDetectors.has(detectorId)) throw new Error(`Agent Catalog detectorId 重复：${detectorId}`)
     seenDetectors.add(detectorId)
@@ -223,10 +365,11 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         ...extensions,
       },
       adaptation,
+      launch,
       tools,
     }
   })
-  return { schemaVersion: 2, providers }
+  return { schemaVersion: 3, providers }
 }
 
 const catalog = parseAgentCatalog(rawCatalog)
@@ -260,5 +403,29 @@ export const builtinAgentCatalog = Object.freeze({
       if (invocation) return { provider: entry.provider, displayName: entry.displayName, args: [...invocation.args] }
     }
     return null
+  },
+  /**
+   * Catalog-derived fill-in hint for the executable field.
+   *
+   * A provider-specific `switch` here used to hardcode hermes/peri wording, so
+   * every new provider needed a component change (A4: no component-level
+   * provider switch). The hint is now built from the same catalog data the
+   * launcher consumes: the declared launch command, the declared wrapper
+   * relation, and the config dir detection reads.
+   */
+  executableHint(provider: string | null | undefined): string {
+    const entry = catalog.providers.find(candidate => candidate.provider === (provider ?? '').trim().toLowerCase())
+    if (!entry) {
+      return 'exe 填 Agent 可执行文件绝对路径；PATH 内的命令也可只填命令名。'
+    }
+    const parts = [`exe 填 ${entry.launch.command}（PATH 内可只填命令名）或其绝对路径`]
+    const relation = entry.adaptation?.adapterRelation ?? null
+    if (relation) {
+      parts.push(`这是 ACP wrapper：启动 ${entry.launch.command}，用户自装的 ${relation.nativeLabel}（${relation.nativeCmd}）仅作探测证据`)
+    }
+    if (entry.detection.configDirs.length > 0) {
+      parts.push(`配置探测读 ${entry.detection.configDirs.join(' / ')}`)
+    }
+    return `${parts.join('；')}。`
   },
 })

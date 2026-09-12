@@ -743,38 +743,26 @@ pub(crate) async fn acp_wire_trace_snapshot(
         .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
     if format.as_deref() == Some("jsonl") {
         const MAX_BYTES: usize = 4 * 1024 * 1024;
-        let records = trace.snapshot();
-        let lines: Vec<String> = records
-            .iter()
-            .map(|record| serde_json::to_string(record).unwrap_or_else(|_| "{}".into()))
-            .collect();
-        let mut used = 0usize;
-        let mut kept = 0usize;
-        for (index, line) in lines.iter().enumerate() {
-            let extra = line.len() + usize::from(index > 0);
-            if used + extra > MAX_BYTES {
-                break;
-            }
-            used += extra;
-            kept += 1;
-        }
-        let complete = kept == lines.len();
-        let body = lines[..kept].join("\n");
-        return Ok(serde_json::json!({
-            "traceId": trace.trace_id(),
-            "format": "jsonl",
-            "data": body,
-            "complete": complete,
-            "firstOrdinal": records.first().map(|r| r.monotonic_seq),
-            "lastOrdinal": records.get(kept.saturating_sub(1)).map(|r| r.monotonic_seq),
-            "droppedCount": records.len().saturating_sub(kept),
-            "reason": if complete { serde_json::Value::Null } else { serde_json::json!("byte_budget") },
-        }));
+        return serde_json::to_value(trace.snapshot_jsonl(MAX_BYTES))
+            .map_err(|error| PylonError::Acp(format!("wire JSONL export failed: {error}")));
     }
+    let records = trace.snapshot();
+    let canonical_correlations: Vec<_> = records
+        .iter()
+        .filter_map(|record| {
+            trace.correlate(record.monotonic_seq).map(|correlation| {
+                serde_json::json!({
+                    "ordinal": record.monotonic_seq,
+                    "correlation": correlation,
+                })
+            })
+        })
+        .collect();
     Ok(serde_json::json!({
         "traceId": trace.trace_id(),
         "length": trace.len(),
-        "records": trace.snapshot(),
+        "records": records,
+        "canonicalCorrelations": canonical_correlations,
     }))
 }
 
@@ -1431,6 +1419,72 @@ for line in sys.stdin:
         assert_eq!(AGENT_VALIDATION_TIMEOUT_SECS, 15);
     }
 
+    /// B1：连接测试响应的 launchPlan 与真实 spawn 同源（同一 planner），env 值
+    /// 一律掩码——计划数据可能包含凭据型环境变量，掩码发生在边界。
+    #[test]
+    fn launch_plan_payload_masks_env_values_and_shares_the_real_planner() {
+        use connection_test::launch_plan_payload;
+        let mut agent = crate::agent_config::AgentDef {
+            name: "Peri".into(),
+            provider: Some("peri".into()),
+            transport: "subprocess".into(),
+            exe: "peri".into(),
+            args: vec!["acp".into()],
+            cwd: None,
+            env: std::collections::HashMap::from([(
+                "PERI_TOKEN".to_string(),
+                "sk-super-secret".to_string(),
+            )]),
+            default: false,
+            set_model_api: false,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let payload = launch_plan_payload(&agent);
+        assert_eq!(payload["executable"], "peri");
+        assert_eq!(
+            payload["argv"],
+            serde_json::json!(["peri", "acp"]),
+            "argv 必须与真实启动一致（同一 planner 计算）"
+        );
+        assert_eq!(payload["env"][0]["name"], "PERI_TOKEN");
+        assert_eq!(payload["env"][0]["value"], "value withheld");
+        assert!(
+            !payload.to_string().contains("sk-super-secret"),
+            "env 值不得以任何形式出现在响应里"
+        );
+
+        // 无 provider 的自定义 agent：显式配置即可计划，错误也不得是 panic。
+        agent.provider = None;
+        agent.exe = "my-agent.exe".into();
+        agent.env.clear();
+        let custom = launch_plan_payload(&agent);
+        assert_eq!(custom["executable"], "my-agent.exe");
+    }
+
+    /// B1：error payload 携带 typed cause（closed vocabulary 视图，前端只渲染）。
+    #[test]
+    fn connection_test_error_payload_carries_typed_cause() {
+        let failure = AcpError::Connect(Box::new(AgentConnectFailure {
+            stage: AgentConnectStage::Spawn,
+            code: "agent_spawn_failed".into(),
+            message: "spawn failed".into(),
+            exit_code: None,
+            stderr_excerpt: None,
+            retryable: false,
+            io_kind: None,
+            remote_code: None,
+            remote_data_summary: None,
+        }));
+        let payload = connection_test_error_payload(&failure);
+        assert_eq!(payload["cause"]["level"], "fail");
+        assert_eq!(payload["cause"]["code"], "agent_spawn_failed");
+        assert_eq!(payload["cause"]["summary"], "spawn failed");
+        assert_eq!(payload["cause"]["action"], "open-runtime-log");
+    }
+
     #[test]
     fn candidate_stderr_is_bounded_and_preserves_chronological_order() {
         let logs = crate::runtime_log::RuntimeLogHub::new(8);
@@ -1477,7 +1531,16 @@ sys.exit(7)
         assert_eq!(payload["ok"], false);
         assert_eq!(payload["error"]["code"], "agent_initialize_failed");
         assert_eq!(payload["error"]["stage"], "initialize");
-        assert!(payload["error"]["exitCode"].is_null());
+        // exitCode 是「initialize 失败那个瞬间子进程是否已被回收」的**尽力观测**
+        // （`acp/client.rs` 的 `child.try_wait()`）：已回收则必为真实退出码 7，尚未回收
+        // 则为 null。该时序随负载浮动（隔离跑常为 7、全量并发跑常为 null），
+        // 故不断言其存在性，只锁定「一旦捕获到，必须就是子进程的真实退出码」。
+        if let Some(code) = payload["error"]["exitCode"].as_i64() {
+            assert_eq!(
+                code, 7,
+                "captured exit code must be the child's real exit code"
+            );
+        }
         assert!(payload["error"]["stderr"]
             .as_str()
             .unwrap_or_default()

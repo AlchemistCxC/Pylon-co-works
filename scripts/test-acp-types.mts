@@ -12,7 +12,11 @@ const response = sessionResponseObject({
   configOptions: [{ id: 'model', currentValue: 'sonnet', options: [{ id: 'sonnet' }, { id: 'opus' }] }],
 })
 assert.equal(response.sessionId, 'peri-a')
-assert.deepEqual(extractModelConfig(response.configOptions), { model: 'sonnet', models: ['sonnet', 'opus'] })
+assert.deepEqual(extractModelConfig(response.configOptions), {
+  model: 'sonnet',
+  models: ['sonnet', 'opus'],
+  modelChoices: [{ id: 'sonnet' }, { id: 'opus' }],
+})
 assert.equal(extractMode(response), 'edit')
 assert.deepEqual(sessionResponseObject('legacy-id'), { sessionId: 'legacy-id' })
 assert.deepEqual(extractModelConfig(undefined), {})

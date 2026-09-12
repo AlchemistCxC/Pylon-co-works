@@ -262,6 +262,14 @@ pub(crate) async fn pet_action(
     Ok(result)
 }
 
+#[allow(dead_code)] // 宠物时钟（未来接入宠物事件）
+fn real_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,12 +331,4 @@ mod tests {
             "HSM 自动入睡转移必须计 dirty（CR-101）"
         );
     }
-}
-
-#[allow(dead_code)] // 宠物时钟（未来接入宠物事件）
-fn real_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }

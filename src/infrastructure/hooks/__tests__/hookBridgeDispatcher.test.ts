@@ -39,7 +39,13 @@ vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({
 }))
 
 import { useIdentityStore, type Session } from '../../../identityStore.ts'
+import { HOOK_NAMES } from '../../../plugin-runtime/hooks/hookTypes.ts'
 import { installPylonHookBridge } from '../hookBridgeDispatcher.ts'
+
+// 词表是封闭集合（`HOOK_NAMES`）。原先拿 `agent.chunk` 当“未知锚点”，
+// 而 7472b731 已把它写进词表（P55 D4 dangerousHooks），fixture 随即失效；
+// 这里用必然不在词表中的名字，并在用例内自守，避免再次撞名后静默变绿。
+const UNKNOWN_ANCHOR = 'undeclared.anchor'
 
 function makeSession(overrides: Partial<Session>): Session {
   return {
@@ -124,9 +130,10 @@ describe('hookBridgeDispatcher（P55-D1）', () => {
   })
 
   it('fail-closed：锚点名不在词表 → 不进 HookRuntime', async () => {
+    expect(HOOK_NAMES as readonly string[]).not.toContain(UNKNOWN_ANCHOR)
     useIdentityStore.setState({ sessions: [makeSession({ hooks: ['p.kernel'] })] })
     dispose = await installPylonHookBridge()
-    listeners.get('pylon:hook-request')?.(hookRequest({ hook: 'agent.chunk' }))
+    listeners.get('pylon:hook-request')?.(hookRequest({ hook: UNKNOWN_ANCHOR }))
     await vi.waitFor(() => expect(respondCalls()).toHaveLength(1))
     expect(hookRuntimeMock.handlerLog).toHaveLength(0)
     expect(respondCalls()[0]).toMatchObject({ result: { action: 'continue' } })

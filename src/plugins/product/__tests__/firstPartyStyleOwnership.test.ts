@@ -7,6 +7,7 @@ import {
 const expectedCssPaths = [
   'src/components/kernel/SkinPreviewBar.css',
   'src/index.css',
+  'src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',

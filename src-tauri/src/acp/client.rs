@@ -34,6 +34,52 @@ pub struct AcpClient {
     /// 断开态为 None；连接后始终存在（容量上限 ring buffer，可 set_enabled 关闭）。
     wire_trace: Option<Arc<AcpWireCapture>>,
     pub(crate) stderr_tail: Arc<StderrTail>,
+    /// B2：initialize 是否完成。session/new 之前必须为 true——守卫在
+    /// `session_ready()` 消费，禁止任何绕过握手的会话建立。
+    session_ready: AtomicBool,
+    /// B2：catalog 声明的会话建立顺序（connect 时按 provider 解析；无 catalog
+    /// profile 时为默认 resume→load→new）。revive 链与
+    /// `session_establishment_channels` 一起做「声明 ∩ 服务端广告」交集。
+    establishment_order: Vec<String>,
+}
+
+/// Default establishment order when no catalog profile declares one: the
+/// pre-B2 behavior (resume → load → new), which every current catalog entry
+/// also declares.
+fn default_establishment_order() -> Vec<String> {
+    ["resume", "load", "new"]
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
+/// Catalog-declared establishment order for a provider; unknown/absent
+/// provider keeps the default (fail-open here is deliberate: an unknown
+/// provider must not silently lose session revival — the server advertisement
+/// side still gates every channel).
+fn declared_establishment_order(provider: Option<&str>) -> Vec<String> {
+    let Some(provider) = provider else {
+        return default_establishment_order();
+    };
+    let Ok(Some(profile)) = pylon_core::agent_catalog::provider_profile(provider) else {
+        return default_establishment_order();
+    };
+    let order: Vec<String> = profile
+        .session_establishment
+        .order
+        .iter()
+        .map(|method| match method {
+            pylon_core::agent_catalog::CatalogSessionMethod::Resume => "resume",
+            pylon_core::agent_catalog::CatalogSessionMethod::Load => "load",
+            pylon_core::agent_catalog::CatalogSessionMethod::New => "new",
+        })
+        .map(String::from)
+        .collect();
+    if order.is_empty() {
+        default_establishment_order()
+    } else {
+        order
+    }
 }
 
 /// Cloneable handle to the connection's single-consumer Kernel notification stream.
@@ -135,6 +181,8 @@ impl AcpClient {
             child: ManagedChild::empty(),
             protocol: crate::agent_config::AcpProtocolConfig::default(),
             capability_registry: CapabilityRegistry::default(),
+            session_ready: AtomicBool::new(false),
+            establishment_order: default_establishment_order(),
             backend: SdkBackend {
                 outbound,
                 next_id: Arc::new(AtomicU64::new(1)),
@@ -235,6 +283,17 @@ impl AcpClient {
     /// Typed, fail-closed view of the initialize negotiation.
     pub fn capabilities(&self) -> &CapabilityRegistry {
         &self.capability_registry
+    }
+
+    /// B2：initialize 是否完成（session/new 守卫的数据源）。
+    pub fn session_ready(&self) -> bool {
+        self.session_ready
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// B2：catalog 声明的会话建立顺序（revive 链交集的声明侧）。
+    pub fn establishment_order(&self) -> &[String] {
+        &self.establishment_order
     }
 
     /// OBS-01：本连接的 ACP wire 只读记录器（断开态为 None）。
@@ -374,21 +433,20 @@ impl AcpClient {
                     _crashed_watch_rx: crashed_watch_rx,
                     wire_trace: Some(wire_trace),
                     stderr_tail: stderr_tail.clone(),
+                    session_ready: AtomicBool::new(false),
+                    establishment_order: declared_establishment_order(agent.provider.as_deref()),
                 };
-                // Initialize——G1-03：握手三段全部来自协议配置（覆盖制，缺省 = 现状
-                // 现值，wire 逐字节不变）：clientCapabilities（D1，agents.yaml
-                // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
-                // Hermes 忽略无害）、protocolVersion（H3）、clientInfo（H4）。
-                // 差异适配表见 acp.rs 头部注释与手册 §3.3。
+                let stderr_mark = stderr_tail.mark();
+                // Initialize——B2：握手三段由纯函数 `build_initialize_plan` 成形
+                // （G1-03 覆盖制语义不变：clientCapabilities D1 / protocolVersion H3 /
+                // clientInfo H4，wire 逐字节不变），client 只消费计划。
+                // A3：caps 合并/形状失败即连接失败（不静默用默认 caps 继续握手）。
+                let initialize_plan = super::initialize_plan::build_initialize_plan(
+                    &client.protocol,
+                    agent.provider.as_deref(),
+                )?;
                 let initialize_response = match client
-                    .call_async(
-                        METHOD_INITIALIZE,
-                        serde_json::json!({
-                            "protocolVersion": client.protocol.protocol_version(),
-                            "clientCapabilities": client.protocol.initialize_caps_for_provider(agent.provider.as_deref()),
-                            "clientInfo": client.protocol.client_info()
-                        }),
-                    )
+                    .call_async(METHOD_INITIALIZE, initialize_plan.params())
                     .await
                 {
                     Ok(response) => response,
@@ -400,7 +458,7 @@ impl AcpClient {
                             .flatten()
                             .and_then(|status| status.code());
                         let mut failure = AgentConnectFailure::initialize(error, exit_code);
-                        let tail = stderr_tail.tail_since(0, 8, 2048);
+                        let tail = stderr_tail.tail_since(stderr_mark, 8, 2048);
                         if !tail.lines.is_empty() {
                             failure.stderr_excerpt = Some(tail.lines.join("\n"));
                         }
@@ -415,13 +473,17 @@ impl AcpClient {
                         Ok(registry) => registry,
                         Err(message) => {
                             let mut failure = AgentConnectFailure::capability(message);
-                            let tail = stderr_tail.tail_since(0, 8, 2048);
+                            let tail = stderr_tail.tail_since(stderr_mark, 8, 2048);
                             if !tail.lines.is_empty() {
                                 failure.stderr_excerpt = Some(tail.lines.join("\n"));
                             }
                             return Err(failure.into());
                         }
                     };
+                // B2：initialize 完成（能力协商成功）之后，session/new 才被允许。
+                client
+                    .session_ready
+                    .store(true, std::sync::atomic::Ordering::Release);
                 Ok(client)
             }
             other => Err(AgentConnectFailure::preflight(

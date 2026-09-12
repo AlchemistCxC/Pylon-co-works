@@ -24,7 +24,24 @@ use super::wire_trace::{WireDirection, WireIdKind, WireRecord};
 use super::{AcpClient, AcpError, METHOD_SESSION_LOAD, METHOD_SESSION_NEW};
 
 /// A0 固定场景清单（顺序即基线文件生成顺序，对应施工书 §A0 步骤 4）。
-pub(crate) const SCENARIOS: [&str; 8] = [
+pub(crate) const SCENARIOS: [&str; 10] = [
+    "initialize",
+    "new_load",
+    "prompt",
+    "tool",
+    "permission",
+    "done_error",
+    "cancel",
+    "reconnect",
+    // A5①：wrapper provider 的基线。这两个场景带真实 `provider`，把
+    // catalog 声明的 clientCapabilities 与实际启动路径一起钉进 wire 基线。
+    "wrapper_claude",
+    "wrapper_codex",
+];
+
+/// 施工书 §A0 步骤 4 点名的 8 个场景。与 [`SCENARIOS`] 的前缀断言对齐：
+/// 新增场景只允许追加，不得删改这 8 个。
+const CONSTRUCTION_BOOK_SCENARIOS: [&str; 8] = [
     "initialize",
     "new_load",
     "prompt",
@@ -35,10 +52,19 @@ pub(crate) const SCENARIOS: [&str; 8] = [
     "reconnect",
 ];
 
+/// A5① wrapper 场景 → catalog provider。`None` = 不带 provider 的基线场景。
+fn scenario_provider(scenario: &str) -> Option<&'static str> {
+    match scenario {
+        "wrapper_claude" => Some("claude-code"),
+        "wrapper_codex" => Some("codex"),
+        _ => None,
+    }
+}
+
 /// 基线使用的 durable owner（真实 `DurableSessionOwner`，不是占位字符串）。
 const OWNER_PARTS: (&str, &str, &str) = ("golden-profile", "fake-acp-golden", "local:golden");
 const SESSION_ID: &str = "golden-session";
-/// permission 场景的 agent 请求 id（数字形态，便于测试用 `send_response` 应答）。
+/// permission 场景的 agent 请求 id（数字形态，便于测试用 responder 应答）。
 const PERMISSION_REQUEST_ID: u64 = 9001;
 
 /// 单一 fake agent 脚本，按 `GOLDEN_SCENARIO` 分支；避免为 8 个场景维护 8 份脚本。
@@ -112,7 +138,16 @@ fn trace_dir() -> Option<PathBuf> {
 fn golden_agent(scenario: &str) -> crate::agent_config::AgentDef {
     let mut env = std::collections::HashMap::new();
     env.insert("GOLDEN_SCENARIO".to_string(), scenario.to_string());
-    crate::test_utils::fake_acp_agent_with("fake-acp-golden", GOLDEN_AGENT_SCRIPT, Vec::new(), env)
+    let mut agent = crate::test_utils::fake_acp_agent_with(
+        "fake-acp-golden",
+        GOLDEN_AGENT_SCRIPT,
+        Vec::new(),
+        env,
+    );
+    // A5①：wrapper 场景带真实 provider，使 catalog 声明的 clientCapabilities 与
+    // provider 身份一起进入 wire 基线；其余场景保持 provider = None（P60 基线不变）。
+    agent.provider = scenario_provider(scenario).map(str::to_string);
+    agent
 }
 
 fn owner_key() -> String {
@@ -132,6 +167,11 @@ fn normalize(connections: &[Vec<WireRecord>], scenario: &str, owner: &str) -> St
         .iter()
         .enumerate()
         .flat_map(|(index, records)| {
+            // SDK 为出站请求生成 UUID，而 legacy 基线使用递增数字。将每条连接内
+            // 首次出现的 wire id 映射到稳定序号，保留 idKind 与请求/响应关联，
+            // 这样 golden trace 比较的是 id 语义和顺序，而不是机器随机 UUID。
+            let mut id_numbers = std::collections::HashMap::<String, u64>::new();
+            let mut next_id = 1_u64;
             records.iter().map(move |record| {
                 let mut value =
                     serde_json::to_value(record).expect("wire record must serialize to JSON");
@@ -150,6 +190,25 @@ fn normalize(connections: &[Vec<WireRecord>], scenario: &str, owner: &str) -> St
                     serde_json::json!(record.client_generation),
                 );
                 object.insert("ordinal".into(), serde_json::json!(record.monotonic_seq));
+                if let Some(id) = object.get("idValue").cloned() {
+                    if !id.is_null() {
+                        let key = serde_json::to_string(&id).expect("wire id must serialize");
+                        let stable_id = if let Some(existing) = id_numbers.get(&key) {
+                            *existing
+                        } else {
+                            let assigned = next_id;
+                            next_id += 1;
+                            id_numbers.insert(key, assigned);
+                            assigned
+                        };
+                        let normalized = match object.get("idKind").and_then(|kind| kind.as_str()) {
+                            Some("number") => serde_json::json!(stable_id),
+                            Some("string") => serde_json::json!(format!("wire-{stable_id}")),
+                            _ => id,
+                        };
+                        object.insert("idValue".into(), normalized);
+                    }
+                }
                 serde_json::to_string(&value).expect("normalized record must serialize")
             })
         })
@@ -186,8 +245,9 @@ async fn prompt(client: &AcpClient) -> Result<serde_json::Value, AcpError> {
         .await
 }
 
-/// 轮询等待 agent 发出 `session/request_permission`，返回其 wire id（数字形态）。
-async fn wait_for_permission_request(client: &AcpClient) -> u64 {
+/// 轮询等待 agent 发出 `session/request_permission`，且 SDK 已登记对应 responder。
+/// wire capture 与 dispatch handler 是两个异步观察点，不能只看到 capture 就立即应答。
+async fn wait_for_permission_request(client: &AcpClient) -> super::RequestId {
     let trace = client
         .wire_trace()
         .expect("golden client must expose wire trace");
@@ -197,11 +257,20 @@ async fn wait_for_permission_request(client: &AcpClient) -> u64 {
             record.method.as_deref() == Some("session/request_permission")
                 && record.direction == WireDirection::AgentToPylon
         }) {
-            return record
+            let id = record
                 .id_value
                 .as_ref()
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(PERMISSION_REQUEST_ID);
+                .and_then(super::RequestId::from_json_value)
+                .unwrap_or(super::RequestId::Number(PERMISSION_REQUEST_ID));
+            let registered = client
+                .backend
+                .pending_requests
+                .lock()
+                .map(|pending| pending.contains_key(&id))
+                .unwrap_or(false);
+            if registered {
+                return id;
+            }
         }
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -240,7 +309,7 @@ async fn drive_scenario(scenario: &str) -> Result<Vec<Vec<WireRecord>>, AcpError
                 client
                     .responder()
                     .respond(
-                        super::RequestId::String(request_id.to_string()),
+                        request_id,
                         serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}}),
                     )
                     .await,
@@ -270,6 +339,12 @@ async fn drive_scenario(scenario: &str) -> Result<Vec<Vec<WireRecord>>, AcpError
             records.push(second_trace.snapshot());
             second.kill()?;
             return Ok(records);
+        }
+        // A5①：wrapper provider 走完整的 initialize → session/new → prompt，
+        // 与真实会话同一条路径（都经 `spawn_agent_child` 的 LaunchPlan）。
+        "wrapper_claude" | "wrapper_codex" => {
+            new_session(&client).await?;
+            let _ = prompt(&client).await;
         }
         other => panic!("unknown golden scenario: {other}"),
     }
@@ -303,21 +378,72 @@ async fn golden_trace_baseline_generation() {
 }
 
 /// 场景清单与施工书 §A0 步骤 4 的 8 个场景逐项对齐（常驻断言，不依赖环境变量）。
+///
+/// A5① 追加了两个 wrapper 场景，所以这里断言的是「施工书 8 场景是 SCENARIOS 的
+/// 前缀」而不是「SCENARIOS 就是这 8 个」——前缀断言仍然禁止删改/重排原 8 场景，
+/// 只是允许向后追加（严格程度不降）。
+/// B2 顺序锁定：任何建立会话的场景，wire 上 `initialize` 必须先于 `session/new`。
+/// 这是「session/new 不得绕过 initialize」契约的可观测证据（守卫在
+/// `AcpClient::session_ready`，这里是端到端的第二把锁）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wire_order_locks_initialize_before_session_new() {
+    let records = tokio::time::timeout(Duration::from_secs(30), drive_scenario("prompt"))
+        .await
+        .expect("prompt scenario must not hang")
+        .expect("prompt scenario must succeed");
+    let sent_methods: Vec<&str> = records
+        .iter()
+        .flatten()
+        .filter(|record| record.direction == WireDirection::PylonToAgent)
+        .filter_map(|record| record.method.as_deref())
+        .collect();
+    let initialize_at = sent_methods
+        .iter()
+        .position(|method| *method == "initialize")
+        .expect("initialize must be on the wire");
+    let session_new_at = sent_methods
+        .iter()
+        .position(|method| *method == "session/new")
+        .expect("session/new must be on the wire");
+    assert!(
+        initialize_at < session_new_at,
+        "initialize must precede session/new on the wire, got {sent_methods:?}"
+    );
+    assert_eq!(initialize_at, 0, "initialize must be the first request");
+}
+
 #[test]
 fn golden_trace_scenarios_match_construction_book() {
     assert_eq!(
-        SCENARIOS,
-        [
-            "initialize",
-            "new_load",
-            "prompt",
-            "tool",
-            "permission",
-            "done_error",
-            "cancel",
-            "reconnect",
-        ]
+        &SCENARIOS[..CONSTRUCTION_BOOK_SCENARIOS.len()],
+        &CONSTRUCTION_BOOK_SCENARIOS[..]
     );
+    assert_eq!(SCENARIOS.len(), CONSTRUCTION_BOOK_SCENARIOS.len() + 2);
+}
+
+/// A5① 验收：wrapper 场景必须带真实 provider，否则基线里就看不出声明是 provider
+/// 作用域的（`initialize` 的 `clientCapabilities` 会与无 provider 场景同形）。
+#[test]
+fn wrapper_scenarios_carry_their_catalog_provider() {
+    assert_eq!(scenario_provider("wrapper_claude"), Some("claude-code"));
+    assert_eq!(scenario_provider("wrapper_codex"), Some("codex"));
+    for scenario in CONSTRUCTION_BOOK_SCENARIOS {
+        assert_eq!(
+            scenario_provider(scenario),
+            None,
+            "{scenario} 必须保持无 provider"
+        );
+    }
+    // 带 provider 的场景必须真的能在 catalog 里解析出 profile。
+    for scenario in ["wrapper_claude", "wrapper_codex"] {
+        let provider = scenario_provider(scenario).expect("wrapper 场景必须有 provider");
+        assert!(
+            crate::agent_catalog::provider_profile(provider)
+                .expect("catalog 必须可解析")
+                .is_some(),
+            "{provider} 必须在 catalog 中"
+        );
+    }
 }
 
 /// 归一化必须去掉机器相关字段、保留身份轴。

@@ -13,6 +13,7 @@ use dashmap::DashMap;
 use crate::acp::{AcpClient, RequestId};
 use crate::agent_runtime::{AgentRuntimeState, SessionBindingHealth};
 use crate::permission::PendingPermission;
+use crate::private_interaction::PrivateInteractionOwner;
 use crate::session::SessionInfo;
 
 /// Stable identity for a GUI/runtime session context.
@@ -56,6 +57,7 @@ pub struct AgentRuntime {
     /// 挂起的权限请求（B9/ACP-01）：请求 id（number 或 string 原始形态）→ 待用户决策
     /// （超时默认拒绝）。id 保留 wire 原始 variant——响应用原 variant 回写。
     pub pending_permissions: Arc<Mutex<HashMap<RequestId, PendingPermission>>>,
+    pub private_interactions: PrivateInteractionOwner,
     /// 会话映射就绪通知（R6，吸收 O5）：new_session / send_prompt_core 自动建会话 /
     /// load_persisted_session 的 sessions 映射插入成功后 notify_waiters，dispatcher
     /// 对未知 periId 的等待由 20×5ms 轮询改为事件驱动（100ms 窗口语义不变）。
@@ -82,6 +84,7 @@ impl AgentRuntime {
             agent_runtime: Arc::new(Mutex::new(AgentRuntimeState::default())),
             auto_reconnect_active: Arc::new(AtomicBool::new(false)),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
+            private_interactions: PrivateInteractionOwner::default(),
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
             terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),

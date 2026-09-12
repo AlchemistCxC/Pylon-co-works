@@ -3,11 +3,12 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const externalDocs = resolve(root, '..', 'Docs')
+// 只校验仓库内的文档指针。CI 的 checkout 仅含本仓库，兄弟目录 Docs/ 不存在，
+// 跨仓库路径（渲染引擎台账位于协作工作区 G:\Project\prism-team-workdir\Docs\）
+// 无法在此门禁成立，故不纳入；该指针仍作为说明留在 CONTEXT.md。
 const checks = [
   ['CONTEXT architecture reference', resolve(root, 'docs/说明书/Pylon-项目架构参考.md')],
   ['CONTEXT plugin topology', resolve(root, 'docs/说明书/Pylon-插件化前后端拓扑全图.md')],
-  ['CONTEXT renderer ledger', resolve(externalDocs, 'Archive/渲染引擎施工/00-唯一入口台账.md')],
 ]
 const missing = checks.filter(([, path]) => !existsSync(path))
 if (missing.length) {

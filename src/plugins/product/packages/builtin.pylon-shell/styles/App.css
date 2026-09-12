@@ -453,7 +453,8 @@
 .right-rail-host.is-collapsed { flex-basis:0; width:0; min-width:0; max-width:0; opacity:0; pointer-events:none; }
 .right-rail-host.is-collapsed .right-rail-resize-handle { display:none; }
 .right-rail-host .context-panel { width:100%; min-width:0; }
-.right-rail-resize-handle { position:absolute; z-index:4; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; background:transparent; }
+.right-rail-host.is-resizing { transition:none; }
+.right-rail-resize-handle { position:absolute; z-index:4; left:0; top:0; bottom:0; width:6px; cursor:col-resize; background:transparent; touch-action:none; }
 .right-rail-resize-handle:hover, .right-rail-resize-handle:focus-visible { background:color-mix(in srgb,var(--accent) 62%,transparent); outline:none; }
 
 .main-body {

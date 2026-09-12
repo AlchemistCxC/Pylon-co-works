@@ -3,6 +3,8 @@ import { createSignal, onCleanup, type JSX } from 'solid-js'
 import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULTS } from '../../../../domains/theme/themeDefaults.ts'
+import { createWorkbenchDocument } from '../../../../domains/workbench/workbenchProjector.ts'
+import { normalizeSessionConfigOptions } from '../../../../domains/workbench/session/sessionSurface.ts'
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
 import { SolidAttachWidget, SolidCcSendButton, SolidModeWidget, SolidModelWidget } from '../WorkbenchWidgets.solid.tsx'
@@ -45,6 +47,52 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
 }
 
 describe('Solid Workbench widgets', () => {
+  it('switching model variants closes stale menus and preserves the dropdown interaction', async () => {
+    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
+    expect(screen.getAllByRole('listbox')).toHaveLength(1)
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'badge' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'minimal' })
+    fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
+    await waitFor(() => expect(services.commands.calls).toHaveLength(1))
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'dropdown' })
+    const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(screen.getAllByRole('listbox')).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('live reasoning sends the advertised config id and renders only confirmed values', async () => {
+    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const publish = (value: string) => {
+      const document = createWorkbenchDocument('preview-session')
+      services.runtime.replaceDocument({ ...document, session: { ...document.session,
+        options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
+          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+      } })
+    }
+    publish('low')
+    services.commands.setHandler('setConfigOption', async () => { publish('high'); return { ok: true } })
+    fireEvent.click(screen.getByRole('button', { name: /（low）/ }))
+    expect(screen.queryByRole('option', { name: 'ultra' })).toBeNull()
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    await waitFor(() => expect(services.commands.calls[0]?.args).toEqual([
+      'preview-session', 'reasoning_effort', 'high', { expectedValue: 'low', expectedVersion: 7 },
+    ]))
+    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    services.commands.setHandler('setConfigOption', async () => ({ ok: false, error: 'reasoning denied' }))
+    fireEvent.click(screen.getByRole('button', { name: /（high）/ }))
+    fireEvent.click(screen.getByRole('option', { name: 'low' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('reasoning denied')
+    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'))
+    expect(screen.queryByRole('button', { name: /（high）/ })).toBeNull()
+  })
+
   it('Model dropdown 枚举 runtime models，并经 facade 切换', async () => {
     const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))

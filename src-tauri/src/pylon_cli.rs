@@ -274,7 +274,7 @@ fn capture_window_pixels(
         if copied == 0 || rows != height as i32 {
             return Err("BitBlt/GetDIBits capture failed".into());
         }
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
             pixel[3] = 255;
         }

@@ -1,6 +1,4 @@
-import type { PluginIdentity } from '../pluginIdentity.ts'
-import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
-import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
+import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { InterfaceModeContribution } from './interfaceModeTypes.ts'
 
 export const INTERFACE_MODE_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
@@ -51,36 +49,6 @@ export function validateInterfaceModeContribution(
   })
 }
 
-export class InterfaceModeRegistry {
-  private readonly registry = new ReactiveRegistryStore<InterfaceModeContribution>()
-
-  register(owner: PluginIdentity, contribution: InterfaceModeContribution): AsyncDisposable {
-    const normalized = validateInterfaceModeContribution(contribution)
-    return this.registry.register(owner, normalized, {
-      contributionId: normalized.id,
-      priority: normalized.order,
-    })
-  }
-
-  beginShadowTransaction(
-    owner: PluginIdentity,
-    replacingRuntimeInstanceId: string,
-  ): RegistryTransaction<InterfaceModeContribution> {
-    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    return {
-      ...transaction,
-      register: (contribution, options) => {
-        const normalized = validateInterfaceModeContribution(contribution)
-        return transaction.register(normalized, {
-          ...options,
-          contributionId: normalized.id,
-          priority: normalized.order,
-        })
-      },
-    }
-  }
-
-  subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }
-  getSnapshot(): RegistrySnapshot<InterfaceModeContribution> { return this.registry.getSnapshot() }
-  resolve(id: string) { return this.registry.getSnapshot().entries.find(entry => entry.contributionId === id) }
+export class InterfaceModeRegistry extends ValidatedContributionRegistry<InterfaceModeContribution> {
+  constructor() { super(validateInterfaceModeContribution) }
 }

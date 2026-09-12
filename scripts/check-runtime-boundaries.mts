@@ -25,7 +25,6 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/application/transactions/openOwnedSessionTransaction.ts',
   'src/cli/pylonCliBridge.ts',
   'src/cli/pylonCliDomainPorts.ts',
-  'src/components/chat/ModeWidget.tsx',
   'src/components/chat/sessionMode.ts',
   'src/components/chat/sessionModel.ts',
   'src/components/chat/streamingSend.ts',
@@ -39,6 +38,10 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/components/settings/GatewayRiskPanel.tsx',
   'src/components/Sidebar.tsx',
   'src/infrastructure/events/canonicalEventRepository.ts',
+  'src/infrastructure/acp/chatClient.ts',
+  // 内核 hook 桥：与 pylonCliBridge 同形态的基础设施 IPC 桥（Rust 锚点缝 ↔ HookRuntime），
+  // 非产品 domain client；P55 D1（3bc8ef13）引入时漏登记，2026-09-10 经架构师裁定按先例登记。
+  'src/infrastructure/hooks/hookBridgeDispatcher.ts',
   'src/sheets/agent-workbench/agentWorkbenchLifecycle.ts',
   'src/infrastructure/skin/skinHostPorts.ts',
   'src/obs04/devTrigger.ts',

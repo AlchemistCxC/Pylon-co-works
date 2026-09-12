@@ -5,6 +5,7 @@
 //! 2. 写 deleting tombstone + 本地事务删除（步骤 2-4）——begin_delete_session 两阶段入口；
 //! 3. 终态化 deleting → deleted（步骤 6 远端 close best effort 之后）——finalize_session_delete；
 //! 4. 'deleting' 同样 gate 迟到写（不复活）；finalize/重复 begin 幂等。
+//!
 //! 依赖 DEL-02（v7 tombstone owner/deletion state）；DEL-04 处理 canonical evt_append gate。
 //! B7：messages 表已删除，迟到写 gate 验证对象改为 evt_append（EventError::SessionDeleted）。
 

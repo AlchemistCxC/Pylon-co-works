@@ -37,6 +37,15 @@ import sys
 import zipfile
 from pathlib import Path
 
+# 标准输出固定为 UTF-8：Windows 上 stdout 默认走宿主 locale 编码，CI runner 是 cp1252，
+# 而发行包内路径含中文（docs/说明书/...），直接 print 这些路径会抛 UnicodeEncodeError。
+# 实测 release CI 在 zip/sha256/manifest 都已写出之后，崩在清单打印上（run 34594629111），
+# 导致 verify_zip 从未执行。本地控制台能编码中文、CI 不能 —— 属 locale 依赖型缺陷，
+# 故在脚本内固定编码，不依赖调用方设置 PYTHONIOENCODING。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 SRC_TAURI_DIR = REPO_DIR / "src-tauri"
@@ -221,6 +230,33 @@ def collect_dev_sdk() -> list[tuple[Path, str]]:
     return [(path, f"resources/sdk/{rel}") for rel, path in sorted(files.items())]
 
 
+def resolve_webview2_loader() -> Path:
+    """定位 WebView2Loader.dll（exe 启动必需，缺失 → 0xC0000135）。
+
+    `tauri build --no-bundle` 不执行 bundling 阶段，因此该 DLL 不会被拷进
+    target/release/ 根；它只由 webview2-com-sys 的 build.rs 拷进 cargo OUT_DIR
+    （<target>/<profile>/build/webview2-com-sys-*/out/<arch>/）。先认发布目录，
+    再按上述布局回退——与下方 Hermes runtime 对 `--no-bundle` 的回退同一思路。
+
+    发行目标是 x86_64-pc-windows-msvc，故只接受 x64 架构的副本：用错架构的
+    DLL 会变成静默故障，不如显式报错。
+    """
+    direct = RELEASE_DIR / "WebView2Loader.dll"
+    if direct.is_file():
+        return direct
+    target_dir = SRC_TAURI_DIR / "target"
+    for profile in ("release", "debug"):
+        pattern = f"{profile}/build/webview2-com-sys-*/out/x64/WebView2Loader.dll"
+        for candidate in sorted(target_dir.glob(pattern)):
+            if candidate.is_file():
+                return candidate
+    raise PackError(
+        f"release WebView2Loader.dll 不存在: {direct}；cargo OUT_DIR 回退也未命中"
+        f"（{target_dir}/release/build/webview2-com-sys-*/out/x64/）。"
+        "请先跑 npx tauri build --no-bundle。"
+    )
+
+
 def collect_source_files(version: str, without_webview2: bool, with_runtime: bool = False) -> list[tuple[Path, str]]:
     """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
     exe_path = RELEASE_DIR / EXE_NAME
@@ -240,9 +276,7 @@ def collect_source_files(version: str, without_webview2: bool, with_runtime: boo
 
     # Tauri release 必带组件：WebView2Loader.dll（exe 启动必需，缺失 → 0xC0000135
     # DLL 缺失）；pylon-cli.exe（标准组件，命令行管理界面）。
-    loader_path = RELEASE_DIR / "WebView2Loader.dll"
-    if not loader_path.is_file():
-        raise PackError(f"release WebView2Loader.dll 不存在: {loader_path}")
+    loader_path = resolve_webview2_loader()
     files.append((loader_path, "WebView2Loader.dll"))
 
     cli_path = RELEASE_DIR / "pylon-cli.exe"

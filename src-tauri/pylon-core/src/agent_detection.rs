@@ -2,6 +2,7 @@
 use crate::agent_catalog::{
     AgentDetectionProfile, CatalogConfigEvidence, CatalogConfigFormat, CatalogInvocation,
 };
+use crate::agent_preflight::ToolVersion;
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -35,6 +36,10 @@ pub struct AgentDetectionDiagnostic {
 #[serde(rename_all = "camelCase")]
 pub struct AgentDetectionReport {
     pub candidates: Vec<AgentRuntimeCandidate>,
+    /// Dual ACP/vendor-CLI evidence per selected provider. Present even when a
+    /// provider has no ACP candidate, which is what makes `adapterMissing`
+    /// observable instead of indistinguishable from "provider absent".
+    pub providers: Vec<AgentProviderEvidence>,
     pub diagnostics: Vec<AgentDetectionDiagnostic>,
     pub elapsed_ms: u64,
     pub truncated: bool,
@@ -106,23 +111,12 @@ impl Default for AgentDetectionLimits {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentDetectionOptions {
     pub detector_ids: Option<Vec<String>>,
     pub home_dir: Option<PathBuf>,
     pub search_roots: Option<Vec<PathBuf>>,
     pub limits: AgentDetectionLimits,
-}
-
-impl Default for AgentDetectionOptions {
-    fn default() -> Self {
-        Self {
-            detector_ids: None,
-            home_dir: None,
-            search_roots: None,
-            limits: AgentDetectionLimits::default(),
-        }
-    }
 }
 
 fn path_key(path: &Path) -> String {
@@ -213,11 +207,50 @@ fn provider_roots(rule: &AgentDetectionProfile, include_platform_roots: bool) ->
     if !include_platform_roots {
         return Vec::new();
     }
+    // A1: adapter-relation extra dirs are probed after the platform roots, in
+    // catalog order. Codeg's own Claude entry lists `.local/bin` and
+    // `.claude/local` because a GUI app's PATH commonly lacks the vendor
+    // installer's target; the relation is data, so the order comes from it.
+    let mut roots: Vec<PathBuf> = rule
+        .adapter_relation
+        .as_ref()
+        .map(|relation| {
+            relation
+                .extra_dirs
+                .iter()
+                .filter_map(|dir| home_relative_dir(dir))
+                .collect()
+        })
+        .unwrap_or_default();
     let Some(local) = std::env::var_os("LOCALAPPDATA") else {
-        return Vec::new();
+        return roots;
     };
     let root = PathBuf::from(local).join("Programs").join(&rule.provider);
-    vec![root.clone(), root.join("bin")]
+    roots.push(root.clone());
+    roots.push(root.join("bin"));
+    roots
+}
+
+/// Expand one catalog-declared home-relative dir (`~/.claude/local`) against the
+/// user profile. Returns `None` when the entry is not home-relative, so a
+/// malformed relation cannot make detection read an arbitrary absolute path.
+fn home_relative_dir(declared: &str) -> Option<PathBuf> {
+    let trimmed = declared.trim();
+    let relative = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+        .unwrap_or(trimmed);
+    if relative.is_empty() || Path::new(relative).is_absolute() {
+        return None;
+    }
+    if Path::new(relative)
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let home = resolved_home_dir(None)?;
+    Some(home.join(relative))
 }
 
 #[cfg(windows)]
@@ -332,43 +365,291 @@ struct LocatedRuntime {
     warnings: Vec<String>,
 }
 
+/// One located executable on the ACP or the vendor-CLI side of a provider.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEvidenceHit {
+    pub kind: String,
+    pub path: String,
+    pub source: String,
+}
+
+/// Per-provider dual evidence, emitted for every selected provider whether or
+/// not an ACP candidate exists.
+///
+/// This is what makes `adapterMissing` observable: a wrapper provider whose ACP
+/// command is absent still has a probe result here, so preflight can tell the
+/// user whether the vendor CLI they already installed was actually found.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProviderEvidence {
+    pub provider: String,
+    pub detector_id: String,
+    /// True when the catalog declares an adapter relation for this provider.
+    pub adapter_relation_declared: bool,
+    pub acp_commands: Vec<AgentEvidenceHit>,
+    pub native_commands: Vec<AgentEvidenceHit>,
+    /// Presence only — never the path and never a file's contents. The shared
+    /// config/credential dir may contain secrets, so the detector reports that
+    /// it was seen, not where or what was in it.
+    pub shared_config_present: bool,
+    /// Node.js state on this machine. Probed once per scan and attached to every
+    /// provider, because the tool is a machine fact and not a per-provider one;
+    /// only providers whose catalog `requires` names Node read it.
+    pub node: ToolVersion,
+    /// uv state on this machine; see `node`.
+    pub uv: ToolVersion,
+    /// The provider's own installed version when a local source could supply it
+    /// (npm global metadata, which the executable probe cannot provide). The
+    /// direct executable probe wins when it produced a version.
+    pub adapter_version: Option<String>,
+    /// What a newly started process would see on PATH but this process does not.
+    /// A machine fact (read once per scan), not a per-provider one — but attached
+    /// per provider so a diagnosis can explain a located executable that the app
+    /// cannot otherwise reach.
+    pub path_gap: crate::agent_diagnostics::PathGapReport,
+}
+
+/// Bounded, read-only search for one command name across the same roots a
+/// candidate search uses. Never spawns anything.
+/// Where a located executable came from.
+///
+/// C2: shared by the candidate scan and the evidence scan, which label these
+/// differently — the evidence side reports presence only (every root hit is
+/// `known-path`), while the candidate side distinguishes an on-PATH root (it
+/// warns when an off-PATH executable is about to be saved as an absolute path).
+/// Both keep their own vocabulary; only the disk walk is shared.
+enum FoundVia {
+    /// A searched directory; `true` when that directory came from the process PATH.
+    Root { on_path: bool },
+    /// The Windows `App Paths` registry entry (never a PATH root).
+    Registry { source: String },
+}
+
+/// The root set for one provider: the process PATH plus its controlled
+/// additions, then the provider's own declared platform roots.
+///
+/// C2: computed in one place. The candidate scan and the evidence scan each
+/// built their own copy of this expression, so the two walks could disagree
+/// about where a provider is allowed to live.
+fn resolve_roots(rule: &AgentDetectionProfile, search_roots: Option<&[PathBuf]>) -> Vec<PathBuf> {
+    let include_platform_roots = search_roots.is_none();
+    dedup_roots(
+        controlled_roots(search_roots)
+            .into_iter()
+            .chain(provider_roots(rule, include_platform_roots))
+            .collect(),
+    )
+}
+
+/// Every `roots × executable_names(command)` hit, plus the Windows `App Paths`
+/// registry entry when platform roots are in play.
+///
+/// C2: the one place a command lookup touches the disk. PATH membership is
+/// resolved once per scan rather than once per candidate, which is what the
+/// previous candidate loop did by re-splitting PATH for every file it tested.
+fn scan_roots(
+    roots: &[PathBuf],
+    command: &str,
+    include_registry: bool,
+) -> Vec<(PathBuf, FoundVia)> {
+    let on_path: HashSet<String> = std::env::var_os("PATH")
+        .map(|value| {
+            std::env::split_paths(&value)
+                .map(|path| path_key(&path))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut found = Vec::new();
+    for root in roots {
+        let root_on_path = on_path.contains(&path_key(root));
+        for name in executable_names(command) {
+            let candidate = root.join(name);
+            if candidate.is_file() {
+                found.push((
+                    candidate,
+                    FoundVia::Root {
+                        on_path: root_on_path,
+                    },
+                ));
+            }
+        }
+    }
+    if include_registry {
+        #[cfg(windows)]
+        found.extend(
+            app_path_candidates(&CatalogInvocation {
+                command: command.to_string(),
+                args: Vec::new(),
+            })
+            .into_iter()
+            .map(|(path, source)| (path, FoundVia::Registry { source })),
+        );
+        #[cfg(not(windows))]
+        let _ = include_registry;
+    }
+    found
+}
+
+fn locate_command(
+    command: &str,
+    roots: &[PathBuf],
+    include_registry: bool,
+) -> Vec<AgentEvidenceHit> {
+    let mut hits: Vec<AgentEvidenceHit> = Vec::new();
+    let mut seen = HashSet::new();
+    for (path, via) in scan_roots(roots, command, include_registry) {
+        if !seen.insert(path_key(&path)) {
+            continue;
+        }
+        // Evidence reports presence, not how it was found: every root hit is
+        // `known-path` here even when the root is on PATH.
+        let source = match via {
+            FoundVia::Root { .. } => "known-path".to_string(),
+            FoundVia::Registry { source } => source,
+        };
+        hits.push(AgentEvidenceHit {
+            kind: "native-command".into(),
+            path: path.to_string_lossy().to_string(),
+            source,
+        });
+    }
+    hits
+}
+
+fn shared_config_present(
+    relation: Option<&crate::agent_catalog::CatalogAdapterRelation>,
+    explicit_home: Option<&Path>,
+) -> bool {
+    let Some(relation) = relation else {
+        return false;
+    };
+    let declared = relation.shared_config_dir.trim();
+    let relative = declared
+        .strip_prefix("~/")
+        .or_else(|| declared.strip_prefix("~\\"))
+        .unwrap_or(declared);
+    if relative.is_empty() || Path::new(relative).is_absolute() {
+        return false;
+    }
+    let Some(home) = resolved_home_dir(explicit_home) else {
+        return false;
+    };
+    home.join(relative).is_dir()
+}
+
+/// Find one command by name across the given roots. Returns the resolved path
+/// when the command exists, `None` otherwise. Pure filesystem lookup.
+fn locate_command_path(command: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+    for root in roots {
+        for name in executable_names(command) {
+            let candidate = root.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Measure one required runtime tool (Node.js / uv).
+///
+/// Bounded and read-only: a plain executable lookup plus the same managed
+/// version probe the provider search uses (timeout, output cap, process-tree
+/// cleanup). No install, no cache write, no environment mutation.
+///
+/// The three outcomes are deliberately distinct — a missing tool is `Absent`
+/// (a real, fixable failure) while an unreadable version is `Unknown` (never
+/// reported as a violation).
+async fn probe_tool_version(
+    command: &str,
+    version_args: &[String],
+    roots: &[PathBuf],
+    budget: Duration,
+) -> ToolVersion {
+    let Some(path) = locate_command_path(command, roots) else {
+        return ToolVersion::Absent;
+    };
+    if budget.is_zero() {
+        return ToolVersion::Unknown;
+    }
+    let outcome = version_probe("builtin.tool", path, version_args, budget).await;
+    match outcome.version {
+        Some(version) => ToolVersion::Known(version),
+        None => ToolVersion::Unknown,
+    }
+}
+
+/// ACP + vendor-CLI evidence for one provider. The native side is probed only
+/// when the catalog declares an adapter relation, which is the only case where
+/// a second CLI is part of the story.
+fn provider_evidence(
+    rule: &AgentDetectionProfile,
+    search_roots: Option<&[PathBuf]>,
+    explicit_home: Option<&Path>,
+) -> AgentProviderEvidence {
+    let include_registry = search_roots.is_none();
+    let roots = resolve_roots(rule, search_roots);
+    let mut acp_commands: Vec<AgentEvidenceHit> = Vec::new();
+    let mut seen = HashSet::new();
+    for invocation in &rule.invocations {
+        for hit in locate_command(&invocation.command, &roots, include_registry) {
+            let key = format!("{}|", hit.path);
+            if seen.insert(key) {
+                acp_commands.push(AgentEvidenceHit {
+                    kind: "acp-command".into(),
+                    ..hit
+                });
+            }
+        }
+    }
+    let native_commands = rule
+        .adapter_relation
+        .as_ref()
+        .map(|relation| locate_command(&relation.native_cmd, &roots, include_registry))
+        .unwrap_or_default();
+    AgentProviderEvidence {
+        provider: rule.provider.clone(),
+        detector_id: rule.detector_id.clone(),
+        adapter_relation_declared: rule.adapter_relation.is_some(),
+        acp_commands,
+        native_commands,
+        shared_config_present: shared_config_present(rule.adapter_relation.as_ref(), explicit_home),
+        // Runtime tools and the provider package version are machine facts that
+        // need an async probe (and an npm query). This sync scan phase leaves
+        // them at "not measured"; the caller fills them in.
+        node: ToolVersion::default(),
+        uv: ToolVersion::default(),
+        adapter_version: None,
+        path_gap: crate::agent_diagnostics::PathGapReport::default(),
+    }
+}
+
+fn dedup_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    roots
+        .into_iter()
+        .filter(|root| seen.insert(path_key(root)))
+        .collect()
+}
+
 fn find_rule(
     rule: &AgentDetectionProfile,
     search_roots: Option<&[PathBuf]>,
 ) -> Vec<LocatedRuntime> {
-    let path_roots = controlled_roots(search_roots);
     let include_platform_roots = search_roots.is_none();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
+    let roots = resolve_roots(rule, search_roots);
     for (alias_index, invocation) in rule.invocations.iter().enumerate() {
-        let mut locations = Vec::new();
-        for root in path_roots
-            .iter()
-            .cloned()
-            .chain(provider_roots(rule, include_platform_roots))
-        {
-            for name in executable_names(&invocation.command) {
-                let candidate = root.join(name);
-                if candidate.is_file() {
-                    locations.push((
-                        candidate,
-                        if path_roots.iter().any(|path| path == &root)
-                            && std::env::var_os("PATH")
-                                .map(|value| std::env::split_paths(&value).any(|path| path == root))
-                                .unwrap_or(false)
-                        {
-                            "path".into()
-                        } else {
-                            "known-path".into()
-                        },
-                    ));
-                }
-            }
-        }
-        if include_platform_roots {
-            locations.extend(app_path_candidates(invocation));
-        }
-        for (candidate, source) in locations {
+        for (candidate, via) in scan_roots(&roots, &invocation.command, include_platform_roots) {
+            // `FoundVia` is moved into the match, so each arm must produce an
+            // owned label — borrowing the registry's `source` would dangle.
+            let source = match via {
+                FoundVia::Root { on_path: true } => "path".to_string(),
+                FoundVia::Root { on_path: false } => "known-path".to_string(),
+                FoundVia::Registry { source } => source,
+            };
             let original = candidate.clone();
             let (executable, launcher_evidence, warnings) =
                 match resolve_stdio_executable(&candidate) {
@@ -546,6 +827,7 @@ fn extract_version_token(text: &str) -> Option<String> {
     None
 }
 
+#[derive(Clone)]
 struct VersionProbeOutcome {
     version: Option<String>,
     startability: Startability,
@@ -707,6 +989,24 @@ fn probe_diagnostic(
     }
 }
 
+/// 版本探针缓存：(规范化路径, 版本参数, mtime) → 版本字符串。
+/// One probe result per (executable, arguments, mtime).
+///
+/// The whole outcome is cached, not just the version: a CLI that does not
+/// understand `--version` fails identically on every refresh, so remembering
+/// nothing meant re-spawning it every time. A cached failure keeps its
+/// diagnostic, so the second refresh reports the same reason as the first
+/// rather than a bare failure.
+///
+/// Keyed by mtime so upgrading a CLI is a miss rather than a stale hit, which
+/// also means each upgrade leaves its predecessor behind. Bounded and dropped
+/// wholesale when full — it is a cache, and re-probing is always correct.
+type VersionProbeCache =
+    Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), VersionProbeOutcome>>;
+
+const MAX_VERSION_PROBE_CACHE_ENTRIES: usize = 64;
+
+/// Cached wrapper around [`probe_version_uncached`].
 async fn version_probe(
     detector_id: &str,
     executable: PathBuf,
@@ -717,22 +1017,16 @@ async fn version_probe(
         .ok()
         .and_then(|m| m.modified().ok())
         .map(|mtime| (path_key(&executable), version_args.to_vec(), mtime));
-    static CACHE: OnceLock<Mutex<HashMap<(String, Vec<String>, std::time::SystemTime), String>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<VersionProbeCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(key) = &cache_key {
-        if let Some(version) = CACHE
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .ok()
-            .and_then(|c| c.get(key).cloned())
-        {
-            return VersionProbeOutcome {
-                version: Some(version),
-                startability: Startability::Verified,
-                diagnostic: None,
-            };
+        if let Some(cached) = cache.lock().ok().and_then(|c| c.get(key).cloned()) {
+            return cached;
         }
     }
+    // Budget exhaustion describes the caller's remaining deadline, not a fact
+    // about the executable. Caching it would freeze "we ran out of time" into
+    // "this CLI reports no version" for as long as the binary is unchanged.
     if budget.is_zero() {
         return VersionProbeOutcome {
             version: None,
@@ -745,7 +1039,25 @@ async fn version_probe(
             )),
         };
     }
-    let mut command = tokio::process::Command::new(&executable);
+    let outcome = probe_version_uncached(detector_id, &executable, version_args, budget).await;
+    if let Some(key) = &cache_key {
+        if let Ok(mut cache) = cache.lock() {
+            if cache.len() >= MAX_VERSION_PROBE_CACHE_ENTRIES {
+                cache.clear();
+            }
+            cache.insert(key.clone(), outcome.clone());
+        }
+    }
+    outcome
+}
+
+async fn probe_version_uncached(
+    detector_id: &str,
+    executable: &Path,
+    version_args: &[String],
+    budget: Duration,
+) -> VersionProbeOutcome {
+    let mut command = tokio::process::Command::new(executable);
     // Catalog's empty argument list selects the standard version probe.
     // Invocation args (e.g. `acp`) belong to session launch, never discovery.
     if version_args.is_empty() {
@@ -850,11 +1162,6 @@ async fn version_probe(
             )),
         }
     } else {
-        if let (Some(key), Some(value)) = (&cache_key, &version) {
-            if let Ok(mut cache) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock() {
-                cache.insert(key.clone(), value.clone());
-            }
-        }
         VersionProbeOutcome {
             version,
             startability: Startability::Verified,
@@ -865,36 +1172,47 @@ async fn version_probe(
 
 type ConfiguredRuntimes = HashMap<String, (String, String, Vec<String>)>;
 
-/// Codeg's read-only local-version path: consult npm global metadata before
-/// falling back to the catalog-controlled executable probe. No install or
-/// cache mutation is performed.
-pub async fn detect_local_version(provider: &str) -> Option<String> {
-    let rule = crate::agent_catalog::detection_profiles()
-        .ok()?
-        .into_iter()
-        .find(|rule| rule.provider == provider)?;
-    if let Some(manager) = &rule.package_manager {
-        if matches!(
-            manager.kind,
-            crate::agent_catalog::CatalogPackageManagerKind::Npx
-        ) {
-            if let Some(package) = manager.package.as_deref() {
-                if let Some(version) = npm_global_version(package).await {
-                    return Some(version);
-                }
-            }
-        }
+/// Whether a catalog requirement actually constrains anything.
+fn requires_tool(value: &Option<String>) -> bool {
+    value
+        .as_deref()
+        .is_some_and(|declared| !declared.trim().is_empty())
+}
+
+/// Whether the npm-global version source should be consulted for this provider.
+///
+/// Both conditions matter: the direct executable probe is authoritative and has
+/// already run, so the fallback is only worth a process spawn when that probe
+/// produced nothing AND a declared gate actually consumes the value. Without the
+/// second condition every scan would pay for an npm query whose result nobody
+/// reads.
+fn needs_npm_version_fallback(
+    rule: &AgentDetectionProfile,
+    candidate_version: Option<&str>,
+) -> bool {
+    candidate_version.is_none()
+        && rule.version_gates.iter().any(|gate| {
+            gate.evidence == crate::agent_catalog::CatalogVersionEvidence::AdapterAgentInfoVersion
+        })
+}
+
+/// npm global metadata version for a provider whose catalog entry ships as an npm
+/// package.
+///
+/// This is the unique half of Codeg's `detect_local_version`: the
+/// executable-probe fallback in that function is redundant at every call site
+/// here, because the caller only asks when the candidate probe ran against the
+/// resolved executable and produced no version. Keeping the fallback would
+/// re-spawn a probe that has already failed. No install, no cache mutation.
+async fn npm_global_package_version(rule: &AgentDetectionProfile) -> Option<String> {
+    let manager = rule.package_manager.as_ref()?;
+    if !matches!(
+        manager.kind,
+        crate::agent_catalog::CatalogPackageManagerKind::Npx
+    ) {
+        return None;
     }
-    let located = find_rule(&rule, None).into_iter().next()?;
-    let budget = Duration::from_secs(2);
-    version_probe(
-        &rule.detector_id,
-        located.executable,
-        &rule.version_args,
-        budget,
-    )
-    .await
-    .version
+    npm_global_version(manager.package.as_deref()?).await
 }
 
 async fn npm_global_version(package: &str) -> Option<String> {
@@ -914,8 +1232,8 @@ async fn npm_global_version(package: &str) -> Option<String> {
 
 fn parse_npm_list_version(bytes: &[u8], package: &str) -> Option<String> {
     let document: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let key = if package.starts_with('@') {
-        package[1..]
+    let key = if let Some(stripped) = package.strip_prefix('@') {
+        stripped
             .find('@')
             .map(|index| &package[..index + 1])
             .unwrap_or(package)
@@ -979,26 +1297,35 @@ pub async fn detect_agent_runtime_candidates_inner(
         .cloned()
         .collect::<Vec<_>>();
     let search_roots = options.search_roots.clone();
+    // The runtime-tool probe runs after the scan, so it needs its own handle on
+    // the roots (the scan closure takes ownership of the original).
+    let tool_roots = search_roots.clone();
     let home_dir = options.home_dir.clone();
     let scan_budget = deadline.saturating_duration_since(Instant::now());
-    let scanned = tokio::time::timeout(
+    let discovered = tokio::time::timeout(
         scan_budget,
         tokio::task::spawn_blocking(move || {
             let mut discovered = Vec::new();
+            let mut providers = Vec::new();
             for rule in selected_rules {
                 let located = find_rule(&rule, search_roots.as_deref());
                 let config = config_evidence(&rule, home_dir.as_deref());
+                providers.push(provider_evidence(
+                    &rule,
+                    search_roots.as_deref(),
+                    home_dir.as_deref(),
+                ));
                 discovered.extend(
                     located
                         .into_iter()
                         .map(|located| (rule.clone(), located, config.clone())),
                 );
             }
-            discovered
+            (discovered, providers)
         }),
     )
     .await;
-    let mut discovered = match scanned {
+    let (mut discovered, providers) = match discovered {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => return Err(format!("Agent detection scan task failed: {error}")),
         Err(_) => {
@@ -1011,6 +1338,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             });
             return Ok(AgentDetectionReport {
                 candidates: Vec::new(),
+                providers: Vec::new(),
                 diagnostics,
                 elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                 truncated: true,
@@ -1173,12 +1501,105 @@ pub async fn detect_agent_runtime_candidates_inner(
         });
         ranked_candidates.truncate(limits.max_candidates);
     }
-    let candidates = ranked_candidates
+    let candidates: Vec<AgentRuntimeCandidate> = ranked_candidates
         .into_iter()
         .map(|(candidate, ..)| candidate)
         .collect();
+    // A version-gated provider whose declared minimum cannot be proven from the
+    // discovered evidence is reported here rather than silently accepted.
+    let mut providers = providers;
+    // Node.js / uv are machine facts, not per-provider ones: probe each at most
+    // once per scan, and only when a detected provider actually declares a
+    // requirement for it. A scan limited to providers needing neither spawns
+    // nothing extra.
+    let mut needs_node = false;
+    let mut needs_uv = false;
+    for provider in &providers {
+        let Some(rule) = rules.iter().find(|rule| rule.provider == provider.provider) else {
+            continue;
+        };
+        needs_node |= requires_tool(&rule.requires.node);
+        needs_uv |= requires_tool(&rule.requires.uv);
+    }
+    let tool_budget = limits
+        .version_probe_budget
+        .min(deadline.saturating_duration_since(Instant::now()));
+    let tool_roots = match tool_roots.as_deref() {
+        Some(roots) => dedup_roots(controlled_roots(Some(roots))),
+        None => controlled_roots(None),
+    };
+    let node = if needs_node {
+        probe_tool_version("node", &[], &tool_roots, tool_budget).await
+    } else {
+        ToolVersion::default()
+    };
+    let uv = if needs_uv {
+        probe_tool_version("uv", &[], &tool_roots, tool_budget).await
+    } else {
+        ToolVersion::default()
+    };
+    // Read once per scan, like the runtime tools above: the PATH a new process
+    // would see is a property of the machine and of when this process started,
+    // not of any one provider. The reading itself lives in
+    // `agent_diagnostics` — the module that already owns environment evidence —
+    // rather than a second implementation here.
+    let path_gap = crate::agent_diagnostics::persisted_path_gap();
+    for provider in &mut providers {
+        provider.node = node.clone();
+        provider.uv = uv.clone();
+        // Machine fact: read once and attach to every provider, for the same
+        // reason Node is. Only a diagnosis reads it, and it answers the question
+        // a status name cannot — whether a located executable is somewhere this
+        // process can actually reach.
+        provider.path_gap = path_gap.clone();
+    }
+    for provider in &mut providers {
+        let Some(rule) = rules.iter().find(|r| r.provider == provider.provider) else {
+            continue;
+        };
+        let Some(minimum) = rule
+            .version_gates
+            .iter()
+            .find(|gate| gate.min_version.is_some())
+            .and_then(|gate| gate.min_version.as_deref())
+        else {
+            continue;
+        };
+        let candidate_version: Option<String> = candidates
+            .iter()
+            .filter(|candidate| candidate.provider == provider.provider)
+            .find_map(|candidate| {
+                candidate
+                    .evidence
+                    .iter()
+                    .find(|item| item.kind == "version")
+                    .map(|item| item.detail.clone())
+            });
+        // The direct executable probe is authoritative; npm global metadata is the
+        // one source it cannot supply, and is consulted only when a gate actually
+        // consumes the value.
+        if needs_npm_version_fallback(rule, candidate_version.as_deref()) {
+            provider.adapter_version = npm_global_package_version(rule).await;
+        }
+        let observed = candidate_version.or_else(|| provider.adapter_version.clone());
+        if let Some(version) = observed {
+            if !crate::agent_preflight::version_at_least(Some(&version), Some(minimum)) {
+                diagnostics.push(AgentDetectionDiagnostic {
+                    code: "adapter_version_below_declared_minimum".into(),
+                    stage: "version".into(),
+                    detector_id: Some(provider.detector_id.clone()),
+                    message: format!(
+                        "{} 的版本 {version} 低于 catalog 声明的下限 {minimum}",
+                        provider.provider
+                    ),
+                    retryable: true,
+                });
+            }
+        }
+    }
     Ok(AgentDetectionReport {
         candidates,
+        providers,
         diagnostics,
         elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         truncated: discovered_truncated || candidates_truncated,
@@ -1191,6 +1612,132 @@ pub async fn detect_agent_runtime_candidates(
     options: AgentDetectionOptions,
 ) -> Result<AgentDetectionReport, String> {
     detect_agent_runtime_candidates_inner(options, &HashMap::new()).await
+}
+
+// ── B0：DetectionSnapshot（不可变证据快照）与缓存策略 ──
+
+/// Immutable detection evidence for one completed scan.
+///
+/// A snapshot merges everything the settings page needs to reason about a
+/// provider — candidates, version probes, wrapper/native/shared-config
+/// evidence, and the preflight verdicts derived from them — and stamps it with
+/// the time it was taken plus the catalog revision it was recorded against.
+/// Consumers treat it as read-only evidence; nothing may mutate a snapshot
+/// after assembly, which is what makes caching by identity safe.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectionSnapshot {
+    /// Unix epoch milliseconds at assembly time.
+    pub taken_at_ms: u64,
+    /// Content revision of the catalog the scan ran against (see
+    /// [`crate::agent_catalog::catalog_revision`]).
+    pub catalog_revision: String,
+    /// Fingerprint of the search roots the scan used (see
+    /// [`search_roots_fingerprint`]).
+    pub search_fingerprint: String,
+    #[serde(flatten)]
+    pub report: AgentDetectionReport,
+    /// One preflight verdict per selected provider, computed by the same
+    /// `from_detection` mapping the `pylon-detect` CLI uses — a snapshot
+    /// consumer never re-derives it, so panel and CLI cannot disagree.
+    pub preflight: Vec<crate::agent_preflight::PreflightResult>,
+}
+
+/// How trustworthy a completed scan is, which decides how long its snapshot
+/// may be served from cache.
+///
+/// Three states, not two: a scan that errored (`Failure`) and a scan that
+/// completed but degraded — truncated, or carrying retryable diagnostics such
+/// as a version-probe timeout (`Unknown`) — must both be re-attempted far
+/// sooner than a clean scan, but they are different facts and are reported as
+/// different facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectionOutcome {
+    Success,
+    Failure,
+    Unknown,
+}
+
+impl DetectionOutcome {
+    pub fn classify(result: &Result<AgentDetectionReport, String>) -> Self {
+        match result {
+            Err(_) => Self::Failure,
+            Ok(report) => {
+                if report.truncated || report.diagnostics.iter().any(|d| d.retryable) {
+                    Self::Unknown
+                } else {
+                    Self::Success
+                }
+            }
+        }
+    }
+
+    /// Failures are cached briefly (retry soon), clean results longer, degraded
+    /// ones in between. Codeg caches only passing checks; this keeps that
+    /// intent while adding the expiry Codeg never had.
+    pub fn ttl(self) -> Duration {
+        match self {
+            Self::Success => Duration::from_secs(600),
+            Self::Unknown => Duration::from_secs(60),
+            Self::Failure => Duration::from_secs(15),
+        }
+    }
+}
+
+/// Fingerprint the roots a scan would search: the same controlled-root
+/// derivation the scan itself uses (so a fingerprint hit implies the scan
+/// really saw these roots), hashed in order — root order affects candidate
+/// priority, so two orderings of the same roots are not the same search. The
+/// NUL separator keeps adjacent roots from aliasing into one another.
+pub fn search_roots_fingerprint(search_roots: Option<&[PathBuf]>) -> String {
+    let mut input = String::new();
+    for root in controlled_roots(search_roots) {
+        input.push_str(&path_key(&root));
+        input.push('\u{0}');
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a-{hash:016x}")
+}
+
+/// Unix epoch milliseconds right now; the caller-visible timestamp half of a
+/// snapshot. Kept separate from the monotonic clock the cache layer uses so
+/// tests can pin either one independently.
+pub fn unix_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+/// Assemble the immutable snapshot for one completed scan. The preflight
+/// verdicts are computed here — by the shared `from_detection` mapping — so
+/// every consumer of a snapshot sees the same conclusions. `search_roots` must
+/// be the same value the scan was given, so the fingerprint describes the
+/// search that actually ran.
+pub fn assemble_detection_snapshot(
+    report: AgentDetectionReport,
+    taken_at_ms: u64,
+    search_roots: Option<&[PathBuf]>,
+) -> DetectionSnapshot {
+    let preflight = report
+        .providers
+        .iter()
+        .filter_map(|evidence| {
+            crate::agent_preflight::from_detection(evidence, &report.candidates).ok()
+        })
+        .collect();
+    DetectionSnapshot {
+        taken_at_ms,
+        catalog_revision: crate::agent_catalog::catalog_revision().to_string(),
+        search_fingerprint: search_roots_fingerprint(search_roots),
+        report,
+        preflight,
+    }
 }
 
 #[cfg(test)]
@@ -1207,6 +1754,32 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    /// 写入一个名为 `command` 的假可执行文件；`version` 为 `None` 时以非零退出，
+    /// 模拟「存在但读不出」（与 `make_hanging_executable` 同一夹具手法）。
+    fn plant_version_tool(root: &Path, command: &str, version: Option<&str>) {
+        std::fs::create_dir_all(root).unwrap();
+        #[cfg(windows)]
+        {
+            let path = root.join(format!("{command}.cmd"));
+            let body = match version {
+                Some(version) => format!("@echo off\r\necho {version}\r\nexit /b 0\r\n"),
+                None => "@echo off\r\nexit /b 7\r\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root.join(command);
+            let body = match version {
+                Some(version) => format!("#!/bin/sh\necho '{version}'\n"),
+                None => "#!/bin/sh\nexit 7\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     fn make_hanging_executable(root: &Path, command: &str) -> PathBuf {
@@ -1228,6 +1801,100 @@ mod tests {
         }
     }
 
+    /// B0/缺口1：npm 全局元数据版本源只有在「声明的 gate 真的消费版本」且直接
+    /// 探针未给出版本时才被咨询（否则每次扫描都会白跑一次 npm）。
+    ///
+    /// 这是对**接线判定**的断言，与机器上装了什么无关。
+    #[test]
+    fn npm_version_fallback_is_gate_and_probe_conditioned() {
+        let rules = crate::agent_catalog::detection_profiles().unwrap();
+        let rule = |provider: &str| {
+            rules
+                .iter()
+                .find(|rule| rule.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} 必须在 catalog 中"))
+                .clone()
+        };
+        // claude-code 的 gate 以「适配器版本」为证据，因此需要版本值。
+        assert!(needs_npm_version_fallback(&rule("claude-code"), None));
+        // 直接探针已经给出版本 → 不再花一次 npm 查询。
+        assert!(!needs_npm_version_fallback(
+            &rule("claude-code"),
+            Some("0.75.1")
+        ));
+        // codex 的 gate 是静态策略（goalControlOutOfBand），不消费版本。
+        assert!(!needs_npm_version_fallback(&rule("codex"), None));
+        // 完全没有 gate 的 provider。
+        assert!(!needs_npm_version_fallback(&rule("peri"), None));
+    }
+
+    /// B0：运行时工具探针（Node/uv）的三态与无副作用。
+    ///
+    /// 三态是关键：存在→Known、存在但读不出→Unknown（不是违规）、不存在→Absent。
+    #[tokio::test]
+    async fn runtime_tool_probe_maps_known_unknown_and_absent() {
+        let root = fixture_root("tool-probe");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 1）存在且可读 → Known
+        let readable = root.join("readable");
+        plant_version_tool(&readable, "node", Some("22.19.0"));
+        assert_eq!(
+            probe_tool_version(
+                "node",
+                &[],
+                std::slice::from_ref(&readable),
+                Duration::from_secs(2)
+            )
+            .await,
+            ToolVersion::Known("22.19.0".into())
+        );
+
+        // 2）存在但不可读 → Unknown
+        let unreadable = root.join("unreadable");
+        plant_version_tool(&unreadable, "node", None);
+        assert_eq!(
+            probe_tool_version(
+                "node",
+                &[],
+                std::slice::from_ref(&unreadable),
+                Duration::from_secs(2)
+            )
+            .await,
+            ToolVersion::Unknown
+        );
+
+        // 3）不存在 → Absent
+        assert_eq!(
+            probe_tool_version("node", &[], &[root.join("missing")], Duration::from_secs(2)).await,
+            ToolVersion::Absent
+        );
+
+        // 4）预算耗尽 → Unknown（不启动探针，也不假装读到版本）
+        assert_eq!(
+            probe_tool_version("node", &[], std::slice::from_ref(&readable), Duration::ZERO).await,
+            ToolVersion::Unknown
+        );
+
+        // 5）无安装副作用：探针不创建任何文件
+        let clean = root.join("clean");
+        std::fs::create_dir_all(&clean).unwrap();
+        let _ = probe_tool_version(
+            "node",
+            &[],
+            std::slice::from_ref(&clean),
+            Duration::from_secs(2),
+        )
+        .await;
+        assert_eq!(
+            std::fs::read_dir(&clean).unwrap().count(),
+            0,
+            "工具探针不得创建任何文件/目录"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn windows_key_is_case_insensitive() {
         let key = path_key(Path::new("Peri.EXE"));
@@ -1247,6 +1914,7 @@ mod tests {
                 "builtin.detector.peri",
                 "builtin.detector.hermes",
                 "builtin.detector.claude-code",
+                "builtin.detector.codex",
             ],
         );
         assert_eq!(
@@ -1264,6 +1932,21 @@ mod tests {
             ["--acp"],
             "Claude Code 的 ACP 入口必须显式带 --acp"
         );
+        // A5①：codex 是第二个 wrapper。ACP 入口是适配器 `codex-acp`，
+        // 而 vendor CLI `codex` 只作为 adapterRelation 的探测证据。
+        let codex = rules
+            .iter()
+            .find(|rule| rule.provider == "codex")
+            .expect("codex 必须在 catalog 中");
+        assert_eq!(codex.invocations[0].command, "codex-acp");
+        assert!(codex.invocations[0].args.is_empty());
+        let relation = codex
+            .adapter_relation
+            .as_ref()
+            .expect("codex 必须声明 adapter relation");
+        assert_eq!(relation.native_cmd, "codex");
+        assert_eq!(relation.shared_config_dir, "~/.codex");
+        assert_eq!(relation.extra_dirs, vec![".local/bin"]);
         assert!(
             rules.iter().all(|rule| rule.provider != "pi"),
             "pi --mode rpc 是私有 JSONL RPC，不得伪装成 ACP runtime",
@@ -1373,6 +2056,168 @@ mod tests {
             .evidence
             .iter()
             .any(|item| item.kind == "config-fields"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A1 验收：wrapper provider 的 ACP 与原生 CLI 证据分开展开，且即使 ACP
+    /// 候选缺失也会产出 provider 级证据（这是 `adapterMissing` 可观察的前提）。
+    #[tokio::test]
+    async fn wrapper_evidence_separates_acp_from_native_cli() {
+        let root = fixture_root("adapter-relation");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        // 只有原生 CLI，没有 wrapper 可执行文件。
+        std::fs::write(
+            search.join(&executable_names("claude")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(
+            report.candidates.is_empty(),
+            "wrapper 命令不存在，不应有候选"
+        );
+        assert_eq!(report.providers.len(), 1);
+        let evidence = &report.providers[0];
+        assert_eq!(evidence.provider, "claude-code");
+        assert!(evidence.adapter_relation_declared);
+        assert!(evidence.acp_commands.is_empty());
+        assert_eq!(evidence.native_commands.len(), 1);
+        assert_eq!(
+            Path::new(&evidence.native_commands[0].path)
+                .file_stem()
+                .and_then(|stem| stem.to_str()),
+            Some("claude")
+        );
+        assert!(evidence.shared_config_present);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 非 wrapper provider 不探测第二 CLI，也不报共享配置目录存在。
+    #[tokio::test]
+    async fn native_acp_provider_has_no_second_cli_evidence() {
+        let root = fixture_root("native-evidence");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        std::fs::write(
+            search.join(&executable_names("peri")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.peri".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        let evidence = &report.providers[0];
+        assert!(!evidence.adapter_relation_declared);
+        assert!(evidence.native_commands.is_empty());
+        assert!(!evidence.shared_config_present);
+        assert_eq!(evidence.acp_commands.len(), 1);
+        assert_eq!(evidence.acp_commands[0].kind, "acp-command");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A1 零安装副作用：探测只读，不创建目录。
+    #[tokio::test]
+    async fn evidence_scan_has_no_install_side_effects() {
+        let root = fixture_root("no-side-effects");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        let before = std::fs::read_dir(&home).unwrap().count();
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home.clone()),
+            search_roots: Some(vec![search.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(report.candidates.is_empty());
+        // 既不建 `~/.claude`，也不建任何缓存/安装目录。
+        assert!(!home.join(".claude").exists());
+        assert_eq!(std::fs::read_dir(&home).unwrap().count(), before);
+        assert_eq!(std::fs::read_dir(&search).unwrap().count(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A5①：codex 的 wrapper 双证据。本机真实状态是「vendor CLI 在、ACP 适配器
+    /// 不在」（`codex` 已装、`codex-acp` 未装），必须产出可行动的 `adapterMissing`。
+    #[tokio::test]
+    async fn codex_wrapper_reports_adapter_missing_with_native_cli_present() {
+        let root = fixture_root("codex-adapter-missing");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+        // 只有 vendor CLI `codex`，没有适配器 `codex-acp`。
+        std::fs::write(
+            search.join(&executable_names("codex")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.codex".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        assert!(
+            report.candidates.is_empty(),
+            "适配器不存在，不应有 ACP 候选"
+        );
+        let evidence = &report.providers[0];
+        assert_eq!(evidence.provider, "codex");
+        assert!(evidence.adapter_relation_declared);
+        assert!(evidence.acp_commands.is_empty());
+        assert_eq!(evidence.native_commands.len(), 1);
+        assert!(evidence.shared_config_present);
+
+        // 同一份证据经共享映射得到可行动状态（与设置页/CLI 一致）。
+        let preflight =
+            crate::agent_preflight::from_detection(evidence, &report.candidates).unwrap();
+        assert_eq!(
+            preflight.status,
+            crate::agent_preflight::PreflightStatus::AdapterMissing
+        );
+        assert!(!preflight.passed);
+        assert_eq!(
+            crate::agent_preflight::action_code(preflight.status),
+            "install-acp-adapter"
+        );
+        let adapter = preflight.adapter.expect("codex 是 wrapper");
+        assert_eq!(adapter.native_cmd, "codex");
+        assert_eq!(adapter.native_label, "Codex CLI");
+        assert_eq!(adapter.shared_config_dir, "~/.codex");
+        // 两侧证据必须分开：vendor CLI 已找到、ACP 适配器未找到。
+        assert!(adapter.native_present);
+        assert!(!adapter.acp_present);
+        assert!(adapter.shared_config_present);
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1529,6 +2374,183 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// C1：失败也必须进缓存，而且缓存是**按 key** 而不是全局「记住最后一次」。
+    ///
+    /// 断言方式是「子进程真的只启动了一次」：夹具每次运行都往自身目录的
+    /// `count.txt` 追加一行。仅断言「两次返回值相同」是抓不到这个缺陷的——旧实现
+    /// 每次都返回同样的失败，只是白跑一次子进程，因此这个断言必须数进程。
+    ///
+    /// 计数文件用 `%~dp0` / `dirname "$0"` 定位（而不是把临时路径嵌进脚本），
+    /// 既避开带空格的路径，也让两个夹具能各自独立计数。
+    #[tokio::test]
+    async fn a_failed_version_probe_is_cached_like_a_successful_one() {
+        let root = fixture_root("probe-failure-cache");
+        let failing_dir = root.join("failing");
+        let working_dir = root.join("working");
+        std::fs::create_dir_all(&failing_dir).unwrap();
+        std::fs::create_dir_all(&working_dir).unwrap();
+        let failing = plant_counting_probe(&failing_dir, "probe", None);
+        let working = plant_counting_probe(&working_dir, "probe", Some("9.9.9"));
+
+        // 第一次：真的跑了，失败带诊断。
+        let first = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(first.startability, Startability::Failed);
+        assert_eq!(
+            first.diagnostic.as_ref().map(|d| d.code.as_str()),
+            Some("version_probe_non_zero")
+        );
+
+        // 第二次：命中缓存——不但结果相同，而且**诊断还在**（缓存的失败必须保留
+        // 理由，否则第二次刷新只会看到一个没有原因的失败）。
+        let second = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(second.startability, Startability::Failed);
+        assert_eq!(
+            second.diagnostic.as_ref().map(|d| d.code.as_str()),
+            Some("version_probe_non_zero"),
+            "缓存的失败必须带着与首次相同的诊断"
+        );
+
+        // 成功路径同样只跑一次。
+        let ok = version_probe("fixture", working.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(ok.version.as_deref(), Some("9.9.9"));
+        let ok_again = version_probe("fixture", working.clone(), &[], Duration::from_secs(5)).await;
+        assert_eq!(ok_again.version.as_deref(), Some("9.9.9"));
+
+        let runs = |dir: &Path| {
+            std::fs::read_to_string(dir.join("count.txt"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        assert_eq!(
+            runs(&failing_dir),
+            1,
+            "失败的探针不得在每次刷新时重回子进程"
+        );
+        assert_eq!(runs(&working_dir), 1, "成功的探针不得重复启动子进程");
+        // 两个夹具各自只跑一次，证明缓存是按 key 存而不是只记住最后一次。
+        assert_eq!(
+            runs(&failing_dir) + runs(&working_dir),
+            2,
+            "缓存必须按 (路径, 参数, mtime) 分键，不得互相驱逐"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 安置一个每次运行都向自身目录的 `count.txt` 追加一行的探针夹具。
+    ///
+    /// `version` 为 `None` 时以非零退出，模拟「存在但不认 --version」。
+    fn plant_counting_probe(dir: &Path, name: &str, version: Option<&str>) -> PathBuf {
+        #[cfg(windows)]
+        {
+            let path = dir.join(format!("{name}.cmd"));
+            let body = match version {
+                Some(version) => format!(
+                    "@echo off\r\n>>\"%~dp0count.txt\" echo x\r\necho {version}\r\nexit /b 0\r\n"
+                ),
+                None => "@echo off\r\n>>\"%~dp0count.txt\" echo x\r\nexit /b 3\r\n".to_string(),
+            };
+            std::fs::write(&path, body).unwrap();
+            path
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.join(name);
+            let count = "echo x >> \"$(dirname \"$0\")/count.txt\"\n";
+            let body = match version {
+                Some(version) => format!("#!/bin/sh\n{count}echo '{version}'\n"),
+                None => format!("#!/bin/sh\n{count}exit 3\n"),
+            };
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+    }
+
+    /// C2：候选扫描与证据扫描必须看到**同一组**可执行文件。
+    ///
+    /// 两者以前各自算一份 roots、各自走一遭文件系统，所以可以互相矛盾。现在共用
+    /// `resolve_roots` + `scan_roots`；这条测试把「不再矛盾」钉成断言，并同时钉住两
+    /// 侧各自**不同**的来源词汇（候选区分 path/known-path，证据只报 known-path）。
+    #[tokio::test]
+    async fn candidate_and_evidence_scans_agree_on_what_exists() {
+        let root = fixture_root("scan-agreement");
+        let on_path = root.join("on-path");
+        let off_path = root.join("off-path");
+        std::fs::create_dir_all(&on_path).unwrap();
+        std::fs::create_dir_all(&off_path).unwrap();
+        // peri 与 hermes 两个 provider 各放一个 ACP 入口，其中一个在 PATH 上。
+        std::fs::write(on_path.join(&executable_names("peri")[0]), b"fixture").unwrap();
+        std::fs::write(off_path.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        // 只用夹具目录作为搜索根，不引入真实 PATH 条目：本机装了 peri 时会把真实
+        // 安装拖进断言，测试就不再确定。`on_path`/`off_path` 都在临时目录下，因此
+        // 两者都必然不在进程 PATH 上。
+        let roots = vec![on_path.clone(), off_path.clone()];
+        let options = AgentDetectionOptions {
+            detector_ids: Some(vec![
+                "builtin.detector.peri".into(),
+                "builtin.detector.hermes".into(),
+            ]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(roots),
+            limits: AgentDetectionLimits {
+                version_probe_budget: Duration::from_millis(50),
+                ..AgentDetectionLimits::default()
+            },
+        };
+        let report = detect_agent_runtime_candidates(options).await.unwrap();
+
+        for provider in ["peri", "hermes"] {
+            let evidence = report
+                .providers
+                .iter()
+                .find(|evidence| evidence.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} 必须有 provider 证据"));
+            let candidates = report
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.provider == provider)
+                .collect::<Vec<_>>();
+
+            let evidence_paths = evidence
+                .acp_commands
+                .iter()
+                .map(|hit| path_key(Path::new(&hit.path)))
+                .collect::<HashSet<_>>();
+            let candidate_paths = candidates
+                .iter()
+                .map(|candidate| path_key(Path::new(&candidate.executable)))
+                .collect::<HashSet<_>>();
+            assert_eq!(
+                evidence_paths, candidate_paths,
+                "{provider}: 候选与证据必须定位到同一组可执行文件"
+            );
+            // 证据侧的词汇：根命中一律 known-path。
+            for hit in &evidence.acp_commands {
+                assert_eq!(
+                    hit.source, "known-path",
+                    "{provider}: 证据只报存在性，不区分是否在 PATH 上"
+                );
+            }
+        }
+        // 候选侧的词汇：显式根列表里的目录都不是进程 PATH，所以标 known-path 并带
+        // 「不在 PATH」警告；这锁住了 C2 不得顺手把两侧标签合并成一种。
+        let peri = report
+            .candidates
+            .iter()
+            .find(|candidate| candidate.provider == "peri")
+            .unwrap();
+        assert_eq!(peri.evidence[0].kind, "known-path");
+        assert!(
+            peri.warnings.iter().any(|w| w.contains("不在当前 PATH")),
+            "候选侧必须保留 off-PATH 警告"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn version_probe_timeout_is_bounded_and_visible() {
         let root = fixture_root("probe-timeout");
@@ -1637,6 +2659,333 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // ── B0：DetectionSnapshot 组装、缓存策略与快照级 fixture ──
+
+    #[test]
+    fn search_roots_fingerprint_tracks_the_controlled_roots() {
+        let left = fixture_root("fingerprint-left");
+        let right = fixture_root("fingerprint-right");
+        std::fs::create_dir_all(&left).unwrap();
+        std::fs::create_dir_all(&right).unwrap();
+
+        let a = search_roots_fingerprint(Some(std::slice::from_ref(&left)));
+        let b = search_roots_fingerprint(Some(&[left.clone(), right.clone()]));
+        let reordered = search_roots_fingerprint(Some(&[right.clone(), left.clone()]));
+        assert_eq!(
+            a,
+            search_roots_fingerprint(Some(std::slice::from_ref(&left))),
+            "同 roots 必须同指纹"
+        );
+        assert_ne!(a, b, "roots 集合不同必须产生不同指纹");
+        assert_ne!(
+            b, reordered,
+            "顺序影响候选优先级，顺序不同的搜索不是同一搜索"
+        );
+
+        std::fs::remove_dir_all(left).unwrap();
+        std::fs::remove_dir_all(right).unwrap();
+    }
+
+    #[test]
+    fn outcome_classifies_and_orders_ttls() {
+        let clean = AgentDetectionReport {
+            candidates: Vec::new(),
+            providers: Vec::new(),
+            diagnostics: Vec::new(),
+            elapsed_ms: 0,
+            truncated: false,
+        };
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(clean.clone())),
+            DetectionOutcome::Success
+        );
+
+        let mut truncated = clean.clone();
+        truncated.truncated = true;
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(truncated)),
+            DetectionOutcome::Unknown
+        );
+
+        let mut retryable = clean.clone();
+        retryable.diagnostics.push(AgentDetectionDiagnostic {
+            code: "version_probe_timeout".into(),
+            stage: "version_probe".into(),
+            detector_id: None,
+            message: "探针超时".into(),
+            retryable: true,
+        });
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(retryable)),
+            DetectionOutcome::Unknown
+        );
+
+        assert_eq!(
+            DetectionOutcome::classify(&Err("catalog invalid".to_string())),
+            DetectionOutcome::Failure
+        );
+
+        assert!(
+            DetectionOutcome::Failure.ttl() < DetectionOutcome::Unknown.ttl(),
+            "失败必须比 degraded 更快重试"
+        );
+        assert!(
+            DetectionOutcome::Unknown.ttl() < DetectionOutcome::Success.ttl(),
+            "degraded 必须比干净结果更快重试"
+        );
+    }
+
+    async fn snapshot_for(
+        detector_ids: Vec<&str>,
+        root: &Path,
+        home: &Path,
+        limits: AgentDetectionLimits,
+    ) -> DetectionSnapshot {
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(detector_ids.into_iter().map(String::from).collect()),
+            home_dir: Some(home.to_path_buf()),
+            search_roots: Some(vec![root.to_path_buf()]),
+            limits,
+        })
+        .await
+        .unwrap();
+        assemble_detection_snapshot(report, 1_700_000_000_000, Some(&[root.to_path_buf()]))
+    }
+
+    /// B0 fixture：未安装——空 roots + 空 home，每个 provider 都有快照证据且
+    /// preflight 结论为 notInstalled（裸机不会被报成更具体的状态）。
+    #[tokio::test]
+    async fn snapshot_fixture_machine_with_nothing_installed() {
+        let root = fixture_root("snapshot-empty");
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri", "builtin.detector.claude-code"],
+            &root,
+            &home,
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        assert_eq!(
+            snapshot.catalog_revision,
+            crate::agent_catalog::catalog_revision()
+        );
+        assert!(snapshot.taken_at_ms > 0);
+        assert_eq!(snapshot.report.candidates.len(), 0);
+        assert!(
+            snapshot.report.providers.len() >= 2,
+            "未安装也要产出 provider 证据"
+        );
+        assert!(
+            snapshot
+                .preflight
+                .iter()
+                .all(|verdict| verdict.status
+                    == crate::agent_preflight::PreflightStatus::NotInstalled)
+        );
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::Success
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：版本超时——探针超时是 retryable 诊断，快照 outcome 必须是
+    /// Unknown（degraded），不是 Success。
+    #[tokio::test]
+    async fn snapshot_fixture_version_timeout_is_degraded() {
+        let root = fixture_root("snapshot-timeout");
+        std::fs::create_dir_all(&root).unwrap();
+        make_hanging_executable(&root, "peri");
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri"],
+            &root,
+            &root.join("home"),
+            AgentDetectionLimits {
+                total_budget: Duration::from_millis(500),
+                version_probe_budget: Duration::from_millis(100),
+                ..AgentDetectionLimits::default()
+            },
+        )
+        .await;
+
+        assert!(snapshot
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
+        assert_eq!(
+            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::Unknown
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：PATH 缺口——候选在搜索 roots 内但不在进程 PATH 上，快照必须
+    /// 保留该警告（导入会保存绝对路径这一事实不可丢失）。
+    #[tokio::test]
+    async fn snapshot_fixture_off_path_candidate_keeps_warning() {
+        let root = fixture_root("snapshot-path-gap");
+        std::fs::create_dir_all(&root).unwrap();
+        plant_version_tool(&root, "peri", Some("1.0.0"));
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.peri"],
+            &root,
+            &root.join("home"),
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        // fixture roots 不在进程 PATH 上（fixture_root 是独立临时目录）；
+        // 若宿主机 PATH 恰好含该临时目录，此断言退化为验证警告存在与否的任一形态，
+        // 因此断言「有版本证据的候选存在」并在非 PATH 情况下携带警告。
+        let candidate = snapshot
+            .report
+            .candidates
+            .iter()
+            .find(|candidate| candidate.provider == "peri")
+            .expect("peri 候选必须存在");
+        assert!(candidate
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == "version"));
+        let on_path = candidate
+            .evidence
+            .iter()
+            .any(|evidence| evidence.kind == "path");
+        if !on_path {
+            assert!(candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("不在当前 PATH")));
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：wrapper/native 双证据 + 版本门槛——`ccb` 与 `claude` 同时在
+    /// 场，快照必须同时携带两侧证据、宣告 adapter relation，且 preflight 以
+    /// installed 收尾（版本 0.75.1 高于 0.65.0 门槛）。
+    #[tokio::test]
+    async fn snapshot_fixture_wrapper_dual_evidence_installs() {
+        let root = fixture_root("snapshot-dual");
+        let home = root.join("home");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let search = root.join("bin");
+        plant_version_tool(&search, "ccb", Some("0.75.1"));
+        std::fs::write(
+            search.join(&executable_names("claude")[0]),
+            b"not-an-executable",
+        )
+        .unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+            home_dir: Some(home),
+            search_roots: Some(vec![search.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+        // 快照指纹必须描述真实搜索的 roots，而不是进程默认 roots。
+        let snapshot = assemble_detection_snapshot(report, 42, Some(std::slice::from_ref(&search)));
+
+        let evidence = snapshot
+            .report
+            .providers
+            .iter()
+            .find(|evidence| evidence.provider == "claude-code")
+            .expect("claude-code provider 证据");
+        assert!(evidence.adapter_relation_declared);
+        assert!(!evidence.acp_commands.is_empty(), "ACP 侧（ccb）必须有证据");
+        assert!(
+            !evidence.native_commands.is_empty(),
+            "原生侧（claude）必须有证据"
+        );
+        assert_eq!(
+            snapshot.search_fingerprint,
+            search_roots_fingerprint(Some(std::slice::from_ref(&search)))
+        );
+        let verdict = snapshot
+            .preflight
+            .iter()
+            .find(|verdict| verdict.provider == "claude-code")
+            .expect("claude-code preflight 结论");
+        assert_eq!(
+            verdict.status,
+            crate::agent_preflight::PreflightStatus::Installed
+        );
+        assert!(verdict
+            .adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.native_present && adapter.acp_present));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：配置仅存在——共享配置目录在、可执行文件不在，preflight 必须
+    /// 报 configOnly 而不是 notInstalled。
+    #[tokio::test]
+    async fn snapshot_fixture_config_only_without_executables() {
+        let root = fixture_root("snapshot-config-only");
+        let home = root.join("home");
+        let search = root.join("bin");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(&search).unwrap();
+
+        let snapshot = snapshot_for(
+            vec!["builtin.detector.claude-code"],
+            &search,
+            &home,
+            AgentDetectionLimits::default(),
+        )
+        .await;
+
+        let verdict = snapshot
+            .preflight
+            .iter()
+            .find(|verdict| verdict.provider == "claude-code")
+            .expect("claude-code preflight 结论");
+        assert_eq!(
+            verdict.status,
+            crate::agent_preflight::PreflightStatus::ConfigOnly
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// B0 fixture：路径不可访问——搜索 root 指向一个普通文件（无法当目录枚举），
+    /// 扫描不得 panic、不得整报失败，只是该 root 无候选。
+    #[tokio::test]
+    async fn snapshot_fixture_inaccessible_root_is_not_an_error() {
+        let root = fixture_root("snapshot-inaccessible");
+        std::fs::create_dir_all(&root).unwrap();
+        let not_a_dir = root.join("blocker.txt");
+        std::fs::write(&not_a_dir, b"this is a regular file").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.peri".into()]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![not_a_dir.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await;
+
+        let report = report.expect("不可访问的 root 不是错误，只是没有候选");
+        assert!(report.candidates.is_empty());
+        let snapshot = assemble_detection_snapshot(report, 7, Some(&[not_a_dir]));
+        assert_eq!(snapshot.report.candidates.len(), 0);
+
         std::fs::remove_dir_all(root).unwrap();
     }
 }

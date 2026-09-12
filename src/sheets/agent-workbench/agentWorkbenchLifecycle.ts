@@ -14,7 +14,7 @@
  * 框架无关（无 React hooks）：宿主 AgentRendererSuiteWorkbench 以 bind 效应驱动。
  */
 import { invoke } from '@tauri-apps/api/core'
-import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
+import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
@@ -29,7 +29,7 @@ import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
-import { runSessionPreflight } from '../../plugins/core/sessionCreation/sessionPreflight.ts'
+import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { ReplayLoadCoordinator } from '../../components/chat/chatReplayCoordinator.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
@@ -70,9 +70,9 @@ export class AgentWorkbenchLifecycle {
   /** 当前绑定会话变更（宿主 bind 效应调用）：跑 new/load 链。
    * 返回值仅作时序信号；错误经 ErrorCenter 呈现。 */
   async activate(session: Session, options: { reloadToken?: number; isCurrent?: () => boolean }): Promise<AgentWorkbenchLifecycleOutcome | undefined> {
-    if (!IS_TAURI) {
-      // 浏览器 Dev 是纯视觉预览：无 canonical SQLite，不走桌面恢复链路。
-      clearMessageStorage(session.id, localStorage)
+    if (!IS_TAURI || isBrowserMockRuntime()) {
+      // Browser sessions restore these snapshots in sessionRuntime.bind().
+      // Only the desktop canonical migration may discard legacy snapshots.
       return { kind: 'placeholder-read' }
     }
     const context = sessionContext(session)
@@ -142,17 +142,11 @@ export class AgentWorkbenchLifecycle {
     // OWNER-02：new_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     try {
-      const preflight = await runSessionPreflight(session)
-      const response = await sessionClient.newSession({
-        agentId: session.agentId,
-        profileId: session.profileId,
-        source: session.source,
+      const response = await requestNewSession(session, sessionClient, () => ({
         persona,
-        cwd: session.workdir || undefined,
         workspaceId: session.workspaceId || undefined,
         model: useIdentityStore.getState().profiles.find(p => p.id === session.profileId)?.model || undefined,
-        ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
-      })
+      }))
       if (this.loadGenerations.get(session.source) !== loadGeneration || !isCurrent()) return
       const res = sessionResponseObject(response)
       const periId = res.sessionId ?? res.periId

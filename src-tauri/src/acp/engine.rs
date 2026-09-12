@@ -195,7 +195,12 @@ pub(crate) async fn complete_prepared(
     }
 }
 
-/// 启动子进程（两后端共用）：preflight + Hermes runtime + env/cwd + `ManagedChild`。
+/// 启动子进程（两后端共用）：preflight + `LaunchPlan` + `ManagedChild`。
+///
+/// A2：exe/args/cwd/env 全部来自 `plan_launch` 产出的 `LaunchPlan`，本函数不再
+/// 内联拼装任何 provider 差异；唯一保留的 provider 侧步骤是托管运行时适配器
+/// （需现查 PATH/Git Bash，无法离线进 plan），它在 plan 应用之后以显式适配器
+/// 形式运行，不再是 spawn 代码内散落的 provider 分支。
 ///
 /// 进程归属不变（Windows Job Object / taskkill / Drop 均在 `ManagedChild`）。
 pub(crate) async fn spawn_agent_child(
@@ -219,27 +224,31 @@ pub(crate) async fn spawn_agent_child(
     let hermes_runtime = crate::hermes_runtime::prepare(agent)
         .await
         .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
-    let mut cmd = Command::new(&agent.exe);
-    cmd.args(agent.command_args())
-        .stdin(Stdio::piped())
+    // 托管运行时要现查 PATH 与 Git Bash，无法离线进入 plan；它作为显式的运行时
+    // 适配器在 plan 之后应用。plan 仍拥有 argv/cwd/per-agent env/HERMES_HOME。
+    let plan = super::launch_plan::plan_for_agent(agent, base_dir, &Default::default(), Vec::new())
+        .map_err(|error| {
+            super::error::AgentConnectFailure::preflight(
+                "agent_launch_plan_invalid",
+                error.to_string(),
+            )
+        })?;
+    for diagnostic in &plan.diagnostics {
+        tracing::debug!(
+            provider = %plan.provider,
+            owner_key = %plan.owner_key,
+            code = %diagnostic.code,
+            "agent launch plan: {}",
+            diagnostic.message
+        );
+    }
+    let mut cmd = Command::new(&plan.executable);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(cwd) = &agent.cwd {
-        cmd.current_dir(cwd);
-    }
-    for (k, v) in &agent.env {
-        cmd.env(k, v);
-    }
+    super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
         crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
-    }
-    if let Some(hermes_home) = crate::hermes::hermes_home_override(agent, base_dir) {
-        cmd.env("HERMES_HOME", &hermes_home);
-        tracing::info!(
-            "agent {}: HERMES_HOME set to {} (hermes_profile)",
-            agent.name,
-            hermes_home
-        );
     }
     let child = cmd
         .spawn()
@@ -356,6 +365,17 @@ fn publish_inbound(
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
     tx: &mpsc::Sender<ClassifiedMessage>,
 ) {
+    // A replay response is the deterministic boundary of the load operation.
+    // Keep this classification on the transport message itself so observers
+    // do not have to infer it from the response channel.
+    if let Some(super::RequestId::Number(id)) = classified.raw.id.as_ref() {
+        if let Ok(active) = active_replay_requests.lock() {
+            if active.contains_key(id) {
+                classified.classification =
+                    super::ReplayClassification::Boundary { request_id: *id };
+            }
+        }
+    }
     if let Some(session_id) = classified
         .raw
         .params
@@ -364,10 +384,14 @@ fn publish_inbound(
         .and_then(serde_json::Value::as_str)
     {
         if let Ok(active) = active_replay_requests.lock() {
-            if let Some((request_id, _)) = active.iter().find(|(_, id)| id.as_str() == session_id) {
-                classified.classification = super::ReplayClassification::Replay {
-                    request_id: *request_id,
-                };
+            if classified.classification == super::ReplayClassification::Live {
+                if let Some((request_id, _)) =
+                    active.iter().find(|(_, id)| id.as_str() == session_id)
+                {
+                    classified.classification = super::ReplayClassification::Replay {
+                        request_id: *request_id,
+                    };
+                }
             }
         }
     }
@@ -425,16 +449,17 @@ fn observe_message(
     direction: WireDirection,
 ) {
     if let Ok(value) = serde_json::to_value(message) {
-        hub.record(direction, &value);
+        match direction {
+            WireDirection::PylonToAgent => hub.capture_request(&value),
+            WireDirection::AgentToPylon => hub.capture_agent_message(&value),
+        }
     }
 }
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
 fn observe_frame(frame: &TransportFrame, hub: &AcpWireHub, direction: WireDirection) {
     let observe = |message: &agent_client_protocol::RawJsonRpcMessage| {
-        if let Ok(value) = serde_json::to_value(message) {
-            hub.record(direction, &value);
-        }
+        observe_message(message, hub, direction);
     };
     match frame {
         TransportFrame::Single(message) => observe(message),

@@ -2,6 +2,9 @@ import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMou
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
   optionLabel,
+  isReasoningOption,
+  resolveDocumentOptionEntries,
+  resolveDocumentOptionValue,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
   resolveReasoningOptionEntries,
@@ -34,9 +37,17 @@ export function SolidModelWidget(props: {
   const modelEntries = () => resolveModelOptionEntries(runtime(), props.draftValue?.())
   const models = () => modelEntries().map(item => item.id)
   const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
-  const displayModel = () => props.reasoningValue?.() ? `${model()}（${props.reasoningValue()}）` : model()
+  const reasoningOption = () => runtime().document?.session.options.find(isReasoningOption)
+  const reasoningValue = () => props.reasoningValue?.()
+    ?? resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') ?? ''
+  const displayModel = () => reasoningValue() ? `${model()}（${reasoningValue()}）` : model()
   const scale = () => appearance().ccScale.model ?? 100
-  const reasoningEntries = () => resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
+  const reasoningEntries = () => props.onReasoningChange
+    ? resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
+    : reasoningOption()?.editable === false ? []
+      : resolveDocumentOptionEntries(reasoningOption() ? [reasoningOption()!] : [], 'reasoning')
+  let reasoningRequest = 0
+  const [reasoningPending, setReasoningPending] = createSignal(false)
   const dropdown = () => props.forceDropdown === true || appearance().modelVariant === 'dropdown'
   const close = (restoreFocus = false) => {
     setOpen(false)
@@ -44,6 +55,11 @@ export function SolidModelWidget(props: {
   }
   createEffect(() => {
     const currentSessionId = workbench.input().sessionId
+    if (currentSessionId !== previousSessionId) {
+      reasoningRequest++
+      setReasoningPending(false)
+      setError('')
+    }
     if (currentSessionId !== previousSessionId || !dropdown()) close()
     previousSessionId = currentSessionId
   })
@@ -77,36 +93,42 @@ export function SolidModelWidget(props: {
     else setError('')
     close(true)
   }
+  const chooseReasoning = async (target: string) => {
+    if (props.onReasoningChange) { props.onReasoningChange(target); return }
+    const sessionId = workbench.input().sessionId
+    const option = reasoningOption()
+    if (!sessionId || !option || option.editable === false || reasoningPending()
+      || !reasoningEntries().some(entry => entry.id === target) || target === reasoningValue()) return
+    const request = ++reasoningRequest
+    setReasoningPending(true)
+    setError('')
+    try {
+      const result = await workbench.commands.setConfigOption(sessionId, option.id, target, {
+        expectedValue: option.value,
+        ...(option.version !== undefined ? { expectedVersion: option.version } : {}),
+      })
+      if (request === reasoningRequest && workbench.input().sessionId === sessionId && !result.ok)
+        setError(result.error || '思考等级切换失败')
+    } catch (cause) {
+      if (request === reasoningRequest && workbench.input().sessionId === sessionId)
+        setError(cause instanceof Error ? cause.message : '思考等级切换失败')
+    } finally {
+      if (request === reasoningRequest) setReasoningPending(false)
+    }
+  }
 
   return (
     <div ref={node => { root = node }} class="solid-model-widget">
       <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
-      <Show when={dropdown()} fallback={
+      <Show when={dropdown() || (appearance().modelVariant !== 'badge' && appearance().modelVariant !== 'minimal')} fallback={
         <Show when={appearance().modelVariant === 'badge'} fallback={
-          <Show when={appearance().modelVariant === 'minimal'} fallback={<ModelDropdown
-            menuId={menuId}
-            triggerRef={node => { trigger = node }}
-            rootRef={node => { root = node }}
-            open={open}
-            setOpen={setOpen}
-            close={close}
-            scale={scale}
-            displayModel={displayModel}
-            model={model}
-            modelEntries={modelEntries}
-            reasoningEntries={reasoningEntries}
-            reasoningValue={props.reasoningValue}
-            onReasoningChange={props.onReasoningChange}
-            choose={choose}
-          />}>
-            <button
-              type="button"
-              class="cc-model-minimal"
-              title="点击切换模型"
-              style={{ 'font-size': `${scale()}%` }}
-              onClick={() => void choose(nextValue(models(), model()))}
-            >{displayModel()}</button>
-          </Show>
+          <button
+            type="button"
+            class="cc-model-minimal"
+            title="点击切换模型"
+            style={{ 'font-size': `${scale()}%` }}
+            onClick={() => void choose(nextValue(models(), model()))}
+          >{displayModel()}</button>
         }>
           <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
         </Show>
@@ -123,8 +145,8 @@ export function SolidModelWidget(props: {
           model={model}
           modelEntries={modelEntries}
           reasoningEntries={reasoningEntries}
-          reasoningValue={props.reasoningValue}
-          onReasoningChange={props.onReasoningChange}
+          reasoningValue={reasoningValue}
+          onReasoningChange={value => void chooseReasoning(value)}
           choose={choose}
         />
       </Show>
@@ -180,7 +202,7 @@ function ModelDropdown(props: {
           props.close(true)
         }}
       >
-        <Show when={props.reasoningValue && props.onReasoningChange}>
+        <Show when={props.reasoningValue && props.onReasoningChange && props.reasoningEntries().length > 0}>
           <div class="model-menu-section" role="group" aria-label="思考强度">
             <span>思考强度</span>
             <For each={props.reasoningEntries()}>{effort => <button

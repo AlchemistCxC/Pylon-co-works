@@ -1,7 +1,5 @@
 import { THEME_FIELD_DEFS, normalizeThemeValue } from '../../themeFieldDefs.ts'
-import type { PluginIdentity } from '../pluginIdentity.ts'
-import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
-import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
+import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { PresentationProfileContribution } from './presentationProfileTypes.ts'
 import type { RendererSettingValue } from '../renderers/rendererSettingsTypes.ts'
 
@@ -59,36 +57,6 @@ export function validatePresentationProfile(
   })
 }
 
-export class PresentationProfileRegistry {
-  private readonly registry = new ReactiveRegistryStore<PresentationProfileContribution>()
-
-  register(owner: PluginIdentity, contribution: PresentationProfileContribution): AsyncDisposable {
-    const normalized = validatePresentationProfile(contribution)
-    return this.registry.register(owner, normalized, {
-      contributionId: normalized.id,
-      priority: normalized.order,
-    })
-  }
-
-  beginShadowTransaction(
-    owner: PluginIdentity,
-    replacingRuntimeInstanceId: string,
-  ): RegistryTransaction<PresentationProfileContribution> {
-    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    return {
-      ...transaction,
-      register: (contribution, options) => {
-        const normalized = validatePresentationProfile(contribution)
-        return transaction.register(normalized, {
-          ...options,
-          contributionId: normalized.id,
-          priority: normalized.order,
-        })
-      },
-    }
-  }
-
-  subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }
-  getSnapshot(): RegistrySnapshot<PresentationProfileContribution> { return this.registry.getSnapshot() }
-  resolve(id: string) { return this.registry.getSnapshot().entries.find(entry => entry.contributionId === id) }
+export class PresentationProfileRegistry extends ValidatedContributionRegistry<PresentationProfileContribution> {
+  constructor() { super(validatePresentationProfile) }
 }

@@ -351,20 +351,6 @@ pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<boo
     }
 }
 
-/// D2 interaction 请求：仅显式 respond/cancel 产生短路动作，其余继续既有 reject。
-pub(crate) fn interpret_interaction_hook_response(
-    response: &Value,
-) -> Option<(&'static str, Value)> {
-    match response.get("action").and_then(Value::as_str) {
-        Some("respond") => response
-            .get("output")
-            .cloned()
-            .map(|output| ("respond", output)),
-        Some("cancel") => Some(("cancel", Value::Null)),
-        _ => None,
-    }
-}
-
 /// #1 发送链缝派发（prompt.rs 调用；窗口可缺——无窗口即 fail-open）。
 pub(crate) async fn before_send_hook_outcome<R: tauri::Runtime>(
     state: &crate::AppState,
@@ -525,7 +511,9 @@ mod tests {
         let (app, window) = mock_app_with_state();
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_USER_BEFORE_SEND]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // tokio 无界通道：`#[tokio::test]` 默认 current_thread 运行时，spawn 的任务与
+        // 被测 future 共用同一个 worker 线程；若在任务里阻塞 recv 会占死线程（死锁）。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         window.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -534,7 +522,7 @@ mod tests {
 
         let responder_bridge = bridge.clone();
         let responder = tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -750,22 +738,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn interaction_hook_interpretation_requires_explicit_response() {
-        assert_eq!(
-            interpret_interaction_hook_response(&json!({"action":"continue"})),
-            None
-        );
-        assert_eq!(
-            interpret_interaction_hook_response(&json!({"action":"cancel"})),
-            Some(("cancel", Value::Null))
-        );
-        assert_eq!(
-            interpret_interaction_hook_response(&json!({"action":"respond","output":{"ok":true}})),
-            Some(("respond", json!({"ok":true})))
-        );
-    }
-
     /// 验收 D1-④：message.received gate 丢弃平台消息，并对齐既有失败路径的
     /// rollback_seen 语义（去重窗口回滚，resume 重放可重新 ingest）。
     #[tokio::test]
@@ -778,7 +750,9 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // 同 bridge_roundtrip：必须用 tokio 通道，避免 current_thread 运行时下
+        // spawn 任务阻塞 recv 占死 worker 线程。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -786,7 +760,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             responder_bridge
                 .respond(
@@ -825,7 +799,9 @@ mod tests {
             .expect("register fake adapter");
         let bridge = bridge_ready(&app, &[HOOK_MESSAGE_RECEIVED]);
 
-        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        // 同 bridge_roundtrip：必须用 tokio 通道，避免 current_thread 运行时下
+        // spawn 任务阻塞 recv 占死 worker 线程。
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         webview.listen(crate::event_names::PYLON_HOOK_REQUEST, move |event| {
             let payload: Value =
                 serde_json::from_str(event.payload()).expect("hook request payload");
@@ -833,7 +809,7 @@ mod tests {
         });
         let responder_bridge = bridge.clone();
         tokio::spawn(async move {
-            let request = rx.recv().expect("hook request must arrive");
+            let request = rx.recv().await.expect("hook request must arrive");
             let request_id = request["requestId"].as_str().unwrap().to_string();
             let mut event = request["payload"].clone();
             if let Value::Object(ref mut map) = event {

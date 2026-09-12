@@ -6,8 +6,6 @@
 //! or ignored as replay.  No Tauri event, store, or renderer type may appear
 //! here.
 
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -246,13 +244,13 @@ impl AcpSessionState {
                 variant: other.to_owned(),
             }),
         };
-        if let Some(ref delta) = delta {
-            match delta {
-                AcpStateDelta::Text { text }
-                | AcpStateDelta::Reasoning { text }
-                | AcpStateDelta::UserText { text } => self.messages.push(text.clone()),
-                _ => {}
-            }
+        if let Some(
+            AcpStateDelta::Text { text }
+            | AcpStateDelta::Reasoning { text }
+            | AcpStateDelta::UserText { text },
+        ) = delta.as_ref()
+        {
+            self.messages.push(text.clone());
         }
         delta.into_iter().collect()
     }

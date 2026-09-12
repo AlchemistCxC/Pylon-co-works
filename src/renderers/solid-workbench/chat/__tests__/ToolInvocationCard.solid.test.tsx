@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolInvocationSnapshot } from '../../../../domains/workbench/workbenchProjector.ts'
@@ -85,7 +85,7 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(output.querySelectorAll('[data-tool-part-kind]')).toHaveLength(1)
   })
 
-  it('renders nested canonical parts with an accessible lifecycle status', () => {
+  it('renders nested canonical parts with an accessible lifecycle status', async () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.generic"
       appearance={{ reducedMotion: true, defaultCollapsed: false, showDuration: true }}
@@ -106,7 +106,8 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(card).toHaveAttribute('data-reduced-motion', 'true')
     expect(card).toHaveTextContent('ProviderExec')
     expect(card).toHaveTextContent('1.4s')
-    expect(screen.getByText('**passed**')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('passed')).toBeTruthy(), { timeout: 10_000 })
+    expect(screen.getByText('passed').tagName).toBe('STRONG')
     expect(container.querySelector('.term-code-block')).not.toBeNull()
   })
 
@@ -133,7 +134,7 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('SAFE')
   })
 
-  it('renders normalized input parts and locations as generic lifecycle content', () => {
+  it('renders normalized input parts and locations as generic lifecycle content', async () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.input"
       appearance={{ defaultCollapsed: false }}
@@ -147,7 +148,8 @@ describe('C04 SolidToolInvocationCard', () => {
       }}
     />)
 
-    expect(screen.getByText('**argument**')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('argument')).toBeTruthy(), { timeout: 10_000 })
+    expect(screen.getByText('argument').tagName).toBe('STRONG')
     expect(container.querySelector('[data-tool-input-parts] .term-code-block')).not.toBeNull()
     expect(screen.getByText('位置')).toBeTruthy()
     expect(container.querySelector('.solid-tool-locations')).toHaveTextContent('/workspace/a.ts')

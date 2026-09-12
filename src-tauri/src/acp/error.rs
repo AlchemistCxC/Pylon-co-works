@@ -147,6 +147,13 @@ impl AgentConnectFailure {
                     serde_json::Value::Array(value) => format!("array({} items)", value.len()),
                     serde_json::Value::Object(value) => format!("object({} keys)", value.len()),
                 });
+            } else {
+                // Keep malformed provider diagnostics bounded and payload-free
+                // using the same parser-error policy as stderr diagnostics.
+                failure.message = format!(
+                    "initialize RPC error: {}",
+                    crate::acp::stderr_tail::summarize_parser_error(raw)
+                );
             }
         }
         failure
@@ -212,8 +219,11 @@ pub(crate) enum RpcFailureKind {
     Other,
 }
 
+/// Typed reason a session-recovery RPC failed. Method-agnostic on purpose:
+/// `resume` and `load` share one classification, so every fallback in the
+/// `resume -> load -> new` chain records the same closed vocabulary (A3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResumeFailureClass {
+pub(crate) enum RecoveryFailureClass {
     Archived,
     Busy,
     Unavailable,
@@ -227,14 +237,14 @@ pub(crate) struct RpcFailureDetails {
 }
 
 impl AcpError {
-    pub(crate) fn resume_failure_class(&self) -> ResumeFailureClass {
+    pub(crate) fn recovery_failure_class(&self) -> RecoveryFailureClass {
         let text = self.to_string().to_ascii_lowercase();
         if text.contains("archiv") || text.contains("expired") {
-            ResumeFailureClass::Archived
+            RecoveryFailureClass::Archived
         } else if text.contains("busy") || text.contains("in progress") {
-            ResumeFailureClass::Busy
+            RecoveryFailureClass::Busy
         } else {
-            ResumeFailureClass::Unavailable
+            RecoveryFailureClass::Unavailable
         }
     }
     pub(crate) fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
@@ -325,27 +335,6 @@ impl From<AcpError> for String {
     }
 }
 
-#[cfg(test)]
-mod resume_failure_tests {
-    use super::{AcpError, ResumeFailureClass};
-
-    #[test]
-    fn classify_resume_failures_for_fallback_policy() {
-        assert_eq!(
-            AcpError::Rpc("session archived".into()).resume_failure_class(),
-            ResumeFailureClass::Archived
-        );
-        assert_eq!(
-            AcpError::Rpc("session busy".into()).resume_failure_class(),
-            ResumeFailureClass::Busy
-        );
-        assert_eq!(
-            AcpError::ConnectionClosed.resume_failure_class(),
-            ResumeFailureClass::Unavailable
-        );
-    }
-}
-
 impl From<AcpError> for crate::error::PylonError {
     fn from(error: AcpError) -> Self {
         if matches!(&error, AcpError::ReplayLoadInProgress) {
@@ -403,3 +392,24 @@ pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
 pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
+
+#[cfg(test)]
+mod resume_failure_tests {
+    use super::{AcpError, RecoveryFailureClass};
+
+    #[test]
+    fn classify_resume_failures_for_fallback_policy() {
+        assert_eq!(
+            AcpError::Rpc("session archived".into()).recovery_failure_class(),
+            RecoveryFailureClass::Archived
+        );
+        assert_eq!(
+            AcpError::Rpc("session busy".into()).recovery_failure_class(),
+            RecoveryFailureClass::Busy
+        );
+        assert_eq!(
+            AcpError::ConnectionClosed.recovery_failure_class(),
+            RecoveryFailureClass::Unavailable
+        );
+    }
+}

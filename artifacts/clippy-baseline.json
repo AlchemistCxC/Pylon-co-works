@@ -1,33 +1,17 @@
 {
-  "version": 2,
-  "note": "P60 clippy baseline (relative: zero new diagnostics, deduped by fingerprint)",
-  "diagnostics": [
-    "clippy::bool_assert_comparison | src/agent_config/tests.rs | used `assert_eq!` with a literal bool",
-    "clippy::bool_assert_comparison | src/gateway_cmds.rs | used `assert_eq!` with a literal bool",
-    "clippy::bool_assert_comparison | src/session/revive_tests.rs | used `assert_eq!` with a literal bool",
-    "clippy::collapsible_match | src/acp/state.rs | this `match` can be collapsed into the outer `if let`",
-    "clippy::doc_lazy_continuation | src/session/del03_local_first_delete.rs | doc list item without indentation",
-    "clippy::doc_lazy_continuation | src/session/del05_error_code_matrix.rs | doc list item without indentation",
-    "clippy::err_expect | src/session_store.rs | called `.err().expect()` on a `Result` value",
-    "clippy::field_reassign_with_default | src/plugin_process/tests.rs | field assignment outside of initializer for an instance created with Default::default()",
-    "clippy::items_after_test_module | src/pet_cmds.rs | items after a test module",
-    "clippy::items_after_test_module | src/session/model.rs | items after a test module",
-    "clippy::items_after_test_module | src/test_utils.rs | items after a test module",
-    "clippy::large_enum_variant | src/dispatcher/routing.rs | large size difference between variants",
-    "clippy::too_many_arguments | src/acp/transport.rs | this function has too many arguments (9/7)",
-    "clippy::too_many_arguments | src/dispatcher/mod.rs | this function has too many arguments (11/7)",
-    "clippy::too_many_arguments | src/runtime_log.rs | this function has too many arguments (8/7)",
-    "clippy::too_many_arguments | src/runtime_log.rs | this function has too many arguments (9/7)",
-    "clippy::too_many_arguments | src/session/create.rs | this function has too many arguments (11/7)",
-    "clippy::too_many_arguments | src/session/create.rs | this function has too many arguments (12/7)",
-    "clippy::too_many_arguments | src/session/create.rs | this function has too many arguments (9/7)",
-    "clippy::type_complexity | src/acp/replay.rs | very complex type used. Consider factoring parts into `type` definitions",
-    "clippy::type_complexity | src/gateway/instance.rs | very complex type used. Consider factoring parts into `type` definitions",
-    "clippy::useless_vec | src/session_info_tests.rs | useless use of `vec!`",
-    "dead_code | src/acp/capabilities.rs | enum `CapabilityState` is never used",
-    "dead_code | src/acp/capabilities.rs | methods `state` and `supports` are never used",
-    "dead_code | src/acp/wire_trace.rs | method `to_jsonl` is never used",
-    "dead_code | src/hook_bridge.rs | function `interpret_interaction_hook_response` is never used",
-    "unused_imports | src/acp/tests.rs | unused import: `super::*`"
+  "version": 3,
+  "note": "P60 clippy baseline v3 (relative: zero new diagnostics; fingerprint carries crate + occurrence count)",
+  "counts": {
+    "pylon | clippy::large_enum_variant | src-tauri/src/dispatcher/routing.rs | large size difference between variants": 1,
+    "pylon | clippy::too_many_arguments | src-tauri/src/runtime_log.rs | this function has too many arguments (8/7)": 1,
+    "pylon | clippy::too_many_arguments | src-tauri/src/runtime_log.rs | this function has too many arguments (9/7)": 1,
+    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (11/7)": 1,
+    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (12/7)": 1,
+    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (9/7)": 2,
+    "pylon-core | clippy::needless_return | src-tauri/pylon-core/src/agent_detection.rs | unneeded `return` statement": 1
+  },
+  "crates": [
+    "pylon",
+    "pylon-core"
   ]
 }

@@ -8,7 +8,7 @@ import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from 
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
-import type { RenderSurface } from '../../../contracts/messageRenderer.ts'
+import type { RenderNodeSnapshot, RenderSurface } from '../../../contracts/messageRenderer.ts'
 import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
@@ -1977,6 +1977,157 @@ describe('mountSolidWorkbench', () => {
     expect(missingPlugin).toHaveTextContent('peri · c15-3')
     expect(missingPlugin).toHaveTextContent('local-observed · authoritative')
     expect(host.querySelector('[data-extension-kind="plugin.removed/result"]')).not.toBeNull()
+  })
+
+  it('同一 semantic WorkbenchDocument 在内置 Solid 与插件 Slot 间保持 parity', async () => {
+    const builtinHost = document.createElement('div')
+    const pluginHost = document.createElement('div')
+    document.body.append(builtinHost, pluginHost)
+    hosts.push(builtinHost, pluginHost)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const hostPort = createWorkbenchHostPort({
+      ...services,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a',
+      sessionOwnerKey: 'owner-parity', sessionId: 'parity-session',
+    })
+
+    const make = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({
+      sessionId: 'parity-session', sequence,
+      recordedAt: `2026-09-10T00:00:0${sequence}.000Z`,
+      source: { provider: 'acp', sourceId: `renderer-parity-${sequence}` }, identity,
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      // Raw ACP evidence may carry replay hints, but it is not a renderer input.
+      raw: { _meta: { periReplay: true }, wireSequence: sequence },
+      event,
+    })
+    const projected = projectWorkbench([
+      make(1, { type: 'message.completed', role: 'assistant', parts: [{ kind: 'markdown', text: 'assistant parity' }] }, { messageId: 'parity-message' }),
+      make(2, { type: 'tool.started', tool: { toolCallId: 'parity-tool', name: 'Read parity', title: '读取 parity', input: { path: '/parity.txt' } } }, { toolCallId: 'parity-tool' }),
+      make(3, { type: 'plan.replaced', entries: [{ id: 'parity-plan', content: 'plan parity', status: 'in_progress' }] }),
+      make(4, { type: 'interaction.requested', interactionId: 'parity-interaction', request: {
+        surface: 'interaction', kind: 'approval', state: 'waiting',
+        identity: { provider: 'acp', agentId: 'agent', requestId: 'parity-request', sessionId: 'parity-session', toolCallId: null, clientGeneration: 1 },
+        questions: [{ id: 'approval', question: 'Approve parity?', options: [], allowMultiple: false, allowFreeform: false }],
+      } }, { interactionId: 'parity-interaction' }),
+      make(5, { type: 'extension.event', kind: 'plugin.parity/card', payload: { label: 'extension parity', status: 'ready' }, fallback: [{ kind: 'text', text: 'extension fallback' }] }),
+      make(6, { type: 'session.commands-updated', commands: [{ id: 'compact', name: '/compact', description: 'Compact parity' }] }),
+      make(7, { type: 'diagnostic.notice', level: 'warning', code: 'parity.notice', message: 'diagnostic parity' }),
+    ]).document
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-parity', generation: 1, sessionId: 'parity-session' })
+    const documentSnapshot = hostPort.document.getSnapshot()!
+    const renderRevision = services.runtime.getSnapshot().revision
+
+    // The host exposes one immutable document; both renderer instances read it.
+    expect(documentSnapshot).toMatchObject({ sessionId: 'parity-session', revision: 7 })
+    expect(renderRevision).toBe(hostPort.generation.getSnapshot().revision)
+    expect(documentSnapshot.timeline.map(entry => entry.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(documentSnapshot.messages).toHaveLength(1)
+    expect(documentSnapshot.activities).toMatchObject([{ id: 'parity-tool', title: 'Read parity', status: 'running' }])
+    expect(documentSnapshot.plan.entries).toMatchObject([{ id: 'parity-plan', content: 'plan parity', status: 'in_progress' }])
+    expect(documentSnapshot.interactions).toMatchObject([{ id: 'parity-interaction', status: 'requested' }])
+    expect(documentSnapshot.extensions).toMatchObject([{ kind: 'plugin.parity/card', payload: { label: 'extension parity' } }])
+    expect(documentSnapshot.session.commands).toMatchObject([{ id: 'compact', name: '/compact' }])
+    expect(documentSnapshot.diagnostics).toMatchObject([{ code: 'parity.notice', level: 'warning', message: 'diagnostic parity' }])
+
+    // Mount the built-in renderer without an activation override: its fallback
+    // surfaces prove the same document remains user-visible without plugins.
+    mountSolidWorkbench({
+      host: builtinHost,
+      input: { sheetId: 'sheet-a', sessionId: 'parity-session', preview: true },
+      services, hostPort,
+    })
+
+    const captured: RenderNodeSnapshot[] = []
+    const slotKinds = [
+      'content.markdown', 'tool.generic', 'content.plan', 'interaction.approval',
+      'plugin.parity/card', 'session.commands', 'system.notice',
+    ] as const
+    const paritySlot: RendererSlotContribution = {
+      id: 'test.renderer-parity', targetSuites: ['builtin.solid'], kinds: slotKinds,
+      priority: 20_000, fallback: false, canRender: () => true,
+      createSurface: () => ({
+        rendererId: 'test.renderer-parity', kind: 'solid',
+        mount(container, snapshot) {
+          captured.push(snapshot)
+          const node = document.createElement('div')
+          node.dataset.parityKind = snapshot.kind
+          container.append(node)
+          return node
+        },
+        update() {},
+        destroy(handle) { (handle as HTMLElement).remove() },
+        on: () => () => {},
+      }),
+    }
+    const entry = {
+      ownerPluginId: 'test.renderer-parity', ownerRuntimeInstanceId: 'runtime',
+      contributionId: paritySlot.id, layer: 'feature', priority: paritySlot.priority, value: paritySlot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: {
+        ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+        contributionId: suite.id, layer: 'feature', priority: 1, value: suite,
+      } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map(),
+      slots: new Map(slotKinds.map(kind => [kind, [entry]])),
+      diagnostics: [],
+    }
+    mountSolidWorkbench({
+      host: pluginHost,
+      input: { sheetId: 'sheet-a', sessionId: 'parity-session', preview: true },
+      services, hostPort, activation,
+    })
+
+    await waitFor(() => expect(builtinHost).toHaveTextContent('assistant parity'))
+    expect(builtinHost).toHaveTextContent('Read parity')
+    expect(builtinHost).toHaveTextContent('plan parity')
+    expect(builtinHost).toHaveTextContent('Approve parity?')
+    expect(builtinHost).toHaveTextContent('/compact')
+    expect(builtinHost).toHaveTextContent('diagnostic parity')
+    expect(builtinHost).toHaveTextContent('extension fallback')
+
+    await waitFor(() => expect(captured).toHaveLength(slotKinds.length))
+    const byKind = new Map(captured.map(snapshot => [snapshot.kind, snapshot]))
+    expect([...byKind.keys()]).toEqual(expect.arrayContaining([...slotKinds]))
+    expect(byKind.size).toBe(slotKinds.length)
+    const message = documentSnapshot.messages[0]!
+    const activity = documentSnapshot.activities[0]!
+    const interaction = documentSnapshot.interactions[0]!
+    const extension = documentSnapshot.extensions[0]!
+    const diagnostic = documentSnapshot.diagnostics[0]!
+    expect(byKind.get('content.markdown')).toMatchObject({
+      nodeId: `${message.id}:part:0`, revision: renderRevision,
+      payload: message.parts[0],
+    })
+    expect(byKind.get('tool.generic')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:${activity.id}`, revision: renderRevision,
+      payload: expect.objectContaining({ id: activity.id, title: activity.displayName, name: activity.providerName, input: activity.input }),
+    })
+    expect(byKind.get('content.plan')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:plan`, revision: renderRevision,
+      payload: { entries: documentSnapshot.plan.entries, goal: documentSnapshot.goal.current },
+    })
+    expect(byKind.get('interaction.approval')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:interaction:${interaction.id}`, revision: renderRevision,
+      payload: interaction,
+    })
+    expect(byKind.get('plugin.parity/card')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:extension:${extension.id}`, revision: renderRevision,
+      payload: extension.payload,
+    })
+    expect(byKind.get('session.commands')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:session:commands`, revision: renderRevision,
+      payload: { commands: documentSnapshot.session.commands },
+    })
+    expect(byKind.get('system.notice')).toMatchObject({
+      nodeId: `${documentSnapshot.sessionId}:notice:${diagnostic.eventId}`, revision: renderRevision,
+      payload: diagnostic,
+    })
+    expect(JSON.stringify(captured)).not.toContain('periReplay')
+    expect(JSON.stringify(captured)).not.toContain('wireSequence')
   })
 
   it('coalesces adjacent streamed text in a missing-plugin extension fallback', async () => {

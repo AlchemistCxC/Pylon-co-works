@@ -69,6 +69,16 @@ pub(crate) fn fake_acp_agent_with(
 ) -> AgentDef {
     let mut args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
     args.extend(extra_args);
+    // fake ACP 子进程通过 stdin/stdout 说 UTF-8 的 JSON-RPC 线（真实 ACP wire 即 UTF-8）。
+    // Python 默认按宿主 locale 解 stdin，而 CI runner 的 locale 是 cp1252：中文 payload
+    // 的 UTF-8 字节里 0x81/0x8D/0x8F/0x90/0x9D 在 cp1252 未定义，被 surrogateescape 成
+    // 孤代理（\udcXX）；子进程再 json.dumps 写进 trace，Rust 侧 serde_json 读回即报
+    // "lone leading surrogate in hex escape"（run 34597826814 实证，列 223）。
+    // 本地不复现是因为开发机 locale 是 cp936/UTF-8（能整字节解码，只是 mojibake）。
+    // 固定子进程 stdio 编码，测试行为就不再随宿主 locale 变化；显式传同名变量者可覆盖。
+    let mut env = env;
+    env.entry("PYTHONIOENCODING".to_string())
+        .or_insert_with(|| "utf-8".to_string());
     AgentDef {
         name: name.to_string(),
         provider: None,
@@ -261,6 +271,51 @@ pub(crate) fn connected_runtime() -> Arc<AgentRuntime> {
     runtime
 }
 
+/// 通用 HTTP 测试桩：绑定随机端口，按序消费响应字节序列。
+///
+/// 收敛 prism.rs / gateway/qq/send.rs 等测试中重复的
+/// `TcpListener::bind(127.0.0.1:0) → thread::spawn(accept → read → write_all)`
+/// 样板。返回 `(socket_addr, 请求字节捕获 channel, 服务线程 join handle)`。
+///
+/// 语义：
+/// - 按 `responses` 顺序每个请求回一个响应；响应耗尽后其余请求收到空响应（测试
+///   不应依赖，计数断言用请求 channel）。
+/// - 每个已接受连接单次读缓冲（不等到 EOF，避免 keep-alive 连接阻塞）后写入对应
+///   响应，再关闭。与历史 qq `spawn_sequence_server` 语义一致。
+/// - 请求字节原文通过 `request_rx` 捕获（供断言请求形状），连接数即请求数。
+pub(crate) fn spawn_http_stub(
+    responses: &'static [&'static [u8]],
+) -> (
+    std::net::SocketAddr,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+    std::thread::JoinHandle<()>,
+) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let address = listener.local_addr().expect("listener address");
+    let (request_tx, request_rx) = mpsc::channel();
+    let server = std::thread::spawn(move || {
+        for response in responses {
+            let (mut stream, _) = match listener.accept() {
+                Ok(accepted) => accepted,
+                Err(_) => return,
+            };
+            let mut buffer = [0_u8; 4096];
+            let mut bytes = Vec::new();
+            match stream.read(&mut buffer) {
+                Ok(count) if count > 0 => bytes.extend_from_slice(&buffer[..count]),
+                _ => {}
+            }
+            let _ = request_tx.send(bytes);
+            let _ = stream.write_all(response);
+        }
+    });
+    (address, request_rx, server)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,49 +390,4 @@ mod tests {
             "注入的 AcpClient 必须挂在 runtime.acp 上（新建 disconnected 默认未崩溃）"
         );
     }
-}
-
-/// 通用 HTTP 测试桩：绑定随机端口，按序消费响应字节序列。
-///
-/// 收敛 prism.rs / gateway/qq/send.rs 等测试中重复的
-/// `TcpListener::bind(127.0.0.1:0) → thread::spawn(accept → read → write_all)`
-/// 样板。返回 `(socket_addr, 请求字节捕获 channel, 服务线程 join handle)`。
-///
-/// 语义：
-/// - 按 `responses` 顺序每个请求回一个响应；响应耗尽后其余请求收到空响应（测试
-///   不应依赖，计数断言用请求 channel）。
-/// - 每个已接受连接单次读缓冲（不等到 EOF，避免 keep-alive 连接阻塞）后写入对应
-///   响应，再关闭。与历史 qq `spawn_sequence_server` 语义一致。
-/// - 请求字节原文通过 `request_rx` 捕获（供断言请求形状），连接数即请求数。
-pub(crate) fn spawn_http_stub(
-    responses: &'static [&'static [u8]],
-) -> (
-    std::net::SocketAddr,
-    std::sync::mpsc::Receiver<Vec<u8>>,
-    std::thread::JoinHandle<()>,
-) {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::mpsc;
-
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-    let address = listener.local_addr().expect("listener address");
-    let (request_tx, request_rx) = mpsc::channel();
-    let server = std::thread::spawn(move || {
-        for response in responses {
-            let (mut stream, _) = match listener.accept() {
-                Ok(accepted) => accepted,
-                Err(_) => return,
-            };
-            let mut buffer = [0_u8; 4096];
-            let mut bytes = Vec::new();
-            match stream.read(&mut buffer) {
-                Ok(count) if count > 0 => bytes.extend_from_slice(&buffer[..count]),
-                _ => {}
-            }
-            let _ = request_tx.send(bytes);
-            let _ = stream.write_all(response);
-        }
-    });
-    (address, request_rx, server)
 }

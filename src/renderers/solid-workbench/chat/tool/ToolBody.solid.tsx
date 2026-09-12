@@ -445,6 +445,7 @@ function diffStats(parts: readonly ContentPart[]): { additions: number; deletion
   for (const part of parts) {
     if (part.kind !== 'diff') continue
     changedFiles += 1
+    // SAFETY: 已由 part.kind !== 'diff' 收窄到 diff part；读取其附加字段需开放索引视图。
     const record = part as unknown as Record<string, unknown>
     const lines = Array.isArray(record.lines) ? record.lines : []
     additions += finiteValue(record.additions) ?? lines.filter(line => isRecord(line) && line.kind === 'added').length

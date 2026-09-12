@@ -399,7 +399,7 @@ fn inspector_row_serializes_exact_wire_and_sorts() {
     );
     assert!(value.get("generation").is_none(), "generation 不得落 wire");
     // 稳定排序：agentId → source → periId
-    let mut rows = vec![
+    let mut rows = [
         InspectorSessionRow {
             agent_id: "b".into(),
             source: "s2".into(),
