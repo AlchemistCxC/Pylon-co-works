@@ -164,12 +164,10 @@ export function selectAcpRuntimeDetectorIds(
   detectors: readonly AgentRuntimeDetectorMetadata[],
 ): string[] {
   const seen = new Set<string>()
-  const seen = new Set<string>()
   return detectors
     .filter(detector => detector.protocol === 'acp' && detector.id.trim().length > 0)
     .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
     .map(detector => detector.id)
-    .filter(id => !seen.has(id) && seen.add(id))
     .filter(id => !seen.has(id) && seen.add(id))
 }
 
