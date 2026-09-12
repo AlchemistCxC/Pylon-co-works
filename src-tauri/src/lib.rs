@@ -629,6 +629,11 @@ pub fn init_tracing() {
 ///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // rustls 0.23 进程级 CryptoProvider：依赖树经 feature 统一同时启用
+    // aws-lc-rs 与 ring（reqwest/hyper-rustls 与 tokio-tungstenite 各拉其一），
+    // 自动探测必然失败——gateway QQ WSS 首次 TLS 握手即 panic（P78 真实平台
+    // 验收暴露；stub 测试不走 TLS 故未覆盖）。启动最早期显式安装默认 provider。
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // P0-3（R2-WI03）+ R2-WI06：注册协议适配器——Peri 与 Hermes 的审批 wire 逐字段
     // 一致（均走 ACP session/request_permission + RequestPermissionResponse，已源码实证），
     // 同一 request_permission 实现按 provider 注册；clarify/ask-user 无真实 wire 不注册。
@@ -1111,6 +1116,31 @@ pub fn run() {
                         state.gateway.clone(),
                         qq_http,
                     );
+                    // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
+                    // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
+                    // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
+                    // （覆盖侧 warn 留痕）。
+                    {
+                        let gateway_for_hook = state.gateway.clone();
+                        state.gateway_instances.set_adapter_registry(Arc::new(
+                            move |key: &str,
+                                  adapter: &Arc<dyn gateway::PlatformAdapter>,
+                                  register: bool| {
+                                if register {
+                                    if gateway_for_hook
+                                        .replace(adapter.clone())
+                                        .is_some()
+                                    {
+                                        tracing::warn!(
+                                            "gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）"
+                                        );
+                                    }
+                                } else if gateway_for_hook.unregister_if(key, adapter) {
+                                    tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
+                                }
+                            },
+                        ));
+                    }
                     // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
                     // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
                     {

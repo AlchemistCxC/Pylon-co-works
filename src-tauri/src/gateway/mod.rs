@@ -332,6 +332,42 @@ impl GatewayCore {
         Ok(())
     }
 
+    /// 注册或替换（P78 实例生命周期）：同 key 已有注册（legacy env 路径与实例
+    /// 路径并存）时覆盖并返回被替换者；出站路由永远只认注册表内最新一份。
+    pub(crate) fn replace(
+        &self,
+        adapter: Arc<dyn PlatformAdapter>,
+    ) -> Option<Arc<dyn PlatformAdapter>> {
+        let mut adapters = self
+            .adapters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        adapters.insert(adapter.platform_key().to_string(), adapter)
+    }
+
+    /// 条件注销（P78 实例生命周期）：仅当该 key 当前注册的 Arc 与 `adapter`
+    /// 同一实例（ptr_eq）时移除——多实例同平台/legacy 并存时，停止实例 A
+    /// 不得拔掉实例 B（或 env 路径）的注册。返回是否发生移除。
+    pub(crate) fn unregister_if(
+        &self,
+        platform_key: &str,
+        adapter: &Arc<dyn PlatformAdapter>,
+    ) -> bool {
+        let mut adapters = self
+            .adapters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let owned = adapters
+            .get(platform_key)
+            .map(|stored| Arc::ptr_eq(stored, adapter))
+            .unwrap_or(false);
+        if owned {
+            adapters.remove(platform_key).is_some()
+        } else {
+            false
+        }
+    }
+
     /// 已注册适配器的 platform_key 列表（会话生命周期 watcher 平台判定 / 测试用）。
     pub fn adapter_keys(&self) -> Vec<String> {
         self.adapters
@@ -503,6 +539,37 @@ mod tests {
             .expect_err("duplicate must fail");
         assert!(error.contains("qq"));
         assert_eq!(core.adapter_keys(), vec!["qq"]);
+    }
+
+    #[test]
+    fn replace_overwrites_and_returns_previous() {
+        // P78 实例生命周期：同 key 再注册 = 替换语义（legacy env 与实例并存），
+        // 注销凭 ptr_eq 所有权判定——旧 Arc 不得拔掉新注册。
+        let core = GatewayCore::new();
+        let first: Arc<dyn PlatformAdapter> = FakeAdapter::new("qq", 4000);
+        let second: Arc<dyn PlatformAdapter> = FakeAdapter::new("qq", 4000);
+        core.register(first.clone()).expect("first register");
+        let previous = core.replace(second.clone());
+        assert!(
+            previous
+                .as_ref()
+                .map(|p| Arc::ptr_eq(p, &first))
+                .unwrap_or(false),
+            "replace 必须返回被覆盖的旧适配器"
+        );
+        assert!(
+            !core.unregister_if("qq", &first),
+            "旧 Arc 不满足所有权，不得移除新注册"
+        );
+        assert!(core.unregister_if("qq", &second), "所有权匹配才移除");
+        assert!(core.adapter_keys().is_empty());
+    }
+
+    #[test]
+    fn unregister_if_is_noop_for_unknown_key() {
+        let core = GatewayCore::new();
+        let adapter: Arc<dyn PlatformAdapter> = FakeAdapter::new("qq", 4000);
+        assert!(!core.unregister_if("qq", &adapter));
     }
 
     #[test]
