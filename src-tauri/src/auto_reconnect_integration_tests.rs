@@ -135,12 +135,10 @@ async fn fake_acp_crash_triggers_auto_reconnect() {
     // 全量负载下失败）。
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
-            let migrated = runtime
-                .sessions
-                .lock()
-                .ok()
-                .and_then(|sessions| sessions.get("source-a").map(|session| session.generation))
-                == Some(1);
+            let migrated =
+                runtime.sessions.lock().ok().and_then(|sessions| {
+                    sessions.get("source-a").map(|session| session.generation)
+                }) == Some(1);
             if migrated {
                 break;
             }
