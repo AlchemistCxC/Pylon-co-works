@@ -19,6 +19,28 @@ function runtime() {
 }
 
 describe('WorkbenchHostPort', () => {
+  it('coalesces active listeners but never delivers queued work after unsubscribe', async () => {
+    const source = runtime()
+    const host = createWorkbenchHostPort({
+      runtime: source, appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+    const services = createSolidWorkbenchServicesFromHostPort(host)
+    const retired = vi.fn(), active = vi.fn()
+    const unsubscribe = services.runtime.subscribe(retired)
+    const unsubscribeActive = services.runtime.subscribe(active)
+    source.update({ tokenCount: 1 })
+    source.update({ tokenCount: 2 })
+    unsubscribe()
+    await Promise.resolve()
+    expect(retired).not.toHaveBeenCalled()
+    expect(active).toHaveBeenCalledTimes(1)
+    expect(services.runtime.getSnapshot().tokenCount).toBe(2)
+    unsubscribeActive()
+    source.destroy()
+  })
+
   it('carries an optional prediction provider into Solid services', () => {
     const predictionProvider = { predict: vi.fn(async () => '继续做') }
     const host = createWorkbenchHostPort({
