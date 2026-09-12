@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type ReactElement } from 'react'
-import type { ApplicationRuntime } from './applicationRuntime'
+import type { ApplicationRuntime } from '../application/applicationRuntime.ts'
 
 interface ApplicationMountProps {
   runtime: ApplicationRuntime

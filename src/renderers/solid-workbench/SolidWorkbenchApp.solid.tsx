@@ -1,9 +1,12 @@
+/** Workbench composition owner: reactive rows, viewport and mount lifetimes.
+ * Value projections live in adjacent modules; they must not create a second runtime store.
+ */
+import { buildLegacyToolConnectorEdges, buildCanonicalToolConnectorEdges, mergeToolConnectorEdges, normalizeToolVisualState } from './toolConnectorProjection.ts'
 import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
-import { buildChatRowDescriptors, isSameChatRowDescriptor, isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
+import { buildChatRowDescriptors, isSameChatRowDescriptor } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
@@ -14,7 +17,8 @@ import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConne
 import { ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
-import { SolidToolConnectorLayer, type SolidToolConnectorEdge, type ToolConnectorAppearance } from './chat/ToolConnector.solid.tsx'
+import { SolidToolConnectorLayer } from './chat/ToolConnector.solid.tsx'
+import type { SolidToolConnectorEdge } from './toolConnectorContracts.ts'
 import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
 import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
@@ -34,7 +38,7 @@ import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.t
 import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { fallbackRenderCommands, renderBuiltinContentPart, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
-import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage, type ActivityTimelinePlacement, deriveCanonicalToolConnectorSources } from './solidWorkbenchProjectionSupport.ts'
+import { canonicalTokenCount, interactionRenderKind, lifecycleRenderKind, selectActivityTimelinePlacement, toSolidMessage } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
 import type { WorkbenchSessionCreationSnapshot } from '../../domains/workbench/workbenchCommandFacade.ts'
 
@@ -999,109 +1003,6 @@ function CanonicalActivitySlot(props: {
   </>
 }
 
-function toolConnectorTone(status: string): 'ok' | 'err' | 'run' {
-  if (status === 'completed' || status === 'success') return 'ok'
-  if (status === 'failed' || status === 'error' || status === 'cancelled') return 'err'
-  return 'run'
-}
-
-function buildLegacyToolConnectorEdges(
-  descriptors: readonly MessageListItem['descriptor'][],
-  appearance: WorkbenchAppearanceSnapshot,
-): SolidToolConnectorEdge[] {
-  const edges: SolidToolConnectorEdge[] = []
-  const connectorAppearance = pickToolConnectorAppearance(appearance)
-  for (let index = 1; index < descriptors.length; index += 1) {
-    const current = descriptors[index]
-    const previous = descriptors[index - 1]
-    if (!current?.showConnector || !previous) continue
-    if (!isToolRenderMessage(current.renderMessage) || !isToolRenderMessage(previous.renderMessage)) continue
-    edges.push({
-      key: `${previous.renderMessage.message.id}->${current.renderMessage.message.id}`,
-      fromMessageId: previous.renderMessage.message.id,
-      toMessageId: current.renderMessage.message.id,
-      status: current.connectorStatus ?? 'run',
-      visualState: normalizeToolVisualState(current.connectorVisualState),
-      appearance: connectorAppearance,
-    })
-  }
-  return edges
-}
-
-function buildCanonicalToolConnectorEdges(
-  placement: ActivityTimelinePlacement,
-  document: WorkbenchDocument | undefined,
-  context: SolidWorkbenchContextValue,
-): SolidToolConnectorEdge[] {
-  if (!document) return []
-  const activities = new Map(document.activities.map(activity => [activity.id, activity]))
-  const connectorAppearance = resolveSolidToolConnectorAppearance(context)
-  const segments: readonly (readonly WorkbenchActivityNode[])[] = [
-    placement.leading,
-    ...placement.afterMessage.values(),
-  ]
-  const edges: SolidToolConnectorEdge[] = []
-  for (const segment of segments) {
-    const sources = deriveCanonicalToolConnectorSources(segment)
-    for (const activity of segment) {
-      const sourceId = sources.get(activity.id)
-      if (!sourceId) continue
-      const source = activities.get(sourceId)
-      edges.push({
-        key: `${sourceId}->${activity.id}`,
-        fromMessageId: sourceId,
-        toMessageId: activity.id,
-        status: toolConnectorTone(source?.status ?? activity.status),
-        visualState: normalizeToolVisualState(source?.status ?? activity.status),
-        appearance: connectorAppearance,
-      })
-    }
-  }
-  return edges
-}
-
-function mergeToolConnectorEdges(
-  ...groups: readonly (readonly SolidToolConnectorEdge[])[]
-): SolidToolConnectorEdge[] {
-  const merged = new Map<string, SolidToolConnectorEdge>()
-  for (const group of groups) {
-    for (const edge of group) {
-      // Legacy message rows are the authoritative representation when both
-      // pipelines expose the same edge; do not register it twice.
-      if (!merged.has(edge.key)) merged.set(edge.key, edge)
-    }
-  }
-  return [...merged.values()]
-}
-
-function pickToolConnectorAppearance(appearance: WorkbenchAppearanceSnapshot): ToolConnectorAppearance {
-  return {
-    toolConnectorMode: appearance.toolConnectorMode,
-    toolConnectorColor: appearance.toolConnectorColor,
-    toolConnectorStyle: appearance.toolConnectorStyle,
-    toolConnectorWidth: appearance.toolConnectorWidth,
-    toolConnectorOpacity: appearance.toolConnectorOpacity,
-  }
-}
-
-function resolveSolidToolConnectorAppearance(context: SolidWorkbenchContextValue): ToolConnectorAppearance {
-  const host = context.appearanceSnapshot()
-  const resolved = context.hostPort?.appearance.resolve?.({
-    // Connector is owned by the generic lifecycle seam even when a
-    // specialized tool kind falls back to the generic base Slot.
-    kind: 'tool.generic',
-    suiteId: context.activation?.suite.value.id ?? '',
-    slotId: 'builtin.solid.content.base',
-  })
-  return {
-    toolConnectorMode: resolved?.connectorMode === 'none' ? 'none' : host.toolConnectorMode,
-    toolConnectorColor: host.toolConnectorColor,
-    toolConnectorStyle: typeof resolved?.connectorStyle === 'string' ? resolved.connectorStyle : host.toolConnectorStyle,
-    toolConnectorWidth: typeof resolved?.connectorWidth === 'number' ? resolved.connectorWidth : host.toolConnectorWidth,
-    toolConnectorOpacity: typeof resolved?.connectorOpacity === 'number' ? resolved.connectorOpacity : host.toolConnectorOpacity,
-  }
-}
-
 function CanonicalActivityList(props: {
   activities: readonly WorkbenchActivityNode[]
   document: WorkbenchDocument | undefined
@@ -1613,21 +1514,6 @@ function contentRenderKind(part: ContentPart): string {
   if (part.kind === 'unknown') return 'content.unknown'
   if (part.kind === 'diagnostic-lsp') return 'diagnostic.lsp'
   return part.kind.includes('.') ? part.kind : `content.${part.kind}`
-}
-
-function normalizeToolVisualState(value: string | undefined) {
-  switch (value) {
-    case 'queued':
-    case 'waiting':
-    case 'running':
-    case 'completed':
-    case 'failed':
-    case 'cancelled':
-    case 'unknown':
-      return value
-    default:
-      return undefined
-  }
 }
 
 export function previewRenderMessages(messages: readonly Message[]): readonly RenderMessage[] {

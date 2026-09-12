@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { createApplicationRuntime } from '../applicationRuntime'
+import { createApplicationRuntime } from '../../application/applicationRuntime.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 
 const ApplicationA = () => null

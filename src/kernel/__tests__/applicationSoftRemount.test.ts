@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applicationRuntime, requestApplicationSoftRemount } from '../applicationRuntimeServices.ts'
+import { applicationRuntime, requestApplicationSoftRemount } from '../../application/applicationRuntimeServices.ts'
 
 describe('Application soft-remount service', () => {
   it('crosses a real unmount/mount revision while preserving the application identity', async () => {

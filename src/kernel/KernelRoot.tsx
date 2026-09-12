@@ -3,15 +3,15 @@ import ErrorBoundary from '../components/ErrorBoundary'
 import SkinPreviewBar from '../components/kernel/SkinPreviewBar'
 import ApplicationMount from './ApplicationMount'
 import KernelRecoveryLayer from './KernelRecoveryLayer'
-import { applicationRuntime } from './applicationRuntimeServices'
+import { applicationRuntime } from '../application/applicationRuntimeServices.ts'
 import { shouldExposeKernelAcceptanceControls } from './kernelAcceptanceControls'
 import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import { kernelBootstrap } from './kernelBootstrapServices.ts'
 import type { KernelBootstrap } from './kernelBootstrap.ts'
-import type { ApplicationRuntime } from './applicationRuntime.ts'
+import type { ApplicationRuntime } from '../application/applicationRuntime.ts'
 
 export const BUILTIN_PYLON_APPLICATION_ID = BUILTIN_PYLON_SHELL_ID
-export { applicationRuntime } from './applicationRuntimeServices'
+export { applicationRuntime } from '../application/applicationRuntimeServices.ts'
 
 export interface KernelRootProps {
   bootstrap?: KernelBootstrap

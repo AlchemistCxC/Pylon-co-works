@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { createApplicationRuntime } from '../applicationRuntime.ts'
+import { createApplicationRuntime } from '../../application/applicationRuntime.ts'
 import type { KernelBootstrap } from '../kernelBootstrap.ts'
 
 describe('KernelRoot bootstrap boundary', () => {
