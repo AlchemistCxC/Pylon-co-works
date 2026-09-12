@@ -27,6 +27,8 @@ pub use client::*;
 pub use error::*;
 
 #[cfg(test)]
+mod catalog_driven_tests;
+#[cfg(test)]
 mod golden_trace_tests;
 #[cfg(test)]
 mod tests;
