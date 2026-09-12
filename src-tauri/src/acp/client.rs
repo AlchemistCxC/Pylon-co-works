@@ -312,6 +312,11 @@ impl AcpClient {
         self.child.pid()
     }
 
+    /// B3：实例注册表登记用的子进程 pid（诊断关联，非安全边界）。
+    pub(crate) fn instance_pid(&self) -> Option<u32> {
+        self.child.pid()
+    }
+
     /// Send a fire-and-forget notification (no id, no response expected).
     /// 仅被 [`Self::cancel_session`] 调用。
     async fn send_notification(

@@ -66,6 +66,12 @@ pub struct AgentRuntime {
     /// bump 注销。dispatcher 对已注册 source 走 Channel 推送并跳过 WebView 广播（A3）。
     pub update_channels: Arc<UpdateChannelMap>,
     pub terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
+    /// B3：当前实例的注册表守卫（全局并发预算的 RAII 槽）。connect 成功登记，
+    /// 替换/停止时出槽归还；runtime 整体 drop 时兜底释放。
+    pub instance_guard: Arc<Mutex<Option<crate::acp::instance_registry::InstanceGuard>>>,
+    /// B3（§4.4）：同一实例同一时刻最多一个 prompt 的闸门——冲突立即失败
+    /// （稳定码 `prompt_in_progress`），不排队。
+    pub prompt_gate: Arc<tokio::sync::Mutex<()>>,
     pub host_tools_policy: Arc<Mutex<crate::acp::host_tools::HostToolsPolicy>>,
 }
 
@@ -88,6 +94,8 @@ impl AgentRuntime {
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
             terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),
+            instance_guard: Arc::new(Mutex::new(None)),
+            prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
             host_tools_policy: Arc::new(Mutex::new(
                 crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
             )),

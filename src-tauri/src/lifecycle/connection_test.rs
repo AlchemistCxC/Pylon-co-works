@@ -166,6 +166,20 @@ pub(crate) async fn test_agent_connection(
     let inner = state.inner();
     let agent = agent_from_registry(inner, &agent_id)?;
 
+    // B3：连接测试也占全局实例预算（临时实例，独立 instance_id 命名空间，
+    // 不与该 agent 的常驻实例互斥）；guard 随命令结束 RAII 归还。
+    let test_instance_id = format!("{agent_id}:connection-test");
+    let _instance_guard = crate::acp::instance_registry::instance_registry()
+        .register(
+            crate::acp::instance_registry::InstanceKey {
+                agent_id: agent_id.clone(),
+                instance_id: test_instance_id,
+                generation: 0,
+            },
+            None,
+        )
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+
     let started = std::time::Instant::now();
     // 施工文档 §4.5：后端用 tokio::time::timeout 包裹整个 connect；禁止无限等待。
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
@@ -213,6 +227,19 @@ pub(crate) async fn test_agent_candidate(
     agent_id: String,
     agent: AgentDef,
 ) -> Result<serde_json::Value, PylonError> {
+    // B3：候选验证同样占全局实例预算（临时实例；guard 随命令 RAII 归还）。
+    let test_instance_id = format!("{agent_id}:candidate-test");
+    let _instance_guard = crate::acp::instance_registry::instance_registry()
+        .register(
+            crate::acp::instance_registry::InstanceKey {
+                agent_id: agent_id.clone(),
+                instance_id: test_instance_id,
+                generation: 0,
+            },
+            None,
+        )
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+
     let started = std::time::Instant::now();
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
     // 候选验证使用隔离日志池：既能返回该次握手的安全 stderr，又不污染运行时日志。
