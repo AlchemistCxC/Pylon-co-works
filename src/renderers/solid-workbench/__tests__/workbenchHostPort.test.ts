@@ -19,6 +19,30 @@ function runtime() {
 }
 
 describe('WorkbenchHostPort', () => {
+  it('keeps projection references stable when two workbenches are read alternately', () => {
+    const sources = ['a', 'b'].map(id => {
+      const source = runtime()
+      source.update({ messages: [{ id, role: 'assistant', sender: id, content: id, time: '10:00' }], activeModel: id })
+      const host = createWorkbenchHostPort({
+        runtime: source, appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+        sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+        suiteId: 'suite.test', sheetId: id, sessionOwnerKey: id, sessionId: id,
+      })
+      return { source, services: createSolidWorkbenchServicesFromHostPort(host) }
+    })
+    const snapshots = sources.map(({ services }) => services.runtime.getSnapshot())
+    for (let pass = 0; pass < 3; pass++) {
+      sources.forEach(({ services }, index) => {
+        const next = services.runtime.getSnapshot()
+        expect(next.messages).toBe(snapshots[index].messages)
+        expect(next.availableModels).toBe(snapshots[index].availableModels)
+        expect(next.availableModes).toBe(snapshots[index].availableModes)
+        expect(next.messages[0].content).toBe(index === 0 ? 'a' : 'b')
+      })
+    }
+    sources.forEach(({ source }) => source.destroy())
+  })
+
   it('coalesces active listeners but never delivers queued work after unsubscribe', async () => {
     const source = runtime()
     const host = createWorkbenchHostPort({

@@ -41,17 +41,28 @@ export function boundPredictionHistory(
   history: readonly string[],
   options: Pick<HttpPredictionProviderOptions, 'maxHistoryItems' | 'maxHistoryChars'> = {},
 ): readonly string[] {
+  return boundContext(history, value => value, (_value, content) => content, options)
+}
+
+function boundContext<T>(
+  items: readonly T[],
+  text: (item: T) => string,
+  normalize: (item: T, content: string) => T,
+  options: Pick<HttpPredictionProviderOptions, 'maxHistoryItems' | 'maxHistoryChars'>,
+): readonly T[] {
   const maxItems = Math.max(0, Math.floor(options.maxHistoryItems ?? 24))
   const maxChars = Math.max(0, Math.floor(options.maxHistoryChars ?? 6_000))
   if (maxItems === 0 || maxChars === 0) return []
-  const selected: string[] = []
+  const selected: T[] = []
   let chars = 0
-  for (let index = history.length - 1; index >= 0 && selected.length < maxItems; index -= 1) {
-    const value = history[index]?.trim()
+  for (let index = items.length - 1; index >= 0 && selected.length < maxItems; index -= 1) {
+    const item = items[index]
+    if (item === undefined) continue
+    const value = text(item)?.trim()
     if (!value) continue
     const nextChars = chars + value.length
     if (nextChars > maxChars) continue
-    selected.push(value)
+    selected.push(normalize(item, value))
     chars = nextChars
   }
   selected.reverse()
@@ -62,19 +73,7 @@ export function boundPredictionMessages(
   messages: readonly { role: 'user' | 'assistant'; content: string }[],
   options: Pick<HttpPredictionProviderOptions, 'maxHistoryItems' | 'maxHistoryChars'> = {},
 ): readonly { role: 'user' | 'assistant'; content: string }[] {
-  const maxItems = Math.max(0, Math.floor(options.maxHistoryItems ?? 24))
-  const maxChars = Math.max(0, Math.floor(options.maxHistoryChars ?? 6_000))
-  const selected: { role: 'user' | 'assistant'; content: string }[] = []
-  let chars = 0
-  for (let index = messages.length - 1; index >= 0 && selected.length < maxItems; index -= 1) {
-    const item = messages[index]
-    const content = item?.content?.trim()
-    if (!content) continue
-    if (chars + content.length > maxChars) continue
-    selected.push({ role: item.role, content })
-    chars += content.length
-  }
-  return selected.reverse()
+  return boundContext(messages, item => item.content, (item, content) => ({ role: item.role, content }), options)
 }
 
 function extractPredictionPayload(value: unknown): string | null {
@@ -109,7 +108,7 @@ export function createHttpPredictionProvider(options: HttpPredictionProviderOpti
         ...(input.generation === undefined ? {} : { generation: input.generation }),
         draft: input.draft,
         history: boundPredictionHistory(input.history, options),
-        ...(input.messages ? { messages: input.messages } : {}),
+        ...(input.messages ? { messages: boundPredictionMessages(input.messages, options) } : {}),
       }
       const response = await request(endpoint, {
         method: 'POST',
@@ -166,19 +165,20 @@ export function createPredictionScheduler(
       cancel()
       if (disposed || !limiter.canRequest()) return
       const current = ++sequence
-      timer = globalThis.setTimeout(() => {
+      timer = globalThis.setTimeout(async () => {
         timer = undefined
-        if (disposed || current !== sequence) return
+        if (disposed || current !== sequence || !limiter.canRequest()) return
         limiter.markRequested()
         const nextController = new AbortController()
         controller = nextController
-        void provider.predict({ ...request, signal: nextController.signal }).then(value => {
+        try {
+          const value = await provider.predict({ ...request, signal: nextController.signal })
           if (!disposed && current === sequence && !nextController.signal.aborted) onResult(normalizePredictionText(value))
-        }).catch(() => {
+        } catch {
           // Provider failures are intentionally silent; the local history path remains available.
-        }).finally(() => {
+        } finally {
           if (controller === nextController) controller = undefined
-        })
+        }
       }, Math.max(0, debounceMs))
     },
     cancel,

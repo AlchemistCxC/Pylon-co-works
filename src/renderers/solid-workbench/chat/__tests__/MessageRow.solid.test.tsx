@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createSignal } from 'solid-js'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
-import { SolidMessageRow } from '../MessageRow.solid.tsx'
+import { ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
 
 const APPEARANCE: Pick<WorkbenchAppearanceSnapshot,
   'userName' | 'userPrefix' | 'userColor' | 'assistantDot' | 'assistantDotGlyph' | 'assistantDotImage'> = {
@@ -26,9 +27,43 @@ afterEach(() => {
   cleanup()
   clearMarkdownRenderModelCache()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('SolidMessageRow', () => {
+  it.each(['frame', 'microtask'])('follows active reasoning with %s scheduling', async mode => {
+    const callbacks: (() => void)[] = []
+    vi.stubGlobal('requestAnimationFrame', mode === 'frame' ? (fn: () => void) => callbacks.push(fn) : undefined)
+    const result = render(() => <ReasoningBlock text="thinking" running defaultCollapsed={false} />)
+    const body = result.container.querySelector('.term-reasoning-body') as HTMLElement
+    Object.defineProperties(body, { scrollHeight: { value: 400 }, clientHeight: { value: 100 } })
+    callbacks.splice(0).forEach(fn => fn())
+    await Promise.resolve()
+    expect(body.scrollTop).toBe(300)
+  })
+
+  it.each(['frame', 'microtask'].flatMap(mode => ['collapse', 'stop', 'redact', 'unmount'].map(action => [mode, action])))(
+    'does not scroll after %s work is invalidated by %s', async (mode, action) => {
+    const callbacks: (() => void)[] = []
+    vi.stubGlobal('requestAnimationFrame', mode === 'frame' ? (fn: () => void) => callbacks.push(fn) : undefined)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const [running, setRunning] = createSignal(true)
+    const [redacted, setRedacted] = createSignal(false)
+    const result = render(() => <ReasoningBlock text="thinking" running={running()} redacted={redacted()} defaultCollapsed={false} />)
+    const body = result.container.querySelector('.term-reasoning-body') as HTMLElement
+    const write = vi.fn()
+    Object.defineProperties(body, {
+      scrollHeight: { value: 400 }, clientHeight: { value: 100 }, scrollTop: { get: () => 0, set: write },
+    })
+    if (action === 'collapse') result.getByRole('button').click()
+    else if (action === 'stop') setRunning(false)
+    else if (action === 'redact') setRedacted(true)
+    else result.unmount()
+    callbacks.splice(0).forEach(fn => fn()) // A canceled frame may already be queued by the host.
+    await Promise.resolve()
+    expect(write).not.toHaveBeenCalled()
+  })
+
   it('渲染 user，并保持旧 class 与内联颜色 contract', () => {
     const result = row({ id: 'u1', role: 'user', sender: 'local:demo', content: '用户提问', time: 't' })
     expect(result.getByText('demo')).toBeTruthy()

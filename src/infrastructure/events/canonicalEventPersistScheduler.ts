@@ -40,6 +40,7 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
   const failures = new Map<string, unknown>()
   /** 已丢弃的 owner（discard 后不写、不复活）。 */
   const discarded = new Set<string>()
+  let disposed = false
 
   const reportError = (ownerKey: string, error: unknown) => {
     if (onError) {
@@ -50,6 +51,7 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
   }
 
   const persistNow = (ownerKey: string): boolean => {
+    if (disposed) return false
     const timer = timers.get(ownerKey)
     if (timer !== undefined) {
       clearTimeout(timer)
@@ -70,7 +72,7 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
         // discard() may run while the append is in flight.  Its result is no
         // longer a valid baseline for this owner, even when the backend write
         // itself eventually succeeds.
-        if (!discarded.has(ownerKey)) revisions.set(ownerKey, revision)
+        if (!disposed && !discarded.has(ownerKey)) revisions.set(ownerKey, revision)
       } catch (error) {
         // An explicit discard makes the backend tombstone response an expected
         // outcome.  Keep other persistence failures visible even if the owner
@@ -84,7 +86,7 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
           // 终态失败：同批与 revision 基准均失效，丢弃（调用方重新播种）。
           dirty.delete(ownerKey)
           revisions.delete(ownerKey)
-        } else if (!dirty.has(ownerKey)) {
+        } else if (!disposed && !discarded.has(ownerKey) && !dirty.has(ownerKey)) {
           // 仅当没有更新的批次在飞期间到达时才恢复 pending（不得用旧数据覆盖新批次）。
           dirty.set(ownerKey, pending)
         }
@@ -110,11 +112,11 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
   return {
     /** 用 repository revision 明确重置 optimistic baseline（首次 seed / conflict reseed）。 */
     seedRevision: (ownerKey: string, revision: number): void => {
-      if (!discarded.has(ownerKey)) revisions.set(ownerKey, revision)
+      if (!disposed && !discarded.has(ownerKey)) revisions.set(ownerKey, revision)
     },
     /** 标记该 owner 事件为 dirty；force=true 立即写盘（终态事件 / 切会话 / dispose）。 */
     markDirty: (ownerKey: string, events: readonly unknown[], force = false): void => {
-      if (discarded.has(ownerKey)) return
+      if (disposed || discarded.has(ownerKey)) return
       dirty.set(ownerKey, events)
       if (force) {
         persistNow(ownerKey)
@@ -161,6 +163,7 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
     },
     /** 丢弃该 owner 未落盘事件与 revision 基准（会话被 prune；不复活）。 */
     discard: (ownerKey: string): void => {
+      if (disposed) return
       discarded.add(ownerKey)
       const timer = timers.get(ownerKey)
       if (timer !== undefined) {
@@ -173,6 +176,8 @@ export function createCanonicalEventPersistScheduler({ debounceMs = 300, persist
     },
     /** 清理全部 timer（不 flush——dispose 语义为丢弃未落盘，由调用方决定先 flushAll）。 */
     dispose: (): void => {
+      if (disposed) return
+      disposed = true
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
       dirty.clear()
