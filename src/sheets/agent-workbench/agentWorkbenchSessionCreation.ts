@@ -7,7 +7,7 @@ import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
-import { runSessionPreflight } from '../../plugins/core/sessionCreation/sessionPreflight.ts'
+import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { reportRuntimeError } from '../../runtimeError.ts'
 
@@ -59,21 +59,14 @@ export async function createAgentWorkbenchSession(
 
   try {
     const profile = useIdentityStore.getState().profiles.find(item => item.id === session.profileId)
-    const preflight = await runSessionPreflight(session)
-    const response = await createSessionClient({
+    const response = await requestNewSession(session, createSessionClient({
       invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
-    }).newSession({
-      agentId: session.agentId,
-      profileId: session.profileId,
-      source: session.source,
+    }), () => ({
       persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
-      cwd: session.workdir || undefined,
-      workspaceId: session.workspaceId,
       model: request?.model || profile?.model,
       ...(request?.reasoningLevel ? { reasoningLevel: request.reasoningLevel } : {}),
       ...(request?.mode ? { mode: request.mode } : {}),
-      ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
-    })
+    }))
     const normalized = sessionResponseObject(response)
     const remoteId = normalized.sessionId ?? normalized.periId
     if (remoteId) useIdentityStore.getState().setSessionPeriId(session.id, remoteId)

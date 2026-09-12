@@ -38,7 +38,7 @@ function status(agentId: string, s: AgentStatus['status'], generation: number): 
   return { agent: agentId, agentId, status: s, generation, lastConnectedAt: Date.now() }
 }
 
-/** 镜像 useBindingState 的派生逻辑（纯 store 读取 + resolve + refine），供矩阵断言 */
+/** 从 stores 派生绑定状态（resolve + refine），验证 owner / generation 矩阵。 */
 function deriveBinding(sessionId: string | null) {
   const ws = useWorkspaceStore.getState()
   const sheetId = ws.workspaceSheets.activeSheetId
