@@ -14,6 +14,7 @@ pub mod fs_policy;
 pub mod host_tools;
 mod launch_plan;
 pub(crate) use launch_plan::plan_for_agent;
+pub(crate) mod cause;
 pub(crate) mod initialize_plan;
 pub(crate) mod instance_registry;
 pub mod plan_policy;
