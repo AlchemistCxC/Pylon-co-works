@@ -5,6 +5,7 @@ import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/app
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
+import { createFrameTask } from '../frameTask.ts'
 
 export interface SolidMessageRowProps {
   renderMessage: RenderMessage
@@ -186,15 +187,17 @@ export function ReasoningBlock(props: {
   })
   let bodyElement: HTMLDivElement | undefined
   let followBottom = true
-  let followScheduled = false
-  let followFrame: number | undefined
   let lastFollowTop: number | undefined
-  const cancelFollow = () => {
-    if (followFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(followFrame)
-    followFrame = undefined
-    followScheduled = false
-  }
-  onCleanup(cancelFollow)
+  const follow = createFrameTask(() => {
+    if (!bodyElement || !followBottom || !props.running || !collapse.open() || props.redacted) return
+    const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
+    // Duplicate markdown/highlight notifications must not fight the outer rail.
+    if (lastFollowTop !== undefined && Math.abs(lastFollowTop - top) <= 0.5
+      && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
+    bodyElement.scrollTop = top
+    lastFollowTop = top
+  })
+  onCleanup(follow.dispose)
   const onBodyScroll = () => {
     if (!bodyElement) return
     followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
@@ -204,24 +207,8 @@ export function ReasoningBlock(props: {
     const text = props.text
     const running = props.running
     const open = collapse.open()
-    if (!text || !running || !open || !bodyElement || !followBottom) return
-    if (followScheduled) return
-    followScheduled = true
-    const applyFollow = () => {
-      followFrame = undefined
-      followScheduled = false
-      if (!bodyElement || !followBottom) return
-      const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
-      // Markdown/highlight updates can notify more than once for one token.
-      // Rewriting the same inner scroll endpoint needlessly competes with the
-      // outer chat follow rail and produces visible vertical jitter.
-      if (lastFollowTop !== undefined && Math.abs(lastFollowTop - top) <= 0.5
-        && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
-      bodyElement.scrollTop = top
-      lastFollowTop = top
-    }
-    if (typeof requestAnimationFrame === 'function') followFrame = requestAnimationFrame(applyFollow)
-    else queueMicrotask(applyFollow)
+    if (!text || !running || !open || !bodyElement || !followBottom || props.redacted) follow.cancel()
+    else follow.schedule()
   })
 
   return (

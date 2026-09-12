@@ -74,18 +74,29 @@ export function createToolConnectorLayoutPort(
   const measure = () => {
     scheduled = null
     if (destroyed) return
+    const anchors = new Map<string, ToolAnchorMeasurement | null>()
+    const readAnchor = (id: string) => {
+      if (!anchors.has(id)) anchors.set(id, tools.get(id)?.() ?? null)
+      return anchors.get(id) ?? null
+    }
+    const updates: [ToolConnectorRegistration, ToolConnectorLayout | null][] = []
+    // Finish every layout read before apply() writes to the DOM.
     for (const connector of connectors.values()) {
-      const from = tools.get(connector.fromMessageId)?.() ?? null
-      const to = tools.get(connector.toMessageId)?.() ?? null
+      const from = readAnchor(connector.fromMessageId)
+      const to = readAnchor(connector.toMessageId)
       const target = connector.measure()
       const layout = from && to && target ? calculateToolConnectorLayout(from, to, target) : null
       const previous = lastApplied.get(connector.key)
       const same = previous === layout || (previous !== undefined && previous !== null && layout !== null
         && previous.left === layout.left && previous.top === layout.top && previous.height === layout.height)
       if (!same) {
-        connector.apply(layout)
-        lastApplied.set(connector.key, layout)
+        updates.push([connector, layout])
       }
+    }
+    for (const [connector, layout] of updates) {
+      if (destroyed || connectors.get(connector.key) !== connector) continue
+      lastApplied.set(connector.key, layout)
+      connector.apply(layout)
     }
   }
 
@@ -101,11 +112,14 @@ export function createToolConnectorLayoutPort(
     },
     registerConnector(registration) {
       if (destroyed) return () => {}
+      lastApplied.delete(registration.key)
       connectors.set(registration.key, registration)
       port.invalidate('items-changed')
       return () => {
-        if (connectors.get(registration.key) === registration) connectors.delete(registration.key)
-        lastApplied.delete(registration.key)
+        if (connectors.get(registration.key) === registration) {
+          connectors.delete(registration.key)
+          lastApplied.delete(registration.key)
+        }
         registration.apply(null)
       }
     },

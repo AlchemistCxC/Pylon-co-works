@@ -33,6 +33,7 @@ function memoMapped<TIn, TOut>(
 ): readonly TOut[] {
   const previousSource = slot.src
   const previousOut = slot.out
+  if (previousOut !== undefined && previousSource === source) return previousOut
   if (previousSource !== undefined && previousOut !== undefined && previousSource.length === source.length) {
     let same = true
     for (let index = 0; index < source.length; index += 1) {
@@ -41,7 +42,7 @@ function memoMapped<TIn, TOut>(
         break
       }
     }
-    if (same) return previousOut
+    if (same) { slot.src = source; return previousOut }
   }
   const out = Object.freeze(source.map(map))
   slot.src = source
@@ -49,17 +50,20 @@ function memoMapped<TIn, TOut>(
   return out
 }
 
-const documentMessagesSlot: ElementMemoSlot<WorkbenchDocument['messages'][number], Message> = { src: undefined, out: undefined }
-let errorMemo: { src: readonly WorkbenchProjectionDiagnostic[] | undefined; out: string | null | undefined } = { src: undefined, out: undefined }
-const optionIdsSlots = new Map<string, { options: unknown; current: string | undefined; out: readonly string[] }>()
+interface ProjectionMemo {
+  messages: ElementMemoSlot<WorkbenchDocument['messages'][number], Message>
+  error?: { src: readonly WorkbenchProjectionDiagnostic[]; out: string | null }
+  options: Map<string, { options: unknown; current: string | undefined; out: readonly string[] }>
+}
 
 function optionIds(
+  memo: ProjectionMemo,
   document: WorkbenchDocument | undefined,
   kind: 'model' | 'mode',
   current: string | undefined,
 ): readonly string[] {
   const options = document?.session.options
-  const slot = optionIdsSlots.get(kind)
+  const slot = memo.options.get(kind)
   if (slot && slot.options === options && slot.current === current) return slot.out
   const ids: string[] = []
   const seen = new Set<string>()
@@ -72,26 +76,26 @@ function optionIds(
   const active = current?.trim() ?? ''
   if (active && !seen.has(active.toLowerCase())) ids.unshift(active)
   const out = Object.freeze(ids)
-  optionIdsSlots.set(kind, { options, current, out })
+  memo.options.set(kind, { options, current, out })
   return out
 }
 
-function documentMessages(document: WorkbenchDocument | undefined): readonly Message[] {
+function documentMessages(memo: ProjectionMemo, document: WorkbenchDocument | undefined): readonly Message[] {
   if (!document) return []
-  return memoMapped(documentMessagesSlot, document.messages, message => ({
+  return memoMapped(memo.messages, document.messages, message => ({
     id: message.id, role: message.role, sender: message.source.provider,
     content: message.content, time: message.time, running: message.running,
   }))
 }
 
-function latestErrorDiagnostic(diagnostics: readonly WorkbenchProjectionDiagnostic[]): string | null {
-  if (errorMemo.src === diagnostics && errorMemo.out !== undefined) return errorMemo.out
+function latestErrorDiagnostic(memo: ProjectionMemo, diagnostics: readonly WorkbenchProjectionDiagnostic[]): string | null {
+  if (memo.error?.src === diagnostics) return memo.error.out
   const error = [...diagnostics].reverse().find(item => item.level === 'error')?.message ?? null
-  errorMemo = { src: diagnostics, out: error }
+  memo.error = { src: diagnostics, out: error }
   return error
 }
 
-function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
+function runtimeSnapshot(host: WorkbenchHostPort, memo: ProjectionMemo): WorkbenchRuntimeSnapshot {
   // Document and generation are legacy split readers. Read them as a pair and
   // retry when their revisions disagree so a subscriber cannot observe a
   // terminal document alongside the previous active generation tick.
@@ -104,14 +108,14 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
     document = host.document.getSnapshot()
     generation = host.generation.getSnapshot()
   }
-  const messages = documentMessages(document)
+  const messages = documentMessages(memo, document)
   const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
   // A terminal fence/summary is stronger than a stale controller flag. Once
   // observed, clear active-only metadata in the same host projection so a
   // third-party Suite cannot render a mixed terminal+active snapshot.
   const terminal = terminalStatus || generation.summary !== null || generation.terminalFence !== undefined
   const generating = terminal ? false : generation.generating
-  const error = document ? latestErrorDiagnostic(document.diagnostics) : null
+  const error = document ? latestErrorDiagnostic(memo, document.diagnostics) : null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
   return Object.freeze({
@@ -130,20 +134,21 @@ function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
     // in the canonical session option surface, not in renderer-local stores.
     // A third-party Suite therefore sees the same model/mode catalogue as the
     // built-in Solid renderer even when its legacy runtime arrays are empty.
-    availableModels: optionIds(document, 'model', activeModel), activeModel,
-    availableModes: optionIds(document, 'mode', activeMode), activeMode,
+    availableModels: optionIds(memo, document, 'model', activeModel), activeModel,
+    availableModes: optionIds(memo, document, 'mode', activeMode), activeMode,
     canAttach: host.capabilities.has('attach'), promptImage: false, error, document,
   })
 }
 
 function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
+  const memo: ProjectionMemo = { messages: { src: undefined, out: undefined }, options: new Map() }
   const slice = (name: WorkbenchRuntimeSlice): unknown => {
     if (name === 'capabilities') return { canAttach: host.capabilities.has('attach'), promptImage: false }
     if (name === 'tasks') return host.document.getSnapshot()?.plan.entries ?? []
     return host.document.getSlice(name as never)
   }
   return {
-    getSnapshot: () => runtimeSnapshot(host),
+    getSnapshot: () => runtimeSnapshot(host, memo),
     subscribe: listener => {
       // A Suite may expose document and generation as separate readers. Queue
       // one notification per microtask so split updates converge to the latest

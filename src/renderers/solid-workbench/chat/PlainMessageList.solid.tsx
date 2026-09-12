@@ -6,6 +6,7 @@ import type {
   MessageListPort,
 } from '../../../domains/workbench/messageListPort.ts'
 import { selectMessageViewportState } from '../../../domains/workbench/messageViewportState.ts'
+import { createFrameTask } from '../frameTask.ts'
 
 export interface PlainMessageListProps {
   initialItems?: readonly MessageListItem[]
@@ -28,30 +29,19 @@ export function PlainMessageList(props: PlainMessageListProps) {
   let bottomAnchor: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
   let destroyed = false
   let resizeObserver: ResizeObserver | undefined
-  let measurementFrame: number | undefined
-  let measurementQueued = false
-
-  const invalidateMeasurements = (reason: MeasurementInvalidationReason) => {
-    if (!container || destroyed || measurementQueued) return
-    measurementQueued = true
-    const publish = () => {
-      measurementFrame = undefined
-      measurementQueued = false
-      if (!container || destroyed) return
-      port.invalidateMeasurements(reason)
-    }
-    if (typeof requestAnimationFrame === 'function') measurementFrame = requestAnimationFrame(publish)
-    else queueMicrotask(publish)
-  }
+  const measurements = createFrameTask((reason: MeasurementInvalidationReason) => port.invalidateMeasurements(reason))
 
   const port: MessageListPort = {
     setItems(nextItems) {
-      if (destroyed) return
+      if (destroyed || nextItems === untrack(items)) return
       const previousRows = untrack(rows)
-      const previousRowsByKey = new Map(previousRows.map(row => [row.key, row]))
+      // Streaming updates usually keep every key in place. Build a lookup only
+      // when reconciliation encounters an insertion, removal or reorder.
+      let previousRowsByKey: Map<string, StableMessageListRow> | undefined
       let changed = false
       const nextRows = nextItems.map((item, index) => {
-        const existing = previousRowsByKey.get(item.key)
+        const existing = previousRows[index]?.key === item.key ? previousRows[index]
+          : (previousRowsByKey ??= new Map(previousRows.map(row => [row.key, row]))).get(item.key)
         if (!existing) {
           changed = true
           const entering = !seenKeys.has(item.key)
@@ -71,7 +61,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
       if (!changed && nextItems.length === previousRows.length) return
       setItems(nextItems)
       setRows(nextRows)
-      invalidateMeasurements('items-changed')
+      measurements.schedule('items-changed')
     },
     async scrollTo(anchor) {
       if (destroyed) return false
@@ -115,9 +105,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
     destroy() {
       if (destroyed) return
       destroyed = true
-      if (measurementFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(measurementFrame)
-      measurementFrame = undefined
-      measurementQueued = false
+      measurements.dispose()
       resizeObserver?.disconnect()
       resizeObserver = undefined
       rowElements.clear()

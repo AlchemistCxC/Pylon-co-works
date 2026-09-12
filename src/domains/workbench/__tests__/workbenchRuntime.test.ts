@@ -4,6 +4,33 @@ import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
 
+it('reuses message projections across metadata changes and interleaved owners without changing generation fields', () => {
+  const times = ['2026-09-12T00:00:01Z', '2026-09-12T00:00:02Z', '2026-09-12T00:00:03Z']
+  const source = createPreviewWorkbenchRuntime({ ...initial(), messages: times.map((time, index) => ({
+    id: String(index), role: index === 1 ? 'reasoning' as const : 'assistant' as const,
+    sender: 'agent', content: String(index), time, running: true,
+  })) })
+  const document = source.getSnapshot().document!
+  const first = mergeWorkbenchRuntimeSnapshot(source.getSnapshot(), { document })
+  for (const model of ['one', 'two', 'three']) {
+    mergeWorkbenchRuntimeSnapshot(first, { document: createWorkbenchDocument('another owner') })
+    const next = mergeWorkbenchRuntimeSnapshot(first, { document: {
+      ...document, session: { ...document.session, model }, activities: [...document.activities], diagnostics: [...document.diagnostics],
+    } })
+    expect(next.messages).toBe(first.messages)
+    expect(next.activeModel).toBe(model)
+    expect(next).toMatchObject({ generating: true, generationPhase: { kind: 'thinking' },
+      generationStart: Date.parse(times[0]), lastTokenAt: Date.parse(times[2]), thinkingStart: Date.parse(times[1]),
+    })
+  }
+  const changed = mergeWorkbenchRuntimeSnapshot(first, { document: { ...document,
+    messages: document.messages.map(message => ({ ...message, running: false })),
+  } })
+  expect(changed.messages).not.toBe(first.messages)
+  expect(changed.generating).toBe(false)
+  source.destroy()
+})
+
 function initial() {
   return {
     sessionId: 'session-a',
