@@ -47,6 +47,25 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
 }
 
 describe('Solid Workbench widgets', () => {
+  it('switching model variants closes stale menus and preserves the dropdown interaction', async () => {
+    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
+    expect(screen.getAllByRole('listbox')).toHaveLength(1)
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'badge' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'minimal' })
+    fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
+    await waitFor(() => expect(services.commands.calls).toHaveLength(1))
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'dropdown' })
+    const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(screen.getAllByRole('listbox')).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('live reasoning sends the advertised config id and renders only confirmed values', async () => {
     const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
     const publish = (value: string) => {

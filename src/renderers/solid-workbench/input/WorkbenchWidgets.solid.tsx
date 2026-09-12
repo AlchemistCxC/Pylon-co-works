@@ -120,32 +120,15 @@ export function SolidModelWidget(props: {
   return (
     <div ref={node => { root = node }} class="solid-model-widget">
       <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
-      <Show when={dropdown()} fallback={
+      <Show when={dropdown() || (appearance().modelVariant !== 'badge' && appearance().modelVariant !== 'minimal')} fallback={
         <Show when={appearance().modelVariant === 'badge'} fallback={
-          <Show when={appearance().modelVariant === 'minimal'} fallback={<ModelDropdown
-            menuId={menuId}
-            triggerRef={node => { trigger = node }}
-            rootRef={node => { root = node }}
-            open={open}
-            setOpen={setOpen}
-            close={close}
-            scale={scale}
-            displayModel={displayModel}
-            model={model}
-            modelEntries={modelEntries}
-            reasoningEntries={reasoningEntries}
-            reasoningValue={reasoningValue}
-            onReasoningChange={value => void chooseReasoning(value)}
-            choose={choose}
-          />}>
-            <button
-              type="button"
-              class="cc-model-minimal"
-              title="点击切换模型"
-              style={{ 'font-size': `${scale()}%` }}
-              onClick={() => void choose(nextValue(models(), model()))}
-            >{displayModel()}</button>
-          </Show>
+          <button
+            type="button"
+            class="cc-model-minimal"
+            title="点击切换模型"
+            style={{ 'font-size': `${scale()}%` }}
+            onClick={() => void choose(nextValue(models(), model()))}
+          >{displayModel()}</button>
         }>
           <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
         </Show>
