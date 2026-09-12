@@ -1,6 +1,4 @@
-import type { PluginIdentity } from '../pluginIdentity.ts'
-import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
-import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
+import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { PluginSettingsPageContribution } from './pluginSettingsTypes.ts'
 import { normalizeRendererSettingsSchema } from '../renderers/rendererSettingsTypes.ts'
 
@@ -23,27 +21,12 @@ function validateAdapterIdentity(ownerPluginId: string, contributionId: string, 
   if (adapter.contributionId !== undefined && adapter.contributionId !== contributionId) throw new Error(`Plugin settings page adapter contributionId 不匹配：${contributionId}`)
 }
 
-export class PluginSettingsPageRegistry {
-  private readonly registry = new ReactiveRegistryStore<PluginSettingsPageContribution>()
-
-  register(owner: PluginIdentity, page: PluginSettingsPageContribution): AsyncDisposable {
-    const normalized = validatePluginSettingsPage(page)
-    validateAdapterIdentity(owner.pluginId, normalized.id, normalized.valueAdapter)
-    return this.registry.register(owner, normalized, { contributionId: normalized.id, priority: normalized.order })
+export class PluginSettingsPageRegistry extends ValidatedContributionRegistry<PluginSettingsPageContribution> {
+  constructor() {
+    super((contribution, owner) => {
+      const normalized = validatePluginSettingsPage(contribution)
+      validateAdapterIdentity(owner.pluginId, normalized.id, normalized.valueAdapter)
+      return normalized
+    })
   }
-
-  beginShadowTransaction(owner: PluginIdentity, replacingRuntimeInstanceId: string): RegistryTransaction<PluginSettingsPageContribution> {
-    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    return {
-      ...transaction,
-      register: (page, options) => {
-        const normalized = validatePluginSettingsPage(page)
-        validateAdapterIdentity(owner.pluginId, normalized.id, normalized.valueAdapter)
-        return transaction.register(normalized, { ...options, contributionId: normalized.id, priority: normalized.order })
-      },
-    }
-  }
-
-  subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }
-  getSnapshot(): RegistrySnapshot<PluginSettingsPageContribution> { return this.registry.getSnapshot() }
 }

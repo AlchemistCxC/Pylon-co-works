@@ -5,12 +5,16 @@ import { InterfaceModeRegistry } from '../../interface-mode/interfaceModeRegistr
 import type { InterfaceModeContribution } from '../../interface-mode/interfaceModeTypes.ts'
 import { PresentationProfileRegistry } from '../../presentation/presentationProfileRegistry.ts'
 import type { PresentationProfileContribution } from '../../presentation/presentationProfileTypes.ts'
+import { ContextPanelRegistry } from '../../context-panel/contextPanelRegistry.ts'
+import type { ContextPanelContribution } from '../../context-panel/contextPanelTypes.ts'
+import { PluginSettingsPageRegistry } from '../../settings/pluginSettingsRegistry.ts'
+import type { PluginSettingsPageContribution } from '../../settings/pluginSettingsTypes.ts'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import type { ValidatedContributionRegistry } from '../validatedContributionRegistry.ts'
 
 type Contribution = { id: string; label: string; order?: number }
 type Registry<T extends Contribution> = Pick<ValidatedContributionRegistry<T>,
-  'register' | 'beginShadowTransaction' | 'getSnapshot' | 'subscribe' | 'resolve'>
+  'register' | 'beginShadowTransaction' | 'getSnapshot' | 'subscribe'>
 
 function registryContract<T extends Contribution>(
   name: string,
@@ -40,29 +44,31 @@ function registryContract<T extends Contribution>(
 
     it('keeps normalized identity/order and caller constraints during replacement', () => {
       const registry = createRegistry()
+      const resolve = (id: string) => registry.getSnapshot().entries.find(entry => entry.contributionId === id)
       registry.register(oldOwner, contribution('shared', 'Old'))
       registry.register(foreignOwner, contribution('foreign', 'Foreign', 10))
-      const foreign = registry.resolve('foreign')
+      const foreign = resolve('foreign')
       const transaction = registry.beginShadowTransaction(nextOwner, oldOwner.key)
       const staged = contribution('shared', 'Next', 70)
       transaction.register(staged, {
         contributionId: 'ignored', priority: -100, layer: 'feature', before: ['foreign'],
       })
       transaction.validate()
-      expect(registry.resolve('shared')?.value.label).toBe('Old')
+      expect(resolve('shared')?.value.label).toBe('Old')
       transaction.commit()
       expect(registry.getSnapshot().entries.map(entry => entry.contributionId)).toEqual(['shared', 'foreign'])
-      expect(registry.resolve('shared')).toMatchObject({
+      expect(resolve('shared')).toMatchObject({
         priority: 70, layer: 'feature', before: ['foreign'], ownerRuntimeInstanceId: nextOwner.key,
       })
-      expect(registry.resolve('shared')?.value).not.toBe(staged)
-      expect(Object.isFrozen(registry.resolve('shared')?.value)).toBe(true)
-      expect(registry.resolve('ignored')).toBeUndefined()
-      expect(registry.resolve('foreign')).toBe(foreign)
+      expect(resolve('shared')?.value).not.toBe(staged)
+      expect(Object.isFrozen(resolve('shared')?.value)).toBe(true)
+      expect(resolve('ignored')).toBeUndefined()
+      expect(resolve('foreign')).toBe(foreign)
     })
 
     it('restores original entries on revert and ignores disposal of the reverted replacement', async () => {
       const registry = createRegistry()
+      const resolve = (id: string) => registry.getSnapshot().entries.find(entry => entry.contributionId === id)
       registry.register(oldOwner, contribution('shared', 'Old'))
       registry.register(foreignOwner, contribution('foreign', 'Foreign'))
       const before = registry.getSnapshot().entries
@@ -72,11 +78,12 @@ function registryContract<T extends Contribution>(
       transaction.revert()
       await replacement.dispose()
       expect(registry.getSnapshot().entries).toEqual(before)
-      expect(registry.resolve('shared')).toBe(before.find(entry => entry.contributionId === 'shared'))
+      expect(resolve('shared')).toBe(before.find(entry => entry.contributionId === 'shared'))
     })
 
     it('isolates old/staged disposables and stops notifications after unsubscribe', async () => {
       const registry = createRegistry()
+      const resolve = (id: string) => registry.getSnapshot().entries.find(entry => entry.contributionId === id)
       const old = registry.register(oldOwner, contribution('shared', 'Old'))
       registry.register(foreignOwner, contribution('foreign', 'Foreign'))
       const listener = vi.fn()
@@ -89,8 +96,8 @@ function registryContract<T extends Contribution>(
       })
       transaction.commit()
       await old.dispose()
-      expect(registry.resolve('shared')).toMatchObject({ layer: 'override', after: ['foreign'] })
-      expect(registry.resolve('cancelled')).toBeUndefined()
+      expect(resolve('shared')).toMatchObject({ layer: 'override', after: ['foreign'] })
+      expect(resolve('cancelled')).toBeUndefined()
       expect(listener).toHaveBeenCalledTimes(1)
       unsubscribe()
       await replacement.dispose()
@@ -110,3 +117,8 @@ registryContract<InterfaceModeContribution>('InterfaceModeRegistry contract', ()
   }))
 registryContract<PresentationProfileContribution>('PresentationProfileRegistry contract', () => new PresentationProfileRegistry(),
   (id, label, order) => ({ id, label, order, family: 'terminal', tokens: { msgStyle: 'terminal' } }))
+
+registryContract<PluginSettingsPageContribution>('PluginSettingsPageRegistry contract', () => new PluginSettingsPageRegistry(),
+  (id, label, order) => ({ id, label, order, renderKind: 'isolated-surface', surfaceId: 'test.surface' }))
+registryContract<ContextPanelContribution>('ContextPanelRegistry contract', () => new ContextPanelRegistry(),
+  (id, label, order) => ({ id, label, order, scope: 'global', renderKind: 'isolated-surface', surfaceId: 'test.surface' }))

@@ -1,7 +1,6 @@
 import { THEME_FIELD_DEFS, type ThemeFieldKey } from '../../themeFieldDefs.ts'
-import type { PluginIdentity } from '../pluginIdentity.ts'
-import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
-import type { AsyncDisposable, RegistryEntry, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
+import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
+import type { RegistryEntry } from '../registry/types.ts'
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './pluginSettingsTypes.ts'
 import { stringifySettingsTarget } from './settingsTargetGrammar.ts'
 
@@ -70,37 +69,8 @@ export function validatePluginSettingOptionsContribution(
   })
 }
 
-export class PluginSettingOptionsRegistry {
-  private readonly registry = new ReactiveRegistryStore<PluginSettingOptionsContribution>()
-
-  register(owner: PluginIdentity, contribution: PluginSettingOptionsContribution): AsyncDisposable {
-    const normalized = validatePluginSettingOptionsContribution(contribution)
-    return this.registry.register(owner, normalized, {
-      contributionId: normalized.id,
-      priority: normalized.order,
-    })
-  }
-
-  beginShadowTransaction(
-    owner: PluginIdentity,
-    replacingRuntimeInstanceId: string,
-  ): RegistryTransaction<PluginSettingOptionsContribution> {
-    const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    return {
-      ...transaction,
-      register: (contribution, options) => {
-        const normalized = validatePluginSettingOptionsContribution(contribution)
-        return transaction.register(normalized, {
-          ...options,
-          contributionId: normalized.id,
-          priority: normalized.order,
-        })
-      },
-    }
-  }
-
-  subscribe(listener: () => void): () => void { return this.registry.subscribe(listener) }
-  getSnapshot(): RegistrySnapshot<PluginSettingOptionsContribution> { return this.registry.getSnapshot() }
+export class PluginSettingOptionsRegistry extends ValidatedContributionRegistry<PluginSettingOptionsContribution> {
+  constructor() { super(validatePluginSettingOptionsContribution) }
 }
 
 interface ResolvedOption extends PluginSettingOption {
