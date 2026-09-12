@@ -15,11 +15,23 @@ export interface AgentCandidateValidationError {
   remoteDataSummary?: string | null
 }
 
+/** B1：连接测试响应携带的启动计划视图（与真实 spawn 同一 planner 计算；env 值已掩码）。 */
+export interface AgentLaunchPlanView {
+  provider: string
+  executable: string
+  argv: string[]
+  cwd: string | null
+  env: { name: string; value: string }[]
+  diagnostics: { code: string; stage: string; message: string }[]
+}
+
 export interface AgentCandidateValidationResult {
   ok: boolean
   agentId: string
   durationMs: number
   error?: AgentCandidateValidationError | null
+  /** 计划失败（如未知 provider 的 Windows 门槛）时为 `{ error }`，无计划字段。 */
+  launchPlan?: AgentLaunchPlanView | { error: string } | null
 }
 
 export interface AgentCandidateValidationState {
@@ -77,6 +89,46 @@ export function normalizeAgentCandidateValidationResult(raw: unknown, fallbackAg
     agentId: typeof value.agentId === 'string' ? value.agentId : fallbackAgentId,
     durationMs: typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs >= 0 ? Math.floor(value.durationMs) : 0,
     error,
+    launchPlan: normalizeLaunchPlanView(value.launchPlan),
+  }
+}
+
+/**
+ * B1：连接测试响应里的启动计划视图。形状不可信即整体丢弃（null）——它只是
+ * 展示性证据，丢弃后 UI 不渲染该行，远好过渲染半截计划误导用户。
+ */
+function normalizeLaunchPlanView(raw: unknown): AgentLaunchPlanView | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Record<string, unknown>
+  const argv = Array.isArray(value.argv) && value.argv.every(item => typeof item === 'string')
+    ? value.argv as string[]
+    : null
+  if (typeof value.executable !== 'string' || argv === null) return null
+  const env = Array.isArray(value.env)
+    ? value.env.flatMap((item): { name: string; value: string }[] => {
+        if (!item || typeof item !== 'object') return []
+        const entry = item as Record<string, unknown>
+        return typeof entry.name === 'string' && typeof entry.value === 'string'
+          ? [{ name: entry.name, value: entry.value }]
+          : []
+      })
+    : []
+  const diagnostics = Array.isArray(value.diagnostics)
+    ? value.diagnostics.flatMap((item): { code: string; stage: string; message: string }[] => {
+        if (!item || typeof item !== 'object') return []
+        const entry = item as Record<string, unknown>
+        return typeof entry.code === 'string' && typeof entry.stage === 'string' && typeof entry.message === 'string'
+          ? [{ code: entry.code, stage: entry.stage, message: entry.message }]
+          : []
+      })
+    : []
+  return {
+    provider: typeof value.provider === 'string' ? value.provider : '',
+    executable: value.executable,
+    argv,
+    cwd: typeof value.cwd === 'string' ? value.cwd : null,
+    env,
+    diagnostics,
   }
 }
 

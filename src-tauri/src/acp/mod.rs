@@ -13,6 +13,7 @@ pub mod file_system_runtime;
 pub mod fs_policy;
 pub mod host_tools;
 mod launch_plan;
+pub(crate) use launch_plan::plan_for_agent;
 pub mod plan_policy;
 pub mod question_policy;
 pub mod terminal_policy;

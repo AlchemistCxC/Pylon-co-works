@@ -469,6 +469,104 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     })
   })
 
+  /** B1：验证期间可取消；取消后在途结果不落地，保存仍被 fail-closed 挡住。 */
+  it('草稿验证可取消，取消后旧结果不落地且保存仍被拒绝', async () => {
+    let finishTest: ((value: { ok: boolean; agentId: string; durationMs: number }) => void) | undefined
+    const testPending = new Promise<{ ok: boolean; agentId: string; durationMs: number }>(resolve => { finishTest = resolve })
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return testPending
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+
+    // 验证中：出现取消验证按钮，保存被禁用。
+    expect(within(periCard).getByRole('button', { name: '取消验证' })).toBeInTheDocument()
+    expect(within(periCard).getByRole('button', { name: '保存' })).toBeDisabled()
+
+    fireEvent.click(within(periCard).getByRole('button', { name: '取消验证' }))
+    // 取消后：回到可编辑，验证按钮恢复。
+    expect(within(periCard).getByRole('button', { name: '先测试连接' })).toBeInTheDocument()
+
+    // 在途结果此刻到达：不得落地为已验证。
+    finishTest?.({ ok: true, agentId: 'peri', durationMs: 5 })
+    await waitFor(() => expect(testPending).resolves.toBeTruthy())
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
+  /** B1：验证成功后修改任一草稿字段，旧验证立即失效，必须重新验证才能保存。 */
+  it('验证成功后再改草稿字段必须重新验证才能保存', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 9 })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    expect(await within(periCard).findByText(/连接成功/)).toBeInTheDocument()
+
+    // 改 name：验证作废。
+    fireEvent.change(within(periCard).getByLabelText('Agent name'), { target: { value: 'Peri draft' } })
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/请先测试连接成功/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
+  /** B1：连接测试返回的启动计划与结果一并展示（与真实 spawn 同源，env 已掩码）。 */
+  it('草稿验证成功后展示后端下发的启动计划', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'test_agent_candidate') return Promise.resolve({
+        ok: true, agentId: 'peri', durationMs: 7,
+        launchPlan: { provider: 'peri', executable: 'peri', argv: ['peri', 'acp'], cwd: null, env: [{ name: 'PERI_TOKEN', value: 'value withheld' }], diagnostics: [] },
+      })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    fireEvent.click(within(periCard).getByRole('button', { name: '先测试连接' }))
+    expect(await within(periCard).findByText(/启动计划：peri acp（env 值已隐藏）/)).toBeInTheDocument()
+    expect(within(periCard).queryByText(/value withheld/)).toBeNull()
+  })
+
+  /** B1：自定义 profile 复用 Codeg 规则——id 借用内置 provider 名而 provider 另指他处时拒绝创建。 */
+  it('新建 Agent 拒绝内置 provider id 冲突并给出可行动原因', async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: '新建 Agent' }))
+    fireEvent.change(screen.getByLabelText('新建 Agent id'), { target: { value: 'peri' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent name'), { target: { value: 'Fake Peri' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent exe'), { target: { value: 'C:\\fake\\peri.exe' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent provider'), { target: { value: 'hermes' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(await screen.findByText(/与内置 provider 同名/)).toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('update_agents_config', expect.anything())
+  })
+
   it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {
     let snapshotCalls = 0
     invoke.mockImplementation((command: string) => {

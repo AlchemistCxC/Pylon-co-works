@@ -50,6 +50,13 @@ pub(crate) fn connection_test_error_payload_with_diagnostics(
         "ioKind": failure.io_kind,
         "remoteCode": failure.remote_code,
         "remoteDataSummary": failure.remote_data_summary,
+        // B1：typed cause——code/message/action 的封闭词汇视图，前端只渲染不推断。
+        "cause": {
+            "level": "fail",
+            "code": failure.code,
+            "summary": failure.message,
+            "action": action,
+        },
     })
 }
 
@@ -73,7 +80,50 @@ pub(crate) fn connection_timeout_payload(
         "ioKind": null,
         "remoteCode": null,
         "remoteDataSummary": null,
+        "cause": {
+            "level": "fail",
+            "code": "agent_connection_timeout",
+            "summary": format!("连接测试超时（{timeout_secs}s）"),
+            "action": "open-runtime-log",
+        },
     })
+}
+
+/// B1：连接测试响应携带的启动计划视图——与真实 spawn 走同一个 planner
+/// （`acp::launch_plan::plan_for_agent`），所以「测试连接看到的」与「实际启动的」
+/// 不可能漂移。env 只下发名称，值一律 `value withheld`：计划数据可能包含
+/// 凭据型环境变量，掩码发生在边界而不是渲染端。
+pub(crate) fn launch_plan_payload(agent: &AgentDef) -> serde_json::Value {
+    let planned = crate::acp::plan_for_agent(
+        agent,
+        None,
+        &pylon_core::agent_launch_plan::LaunchDetection::default(),
+        Vec::new(),
+    );
+    match planned {
+        Ok(plan) => {
+            let mut argv = vec![plan.executable.clone()];
+            argv.extend(plan.args.iter().cloned());
+            serde_json::json!({
+                "provider": plan.provider,
+                "executable": plan.executable,
+                "argv": argv,
+                "cwd": plan.cwd,
+                "env": plan.env.iter().map(|(name, _)| serde_json::json!({
+                    "name": name,
+                    "value": "value withheld",
+                })).collect::<Vec<_>>(),
+                "diagnostics": plan.diagnostics.iter().map(|diagnostic| serde_json::json!({
+                    "code": diagnostic.code,
+                    "stage": diagnostic.stage,
+                    "message": diagnostic.message,
+                })).collect::<Vec<_>>(),
+            })
+        }
+        Err(error) => serde_json::json!({
+            "error": error.to_string(),
+        }),
+    }
 }
 
 pub(crate) fn candidate_stderr(logs: &crate::runtime_log::RuntimeLogHub) -> Option<String> {
@@ -119,6 +169,7 @@ pub(crate) async fn test_agent_connection(
     let started = std::time::Instant::now();
     // 施工文档 §4.5：后端用 tokio::time::timeout 包裹整个 connect；禁止无限等待。
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
+    let launch_plan = launch_plan_payload(&agent);
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
         AcpClient::connect_with_generation(&agent, Some(inner.runtime_logs.clone()), 0),
@@ -134,6 +185,7 @@ pub(crate) async fn test_agent_connection(
                 "agentId": agent_id,
                 "durationMs": duration_ms,
                 "error": null,
+                "launchPlan": launch_plan,
             }))
         }
         Ok(Err(error)) => Ok(serde_json::json!({
@@ -141,12 +193,14 @@ pub(crate) async fn test_agent_connection(
             "agentId": agent_id,
             "durationMs": duration_ms,
             "error": connection_test_error_payload(&error),
+            "launchPlan": launch_plan,
         })),
         Err(_elapsed) => Ok(serde_json::json!({
             "ok": false,
             "agentId": agent_id,
             "durationMs": duration_ms,
             "error": connection_timeout_payload(timeout_secs, None),
+            "launchPlan": launch_plan,
         })),
     }
 }
@@ -163,6 +217,7 @@ pub(crate) async fn test_agent_candidate(
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
     // 候选验证使用隔离日志池：既能返回该次握手的安全 stderr，又不污染运行时日志。
     let diagnostic_logs = crate::runtime_log::RuntimeLogHub::new(64);
+    let launch_plan = launch_plan_payload(&agent);
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
         AcpClient::connect_with_generation(&agent, Some(diagnostic_logs.clone()), 0),
@@ -173,7 +228,7 @@ pub(crate) async fn test_agent_candidate(
             let _ = client.kill();
             let duration_ms = started.elapsed().as_millis() as u64;
             Ok(
-                serde_json::json!({ "ok": true, "agentId": agent_id, "durationMs": duration_ms, "error": null }),
+                serde_json::json!({ "ok": true, "agentId": agent_id, "durationMs": duration_ms, "error": null, "launchPlan": launch_plan }),
             )
         }
         Ok(Err(error)) => {
@@ -185,6 +240,7 @@ pub(crate) async fn test_agent_candidate(
                 "agentId": agent_id,
                 "durationMs": duration_ms,
                 "error": connection_test_error_payload_with_diagnostics(&error, stderr.as_deref(), None),
+                "launchPlan": launch_plan,
             }))
         }
         Err(_) => {
@@ -194,6 +250,7 @@ pub(crate) async fn test_agent_candidate(
                 "agentId": agent_id,
                 "durationMs": duration_ms,
                 "error": connection_timeout_payload(timeout_secs, candidate_stderr(&diagnostic_logs)),
+                "launchPlan": launch_plan,
             }))
         }
     }
