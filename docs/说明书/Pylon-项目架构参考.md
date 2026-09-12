@@ -1,7 +1,7 @@
 ﻿# Pylon 项目架构参考
 
 > 状态：当前实现地图，不是目标架构承诺  
-> 最后核验：2026-09-06  
+> 最后核验：2026-09-12  
 > 适用仓库：`prism-desktop`  
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
@@ -99,12 +99,14 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/src/acp` | subprocess、JSON-RPC、transport、replay | Rust Kernel | `error.rs`、`client.rs`、`replay.rs`、`transport.rs` |
+| `src-tauri/src/acp` | ACP SDK engine（`agent-client-protocol`）、子进程、replay、wire trace、实例注册与诊断 cause | Rust Kernel | `engine.rs`、`client.rs`、`replay.rs`、`instance_registry.rs`、`cause.rs` |
 | `src-tauri/src/agent_config` | agents.yaml 解析、校验、原子写与补丁 API | Rust Kernel | `types.rs`、`load.rs`、`patch.rs`、`atomic_write.rs` |
 | `src-tauri/src/session` | Session create/prompt/load/state、SQLite repos | Rust Kernel | `persist.rs`、`msg_repo/mod.rs`、`msg_repo/migrations.rs`、`event_repo.rs` |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
 | `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
-| `src-tauri/pylon-core` | Agent Catalog、native detection、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs` |
+| `src-tauri/src/agent_detection.rs` | GUI 检测命令层：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消（P74 B0） | Rust Kernel | `agent_detection.rs` |
+| `src-tauri/pylon-core` | Agent Catalog、native detection、preflight/环境诊断、launch plan、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs`、`agent_diagnostics.rs` |
+| `src-tauri/pylon-foundations` | event_names、sanitize、time、workspace、git 等零 tauri 纯逻辑（P58 拆分） | 可复用 Kernel library | `src/lib.rs` |
 | `src-tauri/src/plugin_cmds.rs` | Native plugin package transaction/store | Kernel plugin adapter | stage/commit/recovery 代码 |
 | `src-tauri/src/plugin_process` | 外置插件进程监督 | Kernel plugin adapter | process lifecycle 与 restart |
 
@@ -124,7 +126,7 @@ sequenceDiagram
   Main->>Kernel: render
   Kernel->>Composition: 调用显式 bootstrap action
   Composition->>Runtime: 构造唯一 product runtime
-  loop 五个第一方插件
+  loop 六个第一方插件
     Composition->>Runtime: 按依赖图异步 activate
   end
   Shell->>Runtime: register Application contribution
@@ -147,6 +149,7 @@ flowchart LR
   AgentAdapters["agent-adapters"] --> Tools
   Renderers["renderers"]
   Workspace["workspace"]
+  Manager["plugin-manager"]
   Shell["shell"] --> Tools
   Shell --> AgentAdapters
   Shell --> Renderers
@@ -160,8 +163,9 @@ flowchart LR
 | `builtin.pylon-renderers` | Renderer Engine、内容/工具 renderer、Presentation Profile、字体 |
 | `builtin.pylon-workspace` | Workspace、Sidebar、Context Panel、Search、Export、Projector |
 | `builtin.pylon-shell` | 根 Application、Shell commands、Shell CSS |
+| `builtin.pylon-plugin-manager` | 插件管理面板（P53 起“设置 → 插件”默认页）：安装/启用/Shadow Update 诊断与能力授权卡；声明 `plugin.management` capability，不依赖其他产品包 |
 
-当前约束：尽量保留这五个包的构造。Kernel 加固优先通过稳定 seam、结构化状态和 adapter 收拢业务，不先做目录搬家。
+当前约束：尽量保留这六个包的构造。Kernel 加固优先通过稳定 seam、结构化状态和 adapter 收拢业务，不先做目录搬家。
 
 ## 8. Session 与 canonical event 数据流
 
@@ -215,7 +219,7 @@ GUI 创建、恢复和发送链路会把 `profileId` 送入 Rust runtime 的 `Se
 
 `session/load` 失败时不会自动创建 remote session，也不会改写原 binding。该 owner 转入 detached/send-blocked，UI 让用户明确选择：按原 owner/binding 重试，或创建具有新 local `id/source` 的独立 Session 分叉。分叉继续走既有 `new_session` seam，canonical journal 仍是唯一 durable history。
 
-发送路径的映射缺失是另一条链路（P51）：Pylon 重启后内存映射消失时，`send_message` / `send_message_streaming` 可携带持久化 `periId`（`PromptContext.known_peri_id`）；Rust 先用 ACP 原生 `session/load`（普通 RPC，无 replay capture——历史由本地 canonical journal 呈现）复活原远端会话并重挂槽位，复活失败（远端会话真死）才降级新建，并经 `pylon:session-recreated {source, periId}` 广播让前端回写新 binding。若 prompt Response 携带“会话不存在”语义，则按 `(peri_id, generation)` 复核删除幽灵映射、保留 Detached 健康快照，要求显式 load/重试/分叉，不静默新建。
+发送路径的映射缺失是另一条链路（P51）：Pylon 重启后内存映射消失时，`send_message` / `send_message_streaming` 可携带持久化 `periId`（`PromptContext.known_peri_id`）；Rust 复活链在 agent 广告 resume 能力时优先 ACP 原生 `session/resume`（object-only fail-closed），失败或未广告再走 `session/load`（普通 RPC，无 replay capture——历史由本地 canonical journal 呈现；load 通道须落在 catalog 声明 ∩ 服务端广告的交集内，未广告则 typed 跳过）复活原远端会话并重挂槽位，复活失败（远端会话真死）才降级新建，并经 `pylon:session-recreated {source, periId}` 广播让前端回写新 binding。若 prompt Response 携带“会话不存在”语义，则按 `(peri_id, generation)` 复核删除幽灵映射、保留 Detached 健康快照，要求显式 load/重试/分叉，不静默新建。
 
 `session/load` 成功时携带 `replayMetadata`。`boundary.kind=session-load-response` 表示匹配的 load response 是收集终点；`observedCount` 与 1-based retained ordinals 描述实际窗口。超限保留最近 N 条并报告 `droppedCount`。前端遇到缺失/不自洽 metadata 时标成 `metadata-unavailable`，不会把 partial replay 当完整 snapshot；export 对 truncated replay 返回 `replay_truncated`。
 
@@ -268,7 +272,7 @@ flowchart TB
 2. 可执行文件旁的 `agents.yaml`。
 3. embedded 配置。
 
-当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
+当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 
 ## 10. Plugin Runtime 生命周期
 
@@ -319,7 +323,7 @@ stateDiagram-v2
 | 能力 | 当前主要位置 | 目标 ownership |
 |---|---|---|
 | Agent lifecycle | Rust lifecycle/dispatcher | Kernel |
-| ACP transport/JSON-RPC | Rust `acp` | Kernel |
+| ACP engine/JSON-RPC | Rust `acp`（官方 `agent-client-protocol` SDK engine） | Kernel |
 | Session create/load/prompt | Rust session + React lifecycle | Kernel，UI 只消费 projection |
 | canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 经 canonicalEventFeed 消费 committed row（cursor/gap），自写轨仅限 kernel 未提交 live wire | Kernel durable journal |
 | Session metadata persistence | identityStore + UserDataService | Kernel persistence module |
@@ -383,7 +387,7 @@ D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../
 
 ## 15. 已完成的加固顺序
 
-以下顺序已经在不改变五个 Product Plugin 粗粒度构造的前提下完成，可作为提交历史与回归定位顺序：
+以下顺序已经在不改变第一方 Product Plugin 粗粒度构造的前提下完成（五个基础包；第六个 `builtin.pylon-plugin-manager` 由 P53 增补），可作为提交历史与回归定位顺序：
 
 1. 统一 Session durable identity，修复 state 写读契约。
 2. 建立 DB readiness 与 retryable initialization 状态。
@@ -405,6 +409,7 @@ bun run build
 bun run check:solid
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
+cargo test --manifest-path src-tauri/pylon-foundations/Cargo.toml
 ```
 
 ### 按改动区域选择测试
@@ -460,7 +465,7 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 
 只有命中以下任一条件才进行全量架构复核：
 
-- Kernel、Plugin Runtime、五个 Product Plugin 的 ownership 被重新定义。
+- Kernel、Plugin Runtime、六个 Product Plugin 的 ownership 被重新定义。
 - 启动 composition root 或应用入口被替换。
 - canonical event、Session identity 或持久化权威模型被更改。
 - SQLite schema 发生破坏性升级或引入第二持久化引擎。

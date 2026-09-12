@@ -1,7 +1,7 @@
 # Pylon 插件化前后端拓扑全图
 
 > 状态：当前实现地图 + 明确标注的 Renderer Suite 规划接缝  
-> 核验日期：2026-09-06  
+> 核验日期：2026-09-12  
 > 适用基线：当前 `prism-desktop` 工作副本；规划施工入口见仓库内工作副本外的渲染引擎施工台账（00-唯一入口台账.md）  
 > 阅读纪律：实线节点/边表示当前代码；带 `PLANNED` 且虚线边框的节点表示尚未实现。不得把规划节点写进“当前已支持”说明。
 
@@ -157,7 +157,7 @@ flowchart TB
     subgraph AGENTKERNEL[Agent、ACP 与 Session Kernel]
       LIFECYCLE[lifecycle/mod.rs<br/>connect/switch/reconnect/config]
       ARMANAGER[AgentRuntimeManager<br/>per-agent generations]
-      ACP[acp/*<br/>jsonrpc/process/transport/replay]
+      ACP[acp/*<br/>engine/process/replay/instance_registry]
       DISPATCH[dispatcher/*<br/>normalize/ingest/project runtime]
       SESSION[session/*<br/>create/prompt/load/control/owner]
       AGENTCFG[agent_config + agent_detection + catalog]
@@ -408,7 +408,7 @@ flowchart TB
 | 唯一 Plugin Runtime | `src/plugin-runtime/pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginActivationContext.ts` |
 | 原子 contribution 更新 | `src/plugin-runtime/shadowUpdate.ts`、`registry/reactiveRegistry.ts`、`registry/registryBatch.ts` |
 | Registries | `src/plugin-runtime/runtimeServices.ts`、`pluginHostServices.ts` |
-| 五个 Product Plugin | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
+| 六个 Product Plugin | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
 | 当前 Renderer/完整 Workbench 原型 | `src/plugin-runtime/renderers/*`、`interface-mode/*`、`ui/*`、`src/sheets/AgentSheetView.tsx` |
 | 当前 Solid | `src/renderers/solid-workbench/*` |
 | canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
