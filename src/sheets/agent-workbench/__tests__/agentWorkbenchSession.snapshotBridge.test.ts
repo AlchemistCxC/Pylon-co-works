@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
-import { messageSnapshotToWorkbenchEnvelopes } from '../agentWorkbenchSession.ts'
+import { messageSnapshotToWorkbenchEnvelopes } from '../messageSnapshotProjection.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
 import { persistMessageSnapshot } from '../../../components/chat/messagePersistence.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
