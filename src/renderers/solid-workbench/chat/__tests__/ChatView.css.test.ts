@@ -20,6 +20,18 @@ describe('reasoning row geometry contract', () => {
     expect(collapsedBlock).not.toContain('padding-block:0')
   })
 
+  it('keeps an animated reasoning collapse region at the message width', () => {
+    const region = css.match(/\.term-collapse,\s*\n\.term-collapse-content\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(region).toContain('width:100%')
+    expect(region).toContain('min-width:0')
+
+    const body = css.match(/\.term-reasoning-body\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    expect(body).toContain('box-sizing:border-box')
+    expect(body).toContain('width:100%')
+    expect(body).toContain('max-width:100%')
+    expect(body).toContain('min-width:0')
+  })
+
   it('keeps reasoning and conversation prose on the message font while inline code opts into mono coloring', () => {
     expect(css).toMatch(/\.term-row-user, \.term-row-assistant\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
     expect(css).toMatch(/\.term-row-reasoning\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)

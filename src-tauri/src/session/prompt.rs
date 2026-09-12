@@ -788,6 +788,14 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     };
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
+    // B3（§4.4）：同一实例同一时刻最多一个 prompt——跨 source 的第二个并发
+    // prompt 立即失败（稳定码），不排队：排队会让两条对话在用户看不到的地
+    // 方互相阻塞，超限显形比静默串行可诊断。
+    let _instance_prompt_gate = runtime.prompt_gate.clone().try_lock_owned().map_err(|_| {
+        PylonError::Protocol(
+            "prompt_in_progress: 该 Agent 实例已有进行中的 prompt".to_string(),
+        )
+    })?;
 
     // G2-08 锁合并：updated_at 刷新移入 ensure_session_mapping 的存在性读取
     // （guard 内一次 sessions.lock() 完成"刷新 + 存在性读取 + is_first"）——
