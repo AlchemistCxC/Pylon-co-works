@@ -12,11 +12,11 @@ const SOLID_WORKBENCH_FILES = /src\/renderers\/solid-workbench\/.*\.solid(?:\.te
  * HTML，并注入一个 postMessage bridge。生产构建和 Tauri 原生 WebView
  * 不经过此路由，也不会把代理当成网络访问层。
  */
-function browserPreviewProxy(): Plugin {
+export function browserPreviewProxy(): Plugin {
   return {
     name: 'pylon-browser-preview-proxy',
     configureServer(server) {
-      server.middlewares.use('/__pylon_browser_proxy', async (request, response, next) => {
+      server.middlewares.use('/__pylon_browser_proxy', async (request, response) => {
         const query = new URL(request.url ?? '/', 'http://localhost').searchParams
         const rawTarget = query.get('url')
         if (!rawTarget) {
@@ -57,10 +57,13 @@ function browserPreviewProxy(): Plugin {
           const html = await upstream.text()
           const finalUrl = upstream.url || target.href
           response.end(injectBrowserPreviewBridge(html, finalUrl))
-        } catch (error) {
-          // 交给 Vite 的错误处理中间件，开发页会看到正常的加载失败，而不是
-          // 一个看似成功但内容为空的 iframe。
-          next(error)
+        } catch {
+          // An unavailable page is a preview request failure, not a Vite build
+          // failure. Keep it inside the iframe without broadcasting an HMR error.
+          response.statusCode = 502
+          response.setHeader('content-type', 'text/plain; charset=utf-8')
+          response.setHeader('cache-control', 'no-store')
+          response.end('Browser preview could not load this page. Check the URL or connection and reload.')
         }
       })
     },

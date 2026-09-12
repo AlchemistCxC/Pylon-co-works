@@ -3,6 +3,9 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import { resetStores } from '../../test/resetStores'
+import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
+import { useRightRailStore } from '../../rightRailStore.ts'
 
 const baseProps = {
   sheets: [],
@@ -31,6 +34,29 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     resetStores()
     vi.clearAllMocks()
     Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  it('#52 记住的面板仅在右栏展开时显示选中，重新打开和收起同步菜单', () => {
+    const registration = getContextPanelRegistry().register(createPluginIdentity('test.issue52', 'run'), {
+      id: 'test.context', label: '上下文', scope: 'global', renderKind: 'first-party-react', component: () => null,
+    })
+    try {
+      useRightRailStore.setState({ activePanelId: 'test.context', collapsed: true })
+      render(<WorkspaceTitlebar {...baseProps} />)
+      const openMenu = () => fireEvent.click(screen.getByRole('button', { name: '右侧栏' }))
+      openMenu()
+      expect(screen.getByRole('menuitemradio', { name: '上下文' })).toHaveAttribute('aria-checked', 'false')
+      fireEvent.click(screen.getByRole('menuitemradio', { name: '上下文' }))
+      expect(useRightRailStore.getState().collapsed).toBe(false)
+      openMenu()
+      expect(screen.getByRole('menuitemradio', { name: /上下文/ })).toHaveAttribute('aria-checked', 'true')
+      fireEvent.click(screen.getByRole('menuitem', { name: '收起右侧栏' }))
+      openMenu()
+      expect(screen.getByRole('menuitemradio', { name: '上下文' })).toHaveAttribute('aria-checked', 'false')
+      expect(useRightRailStore.getState().activePanelId).toBe('test.context')
+    } finally {
+      registration.dispose()
+    }
   })
 
   it('打开入口只打开 Registry Launcher，不再暴露硬编码 Runtime 动作', () => {
