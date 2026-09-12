@@ -252,15 +252,15 @@ mod tests {
     use super::*;
     use crate::acp::{AcpKind, RawMessage};
 
-    fn test_handles(
-        rpc_timeout: std::time::Duration,
-        replay_max: usize,
-    ) -> (
+    /// 测试夹具四件套：捕获器、SDK 出站接收端、事件广播发送端、活跃重放登记表。
+    type TestHandles = (
         ReplayCapture,
         mpsc::Receiver<crate::acp::engine::SdkOutbound>,
         broadcast::Sender<ClassifiedMessage>,
         Arc<Mutex<HashMap<u64, String>>>,
-    ) {
+    );
+
+    fn test_handles(rpc_timeout: std::time::Duration, replay_max: usize) -> TestHandles {
         let (sdk_outbound, outbound_rx) = mpsc::channel(8);
         let (events_tx, events_rx) = broadcast::channel(64);
         let active = Arc::new(Mutex::new(HashMap::new()));

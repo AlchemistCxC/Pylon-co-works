@@ -8,6 +8,7 @@
 //! 2. **P4 场景矩阵**——删除→迟到写 wire code=event_session_deleted（canonical evt_append
 //!    终态）；owner_key 非法 wire code=invalid_owner_key（校验前置）。幂等/断线/重试的
 //!    行为矩阵在前端 `del05_p4DeleteMatrix.test.ts` 组合交易+调度器验证。
+//!
 //! B7：messages 表已删除，迟到写矩阵从 msg_append 迁移到 evt_append。
 
 use super::event_repo::{parse_canonical_event, EventError, EventRepo};

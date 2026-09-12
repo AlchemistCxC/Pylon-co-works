@@ -195,7 +195,12 @@ pub(crate) async fn complete_prepared(
     }
 }
 
-/// 启动子进程（两后端共用）：preflight + Hermes runtime + env/cwd + `ManagedChild`。
+/// 启动子进程（两后端共用）：preflight + `LaunchPlan` + `ManagedChild`。
+///
+/// A2：exe/args/cwd/env 全部来自 `plan_launch` 产出的 `LaunchPlan`，本函数不再
+/// 内联拼装任何 provider 差异；唯一保留的 provider 侧步骤是托管运行时适配器
+/// （需现查 PATH/Git Bash，无法离线进 plan），它在 plan 应用之后以显式适配器
+/// 形式运行，不再是 spawn 代码内散落的 provider 分支。
 ///
 /// 进程归属不变（Windows Job Object / taskkill / Drop 均在 `ManagedChild`）。
 pub(crate) async fn spawn_agent_child(
@@ -219,27 +224,31 @@ pub(crate) async fn spawn_agent_child(
     let hermes_runtime = crate::hermes_runtime::prepare(agent)
         .await
         .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
-    let mut cmd = Command::new(&agent.exe);
-    cmd.args(agent.command_args())
-        .stdin(Stdio::piped())
+    // 托管运行时要现查 PATH 与 Git Bash，无法离线进入 plan；它作为显式的运行时
+    // 适配器在 plan 之后应用。plan 仍拥有 argv/cwd/per-agent env/HERMES_HOME。
+    let plan = super::launch_plan::plan_for_agent(agent, base_dir, &Default::default(), Vec::new())
+        .map_err(|error| {
+            super::error::AgentConnectFailure::preflight(
+                "agent_launch_plan_invalid",
+                error.to_string(),
+            )
+        })?;
+    for diagnostic in &plan.diagnostics {
+        tracing::debug!(
+            provider = %plan.provider,
+            owner_key = %plan.owner_key,
+            code = %diagnostic.code,
+            "agent launch plan: {}",
+            diagnostic.message
+        );
+    }
+    let mut cmd = Command::new(&plan.executable);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(cwd) = &agent.cwd {
-        cmd.current_dir(cwd);
-    }
-    for (k, v) in &agent.env {
-        cmd.env(k, v);
-    }
+    super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
         crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
-    }
-    if let Some(hermes_home) = crate::hermes::hermes_home_override(agent, base_dir) {
-        cmd.env("HERMES_HOME", &hermes_home);
-        tracing::info!(
-            "agent {}: HERMES_HOME set to {} (hermes_profile)",
-            agent.name,
-            hermes_home
-        );
     }
     let child = cmd
         .spawn()

@@ -369,320 +369,6 @@ impl SessionInfo {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn session() -> SessionInfo {
-        SessionInfo::new(
-            "remote-1".to_string(),
-            String::new(),
-            "C:/workspace".to_string(),
-            false,
-            1,
-        )
-    }
-
-    #[test]
-    fn profile_binding_is_idempotent_but_cannot_change_owner() {
-        let mut session = session();
-        session.attach_profile_id(None, "local-1").unwrap();
-        assert_eq!(session.profile_id, None);
-
-        session
-            .attach_profile_id(Some("profile-1"), "local-1")
-            .unwrap();
-        session
-            .attach_profile_id(Some("profile-1"), "local-1")
-            .unwrap();
-        let error = session
-            .attach_profile_id(Some("profile-2"), "local-1")
-            .unwrap_err();
-
-        assert!(error.to_string().contains("owner profile mismatch"));
-        assert_eq!(session.profile_id.as_deref(), Some("profile-1"));
-    }
-
-    #[test]
-    fn durable_owner_requires_a_proven_profile_binding() {
-        let mut session = session();
-        assert!(session
-            .durable_owner("agent-1", "local-1")
-            .unwrap()
-            .is_none());
-
-        session
-            .attach_profile_id(Some("profile-1"), "local-1")
-            .unwrap();
-        let owner = session
-            .durable_owner("agent-1", "local-1")
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(owner.profile_id, "profile-1");
-        assert_eq!(owner.agent_id, "agent-1");
-        assert_eq!(owner.local_session_id, "local-1");
-    }
-
-    // ── P56/D1：模型面判定（三态 × camelCase/snake_case）──
-
-    #[test]
-    fn model_surface_detects_config_option_channel_with_category_first() {
-        // 标准 ACP 形态：category=="model" 的选项胜出；description 含 "model" 的
-        // 干扰选项不得胜出（验收 3）。
-        let response = serde_json::json!({
-            "configOptions": [
-                {
-                    "id": "reasoning-effort",
-                    "description": "Reasoning effort for the model",
-                    "category": "thought_level",
-                    "options": [{"valueId": "low", "name": "Low"}],
-                    "currentValue": "low"
-                },
-                {
-                    "id": "model-selection",
-                    "category": "model",
-                    "options": [{"valueId": "m-1", "name": "Model One"}],
-                    "currentValue": "m-1"
-                }
-            ]
-        });
-        let info = determine_model_surface(
-            response
-                .get("configOptions")
-                .and_then(|v| v.as_array())
-                .unwrap(),
-            None,
-        );
-        assert_eq!(
-            info.surface,
-            ModelSurface::ConfigOption {
-                config_id: "model-selection".to_string()
-            }
-        );
-        assert_eq!(info.choices, vec!["m-1".to_string()]);
-    }
-
-    #[test]
-    fn model_surface_falls_back_to_token_equality_without_category() {
-        // review 修复（架构师）：fixture id 必须落在语义别名表（model/models/model_id/
-        // modelid/model_selection）内——"model_selector" 不在表中，精确相等判据下不命中。
-        let options = vec![serde_json::json!({
-            "id": "model_selection",
-            "options": [{"valueId": "a"}, {"valueId": "b"}],
-            "currentValue": "a"
-        })];
-        let info = determine_model_surface(&options, None);
-        assert_eq!(
-            info.surface,
-            ModelSurface::ConfigOption {
-                config_id: "model_selection".to_string()
-            }
-        );
-        assert_eq!(info.choices, vec!["a".to_string(), "b".to_string()]);
-    }
-
-    #[test]
-    fn model_surface_detects_hermes_models_state_in_camel_and_snake() {
-        // hermes 形态（验收 1）：无 configOptions，models.availableModels 为
-        // `provider:model` 编码 id——只收集 machine id，不解析编码。
-        let camel = serde_json::json!({
-            "models": {
-                "availableModels": [
-                    {"modelId": "nous:hermes-4", "name": "Nous · hermes-4"},
-                    {"name": "display-only is dropped"}
-                ],
-                "currentModelId": "nous:hermes-4"
-            }
-        });
-        let info = determine_model_surface(&[], camel.get("models"));
-        assert_eq!(info.surface, ModelSurface::ModelsState);
-        assert_eq!(info.choices, vec!["nous:hermes-4".to_string()]);
-
-        let snake = serde_json::json!({
-            "models": {
-                "available_models": [
-                    {"model_id": "nous:hermes-4", "name": "Nous · hermes-4"}
-                ],
-                "current_model_id": "nous:hermes-4"
-            }
-        });
-        let info = determine_model_surface(&[], snake.get("models"));
-        assert_eq!(info.surface, ModelSurface::ModelsState);
-        assert_eq!(info.choices, vec!["nous:hermes-4".to_string()]);
-    }
-
-    #[test]
-    fn model_surface_is_none_without_any_advertisement() {
-        let info = determine_model_surface(&[], None);
-        assert_eq!(info.surface, ModelSurface::None);
-        assert!(info.choices.is_empty());
-        let empty_models = serde_json::json!({"availableModels": []});
-        let info = determine_model_surface(&[], Some(&empty_models));
-        assert_eq!(info.surface, ModelSurface::None);
-    }
-
-    #[test]
-    fn apply_session_response_tracks_surface_and_choices() {
-        // 验收 1 后端侧：hermes fixture 的宣告 choices 进入 model_choices。
-        let mut hermes = session();
-        hermes.apply_session_response(&serde_json::json!({
-            "sessionId": "s1",
-            "models": {
-                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
-                "currentModelId": "nous:hermes-4"
-            }
-        }));
-        assert_eq!(hermes.model, "nous:hermes-4");
-        assert_eq!(hermes.model_surface, ModelSurface::ModelsState);
-        assert_eq!(hermes.model_choices, vec!["nous:hermes-4".to_string()]);
-
-        // 显示名-only 的 current 不得进入 typed 字段（machine-id-only）。
-        let mut fresh = session();
-        fresh.model = "previous".to_string();
-        fresh.apply_session_response(&serde_json::json!({
-            "models": {"currentModelId": {"name": "Display Only"}}
-        }));
-        assert_eq!(fresh.model, "previous");
-    }
-
-    // ── P56/D2：find_config_option 收紧 ──
-
-    #[test]
-    fn find_config_option_ignores_description_and_substring_matches() {
-        let options = vec![
-            serde_json::json!({
-                "id": "reasoning-effort",
-                "description": "Reasoning effort for the model",
-                "options": [{"valueId": "low"}]
-            }),
-            serde_json::json!({
-                "id": "model_context_window",
-                "description": "Context window of the model"
-            }),
-        ];
-        assert_eq!(find_config_option(&options, "model"), None);
-    }
-
-    #[test]
-    fn find_config_option_prefers_category_over_name_tokens() {
-        let options = vec![
-            serde_json::json!({"id": "model", "name": "Legacy token match"}),
-            serde_json::json!({"id": "model-selection", "category": "model"}),
-        ];
-        let found = find_config_option(&options, "model").unwrap();
-        assert_eq!(
-            found.get("id").and_then(value_as_string).as_deref(),
-            Some("model-selection")
-        );
-    }
-
-    // ── P56/D1.6：空回声保护 ──
-
-    #[test]
-    fn config_option_response_keeps_local_catalog_on_empty_echo() {
-        // 验收 6：hermes set_config_option 恒空回声——本地 config_options 不得被清空，
-        // 且 model 走乐观写回（响应未给权威状态）。
-        let mut session = session();
-        session.config_options = vec![serde_json::json!({"id": "model", "currentValue": "old"})];
-        session.apply_config_option_response(
-            &serde_json::json!({"configOptions": []}),
-            "model",
-            &serde_json::Value::String("next".to_string()),
-        );
-        assert_eq!(session.config_options.len(), 1);
-        assert_eq!(session.model, "next");
-    }
-
-    #[test]
-    fn config_option_response_overwrites_with_authoritative_options() {
-        let mut session = session();
-        session.model = "old".to_string();
-        session.apply_config_option_response(
-            &serde_json::json!({
-                "configOptions": [{
-                    "id": "model-selection",
-                    "category": "model",
-                    "options": [{"valueId": "m-1", "name": "Model One"}],
-                    "currentValue": "m-1"
-                }]
-            }),
-            "model",
-            &serde_json::Value::String("ignored-optimistic".to_string()),
-        );
-        // 权威回声优先：model 取自响应 current，而非乐观值。
-        assert_eq!(session.model, "m-1");
-        assert_eq!(
-            session.model_surface,
-            ModelSurface::ConfigOption {
-                config_id: "model-selection".to_string()
-            }
-        );
-    }
-
-    // ── P56/D1.3/D1.4：路由与发送校验 ──
-
-    #[test]
-    fn resolve_model_switch_target_prefers_explicit_declaration() {
-        // 验收 8：显式 set_model_api 声明按声明路由（现状行为）。
-        let (target, config_id) =
-            resolve_model_switch_target(Some(SetModelApi::SetModel), "model", &ModelSurface::None)
-                .unwrap();
-        assert_eq!(target, crate::agent_config::ModelSwitchTarget::SetModel);
-        assert_eq!(config_id, None);
-
-        // 未声明 + key != "model"：既有路径不变。
-        let (target, config_id) =
-            resolve_model_switch_target(None, "mode", &ModelSurface::None).unwrap();
-        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
-        assert_eq!(config_id, None);
-    }
-
-    #[test]
-    fn resolve_model_switch_target_routes_by_surface_when_undeclared() {
-        let (target, config_id) = resolve_model_switch_target(
-            None,
-            "model",
-            &ModelSurface::ConfigOption {
-                config_id: "model-selection".to_string(),
-            },
-        )
-        .unwrap();
-        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
-        assert_eq!(config_id.as_deref(), Some("model-selection"));
-
-        let (target, config_id) =
-            resolve_model_switch_target(None, "model", &ModelSurface::ModelsState).unwrap();
-        assert_eq!(target, crate::agent_config::ModelSwitchTarget::SetModel);
-        assert_eq!(config_id, None);
-    }
-
-    #[test]
-    fn resolve_model_switch_target_rejects_when_no_surface_advertised() {
-        // 验收 5：surface==None → model switching unavailable。
-        let error = resolve_model_switch_target(None, "model", &ModelSurface::None).unwrap_err();
-        assert!(error.to_string().contains("model switching unavailable"));
-    }
-
-    #[test]
-    fn validate_model_advertised_rejects_out_of_list_values_with_summary() {
-        // 验收 4：非列表值被拒，错误含 model_not_advertised 与宣告列表摘要。
-        let error = validate_model_advertised(
-            "bare-model-x",
-            &["nous:hermes-4".to_string(), "nous:hermes-3".to_string()],
-        )
-        .unwrap_err();
-        let message = error.to_string();
-        assert!(message.contains("model_not_advertised"), "{message}");
-        assert!(message.contains("nous:hermes-4"), "{message}");
-        assert!(message.contains("nous:hermes-3"), "{message}");
-
-        // 未宣告列表（空 choices）→ 无法校验，放行（现状兼容）。
-        assert!(validate_model_advertised("anything", &[]).is_ok());
-        assert!(validate_model_advertised("nous:hermes-4", &["nous:hermes-4".to_string()]).is_ok());
-    }
-}
-
 /// 归一化 token（P56/D1/D2 匹配判据共用）：trim、`-`/` `/`.` → `_`、小写。
 fn normalized_token(value: &str) -> String {
     value
@@ -1070,4 +756,318 @@ pub(crate) fn validate_model_advertised(value: &str, choices: &[String]) -> Resu
         "model_not_advertised: requested model {value:?} is not in the agent-advertised choices [{}]",
         choices.join(", ")
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session() -> SessionInfo {
+        SessionInfo::new(
+            "remote-1".to_string(),
+            String::new(),
+            "C:/workspace".to_string(),
+            false,
+            1,
+        )
+    }
+
+    #[test]
+    fn profile_binding_is_idempotent_but_cannot_change_owner() {
+        let mut session = session();
+        session.attach_profile_id(None, "local-1").unwrap();
+        assert_eq!(session.profile_id, None);
+
+        session
+            .attach_profile_id(Some("profile-1"), "local-1")
+            .unwrap();
+        session
+            .attach_profile_id(Some("profile-1"), "local-1")
+            .unwrap();
+        let error = session
+            .attach_profile_id(Some("profile-2"), "local-1")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("owner profile mismatch"));
+        assert_eq!(session.profile_id.as_deref(), Some("profile-1"));
+    }
+
+    #[test]
+    fn durable_owner_requires_a_proven_profile_binding() {
+        let mut session = session();
+        assert!(session
+            .durable_owner("agent-1", "local-1")
+            .unwrap()
+            .is_none());
+
+        session
+            .attach_profile_id(Some("profile-1"), "local-1")
+            .unwrap();
+        let owner = session
+            .durable_owner("agent-1", "local-1")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(owner.profile_id, "profile-1");
+        assert_eq!(owner.agent_id, "agent-1");
+        assert_eq!(owner.local_session_id, "local-1");
+    }
+
+    // ── P56/D1：模型面判定（三态 × camelCase/snake_case）──
+
+    #[test]
+    fn model_surface_detects_config_option_channel_with_category_first() {
+        // 标准 ACP 形态：category=="model" 的选项胜出；description 含 "model" 的
+        // 干扰选项不得胜出（验收 3）。
+        let response = serde_json::json!({
+            "configOptions": [
+                {
+                    "id": "reasoning-effort",
+                    "description": "Reasoning effort for the model",
+                    "category": "thought_level",
+                    "options": [{"valueId": "low", "name": "Low"}],
+                    "currentValue": "low"
+                },
+                {
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-1", "name": "Model One"}],
+                    "currentValue": "m-1"
+                }
+            ]
+        });
+        let info = determine_model_surface(
+            response
+                .get("configOptions")
+                .and_then(|v| v.as_array())
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            info.surface,
+            ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
+        assert_eq!(info.choices, vec!["m-1".to_string()]);
+    }
+
+    #[test]
+    fn model_surface_falls_back_to_token_equality_without_category() {
+        // review 修复（架构师）：fixture id 必须落在语义别名表（model/models/model_id/
+        // modelid/model_selection）内——"model_selector" 不在表中，精确相等判据下不命中。
+        let options = vec![serde_json::json!({
+            "id": "model_selection",
+            "options": [{"valueId": "a"}, {"valueId": "b"}],
+            "currentValue": "a"
+        })];
+        let info = determine_model_surface(&options, None);
+        assert_eq!(
+            info.surface,
+            ModelSurface::ConfigOption {
+                config_id: "model_selection".to_string()
+            }
+        );
+        assert_eq!(info.choices, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn model_surface_detects_hermes_models_state_in_camel_and_snake() {
+        // hermes 形态（验收 1）：无 configOptions，models.availableModels 为
+        // `provider:model` 编码 id——只收集 machine id，不解析编码。
+        let camel = serde_json::json!({
+            "models": {
+                "availableModels": [
+                    {"modelId": "nous:hermes-4", "name": "Nous · hermes-4"},
+                    {"name": "display-only is dropped"}
+                ],
+                "currentModelId": "nous:hermes-4"
+            }
+        });
+        let info = determine_model_surface(&[], camel.get("models"));
+        assert_eq!(info.surface, ModelSurface::ModelsState);
+        assert_eq!(info.choices, vec!["nous:hermes-4".to_string()]);
+
+        let snake = serde_json::json!({
+            "models": {
+                "available_models": [
+                    {"model_id": "nous:hermes-4", "name": "Nous · hermes-4"}
+                ],
+                "current_model_id": "nous:hermes-4"
+            }
+        });
+        let info = determine_model_surface(&[], snake.get("models"));
+        assert_eq!(info.surface, ModelSurface::ModelsState);
+        assert_eq!(info.choices, vec!["nous:hermes-4".to_string()]);
+    }
+
+    #[test]
+    fn model_surface_is_none_without_any_advertisement() {
+        let info = determine_model_surface(&[], None);
+        assert_eq!(info.surface, ModelSurface::None);
+        assert!(info.choices.is_empty());
+        let empty_models = serde_json::json!({"availableModels": []});
+        let info = determine_model_surface(&[], Some(&empty_models));
+        assert_eq!(info.surface, ModelSurface::None);
+    }
+
+    #[test]
+    fn apply_session_response_tracks_surface_and_choices() {
+        // 验收 1 后端侧：hermes fixture 的宣告 choices 进入 model_choices。
+        let mut hermes = session();
+        hermes.apply_session_response(&serde_json::json!({
+            "sessionId": "s1",
+            "models": {
+                "availableModels": [{"modelId": "nous:hermes-4", "name": "Nous · hermes-4"}],
+                "currentModelId": "nous:hermes-4"
+            }
+        }));
+        assert_eq!(hermes.model, "nous:hermes-4");
+        assert_eq!(hermes.model_surface, ModelSurface::ModelsState);
+        assert_eq!(hermes.model_choices, vec!["nous:hermes-4".to_string()]);
+
+        // 显示名-only 的 current 不得进入 typed 字段（machine-id-only）。
+        let mut fresh = session();
+        fresh.model = "previous".to_string();
+        fresh.apply_session_response(&serde_json::json!({
+            "models": {"currentModelId": {"name": "Display Only"}}
+        }));
+        assert_eq!(fresh.model, "previous");
+    }
+
+    // ── P56/D2：find_config_option 收紧 ──
+
+    #[test]
+    fn find_config_option_ignores_description_and_substring_matches() {
+        let options = vec![
+            serde_json::json!({
+                "id": "reasoning-effort",
+                "description": "Reasoning effort for the model",
+                "options": [{"valueId": "low"}]
+            }),
+            serde_json::json!({
+                "id": "model_context_window",
+                "description": "Context window of the model"
+            }),
+        ];
+        assert_eq!(find_config_option(&options, "model"), None);
+    }
+
+    #[test]
+    fn find_config_option_prefers_category_over_name_tokens() {
+        let options = vec![
+            serde_json::json!({"id": "model", "name": "Legacy token match"}),
+            serde_json::json!({"id": "model-selection", "category": "model"}),
+        ];
+        let found = find_config_option(&options, "model").unwrap();
+        assert_eq!(
+            found.get("id").and_then(value_as_string).as_deref(),
+            Some("model-selection")
+        );
+    }
+
+    // ── P56/D1.6：空回声保护 ──
+
+    #[test]
+    fn config_option_response_keeps_local_catalog_on_empty_echo() {
+        // 验收 6：hermes set_config_option 恒空回声——本地 config_options 不得被清空，
+        // 且 model 走乐观写回（响应未给权威状态）。
+        let mut session = session();
+        session.config_options = vec![serde_json::json!({"id": "model", "currentValue": "old"})];
+        session.apply_config_option_response(
+            &serde_json::json!({"configOptions": []}),
+            "model",
+            &serde_json::Value::String("next".to_string()),
+        );
+        assert_eq!(session.config_options.len(), 1);
+        assert_eq!(session.model, "next");
+    }
+
+    #[test]
+    fn config_option_response_overwrites_with_authoritative_options() {
+        let mut session = session();
+        session.model = "old".to_string();
+        session.apply_config_option_response(
+            &serde_json::json!({
+                "configOptions": [{
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-1", "name": "Model One"}],
+                    "currentValue": "m-1"
+                }]
+            }),
+            "model",
+            &serde_json::Value::String("ignored-optimistic".to_string()),
+        );
+        // 权威回声优先：model 取自响应 current，而非乐观值。
+        assert_eq!(session.model, "m-1");
+        assert_eq!(
+            session.model_surface,
+            ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
+    }
+
+    // ── P56/D1.3/D1.4：路由与发送校验 ──
+
+    #[test]
+    fn resolve_model_switch_target_prefers_explicit_declaration() {
+        // 验收 8：显式 set_model_api 声明按声明路由（现状行为）。
+        let (target, config_id) =
+            resolve_model_switch_target(Some(SetModelApi::SetModel), "model", &ModelSurface::None)
+                .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::SetModel);
+        assert_eq!(config_id, None);
+
+        // 未声明 + key != "model"：既有路径不变。
+        let (target, config_id) =
+            resolve_model_switch_target(None, "mode", &ModelSurface::None).unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id, None);
+    }
+
+    #[test]
+    fn resolve_model_switch_target_routes_by_surface_when_undeclared() {
+        let (target, config_id) = resolve_model_switch_target(
+            None,
+            "model",
+            &ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id.as_deref(), Some("model-selection"));
+
+        let (target, config_id) =
+            resolve_model_switch_target(None, "model", &ModelSurface::ModelsState).unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::SetModel);
+        assert_eq!(config_id, None);
+    }
+
+    #[test]
+    fn resolve_model_switch_target_rejects_when_no_surface_advertised() {
+        // 验收 5：surface==None → model switching unavailable。
+        let error = resolve_model_switch_target(None, "model", &ModelSurface::None).unwrap_err();
+        assert!(error.to_string().contains("model switching unavailable"));
+    }
+
+    #[test]
+    fn validate_model_advertised_rejects_out_of_list_values_with_summary() {
+        // 验收 4：非列表值被拒，错误含 model_not_advertised 与宣告列表摘要。
+        let error = validate_model_advertised(
+            "bare-model-x",
+            &["nous:hermes-4".to_string(), "nous:hermes-3".to_string()],
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("model_not_advertised"), "{message}");
+        assert!(message.contains("nous:hermes-4"), "{message}");
+        assert!(message.contains("nous:hermes-3"), "{message}");
+
+        // 未宣告列表（空 choices）→ 无法校验，放行（现状兼容）。
+        assert!(validate_model_advertised("anything", &[]).is_ok());
+        assert!(validate_model_advertised("nous:hermes-4", &["nous:hermes-4".to_string()]).is_ok());
+    }
 }

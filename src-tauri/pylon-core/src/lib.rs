@@ -5,10 +5,14 @@
 //!
 //! - `agent_catalog`: shared first-party agent catalog (JSON-driven detection rules)
 //! - `agent_detection`: pure agent runtime discovery (no AppState, no tauri)
+//! - `agent_launch_plan`: pure Windows launch planner (catalog + detection + overrides)
+//! - `agent_profile_transform`: Codeg-shaped profile -> Pylon profile DTO
 //! - `cli_client`: named-pipe/Unix-socket client for a running Pylon kernel
 
 pub mod agent_catalog;
 pub mod agent_detection;
 pub mod agent_diagnostics;
+pub mod agent_launch_plan;
 pub mod agent_preflight;
+pub mod agent_profile_transform;
 pub mod cli_client;

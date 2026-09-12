@@ -659,13 +659,25 @@ async fn create_session_slot(
         }
     }
     let generation = state.current_generation(runtime);
+    // B2：session/new 不得绕过 initialize——未完成握手的客户端直接拒绝（稳定
+    // 错误码），而不是把一个注定失败的会话建立发给子进程。
+    {
+        let acp = runtime.acp.lock().await;
+        if !acp.session_ready() {
+            return Err(PylonError::Protocol(
+                "session_new_before_initialize: ACP 握手未完成，禁止建立会话".to_string(),
+            ));
+        }
+    }
     // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 acp.rs 构造器 doc）——
     // per-agent 协议配置解析，缺省 Always = 现状 wire；OmitIfEmpty 显式删键（v2 语义）。
-    let params = acp::session_new_params(
-        session_cwd,
+    // B2：参数经 SessionNewPlan 纯函数成形（MCP 模式语义保持在 session_new_params）。
+    let params = crate::acp::initialize_plan::build_session_new_plan(
+        session_cwd.to_string(),
         wire_mcp_servers.to_vec(),
         state.protocol_for_runtime(runtime).mcp_servers,
-    )?;
+    )
+    .params()?;
     let mut response = match state
         .acp_rpc(runtime, acp::METHOD_SESSION_NEW, params)
         .await
@@ -861,21 +873,33 @@ async fn revive_session_slot(
         state.protocol_for_runtime(runtime).mcp_servers,
     )
     .map_err(PylonError::Protocol)?;
-    let resume_advertised = {
+    // B2：建立通道 = catalog 声明顺序 ∩ 服务端能力广告。声明侧是 connect 时按
+    // provider 解析的 establishment_order（无 profile = 默认 resume→load→new，
+    // 与旧行为一致）；广告侧要求 object 值。resume/load 任一不满足即跳过该通道，
+    // new 恒备。
+    let establishment_channels = {
         let acp = runtime.acp.lock().await;
-        let typed = acp
-            .capabilities()
-            .supports_object(&["sessionCapabilities", "resume"]);
+        let declared: Vec<&str> = acp
+            .establishment_order()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        crate::acp::initialize_plan::session_establishment_channels(&declared, acp.capabilities())
+            .map_err(PylonError::Protocol)?
+    };
+    let resume_advertised =
+        establishment_channels.contains(&crate::acp::initialize_plan::EstablishmentChannel::Resume);
+    {
         // Keep the protocol projection as a parity assertion while the typed
         // registry is the actual decision source.
+        let acp = runtime.acp.lock().await;
         debug_assert_eq!(
-            typed,
+            resume_advertised,
             crate::acp::resume_capability_advertised(
                 acp.capabilities().raw().unwrap_or(&serde_json::Value::Null)
             )
         );
-        typed
-    };
+    }
     let response = if resume_advertised {
         let resume_params =
             crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
@@ -909,7 +933,7 @@ async fn revive_session_slot(
                     runtime_generation = generation,
                     recovery_method = "resume",
                     result = "fallback",
-                    failure_class = ?error.resume_failure_class(),
+                    failure_class = ?error.recovery_failure_class(),
                     response_boundary = "error",
                     "session/resume recovery attempt"
                 );
@@ -921,6 +945,30 @@ async fn revive_session_slot(
     };
     let response = match response {
         Some(response) => response,
+        None if !establishment_channels
+            .contains(&crate::acp::initialize_plan::EstablishmentChannel::Load) =>
+        {
+            // B2：服务端未广告 loadSession（或声明不含 load）——跳过 load，typed
+            // reason 记录后直接走 new 回退。
+            tracing::info!(
+                target: "replay_trace",
+                owner = source,
+                runtime_generation = generation,
+                recovery_method = "load",
+                result = "skipped_not_advertised",
+                response_boundary = "not-sent",
+                canonical_import = "none",
+                "session/load skipped: channel not in declared∩advertised intersection"
+            );
+            state.log_runtime_summary(
+                "info",
+                "session",
+                Some(source.to_string()),
+                "Session load not advertised; falling back to session/new",
+                serde_json::Map::new(),
+            );
+            return Ok(None);
+        }
         None => {
             let load_result = state
                 .acp_rpc_generation_checked(
@@ -944,13 +992,18 @@ async fn revive_session_slot(
                 );
                 response
             } else {
+                // A3：回退到 `new` 也是回退，必须与 resume 分支一样带上 typed reason；
+                // 旧行为在此丢弃了 load 错误，使 `resume -> load -> new` 链条中
+                // 最后一次回退没有可诊断的原因。
                 tracing::info!(
                     target: "replay_trace",
                     owner = source,
                     runtime_generation = generation,
                     recovery_method = "new",
                     result = "fallback",
-                    response_boundary = "not-observed",
+                    failed_method = "load",
+                    failure_class = ?load_result.as_ref().err().map(|error| error.recovery_failure_class()),
+                    response_boundary = "error",
                     canonical_import = "none",
                     "session/new recovery fallback"
                 );

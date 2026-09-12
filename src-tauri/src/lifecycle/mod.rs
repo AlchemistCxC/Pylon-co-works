@@ -1419,6 +1419,72 @@ for line in sys.stdin:
         assert_eq!(AGENT_VALIDATION_TIMEOUT_SECS, 15);
     }
 
+    /// B1：连接测试响应的 launchPlan 与真实 spawn 同源（同一 planner），env 值
+    /// 一律掩码——计划数据可能包含凭据型环境变量，掩码发生在边界。
+    #[test]
+    fn launch_plan_payload_masks_env_values_and_shares_the_real_planner() {
+        use connection_test::launch_plan_payload;
+        let mut agent = crate::agent_config::AgentDef {
+            name: "Peri".into(),
+            provider: Some("peri".into()),
+            transport: "subprocess".into(),
+            exe: "peri".into(),
+            args: vec!["acp".into()],
+            cwd: None,
+            env: std::collections::HashMap::from([(
+                "PERI_TOKEN".to_string(),
+                "sk-super-secret".to_string(),
+            )]),
+            default: false,
+            set_model_api: false,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let payload = launch_plan_payload(&agent);
+        assert_eq!(payload["executable"], "peri");
+        assert_eq!(
+            payload["argv"],
+            serde_json::json!(["peri", "acp"]),
+            "argv 必须与真实启动一致（同一 planner 计算）"
+        );
+        assert_eq!(payload["env"][0]["name"], "PERI_TOKEN");
+        assert_eq!(payload["env"][0]["value"], "value withheld");
+        assert!(
+            !payload.to_string().contains("sk-super-secret"),
+            "env 值不得以任何形式出现在响应里"
+        );
+
+        // 无 provider 的自定义 agent：显式配置即可计划，错误也不得是 panic。
+        agent.provider = None;
+        agent.exe = "my-agent.exe".into();
+        agent.env.clear();
+        let custom = launch_plan_payload(&agent);
+        assert_eq!(custom["executable"], "my-agent.exe");
+    }
+
+    /// B1：error payload 携带 typed cause（closed vocabulary 视图，前端只渲染）。
+    #[test]
+    fn connection_test_error_payload_carries_typed_cause() {
+        let failure = AcpError::Connect(Box::new(AgentConnectFailure {
+            stage: AgentConnectStage::Spawn,
+            code: "agent_spawn_failed".into(),
+            message: "spawn failed".into(),
+            exit_code: None,
+            stderr_excerpt: None,
+            retryable: false,
+            io_kind: None,
+            remote_code: None,
+            remote_data_summary: None,
+        }));
+        let payload = connection_test_error_payload(&failure);
+        assert_eq!(payload["cause"]["level"], "fail");
+        assert_eq!(payload["cause"]["code"], "agent_spawn_failed");
+        assert_eq!(payload["cause"]["summary"], "spawn failed");
+        assert_eq!(payload["cause"]["action"], "open-runtime-log");
+    }
+
     #[test]
     fn candidate_stderr_is_bounded_and_preserves_chronological_order() {
         let logs = crate::runtime_log::RuntimeLogHub::new(8);

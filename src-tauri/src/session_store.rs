@@ -394,8 +394,7 @@ mod tests {
         insert(rt.as_ref(), "src", session("peri-1", 1), true, 100).unwrap();
         // 旧 peri_id + 旧 generation：stale
         let err = update_if_current(rt.as_ref(), "src", "peri-old", 0, |_| ())
-            .err()
-            .expect("stale 必须拒绝");
+            .expect_err("stale 必须拒绝");
         assert!(matches!(err, SessionStoreError::Stale(_)));
         // 匹配则更新
         update_if_current(rt.as_ref(), "src", "peri-1", 1, |s| s.model = "m".into()).unwrap();

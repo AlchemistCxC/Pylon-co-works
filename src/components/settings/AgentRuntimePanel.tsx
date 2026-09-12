@@ -20,6 +20,17 @@ import {
 import ArgumentListEditor from './ArgumentListEditor.tsx'
 import { describeInvocation, validateInvocation } from '../../domains/agent/invocationDraft.ts'
 import { builtinAgentCatalog } from '../../domains/agent/agentCatalog.ts'
+import {
+  agentDraftFingerprint,
+  agentDraftReducer,
+  canSaveAgentDraft,
+  initialAgentDraftState,
+  type AgentDraftState,
+} from '../../domains/agent/agentDraftMachine.ts'
+import {
+  assertCustomProfileFieldsAllowed,
+  validateCustomProfile,
+} from '../../domains/agent/customProfileRules.ts'
 import { provisionAgentTransaction } from '../../application/transactions/provisionAgentTransaction.ts'
 import { activateAgentSheet } from '../../workspace-sheets/activateAgentSheet.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
@@ -116,6 +127,52 @@ function InvocationPreview({ executable, args, effectiveArgs = args }: {
   )
 }
 
+import {
+  agentInstallStatusLabel,
+  agentInstallStatusReason,
+  type AgentInstallStatus,
+  type AgentProviderPreflight,
+} from '../../domains/agent/agentDetector.ts'
+
+function installStatusClass(status: AgentInstallStatus): string {
+  if (status === 'installed') return 'ok'
+  if (status === 'versionTooOld' || status === 'adapterMissing') return 'failed'
+  return 'warn'
+}
+
+/**
+ * A4：安装状态区。每个 provider 一行，非 installed 必须给可行动原因
+ * （文案由前端拥有，状态词表由后端封闭；未知名不会渲染成空白）。
+ *
+ * C3：原因优先用后端下发的 `cause.summary`——它是**本机实测**的原因（如
+ * “某目录不在 PATH 上”），而静态文案只能说状态名，无法区分“没装”和
+ * “装了但本进程看不见”。`level === 'ok'` 时不占行：该 provider 工作正常，
+ * 无需用户读任何东西，而其信息量已由下方状态与 adapter 行给出。
+ * 没有 cause 时回退到静态文案，保证任何状态都不会渲染成空白。
+ */
+function AgentInstallStatusList({ preflight }: { preflight: readonly AgentProviderPreflight[] }) {
+  if (preflight.length === 0) return null
+  return <div className="agent-install-status" aria-label="本机 Agent 安装状态">
+    {preflight.map(entry => {
+      const cause = entry.cause
+      const reason = cause
+        ? (cause.level === 'ok' ? '' : cause.summary)
+        : agentInstallStatusReason(entry.status)
+      const adapter = entry.adapter
+      return <div key={entry.provider} className={`agent-install-row ${installStatusClass(entry.status)}`} role="status">
+        <span><strong>{entry.provider}</strong><small>{agentInstallStatusLabel(entry.status)}</small></span>
+        {reason && <span>{reason}</span>}
+        {adapter && <span className="set-hint">
+          {`ACP：${adapter.acpPresent ? '已找到' : '未找到'} · ${adapter.nativeLabel}（${adapter.nativeCmd}）：${adapter.nativePresent ? '已找到' : '未找到'} · 共享配置目录 ${adapter.sharedConfigDir}：${adapter.sharedConfigPresent ? '存在' : '不存在'}`}
+        </span>}
+        {entry.checks.filter(check => check.status !== 'PASS').map(check => (
+          <span className="set-hint" key={check.checkId} role="status">{`${check.label}：${check.message}（${check.status}）`}</span>
+        ))}
+      </div>
+    })}
+  </div>
+}
+
 function candidateProtocolLabel(validation: AgentCandidateValidationState | undefined): string {
   if (validation?.status === 'testing') return '验证中'
   if (validation?.status === 'ok') return '可用'
@@ -133,16 +190,9 @@ function activationLabel(state: AgentEntry['configActivationState']): string {
   return state === 'activated' ? '已生效' : state === 'pendingRestart' ? '待重启生效' : '已存储'
 }
 
-/** 按 provider 给 exe/命令路径填写引导（任务：说明 hermes/peri 分别填什么路径）。 */
+/** 按 provider 给 exe/命令路径填写引导：文案由 catalog 派生，不在组件内 switch provider（A4）。 */
 function pathHintForProvider(provider: string | null | undefined): string {
-  switch ((provider ?? '').trim().toLowerCase()) {
-    case 'hermes':
-      return 'Hermes 填法：exe 填 hermes 命令名（在 PATH 中）或 Hermes 启动脚本绝对路径；若需固定 provider/密钥，再补 hermes_profile（profile 名或目录）。'
-    case 'peri':
-      return 'Peri 填法：exe 填 peri.exe 的绝对路径，例如 F:\\A-I\\Agent\\Peri\\target\\release\\peri.exe（PATH 内也可只填 peri）。'
-    default:
-      return 'exe 填法：Agent 可执行文件绝对路径；PATH 内的命令（claude、hermes、peri 等）也可只填命令名。'
-  }
+  return builtinAgentCatalog.executableHint(provider)
 }
 
 /**
@@ -162,7 +212,11 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const [savingId, setSavingId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<Record<string, string>>({})
-  const [verifiedDrafts, setVerifiedDrafts] = useState<Record<string, string>>({})
+  // B1：编辑流的草稿→验证→保存生命周期收拢为显式状态机（旧 verifiedDrafts
+  // 散落三处 state 的不变量在此由 reducer + 测试锁定）。
+  const [draftMachine, setDraftMachine] = useState<AgentDraftState>(initialAgentDraftState)
+  // B1：最近一次草稿验证返回的启动计划（与真实 spawn 同源；env 已在后端掩码）。
+  const [draftLaunchPlan, setDraftLaunchPlan] = useState<{ argv: string[] } | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createDraft, setCreateDraft] = useState({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -178,6 +232,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
   const [detectionDiagnostics, setDetectionDiagnostics] = useState<AgentDetectionDiagnostic[]>([])
   const [detectionElapsedMs, setDetectionElapsedMs] = useState(0)
+  const [detectionPreflight, setDetectionPreflight] = useState<AgentProviderPreflight[]>([])
   const [detectionTruncated, setDetectionTruncated] = useState(false)
   const [detectionCompleted, setDetectionCompleted] = useState(false)
   const [detecting, setDetecting] = useState(false)
@@ -235,6 +290,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         ? current
         : report.candidates.find(candidate => !candidate.alreadyImportedAgentId)?.candidateId ?? report.candidates[0]?.candidateId ?? null)
       setDetectionDiagnostics(report.diagnostics)
+      setDetectionPreflight(report.preflight)
       setDetectionElapsedMs(report.elapsedMs)
       setDetectionTruncated(report.truncated)
       setDetectionCompleted(true)
@@ -409,6 +465,20 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     setEditingId(agent.id)
     setDraft(emptyDraft(agent))
     setFeedback(null)
+    setDraftLaunchPlan(null)
+    setDraftMachine(agentDraftReducer(initialAgentDraftState(), { type: 'select', agentId: agent.id }))
+  }
+
+  /** 草稿任一字段变更：指纹更新 + 旧验证立即失效（状态机保证）。 */
+  const patchDraft = (updater: (current: Draft) => Draft) => {
+    setDraft(current => {
+      const next = updater(current)
+      setDraftMachine(machine => agentDraftReducer(machine, {
+        type: 'edit',
+        fingerprint: agentDraftFingerprint({ name: next.name, provider: next.provider, exe: next.exe, args: next.args }),
+      }))
+      return next
+    })
   }
 
   useEffect(() => {
@@ -418,6 +488,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     focusedInitialAgentRef.current = initialAgentId
     setEditingId(target.id)
     setDraft(emptyDraft(target))
+    setDraftMachine(agentDraftReducer(initialAgentDraftState(), { type: 'select', agentId: target.id }))
     setFeedback('请重新选择或修正该 Agent 的可执行文件。')
   }, [agents, initialAgentId])
 
@@ -439,11 +510,13 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     if (savingId) return
     const invalid = invocationError(draft.exe, draft.args)
     if (invalid) { setFeedback(invalid); return }
-    const fingerprint = JSON.stringify({ name: draft.name.trim(), provider: draft.provider.trim(), exe: draft.exe.trim(), args: draft.args })
-    if (verifiedDrafts[agentId] !== fingerprint) {
+    // 状态机 fail-closed：只有 verified 且验证过的指纹与草稿当前指纹相等
+    // 才能保存（草稿变更/切换 agent/取消都会使旧验证失效）。
+    if (draftMachine.agentId !== agentId || !canSaveAgentDraft(draftMachine)) {
       setFeedback('请先测试连接成功，再保存配置变更。')
       return
     }
+    setDraftMachine(machine => agentDraftReducer(machine, { type: 'saveBegin' }))
     setSavingId(agentId)
     setFeedback(null)
     try {
@@ -455,13 +528,15 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         ...(draft.argsKnown ? { args: [...draft.args] } : {}),
       })
       await refreshAgents()
+      setDraftMachine(machine => agentDraftReducer(machine, { type: 'saveEnd', ok: true }))
       setEditingId(null)
-      setVerifiedDrafts(current => { const next = { ...current }; delete next[agentId]; return next })
       setConfigConflict(false)
       setFeedback(null)
       resolvePanelError('保存 Agent 字段', agentId)
       notify(`已保存 ${agentId}`)
     } catch (error) {
+      // 保存失败（含 CAS 冲突）：状态机回到 verified，草稿与验证都保留，可重试。
+      setDraftMachine(machine => agentDraftReducer(machine, { type: 'saveEnd', ok: false }))
       reportConfigMutationError('保存 Agent 字段', error, agentId)
       notify(`保存失败：${agentId}`)
     } finally {
@@ -522,20 +597,37 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     if (testingId) return
     const invalid = invocationError(draft.exe, draft.args)
     if (invalid) { setFeedback(invalid); return }
+    // 在发起验证前捕获草稿指纹：验证期间用户再改草稿，状态机会作废本次验证。
+    const testedFingerprint = agentDraftFingerprint({ name: draft.name, provider: draft.provider, exe: draft.exe, args: draft.args })
+    setDraftMachine(machine => agentDraftReducer(machine, { type: 'testBegin' }))
+    const requestId = draftMachine.testRequestId + 1
     setTestingId(agentId)
     try {
       const result = await agentClient.testAgentCandidate(agentId, {
         name: draft.name.trim(), provider: draft.provider.trim(), transport: 'subprocess', exe: draft.exe.trim(), args: [...draft.args],
       })
+      setDraftLaunchPlan(result.launchPlan && 'argv' in result.launchPlan ? { argv: result.launchPlan.argv } : null)
       if (!result.ok) throw new Error(result.error?.message ?? '连接失败')
-      const fingerprint = JSON.stringify({ name: draft.name.trim(), provider: draft.provider.trim(), exe: draft.exe.trim(), args: draft.args })
-      setVerifiedDrafts(current => ({ ...current, [agentId]: fingerprint }))
+      setDraftMachine(machine => agentDraftReducer(machine, {
+        type: 'testEnd', requestId, ok: true, testedFingerprint,
+        message: `连接成功（${result.durationMs}ms），现在可以保存`,
+      }))
       setTestResult(current => ({ ...current, [agentId]: `连接成功（${result.durationMs}ms），现在可以保存` }))
       setFeedback(null)
     } catch (error) {
-      setVerifiedDrafts(current => { const next = { ...current }; delete next[agentId]; return next })
-      setTestResult(current => ({ ...current, [agentId]: `连接失败：${error instanceof Error ? error.message : String(error)}` }))
+      const message = `连接失败：${error instanceof Error ? error.message : String(error)}`
+      setDraftMachine(machine => agentDraftReducer(machine, {
+        type: 'testEnd', requestId, ok: false, testedFingerprint, message,
+      }))
+      setTestResult(current => ({ ...current, [agentId]: message }))
     } finally { setTestingId(null) }
+  }
+
+  /** B1：取消进行中的草稿验证——在途结果作废（状态机递增请求序号），可立即重测。
+   * testingId 同步复位：Promise 仍会 resolve，但其 finally 与 testEnd 都是无害幂等。 */
+  const cancelDraftTest = () => {
+    setDraftMachine(machine => agentDraftReducer(machine, { type: 'testCancel' }))
+    setTestingId(null)
   }
 
   const restartRuntime = async (agentId: string) => {
@@ -557,8 +649,15 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const createAgent = async () => {
     if (savingId) return
     const id = createDraft.id.trim()
-    if (!id || !createDraft.name.trim() || !createDraft.exe.trim()) {
-      setFeedback('新建 Agent 必须填写 id / name / exe')
+    // B1：自定义 profile 规则（复用 Codeg 类别）：slug、重复 id、内置 id 冲突、
+    // 必填 launch。后端另有同款 slug/重复校验；此处让用户在提交前看到原因。
+    const profileIssues = validateCustomProfile(
+      { id, name: createDraft.name, exe: createDraft.exe, provider: createDraft.provider },
+      agents.map(agent => agent.id),
+      builtinAgentCatalog.providers(),
+    )
+    if (profileIssues.length > 0) {
+      setFeedback(profileIssues.map(issue => issue.message).join('；'))
       return
     }
     const invalid = invocationError(createDraft.exe, createDraft.args)
@@ -566,6 +665,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     setSavingId(id)
     setFeedback(null)
     const config = agentConfig(createDraft.name, createDraft.exe, createDraft.args, createDraft.provider, agents.length === 0)
+    assertCustomProfileFieldsAllowed(config as unknown as Record<string, unknown>)
     try {
       await agentClient.ensureConfigRevision()
       await agentClient.createAgent(id, config)
@@ -630,26 +730,32 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
 
             {isEditing && (
               <div className="agent-runtime-edit">
-                <input className="set-input" value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} placeholder="name" aria-label="Agent name" />
-                <input className="set-input" value={draft.exe} onChange={event => setDraft({ ...draft, exe: event.target.value })} placeholder="exe 绝对路径或命令名" aria-label="Agent exe" />
+                <input className="set-input" value={draft.name} onChange={event => patchDraft(d => ({ ...d, name: event.target.value }))} placeholder="name" aria-label="Agent name" />
+                <input className="set-input" value={draft.exe} onChange={event => patchDraft(d => ({ ...d, exe: event.target.value }))} placeholder="exe 绝对路径或命令名" aria-label="Agent exe" />
                 <div className="set-hint" role="note">{pathHintForProvider(draft.provider || agent.provider)}</div>
                 <div className="set-preset-row">
-                  <button className="ps-btn sm" type="button" onClick={() => pickExecutable().then(path => { if (path) setDraft(d => ({ ...d, exe: path })) })}>选择可执行文件</button>
-                  <input className="set-input" value={draft.provider} onChange={event => setDraft({ ...draft, provider: event.target.value })} placeholder="provider（可空）" aria-label="Agent provider" />
+                  <button className="ps-btn sm" type="button" onClick={() => pickExecutable().then(path => { if (path) patchDraft(d => ({ ...d, exe: path })) })}>选择可执行文件</button>
+                  <input className="set-input" value={draft.provider} onChange={event => patchDraft(d => ({ ...d, provider: event.target.value }))} placeholder="provider（可空）" aria-label="Agent provider" />
                 </div>
-                <ArgumentListEditor args={draft.args} label={agent.id} onChange={args => setDraft({ ...draft, args, argsKnown: true })} />
+                <ArgumentListEditor args={draft.args} label={agent.id} onChange={args => patchDraft(d => ({ ...d, args, argsKnown: true }))} />
                 <InvocationPreview executable={draft.exe} args={draft.args} effectiveArgs={[...draft.args, ...draft.effectiveSuffix]} />
               </div>
             )}
 
             {testResult[agent.id] && <div className="set-hint" role="status">{testResult[agent.id]}</div>}
+            {isEditing && draftLaunchPlan?.argv && (
+              <div className="set-hint" role="note">{`启动计划：${draftLaunchPlan.argv.join(' ')}（env 值已隐藏）`}</div>
+            )}
 
             <div className="set-preset-row">
               {isEditing ? (
                 <>
-                  <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={() => saveEdit(agent.id)}>{savingId === agent.id ? '保存中…' : '保存'}</button>
+                  <button className="ps-btn sm primary" type="button" disabled={savingId !== null || draftMachine.phase === 'testing'} onClick={() => saveEdit(agent.id)}>{savingId === agent.id ? '保存中…' : '保存'}</button>
                   <button className="ps-btn sm" type="button" disabled={testingId !== null || savingId !== null} onClick={() => void testDraftConnection(agent.id)}>{testingId === agent.id ? '测试中…' : '先测试连接'}</button>
-                  <button className="ps-btn sm" type="button" disabled={savingId !== null} onClick={() => setEditingId(null)}>取消</button>
+                  {draftMachine.phase === 'testing' && (
+                    <button className="ps-btn sm" type="button" onClick={cancelDraftTest}>取消验证</button>
+                  )}
+                  <button className="ps-btn sm" type="button" disabled={savingId !== null || draftMachine.phase === 'testing'} onClick={() => { setEditingId(null); setDraftMachine(initialAgentDraftState()) }}>取消</button>
                 </>
               ) : (
                 <button className="ps-btn sm" type="button" disabled={savingId !== null} onClick={() => startEdit(agent)}>编辑</button>
@@ -685,6 +791,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
             <button className="ps-btn sm" type="button" onClick={() => setShowCreate(true)}>手动添加</button>
           </div>
         )}
+        <AgentInstallStatusList preflight={detectionPreflight} />
         {candidates.map(candidate => {
           const discoveredDraft = candidateDrafts[candidate.candidateId] ?? candidateDraft(candidate)
           const validation = candidateValidation[candidate.candidateId]

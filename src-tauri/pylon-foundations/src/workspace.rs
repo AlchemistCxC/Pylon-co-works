@@ -907,7 +907,7 @@ mod tests {
             !paths.iter().any(|p| p.contains(".hidden")),
             "隐藏文件不得进入"
         );
-        assert!(!paths.iter().any(|p| *p == "binary.bin"), "二进制不得命中");
+        assert!(!paths.contains(&"binary.bin"), "二进制不得命中");
         let main_hits: Vec<_> = found.iter().filter(|r| r.path == "src/main.ts").collect();
         assert_eq!(main_hits.len(), 2, "多行命中逐行计（{main_hits:?}）");
         assert_eq!(main_hits[0].line, 1);
@@ -967,7 +967,7 @@ mod tests {
         assert!(long.line_text.chars().count() <= 500, "单行返回必须截断");
         let pairs: Vec<_> = found.iter().map(|r| (r.path.as_str(), r.line)).collect();
         let mut sorted = pairs.clone();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        sorted.sort_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(&b.1)));
         assert_eq!(pairs, sorted, "输出必须稳定排序");
     }
 

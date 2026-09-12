@@ -340,10 +340,12 @@ async fn shutdown_timeout_escalates_to_tree_kill() {
     let base = temp("timeout-kill");
     let app = app_for(&base);
     let supervisor = app.state::<crate::AppState>().plugin_processes.clone();
-    let mut options = PluginProcessOptions::default();
-    options.shutdown = ShutdownOptions {
-        method: ShutdownMethod::JsonRpc,
-        timeout_ms: 100,
+    let options = PluginProcessOptions {
+        shutdown: ShutdownOptions {
+            method: ShutdownMethod::JsonRpc,
+            timeout_ms: 100,
+        },
+        ..Default::default()
     };
     let descriptor = supervisor
         .spawn(
@@ -385,11 +387,13 @@ async fn on_failure_restart_replaces_generation_and_recovers_rpc() {
     let base = temp("restart");
     let app = app_for(&base);
     let supervisor = app.state::<crate::AppState>().plugin_processes.clone();
-    let mut options = PluginProcessOptions::default();
-    options.restart = RestartOptions {
-        policy: RestartPolicy::OnFailure,
-        max_attempts: 1,
-        backoff_ms: 20,
+    let options = PluginProcessOptions {
+        restart: RestartOptions {
+            policy: RestartPolicy::OnFailure,
+            max_attempts: 1,
+            backoff_ms: 20,
+        },
+        ..Default::default()
     };
     let descriptor = supervisor
         .spawn(

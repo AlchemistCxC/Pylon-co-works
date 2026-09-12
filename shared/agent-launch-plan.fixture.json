@@ -1,0 +1,113 @@
+{
+  "note": "P71(A2) launch plan golden fixture. Cross-language intent: this file is the inspectable baseline for plan_launch — the exact argv ORDER, cwd, env additions and redaction behaviour of each existing provider. Consumed by src-tauri/pylon-core/src/agent_launch_plan.rs tests via include_str!, so a behaviour change to any listed case fails the suite with a diff instead of passing silently.",
+  "cases": [
+    {
+      "name": "peri catalog recipe, nothing configured",
+      "provider": "peri",
+      "detection": { "acpPresent": true },
+      "overrides": {},
+      "expected": {
+        "executable": "peri",
+        "args": ["acp"],
+        "cwd": null,
+        "env": [],
+        "source": "catalogRecipe",
+        "diagnosticCodes": ["catalog-recipe"]
+      }
+    },
+    {
+      "name": "hermes explicit override keeps argv order (structured model + acp args)",
+      "provider": "hermes",
+      "detection": { "acpPresent": true },
+      "overrides": {
+        "executable": "hermes",
+        "args": ["acp", "--model", "gpt-5", "--verbose"],
+        "env": [["HERMES_HOME", "F:/H/profiles/a"]]
+      },
+      "expected": {
+        "executable": "hermes",
+        "args": ["acp", "--model", "gpt-5", "--verbose"],
+        "cwd": null,
+        "env": [["HERMES_HOME", "F:/H/profiles/a"]],
+        "source": "explicit",
+        "diagnosticCodes": ["explicit-override", "env-applied"]
+      }
+    },
+    {
+      "name": "claude-code wrapper keeps its ACP entry, native CLI absent is only a diagnostic",
+      "provider": "claude-code",
+      "detection": { "acpPresent": true, "nativePresent": false },
+      "overrides": { "executable": "ccb", "args": ["--acp"] },
+      "expected": {
+        "executable": "ccb",
+        "args": ["--acp"],
+        "cwd": null,
+        "env": [],
+        "source": "explicit",
+        "diagnosticCodes": ["explicit-override", "native-cli-not-found"]
+      }
+    },
+    {
+      "name": "codex wrapper uses the adapter entry with no arguments (vendor CLI present, so no diagnostic)",
+      "provider": "codex",
+      "detection": { "acpPresent": false, "nativePresent": true },
+      "overrides": {},
+      "expected": {
+        "executable": "codex-acp",
+        "args": [],
+        "cwd": null,
+        "env": [],
+        "source": "catalogRecipe",
+        "diagnosticCodes": ["catalog-recipe"]
+      }
+    },
+    {
+      "name": "detection-resolved absolute path wins over the catalog command name",
+      "provider": "peri",
+      "detection": { "acpPresent": true, "resolvedExecutable": "C:/tools/peri.exe" },
+      "overrides": {},
+      "expected": {
+        "executable": "C:/tools/peri.exe",
+        "args": ["acp"],
+        "cwd": null,
+        "env": [],
+        "source": "catalogRecipe",
+        "diagnosticCodes": ["catalog-recipe"]
+      }
+    },
+    {
+      "name": "cwd and env additions are applied in deterministic name order with values withheld from diagnostics",
+      "provider": "hermes",
+      "detection": { "acpPresent": true },
+      "overrides": {
+        "executable": "hermes",
+        "args": ["acp"],
+        "cwd": "G:/workspace",
+        "env": [["PYLON_ZULU", "z"], ["ANTHROPIC_API_KEY", "sk-must-not-leak"], ["PYLON_ALPHA", "a"]]
+      },
+      "expected": {
+        "executable": "hermes",
+        "args": ["acp"],
+        "cwd": "G:/workspace",
+        "env": [
+          ["ANTHROPIC_API_KEY", "sk-must-not-leak"],
+          ["PYLON_ALPHA", "a"],
+          ["PYLON_ZULU", "z"]
+        ],
+        "source": "explicit",
+        "diagnosticCodes": [
+          "explicit-override",
+          "cwd-applied",
+          "env-applied",
+          "env-applied",
+          "env-applied"
+        ],
+        "diagnosticMessages": [
+          "env ANTHROPIC_API_KEY applied (secret value withheld)",
+          "env PYLON_ALPHA applied (value withheld)",
+          "env PYLON_ZULU applied (value withheld)"
+        ]
+      }
+    }
+  ]
+}
