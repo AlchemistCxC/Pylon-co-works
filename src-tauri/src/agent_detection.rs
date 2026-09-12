@@ -47,6 +47,10 @@ pub(crate) async fn detect_agent_runtimes(
             )
         })
         .collect();
+    let detector_ids = detector_ids.map(|ids| {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter().filter(|id| seen.insert(id.clone())).collect()
+    });
     let report = detection_core::detect_agent_runtime_candidates_inner(
         detection_core::AgentDetectionOptions {
             detector_ids,
