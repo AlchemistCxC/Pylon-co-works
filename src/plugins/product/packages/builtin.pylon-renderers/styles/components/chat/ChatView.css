@@ -167,6 +167,14 @@
   pointer-events:auto;
   transition-delay:0s;
 }
+/* A collapsed reasoning region is a grid item while its open animation runs.
+   Give every layer an explicit inline-size/min-size contract: without it the
+   grid item's automatic min-content sizing can win during a live text update,
+   briefly measuring the body as a narrow column.  The streaming Markdown tail
+   then keeps that bad width until a later full mount (for example after a
+   restart), producing the characteristic few-characters-per-line fracture. */
+.term-collapse,
+.term-collapse-content { width:100%; min-width:0; }
 .term-collapse-content { min-height:0; overflow:hidden; }
 .app[data-interface-mode="terminal-like"]:not([data-presentation-profile="builtin.presentation.terminal-classic"]) :is(.term-tool-head,.term-diff-head,.task-tree-summary)[aria-expanded]::after {
   content:'›';
@@ -2145,7 +2153,12 @@
   flex:1 1 0;
   width:0;
 }
-.term-reasoning-body { min-width:0; width:100%; }
+.term-reasoning-body {
+  box-sizing:border-box;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+}
 .term-spinner-row .spinner-frame {
   flex:0 0 var(--dot-col-width,var(--agent-marker-col,1.6em));
   width:var(--dot-col-width,var(--agent-marker-col,1.6em));
