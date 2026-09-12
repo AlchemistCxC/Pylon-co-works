@@ -13,6 +13,7 @@ import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
+import { agentAdvertisedModelEntries } from './agentAdvertisedModels.ts'
 import { AgentWorkbenchLifecycle } from './agentWorkbenchLifecycle.ts'
 
 export interface WorkbenchFatalFailure {
@@ -121,6 +122,15 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const presentationProfiles = getPresentationProfileRegistry()
   const rendererSettingOptions = getPluginSettingOptionsRegistry()
   const catalog = useSyncExternalStore(subscribeRendererCatalog, getRendererCatalogSnapshot, getRendererCatalogSnapshot)
+  // Issue #53: the empty-state model dropdown needs the owning agent's
+  // advertised model set (its sessionConfig buckets). Subscribe here, outside
+  // the renderer subtree, and hand the result down as plain mount-input data.
+  const sheetAgentId = props.sheet.agentId || useIdentityStore.getState().activeAgent
+  const agentAdvertisedModels = useSyncExternalStore(
+    useRuntimeStore.subscribe,
+    () => agentAdvertisedModelEntries(sheetAgentId),
+    () => agentAdvertisedModelEntries(sheetAgentId),
+  )
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
     workspaceMode: props.workspaceMode, replayReadonly: props.isReplay,
@@ -131,7 +141,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     workspaceLabel: workspace?.name ?? workspaceLabel(session?.workdir),
     workspacePath: workspace?.rootPath ?? session?.workdir,
     availableWorkspaces: workspaces.map(item => ({ id: item.id, label: item.name, path: item.rootPath, lastActiveAt: item.lastActiveAt })),
-  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet])
+    agentAdvertisedModels,
+  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet, agentAdvertisedModels])
   const activation = useMemo(() => {
     try {
       return resolveRendererActivation(catalog, {
