@@ -69,13 +69,14 @@ flowchart TB
       IMODEREG[InterfaceModeRegistry]
     end
 
-    subgraph PRODUCT[六个第一方 Product Plugin 包 + 可选 Kernel Skin]
+    subgraph PRODUCT[七个第一方 Product Plugin 包 + 可选 Kernel Skin]
       PTOOLS[builtin.pylon-tools<br/>tool-provider]
       PADAPTERS[builtin.pylon-agent-adapters<br/>agent-adapter]
       PRENDERERS[builtin.pylon-renderers<br/>renderer]
       PWORKSPACE[builtin.pylon-workspace<br/>workspace]
       PSHELL[builtin.pylon-shell<br/>shell]
       PMANAGER[builtin.pylon-plugin-manager<br/>feature · api 1.2<br/>capability: plugin.management]
+      PGATEWAY[builtin.pylon-gateway<br/>workspace]
       PSKIN[builtin.skin<br/>Kernel skin command plugin]
     end
 
@@ -228,6 +229,7 @@ flowchart TB
   COMPOSE --> PWORKSPACE
   COMPOSE --> PSHELL
   COMPOSE --> PMANAGER
+  COMPOSE --> PGATEWAY
   COMPOSE --> PSKIN
   PSHELL -->|register application/commands/styles| APPREG
   PSHELL --> CMDREG
@@ -247,6 +249,7 @@ flowchart TB
   PWORKSPACE --> CTXREG
   PWORKSPACE --> SERVREG
   PWORKSPACE --> CMDREG
+  PGATEWAY --> WORKREG
   PSKIN --> HOOKREG
   PMANAGER -->|registerPage 增强面板| SETPAGEREG
   PMANAGER -->|context.management 只读+管理操作| MGMTAPI
@@ -408,7 +411,7 @@ flowchart TB
 | 唯一 Plugin Runtime | `src/plugin-runtime/pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginActivationContext.ts` |
 | 原子 contribution 更新 | `src/plugin-runtime/shadowUpdate.ts`、`registry/reactiveRegistry.ts`、`registry/registryBatch.ts` |
 | Registries | `src/plugin-runtime/runtimeServices.ts`、`pluginHostServices.ts` |
-| 六个 Product Plugin | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
+| 七个 Product Plugin（P77 起含 builtin.pylon-gateway） | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
 | 当前 Renderer/完整 Workbench 原型 | `src/plugin-runtime/renderers/*`、`interface-mode/*`、`ui/*`、`src/sheets/AgentSheetView.tsx` |
 | 当前 Solid | `src/renderers/solid-workbench/*` |
 | canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |

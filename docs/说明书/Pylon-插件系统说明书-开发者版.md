@@ -20,7 +20,7 @@ KernelBootstrap（starting / ready / degraded / safe-mode）
         │ 显式 bootstrap / retry
         ▼
 pluginCompositionRoot（唯一产品 PluginRuntime authority）
-├─ 六个第一方 Product Plugin definitions
+├─ 七个第一方 Product Plugin definitions
 └─ PackageInstallationService / PackagePluginRuntimeService
           ▲
           │

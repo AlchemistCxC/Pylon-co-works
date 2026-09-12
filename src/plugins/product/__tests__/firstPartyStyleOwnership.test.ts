@@ -30,9 +30,9 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css',
-  'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/gateway/GatewaySheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/history/HistorySheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css',
+  'src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css',
   'src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css',
 ] as const
 
@@ -57,8 +57,9 @@ describe('first-party CSS ownership inventory', () => {
       'src/components/kernel/SkinPreviewBar.css',
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(7)
-    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(10)
+    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(9)
     expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(8) // +WorkbenchChrome.css（Solid 壳层过渡态）
+    expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
   })
 
   it('产品 CSS 全部进入 PluginScope，Smoke 不进入生产 owner', () => {

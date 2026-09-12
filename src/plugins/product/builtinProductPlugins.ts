@@ -7,6 +7,7 @@ import renderersPackage from './packages/builtin.pylon-renderers/entry.ts'
 import agentAdaptersPackage from './packages/builtin.pylon-agent-adapters/entry.ts'
 import toolsPackage from './packages/builtin.pylon-tools/entry.ts'
 import pluginManagerPackage from './packages/builtin.pylon-plugin-manager/entry.ts'
+import gatewayPackage from './packages/builtin.pylon-gateway/entry.ts'
 
 const FIRST_PARTY_PRODUCT_PACKAGES: readonly FirstPartyProductPackage[] = Object.freeze([
   shellPackage,
@@ -15,6 +16,7 @@ const FIRST_PARTY_PRODUCT_PACKAGES: readonly FirstPartyProductPackage[] = Object
   agentAdaptersPackage,
   toolsPackage,
   pluginManagerPackage,
+  gatewayPackage,
 ])
 
 function orderByDependencies(packages: readonly FirstPartyProductPackage[]): FirstPartyProductPackage[] {

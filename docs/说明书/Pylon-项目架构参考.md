@@ -50,12 +50,14 @@ flowchart TB
   PR --> Renderers["builtin.pylon-renderers"]
   PR --> Workspace["builtin.pylon-workspace"]
   PR --> Shell["builtin.pylon-shell"]
+  PR --> Gateway["builtin.pylon-gateway"]
 
   Tools --> ToolImpl["domains/tool + plugins/core/commandSet"]
   Agents --> AgentImpl["domains/agent + session creation/state"]
   Renderers --> RendererImpl["React/Solid/isolated renderers"]
   Workspace --> WorkspaceImpl["Sheets + Sidebar + Context Panel"]
   Shell --> App["src/App.tsx"]
+  Gateway --> GatewayImpl["GatewaySheet + 插件包自有样式"]
 
   App --> Identity["identityStore / userDataRepository"]
   App --> Chat["canonical feed / workbench session lifecycle"]
@@ -126,7 +128,7 @@ sequenceDiagram
   Main->>Kernel: render
   Kernel->>Composition: 调用显式 bootstrap action
   Composition->>Runtime: 构造唯一 product runtime
-  loop 六个第一方插件
+  loop 七个第一方插件
     Composition->>Runtime: 按依赖图异步 activate
   end
   Shell->>Runtime: register Application contribution
@@ -164,8 +166,9 @@ flowchart LR
 | `builtin.pylon-workspace` | Workspace、Sidebar、Context Panel、Search、Export、Projector |
 | `builtin.pylon-shell` | 根 Application、Shell commands、Shell CSS |
 | `builtin.pylon-plugin-manager` | 插件管理面板（P53 起“设置 → 插件”默认页）：安装/启用/Shadow Update 诊断与能力授权卡；声明 `plugin.management` capability，不依赖其他产品包 |
+| `builtin.pylon-gateway` | Gateway sheet 注册与插件包自有样式（P77 起自 core/workspace 包代管迁入）；Rust GatewayCore 仍在 Kernel |
 
-当前约束：尽量保留这六个包的构造。Kernel 加固优先通过稳定 seam、结构化状态和 adapter 收拢业务，不先做目录搬家。
+当前约束：尽量保留这七个包的构造。Kernel 加固优先通过稳定 seam、结构化状态和 adapter 收拢业务，不先做目录搬家。
 
 ## 8. Session 与 canonical event 数据流
 
@@ -387,7 +390,7 @@ D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../
 
 ## 15. 已完成的加固顺序
 
-以下顺序已经在不改变第一方 Product Plugin 粗粒度构造的前提下完成（五个基础包；第六个 `builtin.pylon-plugin-manager` 由 P53 增补），可作为提交历史与回归定位顺序：
+以下顺序已经在不改变第一方 Product Plugin 粗粒度构造的前提下完成（五个基础包；第六个 `builtin.pylon-plugin-manager` 由 P53 增补；第七个 `builtin.pylon-gateway` 由 P77 增补），可作为提交历史与回归定位顺序：
 
 1. 统一 Session durable identity，修复 state 写读契约。
 2. 建立 DB readiness 与 retryable initialization 状态。
@@ -465,7 +468,7 @@ cargo test --manifest-path src-tauri/pylon-foundations/Cargo.toml
 
 只有命中以下任一条件才进行全量架构复核：
 
-- Kernel、Plugin Runtime、六个 Product Plugin 的 ownership 被重新定义。
+- Kernel、Plugin Runtime、七个 Product Plugin 的 ownership 被重新定义。
 - 启动 composition root 或应用入口被替换。
 - canonical event、Session identity 或持久化权威模型被更改。
 - SQLite schema 发生破坏性升级或引入第二持久化引擎。

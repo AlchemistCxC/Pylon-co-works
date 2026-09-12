@@ -3,7 +3,7 @@ import { loadFirstPartyProductPackages, createBuiltinProductPluginDefinitions } 
 import { readPluginContributionFacts } from '../../../plugin-runtime/management/pluginContributionProjection.ts'
 
 describe('sixth first-party package (builtin.pylon-plugin-manager)', () => {
-  it('loads six product packages in dependency order with the manager last', () => {
+  it('loads seven product packages in dependency order with the gateway last (P77)', () => {
     const packages = loadFirstPartyProductPackages()
     expect(packages.map(pkg => pkg.manifest.id)).toEqual([
       'builtin.pylon-workspace',
@@ -12,6 +12,7 @@ describe('sixth first-party package (builtin.pylon-plugin-manager)', () => {
       'builtin.pylon-agent-adapters',
       'builtin.pylon-shell',
       'builtin.pylon-plugin-manager',
+      'builtin.pylon-gateway',
     ])
   })
 
