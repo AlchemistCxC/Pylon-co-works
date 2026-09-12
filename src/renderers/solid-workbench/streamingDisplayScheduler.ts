@@ -30,7 +30,7 @@ export interface StreamingDisplaySchedulerOptions {
 export interface StreamingDisplayScheduler {
   /** Offer the newest raw runtime snapshot (latest target wins). */
   push(snapshot: WorkbenchRuntimeSnapshot): void
-  /** Publish the complete target immediately, discarding display backlog. */
+  /** Publish the complete target immediately, or retain it until resume if paused. */
   flush(snapshot?: WorkbenchRuntimeSnapshot): void
   /** Stop timer work while retaining the latest target/display state. */
   pause(): void
@@ -122,7 +122,7 @@ export function createStreamingDisplayScheduler(
   let disposed = false
   let lastPublishedAt = Number.NEGATIVE_INFINITY
   let lastTickAt = now()
-  let terminalFlushQueued = false
+  let terminalFlushToken: object | undefined
 
   const clearTimer = () => {
     if (timer === undefined) return
@@ -132,6 +132,8 @@ export function createStreamingDisplayScheduler(
 
   const publishSnapshot = (snapshot: WorkbenchRuntimeSnapshot, timestamp = now()) => {
     if (disposed) return
+    // A synchronous flush or owner switch supersedes an older queued terminal.
+    terminalFlushToken = undefined
     displayed = snapshot
     lastPublishedAt = timestamp
     lastTickAt = timestamp
@@ -172,8 +174,8 @@ export function createStreamingDisplayScheduler(
       // `interpolateSnapshot` uses target's non-text fields. Once all text has
       // caught up, publish the original object to restore every canonical part
       // and preserve reference identity for unaffected consumers.
-      if (displayed !== target) publishSnapshot(target, timestamp)
       clearTimer()
+      if (displayed !== target) publishSnapshot(target, timestamp)
       return
     }
 
@@ -184,6 +186,7 @@ export function createStreamingDisplayScheduler(
   const push = (snapshot: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
     snapshot = cohereDisplaySnapshot(snapshot)
+    if (paused) { target = snapshot; return }
     if (displayed !== undefined) snapshot = preserveDisplayedPrefix(displayed, snapshot)
     target = snapshot
     if (displayed === undefined) {
@@ -218,7 +221,8 @@ export function createStreamingDisplayScheduler(
     if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
     if (target === undefined) return
     clearTimer()
-    publishSnapshot(target)
+    terminalFlushToken = undefined
+    if (!paused) publishSnapshot(target)
   }
 
   // Canonical projection and legacy generation metadata can arrive back to
@@ -226,10 +230,11 @@ export function createStreamingDisplayScheduler(
   // current microtask; explicit flush() and structural session switches remain
   // synchronous so a completed response is never visibly truncated.
   function queueTerminalFlush(): void {
-    if (terminalFlushQueued || disposed) return
-    terminalFlushQueued = true
+    if (terminalFlushToken !== undefined || disposed) return
+    const token = terminalFlushToken = {}
     queueMicrotask(() => {
-      terminalFlushQueued = false
+      if (terminalFlushToken !== token) return
+      terminalFlushToken = undefined
       if (disposed || paused || target === undefined) return
       clearTimer()
       publishSnapshot(target)
@@ -239,6 +244,7 @@ export function createStreamingDisplayScheduler(
   const pause = () => {
     if (disposed) return
     paused = true
+    terminalFlushToken = undefined
     clearTimer()
   }
 
@@ -252,6 +258,7 @@ export function createStreamingDisplayScheduler(
   const dispose = () => {
     if (disposed) return
     disposed = true
+    terminalFlushToken = undefined
     clearTimer()
     target = undefined
     displayed = undefined
@@ -276,9 +283,12 @@ function preserveDisplayedPrefix(
     || displayed.generation !== next.generation
     || displayed.turnEpoch !== next.turnEpoch) return next
   const messages = preserveMessagePrefixes(displayed.messages, next.messages)
-  const document = displayed.document && next.document
-    ? { ...next.document, messages: preserveMessagePrefixes(displayed.document.messages, next.document.messages) as WorkbenchDocument['messages'] }
-    : next.document
+  const documentMessages = displayed.document && next.document
+    ? preserveMessagePrefixes(displayed.document.messages, next.document.messages)
+    : next.document?.messages
+  const document = next.document && documentMessages !== next.document.messages
+    ? { ...next.document, messages: documentMessages as WorkbenchDocument['messages'] } : next.document
+  if (messages === next.messages && document === next.document) return next
   return {
     ...next,
     messages,
@@ -290,13 +300,17 @@ function preserveMessagePrefixes<T extends DisplayMessage>(
   displayed: readonly T[],
   next: readonly T[],
 ): readonly T[] {
+  if (displayed === next) return next
   const displayedById = new Map(displayed.map(message => [message.id, message]))
-  return next.map(message => {
+  let corrected: T[] | undefined
+  next.forEach((message, index) => {
     const previous = displayedById.get(message.id)
-    if (!previous || previous.role !== message.role || !message.running || message.content.length >= previous.content.length) return message
-    if (!previous.content.startsWith(message.content)) return message
-    return previous
+    if (!previous || previous.role !== message.role || !message.running || message.content.length >= previous.content.length) return
+    if (!previous.content.startsWith(message.content)) return
+    corrected ??= [...next]
+    corrected[index] = previous
   })
+  return corrected ?? next
 }
 
 function isTerminalTransition(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
@@ -364,6 +378,7 @@ function hasNonPrefixMessageChange<T extends DisplayMessage>(
   current: readonly T[],
   next: readonly T[],
 ): boolean {
+  if (current === next) return false
   const currentById = new Map(current.map(message => [message.id, message]))
   for (const message of next) {
     const previous = currentById.get(message.id)
@@ -382,6 +397,7 @@ function messageShapeRequiresReset<T extends DisplayMessage>(
   current: readonly T[],
   next: readonly T[],
 ): boolean {
+  if (current === next) return false
   if (next.length < current.length) return true
   for (let index = 0; index < current.length; index += 1) {
     const previous = current[index]
@@ -403,6 +419,7 @@ function messageListHasPendingGrowth<T extends DisplayMessage>(
   current: readonly T[],
   next: readonly T[],
 ): boolean {
+  if (current === next) return false
   const currentById = new Map(current.map(message => [message.id, message]))
   for (const message of next) {
     if (!isStreamMessage(message)) continue
@@ -455,6 +472,7 @@ function interpolateMessageList<T extends DisplayMessage>(
   target: readonly T[],
   budget: number,
 ): MessageProgress<T> {
+  if (current === target) return { messages: target, pending: false }
   const currentById = new Map(current.map(message => [message.id, message]))
   let pending = false
   const messages = target.map(message => {

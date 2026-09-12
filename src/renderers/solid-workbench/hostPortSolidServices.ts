@@ -150,17 +150,18 @@ function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
       // combined snapshot without duplicate renders when both readers share a
       // runtime implementation.
       let queued = false
+      let active = true
       const notify = () => {
-        if (queued) return
+        if (!active || queued) return
         queued = true
         queueMicrotask(() => {
           queued = false
-          listener()
+          if (active) listener()
         })
       }
       const unsubscribeDocument = host.document.subscribe(notify)
       const unsubscribeGeneration = host.generation.subscribe(notify)
-      return () => { unsubscribeDocument(); unsubscribeGeneration() }
+      return () => { active = false; unsubscribeDocument(); unsubscribeGeneration() }
     },
     getSlice: name => slice(name) as never,
     subscribeSlice: (name, listener) => name === 'capabilities'

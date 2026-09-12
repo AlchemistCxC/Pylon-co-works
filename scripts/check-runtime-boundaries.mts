@@ -25,7 +25,6 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/application/transactions/openOwnedSessionTransaction.ts',
   'src/cli/pylonCliBridge.ts',
   'src/cli/pylonCliDomainPorts.ts',
-  'src/components/chat/ModeWidget.tsx',
   'src/components/chat/sessionMode.ts',
   'src/components/chat/sessionModel.ts',
   'src/components/chat/streamingSend.ts',

@@ -15,6 +15,18 @@ export interface RegisteredHookDefinition<TEvent = unknown> extends HookDefiniti
   hookName: HookName
 }
 
+function normalizeHook<TEvent>(hookName: HookName, definition: HookDefinition<TEvent>): RegisteredHookDefinition<TEvent> {
+  if (!definition.id) throw new Error('Hook id 不能为空')
+  return Object.freeze({
+    ...definition,
+    hookName,
+    priority: definition.priority ?? 1000,
+    execution: definition.execution ?? 'blocking',
+    timeoutMs: definition.timeoutMs ?? 3000,
+    failurePolicy: definition.failurePolicy ?? 'continue',
+  })
+}
+
 export class HookRegistry {
   private readonly registry = new ReactiveRegistryStore<RegisteredHookDefinition>()
 
@@ -23,15 +35,7 @@ export class HookRegistry {
     hookName: HookName,
     definition: HookDefinition<TEvent>,
   ): AsyncDisposable {
-    if (!definition.id) throw new Error('Hook id 不能为空')
-    const registered: RegisteredHookDefinition<TEvent> = Object.freeze({
-      ...definition,
-      hookName,
-      priority: definition.priority ?? 1000,
-      execution: definition.execution ?? 'blocking',
-      timeoutMs: definition.timeoutMs ?? 3000,
-      failurePolicy: definition.failurePolicy ?? 'continue',
-    })
+    const registered = normalizeHook(hookName, definition)
     return this.registry.register(owner, registered as RegisteredHookDefinition, {
       contributionId: `${owner.key}:${hookName}:${definition.id}`,
       priority: registered.priority,
@@ -45,15 +49,7 @@ export class HookRegistry {
     const transaction = this.registry.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     return {
       register: <TEvent>(hookName: HookName, definition: HookDefinition<TEvent>) => {
-        if (!definition.id) throw new Error('Hook id 不能为空')
-        const registered: RegisteredHookDefinition<TEvent> = Object.freeze({
-          ...definition,
-          hookName,
-          priority: definition.priority ?? 1000,
-          execution: definition.execution ?? 'blocking',
-          timeoutMs: definition.timeoutMs ?? 3000,
-          failurePolicy: definition.failurePolicy ?? 'continue',
-        })
+        const registered = normalizeHook(hookName, definition)
         return transaction.register(registered as RegisteredHookDefinition, {
           contributionId: `${owner.key}:${hookName}:${definition.id}`,
           priority: registered.priority,

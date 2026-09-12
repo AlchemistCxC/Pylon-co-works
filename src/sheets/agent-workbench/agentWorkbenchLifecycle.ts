@@ -29,7 +29,7 @@ import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
-import { runSessionPreflight } from '../../plugins/core/sessionCreation/sessionPreflight.ts'
+import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { ReplayLoadCoordinator } from '../../components/chat/chatReplayCoordinator.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
@@ -142,17 +142,11 @@ export class AgentWorkbenchLifecycle {
     // OWNER-02：new_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     try {
-      const preflight = await runSessionPreflight(session)
-      const response = await sessionClient.newSession({
-        agentId: session.agentId,
-        profileId: session.profileId,
-        source: session.source,
+      const response = await requestNewSession(session, sessionClient, () => ({
         persona,
-        cwd: session.workdir || undefined,
         workspaceId: session.workspaceId || undefined,
         model: useIdentityStore.getState().profiles.find(p => p.id === session.profileId)?.model || undefined,
-        ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
-      })
+      }))
       if (this.loadGenerations.get(session.source) !== loadGeneration || !isCurrent()) return
       const res = sessionResponseObject(response)
       const periId = res.sessionId ?? res.periId

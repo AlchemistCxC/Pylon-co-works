@@ -1,7 +1,7 @@
 /**
  * approvalMode — 全局审批模式纯域（P0-04）。
  *
- * ModeWidget 明确改为 approval mode widget：循环值限定 bypass/auto/edit/default，
+ * 全局 approval mode 的循环值限定 bypass/auto/edit/default，
  * invoke set_approval_mode（契约 §2.3，无 source 参数——全局）。运行时值存
  * runtimeStore，最近一次成功设置同时写入本地持久化边界；失败回滚显示值。session mode（plan/code）由
  * slash command/sessionMode 链消费 set_mode，本域不混用。
