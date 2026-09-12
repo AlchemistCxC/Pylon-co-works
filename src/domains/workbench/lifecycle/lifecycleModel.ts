@@ -106,14 +106,14 @@ export function normalizeNormalizedError(raw: unknown, depth = 0): NormalizedErr
 
 function normalizeRecoverability(value: unknown, retryable?: unknown): Recoverability {
   const candidates: readonly Recoverability[] = ['retry', 'fallback', 'reload-plugin', 'reimport', 'none']
-  const text_ = text(value)?.trim().toLowerCase()
-  return candidates.find(candidate => candidate === text_) ?? (retryable === true ? 'retry' : 'none')
+  const normalizedValue = text(value)?.trim().toLowerCase()
+  return candidates.find(candidate => candidate === normalizedValue) ?? (retryable === true ? 'retry' : 'none')
 }
 
 function normalizeErrorPhase(value: unknown): ErrorPhase | undefined {
   const candidates: readonly ErrorPhase[] = ['resolve', 'prepare', 'mount', 'update', 'switch', 'action', 'destroy', 'settings-migrate']
-  const text_ = text(value)?.trim().toLowerCase()
-  return candidates.find(candidate => candidate === text_)
+  const normalizedValue = text(value)?.trim().toLowerCase()
+  return candidates.find(candidate => candidate === normalizedValue)
 }
 
 // —— 当前态 ——

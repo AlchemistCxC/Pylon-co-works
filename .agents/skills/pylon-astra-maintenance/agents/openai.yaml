@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pylon Astra 分块维护"
+  short_description: "面向 Astra 的 Pylon 分块重构、命名规范、模块边界与多人协作验收"
+  default_prompt: "使用 $pylon-astra-maintenance 核对当前 Pylon 分支，按职责实施模块化和命名改进，并保留可复现的验证与交接记录。"

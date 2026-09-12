@@ -1,5 +1,5 @@
 // eslint flat config（ESLint 9 + typescript-eslint + react-hooks）
-// 目标：抓未使用变量 / React hooks 违规 / 未定义引用；不做风格警察。
+// 目标：抓未使用变量 / React hooks 违规 / 未定义引用，并约束内部绑定命名。
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
@@ -21,6 +21,12 @@ export default tseslint.config(
       'no-empty': ['error', { allowEmptyCatch: true }],
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
+      // Only internal bindings: wire / storage properties and destructured keys retain their contracts.
+      '@typescript-eslint/naming-convention': ['error',
+        { selector: 'variable', modifiers: ['destructured'], format: null },
+        { selector: 'variable', format: ['camelCase', 'PascalCase', 'UPPER_CASE'], leadingUnderscore: 'allow' },
+        { selector: 'parameter', format: ['camelCase', 'PascalCase'], leadingUnderscore: 'allow' },
+      ],
     },
   },
   {

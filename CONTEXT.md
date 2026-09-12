@@ -4,6 +4,8 @@ Pylon 是以 ACP 连接多个本地 Agent runtime 的桌面工作台；配置实
 
 项目结构、Kernel/插件层归属、关键调用链与定向阅读入口见 [`docs/说明书/Pylon-项目架构参考.md`](docs/说明书/Pylon-项目架构参考.md)。后续任务默认先读该文档并做局部核验，不重新进行全量架构侦察。
 
+分块维护时先看 [模块维护地图](docs/说明书/Pylon-模块维护地图.md) 与 [开发与协作规范](docs/说明书/Pylon-开发与协作规范.md)：目录归属由可执行清单核对，命名和协作规则随代码维护。
+
 Kernel 加固的已确认产品决策、问题编号与施工进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../Docs/Archive/Pylon-Kernel-施工台账.md)。
 
 ## Agent language
