@@ -15,7 +15,7 @@ for line in sys.stdin:
     result={}
     error=None
     if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'resume':{}}}} if method_to_wait == 'session/resume' else {}
+        result={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}} if method_to_wait == 'session/resume' else {'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
     elif method.startswith('session/'):
         seen.append(method)
         if method == method_to_wait:
@@ -77,7 +77,9 @@ for line in sys.stdin:
     request = json.loads(line)
     response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     method = request.get('method')
-    if method == 'session/new':
+    if method == 'initialize':
+        response['result'] = {'agentCapabilities': {'sessionCapabilities': {'loadSession': {}}}}
+    elif method == 'session/new':
         response['result'] = {'sessionId':'newly-created'}
     elif method == 'session/load':
         response['result'] = {'sessionId': request['params']['sessionId']}
@@ -184,7 +186,7 @@ for line in sys.stdin:
     request=json.loads(line); method=request.get('method'); seen.append(method)
     response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}}
     elif method == 'session/resume':
         response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session archived'}}
     elif method == 'session/load':
@@ -228,7 +230,7 @@ for line in sys.stdin:
     request=json.loads(line); method=request.get('method')
     response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}}
     elif method in ('session/resume','session/load'):
         response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session unavailable'}}
     elif method == 'session/new':
@@ -270,7 +272,7 @@ for line in sys.stdin:
     request=json.loads(line); method=request.get('method')
     response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
     if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':True}}}
+        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':True,'loadSession':{}}}}
     elif method == 'session/resume':
         raise SystemExit('malformed boolean capability must not resume')
     elif method == 'session/load':

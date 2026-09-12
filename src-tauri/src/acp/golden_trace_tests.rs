@@ -382,6 +382,36 @@ async fn golden_trace_baseline_generation() {
 /// A5① 追加了两个 wrapper 场景，所以这里断言的是「施工书 8 场景是 SCENARIOS 的
 /// 前缀」而不是「SCENARIOS 就是这 8 个」——前缀断言仍然禁止删改/重排原 8 场景，
 /// 只是允许向后追加（严格程度不降）。
+/// B2 顺序锁定：任何建立会话的场景，wire 上 `initialize` 必须先于 `session/new`。
+/// 这是「session/new 不得绕过 initialize」契约的可观测证据（守卫在
+/// `AcpClient::session_ready`，这里是端到端的第二把锁）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wire_order_locks_initialize_before_session_new() {
+    let records = tokio::time::timeout(Duration::from_secs(30), drive_scenario("prompt"))
+        .await
+        .expect("prompt scenario must not hang")
+        .expect("prompt scenario must succeed");
+    let sent_methods: Vec<&str> = records
+        .iter()
+        .flatten()
+        .filter(|record| record.direction == WireDirection::PylonToAgent)
+        .filter_map(|record| record.method.as_deref())
+        .collect();
+    let initialize_at = sent_methods
+        .iter()
+        .position(|method| *method == "initialize")
+        .expect("initialize must be on the wire");
+    let session_new_at = sent_methods
+        .iter()
+        .position(|method| *method == "session/new")
+        .expect("session/new must be on the wire");
+    assert!(
+        initialize_at < session_new_at,
+        "initialize must precede session/new on the wire, got {sent_methods:?}"
+    );
+    assert_eq!(initialize_at, 0, "initialize must be the first request");
+}
+
 #[test]
 fn golden_trace_scenarios_match_construction_book() {
     assert_eq!(
