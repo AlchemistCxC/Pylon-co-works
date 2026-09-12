@@ -23,7 +23,7 @@ export default tseslint.config(
       '@typescript-eslint/no-empty-object-type': 'off',
       // Only internal bindings: wire / storage properties and destructured keys retain their contracts.
       '@typescript-eslint/naming-convention': ['error',
-        { selector: 'variable', modifiers: ['destructured'], format: null },
+        { selector: ['variable', 'parameter'], modifiers: ['destructured'], format: null },
         { selector: 'variable', format: ['camelCase', 'PascalCase', 'UPPER_CASE'], leadingUnderscore: 'allow' },
         { selector: 'parameter', format: ['camelCase', 'PascalCase'], leadingUnderscore: 'allow' },
       ],

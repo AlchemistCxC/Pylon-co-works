@@ -13,7 +13,7 @@ describe('maintenance module classification', () => {
     expect(moduleFor('src/new-feature/implementation.ts')).toBeUndefined()
   })
   it('keeps vendor, fixtures and test code out of production ownership counts', () => {
-    for (const path of ['src-tauri/vendor/acp/client.rs', 'src/test/setup.ts', 'src/demo/__fixtures__/seed.ts', 'scripts/audit-maintenance.test.mts', 'src-tauri/resources/sdk/pylon-plugin-sdk.js']) {
+    for (const path of ['src-tauri/vendor/acp/client.rs', 'src/test/setup.ts', 'src/demo/__fixtures__/seed.ts', 'scripts/audit-maintenance.test.mts', 'src-tauri/resources/sdk/pylon-plugin-sdk.js', 'src/api.d.ts', 'src/api.d.mts', 'src/api.d.cts']) {
       expect(isMaintainedSource(path)).toBe(false)
     }
     expect(isMaintainedSource('src-tauri/src/session/prompt.rs')).toBe(true)

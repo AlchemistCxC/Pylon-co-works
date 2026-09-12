@@ -38,7 +38,7 @@ export function isMaintainedSource(path: string): boolean {
   return /\.(?:[cm]?[jt]sx?|rs|py|ps1|sh)$/.test(path)
     && !/(?:^|\/)(?:__tests__|__fixtures__|test|tests|vendor|target|node_modules)\//.test(path)
     && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
-    && !/\.d\.ts$/.test(path)
+    && !/\.d\.[cm]?ts$/.test(path)
     && !path.startsWith('src-tauri/resources/')
     && /^(?:src\/|src-tauri\/|scripts\/)/.test(path)
 }
