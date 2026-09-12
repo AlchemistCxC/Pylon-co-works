@@ -6,6 +6,7 @@ import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import type { WorkbenchOptionEntry } from './input/workbenchOptionCatalog.ts'
 export type {
   WorkbenchHostPort,
   WorkbenchCommandPort,
@@ -47,6 +48,12 @@ export interface WorkbenchMountInput {
   readonly workspaceLabel?: string
   readonly workspacePath?: string
   readonly availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
+  /**
+   * Empty-state model candidates advertised by the sheet's owning agent
+   * (its sessionConfig buckets). Host-derived plain data: the renderer
+   * subtree must not import the runtime store itself.
+   */
+  readonly agentAdvertisedModels?: readonly WorkbenchOptionEntry[]
 }
 
 export interface WorkbenchWorkspaceOption {
@@ -97,6 +104,7 @@ export interface SolidWorkbenchInput {
   workspaceLabel?: string
   workspacePath?: string
   availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
+  agentAdvertisedModels?: readonly WorkbenchOptionEntry[]
 }
 
 export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): WorkbenchMountInput {
@@ -115,6 +123,7 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     ...(input.workspaceLabel ? { workspaceLabel: input.workspaceLabel } : {}),
     ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
     ...(input.availableWorkspaces ? { availableWorkspaces: Object.freeze(input.availableWorkspaces.map(item => Object.freeze({ ...item }))) } : {}),
+    ...(input.agentAdvertisedModels ? { agentAdvertisedModels: Object.freeze(input.agentAdvertisedModels.map(item => Object.freeze({ ...item }))) } : {}),
   })
 }
 

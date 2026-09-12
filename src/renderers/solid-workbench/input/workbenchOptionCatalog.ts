@@ -16,11 +16,6 @@ export interface WorkbenchOptionEntry {
 
 export type WorkbenchOptionKind = 'model' | 'mode' | 'reasoning'
 
-export const DEFAULT_MODEL_OPTIONS: readonly WorkbenchOptionEntry[] = Object.freeze([
-  { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
-  { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro' },
-])
-
 /** Broad fallback catalogue. A provider's advertised modes always win. */
 export const DEFAULT_MODE_OPTIONS: readonly WorkbenchOptionEntry[] = Object.freeze([
   { id: 'default', label: '默认' },
@@ -250,14 +245,24 @@ function preferAdvertised(
   return advertised.length > 0 ? advertised : fallback
 }
 
-export function resolveModelOptionEntries(snapshot: WorkbenchRuntimeSnapshot, draft?: string): readonly WorkbenchOptionEntry[] {
+/**
+ * Model candidates come only from advertised surfaces: the live session
+ * snapshot (negotiation response) plus, for the empty-state draft binding, the
+ * owning agent's advertised set (its sessionConfig buckets). When nothing is
+ * advertised there is no candidate list — the hardcoded default catalogue was
+ * removed because it named models the agent never declared.
+ */
+export function resolveModelOptionEntries(
+  snapshot: WorkbenchRuntimeSnapshot,
+  draft?: string,
+  agentAdvertised?: readonly WorkbenchOptionEntry[],
+): readonly WorkbenchOptionEntry[] {
   const advertised = mergeEntries([
     stringsToEntries(snapshot.availableModels),
     documentOptions(snapshot, 'model'),
+    ...(agentAdvertised ? [agentAdvertised] : []),
   ])
-  return mergeEntries([
-    preferAdvertised(advertised, DEFAULT_MODEL_OPTIONS),
-  ], draft || snapshot.activeModel)
+  return mergeEntries([advertised], draft || snapshot.activeModel)
 }
 
 export function resolveModeOptionEntries(snapshot: WorkbenchRuntimeSnapshot, draft?: string): readonly WorkbenchOptionEntry[] {
