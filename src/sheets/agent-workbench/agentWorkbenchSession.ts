@@ -222,6 +222,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     envelope: WorkbenchEventEnvelope
   }>>()
 
+  /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
+   *  source → 该 source 上"仅时钟起点"的 clientMessageId。发送被拒时据此精确撤销，
+   *  不误伤同 source 上由外部客户端 echo 启动的回合（issue #68 配套）。 */
+  const clockOnlyStarts = new Map<string, string>()
+
   const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
     const current = runtime.getSnapshot()
     if (!current.document) {
@@ -268,6 +273,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const entry = turnClocks.get(targetSource)
     if (!entry || entry.terminal) return
     entry.terminal = true
+    // 回合已有终态："仅时钟起点"的记账已完成使命。
+    clockOnlyStarts.delete(targetSource)
     if (source !== targetSource) return
     updateRuntimeState({
       summary: {
@@ -311,11 +318,22 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
 
   function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
-    if (destroyed || source !== targetSource || !boundSessionId) return
+    if (destroyed) return
+    // P52 D3：回合起点属于**发送入口**，不属于 bind。空态创建路径
+    // （ControlCenter.createEmptySession → selectSession → send 同一 tick）下会话已被
+    // 选中但 bind 尚未完成；若在这里因"未绑定"早退，终帧到达时 turnClocks 没有该 source
+    // 的条目，turnClockTerminal 会直接 return ⇒ 终态摘要永不发布（issue #68）。
+    // 故时钟先无条件建立/覆盖；文档投影与快照 patch 仍严格限于已绑定的本 source。
+    const now = Date.now()
+    turnClockStart(targetSource, now)
+    if (targetSource !== source || !boundSessionId) {
+      // 仅时钟起点：文档投影要等 bind 之后由 canonical echo 承担。
+      clockOnlyStarts.set(targetSource, clientMessageId)
+      return
+    }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(targetSource)
     const existing = pendingOptimisticBySource.get(targetSource) ?? []
     if (existing.some(item => item.clientMessageId === clientMessageId)) return
-    const now = Date.now()
     const envelope = createWorkbenchEnvelope({
       eventId: `optimistic:${targetSource}:${clientMessageId}`,
       sessionId: targetSource,
@@ -336,7 +354,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
     pendingOptimisticBySource.set(targetSource, existing)
     turnEpoch += 1
-    turnClockStart(targetSource, now)
     runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
@@ -351,7 +368,16 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   function rejectOptimisticUser(targetSource: string, clientMessageId: string): void {
     const pending = pendingOptimisticBySource.get(targetSource) ?? []
     const rejected = pending.find(item => item.clientMessageId === clientMessageId)
-    if (!rejected) return
+    if (!rejected) {
+      // 空态路径（尚未 bind）没有文档投影可撤：projectOptimisticUser 只记了"仅时钟起点"。
+      // 拒绝时同样必须撤销时钟，否则 bind 后的 reconcileTurnClock 会把从未发出的回合
+      // 复活成常驻 spinner（issue #68 配套）。
+      if (clockOnlyStarts.get(targetSource) === clientMessageId) {
+        clockOnlyStarts.delete(targetSource)
+        turnClockRollback(targetSource)
+      }
+      return
+    }
     const remaining = pending.filter(item => item !== rejected)
     if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
     else pendingOptimisticBySource.delete(targetSource)
@@ -468,7 +494,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
-    if (isUserStart && !echoesOptimistic) turnClockStart(envelope.sessionId, envelopeTime)
+    if (isUserStart && !echoesOptimistic) {
+      // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
+      // （elapsed 从用户发出算起，与已绑定路径一致）。
+      if (!clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
+      clockOnlyStarts.delete(envelope.sessionId)
+    }
     // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
     turnClockTouch(envelope.sessionId, envelopeTime)
     if (loading) { buffered.push(envelope); return }
@@ -739,7 +770,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     destroy() {
       if (destroyed) return
       destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
-      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear()
     },
   }
 }

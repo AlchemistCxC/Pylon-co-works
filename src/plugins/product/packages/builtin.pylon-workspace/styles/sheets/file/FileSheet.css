@@ -1190,6 +1190,16 @@
   line-height: var(--file-code-line-height);
 }
 
+/* issue #69：CodeMirror 的 gutter 列默认按行号内容定宽（vendor 默认 CSS
+   `.cm-gutter { flex-shrink: 0; width: auto }`），不铺满上面这个固定宽度的
+   gutter 盒，行号文字因此比只读态左移约一个右内边距（约 12px）。让列填满盒子
+   后，行号文字右边缘才与 `.file-tab-gutter`（右内边距同为 12px）对齐。
+   不变量：两态行号文字的右内边距必须相等（56px − 12px = 44px）。 */
+.file-code-editor .cm-gutters .cm-gutter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .file-code-editor .cm-lineNumbers .cm-gutterElement {
   box-sizing: border-box;
   line-height: var(--file-code-line-height);
