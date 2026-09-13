@@ -40,7 +40,10 @@ assert.match(view, /\.status\(\)/, '必须经 gateway client 调 gateway_status'
 assert.match(view, /raw as GatewayStatus/, '状态必须 typed 消费')
 assert.match(view, /\.sessions\(\)/, '必须经 gateway client 调 gateway_sessions（Phase 2 接线）')
 assert.match(view, /raw as PlatformSession\[\]/, '平台会话必须 typed 消费')
-assert.match(view, /归 Prism 管理，只读/, 'inject 必须只读提示归 Prism')
+// inject 只读提示曾是源码字面量断言（/归 Prism 管理，只读/），P82 视觉精修把分隔符改成
+// 间隔号即撞红——那条断言管的是文案与标点，不是行为，已删除；只读契约改由渲染层承担：
+// src/sheets/gateway/__tests__/gatewaySheetView.ui.test.tsx「知识注入区只读」
+// （注入事实来自 gateway_status 快照，且区块内不得出现任何可编辑控件）。
 assert.equal(view.includes('rightPanel'), false, 'gateway 无右栏')
 const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', import.meta.url), 'utf8')
 assert.ok(css.length > 0, '必须有样式')

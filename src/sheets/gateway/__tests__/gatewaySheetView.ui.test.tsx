@@ -5,6 +5,9 @@
  *    提交按字段顺序 join ':' 写入 gateway_instance_set_credentials；
  * 2. 删除二段确认：第一次点击不触发删除（仅进入确认态），二次点击才调用命令；
  * 3. 实例状态轮询：sheet 挂载期间每 3s 重新拉取 gateway_instances（状态翻转可见性）。
+ * 4. 知识注入区只读：注入事实来自 gateway_status 快照，区块内不提供任何可编辑控件
+ *    （取代原 legacy 脚本中的文案字面量断言 `/归 Prism 管理，只读/`——那条断言管文案标点，
+ *    P82 视觉精修或任何文案调整都会把它撞红，而它对“区块被改成可编辑”反而一声不响）。
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
@@ -61,6 +64,28 @@ describe('P79 Gateway 页交互优化', () => {
   afterEach(() => {
     clearErrors()
     vi.useRealTimers()
+  })
+
+  it('知识注入区只读：显示 gateway 上报事实且不提供任何可编辑控件', async () => {
+    fakeInvoke.registerMany({
+      gateway_status: () => ({
+        adapters: [],
+        routes: [],
+        qq: null,
+        inject: { enabled: true, scenario: 'gateway-inject', sources: ['memory'], persist: 'prism' },
+      }),
+      gateway_sessions: () => [],
+      gateway_instances: () => [],
+      gateway_catalog: () => CATALOG,
+    })
+    renderSheet()
+    await flushEffects()
+
+    // 以“快照里的值”定位区块（不按标题文案定位，改文案不会让本断言变红）。
+    const section = screen.getByText('gateway-inject').closest('section')
+    expect(section).not.toBeNull()
+    // 只读契约：整个知识注入区块里没有任何可编辑控件（输入/下拉/按钮/contenteditable）。
+    expect(section!.querySelectorAll('input, select, textarea, button, [contenteditable="true"]')).toHaveLength(0)
   })
 
   it('凭据表单按 catalog 渲染双字段，提交按字段顺序 join ":"', async () => {
