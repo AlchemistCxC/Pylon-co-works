@@ -416,10 +416,6 @@ describe('streaming scheduler budget accounting (P89/S3)', () => {
     parts: [{ kind: 'markdown', text: content }],
     identity: {}, source: { provider: 'peri', sourceId: 'test' }, sequence: 1, running: true, time: '',
   })
-  const totalLengths = (published: readonly WorkbenchRuntimeSnapshot[]) => published.map(value =>
-    value.messages.reduce((total, row) => total + row.content.length, 0))
-  const growthOf = (lengths: readonly number[]) =>
-    lengths.map((length, index) => length - (index === 0 ? 0 : lengths[index - 1]))
 
   it('bounds the aggregate reveal of one publication, not only each row', () => {
     vi.useFakeTimers()
@@ -431,15 +427,15 @@ describe('streaming scheduler budget accounting (P89/S3)', () => {
       looseRow('m3', 'c'.repeat(length)),
     ]
     scheduler.push(snapshot({ generating: true, messages: rows(0) }))
-    for (let index = 1; index <= 30; index += 1) {
-      scheduler.push(snapshot({ generating: true, messages: rows(index * 20) }))
-      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
-    }
-    const growth = growthOf(totalLengths(published))
-    expect(growth.length).toBeGreaterThan(3)
-    // D1：三行并发时聚合新增也受单帧上限约束（修正前 = 行数 × 上限）。
-    expect(Math.max(...growth)).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
-    expect(Math.max(...growth)).toBeGreaterThan(0)
+    // 3 × 4000 的欠账把一拍预算顶到上限（追赶量远大于 128），才测得出"聚合超界"：
+    // 修正前每行各自拿全量预算 ⇒ 一次发布 = 行数 × 上限。
+    scheduler.push(snapshot({ generating: true, messages: rows(4000) }))
+    vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+    expect(scheduler.diagnostics().lastBudget).toBe(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    const latest = published.at(-1)!
+    const aggregate = latest.messages.reduce((total, row) => total + row.content.length, 0)
+    expect(aggregate).toBeGreaterThan(0)
+    expect(aggregate).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
     scheduler.dispose()
   })
 
@@ -466,15 +462,19 @@ describe('streaming scheduler budget accounting (P89/S3)', () => {
     const published: WorkbenchRuntimeSnapshot[] = []
     const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => Date.now() })
     scheduler.push(snapshot({ generating: true, messages: [looseRow('m1', '')] }))
-    for (let index = 1; index <= 40; index += 1) {
-      scheduler.push(snapshot({ generating: true, messages: [looseRow('m1', grapheme.repeat(index * 4))] }))
-      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
-    }
-    const lengths = published.map(value => value.messages[0].content.length)
-    // D2：预算按单元计——修正前一字素算一格，astral 文本每拍可达上限 × 字素长度。
-    expect(Math.max(...growthOf(lengths))).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    // 一次到达 400 个字素（2000 单元）：预算按**单元**算 ⇒ 每拍最多 128 单元。
+    // 若按字素记账（旧行为）则一拍会吃掉 128 个字素 = 640 单元。
+    scheduler.push(snapshot({ generating: true, messages: [looseRow('m1', grapheme.repeat(400))] }))
+    vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+    const firstReveal = published.at(-1)!.messages[0].content.length
+    expect(firstReveal).toBeGreaterThan(0)
+    expect(firstReveal).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
     // 不切开字素：每次揭示长度都是字素长度的整数倍。
-    for (const length of lengths) expect(length % grapheme.length).toBe(0)
+    for (let index = 0; index < 60; index += 1) {
+      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+      for (const value of published) expect(value.messages[0].content.length % grapheme.length).toBe(0)
+    }
+    expect(published.at(-1)?.messages[0].content).toBe(grapheme.repeat(400))
     scheduler.dispose()
   })
 
@@ -490,7 +490,8 @@ describe('streaming scheduler budget accounting (P89/S3)', () => {
           : {}),
       })
       scheduler.push(snapshot({ generating: true, ...next('') }))
-      scheduler.push(snapshot({ generating: true, ...next('x'.repeat(400)) }))
+      // 300 而非 400：让"欠账翻倍"在预算上显形（ceil(300/24)=13 vs ceil(600/24)=25 再对半分=12）。
+      scheduler.push(snapshot({ generating: true, ...next('x'.repeat(300)) }))
       vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
       const latest = published.at(-1)!
       const result = {
