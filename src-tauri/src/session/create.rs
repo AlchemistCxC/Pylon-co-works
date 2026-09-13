@@ -354,17 +354,17 @@ fn merge_setting_response(
     option_key: &str,
     value: &str,
 ) {
-    merge_response_value(response, setting_response);
-    // An ACP response is authoritative when it reports a settled value. Only
-    // synthesize the requested value for agents (such as Hermes set_model)
-    // that return an empty acknowledgement.
-    let has_current = response
+    // Inspect the *fresh* acknowledgement before merging it into the session/new
+    // snapshot.  The snapshot may already contain the agent default (for Hermes,
+    // often V4.1); treating that as an acknowledgement would discard the user's
+    // requested V4 Flash when Hermes returns `{}`.
+    let acknowledged = setting_response
         .get(section)
         .and_then(|section| section.get(current_key))
         .is_some_and(|current| !current.is_null())
-        || response
+        || setting_response
             .get("configOptions")
-            .or_else(|| response.get("config_options"))
+            .or_else(|| setting_response.get("config_options"))
             .and_then(serde_json::Value::as_array)
             .is_some_and(|options| {
                 options.iter().any(|option| {
@@ -374,10 +374,23 @@ fn merge_setting_response(
                             .any(|key| option.get(*key).is_some_and(|value| !value.is_null()))
                 })
             });
-    if !has_current {
-        set_response_current(response, section, current_key, value);
-        set_config_option_current(response, option_key, value);
+    merge_response_value(response, setting_response);
+
+    // Empty acknowledgements have no authoritative value, so the requested
+    // machine id is the confirmed value.  Keep the models and configOptions
+    // projections converged for callers that read either representation.
+    let confirmed = if acknowledged {
+        response
+            .get(section)
+            .and_then(|section| section.get(current_key))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(value)
+    } else {
+        value
     }
+    .to_string();
+    set_response_current(response, section, current_key, &confirmed);
+    set_config_option_current(response, option_key, &confirmed);
 }
 
 fn merge_config_setting_response(
