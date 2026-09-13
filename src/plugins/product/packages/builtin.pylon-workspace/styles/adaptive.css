@@ -11,3 +11,15 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
   box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
 }
+
+.app[data-interface-mode="modern-gui"] .search-sidebar-scope,
+.app[data-interface-mode="modern-gui"] .search-sidebar-action,
+.app[data-interface-mode="modern-gui"] .search-sheet-input { border-radius: 10px; }
+.app[data-interface-mode="modern-gui"] .search-result-row {
+  margin-bottom: 7px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
+}
+.app[data-interface-mode="modern-gui"] .search-result-row:hover { border-left-color: var(--accent); }

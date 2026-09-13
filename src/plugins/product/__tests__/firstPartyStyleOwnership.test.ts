@@ -27,7 +27,6 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css',
-  'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css',
   'src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css',
   'src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css',
   // TW 施工书 20260914（P85）：Tailwind v4 utilities 基线，kernel-static。

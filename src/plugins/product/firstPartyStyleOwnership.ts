@@ -87,7 +87,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'shared', [WORKSPACE_STYLE_ASSETS], '解耦评估批 1：内含 file-main-*/file-section-*/search-result-* 共享词汇基线（被 history/search/gateway/browser/ContextPanel 消费），底座豁免'),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
 
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/adaptive.css', 'builtin.pylon-renderers', 'adaptive', [RENDERER_STYLE_ASSETS], '渲染包自适应残量：reduced-motion 通用后代规则（绞杀地基 20260914）'),

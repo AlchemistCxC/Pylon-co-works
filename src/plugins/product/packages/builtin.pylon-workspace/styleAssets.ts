@@ -11,7 +11,6 @@ const styleModules = typeof document === 'undefined'
   './styles/sheets/RuntimeSheetView.css',
   './styles/sheets/browser/BrowserSheet.css',
   './styles/sheets/file/FileSheet.css',
-  './styles/sheets/search/SearchSheet.css',
 ], { query: '?inline', import: 'default', eager: true })
 
 export function loadBuiltinPylonWorkspaceStyles(): readonly FirstPartyStyleAsset[] {
