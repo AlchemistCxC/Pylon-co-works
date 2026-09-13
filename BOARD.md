@@ -1,6 +1,8 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13] [Astra] [#74 修复分支·待 CI] 基线 `fb1e6c4`（已含 #65 / #70），分支 `fix/issue-74-scroll-intent`。已用原生滚轮复现外层 48px 容差把用户暂停重新变成跟随：1366→1364→程序回写1366；内层 ReasoningBlock 的 24px 容差有同类回拉。组件保留滚动/rAF 所有权，共用 scrollUserIntent 输入判向；暂停后只在向下到达真实底部时恢复，用户取消同时清锁并中止在途 smooth。105 项定向测试与 check:solid 通过，完整前端/CI 待收口。无 Markdown/CSS/协议/工作流变更，不执行 main 合并；证据与最终门禁随 PR 提交。
+
 [2026-09-13] [Chica·工程师] [认领·#53 中控区空态模型列表] 分支 fix/issue-53-agent-model-list（fork 已推），基线 c43f8b0。施工书见文档库 Pylon-Issue53-空态模型列表施工书-20260913.md。开工前侦察数据源，触及他人区域前回板。
 
 [2026-09-12 23:49] [校书·工程师] [说明书第二轮事实漂移修正完成（P54.1）·docs 提交 `af65c39d`] 用户指派"更新老旧说明书到最新说法"。六份说明书依源码同步（43+/33-）：版本头 1.5.9→1.6.0；开发者版补 API 1.2 契约（`capabilities`/`dangerousHooks` 字段表、1.0/1.1 出现即 removed-field 拒绝、Hook 词表 +`message.received`/`agent.chunk`、api allowlist 三版本、"当前限制"改为"授权卡非沙箱"）；两版插件书与架构参考的"五个 Product Plugin"→六个（`builtin.pylon-plugin-manager` 全部 product-required）；架构参考 acp 目录行换 P60 A1c 后现实（`engine.rs`/`instance_registry.rs`/`cause.rs`，transport/jsonrpc 已删）+ 补 `pylon-foundations`（P58）与 `agent_detection.rs` 命令层（P74 B0）行 + 复活链改 resume-first（`session/resume` 广告优先 → load 通道须 catalog∩广告交集，P60 A6/P74 B2）+ 检测 TTL 快照与保存 fail-closed 门禁（P74 B0/B1）；拓扑图 acp 节点标签同步；检测器手册补 `--diagnose`/`--version`（P73 C5）与"重新探测"按钮、GUI TTL 缓存说明。核验无漂移未动：CLI 壳 58 命令（manifest 实数）、内置 64 可执行命令（保留 runtime-truth 口径）、发行包清单全部脚本引用。门禁：mermaid v11 真实 parse 8/8 块全过（mermaid+jsdom 装在仓库外 /tmp，未入工作树）、`check:docs` 绿、文档指针逐个验证。用户在途 5 文件 fmt WIP 与 `pylon-foundations/Cargo.lock` 全程未触碰。台账已登记 **P54.1**（Euclid 的 P54"下一步"预言的正是本轮）。后续结构性改动请继续按拓扑图维护规则 1 同提交更新说明书。
