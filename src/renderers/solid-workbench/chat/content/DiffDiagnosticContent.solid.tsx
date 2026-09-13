@@ -6,6 +6,40 @@ import { wordDiff, type DiffWordSegment } from '../../../../domains/tool/diffPre
 import { SolidCollapsibleRegion } from '../CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from '../CollapsiblePresenter.solid.tsx'
 
+// 样式绞杀（P92 地基后机械翻译）：与 React DiffCard.tsx / DiffCard.solid.tsx
+// 镜像同一组 utility 常量（原 DiffCard.css）。solid-diff-content 与
+// solid-lsp-diagnostic 类名保留为 renderers 包 adaptive.css 残量规则的锚点。
+const DIFF_CARD = 'mt-1 mb-1.5 rounded-none overflow-hidden border border-border bg-[var(--chat-code-bg,rgba(0,0,0,0.02))]'
+const DIFF_HEAD = 'w-full flex justify-between gap-3 py-[5px] px-2 border-0 text-text bg-transparent [font:inherit] text-left cursor-pointer hover:bg-border'
+const DIFF_COUNT = 'text-text-dim text-[0.85em]'
+const DIFF_BODY = 'max-h-[320px] overflow-auto font-mono text-[0.9em] leading-[1.5]'
+const DIFF_OPEN = 'mx-2 mb-1.5 mt-0 px-[7px] py-0.5 border border-border text-text bg-transparent [font:inherit] cursor-pointer enabled:hover:border-accent enabled:hover:text-accent disabled:text-text-dim disabled:cursor-not-allowed disabled:opacity-70'
+const DIFF_LINE = 'flex min-w-max pr-2.5 whitespace-pre'
+const DIFF_LINE_NUMBER = 'w-[4ch] shrink-0 basis-[4ch] px-1.5 text-text-dim text-right select-none border-r border-stroke-faint'
+const DIFF_SIGN = 'w-6 shrink-0 pl-2 text-text-dim select-none'
+const DIFF_LINE_BG: Partial<Record<'context' | 'added' | 'removed', string>> = {
+  added: 'bg-[color-mix(in_srgb,var(--diff-added,#4EBA65)_14%,transparent)]',
+  removed: 'bg-[color-mix(in_srgb,var(--diff-removed,#FF6B80)_14%,transparent)]',
+}
+const DIFF_SIGN_TONE: Partial<Record<'context' | 'added' | 'removed', string>> = {
+  added: 'text-[var(--diff-added,#4EBA65)]',
+  removed: 'text-[var(--diff-removed,#FF6B80)]',
+}
+const WORD_BASE = 'rounded-none'
+const WORD_TONE: Record<'added' | 'removed', string> = {
+  added: 'bg-[var(--diff-added-word,#3EA15E)] text-white',
+  removed: 'bg-[var(--diff-removed-word,#E0556B)] text-white',
+}
+const DIFF_OMISSION = 'px-2 py-0.5 text-text-dim bg-stroke-faint italic'
+const DIFF_RAW = 'border-t border-border px-2 py-1.5'
+const MUTED_BLOCK = 'block m-0 p-2 text-text-dim'
+const SPLIT = 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] min-w-[640px] max-[720px]:min-w-0 max-[720px]:grid-cols-1'
+const SPLIT_BEFORE = 'min-w-0 overflow-auto border-r border-border max-[720px]:border-r-0 max-[720px]:border-b max-[720px]:border-border'
+const SPLIT_AFTER = 'min-w-0 overflow-auto'
+const LSP = 'mt-1 mb-1.5 px-2.5 py-2 border border-l-[3px] text-text bg-[var(--chat-code-bg,rgba(0,0,0,.02))]'
+const LSP_LOCATION = 'flex items-baseline gap-2 min-w-0'
+const LSP_BTN = 'ml-auto border-0 px-1 py-0.5 text-accent bg-transparent [font:inherit] cursor-pointer disabled:text-text-dim disabled:cursor-not-allowed'
+
 export function SolidDiffContent(props: {
   snapshot: DiffSnapshot
   nodeId: string
@@ -30,7 +64,7 @@ export function SolidDiffContent(props: {
     bodyId: () => `solid-diff-${safeDomId(props.nodeId)}`,
   })
 
-  return <section class="term-diff-card solid-diff-content" role="region" aria-label={`Diff：${label()}`} data-content-kind="content.diff"
+  return <section class={`solid-diff-content ${DIFF_CARD}`} role="region" aria-label={`Diff：${label()}`} data-content-kind="content.diff"
     data-view={view()} data-line-numbers={String(showLineNumbers())} data-word-diff={String(useWordDiff())}
     data-wrap={wrap()} data-reduced-motion={props.appearance.reducedMotion === true ? 'true' : 'false'}
     style={{
@@ -40,21 +74,21 @@ export function SolidDiffContent(props: {
       background: stringSetting(props.appearance, 'background', 'var(--chat-code-bg, rgba(0,0,0,0.02))'),
       color: stringSetting(props.appearance, 'foreground', 'var(--text)'),
     }}>
-    <button type="button" class="term-diff-head" aria-expanded={collapse.open()} aria-controls={collapse.bodyId}
+    <button type="button" class={DIFF_HEAD} aria-expanded={collapse.open()} aria-controls={collapse.bodyId}
       onClick={collapse.toggle}>
       <strong>{label()}</strong>
       <Show when={props.snapshot.status}><span>{props.snapshot.status}</span></Show>
-      <span class="term-diff-count">{additions()} additions · {deletions()} deletions</span>
+      <span class={DIFF_COUNT}>{additions()} additions · {deletions()} deletions</span>
     </button>
     <Show when={props.snapshot.path || props.snapshot.oldPath}>{path => <button
-      type="button" class="term-diff-open"
+      type="button" class={DIFF_OPEN}
       aria-label={`打开 ${path()}`}
       disabled={props.commands.canExecute?.('resource.open') !== true}
       title={props.commands.canExecute?.('resource.open') === true ? undefined : '宿主未提供打开能力'}
       onClick={() => void props.commands.execute({ type: 'resource.open', payload: { path: path() } })}
     >打开文件</button>}</Show>
     <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
-      <div class="term-diff-body" style={{
+      <div class={DIFF_BODY} data-diff-body="true" style={{
         'max-height': `${numberSetting(props.appearance, 'maxHeight', 320)}px`,
         'font-size': `${numberSetting(props.appearance, 'fontSize', 13)}px`,
       }}>
@@ -65,10 +99,10 @@ export function SolidDiffContent(props: {
           </Show>
         </Show>
         <Show when={booleanSetting(props.appearance, 'showMetadata', true) && diffMetadata(props.snapshot)}>
-          {metadata => <small class="solid-diff-metadata">{metadata()}</small>}
+          {metadata => <small class="text-text-dim">{metadata()}</small>}
         </Show>
         <Show when={booleanSetting(props.appearance, 'showRaw', false) && props.snapshot.rawPatch !== undefined}>
-          <details class="solid-diff-raw"><summary>Raw 审计信息</summary><pre>{rawText(props.snapshot.rawPatch)}</pre></details>
+          <details class={DIFF_RAW}><summary>Raw 审计信息</summary><pre class="m-0 p-2 overflow-auto whitespace-pre [font:inherit]">{rawText(props.snapshot.rawPatch)}</pre></details>
         </Show>
       </div>
     </SolidCollapsibleRegion>
@@ -76,9 +110,9 @@ export function SolidDiffContent(props: {
 }
 
 function DiffNonLineContent(props: { snapshot: DiffSnapshot }) {
-  if (props.snapshot.binary) return <p class="solid-diff-binary">二进制文件发生变更</p>
-  if (props.snapshot.unified) return <pre class="solid-diff-unified-text">{props.snapshot.unified}</pre>
-  return <div class="solid-diff-hunks"><For each={props.snapshot.hunks ?? []}>{hunk => <code>
+  if (props.snapshot.binary) return <p class={MUTED_BLOCK}>二进制文件发生变更</p>
+  if (props.snapshot.unified) return <pre class="m-0 p-2 overflow-auto whitespace-pre [font:inherit]" data-diff-view="unified">{props.snapshot.unified}</pre>
+  return <div class="grid gap-1 p-2 text-text-dim" data-diff-hunks="true"><For each={props.snapshot.hunks ?? []}>{hunk => <code>
     {`@@ -${hunk.oldStart ?? '?'},${hunk.oldLines ?? '?'} +${hunk.newStart ?? '?'},${hunk.newLines ?? '?'} @@`}
   </code>}</For></div>
 }
@@ -95,7 +129,7 @@ export function SolidLspDiagnosticContent(props: {
     void props.commands.execute({ type: 'resource.open', payload: { path, ...(range ? { range } : {}) } })
   }
   return <section
-    class="solid-lsp-diagnostic"
+    class={`solid-lsp-diagnostic ${LSP}`}
     data-content-kind="diagnostic.lsp"
     role={severity() === 'error' ? 'alert' : 'status'}
     aria-label={`LSP ${severity()}：${props.diagnostic.message}`}
@@ -109,27 +143,27 @@ export function SolidLspDiagnosticContent(props: {
       'border-color': 'var(--lsp-accent)',
     }}
   >
-    <header><strong>{props.diagnostic.message}</strong></header>
+    <header class="mb-[3px]"><strong>{props.diagnostic.message}</strong></header>
     <Show when={booleanSetting(props.appearance, 'showCode', true) && props.diagnostic.code
       || booleanSetting(props.appearance, 'showSource', true) && props.diagnostic.source}>
-      <small>{[
+      <small class="text-text-dim">{[
         booleanSetting(props.appearance, 'showCode', true) ? props.diagnostic.code : undefined,
         booleanSetting(props.appearance, 'showSource', true) ? props.diagnostic.source : undefined,
       ].filter(Boolean).join(' · ')}</small>
     </Show>
-    <div class="solid-lsp-location">
-      <code>{formatLocation(props.diagnostic.path, props.diagnostic.range)}</code>
-      <button type="button" aria-label={`打开诊断位置 ${props.diagnostic.path}`}
+    <div class={LSP_LOCATION}>
+      <code class="min-w-0 wrap-anywhere">{formatLocation(props.diagnostic.path, props.diagnostic.range)}</code>
+      <button type="button" class={LSP_BTN} aria-label={`打开诊断位置 ${props.diagnostic.path}`}
         disabled={!canOpen()} title={canOpen() ? undefined : '宿主未提供打开能力'}
         onClick={() => open(props.diagnostic.path, props.diagnostic.range)}>打开</button>
     </div>
     <Show when={booleanSetting(props.appearance, 'showRelated', true) && props.diagnostic.related?.length}>
-      <ul aria-label="关联诊断位置">
+      <ul class="grid mt-2 gap-1 pl-5" aria-label="关联诊断位置">
         <For each={props.diagnostic.related}>{item => <LspRelatedItem item={item} canOpen={canOpen()} open={open} />}</For>
       </ul>
     </Show>
     <Show when={booleanSetting(props.appearance, 'showMetadata', true) && props.diagnostic.unknownFields?.length}>
-      <small class="solid-lsp-metadata">unknown: {props.diagnostic.unknownFields?.join(', ')}</small>
+      <small class="text-text-dim">unknown: {props.diagnostic.unknownFields?.join(', ')}</small>
     </Show>
   </section>
 }
@@ -139,10 +173,10 @@ function LspRelatedItem(props: {
   canOpen: boolean
   open(path: string, range?: TextRange): void
 }) {
-  return <li>
+  return <li class={LSP_LOCATION}>
     <span>{props.item.message}</span>
-    <code>{formatLocation(props.item.path, props.item.range)}</code>
-    <button type="button" aria-label={`打开关联位置 ${props.item.path}`}
+    <code class="min-w-0 wrap-anywhere">{formatLocation(props.item.path, props.item.range)}</code>
+    <button type="button" class={LSP_BTN} aria-label={`打开关联位置 ${props.item.path}`}
       disabled={!props.canOpen} title={props.canOpen ? undefined : '宿主未提供打开能力'}
       onClick={() => props.open(props.item.path, props.item.range)}>打开</button>
   </li>
@@ -183,12 +217,12 @@ function UnifiedDiffLines(props: {
 
 function SplitDiffLines(props: { lines: NonNullable<DiffSnapshot['lines']>; lineNumbers: boolean; wrap: 'none' | 'soft'; contextLines: number }) {
   const numbered = () => limitContext(numberedLines(props.lines), props.contextLines)
-  return <div class="solid-diff-split">
-    <div class="solid-diff-split-before" aria-label="变更前">
+  return <div class={SPLIT}>
+    <div class={SPLIT_BEFORE} aria-label="变更前">
       <For each={numbered().filter(line => line.kind !== 'added')}>{line => line.kind === 'omitted'
         ? <DiffOmission count={line.count} /> : <DiffLineRow {...line} {...props} />}</For>
     </div>
-    <div class="solid-diff-split-after" aria-label="变更后">
+    <div class={SPLIT_AFTER} aria-label="变更后">
       <For each={numbered().filter(line => line.kind !== 'removed')}>{line => line.kind === 'omitted'
         ? <DiffOmission count={line.count} /> : <DiffLineRow {...line} {...props} />}</For>
     </div>
@@ -196,7 +230,7 @@ function SplitDiffLines(props: { lines: NonNullable<DiffSnapshot['lines']>; line
 }
 
 function DiffOmission(props: { count: number }) {
-  return <div class="term-diff-omission" role="note">… {props.count} unchanged lines …</div>
+  return <div class={DIFF_OMISSION} role="note">… {props.count} unchanged lines …</div>
 }
 
 function DiffLineRow(props: {
@@ -208,10 +242,10 @@ function DiffLineRow(props: {
   wrap: 'none' | 'soft'
 }) {
   const number = () => props.kind === 'added' ? props.newLine : props.oldLine
-  return <div class={`term-diff-line term-diff-${props.kind}`} style={{ 'white-space': props.wrap === 'soft' ? 'pre-wrap' : 'pre' }}>
-    <Show when={props.lineNumbers}><span class="term-diff-line-number" aria-hidden="true">{number() ?? ''}</span></Show>
-    <span class="term-diff-sign" aria-hidden="true">{props.kind === 'added' ? '+' : props.kind === 'removed' ? '-' : ' '}</span>
-    <code>{props.text || '\u00a0'}</code>
+  return <div class={`${DIFF_LINE} ${DIFF_LINE_BG[props.kind] ?? ''}`} style={{ 'white-space': props.wrap === 'soft' ? 'pre-wrap' : 'pre' }}>
+    <Show when={props.lineNumbers}><span class={DIFF_LINE_NUMBER} aria-hidden="true">{number() ?? ''}</span></Show>
+    <span class={`${DIFF_SIGN} ${DIFF_SIGN_TONE[props.kind] ?? ''}`} aria-hidden="true">{props.kind === 'added' ? '+' : props.kind === 'removed' ? '-' : ' '}</span>
+    <code class="[font:inherit]">{props.text || '\u00a0'}</code>
   </div>
 }
 
@@ -224,12 +258,12 @@ function DiffWordRow(props: {
   wrap: 'none' | 'soft'
 }) {
   const number = () => props.kind === 'added' ? props.newLine : props.oldLine
-  return <div class={`term-diff-line term-diff-${props.kind}`} style={{ 'white-space': props.wrap === 'soft' ? 'pre-wrap' : 'pre' }}>
-    <Show when={props.lineNumbers}><span class="term-diff-line-number" aria-hidden="true">{number() ?? ''}</span></Show>
-    <span class="term-diff-sign" aria-hidden="true">{props.kind === 'added' ? '+' : '-'}</span>
-    <code><For each={props.segments}>{segment => segment.kind === 'common'
+  return <div class={`${DIFF_LINE} ${DIFF_LINE_BG[props.kind]}`} style={{ 'white-space': props.wrap === 'soft' ? 'pre-wrap' : 'pre' }}>
+    <Show when={props.lineNumbers}><span class={DIFF_LINE_NUMBER} aria-hidden="true">{number() ?? ''}</span></Show>
+    <span class={`${DIFF_SIGN} ${DIFF_SIGN_TONE[props.kind]}`} aria-hidden="true">{props.kind === 'added' ? '+' : '-'}</span>
+    <code class="[font:inherit]"><For each={props.segments}>{segment => segment.kind === 'common'
       ? <span>{segment.text}</span>
-      : <span class={`term-diff-word term-diff-word-${segment.kind}`}>{segment.text}</span>}
+      : <span data-diff-word={segment.kind} class={`${WORD_BASE} ${WORD_TONE[segment.kind]}`}>{segment.text}</span>}
     </For></code>
   </div>
 }

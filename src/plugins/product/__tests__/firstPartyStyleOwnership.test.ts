@@ -8,10 +8,10 @@ const expectedCssPaths = [
   'src/components/kernel/SkinPreviewBar.css',
   'src/index.css',
   // J 施工书 20260914：pluginManagerPanel.css 已绞杀进 utilities 层，不再登记。
+  'src/plugins/product/packages/builtin.pylon-renderers/styles/adaptive.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',
-  'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/DiffCard.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css',

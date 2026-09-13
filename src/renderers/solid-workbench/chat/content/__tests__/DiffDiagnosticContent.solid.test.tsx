@@ -56,7 +56,7 @@ describe('C06 diff and LSP built-in content Slot', () => {
     expect(card).toHaveAttribute('data-reduced-motion', 'true')
     expect(card).toHaveStyle({ '--diff-added': '#00ff00', '--diff-removed': '#ff0000' })
     expect(screen.getByRole('button', { name: /^\/src\/settings\.ts/ })).toHaveAttribute('aria-expanded', 'false')
-    expect(container.querySelector<HTMLElement>('.term-diff-body')).toHaveStyle({ maxHeight: '180px' })
+    expect(container.querySelector<HTMLElement>('[data-diff-body]')).toHaveStyle({ maxHeight: '180px' })
   })
 
   it('applies word-level diff only when the setting enables it', () => {
@@ -70,14 +70,14 @@ describe('C06 diff and LSP built-in content Slot', () => {
     const enabled = render(() => <BuiltinSolidContentSlot
       snapshot={{ nodeId: 'words-on', kind: 'content.diff', revision: 1, payload }}
       appearance={{ wordDiff: true }} commands={{ execute: vi.fn() }} />)
-    expect(enabled.container.querySelector('.term-diff-word-removed')).toHaveTextContent('react')
-    expect(enabled.container.querySelector('.term-diff-word-added')).toHaveTextContent('solid')
+    expect(enabled.container.querySelector('[data-diff-word="removed"]')).toHaveTextContent('react')
+    expect(enabled.container.querySelector('[data-diff-word="added"]')).toHaveTextContent('solid')
     enabled.unmount()
 
     const disabled = render(() => <BuiltinSolidContentSlot
       snapshot={{ nodeId: 'words-off', kind: 'content.diff', revision: 1, payload }}
       appearance={{ wordDiff: false }} commands={{ execute: vi.fn() }} />)
-    expect(disabled.container.querySelector('.term-diff-word')).toBeNull()
+    expect(disabled.container.querySelector('[data-diff-word]')).toBeNull()
   })
 
   it('limits unchanged context without hiding changed lines', () => {
@@ -218,7 +218,7 @@ describe('C06 diff and LSP built-in content Slot', () => {
         payload: { kind: 'diff', path: '/src/unified.ts', unified: '@@ -1 +1 @@\n-old\n+new', rawPatch: 'do not parse me' },
       }}
       appearance={{ showRaw: false }} commands={{ execute: vi.fn() }} />)
-    expect(unified.container.querySelector('.solid-diff-unified-text')).toHaveTextContent('@@ -1 +1 @@')
+    expect(unified.container.querySelector('[data-diff-view="unified"]')).toHaveTextContent('@@ -1 +1 @@')
     expect(unified.container.textContent).not.toContain('do not parse me')
     unified.unmount()
 
@@ -228,7 +228,7 @@ describe('C06 diff and LSP built-in content Slot', () => {
         payload: { kind: 'diff', path: '/src/hunks.ts', hunks: [{ oldStart: 10, oldLines: 2, newStart: 11, newLines: 3 }] },
       }}
       appearance={{}} commands={{ execute: vi.fn() }} />)
-    expect(hunks.container.querySelector('.solid-diff-hunks')).toHaveTextContent('@@ -10,2 +11,3 @@')
+    expect(hunks.container.querySelector('[data-diff-hunks]')).toHaveTextContent('@@ -10,2 +11,3 @@')
     hunks.unmount()
 
     render(() => <BuiltinSolidContentSlot

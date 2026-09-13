@@ -90,7 +90,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
 
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/DiffCard.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
+  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/adaptive.css', 'builtin.pylon-renderers', 'adaptive', [RENDERER_STYLE_ASSETS], '渲染包自适应残量：reduced-motion 通用后代规则（绞杀地基 20260914）'),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),

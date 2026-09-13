@@ -4,12 +4,12 @@ const styleModules = typeof document === 'undefined'
   ? {}
   : import.meta.glob<string>([
   './styles/components/chat/ChatView.css',
-  './styles/components/chat/DiffCard.css',
   './styles/components/chat/InputBar.css',
   './styles/components/chat/StatusBar.css',
   './styles/components/ControlCenter.css',
   './styles/components/PetCompanion.css',
   './styles/components/solid-workbench/WorkbenchChrome.css',
+  './styles/adaptive.css',
 ], { query: '?inline', import: 'default', eager: true })
 
 export function loadBuiltinPylonRendererStyles(): readonly FirstPartyStyleAsset[] {
