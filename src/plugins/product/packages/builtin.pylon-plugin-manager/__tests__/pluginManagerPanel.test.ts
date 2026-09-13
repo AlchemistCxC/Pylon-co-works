@@ -130,8 +130,11 @@ describe('plugin manager panel (framework-free DOM)', () => {
 
     const handle = mountPluginManagerPanel(container, {})
 
-    expect(handle.root.querySelector('.pypm-consent-title')?.textContent).toBe('等待能力授权')
-    expect(handle.root.querySelector('.pypm-group')).toBeNull()
+    // J 施工书 20260914：样式迁 utilities 层后 pypm-* 语义类退役，
+    // 断言改走 data-* 等价定位（强度不减）。
+    expect(handle.root.dataset.pypmPanel).toBe('consent')
+    expect(handle.root.querySelector('[data-pypm-consent] h3')?.textContent).toBe('等待能力授权')
+    expect(handle.root.querySelector('[data-pypm-group-title]')).toBeNull()
     handle.dispose()
   })
 
@@ -146,9 +149,9 @@ describe('plugin manager panel (framework-free DOM)', () => {
       expect(handle.root.querySelector('[data-plugin-id="user.demo"]')).not.toBeNull()
     })
     expect(deps.calls).toContain('listInstalled')
-    expect(handle.root.querySelector('.pypm-overview')?.textContent).toContain('2 个运行中')
-    expect(handle.root.querySelector('.pypm-overview')?.textContent).toContain('1 个用户插件')
-    expect(handle.root.querySelectorAll('.pypm-group-title').length).toBeGreaterThanOrEqual(5)
+    expect(handle.root.querySelector('[aria-label="插件概览"]')?.textContent).toContain('2 个运行中')
+    expect(handle.root.querySelector('[aria-label="插件概览"]')?.textContent).toContain('1 个用户插件')
+    expect(handle.root.querySelectorAll('[data-pypm-group-title]').length).toBeGreaterThanOrEqual(5)
     // review P1-2/B：内置组件区块只渲染 builtin 实例——用户插件不得混入
     expect(handle.root.querySelector('[data-builtin-id="builtin.pylon-shell"]')).not.toBeNull()
     expect(handle.root.querySelector('[data-builtin-id="user.demo"]')).toBeNull()

@@ -43,7 +43,6 @@ const entry = (
 const SHELL_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-shell/styleAssets.ts'
 const WORKSPACE_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-workspace/styleAssets.ts'
 const RENDERER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-renderers/styleAssets.ts'
-const MANAGER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-plugin-manager/styleAssets.ts'
 const GATEWAY_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-gateway/styleAssets.ts'
 
 /**
@@ -96,7 +95,8 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层：suite 挂载几何 + 生产中控槽位'),
 
-  entry('src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css', 'builtin.pylon-plugin-manager', 'plugin-scope', [MANAGER_STYLE_ASSETS], '第 6 个 first-party 包（P53 D2）的 framework-free 管理面板样式'),
+  // 第 6 包（P53 D2）的 framework-free 面板样式已由 J 施工书 20260914 绞杀进
+  // utilities 层：owner 保留在名单里，但名下暂无 CSS 文件。
 
   entry('src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', 'builtin.pylon-gateway', 'plugin-scope', [GATEWAY_STYLE_ASSETS], '第 7 个 first-party 包（P77）的 gateway sheet 样式'),
 

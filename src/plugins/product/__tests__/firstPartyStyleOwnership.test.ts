@@ -7,7 +7,7 @@ import {
 const expectedCssPaths = [
   'src/components/kernel/SkinPreviewBar.css',
   'src/index.css',
-  'src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css',
+  // J 施工书 20260914：pluginManagerPanel.css 已绞杀进 utilities 层，不再登记。
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',
