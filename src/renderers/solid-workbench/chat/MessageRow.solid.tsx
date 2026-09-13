@@ -1,6 +1,7 @@
 import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
+import { createScrollUserIntent } from '../../../components/chat/scrollUserIntent.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
@@ -188,6 +189,7 @@ export function ReasoningBlock(props: {
   let bodyElement: HTMLDivElement | undefined
   let followBottom = true
   let lastFollowTop: number | undefined
+  let lastObservedScrollTop = 0
   const follow = createFrameTask(() => {
     if (!bodyElement || !followBottom || !props.running || !collapse.open() || props.redacted) return
     const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
@@ -198,9 +200,18 @@ export function ReasoningBlock(props: {
     lastFollowTop = top
   })
   onCleanup(follow.dispose)
+  const scrollIntent = createScrollUserIntent(() => {
+    lastObservedScrollTop = bodyElement?.scrollTop ?? 0
+    followBottom = false
+    lastFollowTop = undefined
+    follow.cancel()
+  })
   const onBodyScroll = () => {
     if (!bodyElement) return
-    followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
+    const movingDown = bodyElement.scrollTop > lastObservedScrollTop
+    lastObservedScrollTop = bodyElement.scrollTop
+    const distance = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight
+    followBottom = followBottom ? distance < 24 : movingDown && distance <= 1
     if (!followBottom) lastFollowTop = undefined
   }
   createEffect(() => {
@@ -233,7 +244,10 @@ export function ReasoningBlock(props: {
         </button>
         <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
           {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
-          <div class="term-reasoning-body" ref={element => { bodyElement = element }} onScroll={onBodyScroll} style={bodyStyle()}>
+          <div class="term-reasoning-body" ref={element => { bodyElement = element }} onScroll={onBodyScroll}
+            onWheel={scrollIntent.onWheel} onKeyDown={scrollIntent.onKeyDown}
+            onTouchStart={scrollIntent.onTouchStart} onTouchMove={scrollIntent.onTouchMove}
+            onTouchEnd={scrollIntent.onTouchEnd} onTouchCancel={scrollIntent.onTouchEnd} style={bodyStyle()}>
             <MarkdownContent text={props.text} streaming={props.running} />
           </div>
         </SolidCollapsibleRegion>

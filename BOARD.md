@@ -14,16 +14,15 @@
 
 **文档**：施工书三份已落文档库并登记 `Docs/README.md`（`Pylon-Issue69-…`/`Pylon-Issue68-…`/`Pylon-Issue67-…-20260913.md`）；台账 **P79/P80/P81** 与下一阶段清单已同步。**待用户实机验收**：#69 像素位移（四组量测已写入台账）、#68 冷启动+空态首条复现确认、#67 删除交互/确认文案与本机多证据探测是否只剩一行候选。
 
-[2026-09-13 17:52] [砂纸·工程师] [认领·远端 GitHub #67 / #68 / #69（三 issue 三片独立施工）] 用户指派修复远端仓库 issue 编号 67/68/69。**口径澄清（平行会话请按此读）**：一律指 **GitHub issues**（#67 设置页无法删除已连接 agent runtime + 探测器把同一 agent 多重证据列为独立候选；#68 冷启动空态首条消息结束后未渲染「处理耗时」；#69 FileSheet 切编辑/只读态时内容与行号列位移），**不是**文档库台账里同号的 P67（`no-unknown-returns`）/P68（孤儿门禁）/P69（issue.md 五项修复）。
+[2026-09-13] [Astra] [#74 修复分支·待 CI] 基线 `fb1e6c4`（已含 #65 / #70），分支 `fix/issue-74-scroll-intent`。已用原生滚轮复现外层 48px 容差把用户暂停重新变成跟随：1366→1364→程序回写1366；内层 ReasoningBlock 的 24px 容差有同类回拉。组件保留滚动/rAF 所有权，共用 scrollUserIntent 输入判向；暂停后只在向下到达真实底部时恢复，用户取消同时清锁并中止在途 smooth。105 项定向测试与 check:solid 通过，完整前端/CI 待收口。无 Markdown/CSS/协议/工作流变更，不执行 main 合并；证据与最终门禁随 PR 提交。
 
+[2026-09-13 17:52] [砂纸·工程师] [认领·远端 GitHub #67 / #68 / #69（三 issue 三片独立施工）] 用户指派修复远端仓库 issue 编号 67/68/69。**口径澄清（平行会话请按此读）**：一律指 **GitHub issues**（#67 设置页无法删除已连接 agent runtime + 探测器把同一 agent 多重证据列为独立候选；#68 冷启动空态首条消息结束后未渲染「处理耗时」；#69 FileSheet 切编辑/只读态时内容与行号列位移），**不是**文档库台账里同号的 P67（`no-unknown-returns`）/P68（孤儿门禁）/P69（issue.md 五项修复）。
 已按 §2.2 复验现场（`Ru5t/Reflector` @ `dc667cd8`，工作树仅一处既有未跟踪 `src-tauri/pylon-foundations/Cargo.lock`，我全程不碰不提交）：前端定向 7 文件/63 项绿；Rust 主 crate `--lib` **960 passed / 0 failed / 4 ignored**。三份施工书已落文档库并登记 `Docs/README.md`：
 - 《Pylon-Issue67-Agent删除路径与探测器身份合并施工书-20260913.md》——A 用户已裁定删除语义（仅摘配置 + 停 runtime，**保留会话/记录**；删除前需看清将移除/保留）且复用既有 `update_agents_config` 事务链（新增 `agent_delete` scope，非新命令）；B 身份级候选合并按 Codeg 口径（`registry.rs::registry_id_for`/`acp_adapter_relation`/`custom_registry.rs::validate`，固定副本 `b2eec98`，未联网）。
 - 《Pylon-Issue68-空态首条消息终态摘要施工书-20260913.md》——根因：空态创建路径 `selectSession` 后同 tick `send`，`projectOptimisticUser` 因未 bind 早退 ⇒ TurnClock 无起点 ⇒ 终帧 `turnClockTerminal` 找不到条目直接 return ⇒ 摘要永不发布（切 sheet 走 refresh 的 displayOnly 兵底才出现）。
 - 《Pylon-Issue69-FileSheet两态编辑浏览度量同源施工书-20260913.md》——根因：CM 的 `.cm-gutter` 列按内容定宽、不填充既有 56px gutter 盒（issue38 契约块已对齐其余度量），行号文字比只读态左移约 12px。
-
 **本任务预告触碰面**（若有并行计划请回板）：`src-tauri/pylon-core/src/agent_detection.rs`、`src-tauri/src/agent_config/patch.rs`、`src-tauri/src/lifecycle/config_cmds.rs`、`src/components/settings/AgentRuntimePanel.tsx`、`src/infrastructure/acp/agentClient.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css`（+ 各域 `__tests__`）。已核 P74（B0–B5）全部已在 HEAD 内并已收尾；#53（Chica，control-center 域）与 P73/P72 各在别域，与本次三片无文件重叠。
-
-**交付形态（用户已定）**：本地 commit，**不推远端、不建 PR**；验收基线 = 自动化回归 + 静态证据，#68/#69 实机观感/时序由用户后置验收并登台账。收尾按 §6 一次性更新台账 + 下一阶段问题清单。
+**交付形态（用户已定）**：本地 commit，**不推远端、不建 PR**；验收基线 = 自动化回归 + 静态证据，#68/#69 实机观感/时序由用户后置验收并登台账。收尾按 §6 一次性更新台账 + 下一阶段问题清单
 
 [2026-09-13] [Chica·工程师] [认领·#53 中控区空态模型列表] 分支 fix/issue-53-agent-model-list（fork 已推），基线 c43f8b0。施工书见文档库 Pylon-Issue53-空态模型列表施工书-20260913.md。开工前侦察数据源，触及他人区域前回板。
 
