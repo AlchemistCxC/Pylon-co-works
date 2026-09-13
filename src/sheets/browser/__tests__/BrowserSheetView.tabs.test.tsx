@@ -3,10 +3,16 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, hasTauriRuntime: () => true }))
-const invokeMock = vi.fn()
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 class MockResizeObserver {
@@ -43,30 +49,32 @@ const snapshot = (activeTabId: number | null, tabs: TestBrowserTab[] = [firstTab
 
 let serverTabs: TestBrowserTab[] = [firstTab, secondTab]
 let serverActiveTabId: number | null = 1
+let fakeInvoke: FakeInvoke
 
 describe('Browser 内部多标签', () => {
   beforeEach(() => {
     serverTabs = [firstTab, secondTab]
     serverActiveTabId = 1
-    invokeMock.mockReset()
-    invokeMock.mockImplementation((cmd: string, args?: { tabId?: number }) => {
-      if (cmd === 'browser_status') return Promise.resolve(snapshot(serverActiveTabId, serverTabs))
-      if (cmd === 'browser_select_tab') {
-        serverActiveTabId = args?.tabId ?? serverActiveTabId
+    fakeInvoke = new FakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
+    fakeInvoke.registerMany({
+      browser_status: () => Promise.resolve(snapshot(serverActiveTabId, serverTabs)),
+      browser_select_tab: args => {
+        serverActiveTabId = (args as { tabId?: number }).tabId ?? serverActiveTabId
         return Promise.resolve(snapshot(serverActiveTabId, serverTabs))
-      }
-      if (cmd === 'browser_close_tab') {
-        serverTabs = serverTabs.filter(tab => tab.id !== args?.tabId)
-        if (serverActiveTabId === args?.tabId) serverActiveTabId = serverTabs.at(-1)?.id ?? null
+      },
+      browser_close_tab: args => {
+        serverTabs = serverTabs.filter(tab => tab.id !== (args as { tabId?: number }).tabId)
+        if (serverActiveTabId === (args as { tabId?: number }).tabId) serverActiveTabId = serverTabs.at(-1)?.id ?? null
         return Promise.resolve(snapshot(serverActiveTabId, serverTabs))
-      }
-      if (cmd === 'browser_new_tab') {
+      },
+      browser_new_tab: () => {
         serverTabs = [...serverTabs, { id: 3, url: 'about:blank', title: null }]
         serverActiveTabId = 3
         return Promise.resolve(snapshot(serverActiveTabId, serverTabs))
-      }
-      if (cmd === 'browser_set_bounds' || cmd === 'browser_close') return Promise.resolve({})
-      return Promise.reject(new Error(`unexpected invoke: ${cmd}`))
+      },
+      browser_set_bounds: () => Promise.resolve({}),
+      browser_close: () => Promise.resolve({}),
     })
   })
 
@@ -76,7 +84,7 @@ describe('Browser 内部多标签', () => {
     expect(await screen.findByRole('tab', { name: 'Example Domain' })).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(screen.getByRole('tab', { name: 'IANA Help' }))
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('browser_select_tab', { tabId: 2 })
+      expect(fakeInvoke.calls).toContainEqual({ cmd: 'browser_select_tab', args: { tabId: 2 } })
       expect(screen.getByRole('textbox', { name: '网址' })).toHaveValue(secondTab.url)
     })
 
@@ -85,7 +93,7 @@ describe('Browser 内部多标签', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建浏览器标签' }))
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('browser_new_tab', undefined)
+      expect(fakeInvoke.calls).toContainEqual({ cmd: 'browser_new_tab', args: {} })
       expect(screen.getByRole('tab', { name: '新标签' })).toHaveAttribute('aria-selected', 'true')
     })
 

@@ -9,10 +9,16 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, hasTauriRuntime: () => true }))
-const invokeMock = vi.fn()
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 class MockResizeObserver {
@@ -31,21 +37,24 @@ const ctx: SheetContext = {
 }
 
 describe('Browser page snapshot single-flight', () => {
+  let fakeInvoke: FakeInvoke
+
   beforeEach(() => {
-    invokeMock.mockReset()
+    fakeInvoke = new FakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   })
 
   it('coalesces concurrent panel-triggered snapshot calls', async () => {
     let releaseSnapshot: ((value: unknown) => void) | undefined
     const snapshotPromise = new Promise(resolve => { releaseSnapshot = resolve })
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'browser_status') return Promise.resolve({
+    fakeInvoke.registerMany({
+      browser_status: () => Promise.resolve({
         instanceId: 1, phase: 'ready', url: 'https://example.com', title: 'Example', zoomPercent: 90,
         activeTabId: 1, tabs: [{ id: 1, url: 'https://example.com', title: 'Example' }],
-      })
-      if (cmd === 'browser_snapshot') return snapshotPromise
-      if (cmd === 'browser_set_bounds' || cmd === 'browser_close') return Promise.resolve({})
-      return Promise.reject(new Error(`unexpected invoke: ${cmd}`))
+      }),
+      browser_snapshot: () => snapshotPromise,
+      browser_set_bounds: () => Promise.resolve({}),
+      browser_close: () => Promise.resolve({}),
     })
 
     render(<BrowserSheetView sheet={sheet} ctx={ctx} />)
@@ -54,9 +63,9 @@ describe('Browser page snapshot single-flight', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载' }))
     fireEvent.click(screen.getByRole('button', { name: '控制台' }))
 
-    await waitFor(() => expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'browser_snapshot')).toHaveLength(1))
+    await waitFor(() => expect(fakeInvoke.calls.filter(call => call.cmd === 'browser_snapshot')).toHaveLength(1))
     releaseSnapshot?.({ url: 'https://example.com', text: 'ok', links: [] })
-    await waitFor(() => expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'browser_snapshot')).toHaveLength(1))
+    await waitFor(() => expect(fakeInvoke.calls.filter(call => call.cmd === 'browser_snapshot')).toHaveLength(1))
   })
 })
 

@@ -6,15 +6,35 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
+import { FakeInvoke } from '../../test/fakeInvoke'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve({})) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
 vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))
+
+/** 未注册命令 resolve {}（对齐原内联 mock `vi.fn(() => Promise.resolve({}))` 的宽松路径） */
+class PermissiveFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return {}
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: PermissiveFakeInvoke
 
 const sheet: SheetRecord = { id: 'overview', kind: 'overview', title: 'Overview', createdAt: 0, lastFocusedAt: 0 }
 
 beforeEach(() => {
+  fakeInvoke = new PermissiveFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   resetStores()
   useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
   useIdentityStore.setState({
@@ -114,11 +134,7 @@ describe('Overview visual workbench', () => {
   })
 
   it('选择 Agent 失败：保持 overview、错误以 alert 展示、卡片恢复可再选', async () => {
-    const { invoke } = await import('@tauri-apps/api/core')
-    vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === 'switch_agent') return Promise.reject(new Error('switch refused'))
-      return Promise.resolve({})
-    })
+    fakeInvoke.register('switch_agent', () => { throw new Error('switch refused') })
     const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
     render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
 
@@ -128,6 +144,5 @@ describe('Overview visual workbench', () => {
     expect(status).toHaveTextContent('操作失败，详情见右下角错误中心')
     expect(ctx.openSheet).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /Peri.*1 个会话.*已连接/ })).toBeEnabled()
-    vi.mocked(invoke).mockImplementation(() => Promise.resolve({}))
   })
 })

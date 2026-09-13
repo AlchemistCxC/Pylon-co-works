@@ -36,4 +36,25 @@ describe('renderer settings schema', () => {
   ] as const)('拒绝 %s', (_label, schema) => {
     expect(() => validateRendererSettingsSchema(schema)).toThrow()
   })
+
+  // S1 presentation 可选化校验（自 rendererSettingsPresentation.test.ts 并入）
+  it('拒绝声明了非法 presentation 的字段（条件校验语义不变）', () => {
+    const schema = {
+      schemaVersion: 1,
+      groups: [{ id: 'g', label: '组', fields: [
+        { key: 'style', label: '风格', type: 'choice', presentation: 'magic', options: [{ value: 'a' }] },
+      ] }],
+    }
+    expect(() => validateRendererSettingsSchema(schema as never)).toThrow(/presentation 非法|choice presentation 非法/)
+  })
+
+  it('接受未声明 presentation 的字段（未声明合法，运行时由默认补齐）', () => {
+    const schema = {
+      schemaVersion: 1,
+      groups: [{ id: 'g', label: '组', fields: [
+        { key: 'scale', label: '缩放', type: 'number', min: 0, max: 10, default: 1 },
+      ] }],
+    }
+    expect(() => validateRendererSettingsSchema(schema as never)).not.toThrow()
+  })
 })

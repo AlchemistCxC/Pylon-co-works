@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import type { PluginPackageClient, PluginPackageDescriptor } from '../../../infrastructure/plugins/pluginPackageClient.ts'
@@ -15,6 +17,33 @@ import { createRendererSettingsStore } from '../rendererSettingsStore.ts'
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
 import type { RenderSurface } from '../../../contracts/messageRenderer.ts'
 import { projectSettingsContributionCatalog } from '../../../components/settings/settingsContributionCatalog.ts'
+
+// P91 C2 §7：esbuild spawn/dist 构建重型套件，testTimeout 个别放宽（全局 30s）
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
+
+// P91 §12 dist 构建门禁：本套件动态 import 预构建的 examples dist/entry.js（:103/:166 等），
+// 若 dist 缺失或旧于 example src 源码，会静默验证陈旧 bundle。守卫要求 dist/entry.js
+// 存在且新于 examples/plugins/example.solid-renderer/src/**，否则立即失败。
+// 注：该 example 包无自动构建脚本（src/entry.ts 仅为 re-export dist 的指针模块，
+// dist/entry.js 是手工维护的自包含产物），故守卫只做"存在 + 新鲜度"断言并响亮失败，
+// 不做自动重建（自动重建指针模块会产出陈旧/循环 bundle）。
+const EXAMPLE_PLUGIN_DIR = join(process.cwd(), 'examples', 'plugins', 'example.solid-renderer')
+const DIST_ENTRY_PATH = join(EXAMPLE_PLUGIN_DIR, 'dist', 'entry.js')
+
+function assertExampleDistFresh(): void {
+  if (!existsSync(DIST_ENTRY_PATH)) {
+    throw new Error(`[build-guard] ${DIST_ENTRY_PATH} 不存在：先产出 example.solid-renderer 的 dist/entry.js 再运行本套件`)
+  }
+  const entryMtimeMs = statSync(DIST_ENTRY_PATH).mtimeMs
+  const srcDir = join(EXAMPLE_PLUGIN_DIR, 'src')
+  const stale = readdirSync(srcDir, { recursive: true })
+    .map(name => String(name).replaceAll('\\', '/'))
+    .filter(name => /\.(ts|tsx|css)$/.test(name))
+    .filter(name => statSync(join(srcDir, name)).mtimeMs > entryMtimeMs)
+  if (stale.length > 0) {
+    throw new Error(`[build-guard] dist/entry.js 旧于 example 源码（${stale.join(', ')}）：拒绝静默验证陈旧 bundle，先重建 dist 再运行`)
+  }
+}
 
 const PLUGIN_ID = 'example.solid-renderer'
 const SUITE_ID = `${PLUGIN_ID}.suite`
@@ -92,6 +121,8 @@ function fakePackages(input: PluginPackageDescriptor | readonly PluginPackageDes
 
 describe('third-party Solid renderer package', () => {
   let runtime: TestPluginRuntime | undefined
+
+  beforeAll(() => { assertExampleDistFresh() })
 
   async function install(version = '1.0.0') {
     const packageDescriptor = descriptor(version)
