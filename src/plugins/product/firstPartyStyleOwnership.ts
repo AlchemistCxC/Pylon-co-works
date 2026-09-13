@@ -73,7 +73,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/ProfileEditor.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionOwnerRecoveryDialog.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionSettings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),

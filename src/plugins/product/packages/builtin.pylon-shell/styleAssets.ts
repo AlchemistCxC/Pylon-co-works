@@ -5,7 +5,6 @@ const styleModules = typeof document === 'undefined'
   : import.meta.glob<string>([
   './styles/App.css',
   './styles/components/ProfileEditor.css',
-  './styles/components/SessionOwnerRecoveryDialog.css',
   './styles/components/SessionSettings.css',
   './styles/components/Settings.css',
   './styles/components/SettingsCommon.css',
