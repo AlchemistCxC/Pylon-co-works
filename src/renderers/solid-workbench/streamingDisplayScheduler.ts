@@ -9,11 +9,28 @@ import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbench
  * values only control how quickly a Solid tree consumes the already projected
  * snapshot. Keeping the constants here (instead of in the projector) makes
  * the seam explicit and leaves room for a future Presentation Profile token.
+ *
+ * Reveal policy (two bounds, whichever is stricter):
+ * - a baseline typing pace (`revealUnitsPerSecond`), so a slow stream reads
+ *   like a typewriter instead of a sequence of jumps; and
+ * - a bounded visual lag (`maxRevealLagMs`), so a fast stream accelerates
+ *   instead of falling behind forever and then dumping the backlog in one
+ *   publication at the next segment boundary or terminal flush.
+ * The lag bound is what keeps "faster than the baseline" from turning into
+ * "nothing, nothing, …, one whole block".
  */
 export const DEFAULT_STREAMING_DISPLAY_OPTIONS = Object.freeze({
   maxUpdatesPerSecond: 30,
   revealUnitsPerSecond: 120,
-  maxRevealUnitsPerTick: 12,
+  /**
+   * Safety net for a single timer tick. It must be loose enough not to defeat
+   * the lag bound (a tight cap is exactly what turns a backlog into one late
+   * block), yet tight enough that a resumed background callback never paints
+   * an unbounded amount of text in one frame.
+   */
+  maxRevealUnitsPerTick: 1024,
+  /** Maximum time the revealed text may trail the newest snapshot. */
+  maxRevealLagMs: 400,
 })
 
 export interface StreamingDisplaySchedulerOptions {
@@ -23,6 +40,8 @@ export interface StreamingDisplaySchedulerOptions {
   revealUnitsPerSecond?: number
   /** Hard cap for one timer tick, even after a delayed background callback. */
   maxRevealUnitsPerTick?: number
+  /** Maximum time the revealed text may trail the newest snapshot. */
+  maxRevealLagMs?: number
   /** Injectable clock for non-browser hosts and deterministic diagnostics. */
   now?: () => number
 }
@@ -93,8 +112,11 @@ const graphemeSegmenter = createGraphemeSegmenter()
  * Create a renderer-only latest-wins display scheduler.
  *
  * `publish` is called at most `maxUpdatesPerSecond` for ordinary stream
- * updates. Hard resets and terminal flushes are deliberately immediate so a
- * completed response can never remain visually truncated.
+ * updates. Identity/reset transitions and terminal flushes are deliberately
+ * immediate so a completed response can never remain visually truncated;
+ * every other transition (including a segment finishing mid-turn, a new row,
+ * or a canonical list replacement) still publishes its structure immediately
+ * while the not-yet-revealed text keeps converging under the lag bound.
  */
 export function createStreamingDisplayScheduler(
   publish: (snapshot: WorkbenchRuntimeSnapshot) => void,
@@ -112,7 +134,15 @@ export function createStreamingDisplayScheduler(
     options.maxRevealUnitsPerTick,
     DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick,
   )))
+  const maxRevealLagMs = positiveFinite(
+    options.maxRevealLagMs,
+    DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs,
+  )
   const updateIntervalMs = 1000 / maxUpdatesPerSecond
+  /** Ticks a full backlog is allowed to take to catch up. */
+  const catchUpTicks = Math.max(1, Math.ceil(maxRevealLagMs / updateIntervalMs))
+  /** Backlog the smooth typing pace already clears within the lag window. */
+  const smoothBacklogCapacity = revealUnitsPerSecond * maxRevealLagMs / 1000
   const now = options.now ?? defaultNow
 
   let target: WorkbenchRuntimeSnapshot | undefined
@@ -123,11 +153,25 @@ export function createStreamingDisplayScheduler(
   let lastPublishedAt = Number.NEGATIVE_INFINITY
   let lastTickAt = now()
   let terminalFlushToken: object | undefined
+  /** Start of the window in which the current backlog must be fully revealed. */
+  let catchUpDeadline = Number.NEGATIVE_INFINITY
 
   const clearTimer = () => {
     if (timer === undefined) return
     clearTimeout(timer)
     timer = undefined
+  }
+
+  /**
+   * A push that outruns the typing pace starts (or extends) a fixed catch-up
+   * window. Extending it on every such push is what makes the policy a *lag*
+   * bound: continuous fast text keeps the window open while a one-shot burst
+   * drains completely within it.
+   */
+  const noteBacklog = (snapshot: WorkbenchRuntimeSnapshot) => {
+    if (displayed === undefined) return
+    if (pendingTextUnits(displayed, snapshot) <= smoothBacklogCapacity) return
+    catchUpDeadline = Math.max(catchUpDeadline, now() + maxRevealLagMs)
   }
 
   const publishSnapshot = (snapshot: WorkbenchRuntimeSnapshot, timestamp = now()) => {
@@ -137,6 +181,8 @@ export function createStreamingDisplayScheduler(
     displayed = snapshot
     lastPublishedAt = timestamp
     lastTickAt = timestamp
+    // Publishing the full target means nothing is left to catch up.
+    if (snapshot === target) catchUpDeadline = Number.NEGATIVE_INFINITY
     publish(snapshot)
   }
 
@@ -152,14 +198,31 @@ export function createStreamingDisplayScheduler(
     }, delay)
   }
 
+  /**
+   * Reveal budget for one tick: the smooth typing pace, raised whenever the
+   * backlog would otherwise outlive its catch-up deadline.
+   */
+  const revealBudget = (timestamp: number): number => {
+    const elapsedSinceTick = Math.max(0, timestamp - lastTickAt)
+    const baseline = Math.max(1, Math.round(
+      revealUnitsPerSecond * Math.max(elapsedSinceTick, updateIntervalMs) / 1000,
+    ))
+    if (displayed === undefined || target === undefined) return Math.min(maxRevealUnitsPerTick, baseline)
+    const backlog = pendingTextUnits(displayed, target)
+    if (backlog <= 0) return Math.min(maxRevealUnitsPerTick, baseline)
+    // An unarmed window (smooth stream) or one already elapsed (throttled
+    // background timer) restarts here, so the countdown never degrades into
+    // "reveal everything left in this frame".
+    if (!(catchUpDeadline > timestamp)) catchUpDeadline = timestamp + maxRevealLagMs
+    const ticksLeft = Math.max(1, Math.ceil((catchUpDeadline - timestamp) / updateIntervalMs))
+    const catchUp = Math.ceil(backlog / Math.min(catchUpTicks, ticksLeft))
+    return Math.min(maxRevealUnitsPerTick, Math.max(baseline, catchUp))
+  }
+
   const tick = () => {
     if (disposed || paused || target === undefined || displayed === undefined) return
     const timestamp = now()
-    const elapsedSinceTick = Math.max(0, timestamp - lastTickAt)
-    const budget = Math.min(
-      maxRevealUnitsPerTick,
-      Math.max(1, Math.round(revealUnitsPerSecond * Math.max(elapsedSinceTick, updateIntervalMs) / 1000)),
-    )
+    const budget = revealBudget(timestamp)
     lastTickAt = timestamp
 
     if (requiresImmediateFlush(displayed, target)) {
@@ -175,6 +238,7 @@ export function createStreamingDisplayScheduler(
       // caught up, publish the original object to restore every canonical part
       // and preserve reference identity for unaffected consumers.
       clearTimer()
+      catchUpDeadline = Number.NEGATIVE_INFINITY
       if (displayed !== target) publishSnapshot(target, timestamp)
       return
     }
@@ -203,15 +267,18 @@ export function createStreamingDisplayScheduler(
 
     const pending = hasPendingTextGrowth(displayed, snapshot)
     if (!pending) {
-      // Non-streaming changes should stay responsive. While a stream is active
-      // they still respect the same cadence, so a burst of usage/tool updates
-      // cannot create an independent render storm.
+      // Nothing is left to reveal for this snapshot, so any catch-up window is
+      // stale. Non-streaming changes should stay responsive; while a stream is
+      // active they still respect the same cadence, so a burst of usage/tool
+      // updates cannot create an independent render storm.
+      catchUpDeadline = Number.NEGATIVE_INFINITY
       const activeStream = hasActiveTextStream(snapshot)
       if (!activeStream || now() - lastPublishedAt >= updateIntervalMs) tick()
       else schedule()
       return
     }
 
+    noteBacklog(snapshot)
     if (now() - lastPublishedAt >= updateIntervalMs) tick()
     else schedule()
   }
@@ -345,6 +412,38 @@ function hasPendingTextGrowth(
   return false
 }
 
+/**
+ * Cheap size of the not-yet-revealed text, used only to size the catch-up
+ * budget. It counts UTF-16 units (never grapheme clusters) on purpose: the
+ * budget must not pay for segmenting the entire backlog on every tick.
+ */
+function pendingTextUnits(
+  current: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+): number {
+  let total = messageListPendingUnits(current.messages, next.messages)
+  if (current.document && next.document) {
+    total += messageListPendingUnits(current.document.messages, next.document.messages)
+  }
+  return total
+}
+
+function messageListPendingUnits<T extends DisplayMessage>(
+  current: readonly T[],
+  next: readonly T[],
+): number {
+  if (current === next) return 0
+  const currentById = new Map(current.map(message => [message.id, message]))
+  let total = 0
+  for (const message of next) {
+    if (!isStreamMessage(message)) continue
+    const previous = currentById.get(message.id)
+    const previousText = previous?.role === message.role ? previous.content : ''
+    if (isPrefixGrowth(previousText, message.content)) total += message.content.length - previousText.length
+  }
+  return total
+}
+
 function isPrefixGrowth(current: string, next: string): boolean {
   return next.length > current.length && next.startsWith(current)
 }
@@ -360,17 +459,19 @@ function requiresImmediateFlush(
   if (current.document?.sessionId !== next.document?.sessionId) return true
   if (next.status === 'error' || next.summary !== null && next.summary !== current.summary) return true
 
-  if (messageShapeRequiresReset(current.messages, next.messages)
-    || current.document && next.document && messageShapeRequiresReset(current.document.messages, next.document.messages)
+  if (requiresImmediateReplacement(current.messages, next.messages)
+    || current.document && next.document && requiresImmediateReplacement(current.document.messages, next.document.messages)
     || current.document === undefined !== (next.document === undefined)) return true
 
   if (hasNonPrefixMessageChange(current.messages, next.messages)) return true
   if (current.document && next.document && hasNonPrefixMessageChange(current.document.messages, next.document.messages)) return true
 
   const pending = hasPendingTextGrowth(current, next)
-  // A terminal text snapshot must never wait for the next timer. This also
-  // covers “assistant finished, tool is still running” projections.
-  if (pending && (!hasActiveTextStream(next) || next.generating === false)) return true
+  // Only a genuine turn end may dump the whole backlog. "This segment finished
+  // but the turn is still generating" (e.g. the assistant text closed while a
+  // tool runs) still has to show its structure now without skipping the reveal:
+  // otherwise a fast stream buys one whole-block publication per segment.
+  if (pending && next.generating === false) return true
   return false
 }
 
@@ -390,10 +491,13 @@ function hasNonPrefixMessageChange<T extends DisplayMessage>(
 
 /**
  * A list may append one or more *running* assistant/reasoning rows while a
- * stream crosses a semantic boundary. Any other insertion/removal/reorder is
- * a snapshot replacement and should be shown immediately.
+ * stream crosses a semantic boundary, and it may append rows that are already
+ * finished. Neither is a replacement: appended rows are new text (revealed
+ * under the same pace) and an appended non-stream row such as a user echo is
+ * never clipped. Only a shorter or re-keyed list invalidates what is on screen
+ * and must be published wholesale.
  */
-function messageShapeRequiresReset<T extends DisplayMessage>(
+function requiresImmediateReplacement<T extends DisplayMessage>(
   current: readonly T[],
   next: readonly T[],
 ): boolean {
@@ -403,10 +507,6 @@ function messageShapeRequiresReset<T extends DisplayMessage>(
     const previous = current[index]
     const incoming = next[index]
     if (!previous || !incoming || previous.id !== incoming.id || previous.role !== incoming.role) return true
-  }
-  for (let index = current.length; index < next.length; index += 1) {
-    const appended = next[index]
-    if (!appended || !isStreamMessage(appended) || appended.running !== true) return true
   }
   return false
 }

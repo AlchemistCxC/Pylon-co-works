@@ -237,6 +237,8 @@ Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 
 
 终态 document 与 generation metadata 可能在同一事件中连续发布。显示层 `streamingDisplayScheduler` 对同一 owner/session 的 terminal transition 在微任务边界做 latest-wins 合并；结构性会话切换和显式 flush 仍同步。该合并只影响 Renderer 消费节奏，不改变 canonical journal、Workbench Runtime 事实或 legacy Adapter 的职责边界。
 
+显示层的揭示策略同时受两个上限约束：打字机基线速率（`revealUnitsPerSecond`，120 字素/秒）与视觉滞后上限（`maxRevealLagMs`，400ms）。快于基线的流按滞后上限加速追赶，单帧另有 `maxRevealUnitsPerTick` 安全上限；因此只有 identity/reset 切换与真终态（`generating=false`、summary/error）才整发快照，段完成、追加行与列表重排只立即发布结构，未揭示文本继续在滞后上限内收敛——避免"快流末尾一次性倒出整块文本"。
+
 Workbench 的底部跟随由 `followBottom` sticky seam 控制。`PlainMessageList` 负责消息行测量，外层 `.term` 另以 `ResizeObserver` 覆盖流式行、异步 Markdown/highlight 和图片导致的高度变化；观察回调只有在 sticky 时才执行底部跟随，用户上滚后不再夺回滚动权。
 
 Host Port 的 `WorkbenchRuntime` Adapter 同时订阅 `document` 与 `generation` reader，并在微任务边界合并通知。该 seam 兼容 document/generation 分离的第三方 Suite，避免 generation-only 更新漏掉，同时不把两者重新聚合成单一事实状态。

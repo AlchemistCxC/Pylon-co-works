@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
+import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
 import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 
@@ -77,20 +77,159 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     expect(published.at(-1)?.generating).toBe(false)
   })
 
-  it('keeps burst pacing and flushes the complete Unicode terminal text', async () => {
+  it('reveals a small delta at the typing pace instead of at once', () => {
     const { scheduler, published } = setup()
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     scheduler.push(snapshot({ generating: true, messages: [message('')] }))
-    for (let index = 1; index <= 100; index++) scheduler.push(snapshot({ generating: true, messages: [message('👩‍💻'.repeat(index))] }))
-    expect(published).toHaveLength(1)
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(20))] }))
     vi.advanceTimersByTime(34)
-    expect(published).toHaveLength(2)
-    expect(published[1].messages[0].content).toBe('👩‍💻'.repeat(4))
-    const complete = '👩‍💻'.repeat(100)
-    scheduler.push({ ...terminal(), messages: [message(complete, false)] })
-    await Promise.resolve()
+    const revealed = published.at(-1)!.messages[0].content.length
+    expect(revealed).toBeGreaterThan(0)
+    // A backlog below the lag window must stay on the typing pace, not be
+    // published whole (the catch-up window must not collapse to one frame).
+    expect(revealed).toBeLessThanOrEqual(Math.round(DEFAULT_STREAMING_DISPLAY_OPTIONS.revealUnitsPerSecond / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond))
+    expect(revealed).toBeLessThan(20)
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs)
+    expect(published.at(-1)?.messages[0].content).toBe('x'.repeat(20))
+    scheduler.dispose()
+  })
+
+  it('paces a burst, converges inside the reveal lag, and flushes the complete Unicode terminal text', async () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    const grapheme = '👩‍💻'
+    const complete = grapheme.repeat(100)
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+    for (let index = 1; index <= 100; index++) scheduler.push(snapshot({ generating: true, messages: [message(grapheme.repeat(index))] }))
+    expect(published).toHaveLength(1)
+
+    vi.advanceTimersByTime(34)
+    const firstReveal = published.at(-1)!.messages[0].content
+    // A burst is never published as one block...
+    expect(firstReveal).not.toBe(complete)
+    expect(complete.startsWith(firstReveal)).toBe(true)
+    // ...and a reveal step never splits a grapheme cluster.
+    expect(firstReveal.length % grapheme.length).toBe(0)
+
+    // No terminal is involved: the backlog still has to converge inside the lag
+    // bound, which is what stops "nothing, nothing, …, one whole block".
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs)
     expect(published.at(-1)?.messages[0].content).toBe(complete)
     expect(vi.getTimerCount()).toBe(0)
+
+    const completeTerminal = grapheme.repeat(200)
+    scheduler.push(snapshot({ generating: true, messages: [message(completeTerminal)] }))
+    scheduler.push({ ...terminal(), messages: [message(completeTerminal, false)] })
+    await Promise.resolve()
+    expect(published.at(-1)?.messages[0].content).toBe(completeTerminal)
+    expect(vi.getTimerCount()).toBe(0)
+    scheduler.dispose()
+  })
+
+  it('keeps a stream faster than the typing pace within the reveal lag', () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    const unitsPerArrival = 10
+    const tickMs = 34
+    const arrivals = 30
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(unitsPerArrival))] }))
+    let worstLag = 0
+    for (let index = 2; index <= arrivals; index++) {
+      vi.advanceTimersByTime(tickMs)
+      scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * unitsPerArrival))] }))
+      worstLag = Math.max(worstLag, index * unitsPerArrival - published.at(-1)!.messages[0].content.length)
+    }
+    const arrivalPerSecond = unitsPerArrival * 1000 / tickMs
+    const lagBound = Math.ceil(arrivalPerSecond * DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs / 1000)
+    // ~294 units/s against a 120 units/s typing pace: the visible text has to
+    // track the stream, not stop at the baseline and leave the rest for the end.
+    expect(worstLag).toBeLessThanOrEqual(lagBound + unitsPerArrival * 2)
+    expect(published.at(-1)!.messages[0].content.length).toBeGreaterThan(arrivals * unitsPerArrival - lagBound - unitsPerArrival * 2)
+    scheduler.dispose()
+  })
+
+  it('publishes a mid-turn segment completion immediately without dumping the backlog', () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+    for (let index = 1; index <= 40; index++) scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * 10))] }))
+    vi.advanceTimersByTime(34)
+    const before = published.at(-1)!.messages[0].content.length
+    expect(before).toBeLessThan(400)
+
+    // The segment closes while the turn is still generating (e.g. a tool runs):
+    // the new structure must show up now, the unrevealed text must not be dumped.
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(400), false)] }))
+    vi.advanceTimersByTime(34)
+    const last = published.at(-1)!
+    expect(last.messages[0].running).toBe(false)
+    expect(last.messages[0].content.length).toBeLessThan(400)
+    expect(last.messages[0].content.length - before).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+
+    // It still converges without waiting for the terminal flush.
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs)
+    expect(published.at(-1)?.messages[0].content).toBe('x'.repeat(400))
+    scheduler.dispose()
+  })
+
+  it('appends a finished row immediately while its text converges under the lag bound', () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    const late = (content: string) => ({ id: 'm2', role: 'assistant' as const, sender: 'test', content, time: '', running: false })
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(40))] }))
+    vi.advanceTimersByTime(34)
+    const revealed = published.at(-1)!.messages[0].content.length
+
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(40)), late('y'.repeat(400))] }))
+    vi.advanceTimersByTime(34)
+    const appended = published.at(-1)!.messages[1]
+    expect(appended?.id).toBe('m2')                                     // the row is visible now
+    expect(appended!.content.length).toBeLessThan(400)                  // the text is not dumped
+    expect(published.at(-1)!.messages[0].content.length).toBe(revealed) // and nothing retracts
+
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs)
+    expect(published.at(-1)?.messages[1]?.content).toBe('y'.repeat(400))
+    scheduler.dispose()
+  })
+
+  it('caps one delayed tick so a resumed callback cannot paint the whole backlog at once', () => {
+    vi.useFakeTimers()
+    let clock = 0
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => clock })
+    schedulers.push(scheduler)
+    const message = (content: string) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running: true })
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+
+    // The window was hidden: one timer fires, but a long wall-clock gap passed.
+    clock = 1000
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(4000))] }))
+    vi.advanceTimersByTime(1)
+    const revealed = published.at(-1)!.messages[0].content.length
+    expect(revealed).toBeGreaterThan(0)
+    expect(revealed).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    expect(revealed).toBeLessThan(4000)
+    scheduler.dispose()
+  })
+
+  it('keeps identity resets and list replacement immediate and complete', () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+    scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(400))] }))
+    vi.advanceTimersByTime(34)
+    expect(published.at(-1)!.messages[0].content.length).toBeLessThan(400)
+
+    // A new generation is a reset, not a backlog: it must land whole, at once.
+    const reset = snapshot({ generation: 2, generating: true, messages: [message('z'.repeat(400))] })
+    scheduler.push(reset)
+    expect(published.at(-1)).toBe(reset)
+
+    // A re-keyed row cannot be interpolated either: whole replacement, at once.
+    const replaced = snapshot({ generation: 2, generating: true, messages: [{ ...message('q'.repeat(400)), id: 'm2', role: 'reasoning' as const }] })
+    scheduler.push(replaced)
+    expect(published.at(-1)).toBe(replaced)
+    scheduler.dispose()
   })
 
   it('dispose discards both timer work and queued terminal work', async () => {
