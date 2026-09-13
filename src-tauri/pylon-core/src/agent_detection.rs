@@ -627,7 +627,15 @@ fn provider_evidence(
 
 /// 候选排序元组：产出、身份合并与排序三步共用（候选本体 / rule.priority / 身份可信度 /
 /// alias 序号 / 是否在 PATH 外 / 规范化路径键 / 原始来源标记）。
-type RankedCandidate = (AgentRuntimeCandidate, i32, IdentityConfidence, usize, bool, String, String);
+type RankedCandidate = (
+    AgentRuntimeCandidate,
+    i32,
+    IdentityConfidence,
+    usize,
+    bool,
+    String,
+    String,
+);
 
 fn identity_rank(confidence: IdentityConfidence) -> u8 {
     match confidence {
@@ -658,10 +666,16 @@ fn startability_rank(startability: Startability) -> u8 {
 /// 证据强度序（小者强）：身份可信度 → ACP 可用性 → 可启动性 → 既有稳定序
 /// （rule.priority / alias 序号 / PATH 内优先 / 路径键 / args）。与调用方排序同源，
 /// 保证合并结果确定且与既有候选排序口径一致。
-fn compare_candidate_strength(left: &RankedCandidate, right: &RankedCandidate) -> std::cmp::Ordering {
+fn compare_candidate_strength(
+    left: &RankedCandidate,
+    right: &RankedCandidate,
+) -> std::cmp::Ordering {
     identity_rank(left.2)
         .cmp(&identity_rank(right.2))
-        .then(protocol_rank(left.0.protocol_availability).cmp(&protocol_rank(right.0.protocol_availability)))
+        .then(
+            protocol_rank(left.0.protocol_availability)
+                .cmp(&protocol_rank(right.0.protocol_availability)),
+        )
         .then(startability_rank(left.0.startability).cmp(&startability_rank(right.0.startability)))
         .then(right.1.cmp(&left.1))
         .then(left.3.cmp(&right.3))
@@ -712,7 +726,9 @@ fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<RankedCandi
         let winner_version = candidate_version(&winner.0);
         for variant in bucket {
             let variant_version = candidate_version(&variant.0);
-            if let (Some(winner_version), Some(variant_version)) = (&winner_version, &variant_version) {
+            if let (Some(winner_version), Some(variant_version)) =
+                (&winner_version, &variant_version)
+            {
                 if winner_version != variant_version {
                     winner.0.warnings.push(format!(
                         "同一 Agent 的多个安装版本不一致：{winner_version} / {variant_version}"
@@ -2470,7 +2486,11 @@ mod tests {
             .iter()
             .filter(|evidence| evidence.kind == "folded-runtime")
             .collect();
-        assert_eq!(folded.len(), 1, "另一处安装必须留下一条 folded-runtime 证据");
+        assert_eq!(
+            folded.len(),
+            1,
+            "另一处安装必须留下一条 folded-runtime 证据"
+        );
         assert!(
             folded[0].detail.contains("bin-b") || folded[0].detail.contains("bin-a"),
             "折叠证据必须写明被折叠的可执行文件路径：{}",
@@ -2618,7 +2638,15 @@ mod tests {
     #[test]
     fn merge_prefers_the_imported_variant_and_warns_on_version_conflict() {
         let merged = merge_candidates_by_identity(vec![
-            synthetic_candidate("d", "hermes", "C:/a/hermes", &["acp"], 0, None, Some("1.0.0")),
+            synthetic_candidate(
+                "d",
+                "hermes",
+                "C:/a/hermes",
+                &["acp"],
+                0,
+                None,
+                Some("1.0.0"),
+            ),
             synthetic_candidate(
                 "d",
                 "hermes",
