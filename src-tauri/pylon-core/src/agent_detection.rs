@@ -625,6 +625,125 @@ fn provider_evidence(
     }
 }
 
+/// 候选排序元组：产出、身份合并与排序三步共用（候选本体 / rule.priority / 身份可信度 /
+/// alias 序号 / 是否在 PATH 外 / 规范化路径键 / 原始来源标记）。
+type RankedCandidate = (AgentRuntimeCandidate, i32, IdentityConfidence, usize, bool, String, String);
+
+fn identity_rank(confidence: IdentityConfidence) -> u8 {
+    match confidence {
+        IdentityConfidence::Exact => 0,
+        IdentityConfidence::High => 1,
+        IdentityConfidence::Medium => 2,
+        IdentityConfidence::Low => 3,
+    }
+}
+
+/// 已测试过的 ACP 握手是最强证据；未测试次之（未知）；握手失败最弱。
+fn protocol_rank(availability: ProtocolAvailability) -> u8 {
+    match availability {
+        ProtocolAvailability::Verified => 0,
+        ProtocolAvailability::NotTested => 1,
+        ProtocolAvailability::Failed => 2,
+    }
+}
+
+fn startability_rank(startability: Startability) -> u8 {
+    match startability {
+        Startability::Verified => 0,
+        Startability::NotTested => 1,
+        Startability::Failed => 2,
+    }
+}
+
+/// 证据强度序（小者强）：身份可信度 → ACP 可用性 → 可启动性 → 既有稳定序
+/// （rule.priority / alias 序号 / PATH 内优先 / 路径键 / args）。与调用方排序同源，
+/// 保证合并结果确定且与既有候选排序口径一致。
+fn compare_candidate_strength(left: &RankedCandidate, right: &RankedCandidate) -> std::cmp::Ordering {
+    identity_rank(left.2)
+        .cmp(&identity_rank(right.2))
+        .then(protocol_rank(left.0.protocol_availability).cmp(&protocol_rank(right.0.protocol_availability)))
+        .then(startability_rank(left.0.startability).cmp(&startability_rank(right.0.startability)))
+        .then(right.1.cmp(&left.1))
+        .then(left.3.cmp(&right.3))
+        .then(left.4.cmp(&right.4))
+        .then(left.5.cmp(&right.5))
+        .then(left.0.args.cmp(&right.0.args))
+}
+
+fn candidate_version(candidate: &AgentRuntimeCandidate) -> Option<String> {
+    candidate
+        .evidence
+        .iter()
+        .find(|item| item.kind == "version")
+        .map(|item| item.detail.clone())
+}
+
+/// issue #67B（Codeg 口径）：同一 agent 的多重证据合并为**一条**候选。
+///
+/// 身份由 `detector_id` / provider 决定，与安装路径无关（Codeg `registry.rs::registry_id_for`）；
+/// vendor CLI 与 ACP 适配器是同一 agent 的两个证据面（`acp_adapter_relation`），不是两个实例。
+///
+/// 合并取最强证据作代表，但被折叠的形式**不静默丢弃**：写入 `evidence`
+/// （kind=`folded-runtime`）与 `warnings`，并在版本不一致时显式告警；已导入的变体优先
+/// 当代表，否则"已导入"会在合并后丢失并诱导重复导入。
+fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<RankedCandidate> {
+    let mut groups: Vec<(String, Vec<RankedCandidate>)> = Vec::new();
+    for entry in ranked {
+        let identity = entry.0.detector_id.clone();
+        match groups.iter_mut().find(|(key, _)| *key == identity) {
+            Some((_, bucket)) => bucket.push(entry),
+            None => groups.push((identity, vec![entry])),
+        }
+    }
+    let mut merged = Vec::with_capacity(groups.len());
+    for (_, mut bucket) in groups {
+        if bucket.len() == 1 {
+            if let Some(entry) = bucket.pop() {
+                merged.push(entry)
+            }
+            continue;
+        }
+        bucket.sort_by(compare_candidate_strength);
+        let winner_index = bucket
+            .iter()
+            .position(|entry| entry.0.already_imported_agent_id.is_some())
+            .unwrap_or(0);
+        let mut winner = bucket.remove(winner_index);
+        let winner_version = candidate_version(&winner.0);
+        for variant in bucket {
+            let variant_version = candidate_version(&variant.0);
+            if let (Some(winner_version), Some(variant_version)) = (&winner_version, &variant_version) {
+                if winner_version != variant_version {
+                    winner.0.warnings.push(format!(
+                        "同一 Agent 的多个安装版本不一致：{winner_version} / {variant_version}"
+                    ));
+                }
+            }
+            winner.0.warnings.push(format!(
+                "同一 Agent 另有可执行形式：{} {}（未采用为导入目标）",
+                variant.0.executable,
+                variant.0.args.join(" ")
+            ));
+            winner.0.evidence.push(AgentDetectionEvidence {
+                kind: "folded-runtime".into(),
+                detail: format!(
+                    "{} {} · 来源 {} · alias #{} · 版本 {}",
+                    variant.0.executable,
+                    variant.0.args.join(" "),
+                    variant.6,
+                    variant.3,
+                    variant_version.unwrap_or_else(|| "未知".into())
+                ),
+            });
+            if winner.0.already_imported_agent_id.is_none() {
+                winner.0.already_imported_agent_id = variant.0.already_imported_agent_id.clone();
+            }
+        }
+        merged.push(winner);
+    }
+    merged
+}
+
 fn dedup_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     roots
@@ -1411,12 +1530,35 @@ pub async fn detect_agent_runtime_candidates_inner(
         let source = located.source;
         let key = path_key(&path);
         let candidate_args = located.args;
-        let imported = configured
+        // issue #67B：导入侧同口径——“已导入”按 **provider 身份** 判定，不再要求 exe/args
+        // 逐字相等。否则同一 agent 换一种启动形式（不同 invocation / 不同安装路径）会被显示
+        // 成"未导入"，前端随后把 id 追加 -2 后缀，重复导入由此发生（探测侧的去重必须与
+        // 导入侧的判定同一口径，issue #67B 明确要求两侧都做）。
+        // 多命中时取 id 字典序最小者，保证候选字段与提示文本稳定。
+        let imported_exact = configured
             .iter()
             .find(|(_, (provider, executable, args))| {
                 provider == &rule.provider && executable == &key && args == &candidate_args
             })
             .map(|(id, _)| id.clone());
+        let imported_provider = imported_exact.clone().or_else(|| {
+            let mut same_provider: Vec<&String> = configured
+                .iter()
+                .filter(|(_, (provider, _, _))| provider == &rule.provider)
+                .map(|(id, _)| id)
+                .collect();
+            same_provider.sort();
+            same_provider.first().map(|id| (*id).clone())
+        });
+        let imported_form_hint = match (&imported_exact, &imported_provider) {
+            (None, Some(id)) => Some(format!(
+                "已存在同 provider 的 agent 配置 {}；当前候选使用不同可执行形式（{} {}）",
+                id,
+                path.to_string_lossy(),
+                candidate_args.join(" ")
+            )),
+            _ => None,
+        };
         let mut evidence = located.evidence;
         evidence.extend(config);
         let structured_config_match = evidence.iter().any(|item| item.kind == "config-fields");
@@ -1444,7 +1586,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             identity_confidence,
             startability,
             protocol_availability: ProtocolAvailability::NotTested,
-            already_imported_agent_id: imported,
+            already_imported_agent_id: imported_provider,
             warnings: {
                 let mut warnings = located.warnings;
                 if source != "path" {
@@ -1457,6 +1599,9 @@ pub async fn detect_agent_runtime_candidates_inner(
                 } else if version.is_none() {
                     warnings.push("未能读取版本；导入前建议执行 ACP initialize 验证".into())
                 }
+                if let Some(hint) = imported_form_hint {
+                    warnings.push(hint)
+                }
                 warnings
             },
         };
@@ -1467,8 +1612,12 @@ pub async fn detect_agent_runtime_candidates_inner(
             alias_index,
             source != "path",
             key,
+            source,
         ));
     }
+    // issue #67B：身份级合并必须在排序与截断**之前**——否则同一 agent 的多条证据会各自
+    // 占用 max_candidates 预算，并各自展开一条导入流（重复导入的直接诱因）。
+    let mut ranked_candidates = merge_candidates_by_identity(ranked_candidates);
     fn confidence_rank(confidence: IdentityConfidence) -> u8 {
         match confidence {
             IdentityConfidence::Exact => 0,
@@ -2257,17 +2406,289 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(report.candidates.len(), 2);
-        assert_ne!(
-            report.candidates[0].candidate_id, report.candidates[1].candidate_id,
-            "不同 invocation 必须有不同稳定 id"
+        // issue #67B 契约变更（原断言：两种 invocation → 两条候选、候选 id 互不相同）：
+        // 同一 agent 的多种证据（hermes acp / hermes-acp）是**同一身份**的证据面，
+        // 必须折叠为一条候选；被折叠形式保留在 evidence + warnings 中，不得静默丢掉。
+        assert_eq!(
+            report.candidates.len(),
+            1,
+            "同一 detector 的多重证据必须合并为一条候选"
         );
-        assert!(report.candidates.iter().all(|candidate| {
-            candidate.identity_confidence == IdentityConfidence::Medium
-                && candidate.startability == Startability::Failed
-                && candidate.protocol_availability == ProtocolAvailability::NotTested
-        }));
+        let candidate = &report.candidates[0];
+        assert_eq!(candidate.provider, "hermes");
+        assert_eq!(candidate.args, ["acp"], "代表取既有稳定序的更优形式");
+        assert!(
+            candidate
+                .evidence
+                .iter()
+                .any(|evidence| evidence.kind == "folded-runtime"
+                    && evidence.detail.contains("hermes-acp")),
+            "被折叠形式必须以 folded-runtime 证据留痕"
+        );
+        assert!(
+            candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("同一 Agent 另有可执行形式")),
+            "合并必须显式告警，而不是静默丢弃一条真实安装"
+        );
+        // 原意图保留：身份可信度 / 启动性 / 协议可用性三个维度仍分别上报。
+        assert_eq!(candidate.identity_confidence, IdentityConfidence::Medium);
+        assert_eq!(candidate.startability, Startability::Failed);
+        assert_eq!(
+            candidate.protocol_availability,
+            ProtocolAvailability::NotTested
+        );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// issue #67B：同一 invocation 在多个安装位置命中（PATH 与 known-path / 多个搜索根）
+    /// 也是同一 agent 的多重证据，必须折叠；折叠后仍能看出存在第二处安装。
+    #[tokio::test]
+    async fn same_agent_found_in_multiple_roots_folds_into_one_candidate() {
+        let root = fixture_root("identity-multi-root");
+        let first = root.join("bin-a");
+        let second = root.join("bin-b");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(second.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.hermes".into()]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![first.clone(), second.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(report.candidates.len(), 1, "同一 agent 的两处安装必须合并");
+        let candidate = &report.candidates[0];
+        let folded: Vec<&AgentDetectionEvidence> = candidate
+            .evidence
+            .iter()
+            .filter(|evidence| evidence.kind == "folded-runtime")
+            .collect();
+        assert_eq!(folded.len(), 1, "另一处安装必须留下一条 folded-runtime 证据");
+        assert!(
+            folded[0].detail.contains("bin-b") || folded[0].detail.contains("bin-a"),
+            "折叠证据必须写明被折叠的可执行文件路径：{}",
+            folded[0].detail
+        );
+        assert_eq!(candidate.already_imported_agent_id, None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// issue #67B：身份键包含 provider——不同 agent 的多重证据**永不**互相合并。
+    #[tokio::test]
+    async fn different_providers_are_never_merged() {
+        let root = fixture_root("identity-cross-provider");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("peri")[0]), b"fixture").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec![
+                "builtin.detector.hermes".into(),
+                "builtin.detector.peri".into(),
+            ]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![root.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+
+        let mut providers: Vec<&str> = report
+            .candidates
+            .iter()
+            .map(|candidate| candidate.provider.as_str())
+            .collect();
+        providers.sort();
+        assert_eq!(
+            providers,
+            vec!["hermes", "peri"],
+            "跨 provider 的候选绝不合并"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// issue #67B：导入侧判定改用 provider 身份——已配置的 agent 即使使用另一种启动形式
+    /// 也必须被认出来（否则界面显示"未导入"并诱导重复导入），且已导入变体优先当代表。
+    #[tokio::test]
+    async fn configured_agent_matches_by_provider_identity_across_launch_forms() {
+        let root = fixture_root("identity-imported-form");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
+
+        // 已配置的 agent 采用 hermes-acp 形式（alias_index 更靠后 → 默认不是代表）。
+        let mut configured: ConfiguredRuntimes = HashMap::new();
+        configured.insert(
+            "hermes-existing".to_string(),
+            (
+                "hermes".to_string(),
+                path_key(&root.join(&executable_names("hermes-acp")[0])),
+                Vec::new(),
+            ),
+        );
+
+        let report = detect_agent_runtime_candidates_inner(
+            AgentDetectionOptions {
+                detector_ids: Some(vec!["builtin.detector.hermes".into()]),
+                home_dir: Some(root.join("home")),
+                search_roots: Some(vec![root.clone()]),
+                ..AgentDetectionOptions::default()
+            },
+            &configured,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.candidates.len(), 1);
+        let candidate = &report.candidates[0];
+        assert_eq!(
+            candidate.already_imported_agent_id.as_deref(),
+            Some("hermes-existing"),
+            "同 provider 的既有配置必须被认出来"
+        );
+        assert_eq!(
+            candidate.args,
+            ["acp"],
+            "provider 身份回退让同一 provider 的所有变体都属于已导入，代表仍取既有稳定序的更优形式"
+        );
+        assert!(
+            candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("同一 Agent 另有可执行形式")),
+            "合并后的代表与折叠形式必须都有留痕"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn synthetic_candidate(
+        detector_id: &str,
+        provider: &str,
+        executable: &str,
+        args: &[&str],
+        alias_index: usize,
+        imported: Option<&str>,
+        version: Option<&str>,
+    ) -> RankedCandidate {
+        let mut evidence = vec![AgentDetectionEvidence {
+            kind: "path".into(),
+            detail: executable.into(),
+        }];
+        if let Some(version) = version {
+            evidence.push(AgentDetectionEvidence {
+                kind: "version".into(),
+                detail: version.into(),
+            });
+        }
+        (
+            AgentRuntimeCandidate {
+                candidate_id: format!("{provider}:{executable}:{}", args.join("_")),
+                detector_id: detector_id.into(),
+                provider: provider.into(),
+                suggested_agent_id: provider.into(),
+                name: provider.into(),
+                executable: executable.into(),
+                args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                evidence,
+                identity_confidence: IdentityConfidence::Medium,
+                startability: Startability::NotTested,
+                protocol_availability: ProtocolAvailability::NotTested,
+                already_imported_agent_id: imported.map(str::to_string),
+                warnings: Vec::new(),
+            },
+            100,
+            IdentityConfidence::Medium,
+            alias_index,
+            false,
+            executable.into(),
+            "path".into(),
+        )
+    }
+
+    /// 合并规则（纯函数层）：已导入变体优先当代表（否则"已导入"会在合并后丢失）；
+    /// 版本不一致必须显式告警；被折叠形式逐条写入 evidence 与 warnings。
+    #[test]
+    fn merge_prefers_the_imported_variant_and_warns_on_version_conflict() {
+        let merged = merge_candidates_by_identity(vec![
+            synthetic_candidate("d", "hermes", "C:/a/hermes", &["acp"], 0, None, Some("1.0.0")),
+            synthetic_candidate(
+                "d",
+                "hermes",
+                "C:/b/hermes-acp",
+                &[],
+                1,
+                Some("hermes-existing"),
+                Some("2.0.0"),
+            ),
+        ]);
+        assert_eq!(merged.len(), 1, "同一 detector 必须合并");
+        let candidate = &merged[0];
+        assert_eq!(
+            candidate.0.already_imported_agent_id.as_deref(),
+            Some("hermes-existing")
+        );
+        assert_eq!(
+            candidate.0.executable, "C:/b/hermes-acp",
+            "已导入变体必须成为代表"
+        );
+        assert!(
+            candidate
+                .0
+                .evidence
+                .iter()
+                .any(|evidence| evidence.kind == "folded-runtime"
+                    && evidence.detail.contains("C:/a/hermes")),
+            "折叠形式必须留证"
+        );
+        assert!(
+            candidate
+                .0
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("版本不一致")
+                    && warning.contains("1.0.0")
+                    && warning.contains("2.0.0")),
+            "版本冲突必须显式告警"
+        );
+        assert!(candidate
+            .0
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("同一 Agent 另有可执行形式")));
+    }
+
+    /// 身份键含 detector/provider：不同 agent 的候选绝不互相合并（防御路径）。
+    #[test]
+    fn merge_never_collapses_different_detectors() {
+        let merged = merge_candidates_by_identity(vec![
+            synthetic_candidate(
+                "builtin.detector.hermes",
+                "hermes",
+                "C:/a/hermes",
+                &["acp"],
+                0,
+                None,
+                None,
+            ),
+            synthetic_candidate(
+                "builtin.detector.peri",
+                "peri",
+                "C:/a/peri",
+                &[],
+                0,
+                None,
+                None,
+            ),
+        ]);
+        assert_eq!(merged.len(), 2, "跨 detector 的候选绝不合并");
     }
 
     #[tokio::test]
