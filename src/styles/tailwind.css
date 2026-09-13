@@ -76,6 +76,19 @@
   --color-selected-bg: var(--state-selected-bg);
   --color-hover-bg: var(--state-hover-bg);
 
+  /* 派生色调（index.css 派生色调层，样式绞杀地基 20260914） */
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-strong: var(--accent-soft-strong);
+  --color-accent-edge: var(--accent-edge);
+  --color-success-soft: var(--success-soft);
+  --color-success-edge: var(--success-edge);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-strong: var(--danger-soft-strong);
+  --color-danger-edge: var(--danger-edge);
+  --color-stroke-faint: var(--stroke-faint);
+  --color-text-faint: var(--text-faint);
+
   /* 既有别名镜像（多数组件消费这些名字，同一条角色链） */
   --color-text: var(--text);
   --color-text-dim: var(--text-dim);

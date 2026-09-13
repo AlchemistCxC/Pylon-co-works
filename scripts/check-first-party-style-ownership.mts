@@ -72,7 +72,11 @@ for (const [cssPath, importerEntries] of actualImporters) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     failures.push(`CSS importer 漂移：${cssPath}\n  expected: ${expected.join(', ')}\n  actual:   ${actual.join(', ')}`)
   }
-  const expectedMode = declared.lifecycle === 'plugin-scope' ? 'inline' : 'static'
+  // 样式绞杀地基 20260914：adaptive（每包自适应残量）与 plugin-scope 同为
+  // 插件生命周期样式，一律 ?inline 挂载回收。
+  const expectedMode = declared.lifecycle === 'plugin-scope' || declared.lifecycle === 'adaptive'
+    ? 'inline'
+    : 'static'
   const actualModes = [...new Set(importerEntries.map(item => item.mode))]
   if (actualModes.length !== 1 || actualModes[0] !== expectedMode) {
     failures.push(`CSS lifecycle import 错误：${cssPath}\n  lifecycle: ${declared.lifecycle}\n  expected import: ${expectedMode}\n  actual: ${actualModes.join(', ')}`)

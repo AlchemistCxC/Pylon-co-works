@@ -13,6 +13,9 @@ export type FirstPartyStyleOwner = typeof FIRST_PARTY_STYLE_OWNERS[number]
 export const FIRST_PARTY_STYLE_LIFECYCLES = [
   'kernel-static',
   'plugin-scope',
+  // 样式绞杀地基 20260914：每包至多一个自适应残量样式（mode/媒体查询/
+  // 动效/:has() 专用），?inline 随插件生命周期回收，其余样式一律 utilities。
+  'adaptive',
   'smoke-only',
 ] as const
 
