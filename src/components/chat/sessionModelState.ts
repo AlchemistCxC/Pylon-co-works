@@ -6,7 +6,7 @@ interface ModelChangeOptions {
   previousModel?: string
   writeModel: (model: string) => void
   /** P56/D3：权威回声覆盖写入口（响应可提取出新 model/choices 时调用）。 */
-  applyResponseConfig?: (config: { model?: string; modelChoices?: ModelChoice[]; thinkingEffort?: string }) => void
+  applyResponseConfig?: (config: { model?: string; modelChoices?: ModelChoice[]; thinkingEffort?: string; reasoning?: string[] }) => void
   invokeSet: (source: string, model: string) => Promise<unknown>
 }
 
@@ -34,11 +34,13 @@ export async function applySessionModelChange({
       const normalized = sessionResponseObject(response)
       const cfg = extractModelConfig(normalized.configOptions, normalized)
       const reasoning = extractReasoningConfig(normalized.configOptions, normalized)
-      if (cfg.model || cfg.modelChoices || reasoning.thinkingEffort) {
+      const modelReasoning = cfg.modelChoices?.find(choice => choice.id === (cfg.model ?? nextModel))?.reasoningEfforts
+      if (cfg.model || cfg.modelChoices || reasoning.thinkingEffort || modelReasoning) {
         applyResponseConfig({
           ...(cfg.model ? { model: cfg.model } : {}),
           ...(cfg.modelChoices ? { modelChoices: cfg.modelChoices } : {}),
           ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
+          ...(modelReasoning ? { reasoning: modelReasoning } : {}),
         })
       }
     }

@@ -282,26 +282,22 @@ impl SessionInfo {
         // `configOptions` absent. Consume that acknowledgement before the
         // compatibility fallback below so the session converges on the
         // agent's value instead of retaining an optimistic client value.
-        if let Some(model) = response
+        let acknowledged_model = response
             .get("models")
             .and_then(|models| {
                 models
                     .get("currentModelId")
                     .or_else(|| models.get("current_model_id"))
-                    .or_else(|| models.get("currentModel"))
-                    .or_else(|| models.get("current_model"))
-                    .or_else(|| models.get("current"))
             })
             .and_then(value_as_machine_id)
             .or_else(|| {
                 response
                     .get("currentModelId")
                     .or_else(|| response.get("current_model_id"))
-                    .or_else(|| response.get("modelId"))
                     .and_then(value_as_machine_id)
-            })
-        {
-            self.model = model;
+            });
+        if let Some(model) = acknowledged_model.as_ref() {
+            self.model = model.clone();
         }
         if let Some(options) = response
             .get("configOptions")
@@ -314,6 +310,9 @@ impl SessionInfo {
             }
         }
         if authoritative {
+            return;
+        }
+        if acknowledged_model.is_some() {
             return;
         }
         match key {
@@ -1108,10 +1107,10 @@ mod tests {
         );
         session.model = "old-model".to_string();
         session.apply_config_option_response(
-            &serde_json::json!({"models": {"currentModelId": "new-model"}}),
+            &serde_json::json!({"models": {"currentModelId": "agent-normalized-model"}}),
             "model",
             &serde_json::json!("new-model"),
         );
-        assert_eq!(session.model, "new-model");
+        assert_eq!(session.model, "agent-normalized-model");
     }
 }
