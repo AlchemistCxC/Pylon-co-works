@@ -44,10 +44,12 @@ describe('plugin manager default page (P53)', () => {
     // 管理器贡献页渲染（heading 来自注册 label，不含"增强"）
     const heading = await screen.findByRole('heading', { name: '插件管理器', level: 3 })
     expect(heading).toBeInTheDocument()
-    // 面板区块存在（aria-label 挂在 DOM 面板 overview 区；宿主基础页的授权卡不在默认页里）
+    // 面板区块存在（aria-label 挂在 DOM 面板 overview 区；宿主基础页的授权卡不在默认页里）。
+    // P91 C2：默认 1s waitFor 预算是全量负载下的 flake 根因（单跑必绿，非产品缺陷）——
+    // 重启动 afterEach 卸载叠加全量并行时序，预算放宽到 ≥4s。
     await vi.waitFor(() => {
       expect(screen.getByLabelText('插件概览')).toBeInTheDocument()
-    })
+    }, { timeout: 4_000 })
     expect(screen.queryByText('能力授权')).not.toBeInTheDocument()
     grants.resetPluginCapabilityGrantStoreForTests()
   })

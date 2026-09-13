@@ -525,10 +525,11 @@ describe('AgentSheetView renderer mode context', () => {
           key: expect.stringMatching(new RegExp(`^renderer-suite:agent-sheet:none:${pluginId}\\.suite:`)),
         }),
       ])))
-      await new Promise(resolve => setTimeout(resolve, 250))
-
-      expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
-      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
+      // P91 C2：真实 250ms 等待改为 waitFor 可观察条件——健康实例保持挂载且宿主仍指向本 suite。
+      await waitFor(() => {
+        expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
+        expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
+      })
       expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
       // Ordinary Suite fallback errors have one presentation: the application
       // ErrorCenter. The healthy renderer remains mounted without a local

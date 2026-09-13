@@ -13,15 +13,19 @@ const ctxBase = {
 } as unknown as RenderCtx
 
 describe('ZoneGroupFields density', () => {
-  it('basic 档只渲染 tier basic 字段（chat 等待动画颜色是 basic）', () => {
+  // P91 C2 恒真修复：原断言 `queryAllByRole('generic').length >= 0` 恒真，
+  // 「basic 档只渲染 tier basic 字段」契约实际裸奔——改为 basic 显/进阶隐。
+  it('basic 档：tier basic 字段可见，无 tier 字段隐藏', () => {
     render(<ZoneGroupFields zone="chat" ctx={ctxBase} density="basic" />)
-    // basic 字段存在
-    expect(screen.queryAllByRole('generic').length).toBeGreaterThanOrEqual(0)
-    // 非 basic 的字段标签不可见（如「代码差异」组的进阶字段）
+    // tier basic 的 chat 字段（chatFontSize / chatTextColor）标签可见
+    expect(screen.getByText('字号')).toBeInTheDocument()
+    expect(screen.getByText('文字')).toBeInTheDocument()
+    // 无 tier 的 chat 字段（chatBg「消息流背景色」）在 basic 档不可见
+    expect(screen.queryByText('消息流背景色')).toBeNull()
   })
 
-  it('standard 档（默认）与现状一致——非 advanced 可见', () => {
-    const { container } = render(<ZoneGroupFields zone="right" ctx={ctxBase} />)
-    expect(container.querySelectorAll('.set-group').length).toBeGreaterThan(0)
+  it('standard 档（默认）：无 tier 字段可见', () => {
+    render(<ZoneGroupFields zone="chat" ctx={ctxBase} />)
+    expect(screen.getByText('消息流背景色')).toBeInTheDocument()
   })
 })

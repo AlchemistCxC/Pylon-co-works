@@ -14,7 +14,9 @@ describe('Workbench 迁移 fixture', () => {
     const toolStatuses = new Set(WORKBENCH_MESSAGE_FIXTURE.messages
       .filter(message => message.role === 'tool')
       .map(message => message.toolStatus))
-    expect(toolStatuses).toEqual(expect.objectContaining(new Set(['in_progress', 'completed', 'failed'])))
+    // P91 C2 恒真修复：原 `toEqual(expect.objectContaining(new Set([...])))` 对 Set
+    // 只迭代自有可枚举键（空）→ 恒真，Tool 三终态覆盖门实际未锁。
+    expect(toolStatuses).toEqual(new Set(['in_progress', 'completed', 'failed']))
     expect(WORKBENCH_MESSAGE_FIXTURE.messages.some(message => message.contentBlocks?.some(block => block.type === 'tool_diff_content'))).toBe(true)
     expect(WORKBENCH_MESSAGE_FIXTURE.messages.some(message => message.content.includes('```ts'))).toBe(true)
   })
