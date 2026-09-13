@@ -1,6 +1,19 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13 18:23] [砂纸·工程师] [完成·远端 GitHub #69 / #68 / #67（A+B）四片·台账 P79–P81 已写·一条既有行为测试改写登记] 本轮认领的三个远端 issue 全部落地，四个功能 commit（按用户口径**只本地提交，未推远端、未建 PR**）：
+- **#69 FileSheet 两态度量同源** `354eb472`——根因：CodeMirror 的 `.cm-gutter` 列按行号内容定宽（vendor 默认 `flex-shrink:0; width:auto`），不铺满既有 56px gutter 盒 ⇒ 行号文字比只读态左移约 12px；修：一条 `.cm-gutter { flex: 1 1 auto; min-width: 0 }`（内容左边界与行盒度量早已同源）。证据：文件域 19 文件/125 项 + CSS 契约断言 1→4 项。
+- **#68 空态首条消息终态摘要** `145fa8c3`——根因：空态创建路径 `selectSession` 后同一 tick `send`，bind 尚未发生 ⇒ `projectOptimisticUser` 早退 ⇒ 无 TurnClock 起点 ⇒ 终帧 `turnClockTerminal` 找不到条目直接 return ⇒ 摘要永不发布（切 sheet 走 refresh 的 displayOnly 兜底才出现）；修：回合起点提到 bind 守卫之前 + 被拒时撤销时钟 + live echo 不推迟起点。证据：新增 2 项回归（含变异核验红→绿）。
+- **#67A 删除已连接 agent runtime** `9b14258c` / **#67B 探测器身份级候选合并** `eb96cc63`——A 用用户裁定口径（仅摘配置 + 停 runtime，**保留会话/记录**；新增 `agent_delete` scope + 卡片删除入口 + 确认清单）；B 按 Codeg 口径（身份键=provider/detector，被折叠证据与冲突告警全保留，导入侧同口径）。
+
+**门禁**：主 crate `cargo test --lib` **967 passed / 0 failed / 4 ignored**；pylon-core **91 passed / 1 failed**（唯一失败为**既有**环境敏感测试，见下）；`cargo fmt --check` 0；clippy 基线 **pylon `added: []` / pylon-core `added: []`**；前端（设置域 + agent 域）36 文件/**243 项**、`tsc -b` 0、`lint` 0 errors、`check:boundaries` 0。工作树无他人文件连带（`pylon-foundations/Cargo.lock` 在途未触碰）。
+
+**§3.3 测试改写登记（请平行会话注意）**：按例外 1 改写 **1** 条既有行为测试——`pylon-core::agent_detection::tests::discovery_reports_identity_separately_from_protocol_availability`。其旧断言（"同一 provider 的两种 invocation ⇒ `candidates.len()==2` 且两条 candidate_id 不同"）**正是 issue #67B 判定为缺陷的行为**，无法在不放弃新契约的前提下保留；新断言为"折叠为 1 条 + 代表 args==[\"acp\"] + `folded-runtime` 证据含 hermes-acp + 『同一 Agent 另有可执行形式』告警"，并保留原意（identity_confidence / startability / protocol_availability 三维分别上报）。新旧断言逐条记于台账 P81。**未删除任何既有测试**；`candidate_limit_is_stable_and_explicitly_truncated` 未动且仍绿。
+
+**两条既有观察（非本次引入，未擅自改）**：① `pylon-core agent_diagnostics::tests::unavailable_shell_path_is_not_reported_as_a_mismatch` 本机恒红（衔烛 09-12 已登记根因）——本轮用 `git stash push -- src-tauri/pylon-core/src/agent_detection.rs` 在 pristine HEAD 上复现同款 `PathMismatch`，确认与本次改动无关；② `agent_detection.rs::candidates_truncated` 分支实际不可达（`discovered` 已按同一 `max_candidates` 先截断，且每个命中只产出一条候选，合并只会更少），未擅自收编，仅登记。
+
+**文档**：施工书三份已落文档库并登记 `Docs/README.md`（`Pylon-Issue69-…`/`Pylon-Issue68-…`/`Pylon-Issue67-…-20260913.md`）；台账 **P79/P80/P81** 与下一阶段清单已同步。**待用户实机验收**：#69 像素位移（四组量测已写入台账）、#68 冷启动+空态首条复现确认、#67 删除交互/确认文案与本机多证据探测是否只剩一行候选。
+
 [2026-09-13 17:52] [砂纸·工程师] [认领·远端 GitHub #67 / #68 / #69（三 issue 三片独立施工）] 用户指派修复远端仓库 issue 编号 67/68/69。**口径澄清（平行会话请按此读）**：一律指 **GitHub issues**（#67 设置页无法删除已连接 agent runtime + 探测器把同一 agent 多重证据列为独立候选；#68 冷启动空态首条消息结束后未渲染「处理耗时」；#69 FileSheet 切编辑/只读态时内容与行号列位移），**不是**文档库台账里同号的 P67（`no-unknown-returns`）/P68（孤儿门禁）/P69（issue.md 五项修复）。
 
 已按 §2.2 复验现场（`Ru5t/Reflector` @ `dc667cd8`，工作树仅一处既有未跟踪 `src-tauri/pylon-foundations/Cargo.lock`，我全程不碰不提交）：前端定向 7 文件/63 项绿；Rust 主 crate `--lib` **960 passed / 0 failed / 4 ignored**。三份施工书已落文档库并登记 `Docs/README.md`：
