@@ -21,7 +21,13 @@ import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbench
  * its remaining text keeps converging at the same pace.
  */
 export const DEFAULT_STREAMING_DISPLAY_OPTIONS = Object.freeze({
-  maxUpdatesPerSecond: 30,
+  /**
+   * One publication per display frame: fast streams advance in smaller steps
+   * instead of being coalesced into a 30 Hz frame. The cost is a doubled
+   * publication rate (incremental markdown parse + row measure per publish),
+   * which is why this is the frame rate rather than "as fast as possible".
+   */
+  maxUpdatesPerSecond: 60,
   revealUnitsPerSecond: 120,
   /**
    * Hard per-frame visual bound: one publication never adds more than this to

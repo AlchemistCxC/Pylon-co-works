@@ -3,6 +3,12 @@ import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } fr
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
 import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 
+/** 一拍：一个调度器定时器间隔（+1ms 余量，保证恰好走一拍而不会走两拍）。
+    刷新率是契约常量，测试不写死毫秒数。 */
+const TICK_MS = 1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1
+/** 模拟真实流的到达节奏（与调度器刷新率无关，故意保持 ~33ms/次）。 */
+const ARRIVAL_MS = 34
+
 function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
   return {
     revision: 0, sessionId: 'session-a', ownerKey: 'owner-a', generation: 1,
@@ -34,7 +40,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     scheduler.push(snapshot({ generating: true, messages, document }))
     const next = snapshot({ generating: true, messages, document, tokenCount: 9 })
     scheduler.push(next)
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     expect(published.at(-1)).toBe(next)
     expect(published.at(-1)?.messages).toBe(messages)
     expect(published.at(-1)?.document).toBe(document)
@@ -82,7 +88,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     scheduler.push(snapshot({ generating: true, messages: [message('')] }))
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(20))] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const revealed = published.at(-1)!.messages[0].content.length
     expect(revealed).toBeGreaterThan(0)
     // A backlog below the lag window must stay on the typing pace, not be
@@ -103,7 +109,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     for (let index = 1; index <= 100; index++) scheduler.push(snapshot({ generating: true, messages: [message(grapheme.repeat(index))] }))
     expect(published).toHaveLength(1)
 
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const firstReveal = published.at(-1)!.messages[0].content
     // A burst is never published as one block...
     expect(firstReveal).not.toBe(complete)
@@ -137,7 +143,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const { scheduler, published } = setup()
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     scheduler.push(snapshot({ generating: true, messages: [message('')] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     scheduler.pause()
     scheduler.push(snapshot({ generating: true, tokenCount: 6, messages: [message('x'.repeat(2400))] }))
     scheduler.push(snapshot({ generating: true, tokenCount: 9, messages: [message('x'.repeat(2400))] }))
@@ -166,7 +172,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const unitsPerArrival = 200
     const arrivals = 60
     for (let index = 1; index <= arrivals; index++) {
-      vi.advanceTimersByTime(34)
+      vi.advanceTimersByTime(ARRIVAL_MS)
       scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * unitsPerArrival))] }))
     }
     const complete = 'x'.repeat(arrivals * unitsPerArrival)
@@ -192,16 +198,16 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const { scheduler, published } = setup()
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     const unitsPerArrival = 10
-    const tickMs = 34
+    const arrivalMs = ARRIVAL_MS
     const arrivals = 30
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(unitsPerArrival))] }))
     let worstLag = 0
     for (let index = 2; index <= arrivals; index++) {
-      vi.advanceTimersByTime(tickMs)
+      vi.advanceTimersByTime(arrivalMs)
       scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * unitsPerArrival))] }))
       worstLag = Math.max(worstLag, index * unitsPerArrival - published.at(-1)!.messages[0].content.length)
     }
-    const arrivalPerSecond = unitsPerArrival * 1000 / tickMs
+    const arrivalPerSecond = unitsPerArrival * 1000 / arrivalMs
     const lagBound = Math.ceil(arrivalPerSecond * DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs / 1000)
     // ~294 units/s against a 120 units/s typing pace: the visible text has to
     // track the stream, not stop at the baseline and leave the rest for the end.
@@ -215,14 +221,14 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     scheduler.push(snapshot({ generating: true, messages: [message('')] }))
     for (let index = 1; index <= 40; index++) scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * 10))] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const before = published.at(-1)!.messages[0].content.length
     expect(before).toBeLessThan(400)
 
     // The segment closes while the turn is still generating (e.g. a tool runs):
     // the new structure must show up now, the unrevealed text must not be dumped.
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(400), false)] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const last = published.at(-1)!
     expect(last.messages[0].running).toBe(false)
     expect(last.messages[0].content.length).toBeLessThan(400)
@@ -239,11 +245,11 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     const late = (content: string) => ({ id: 'm2', role: 'assistant' as const, sender: 'test', content, time: '', running: false })
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(40))] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const revealed = published.at(-1)!.messages[0].content.length
 
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(40)), late('y'.repeat(400))] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     const appended = published.at(-1)!.messages[1]
     expect(appended?.id).toBe('m2')                                     // the row is visible now
     expect(appended!.content.length).toBeLessThan(400)                  // the text is not dumped
@@ -279,7 +285,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     scheduler.push(snapshot({ generating: true, messages: [message('')] }))
     scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(400))] }))
-    vi.advanceTimersByTime(34)
+    vi.advanceTimersByTime(TICK_MS)
     expect(published.at(-1)!.messages[0].content.length).toBeLessThan(400)
 
     // A new generation is a reset, not a backlog: it must land whole, at once.
