@@ -13,10 +13,9 @@ design-qa.md
 __pycache__/
 *.py[cod]
 
-# 内部协作文档不入库（保留本地）
-AGENTS.md
-AGENTS-架构师.md
-AGENTS-工程师.md
+# 协作规范随仓库分发（2026-09-14 起入库）
+# spec 为一次性工作文档，用完即弃，不入库
+.agents/spec/
 /references/
 /.hermes/
 
@@ -50,9 +49,6 @@ examples/process-plugins/*/bin/*/echo
 
 # 本地 agent 配置（真实路径/密钥，不入库；模板见 agents.example.yaml）
 agents.yaml
-
-# 本地维护用 skill（不入库，仅保留本地工作区）
-.agents/skills/pylon-astra-maintenance/
 
 # codex binaries (local only)
 codex.exe

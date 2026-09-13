@@ -1,6 +1,8 @@
-# Pylon 开发与协作规范
+# Pylon 开发规范
 
-适用 TypeScript/Solid/React 与 Rust/Tauri。领域名词以 [CONTEXT](../../CONTEXT.md) 为准；实际职责见 [模块维护地图](Pylon-模块维护地图.md)，历史架构说明见 [项目架构参考](Pylon-项目架构参考.md)。规则服务于行为保持和可维护性，不要求为统一外观重写未涉及的代码。
+适用 TypeScript/Solid/React 与 Rust/Tauri。领域名词以 [CONTEXT](../CONTEXT.md) 为准；模块责任边界见 [模块维护地图](../docs/说明书/Pylon-模块维护地图.md)，历史架构说明见 [项目架构参考](../docs/说明书/Pylon-项目架构参考.md)。规则服务于行为保持和可维护性，不要求为统一外观重写未涉及的代码。
+
+协作流程见仓库根 [`AGENTS.md`](../AGENTS.md)。
 
 ## 模块与依赖
 
@@ -37,24 +39,17 @@
 - 禁用 `dark:` variant：主题是 CSS 变量换值，不存在 class 翻转。插件 `?inline` CSS 不得使用 `@apply`（不经过 Tailwind 入口编译），但可照常使用 utility 类名。
 - utility 类名不对第三方 Suite 承诺稳定；第三方 Suite 视觉自足，不依赖宿主 Tailwind 版本与类集合。
 - 样式注释文本里避免写出会被解析器误读的序列：星号紧跟斜杠会提前终止块注释，把注释文本变成活 CSS（tailwind.css 头部注释曾因此打断构建）。
-- 共享词汇底座（解耦评估批 1，lifecycle `shared`）：`FileSheet.css` 的 `file-main-*`/`file-section-*`/`file-tree-error`/`search-result-*` 基线被 history/search/gateway/browser/ContextPanel 跨 sheet 消费；`SettingsCommon.css` 的 `settings-dialog/control/action/section`、`--settings-*` 变量组、`dialog-overlay/content`、`ps-btn` 为 settings 域底座。utilities 层恒输给未分层底座——新组件**不得携带这些类名**（除非有意消费底座）；存量组件解耦时须同波删除类名与其覆写 CSS。
 - 派生色调（主色淡化背景、描边融合）一律用 index.css 派生色调层的 `*-soft`/`*-edge` token 或其 utility（`bg-accent-soft`、`border-danger-edge` 等）；禁止在 TS 类串或组件样式里新写 color-mix 或字面量色值——需要新档位时先在 index.css 派生色调层立 token，再映射进 tailwind.css。
 - 每包允许至多一个自适应残量样式（lifecycle `adaptive`，`?inline` 随插件生命周期回收），只收模式切换、媒体查询、动效、`:has()` 这类 utilities 不宜表达的自适应规则；其余样式一律 utilities，绞杀时随组件迁移。
 - 常用 variant 对照：展开态 `aria-expanded:`、键盘焦点 `focus-visible:`、减动效 `motion-reduce:`、窄屏 `max-[720px]:`、后代引用 `[.some-scope_&]:`（慎用，优先把判断放进组件状态）。
-
-## 多人协作与交接
-
-1. 动工前记录 branch、base/head、工作区状态，更新远端引用并检查在途 PR 与 BOARD；未提交内容按文件或 hunk 保留。用户要求同步 main 时先同步，再做新改动。
-2. 按责任块认领文件与接口。人或 agent 并行工作使用不同分支/worktree；共享协议、锁文件、门禁入口与公共类型由一个集成责任人处理。认领说明应包含目标、可写范围、禁止改动、依赖、验收与停止条件。不要虚构 GitHub owner 或把讨论多人流程当作启动子代理的授权。
-3. 每块先记录当前入口、所有调用者、既有测试和保持不变的行为，再实施。一次提交围绕一个可审阅变化；新业务逻辑与纯移动/重命名尽量分开，便于区分回归来源。
-4. 冲突按双方最终意图解决。不能整文件接受一方、覆盖别人的在途改动或清空未跟踪文件；共同编辑的文件使用明确路径/hunk 暂存。只在确有并行独立收益且已获授权时委派，主负责人保留架构判断、集成与最终验收。
-5. 交接写明基准提交、已落地行为、测试命令/退出码、未解问题、下一块依赖和可重现证据。BOARD 保留短摘要，详细过程放在当前工作区的开发记录，持久规则回写本说明书。
 
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。
 
-记录分别标注“当前事实”“待实施”“已验证”“尚未复现”。外部路径不存在时注明不可用，优先读取仓内事实，不从历史施工书标题推断当前要求。文档与门禁、注释与类型冲突时先查代码和运行结果，再更新过期说明。
+记录模板见 [`templates/adr.md`](templates/adr.md)，落地到 `decisions/`。
+
+记录分别标注"当前事实""待实施""已验证""尚未复现"。外部路径不存在时注明不可用，优先读取仓内事实，不从历史施工书标题推断当前要求。文档与门禁、注释与类型冲突时先查代码和运行结果，再更新过期说明。
 
 ## 验证与交付
 
