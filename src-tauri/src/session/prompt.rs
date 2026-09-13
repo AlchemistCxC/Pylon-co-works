@@ -792,9 +792,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     // prompt 立即失败（稳定码），不排队：排队会让两条对话在用户看不到的地
     // 方互相阻塞，超限显形比静默串行可诊断。
     let _instance_prompt_gate = runtime.prompt_gate.clone().try_lock_owned().map_err(|_| {
-        PylonError::Protocol(
-            "prompt_in_progress: 该 Agent 实例已有进行中的 prompt".to_string(),
-        )
+        PylonError::Protocol("prompt_in_progress: 该 Agent 实例已有进行中的 prompt".to_string())
     })?;
 
     // G2-08 锁合并：updated_at 刷新移入 ensure_session_mapping 的存在性读取
@@ -1588,9 +1586,8 @@ for line in sys.stdin:
                 // 带原文的诊断：本测试此前在 CI 上只报"trace line JSON: lone leading
                 // surrogate..."，看不到子进程实际写了什么（子进程 locale 相关），
                 // 失败时把该行原文打出来，避免再次盲猜。
-                serde_json::from_str(line).unwrap_or_else(|error| {
-                    panic!("trace line JSON: {error}; raw={line}")
-                })
+                serde_json::from_str(line)
+                    .unwrap_or_else(|error| panic!("trace line JSON: {error}; raw={line}"))
             })
             .expect("trace must capture session/prompt");
         assert_eq!(

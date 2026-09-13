@@ -19,11 +19,17 @@ import { createRuntimeServices } from '../../plugin-runtime/runtimeServices.ts'
 import { WorkspaceRegistryStore } from '../workspaceRegistry.ts'
 
 describe('Workspace Registry（阶段 6 首个切片）', () => {
+  // P77：gateway 类型由第 7 包 builtin.pylon-gateway 贡献（core BUILTIN_WORKSPACE_TYPES
+  // 已摘除），productPluginTestBootstrap 全量装载后注册表 = core 种子 + 包贡献的 gateway。
+  const SEEDED_KINDS = [...BUILTIN_WORKSPACE_TYPES.map(item => item.kind), 'gateway']
+
   it('9 个内置 workspace 全量种子，描述符字段完整', () => {
     const snapshot = getWorkspaceRegistrySnapshot()
 
-    expect(snapshot.workspaces).toHaveLength(BUILTIN_WORKSPACE_TYPES.length)
-    expect(snapshot.workspaces.map(item => item.kind).sort()).toEqual(BUILTIN_WORKSPACE_TYPES.map(item => item.kind).sort())
+    // core 列表不再含 gateway（包贡献唯一来源；双注册会被 registerType 抛错暴露）
+    expect(BUILTIN_WORKSPACE_TYPES.map(item => item.kind)).not.toContain('gateway')
+    expect(snapshot.workspaces).toHaveLength(SEEDED_KINDS.length)
+    expect(snapshot.workspaces.map(item => item.kind).sort()).toEqual([...SEEDED_KINDS].sort())
 
     for (const workspace of snapshot.workspaces) {
       expect(workspace.kind).toBeTruthy()
@@ -40,7 +46,8 @@ describe('Workspace Registry（阶段 6 首个切片）', () => {
   it('launchOptions 只包含声明 launch 的 workspace，且 getSheetLaunchOption 可用', () => {
     const options = getSheetLaunchOptions()
 
-    expect(options).toHaveLength(BUILTIN_WORKSPACE_TYPES.filter(item => item.launch).length)
+    // core launch 项 + 包贡献的 gateway launch 项
+    expect(options).toHaveLength(BUILTIN_WORKSPACE_TYPES.filter(item => item.launch).length + 1)
     for (const option of options) {
       expect(option.title).toBeTruthy()
       expect(option.description).toBeTruthy()

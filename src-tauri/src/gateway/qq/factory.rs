@@ -5,10 +5,12 @@
 //! `QqAuth` + `QqAdapter`，并给出 cancel 感知的托管连接循环（T12-4：stop →
 //! cancel → 收敛退出 → 关闭适配器 → 不留后台残余）。
 //!
-//! 本模块持有应用级依赖（`GatewayCore` + HTTP client），在 composition root 构造；
-//! lib.rs 接线（register_factory）属后续 wave（当前 wave 文件范围不含 lib.rs）。
+//! 本模块持有应用级依赖（`GatewayCore` + HTTP client）；宿主接线统一经
+//! `gateway::platform_registry`（P78：register_platform_factories /
+//! bootstrap_env_adapters），lib.rs 不出现平台特判。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use reqwest::Client;
 use tokio_util::sync::CancellationToken;
@@ -79,6 +81,38 @@ impl AdapterFactory for QqAdapterFactory {
             notifier,
         ));
         Ok((adapter, run))
+    }
+}
+
+/// env-only 引导（legacy B10.2 路径，P78 自 lib.rs 原样搬移进注册表）：
+/// `PYLON_QQ_APP_ID` + `PYLON_QQ_CLIENT_SECRET` 同时存在时，构造独立适配器
+/// 注册进 core 并拉起 WS 循环（不创建实例身份，与实例路径并存）。
+/// `PYLON_QQ_CLIENT_SECRET` 为 secret：只读入 QqAuth，不进任何输出。
+/// 需在 tokio runtime 上下文内调用（lib.rs run() 同步段，runtime 已就绪）。
+pub(crate) fn env_bootstrap(core: &Arc<GatewayCore>) {
+    if let (Ok(qq_app_id), Ok(qq_client_secret)) = (
+        std::env::var("PYLON_QQ_APP_ID"),
+        std::env::var("PYLON_QQ_CLIENT_SECRET"),
+    ) {
+        let http = match reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                eprintln!("Pylon QQ HTTP client unavailable: {error}");
+                reqwest::Client::new()
+            }
+        };
+        let auth = Arc::new(QqAuth::new(http.clone(), qq_app_id, qq_client_secret));
+        let adapter = QqAdapter::new(core.clone(), http.clone(), auth.clone());
+        if let Err(error) = core.register(adapter.clone()) {
+            eprintln!("Pylon QQ adapter register failed: {error}");
+        } else {
+            tracing::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
+            tokio::spawn(ws::run_ws_loop(http, auth, adapter));
+        }
     }
 }
 

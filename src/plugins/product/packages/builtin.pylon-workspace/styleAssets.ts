@@ -10,7 +10,6 @@ const styleModules = typeof document === 'undefined'
   './styles/sheets/RuntimeSheetView.css',
   './styles/sheets/browser/BrowserSheet.css',
   './styles/sheets/file/FileSheet.css',
-  './styles/sheets/gateway/GatewaySheet.css',
   './styles/sheets/history/HistorySheet.css',
   './styles/sheets/search/SearchSheet.css',
 ], { query: '?inline', import: 'default', eager: true })

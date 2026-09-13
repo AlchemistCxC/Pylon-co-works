@@ -4,6 +4,7 @@ export const FIRST_PARTY_STYLE_OWNERS = [
   'builtin.pylon-workspace',
   'builtin.pylon-renderers',
   'builtin.pylon-plugin-manager',
+  'builtin.pylon-gateway',
   'solid-smoke',
 ] as const
 
@@ -43,6 +44,7 @@ const SHELL_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-shell/sty
 const WORKSPACE_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-workspace/styleAssets.ts'
 const RENDERER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-renderers/styleAssets.ts'
 const MANAGER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-plugin-manager/styleAssets.ts'
+const GATEWAY_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-gateway/styleAssets.ts'
 
 /**
  * 第一方 CSS 的唯一 ownership 真值。
@@ -75,7 +77,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/gateway/GatewaySheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/history/HistorySheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
 
@@ -89,6 +90,8 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层：suite 挂载几何 + 生产中控槽位'),
 
   entry('src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css', 'builtin.pylon-plugin-manager', 'plugin-scope', [MANAGER_STYLE_ASSETS], '第 6 个 first-party 包（P53 D2）的 framework-free 管理面板样式'),
+
+  entry('src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', 'builtin.pylon-gateway', 'plugin-scope', [GATEWAY_STYLE_ASSETS], '第 7 个 first-party 包（P77）的 gateway sheet 样式'),
 
   entry('src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css', 'solid-smoke', 'smoke-only', [
     'src/renderers/solid-workbench/smoke/browserSmoke.solid.tsx',

@@ -64,7 +64,12 @@ describe('Plugin composition root bootstrap boundary', () => {
       'builtin.pylon-tools',
       'builtin.pylon-workspace',
     ])
-    expect(result.skippedPluginIds).toEqual(['builtin.pylon-plugin-manager', 'builtin.skin'])
+    // P77（§3.3 例外 1）：第 7 包 builtin.pylon-gateway 同样不在 shell 闭包内，保持 skipped。
+    expect(result.skippedPluginIds).toEqual([
+      'builtin.pylon-gateway',
+      'builtin.pylon-plugin-manager',
+      'builtin.skin',
+    ])
   })
 
   it('wires hook disable-plugin policy to the single product runtime', async () => {
