@@ -46,6 +46,12 @@ export const DEFAULT_STREAMING_DISPLAY_OPTIONS = Object.freeze({
   maxRevealLagMs: 400,
 })
 
+/**
+ * 帧源：请求一帧并返回取消函数。
+ * 语义：回调最多被调用一次；取消后不得再调用。
+ */
+export type StreamingDisplayFrameSource = (callback: () => void) => () => void
+
 export interface StreamingDisplaySchedulerOptions {
   /** Maximum number of display snapshot publications per second. */
   maxUpdatesPerSecond?: number
@@ -55,6 +61,13 @@ export interface StreamingDisplaySchedulerOptions {
   maxRevealUnitsPerTick?: number
   /** Maximum time the revealed text may trail the newest snapshot. */
   maxRevealLagMs?: number
+  /**
+   * 帧源（可注入，默认浏览器 rAF）：**可见时**把发布对齐到下一帧，
+   * 避免"发布了但没显示"，并自动匹配 120/144Hz 屏幕。
+   * 不注入或环境无 rAF 时走纯定时器路径（与帧对齐前行为一致）。
+   * 隐藏时**不用**帧源——定时器就是心跳，发布继续（用户决策 D-A）。
+   */
+  frame?: StreamingDisplayFrameSource
   /** Injectable clock for non-browser hosts and deterministic diagnostics. */
   now?: () => number
 }
@@ -208,6 +221,11 @@ export function createStreamingDisplayScheduler(
   /** Start of the window in which the current backlog must be fully revealed. */
   let catchUpDeadline = Number.NEGATIVE_INFINITY
 
+  // ── S1 帧对齐（D-A：隐藏不停发，定时器即心跳）─────────────────
+  const requestFrame = options.frame ?? defaultFrameSource()
+  let cancelFrame: (() => void) | undefined
+  let frameRequestedAt = 0
+
   // ── S0 只读诊断（不参与任何节奏决策）────────────────────────
   const DIAGNOSTIC_INTERVAL_CAPACITY = 64
   const publicationIntervals: number[] = []
@@ -227,6 +245,64 @@ export function createStreamingDisplayScheduler(
     if (timer === undefined) return
     clearTimeout(timer)
     timer = undefined
+  }
+
+  /** 排一个心跳定时器（单例：已有定时器时不重复排）。 */
+  const armTimer = (delayMs: number) => {
+    if (disposed || paused || timer !== undefined) return
+    timer = setTimeout(() => {
+      timer = undefined
+      publishOnDue()
+    }, Math.max(0, delayMs))
+  }
+
+  const clearFrame = () => {
+    if (cancelFrame === undefined) return
+    cancelFrame()
+    cancelFrame = undefined
+  }
+
+  /**
+   * 可见且帧源可用时才把发布对齐到帧；隐藏（或无帧源）直接走定时器——
+   * 用户决策 D-A：窗口隐藏也继续收敛，定时器就是心跳。
+   */
+  const framesAlignable = (): boolean => requestFrame !== undefined
+    && (typeof document === 'undefined' || document.visibilityState === 'visible')
+
+  /**
+   * 到期即发布：可见时排到下一帧，隐藏/无帧源时立即发布。
+   * 帧停摆兜底：帧源存在但一帧都没来（遮挡/合成器节流）时，超过两拍就取消并直接发布，
+   * 保证"隐藏或遮挡也继续收敛"不被一个不流动的 rAF 破坏（心跳语义优先）。
+   */
+  const publishOnDue = () => {
+    const scheduleFrame = requestFrame
+    if (scheduleFrame === undefined || !framesAlignable()) {
+      tick()
+      return
+    }
+    const timestamp = now()
+    if (cancelFrame !== undefined) {
+      const sinceRequest = timestamp - frameRequestedAt
+      if (sinceRequest < updateIntervalMs * 2) {
+        // 还在等这一帧：**按整拍**重挂心跳（不能挂 0ms——那会变成热循环），
+        // 同时保证下一拍仍能走到停摆判定。
+        armTimer(Math.max(updateIntervalMs, updateIntervalMs * 2 - sinceRequest))
+        return
+      }
+      // 帧停摆（遮挡/节流）：取消该帧并**直接发布**，不重排——心跳语义优先于帧对齐。
+      clearFrame()
+      tick()
+      return
+    }
+    frameRequestedAt = timestamp
+    cancelFrame = scheduleFrame(() => {
+      cancelFrame = undefined
+      // 帧到了：清掉等帧心跳，由 tick() 的 schedule() 按**实际发布节奏**重排。
+      clearTimer()
+      tick()
+    })
+    // 排了帧也要给下一次机会：帧若一直不来，下一拍会在这里发现停摆并直接发布。
+    armTimer(updateIntervalMs)
   }
 
   /**
@@ -277,10 +353,7 @@ export function createStreamingDisplayScheduler(
     const delay = Number.isFinite(elapsed)
       ? Math.max(0, updateIntervalMs - elapsed)
       : 0
-    timer = setTimeout(() => {
-      timer = undefined
-      tick()
-    }, delay)
+    armTimer(delay)
   }
 
   /**
@@ -377,7 +450,7 @@ export function createStreamingDisplayScheduler(
       // updates cannot create an independent render storm.
       catchUpDeadline = Number.NEGATIVE_INFINITY
       const activeStream = hasActiveTextStream(snapshot)
-      if (!activeStream || now() - lastPublishedAt >= updateIntervalMs) tick()
+      if (!activeStream || now() - lastPublishedAt >= updateIntervalMs) publishOnDue()
       else schedule()
       return
     }
@@ -421,6 +494,7 @@ export function createStreamingDisplayScheduler(
     paused = true
     terminalFlushToken = undefined
     clearTimer()
+    clearFrame()
   }
 
   const resume = (snapshot?: WorkbenchRuntimeSnapshot) => {
@@ -437,6 +511,7 @@ export function createStreamingDisplayScheduler(
     disposed = true
     terminalFlushToken = undefined
     clearTimer()
+    clearFrame()
     target = undefined
     displayed = undefined
   }
@@ -525,6 +600,15 @@ function positiveFinite(value: number | undefined, fallback: number): number {
 
 function defaultNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
+/** 默认帧源：浏览器 rAF；无 rAF 的宿主（或测试）返回 undefined ⇒ 纯定时器路径。 */
+function defaultFrameSource(): StreamingDisplayFrameSource | undefined {
+  if (typeof requestAnimationFrame !== 'function') return undefined
+  return callback => {
+    const handle = requestAnimationFrame(() => callback())
+    return () => cancelAnimationFrame(handle)
+  }
 }
 
 function hasActiveTextStream(snapshot: WorkbenchRuntimeSnapshot): boolean {
