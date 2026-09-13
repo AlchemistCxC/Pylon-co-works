@@ -42,12 +42,13 @@ assert.match(view, /\.sessions\(\)/, '必须经 gateway client 调 gateway_sessi
 assert.match(view, /raw as PlatformSession\[\]/, '平台会话必须 typed 消费')
 assert.match(view, /归 Prism 管理，只读/, 'inject 必须只读提示归 Prism')
 assert.equal(view.includes('rightPanel'), false, 'gateway 无右栏')
-const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/gateway/GatewaySheet.css', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', import.meta.url), 'utf8')
 assert.ok(css.length > 0, '必须有样式')
 
 // 3. registry gateway 条目渲染
-const registry = readFileSync(new URL('../src/plugins/core/sheet/builtinWorkspacePlugins.ts', import.meta.url), 'utf8')
-assert.match(registry, /kind: 'gateway'.*sidebarMode: 'sheet'.*component: lazyWorkspace\(GatewaySheetView\)/, 'gateway type 必须注册内置左栏 renderer')
+// P77：gateway 类型由第 7 包 builtin.pylon-gateway 贡献（core BUILTIN_WORKSPACE_TYPES 已摘除）
+const registry = readFileSync(new URL('../src/plugins/product/builtinPylonGateway.ts', import.meta.url), 'utf8')
+assert.match(registry, /kind: 'gateway'[\s\S]*?sidebarMode: 'sheet'[\s\S]*?component: lazyWorkspace\(GatewaySheetView\)/, 'gateway type 必须注册内置左栏 renderer')
 assert.match(view, /!ctx\.sidebarCollapsed && <aside className="gateway-sidebar">/, 'gateway 内置左栏必须服从宿主折叠态')
 
 console.log('gateway sheet 守卫通过')

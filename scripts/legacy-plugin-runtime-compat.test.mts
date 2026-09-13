@@ -3,6 +3,7 @@ import { createPluginIdentity } from '../src/plugin-runtime/pluginIdentity.ts'
 import { activateBuiltinPlugin, getPluginRuntime } from '../src/plugin-runtime/pluginCompositionRoot.ts'
 import { BUILTIN_WORKSPACE_TYPES } from '../src/plugins/core/sheet/builtinWorkspacePlugins.ts'
 import {
+  BUILTIN_PYLON_GATEWAY_ID,
   BUILTIN_PYLON_RENDERERS_ID,
   BUILTIN_PYLON_TOOLS_ID,
 } from '../src/plugins/product/productPluginIds.ts'
@@ -22,7 +23,9 @@ const activatedRuntimeKeys: string[] = []
 
 beforeAll(async () => {
   const runtime = getPluginRuntime()
-  for (const pluginId of [BUILTIN_PYLON_TOOLS_ID, BUILTIN_PYLON_RENDERERS_ID]) {
+  // P77：gateway 由第 7 包 builtin.pylon-gateway 贡献（core BUILTIN_WORKSPACE_TYPES 已摘除），
+  // 因此本 runner 必须显式激活它，否则注册表只有 core 的 8 个 kind。
+  for (const pluginId of [BUILTIN_PYLON_TOOLS_ID, BUILTIN_PYLON_RENDERERS_ID, BUILTIN_PYLON_GATEWAY_ID]) {
     const existing = runtime.snapshot().active.find(identity => identity.pluginId === pluginId)
     if (existing) continue
     await activateBuiltinPlugin(pluginId)
