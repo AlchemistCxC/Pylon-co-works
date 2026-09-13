@@ -213,7 +213,7 @@ export function SolidControlCenter() {
     submitButtonMode: appearance().inputSubmitButtonMode,
   })
   const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
-  const externalAttach = () => externalButtonMode() && !appearance().ccHidden.includes('attach')
+  const externalAttach = () => visibleIds().includes('attach')
   const hiddenWidgetIds = () => !emptyVisual()
     ? appearance().ccHidden
     : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]

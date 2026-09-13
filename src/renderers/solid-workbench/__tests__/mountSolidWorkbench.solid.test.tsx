@@ -1122,6 +1122,16 @@ describe('mountSolidWorkbench', () => {
     expect(host.firstElementChild).toBe(root)
   })
 
+  it.each([false, true])('#54 终端空态只有一个附件入口（编辑模式 %s）', async editMode => {
+    const { host, services, lifecycle } = mountPreview()
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), inputMode: 'cli', inputVariant: 'cli' })
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: editMode })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true,
+      presentationProfileId: 'builtin.presentation.terminal-classic' })
+    await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    expect(host.querySelectorAll('.input-btn.attach, .cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toHaveLength(1)
+  })
+
   it('空态只有一个工作区时自动选中，并随首条请求创建会话', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
