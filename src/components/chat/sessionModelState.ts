@@ -1,4 +1,4 @@
-import { extractModelConfig, sessionResponseObject, type ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
+import { extractModelConfig, extractReasoningConfig, sessionResponseObject, type ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
 
 interface ModelChangeOptions {
   source: string
@@ -6,7 +6,7 @@ interface ModelChangeOptions {
   previousModel?: string
   writeModel: (model: string) => void
   /** P56/D3：权威回声覆盖写入口（响应可提取出新 model/choices 时调用）。 */
-  applyResponseConfig?: (config: { model?: string; modelChoices?: ModelChoice[] }) => void
+  applyResponseConfig?: (config: { model?: string; modelChoices?: ModelChoice[]; thinkingEffort?: string }) => void
   invokeSet: (source: string, model: string) => Promise<unknown>
 }
 
@@ -33,10 +33,12 @@ export async function applySessionModelChange({
     if (applyResponseConfig) {
       const normalized = sessionResponseObject(response)
       const cfg = extractModelConfig(normalized.configOptions, normalized)
-      if (cfg.model || cfg.modelChoices) {
+      const reasoning = extractReasoningConfig(normalized.configOptions, normalized)
+      if (cfg.model || cfg.modelChoices || reasoning.thinkingEffort) {
         applyResponseConfig({
           ...(cfg.model ? { model: cfg.model } : {}),
           ...(cfg.modelChoices ? { modelChoices: cfg.modelChoices } : {}),
+          ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
         })
       }
     }

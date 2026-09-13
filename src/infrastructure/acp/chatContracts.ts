@@ -491,6 +491,8 @@ export interface ModelChoice {
   id: string
   label?: string
   provider?: string
+  contextWindow?: number
+  reasoningEfforts?: string[]
 }
 
 /** provider 仅呈现用途：hermes 风格 description（`Provider: X`）或 id 前缀。 */
@@ -503,6 +505,12 @@ function choiceProvider(choice: unknown, id: string): string | undefined {
   return separator > 0 ? id.slice(0, separator) : undefined
 }
 
+function extractWireNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value)
+  return undefined
+}
+
 /** machine id 优先：无 machine id 的 choice 直接丢弃，不降级把显示名上 wire。 */
 function toModelChoice(choice: unknown): ModelChoice | undefined {
   const id = extractMachineIdString(choice)
@@ -510,10 +518,21 @@ function toModelChoice(choice: unknown): ModelChoice | undefined {
   const record = asWireRecord(choice)
   const name = record ? extractWireString(readWireField(record, ['name']), []) : undefined
   const provider = choiceProvider(choice, id)
+  const contextWindow = record
+    ? extractWireNumber(readWireField(record, ['contextWindow', 'context_window', 'contextTokens', 'context_tokens', 'maxContextTokens']))
+    : undefined
+  const reasoningRaw = record
+    ? readWireField(record, ['reasoningEfforts', 'reasoning_efforts', 'reasoningOptions', 'reasoning_options'])
+    : undefined
+  const reasoningEfforts = Array.isArray(reasoningRaw)
+    ? uniqueStrings(reasoningRaw.map(value => extractWireString(value, ['id', 'value', 'valueId', 'value_id'])))
+    : []
   return {
     id,
     ...(name ? { label: name } : {}),
     ...(provider ? { provider } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(reasoningEfforts.length > 0 ? { reasoningEfforts } : {}),
   }
 }
 
