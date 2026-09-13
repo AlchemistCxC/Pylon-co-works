@@ -39,3 +39,22 @@
 }
 .app[data-interface-mode="modern-gui"] .browser-tab-strip { border-radius: 8px 8px 0 0; margin-inline: 8px; }
 .app[data-interface-mode="modern-gui"] .browser-viewport { margin: 0 8px 8px; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 26px color-mix(in srgb, var(--text) 6%, transparent); }
+
+/* runtime-* 类名是锚点（RuntimeSheetView 保留）：mode 变量覆写与 tactical-blue 材质。
+   （原 modern-gui 规则中 .runtime-log-item 无 JSX 消费方，系死锚点，未迁移。） */
+.app[data-interface-mode="tactical-blue"] .runtime-sheet { background: #05132ba6; --danger: #ff9bab; --warning: #ffda83; --tool-ok: #77e4b6; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar { background: #091b37ed; border-right: 1px solid #74c4fa55; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-head { border-left: 3px solid #76e8ff; padding-left: 16px; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-title { font-size: 22px; font-weight: 800; }
+.app[data-interface-mode="tactical-blue"] .runtime-main { background: #07172bcc; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-list { background: #091931e8; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row { min-height: 44px; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row[aria-expanded="true"] { background: #164276; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-error { color: #ff9bab; }
+.app[data-interface-mode="tactical-blue"] :is(.runtime-filter-input, .runtime-filter-select) { background: #071329; border-color: #527ea5; border-radius: 2px; }
+
+.app[data-interface-mode="modern-gui"] .runtime-filter-select,
+.app[data-interface-mode="modern-gui"] .runtime-filter-input,
+.app[data-interface-mode="modern-gui"] .runtime-clear { border-radius: 9px; }
+.app[data-interface-mode="modern-gui"] .runtime-diagnostics,
+.app[data-interface-mode="modern-gui"] .runtime-markers { border-radius: 12px; }
