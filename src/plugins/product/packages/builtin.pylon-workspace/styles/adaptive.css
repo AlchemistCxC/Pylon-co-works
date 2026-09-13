@@ -1,0 +1,13 @@
+/* workspace 包自适应残量（样式绞杀地基 20260914，lifecycle=adaptive）：
+   只收 utilities 不宜表达的规则（mode 切换等）；?inline 随插件生命周期挂载回收。
+   history-* 类名是锚点（HistorySheetView 保留）。 */
+.app[data-interface-mode="modern-gui"] .history-sidebar-total,
+.app[data-interface-mode="modern-gui"] .history-sidebar nav button,
+.app[data-interface-mode="modern-gui"] .history-row,
+.app[data-interface-mode="modern-gui"] .history-sheet .template-apply { border-radius: 10px; }
+.app[data-interface-mode="modern-gui"] .history-row {
+  margin-bottom: 7px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
+}

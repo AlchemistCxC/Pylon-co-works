@@ -3,6 +3,7 @@ import type { FirstPartyStyleAsset } from '../../firstPartyStyleRuntime.ts'
 const styleModules = typeof document === 'undefined'
   ? {}
   : import.meta.glob<string>([
+  './styles/adaptive.css',
   './styles/components/PrismSheet.css',
   './styles/components/Sidebar.css',
   './styles/components/right-panel/ContextPanel.css',
@@ -10,7 +11,6 @@ const styleModules = typeof document === 'undefined'
   './styles/sheets/RuntimeSheetView.css',
   './styles/sheets/browser/BrowserSheet.css',
   './styles/sheets/file/FileSheet.css',
-  './styles/sheets/history/HistorySheet.css',
   './styles/sheets/search/SearchSheet.css',
 ], { query: '?inline', import: 'default', eager: true })
 
