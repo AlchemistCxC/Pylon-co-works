@@ -96,6 +96,11 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
     setWriteStatus({ kind: 'saving' })
     const enabledInstances = instances.filter(instance => instance.enabled)
     const readMigrated = async (): Promise<GatewayRouteShape[]> => {
+      // SAFETY: 负载已经 normalizeGatewayStatus 收敛，但 gatewayClient 刻意只声明
+      // Promise<unknown>——typed 消费发生在调用点（legacy 门禁 "raw as GatewayStatus" 亦断言此处）。
+      // routes 的契约元素 GatewayRoute 与事务入参 GatewayRouteShape 字段同源，差别只在
+      // reset 的必选/可选；该断言把契约快照交给事务侧校验（migrateLegacyRouteBindings +
+      // upsertGatewayRoute 的 validateGatewayRoute），不引入未经验证的运行时形状。
       const existing = (await gatewayClient.status() as GatewayStatus).routes as unknown as GatewayRouteShape[]
       return migrateLegacyRouteBindings(existing, enabledInstances)
     }
