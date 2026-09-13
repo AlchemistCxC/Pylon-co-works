@@ -31,6 +31,38 @@ afterEach(() => {
 })
 
 describe('SolidMessageRow', () => {
+  it.each(['wheel', 'touch', 'keyboard'])('inner reasoning respects %s intent inside its 24px sticky band (#74)', async inputKind => {
+    const callbacks: (() => void)[] = []
+    vi.stubGlobal('requestAnimationFrame', (fn: () => void) => callbacks.push(fn))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const [text, setText] = createSignal('thinking')
+    const result = render(() => <ReasoningBlock text={text()} running defaultCollapsed={false} />)
+    const body = result.container.querySelector('.term-reasoning-body') as HTMLElement
+    Object.defineProperties(body, { scrollHeight: { value: 400 }, clientHeight: { value: 100 } })
+    callbacks.splice(0).forEach(fn => fn())
+    expect(body.scrollTop).toBe(300)
+    setText('queued before gesture')
+    if (inputKind === 'wheel') fireEvent.wheel(body, { deltaY: -2 })
+    else if (inputKind === 'keyboard') fireEvent.keyDown(body, { key: 'ArrowUp' })
+    else {
+      fireEvent.touchStart(body, { touches: [{ clientY: 100 }] })
+      fireEvent.touchMove(body, { touches: [{ clientY: 110 }] })
+    }
+    fireEvent.scroll(body)
+    body.scrollTop = 298
+    fireEvent.scroll(body)
+    callbacks.splice(0).forEach(fn => fn())
+    expect(body.scrollTop).toBe(298)
+    setText('more content after gesture')
+    callbacks.splice(0).forEach(fn => fn())
+    expect(body.scrollTop).toBe(298)
+    body.scrollTop = 300
+    fireEvent.scroll(body)
+    setText('resumed at endpoint')
+    callbacks.splice(0).forEach(fn => fn())
+    expect(body.scrollTop).toBe(300)
+  })
+
   it.each(['frame', 'microtask'])('follows active reasoning with %s scheduling', async mode => {
     const callbacks: (() => void)[] = []
     vi.stubGlobal('requestAnimationFrame', mode === 'frame' ? (fn: () => void) => callbacks.push(fn) : undefined)
