@@ -68,4 +68,22 @@ describe('agentAdvertisedModelEntries', () => {
     expect(second).not.toBe(first)
     expect(second.map(entry => entry.id)).toEqual(['second'])
   })
+
+  it('keeps each mounted agent snapshot stable across interleaved reads', () => {
+    useRuntimeStore.getState().setSessionConfig(agentA, { models: ['a-model'] })
+    useRuntimeStore.getState().setSessionConfig(agentB, { models: ['b-model'] })
+    const firstA = agentAdvertisedModelEntries('agent-a')
+    const firstB = agentAdvertisedModelEntries('agent-b')
+    for (let index = 0; index < 20; index += 1) {
+      expect(agentAdvertisedModelEntries('agent-a')).toBe(firstA)
+      expect(agentAdvertisedModelEntries('agent-b')).toBe(firstB)
+    }
+    useRuntimeStore.getState().setSessionConfig(agentB, { models: ['new-b'] })
+    const nextA = agentAdvertisedModelEntries('agent-a')
+    const nextB = agentAdvertisedModelEntries('agent-b')
+    expect(nextA).toEqual(firstA)
+    expect(nextB.map(entry => entry.id)).toEqual(['new-b'])
+    expect(agentAdvertisedModelEntries('agent-a')).toBe(nextA)
+    expect(agentAdvertisedModelEntries('agent-b')).toBe(nextB)
+  })
 })

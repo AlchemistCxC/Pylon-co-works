@@ -54,13 +54,10 @@ function computeEntries(config: Record<string, SessionConfig>, agentId: string):
   return Object.freeze(result)
 }
 
-interface AgentModelsCache {
-  sessionConfig: Record<string, SessionConfig>
-  agentId: string
-  entries: readonly WorkbenchOptionEntry[]
-}
-
-let cache: AgentModelsCache | undefined
+// Several Agent Sheets read the same store concurrently. A single last-agent
+// cache makes their getSnapshot calls evict each other and loop in React.
+// Weak keys release old immutable config snapshots when the store replaces them.
+const entriesByConfig = new WeakMap<Record<string, SessionConfig>, Map<string, readonly WorkbenchOptionEntry[]>>()
 
 /**
  * Returns the agent's advertised entries with a cached identity so a React
@@ -69,7 +66,15 @@ let cache: AgentModelsCache | undefined
  */
 export function agentAdvertisedModelEntries(agentId: string): readonly WorkbenchOptionEntry[] {
   const sessionConfig = useRuntimeStore.getState().sessionConfig
-  if (cache && cache.sessionConfig === sessionConfig && cache.agentId === agentId) return cache.entries
-  cache = { sessionConfig, agentId, entries: computeEntries(sessionConfig, agentId) }
-  return cache.entries
+  let entriesByAgent = entriesByConfig.get(sessionConfig)
+  if (!entriesByAgent) {
+    entriesByAgent = new Map()
+    entriesByConfig.set(sessionConfig, entriesByAgent)
+  }
+  let entries = entriesByAgent.get(agentId)
+  if (!entries) {
+    entries = computeEntries(sessionConfig, agentId)
+    entriesByAgent.set(agentId, entries)
+  }
+  return entries
 }
