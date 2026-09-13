@@ -13,23 +13,25 @@ import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbench
  * Reveal policy (two bounds, whichever is stricter):
  * - a baseline typing pace (`revealUnitsPerSecond`), so a slow stream reads
  *   like a typewriter instead of a sequence of jumps; and
- * - a bounded visual lag (`maxRevealLagMs`), so a fast stream accelerates
- *   instead of falling behind forever and then dumping the backlog in one
- *   publication at the next segment boundary or terminal flush.
- * The lag bound is what keeps "faster than the baseline" from turning into
- * "nothing, nothing, …, one whole block".
+ * - a per-frame bound (`maxRevealUnitsPerTick`), raised towards by the
+ *   catch-up window (`maxRevealLagMs`) so a backlog converges quickly without
+ *   ever painting a whole block in one frame.
+ * Both bounds apply to every publication, the terminal one included: a
+ * finished response stops generating and shows its summary immediately, then
+ * its remaining text keeps converging at the same pace.
  */
 export const DEFAULT_STREAMING_DISPLAY_OPTIONS = Object.freeze({
   maxUpdatesPerSecond: 30,
   revealUnitsPerSecond: 120,
   /**
-   * Safety net for a single timer tick. It must be loose enough not to defeat
-   * the lag bound (a tight cap is exactly what turns a backlog into one late
-   * block), yet tight enough that a resumed background callback never paints
-   * an unbounded amount of text in one frame.
+   * Hard per-frame visual bound: one publication never adds more than this to
+   * a streaming row. This is the contract that keeps a fast stream (and a
+   * finished one) from painting a whole block in one frame, which is what
+   * breaks live layout measurement; it doubles as the guard against a resumed
+   * background callback painting an unbounded amount of text.
    */
-  maxRevealUnitsPerTick: 1024,
-  /** Maximum time the revealed text may trail the newest snapshot. */
+  maxRevealUnitsPerTick: 128,
+  /** Target time for the revealed text to converge with the newest snapshot. */
   maxRevealLagMs: 400,
 })
 
@@ -42,8 +44,7 @@ export interface StreamingDisplaySchedulerOptions {
   maxRevealUnitsPerTick?: number
   /** Maximum time the revealed text may trail the newest snapshot. */
   maxRevealLagMs?: number
-  /** Injectable clock for non-browser hosts and deterministic diagnostics. */
-  now?: () => number
+  /** Injectable clock for non-browser hosts and deterministic diagnostics. */  now?: () => number
 }
 
 export interface StreamingDisplayScheduler {
@@ -53,7 +54,11 @@ export interface StreamingDisplayScheduler {
   flush(snapshot?: WorkbenchRuntimeSnapshot): void
   /** Stop timer work while retaining the latest target/display state. */
   pause(): void
-  /** Resume from the newest raw snapshot and converge in one publication. */
+  /**
+   * Resume from the newest raw snapshot and publish its structure immediately.
+   * Unrevealed text keeps converging under the reveal bounds, so returning to a
+   * surface that streamed in the background never paints one whole block.
+   */
   resume(snapshot?: WorkbenchRuntimeSnapshot): void
   /** Cancel pending work and release references. */
   dispose(): void
@@ -112,11 +117,12 @@ const graphemeSegmenter = createGraphemeSegmenter()
  * Create a renderer-only latest-wins display scheduler.
  *
  * `publish` is called at most `maxUpdatesPerSecond` for ordinary stream
- * updates. Identity/reset transitions and terminal flushes are deliberately
- * immediate so a completed response can never remain visually truncated;
- * every other transition (including a segment finishing mid-turn, a new row,
- * or a canonical list replacement) still publishes its structure immediately
- * while the not-yet-revealed text keeps converging under the lag bound.
+ * updates, and no publication ever adds more than `maxRevealUnitsPerTick` to a
+ * streaming row. Identity/reset transitions replace the displayed rows whole
+ * (the text cannot be interpolated anyway); every other transition — a segment
+ * finishing mid-turn, a new row, a terminal state, a resume — publishes its
+ * structure immediately while the not-yet-revealed text keeps converging under
+ * the same bounds.
  */
 export function createStreamingDisplayScheduler(
   publish: (snapshot: WorkbenchRuntimeSnapshot) => void,
@@ -225,10 +231,9 @@ export function createStreamingDisplayScheduler(
     const budget = revealBudget(timestamp)
     lastTickAt = timestamp
 
-    if (requiresImmediateFlush(displayed, target)) {
+    if (requiresReplacementFlush(displayed, target)) {
       clearTimer()
-      if (isTerminalTransition(displayed, target)) queueTerminalFlush()
-      else publishSnapshot(target, timestamp)
+      publishSnapshot(target, timestamp)
       return
     }
 
@@ -258,10 +263,20 @@ export function createStreamingDisplayScheduler(
       return
     }
 
-    if (requiresImmediateFlush(displayed, snapshot)) {
+    if (requiresReplacementFlush(displayed, snapshot)) {
       clearTimer()
-      if (isTerminalTransition(displayed, snapshot)) queueTerminalFlush()
-      else publishSnapshot(snapshot)
+      publishSnapshot(snapshot)
+      return
+    }
+
+    if (isTerminalFlush(displayed, snapshot)) {
+      // The finished state has to land now (summary, elapsed, running=false),
+      // but not the text that is still being revealed: coalesce the
+      // transition into one budgeted publication instead of a whole-block
+      // paint. A 6000 units/s response used to hand its entire tail to one
+      // frame here, which is exactly what a live row cannot lay out.
+      clearTimer()
+      queueTerminalFlush()
       return
     }
 
@@ -293,18 +308,18 @@ export function createStreamingDisplayScheduler(
   }
 
   // Canonical projection and legacy generation metadata can arrive back to
-  // back for one terminal event. Coalesce only terminal transitions within the
-  // current microtask; explicit flush() and structural session switches remain
-  // synchronous so a completed response is never visibly truncated.
+  // back for one terminal event. Coalesce the terminal transition into one
+  // microtask publication so the finished state lands immediately; the
+  // publication is an ordinary tick, so "the turn is over" never becomes a
+  // whole-block paint of the text that was still being revealed.
   function queueTerminalFlush(): void {
     if (terminalFlushToken !== undefined || disposed) return
     const token = terminalFlushToken = {}
     queueMicrotask(() => {
       if (terminalFlushToken !== token) return
       terminalFlushToken = undefined
-      if (disposed || paused || target === undefined) return
-      clearTimer()
-      publishSnapshot(target)
+      if (disposed || paused) return
+      tick()
     })
   }
 
@@ -318,8 +333,10 @@ export function createStreamingDisplayScheduler(
   const resume = (snapshot?: WorkbenchRuntimeSnapshot) => {
     if (disposed) return
     paused = false
-    if (snapshot !== undefined) target = snapshot
-    if (target !== undefined) flush(target)
+    if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
+    if (target === undefined || displayed === undefined) return
+    noteBacklog(target)
+    tick()
   }
 
   const dispose = () => {
@@ -448,7 +465,12 @@ function isPrefixGrowth(current: string, next: string): boolean {
   return next.length > current.length && next.startsWith(current)
 }
 
-function requiresImmediateFlush(
+/**
+ * Transitions that *replace* what is on screen. Their text cannot be
+ * interpolated (the rows are gone, re-keyed or rewritten), so they stay
+ * synchronous and whole.
+ */
+function requiresReplacementFlush(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
@@ -457,7 +479,6 @@ function requiresImmediateFlush(
     || current.generation !== next.generation
     || current.turnEpoch !== next.turnEpoch) return true
   if (current.document?.sessionId !== next.document?.sessionId) return true
-  if (next.status === 'error' || next.summary !== null && next.summary !== current.summary) return true
 
   if (requiresImmediateReplacement(current.messages, next.messages)
     || current.document && next.document && requiresImmediateReplacement(current.document.messages, next.document.messages)
@@ -465,14 +486,19 @@ function requiresImmediateFlush(
 
   if (hasNonPrefixMessageChange(current.messages, next.messages)) return true
   if (current.document && next.document && hasNonPrefixMessageChange(current.document.messages, next.document.messages)) return true
-
-  const pending = hasPendingTextGrowth(current, next)
-  // Only a genuine turn end may dump the whole backlog. "This segment finished
-  // but the turn is still generating" (e.g. the assistant text closed while a
-  // tool runs) still has to show its structure now without skipping the reveal:
-  // otherwise a fast stream buys one whole-block publication per segment.
-  if (pending && next.generating === false) return true
   return false
+}
+
+/**
+ * The finished/aborted state of a turn — summary, elapsed time, error status,
+ * `running=false` — has to land now; its *text* must not. Routing these through
+ * the coalesced budgeted publication is what keeps "the turn is over" from
+ * becoming one whole-block paint of everything that was still being revealed.
+ */
+function isTerminalFlush(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
+  if (isTerminalTransition(current, next)) return true
+  if (next.status === 'error') return true
+  return hasPendingTextGrowth(current, next) && next.generating === false
 }
 
 function hasNonPrefixMessageChange<T extends DisplayMessage>(

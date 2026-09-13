@@ -94,7 +94,7 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     scheduler.dispose()
   })
 
-  it('paces a burst, converges inside the reveal lag, and flushes the complete Unicode terminal text', async () => {
+  it('paces a burst and converges inside the reveal lag without ever painting one block', async () => {
     const { scheduler, published } = setup()
     const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
     const grapheme = '👩‍💻'
@@ -117,11 +117,73 @@ describe('streaming scheduler lifecycle and stable metadata', () => {
     expect(published.at(-1)?.messages[0].content).toBe(complete)
     expect(vi.getTimerCount()).toBe(0)
 
+    // The terminal state lands now (summary, running=false) but its text must
+    // not: a finished turn still converges under the same per-frame bound.
     const completeTerminal = grapheme.repeat(200)
     scheduler.push(snapshot({ generating: true, messages: [message(completeTerminal)] }))
     scheduler.push({ ...terminal(), messages: [message(completeTerminal, false)] })
     await Promise.resolve()
+    const terminalPublication = published.at(-1)!
+    expect(terminalPublication.generating).toBe(false)
+    expect(terminalPublication.summary?.reason).toBe('done')
+    expect(terminalPublication.messages[0].content).not.toBe(completeTerminal)
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs + 40)
     expect(published.at(-1)?.messages[0].content).toBe(completeTerminal)
+    expect(vi.getTimerCount()).toBe(0)
+    scheduler.dispose()
+  })
+
+  it('resumes under the same bounds instead of painting the background backlog', () => {
+    const { scheduler, published } = setup()
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+    vi.advanceTimersByTime(34)
+    scheduler.pause()
+    scheduler.push(snapshot({ generating: true, tokenCount: 6, messages: [message('x'.repeat(2400))] }))
+    scheduler.push(snapshot({ generating: true, tokenCount: 9, messages: [message('x'.repeat(2400))] }))
+    vi.advanceTimersByTime(5000)
+    const before = published.length
+
+    scheduler.resume(snapshot({ generating: true, tokenCount: 9, messages: [message('x'.repeat(2400))] }))
+    expect(published).toHaveLength(before + 1)
+    const resumed = published.at(-1)!
+    expect(resumed.tokenCount).toBe(9)
+    expect(resumed.messages[0].content.length).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+
+    vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs + 1200)
+    expect(published.at(-1)?.messages[0].content).toBe('x'.repeat(2400))
+    expect(vi.getTimerCount()).toBe(0)
+    scheduler.dispose()
+  })
+
+  it('never grows a streaming row by more than the per-frame bound, terminal included', async () => {
+    const { scheduler, published } = setup()
+    const cap = DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick
+    const message = (content: string, running = true) => ({ id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running })
+    scheduler.push(snapshot({ generating: true, messages: [message('')] }))
+    // Arrival is far above both the typing pace and the per-frame bound, so a
+    // backlog exists at every moment — including when the turn ends.
+    const unitsPerArrival = 200
+    const arrivals = 60
+    for (let index = 1; index <= arrivals; index++) {
+      vi.advanceTimersByTime(34)
+      scheduler.push(snapshot({ generating: true, messages: [message('x'.repeat(index * unitsPerArrival))] }))
+    }
+    const complete = 'x'.repeat(arrivals * unitsPerArrival)
+    expect(published.at(-1)!.messages[0].content.length).toBeLessThan(complete.length)
+
+    scheduler.push({ ...terminal(), messages: [message(complete, false)] })
+    await Promise.resolve()
+    const lengths = published.map(snapshot => snapshot.messages[0].content.length)
+    const growth = lengths.map((length, index) => length - (index === 0 ? 0 : lengths[index - 1]))
+    // The whole stream, the terminal publication included: no frame paints a block.
+    expect(Math.max(...growth)).toBeLessThanOrEqual(cap)
+    expect(published.at(-1)?.generating).toBe(false)
+    expect(published.at(-1)?.summary?.reason).toBe('done')
+
+    // The drain needs no further events — the scheduler keeps converging alone.
+    vi.advanceTimersByTime(10_000)
+    expect(published.at(-1)?.messages[0].content).toBe(complete)
     expect(vi.getTimerCount()).toBe(0)
     scheduler.dispose()
   })

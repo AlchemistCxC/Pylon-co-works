@@ -237,7 +237,7 @@ Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 
 
 终态 document 与 generation metadata 可能在同一事件中连续发布。显示层 `streamingDisplayScheduler` 对同一 owner/session 的 terminal transition 在微任务边界做 latest-wins 合并；结构性会话切换和显式 flush 仍同步。该合并只影响 Renderer 消费节奏，不改变 canonical journal、Workbench Runtime 事实或 legacy Adapter 的职责边界。
 
-显示层的揭示策略同时受两个上限约束：打字机基线速率（`revealUnitsPerSecond`，120 字素/秒）与视觉滞后上限（`maxRevealLagMs`，400ms）。快于基线的流按滞后上限加速追赶，单帧另有 `maxRevealUnitsPerTick` 安全上限；因此只有 identity/reset 切换与真终态（`generating=false`、summary/error）才整发快照，段完成、追加行与列表重排只立即发布结构，未揭示文本继续在滞后上限内收敛——避免"快流末尾一次性倒出整块文本"。
+显示层的揭示策略同时受两个上限约束：打字机基线速率（`revealUnitsPerSecond`，120 字素/秒）与单帧上限（`maxRevealUnitsPerTick`，128 单元），追赶窗口（`maxRevealLagMs`，400ms）决定抬升预算的快慢。**两个上限适用于每一次发布，终态那一帧也不例外**：identity/reset 切换整发快照（被替换的行本就无法插值），其余一切——段完成、追加行、列表重排、终态/错误、后台恢复——只立即发布**结构**（summary、耗时、running、错误状态），未揭示文本按同一上限继续收敛，因此流式行不会在单帧内长出整块文本（那是实时布局测量被打破的来源），也不会出现首次整块倒出。
 
 Workbench 的底部跟随由 `followBottom` sticky seam 控制。`PlainMessageList` 负责消息行测量，外层 `.term` 另以 `ResizeObserver` 覆盖流式行、异步 Markdown/highlight 和图片导致的高度变化；观察回调只有在 sticky 时才执行底部跟随，用户上滚后不再夺回滚动权。
 
