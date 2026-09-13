@@ -79,6 +79,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
 
+  entry('src/plugins/product/packages/builtin.pylon-gateway/styles/adaptive.css', 'builtin.pylon-gateway', 'adaptive', [GATEWAY_STYLE_ASSETS], 'gateway 包自适应残量：modern-gui 覆写 + status-pulse 动画（绞杀 P93 批 3）'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css', 'builtin.pylon-workspace', 'adaptive', [WORKSPACE_STYLE_ASSETS], 'workspace 包自适应残量：history modern-gui 模式覆写（绞杀 P93）'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
@@ -99,7 +100,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   // 第 6 包（P53 D2）的 framework-free 面板样式已由 J 施工书 20260914 绞杀进
   // utilities 层：owner 保留在名单里，但名下暂无 CSS 文件。
 
-  entry('src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', 'builtin.pylon-gateway', 'plugin-scope', [GATEWAY_STYLE_ASSETS], '第 7 个 first-party 包（P77）的 gateway sheet 样式'),
 
   entry('src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css', 'solid-smoke', 'smoke-only', [
     'src/renderers/solid-workbench/smoke/browserSmoke.solid.tsx',
