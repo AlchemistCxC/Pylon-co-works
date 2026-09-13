@@ -74,7 +74,7 @@ for (const [cssPath, importerEntries] of actualImporters) {
   }
   // 样式绞杀地基 20260914：adaptive（每包自适应残量）与 plugin-scope 同为
   // 插件生命周期样式，一律 ?inline 挂载回收。
-  const expectedMode = declared.lifecycle === 'plugin-scope' || declared.lifecycle === 'adaptive'
+  const expectedMode = declared.lifecycle === 'plugin-scope' || declared.lifecycle === 'adaptive' || declared.lifecycle === 'shared'
     ? 'inline'
     : 'static'
   const actualModes = [...new Set(importerEntries.map(item => item.mode))]

@@ -37,6 +37,7 @@
 - 禁用 `dark:` variant：主题是 CSS 变量换值，不存在 class 翻转。插件 `?inline` CSS 不得使用 `@apply`（不经过 Tailwind 入口编译），但可照常使用 utility 类名。
 - utility 类名不对第三方 Suite 承诺稳定；第三方 Suite 视觉自足，不依赖宿主 Tailwind 版本与类集合。
 - 样式注释文本里避免写出会被解析器误读的序列：星号紧跟斜杠会提前终止块注释，把注释文本变成活 CSS（tailwind.css 头部注释曾因此打断构建）。
+- 共享词汇底座（解耦评估批 1，lifecycle `shared`）：`FileSheet.css` 的 `file-main-*`/`file-section-*`/`file-tree-error`/`search-result-*` 基线被 history/search/gateway/browser/ContextPanel 跨 sheet 消费；`SettingsCommon.css` 的 `settings-dialog/control/action/section`、`--settings-*` 变量组、`dialog-overlay/content`、`ps-btn` 为 settings 域底座。utilities 层恒输给未分层底座——新组件**不得携带这些类名**（除非有意消费底座）；存量组件解耦时须同波删除类名与其覆写 CSS。
 - 派生色调（主色淡化背景、描边融合）一律用 index.css 派生色调层的 `*-soft`/`*-edge` token 或其 utility（`bg-accent-soft`、`border-danger-edge` 等）；禁止在 TS 类串或组件样式里新写 color-mix 或字面量色值——需要新档位时先在 index.css 派生色调层立 token，再映射进 tailwind.css。
 - 每包允许至多一个自适应残量样式（lifecycle `adaptive`，`?inline` 随插件生命周期回收），只收模式切换、媒体查询、动效、`:has()` 这类 utilities 不宜表达的自适应规则；其余样式一律 utilities，绞杀时随组件迁移。
 - 常用 variant 对照：展开态 `aria-expanded:`、键盘焦点 `focus-visible:`、减动效 `motion-reduce:`、窄屏 `max-[720px]:`、后代引用 `[.some-scope_&]:`（慎用，优先把判断放进组件状态）。

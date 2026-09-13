@@ -16,6 +16,9 @@ export const FIRST_PARTY_STYLE_LIFECYCLES = [
   // 样式绞杀地基 20260914：每包至多一个自适应残量样式（mode/媒体查询/
   // 动效/:has() 专用），?inline 随插件生命周期回收，其余样式一律 utilities。
   'adaptive',
+  // 解耦评估批 1（P93）：跨 sheet 共享词汇基线（file-main-*/search-result-*/
+  // file-section-* 等，消费方矩阵见解耦评估报告），作为底座豁免保留。
+  'shared',
   'smoke-only',
 ] as const
 
@@ -82,7 +85,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
+  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'shared', [WORKSPACE_STYLE_ASSETS], '解耦评估批 1：内含 file-main-*/file-section-*/search-result-* 共享词汇基线（被 history/search/gateway/browser/ContextPanel 消费），底座豁免'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/history/HistorySheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
 

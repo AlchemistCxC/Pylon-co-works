@@ -65,7 +65,8 @@ describe('first-party CSS ownership inventory', () => {
   it('产品 CSS 全部进入 PluginScope（或 adaptive 残量），Smoke 不进入生产 owner', () => {
     const productStyles = FIRST_PARTY_STYLE_OWNERSHIP.filter(item => item.owner.startsWith('builtin.'))
     // 样式绞杀地基（P92）：adaptive 是产品包合法生命周期（每包至多一个自适应残量）。
-    expect(productStyles.every(item => item.lifecycle === 'plugin-scope' || item.lifecycle === 'adaptive')).toBe(true)
+    // 解耦评估批 1（P93）：FileSheet.css 含共享词汇基线，lifecycle 升格为 shared。
+    expect(productStyles.every(item => ['plugin-scope', 'adaptive', 'shared'].includes(item.lifecycle))).toBe(true)
     expect(productStyles.every(item => item.path.includes('/packages/'))).toBe(true)
     expect(listFirstPartyStylesByOwner('solid-smoke')).toEqual([
       expect.objectContaining({
