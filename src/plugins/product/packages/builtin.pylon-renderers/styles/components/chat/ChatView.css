@@ -2147,9 +2147,18 @@
   max-width:100%;
 }
 /* Full-width terminal rails can use a zero basis to ignore a transient Slot's
-   max-content contribution. Bubble rows remain auto-sized so the body keeps
-   its intrinsic width instead of collapsing the entire bubble to the marker. */
-.app[data-message-layout="classic"] .term-assistant.has-dot > .term-assistant-body {
+   max-content contribution.  The guard keys on the row's *width source*, not on
+   the message layout: `data-msg-style="bubble"` is what makes the row
+   shrink-to-fit (`.app[data-msg-style="bubble"] .term-row-assistant { width:
+   fit-content }`), and that attribute is independent of `data-message-layout`.
+   Built-in preset `terminal-modern` sets msgStyle=bubble + messageLayout=classic
+   + assistantDot together; while this rule ignored msg-style, the zero basis
+   collapsed that row to the marker column — measured in Chrome at 1280px, the
+   same paragraph laid out in 91 lines (about two CJK glyphs per line, the body's
+   used width falling back to its min-content) instead of 3, and no width could
+   recover it once the bad column was measured.  Keep the guard, or keep bubble
+   rows free of a zero basis in any other form. */
+.app[data-message-layout="classic"]:not([data-msg-style="bubble"]) .term-assistant.has-dot > .term-assistant-body {
   flex:1 1 0;
   width:0;
 }
