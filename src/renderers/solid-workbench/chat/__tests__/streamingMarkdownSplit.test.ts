@@ -39,11 +39,31 @@ describe('findLastStableBlockBoundary / splitStreamingMarkdown', () => {
     expect(closed.unstable).toBe('新的片段继续')
   })
 
-  it('列表/标题块也按空行稳定化', () => {
+  it('列表后的空行不能证明容器已结束，保留整个上下文', () => {
     const text = '- 项1\n- 项2\n\n新段落开始'
     const { stable, unstable } = splitStreamingMarkdown(text)
-    expect(stable).toContain('- 项1')
-    expect(unstable).toBe('新段落开始')
+    expect(stable).toBe('')
+    expect(unstable).toBe(text)
+  })
+
+  it.each(['1.', '10)', '-', '+', '*', '>'])('does not split %s containers, at any wire boundary', marker => {
+    const text = `# 前文\n\n${marker} **开始**\n\n    **后续**\n    正文\n\n新段落`
+    let previousStable = ''
+    for (let length = 0; length <= text.length; length += 1) {
+      const prefix = text.slice(0, length)
+      const { stable, unstable } = splitStreamingMarkdown(prefix)
+      expect(stable + unstable).toBe(prefix)
+      expect(stable.startsWith(previousStable)).toBe(true)
+      expect(findLastStableBlockBoundary(prefix)).toBe(stable.length)
+      if (length >= '# 前文\n\n'.length) expect(stable).toBe('# 前文\n\n')
+      previousStable = stable
+    }
+  })
+
+  it('ignores container-looking text inside top-level fenced code', () => {
+    const text = '```md\n1. item\n\n> quote\n```\n\ntail'
+    expect(splitStreamingMarkdown(text).unstable).toBe('tail')
+    expect(splitOpenCodeFenceTail(text.slice(0, text.indexOf('\n```\n')))?.code).toContain('> quote')
   })
 
   it('识别带缩进的围栏，且较短或带尾随文本的 marker 不能伪闭合', () => {
