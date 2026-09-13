@@ -34,6 +34,8 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css',
   'src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css',
   'src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css',
+  // TW 施工书 20260914（P85）：Tailwind v4 utilities 基线，kernel-static。
+  'src/styles/tailwind.css',
 ] as const
 
 describe('first-party CSS ownership inventory', () => {
@@ -54,6 +56,8 @@ describe('first-party CSS ownership inventory', () => {
   it('Kernel 只持有跨 Application 基线，产品样式归属第一方插件', () => {
     expect(listFirstPartyStylesByOwner('kernel').map(item => item.path)).toEqual([
       'src/index.css',
+      // TW 施工书 20260914（P85）：Tailwind utilities 基线为 kernel 级静态基线。
+      'src/styles/tailwind.css',
       'src/components/kernel/SkinPreviewBar.css',
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(7)
