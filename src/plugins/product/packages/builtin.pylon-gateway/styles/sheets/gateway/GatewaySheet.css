@@ -289,6 +289,7 @@
 
 /* I12-W5：实例卡片 */
 .gateway-instances { margin-bottom: var(--ui-space-6); }
+.gateway-instances > .gateway-section-hint { margin: 0 0 var(--ui-space-3); }
 .gateway-instance-card {
   display: flex;
   flex-direction: column;
@@ -298,6 +299,49 @@
   border-radius: 0;
   margin-bottom: var(--ui-space-3);
 }
+/* P79：错误实例卡片红边，让失败实例在列表里可扫读 */
+.gateway-instance-card-error { border-color: color-mix(in srgb, var(--color-danger, #c62828) 55%, var(--border)); }
+
+/* P79：区块副说明（紧跟 section title 的灰字说明行） */
+.gateway-section-hint {
+  margin: 0 0 var(--ui-space-2);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* P79：只读字段行（label 左 value 右），取代 key = value 日志式展示 */
+.gateway-field {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: var(--ui-space-3);
+  align-items: baseline;
+  min-height: 22px;
+  font-size: 12px;
+}
+.gateway-field-label { color: var(--text-dim); }
+.gateway-field-value { color: var(--text); overflow-wrap: anywhere; }
+
+/* P79：删除确认的危险按钮 */
+.gateway-edit-row .template-apply.gateway-btn-danger {
+  border-color: color-mix(in srgb, var(--color-danger, #c62828) 60%, var(--border));
+  color: var(--color-danger, #c62828);
+  background: color-mix(in srgb, var(--color-danger, #c62828) 10%, transparent);
+}
+.gateway-edit-row .template-apply.gateway-btn-danger:hover {
+  background: color-mix(in srgb, var(--color-danger, #c62828) 18%, transparent);
+}
+
+/* P79：启动中状态 chip 脉动（轻量呼吸，不闪烁） */
+@keyframes gateway-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+.gateway-status-pulse { animation: gateway-status-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .gateway-status-pulse { animation: none; }
+}
+
 .gateway-instance-head { display: flex; align-items: center; gap: var(--ui-space-2); flex-wrap: wrap; }
 .gateway-instance-status { font-size: 0.85em; padding: 1px 6px; border-radius: var(--ui-radius-pill); }
 .gateway-instance-status-connected { background: var(--color-success-bg, #e8f5e9); color: var(--color-success, #2e7d32); }

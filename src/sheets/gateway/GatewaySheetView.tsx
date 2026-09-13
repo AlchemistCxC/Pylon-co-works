@@ -8,16 +8,27 @@ import { useIdentityStore } from '../../identityStore'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**
- * GatewaySheetView — 网关平台概览（W3-01）+ 实例管理（I12-W5）。
+ * GatewaySheetView — 网关平台概览（W3-01）+ 实例管理（I12-W5）+ 交互优化（P79）。
  *
  * gateway_status 只读概览：适配器/平台会话两分区（GatewaySidebar）；主区平台概览
  * （routes 表 + inject 只读提示「归 Prism」不编辑）。I12-W5：实例分区展示真实
  * 实例/状态/错误/凭据状态与启停删操作；创建仅限 builtIn 平台（未实现平台不可用）；
  * 凭据提交后清空前端 secret state（不残留明文）。
+ *
+ * P79 交互优化：
+ * - 实例状态轮询（3s，可见时才拉）：状态翻转（starting→connected/error）无后端
+ *   推送通道，此前必须重开 sheet 才能看到「已连接」；
+ * - 凭据表单按 catalog credentialFields 动态渲染（QQ = App ID + Client Secret 两框，
+ *   提交按字段顺序 join ':'）——不再要求用户手拼单串；无字段描述的平台回退单框；
+ * - 删除二段确认（误点保护，3s 自动回弹）；
+ * - 只读信息（注入/未绑定策略）从 key = value 日志行改为字段行展示。
  */
 function statusLabel(status: AdapterInstance['status']): string {
   return status === 'connected' ? '已连接' : status === 'starting' ? '启动中' : status === 'error' ? '错误' : '已停止'
 }
+
+const INSTANCE_REFRESH_MS = 3000
+const DELETE_CONFIRM_MS = 3000
 
 export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const sheetScope = useMemo(() => ({ kind: 'sheet' as const, id: sheet.id }), [sheet.id])
@@ -46,7 +57,10 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
   const [instances, setInstances] = useState<AdapterInstance[]>([])
   const [catalog, setCatalog] = useState<AdapterCatalogItem[]>([])
   const [instanceError, setInstanceError] = useState('')
-  const [credentialSecrets, setCredentialSecrets] = useState<Record<string, string>>({})
+  // P79：凭据草稿按 catalog 字段顺序存放（无字段描述的平台回退单框 = index 0）
+  const [credentialDrafts, setCredentialDrafts] = useState<Record<string, string[]>>({})
+  // P79：删除二段确认（null = 无待确认实例）
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [createForm, setCreateForm] = useState<{ platform: string; id: string; label: string }>({ platform: '', id: '', label: '' })
 
   // W3-02 + FE-AUD-004：保存 = saveGatewayRouteTransaction（合并既有 routes → 保存 →
@@ -162,7 +176,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
     return () => { disposed = true }
   }, [gatewayClient, operationKey, sheet.id, sheetScope])
 
-  // I12-W5：实例列表 + 平台 catalog（创建表单可用平台来源）
+  // I12-W5：实例列表 + 平台 catalog（创建表单可用平台与凭据字段来源）
   const reloadInstances = useCallback(async () => {
     try {
       setInstances(await gatewayClient.instances())
@@ -192,6 +206,23 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
     })
     return () => { disposed = true }
   }, [gatewayClient, reloadInstances, operationKey, sheet.id, sheetScope])
+
+  // P79：实例状态轮询——状态翻转（starting→connected/error）无后端推送通道，
+  // 挂载期间低频轮询让「已连接/错误」自动可见（此前必须重开 sheet 才能看到）。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      void reloadInstances()
+    }, INSTANCE_REFRESH_MS)
+    return () => window.clearInterval(timer)
+  }, [reloadInstances])
+
+  // P79：删除确认 3s 未二次点击自动回弹
+  useEffect(() => {
+    if (!pendingDeleteId) return
+    const timer = window.setTimeout(() => setPendingDeleteId(null), DELETE_CONFIRM_MS)
+    return () => window.clearTimeout(timer)
+  }, [pendingDeleteId])
 
   const runInstanceAction = async (operation: string, action: () => Promise<unknown>) => {
     try {
@@ -224,12 +255,26 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
     setCreateForm({ platform: createForm.platform, id: '', label: '' })
   }
 
-  const submitCredentials = async (id: string) => {
-    const secret = credentialSecrets[id]
+  const credentialFieldsFor = useCallback((platform: string) => {
+    return catalog.find(item => item.platform === platform)?.credentialFields ?? []
+  }, [catalog])
+
+  const setCredentialDraft = (id: string, index: number, value: string) => {
+    setCredentialDrafts(prev => {
+      const current = prev[id] ?? []
+      const next = [...current]
+      next[index] = value
+      return { ...prev, [id]: next }
+    })
+  }
+
+  const submitCredentials = async (instance: AdapterInstance) => {
+    const drafts = credentialDrafts[instance.id] ?? []
+    const secret = drafts.join(':')
     if (!secret) return
-    await runInstanceAction('保存网关凭据', () => gatewayClient.setInstanceCredentials(id, secret))
+    await runInstanceAction('保存网关凭据', () => gatewayClient.setInstanceCredentials(instance.id, secret))
     // I12-W5：凭据提交后清空前端 secret state（明文不残留）
-    setCredentialSecrets(prev => ({ ...prev, [id]: '' }))
+    setCredentialDrafts(prev => ({ ...prev, [instance.id]: [] }))
   }
 
   const availablePlatforms = catalog.filter(item => item.availability === 'builtIn')
@@ -285,7 +330,8 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
           {status && status.routes.length === 0 && <p className="file-section-hint">无路由</p>}
         </div>
         <div className="gateway-route-edit">
-          <div className="file-section-title">新增路由（instance/profile/session 必填）</div>
+          <div className="file-section-title">新增路由</div>
+          <p className="gateway-section-hint">把平台会话（source）绑定到 agent：实例 / profile / session 为必填，其余可选</p>
           <div className="gateway-edit-row">
             <input className="runtime-filter-input" placeholder="source（如 qq:group:123）" value={editSource} onChange={e => onSourceChange(e.target.value)} aria-label="路由 source" />
             <input className="runtime-filter-input" placeholder="agentId（如 peri）" value={editAgentId} onChange={e => setEditAgentId(e.target.value)} aria-label="路由 agentId" />
@@ -324,16 +370,23 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
         {/* I12-W5：实例管理（真实实例/状态/错误/操作；未实现平台不可用） */}
         <div className="gateway-instances">
           <div className="file-section-title">实例</div>
+          <p className="gateway-section-hint">状态每 {INSTANCE_REFRESH_MS / 1000} 秒自动刷新；启动前需配置凭据</p>
           {instanceError && <p className="file-section-hint gateway-error-reference" role="status">网关实例操作失败，详情见右下角错误中心</p>}
           {instances.length === 0 ? (
             <p className="file-section-hint">无实例</p>
           ) : (
             <ul className="search-result-list">
-              {instances.map(instance => (
-                <li key={instance.id} className="gateway-instance-card">
+              {instances.map(instance => {
+                const fields = credentialFieldsFor(instance.platform)
+                const drafts = credentialDrafts[instance.id] ?? []
+                const readyToSave = fields.length > 0
+                  ? fields.every((field, index) => !field.required || (drafts[index] ?? '').length > 0)
+                  : (drafts[0] ?? '').length > 0
+                return (
+                <li key={instance.id} className={`gateway-instance-card${instance.status === 'error' ? ' gateway-instance-card-error' : ''}`}>
                   <div className="gateway-instance-head">
                     <span className="search-result-path">{instance.label || instance.id}</span>
-                    <span className={`gateway-instance-status gateway-instance-status-${instance.status}`}>{statusLabel(instance.status)}</span>
+                    <span className={`gateway-instance-status gateway-instance-status-${instance.status}${instance.status === 'starting' ? ' gateway-status-pulse' : ''}`}>{statusLabel(instance.status)}</span>
                     <span className="search-result-text">· {instance.platform}</span>
                     <span className="search-result-text">凭据：{instance.credentialStatus === 'configured' ? '已配置' : instance.credentialStatus === 'invalid' ? '损坏' : '未配置'}</span>
                   </div>
@@ -342,17 +395,39 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
                     <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('启动网关实例', () => gatewayClient.startInstance(instance.id))}>启动</button>
                     <button type="button" className="template-apply" disabled={instance.status === 'stopped' || instance.status === 'starting'} onClick={() => void runInstanceAction('停止网关实例', () => gatewayClient.stopInstance(instance.id))}>停止</button>
                     <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('重启网关实例', () => gatewayClient.restartInstance(instance.id))}>重启</button>
-                    <button type="button" className="template-apply" disabled={instance.status !== 'stopped'} onClick={() => void runInstanceAction('删除网关实例', () => gatewayClient.removeInstance(instance.id))}>删除</button>
+                    {pendingDeleteId === instance.id ? (
+                      <button type="button" className="template-apply gateway-btn-danger" aria-label={`确认删除 ${instance.id}`} onClick={() => {
+                        setPendingDeleteId(null)
+                        void runInstanceAction('删除网关实例', () => gatewayClient.removeInstance(instance.id))
+                      }}>确认删除</button>
+                    ) : (
+                      <button type="button" className="template-apply" disabled={instance.status !== 'stopped'} aria-label={`删除 ${instance.id}`} onClick={() => setPendingDeleteId(instance.id)}>删除</button>
+                    )}
                   </div>
+                  {/* P79：凭据字段按 catalog credentialFields 渲染（secret → 密码框）；
+                      提交按字段顺序 join ':'；无字段描述的平台回退单框。 */}
                   <div className="gateway-edit-row">
-                    <input className="runtime-filter-input" type="password" placeholder="appId:clientSecret" value={credentialSecrets[instance.id] ?? ''} onChange={e => setCredentialSecrets(prev => ({ ...prev, [instance.id]: e.target.value }))} aria-label={`${instance.id} 凭据`} />
-                    <button type="button" className="template-apply" disabled={!credentialSecrets[instance.id]} onClick={() => void submitCredentials(instance.id)}>保存凭据</button>
+                    {(fields.length > 0 ? fields : [{ key: 'secret', label: '凭据（appId:clientSecret）', secret: true, required: true }]).map((field, index) => (
+                      <input
+                        key={field.key}
+                        className="runtime-filter-input"
+                        type={field.secret ? 'password' : 'text'}
+                        placeholder={`${field.label}${field.required ? '' : '（可选）'}`}
+                        value={drafts[index] ?? ''}
+                        onChange={e => setCredentialDraft(instance.id, index, e.target.value)}
+                        aria-label={`${instance.id} ${field.label}`}
+                        autoComplete="off"
+                      />
+                    ))}
+                    <button type="button" className="template-apply" disabled={!readyToSave} onClick={() => void submitCredentials(instance)}>保存凭据</button>
                   </div>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
           <div className="file-section-title">新建实例</div>
+          <p className="gateway-section-hint">仅显示已实现平台；创建后配置凭据并启动。未实现平台（如微信）不可创建。</p>
           {availablePlatforms.length === 0 ? (
             <p className="file-section-hint">无可用平台（未实现平台不可用）</p>
           ) : (
@@ -362,7 +437,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
                 {availablePlatforms.map(item => <option key={item.platform} value={item.platform}>{item.label}</option>)}
               </select>
               <input className="runtime-filter-input" placeholder="实例 id" value={createForm.id} onChange={e => setCreateForm(prev => ({ ...prev, id: e.target.value }))} aria-label="实例 id" />
-              <input className="runtime-filter-input" placeholder="标签" value={createForm.label} onChange={e => setCreateForm(prev => ({ ...prev, label: e.target.value }))} aria-label="标签" />
+              <input className="runtime-filter-input" placeholder="标签（可选）" value={createForm.label} onChange={e => setCreateForm(prev => ({ ...prev, label: e.target.value }))} aria-label="实例标签" />
               <button type="button" className="template-apply" disabled={!createForm.platform || !createForm.id.trim()} onClick={() => void createInstance()}>创建</button>
             </div>
           )}
@@ -371,18 +446,27 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
         {status?.unboundPolicy && (
           <div className="gateway-inject">
             <div className="file-section-title">未绑定消息策略</div>
-            <div className="runtime-log-field"><code>unboundPolicy</code> = {status.unboundPolicy}</div>
-            {status.unboundPolicy === 'reject'
-              ? <p className="file-section-hint" role="status">严格模式：未绑定路由的消息将被拒绝，不会回退到 active agent</p>
-              : <p className="file-section-hint" role="status">宽松模式（缺省）：未绑定路由的消息回退到 active agent</p>}
+            <div className="gateway-field">
+              <span className="gateway-field-label">策略</span>
+              <span className="gateway-field-value">{status.unboundPolicy === 'reject' ? '严格模式（reject）：未绑定路由的消息将被拒绝，不会回退到 active agent' : '宽松模式（active-agent）：未绑定路由的消息回退到 active agent'}</span>
+            </div>
           </div>
         )}
         {status?.inject && (
           <div className="gateway-inject">
-            <div className="file-section-title">注入（归 Prism 管理，只读）</div>
-            <div className="runtime-log-field"><code>enabled</code> = {String(status.inject.enabled ?? '—')}</div>
-            <div className="runtime-log-field"><code>scenario</code> = {status.inject.scenario || '—'}</div>
-            <div className="runtime-log-field"><code>persist</code> = {status.inject.persist || '—'}</div>
+            <div className="file-section-title">知识注入（归 Prism 管理，只读）</div>
+            <div className="gateway-field">
+              <span className="gateway-field-label">注入开关</span>
+              <span className="gateway-field-value">{status.inject.enabled == null ? '—' : status.inject.enabled ? '开启' : '关闭'}</span>
+            </div>
+            <div className="gateway-field">
+              <span className="gateway-field-label">注入场景</span>
+              <span className="gateway-field-value">{status.inject.scenario || '跟随 Prism active.scenario'}</span>
+            </div>
+            <div className="gateway-field">
+              <span className="gateway-field-label">完成持久化</span>
+              <span className="gateway-field-value">{status.inject.persist === 'prism' ? '写入 Prism（persist）' : status.inject.persist || '—'}</span>
+            </div>
           </div>
         )}
       </main>
