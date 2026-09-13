@@ -1,7 +1,4 @@
-import { describe, expect, it, test } from 'vitest'
-import { createPluginIdentity } from '../src/plugin-runtime/pluginIdentity.ts'
-import { BUILTIN_WORKSPACE_TYPES } from '../src/plugins/core/sheet/builtinWorkspacePlugins.ts'
-import { getWorkspaceRegistryStore } from '../src/workspace-sheets/workspaceRegistry.ts'
+import { describe, expect, it } from 'vitest'
 import {
   EMPTY_PERSISTED_SHEET_STATE,
   loadSheetStateV2,
@@ -11,25 +8,8 @@ import {
 } from '../src/workspace-sheets/sheetPersistence.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
-test('F0.2 Sheet 持久化 v1 迁移源回归', async () => {
-  // composition root owns the compatibility registry; initialize it before
-  // registering the test descriptors so the parser and wrapper share one store.
-  await import('../src/plugin-runtime/pluginCompositionRoot.ts')
-  const registry = getWorkspaceRegistryStore()
-  const owner = createPluginIdentity('test.sheet-persistence', 'runtime')
-  const registrations = BUILTIN_WORKSPACE_TYPES
-    .filter(workspace => (workspace.kind === 'agent' || workspace.kind === 'file') && !registry.resolve(workspace.kind))
-    .map(workspace => registry.register(owner, workspace))
-
-  try {
-    await import('./test-sheet-persistence.mts')
-  } finally {
-    for (const registration of registrations.reverse()) registration.dispose()
-  }
-})
-
 // W1-01：v1 parser 保留为迁移源（细化路线 §4 步骤 1），本 describe 锁定 v1 normalize/roundtrip 输出
-// （P91 A1：原 scripts/test-sheet-persistence.mts 顶层断言转正为 expect()，原脚本由协调者退役。）
+// （P91 A1/A5：原 scripts/test-sheet-persistence.mts 顶层断言转正为 expect()，原脚本已退役。）
 describe('F0.2 Sheet 持久化 v1 迁移源（compat 转正）', () => {
   useLegacyCompatRuntime()
 

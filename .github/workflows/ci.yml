@@ -24,7 +24,7 @@ jobs:
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
 
-      # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
+      # ISSUE-20 W1：统一入口——lint + vitest（P91 A5：legacy spawn 套件已全部退役，vitest 单轨）+ 覆盖率 + tsc/build
       - name: 统一前端门禁（check:frontend）
         run: bun run check:frontend
 

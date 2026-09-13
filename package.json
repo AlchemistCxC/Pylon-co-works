@@ -17,7 +17,6 @@
     "pack:portable": "python scripts/pack_release.py",
     "release:portable": "bun run build && bun run build:plugin-sdk && bun run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && bun run pack:portable",
     "test": "vitest run",
-    "test:legacy": "bun scripts/run-frontend-tests.mts",
     "test:unit": "vitest run src/domains src/infrastructure --passWithNoTests",
     "test:frontend": "vitest run",
     "test:coverage": "vitest run --coverage",
