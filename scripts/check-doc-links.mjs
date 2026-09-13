@@ -9,6 +9,8 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const checks = [
   ['CONTEXT architecture reference', resolve(root, 'docs/说明书/Pylon-项目架构参考.md')],
   ['CONTEXT plugin topology', resolve(root, 'docs/说明书/Pylon-插件化前后端拓扑全图.md')],
+  ['CONTEXT module ownership', resolve(root, 'docs/说明书/Pylon-模块维护地图.md')],
+  ['CONTEXT development practices', resolve(root, 'docs/说明书/Pylon-开发与协作规范.md')],
 ]
 const missing = checks.filter(([, path]) => !existsSync(path))
 if (missing.length) {

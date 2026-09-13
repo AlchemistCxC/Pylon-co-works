@@ -2,15 +2,12 @@ import { For, createEffect, createSignal, onCleanup, onMount, untrack } from 'so
 import { resolveConnectorColor, type ToolConnectorStatus } from '../../../domains/tool/toolPresentation.ts'
 import { toolConnectorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
 import type { ToolVisualState } from '../../../domains/tool/status.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
+import type { SolidToolConnectorEdge, ToolConnectorAppearance } from '../toolConnectorContracts.ts'
 import type {
   ToolConnectorInvalidationReason,
   ToolConnectorLayoutPort,
 } from '../../../domains/workbench/toolConnectorLayoutPort.ts'
 import { measureToolConnector } from './domToolConnectorMeasurement.ts'
-
-export type ToolConnectorAppearance = Pick<WorkbenchAppearanceSnapshot,
-  'toolConnectorMode' | 'toolConnectorColor' | 'toolConnectorStyle' | 'toolConnectorWidth' | 'toolConnectorOpacity'>
 
 export interface SolidToolConnectorProps {
   connectorKey: string
@@ -23,15 +20,6 @@ export interface SolidToolConnectorProps {
   colors?: { toolOk?: string; toolRun?: string; toolErr?: string }
   /** Explicit coordinate root supplied by the shared overlay. */
   coordinateRoot?: () => HTMLElement | undefined
-}
-
-export interface SolidToolConnectorEdge {
-  key: string
-  fromMessageId: string
-  toMessageId: string
-  status: ToolConnectorStatus
-  visualState?: ToolVisualState
-  appearance: ToolConnectorAppearance
 }
 
 export interface SolidToolConnectorLayerProps {

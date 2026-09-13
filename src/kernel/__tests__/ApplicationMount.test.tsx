@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import ApplicationMount from '../ApplicationMount'
 import KernelRecoveryLayer from '../KernelRecoveryLayer'
-import { createApplicationRuntime } from '../applicationRuntime'
+import { createApplicationRuntime } from '../../application/applicationRuntime.ts'
 
 function DemoApplication() {
   return <div data-testid="demo-application">Pylon Application</div>

@@ -2,10 +2,12 @@
 
 > 状态：当前实现地图，不是目标架构承诺  
 > 最后核验：2026-09-06  
-> 适用仓库：`prism-desktop`  
+> 适用仓库：`Pylon-co-works`（历史名称 `prism-desktop`）
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
 当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../../Docs/Archive/Pylon-Kernel-施工台账.md)。
+
+2026-09-13 局部核验：第一方产品现含 plugin-manager；application runtime 已归 `src/application/`，kernel 仅保留根挂载与恢复接线。当前路径、命名与维护入口见 [模块维护地图](Pylon-模块维护地图.md)。下文历史阶段仍按当时范围描述，不将其当成最新文件计数。
 
 插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图的 Renderer Suite 宿主接缝已落地为实线；仅第三方可安装 Suite 仍是虚线规划，虚线不得视为当前实现（React minimal fatal fallback 规划已取消，Suite 宿主的 fatal 分支为纯错误横幅）。
 
@@ -87,7 +89,8 @@ flowchart TB
 
 | 路径 | 当前职责 | 架构归属 | 修改前优先阅读 |
 |---|---|---|---|
-| `src/kernel` | Application runtime、mount、recovery | 物理 Kernel 壳 | `KernelRoot.tsx`、`applicationRuntime*.ts` |
+| `src/kernel` | 根 mount、recovery 与 bootstrap 接线 | 物理 Kernel 壳 | `KernelRoot.tsx`、`ApplicationMount.tsx` |
+| `src/application` | Application runtime、注册事务与 soft-remount | Application 所有者 | `applicationRuntime*.ts` |
 | `src/plugin-runtime` | PluginRuntime、Scope、registries、shadow update、package runtime | Kernel 扩展机制 | `pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginActivationContext.ts` |
 | `src/plugins/product` | 第一方插件包定义、依赖拓扑、激活入口 | Product Plugin | `builtinProductPlugins.ts`、`packages/*` |
 | `src/plugins/core` | 第一方插件的具体贡献 implementation | Product Plugin implementation | 按目标贡献定向阅读 |
