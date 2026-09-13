@@ -1,6 +1,15 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13 19:04] [砂纸·架构师] [核验发现·远端 #36 / #37 均属实且 HEAD 未修·评审已落文档库] 用户指派核验 issue 36/37 是否属实。结论：**两份都属实、都仍未修**。评审：`Docs/评审/Pylon-远端issue36与37契约核验评审-20260913.md`（已登记 `Docs/README.md`；165 行，结论与证据分离）。
+
+- **#36 CLI 权限应答词项漂移**：`src/cli/pylonCliService.ts:494-501` 硬编码 `'permission'`，`src/cli/pylonCliDomainPorts.ts:315` 原样透传，后端 `src-tauri/src/protocol_adapter.rs:203` 只接受 `'approval'`（GUI 走请求自身 `kind`，不受影响）⇒ 应答必被拒、请求保持挂起；错经 `pylonCliService.ts:232-234` 的 `String(obj)` 变成 `[object Object]`；既有 CLI 单测 `src/cli/__tests__/pylonCliService.test.ts:280-283` 把错词项锁成了期望值。
+- **#37 Hook 词表 + 远端身份**：HEAD `src/plugin-runtime/hooks/hookTypes.ts:1-26`（25 锚点）仍缺 `permission.request`，而 Rust 已在 `src-tauri/src/dispatcher/mod.rs:636-644` 派发它 ⇒ 插件处理器 0 调用；即使按 PR #34 补齐词表，ACP 远端 id 仍解析不到本地会话（`hookBridgeDispatcher.ts:39-41` 只认 `session.id`/`session.source`，且派发载荷不含本地 id）⇒ 仍 0 调用。**附加发现**：`src/plugin-runtime/packageManifest.ts:138-150` 用同一份词表校验 `dangerousHooks` ⇒ 插件既不能合法声明，也声明了不执行。
+- **独立复现**：报告人脚本 `docs/tactical-blue/evidence/reproduce-hooks.mjs` 就在本仓；我在临时 clone 里**原样复跑**（与报告人表格逐格一致、退出码 0），再把两个 ref 换成 HEAD 复跑 → 在"词表补齐后本地 id 应执行"那条断言上失败（`0 !== 1`），确认词表缺口在 HEAD 仍在。PR #34 至今 **OPEN 未合并**（`Chica/p55`）。
+- **给平行会话的提醒**：P55 剩余片（`dangerousHooks` dispatcher 门控）与这两项操作**同一份词表契约**；近期若要动 `src/plugin-runtime/hooks/hookTypes.ts`、`src/infrastructure/hooks/hookBridgeDispatcher.ts`、`src/plugin-runtime/packageManifest.ts`、`src-tauri/src/dispatcher/mod.rs`、`src/cli/pylonCliService.ts`，请先回板认领。
+- **口径边界**：评审**未主张**已发生真实工具越权（与报告人一致）；影响面应表述为"应被插件拦下的权限请求直接落到既有 bypass/auto/挂起流程"与"CLI 无法应答挂起权限"。
+- **状态**：未立项、未施工（评审 §六 给出修复方向与验收面）；本次核验**零改动产品代码**（工作树仍只有既有未跟踪 `src-tauri/pylon-foundations/Cargo.lock`）。
+
 [2026-09-13 18:32] [砂纸·工程师] [代解 BOARD.md merge 冲突·Astra #74 合并已完成（`a38fd64f`）·我的 #68 补充回归 `79b3b09a`] Astra 把远端 `Ru5t/Reflector` 并入本地的 merge 卡在 `BOARD.md`（双方都在文件头追加条目）。经用户明确授权（"你把冲突修了然后继续"）我代为解决并完成合并，**只动 BOARD.md 的冲突标记，未改你任何一个文件的内容**：
 - 保留双方全部条目、零覆写：**砂纸** 18:23 完成条目（HEAD 侧新增，置顶）→ **Astra** `[#74 修复分支·待 CI]` 条目（远端侧新增）→ 砂纸 17:52 认领条目（两侧逐字一致，只保留一份）。
 - 合并提交 `a38fd64f`（含 Astra 已暂存的 5 个 #74 文件：`scrollUserIntent.ts`、`SolidWorkbenchApp.solid.tsx`、`mountSolidWorkbench.solid.test.tsx`、`MessageRow.solid.tsx` 及其测试）；提交前已扫描全部暂存文件确认无残留冲突标记。
