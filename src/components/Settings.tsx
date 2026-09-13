@@ -17,6 +17,7 @@ import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetRed
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
+import { reloadAgentsTransaction } from '../application/transactions/reloadAgentsTransaction.ts'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
 import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings/agentTypes'
 import { runReconnectCommand } from './settings/reconnectCommand'
@@ -426,23 +427,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }
 
   const reloadAgents = async () => {
-    if (reloading) return
-    setReloading(true)
-    try {
-      await agentClient.reloadAgents()
-      const list = await agentClient.listAgents()
-      useIdentityStore.getState().setAgents(list)
-      const dictionary = await agentClient.listToolDictionary()
-      applyToolDictionaryThroughPort(getPluginServiceRegistry(), dictionary)
-      const providerCount = Object.keys(dictionary as Record<string, unknown> ?? {}).length
-      setDictFeedback(providerCount > 0 ? `工具归一化字典已加载（${providerCount} 个 provider）` : '工具归一化字典为空，已使用内置 fallback')
-      resolveSettingsError('重载 Agent 配置')
-    } catch (error) {
-      setDictFeedback('工具归一化字典加载失败，详情见右下角错误中心')
-      // Compatibility token retained for the reload structure guard:
-      // reportRuntimeError('重载 Agent 配置', error)
-      reportSettingsError('重载 Agent 配置', error)
-    } finally { setReloading(false) }
+    await reloadAgentsTransaction({
+      isReloading: () => reloading,
+      setReloading,
+      reloadAgents: () => agentClient.reloadAgents(),
+      listAgents: () => agentClient.listAgents(),
+      setAgents: list => useIdentityStore.getState().setAgents(list),
+      loadToolDictionary: async () => {
+        const dictionary = await agentClient.listToolDictionary()
+        applyToolDictionaryThroughPort(getPluginServiceRegistry(), dictionary)
+        const providerCount = Object.keys(dictionary as Record<string, unknown> ?? {}).length
+        setDictFeedback(providerCount > 0 ? `工具归一化字典已加载（${providerCount} 个 provider）` : '工具归一化字典为空，已使用内置 fallback')
+      },
+      reportError: (action, error) => {
+        setDictFeedback('工具归一化字典加载失败，详情见右下角错误中心')
+        reportSettingsError(action, error)
+      },
+      resolveError: action => resolveSettingsError(action),
+    })
   }
 
   // F2：禁储环境安全存储（内存兜底，会话内可用）
