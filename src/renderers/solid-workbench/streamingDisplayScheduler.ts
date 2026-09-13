@@ -44,7 +44,8 @@ export interface StreamingDisplaySchedulerOptions {
   maxRevealUnitsPerTick?: number
   /** Maximum time the revealed text may trail the newest snapshot. */
   maxRevealLagMs?: number
-  /** Injectable clock for non-browser hosts and deterministic diagnostics. */  now?: () => number
+  /** Injectable clock for non-browser hosts and deterministic diagnostics. */
+  now?: () => number
 }
 
 export interface StreamingDisplayScheduler {
