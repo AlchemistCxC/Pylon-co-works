@@ -30,11 +30,16 @@ export const DEFAULT_STREAMING_DISPLAY_OPTIONS = Object.freeze({
   maxUpdatesPerSecond: 60,
   revealUnitsPerSecond: 120,
   /**
-   * Hard per-frame visual bound: one publication never adds more than this to
-   * a streaming row. This is the contract that keeps a fast stream (and a
-   * finished one) from painting a whole block in one frame, which is what
-   * breaks live layout measurement; it doubles as the guard against a resumed
-   * background callback painting an unbounded amount of text.
+   * Hard per-frame visual bound. It has two readings, both contract:
+   * - one publication never adds more than this to a *single* row;
+   * - one publication never adds more than this *in aggregate* across all rows
+   *   either (D1: the budget is decremented row by row, so N running rows can
+   *   no longer each take the full step in the same frame).
+   * Accounting is in UTF-16 units (D2), and the step never splits a grapheme.
+   * This is the contract that keeps a fast stream (and a finished one) from
+   * painting a whole block in one frame, which is what breaks live layout
+   * measurement; it doubles as the guard against a resumed background callback
+   * painting an unbounded amount of text.
    */
   maxRevealUnitsPerTick: 128,
   /** Target time for the revealed text to converge with the newest snapshot. */
@@ -131,18 +136,10 @@ interface StreamingDisplayPublication {
   readonly totalUnits?: number
 }
 
-interface MessageProgress<T extends DisplayMessage> {
-  readonly messages: readonly T[]
-  readonly pending: boolean
-  /** S0：本列表本次推进的单行最大新增（UTF-16 单元） */
-  readonly advancedMaxUnits: number
-  /** S0：本列表本次推进的所有行新增之和（UTF-16 单元） */
-  readonly advancedTotalUnits: number
-}
-
 interface PrefixAdvance {
   readonly value: string
-  readonly consumed: number
+  /** 本次揭示消费的 UTF-16 单元数（D2：与预算/欠账同量纲） */
+  readonly consumedUnits: number
 }
 
 interface GraphemeSegment {
@@ -542,42 +539,78 @@ function hasPendingTextGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
-  if (messageListHasPendingGrowth(current.messages, next.messages)) return true
-  if (current.document && next.document
-    && messageListHasPendingGrowth(current.document.messages, next.document.messages)) return true
-  return false
+  // D3：与 pendingTextUnits 同一口径（归并双列表），避免两处判据分叉。
+  return pendingRowPlans(current, next).size > 0
 }
 
 /**
  * Cheap size of the not-yet-revealed text, used only to size the catch-up
  * budget. It counts UTF-16 units (never grapheme clusters) on purpose: the
  * budget must not pay for segmenting the entire backlog on every tick.
+ * D3：双列表同源时按 id+role 归并，同一行只计费一次。
  */
 function pendingTextUnits(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): number {
-  let total = messageListPendingUnits(current.messages, next.messages)
-  if (current.document && next.document) {
-    total += messageListPendingUnits(current.document.messages, next.document.messages)
+  let total = 0
+  for (const plan of pendingRowPlans(current, next).values()) {
+    total += plan.nextText.length - plan.previousText.length
   }
   return total
 }
 
-function messageListPendingUnits<T extends DisplayMessage>(
-  current: readonly T[],
-  next: readonly T[],
-): number {
-  if (current === next) return 0
+/** 一行待揭示文本的计费/决策单元（D3：同 id+role 出现在两个列表时只算一行）。 */
+interface StreamRowPlan {
+  readonly previousText: string
+  readonly nextText: string
+}
+
+/**
+ * 收集"待揭示"行：只认 assistant/reasoning 的前缀增长。
+ * 两个列表（legacy `messages` 与 canonical `document.messages`）按 id+role 归并：
+ * 同一行只计费一次、只决策一次（D3）——否则双列表同源时欠账与预算双双翻倍。
+ */
+function collectStreamRowPlans(
+  current: readonly DisplayMessage[],
+  target: readonly DisplayMessage[],
+  plans: Map<string, StreamRowPlan>,
+): void {
+  if (current === target) return
   const currentById = new Map(current.map(message => [message.id, message]))
-  let total = 0
-  for (const message of next) {
+  for (const message of target) {
     if (!isStreamMessage(message)) continue
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
-    if (isPrefixGrowth(previousText, message.content)) total += message.content.length - previousText.length
+    if (!isPrefixGrowth(previousText, message.content)) continue
+    const key = streamRowKey(message.id, message.role)
+    const existing = plans.get(key)
+    // 双写正常时两份文本一致；万一短暂分叉，以更长的目标文本作为可见量（保守不超发）。
+    if (existing === undefined || message.content.length > existing.nextText.length) {
+      plans.set(key, { previousText, nextText: message.content })
+    }
   }
-  return total
+}
+
+/**
+ * 当前快照对下所有待揭示行的归并集合。
+ * 注：`current.document` 缺失而 `next.document` 存在属于整发转换（`requiresReplacementFlush`），
+ * 不会走到插值；此处与 `interpolateSnapshot` 保持同一条件，避免两处判据分叉。
+ */
+function pendingRowPlans(
+  current: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+): Map<string, StreamRowPlan> {
+  const plans = new Map<string, StreamRowPlan>()
+  collectStreamRowPlans(current.messages, next.messages, plans)
+  if (next.document !== undefined) {
+    collectStreamRowPlans(current.document?.messages ?? [], next.document.messages, plans)
+  }
+  return plans
+}
+
+function streamRowKey(id: string, role: string): string {
+  return `${id}\u0000${role}`
 }
 
 function isPrefixGrowth(current: string, next: string): boolean {
@@ -660,21 +693,6 @@ function isStreamMessage(message: DisplayMessage): boolean {
   return message.role === 'assistant' || message.role === 'reasoning'
 }
 
-function messageListHasPendingGrowth<T extends DisplayMessage>(
-  current: readonly T[],
-  next: readonly T[],
-): boolean {
-  if (current === next) return false
-  const currentById = new Map(current.map(message => [message.id, message]))
-  for (const message of next) {
-    if (!isStreamMessage(message)) continue
-    const previous = currentById.get(message.id)
-    const previousText = previous?.role === message.role ? previous.content : ''
-    if (isPrefixGrowth(previousText, message.content)) return true
-  }
-  return false
-}
-
 interface SnapshotProjection {
   readonly snapshot: WorkbenchRuntimeSnapshot
   readonly pending: boolean
@@ -682,70 +700,103 @@ interface SnapshotProjection {
   readonly advancedTotalUnits: number
 }
 
+/** 一行的本拍决策：揭示到的前缀 + 该行分到的预算（供两列表短暂分叉时回落）。 */
+interface RowDecision {
+  readonly value: string
+  readonly perRow: number
+}
+
 function interpolateSnapshot(
   current: WorkbenchRuntimeSnapshot,
   target: WorkbenchRuntimeSnapshot,
   budget: number,
 ): SnapshotProjection {
-  const legacy = interpolateMessageList(current.messages, target.messages, budget)
-  const documentProgress = target.document && current.document
-    ? interpolateMessageList(current.document.messages, target.document.messages, budget)
-    : target.document
-      ? interpolateMessageList([], target.document.messages, budget)
-      : { messages: [], pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
+  const plans = pendingRowPlans(current, target)
+  if (plans.size === 0) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
 
-  const pending = legacy.pending || documentProgress.pending
+  // D1：递减预算——逐行决策一次，任何一次发布的**聚合**新增不超过 budget。
+  // budget ≥ 行数 时每行至少分到 1；budget < 行数 时末尾行本拍分到 0（不饿死：下一拍重算）。
+  const decisions = new Map<string, RowDecision>()
+  let remaining = Math.max(0, Math.floor(budget))
+  let rowsLeft = plans.size
+  let advancedMaxUnits = 0
+  let advancedTotalUnits = 0
+  let pending = false
+  for (const [key, plan] of plans) {
+    const perRow = rowsLeft > 1 ? Math.max(1, Math.floor(remaining / rowsLeft)) : remaining
+    const advanced = advancePrefix(plan.previousText, plan.nextText, perRow)
+    decisions.set(key, { value: advanced.value, perRow })
+    advancedTotalUnits += advanced.consumedUnits
+    if (advanced.consumedUnits > advancedMaxUnits) advancedMaxUnits = advanced.consumedUnits
+    remaining = Math.max(0, remaining - advanced.consumedUnits)
+    rowsLeft -= 1
+    if (advanced.value.length < plan.nextText.length) pending = true
+  }
 
   if (!pending) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
 
+  const legacyMessages = applyRowDecisions(current.messages, target.messages, decisions)
+  const documentMessages = applyRowDecisions(
+    current.document?.messages ?? [],
+    target.document?.messages ?? [],
+    decisions,
+  )
   const document = target.document
     ? {
         ...target.document,
-        messages: documentProgress.messages as readonly WorkbenchMessage[],
+        messages: documentMessages as readonly WorkbenchMessage[],
       } as WorkbenchDocument
     : undefined
   return {
     snapshot: {
       ...target,
-      messages: legacy.messages,
+      messages: legacyMessages,
       ...(document ? { document } : {}),
     },
     pending: true,
-    advancedMaxUnits: Math.max(legacy.advancedMaxUnits, documentProgress.advancedMaxUnits),
-    advancedTotalUnits: legacy.advancedTotalUnits + documentProgress.advancedTotalUnits,
+    advancedMaxUnits,
+    advancedTotalUnits,
   }
 }
 
-function interpolateMessageList<T extends DisplayMessage>(
+/**
+ * 把本拍决策写回一个列表：同一 id+role 的行共用同一决策（D3），
+ * 因此两列表同源时不会各自推进一次，聚合也不会翻倍。
+ * 决策不是该行目标文本的前缀时（两列表短暂分叉）用该行自己的预算回落推进，绝不整发。
+ */
+function applyRowDecisions<T extends DisplayMessage>(
   current: readonly T[],
   target: readonly T[],
-  budget: number,
-): MessageProgress<T> {
-  if (current === target) return { messages: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
+  decisions: ReadonlyMap<string, RowDecision>,
+): readonly T[] {
+  if (decisions.size === 0 || current === target) return target
   const currentById = new Map(current.map(message => [message.id, message]))
-  let pending = false
-  let advancedMaxUnits = 0
-  let advancedTotalUnits = 0
+  let changed = false
   const messages = target.map(message => {
     if (!isStreamMessage(message)) return message
+    const decision = decisions.get(streamRowKey(message.id, message.role))
+    if (decision === undefined) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
-    if (!message.content.startsWith(previousText) || message.content.length <= previousText.length) return message
-    const advanced = advancePrefix(previousText, message.content, budget)
-    // S0：按 UTF-16 单元计数（与欠账口径一致），仅观测。
-    const advancedUnits = Math.max(0, advanced.value.length - previousText.length)
-    advancedTotalUnits += advancedUnits
-    if (advancedUnits > advancedMaxUnits) advancedMaxUnits = advancedUnits
-    if (advanced.value === message.content) return message
-    pending = true
-    const parts = partialTextParts(message.parts, advanced.value)
+    // 决策可用时两列表得到**同一**前缀；否则回落为本行预算（不整发、不回退）。
+    const value = isDecisionUsable(previousText, decision.value, message.content)
+      ? decision.value
+      : advancePrefix(previousText, message.content, decision.perRow).value
+    if (value === message.content) return message
+    changed = true
+    const parts = partialTextParts(message.parts, value)
     return {
       ...message,
-      content: advanced.value,
+      content: value,
       ...(parts !== undefined ? { parts } : {}),
     } as T
   })
-  return { messages, pending, advancedMaxUnits, advancedTotalUnits }
+  return changed ? messages : target
+}
+
+/** 决策可用于该行：必须是该行目标文本的前缀，且不得让该行回退。 */
+function isDecisionUsable(previousText: string, value: string, targetText: string): boolean {
+  return value.length >= previousText.length && targetText.startsWith(value)
 }
 
 function partialTextParts(
@@ -778,29 +829,30 @@ function partialTextParts(
 }
 
 function advancePrefix(current: string, target: string, budget: number): PrefixAdvance {
-  if (current === target) return { value: current, consumed: 0 }
-  if (!target.startsWith(current)) return { value: target, consumed: 0 }
+  if (current === target) return { value: current, consumedUnits: 0 }
+  if (!target.startsWith(current)) return { value: target, consumedUnits: 0 }
   const remaining = target.slice(current.length)
-  if (!remaining || budget <= 0) return { value: current, consumed: 0 }
+  if (!remaining || budget <= 0) return { value: current, consumedUnits: 0 }
 
-  let consumed = 0
+  // D2：记账量纲 = UTF-16 单元（与欠账/预算一致），步进单位 = 字素（不切开字素）。
+  // 于是 astral 文本（1 字素 = 2+ 单元）也不会超预算，代价是最多少用一个字素的余量。
   let codeUnits = 0
   if (graphemeSegmenter) {
     for (const item of graphemeSegmenter.segment(remaining)) {
-      if (consumed >= budget) break
-      codeUnits += item.segment.length
-      consumed += 1
+      const next = codeUnits + item.segment.length
+      if (next > budget) break
+      codeUnits = next
     }
   } else {
     // `for…of` iterates Unicode code points (not UTF-16 halves), which is a
     // safe fallback for older WebView implementations without Segmenter.
     for (const item of remaining) {
-      if (consumed >= budget) break
-      codeUnits += item.length
-      consumed += 1
+      const next = codeUnits + item.length
+      if (next > budget) break
+      codeUnits = next
     }
   }
-  return { value: current + remaining.slice(0, codeUnits), consumed }
+  return { value: current + remaining.slice(0, codeUnits), consumedUnits: codeUnits }
 }
 
 function createGraphemeSegmenter(): GraphemeSegmenter | undefined {

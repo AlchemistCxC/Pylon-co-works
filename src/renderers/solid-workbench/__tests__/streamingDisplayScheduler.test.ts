@@ -405,3 +405,108 @@ describe('streaming display scheduler terminal coalescing', () => {
     scheduler.dispose()
   })
 })
+
+// P89 S3：预算口径修正（D1 聚合上界 / D2 单元记账 / D3 双列表归并）。
+describe('streaming scheduler budget accounting (P89/S3)', () => {
+  const looseRow = (id: string, content: string) => ({
+    id, role: 'assistant' as const, sender: 'test', content, time: '', running: true,
+  })
+  const documentRow = (id: string, content: string): WorkbenchMessage => ({
+    id, segmentId: 'segment-1', role: 'assistant', content,
+    parts: [{ kind: 'markdown', text: content }],
+    identity: {}, source: { provider: 'peri', sourceId: 'test' }, sequence: 1, running: true, time: '',
+  })
+  const totalLengths = (published: readonly WorkbenchRuntimeSnapshot[]) => published.map(value =>
+    value.messages.reduce((total, row) => total + row.content.length, 0))
+  const growthOf = (lengths: readonly number[]) =>
+    lengths.map((length, index) => length - (index === 0 ? 0 : lengths[index - 1]))
+
+  it('bounds the aggregate reveal of one publication, not only each row', () => {
+    vi.useFakeTimers()
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => Date.now() })
+    const rows = (length: number) => [
+      looseRow('m1', 'a'.repeat(length)),
+      looseRow('m2', 'b'.repeat(length)),
+      looseRow('m3', 'c'.repeat(length)),
+    ]
+    scheduler.push(snapshot({ generating: true, messages: rows(0) }))
+    for (let index = 1; index <= 30; index += 1) {
+      scheduler.push(snapshot({ generating: true, messages: rows(index * 20) }))
+      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+    }
+    const growth = growthOf(totalLengths(published))
+    expect(growth.length).toBeGreaterThan(3)
+    // D1：三行并发时聚合新增也受单帧上限约束（修正前 = 行数 × 上限）。
+    expect(Math.max(...growth)).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    expect(Math.max(...growth)).toBeGreaterThan(0)
+    scheduler.dispose()
+  })
+
+  it('advances every running row instead of starving the later ones', () => {
+    vi.useFakeTimers()
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => Date.now() })
+    const rows = (length: number) => [
+      looseRow('m1', 'a'.repeat(length)),
+      looseRow('m2', 'b'.repeat(length)),
+      looseRow('m3', 'c'.repeat(length)),
+    ]
+    scheduler.push(snapshot({ generating: true, messages: rows(0) }))
+    scheduler.push(snapshot({ generating: true, messages: rows(60) }))
+    vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+    const latest = published.at(-1)!
+    for (const row of latest.messages) expect(row.content.length).toBeGreaterThan(0)
+    scheduler.dispose()
+  })
+
+  it('accounts the reveal in UTF-16 units so astral text stays inside the bound', () => {
+    vi.useFakeTimers()
+    const grapheme = '👩‍💻'   // 1 字素 = 5 UTF-16 单元
+    const published: WorkbenchRuntimeSnapshot[] = []
+    const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => Date.now() })
+    scheduler.push(snapshot({ generating: true, messages: [looseRow('m1', '')] }))
+    for (let index = 1; index <= 40; index += 1) {
+      scheduler.push(snapshot({ generating: true, messages: [looseRow('m1', grapheme.repeat(index * 4))] }))
+      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+    }
+    const lengths = published.map(value => value.messages[0].content.length)
+    // D2：预算按单元计——修正前一字素算一格，astral 文本每拍可达上限 × 字素长度。
+    expect(Math.max(...growthOf(lengths))).toBeLessThanOrEqual(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    // 不切开字素：每次揭示长度都是字素长度的整数倍。
+    for (const length of lengths) expect(length % grapheme.length).toBe(0)
+    scheduler.dispose()
+  })
+
+  it('bills a row that appears in both lists only once and gives both lists the same decision', () => {
+    const reveal = (withDocument: boolean) => {
+      vi.useFakeTimers()
+      const published: WorkbenchRuntimeSnapshot[] = []
+      const scheduler = createStreamingDisplayScheduler(value => published.push(value), { now: () => Date.now() })
+      const next = (content: string) => ({
+        messages: [looseRow('m1', content)],
+        ...(withDocument
+          ? { document: { ...createWorkbenchDocument('session-a'), messages: [documentRow('m1', content)] } }
+          : {}),
+      })
+      scheduler.push(snapshot({ generating: true, ...next('') }))
+      scheduler.push(snapshot({ generating: true, ...next('x'.repeat(400)) }))
+      vi.advanceTimersByTime(1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1)
+      const latest = published.at(-1)!
+      const result = {
+        revealed: latest.messages[0].content.length,
+        documentRevealed: latest.document?.messages[0]?.content.length ?? 0,
+      }
+      scheduler.dispose()
+      vi.useRealTimers()
+      return result
+    }
+    const singleList = reveal(false)
+    const bothLists = reveal(true)
+    // D3：同一行出现在两个列表时不重复计费（修正前 backlog 翻倍 ⇒ 每拍揭示量翻倍）。
+    expect(bothLists.revealed).toBe(singleList.revealed)
+    // D3：两列表得到同一个决策（不会各自推进一次）。
+    expect(bothLists.documentRevealed).toBe(bothLists.revealed)
+    expect(bothLists.revealed).toBeGreaterThan(0)
+  })
+})
