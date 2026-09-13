@@ -79,6 +79,28 @@
   user-select:none;
 }
 .cc-widget { position:relative; overflow:visible; display:flex; align-items:center; }
+/* Widget failures must not participate in the status-row layout. Backend
+   diagnostics can include an advertised model list and therefore be long. */
+.solid-model-widget,
+.solid-mode-widget { position:relative; min-width:0; }
+.cc-widget-error {
+  position:absolute;
+  z-index:20;
+  right:0;
+  bottom:calc(100% + 4px);
+  max-width:min(42rem, calc(100vw - 24px));
+  overflow:hidden;
+  padding:3px 7px;
+  border:1px solid color-mix(in srgb, var(--danger, #d66) 60%, transparent);
+  border-radius:4px;
+  background:var(--cc-bg, #1b1b1b);
+  color:var(--danger, #f08a8a);
+  font-size:.78em;
+  line-height:1.3;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  pointer-events:auto;
+}
 /* 文字型控件（model/mode/send/attach）宽高随内容自适应 */
 .cc-widget.cc-natural { width:fit-content; height:auto; }
 .cc-widget:has(.cli-mode) { overflow:visible !important; }
