@@ -60,6 +60,13 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
     ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'React Root、基础 token、跨 Application scheme、Recovery 与 Rich QA 基线',
   ),
+  entry(
+    'src/styles/tailwind.css',
+    'kernel',
+    'kernel-static',
+    ['src/main.tsx'],
+    'Tailwind v4 utilities 基线：@theme inline 只读消费 index.css token；无 preflight（TW 施工书 20260914）',
+  ),
   entry('src/components/kernel/SkinPreviewBar.css', 'kernel', 'kernel-static', ['src/components/kernel/SkinPreviewBar.tsx']),
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),

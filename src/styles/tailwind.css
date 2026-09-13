@@ -1,0 +1,89 @@
+/* ═══════════════════════════════════════════════════════════
+   Tailwind v4 utilities 基线（P85 / TW 施工书 20260914）。
+
+   本文件的不变量（违反即门禁红，见 scripts/check-tailwind-token-purity.mts）：
+   - 不引 preflight：全局 reset 由 src/index.css 承担；preflight 会全局
+     重置元素默认值，破坏全部既有 CSS 的视觉前提。
+   - source(none) 关闭自动全仓扫描，由下方 @source 显式限定 src（
+     src-tauri 与 scripts 不进扫描）；扫描按文本匹配 class 字符串，与
+     React、Solid 框架无关，.solid.tsx 同样命中。
+   - 只允许 var(…) 引用：禁止 hex、rgb、hsl、oklch、color-mix 字面量，
+     不产生第二 token 源。
+   - @theme inline 让 utility 的值内联为变量引用、在每个元素自己的作用域
+     解析——换肤（skinProjection 对 root、body 双层与子树级 setProperty）
+     即时生效；非 inline 的 :root 间接层会丢失 body 与子树级覆盖。
+   - 同名自引用禁止：--ease-*、--motion-*、--shadow-* 命名空间与既有
+     token 撞名，不映射；需要时用任意值语法 ease-[var(--ease-standard)]、
+     shadow-[var(--shadow-soft)]。
+   - 注释纪律：注释文本里不得出现星号紧跟斜杠的序列（会提前终止块注释，
+     把注释文本变成活 CSS——本项目已踩过一次）。
+   ═══════════════════════════════════════════════════════════ */
+@import "tailwindcss/theme.css" layer(theme) source(none);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../";
+
+@theme inline {
+  /* 间距基数：--ui-space-1=4px 恰为 Tailwind 默认 4px 网格，
+     p-1…p-N 自动落在项目阶梯 4、8、12、16、24、32、48 上。 */
+  --spacing: var(--ui-space-1);
+
+  /* 圆角（--ui-radius-*） */
+  --radius-xs: var(--ui-radius-xs);
+  --radius-sm: var(--ui-radius-sm);
+  --radius-md: var(--ui-radius-md);
+  --radius-lg: var(--ui-radius-lg);
+  --radius-pill: var(--ui-radius-pill);
+
+  /* 字体族 */
+  --font-sans: var(--font-system);
+  --font-serif: var(--serif);
+  --font-mono: var(--mono);
+
+  /* 字号（项目字阶 --font-size-*） */
+  --text-4xs: var(--font-size-4xs);
+  --text-3xs: var(--font-size-3xs);
+  --text-2xs: var(--font-size-2xs);
+  --text-xs: var(--font-size-xs);
+  --text-sm: var(--font-size-sm);
+  --text-base: var(--font-size-base);
+  --text-md: var(--font-size-md);
+  --text-lg: var(--font-size-lg);
+  --text-xl: var(--font-size-xl);
+  --text-1xl: var(--font-size-1xl);
+  --text-2xl: var(--font-size-2xl);
+  --text-3xl: var(--font-size-3xl);
+
+  /* 语义表面与描边（DF-03a 公开角色链：mode、scheme、preset 重映射同名变量） */
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-glass: var(--surface-glass);
+  --color-stroke-subtle: var(--stroke-subtle);
+  --color-stroke-default: var(--stroke-default);
+  --color-stroke-strong: var(--stroke-strong);
+  --color-content-text: var(--content-text);
+  --color-content-muted: var(--content-muted);
+  --color-accent: var(--accent);
+  --color-connector: var(--connector-default);
+
+  /* 状态色（--success、--warning、--danger 是 state-* 的公开别名） */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-focus-ring: var(--state-focus-ring);
+  --color-selected-bg: var(--state-selected-bg);
+  --color-hover-bg: var(--state-hover-bg);
+
+  /* 既有别名镜像（多数组件消费这些名字，同一条角色链） */
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-text-placeholder: var(--text-placeholder);
+  --color-border: var(--border);
+  --color-border-focus: var(--border-focus);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-bg-input: var(--bg-input);
+}
