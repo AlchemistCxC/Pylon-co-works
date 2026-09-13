@@ -16,7 +16,6 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css',
   'src/plugins/product/packages/builtin.pylon-shell/styles/App.css',
-  'src/plugins/product/packages/builtin.pylon-shell/styles/components/ProfileEditor.css',
   'src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionSettings.css',
   'src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css',
   'src/plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css',
@@ -57,7 +56,7 @@ describe('first-party CSS ownership inventory', () => {
       'src/styles/tailwind.css',
       'src/components/kernel/SkinPreviewBar.css',
     ])
-    expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(5) // -PermissionDialog/-SessionOwnerRecoveryDialog（已绞杀，P93）
+    expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(4) // -PermissionDialog/-SessionOwnerRecoveryDialog/-ProfileEditor（已绞杀，P93）
     expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(9)
     expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(7) // -MessageSearchBar（已绞杀，J/绞杀流水线 20260914）；+WorkbenchChrome.css（Solid 壳层过渡态）
     expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
