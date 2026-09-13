@@ -143,8 +143,10 @@ function installInstantScrollToSink(viewport: HTMLElement, model: ScrollModel, p
  * 用固定帧数线性逼近 endpoint，每帧落一次 top 并派发 scroll 事件。
  */
 function installAnimatedScrollTo(viewport: HTMLElement, model: ScrollModel, pump: FramePump, frames = 3) {
+  let animationRevision = 0
   const scrollTo = vi.fn((options?: ScrollToOptions) => {
     if (options?.top === undefined) return
+    const revision = ++animationRevision
     if (options.behavior !== 'smooth') {
       model.top = options.top
       pump.enqueue(() => viewport.dispatchEvent(new Event('scroll')))
@@ -154,6 +156,7 @@ function installAnimatedScrollTo(viewport: HTMLElement, model: ScrollModel, pump
     const to = options.top
     let step = 0
     const advance = () => {
+      if (revision !== animationRevision) return
       step += 1
       model.top = from + (to - from) * (step / frames)
       viewport.dispatchEvent(new Event('scroll'))
@@ -368,6 +371,93 @@ describe('mountSolidWorkbench', () => {
     } finally {
       pump.dispose()
       globalThis.ResizeObserver = previousResizeObserver
+    }
+  })
+
+  it.each([0.25, 1, 2, 20, 47])('上滚 %s px 后，底部容差和迟到反馈不能重新开启跟随（#74）', async (distance) => {
+    const pump = createFramePump()
+    try {
+      const { host, services } = mountPreview()
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      const model = createScrollModel(viewport, { top: 700 })
+      const scrollTo = installInstantScrollToSink(viewport, model, pump)
+      await Promise.resolve()
+      pump.flush()
+      pump.flush()
+      scrollTo.mockClear()
+
+      fireEvent.wheel(viewport, { deltaY: -distance })
+      // A pending programmatic feedback event can precede the wheel's default movement.
+      fireEvent.scroll(viewport)
+      model.top -= distance
+      fireEvent.scroll(viewport)
+      services.runtime.update({ status: 'ready' })
+      await Promise.resolve()
+      pump.flush()
+      expect(model.top).toBe(700 - distance)
+      expect(scrollTo).not.toHaveBeenCalled()
+
+      // Growing content must not reclaim the viewport either.
+      model.height += 100
+      services.runtime.update({ status: 'idle' })
+      await Promise.resolve()
+      pump.flush()
+      expect(model.top).toBe(700 - distance)
+      expect(scrollTo).not.toHaveBeenCalled()
+
+      // Natural downward scrolling all the way to the endpoint resumes following.
+      fireEvent.wheel(viewport, { deltaY: 200 })
+      model.top = 800
+      fireEvent.scroll(viewport)
+      model.height += 100
+      services.runtime.update({ status: 'ready' })
+      await Promise.resolve()
+      pump.flush()
+      expect(model.top).toBe(900)
+    } finally {
+      pump.dispose()
+    }
+  })
+
+  it.each(['wheel', 'touch', 'keyboard'] as const)('%s 打断 smooth 后冻结动画、解除锁，并允许自然回底（#74）', async (inputKind) => {
+    const pump = createFramePump()
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+    try {
+      const { host, services } = mountPreview(undefined, { reducedMotion: false })
+      const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+      const model = createScrollModel(viewport, { top: 100 })
+      const scrollTo = installAnimatedScrollTo(viewport, model, pump)
+      fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
+      pump.flush()
+      const interruptedTop = model.top
+      expect(interruptedTop).toBeGreaterThan(100)
+      expect(interruptedTop).toBeLessThan(700)
+      if (inputKind === 'wheel') fireEvent.wheel(viewport, { deltaY: -2 })
+      else if (inputKind === 'keyboard') fireEvent.keyDown(viewport, { key: 'ArrowUp' })
+      else {
+        fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] })
+        fireEvent.touchMove(viewport, { touches: [{ clientY: 110 }] })
+      }
+      expect(scrollTo).toHaveBeenLastCalledWith({ top: interruptedTop, behavior: 'instant' })
+      model.top -= 2
+      fireEvent.scroll(viewport)
+      services.runtime.update({ status: 'idle' })
+      await Promise.resolve()
+      pump.flush()
+      pump.flush()
+      expect(model.top).toBe(interruptedTop - 2)
+
+      // Clock remains inside the original smooth lock. User intent releases it.
+      model.top = 699.4
+      fireEvent.scroll(viewport)
+      model.height += 100
+      services.runtime.update({ status: 'ready' })
+      await Promise.resolve()
+      pump.flush()
+      expect(model.top).toBe(800)
+    } finally {
+      clock.mockRestore()
+      pump.dispose()
     }
   })
 
