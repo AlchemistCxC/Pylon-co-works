@@ -1,6 +1,17 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13 17:52] [砂纸·工程师] [认领·远端 GitHub #67 / #68 / #69（三 issue 三片独立施工）] 用户指派修复远端仓库 issue 编号 67/68/69。**口径澄清（平行会话请按此读）**：一律指 **GitHub issues**（#67 设置页无法删除已连接 agent runtime + 探测器把同一 agent 多重证据列为独立候选；#68 冷启动空态首条消息结束后未渲染「处理耗时」；#69 FileSheet 切编辑/只读态时内容与行号列位移），**不是**文档库台账里同号的 P67（`no-unknown-returns`）/P68（孤儿门禁）/P69（issue.md 五项修复）。
+
+已按 §2.2 复验现场（`Ru5t/Reflector` @ `dc667cd8`，工作树仅一处既有未跟踪 `src-tauri/pylon-foundations/Cargo.lock`，我全程不碰不提交）：前端定向 7 文件/63 项绿；Rust 主 crate `--lib` **960 passed / 0 failed / 4 ignored**。三份施工书已落文档库并登记 `Docs/README.md`：
+- 《Pylon-Issue67-Agent删除路径与探测器身份合并施工书-20260913.md》——A 用户已裁定删除语义（仅摘配置 + 停 runtime，**保留会话/记录**；删除前需看清将移除/保留）且复用既有 `update_agents_config` 事务链（新增 `agent_delete` scope，非新命令）；B 身份级候选合并按 Codeg 口径（`registry.rs::registry_id_for`/`acp_adapter_relation`/`custom_registry.rs::validate`，固定副本 `b2eec98`，未联网）。
+- 《Pylon-Issue68-空态首条消息终态摘要施工书-20260913.md》——根因：空态创建路径 `selectSession` 后同 tick `send`，`projectOptimisticUser` 因未 bind 早退 ⇒ TurnClock 无起点 ⇒ 终帧 `turnClockTerminal` 找不到条目直接 return ⇒ 摘要永不发布（切 sheet 走 refresh 的 displayOnly 兵底才出现）。
+- 《Pylon-Issue69-FileSheet两态编辑浏览度量同源施工书-20260913.md》——根因：CM 的 `.cm-gutter` 列按内容定宽、不填充既有 56px gutter 盒（issue38 契约块已对齐其余度量），行号文字比只读态左移约 12px。
+
+**本任务预告触碰面**（若有并行计划请回板）：`src-tauri/pylon-core/src/agent_detection.rs`、`src-tauri/src/agent_config/patch.rs`、`src-tauri/src/lifecycle/config_cmds.rs`、`src/components/settings/AgentRuntimePanel.tsx`、`src/infrastructure/acp/agentClient.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css`（+ 各域 `__tests__`）。已核 P74（B0–B5）全部已在 HEAD 内并已收尾；#53（Chica，control-center 域）与 P73/P72 各在别域，与本次三片无文件重叠。
+
+**交付形态（用户已定）**：本地 commit，**不推远端、不建 PR**；验收基线 = 自动化回归 + 静态证据，#68/#69 实机观感/时序由用户后置验收并登台账。收尾按 §6 一次性更新台账 + 下一阶段问题清单。
+
 [2026-09-13] [Chica·工程师] [认领·#53 中控区空态模型列表] 分支 fix/issue-53-agent-model-list（fork 已推），基线 c43f8b0。施工书见文档库 Pylon-Issue53-空态模型列表施工书-20260913.md。开工前侦察数据源，触及他人区域前回板。
 
 [2026-09-12 23:49] [校书·工程师] [说明书第二轮事实漂移修正完成（P54.1）·docs 提交 `af65c39d`] 用户指派"更新老旧说明书到最新说法"。六份说明书依源码同步（43+/33-）：版本头 1.5.9→1.6.0；开发者版补 API 1.2 契约（`capabilities`/`dangerousHooks` 字段表、1.0/1.1 出现即 removed-field 拒绝、Hook 词表 +`message.received`/`agent.chunk`、api allowlist 三版本、"当前限制"改为"授权卡非沙箱"）；两版插件书与架构参考的"五个 Product Plugin"→六个（`builtin.pylon-plugin-manager` 全部 product-required）；架构参考 acp 目录行换 P60 A1c 后现实（`engine.rs`/`instance_registry.rs`/`cause.rs`，transport/jsonrpc 已删）+ 补 `pylon-foundations`（P58）与 `agent_detection.rs` 命令层（P74 B0）行 + 复活链改 resume-first（`session/resume` 广告优先 → load 通道须 catalog∩广告交集，P60 A6/P74 B2）+ 检测 TTL 快照与保存 fail-closed 门禁（P74 B0/B1）；拓扑图 acp 节点标签同步；检测器手册补 `--diagnose`/`--version`（P73 C5）与"重新探测"按钮、GUI TTL 缓存说明。核验无漂移未动：CLI 壳 58 命令（manifest 实数）、内置 64 可执行命令（保留 runtime-truth 口径）、发行包清单全部脚本引用。门禁：mermaid v11 真实 parse 8/8 块全过（mermaid+jsdom 装在仓库外 /tmp，未入工作树）、`check:docs` 绿、文档指针逐个验证。用户在途 5 文件 fmt WIP 与 `pylon-foundations/Cargo.lock` 全程未触碰。台账已登记 **P54.1**（Euclid 的 P54"下一步"预言的正是本轮）。后续结构性改动请继续按拓扑图维护规则 1 同提交更新说明书。
