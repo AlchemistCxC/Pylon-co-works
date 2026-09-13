@@ -8,7 +8,9 @@ import { useIdentityStore } from '../../identityStore'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**
- * GatewaySheetView — 网关平台概览（W3-01）+ 实例管理（I12-W5）+ 交互优化（P79）。
+ * GatewaySheetView — 网关平台概览（W3-01）+ 实例管理（I12-W5）+ 交互优化（P79）
+ * + 视觉美化（P82：页头状态摘要、统一 section 卡片层级、状态点章、按钮分级、
+ * 空态引导；classic 直角 / modern-gui 圆角双模式均沿 token 体系）。
  *
  * gateway_status 只读概览：适配器/平台会话两分区（GatewaySidebar）；主区平台概览
  * （routes 表 + inject 只读提示「归 Prism」不编辑）。I12-W5：实例分区展示真实
@@ -20,8 +22,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  *   推送通道，此前必须重开 sheet 才能看到「已连接」；
  * - 凭据表单按 catalog credentialFields 动态渲染（QQ = App ID + Client Secret 两框，
  *   提交按字段顺序 join ':'）——不再要求用户手拼单串；无字段描述的平台回退单框；
- * - 删除二段确认（误点保护，3s 自动回弹）；
- * - 只读信息（注入/未绑定策略）从 key = value 日志行改为字段行展示。
+ * - 删除二段确认（误点保护，3s 自动回弹）。
  */
 function statusLabel(status: AdapterInstance['status']): string {
   return status === 'connected' ? '已连接' : status === 'starting' ? '启动中' : status === 'error' ? '错误' : '已停止'
@@ -278,6 +279,8 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
   }
 
   const availablePlatforms = catalog.filter(item => item.availability === 'builtIn')
+  // P82：页头状态摘要（在线实例 / 路由 / 适配器）
+  const connectedCount = instances.filter(instance => instance.status === 'connected').length
 
   return (
     <div className="gateway-sheet">
@@ -306,31 +309,54 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
       </aside>}
       <main className="gateway-main">
         {error && <p className="file-section-hint gateway-error-reference" role="status">网关状态读取失败，详情见右下角错误中心</p>}
-        <div className="file-main-kicker">GATEWAY</div>
-        <h2 className="file-main-title">平台概览</h2>
-        <div className="gateway-routes">
-          {status?.routes.map((route, index) => (
-            <div key={route.source} className="gateway-route">
-              <button type="button" className="gateway-route-head" aria-expanded={expandedRoute === index} onClick={() => setExpandedRoute(expandedRoute === index ? null : index)}>
-                <span className="search-result-path">{route.source}</span>
-                <span className="search-result-text">→ {route.agentId}</span>
-                <span className="gateway-route-reset">{route.reset}</span>
-              </button>
-              {expandedRoute === index && (
-                <div className="gateway-route-detail">
-                  <div className="runtime-log-field"><code>instanceId</code> = {route.instanceId || '—（未绑定实例）'}</div>
-                  <div className="runtime-log-field"><code>profileId</code> = {route.profileId || '—'}</div>
-                  <div className="runtime-log-field"><code>sessionKey</code> = {route.sessionKey || '—'}</div>
-                  <div className="runtime-log-field"><code>allowFrom</code> = {(route.allowFrom || []).join(', ') || '—'}</div>
-                  <div className="runtime-log-field"><code>idleMinutes</code> = {route.idleMinutes ?? '—'}</div>
+        <header className="gateway-header">
+          <div>
+            <div className="file-main-kicker">GATEWAY</div>
+            <h2 className="file-main-title">平台概览</h2>
+          </div>
+          <div className="gateway-summary" aria-label="网关状态摘要">
+            <span className="gateway-summary-chip"><span className="gateway-summary-num">{instances.length}</span> 实例</span>
+            <span className="gateway-summary-chip gateway-summary-chip-online"><span className="gateway-summary-num">{connectedCount}</span> 在线</span>
+            <span className="gateway-summary-chip"><span className="gateway-summary-num">{status?.routes.length ?? 0}</span> 路由</span>
+            <span className="gateway-summary-chip"><span className="gateway-summary-num">{status?.adapters.length ?? 0}</span> 适配器</span>
+          </div>
+        </header>
+
+        <section className="gateway-section">
+          <div className="gateway-section-head">
+            <h3 className="file-section-title">路由</h3>
+            <span className="gateway-section-meta">{status?.routes.length ?? 0} 条 · 点击展开详情</span>
+          </div>
+          {status && status.routes.length === 0 ? (
+            <p className="gateway-empty">还没有路由——在下方「新增路由」把平台会话（如 qq 群）绑定到 agent</p>
+          ) : (
+            <div className="gateway-routes">
+              {status?.routes.map((route, index) => (
+                <div key={route.source} className="gateway-route">
+                  <button type="button" className="gateway-route-head" aria-expanded={expandedRoute === index} onClick={() => setExpandedRoute(expandedRoute === index ? null : index)}>
+                    <span className="search-result-path">{route.source}</span>
+                    <span className="search-result-text">→ {route.agentId}</span>
+                    <span className="gateway-route-reset">{route.reset}</span>
+                  </button>
+                  {expandedRoute === index && (
+                    <div className="gateway-route-detail">
+                      <div className="runtime-log-field"><code>instanceId</code> = {route.instanceId || '—（未绑定实例）'}</div>
+                      <div className="runtime-log-field"><code>profileId</code> = {route.profileId || '—'}</div>
+                      <div className="runtime-log-field"><code>sessionKey</code> = {route.sessionKey || '—'}</div>
+                      <div className="runtime-log-field"><code>allowFrom</code> = {(route.allowFrom || []).join(', ') || '—'}</div>
+                      <div className="runtime-log-field"><code>idleMinutes</code> = {route.idleMinutes ?? '—'}</div>
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
-          {status && status.routes.length === 0 && <p className="file-section-hint">无路由</p>}
-        </div>
-        <div className="gateway-route-edit">
-          <div className="file-section-title">新增路由</div>
+          )}
+        </section>
+
+        <section className="gateway-section">
+          <div className="gateway-section-head">
+            <h3 className="file-section-title">新增路由</h3>
+          </div>
           <p className="gateway-section-hint">把平台会话（source）绑定到 agent：实例 / profile / session 为必填，其余可选</p>
           <div className="gateway-edit-row">
             <input className="runtime-filter-input" placeholder="source（如 qq:group:123）" value={editSource} onChange={e => onSourceChange(e.target.value)} aria-label="路由 source" />
@@ -359,23 +385,27 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
             </select>
             <input className="runtime-filter-input" placeholder="idleMinutes（可选）" type="number" min="0" value={editIdleMinutes} onChange={e => setEditIdleMinutes(e.target.value)} aria-label="路由 idleMinutes" />
             <input className="runtime-filter-input" placeholder="allowFrom（逗号分隔，可选）" value={editAllowFrom} onChange={e => setEditAllowFrom(e.target.value)} aria-label="路由 allowFrom" />
-            <button type="button" className="template-apply" onClick={() => void saveRoute()}>保存</button>
+            <button type="button" className="template-apply gateway-btn-primary" onClick={() => void saveRoute()}>保存</button>
           </div>
           {formError && <div className="file-tree-error" role="alert">{formError}</div>}
           {writeStatus.kind === 'blocked' && <p className="file-section-hint" role="status">待后端：update_agents_config 命令尚未提供</p>}
           {writeStatus.kind === 'lock-poisoned' && <p className="file-section-hint gateway-error-reference" role="status">网关配置回读不一致，详情见右下角错误中心</p>}
           {writeStatus.kind === 'error' && <p className="file-section-hint gateway-error-reference" role="status">网关配置保存失败，详情见右下角错误中心</p>}
           {writeStatus.kind === 'ok' && <p className="file-section-hint" role="status">已保存并重载</p>}
-        </div>
+        </section>
+
         {/* I12-W5：实例管理（真实实例/状态/错误/操作；未实现平台不可用） */}
-        <div className="gateway-instances">
-          <div className="file-section-title">实例</div>
-          <p className="gateway-section-hint">状态每 {INSTANCE_REFRESH_MS / 1000} 秒自动刷新；启动前需配置凭据</p>
+        <section className="gateway-section">
+          <div className="gateway-section-head">
+            <h3 className="file-section-title">实例</h3>
+            <span className="gateway-section-meta">状态每 {INSTANCE_REFRESH_MS / 1000} 秒自动刷新</span>
+          </div>
+          <p className="gateway-section-hint">启动前需配置凭据；状态翻转自动刷新，无需重开页面</p>
           {instanceError && <p className="file-section-hint gateway-error-reference" role="status">网关实例操作失败，详情见右下角错误中心</p>}
           {instances.length === 0 ? (
-            <p className="file-section-hint">无实例</p>
+            <p className="gateway-empty">还没有实例——在下方「新建实例」创建，配置凭据后启动</p>
           ) : (
-            <ul className="search-result-list">
+            <ul className="search-result-list gateway-instance-list">
               {instances.map(instance => {
                 const fields = credentialFieldsFor(instance.platform)
                 const drafts = credentialDrafts[instance.id] ?? []
@@ -392,7 +422,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
                   </div>
                   {instance.lastError && <p className="file-section-hint" role="status">上次运行错误：{instance.lastError}</p>}
                   <div className="gateway-edit-row">
-                    <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('启动网关实例', () => gatewayClient.startInstance(instance.id))}>启动</button>
+                    <button type="button" className="template-apply gateway-btn-primary" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('启动网关实例', () => gatewayClient.startInstance(instance.id))}>启动</button>
                     <button type="button" className="template-apply" disabled={instance.status === 'stopped' || instance.status === 'starting'} onClick={() => void runInstanceAction('停止网关实例', () => gatewayClient.stopInstance(instance.id))}>停止</button>
                     <button type="button" className="template-apply" disabled={instance.status === 'starting'} onClick={() => void runInstanceAction('重启网关实例', () => gatewayClient.restartInstance(instance.id))}>重启</button>
                     {pendingDeleteId === instance.id ? (
@@ -426,7 +456,9 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
               })}
             </ul>
           )}
-          <div className="file-section-title">新建实例</div>
+          <div className="gateway-section-head gateway-section-head-sub">
+            <h3 className="file-section-title">新建实例</h3>
+          </div>
           <p className="gateway-section-hint">仅显示已实现平台；创建后配置凭据并启动。未实现平台（如微信）不可创建。</p>
           {availablePlatforms.length === 0 ? (
             <p className="file-section-hint">无可用平台（未实现平台不可用）</p>
@@ -441,20 +473,26 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
               <button type="button" className="template-apply" disabled={!createForm.platform || !createForm.id.trim()} onClick={() => void createInstance()}>创建</button>
             </div>
           )}
-        </div>
+        </section>
+
         {/* I12 W9：未绑定消息策略只读展示（明示风险——reject 模式未绑定消息不进入 agent） */}
         {status?.unboundPolicy && (
-          <div className="gateway-inject">
-            <div className="file-section-title">未绑定消息策略</div>
+          <section className="gateway-section">
+            <div className="gateway-section-head">
+              <h3 className="file-section-title">未绑定消息策略</h3>
+            </div>
             <div className="gateway-field">
               <span className="gateway-field-label">策略</span>
               <span className="gateway-field-value">{status.unboundPolicy === 'reject' ? '严格模式（reject）：未绑定路由的消息将被拒绝，不会回退到 active agent' : '宽松模式（active-agent）：未绑定路由的消息回退到 active agent'}</span>
             </div>
-          </div>
+          </section>
         )}
         {status?.inject && (
-          <div className="gateway-inject">
-            <div className="file-section-title">知识注入（归 Prism 管理，只读）</div>
+          <section className="gateway-section">
+            <div className="gateway-section-head">
+              <h3 className="file-section-title">知识注入</h3>
+              <span className="gateway-section-meta">归 Prism 管理 · 只读</span>
+            </div>
             <div className="gateway-field">
               <span className="gateway-field-label">注入开关</span>
               <span className="gateway-field-value">{status.inject.enabled == null ? '—' : status.inject.enabled ? '开启' : '关闭'}</span>
@@ -467,7 +505,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
               <span className="gateway-field-label">完成持久化</span>
               <span className="gateway-field-value">{status.inject.persist === 'prism' ? '写入 Prism（persist）' : status.inject.persist || '—'}</span>
             </div>
-          </div>
+          </section>
         )}
       </main>
     </div>
