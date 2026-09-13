@@ -1,3 +1,4 @@
+// P91 A4 收编：插件 manifest allowlist 与 v1 运行时删除守卫（原 scripts/test-plugin-v1-removed.mts）。
 import { strict as assert } from 'node:assert'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -81,4 +82,4 @@ const pluginManager = readFileSync(join(root, 'src/components/settings/PluginMan
 assert.doesNotMatch(pluginManager, /PluginRegistry|PluginHost|api=0\.1|devMode|paste/i)
 assert.match(pluginManager, /Pylon Plugin API \{PYLON_PLUGIN_API_VERSION\}/)
 
-console.log('插件 API allowlist 与旧运行时删除守卫通过')
+console.log('插件 API allowlist 与旧运行时删除守卫通过（check-plugin-manifests）')

@@ -1,15 +1,15 @@
+// CSS 消费审计回归门禁（2026-08-04；P91 A4 收编正名，原 scripts/test-css-var-consumption.mts）：
+// 主题系统不变量 = "Settings 每个字段都有真实渲染效果"。字段注入的 CSS var 必须被 var()
+// 消费；CSS 消费的 var 必须已注入/声明，否则必须带 fallback（悬空引用会静默回退）。
+// 防再犯：新增字段若注入 var 却无人消费，或组件引用悬空 var，本检查即红。
+//
+// 注入集 = THEME_CSS_VAR_MAP（defs 中 color/number 且非 noCssVar 的字段，cssVar 显式或
+// kebab 派生）+ themeCssSnapshot 注入 var。
+import { THEME_CSS_VAR_MAP, THEME_SETTING_KEYS } from '../src/themeFieldDefs.ts'
 import { strict as assert } from 'node:assert'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-// CSS 消费审计回归门禁（2026-08-04）：
-// 主题系统不变量 = "Settings 每个字段都有真实渲染效果"。字段注入的 CSS var 必须被 var()
-// 消费；CSS 消费的 var 必须已注入/声明，否则必须带 fallback（悬空引用会静默回退）。
-// 防再犯：新增字段若注入 var 却无人消费，或组件引用悬空 var，本测试即红。
-//
-// 注入集 = THEME_CSS_VAR_MAP（defs 中 color/number 且非 noCssVar 的字段，cssVar 显式或
-// kebab 派生）+ App.tsx 手写注入 var。与 src/themeFieldDefs.ts:264 的生成规则保持一致。
 
 const ROOT = fileURLToPath(new URL('../src', import.meta.url))
 const read = (p: string) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
@@ -32,7 +32,6 @@ walk(ROOT)
 const cssAll = cssFiles.map(read).join('\n')
 const tsxAll = tsxFiles.map(read).join('\n')
 // ── 注入集：直接 import THEME_CSS_VAR_MAP 单一真值（消灭正则镜像第二实现）──
-const { THEME_CSS_VAR_MAP, THEME_SETTING_KEYS } = await import('../src/themeFieldDefs.ts')
 const injected = new Set<string>(Object.keys(THEME_CSS_VAR_MAP))
 const injectedFields = new Set<string>(Object.values(THEME_CSS_VAR_MAP))
 // S5：显式派生 var 从 themeCssSnapshot 注入（App 不再手写 cssVars 对象键）
