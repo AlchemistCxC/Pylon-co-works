@@ -79,7 +79,6 @@ export interface WorkbenchAppearanceSnapshot {
   modelVariant: string
   modeVariant: string
   sendVariant: string
-  attachVariant: string
   cliHintMode: string
   footerLayout: string
   cliOverflowMode: string
@@ -184,7 +183,6 @@ export function selectWorkbenchAppearance(
     modelVariant: theme.modelVariant,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
-    attachVariant: theme.attachVariant,
     cliHintMode: theme.cliHintMode,
     footerLayout: theme.footerLayout,
     cliOverflowMode: theme.cliOverflowMode,
@@ -272,6 +270,5 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     modelVariant: theme.modelVariant,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
-    attachVariant: theme.attachVariant,
   }
 }

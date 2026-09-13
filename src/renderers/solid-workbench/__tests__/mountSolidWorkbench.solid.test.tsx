@@ -1482,17 +1482,14 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
     expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
     expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
-    expect(host.querySelector('.cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     theme.inputSubmitButtonMode = 'external'
-    theme.ccHidden = ['attach']
     theme.ccLayout.placements.send = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
     theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
-    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
     expect(host.querySelector('[data-widget-id="model"]')).toBeNull()
 
@@ -1505,7 +1502,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-widget-id="activity"]')).toBeNull()
   })
 
-  it('外置按钮模式下单独隐藏发送或附件不会误吞掉输入栏另一按钮', async () => {
+  it('外置按钮模式下隐藏发送不会误吞掉输入栏按钮', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
     theme.inputMode = 'default'
@@ -1515,17 +1512,12 @@ describe('mountSolidWorkbench', () => {
     services.appearance.setTheme(theme)
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
-    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
-    expect(host.querySelector('.input-btn.attach')).toBeNull()
 
-    theme.ccHidden = ['attach']
     services.appearance.setTheme(theme)
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
-    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
-    expect(host.querySelector('.input-btn.attach')).toBeNull()
   })
 
   it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {

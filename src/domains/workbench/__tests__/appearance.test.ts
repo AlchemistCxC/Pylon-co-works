@@ -320,7 +320,7 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({
       inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
       ccHeight: 84,
-      ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'attach', 'tasks'],
+      ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'tasks'],
     }))
 
     store.dispatch({ type: 'set-cc-hidden', id: 'pct', hidden: false })

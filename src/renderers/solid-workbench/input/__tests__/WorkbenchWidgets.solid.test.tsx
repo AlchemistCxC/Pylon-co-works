@@ -8,7 +8,7 @@ import { normalizeSessionConfigOptions } from '../../../../domains/workbench/ses
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
 import type { SolidWorkbenchInput } from '../../workbenchContracts.ts'
-import { SolidAttachWidget, SolidCcSendButton, SolidModeWidget, SolidModelWidget } from '../WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget } from '../WorkbenchWidgets.solid.tsx'
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
 
@@ -287,20 +287,5 @@ describe('Solid Workbench widgets', () => {
     expect(screen.getByRole('button')).toBeDisabled()
     disabledServices.destroy()
     window.removeEventListener('pylon:solid-input-send', sendEvent)
-  })
-
-  it('Attach 反映 capability、图片提示与 variant，并派发输入事件', async () => {
-    const attachEvent = vi.fn()
-    window.addEventListener('pylon:solid-input-attach', attachEvent)
-    const services = renderWidget(() => <SolidAttachWidget />, { attachVariant: 'minimal' })
-    const attach = screen.getByRole('button', { name: '附件（当前 Agent 不支持图片）' })
-    expect(attach.className).toBe('cc-attach-minimal')
-    expect(attach.title).toContain('不支持图片')
-    fireEvent.click(attach)
-    expect(attachEvent).toHaveBeenCalledTimes(1)
-
-    services.runtime.update({ canAttach: false })
-    await waitFor(() => expect(screen.getByRole('button')).toBeDisabled())
-    window.removeEventListener('pylon:solid-input-attach', attachEvent)
   })
 })

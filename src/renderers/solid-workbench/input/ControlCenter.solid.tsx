@@ -6,7 +6,7 @@ import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../cc
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
-import { SolidAttachWidget, SolidCcSendButton, SolidModeWidget, SolidModelWidget } from './WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
@@ -18,7 +18,7 @@ const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', '
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
   ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', mode: '权限模式',
-  send: '发送按钮', attach: '附件按钮', tasks: '任务',
+  send: '发送按钮', tasks: '任务',
 }
 
 export function SolidControlCenter() {
@@ -353,8 +353,6 @@ export function SolidControlCenter() {
         />
       case 'send':
         return null
-      case 'attach':
-        return <SolidAttachWidget disabled={readonly()} />
       case 'tasks': {
         return <Show when={taskLabel(runtime().tasks)}>{label => (
           <button type="button" class="cc-tasks-pill" title="任务列表（点击展开/收起）" onClick={() => window.dispatchEvent(new CustomEvent('pylon:tasks-toggle'))}>{label()}</button>

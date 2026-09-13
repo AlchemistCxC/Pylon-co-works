@@ -424,29 +424,3 @@ export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 
     onClick={() => runtime().generating ? cancel() : send()}
   ><svg viewBox="0 0 24 24" class={iconClass()} aria-hidden="true"><path d={path()} /></svg></button>
 }
-
-export function SolidAttachWidget(props: { disabled?: boolean } = {}) {
-  const workbench = useSolidWorkbench()
-  const appearance = () => workbench.appearanceSnapshot()
-  const runtime = () => workbench.runtimeSnapshot()
-  const variant = () => appearance().attachVariant || 'icon'
-  const className = () => variant() === 'minimal' ? 'cc-attach-minimal' : variant() === 'square' ? 'cc-attach-square' : 'cc-attach-icon'
-  const scale = () => appearance().ccScale.attach ?? 100
-  const title = () => !runtime().canAttach
-    ? '附件暂不可用'
-    : runtime().promptImage
-      ? 'Attach file'
-      : '当前 Agent 不支持图片（文本附件可用）'
-
-  return (
-    <button
-      type="button"
-      class={className()}
-      style={{ 'font-size': `${scale()}%` }}
-      disabled={props.disabled || (Boolean(workbench.input().sessionId) && !runtime().canAttach)}
-      title={title()}
-      aria-label={runtime().promptImage ? '添加附件' : '附件（当前 Agent 不支持图片）'}
-      onClick={() => window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))}
-    >＋</button>
-  )
-}

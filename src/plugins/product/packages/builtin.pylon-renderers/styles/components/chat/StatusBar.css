@@ -16,7 +16,7 @@
 .prism-tag.off { color:var(--text-dim); }
 .prism-tag:hover { text-decoration:underline; }
 
-/* ── ModelWidget variants ── */
+/* ── 模型控件 variants ── */
 .model-tag { font-size:12px; color:var(--pill-text,#999); padding:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
 .model-tag:hover { text-decoration:underline; }
 .model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius: 0; overflow:hidden; min-width:180px; z-index:100; }
@@ -61,27 +61,6 @@
   .ekg-pct,
   .status-bar button { transition:none!important; }
 }
-
-/* ── Attach widget variants ──
-   注：send 侧已由 cc-send-button 接管。旧的 .cc-send-icon 选择器会撞上
-   新图标 SVG（给它铺圆灰底），已摘除；.cc-send-square/minimal 暂无使用者。 */
-.cc-send-square, .cc-send-minimal,
-.cc-attach-icon, .cc-attach-square, .cc-attach-minimal {
-  display:flex; align-items:center; justify-content:center; border:none; cursor:pointer;
-  font-family:var(--mono); transition:background 0.15s, color 0.15s;
-}
-.cc-attach-icon {
-  border-radius: 50%; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
-}
-.cc-attach-icon:hover { background:rgba(0,0,0,0.18); }
-.cc-send-square, .cc-attach-square {
-  border-radius: 0; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
-}
-.cc-send-square:hover, .cc-attach-square:hover { background:rgba(0,0,0,0.18); }
-.cc-send-minimal, .cc-attach-minimal {
-  background:transparent; color:var(--text-dim); border-radius: 0;
-}
-.cc-send-minimal:hover, .cc-attach-minimal:hover { color:var(--text); }
 
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 

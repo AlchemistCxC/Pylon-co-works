@@ -5,17 +5,17 @@ import type { CcWidgetContribution } from '../../plugin-runtime/cc-widget/ccWidg
 const placement = (slot: CcWidgetPlacement['slot'], order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 const labels: Record<typeof CC_WIDGET_IDS[number], string> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态', ekg: '用量条', pct: '百分比',
-  tokens: 'Token数', model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮', tasks: '任务',
+  tokens: 'Token数', model: '模型', mode: '权限模式', send: '发送按钮', tasks: '任务',
 }
 const categories: Record<typeof CC_WIDGET_IDS[number], string> = {
   input: 'input', session: 'runtime', workspace: 'runtime', activity: 'status', ekg: 'context', pct: 'context',
-  tokens: 'context', model: 'runtime', mode: 'runtime', send: 'action', attach: 'action', tasks: 'status',
+  tokens: 'context', model: 'runtime', mode: 'runtime', send: 'action', tasks: 'status',
 }
 const placements: Record<typeof CC_WIDGET_IDS[number], CcWidgetPlacement> = {
   input: placement('input', 0), session: placement('status-secondary', 0), workspace: placement('status-secondary', 1),
   model: placement('status-secondary', 2), mode: placement('status-secondary', 3), activity: placement('status-primary', 0),
   ekg: placement('status-primary', 1), pct: placement('status-primary', 2), tokens: placement('status-primary', 3),
-  send: placement('actions', 0), attach: placement('actions', 1), tasks: placement('status-primary', 4),
+  send: placement('actions', 0), tasks: placement('status-primary', 4),
 }
 
 /** Legacy widget definitions retained for the switch renderer. */

@@ -229,30 +229,6 @@ describe('SolidInputBar', () => {
     await waitFor(() => expect(screen.queryByText('第二条待发')).toBeNull())
   })
 
-  it('生成期间排队的消息保留当时选择的附件', async () => {
-    const { services, textarea } = renderInput()
-    services.commands.setHandler('attach', vi.fn(async () => [
-      { id: 'a', path: 'C:/a.txt', name: 'a.txt' },
-    ]))
-    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
-
-    services.commands.reset()
-    services.runtime.update({ generating: true })
-    fireEvent.input(textarea, { target: { value: '稍后读取附件' } })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-    services.runtime.update({ generating: false })
-    fireEvent.click(await screen.findByRole('button', { name: '发送待发送消息' }))
-
-    await waitFor(() => expect(services.commands.calls).toContainEqual({
-      command: 'send',
-      args: ['session-a', {
-        text: '稍后读取附件',
-        attachments: [{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }],
-      }],
-    }))
-  })
-
   it('待发消息发送未完成时禁用队列按钮，避免重复提交', async () => {
     let resolveSend: ((value: { status: 'sent'; messageId: string }) => void) | undefined
     const { services, textarea } = renderInput()
@@ -403,38 +379,6 @@ describe('SolidInputBar', () => {
     })]).document, { ownerKey: 'owner-a', generation: 2 })
     fireEvent.input(textarea, { target: { value: '/audit' } })
     expect(await screen.findByText('全量审计')).toBeTruthy()
-  })
-
-  it('附件通过 facade 注入，去重并可移除', async () => {
-    const { services } = renderInput()
-    services.commands.setHandler('attach', vi.fn(async () => [
-      { id: 'a', path: 'C:/a.txt', name: 'a.txt' },
-      { id: 'a-copy', path: 'C:/a.txt', name: 'a.txt' },
-    ]))
-
-    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
-    expect(screen.getAllByText(/a\.txt/)).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: '移除附件 a.txt' }))
-    expect(screen.queryByRole('button', { name: '移除附件 a.txt' })).toBeNull()
-  })
-
-  it('附件选择未完成时切换会话，结果只归属发起会话', async () => {
-    let resolveAttach: ((value: Array<{ id: string; path: string; name: string }>) => void) | undefined
-    const attachPromise = new Promise<Array<{ id: string; path: string; name: string }>>(resolve => { resolveAttach = resolve })
-    const { services, switchSession } = renderInput()
-    services.commands.setHandler('attach', vi.fn(() => attachPromise))
-
-    window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))
-    await waitFor(() => expect(services.commands.calls[0]?.command).toBe('attach'))
-    switchSession('session-b')
-    resolveAttach?.([{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }])
-    await attachPromise
-    await Promise.resolve()
-
-    expect(screen.queryByRole('button', { name: '移除附件 a.txt' })).toBeNull()
-    switchSession('session-a')
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
   })
 
   it('Esc/Ctrl+C 在生成时取消，失败结果展示可见错误', async () => {

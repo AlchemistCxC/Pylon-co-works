@@ -63,7 +63,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
   let historyDraft = ''
   let autoQueueSessionId: string | null | undefined
   let autoQueueArmed = false
-  let fileInput: HTMLInputElement | undefined
   const emptyState = () => typeof props.empty === 'function' ? props.empty() : props.empty
   const isDisabled = () => Boolean(props.disabled || emptyState()?.submitting?.())
 
@@ -186,7 +185,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
     textarea?.focus()
     const unsubscribeCommands = subscribePluginCommands(() => setCommandRevision(value => value + 1))
     const sendFromWidget = () => void send()
-    const attachFromWidget = () => void attach()
     const resetEmptyDraft = () => {
       if (!emptyState()) return
       setDraft('')
@@ -195,12 +193,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
       queueMicrotask(() => textarea?.focus())
     }
     window.addEventListener('pylon:solid-input-send', sendFromWidget)
-    window.addEventListener('pylon:solid-input-attach', attachFromWidget)
     window.addEventListener('pylon:new-session', resetEmptyDraft)
     onCleanup(() => {
       unsubscribeCommands()
       window.removeEventListener('pylon:solid-input-send', sendFromWidget)
-      window.removeEventListener('pylon:solid-input-attach', attachFromWidget)
       window.removeEventListener('pylon:new-session', resetEmptyDraft)
     })
   })
@@ -404,30 +400,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
     if (result.status === 'rejected') ui.set('input-error', result.error || '取消失败')
   }
 
-  const attach = async () => {
-    if (isDisabled()) return
-    const id = sessionId()
-    if (!id) {
-      fileInput?.click()
-      return
-    }
-    const ui = workbench.sessionUi.capture(id)
-    try {
-      const selected = await workbench.commands.attach(id)
-      ui.update<readonly WorkbenchAttachment[]>('attachments', [], previous => {
-        const seen = new Set(previous.map(item => item.path))
-        const additions = selected.filter(item => {
-          if (seen.has(item.path)) return false
-          seen.add(item.path)
-          return true
-        })
-        return [...previous, ...additions]
-      })
-    } catch (error) {
-      ui.set('input-error', error instanceof Error ? error.message : String(error))
-    }
-  }
-
   const browseHistory = (direction: 'up' | 'down') => {
     const entries = history()
     if (entries.length === 0) return
@@ -545,20 +517,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
           communicates the affordance, so keyboard-hint chrome would make the
           centered composer look like a second instruction panel. */}
       <Show when={sendError()}>{error => <div class="input-error" role="alert">{error()}</div>}</Show>
-      <Show when={attachments().length > 0}>
-        <div class="attached-files" aria-label="附件">
-          <For each={attachments()}>{item => (
-            <button
-              type="button"
-              class="attached-chip"
-              onClick={() => setAttachments(previous => previous.filter(current => current.id !== item.id))}
-              aria-label={`移除附件 ${item.name || item.path}`}
-            >
-              {item.name || item.path} ×
-            </button>
-          )}</For>
-        </div>
-      </Show>
       <Show when={!emptyState() && suggestionList().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
           <For each={suggestionList()}>{(suggestion, index) => (
@@ -647,22 +605,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
         </div>
       </div>
       <Show when={emptyState()?.after}>{content => <div class="input-empty-after">{content()}</div>}</Show>
-      <input
-        ref={fileInput}
-        type="file"
-        multiple
-        hidden
-        onChange={event => {
-          const files = event.currentTarget.files
-          if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({
-            id: `${file.name}:${file.size}:${file.lastModified}`,
-            name: file.name,
-            path: (file as File & { path?: string }).path || file.name,
-            mediaType: file.type || undefined,
-          }))])
-          event.currentTarget.value = ''
-        }}
-      />
     </div>
   )
 }

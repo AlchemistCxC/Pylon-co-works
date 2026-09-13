@@ -266,7 +266,6 @@ export const THEME_FIELD_DEFS = {
   inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },
   inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: '输入栏', cssVar: '--cc-input-text' },
   inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: '输入栏', cssVar: '--cc-input-placeholder' },
-  inputSendBg: { ...C('cc', '发送按钮背景'), default: 'rgba(0,0,0,0.10)', group: "输入与状态", semanticRole: 'surface.raised' },
   sendButtonColor: { ...C('cc', '发送按钮颜色'), default: '#000000', group: '发送按钮', noCssVar: true },
   sendButtonRadius: { ...S('cc', '发送按钮圆角', ['0', '0.25', '0.33', '0.5']), optionLabels: { '0': '直角', '0.25': '四分之一', '0.33': '三分之一', '0.5': '圆形' }, default: '0.5', group: '发送按钮', noCssVar: true },
   sendButtonBorderColor: { ...S('cc', '发送按钮边框', ['white', 'black']), optionLabels: { white: '纯白', black: '纯黑' }, default: 'white', group: '发送按钮', noCssVar: true },
@@ -315,7 +314,6 @@ export const THEME_FIELD_DEFS = {
   modelVariant: { ...S('cc', '模型控件外观', ['dropdown', 'minimal', 'badge']), optionLabels: { dropdown: '下拉选择', minimal: '极简文字', badge: '徽标' }, default: 'dropdown', group: "控件样式", },
   modeVariant: { ...S('cc', '模式控件外观', ['pill', 'badge', 'minimal']), optionLabels: { pill: '胶囊', badge: '方括号', minimal: '极简文字' }, default: 'pill', group: "控件样式", },
   sendVariant: { ...S('cc', '发送按钮外观', ['icon', 'square', 'minimal']), optionLabels: { icon: '圆形图标', square: '方形按钮', minimal: '极简图标' }, default: 'icon', group: "控件样式", },
-  attachVariant: { ...S('cc', '附件按钮外观', ['icon', 'square', 'minimal']), optionLabels: { icon: '圆形图标', square: '方形按钮', minimal: '极简图标' }, default: 'icon', group: "控件样式", },
   modeAutoColor: { ...C('cc', '自动模式颜色'), default: '#FFC107', group: "控件样式", advanced: true, semanticRole: 'state.warning' },
   modeEditColor: { ...C('cc', '编辑模式颜色'), default: '#A2A9E4', group: "控件样式", advanced: true, semanticRole: 'accent' },
 

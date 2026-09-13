@@ -6,7 +6,7 @@ const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../src/domains/theme/migration.ts', import.meta.url), 'utf8')
 const profile = readFileSync(new URL('../src/profilePersistence.ts', import.meta.url), 'utf8')
 
-for (const id of ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach']) {
+for (const id of ['ekg', 'pct', 'tokens', 'model', 'mode', 'send']) {
   const matches = [...presets.matchAll(new RegExp(`${id}:\\s*\\{`, 'g'))]
   assert.equal(matches.length, 0, `${id} 坐标对象必须已从预设中删除（v3 以 slot layout 为真值）`)
 }

@@ -54,7 +54,6 @@ describe('主题设置展示文案契约', () => {
       modelVariant: ['dropdown', 'minimal', 'badge'],
       modeVariant: ['pill', 'badge', 'minimal'],
       sendVariant: ['icon', 'square', 'minimal'],
-      attachVariant: ['icon', 'square', 'minimal'],
     } as const
 
     for (const [key, options] of Object.entries(expectedOptions)) {
