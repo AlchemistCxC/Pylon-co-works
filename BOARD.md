@@ -1,10 +1,18 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13 19:12] [砂纸·架构师] [已把 #36/#37 核验结论回帖到远端 tracker（含自更正）·并已读到仓库主对 #67/#69/#53 的验收反馈] 按用户口径（"#36/#37 追核验评论"）在两个 issue 各发一条维护方核验评论，**未改报告人正文**：
+- **#36** → https://github.com/AlchemistCxC/Pylon-co-works/issues/36#issuecomment-5652904797（逐条判定表 + 契约真值 `approval` 三方对照 + “`[object Object]` 是独立缺陷” + CLI 为何只能硬编码（`InteractionItem` 无 kind）+ 验收面与反指标）
+- **#37** → https://github.com/AlchemistCxC/Pylon-co-works/issues/37#issuecomment-5652905239（原样复跑逐格一致 + **HEAD 变体断言失败 `0 !== 1`** + 身份规范化必须放后端（派发载荷不含本地 id）+ **词表与手册 §6.2 一致而派发面在发词表外锚点** + `dangerousHooks` 双重不可达）
+
+**自更正（现在）**：上一板条与本轮评审初稿把前端 Hook 词表记为 **25 锚点，实为 24**（`hookTypes.ts` 与仓库内手册 §6.2 逐项一致，均不含 `permission.request`）；评审文档已改（含新增证据行），本板条已就地更正并留痕。
+
+**已读、尚未回板**：仓库主 2026-09-13 三条验收反馈——#67（10:54Z）“去重部分实现，但探测到已入列表的 runtime 仍可重复导入，且无法删除已导入的重复实例”；#69（10:57Z）“部分解决，但进出编辑模式仍有轻微漂移，需彻底重构建立统一模型而不是追加补丁”；#53（10:13Z，Chica 认领域）要求通用可用模型列表探测（可借鉴 codeg）。等用户定下一步：我拟先就 #67 的两个现象定位（静态首疑：`src-tauri/src/agent_detection.rs:362-375` 的 configured provider 取 `agent.provider.unwrap_or_default().to_lowercase()`，**provider 为空的已导入 agent 永远命中不到 alreadyImported**，而“删除”无 embedded→initialize 降级）；#69 按用户“统一模型”口径需先出重构施工书（已有两处静态残余：`.file-tab-line` 未被契约块重置的 `border-left: 2px` ⇒ 只读文本比编辑态右 2px；`[data-changed]::before` 仅只读态的内联标记），**#53 属他人认领域，未经指派我不动**。
+
 [2026-09-13 19:04] [砂纸·架构师] [核验发现·远端 #36 / #37 均属实且 HEAD 未修·评审已落文档库] 用户指派核验 issue 36/37 是否属实。结论：**两份都属实、都仍未修**。评审：`Docs/评审/Pylon-远端issue36与37契约核验评审-20260913.md`（已登记 `Docs/README.md`；165 行，结论与证据分离）。
 
 - **#36 CLI 权限应答词项漂移**：`src/cli/pylonCliService.ts:494-501` 硬编码 `'permission'`，`src/cli/pylonCliDomainPorts.ts:315` 原样透传，后端 `src-tauri/src/protocol_adapter.rs:203` 只接受 `'approval'`（GUI 走请求自身 `kind`，不受影响）⇒ 应答必被拒、请求保持挂起；错经 `pylonCliService.ts:232-234` 的 `String(obj)` 变成 `[object Object]`；既有 CLI 单测 `src/cli/__tests__/pylonCliService.test.ts:280-283` 把错词项锁成了期望值。
-- **#37 Hook 词表 + 远端身份**：HEAD `src/plugin-runtime/hooks/hookTypes.ts:1-26`（25 锚点）仍缺 `permission.request`，而 Rust 已在 `src-tauri/src/dispatcher/mod.rs:636-644` 派发它 ⇒ 插件处理器 0 调用；即使按 PR #34 补齐词表，ACP 远端 id 仍解析不到本地会话（`hookBridgeDispatcher.ts:39-41` 只认 `session.id`/`session.source`，且派发载荷不含本地 id）⇒ 仍 0 调用。**附加发现**：`src/plugin-runtime/packageManifest.ts:138-150` 用同一份词表校验 `dangerousHooks` ⇒ 插件既不能合法声明，也声明了不执行。
+- **#37 Hook 词表 + 远端身份**：HEAD `src/plugin-runtime/hooks/hookTypes.ts:1-26`（**24** 锚点，与仓库内手册 §6.2 词表逐项一致）仍缺 `permission.request`，而 Rust 已在 `src-tauri/src/dispatcher/mod.rs:636-644` 派发它（`src-tauri/src/hook_bridge.rs:36` 自述"与前端 HOOK_NAMES 词表一致"）⇒ 插件处理器 0 调用（**自更正**：本条初稿误记 25 锚点，实为 24；已重数并与手册 §6.2 逐项对齐）；即使按 PR #34 补齐词表，ACP 远端 id 仍解析不到本地会话（`hookBridgeDispatcher.ts:39-41` 只认 `session.id`/`session.source`，且派发载荷不含本地 id）⇒ 仍 0 调用。**附加发现**：`src/plugin-runtime/packageManifest.ts:138-150` 用同一份词表校验 `dangerousHooks` ⇒ 插件既不能合法声明，也声明了不执行。
 - **独立复现**：报告人脚本 `docs/tactical-blue/evidence/reproduce-hooks.mjs` 就在本仓；我在临时 clone 里**原样复跑**（与报告人表格逐格一致、退出码 0），再把两个 ref 换成 HEAD 复跑 → 在"词表补齐后本地 id 应执行"那条断言上失败（`0 !== 1`），确认词表缺口在 HEAD 仍在。PR #34 至今 **OPEN 未合并**（`Chica/p55`）。
 - **给平行会话的提醒**：P55 剩余片（`dangerousHooks` dispatcher 门控）与这两项操作**同一份词表契约**；近期若要动 `src/plugin-runtime/hooks/hookTypes.ts`、`src/infrastructure/hooks/hookBridgeDispatcher.ts`、`src/plugin-runtime/packageManifest.ts`、`src-tauri/src/dispatcher/mod.rs`、`src/cli/pylonCliService.ts`，请先回板认领。
 - **口径边界**：评审**未主张**已发生真实工具越权（与报告人一致）；影响面应表述为"应被插件拦下的权限请求直接落到既有 bypass/auto/挂起流程"与"CLI 无法应答挂起权限"。
