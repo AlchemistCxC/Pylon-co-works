@@ -10,53 +10,18 @@
  *  - `stable`：边界之前的文本（块结构已完成、不再变化）→ 解析结果可缓存/复用，永不重解析。
  *  - `unstable`：边界之后仍在增长的尾部（通常是当前未收尾的最后一个块）→ 每次只重解析这一小段。
  *
- * 不变量：边界只会落在顶层块边界（双换行 / 围栏闭合之后），`unstable` 单独解析结构成立；
+ * 不变量：只提交已确认的顶层块边界；容器内空行不构成边界，`unstable` 单独解析结构成立；
  * 代码围栏未闭合时整段计入 `unstable`（不跨边界劈开围栏），保证代码高亮不因切分而破坏。
  */
 
-/** 找"最后一个已完成顶层块边界"的字节偏移。fence-aware：不跨越未闭合的 ```/~~~ 围栏。 */
+/** Offset of the last boundary proven safe by the shared streaming splitter. */
 export function findLastStableBlockBoundary(text: string): number {
-  const n = text.length
-  if (n === 0) return 0
-  let inFence = false
-  let fenceChar = ''
-  let fenceLength = 0
-  let lastBoundary = 0
-  let pos = 0
-  while (pos < n) {
-    const newline = text.indexOf('\n', pos)
-    const nextPos = newline === -1 ? n : newline + 1
-    const rawLine = text.slice(pos, newline === -1 ? n : newline)
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+  return text.length - splitStreamingMarkdownBlocks(text).unstable.length
+}
 
-    if (inFence) {
-      const close = line.match(/^ {0,3}(`+|~+)[\t ]*$/)
-      if (close && close[1]![0] === fenceChar && close[1]!.length >= fenceLength) {
-        inFence = false
-        fenceChar = ''
-        fenceLength = 0
-      }
-      pos = nextPos
-      continue
-    }
-
-    // CommonMark fenced code allows up to three leading spaces. A backtick
-    // info string may not itself contain a backtick; otherwise this is text.
-    const open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
-    if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-      inFence = true
-      fenceChar = open[1]![0]!
-      fenceLength = open[1]!.length
-      pos = nextPos
-      continue
-    }
-
-    // An empty/whitespace-only line completes the preceding top-level block.
-    // Line-based scanning handles LF and CRLF without slicing through \r.
-    if (/^[\t ]*$/.test(line) && newline !== -1) lastBoundary = nextPos
-    pos = nextPos
-  }
-  return lastBoundary
+/** Conservative container marker: false positives retain context instead of corrupting it. */
+function isContainerLine(line: string): boolean {
+  return /^ {0,3}(?:>|(?:[-+*]|\d{1,9}[.)])(?:[\t ]|$))/.test(line)
 }
 
 /** 把流式文本切成 { stable, unstable }。stable 是已完成块；unstable 是仍增长的尾块。 */
@@ -88,6 +53,10 @@ export function splitStreamingMarkdownBlocks(text: string): { stableBlocks: read
         fenceLength = 0
       }
     } else {
+      // Blank lines do not close lists or quotes. Keep the container and its
+      // suffix together until completion instead of guessing a CommonMark
+      // boundary from indentation (nested fences/lazy continuations need it).
+      if (isContainerLine(line)) break
       const open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
         inFence = true
@@ -95,8 +64,7 @@ export function splitStreamingMarkdownBlocks(text: string): { stableBlocks: read
         fenceLength = open[1]!.length
       } else if (/^[\t ]*$/.test(line) && newline !== -1) {
         const candidate = text.slice(blockStart, nextPosition)
-        // Consecutive blank lines belong to the next meaningful block rather
-        // than creating empty renderer rows.
+        // Keep blank delimiters in the source prefix without empty rows.
         if (candidate.trim().length > 0) {
           stableBlocks.push(candidate)
           blockStart = nextPosition
@@ -141,6 +109,7 @@ export function splitOpenCodeFenceTail(text: string): OpenCodeFenceTail | null {
         open = null
       }
     } else {
+      if (isContainerLine(line)) return null
       const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
       if (opening && (opening[1]![0] === '~' || !opening[2]!.includes('`'))) {
         const language = opening[2]!.trim().split(/\s+/, 1)[0] || undefined
