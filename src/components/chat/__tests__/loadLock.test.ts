@@ -8,6 +8,8 @@ describe('stale-safe load lock', () => {
     state = first.state
     const second = beginLoadLock(state, 'A')
     state = second.state
+    // generation 单调递增：同 source 重复 begin 产生新 attempt
+    expect(second.generation).toBe(first.generation + 1)
     expect(finishLoadLock(state, 'A', first.generation).finished).toBeUndefined()
     expect(isSendBlockedDuringLoad(state, 'A')).toBe(true)
     const finished = finishLoadLock(state, 'A', second.generation)

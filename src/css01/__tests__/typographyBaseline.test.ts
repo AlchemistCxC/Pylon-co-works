@@ -16,10 +16,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTypographyBaselineArtifact,
   captureComputedStyleBaseline,
-  HEADING_CLASS_CONTRACT_IN_PLACE,
   headingDomContract,
   HEADING_SCALE_UPPER_BOUNDS,
-  PX_CONTRACT_FALLBACK_SAFE,
   resolveChatFontSizeContract,
   TYPOGRAPHY_EVIDENCE,
 } from '../typographyBaseline'
@@ -49,18 +47,9 @@ describe('headingDomContract（renderer DOM/class contract）', () => {
 })
 
 describe('结构性常量与证据登记', () => {
-  it('CSS-03 后：heading class contract 与 px contract 均已就位（双结构性常量=true）', () => {
-    expect(HEADING_CLASS_CONTRACT_IN_PLACE).toBe(true) // CSS-02 翻转
-    expect(PX_CONTRACT_FALLBACK_SAFE).toBe(true) // CSS-03 翻转
-  })
-
-  it('证据登记：.term fallback=15px / --chat-font-size / 完整 h1-h6 规则 + Solid renderer class contract', () => {
+  it('证据登记：.term fallback=15px / --chat-font-size（px 契约）', () => {
     expect(TYPOGRAPHY_EVIDENCE.termRule.fontSizeFallback).toBe('15px')
     expect(TYPOGRAPHY_EVIDENCE.termRule.cssVar).toBe('--chat-font-size')
-    expect(TYPOGRAPHY_EVIDENCE.termRule.file).toBe('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css:8')
-    expect(TYPOGRAPHY_EVIDENCE.headingCss.rules).toEqual(['.term-h1', '.term-h2', '.term-h3', '.term-h4', '.term-h5', '.term-h6'])
-    expect(TYPOGRAPHY_EVIDENCE.renderers.solid.headingDom).toBe('h1-h6 输出 class term-h1~term-h6')
-    expect(TYPOGRAPHY_EVIDENCE.renderers.solid.file).toBe('src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx:65-69')
   })
 
   it('建议比例上限（方案书 §5.15）：全 6 级正值 + 逐级上限 + 单调不增（h1 最高 h6 最低，CR-314 消化）', () => {

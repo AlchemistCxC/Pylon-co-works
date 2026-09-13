@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeContentBlock } from '../../normalizers/normalizerSupport.ts'
-import { parseContentPart } from '../contentPartSchema.ts'
+import { createUnknownContentPart, parseContentPart } from '../contentPartSchema.ts'
 
 describe('C15 first-class extension content normalization', () => {
   it('normalizes memory and skill into typed safe metadata instead of unknown', () => {
@@ -84,5 +84,32 @@ describe('C15 first-class extension content normalization', () => {
 
     expect(oversized.part).toMatchObject({ kind: 'unknown', originalType: 'artifact', truncated: true })
     expect(oversized.diagnostic).toMatchObject({ code: 'content.artifact.invalid' })
+  })
+})
+
+// 正向用例并入自 memorySkillArtifactParts.test.ts（P91 A6：4 个薄用例合并）
+describe('C15 ContentPart 契约正向解析（DIC-C15-01）', () => {
+  it('validates memory / mcp-resource / artifact parts directly at the schema boundary', () => {
+    expect(parseContentPart({
+      kind: 'memory', memoryId: 'mem-1', source: 'hermes', scope: 'session',
+      title: 'User prefers dark mode', summary: 'stored preference',
+      status: 'recalled', version: 3,
+    }).ok).toBe(true)
+
+    expect(parseContentPart({
+      kind: 'mcp-resource', server: 'fs-mcp', resourceUri: 'file:///docs/spec.md',
+      mimeType: 'text/markdown', connectionState: 'connected',
+    }).ok).toBe(true)
+
+    expect(parseContentPart({
+      kind: 'artifact', artifactId: 'art-1', title: 'report.pdf', uri: 'https://example.com/report.pdf',
+      version: 2, hasBlob: true,
+    }).ok).toBe(true)
+  })
+
+  it('falls back to unknown for unrecognized attachment subtypes while keeping the raw visible', () => {
+    const unknown = createUnknownContentPart('mystery-attachment', { blob: 'x' })
+    expect(unknown.kind).toBe('unknown')
+    expect(unknown.summary).toContain('mystery-attachment')
   })
 })

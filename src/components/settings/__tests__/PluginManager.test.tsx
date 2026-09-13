@@ -7,6 +7,8 @@ import type { PackageInstallationService } from '../../../plugin-runtime/package
 import type { KernelBootstrap } from '../../../kernel/kernelBootstrap.ts'
 import {
   bootstrapBuiltins,
+  getBuiltinPluginCriticality,
+  getBuiltinPluginIds,
   getPluginRuntime,
 } from '../../../plugin-runtime/pluginCompositionRoot.ts'
 
@@ -122,10 +124,20 @@ describe('PluginManager v2-only', () => {
 
     render(<PluginManager service={service as unknown as PackageInstallationService} />)
 
+    // P53 D2（施工书 §6 例外 1）：builtin.pylon-plugin-manager 同为 product-required
+    // P77：builtin.pylon-gateway 亦为 product-required（gateway 由 core 摘除后改由包贡献）
+    // 断言遍历 criticality 注册表派生的 product-required 集合，不写死包数
+    const productRequiredIds = getBuiltinPluginIds()
+      .filter(id => getBuiltinPluginCriticality(id) === 'product-required')
+    expect(productRequiredIds).toContain('builtin.pylon-shell')
+    expect(productRequiredIds.length).toBeGreaterThan(1)
+    expect(screen.getAllByText('产品运行必需')).toHaveLength(productRequiredIds.length)
+    // 处于激活态（按钮为「停用」）的 product-required 内置一律禁用普通停用
+    for (const id of productRequiredIds) {
+      const disableButton = screen.queryByRole('button', { name: `停用 ${id}` })
+      if (disableButton) expect(disableButton).toBeDisabled()
+    }
     expect(screen.getByRole('button', { name: '停用 builtin.pylon-shell' })).toBeDisabled()
-    // P53 D2（施工书 §6 例外 1）：第 6 包 builtin.pylon-plugin-manager 同为 product-required
-    // P77：第 7 包 builtin.pylon-gateway 亦为 product-required（gateway 由 core 摘除后改由包贡献）
-    expect(screen.getAllByText('产品运行必需')).toHaveLength(7)
   })
 
   it('shows degraded bootstrap failures and delegates explicit retry to the Kernel supervisor', async () => {

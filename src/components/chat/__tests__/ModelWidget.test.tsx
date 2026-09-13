@@ -1,10 +1,29 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import ModelWidget from '../ModelWidget.tsx'
 import { useRuntimeStore } from '../../../runtimeStore.ts'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => ({})) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined（对齐 vi.fn(async () => ({})) 之外的宽松路径） */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: TolerantFakeInvoke
 
 // jsdom 未实现 PointerEvent：Radix DropdownMenu 触发器依赖 pointerdown 打开。
 if (typeof window !== 'undefined' && typeof window.PointerEvent === 'undefined') {
@@ -22,10 +41,9 @@ if (typeof window !== 'undefined' && typeof window.PointerEvent === 'undefined')
 
 const context = { agentId: 'hermes', source: 'local:session-1' }
 
-const invokeMock = vi.mocked((await import('@tauri-apps/api/core')).invoke)
-
 beforeEach(() => {
-  invokeMock.mockClear()
+  fakeInvoke = new TolerantFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   useRuntimeStore.getState().resetSessionRuntime()
 })
 
@@ -40,7 +58,7 @@ describe('ModelWidget 模型宣告面（P56/D3）', () => {
     expect(badge).toHaveTextContent('deepseek-v4-pro')
     expect(badge?.getAttribute('title')).toContain('未宣告可选模型')
     expect(screen.queryByRole('menuitem')).toBeNull()
-    expect(invokeMock).not.toHaveBeenCalled()
+    expect(fakeInvoke.calls).toHaveLength(0)
   })
 
   it('shows labels in the menu and sends machine ids on the wire', async () => {
@@ -63,12 +81,15 @@ describe('ModelWidget 模型宣告面（P56/D3）', () => {
     // 菜单项不可见处夹带 machine id：发送值必须是 id（发送不变量）。
     fireEvent.click(items[1])
     await vi.waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('set_config_option', expect.objectContaining({
-        agentId: 'hermes',
-        source: 'local:session-1',
-        key: 'model',
-        value: 'nous:hermes-3',
-      }))
+      expect(fakeInvoke.calls).toContainEqual({
+        cmd: 'set_config_option',
+        args: expect.objectContaining({
+          agentId: 'hermes',
+          source: 'local:session-1',
+          key: 'model',
+          value: 'nous:hermes-3',
+        }),
+      })
     })
   })
 
@@ -77,6 +98,6 @@ describe('ModelWidget 模型宣告面（P56/D3）', () => {
     const badge = container.querySelector('.cc-model-badge')
     expect(badge).not.toBeNull()
     expect(badge?.getAttribute('title')).toContain('未宣告可选模型')
-    expect(invokeMock).not.toHaveBeenCalled()
+    expect(fakeInvoke.calls).toHaveLength(0)
   })
 })

@@ -7,12 +7,29 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, waitFor, cleanup, fireEvent, screen } from '@testing-library/react'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useIdentityStore } from '../../../identityStore'
 import SessionSettings from '../../SessionSettings'
 import type { Session } from '../../../identityStore'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined——表单同步断言不关心后台 invoke */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: TolerantFakeInvoke
 
 function makeSession(id: string, name: string, sessionPrompt: string): Session {
   return {
@@ -26,7 +43,8 @@ function nameInput(): HTMLInputElement {
 }
 
 beforeEach(() => {
-  invokeMock.mockReset()
+  fakeInvoke = new TolerantFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   useIdentityStore.setState({ sessions: [], sessionsHydrated: true })
   localStorage.clear()
 })

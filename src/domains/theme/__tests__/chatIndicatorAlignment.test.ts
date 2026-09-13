@@ -10,13 +10,57 @@ const chatCss = (() => {
   return readFileSync(pathname, 'utf8')
 })()
 
+/** 取完整规则块（大括号配平，支持 :is(...) 选择器与嵌套块）；起始锚点可为字符串或正则 */
+function blockContaining(cssText: string, startMarker: string | RegExp): string {
+  const index = typeof startMarker === 'string' ? cssText.indexOf(startMarker) : cssText.search(startMarker)
+  if (index < 0) throw new Error(`缺少 ${startMarker}`)
+  const open = cssText.indexOf('{', index)
+  if (open < 0) throw new Error(`区块无开括号：${startMarker}`)
+  let depth = 0
+  for (let i = open; i < cssText.length; i++) {
+    if (cssText[i] === '{') depth++
+    else if (cssText[i] === '}') {
+      depth--
+      if (depth === 0) return cssText.slice(index, i + 1)
+    }
+  }
+  throw new Error(`区块未闭合：${startMarker}`)
+}
+
+/** 归一化：去除全部空白后比较声明（书写格式与属性顺序不耦合） */
+function compact(text: string): string {
+  return text.replace(/\s+/g, '')
+}
+
 describe('chat indicator alignment contract', () => {
-  it('keeps terminal-like assistant and tool markers in the same fixed left column', () => {
-    expect(chatCss).toContain('.app[data-interface-mode="terminal-like"] :is(')
+  it('keeps terminal-like assistant and tool markers in the same fixed left column（块内属性级断言，不耦合属性顺序）', () => {
+    // 选择器存在性（文件级契约）
     expect(chatCss).toContain('.term-assistant.has-dot > .term-assistant-dot')
     expect(chatCss).toContain('.term-tool-head > .term-tool-indicator')
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--msg-font,var\(--chat-font,var\(--mono\)\)\)\s*;[^}]*font-size\s*:\s*var\(--msg-font-size,var\(--chat-font-size,var\(--font-size-lg\)\)\)\s*;[^}]*line-height\s*:\s*var\(--msg-line-height,var\(--chat-line-height,1\.35\)\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;[^}]*font-family\s*:\s*var\(--msg-font, var\(--chat-font, var\(--mono\)\)\)\s*;[^}]*font-size\s*:\s*var\(--msg-font-size, var\(--chat-font-size, var\(--font-size-lg\)\)\)\s*;[^}]*line-height\s*:\s*var\(--msg-line-height, var\(--chat-line-height, 1\.35\)\)\s*;/s)
+    // 助手 marker 区块：消息轨字体/字号 + 固定左列（属性级断言，与书写顺序无关）
+    const markerBlock = compact(blockContaining(chatCss, /\.app\[data-interface-mode="terminal-like"\]\s*:is\(\s*\.term-assistant\.has-dot/))
+    for (const declaration of [
+      'font-family: var(--msg-font, var(--chat-font, var(--mono)))',
+      'font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)))',
+      'line-height: var(--msg-line-height, var(--chat-line-height, 1.35))',
+      'width: var(--dot-col-width, 1.6em)',
+      'flex: 0 0 var(--dot-col-width, 1.6em)',
+      'justify-content: flex-start',
+      'text-align: left',
+    ]) {
+      expect(markerBlock).toContain(compact(declaration))
+    }
+
+    const toolIndicatorBlock = compact(blockContaining(chatCss, '.app[data-interface-mode="terminal-like"] .term-tool-head > .term-tool-indicator'))
+    for (const declaration of [
+      'justify-content: flex-start',
+      'text-align: left',
+      'font-family: var(--msg-font, var(--chat-font, var(--mono)))',
+      'font-size: var(--msg-font-size, var(--chat-font-size, var(--font-size-lg)))',
+      'line-height: var(--msg-line-height, var(--chat-line-height, 1.35))',
+    ]) {
+      expect(toolIndicatorBlock).toContain(compact(declaration))
+    }
     expect(chatCss).not.toMatch(/\.app\[data-interface-mode="terminal-like"\][^{}]*\{[^}]*scale\s*:/s)
   })
 
@@ -26,8 +70,13 @@ describe('chat indicator alignment contract', () => {
     expect(chatCss).toMatch(/\.term-assistant\.has-dot > \.term-assistant-body > :first-child > :first-child > :first-child\s*\{[^}]*margin-top\s*:\s*0\s*;/s)
   })
 
-  it('does not vertically offset the tool indicator from the assistant marker', () => {
-    expect(chatCss).not.toMatch(/\.term-tool-indicator\s*\{[^}]*margin-top\s*:\s*\.16em\s*;/s)
+  it('does not vertically offset the tool indicator from the assistant marker（块内属性级断言，不钉具体偏移值）', () => {
+    // 所有涉及 .term-tool-indicator 的规则块都不得设置 margin-top（任何值都不行）
+    for (const match of chatCss.matchAll(/([^{}]+)\{[^{}]*\}/g)) {
+      if ((match[1] ?? '').includes('.term-tool-indicator')) {
+        expect(match[0]).not.toContain('margin-top')
+      }
+    }
   })
 
   it('pins assistant and tool markers to the same chat-rail typography in every interface mode', () => {

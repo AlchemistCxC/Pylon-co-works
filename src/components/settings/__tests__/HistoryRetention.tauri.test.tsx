@@ -8,29 +8,35 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import HistoryRetention from '../HistoryRetention'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
 }))
 vi.mock('../../../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+
+let fakeInvoke: FakeInvoke
 
 describe('HistoryRetention Tauri 模式（A1-c/B5 重接后端）', () => {
   beforeEach(() => {
     localStorage.clear()
-    invokeMock.mockReset()
-    invokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === 'retention_policy_get') return null
-      if (cmd === 'retention_policy_set') return 1
-      throw new Error(`unexpected command ${cmd}`)
+    fakeInvoke = new FakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
+    // 未注册命令按 FakeInvoke 默认行为拒绝（对齐原 unexpected command 抛错）
+    fakeInvoke.registerMany({
+      retention_policy_get: () => null,
+      retention_policy_set: () => 1,
     })
   })
 
   it('挂载后读后端权威值（无行 → 永久保存），渲染策略表单', async () => {
     render(<HistoryRetention />)
     expect(await screen.findByLabelText('保留策略')).toBeInTheDocument()
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('retention_policy_get'))
+    await waitFor(() => expect(fakeInvoke.calls.map(call => call.cmd)).toContain('retention_policy_get'))
     expect(screen.getByText(/永久保存/)).toBeInTheDocument()
     expect(screen.queryByText(/保留策略待 canonical 数据层就绪后开放/)).toBeNull()
     expect(screen.queryByRole('button', { name: '立即清理' })).toBeNull()
@@ -39,15 +45,15 @@ describe('HistoryRetention Tauri 模式（A1-c/B5 重接后端）', () => {
   it('切换到按时间保留 → retention_policy_set 首写 expectedRevision=0，保存后出现清理入口', async () => {
     render(<HistoryRetention />)
     const select = await screen.findByRole('combobox', { name: '保留策略' })
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('retention_policy_get'))
+    await waitFor(() => expect(fakeInvoke.calls.map(call => call.cmd)).toContain('retention_policy_get'))
     fireEvent.click(select)
     fireEvent.mouseDown(screen.getByRole('option', { name: '按时间保留' }))
     await waitFor(() => {
-      const calls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'retention_policy_set')
+      const calls = fakeInvoke.calls.filter(call => call.cmd === 'retention_policy_set')
       expect(calls).toHaveLength(1)
     })
-    const [, args] = invokeMock.mock.calls.find(([cmd]) => cmd === 'retention_policy_set')!
-    expect(args).toEqual({
+    const setCall = fakeInvoke.calls.find(call => call.cmd === 'retention_policy_set')!
+    expect(setCall.args).toEqual({
       json: JSON.stringify({ mode: 'by_time', days: 30 }),
       expectedRevision: 0,
     })
