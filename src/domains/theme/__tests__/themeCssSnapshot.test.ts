@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { resolveFontToken, selectThemeCssSnapshot, WORKSPACE_SIDEBAR_COLLAPSED_WIDTH } from '../themeCssSnapshot'
+import { THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
 
 const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
 
@@ -88,5 +89,25 @@ describe('I09-A-FE-01 统一折叠宽度 token 契约（D-08：42px）', () => {
     const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: false })
     expect(vars['--titlebar-sidebar-width']).toBe('42px')
     expect(vars['--workspace-sidebar-track-width']).toBe('42px')
+  })
+})
+
+// 下沉自 scripts/test-message-style.mts（P91 A2）：消息样式变量契约。
+describe('msg 变量派生契约', () => {
+  it('--msg-font/--msg-text 由快照显式派生', () => {
+    const vars = selectThemeCssSnapshot(makeState({ msgFont: 'code', msgTextColor: '#ff0000' }), LAYOUT)
+    expect(vars['--msg-font']).toBe(resolveFontToken('code'))
+    expect(vars['--msg-text']).toBe('#ff0000')
+  })
+
+  it('--msg-text 缺省回落 chat 文本色链', () => {
+    const vars = selectThemeCssSnapshot(makeState(), LAYOUT)
+    expect(vars['--msg-text']).toBe('var(--chat-text-color,var(--text))')
+  })
+
+  it('--msg-line-height 由 defs 声明驱动循环注入（chat zone number 字段）', () => {
+    expect(THEME_FIELD_DEFS.msgLineHeight).toBeDefined()
+    expect(THEME_FIELD_DEFS.msgLineHeight.zone).toBe('chat')
+    expect(THEME_FIELD_DEFS.msgLineHeight.type).toBe('number')
   })
 })

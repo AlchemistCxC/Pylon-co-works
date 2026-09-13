@@ -3,7 +3,7 @@
 // 原脚本读 App.tsx / skinRuntimeServices.ts 的源码正则段（useSkinSurface / THEME_SETTING_KEYS
 // 订阅扫描）与 css-var 审计重复，按施工书处置不迁移；其余 defs 数据断言逐条平移。
 import { describe, expect, it } from 'vitest'
-import { THEME_FIELD_DEFS, THEME_DEFAULTS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONE_FIELDS } from '../themeFieldDefs.ts'
+import { resolveBasicThemeFields, THEME_FIELD_DEFS, THEME_DEFAULTS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONE_FIELDS } from '../themeFieldDefs.ts'
 
 const EDITOR_FIELDS = [
   'editorFontSize',
@@ -64,5 +64,23 @@ describe('editor theme fields（F3-D 8 字段，原 test-editor-theme-fields.mts
   it('字段数自律：8 封顶（F3-D）', () => {
     const editorDefs = Object.entries(THEME_FIELD_DEFS).filter(([, def]) => (def as { group?: string }).group === '文件编辑器')
     expect(editorDefs.length, '编辑器字段必须 8 个封顶').toBe(8)
+  })
+})
+
+// 迁移自 scripts/test-settings-tiers.mts（P91 A1）。
+// 按点名清单 A.14 处置只迁 defs 清单断言（I13-W2：basic 清单来自 defs 单一真值，
+// 组件不硬编码）；原脚本对 Settings.tsx / settingsDomains.ts / WorkspaceTitlebar.tsx /
+// App.tsx / themeFieldRenderer.tsx 的源码正则接线段不迁——已被行为测试锁（处置行
+// 点名「接线已全被锁」）。tier/quick 退役断言随源码文本断言一并删除。
+describe('basic 字段清单（原 test-settings-tiers.mts，I13-W2）', () => {
+  it('basic 清单 ≥12 且含六个代表性字段（defs 单一真值）', () => {
+    const basic = resolveBasicThemeFields()
+    expect(basic.length >= 12, `basic 字段应 ≥12（实际 ${basic.length}）`).toBe(true)
+    expect(basic.includes('accent'), 'accent 应在 basic').toBe(true)
+    expect(basic.includes('globalFontSize')).toBe(true)
+    expect(basic.includes('uiScheme')).toBe(true)
+    expect(basic.includes('chatTextColor')).toBe(true)
+    expect(basic.includes('inputFontSize')).toBe(true)
+    expect(basic.includes('spinnerColor')).toBe(true)
   })
 })
