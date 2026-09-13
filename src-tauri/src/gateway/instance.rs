@@ -293,7 +293,17 @@ pub(crate) struct GatewayInstanceService {
     /// I12-W5：凭据解析器（platform, instance_id → 凭据明文）。命令/启动接线——
     /// start_impl 在 factory.create 前解析 secret 填入 state；None = 未配置。
     credential_resolver: Arc<StdRwLock<Option<CredentialResolver>>>,
+    /// P78：适配器注册表挂钩——start 成功 → (platform, adapter, true) 注册进
+    /// GatewayCore（出站 deliver_all 按 source 前缀查注册表）；stop/finalize 清
+    /// runtime → (platform, adapter, false) 注销（ptr_eq 所有权判定，只摘自己）。
+    /// 未接线 = 实例适配器不进 GatewayCore（入站仍通，出站被丢）。
+    adapter_registry: Arc<StdRwLock<Option<AdapterRegistryHook>>>,
 }
+
+/// 适配器注册表挂钩：register=true 注册（可覆盖 legacy env 注册），false 注销。
+/// adapter 一律传运行句柄里的 Arc——注销侧据此做 ptr_eq 所有权判定。
+pub(crate) type AdapterRegistryHook =
+    Arc<dyn Fn(&str, &Arc<dyn PlatformAdapter>, bool) + Send + Sync>;
 
 /// 凭据解析器：给定 (platform, instance_id) 返回凭据明文（None = 未配置）。
 pub(crate) type CredentialResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
@@ -312,6 +322,7 @@ impl GatewayInstanceService {
             lifecycle_lock: Arc::new(AsyncMutex::new(())),
             route_guard: Arc::new(StdRwLock::new(None)),
             credential_resolver: Arc::new(StdRwLock::new(None)),
+            adapter_registry: Arc::new(StdRwLock::new(None)),
         }
     }
 
@@ -331,6 +342,26 @@ impl GatewayInstanceService {
     pub(crate) fn set_credential_resolver(&self, resolver: CredentialResolver) {
         if let Ok(mut slot) = self.credential_resolver.write() {
             *slot = Some(resolver);
+        }
+    }
+
+    /// P78：接线适配器注册表挂钩（lib.rs setup 注入，桥接 GatewayCore 注册表）。
+    pub(crate) fn set_adapter_registry(&self, hook: AdapterRegistryHook) {
+        if let Ok(mut slot) = self.adapter_registry.write() {
+            *slot = Some(hook);
+        }
+    }
+
+    fn notify_adapter_registry(
+        &self,
+        platform: &str,
+        adapter: &Arc<dyn PlatformAdapter>,
+        register: bool,
+    ) {
+        if let Ok(slot) = self.adapter_registry.read() {
+            if let Some(hook) = slot.as_ref() {
+                hook(platform, adapter, register);
+            }
         }
     }
 
@@ -661,12 +692,17 @@ impl GatewayInstanceService {
             {
                 managed.state.last_error = None;
                 managed.runtime = Some(InstanceRuntime {
-                    adapter,
+                    adapter: adapter.clone(),
                     cancel,
                     join,
                 });
             }
-            Ok(managed.dto())
+            let dto = managed.dto();
+            // P78：登记成功即注册进 GatewayCore 适配器注册表（出站 deliver_all
+            // 按 source 前缀路由依赖注册表；hook 只碰 core 锁，registry 写锁内
+            // 调用无锁序风险）。restart 代际替换时 replace 语义覆盖旧注册。
+            self.notify_adapter_registry(&state.platform, &adapter, true);
+            Ok(dto)
         }
     }
 
@@ -714,6 +750,10 @@ impl GatewayInstanceService {
             | InstanceLifecycle::Error => {
                 if let Some(runtime) = managed.runtime.take() {
                     runtime.cancel.cancel();
+                    // P78：stop 在此摘 GatewayCore 注册（finalize 时 runtime 已被
+                    // 本处取走；ptr_eq 判定只摘自己，不影响并存的其他注册）。
+                    let platform = managed.state.platform.clone();
+                    self.notify_adapter_registry(&platform, &runtime.adapter, false);
                 }
                 // Stopping 是瞬态：锁内即收敛为 Stopped（wire 折叠 Stopping→Stopped）。
                 managed.set_lifecycle(InstanceLifecycle::Stopping);
@@ -732,26 +772,29 @@ impl GatewayInstanceService {
         if managed.generation != generation {
             return;
         }
+        // P78：runtime 清理时摘掉 GatewayCore 注册（ptr_eq 判定只摘自己那份，
+        // 代际替换后旧 task finalize 不会拔掉新 adapter 的注册）。
+        let retiring = managed.runtime.take();
+        let platform = managed.state.platform.clone();
         match managed.lifecycle {
             // 主动 stop/remove 后残响：状态已收敛，仅清 runtime
-            InstanceLifecycle::Stopped | InstanceLifecycle::Stopping => {
-                managed.runtime = None;
-            }
+            InstanceLifecycle::Stopped | InstanceLifecycle::Stopping => {}
             InstanceLifecycle::Starting | InstanceLifecycle::Connected => match outcome {
                 Ok(()) => {
-                    managed.runtime = None;
                     managed.set_lifecycle(InstanceLifecycle::Stopped);
                 }
                 Err(message) => {
                     managed.state.last_error = Some(message);
-                    managed.runtime = None;
                     managed.set_lifecycle(InstanceLifecycle::Error);
                 }
             },
             InstanceLifecycle::Error => {
                 // 已 Error（mark_failed 等）；task 退出仅清 runtime
-                managed.runtime = None;
             }
+        }
+        drop(registry);
+        if let Some(runtime) = retiring {
+            self.notify_adapter_registry(&platform, &runtime.adapter, false);
         }
     }
 
@@ -1476,6 +1519,61 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(service.status_of("a").await, Some(InstanceStatus::Stopped));
+    }
+
+    #[tokio::test]
+    async fn adapter_registry_hook_fires_on_start_and_finalize() {
+        // P78：start 成功 → hook(true)（GatewayCore 注册，出站路由依赖）；
+        // stop → finalize 清 runtime → hook(false) 注销。hook 未接线时实例
+        // 入站仍通但出站被丢——本测试锁定接线后的事件序列。
+        let service = GatewayInstanceService::new();
+        let events: Arc<StdRwLock<Vec<(String, bool)>>> = Arc::new(StdRwLock::new(Vec::new()));
+        let events_for_hook = events.clone();
+        service.set_adapter_registry(Arc::new(move |key, _adapter, register| {
+            events_for_hook
+                .write()
+                .unwrap()
+                .push((key.to_string(), register));
+        }));
+        let calls = Arc::new(AtomicUsize::new(0));
+        service.register_factory(factory_with(calls, |_state, _cancel, notifier| {
+            let notifier = notifier.clone();
+            let run: BoxRunFuture = Box::pin(async move {
+                notifier.connected().await;
+                std::future::pending::<()>().await;
+                Ok(())
+            });
+            Ok((Arc::new(StubAdapter { platform: "qq" }), run))
+        }));
+        service
+            .create(CreateInstanceInput {
+                id: "a".into(),
+                platform: "qq".into(),
+                label: "a".into(),
+                enabled: true,
+                auto_start: false,
+            })
+            .await
+            .unwrap();
+        service.start("a").await.unwrap();
+        wait_for_status(&service, "a", InstanceStatus::Connected).await;
+        assert_eq!(
+            events.read().unwrap().as_slice(),
+            &[("qq".to_string(), true)],
+            "start 必须触发注册"
+        );
+        service.stop("a").await.unwrap();
+        for _ in 0..200 {
+            if events.read().unwrap().len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            events.read().unwrap().as_slice(),
+            &[("qq".to_string(), true), ("qq".to_string(), false)],
+            "stop 经 finalize 必须触发注销"
+        );
     }
 
     #[tokio::test]

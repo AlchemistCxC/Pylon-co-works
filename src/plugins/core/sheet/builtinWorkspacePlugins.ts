@@ -14,7 +14,6 @@ const OverviewSheetView = lazy(() => import('../../../sheets/OverviewSheetView.t
 const SearchSheetView = lazy(() => import('../../../sheets/search/SearchSheetView.tsx'))
 const HistorySheetView = lazy(() => import('../../../sheets/history/HistorySheetView.tsx'))
 const BrowserSheetView = lazy(() => import('../../../sheets/browser/BrowserSheetView.tsx'))
-const GatewaySheetView = lazy(() => import('../../../sheets/gateway/GatewaySheetView.tsx'))
 const Sidebar = lazy(() => import('../../../components/Sidebar.tsx'))
 
 const loadingFallback = createElement(
@@ -70,7 +69,6 @@ export const BUILTIN_WORKSPACE_TYPES: readonly WorkspaceTypeDefinition<unknown>[
   defineWorkspace({ kind: 'search', label: 'Search', singleton: true, getSingletonKey: singleton('search'), sidebarMode: 'sheet', component: lazyWorkspace(SearchSheetView), launch: { kind: 'search', title: 'Search', description: '跨会话快照搜索', launchable: true, icon: 'search', category: 'work', categoryLabel: '工作台', categoryOrder: 10, order: 30, keywords: ['find', 'snapshot'] } }),
   defineWorkspace({ kind: 'history', label: 'History', singleton: true, getSingletonKey: singleton('history'), sidebarMode: 'sheet', component: lazyWorkspace(HistorySheetView), launch: { kind: 'history', title: 'History', description: '存档会话列表与导出', launchable: true, icon: 'history', category: 'observe', categoryLabel: '观察与诊断', categoryOrder: 20, order: 20, keywords: ['archive', 'export'] } }),
   defineWorkspace({ kind: 'browser', label: 'Browser', singleton: true, getSingletonKey: singleton('browser'), sidebarMode: 'sheet', component: lazyWorkspace(BrowserSheetView), launch: { kind: 'browser', title: 'Browser', description: '多标签网页工作区', launchable: true, icon: 'globe', category: 'work', categoryLabel: '工作台', categoryOrder: 10, order: 20, keywords: ['web', 'url'] } }),
-  defineWorkspace({ kind: 'gateway', label: 'Gateway', singleton: true, getSingletonKey: singleton('gateway'), sidebarMode: 'sheet', component: lazyWorkspace(GatewaySheetView), launch: { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', launchable: true, icon: 'waypoints', category: 'system', categoryLabel: '系统与管理', categoryOrder: 30, order: 20, keywords: ['route', 'adapter'] } }),
 ] as const
 
 export function createBuiltinWorkspacePluginDefinitions(): readonly BuiltinPluginDefinition[] {

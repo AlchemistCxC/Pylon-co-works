@@ -110,15 +110,16 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         &format!("Agent {log_action} started"),
         serde_json::Map::new(),
     );
+    let next_generation = runtime
+        .client_generation
+        .load(std::sync::atomic::Ordering::Acquire)
+        + 1;
     let new_acp = match AcpClient::connect_with_generation(
         agent,
         Some(handles.runtime_logs.clone()),
         // OBS-02：新连接将激活为 current+1 代际（replace_agent_client 的
         // fetch_add(1)+1 一致），wire trace 据此记录 clientGeneration。
-        runtime
-            .client_generation
-            .load(std::sync::atomic::Ordering::Acquire)
-            + 1,
+        next_generation,
     )
     .await
     {
@@ -143,6 +144,48 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
             return Err(error.into());
         }
     };
+    // B3：登记实例（InstanceKey = agentId/instanceId/generation）——全局并发
+    // 预算 + 诊断表；超限即回收刚建立的连接并显形 `instance_limit`，不排队。
+    // 调用方缺 agent id 时以 AgentDef.name 兜底——注册表身份要求稳定唯一，
+    // 不要求等于 agents.yaml 键（诊断维度）。
+    let instance_identity = agent_id.clone().unwrap_or_else(|| agent.name.clone());
+    let instance_key = crate::acp::instance_registry::InstanceKey {
+        agent_id: instance_identity.clone(),
+        instance_id: instance_identity,
+        generation: next_generation,
+    };
+    let instance_guard = match crate::acp::instance_registry::instance_registry()
+        .register(instance_key, new_acp.instance_pid())
+    {
+        Ok(guard) => guard,
+        Err(error) => {
+            // 预算拒绝：新连接必须当场回收（RAII kill），状态回落。
+            let message = error.to_string();
+            drop(new_acp);
+            if announce {
+                handles.emit_agent_status(
+                    runtime,
+                    window,
+                    status_after_connection_failure(previous_status),
+                    Some(message.clone()),
+                );
+            }
+            handles.log_runtime_summary(
+                "error",
+                "agent",
+                agent_id,
+                "Agent instance rejected by global budget",
+                serde_json::Map::from_iter([(
+                    "code".to_string(),
+                    serde_json::Value::String("instance_limit".to_string()),
+                )]),
+            );
+            return Err(message);
+        }
+    };
+    if let Ok(mut slot) = runtime.instance_guard.lock() {
+        *slot = Some(instance_guard);
+    }
     let host_env = agent
         .env
         .iter()
@@ -560,6 +603,10 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
         let mut acp = old.acp.lock().await;
         let _ = acp.kill();
         drop(acp);
+        // B3：实例停止即归还全局预算配额（runtime 仍留在表中，槽位显式清空）。
+        if let Ok(mut slot) = old.instance_guard.lock() {
+            *slot = None;
+        }
         if let Ok(mut state) = old.agent_runtime.lock() {
             state.status = AgentLifecycleStatus::Disconnected;
         }

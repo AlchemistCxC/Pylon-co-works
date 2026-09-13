@@ -124,7 +124,8 @@ describe('PluginManager v2-only', () => {
 
     expect(screen.getByRole('button', { name: '停用 builtin.pylon-shell' })).toBeDisabled()
     // P53 D2（施工书 §6 例外 1）：第 6 包 builtin.pylon-plugin-manager 同为 product-required
-    expect(screen.getAllByText('产品运行必需')).toHaveLength(6)
+    // P77：第 7 包 builtin.pylon-gateway 亦为 product-required（gateway 由 core 摘除后改由包贡献）
+    expect(screen.getAllByText('产品运行必需')).toHaveLength(7)
   })
 
   it('shows degraded bootstrap failures and delegates explicit retry to the Kernel supervisor', async () => {

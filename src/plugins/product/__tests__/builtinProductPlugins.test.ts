@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createBuiltinProductPluginDefinitions } from '../builtinProductPlugins.ts'
+import { createBuiltinProductPluginDefinitions, loadFirstPartyProductPackages } from '../builtinProductPlugins.ts'
+import { BUILTIN_PYLON_PRODUCT_PLUGIN_IDS } from '../productPluginIds.ts'
 
 describe('first-party product plugin contracts', () => {
   it('preserves manifest dependency ranges, conflicts and activation events in runtime definitions', () => {
@@ -17,5 +18,10 @@ describe('first-party product plugin contracts', () => {
       conflicts: [],
       activationEvents: ['kernel.ready'],
     })
+  })
+
+  it('keeps the loaded package id set equal to the closed product plugin id list', () => {
+    expect(loadFirstPartyProductPackages().map(pkg => pkg.manifest.id).sort())
+      .toEqual([...BUILTIN_PYLON_PRODUCT_PLUGIN_IDS].sort())
   })
 })

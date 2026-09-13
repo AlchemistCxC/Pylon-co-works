@@ -14,6 +14,39 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('canonicalEventPersistScheduler', () => {
+  it('dispose rejects later scheduling and does not revive a successfully completed in-flight owner', async () => {
+    let release!: (revision: number) => void
+    const persist = vi.fn(() => new Promise<number>(resolve => { release = resolve }))
+    const scheduler = createCanonicalEventPersistScheduler({ persist })
+    scheduler.markDirty('owner', ['first'], true)
+    scheduler.dispose()
+    scheduler.seedRevision('owner', 99)
+    scheduler.markDirty('owner', ['after close'], true)
+    release(1)
+    await flushMicrotasks()
+    scheduler.flushAll()
+    expect(persist).toHaveBeenCalledOnce()
+    expect(scheduler.hasDirty('owner')).toBe(false)
+    await expect(scheduler.flushAllAsync()).resolves.toBeUndefined()
+  })
+
+  it.each(['dispose', 'discard'] as const)('%s does not restore a failed batch, while durable failure remains visible', async action => {
+    let reject!: (error: Error) => void
+    const persist = vi.fn(() => new Promise<number>((_resolve, fail) => { reject = fail }))
+    const onError = vi.fn()
+    const scheduler = createCanonicalEventPersistScheduler({ persist, onError })
+    scheduler.markDirty('owner', ['first'], true)
+    if (action === 'dispose') scheduler.dispose()
+    else scheduler.discard('owner')
+    const error = new Error('database unavailable')
+    reject(error)
+    await flushMicrotasks()
+    expect(scheduler.hasDirty('owner')).toBe(false)
+    expect(onError).toHaveBeenCalledWith('owner', error)
+    await expect(scheduler.flushAllAsync()).rejects.toBe(error)
+    expect(persist).toHaveBeenCalledOnce()
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
   })

@@ -504,12 +504,39 @@ function freezeJsonValue(value: JsonValue): JsonValue {
   return value
 }
 
-// P57 S2-R1c：legacyFieldsFromDocument 模块级单槽 memo。输出字段来源横跨
-// messages/activities/diagnostics/session（v2 勘误：单键 document.messages 不够）。
-// session 键用输出实际消费的 status/model/mode 值而非对象引用——usage 类事件经
-// reduceUsage 会克隆 session 对象，引用键会使 memo 在目标场景恒失效；三者值不变
-// 时输出不变，单槽命中语义与四元组引用比较等价且更精确。数组每事件换新时键必
-// 失效，因此不用 WeakMap。
+// Message projection depends only on the immutable message array. Activity,
+// diagnostic and model changes must not rebuild it; weak keys release old turns.
+const messageProjectionMemo = new WeakMap<readonly WorkbenchMessage[], {
+  messages: readonly Message[]
+  firstRunning?: WorkbenchMessage
+  lastRunning?: WorkbenchMessage
+  runningReasoning?: WorkbenchMessage
+}>()
+
+function projectLegacyMessages(source: readonly WorkbenchMessage[]) {
+  const cached = messageProjectionMemo.get(source)
+  if (cached) return cached
+  let firstRunning: WorkbenchMessage | undefined
+  let lastRunning: WorkbenchMessage | undefined
+  let runningReasoning: WorkbenchMessage | undefined
+  const messages: Message[] = source.map(message => {
+    if (message.running) {
+      firstRunning ??= message
+      lastRunning = message
+      if (message.role === 'reasoning') runningReasoning = message
+    }
+    return {
+      id: message.id,
+      role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
+      sender: message.source.provider, content: message.content, time: message.time, running: message.running,
+    }
+  })
+  const result = { messages: Object.freeze(messages), firstRunning, lastRunning, runningReasoning }
+  messageProjectionMemo.set(source, result)
+  return result
+}
+
+// Cache the remaining fields by the references and session values they consume.
 let legacyFieldsMemo: {
   readonly messages: unknown
   readonly activities: unknown
@@ -531,29 +558,19 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     && memo.sessionMode === document.session.mode) {
     return memo.value
   }
-  const messages: Message[] = document.messages.map(message => ({
-    id: message.id,
-    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
-    sender: message.source.provider,
-    content: message.content,
-    time: message.time,
-    running: message.running,
-  }))
+  const { messages, firstRunning, lastRunning: lastRunningMessage, runningReasoning } = projectLegacyMessages(document.messages)
   const error = [...document.diagnostics].reverse().find(diagnostic => diagnostic.level === 'error')?.message ?? null
   const status = document.session.status === 'error' || document.session.status === 'degraded' || document.session.status === 'loading' || document.session.status === 'ready' || document.session.status === 'idle'
     ? document.session.status
     : document.session.status === 'completed' ? 'ready' : 'ready'
-  const runningMessages = document.messages.filter(message => message.running)
   const runningActivity = [...document.activities].reverse().find(activity => !isTerminalActivityStatus(activity.status))
   // Lifecycle status alone is not evidence of an active turn. Require a
   // running message/activity so mode strings and stale status cannot revive
   // a completed generation.
-  const generating = runningMessages.length > 0 || runningActivity !== undefined
-  const runningReasoning = [...runningMessages].reverse().find(message => message.role === 'reasoning')
-  const lastRunningMessage = runningMessages.at(-1)
+  const generating = firstRunning !== undefined || runningActivity !== undefined
   const generationStart = generating
     ? firstTimestamp([
-        runningMessages[0]?.time,
+        firstRunning?.time,
         runningActivity?.startedAt,
       ]) ?? Date.now()
     : 0
@@ -565,7 +582,7 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     : undefined
   const value: Partial<WorkbenchRuntimeSnapshot> = {
     // memo 复用的数组必须先冻结：freezeSnapshot 对未冻结数组会逐次拷贝（引用失稳）。
-    messages: Object.freeze(messages),
+    messages,
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',

@@ -1245,6 +1245,34 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 async move {
                     // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
                     let last_error = format!("ACP 进程崩溃（{reason}）");
+                    // B4：崩溃以统一 cause DTO 入日志（与 preflight/连接测试同形；
+                    // 未知 code 不写 cause 字段，不猜）。
+                    if let Some(crash_reason) = crate::acp::cause::crash_reason_from_code(&reason) {
+                        let cause = crate::acp::cause::crash_reason_cause(crash_reason);
+                        runtime_logs.push(
+                            crate::time::Timestamp::now(),
+                            "error",
+                            "agent-crash",
+                            None,
+                            &cause.summary,
+                            serde_json::Map::from_iter([
+                                (
+                                    "causeCode".to_string(),
+                                    serde_json::Value::String(cause.code.clone()),
+                                ),
+                                (
+                                    "causeLevel".to_string(),
+                                    serde_json::Value::String(cause.level.to_string()),
+                                ),
+                                (
+                                    "action".to_string(),
+                                    serde_json::Value::String(
+                                        cause.action.unwrap_or_default().to_string(),
+                                    ),
+                                ),
+                            ]),
+                        );
+                    }
                     if let Ok(mut runtime_state) = agent_runtime.lock() {
                         runtime_state.status = AgentLifecycleStatus::Crashed;
                         runtime_state.last_error = Some(last_error.clone());

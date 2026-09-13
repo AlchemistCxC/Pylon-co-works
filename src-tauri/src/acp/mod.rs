@@ -14,7 +14,9 @@ pub mod fs_policy;
 pub mod host_tools;
 mod launch_plan;
 pub(crate) use launch_plan::plan_for_agent;
+pub(crate) mod cause;
 pub(crate) mod initialize_plan;
+pub(crate) mod instance_registry;
 pub mod plan_policy;
 pub mod question_policy;
 pub mod terminal_policy;
@@ -24,6 +26,8 @@ pub use capabilities::{CapabilityRegistry, CapabilityState};
 pub use client::*;
 pub use error::*;
 
+#[cfg(test)]
+mod catalog_driven_tests;
 #[cfg(test)]
 mod golden_trace_tests;
 #[cfg(test)]

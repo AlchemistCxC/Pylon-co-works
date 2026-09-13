@@ -1,7 +1,14 @@
+/**
+ * Workbench session host: binding, canonical replay/live reconciliation and
+ * generation ownership. Stateless response/snapshot adapters live alongside
+ * this module; they cannot mutate lifecycle state or access persistence.
+ */
+import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './sessionResponseProjection.ts'
+import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
-import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
@@ -16,11 +23,6 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
-  extractChoiceId,
-  extractChoiceLabel,
-  extractConfigOptionId,
-  extractModeConfig,
-  extractModelConfig,
   sessionResponseObject,
   type PromptFailureMetadata,
   type SessionResponseObject,
@@ -110,222 +112,6 @@ function canonicalHasTerminalFromRows(rows: readonly unknown[]): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function responseChoice(value: unknown, kind?: 'model' | 'mode'): { id: string; label: string } | undefined {
-  const id = extractChoiceId(value, kind)
-  if (!id) return undefined
-  return { id, label: extractChoiceLabel(value, id) ?? id }
-}
-
-function toJsonValue(value: unknown, depth = 0): JsonValue | undefined {
-  if (depth > 8) return undefined
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
-  if (Array.isArray(value)) {
-    const items = value.map(item => toJsonValue(item, depth + 1)).filter((item): item is JsonValue => item !== undefined)
-    return items
-  }
-  if (isRecord(value)) {
-    const result: Record<string, JsonValue> = {}
-    for (const [key, item] of Object.entries(value)) {
-      const json = toJsonValue(item, depth + 1)
-      if (json !== undefined) result[key] = json
-    }
-    return result
-  }
-  return undefined
-}
-
-function responseChoiceList(value: unknown): readonly { id: string; label: string }[] {
-  if (!Array.isArray(value)) return []
-  const seen = new Set<string>()
-  const choices: Array<{ id: string; label: string }> = []
-  for (const item of value) {
-    const choice = responseChoice(item)
-    if (!choice || seen.has(choice.id.toLowerCase())) continue
-    seen.add(choice.id.toLowerCase())
-    choices.push(choice)
-  }
-  return choices
-}
-
-function syntheticSessionOption(
-  kind: 'model' | 'mode',
-  response: SessionResponseObject,
-): Record<string, JsonValue> | undefined {
-  const state = kind === 'model' ? response.models : response.modes
-  if (!state) return undefined
-  // Keep the discriminant on the original response instead of indexing the
-  // `SessionModels | SessionModes` union through a conditional state variable;
-  // this also makes the two wire shapes explicit for future schema additions.
-  const rawChoices = kind === 'model'
-    ? response.models?.availableModels ?? response.models?.available_models
-    : response.modes?.availableModes ?? response.modes?.available_modes
-  const choices = responseChoiceList(rawChoices)
-  const current = kind === 'model'
-    ? extractModelConfig(response.configOptions, response).model
-    : extractModeConfig(response).mode
-  if (!current && choices.length === 0) return undefined
-  const schema: Record<string, JsonValue> = {
-    options: choices.map(choice => ({ id: choice.id, label: choice.label })),
-  }
-  return {
-    id: kind,
-    label: kind === 'model' ? '模型' : '模式',
-    valueType: 'select',
-    editable: true,
-    ...(current ? { value: current } : {}),
-    schema,
-  }
-}
-
-function optionId(value: unknown): string | undefined {
-  return extractConfigOptionId(value)
-}
-
-function mergeSessionResponseOptions(response: SessionResponseObject): readonly JsonValue[] {
-  const options: JsonValue[] = (Array.isArray(response.configOptions)
-    ? response.configOptions
-    : Array.isArray(response.config_options) ? response.config_options : [])
-    .map(item => toJsonValue(item))
-    .filter((item): item is JsonValue => item !== undefined)
-  for (const synthetic of [syntheticSessionOption('model', response), syntheticSessionOption('mode', response)]) {
-    if (!synthetic) continue
-    const syntheticId = String(synthetic.id).toLowerCase()
-    const index = options.findIndex(item => optionId(item)?.toLowerCase() === syntheticId)
-    if (index < 0) {
-      options.push(synthetic)
-      continue
-    }
-    const existing = options[index]
-    if (!isRecord(existing)) continue
-    const merged: Record<string, JsonValue> = { ...existing }
-    // Preserve provider metadata, but ensure the standard models/modes state
-    // supplies choices/current value when the provider's config option omitted
-    // them.  This gives every renderer one canonical selector surface.
-    if (!('value' in merged) && 'value' in synthetic) merged.value = synthetic.value!
-    if (!('valueType' in merged) && 'valueType' in synthetic) merged.valueType = synthetic.valueType!
-    if (!('schema' in merged) && 'schema' in synthetic) merged.schema = synthetic.schema!
-    options[index] = merged
-  }
-  return Object.freeze(options)
-}
-
-function responseProjectionKey(response: SessionResponseObject): string {
-  try {
-    return JSON.stringify({
-      models: response.models,
-      modes: response.modes,
-      configOptions: response.configOptions ?? response.config_options,
-    })
-  } catch {
-    return String(response)
-  }
-}
-
-function shortHash(value: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(36)
-}
-
-function sessionResponseEnvelope(
-  sessionId: string,
-  provider: string,
-  response: SessionResponseObject,
-  sequence: number,
-): WorkbenchEventEnvelope {
-  const model = extractModelConfig(response.configOptions, response).model
-  const mode = extractModeConfig(response).mode
-  const options = mergeSessionResponseOptions(response)
-  const fingerprint = shortHash(responseProjectionKey(response))
-  return createWorkbenchEnvelope({
-    eventId: `session-response:${sessionId}:${fingerprint}`,
-    sessionId,
-    sequence: Math.max(1, sequence),
-    recordedAt: new Date().toISOString(),
-    source: { provider: provider || 'acp', sourceId: `session-response:${fingerprint}` },
-    identity: { runId: `session-response:${fingerprint}` },
-    provenance: {
-      origin: 'local-observed',
-      trust: 'authoritative',
-      provider: provider || 'acp',
-      orderConfidence: 'observed',
-      synthetic: { reason: 'session-new-response' },
-    },
-    event: {
-      type: 'session.started',
-      status: 'ready',
-      ...(model ? { model } : {}),
-      ...(mode ? { mode } : {}),
-      ...(options.length > 0 ? { options } : {}),
-    },
-  })
-}
-
-/** Browser/demo compatibility bridge. The visual seed predates the Workbench
- * journal and stores Message[] snapshots; terminal-like renders only the
- * Workbench projection, so hydrate those snapshots into provider-neutral events.
- */
-export function messageSnapshotToWorkbenchEnvelopes(sessionId: string, messages: readonly Message[]): readonly WorkbenchEventEnvelope[] {
-  const recordedBase = Date.now() - Math.max(0, messages.length - 1) * 1000
-  const envelopes: WorkbenchEventEnvelope[] = []
-  let sequence = 0
-  messages.forEach((message, index) => {
-    const messageId = message.id || `snapshot-message-${index + 1}`
-    const recordedAt = new Date(recordedBase + index * 1000).toISOString()
-    const identity = { messageId }
-    const source = { provider: 'browser-demo', sourceId: messageId }
-    const provenance = { origin: 'migration' as const, trust: 'unverified' as const, provider: 'browser-demo', orderConfidence: 'observed' as const, synthetic: { reason: 'message-snapshot-bridge' } }
-    const text = message.content || ''
-    const parts: Array<{ kind: 'text' | 'markdown'; text: string }> = text
-      ? [{ kind: message.role === 'assistant' ? 'markdown' : 'text', text }]
-      : []
-    const push = (event: WorkbenchEventEnvelope['event'], suffix: string) => {
-      sequence += 1
-      envelopes.push(createWorkbenchEnvelope({
-        eventId: `snapshot:${sessionId}:${messageId}:${suffix}`,
-        sessionId, sequence, recordedAt, occurredAt: recordedAt,
-        source, identity, provenance, event,
-      }))
-    }
-    if (message.role === 'tool') {
-      const toolCallId = messageId
-      const tool: Record<string, string | Array<{ kind: 'text' | 'markdown'; text: string }>> = {
-        toolCallId, name: message.toolName || 'Tool',
-      }
-      if (message.toolKind) tool.kind = message.toolKind
-      if (message.toolInput) tool.input = message.toolInput
-      if (message.toolStatus) tool.status = message.toolStatus
-      if (message.toolOutput) tool.progress = message.toolOutput
-      push({ type: 'tool.started', tool }, 'tool-start')
-      if (message.running || (message.toolStatus && !['completed', 'failed', 'cancelled'].includes(message.toolStatus))) {
-        push({ type: 'tool.progress', tool }, 'tool-progress')
-      } else {
-        const terminalType = message.toolStatus === 'failed' ? 'tool.failed' : 'tool.completed'
-        const terminalTool = { ...tool, ...(parts.length > 0 ? { parts } : {}), ...(message.toolOutput ? { rawOutput: message.toolOutput } : {}) }
-        push({ type: terminalType, tool: terminalTool, result: message.toolOutput }, 'tool-end')
-      }
-      return
-    }
-    if (message.role === 'reasoning') {
-      push({ type: 'reasoning.delta', parts }, 'reasoning-delta')
-      push({ type: 'reasoning.completed', parts: [], durationMs: message.thoughtDurationMs }, 'reasoning-end')
-      return
-    }
-    if (message.role === 'assistant') {
-      push({ type: 'message.started', role: 'assistant', parts: [] }, 'message-start')
-      push({ type: 'message.delta', role: 'assistant', parts }, 'message-delta')
-      push({ type: 'message.completed', role: 'assistant', parts: [] }, 'message-end')
-      return
-    }
-    push({ type: 'message.completed', role: 'user', parts }, 'message-end')
-  })
-  return envelopes
 }
 
 function withJournalDiagnostic(document: WorkbenchDocument, count: number): WorkbenchDocument {
@@ -436,6 +222,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     envelope: WorkbenchEventEnvelope
   }>>()
 
+  /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
+   *  source → 该 source 上"仅时钟起点"的 clientMessageId。发送被拒时据此精确撤销，
+   *  不误伤同 source 上由外部客户端 echo 启动的回合（issue #68 配套）。 */
+  const clockOnlyStarts = new Map<string, string>()
+
   const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
     const current = runtime.getSnapshot()
     if (!current.document) {
@@ -482,6 +273,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const entry = turnClocks.get(targetSource)
     if (!entry || entry.terminal) return
     entry.terminal = true
+    // 回合已有终态："仅时钟起点"的记账已完成使命。
+    clockOnlyStarts.delete(targetSource)
     if (source !== targetSource) return
     updateRuntimeState({
       summary: {
@@ -525,11 +318,22 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
 
   function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
-    if (destroyed || source !== targetSource || !boundSessionId) return
+    if (destroyed) return
+    // P52 D3：回合起点属于**发送入口**，不属于 bind。空态创建路径
+    // （ControlCenter.createEmptySession → selectSession → send 同一 tick）下会话已被
+    // 选中但 bind 尚未完成；若在这里因"未绑定"早退，终帧到达时 turnClocks 没有该 source
+    // 的条目，turnClockTerminal 会直接 return ⇒ 终态摘要永不发布（issue #68）。
+    // 故时钟先无条件建立/覆盖；文档投影与快照 patch 仍严格限于已绑定的本 source。
+    const now = Date.now()
+    turnClockStart(targetSource, now)
+    if (targetSource !== source || !boundSessionId) {
+      // 仅时钟起点：文档投影要等 bind 之后由 canonical echo 承担。
+      clockOnlyStarts.set(targetSource, clientMessageId)
+      return
+    }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(targetSource)
     const existing = pendingOptimisticBySource.get(targetSource) ?? []
     if (existing.some(item => item.clientMessageId === clientMessageId)) return
-    const now = Date.now()
     const envelope = createWorkbenchEnvelope({
       eventId: `optimistic:${targetSource}:${clientMessageId}`,
       sessionId: targetSource,
@@ -550,7 +354,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
     pendingOptimisticBySource.set(targetSource, existing)
     turnEpoch += 1
-    turnClockStart(targetSource, now)
     runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
@@ -565,7 +368,16 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   function rejectOptimisticUser(targetSource: string, clientMessageId: string): void {
     const pending = pendingOptimisticBySource.get(targetSource) ?? []
     const rejected = pending.find(item => item.clientMessageId === clientMessageId)
-    if (!rejected) return
+    if (!rejected) {
+      // 空态路径（尚未 bind）没有文档投影可撤：projectOptimisticUser 只记了"仅时钟起点"。
+      // 拒绝时同样必须撤销时钟，否则 bind 后的 reconcileTurnClock 会把从未发出的回合
+      // 复活成常驻 spinner（issue #68 配套）。
+      if (clockOnlyStarts.get(targetSource) === clientMessageId) {
+        clockOnlyStarts.delete(targetSource)
+        turnClockRollback(targetSource)
+      }
+      return
+    }
     const remaining = pending.filter(item => item !== rejected)
     if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
     else pendingOptimisticBySource.delete(targetSource)
@@ -615,7 +427,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
 
   const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string): void => {
     if (destroyed || !boundSessionId || !source || targetSessionId !== boundSessionId) return
-    const key = responseProjectionKey(response)
+    const key = sessionResponseProjectionKey(response)
     const applied = appliedSessionResponseKeys.get(targetSessionId) ?? new Set<string>()
     if (applied.has(key)) return
     applied.add(key)
@@ -626,7 +438,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const previousTransient = transientSequenceBySource.get(source) ?? 0
     const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
     transientSequenceBySource.set(source, sequence)
-    const envelope = sessionResponseEnvelope(source, boundProvider, response, sequence)
+    const envelope = createSessionResponseEnvelope(source, boundProvider, response, sequence)
     if (loading) {
       buffered.push(envelope)
       return
@@ -682,7 +494,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
-    if (isUserStart && !echoesOptimistic) turnClockStart(envelope.sessionId, envelopeTime)
+    if (isUserStart && !echoesOptimistic) {
+      // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
+      // （elapsed 从用户发出算起，与已绑定路径一致）。
+      if (!clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
+      clockOnlyStarts.delete(envelope.sessionId)
+    }
     // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
     turnClockTouch(envelope.sessionId, envelopeTime)
     if (loading) { buffered.push(envelope); return }
@@ -953,7 +770,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     destroy() {
       if (destroyed) return
       destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
-      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear()
     },
   }
 }

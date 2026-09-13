@@ -34,37 +34,86 @@ for line in sys.stdin:
 "#;
     for method in ["session/resume", "session/load"] {
         for outcome in ["success", "error"] {
-            let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let ready = std::env::temp_dir().join(format!("pylon-recovery-{}-{unique}.ready", std::process::id()));
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let ready = std::env::temp_dir().join(format!(
+                "pylon-recovery-{}-{unique}.ready",
+                std::process::id()
+            ));
             let release = ready.with_extension("release");
             let agent = crate::test_utils::fake_acp_agent_with(
-                "recovery-generation", SCRIPT,
-                vec![ready.to_string_lossy().into_owned(), release.to_string_lossy().into_owned(), method.into(), outcome.into()],
+                "recovery-generation",
+                SCRIPT,
+                vec![
+                    ready.to_string_lossy().into_owned(),
+                    release.to_string_lossy().into_owned(),
+                    method.into(),
+                    outcome.into(),
+                ],
                 Default::default(),
             );
             let runtime = AgentRuntime::new_disconnected();
-            *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None).await.unwrap();
+            *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+                .await
+                .unwrap();
             let state = crate::test_utils::TestStateBuilder::bare()
-                .with_active_agent("recovery-generation").with_agent(agent)
-                .with_runtime("recovery-generation", runtime.clone()).build();
+                .with_active_agent("recovery-generation")
+                .with_agent(agent)
+                .with_runtime("recovery-generation", runtime.clone())
+                .build();
             let mut recreated = None;
-            let recover = ensure_session_mapping(&state, &runtime, "local:generation", Some("profile"), "", ".", &[], Some("remote-original"), &mut recreated);
+            let recover = ensure_session_mapping(
+                &state,
+                &runtime,
+                "local:generation",
+                Some("profile"),
+                "",
+                ".",
+                &[],
+                Some("remote-original"),
+                &mut recreated,
+            );
             let change_generation = async {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    while !ready.exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
-                }).await.expect("agent must receive recovery request");
-                runtime.client_generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    while !ready.exists() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("agent must receive recovery request");
+                runtime
+                    .client_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
                 std::fs::write(&release, b"release").unwrap();
             };
             let (result, ()) = tokio::join!(recover, change_generation);
-            let seen = state.acp_rpc(&runtime, "_test/seen", serde_json::json!({})).await.unwrap();
+            let seen = state
+                .acp_rpc(&runtime, "_test/seen", serde_json::json!({}))
+                .await
+                .unwrap();
             std::fs::remove_file(&ready).unwrap();
             std::fs::remove_file(&release).unwrap();
-            let error = match result { Ok(_) => panic!("{method}/{outcome} unexpectedly succeeded"), Err(error) => error };
-            assert!(error.to_string().contains("stale ACP client generation"), "{method}/{outcome}: {error}");
-            assert_eq!(seen["methods"], serde_json::json!([method]), "no load/new fallback after generation changes");
+            let error = match result {
+                Ok(_) => panic!("{method}/{outcome} unexpectedly succeeded"),
+                Err(error) => error,
+            };
+            assert!(
+                error.to_string().contains("stale ACP client generation"),
+                "{method}/{outcome}: {error}"
+            );
+            assert_eq!(
+                seen["methods"],
+                serde_json::json!([method]),
+                "no load/new fallback after generation changes"
+            );
             assert!(recreated.is_none());
-            assert!(!runtime.sessions.lock().unwrap().contains_key("local:generation"));
+            assert!(!runtime
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("local:generation"));
         }
     }
 }

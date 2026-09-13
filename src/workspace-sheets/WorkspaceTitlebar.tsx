@@ -122,7 +122,7 @@ export default function WorkspaceTitlebar({
     activeSessionId,
     activeAgent,
   })
-  const activePanelId = useRightRailStore(state => state.activePanelId)
+  const activePanelId = useRightRailStore(state => state.collapsed ? null : state.activePanelId)
   const rightPanelAvailable = rightPanelEnabled !== false && availablePanels.length > 0
   const menuId = (kind: WorkspaceMenuKind) => `${titlebarId}-menu-${kind}`
   const toggleMenu = (kind: WorkspaceMenuKind, trigger: HTMLButtonElement) => {

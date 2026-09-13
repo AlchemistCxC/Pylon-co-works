@@ -629,6 +629,11 @@ pub fn init_tracing() {
 ///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // rustls 0.23 进程级 CryptoProvider：依赖树经 feature 统一同时启用
+    // aws-lc-rs 与 ring（reqwest/hyper-rustls 与 tokio-tungstenite 各拉其一），
+    // 自动探测必然失败——gateway QQ WSS 首次 TLS 握手即 panic（P78 真实平台
+    // 验收暴露；stub 测试不走 TLS 故未覆盖）。启动最早期显式安装默认 provider。
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // P0-3（R2-WI03）+ R2-WI06：注册协议适配器——Peri 与 Hermes 的审批 wire 逐字段
     // 一致（均走 ACP session/request_permission + RequestPermissionResponse，已源码实证），
     // 同一 request_permission 实现按 provider 注册；clarify/ask-user 无真实 wire 不注册。
@@ -702,36 +707,9 @@ pub fn run() {
                 GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
             }
         });
-        // QQ 适配器（B10.2）：凭据存在时创建 auth + adapter + WS 循环并注册进 gateway。
-        // PYLON_QQ_CLIENT_SECRET 为 secret：只读入 QqAuth，不进任何输出。
-        if let (Ok(qq_app_id), Ok(qq_client_secret)) = (
-            std::env::var("PYLON_QQ_APP_ID"),
-            std::env::var("PYLON_QQ_CLIENT_SECRET"),
-        ) {
-            let qq_http = match reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-            {
-                Ok(client) => client,
-                Err(error) => {
-                    eprintln!("Pylon QQ HTTP client unavailable: {error}");
-                    reqwest::Client::new()
-                }
-            };
-            let qq_auth = Arc::new(gateway::qq::auth::QqAuth::new(
-                qq_http.clone(),
-                qq_app_id,
-                qq_client_secret,
-            ));
-            let qq_adapter = gateway::qq::QqAdapter::new(gateway.clone(), qq_http.clone(), qq_auth.clone());
-            if let Err(error) = gateway.register(qq_adapter.clone()) {
-                eprintln!("Pylon QQ adapter register failed: {error}");
-            } else {
-                tracing::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
-                tokio::spawn(gateway::qq::ws::run_ws_loop(qq_http, qq_auth, qq_adapter));
-            }
-        }
+        // 平台注册表（P78）：env-only 引导（legacy PYLON_QQ_* 路径）。平台清单
+        // 与新增平台入口收敛在 gateway/platform_registry.rs，本文件保持平台无关。
+        crate::gateway::platform_registry::bootstrap_env_adapters(&gateway);
         let runtimes = Arc::new(AgentRuntimeManager::new());
         let default_runtime = AgentRuntime::new_disconnected();
         {
@@ -837,6 +815,7 @@ pub fn run() {
                 crate::protocol_adapter::protocol_adapter_catalog,
                 crate::agent_detection::detect_agent_runtimes,
                 crate::agent_detection::cancel_detection_refresh,
+                crate::acp::instance_registry::acp_instance_overview,
                 crate::permission::approve_tool_call, crate::permission::respond_interaction, crate::permission::set_approval_mode,
                 crate::permission::get_approval_mode, crate::permission::interaction_list,
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
@@ -1116,7 +1095,8 @@ pub fn run() {
                             },
                         ));
                     }
-                    // QQ factory 注册（W2 已建；auto-start/手动 start 的凭据校验与连接循环入口）
+                    // gateway 共用 HTTP client（平台 factory 连接循环共用；超时参数
+                    // 与 legacy env 路径一致）。
                     let qq_http = match reqwest::Client::builder()
                         .connect_timeout(Duration::from_secs(10))
                         .timeout(Duration::from_secs(30))
@@ -1128,11 +1108,39 @@ pub fn run() {
                             reqwest::Client::new()
                         }
                     };
-                    let factory = Arc::new(crate::gateway::qq::factory::QqAdapterFactory::new(
+                    // 平台注册表（P78）：一次注册全部带真实适配器的平台（当前仅 qq）；
+                    // auto-start/手动 start 的凭据校验与连接循环入口。新增平台 =
+                    // platform_registry.rs 加 entry，本文件零改动。
+                    crate::gateway::platform_registry::register_platform_factories(
+                        &state.gateway_instances,
                         state.gateway.clone(),
                         qq_http,
-                    ));
-                    state.gateway_instances.register_factory(factory);
+                    );
+                    // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
+                    // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
+                    // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
+                    // （覆盖侧 warn 留痕）。
+                    {
+                        let gateway_for_hook = state.gateway.clone();
+                        state.gateway_instances.set_adapter_registry(Arc::new(
+                            move |key: &str,
+                                  adapter: &Arc<dyn gateway::PlatformAdapter>,
+                                  register: bool| {
+                                if register {
+                                    if gateway_for_hook
+                                        .replace(adapter.clone())
+                                        .is_some()
+                                    {
+                                        tracing::warn!(
+                                            "gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）"
+                                        );
+                                    }
+                                } else if gateway_for_hook.unregister_if(key, adapter) {
+                                    tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
+                                }
+                            },
+                        ));
+                    }
                     // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
                     // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
                     {

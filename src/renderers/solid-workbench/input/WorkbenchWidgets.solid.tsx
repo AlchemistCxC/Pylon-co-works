@@ -34,7 +34,16 @@ export function SolidModelWidget(props: {
   let trigger: HTMLButtonElement | undefined
   let previousSessionId = workbench.input().sessionId
   const menuId = `cc-model-menu-${createUniqueId()}`
-  const modelEntries = () => resolveModelOptionEntries(runtime(), props.draftValue?.())
+  // Issue #53: the draft binding is the empty-state/entering seam — while it
+  // is active the owning agent's advertised set (host-provided plain data)
+  // joins the candidates so the dropdown no longer falls back to a hardcoded
+  // catalogue the agent never declared. Live sessions keep snapshot-only
+  // sourcing so negotiated candidates stay authoritative.
+  const modelEntries = () => resolveModelOptionEntries(
+    runtime(),
+    props.draftValue?.(),
+    props.draftValue ? workbench.input().agentAdvertisedModels : undefined,
+  )
   const models = () => modelEntries().map(item => item.id)
   const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
   const reasoningOption = () => runtime().document?.session.options.find(isReasoningOption)

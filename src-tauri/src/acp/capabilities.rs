@@ -137,8 +137,12 @@ mod tests {
     fn fork_remains_unknown_without_explicit_negotiation() {
         let registry = CapabilityRegistry::from_initialize_response(&serde_json::json!({
             "agentCapabilities": {"sessionCapabilities": {"resume": {}}}
-        })).unwrap();
-        assert_eq!(registry.state(&["sessionCapabilities", "fork"]), CapabilityState::Unknown);
+        }))
+        .unwrap();
+        assert_eq!(
+            registry.state(&["sessionCapabilities", "fork"]),
+            CapabilityState::Unknown
+        );
         assert!(!registry.supports(&["sessionCapabilities", "fork"]));
     }
 }

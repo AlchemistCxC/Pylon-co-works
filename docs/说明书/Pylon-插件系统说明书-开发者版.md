@@ -1,10 +1,10 @@
 ﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 1.5.9
+> 适用版本：Pylon 1.6.0
 >
-> 生产契约：Plugin API 1.0，`pylon-plugin.json` schema 1
+> 生产契约：Plugin API 1.0 / 1.1 / 1.2（最新 1.2），`pylon-plugin.json` schema 1
 
-本文基于当前源码契约编写。旧 API 0.1 的 `trust`、`capabilities`、`contributes`、`signature`、顶层 `entry`、CapabilityBroker、旧 Host/ExtensionPoint 均已删除，不得用于新插件。
+本文基于当前源码契约编写。旧 API 0.1 的 `trust`、`contributes`、`signature`、顶层 `entry`、CapabilityBroker、旧 Host/ExtensionPoint 均已删除，不得用于新插件。`capabilities` 与 `dangerousHooks` 自 API 1.2 起以新语义回归（见 §3.1）。
 
 普通用户请阅读[用户版](Pylon-插件系统说明书-用户版.md)。
 
@@ -20,7 +20,7 @@ KernelBootstrap（starting / ready / degraded / safe-mode）
         │ 显式 bootstrap / retry
         ▼
 pluginCompositionRoot（唯一产品 PluginRuntime authority）
-├─ 五个第一方 Product Plugin definitions
+├─ 七个第一方 Product Plugin definitions
 └─ PackageInstallationService / PackagePluginRuntimeService
           ▲
           │
@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前必须为 `1.0` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -165,19 +165,18 @@ my-plugin/
 | `hotSwap.mode` | 否 | 缺省 `parallel` |
 | `hotSwap.drainTimeoutMs` | 否 | 正数；Hook lease 排空超时 |
 | `executables` | 否 | executable id → platform → 包内路径 |
+| `capabilities` | 否 | API 1.2 新增：声明所需的宿主能力（封闭词表，当前只有 `plugin.management`），须经用户在授权卡逐项批准后插件才会激活（用户版 §5.1）；1.0/1.1 manifest 出现该字段直接校验失败 |
+| `dangerousHooks` | 否 | API 1.2 新增：声明需要用户确认的危险 Hook 锚点（锚点必须存在于 §6.2 词表且不重复）；宿主当前只做词表与重复校验。1.0/1.1 manifest 出现该字段直接校验失败 |
 | `reactVersion` | 否 | UI surface / React 隔离诊断元数据 |
 
-已删除字段：
+已删除字段（任何 API 版本都直接校验失败）：
 
 ```text
 trust
-capabilities
 contributes
 signature
 顶层 entry
 ```
-
-manifest 出现上述字段会直接校验失败。
 
 ### 3.2 kind
 
@@ -386,7 +385,8 @@ Hook 名称：
 ```text
 session.creating / created / loading / loaded / closing / closed / deleting / deleted
 message.user.beforeSend / sent / sendFailed
-message.agent.committed
+message.received / message.agent.committed
+agent.chunk（API 1.2 新增锚点）
 turn.started / completed / failed / cancelled
 tool.beforeCall / started / afterCall / failed
 context.beforeBuild / afterBuild
@@ -853,10 +853,10 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1`（`PYLON_PLUGIN_API_SUPPORTED`）；
-  **1.0 插件在 1.1 宿主继续激活**，未知更高版本拒绝并提示升级宿主。
-- minor 版本只做加法（新增可选 context 成员）；破坏性变更加 major 并要求重写。
-- `api: "1.0"` 的插件不得引用 1.1 成员（如 `storage`）——宿主仅在 1.1 契约下保证其存在。
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2`（`PYLON_PLUGIN_API_SUPPORTED`）；
+  旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
+- minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
+- `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。
 
 #### 6.11.4 SDK 发行形态
 
@@ -1327,7 +1327,7 @@ operation inspect
 ## 16. 当前限制
 
 - Plugin API 0.1 不兼容，旧插件必须重写。
-- 没有签名、trust、capability 权限模型或插件市场。
+- 没有签名、trust 或插件市场。1.2 的能力授权卡只约束插件**声明过**的宿主能力（当前词表仅 `plugin.management`），不是恶意代码权限沙箱。
 - 第三方插件按产品决策视为完全可信本机代码；生命周期、依赖和 cleanup 隔离不是恶意代码安全沙箱。
 - CSS 没有 selector 沙箱。
 - 第一版入口应为单 JS bundle，不支持插件入口继续拆动态 chunk。

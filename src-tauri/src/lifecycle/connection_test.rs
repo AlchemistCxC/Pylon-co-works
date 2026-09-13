@@ -50,13 +50,8 @@ pub(crate) fn connection_test_error_payload_with_diagnostics(
         "ioKind": failure.io_kind,
         "remoteCode": failure.remote_code,
         "remoteDataSummary": failure.remote_data_summary,
-        // B1：typed cause——code/message/action 的封闭词汇视图，前端只渲染不推断。
-        "cause": {
-            "level": "fail",
-            "code": failure.code,
-            "summary": failure.message,
-            "action": action,
-        },
+        // B4：统一 cause DTO（与 preflight/崩溃 cause 同形，封闭 code 词表）。
+        "cause": crate::acp::cause::connect_failure_cause(failure),
     })
 }
 
@@ -80,11 +75,11 @@ pub(crate) fn connection_timeout_payload(
         "ioKind": null,
         "remoteCode": null,
         "remoteDataSummary": null,
-        "cause": {
-            "level": "fail",
-            "code": "agent_connection_timeout",
-            "summary": format!("连接测试超时（{timeout_secs}s）"),
-            "action": "open-runtime-log",
+        "cause": crate::acp::cause::DiagnosticCause {
+            level: "fail",
+            code: "agent_connection_timeout".to_string(),
+            summary: format!("连接测试超时（{timeout_secs}s）"),
+            action: Some("open-runtime-log"),
         },
     })
 }
@@ -166,6 +161,20 @@ pub(crate) async fn test_agent_connection(
     let inner = state.inner();
     let agent = agent_from_registry(inner, &agent_id)?;
 
+    // B3：连接测试也占全局实例预算（临时实例，独立 instance_id 命名空间，
+    // 不与该 agent 的常驻实例互斥）；guard 随命令结束 RAII 归还。
+    let test_instance_id = format!("{agent_id}:connection-test");
+    let _instance_guard = crate::acp::instance_registry::instance_registry()
+        .register(
+            crate::acp::instance_registry::InstanceKey {
+                agent_id: agent_id.clone(),
+                instance_id: test_instance_id,
+                generation: 0,
+            },
+            None,
+        )
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+
     let started = std::time::Instant::now();
     // 施工文档 §4.5：后端用 tokio::time::timeout 包裹整个 connect；禁止无限等待。
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
@@ -213,6 +222,19 @@ pub(crate) async fn test_agent_candidate(
     agent_id: String,
     agent: AgentDef,
 ) -> Result<serde_json::Value, PylonError> {
+    // B3：候选验证同样占全局实例预算（临时实例；guard 随命令 RAII 归还）。
+    let test_instance_id = format!("{agent_id}:candidate-test");
+    let _instance_guard = crate::acp::instance_registry::instance_registry()
+        .register(
+            crate::acp::instance_registry::InstanceKey {
+                agent_id: agent_id.clone(),
+                instance_id: test_instance_id,
+                generation: 0,
+            },
+            None,
+        )
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+
     let started = std::time::Instant::now();
     let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
     // 候选验证使用隔离日志池：既能返回该次握手的安全 stderr，又不污染运行时日志。

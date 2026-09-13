@@ -73,6 +73,9 @@ scenario = os.environ.get('GOLDEN_SCENARIO', 'initialize')
 pending_prompt = None
 def emit(payload):
     print(json.dumps(payload), flush=True)
+def emit_reply(session_id):
+    emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
+        'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'text': 'golden reply'}}}})
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get('method')
@@ -96,8 +99,8 @@ for line in sys.stdin:
         emit({'jsonrpc': '2.0', 'id': rid, 'result': {'loaded': True}})
     elif method == 'session/prompt':
         pending_prompt = rid
-        emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
-            'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'text': 'golden reply'}}}})
+        if scenario != 'cancel':
+            emit_reply(session_id)
         if scenario == 'tool':
             emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
                 'update': {'sessionUpdate': 'tool_call', 'toolCallId': 'tc-golden', 'title': 'golden tool',
@@ -122,6 +125,10 @@ for line in sys.stdin:
             pending_prompt = None
     elif method == 'session/cancel':
         if pending_prompt is not None:
+            # Preserve the committed cancel-before-tail trace by causality,
+            # not by racing prompt output against the client's notification.
+            if scenario == 'cancel':
+                emit_reply(session_id)
             emit({'jsonrpc': '2.0', 'id': pending_prompt, 'result': {'stopReason': 'cancelled'}})
             pending_prompt = None
     else:
@@ -133,6 +140,56 @@ fn trace_dir() -> Option<PathBuf> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
+}
+
+/// A FIFO barrier proves that prompt processing has finished before cancel.
+/// The fixture must withhold its reply until cancel, regardless of scheduling.
+#[tokio::test]
+async fn cancel_fixture_reply_waits_for_cancel() {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let mut python = crate::test_utils::test_python_exe().split_whitespace();
+    let mut child = tokio::process::Command::new(python.next().expect("python executable"))
+        .args(python)
+        .args(["-u", "-c", GOLDEN_AGENT_SCRIPT])
+        .env("GOLDEN_SCENARIO", "cancel")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("fixture must start");
+    let mut stdin = child.stdin.take().expect("fixture stdin");
+    stdin
+        .write_all(
+            concat!(
+                "{\"id\":1,\"method\":\"session/prompt\"}\n",
+                "{\"id\":2,\"method\":\"fixture/barrier\"}\n",
+                "{\"method\":\"session/cancel\"}\n",
+            )
+            .as_bytes(),
+        )
+        .await
+        .expect("fixture input");
+    drop(stdin);
+    let output = tokio::time::timeout(Duration::from_secs(5), child.wait_with_output())
+        .await
+        .expect("fixture timeout")
+        .expect("fixture output");
+    assert!(output.status.success());
+    let records: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .expect("UTF-8 output")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("JSON output"))
+        .collect();
+    assert_eq!(records.len(), 3);
+    assert_eq!(
+        records[0]["id"], 2,
+        "reply must follow the pre-cancel barrier"
+    );
+    assert_eq!(records[1]["method"], "session/update");
+    assert_eq!(records[2]["id"], 1);
+    assert_eq!(records[2]["result"]["stopReason"], "cancelled");
 }
 
 fn golden_agent(scenario: &str) -> crate::agent_config::AgentDef {

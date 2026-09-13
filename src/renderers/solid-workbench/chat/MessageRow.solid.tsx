@@ -1,10 +1,12 @@
 import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
+import { createScrollUserIntent } from '../../../components/chat/scrollUserIntent.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
+import { createFrameTask } from '../frameTask.ts'
 
 export interface SolidMessageRowProps {
   renderMessage: RenderMessage
@@ -186,42 +188,38 @@ export function ReasoningBlock(props: {
   })
   let bodyElement: HTMLDivElement | undefined
   let followBottom = true
-  let followScheduled = false
-  let followFrame: number | undefined
   let lastFollowTop: number | undefined
-  const cancelFollow = () => {
-    if (followFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(followFrame)
-    followFrame = undefined
-    followScheduled = false
-  }
-  onCleanup(cancelFollow)
+  let lastObservedScrollTop = 0
+  const follow = createFrameTask(() => {
+    if (!bodyElement || !followBottom || !props.running || !collapse.open() || props.redacted) return
+    const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
+    // Duplicate markdown/highlight notifications must not fight the outer rail.
+    if (lastFollowTop !== undefined && Math.abs(lastFollowTop - top) <= 0.5
+      && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
+    bodyElement.scrollTop = top
+    lastFollowTop = top
+  })
+  onCleanup(follow.dispose)
+  const scrollIntent = createScrollUserIntent(() => {
+    lastObservedScrollTop = bodyElement?.scrollTop ?? 0
+    followBottom = false
+    lastFollowTop = undefined
+    follow.cancel()
+  })
   const onBodyScroll = () => {
     if (!bodyElement) return
-    followBottom = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight < 24
+    const movingDown = bodyElement.scrollTop > lastObservedScrollTop
+    lastObservedScrollTop = bodyElement.scrollTop
+    const distance = bodyElement.scrollHeight - bodyElement.scrollTop - bodyElement.clientHeight
+    followBottom = followBottom ? distance < 24 : movingDown && distance <= 1
     if (!followBottom) lastFollowTop = undefined
   }
   createEffect(() => {
     const text = props.text
     const running = props.running
     const open = collapse.open()
-    if (!text || !running || !open || !bodyElement || !followBottom) return
-    if (followScheduled) return
-    followScheduled = true
-    const applyFollow = () => {
-      followFrame = undefined
-      followScheduled = false
-      if (!bodyElement || !followBottom) return
-      const top = Math.max(0, bodyElement.scrollHeight - bodyElement.clientHeight)
-      // Markdown/highlight updates can notify more than once for one token.
-      // Rewriting the same inner scroll endpoint needlessly competes with the
-      // outer chat follow rail and produces visible vertical jitter.
-      if (lastFollowTop !== undefined && Math.abs(lastFollowTop - top) <= 0.5
-        && Math.abs(bodyElement.scrollTop - top) <= 0.5) return
-      bodyElement.scrollTop = top
-      lastFollowTop = top
-    }
-    if (typeof requestAnimationFrame === 'function') followFrame = requestAnimationFrame(applyFollow)
-    else queueMicrotask(applyFollow)
+    if (!text || !running || !open || !bodyElement || !followBottom || props.redacted) follow.cancel()
+    else follow.schedule()
   })
 
   return (
@@ -246,7 +244,10 @@ export function ReasoningBlock(props: {
         </button>
         <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
           {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
-          <div class="term-reasoning-body" ref={element => { bodyElement = element }} onScroll={onBodyScroll} style={bodyStyle()}>
+          <div class="term-reasoning-body" ref={element => { bodyElement = element }} onScroll={onBodyScroll}
+            onWheel={scrollIntent.onWheel} onKeyDown={scrollIntent.onKeyDown}
+            onTouchStart={scrollIntent.onTouchStart} onTouchMove={scrollIntent.onTouchMove}
+            onTouchEnd={scrollIntent.onTouchEnd} onTouchCancel={scrollIntent.onTouchEnd} style={bodyStyle()}>
             <MarkdownContent text={props.text} streaming={props.running} />
           </div>
         </SolidCollapsibleRegion>

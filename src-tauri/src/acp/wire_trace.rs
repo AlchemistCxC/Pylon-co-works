@@ -686,8 +686,14 @@ mod tests {
         assert!(empty.complete);
         assert_eq!(empty.first_ordinal, None);
         assert_eq!(empty.last_ordinal, None);
-        hub.record(WireDirection::PylonToAgent, &json!({"id":1,"params":{"text":"中文"}}));
-        hub.record(WireDirection::PylonToAgent, &json!({"id":2,"params":{"text":"更多"}}));
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":1,"params":{"text":"中文"}}),
+        );
+        hub.record(
+            WireDirection::PylonToAgent,
+            &json!({"id":2,"params":{"text":"更多"}}),
+        );
         let all = hub.snapshot_jsonl(usize::MAX);
         let first_line = all.data.lines().next().unwrap();
         let none = hub.snapshot_jsonl(first_line.len() - 1);

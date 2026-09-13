@@ -45,6 +45,30 @@ afterEach(() => {
 })
 
 describe('PlainMessageList', () => {
+  it('does not revisit keys when the immutable input array is unchanged', () => {
+    let reads = 0
+    const items = ITEMS.map(item => ({ get key() { reads++; return item.key }, descriptor: item.descriptor }))
+    let port!: MessageListPort
+    render(() => <PlainMessageList initialItems={items} onPortReady={value => { port = value }} renderItem={item => item.key} />)
+    const before = reads
+    for (let index = 0; index < 10; index++) port.setItems(items)
+    expect(reads).toBe(before)
+  })
+
+  it('keeps row identity and content across reordering, insertion and trimming', () => {
+    let port!: MessageListPort
+    const result = render(() => <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }}
+      renderItem={item => <span>{item.descriptor.renderMessage.message.content}</span>} />)
+    const original = result.container.querySelector('[data-message-id="m2"]')
+    const inserted = createMessageListItems([descriptor({ id: 'm3', role: 'user', sender: 'user', content: 'three', time: '10:02' })])[0]
+    port.setItems([ITEMS[1], inserted, ITEMS[0]])
+    expect([...result.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))).toEqual(['m2', 'm3', 'm1'])
+    port.setItems([ITEMS[1]])
+    expect(result.container.querySelector('[data-message-id="m2"]')).toBe(original)
+    expect(result.container.querySelectorAll('[data-message-id]')).toHaveLength(1)
+    expect(result.container.textContent).toBe('two')
+  })
+
   it('用 Solid For 渲染全部 item，并通过 port 替换列表', () => {
     let port: MessageListPort | undefined
     const result = render(() => (
