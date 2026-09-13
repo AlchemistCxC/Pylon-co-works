@@ -285,16 +285,20 @@ pub(crate) fn connected_runtime() -> Arc<AgentRuntime> {
 
 /// 通用 HTTP 测试桩：绑定随机端口，按序消费响应字节序列。
 ///
-/// 收敛 prism.rs / gateway/qq/send.rs 等测试中重复的
+/// 收敛 prism.rs / gateway/qq/send.rs / b10 / b11 等测试中重复的
 /// `TcpListener::bind(127.0.0.1:0) → thread::spawn(accept → read → write_all)`
 /// 样板。返回 `(socket_addr, 请求字节捕获 channel, 服务线程 join handle)`。
 ///
 /// 语义：
 /// - 按 `responses` 顺序每个请求回一个响应；响应耗尽后其余请求收到空响应（测试
 ///   不应依赖，计数断言用请求 channel）。
-/// - 每个已接受连接单次读缓冲（不等到 EOF，避免 keep-alive 连接阻塞）后写入对应
-///   响应，再关闭。与历史 qq `spawn_sequence_server` 语义一致。
-/// - 请求字节原文通过 `request_rx` 捕获（供断言请求形状），连接数即请求数。
+/// - 每个已接受连接读到请求头声明（大小写不敏感）的 Content-Length 完整为止
+///   （b11 注入请求可达数 KB，截半关连接会夭折客户端请求——历史 b11 桩语义）；
+///   头完结但无长度声明则首读即整包（历史 qq 单读语义）。请求字节原文通过
+///   `request_rx` 捕获（供断言请求形状），连接数即请求数。
+/// - 非阻塞 accept + 5s 整体截止（P91 批 D1 自 b11 自拷桩收敛）：「不应有请求」
+///   的负向测试里服务线程到点自退，`join()` 不死锁；accept 出的连接显式切回
+///   阻塞模式（Windows 继承监听口非阻塞模式，首读 WouldBlock 会被误判 EOF）。
 pub(crate) fn spawn_http_stub(
     responses: &'static [&'static [u8]],
 ) -> (
@@ -305,21 +309,69 @@ pub(crate) fn spawn_http_stub(
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+    use std::time::{Duration, Instant};
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
     let address = listener.local_addr().expect("listener address");
     let (request_tx, request_rx) = mpsc::channel();
     let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
         for response in responses {
-            let (mut stream, _) = match listener.accept() {
-                Ok(accepted) => accepted,
-                Err(_) => return,
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() > deadline {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => return,
+                }
             };
-            let mut buffer = [0_u8; 4096];
+            // Windows 上 accept 出的 socket 继承监听口的非阻塞模式——显式切回阻塞，
+            // 否则首读 WouldBlock 会被误判为 EOF（请求体丢失、客户端收到空响应）。
+            stream.set_nonblocking(false).expect("blocking stream");
             let mut bytes = Vec::new();
-            match stream.read(&mut buffer) {
-                Ok(count) if count > 0 => bytes.extend_from_slice(&buffer[..count]),
-                _ => {}
+            let mut buffer = [0_u8; 4096];
+            // 读到请求头声明（大小写不敏感）的 Content-Length 完整为止——b11 注入
+            // 请求可达数 KB，截半即关连接会让客户端请求中途夭折（历史 b11 桩语义）；
+            // 头完结但无长度声明 → 首读即整包（历史 qq 单读语义）；头未完结则继续读。
+            let expected = loop {
+                if bytes.len() >= 64 * 1024 {
+                    break None;
+                }
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                    let declared = headers.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    });
+                    break match declared {
+                        Some(length) => Some(headers_end + 4 + length),
+                        None => None,
+                    };
+                }
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break None,
+                    Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+                }
+            };
+            if let Some(total) = expected {
+                while bytes.len() < total {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+                    }
+                }
             }
             let _ = request_tx.send(bytes);
             let _ = stream.write_all(response);
