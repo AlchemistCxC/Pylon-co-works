@@ -6,6 +6,8 @@ src-tauri/pet-core/target/
 src-tauri/pylon-core/target/
 src-tauri/pylon-foundations/target/
 *.log
+# P91 B3：本地 QA 草稿不入库（_rustfail/tsc/pylon-acceptance/cargo-test* 等 log 残留已被上方 *.log 覆盖）
+design-qa.md
 .DS_Store
 *.tsbuildinfo
 __pycache__/
