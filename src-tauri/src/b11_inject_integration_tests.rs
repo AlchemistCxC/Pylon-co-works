@@ -384,8 +384,7 @@ async fn complete_session_load_replay_is_imported_into_the_empty_kernel_journal(
 #[tokio::test]
 async fn inject_prepends_context_and_advances_round_per_message() {
     let (address, request_rx, server) = spawn_inject_stub(2);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-trace-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("b11-trace").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -469,8 +468,7 @@ gateway:
 #[tokio::test]
 async fn inject_disabled_passes_plain_text_through() {
     let (address, request_rx, server) = spawn_inject_stub(1);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-disabled-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("b11-disabled").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -556,8 +554,7 @@ gateway:
 #[tokio::test]
 async fn command_message_skips_injection() {
     let (address, request_rx, server) = spawn_inject_stub(1);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-cmd-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("b11-cmd").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -598,8 +595,7 @@ gateway:
 #[tokio::test]
 async fn persist_prism_mode_sends_round_with_streamed_response() {
     let (address, request_rx, server) = spawn_inject_stub(2);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-persist-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("b11-persist").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, true);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await

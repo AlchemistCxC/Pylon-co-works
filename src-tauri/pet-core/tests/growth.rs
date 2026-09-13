@@ -814,7 +814,13 @@ fn poll_voice_reports_need_priorities() {
     assert!(!pet.poll_voice(1), "健康时不说话");
     pet.hunger = 10;
     assert!(pet.poll_voice(2), "饥饿必须说话");
-    assert!(pet.msg.as_deref() == Some("咕……") || pet.msg.is_some());
+    // P91 批 C1：去掉恒真子句 `|| pet.msg.is_some()`（原断言实际退化为 is_some），
+    // 钉死具体台词——per-state 计数器从 0 起轮换，饥饿首句恒为 Hungry 池[0]。
+    assert_eq!(
+        pet.msg.as_deref(),
+        Some("咕……"),
+        "饥饿文案必须命中 Hungry 池首句"
+    );
     pet.msg = None;
 
     pet.hunger = 80;
@@ -874,8 +880,14 @@ fn day_part_respects_local_offset_and_clamps() {
     assert_eq!(pet.day_part(0), DayPart::Day);
     // 修复（2026-08-02 A2）：480 分钟时 UTC 14:00 = 本地 22:00 → Night
     //（旧实现偏移按小时语义被丢弃，此处恒 Day/恒 UTC——断言修复后为 Night）
+    // P91 批 C1：offset_480_minutes_produces_night_at_local_22h 用例的
+    // 跨日回绕/对照断言并入此处（480→Night 断言原与该用例重复）。
     pet.set_local_offset_minutes(480);
     assert_eq!(pet.day_part(14 * 3_600_000), DayPart::Night);
+    // 跨日回绕：UTC 16:00 = 次日本地 00:00 → 仍 Night
+    assert_eq!(pet.day_part(16 * 3_600_000), DayPart::Night);
+    // 对照：UTC 4:00 = 本地 12:00 → Day（凌晨本地正午，隔离误判）
+    assert_eq!(pet.day_part(4 * 3_600_000), DayPart::Day);
     // 负偏移：UTC 0 点 - 5h = 前日 19:00 → Dusk
     pet.set_local_offset_minutes(-5 * 60);
     assert_eq!(pet.day_part(0), DayPart::Dusk);
@@ -886,20 +898,6 @@ fn day_part_respects_local_offset_and_clamps() {
     // 0 = UTC（默认）
     let pet = PetState::new_at(0);
     assert_eq!(pet.day_part(0), DayPart::Night);
-}
-
-#[test]
-fn offset_480_minutes_produces_night_at_local_22h() {
-    use pylon_pet_core::DayPart;
-    // 东八区（+480 分钟）：UTC 14:00 = 本地 22:00 → Night（修复后深夜功能
-    // 生效——Night bond×1.5 / night_visits / 深夜静默按真实本地时段触发）
-    let mut pet = PetState::new_at(0);
-    pet.set_local_offset_minutes(480);
-    assert_eq!(pet.day_part(14 * 3_600_000), DayPart::Night);
-    // 跨日回绕：UTC 16:00 = 次日本地 00:00 → 仍 Night
-    assert_eq!(pet.day_part(16 * 3_600_000), DayPart::Night);
-    // 对照：UTC 4:00 = 本地 12:00 → Day（凌晨本地正午，隔离误判）
-    assert_eq!(pet.day_part(4 * 3_600_000), DayPart::Day);
 }
 
 #[test]

@@ -99,13 +99,31 @@ pub(crate) async fn update_agents_config(
     config: serde_json::Value,
     expected_revision: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
+    update_agents_config_via(state, scope, agent_id, config, expected_revision, None).await
+}
+
+/// P91 批 C1（横切 §4）：配置路径参数化入口——生产恒走
+/// `effective_config_path()`（`config_path_override=None`，行为不变）；测试注入
+/// 临时配置路径，不再 `set_var` 进程全局 `PYLON_AGENTS_CONFIG`（进程级 env 变异
+/// 与并行测试竞态）。
+pub(crate) async fn update_agents_config_via(
+    state: tauri::State<'_, AppState>,
+    scope: String,
+    agent_id: Option<String>,
+    config: serde_json::Value,
+    expected_revision: Option<String>,
+    config_path_override: Option<std::path::PathBuf>,
+) -> Result<serde_json::Value, PylonError> {
     use crate::agent_config::ConfigError;
     let inner = state.inner();
     // 写序锁：读当前→生成候选→校验→写盘→内存提交全程串行，防基于旧版本互相覆盖
     let _write_guard = inner.config_write_lock.lock().await;
     // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
-    let path = crate::agent_config::effective_config_path()
-        .ok_or(PylonError::Config(ConfigError::ReadOnly))?;
+    let path = match config_path_override {
+        Some(path) => path,
+        None => crate::agent_config::effective_config_path()
+            .ok_or(PylonError::Config(ConfigError::ReadOnly))?,
+    };
     let expected_revision =
         expected_revision.ok_or(PylonError::Config(ConfigError::RevisionRequired))?;
     // 跨进程 lease 覆盖“重读 baseline → 生成/校验候选 → 提交”整个窗口。

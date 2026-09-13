@@ -1921,6 +1921,39 @@ mod tests {
         ))
     }
 
+    /// P91 批 C1（横切 §3）：fixture 根目录 RAII 守卫——断言失败 panic / 提前
+    /// return 也清理（旧式测试尾部手工 remove_dir_all 在失败路径泄漏目录）。
+    /// 经 Deref 透明使用：`root.join(..)` / `&root` / `root.clone()` 语义与原
+    /// PathBuf 一致（clone 走解歧到 PathBuf，不再克隆守卫）。
+    struct FixtureRoot(PathBuf);
+
+    impl FixtureRoot {
+        fn new(label: &str) -> Self {
+            Self(fixture_root(label))
+        }
+    }
+
+    impl Drop for FixtureRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for FixtureRoot {
+        type Target = PathBuf;
+
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    // fs::create_dir_all(&root) 等 AsRef<Path> 泛型边界不走路由解强制转换，需显式实现。
+    impl AsRef<Path> for FixtureRoot {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
     /// 写入一个名为 `command` 的假可执行文件；`version` 为 `None` 时以非零退出，
     /// 模拟「存在但读不出」（与 `make_hanging_executable` 同一夹具手法）。
     fn plant_version_tool(root: &Path, command: &str, version: Option<&str>) {
@@ -1998,7 +2031,7 @@ mod tests {
     /// 三态是关键：存在→Known、存在但读不出→Unknown（不是违规）、不存在→Absent。
     #[tokio::test]
     async fn runtime_tool_probe_maps_known_unknown_and_absent() {
-        let root = fixture_root("tool-probe");
+        let root = FixtureRoot::new("tool-probe");
         std::fs::create_dir_all(&root).unwrap();
 
         // 1）存在且可读 → Known
@@ -2056,8 +2089,6 @@ mod tests {
             0,
             "工具探针不得创建任何文件/目录"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2138,7 +2169,7 @@ mod tests {
 
     #[test]
     fn structured_config_evidence_reports_field_names_without_values() {
-        let root = fixture_root("config");
+        let root = FixtureRoot::new("config");
         let home = root.join("home");
         let config_dir = home.join(".hermes");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -2163,13 +2194,11 @@ mod tests {
         assert!(!structured.detail.contains("private-provider"));
         assert!(!structured.detail.contains("private-model"));
         assert!(!structured.detail.contains("super-secret"));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn all_installed_invocation_aliases_are_discovered() {
-        let root = fixture_root("aliases");
+        let root = FixtureRoot::new("aliases");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2179,17 +2208,16 @@ mod tests {
             .find(|rule| rule.provider == "hermes")
             .unwrap();
 
-        let found = find_rule(&rule, Some(std::slice::from_ref(&root)));
+        let found = find_rule(&rule, Some(std::slice::from_ref(&*root)));
 
         assert_eq!(found.len(), 2, "首个 alias 不得遮蔽后续已安装 alias");
         assert_eq!(found[0].args, ["acp"]);
         assert!(found[1].args.is_empty());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn standalone_entry_uses_the_same_structured_evidence_engine() {
-        let root = fixture_root("standalone");
+        let root = FixtureRoot::new("standalone");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".hermes")).unwrap();
@@ -2221,15 +2249,13 @@ mod tests {
             .evidence
             .iter()
             .any(|item| item.kind == "config-fields"));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A1 验收：wrapper provider 的 ACP 与原生 CLI 证据分开展开，且即使 ACP
     /// 候选缺失也会产出 provider 级证据（这是 `adapterMissing` 可观察的前提）。
     #[tokio::test]
     async fn wrapper_evidence_separates_acp_from_native_cli() {
-        let root = fixture_root("adapter-relation");
+        let root = FixtureRoot::new("adapter-relation");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
@@ -2266,14 +2292,12 @@ mod tests {
             Some("claude")
         );
         assert!(evidence.shared_config_present);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// 非 wrapper provider 不探测第二 CLI，也不报共享配置目录存在。
     #[tokio::test]
     async fn native_acp_provider_has_no_second_cli_evidence() {
-        let root = fixture_root("native-evidence");
+        let root = FixtureRoot::new("native-evidence");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(&home).unwrap();
@@ -2298,14 +2322,12 @@ mod tests {
         assert!(!evidence.shared_config_present);
         assert_eq!(evidence.acp_commands.len(), 1);
         assert_eq!(evidence.acp_commands[0].kind, "acp-command");
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A1 零安装副作用：探测只读，不创建目录。
     #[tokio::test]
     async fn evidence_scan_has_no_install_side_effects() {
-        let root = fixture_root("no-side-effects");
+        let root = FixtureRoot::new("no-side-effects");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(&home).unwrap();
@@ -2324,15 +2346,13 @@ mod tests {
         assert!(!home.join(".claude").exists());
         assert_eq!(std::fs::read_dir(&home).unwrap().count(), before);
         assert_eq!(std::fs::read_dir(&search).unwrap().count(), 0);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A5①：codex 的 wrapper 双证据。本机真实状态是「vendor CLI 在、ACP 适配器
     /// 不在」（`codex` 已装、`codex-acp` 未装），必须产出可行动的 `adapterMissing`。
     #[tokio::test]
     async fn codex_wrapper_reports_adapter_missing_with_native_cli_present() {
-        let root = fixture_root("codex-adapter-missing");
+        let root = FixtureRoot::new("codex-adapter-missing");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".codex")).unwrap();
@@ -2383,8 +2403,6 @@ mod tests {
         assert!(adapter.native_present);
         assert!(!adapter.acp_present);
         assert!(adapter.shared_config_present);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -2408,7 +2426,7 @@ mod tests {
 
     #[tokio::test]
     async fn discovery_reports_identity_separately_from_protocol_availability() {
-        let root = fixture_root("identity-protocol");
+        let root = FixtureRoot::new("identity-protocol");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2455,14 +2473,13 @@ mod tests {
             candidate.protocol_availability,
             ProtocolAvailability::NotTested
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// issue #67B：同一 invocation 在多个安装位置命中（PATH 与 known-path / 多个搜索根）
     /// 也是同一 agent 的多重证据，必须折叠；折叠后仍能看出存在第二处安装。
     #[tokio::test]
     async fn same_agent_found_in_multiple_roots_folds_into_one_candidate() {
-        let root = fixture_root("identity-multi-root");
+        let root = FixtureRoot::new("identity-multi-root");
         let first = root.join("bin-a");
         let second = root.join("bin-b");
         std::fs::create_dir_all(&first).unwrap();
@@ -2497,13 +2514,12 @@ mod tests {
             folded[0].detail
         );
         assert_eq!(candidate.already_imported_agent_id, None);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// issue #67B：身份键包含 provider——不同 agent 的多重证据**永不**互相合并。
     #[tokio::test]
     async fn different_providers_are_never_merged() {
-        let root = fixture_root("identity-cross-provider");
+        let root = FixtureRoot::new("identity-cross-provider");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2532,14 +2548,13 @@ mod tests {
             vec!["hermes", "peri"],
             "跨 provider 的候选绝不合并"
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// issue #67B：导入侧判定改用 provider 身份——已配置的 agent 即使使用另一种启动形式
     /// 也必须被认出来（否则界面显示"未导入"并诱导重复导入），且已导入变体优先当代表。
     #[tokio::test]
     async fn configured_agent_matches_by_provider_identity_across_launch_forms() {
-        let root = fixture_root("identity-imported-form");
+        let root = FixtureRoot::new("identity-imported-form");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2586,7 +2601,6 @@ mod tests {
                 .any(|warning| warning.contains("同一 Agent 另有可执行形式")),
             "合并后的代表与折叠形式必须都有留痕"
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn synthetic_candidate(
@@ -2721,7 +2735,7 @@ mod tests {
 
     #[tokio::test]
     async fn candidate_limit_is_stable_and_explicitly_truncated() {
-        let root = fixture_root("candidate-limit");
+        let root = FixtureRoot::new("candidate-limit");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2745,12 +2759,11 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "candidate_limit_reached"));
         assert_eq!(report.candidates[0].args, ["acp"]);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn exact_name_lookup_reaches_search_roots_after_the_sixteenth_entry() {
-        let root = fixture_root("root-limit");
+        let root = FixtureRoot::new("root-limit");
         let roots = (0..17)
             .map(|index| root.join(format!("bin-{index}")))
             .collect::<Vec<_>>();
@@ -2781,12 +2794,11 @@ mod tests {
             roots[16].join(&executable_names("peri")[0]),
         );
         assert!(!report.truncated, "精确文件名检查不应被搜索目录数量截断");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn version_probe_uses_catalog_arguments_and_standard_default() {
-        let root = fixture_root("version-args");
+        let root = FixtureRoot::new("version-args");
         std::fs::create_dir_all(&root).unwrap();
         #[cfg(windows)]
         let (executable, args) = {
@@ -2820,7 +2832,6 @@ mod tests {
             assert_eq!(invalid.startability, Startability::Failed);
             assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
         }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// C1：失败也必须进缓存，而且缓存是**按 key** 而不是全局「记住最后一次」。
@@ -2833,7 +2844,7 @@ mod tests {
     /// 既避开带空格的路径，也让两个夹具能各自独立计数。
     #[tokio::test]
     async fn a_failed_version_probe_is_cached_like_a_successful_one() {
-        let root = fixture_root("probe-failure-cache");
+        let root = FixtureRoot::new("probe-failure-cache");
         let failing_dir = root.join("failing");
         let working_dir = root.join("working");
         std::fs::create_dir_all(&failing_dir).unwrap();
@@ -2883,8 +2894,6 @@ mod tests {
             2,
             "缓存必须按 (路径, 参数, mtime) 分键，不得互相驱逐"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// 安置一个每次运行都向自身目录的 `count.txt` 追加一行的探针夹具。
@@ -2925,7 +2934,7 @@ mod tests {
     /// 侧各自**不同**的来源词汇（候选区分 path/known-path，证据只报 known-path）。
     #[tokio::test]
     async fn candidate_and_evidence_scans_agree_on_what_exists() {
-        let root = fixture_root("scan-agreement");
+        let root = FixtureRoot::new("scan-agreement");
         let on_path = root.join("on-path");
         let off_path = root.join("off-path");
         std::fs::create_dir_all(&on_path).unwrap();
@@ -2996,13 +3005,11 @@ mod tests {
             peri.warnings.iter().any(|w| w.contains("不在当前 PATH")),
             "候选侧必须保留 off-PATH 警告"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn version_probe_timeout_is_bounded_and_visible() {
-        let root = fixture_root("probe-timeout");
+        let root = FixtureRoot::new("probe-timeout");
         std::fs::create_dir_all(&root).unwrap();
         make_hanging_executable(&root, "peri");
 
@@ -3026,7 +3033,6 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
         assert_eq!(report.candidates[0].startability, Startability::Failed);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3064,7 +3070,7 @@ mod tests {
             GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
-        let root = fixture_root("probe-tree");
+        let root = FixtureRoot::new("probe-tree");
         std::fs::create_dir_all(&root).unwrap();
         let pid_file = root.join("child.pid");
         let escaped_pid_file = pid_file.to_string_lossy().replace("'", "''");
@@ -3108,24 +3114,23 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     // ── B0：DetectionSnapshot 组装、缓存策略与快照级 fixture ──
 
     #[test]
     fn search_roots_fingerprint_tracks_the_controlled_roots() {
-        let left = fixture_root("fingerprint-left");
-        let right = fixture_root("fingerprint-right");
+        let left = FixtureRoot::new("fingerprint-left");
+        let right = FixtureRoot::new("fingerprint-right");
         std::fs::create_dir_all(&left).unwrap();
         std::fs::create_dir_all(&right).unwrap();
 
-        let a = search_roots_fingerprint(Some(std::slice::from_ref(&left)));
+        let a = search_roots_fingerprint(Some(std::slice::from_ref(&*left)));
         let b = search_roots_fingerprint(Some(&[left.clone(), right.clone()]));
         let reordered = search_roots_fingerprint(Some(&[right.clone(), left.clone()]));
         assert_eq!(
             a,
-            search_roots_fingerprint(Some(std::slice::from_ref(&left))),
+            search_roots_fingerprint(Some(std::slice::from_ref(&*left))),
             "同 roots 必须同指纹"
         );
         assert_ne!(a, b, "roots 集合不同必须产生不同指纹");
@@ -3133,9 +3138,6 @@ mod tests {
             b, reordered,
             "顺序影响候选优先级，顺序不同的搜索不是同一搜索"
         );
-
-        std::fs::remove_dir_all(left).unwrap();
-        std::fs::remove_dir_all(right).unwrap();
     }
 
     #[test]
@@ -3208,7 +3210,7 @@ mod tests {
     /// preflight 结论为 notInstalled（裸机不会被报成更具体的状态）。
     #[tokio::test]
     async fn snapshot_fixture_machine_with_nothing_installed() {
-        let root = fixture_root("snapshot-empty");
+        let root = FixtureRoot::new("snapshot-empty");
         let home = root.join("home");
         std::fs::create_dir_all(&home).unwrap();
 
@@ -3241,15 +3243,13 @@ mod tests {
             DetectionOutcome::classify(&Ok(snapshot.report.clone())),
             DetectionOutcome::Success
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：版本超时——探针超时是 retryable 诊断，快照 outcome 必须是
     /// Unknown（degraded），不是 Success。
     #[tokio::test]
     async fn snapshot_fixture_version_timeout_is_degraded() {
-        let root = fixture_root("snapshot-timeout");
+        let root = FixtureRoot::new("snapshot-timeout");
         std::fs::create_dir_all(&root).unwrap();
         make_hanging_executable(&root, "peri");
 
@@ -3274,15 +3274,13 @@ mod tests {
             DetectionOutcome::classify(&Ok(snapshot.report.clone())),
             DetectionOutcome::Unknown
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：PATH 缺口——候选在搜索 roots 内但不在进程 PATH 上，快照必须
     /// 保留该警告（导入会保存绝对路径这一事实不可丢失）。
     #[tokio::test]
     async fn snapshot_fixture_off_path_candidate_keeps_warning() {
-        let root = fixture_root("snapshot-path-gap");
+        let root = FixtureRoot::new("snapshot-path-gap");
         std::fs::create_dir_all(&root).unwrap();
         plant_version_tool(&root, "peri", Some("1.0.0"));
 
@@ -3317,8 +3315,6 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("不在当前 PATH")));
         }
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：wrapper/native 双证据 + 版本门槛——`ccb` 与 `claude` 同时在
@@ -3326,7 +3322,7 @@ mod tests {
     /// installed 收尾（版本 0.75.1 高于 0.65.0 门槛）。
     #[tokio::test]
     async fn snapshot_fixture_wrapper_dual_evidence_installs() {
-        let root = fixture_root("snapshot-dual");
+        let root = FixtureRoot::new("snapshot-dual");
         let home = root.join("home");
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
@@ -3378,15 +3374,13 @@ mod tests {
             .adapter
             .as_ref()
             .is_some_and(|adapter| adapter.native_present && adapter.acp_present));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：配置仅存在——共享配置目录在、可执行文件不在，preflight 必须
     /// 报 configOnly 而不是 notInstalled。
     #[tokio::test]
     async fn snapshot_fixture_config_only_without_executables() {
-        let root = fixture_root("snapshot-config-only");
+        let root = FixtureRoot::new("snapshot-config-only");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
@@ -3409,15 +3403,13 @@ mod tests {
             verdict.status,
             crate::agent_preflight::PreflightStatus::ConfigOnly
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：路径不可访问——搜索 root 指向一个普通文件（无法当目录枚举），
     /// 扫描不得 panic、不得整报失败，只是该 root 无候选。
     #[tokio::test]
     async fn snapshot_fixture_inaccessible_root_is_not_an_error() {
-        let root = fixture_root("snapshot-inaccessible");
+        let root = FixtureRoot::new("snapshot-inaccessible");
         std::fs::create_dir_all(&root).unwrap();
         let not_a_dir = root.join("blocker.txt");
         std::fs::write(&not_a_dir, b"this is a regular file").unwrap();
@@ -3434,7 +3426,5 @@ mod tests {
         assert!(report.candidates.is_empty());
         let snapshot = assemble_detection_snapshot(report, 7, Some(&[not_a_dir]));
         assert_eq!(snapshot.report.candidates.len(), 0);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

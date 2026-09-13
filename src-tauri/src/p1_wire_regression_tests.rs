@@ -250,7 +250,7 @@ fn entries_with_message(
 }
 
 fn temp_trace(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("pylon-p1-{label}-{}.jsonl", std::process::id()))
+    crate::test_utils::unique_temp(&format!("p1-{label}")).with_extension("jsonl")
 }
 
 /// id 形态参数：python 字面量（fake ACP 脚本）、挂起键 RequestId、期望回显、

@@ -260,7 +260,7 @@ fn entries_with_message(
 }
 
 fn temp_trace(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("pylon-obs03-{label}-{}.jsonl", std::process::id()))
+    crate::test_utils::unique_temp(&format!("obs03-{label}")).with_extension("jsonl")
 }
 
 // ── Case A：fake ACP / number id / allow_once+deny / default ────────────────────────────

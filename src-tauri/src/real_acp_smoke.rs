@@ -61,18 +61,29 @@ async fn real_agent_initialize_new_session_and_process_cleanup() {
     // kill → 直接子进程必须退出（R9 进程树清理）
     let mut client = client;
     client.kill().expect("kill 必须成功");
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let alive = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {child_pid}"), "/NH"])
-        .output()
-        .map(|output| {
-            let text = String::from_utf8_lossy(&output.stdout);
-            !text.trim().is_empty()
-                && !text.contains("没有运行的任务")
-                && !text.contains("INFO: No tasks")
-        })
-        .unwrap_or(true);
-    assert!(!alive, "kill 后直接子进程 (pid={child_pid}) 必须被回收");
+    // P91 批 C1（横切 §5）：固定 300ms sleep 改轮询——子进程退出时刻不定，
+    // 轮询既消除慢机器上的假阳性（>300ms 未退出即误判泄漏），也不拖慢快机器。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let alive = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {child_pid}"), "/NH"])
+            .output()
+            .map(|output| {
+                let text = String::from_utf8_lossy(&output.stdout);
+                !text.trim().is_empty()
+                    && !text.contains("没有运行的任务")
+                    && !text.contains("INFO: No tasks")
+            })
+            .unwrap_or(true);
+        if !alive {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "kill 后直接子进程 (pid={child_pid}) 必须在 10s 内被回收"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     tracing::info!("真实 agent 进程树清理 OK (pid={child_pid})");
 }
 

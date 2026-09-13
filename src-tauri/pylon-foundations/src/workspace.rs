@@ -707,7 +707,6 @@ pub fn workspace_root(source: String, root: &Path) -> WorkspaceRoot {
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDir(PathBuf);
     impl Drop for TempDir {
@@ -716,12 +715,22 @@ mod tests {
         }
     }
 
+    /// P91 批 C1（横切 §3）：唯一临时目录名（pid + nanos）——原纯 nanos 命名
+    /// 无 pid 维度，跨测试进程可碰撞（时钟回拨/同刻并发），pid 隔离后不可能复用
+    /// 他人目录。
+    fn unique_workspace_temp(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "pylon-workspace-test-{label}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
     fn fixture() -> (TempDir, PathBuf) {
-        let id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("pylon-workspace-test-{id}"));
+        let dir = unique_workspace_temp("fixture");
         let root = dir.join("root");
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/main.ts"), "hello").unwrap();

@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn save_and_load_round_trips_state() {
-        let dir = std::env::temp_dir().join(format!("pylon-pet-test-{}", std::process::id()));
+        let dir = crate::test_utils::unique_temp("pet-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("pylon-pet.json");
         let mut pet = PetState::new_at(1_000);
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn load_missing_or_corrupt_returns_none() {
-        let dir = std::env::temp_dir().join(format!("pylon-pet-bad-{}", std::process::id()));
+        let dir = crate::test_utils::unique_temp("pet-bad");
         std::fs::create_dir_all(&dir).unwrap();
         let missing = dir.join("missing.json");
         assert!(load_from_file(&missing).is_none());

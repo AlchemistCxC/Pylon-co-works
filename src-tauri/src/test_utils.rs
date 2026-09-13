@@ -54,6 +54,18 @@ fn python_available(candidate: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// P70/P91（批 C1 横切 §3）：同型临时路径的唯一命名（pid + nanos）。
+/// pid 隔离跨进程并发，nanos 隔离同进程内先后/并发调用——上次崩溃残留的
+/// 同名路径不会被 create_dir_all 静默复用（纯 pid 命名的缺陷）。调用方需要
+/// 带扩展名的文件路径时对返回值 `.with_extension(...)`（本命名不含 `.`）。
+pub(crate) fn unique_temp(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("pylon-{label}-{}-{nanos}", std::process::id()))
+}
+
 /// 构造 fake ACP 子进程 agent：`python -u -c <script>`，无额外参数与环境。
 pub(crate) fn fake_acp_agent(name: &str, script: &str) -> AgentDef {
     fake_acp_agent_with(name, script, Vec::new(), HashMap::new())
