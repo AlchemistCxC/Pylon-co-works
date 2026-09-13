@@ -1,6 +1,22 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-13 19:34] [砂纸·工程师] [已复现 #67 重复导入根因·已登记 #69 返工口径·按用户指示“不着急开工”只沉淀不动代码] 接上一条（仓库主对 #67/#69 的验收反馈），我按其选择"在 HEAD 上自行复现"完成只读复现：
+
+**#67 重复导入——根因已复现（未改仓库）**：树外一次性 harness（`G:\TEMP\pylon-67-repro{,2}`，仅以 path 依赖引用 `pylon-core`，直接向 `detect_agent_runtime_candidates_inner` 喂 `configured`）：
+- provider=`peri`（对照）→ `alreadyImportedAgentId=Some("peri-imported")`；provider=**空串** → `None`；provider=**`custom`** → `None`。
+- 保真版（改用**应用自己的** `configured_executable_key`）对 `peri.exe`/`peri.cmd` 两种形态得到**相同**结果，并证明应用侧键与探测侧 `path_key` **逐字一致** ⇒ “.cmd launcher 解析导致键不一致”假设**已被排除**。
+- 触发面已定位到源码：已导入判定只认 provider 相等（`src-tauri/src/agent_detection.rs:362-375`），而**手动新建 Agent 的 provider 默认值是 `'custom'`**（`src/components/settings/AgentRuntimePanel.tsx:221`）⇒ provider 为空/`custom` 的存量条目**永远识别不出已导入**，探测照旧给「验证并导入 / 仍然导入」；`importCandidate` 再追加 `-2` 后缀造出重复实例。**我 67B 只放宽了 exe/args，未覆盖 provider 这层——定性为漏项**。
+- 旁证：`pylon-detect` CLI 永远显示不出已导入（走的是不带 configured 的入口）；既有 Rust 测试只钉了缓存指纹，未覆盖匹配语义。
+
+**#67“无法删除已导入的重复实例”——待定位清单**：① embedded（只读）态 `deleteAgent` 无 initialize 降级（而 `importCandidate` 有）且 `effective_config_path()` 为 None 时先返 `config_read_only`（`config_cmds.rs:147-148`）⇒ 嵌入态“能导入但删不掉”；② 目标是 active agent（前端禁用+后端保护）；③ 构建早于 `9b14258c`。已排除：配置校验不会因网关引用而拒绝删除候选。**需用户回一句**：现场构建是否含 `9b14258c`/`eb96cc63`，以及点删除时是“无按钮/按钮禁用/报错及其 code”。
+
+**文档沉淀**：施工书《Pylon-Issue67-…》追加 **§9 验收返工线索**（含原话反馈、复现方法与输出表、漏项定性、返工方向、删除面清单）；台账 **P81** 状态改为「🔧 验收未通过·待返工（已复现根因）」、**P79** 改为「🔧 验收未通过·待重构（用户要求统一模型）」，两者均写入原话反馈与我的静态/复现证据；下一阶段清单两行同步。
+
+**#69 返工口径（按用户原话）**：不再打补丁，改为把两态的**几何与行装饰收编为单一真源**；已定位两处 token 无法解决的残余：`.file-tab-line` 未被契约块重置的 `border-left: 2px`（只读正文每行右移 2px）、`[data-changed]::before` 仅存于只读态（变更行内容宽度不同源）。施工前需先出重构施工书。
+
+**待指派**（用户已答复“不着急开工”）：#67 返工（将触及 `src-tauri/src/agent_detection.rs` 的 configured 构造与 `AgentRuntimePanel.tsx` 的导入判定）、#69 重构；#53 属 Chica 认领域，**未经指派我不动**。
+
 [2026-09-13 19:12] [砂纸·架构师] [已把 #36/#37 核验结论回帖到远端 tracker（含自更正）·并已读到仓库主对 #67/#69/#53 的验收反馈] 按用户口径（"#36/#37 追核验评论"）在两个 issue 各发一条维护方核验评论，**未改报告人正文**：
 - **#36** → https://github.com/AlchemistCxC/Pylon-co-works/issues/36#issuecomment-5652904797（逐条判定表 + 契约真值 `approval` 三方对照 + “`[object Object]` 是独立缺陷” + CLI 为何只能硬编码（`InteractionItem` 无 kind）+ 验收面与反指标）
 - **#37** → https://github.com/AlchemistCxC/Pylon-co-works/issues/37#issuecomment-5652905239（原样复跑逐格一致 + **HEAD 变体断言失败 `0 !== 1`** + 身份规范化必须放后端（派发载荷不含本地 id）+ **词表与手册 §6.2 一致而派发面在发词表外锚点** + `dangerousHooks` 双重不可达）
