@@ -792,4 +792,77 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     expect(await screen.findByText(/未发现可自动配置的 ACP Agent/)).toBeInTheDocument()
     expect(screen.queryByLabelText('本机 Agent 安装状态')).toBeNull()
   })
+
+  // ── issue #67A：删除已连接 agent runtime（仅摘配置 + 停 runtime；会话/记录保留） ──
+
+  it('删除非 active Agent 前先确认影响面，确认后按 agent_delete scope 写配置', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, scope: 'agent_delete', agentCount: 1, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([
+        { id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', args: ['acp'], effectiveArgs: ['acp'], default: true },
+      ])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', expect.objectContaining({ scope: 'agent_delete', agentId: 'hermes' })))
+    const message = String(confirmSpy.mock.calls[0]?.[0] ?? '')
+    expect(message).toContain('将移除：')
+    expect(message).toContain('配置条目 hermes（agents.yaml）')
+    expect(message).toContain('保留不动：')
+    expect(message).toContain('该 Agent 的历史会话与记录数据')
+    expect(await screen.findByText(/已删除 Hermes（hermes）/)).toBeInTheDocument()
+    expect(screen.queryByText('Hermes')).toBeNull()
+    confirmSpy.mockRestore()
+  })
+
+  it('取消确认时不发送任何配置写请求', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    const confirmationsBefore = confirmSpy.mock.calls.length
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    expect(confirmSpy.mock.calls.length - confirmationsBefore).toBe(1)
+    expect(invoke.mock.calls.filter(([command]) => command === 'update_agents_config')).toEqual([])
+    expect(screen.getByText('Hermes')).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  it('active Agent 不可删除，并直接给出切换原因', async () => {
+    render(<AgentRuntimePanel />)
+
+    const periCard = (await screen.findByText('Peri')).closest('.agent-runtime-card') as HTMLElement
+    expect(within(periCard).getByRole('button', { name: '删除' })).toBeDisabled()
+    expect(within(periCard).getByText(/当前正在使用的 Agent 不能删除/)).toBeInTheDocument()
+    const hermesCard = screen.getByText('Hermes').closest('.agent-runtime-card') as HTMLElement
+    expect(within(hermesCard).getByRole('button', { name: '删除' })).toBeEnabled()
+  })
+
+  it('删除失败时展示可行动提示且列表不变', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') {
+        return Promise.reject({ code: 'config_active_agent_protected', message: 'config_active_agent_protected: 候选配置删除了当前 active agent: hermes' })
+      }
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    expect(await screen.findByText(/删除 Agent失败，详情见右下角错误中心/)).toBeInTheDocument()
+    expect(screen.getByText('Hermes')).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
 })

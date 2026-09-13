@@ -295,6 +295,14 @@ export function createAgentClient(transport: ClientTransport) {
       acceptMutationRevision(result)
       return result
     },
+    /** 删除单个 Agent 配置条目（issue #67A）：仅摘配置 + 停 runtime，会话/记录数据保留。
+     *  无 initialize 降级——embedded 配置没有可写目标，删除只能 fail-closed（config_read_only）。 */
+    deleteAgent: async (agentId: string): Promise<unknown> => {
+      const expectedRevision = await mutationRevision()
+      const result = await transport.invoke('update_agents_config', { scope: 'agent_delete', agentId, ...(expectedRevision ? { expectedRevision } : {}) })
+      acceptMutationRevision(result)
+      return result
+    },
     /** 施工文档 §4.6：embedded → exe 旁 agents.yaml 首次外部配置初始化。 */
     initializeAgentsConfig: async (agentId: string | undefined, config: AgentsConfigDocument): Promise<unknown> => {
       const result = await transport.invoke('initialize_agents_config', { agentId, config })
