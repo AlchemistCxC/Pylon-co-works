@@ -54,6 +54,32 @@ export interface StreamingDisplaySchedulerOptions {
   now?: () => number
 }
 
+/** S0 诊断：一次发布是「按预算插值」还是「整发（replacement/reset/flush）。 */
+export type StreamingDisplayPublicationKind = 'whole' | 'budgeted'
+
+/**
+ * S0 只读诊断读数。纯观测：不参与任何节奏决策，调用不得改变调度器状态。
+ * 采样走固定容量环形缓冲（64）O(1) 记录，不新增全量扇描。
+ */
+export interface StreamingDisplayDiagnosticsSnapshot {
+  readonly publishes: number
+  readonly lastPublicationKind: StreamingDisplayPublicationKind
+  /** budgeted 发布：单行最大新增（UTF-16 单元）；whole 发布为 null（整发不适用预算） */
+  readonly lastPublicationMaxUnits: number | null
+  /** budgeted 发布：所有行新增之和（UTF-16 单元）；whole 发布为 null */
+  readonly lastPublicationTotalUnits: number | null
+  /** 最近一次 revealBudget 计算出的欠账（UTF-16 单元） */
+  readonly lastBacklogUnits: number
+  /** 最近一次一拍预算（UTF-16 单元） */
+  readonly lastBudget: number
+  /** 追赶窗口（重新）开启的次数 */
+  readonly catchUpWindows: number
+  readonly terminalPublications: number
+  readonly flushes: number
+  /** 最近 ≤64 次发布的实际间隔（ms，按发生顺序） */
+  readonly recentPublicationIntervalsMs: readonly number[]
+}
+
 export interface StreamingDisplayScheduler {
   /** Offer the newest raw runtime snapshot (latest target wins). */
   push(snapshot: WorkbenchRuntimeSnapshot): void
@@ -69,6 +95,11 @@ export interface StreamingDisplayScheduler {
   resume(snapshot?: WorkbenchRuntimeSnapshot): void
   /** Cancel pending work and release references. */
   dispose(): void
+  /**
+   * S0 只读诊断读数：纯观测，调用不改变任何节奏状态。
+   * 用于在真机会话里验证“发布节奏/单拍增量/追赶次数”，也是行几何诊断的入口。
+   */
+  diagnostics(): StreamingDisplayDiagnosticsSnapshot
 }
 
 /** Renderer safety net: never publish an impossible terminal combination. */
@@ -93,9 +124,20 @@ type DisplayMessage = {
   readonly parts?: readonly ContentPart[]
 }
 
+/** 一次发布的可选标注（S0）：kind 必填，单位仅在 budgeted 时有效。 */
+interface StreamingDisplayPublication {
+  readonly kind: StreamingDisplayPublicationKind
+  readonly maxUnits?: number
+  readonly totalUnits?: number
+}
+
 interface MessageProgress<T extends DisplayMessage> {
   readonly messages: readonly T[]
   readonly pending: boolean
+  /** S0：本列表本次推进的单行最大新增（UTF-16 单元） */
+  readonly advancedMaxUnits: number
+  /** S0：本列表本次推进的所有行新增之和（UTF-16 单元） */
+  readonly advancedTotalUnits: number
 }
 
 interface PrefixAdvance {
@@ -169,6 +211,21 @@ export function createStreamingDisplayScheduler(
   /** Start of the window in which the current backlog must be fully revealed. */
   let catchUpDeadline = Number.NEGATIVE_INFINITY
 
+  // ── S0 只读诊断（不参与任何节奏决策）────────────────────────
+  const DIAGNOSTIC_INTERVAL_CAPACITY = 64
+  const publicationIntervals: number[] = []
+  let publicationIntervalCursor = 0
+  let previousPublicationAt = Number.NEGATIVE_INFINITY
+  let diagnosticsPublishes = 0
+  let diagnosticsKind: StreamingDisplayPublicationKind = 'whole'
+  let diagnosticsMaxUnits: number | null = null
+  let diagnosticsTotalUnits: number | null = null
+  let diagnosticsBacklogUnits = 0
+  let diagnosticsBudget = 0
+  let diagnosticsCatchUpWindows = 0
+  let diagnosticsTerminalPublications = 0
+  let diagnosticsFlushes = 0
+
   const clearTimer = () => {
     if (timer === undefined) return
     clearTimeout(timer)
@@ -187,7 +244,11 @@ export function createStreamingDisplayScheduler(
     catchUpDeadline = Math.max(catchUpDeadline, now() + maxRevealLagMs)
   }
 
-  const publishSnapshot = (snapshot: WorkbenchRuntimeSnapshot, timestamp = now()) => {
+  const publishSnapshot = (
+    snapshot: WorkbenchRuntimeSnapshot,
+    timestamp = now(),
+    publication: StreamingDisplayPublication = { kind: 'whole' },
+  ) => {
     if (disposed) return
     // A synchronous flush or owner switch supersedes an older queued terminal.
     terminalFlushToken = undefined
@@ -196,6 +257,20 @@ export function createStreamingDisplayScheduler(
     lastTickAt = timestamp
     // Publishing the full target means nothing is left to catch up.
     if (snapshot === target) catchUpDeadline = Number.NEGATIVE_INFINITY
+    // S0：只读计数（O(1)，不扇扫）。整发不适用预算，故单位字段记 null，避免伪造读数。
+    diagnosticsPublishes += 1
+    diagnosticsKind = publication.kind
+    diagnosticsMaxUnits = publication.kind === 'budgeted' ? Math.max(0, publication.maxUnits ?? 0) : null
+    diagnosticsTotalUnits = publication.kind === 'budgeted' ? Math.max(0, publication.totalUnits ?? 0) : null
+    if (Number.isFinite(previousPublicationAt)) {
+      const gap = Math.max(0, timestamp - previousPublicationAt)
+      if (publicationIntervals.length < DIAGNOSTIC_INTERVAL_CAPACITY) publicationIntervals.push(gap)
+      else {
+        publicationIntervals[publicationIntervalCursor] = gap
+        publicationIntervalCursor = (publicationIntervalCursor + 1) % DIAGNOSTIC_INTERVAL_CAPACITY
+      }
+    }
+    previousPublicationAt = timestamp
     publish(snapshot)
   }
 
@@ -222,14 +297,20 @@ export function createStreamingDisplayScheduler(
     ))
     if (displayed === undefined || target === undefined) return Math.min(maxRevealUnitsPerTick, baseline)
     const backlog = pendingTextUnits(displayed, target)
+    diagnosticsBacklogUnits = backlog
     if (backlog <= 0) return Math.min(maxRevealUnitsPerTick, baseline)
     // An unarmed window (smooth stream) or one already elapsed (throttled
     // background timer) restarts here, so the countdown never degrades into
     // "reveal everything left in this frame".
-    if (!(catchUpDeadline > timestamp)) catchUpDeadline = timestamp + maxRevealLagMs
+    if (!(catchUpDeadline > timestamp)) {
+      catchUpDeadline = timestamp + maxRevealLagMs
+      diagnosticsCatchUpWindows += 1
+    }
     const ticksLeft = Math.max(1, Math.ceil((catchUpDeadline - timestamp) / updateIntervalMs))
     const catchUp = Math.ceil(backlog / Math.min(catchUpTicks, ticksLeft))
-    return Math.min(maxRevealUnitsPerTick, Math.max(baseline, catchUp))
+    const budget = Math.min(maxRevealUnitsPerTick, Math.max(baseline, catchUp))
+    diagnosticsBudget = budget
+    return budget
   }
 
   const tick = () => {
@@ -255,7 +336,11 @@ export function createStreamingDisplayScheduler(
       return
     }
 
-    publishSnapshot(projection.snapshot, timestamp)
+    publishSnapshot(projection.snapshot, timestamp, {
+      kind: 'budgeted',
+      maxUnits: projection.advancedMaxUnits,
+      totalUnits: projection.advancedTotalUnits,
+    })
     schedule()
   }
 
@@ -311,7 +396,10 @@ export function createStreamingDisplayScheduler(
     if (target === undefined) return
     clearTimer()
     terminalFlushToken = undefined
-    if (!paused) publishSnapshot(target)
+    if (!paused) {
+      diagnosticsFlushes += 1
+      publishSnapshot(target)
+    }
   }
 
   // Canonical projection and legacy generation metadata can arrive back to
@@ -326,6 +414,7 @@ export function createStreamingDisplayScheduler(
       if (terminalFlushToken !== token) return
       terminalFlushToken = undefined
       if (disposed || paused) return
+      diagnosticsTerminalPublications += 1
       tick()
     })
   }
@@ -355,7 +444,30 @@ export function createStreamingDisplayScheduler(
     displayed = undefined
   }
 
-  return { push, flush, pause, resume, dispose }
+  const diagnostics = (): StreamingDisplayDiagnosticsSnapshot => {
+    const recent: number[] = []
+    if (publicationIntervals.length < DIAGNOSTIC_INTERVAL_CAPACITY) {
+      for (const gap of publicationIntervals) recent.push(gap)
+    } else {
+      for (let index = 0; index < DIAGNOSTIC_INTERVAL_CAPACITY; index += 1) {
+        recent.push(publicationIntervals[(publicationIntervalCursor + index) % DIAGNOSTIC_INTERVAL_CAPACITY])
+      }
+    }
+    return {
+      publishes: diagnosticsPublishes,
+      lastPublicationKind: diagnosticsKind,
+      lastPublicationMaxUnits: diagnosticsMaxUnits,
+      lastPublicationTotalUnits: diagnosticsTotalUnits,
+      lastBacklogUnits: diagnosticsBacklogUnits,
+      lastBudget: diagnosticsBudget,
+      catchUpWindows: diagnosticsCatchUpWindows,
+      terminalPublications: diagnosticsTerminalPublications,
+      flushes: diagnosticsFlushes,
+      recentPublicationIntervalsMs: recent,
+    }
+  }
+
+  return { push, flush, pause, resume, dispose, diagnostics }
 }
 
 /**
@@ -566,6 +678,8 @@ function messageListHasPendingGrowth<T extends DisplayMessage>(
 interface SnapshotProjection {
   readonly snapshot: WorkbenchRuntimeSnapshot
   readonly pending: boolean
+  readonly advancedMaxUnits: number
+  readonly advancedTotalUnits: number
 }
 
 function interpolateSnapshot(
@@ -578,11 +692,11 @@ function interpolateSnapshot(
     ? interpolateMessageList(current.document.messages, target.document.messages, budget)
     : target.document
       ? interpolateMessageList([], target.document.messages, budget)
-      : { messages: [], pending: false }
+      : { messages: [], pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
 
   const pending = legacy.pending || documentProgress.pending
 
-  if (!pending) return { snapshot: target, pending: false }
+  if (!pending) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
 
   const document = target.document
     ? {
@@ -597,6 +711,8 @@ function interpolateSnapshot(
       ...(document ? { document } : {}),
     },
     pending: true,
+    advancedMaxUnits: Math.max(legacy.advancedMaxUnits, documentProgress.advancedMaxUnits),
+    advancedTotalUnits: legacy.advancedTotalUnits + documentProgress.advancedTotalUnits,
   }
 }
 
@@ -605,15 +721,21 @@ function interpolateMessageList<T extends DisplayMessage>(
   target: readonly T[],
   budget: number,
 ): MessageProgress<T> {
-  if (current === target) return { messages: target, pending: false }
+  if (current === target) return { messages: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
   const currentById = new Map(current.map(message => [message.id, message]))
   let pending = false
+  let advancedMaxUnits = 0
+  let advancedTotalUnits = 0
   const messages = target.map(message => {
     if (!isStreamMessage(message)) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
     if (!message.content.startsWith(previousText) || message.content.length <= previousText.length) return message
     const advanced = advancePrefix(previousText, message.content, budget)
+    // S0：按 UTF-16 单元计数（与欠账口径一致），仅观测。
+    const advancedUnits = Math.max(0, advanced.value.length - previousText.length)
+    advancedTotalUnits += advancedUnits
+    if (advancedUnits > advancedMaxUnits) advancedMaxUnits = advancedUnits
     if (advanced.value === message.content) return message
     pending = true
     const parts = partialTextParts(message.parts, advanced.value)
@@ -623,7 +745,7 @@ function interpolateMessageList<T extends DisplayMessage>(
       ...(parts !== undefined ? { parts } : {}),
     } as T
   })
-  return { messages, pending }
+  return { messages, pending, advancedMaxUnits, advancedTotalUnits }
 }
 
 function partialTextParts(

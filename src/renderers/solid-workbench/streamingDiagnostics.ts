@@ -1,0 +1,120 @@
+/**
+ * 流式显示调度器的真机诊断读数（台账 P89 / 施工书 S0，纯观测，不改行为）。
+ *
+ * 两件事：
+ * 1. `diagnoseStreamingRows()`：读当前消息行的几何（行宽/正文宽/标记列宽/实际渲染行数），
+ *    用于当场判定"是宽度塌陷还是内容里多了硬换行"（P86 家族症状的判据）。
+ * 2. 成本读数与读数登记：把调度器 counters + 发布耗时 + 行几何打包成只读读数，
+ *    经 `rendererDiagnosticsRegistry` 由验收桥按需拉取（不新增全局、不新增协议）。
+ */
+import type { StreamingDisplayDiagnosticsSnapshot } from './streamingDisplayScheduler.ts'
+import { registerRendererDiagnostics } from '../../plugin-runtime/renderers/rendererDiagnosticsRegistry.ts'
+
+/** 验收桥上的读数 key（`__PYLON_KERNEL_DEV__.diagnostics.read('streamingDisplay')`）。 */
+export const STREAMING_DISPLAY_DIAGNOSTICS_KEY = 'streamingDisplay'
+
+export interface StreamingRowGeometry {
+  /** 行所属消息 id（取自消息行包装元素的 data-message-id） */
+  readonly messageId: string
+  readonly role: 'assistant' | 'reasoning'
+  /** 消息行元素宽度（px） */
+  readonly rowWidth: number
+  /** 正文元素宽度（px）；≈0 或远小于 rowWidth 即"宽度塌陷" */
+  readonly bodyWidth: number
+  /** 助手标记列宽度（px）；无标记时为 0 */
+  readonly markerWidth: number
+  /** 正文实际渲染行数（Range.getClientRects().length） */
+  readonly textLines: number
+}
+
+/**
+ * 读当前挂载体内流式行的几何。**只读**，不做任何 DOM 写入。
+ * 注意：jsdom 里没有布局，几何值恒为 0；真实数值只能在真浏览器取得（CDP 探针）。
+ */
+export function diagnoseStreamingRows(host: HTMLElement): readonly StreamingRowGeometry[] {
+  const rows = host.querySelectorAll<HTMLElement>('.term-row-assistant, .term-row-reasoning')
+  const geometry: StreamingRowGeometry[] = []
+  rows.forEach(row => {
+    const body = row.querySelector<HTMLElement>('.term-assistant-body, .term-reasoning-body')
+    if (body === null) return
+    const marker = row.querySelector<HTMLElement>('.term-assistant-dot, .term-assistant-dot-img')
+    geometry.push({
+      messageId: row.closest('[data-message-id]')?.getAttribute('data-message-id') ?? '',
+      role: row.classList.contains('term-row-assistant') ? 'assistant' : 'reasoning',
+      rowWidth: roundWidth(row.getBoundingClientRect().width),
+      bodyWidth: roundWidth(body.getBoundingClientRect().width),
+      markerWidth: marker === null ? 0 : roundWidth(marker.getBoundingClientRect().width),
+      textLines: countTextLines(body),
+    })
+  })
+  return geometry
+}
+
+/** 发布耗时读数（S5a 只读；用于"这个机器扛不扛得住当前节奏"的现场判断）。 */
+export interface StreamingDisplayPublishCost {
+  readonly samples: number
+  readonly lastMs: number
+  readonly maxMs: number
+  readonly p95Ms: number
+}
+
+export interface StreamingDisplayPublishCostRecorder {
+  record(durationMs: number): void
+  snapshot(): StreamingDisplayPublishCost
+}
+
+/** 发布耗时环形记录器（固定容量，O(1) 记录）。 */
+export function createStreamingDisplayPublishCostRecorder(capacity = 64): StreamingDisplayPublishCostRecorder {
+  const samples: number[] = []
+  let cursor = 0
+  let last = 0
+  return {
+    record(durationMs: number) {
+      const value = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0
+      last = value
+      if (samples.length < capacity) samples.push(value)
+      else {
+        samples[cursor] = value
+        cursor = (cursor + 1) % capacity
+      }
+    },
+    snapshot(): StreamingDisplayPublishCost {
+      if (samples.length === 0) return { samples: 0, lastMs: 0, maxMs: 0, p95Ms: 0 }
+      const ordered = [...samples].sort((a, b) => a - b)
+      return {
+        samples: samples.length,
+        lastMs: last,
+        maxMs: ordered.at(-1) ?? 0,
+        p95Ms: ordered[Math.min(ordered.length - 1, Math.floor(0.95 * ordered.length))],
+      }
+    },
+  }
+}
+
+/** 登记流式显示读数；返回注销函数（挂载层在 destroy 时调用）。 */
+export function registerStreamingDisplayDiagnostics(input: {
+  host: HTMLElement
+  scheduler: { diagnostics(): StreamingDisplayDiagnosticsSnapshot }
+  publishCost: StreamingDisplayPublishCostRecorder
+}): () => void {
+  return registerRendererDiagnostics(STREAMING_DISPLAY_DIAGNOSTICS_KEY, () => JSON.stringify({
+    snapshot: input.scheduler.diagnostics(),
+    publishCost: input.publishCost.snapshot(),
+    rows: diagnoseStreamingRows(input.host),
+  }))
+}
+
+function roundWidth(value: number): number {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0
+}
+
+function countTextLines(element: HTMLElement): number {
+  // jsdom 不实现 Range 几何：真实行数只在真浏览器可得，取不到就回 0（不报错）。
+  try {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    return range.getClientRects().length
+  } catch {
+    return 0
+  }
+}
