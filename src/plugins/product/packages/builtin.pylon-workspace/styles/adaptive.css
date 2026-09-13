@@ -23,3 +23,19 @@
   box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
 }
 .app[data-interface-mode="modern-gui"] .search-result-row:hover { border-left-color: var(--accent); }
+
+/* browser-* 类名是锚点（BrowserSheetView 保留）。
+   adaptive.css 在 glob 序中先于 sheets/ 注入，同特异性会输给 FileSheet 基座；
+   browser-error 需压过 file-tree-error 的外边距，故升为后代选择器（0,2,0）。 */
+.browser-main .browser-error { position: relative; flex: 0 0 auto; margin: 0; }
+
+/* Modern GUI 只改变材质，不改变浏览器视图的主区比例。 */
+.app[data-interface-mode="modern-gui"] .browser-toolbar {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 6px 8px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 5%, transparent);
+}
+.app[data-interface-mode="modern-gui"] .browser-tab-strip { border-radius: 8px 8px 0 0; margin-inline: 8px; }
+.app[data-interface-mode="modern-gui"] .browser-viewport { margin: 0 8px 8px; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 26px color-mix(in srgb, var(--text) 6%, transparent); }

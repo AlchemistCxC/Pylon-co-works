@@ -9,7 +9,6 @@ const styleModules = typeof document === 'undefined'
   './styles/components/right-panel/ContextPanel.css',
   './styles/sheets/OverviewSheetView.css',
   './styles/sheets/RuntimeSheetView.css',
-  './styles/sheets/browser/BrowserSheet.css',
   './styles/sheets/file/FileSheet.css',
 ], { query: '?inline', import: 'default', eager: true })
 

@@ -26,7 +26,7 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css',
-  'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css',
+  // 绞杀 P93 批 4：sheets/browser/BrowserSheet.css 已绞杀进 utilities 层，不再登记。
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css',
   'src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css',
   // TW 施工书 20260914（P85）：Tailwind v4 utilities 基线，kernel-static。
@@ -56,7 +56,7 @@ describe('first-party CSS ownership inventory', () => {
       'src/components/kernel/SkinPreviewBar.css',
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(4) // -PermissionDialog/-SessionOwnerRecoveryDialog/-ProfileEditor（已绞杀，P93）
-    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(9)
+    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(7) // -HistorySheet/-BrowserSheet（已绞杀，P93 批 2/4）
     expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(7) // -MessageSearchBar（已绞杀，J/绞杀流水线 20260914）；+WorkbenchChrome.css（Solid 壳层过渡态）
     expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
   })

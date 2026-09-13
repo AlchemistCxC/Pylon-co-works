@@ -1,21 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(
-  'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css',
-  'utf8',
-)
+// 绞杀 P93 批 4：BrowserSheet.css 已删除，地址栏焦点契约迁移为
+// BrowserSheetView 上的 utilities。本测试锁定契约在新载体的表达。
+const tsx = readFileSync('src/sheets/browser/BrowserSheetView.tsx', 'utf8')
 
 describe('browser address focus visual contract', () => {
   it('keeps focus feedback inset without an external glow or layout expansion', () => {
-    const focusBlock = css.match(
-      /\.browser-address-wrap:focus-within\s*\{([\s\S]*?)\n\}/,
-    )?.[1] ?? ''
+    const wrapLine = tsx.split('\n').find(line => line.includes('browser-address-wrap')) ?? ''
+    expect(wrapLine).toContain('focus-within:border-border-focus')
+    expect(wrapLine).toContain('focus-within:shadow-[inset_0_-2px_0_var(--accent)]')
+    expect(wrapLine).not.toMatch(/0 0 0 2px/)
 
-    expect(focusBlock).toContain('border-color: var(--border-focus)')
-    expect(focusBlock).toContain('box-shadow: inset 0 -2px 0 var(--accent)')
-    expect(focusBlock).not.toMatch(/0 0 0 2px/)
-    expect(css).toContain('.browser-address:focus-visible')
-    expect(css).toContain('outline: 1px solid var(--state-focus-ring)')
+    const addressLine = tsx.split('\n').find(line => line.includes('browser-address ')) ?? ''
+    expect(addressLine).toContain('focus-visible:outline-[var(--state-focus-ring)]')
+    expect(addressLine).toContain('focus-visible:outline-offset-[-1px]')
   })
 })
