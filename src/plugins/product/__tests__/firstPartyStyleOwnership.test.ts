@@ -13,7 +13,6 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/DiffCard.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css',
-  'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/MessageSearchBar.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css',
   'src/plugins/product/packages/builtin.pylon-shell/styles/App.css',
@@ -62,7 +61,7 @@ describe('first-party CSS ownership inventory', () => {
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(7)
     expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(9)
-    expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(8) // +WorkbenchChrome.css（Solid 壳层过渡态）
+    expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(7) // -MessageSearchBar（已绞杀，J/绞杀流水线 20260914）；+WorkbenchChrome.css（Solid 壳层过渡态）
     expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
   })
 

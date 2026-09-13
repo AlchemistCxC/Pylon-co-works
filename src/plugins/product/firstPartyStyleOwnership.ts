@@ -92,7 +92,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/DiffCard.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/MessageSearchBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),

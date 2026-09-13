@@ -6,7 +6,6 @@ const styleModules = typeof document === 'undefined'
   './styles/components/chat/ChatView.css',
   './styles/components/chat/DiffCard.css',
   './styles/components/chat/InputBar.css',
-  './styles/components/chat/MessageSearchBar.css',
   './styles/components/chat/StatusBar.css',
   './styles/components/ControlCenter.css',
   './styles/components/PetCompanion.css',
