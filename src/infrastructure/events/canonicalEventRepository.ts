@@ -198,6 +198,9 @@ export interface CanonicalEventRepository {
   list(ownerKey: string, beforeSequence: number | null, limit?: number): Promise<CanonicalEventPage>
   /** 全量读取 owner 事件流（按 sequence 升序）。 */
   loadAll(ownerKey: string): Promise<CanonicalEventRow[]>
+  /** #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（投影/搜索入口；
+   * 被单元覆盖的行不传输不解析，读放大随单元粒度下降）。 */
+  loadAllPreferUnits(ownerKey: string): Promise<CanonicalEventRow[]>
   /** 单行取证导出：不解析损坏 JSON，返回数据库中的原始文本。 */
   exportRaw(eventId: string): Promise<CanonicalEventRawExport | null>
   /** B6：跨 owner 内容搜索候选 owner（payload/eventType LIKE）；前端再做消息级过滤。 */
@@ -295,6 +298,11 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       } while (beforeSequence !== null)
       rows.sort((a, b) => a.sequence - b.sequence)
       return rows
+    },
+    async loadAllPreferUnits(ownerKey) {
+      const rows = await invoke<CanonicalEventRow[]>('evt_load_compact', { ownerKey })
+        .catch(rejectCanonicalEventRepositoryError)
+      return rows.map(normalizeCanonicalEventRow)
     },
     async exportRaw(eventId) {
       return invoke<CanonicalEventRawExport | null>('evt_export_raw', { eventId })

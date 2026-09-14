@@ -62,7 +62,8 @@ export async function searchAllMessagesTauri(query: string): Promise<{ results: 
     const session = sessionByOwner.get(ownerKey)
     if (!session) return null
     try {
-      const rows = await repository.loadAll(ownerKey)
+      // #81 L2：投影读走 compact（单元展开在 effectiveCanonicalProjectionEvents 内完成）。
+      const rows = await repository.loadAllPreferUnits(ownerKey)
       return { session, messages: projectMessagesFromCanonical(rows) }
     } catch (error) {
       reportRuntimeError(`读取 canonical 历史失败（${session.id}）`, error)

@@ -18,6 +18,7 @@ import type { EventProjector } from '../../contracts/eventProjector.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { getToolSummary } from '../tool/toolPresentation.ts'
 import { normalizeRawEvent } from './canonicalNormalizer.ts'
+import { expandTurnUnitRows } from './canonicalUnit.ts'
 import type { CanonicalConversationEvent } from './eventSchema.ts'
 import { projectCanonicalMessages, reconcileOptimisticUserEvents } from './messageProjectionRules.ts'
 
@@ -78,7 +79,10 @@ export function effectiveCanonicalProjectionEvents(
   events: readonly CanonicalConversationEvent[],
 ): CanonicalConversationEvent[] {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence)
-  const live = reconcileOptimisticUserEvents(sorted.filter(event => event.eventType !== 'history.snapshot'))
+  // #81 L2：单元行在此展开为 segment 级 canonical 事件（读侧优先消费单元——
+  // compact 读只返回单元 + 未覆盖行；L3 裁剪后逐行数据已不在库内）。
+  const expanded = expandTurnUnitRows(sorted)
+  const live = reconcileOptimisticUserEvents(expanded.filter(event => event.eventType !== 'history.snapshot'))
   const recoveredEvents = live
     .filter(event => canonicalRecoveryMetadata(event))
     .sort((left, right) => {

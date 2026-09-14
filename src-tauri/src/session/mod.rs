@@ -59,6 +59,8 @@ pub(crate) use user_data::*;
 // canonical_events 表 v6；独立连接 + busy_timeout；service/DTO/错误经本层 re-export）。
 mod event_repo;
 pub(crate) use event_repo::*;
+// #81 L2/L3：turn 单元行构建（kernel 终结时追加）与 L3 裁剪校验。
+mod turn_rollup;
 // Kernel persistence readiness barrier：三个同库 service 作为一个启动单元安装，
 // setup 返回前全部 ready；禁止半初始化与备用历史权威。
 mod persistence_bootstrap;
@@ -753,6 +755,41 @@ pub(crate) async fn evt_search(
     require_event_service(&state)?
         .search_owners(query, limit.unwrap_or(50))
         .await
+}
+
+/// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
+/// 入口；被单元覆盖的行不再传输/解析，读放大随单元粒度下降）。
+#[tauri::command]
+pub(crate) async fn evt_load_compact(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+) -> Result<Vec<CanonicalEventRow>, EventError> {
+    require_event_service(&state)?
+        .load_events_compact(owner_key)
+        .await
+}
+
+/// #81 L3：裁剪迁移（应用关闭时调用）。budget_ms 控制单次预算（逐 turn 单事务，
+/// 可暂停/续跑）；`trim_rolledup` 保留策略关闭时只报告不删行。全部完成后 VACUUM。
+#[tauri::command]
+pub(crate) async fn evt_rollup_trim(
+    state: tauri::State<'_, AppState>,
+    budget_ms: Option<u64>,
+) -> Result<RollupTrimReport, EventError> {
+    let service = require_event_service(&state)?;
+    let policy = require_retention_service(&state)
+        .map_err(|error| EventError::Unavailable(error.to_string()))?
+        .get_policy()
+        .await
+        .map_err(|error| EventError::Unavailable(error.to_string()))?;
+    let policy_json = policy.map(|row| row.payload);
+    if !crate::session::retention::trim_rolledup_enabled(policy_json.as_deref()) {
+        let mut report = RollupTrimReport::default();
+        report.policy_blocked = true;
+        report.remaining_units = service.count_remaining_rollup_units().await?;
+        return Ok(report);
+    }
+    service.rollup_trim(budget_ms).await
 }
 
 // ============================================================================

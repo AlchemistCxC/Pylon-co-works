@@ -204,6 +204,11 @@ export interface WorkbenchDocument {
   readonly sessionId: string
   readonly revision: number
   readonly appliedEventIds: readonly string[]
+  /** #81 L2：journal 权威覆盖区间（升序、合并且互不重叠）。携带 coverage 的
+   * journal 信封以区间覆盖做幂等（单元/批量行与逐 chunk 行粒度不同，id 集合
+   * 无法对齐）；不带 coverage 的信封（optimistic/session-response）保持
+   * appliedEventIds 幂等，行为不变。 */
+  readonly appliedRanges: readonly (readonly [number, number])[]
   readonly timeline: readonly WorkbenchTimelineEntry[]
   readonly messages: readonly WorkbenchMessage[]
   readonly activities: readonly WorkbenchActivityNode[]
@@ -230,6 +235,7 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
     sessionId,
     revision: 0,
     appliedEventIds: [],
+    appliedRanges: [],
     timeline: [],
     messages: [],
     activities: [],
@@ -245,11 +251,57 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
   }
 }
 
+/** #81 L2：信封携带的 journal 覆盖跨度（形状非法视为无 coverage）。 */
+function coverageSpanOf(envelope: WorkbenchEventEnvelope): readonly [number, number] | undefined {
+  const span = envelope.coverage
+  if (!span || !Number.isSafeInteger(span[0]) || !Number.isSafeInteger(span[1]) || span[0] < 1 || span[0] > span[1]) return undefined
+  return [span[0], span[1]]
+}
+
+/** 区间 [start,end] 是否被升序不重叠覆盖集完整包含。 */
+function isSpanCovered(ranges: readonly (readonly [number, number])[], start: number, end: number): boolean {
+  for (const [from, to] of ranges) {
+    if (from > start) return false
+    if (end <= to) return true
+  }
+  return false
+}
+
+/** 并入一个区间并保持升序不重叠（吸收接触/重叠区间）。 */
+function mergeCoverage(ranges: readonly (readonly [number, number])[], start: number, end: number): readonly (readonly [number, number])[] {
+  const merged: [number, number][] = []
+  let low = start
+  let high = end
+  let placed = false
+  for (const [from, to] of ranges) {
+    if (to < low - 1) {
+      merged.push([from, to])
+      continue
+    }
+    if (from > high + 1) {
+      // 整数跨度上相邻即连续（[1,3]+[4,6] → [1,6]），接触区间一律吸收
+      if (!placed) {
+        merged.push([low, high])
+        placed = true
+      }
+      merged.push([from, to])
+      continue
+    }
+    low = Math.min(low, from)
+    high = Math.max(high, to)
+  }
+  if (!placed) merged.push([low, high])
+  return merged
+}
+
 export function reduceWorkbenchEvent(
   document: WorkbenchDocument,
   envelope: WorkbenchEventEnvelope,
 ): WorkbenchDocument {
-  if (document.appliedEventIds.includes(envelope.eventId)) return document
+  // #81 L2：journal 信封按覆盖区间幂等（单元/批量展开与逐 chunk 行粒度不同）；
+  // 非 journal 信封（optimistic/session-response）保持 eventId 幂等。
+  const span = coverageSpanOf(envelope)
+  if (span ? isSpanCovered(document.appliedRanges, span[0], span[1]) : document.appliedEventIds.includes(envelope.eventId)) return document
   // C12：secret-bearing interaction 事件在进入任何投影面（timeline.data、interactions）前统一剥敏——
   // journal 投影的 timeline 与 document.interactions 共享同一脱敏结果
   // SAFETY: redactInteractionEvent 是保形脱敏（只替换敏感叶子值，不增删键），结果仍是同一
@@ -261,7 +313,9 @@ export function reduceWorkbenchEvent(
   let next: WorkbenchDocument = {
     ...document,
     revision: Math.max(document.revision, envelope.sequence),
-    appliedEventIds: [...document.appliedEventIds, envelope.eventId],
+    ...(span
+      ? { appliedRanges: mergeCoverage(document.appliedRanges, span[0], span[1]) }
+      : { appliedEventIds: [...document.appliedEventIds, envelope.eventId] }),
     timeline,
   }
   next = reduceSemanticEvent(next, effective)
@@ -279,11 +333,20 @@ export function projectWorkbench(
   // 公共形状 readonly string[] 不变；单事件 live 路径仍走 reduceWorkbenchEvent。
   const applied = new Set(initial.appliedEventIds)
   const appliedEventIds = [...initial.appliedEventIds]
+  let appliedRanges = initial.appliedRanges
   let document = initial
   for (const envelope of sorted) {
-    if (applied.has(envelope.eventId)) continue
-    applied.add(envelope.eventId)
-    appliedEventIds.push(envelope.eventId)
+    // #81 L2：与 reduceWorkbenchEvent 同一幂等判据（journal 信封按区间覆盖，
+    // 其余按 eventId）——单事件路径与批量路径语义一致。
+    const span = coverageSpanOf(envelope)
+    if (span) {
+      if (isSpanCovered(appliedRanges, span[0], span[1])) continue
+      appliedRanges = mergeCoverage(appliedRanges, span[0], span[1])
+    } else {
+      if (applied.has(envelope.eventId)) continue
+      applied.add(envelope.eventId)
+      appliedEventIds.push(envelope.eventId)
+    }
     // SAFETY: 同上一处——redactInteractionEvent 保形，结果仍是同一 event.type 的 WorkbenchEventEnvelope。
     const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
       ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
@@ -292,13 +355,18 @@ export function projectWorkbench(
       ...document,
       revision: Math.max(document.revision, envelope.sequence),
       appliedEventIds,
+      appliedRanges,
       timeline: insertBySequence(document.timeline, timelineEntry(effective)),
     }
     next = reduceSemanticEvent(next, effective)
     document = refreshOrphans(next)
   }
   return {
-    document: { ...document, appliedEventIds: Object.freeze([...appliedEventIds]) },
+    document: {
+      ...document,
+      appliedEventIds: Object.freeze([...appliedEventIds]),
+      appliedRanges: Object.freeze(appliedRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number])),
+    },
     diagnostics: document.diagnostics,
   }
 }

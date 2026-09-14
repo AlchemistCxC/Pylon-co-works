@@ -113,8 +113,8 @@ fn schema_version_is_v13_versioned_canonical_envelope_baseline() {
         "user_version 必须等于 SCHEMA_VERSION"
     );
     assert_eq!(
-        version, 13,
-        "审计基线 = v13（canonical_events 唯一历史；versioned envelope provenance/raw metadata；tombstone durable-owner keyed）。后续迁移必须显式递增并更新本基线"
+        version, 14,
+        "审计基线 = v14（v13 + #81 rollup：canonical_events.rollup_seq_start/seq_end + rollup_migration_state 进度表）。后续迁移必须显式递增并更新本基线"
     );
 }
 
@@ -128,13 +128,14 @@ fn table_inventory_baseline() {
         "deleted_sessions",
         "legacy_message_backfill_audit",
         "retention_policy",
+        "rollup_migration_state",
         "session_state_snapshots",
         "sessions",
         "user_data",
     ];
     assert_eq!(
         tables, expected,
-        "DEL-01 审计：v13 active 表清单必须与 SCHEMA_SQL 一致。旧 messages active names 不得存在"
+        "DEL-01 审计：v14 active 表清单必须与 SCHEMA_SQL 一致。旧 messages active names 不得存在"
     );
 }
 

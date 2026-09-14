@@ -28,6 +28,7 @@ import { normalizeAgentStatus, type AgentStatusPayload } from './components/sett
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
+import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
@@ -407,10 +408,15 @@ export default function App() {
   }, [resolved])
 
   const appWindow = appWindowSingleton
-  const drainBeforeClose = () => drainPersistentStateBeforeClose({
-    flushCanonical: () => getCanonicalEventFeed().flushAsync(),
-    flushIdentity: flushIdentityBackend,
-  })
+  const drainBeforeClose = async () => {
+    await drainPersistentStateBeforeClose({
+      flushCanonical: () => getCanonicalEventFeed().flushAsync(),
+      flushIdentity: flushIdentityBackend,
+    })
+    // #81 L3：前端 pending 已清空（kernel 单写者）→ 安全窗口内运行裁剪迁移
+    // （可暂停/续跑；超时不阻塞关窗；trim_rolledup 策略关闭时后端只报告）。
+    await runRollupTrimBeforeClose()
+  }
   const closeWindowWithFlush = async () => {
     try {
       await drainBeforeClose()

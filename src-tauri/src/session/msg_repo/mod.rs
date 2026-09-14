@@ -36,7 +36,7 @@ use crate::error::PylonError;
 ///      v11 源表保留为 forensic archive，避免同 source 多 owner 互相覆盖。
 /// v13：canonical_events 增加 versioned envelope/provenance/raw 截断元数据；旧行
 ///      append-only 保留并默认标记 migration/unverified。
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 /// 当前 schema DDL（CREATE IF NOT EXISTS；升版迁移在 migrate() 内按版本补齐）。
 /// - sessions：会话行 + v8 会话级可恢复状态快照列（usage/commands 等）。
@@ -137,7 +137,18 @@ CREATE TABLE IF NOT EXISTS canonical_events (
     raw_retained_bytes INTEGER NOT NULL DEFAULT 0,
     raw_omitted_bytes INTEGER NOT NULL DEFAULT 0,
     raw_truncation_reason TEXT,
+    -- #81 L2/L3：turn.unit 行的覆盖跨度（其余事件 NULL；迁移回填自 typedPayload）。
+    rollup_seq_start INTEGER,
+    rollup_seq_end INTEGER,
     UNIQUE(owner_key, sequence)
+);
+-- #81 L3：裁剪迁移进度（逐 turn 单事务；trimmed/mismatch 永久跳过 => 可暂停/续跑）。
+CREATE TABLE IF NOT EXISTS rollup_migration_state (
+    owner_key TEXT NOT NULL,
+    unit_event_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_key, unit_event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_canonical_events_session_seq
     ON canonical_events(local_session_id, sequence);

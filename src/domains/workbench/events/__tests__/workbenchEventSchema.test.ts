@@ -53,6 +53,7 @@ describe('Workbench event envelope schema', () => {
       'session.config-updated': 'session.config-updated',
       'session.commands-updated': 'session.commands-updated',
       'history.snapshot': 'event.unknown',
+      'turn.unit': 'event.unknown',
       unknown: 'event.unknown',
     }
     const fixtures: Record<string, { typed: Record<string, JsonValue>; text?: string }> = {
@@ -74,6 +75,7 @@ describe('Workbench event envelope schema', () => {
       'session.config-updated': { typed: { options: [{ id: 'reasoning', value: 'high' }] } },
       'session.commands-updated': { typed: { commands: [{ name: '/compact' }] } },
       'history.snapshot': { typed: { checkpoint: 'replay-1' } },
+      'turn.unit': { typed: { aggregateKind: 'turn-rollup' } },
       unknown: { typed: { future: true } },
     }
 

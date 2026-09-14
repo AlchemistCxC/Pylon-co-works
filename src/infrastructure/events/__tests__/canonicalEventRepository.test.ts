@@ -238,6 +238,7 @@ describe('loadCanonicalEventsIncremental（#81 L1 双读修复）', () => {
         return { events: page, nextBeforeSequence }
       },
       loadAll: vi.fn(async () => rows),
+      async loadAllPreferUnits() { return rows },
       async exportRaw() { return null },
       async searchOwners() { return [] },
     }

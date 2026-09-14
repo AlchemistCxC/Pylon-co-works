@@ -68,6 +68,7 @@ function fakeRepository(): FakeRepo {
     async list() { return { events: [], nextBeforeSequence: null } },
     async loadAll() { return [] },
     async exportRaw() { return null },
+    async loadAllPreferUnits() { return [] },
     async searchOwners() { return [] },
   }
   return { repository, revision, append }

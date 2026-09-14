@@ -139,3 +139,73 @@ describe('messageProjection batch 等价性（#81 L1 golden）', () => {
     expect(batch.typedPayload).toEqual({ text: '你好', foldedCount: 2, seqSpan: [1, 2] })
   })
 })
+
+describe('turn.unit 消息侧展开（#81 L2）', () => {
+  it('单元行展开为 segment 事件；被覆盖行丢弃；投影与逐行等价', async () => {
+    const { expandTurnUnitRows } = await import('../canonicalUnit')
+    const { createCanonicalEvent } = await import('../eventSchema')
+    const unitRow = createCanonicalEvent({
+      owner,
+      clientGeneration: 1,
+      sequence: 5,
+      occurredAt: '2026-09-14T00:00:04.000Z',
+      receivedAt: '2026-09-14T00:00:04.000Z',
+      eventType: 'turn.unit',
+      payloadVersion: 1,
+      typedPayload: {
+        aggregateKind: 'turn-rollup',
+        seqStart: 2,
+        seqEnd: 4,
+        foldedCount: 3,
+        foldScheme: 'adjacent-delta-fold-v1',
+        contentSha256: 'deadbeef',
+        terminal: { eventType: 'turn.completed', occurredAt: '2026-09-14T00:00:04.000Z' },
+        segments: [
+          { kind: 'delta-run', eventType: 'assistant.text.delta', seqStart: 2, seqEnd: 3, identity: { messageId: 'msg-1' }, text: '答案', occurredAt: '2026-09-14T00:00:02.000Z', markdown: false },
+          { kind: 'event', event: createCanonicalEvent({
+            owner,
+            clientGeneration: 1,
+            sequence: 4,
+            occurredAt: '2026-09-14T00:00:04.000Z',
+            receivedAt: '2026-09-14T00:00:04.000Z',
+            eventType: 'turn.completed',
+            payloadVersion: 1,
+            typedPayload: { stopReason: 'end_turn' },
+            rawPayload: { update: { sessionUpdate: 'done' } },
+          }) },
+        ],
+      },
+      rawPayload: { kind: 'turn-unit' },
+    })
+    const covered = [
+      createCanonicalEvent({
+        owner, clientGeneration: 1, sequence: 2,
+        occurredAt: '2026-09-14T00:00:02.000Z', receivedAt: '2026-09-14T00:00:02.000Z',
+        eventType: 'assistant.text.delta', payloadVersion: 1,
+        identity: { messageId: 'msg-1' }, typedPayload: { text: '答' },
+        rawPayload: rawText('答'),
+      }),
+      createCanonicalEvent({
+        owner, clientGeneration: 1, sequence: 3,
+        occurredAt: '2026-09-14T00:00:03.000Z', receivedAt: '2026-09-14T00:00:03.000Z',
+        eventType: 'assistant.text.delta', payloadVersion: 1,
+        identity: { messageId: 'msg-1' }, typedPayload: { text: '案' },
+        rawPayload: rawText('案'),
+      }),
+      createCanonicalEvent({
+        owner, clientGeneration: 1, sequence: 4,
+        occurredAt: '2026-09-14T00:00:04.000Z', receivedAt: '2026-09-14T00:00:04.000Z',
+        eventType: 'turn.completed', payloadVersion: 1,
+        typedPayload: { stopReason: 'end_turn' },
+        rawPayload: rawDone(),
+      }),
+    ]
+    // 混合读取（单元 + 被覆盖行）⇒ 展开为 segment 事件，被覆盖行不重复
+    const mixed = expandTurnUnitRows([covered[0], covered[1], covered[2], unitRow])
+    expect(mixed.map(event => event.eventType)).toEqual(['assistant.text.delta', 'turn.completed'])
+    const projected = JSON.stringify(projectMessagesFromCanonical(mixed))
+    // 与"逐行（无单元）"投影一致
+    const perRow = JSON.stringify(projectMessagesFromCanonical(covered))
+    expect(projected).toBe(perRow)
+  })
+})
