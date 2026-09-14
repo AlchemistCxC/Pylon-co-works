@@ -6,13 +6,30 @@
  * 与表单源字段的源码 token，这里渲染组件切换会话验证真实行为。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, waitFor, cleanup } from '@testing-library/react'
+import { render, waitFor, cleanup, fireEvent, screen } from '@testing-library/react'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useIdentityStore } from '../../../identityStore'
 import SessionSettings from '../../SessionSettings'
 import type { Session } from '../../../identityStore'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined——表单同步断言不关心后台 invoke */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: TolerantFakeInvoke
 
 function makeSession(id: string, name: string, sessionPrompt: string): Session {
   return {
@@ -26,7 +43,8 @@ function nameInput(): HTMLInputElement {
 }
 
 beforeEach(() => {
-  invokeMock.mockReset()
+  fakeInvoke = new TolerantFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   useIdentityStore.setState({ sessions: [], sessionsHydrated: true })
   localStorage.clear()
 })
@@ -60,5 +78,30 @@ describe('SessionSettings 表单同步（session-settings-lifecycle 契约）', 
 
     useIdentityStore.setState({ sessions: [{ ...a, name: '新名', sessionPrompt: '新提示' }], sessionsHydrated: true })
     await waitFor(() => expect(nameInput().value).toBe('新名'))
+  })
+
+  // 下沉自 scripts/test-session-settings-form.mts（P91 A2）：dirty 门控保存按钮、
+  // 信息层级分区（section/danger）、Dialog 说明关联。
+  // 注意：SessionSettings 经 Radix Dialog portal 到 body，查询须用 document。
+  it('未修改时保存按钮禁用，修改后解锁', async () => {
+    useIdentityStore.setState({ sessions: [makeSession('sa', '会话A', '提示A')], sessionsHydrated: true })
+    render(<SessionSettings sessionId="sa" open onClose={() => {}} />)
+    await waitFor(() => expect(nameInput().value).toBe('会话A'))
+
+    const save = screen.getByRole('button', { name: '保存修改' })
+    expect(save).toBeDisabled()
+    fireEvent.change(nameInput(), { target: { value: '改名' } })
+    expect(save).toBeEnabled()
+  })
+
+  it('分区与危险区在 DOM，Dialog 说明经 aria-describedby 关联', async () => {
+    useIdentityStore.setState({ sessions: [makeSession('sa', '会话A', '提示A')], sessionsHydrated: true })
+    render(<SessionSettings sessionId="sa" open onClose={() => {}} />)
+    await waitFor(() => expect(nameInput().value).toBe('会话A'))
+
+    expect(document.querySelector('.session-settings-section')).not.toBeNull()
+    expect(document.querySelector('.session-settings-danger')).not.toBeNull()
+    expect(document.getElementById('session-settings-description')).not.toBeNull()
+    expect(document.querySelector('[aria-describedby="session-settings-description"]')).not.toBeNull()
   })
 })

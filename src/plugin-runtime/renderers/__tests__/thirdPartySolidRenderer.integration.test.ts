@@ -16,6 +16,15 @@ import { usePresentationPreferenceStore } from '../../../domains/presentation/pr
 import type { RenderSurface } from '../../../contracts/messageRenderer.ts'
 import { projectSettingsContributionCatalog } from '../../../components/settings/settingsContributionCatalog.ts'
 
+// P91 C2 §7：esbuild spawn/dist 构建重型套件，testTimeout 个别放宽（全局 30s）
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
+
+// P91 §12 的 mtime 新鲜度守卫已下线：dist/entry.js 现在由
+// `bun run build:example-plugin` 从 src/entry.ts 构建产出（挂在 check:frontend 链上，
+// 本地与 CI 都会先构建再跑测试），dist 与 src 恒定同源。
+// 原守卫用文件 mtime 判新鲜度，而 checkout 会重写 mtime 且其顺序取决于 git 索引写入顺序，
+// 导致同一份内容在 CI 上非确定性判红（dist/ 在树序中先于 src/ 写入，src 的 mtime 反而更新）。
+
 const PLUGIN_ID = 'example.solid-renderer'
 const SUITE_ID = `${PLUGIN_ID}.suite`
 

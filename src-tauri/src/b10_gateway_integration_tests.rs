@@ -1,10 +1,6 @@
 use super::*;
 
 use crate::gateway::qq::{auth::QqAuth, QqAdapter};
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 /// fake ACP：prompt 时先发一条流式 chunk（deliver 回发的文本），再响应 end_turn。
@@ -26,54 +22,12 @@ fn chunk_acp_agent() -> AgentDef {
     crate::test_utils::fake_acp_agent("fake-acp-chunk", CHUNK_ACP_SCRIPT)
 }
 
-/// QQ API 桩：捕获发送请求（Content-Length 完整读取），返回 {"id":"sent-1"}。
-fn spawn_qq_api_stub() -> (
-    std::net::SocketAddr,
-    mpsc::Receiver<String>,
-    thread::JoinHandle<()>,
-) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
-    let address = listener.local_addr().expect("address");
-    let (request_tx, request_rx) = mpsc::channel();
-    let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept request");
-        let mut bytes = Vec::new();
-        let mut buffer = [0_u8; 4096];
-        loop {
-            let count = stream.read(&mut buffer).expect("read request");
-            if count == 0 {
-                break;
-            }
-            bytes.extend_from_slice(&buffer[..count]);
-            if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
-                let headers = String::from_utf8_lossy(&bytes[..headers_end]);
-                let length = headers
-                    .lines()
-                    .find_map(|line| line.strip_prefix("Content-Length: "))
-                    .and_then(|value| value.trim().parse::<usize>().ok())
-                    .unwrap_or(0);
-                if bytes.len() >= headers_end + 4 + length {
-                    break;
-                }
-            }
-        }
-        request_tx
-            .send(String::from_utf8(bytes).expect("request UTF-8"))
-            .expect("send request");
-        let body = r#"{"id":"sent-1"}"#;
-        let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-        let _ = stream.write_all(response.as_bytes());
-    });
-    (address, request_rx, server)
-}
-
 #[tokio::test]
 async fn qq_ingest_to_deliver_end_to_end_with_reply_anchor() {
-    let (_qq_api_address, qq_request_rx, qq_server) = spawn_qq_api_stub();
+    // QQ API 桩（P91 批 D1：自拷桩收敛至 crate::test_utils::spawn_http_stub）。
+    let (_qq_api_address, qq_request_rx, qq_server) = crate::test_utils::spawn_http_stub(&[
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"id\":\"sent-1\"}",
+    ]);
     // gateway：qq:group:123 → peri 绑定；注入关闭（本测试不依赖 Prism）
     let gateway = Arc::new(gateway::GatewayCore::from_config(
         gateway::route::parse_config(
@@ -207,9 +161,12 @@ gateway:
     .expect("ingest handler 必须建立平台会话（send_prompt_core 链路）");
 
     // 等待 deliver 回发到达 QQ API 桩
-    let request = qq_request_rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("QQ API 桩必须收到 deliver");
+    let request = String::from_utf8(
+        qq_request_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("QQ API 桩必须收到 deliver"),
+    )
+    .expect("request UTF-8");
     assert!(
         request.starts_with("POST /v2/groups/123/messages HTTP/1.1"),
         "URL: {request:.100}"

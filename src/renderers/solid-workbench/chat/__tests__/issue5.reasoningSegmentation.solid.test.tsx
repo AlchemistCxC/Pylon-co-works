@@ -2,6 +2,10 @@
 import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it } from 'vitest'
+
+// P91 C 批 retry 退役后全量并发下的预算放宽：揭示链（P89 调度器心跳）在满载
+// worker 上可超 waitFor 默认 1s——根因是预算不是产品（同 pluginManagerDefaultPage 先例）。
+const REVEAL_BUDGET = { timeout: 4_000 }
 import { ReasoningBlock } from '../MessageRow.solid.tsx'
 import { mountSolidWorkbench } from '../../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
@@ -16,14 +20,14 @@ describe('issue 5 reasoning segmentation regression', () => {
     const [text, setText] = createSignal('')
     const result = render(() => <ReasoningBlock text={text()} running />)
     for (const char of '这是一个连续的思考过程，不应该每几个字符换段。') setText(current => current + char)
-    await waitFor(() => expect(result.container.textContent).toContain('不应该每几个字符换段'))
+    await waitFor(() => expect(result.container.textContent).toContain('不应该每几个字符换段'), REVEAL_BUDGET)
     expect(result.container.querySelectorAll('p')).toHaveLength(1)
   })
 
   it('keeps intentional Markdown blank-line paragraphs intact', async () => {
     const result = render(() => <ReasoningBlock text={'**第一段思考。**\n\n第二段思考。'} running={false} defaultCollapsed={false} />)
-    await waitFor(() => expect(result.container.textContent).toContain('第二段思考'))
-    await waitFor(() => expect(result.container.querySelectorAll('p')).toHaveLength(2))
+    await waitFor(() => expect(result.container.textContent).toContain('第二段思考'), REVEAL_BUDGET)
+    await waitFor(() => expect(result.container.querySelectorAll('p')).toHaveLength(2), REVEAL_BUDGET)
   })
 
   it('canonical reasoning character deltas remain one paragraph', async () => {
@@ -45,10 +49,10 @@ describe('issue 5 reasoning segmentation regression', () => {
     }
     mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }, services })
     services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 1 })
-    const button = await waitFor(() => host.querySelector<HTMLButtonElement>('.term-reasoning-head'))
+    const button = await waitFor(() => host.querySelector<HTMLButtonElement>('.term-reasoning-head'), REVEAL_BUDGET)
     expect(button).not.toBeNull()
     fireEvent.click(button!)
-    await waitFor(() => expect(host.textContent).toContain(text))
+    await waitFor(() => expect(host.textContent).toContain(text), REVEAL_BUDGET)
     const body = host.querySelector('.term-reasoning-body')!
     expect(body.querySelectorAll('p')).toHaveLength(1)
     services.destroy()
@@ -93,9 +97,9 @@ describe('issue 5 reasoning segmentation regression', () => {
       const found = host.querySelector('.solid-workbench-chat .term-reasoning-body')
       expect(found).not.toBeNull()
       return found!
-    })
+    }, REVEAL_BUDGET)
     // body is collapsed by default; content still exists in DOM
-    await waitFor(() => expect(body.textContent).toContain(text))
+    await waitFor(() => expect(body.textContent).toContain(text), REVEAL_BUDGET)
     expect(body.querySelectorAll('p')).toHaveLength(1)
     services.destroy()
     host.remove()
@@ -120,7 +124,7 @@ describe('issue 5 reasoning segmentation regression', () => {
         const node = result.container.querySelector<HTMLDivElement>('.term-reasoning-body')
         if (!node) throw new Error('reasoning body not mounted')
         return node
-      })
+      }, REVEAL_BUDGET)
       let scrollHeight = 160
       Object.defineProperties(body, {
         scrollHeight: { configurable: true, get: () => scrollHeight },

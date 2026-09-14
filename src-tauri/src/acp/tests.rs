@@ -317,8 +317,7 @@ fn prompt_rejects_missing_attachment_with_explicit_error() {
 
 #[test]
 fn prompt_rejects_directory_attachment() {
-    let directory =
-        std::env::temp_dir().join(format!("pylon-attachment-dir-{}", std::process::id()));
+    let directory = crate::test_utils::unique_temp("attachment-dir");
     std::fs::create_dir_all(&directory).unwrap();
     let error = prompt_blocks(
         "hello".to_string(),
@@ -1085,8 +1084,7 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn fake_acp_cancel_and_close_send_expected_notifications() {
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-acp-control-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("acp-control").with_extension("jsonl");
     let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1266,8 +1264,7 @@ for line in sys.stdin:
 }
 #[tokio::test]
 async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response() {
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-acp-prompt-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("acp-prompt").with_extension("jsonl");
     let script = r#"import json,sys,time
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:

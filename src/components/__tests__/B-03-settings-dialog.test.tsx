@@ -2,12 +2,32 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../../test/fakeInvoke'
 import Settings from '../Settings.tsx'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
+
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined——对话框语义测试不关心后台 invoke */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+const fakeInvoke = new TolerantFakeInvoke()
+invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
 
 describe('B-03 Settings dialog semantics', () => {
   it('exposes dialog semantics and moves focus inside on open', () => {

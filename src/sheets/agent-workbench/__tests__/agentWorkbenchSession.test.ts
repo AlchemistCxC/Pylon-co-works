@@ -507,6 +507,29 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('supports top-level availableModels responses and preserves the selected model list', async () => {
+    const active = session('created-top-level-models', 'local:created-top-level-models')
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    service.applySessionResponse({
+      sessionId: 'remote-created',
+      modelId: 'deepseek-v4-flash',
+      availableModels: [
+        { modelId: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+        { modelId: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+      ],
+    }, active.id)
+    await service.bind(active)
+    const option = service.runtime.getSnapshot().document?.session.options.find(item => item.id === 'model')
+    expect(option?.value).toBe('deepseek-v4-flash')
+    expect(option?.schema).toEqual(expect.objectContaining({
+      options: expect.arrayContaining([
+        expect.objectContaining({ id: 'deepseek-v4-flash' }),
+        expect.objectContaining({ id: 'deepseek-v4.1-flash' }),
+      ]),
+    }))
+    service.destroy()
+  })
+
   it('重复投影相同创建响应不会制造重复 session 事件', async () => {
     const active = session('created-idempotent', 'local:created-idempotent')
     const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })

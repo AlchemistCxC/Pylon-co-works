@@ -33,6 +33,24 @@ function context(provider: string): NormalizeContext {
 }
 
 describe('C16 provider coverage inventory', () => {
+  // P91 A6 I/O memoize：证据环对同一 ref 的 existsSync+readFileSync 只执行一次，
+  // 结果缓存复用（原实现 121 项×多 key 逐 ref 同步读数千次，是 retry 掩盖的 flake 根因）。
+  // 断言面不变：每个 ref 仍逐项断言；硬编码 121/3-provider 为 P72 §5.0 口径的审计完成定义，不动。
+  const refProbeCache = new Map<string, 'ok' | 'missing' | 'error'>()
+
+  function probeRefOnce(ref: string): 'ok' | 'missing' | 'error' {
+    let state = refProbeCache.get(ref)
+    if (state === undefined) {
+      try {
+        state = existsSync(ref) ? (readFileSync(ref, 'utf-8'), 'ok') : 'missing'
+      } catch {
+        state = 'error'
+      }
+      refProbeCache.set(ref, state)
+    }
+    return state
+  }
+
   it('映射单元数与字典 §十 精确一致（44/46/31）', () => {
     for (const provider of ['claude-code', 'peri', 'hermes'] as const) {
       const items = PROVIDER_COVERAGE[provider]
@@ -370,9 +388,9 @@ describe('C16 provider coverage inventory', () => {
       expect(item.evidence.source.refs.length, `${item.id} provider source evidence 为空`).toBeGreaterThan(0)
       for (const ref of item.evidence.source.refs) {
         // refs 常指向本机其他仓库源码（如 CCB clone），CI 上不存在属预期——
-        // 存在性跳过，本地仍校验可读性（文件坏/权限错误必须暴露）。
-        if (!existsSync(ref)) continue
-        expect(() => readFileSync(ref, 'utf-8'), `${item.id} provider source 不可读: ${ref}`).not.toThrow()
+        // 存在性跳过，本地仍校验可读性（文件坏/权限错误必须暴露）；探测结果按文件缓存。
+        if (probeRefOnce(ref) === 'missing') continue
+        expect(probeRefOnce(ref), `${item.id} provider source 不可读: ${ref}`).toBe('ok')
       }
 
       if (item.transportStatus === 'SOURCE-ONLY/BACKLOG') {
@@ -424,9 +442,9 @@ describe('C16 provider coverage inventory', () => {
         if (claim.state !== 'verified') throw new Error(`${item.id}.${key} 状态未收窄`)
         expect(claim.refs.length, `${item.id}.${key} 无证据引用`).toBeGreaterThan(0)
         for (const ref of claim.refs) {
-          // 同 provider source：CI 上外部仓库路径缺失属预期，跳过存在性
-          if (!existsSync(ref)) continue
-          expect(() => readFileSync(ref, 'utf-8'), `${item.id}.${key} 引用不可读: ${ref}`).not.toThrow()
+          // 同 provider source：CI 上外部仓库路径缺失属预期，跳过存在性；探测结果按文件缓存
+          if (probeRefOnce(ref) === 'missing') continue
+          expect(probeRefOnce(ref), `${item.id}.${key} 引用不可读: ${ref}`).toBe('ok')
         }
       }
     }

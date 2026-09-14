@@ -182,11 +182,15 @@ describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
     replaceFileEditorValue(editor, 'const x = 999')
     // agent 已触碰（touchVersion 定义）；磁盘仍为 'const x = 1'
     useWorkspaceStore.setState({ touchVersions: { [touchedFileVersionKey({ agentId: 'agent-test', source: 'ws-a' }, 'src/a.ts')]: 7 } })
-    // 退出编辑：旧实现因 editing 在 effect 依赖里重跑 → 300ms 后 loadContent 静默覆盖
+    // 退出编辑：旧实现因 editing 在 effect 依赖里重跑 → 300ms 后 loadContent 静默覆盖。
+    // P91 C2 受保护点名改写：真实 400ms 等待 → fake timers 推进（gatewaySheetView.ui 先例），
+    // 断言强度不变——仍须越过 300ms debounce 窗口后验证未保存编辑未被覆盖。
+    vi.useFakeTimers()
     rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={onContentReady} onExternalChange={onExternalChange} />)
-    await new Promise(resolve => setTimeout(resolve, 400))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(screen.getByText('const x = 999')).toBeTruthy()
     expect(onExternalChange).not.toHaveBeenCalled()
+    vi.useRealTimers()
   })
 
   it('带未保存内容重进编辑模式不误报冲突：touchVersion 已定义且磁盘未变，probeDisk 不触发 onExternalChange', async () => {
@@ -195,12 +199,14 @@ describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
     const editor = await waitForFileEditor('const x = 1')
     replaceFileEditorValue(editor, 'const x = 999')
     useWorkspaceStore.setState({ touchVersions: { [touchedFileVersionKey({ agentId: 'agent-test', source: 'ws-a' }, 'src/a.ts')]: 7 } })
-    // 退出编辑 → 重新进入编辑模式
+    // 退出编辑 → 重新进入编辑模式。P91 C2：真实 400ms → fake timers 推进（同上）。
+    vi.useFakeTimers()
     rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={vi.fn()} />)
     rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={vi.fn()} editing onExternalChange={onExternalChange} />)
-    await new Promise(resolve => setTimeout(resolve, 400))
+    await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(onExternalChange).not.toHaveBeenCalled()
     expect(fileEditorView().state.doc.toString()).toBe('const x = 999')
+    vi.useRealTimers()
   })
 
   it('saveAnchorToken 递增 → 重拉磁盘对齐（保存后的磁盘锚点推进）', async () => {

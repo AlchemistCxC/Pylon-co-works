@@ -8,7 +8,20 @@ import Select from './ui/Select.tsx'
  * ISSUE-01：未决 Session 恢复入口。
  *
  * 取消只隐藏当前提示，不写回、不丢弃原始 envelope；store 发生变化后重新出现。
+ *
+ * 样式绞杀（P93）：原 SessionOwnerRecoveryDialog.css 的 utility 化；
+ * `.session-owner-select .pylon-select` 的宽度规则以子级 arbitrary variant
+ * 保留（不改动共享 Select 组件）。
  */
+const OVERLAY = 'fixed inset-0 z-[210] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]'
+const DIALOG = 'w-[min(560px,calc(100vw-32px))] max-h-[calc(100vh-32px)] overflow-auto p-4 border border-border bg-[var(--settings-surface)] shadow-[var(--settings-shadow)] text-text font-[family-name:var(--font)]'
+const H2 = 'm-0 mb-2 text-[16px]'
+const P = 'm-0 mb-3 text-text-dim text-[13px] leading-[1.5]'
+const UL = 'grid gap-2 m-0 mb-3 p-0 list-none'
+const LI = 'grid grid-cols-[minmax(0,1fr)_160px_auto] items-center gap-2 max-[640px]:grid-cols-1'
+const SELECT_WRAP = 'min-h-[32px] border border-border rounded-none bg-bg-input text-text [&_.pylon-select]:w-full'
+const BTN = 'min-h-[32px] px-3 py-1.5 border border-border rounded-none bg-bg-input text-text [font:inherit] cursor-pointer disabled:cursor-not-allowed disabled:opacity-[var(--state-disabled-opacity)]'
+
 export default function SessionOwnerRecoveryDialog() {
   const hydration = useIdentityStore(s => s.sessionHydration)
   const agents = useIdentityStore(s => s.agents)
@@ -59,15 +72,15 @@ export default function SessionOwnerRecoveryDialog() {
   }
 
   return (
-    <div className="session-owner-dialog-overlay" role="dialog" aria-modal="true" aria-label="恢复遗留会话归属">
-      <div className="session-owner-dialog">
-        <h2>恢复遗留会话归属</h2>
-        <p>以下会话无法从持久化数据唯一判断所属 Agent。请选择后确认；稍后处理不会修改原始数据。</p>
-        <ul>
+    <div className={OVERLAY} role="dialog" aria-modal="true" aria-label="恢复遗留会话归属">
+      <div className={DIALOG}>
+        <h2 className={H2}>恢复遗留会话归属</h2>
+        <p className={P}>以下会话无法从持久化数据唯一判断所属 Agent。请选择后确认；稍后处理不会修改原始数据。</p>
+        <ul className={UL}>
           {unresolved.map(session => (
-            <li key={session.id}>
+            <li key={session.id} className={LI}>
               <span>{session.name}</span>
-              <div className="session-owner-select">
+              <div className={SELECT_WRAP}>
                 <Select
                   ariaLabel={`${session.name}的 Agent`}
                   value={selected[session.id] ?? ''}
@@ -76,14 +89,14 @@ export default function SessionOwnerRecoveryDialog() {
                   options={agents.map(agent => ({ value: agent.id, label: agent.name }))}
                 />
               </div>
-              <button type="button" disabled={busy === session.id || !selected[session.id]} onClick={() => void resolve(session.id)}>
+              <button type="button" className={BTN} disabled={busy === session.id || !selected[session.id]} onClick={() => void resolve(session.id)}>
                 {busy === session.id ? '保存中…' : '确认恢复'}
               </button>
             </li>
           ))}
         </ul>
-        {error && <p role="alert">{error}</p>}
-        <button type="button" onClick={() => setDismissed(true)}>稍后处理</button>
+        {error && <p role="alert" className={P}>{error}</p>}
+        <button type="button" className={BTN} onClick={() => setDismissed(true)}>稍后处理</button>
       </div>
     </div>
   )

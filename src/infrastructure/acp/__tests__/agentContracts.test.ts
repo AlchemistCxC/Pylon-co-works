@@ -151,3 +151,148 @@ describe('normalizeAgentList invocation contract', () => {
     ])
   })
 })
+
+// ── 迁移自 scripts/test-agent-contracts.mts（P91 A1）：先读既有用例查重后仅迁缺失段——
+// 四个实测样本的完整 11 键深相等、空对象 capabilities 语义、显式 vs 缺省、authMethods 漂移、
+// 图片 filters 完整性（长度 + png 扩展）与 gate 对缺失快照的拦截；
+// 旧代际 connected=false、undefined/null 初始态、附件 gate/filters 三态主干已由上方用例覆盖，不再重复。──
+describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scripts/test-agent-contracts.mts，P91 A1）', () => {
+  it('样本 1：Peri 实测形状（无 authMethods、无 mcpCapabilities、promptCapabilities 空对象）', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: {
+        loadSession: true,
+        promptCapabilities: {},
+        sessionCapabilities: { list: true, close: true, resume: true, fork: true },
+        _meta: { 'peri.*': true },
+      },
+    }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: true,
+      promptImage: false,
+      sessionFork: true,
+      sessionResume: true,
+      sessionClose: true,
+      sessionList: true,
+      mcpHttp: true,
+      mcpSse: true,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('样本 2：Hermes 实测形状（mcp 显式 false 关闭、authMethods 非空、close 未声明按缺省 true）', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: {
+        loadSession: true,
+        promptCapabilities: { image: true },
+        sessionCapabilities: { fork: true, list: true, resume: true },
+        mcpCapabilities: { http: false, sse: false },
+        authMethods: ['api_key'],
+      },
+    }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: true,
+      promptImage: true,
+      sessionFork: true,
+      sessionResume: true,
+      sessionClose: true,
+      sessionList: true,
+      mcpHttp: false,
+      mcpSse: false,
+      hasAuthMethods: true,
+    })
+  })
+
+  it('样本 3：第三方未知 agent 漂移形状——未知键不崩，缺省语义正确', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: {
+        loadSession: false,
+        sessionCapabilities: { fork: true },
+        weirdField: { a: 1 },
+      },
+    }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: false,
+      promptImage: false,
+      sessionFork: true,
+      sessionResume: false,
+      sessionClose: true,
+      sessionList: false,
+      mcpHttp: true,
+      mcpSse: true,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('样本 4：capabilities null 的完整 11 键快照（生命周期 connected 但能力未确认）', () => {
+    expect(resolveCapabilitySnapshot(status({ capabilities: null }))).toEqual({
+      connected: true,
+      capabilitiesKnown: false,
+      loadSession: false,
+      promptImage: false,
+      sessionFork: false,
+      sessionResume: false,
+      sessionClose: true,
+      sessionList: false,
+      mcpHttp: true,
+      mcpSse: true,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('空对象 capabilities：不断线且能力已确认（区别于缺失 capabilities 的未确认语义）', () => {
+    expect(resolveCapabilitySnapshot(status({ capabilities: {} }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: false,
+      promptImage: false,
+      sessionFork: false,
+      sessionResume: false,
+      sessionClose: true,
+      sessionList: false,
+      mcpHttp: true,
+      mcpSse: true,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('缺省 vs 显式：sessionClose 显式 false 才关；mcp 显式 false 才关，显式 true 保持 true', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: {
+        sessionCapabilities: { close: false },
+        mcpCapabilities: { http: false, sse: true },
+      },
+    }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: false,
+      promptImage: false,
+      sessionFork: false,
+      sessionResume: false,
+      sessionClose: false,
+      sessionList: false,
+      mcpHttp: false,
+      mcpSse: true,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('authMethods 非数组（漂移）不当 hasAuthMethods', () => {
+    expect(resolveCapabilitySnapshot(status({ capabilities: { authMethods: 'api_key' } })).hasAuthMethods).toBe(false)
+  })
+})
+
+describe('resolveAttachFilters/gate — 图片 filters 完整性与缺失快照（迁移自 scripts/test-agent-contracts.mts，P91 A1）', () => {
+  it('connected + promptImage=true → filters 恰为 2 且图片含 png 扩展（态 4 补遗）', () => {
+    const imageOk = resolveCapabilitySnapshot(status({ capabilities: { promptCapabilities: { image: true } } }))
+    const imageFilters = resolveAttachFilters(imageOk)
+    expect(imageFilters.length).toBe(2)
+    expect(imageFilters.some(f => f.name === '图片' && f.extensions.includes('png'))).toBe(true)
+  })
+
+  it('gate 对缺失快照（status 整体缺失）同样拦截', () => {
+    expect(resolveAttachGate(resolveCapabilitySnapshot(undefined)).allowed).toBe(false)
+  })
+})

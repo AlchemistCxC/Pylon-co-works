@@ -2146,12 +2146,14 @@
   width:auto;
   max-width:100%;
 }
-/* Full-width terminal rails can use a zero basis to ignore a transient Slot's
-   max-content contribution. Bubble rows remain auto-sized so the body keeps
-   its intrinsic width instead of collapsing the entire bubble to the marker. */
-.app[data-message-layout="classic"] .term-assistant.has-dot > .term-assistant-body {
-  flex:1 1 0;
-  width:0;
+/* Keep the content column width-bearing in every message layout. A zero flex
+   basis combined with a shrink-to-fit row collapses the body to the marker's
+   min-content width, producing the characteristic few-characters-per-line
+   fracture. The shared auto basis works for both full-width rails and bubbles. */
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  width:auto;
+  max-width:100%;
 }
 .term-reasoning-body {
   box-sizing:border-box;

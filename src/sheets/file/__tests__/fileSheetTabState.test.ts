@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_FILE_TAB_STATE,
   fileTabKey,
+  languageFromPath,
   parseFileTabs,
   serializeFileTabs,
 } from '../fileSheetState'
@@ -132,5 +133,24 @@ describe('file/diff tab identity 版本化 schema', () => {
       activeKey: 'git.diff:a.ts',
     }))
     expect(parsed.tabs).toEqual([{ path: 'a.ts', viewType: 'git.diff' }])
+  })
+})
+
+// 迁移自 scripts/test-file-tabs.mts（P91 A1）；round-trip / 空态 / 损坏 JSON / fileTabKey 已由上方既有用例覆盖
+describe('file tabs v3（迁移自 test-file-tabs.mts）', () => {
+  it('legacy openTabs:string[] → v3 file-mode tabs（activeKey 取最后一条）', () => {
+    expect(parseFileTabs(JSON.stringify(['a.ts', 'b.ts']))).toEqual({
+      version: 3,
+      tabs: [
+        { path: 'a.ts', viewType: 'file.text' },
+        { path: 'b.ts', viewType: 'file.text' },
+      ],
+      activeKey: 'file.text:b.ts',
+    })
+  })
+
+  it('languageFromPath 按扩展名映射语法语言', () => {
+    expect(languageFromPath('src/a.ts')).toBe('typescript')
+    expect(languageFromPath('a.md')).toBe('markdown')
   })
 })

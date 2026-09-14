@@ -6,15 +6,35 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
+import { FakeInvoke } from '../../test/fakeInvoke'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve({})) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
 vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))
+
+/** 未注册命令 resolve {}（对齐原内联 mock `vi.fn(() => Promise.resolve({}))` 的宽松路径） */
+class PermissiveFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return {}
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: PermissiveFakeInvoke
 
 const sheet: SheetRecord = { id: 'overview', kind: 'overview', title: 'Overview', createdAt: 0, lastFocusedAt: 0 }
 
 beforeEach(() => {
+  fakeInvoke = new PermissiveFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   resetStores()
   useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
   useIdentityStore.setState({
@@ -93,5 +113,36 @@ describe('Overview visual workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: /配置 Agent/ }))
     expect(listener).toHaveBeenCalledOnce()
     window.removeEventListener('pylon:open-settings', listener)
+  })
+
+  // 下沉自 scripts/test-overview-sheet.mts（P91 A2）：三入口壳 + 选择 Agent 事务流
+  // （switchAgentTransaction → 无缝 open agent sheet；失败保持 overview 并可审计展示）。
+  it('选择 Agent：卡片点击经 switch 事务成功后打开 agent sheet 并清运行时状态', async () => {
+    const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
+    render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
+
+    // 三入口壳在场：选择 Agent（section 标题）+ hero 的 Agent 设置入口
+    expect(screen.getByRole('heading', { name: '选择 Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agent 设置' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Peri.*1 个会话.*已连接/ }))
+    await vi.waitFor(() => {
+      expect(ctx.openSheet).toHaveBeenCalledWith({ kind: 'agent', title: 'Peri', agentId: 'peri' })
+    })
+    // pylon:agent-switched 广播（switchAgentTransaction dispatchSwitched）
+    expect(useIdentityStore.getState().activeAgent).toBe('peri')
+  })
+
+  it('选择 Agent 失败：保持 overview、错误以 alert 展示、卡片恢复可再选', async () => {
+    fakeInvoke.register('switch_agent', () => { throw new Error('switch refused') })
+    const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
+    render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Peri.*1 个会话.*已连接/ }))
+    // 非校验错误：页面给 status 提示，细节进右下角错误中心（reportRuntimeError）
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('操作失败，详情见右下角错误中心')
+    expect(ctx.openSheet).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Peri.*1 个会话.*已连接/ })).toBeEnabled()
   })
 })

@@ -277,6 +277,28 @@ impl SessionInfo {
         value: &serde_json::Value,
     ) {
         let mut authoritative = false;
+        // Some ACP agents (notably set_model implementations) return the
+        // settled model in `models.currentModelId` while leaving
+        // `configOptions` absent. Consume that acknowledgement before the
+        // compatibility fallback below so the session converges on the
+        // agent's value instead of retaining an optimistic client value.
+        let acknowledged_model = response
+            .get("models")
+            .and_then(|models| {
+                models
+                    .get("currentModelId")
+                    .or_else(|| models.get("current_model_id"))
+            })
+            .and_then(value_as_machine_id)
+            .or_else(|| {
+                response
+                    .get("currentModelId")
+                    .or_else(|| response.get("current_model_id"))
+                    .and_then(value_as_machine_id)
+            });
+        if let Some(model) = acknowledged_model.as_ref() {
+            self.model = model.clone();
+        }
         if let Some(options) = response
             .get("configOptions")
             .and_then(|value| value.as_array())
@@ -288,6 +310,9 @@ impl SessionInfo {
             }
         }
         if authoritative {
+            return;
+        }
+        if acknowledged_model.is_some() {
             return;
         }
         match key {
@@ -1069,5 +1094,23 @@ mod tests {
         // 未宣告列表（空 choices）→ 无法校验，放行（现状兼容）。
         assert!(validate_model_advertised("anything", &[]).is_ok());
         assert!(validate_model_advertised("nous:hermes-4", &["nous:hermes-4".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn set_model_response_acknowledgement_converges_without_config_options() {
+        let mut session = SessionInfo::new(
+            "peri-1".to_string(),
+            "persona".to_string(),
+            ".".to_string(),
+            false,
+            1,
+        );
+        session.model = "old-model".to_string();
+        session.apply_config_option_response(
+            &serde_json::json!({"models": {"currentModelId": "agent-normalized-model"}}),
+            "model",
+            &serde_json::json!("new-model"),
+        );
+        assert_eq!(session.model, "agent-normalized-model");
     }
 }

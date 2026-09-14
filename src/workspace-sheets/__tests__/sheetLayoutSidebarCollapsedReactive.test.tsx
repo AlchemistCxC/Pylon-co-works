@@ -41,21 +41,18 @@ describe('I09-A-FE-01 SheetLayout sidebarCollapsed 响应式订阅', () => {
     expect(sidebar).toBeTruthy()
     expect(sidebar!.classList.contains('collapsed')).toBe(false)
 
-    const expandedTrack = getComputedStyle(sidebar!).width
-
     // 折叠：若 SheetLayout 仅 getState() 快照（不订阅），此处不重渲染 → collapsed 类不出现
     act(() => {
       useWorkspaceStore.getState().setSidebarCollapsed(true)
     })
     expect(sidebar!.classList.contains('collapsed')).toBe(true)
-    expect(getComputedStyle(sidebar!).width).toBe(expandedTrack)
+    // P91 C2：删除 getComputedStyle 宽度比较——jsdom 无样式表恒真死断言；真契约在 collapsed 类翻转。
 
     // 展开：响应式订阅同样立即可见
     act(() => {
       useWorkspaceStore.getState().setSidebarCollapsed(false)
     })
     expect(sidebar!.classList.contains('collapsed')).toBe(false)
-    expect(getComputedStyle(sidebar!).width).toBe(expandedTrack)
   })
 
   it('FileSheet 与 AgentSheet 共享同一折叠状态', async () => {

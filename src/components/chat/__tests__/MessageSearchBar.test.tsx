@@ -48,7 +48,10 @@ describe('MessageSearchBar', () => {
   })
 
   test('无结果时显示"无结果"且按钮禁用', () => {
-    const { onPrevious, onNext } = setup()
+    setup()
+    // 有结果基线：导航按钮可用
+    expect(screen.getByRole('button', { name: '上一个搜索结果' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '下一个搜索结果' })).toBeEnabled()
     render(
       <MessageSearchBar
         query="无匹配词"
@@ -61,7 +64,12 @@ describe('MessageSearchBar', () => {
       />,
     )
     expect(screen.getByText('无结果')).toBeTruthy()
-    expect(onPrevious).toBeDefined()
-    expect(onNext).toBeDefined()
+    // 行为断言：matchCount=0 → 上一个/下一个按钮真实禁用（disabled={matchCount === 0}）
+    const prevButtons = screen.getAllByRole('button', { name: '上一个搜索结果' })
+    const nextButtons = screen.getAllByRole('button', { name: '下一个搜索结果' })
+    expect(prevButtons).toHaveLength(2)
+    expect(nextButtons).toHaveLength(2)
+    expect(prevButtons[1]).toBeDisabled()
+    expect(nextButtons[1]).toBeDisabled()
   })
 })

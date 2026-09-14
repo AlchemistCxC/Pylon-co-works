@@ -7,12 +7,15 @@ import { describe, expect, it } from 'vitest'
 
 import {
   browserMessageRepository,
+  canPersistMessages,
+  clearMessageStorage,
   fromWireRecord,
   messageStorageKey,
   parseMessageSnapshot,
+  persistMessageSnapshot,
   toWireRecord,
   type MessageStorage,
-} from '../messagePersistence'
+} from '../messagePersistence.ts'
 import type { Message } from '../messageTypes'
 
 function memoryStorage(): MessageStorage {
@@ -83,5 +86,81 @@ describe('wire 映射', () => {
       messageId: 'm2', sessionId: 's1', seq: 2, role: 'unknown-role', content: 'x', clientMsgId: null, createdAt: 0,
     })
     expect(fallback.role).toBe('assistant')
+  })
+})
+
+// ── 以下两个 describe 迁移自 scripts/test-message-persistence.mts 与
+// scripts/test-message-persistence-clear.mts（P91 A1）──
+
+describe('messagePersistence 持久化门槛与 envelope（迁移自 scripts/test-message-persistence.mts，P91 A1）', () => {
+  it('canPersistMessages：owner、source 与当前 render 一致时应允许持久化', () => {
+    expect(canPersistMessages({
+      ownerId: 'session-a',
+      source: 'local:a',
+      renderedSessionId: 'session-a',
+      renderedSource: 'local:a',
+    })).toBe(true)
+  })
+
+  it('canPersistMessages：A 的旧消息不得以 B 的 sessionId 持久化', () => {
+    expect(canPersistMessages({
+      ownerId: 'session-a',
+      source: 'local:a',
+      renderedSessionId: 'session-b',
+      renderedSource: 'local:b',
+    })).toBe(false)
+  })
+
+  it('canPersistMessages：owner 正确但 source 不一致时不得持久化', () => {
+    expect(canPersistMessages({
+      ownerId: 'session-a',
+      source: 'local:a',
+      renderedSessionId: 'session-a',
+      renderedSource: 'local:b',
+    })).toBe(false)
+  })
+
+  it('canPersistMessages：会话切换清理 owner 后不得持久化', () => {
+    expect(canPersistMessages({
+      ownerId: null,
+      source: null,
+      renderedSessionId: 'session-b',
+      renderedSource: 'local:b',
+    })).toBe(false)
+  })
+
+  it('persistMessageSnapshot 写稳定 key + envelope；空列表清除 key', () => {
+    const writes: Array<[string, string]> = []
+    const removes: string[] = []
+    const storage = {
+      getItem: (_key: string): string | null => null,
+      setItem: (key: string, value: string) => writes.push([key, value]),
+      removeItem: (key: string) => removes.push(key),
+    }
+
+    persistMessageSnapshot('session-a', [{ id: 'm1' }], storage)
+    expect(writes).toEqual([['pylon-msgs-session-a', '{"version":1,"messages":[{"id":"m1"}]}']])
+    persistMessageSnapshot('session-a', [], storage)
+    expect(removes).toEqual(['pylon-msgs-session-a'])
+  })
+
+  it('parseMessageSnapshot：2026-08-02 版本 envelope，读取兼容旧裸数组，损坏返回 null', () => {
+    expect(parseMessageSnapshot('{"version":1,"messages":[{"id":"m1"}]}')).toEqual([{ id: 'm1' }])
+    expect(parseMessageSnapshot('[{"id":"m1"}]')).toEqual([{ id: 'm1' }]) // 旧裸数组格式必须兼容
+    expect(parseMessageSnapshot('{"version":1,"messages":"not-array"}')).toBeNull()
+    expect(parseMessageSnapshot('{not json')).toBeNull()
+    expect(parseMessageSnapshot(null)).toBeNull()
+  })
+})
+
+describe('messageStorage key 格式与 clearMessageStorage（迁移自 scripts/test-message-persistence-clear.mts，P91 A1）', () => {
+  it('key 格式 pylon-msgs-<sessionId>', () => {
+    expect(messageStorageKey('session-a')).toBe('pylon-msgs-session-a')
+  })
+
+  it('clearMessageStorage 移除对应 key', () => {
+    const removed: string[] = []
+    clearMessageStorage('session-a', { removeItem: key => removed.push(key) })
+    expect(removed).toEqual(['pylon-msgs-session-a'])
   })
 })

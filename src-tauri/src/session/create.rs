@@ -354,9 +354,43 @@ fn merge_setting_response(
     option_key: &str,
     value: &str,
 ) {
+    // Inspect the *fresh* acknowledgement before merging it into the session/new
+    // snapshot.  The snapshot may already contain the agent default (for Hermes,
+    // often V4.1); treating that as an acknowledgement would discard the user's
+    // requested V4 Flash when Hermes returns `{}`.
+    let acknowledged = setting_response
+        .get(section)
+        .and_then(|section| section.get(current_key))
+        .is_some_and(|current| !current.is_null())
+        || setting_response
+            .get("configOptions")
+            .or_else(|| setting_response.get("config_options"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|options| {
+                options.iter().any(|option| {
+                    option_identity(option).is_some_and(|id| id.eq_ignore_ascii_case(option_key))
+                        && ["currentValue", "current_value", "value"]
+                            .iter()
+                            .any(|key| option.get(*key).is_some_and(|value| !value.is_null()))
+                })
+            });
     merge_response_value(response, setting_response);
-    set_response_current(response, section, current_key, value);
-    set_config_option_current(response, option_key, value);
+
+    // Empty acknowledgements have no authoritative value, so the requested
+    // machine id is the confirmed value.  Keep the models and configOptions
+    // projections converged for callers that read either representation.
+    let confirmed = if acknowledged {
+        response
+            .get(section)
+            .and_then(|section| section.get(current_key))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(value)
+    } else {
+        value
+    }
+    .to_string();
+    set_response_current(response, section, current_key, &confirmed);
+    set_config_option_current(response, option_key, &confirmed);
 }
 
 fn merge_config_setting_response(
@@ -390,6 +424,16 @@ fn plan_initial_model(
     declared: Option<crate::agent_config::SetModelApi>,
 ) -> Result<InitialModelAction, PylonError> {
     use crate::agent_config::ModelSwitchTarget;
+    // ACP wrappers in the wild emit the model catalog either under
+    // `models.availableModels` or at the response root. Feed both shapes into
+    // the same planner so an advertised initial model is never silently
+    // skipped and replaced by the agent's default.
+    let model_surface = response.get("models").or_else(|| {
+        response
+            .get("availableModels")
+            .or_else(|| response.get("available_models"))
+            .map(|_| response)
+    });
     let info = super::determine_model_surface(
         response
             .get("configOptions")
@@ -397,7 +441,7 @@ fn plan_initial_model(
             .and_then(serde_json::Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or(&[]),
-        response.get("models"),
+        model_surface,
     );
     let validate = |action: InitialModelAction| -> InitialModelAction {
         if info.choices.is_empty() || info.choices.iter().any(|choice| choice == model) {
@@ -1387,5 +1431,21 @@ mod initial_option_tests {
             Some(crate::agent_config::SetModelApi::None)
         )
         .is_err());
+    }
+
+    #[test]
+    fn initial_model_plan_reads_top_level_model_catalog() {
+        let response = json!({
+            "sessionId": "session-1",
+            "currentModelId": "deepseek-v4.1-flash",
+            "availableModels": [
+                {"modelId": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"},
+                {"modelId": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"}
+            ]
+        });
+        assert!(matches!(
+            plan_initial_model(&response, "deepseek-v4-flash", None).unwrap(),
+            InitialModelAction::SendSetModel
+        ));
     }
 }

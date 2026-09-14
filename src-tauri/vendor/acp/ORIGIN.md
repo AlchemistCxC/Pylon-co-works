@@ -2,7 +2,7 @@
 
 > 本目录（`src-tauri/vendor/acp/`）只存放从 codeg 迁入的**源码副本**，用于溯源、许可证履约与逐文件比对。
 > 它**不是编译目标**：Cargo 不编译 `vendor/`，Pylon 的行为改动一律落在 `src-tauri/src/acp/` 的 adapter 中。
-> 任何进入本目录的文件都必须在本文件登记，并由 `node scripts/check-vendor-provenance.mjs` 校验（A0 门禁）。
+> **[已退役 2026-09-14，P91 测试体系大修 §0 决策 2]** `scripts/check-vendor-provenance.mjs` 经用户裁定为死代码并删除；provenance 机器校验与 consumer 登记要求随之废止。本文件保留的 license/出处登记（§1–§3）是外部代码署名义务，继续有效。
 
 ## 1. 来源锁定
 
@@ -15,7 +15,6 @@
 | 许可证文本 | `LICENSES/Apache-2.0.txt` |
 | 版权声明 | 根 `NOTICE` |
 | Pylon 许可证 | MIT（根 `LICENSE`） |
-| 校验脚本 | `scripts/check-vendor-provenance.mjs` |
 
 读取纪律：只读本片点名的符号区间；不得通读 `acp/connection.rs`（21,689 行）、`acp/manager.rs`（8,896 行）、`acp/registry.rs`；不得读取 codeg 的 DB 实体、`web/`、React/Next 前端。
 
@@ -37,7 +36,7 @@
 
 ## 3. 迁入文件登记（机器可读）
 
-`scripts/check-vendor-provenance.mjs` 解析下面这个代码块；新增迁入文件必须同时在此登记，否则门禁失败。
+下面这个代码块曾由 `scripts/check-vendor-provenance.mjs` 机器解析校验（脚本已删，见篇首退役注记）；现仅作出处存档，不再有配套门禁，consumer 登记要求一并废止。
 
 ```json provenance
 {
@@ -201,6 +200,6 @@
 - Pylon 接缝：catalog `params.min` 和 `PreflightInputs`；缺失/非法版本不能证明满足要求。未迁上游 registry、AppState、探测缓存和安装动作。
 - 证据：`invalid_or_missing_versions_cannot_pass_a_requirement`、`upstream_parser_accepts_banner_whitespace_and_patch_suffixes`。Node/uv 的完整状态分级、采集与 fix action 仍待整片收敛，不以此宣称 preflight 完成。
 
-1. 新增迁入文件：复制到 `src-tauri/vendor/acp/` → 计算 `sha256` → 在本文件 §3 追加登记（含 `sourcePath`、`modifications`、`consumer`、`unmigratedDeps`）→ 跑 `node scripts/check-vendor-provenance.mjs`。
+1. 新增迁入文件：复制到 `src-tauri/vendor/acp/` → 在本文件 §3 追加出处登记（含 `sourcePath`、`modifications`、license 信息；provenance 机器校验已退役，见篇首注记）。
 2. 修改已迁入副本：**不要**直接改 `vendor/` 里的文件；在 Pylon adapter 中改写，并在本文件 `modifications` 字段记录改动摘要。若确需改动副本本身（例如去掉不可编译的前端依赖），必须在 `modifications` 写明并更新 `sha256`。
 3. 新增 crate 落点、依赖方向与职责边界按施工书 §0 纪律同步登记到 `Docs/Pylon-问题台账.md` P60 条目。

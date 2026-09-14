@@ -127,3 +127,122 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.term-md-skeleton\s*\{[^}]*min-height:\s*1em;/)
   })
 })
+
+// 真浏览器实测（Chrome headless 1280px，直接加载本文件；探针与数据见台账 P85）：
+// `data-msg-style="bubble"`（行 shrink-to-fit）+ `data-message-layout="classic"`
+// （正文零 basis）+ assistantDot 三者同开时，正文被压成 row=44px / body=0px /
+// 91 行（同一段落其余组合均 3 行）——这正是「输出少数几个字符就换行」的碎裂。
+describe('assistant body width contract', () => {
+  it('keeps the content column width-bearing in every row style', () => {
+    const rules = css.match(/\.term-assistant\.has-dot > \.term-assistant-body\s*\{([^}]*)\}/g) ?? []
+    expect(rules.length).toBeGreaterThan(0)
+    expect(rules.join('\n')).toContain('flex:1 1 auto')
+    expect(rules.join('\n')).toContain('width:auto')
+    expect(rules.join('\n')).toContain('max-width:100%')
+    expect(css).not.toMatch(/\.app\[data-message-layout="classic"\][^{]*\.term-assistant\.has-dot > \.term-assistant-body\s*\{[^}]*width:0;/)
+  })
+})
+
+// 下沉自 scripts/test-markdown-list-line-height.mts（P91 A2）：列表行高与缩进契约，
+// 原为全文 includes 文案断言，改选择器限域（防 token 撞车误绿）。
+describe('markdown 列表行高与缩进契约', () => {
+  it('assistant 行基础块用 token 内边距且 white-space:normal（非 pre-wrap）', () => {
+    const base = css.match(/(\.term-assistant \{[^}]*\})/)?.[1] ?? ''
+    expect(base).toContain('padding:var(--ui-space-1) 0')
+    expect(base).toContain('white-space:normal')
+    expect(base).not.toContain('white-space:pre-wrap')
+  })
+
+  it('列表元素行高走 msg-line-height 变量链', () => {
+    const listRule = css.match(
+      /(\.term-row-assistant \.term-assistant ol,\s*\n\.term-row-assistant \.term-assistant ul,\s*\n\.term-row-assistant \.term-assistant li \{[^}]*\})/,
+    )?.[1] ?? ''
+    expect(listRule).toContain('line-height:var(--msg-line-height,var(--chat-line-height,1.35))')
+  })
+
+  it('ReactMarkdown 列表缩进：ol 2em / ul 1.5em，零外边距（间距由行高承担）', () => {
+    const ol = css.match(/(\.term-assistant ol \{[^}]*\})/g)?.map(rule => rule) ?? []
+    const ul = css.match(/(\.term-assistant ul \{[^}]*\})/)?.[1] ?? ''
+    const li = css.match(/(\.term-assistant li \{ margin:[^}]*\})/g) ?? []
+    // claude 布局在 224 行附近有自己的 em 外边距覆盖；基础规则（ReactMarkdown 缩进块）
+    // 必须是零边距 + 缩进，不得被误改。
+    expect(ol).toContain('.term-assistant ol { padding-left:2em; margin:0; }')
+    expect(ol).not.toContain('.term-assistant ol { padding-left:2em; margin:4px 0; }')
+    expect(ul).toContain('.term-assistant ul { padding-left:1.5em; margin:0; }')
+    expect(li).toContain('.term-assistant li { margin:0; }')
+    expect(li).not.toContain('.term-assistant li { margin:2px 0; }')
+  })
+})
+
+// 下沉自 scripts/test-message-style.mts（P91 A2）：消息变量消费与布局属性钩子。
+describe('消息变量消费与布局钩子', () => {
+  it('消息渲染消费 msg 三变量（font/text/line-height）', () => {
+    expect(css).toContain('var(--msg-font')
+    expect(css).toContain('var(--msg-text')
+    expect(css).toContain('var(--msg-line-height')
+  })
+
+  it('气泡/claude 布局属性钩子在场', () => {
+    expect(css).toContain('[data-msg-style="bubble"]')
+    expect(css).toContain('[data-message-layout="claude"] .term-tool')
+    expect(css).not.toContain('padding:0 0 0 2ch')
+  })
+
+  it('claude 布局：用户消息 8px 纵向内边距，块级元素左内边距归零', () => {
+    expect(css).toMatch(/\.app\[data-message-layout="claude"\] \.term-user \{[^}]*padding:8px 0;/)
+    expect(css).toMatch(/\.app\[data-message-layout="claude"\] \.term-assistant,[^{]*\.term-reasoning,[^{]*\.term-tool \{[^}]*padding-left:0;/)
+  })
+
+  it('用户消息固定前缀列布局；spinner 行与消息左轨道对齐', () => {
+    expect(css).toMatch(/\.term-user \{ display:flex; align-items:baseline;/)
+    expect(css).toMatch(/\.term-spinner-row \{[^}]*padding: var\(--ui-space-1\) 0;/)
+  })
+})
+
+// 下沉自 scripts/test-tool-connector.mts（P91 A2）：连接线层叠定位与状态着色。
+describe('工具连接线 CSS 契约', () => {
+  it('层叠次序：term 定位包含块，线在 body 之上，head 覆盖线', () => {
+    expect(css).toMatch(/\.term \{[^}]*position:relative;/)
+    expect(css).toMatch(/\.term-tool-connector \{[^}]*position:absolute;[^}]*z-index:1;/)
+    expect(css).toMatch(/\.term-tool-head \{ position:relative; z-index:2;/)
+    expect(css).not.toContain('term-tool::before')
+    expect(css).not.toContain('--conn-gap')
+  })
+
+  it('工具名随状态着色（ok/err/run 三态变量链）', () => {
+    expect(css).toContain('.term-tool[data-status="ok"] .term-tool-name { color:var(--tool-ok,#1e9646); }')
+    expect(css).toContain('.term-tool[data-status="err"] .term-tool-name { color:var(--tool-err,#be2828); }')
+    expect(css).toContain('.term-tool[data-status="run"] .term-tool-name { color:var(--tool-run,#3b82f6); }')
+  })
+})
+
+// 下沉自 scripts/test-tool-connector-motion.mts（P91 A2）：连接线动画样式契约。
+describe('工具连接线动画 CSS 契约', () => {
+  it('dotted 与 pulse 样式族在场', () => {
+    expect(css).toMatch(/\.term-tool-connector-style--dotted/)
+    expect(css).toMatch(/\.term-tool-connector-style--pulse/)
+  })
+
+  it('状态动画：pulse 呼吸 / settle 收敛 / flash 闪烁 / static 静止', () => {
+    expect(css).toContain('.term-tool-connector--pulse { animation:tool-connector-pulse 1.8s ease-in-out infinite; }')
+    expect(css).toContain('.term-tool-connector--settle { animation:tool-connector-settle 360ms ease-out 1 both; }')
+    expect(css).toContain('.term-tool-connector--flash { animation:tool-connector-flash 320ms ease-out 1 both; }')
+    expect(css).toContain('.term-tool-connector--static { animation:none; }')
+  })
+
+  it('failed 连接线同步指示物模糊；减动效时 breathe/flash 归零', () => {
+    expect(css).toContain('.term-tool-connector[data-connector-mode="follow"][data-tool-state="failed"] { filter:blur(0.65px); }')
+    expect(css).toMatch(/@media \(prefers-reduced-motion:reduce\)[^@]*\.term-tool-connector--breathe,[^@]*\.term-tool-connector--flash \{ animation:none; filter:none; \}/)
+  })
+})
+
+// 下沉自 scripts/test-style-guards.mts（P91 A2 拆分）：ChatView 基础样式守卫。
+describe('ChatView 基础样式守卫', () => {
+  it('消息渲染失败行必须有错误样式', () => {
+    expect(css).toMatch(/\.term-row-error\s*\{/)
+  })
+
+  it('用户代码块保持等宽字体', () => {
+    expect(css).toContain('.term-user code { font-family:var(--mono); font-size:inherit; }')
+  })
+})

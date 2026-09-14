@@ -44,6 +44,23 @@ function paletteBlock(mode: string, scheme: string): string {
   return INDEX_CSS.slice(start, end)
 }
 
+/** 区块化取块：从 startMarker 起按大括号配平截取完整规则块（支持 @media 嵌套） */
+function blockContaining(cssText: string, startMarker: string): string {
+  const start = cssText.indexOf(startMarker)
+  if (start < 0) throw new Error(`缺少 ${startMarker}`)
+  const open = cssText.indexOf('{', start)
+  if (open < 0) throw new Error(`区块无开括号：${startMarker}`)
+  let depth = 0
+  for (let i = open; i < cssText.length; i++) {
+    if (cssText[i] === '{') depth++
+    else if (cssText[i] === '}') {
+      depth--
+      if (depth === 0) return cssText.slice(start, i + 1)
+    }
+  }
+  throw new Error(`区块未闭合：${startMarker}`)
+}
+
 describe('B-04 visual conformance invariants', () => {
   it.each([
     ['terminal-like', 'dark'],
@@ -70,14 +87,19 @@ describe('B-04 visual conformance invariants', () => {
     }
   })
 
-  it('keeps host focus and reduced-motion guardrails tokenized', () => {
-    expect(INDEX_CSS).toContain(':where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"], a, input, textarea, select):focus-visible')
-    expect(INDEX_CSS).toContain('outline: 2px solid var(--accent)')
-    expect(INDEX_CSS).toContain('outline-offset: 2px')
-    expect(INDEX_CSS).toContain('opacity: var(--state-disabled-opacity)')
-    expect(INDEX_CSS).toContain('@media (prefers-reduced-motion: reduce)')
-    expect(INDEX_CSS).toContain('--motion-standard: 1ms')
-    expect(INDEX_CSS).toContain('animation-duration:1ms !important')
-    expect(INDEX_CSS).toContain('transition-duration:1ms !important')
+  it('keeps host focus and reduced-motion guardrails tokenized（断言锚定到具体规则区块）', () => {
+    // 键盘焦点区块：完整 :where(...) 选择器 + token 化的 outline/offset 都在同一区块内
+    const focusBlock = blockContaining(INDEX_CSS, ':where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"], a, input, textarea, select):focus-visible')
+    expect(focusBlock).toContain(':where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"], a, input, textarea, select):focus-visible')
+    expect(focusBlock).toContain('outline: 2px solid var(--accent)')
+    expect(focusBlock).toContain('outline-offset: 2px')
+    // 禁用态区块：disabled/aria-disabled 命中同一 token 化 opacity
+    const disabledBlock = blockContaining(INDEX_CSS, ':where(button, input, textarea, select):disabled')
+    expect(disabledBlock).toContain('opacity: var(--state-disabled-opacity)')
+    // reduced-motion 媒体区块：token 降速 + 强制时长都在区块内
+    const reducedMotionBlock = blockContaining(INDEX_CSS, '@media (prefers-reduced-motion: reduce)')
+    expect(reducedMotionBlock).toContain('--motion-standard: 1ms')
+    expect(reducedMotionBlock).toContain('animation-duration:1ms !important')
+    expect(reducedMotionBlock).toContain('transition-duration:1ms !important')
   })
 })

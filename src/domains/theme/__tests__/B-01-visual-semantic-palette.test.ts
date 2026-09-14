@@ -5,8 +5,17 @@ import { selectThemeCssSnapshot } from '../themeCssSnapshot.ts'
 
 const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
 
-function css(relativePath: string): string {
-  const pathname = decodeURIComponent(new URL(relativePath, import.meta.url).pathname)
+/** 区块解析（复用 B-04 先例）：按 selector 定位并按大括号配平截取完整规则块 */
+function selectorBlock(cssText: string, selector: string): string {
+  const start = cssText.indexOf(selector)
+  if (start < 0) throw new Error(`缺少 ${selector}`)
+  const end = cssText.indexOf('}', start)
+  if (end < 0) throw new Error(`selector 未闭合：${selector}`)
+  return cssText.slice(start, end)
+}
+
+function indexCss(): string {
+  const pathname = decodeURIComponent(new URL('../../../index.css', import.meta.url).pathname)
     .replace(/^\/([A-Za-z]:)/, '$1')
   return readFileSync(pathname, 'utf8')
 }
@@ -71,15 +80,19 @@ describe('B-01 host semantic palette projection', () => {
     expect(vars['--state-success']).toBe('var(--preset-success)')
   })
 
-  it('defines all mode/scheme fallback selectors in the host stylesheet', () => {
-    const styles = css('../../../index.css')
+  it('defines all mode/scheme fallback selectors in the host stylesheet（区块解析）', () => {
+    const styles = indexCss()
     for (const mode of ['terminal-like', 'modern-gui']) {
       for (const scheme of ['dark', 'light']) {
-        expect(styles).toContain(`data-interface-mode="${mode}"`)
-        expect(styles).toContain(`data-ui-scheme="${scheme}"`)
+        // 每个 mode/scheme 的 fallback palette 区块都存在且真的携带 palette token
+        const block = selectorBlock(styles, `[data-interface-mode="${mode}"][data-ui-scheme="${scheme}"]`)
+        expect(block).toContain('--pylon-palette-content-text: #')
+        expect(block).toContain('--pylon-palette-connector-default: #')
       }
     }
-    expect(styles).toContain('--content-text: var(--pylon-palette-content-text)')
-    expect(styles).toContain('--connector-default: var(--pylon-palette-connector-default)')
+    // 角色投影集中在 mode/scheme 无关的通配区块内
+    const projectionBlock = selectorBlock(styles, ':where(html, body, .app)[data-interface-mode][data-ui-scheme]')
+    expect(projectionBlock).toContain('--content-text: var(--pylon-palette-content-text)')
+    expect(projectionBlock).toContain('--connector-default: var(--pylon-palette-connector-default)')
   })
 })

@@ -148,6 +148,18 @@ pub fn list_profiles(home: &Path) -> Vec<String> {
 /// - 纯名称 → `<detect_hermes_home()>/profiles/<name>`；探测不到 home 时返回
 ///   None（调用方回退不注入，并记录诊断）。
 pub fn resolve_profile_dir(agent: &AgentDef, base_dir: Option<&Path>) -> Option<PathBuf> {
+    resolve_profile_dir_with_home(agent, base_dir, detect_hermes_home())
+}
+
+/// P91 批 C1（横切 §4）：home 参数化变体——探测与解析解耦。生产入口
+/// [`resolve_profile_dir`] 恒传 `detect_hermes_home()`（行为不变）；测试注入
+/// 假 home，不再 `set_var` 进程全局 `HERMES_HOME`（进程级 env 变异与并行测试竞态，
+/// 「串行安全」假设与 lib 测试并行执行矛盾）。
+fn resolve_profile_dir_with_home(
+    agent: &AgentDef,
+    base_dir: Option<&Path>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
     let profile = agent.hermes_profile.as_deref()?;
     let candidate = Path::new(profile);
     let is_path_like = candidate.components().count() > 1 || candidate.is_absolute();
@@ -161,7 +173,7 @@ pub fn resolve_profile_dir(agent: &AgentDef, base_dir: Option<&Path>) -> Option<
         };
         return Some(resolved);
     }
-    let home = detect_hermes_home()?;
+    let home = home?;
     Some(join_profile_dir(&home, profile))
 }
 
@@ -222,20 +234,19 @@ mod tests {
     }
 
     #[test]
-    fn profile_name_resolves_under_detected_home() {
-        // HERMES_HOME env 指向临时目录 → 名称解析为 <home>/profiles/profile-a
-        let dir = std::env::temp_dir().join(format!("pylon-hermes-{}", std::process::id()));
+    fn profile_name_resolves_under_injected_home() {
+        // P91 批 C1（横切 §4）：home 经参数注入（原实现 set_var 进程全局
+        // HERMES_HOME，与并行测试竞态）——名称解析为 <home>/profiles/profile-a
+        let dir = crate::test_utils::unique_temp("hermes");
         std::fs::create_dir_all(dir.join("profiles")).unwrap();
-        // env 在测试进程内短暂设置（Rust 1.97 仍无 thread-local set_var；串行测试安全）
-        std::env::set_var("HERMES_HOME", &dir);
         let agent = agent_with_profile(Some("profile-a"));
-        let resolved = resolve_profile_dir(&agent, None).expect("must resolve via env home");
+        let resolved =
+            resolve_profile_dir_with_home(&agent, None, Some(dir.clone())).expect("injected home");
         assert_eq!(
             resolved,
             dir.join("profiles").join("profile-a"),
             "名称形态必须解析为 <home>/profiles/<name>"
         );
-        std::env::remove_var("HERMES_HOME");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -262,7 +273,7 @@ mod tests {
 
     #[test]
     fn list_profiles_returns_sorted_dirs_only() {
-        let dir = std::env::temp_dir().join(format!("pylon-hermes-list-{}", std::process::id()));
+        let dir = crate::test_utils::unique_temp("hermes-list");
         std::fs::create_dir_all(dir.join("profiles")).unwrap();
         for name in ["profile-a", "profile-x", "shared"] {
             std::fs::create_dir_all(dir.join("profiles").join(name)).unwrap();

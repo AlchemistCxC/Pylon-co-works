@@ -5,6 +5,9 @@ import { bindSkinPersistence, restoreSkinFromStorage } from './infrastructure/sk
 import { installPylonCliBridge } from './cli/pylonCliBridge'
 import { installPylonHookBridge } from './infrastructure/hooks/hookBridgeDispatcher'
 import './index.css'
+// Tailwind v4 utilities 基线（TW 施工书 20260914）：无 preflight，@theme inline
+// 只读消费 index.css token；必须在 index.css 之后引入。
+import './styles/tailwind.css'
 // 浏览器模式假 Tauri 后端（静态演示全景）。必须在 env.ts（IS_TAURI）求值之后安装：
 // 本文件静态 import 已全部求值（App → env.ts 已冻结 IS_TAURI=false），此刻装 globals 安全。
 import { installMockTauri } from './demo/mockTauri'

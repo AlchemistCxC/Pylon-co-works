@@ -2694,7 +2694,13 @@ describe('mountSolidWorkbench', () => {
       services.runtime.applyDocument(buildDocument(), { ownerKey: 'owner-a', generation: 1, preserveGeneration: true })
     }
     await waitFor(() => expect(updates).toBeGreaterThan(0))
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // P91 C2：50ms 真实等待 → 更新计数连续两拍稳定（等效静止窗口，不依赖墙钟）。
+    let lastSeen = -1
+    await vi.waitFor(() => {
+      const current = updates
+      if (lastSeen >= 0) expect(current).toBe(lastSeen)
+      lastSeen = current
+    }, { timeout: 2_000 })
     expect(mounts).toBe(2)
     expect(host.querySelectorAll('.group-member-probe')).toHaveLength(2)
   })

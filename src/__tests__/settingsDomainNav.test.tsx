@@ -7,19 +7,37 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../test/fakeInvoke'
 import Settings from '../components/Settings'
 import { useIdentityStore } from '../identityStore'
 import { resetStores } from '../test/resetStores'
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined——Settings 渲染期的后台 invoke 不影响导航断言 */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: TolerantFakeInvoke
 
 describe('ISSUE-13 W2 当前域内 section 导航', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()
-    invoke.mockReset()
+    fakeInvoke = new TolerantFakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
     Element.prototype.scrollIntoView = vi.fn()
     useIdentityStore.setState({
       agents: [{ id: 'peri', name: 'Peri' }],
@@ -89,7 +107,8 @@ describe('K-2 左栏二级折叠导航（施工书 09）', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()
-    invoke.mockReset()
+    fakeInvoke = new TolerantFakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
     Element.prototype.scrollIntoView = vi.fn()
   })
 
@@ -122,7 +141,8 @@ describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()
-    invoke.mockReset()
+    fakeInvoke = new TolerantFakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   })
 
   it('F1 常用区点击其他 domain 的 section 时，domain 跟随切换', async () => {
@@ -149,7 +169,8 @@ describe('P6 Slice A 设置入口兼容', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()
-    invoke.mockReset()
+    fakeInvoke = new TolerantFakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   })
 
   it('消费旧 renderer/suite 事件时落到现行渲染器分区', async () => {

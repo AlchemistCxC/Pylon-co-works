@@ -13,6 +13,12 @@ export type FirstPartyStyleOwner = typeof FIRST_PARTY_STYLE_OWNERS[number]
 export const FIRST_PARTY_STYLE_LIFECYCLES = [
   'kernel-static',
   'plugin-scope',
+  // 样式绞杀地基 20260914：每包至多一个自适应残量样式（mode/媒体查询/
+  // 动效/:has() 专用），?inline 随插件生命周期回收，其余样式一律 utilities。
+  'adaptive',
+  // 解耦评估批 1（P93）：跨 sheet 共享词汇基线（file-main-*/search-result-*/
+  // file-section-* 等，消费方矩阵见解耦评估报告），作为底座豁免保留。
+  'shared',
   'smoke-only',
 ] as const
 
@@ -43,7 +49,6 @@ const entry = (
 const SHELL_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-shell/styleAssets.ts'
 const WORKSPACE_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-workspace/styleAssets.ts'
 const RENDERER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-renderers/styleAssets.ts'
-const MANAGER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-plugin-manager/styleAssets.ts'
 const GATEWAY_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-gateway/styleAssets.ts'
 
 /**
@@ -60,38 +65,39 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
     ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'React Root、基础 token、跨 Application scheme、Recovery 与 Rich QA 基线',
   ),
+  entry(
+    'src/styles/tailwind.css',
+    'kernel',
+    'kernel-static',
+    ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
+    'Tailwind v4 utilities 基线：@theme inline 只读消费 index.css token；无 preflight（TW 施工书 20260914）',
+  ),
   entry('src/components/kernel/SkinPreviewBar.css', 'kernel', 'kernel-static', ['src/components/kernel/SkinPreviewBar.tsx']),
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/PermissionDialog.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/ProfileEditor.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionOwnerRecoveryDialog.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionSettings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
 
+  entry('src/plugins/product/packages/builtin.pylon-gateway/styles/adaptive.css', 'builtin.pylon-gateway', 'adaptive', [GATEWAY_STYLE_ASSETS], 'gateway 包自适应残量：modern-gui 覆写 + status-pulse 动画（绞杀 P93 批 3）'),
+  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css', 'builtin.pylon-workspace', 'adaptive', [WORKSPACE_STYLE_ASSETS], 'workspace 包自适应残量：history/search/browser/runtime 的 mode 覆写与变量残量（绞杀 P93 批 2/4）'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/RuntimeSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/browser/BrowserSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/history/HistorySheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/search/SearchSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
+  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css', 'builtin.pylon-workspace', 'shared', [WORKSPACE_STYLE_ASSETS], '解耦评估批 1：内含 file-main-*/file-section-*/search-result-* 共享词汇基线（被 history/search/gateway/browser/ContextPanel 消费），底座豁免'),
 
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/DiffCard.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
+  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/adaptive.css', 'builtin.pylon-renderers', 'adaptive', [RENDERER_STYLE_ASSETS], '渲染包自适应残量：reduced-motion 通用后代规则（绞杀地基 20260914）'),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/MessageSearchBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层：suite 挂载几何 + 生产中控槽位'),
 
-  entry('src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.css', 'builtin.pylon-plugin-manager', 'plugin-scope', [MANAGER_STYLE_ASSETS], '第 6 个 first-party 包（P53 D2）的 framework-free 管理面板样式'),
+  // 第 6 包（P53 D2）的 framework-free 面板样式已由 J 施工书 20260914 绞杀进
+  // utilities 层：owner 保留在名单里，但名下暂无 CSS 文件。
 
-  entry('src/plugins/product/packages/builtin.pylon-gateway/styles/sheets/gateway/GatewaySheet.css', 'builtin.pylon-gateway', 'plugin-scope', [GATEWAY_STYLE_ASSETS], '第 7 个 first-party 包（P77）的 gateway sheet 样式'),
 
   entry('src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css', 'solid-smoke', 'smoke-only', [
     'src/renderers/solid-workbench/smoke/browserSmoke.solid.tsx',

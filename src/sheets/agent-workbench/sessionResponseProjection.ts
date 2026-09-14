@@ -53,13 +53,19 @@ function syntheticSessionOption(
   response: SessionResponseObject,
 ): Record<string, JsonValue> | undefined {
   const selectionState = kind === 'model' ? response.models : response.modes
-  if (!selectionState) return undefined
   // Keep the discriminant on the original response instead of indexing the
   // `SessionModels | SessionModes` union through a conditional state variable;
   // this also makes the two wire shapes explicit for future schema additions.
   const rawChoices = kind === 'model'
-    ? response.models?.availableModels ?? response.models?.available_models
-    : response.modes?.availableModes ?? response.modes?.available_modes
+    ? response.models?.availableModels
+      ?? response.models?.available_models
+      ?? response.availableModels
+      ?? response.available_models
+    : response.modes?.availableModes
+      ?? response.modes?.available_modes
+      ?? response.availableModes
+      ?? response.available_modes
+  if (!selectionState && !Array.isArray(rawChoices)) return undefined
   const choices = responseChoiceList(rawChoices)
   const current = kind === 'model'
     ? extractModelConfig(response.configOptions, response).model
@@ -115,6 +121,8 @@ export function sessionResponseProjectionKey(response: SessionResponseObject): s
     return JSON.stringify({
       models: response.models,
       modes: response.modes,
+      availableModels: response.availableModels ?? response.available_models,
+      availableModes: response.availableModes ?? response.available_modes,
       configOptions: response.configOptions ?? response.config_options,
     })
   } catch {
@@ -164,4 +172,3 @@ export function createSessionResponseEnvelope(
     },
   })
 }
-

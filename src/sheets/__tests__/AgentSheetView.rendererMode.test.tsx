@@ -17,11 +17,29 @@ import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrast
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
-import { invoke } from '@tauri-apps/api/core'
 import { clearErrors, getErrors } from '../../errorCenter.ts'
 import { messageStorageKey, persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import { FakeInvoke } from '../../test/fakeInvoke'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined（对齐原内联 mock `vi.fn(async () => undefined)` 的宽松路径） */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: TolerantFakeInvoke
+const invokeLog: string[] = []
 
 /**
  * Production publishes CanonicalConversationEvent through the compatibility
@@ -109,6 +127,12 @@ function systemErrorSlotSummary(payload: unknown): string {
 
 describe('AgentSheetView renderer mode context', () => {
   beforeEach(() => {
+    fakeInvoke = new TolerantFakeInvoke()
+    invokeLog.length = 0
+    invokeRef.current = (cmd, args) => {
+      invokeLog.push(cmd)
+      return fakeInvoke.invoke(cmd, args)
+    }
     resetStores()
     clearErrors()
   })
@@ -488,23 +512,19 @@ describe('AgentSheetView renderer mode context', () => {
     render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
     await screen.findByText('removable-suite')
 
-    const invokeMock = vi.mocked(invoke)
-    invokeMock.mockImplementation(async command => {
-      if (command === 'plugin_package_list') return [{
-        enabled: true,
-        package: {
-          pluginId, version: '1.0.0', packageInstanceId: `${pluginId}@1.0.0-test`, active: true,
-          manifest: { schema: 1, id: pluginId, name: 'Removable Suite', version: '1.0.0', api: '1.0', kind: 'renderer', web: { entry: './dist/entry.js' } },
-          files: [], totalBytes: 1,
-        },
-      }]
-      return undefined
-    })
+    fakeInvoke.register('plugin_package_list', () => [{
+      enabled: true,
+      package: {
+        pluginId, version: '1.0.0', packageInstanceId: `${pluginId}@1.0.0-test`, active: true,
+        manifest: { schema: 1, id: pluginId, name: 'Removable Suite', version: '1.0.0', api: '1.0', kind: 'renderer', web: { entry: './dist/entry.js' } },
+        files: [], totalBytes: 1,
+      },
+    }])
     await expect(getPackageInstallationService().uninstall(pluginId)).resolves.toEqual({ ok: true })
 
     expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
     await waitFor(() => expect(destroyed).toHaveBeenCalledOnce())
-    expect(invokeMock).toHaveBeenCalledWith('plugin_package_uninstall', { pluginId, purgeData: false })
+    expect(fakeInvoke.calls).toContainEqual({ cmd: 'plugin_package_uninstall', args: { pluginId, purgeData: false } })
     expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
   })
 
@@ -525,10 +545,11 @@ describe('AgentSheetView renderer mode context', () => {
           key: expect.stringMatching(new RegExp(`^renderer-suite:agent-sheet:none:${pluginId}\\.suite:`)),
         }),
       ])))
-      await new Promise(resolve => setTimeout(resolve, 250))
-
-      expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
-      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
+      // P91 C2：真实 250ms 等待改为 waitFor 可观察条件——健康实例保持挂载且宿主仍指向本 suite。
+      await waitFor(() => {
+        expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
+        expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
+      })
       expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
       // Ordinary Suite fallback errors have one presentation: the application
       // ErrorCenter. The healthy renderer remains mounted without a local
@@ -1279,8 +1300,6 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('AgentSheet interaction command 穿过 Host gate 与统一 production transport', async () => {
-    const invokeMock = vi.mocked(invoke)
-    invokeMock.mockClear()
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
     useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
     render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
@@ -1302,9 +1321,12 @@ describe('AgentSheetView renderer mode context', () => {
 
     ;(await screen.findByRole('button', { name: 'Allow production action' })).click()
 
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('respond_interaction', {
-      identity: { provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 1 },
-      kind: 'approval', answer: { optionId: 'allow_once' },
+    await waitFor(() => expect(fakeInvoke.calls).toContainEqual({
+      cmd: 'respond_interaction',
+      args: {
+        identity: { provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 1 },
+        kind: 'approval', answer: { optionId: 'allow_once' },
+      },
     }))
   })
 
@@ -1550,11 +1572,8 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('Solid 空态提交首条请求后创建并选中会话，再向同一 owner 发送消息', async () => {
-    const selectSession = vi.fn()
-    vi.mocked(invoke).mockImplementation(async command => {
-      if (command === 'new_session') return { sessionId: 'remote-created' }
-      return undefined
-    })
+    const selectSession = vi.fn((id: string | null) => { invokeLog.push(`selectSession:${id}`) })
+    fakeInvoke.register('new_session', () => Promise.resolve({ sessionId: 'remote-created' }))
 
     render(<AgentSheetView
       sheet={sheet({ sidebarMode: 'chat' })}
@@ -1572,17 +1591,15 @@ describe('AgentSheetView renderer mode context', () => {
     const sessionId = selectSession.mock.calls[0]?.[0]
     const created = useIdentityStore.getState().sessions.find(item => item.id === sessionId)
     expect(created).toMatchObject({ agentId: 'peri', periId: 'remote-created' })
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('new_session', expect.objectContaining({
+    expect(fakeInvoke.calls).toContainEqual({ cmd: 'new_session', args: expect.objectContaining({
       agentId: 'peri', source: created?.source,
-    }))
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('send_message', expect.objectContaining({
+    }) })
+    expect(fakeInvoke.calls).toContainEqual({ cmd: 'send_message', args: expect.objectContaining({
       agentId: 'peri', source: created?.source, content: '检查当前项目的测试状态',
-    }))
-    const sendCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'send_message')
-    expect(sendCall).toBeTruthy()
-    expect(selectSession.mock.invocationCallOrder[0]!).toBeLessThan(
-      vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]!,
-    )
+    }) })
+    // 顺序契约（原 invocationCallOrder）：先 selectSession 选中，再向同一 owner 发送消息
+    expect(invokeLog.indexOf(`selectSession:${sessionId}`)).toBeGreaterThanOrEqual(0)
+    expect(invokeLog.indexOf('send_message')).toBeGreaterThan(invokeLog.indexOf(`selectSession:${sessionId}`))
   })
 
   it('Solid 工作空态只在选择工作区后创建带 cwd 绑定的会话', async () => {
@@ -1594,7 +1611,7 @@ describe('AgentSheetView renderer mode context', () => {
       }],
       hydrated: true,
     })
-    vi.mocked(invoke).mockImplementation(async command => command === 'new_session' ? { sessionId: 'remote-work' } : undefined)
+    fakeInvoke.register('new_session', () => Promise.resolve({ sessionId: 'remote-work' }))
 
     render(<AgentSheetView
       sheet={sheet({ sidebarMode: 'work' })}
@@ -1612,9 +1629,9 @@ describe('AgentSheetView renderer mode context', () => {
     expect(created).toMatchObject({
       workspaceId: 'workspace-a', workdir: 'G:/Project/Pylon', skills: ['tdd'], hooks: ['hook-a'],
     })
-    expect(vi.mocked(invoke)).toHaveBeenCalledWith('new_session', expect.objectContaining({
+    expect(fakeInvoke.calls).toContainEqual({ cmd: 'new_session', args: expect.objectContaining({
       workspaceId: 'workspace-a', cwd: 'G:/Project/Pylon', source: created?.source,
-    }))
+    }) })
   })
 
   it('Interface Mode 切换仍复用 Renderer Suite Host，不回到硬编码 React 工作台', async () => {

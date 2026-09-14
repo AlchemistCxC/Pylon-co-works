@@ -14,6 +14,7 @@ export interface SessionConfig {
   /** P56/D3：宣告的模型选项（id/label 分离真源；id 为上 wire 的 machine id） */
   modelChoices?: ModelChoice[]
   thinkingEffort?: string
+  reasoning?: string[]
   context1m?: boolean
   raw?: ConfigOption[]     // 原始 configOptions（兜底/调试）
 }

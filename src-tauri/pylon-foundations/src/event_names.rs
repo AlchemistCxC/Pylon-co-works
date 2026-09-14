@@ -43,6 +43,28 @@ pub const PYLON_HOOK_REQUEST: &str = "pylon:hook-request";
 /// P55 kernel hook cancellation（Rust 时钟超时后通知前端 abort 该请求的执行）。
 pub const PYLON_HOOK_CANCEL: &str = "pylon:hook-cancel";
 
+/// 全量事件名单一真值数组（P91 批 C1：原三个 wire 契约测试各手抄一份 16 名列表，
+/// 新增事件常量时漏改任意一份都不入测）——**新增事件常量后必须同步登记本数组**，
+/// 唯一性 / pylon: 前缀 / kebab-case 三条契约测试遍历本数组自动覆盖。
+pub const ALL_EVENT_NAMES: &[&str] = &[
+    AGENT_STATUS,
+    SESSION_UPDATE,
+    SESSION_DONE,
+    SESSION_ERROR,
+    USER_ECHO,
+    INTERACTION,
+    INTERACTION_REJECTED,
+    RUNTIME_LOG,
+    AGENT_CRASHED,
+    BROWSER_STATUS,
+    BROWSER_PAGE,
+    PLUGIN_PROCESS,
+    PYLON_CLI_REQUEST,
+    PYLON_CLI_CANCEL,
+    PYLON_HOOK_REQUEST,
+    PYLON_HOOK_CANCEL,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,24 +73,7 @@ mod tests {
     /// wire 契约：全部事件名必须唯一（重复值会让前端 listen 同名事件被覆盖，静默失联）。
     #[test]
     fn event_names_are_unique() {
-        let names = [
-            AGENT_STATUS,
-            SESSION_UPDATE,
-            SESSION_DONE,
-            SESSION_ERROR,
-            USER_ECHO,
-            INTERACTION,
-            INTERACTION_REJECTED,
-            RUNTIME_LOG,
-            AGENT_CRASHED,
-            BROWSER_STATUS,
-            BROWSER_PAGE,
-            PLUGIN_PROCESS,
-            PYLON_CLI_REQUEST,
-            PYLON_CLI_CANCEL,
-            PYLON_HOOK_REQUEST,
-            PYLON_HOOK_CANCEL,
-        ];
+        let names = ALL_EVENT_NAMES;
         let unique: HashSet<&str> = names.iter().copied().collect();
         assert_eq!(unique.len(), names.len(), "事件名重复：{names:?}");
     }
@@ -76,24 +81,7 @@ mod tests {
     /// wire 契约：全部事件名必须以 `pylon:` 前缀开头（2026-08-03 战役决策）。
     #[test]
     fn event_names_have_pylon_prefix() {
-        for name in [
-            AGENT_STATUS,
-            SESSION_UPDATE,
-            SESSION_DONE,
-            SESSION_ERROR,
-            USER_ECHO,
-            INTERACTION,
-            INTERACTION_REJECTED,
-            RUNTIME_LOG,
-            AGENT_CRASHED,
-            BROWSER_STATUS,
-            BROWSER_PAGE,
-            PLUGIN_PROCESS,
-            PYLON_CLI_REQUEST,
-            PYLON_CLI_CANCEL,
-            PYLON_HOOK_REQUEST,
-            PYLON_HOOK_CANCEL,
-        ] {
+        for &name in ALL_EVENT_NAMES {
             assert!(
                 name.starts_with("pylon:"),
                 "事件名 {name:?} 必须以 pylon: 前缀开头"
@@ -108,24 +96,7 @@ mod tests {
     /// wire 契约：主题部分为非空 kebab-case（`pylon:主题`），不得含空格/大写/下划线。
     #[test]
     fn event_names_are_kebab_case() {
-        for name in [
-            AGENT_STATUS,
-            SESSION_UPDATE,
-            SESSION_DONE,
-            SESSION_ERROR,
-            USER_ECHO,
-            INTERACTION,
-            INTERACTION_REJECTED,
-            RUNTIME_LOG,
-            AGENT_CRASHED,
-            BROWSER_STATUS,
-            BROWSER_PAGE,
-            PLUGIN_PROCESS,
-            PYLON_CLI_REQUEST,
-            PYLON_CLI_CANCEL,
-            PYLON_HOOK_REQUEST,
-            PYLON_HOOK_CANCEL,
-        ] {
+        for &name in ALL_EVENT_NAMES {
             let topic = name.strip_prefix("pylon:").unwrap_or(name);
             assert!(!topic.is_empty(), "事件名 {name:?} 主题部分为空");
             assert!(

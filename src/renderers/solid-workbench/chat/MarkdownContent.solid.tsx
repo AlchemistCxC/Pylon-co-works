@@ -9,6 +9,7 @@ import {
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
 import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from './streamingMarkdownSplit.ts'
+import { noteStreamingRowSet } from './streamingRowCounters.ts'
 
 export interface MarkdownContentProps {
   text: string
@@ -45,70 +46,90 @@ interface StreamingBlockRow {
   update(text: string): void
 }
 
+/** 由当前文本推导出的一行（顺序即渲染顺序）。 */
+interface RowSpec {
+  readonly text: string
+  readonly tail: boolean
+}
+
+interface DerivedRows {
+  readonly specs: readonly RowSpec[]
+  /** 当前文本的段落数（稳定块 + 尾块）——行集合的上界，只读诊断用。 */
+  readonly paragraphs: number
+}
+
+/**
+ * 把「可见文本」推导为行描述序列——**纯函数**：同一文本 + 同一 final 恒得到同一序列。
+ *
+ * 为什么必须纯：发布链不保证单调（插值后的裁剪前缀、双列表短暂分叉、终态重发、resume）。
+ * 只要行集合里留着独立于文本的累积历史，输入一旦回退或换挡就会留下「当前文本里并不存在
+ * 的行边界」，把同一段干净文本切成每几个字一行的碎片（issue #55：实测 117 个块、其中 44 个
+ * 不足 6 字，而文本只有 55 个段落；重启后同一条消息恢复正常）。
+ *
+ * 切分语义仍单一由 `splitStreamingMarkdownBlocks` 负责：空行切块、容器行不越界、未闭合
+ * 围栏不劈开——本次不触碰它。
+ *
+ * 行文本不变式：每一行的文本都不以结构性空白开头或结尾（见
+ * `trimRowStructuralWhitespace`），且不为空——分隔空行是行与行之间的结构，不是行内容。
+ */
+function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
+  const split = splitStreamingMarkdownBlocks(visible)
+  const specs: RowSpec[] = []
+  for (const block of split.stableBlocks) {
+    // The splitter includes the blank-line delimiter in each stable block so the
+    // accumulated prefix stays lossless.  That delimiter is structural, though—not
+    // content that should become an extra `pre-wrap` line inside the row.  The shared
+    // `.term-p + .term-p` cadence represents the separator; strip it from the visible
+    // stable text to keep streaming geometry identical to the completed Markdown path.
+    const text = trimRowStructuralWhitespace(block)
+    if (text.length > 0) specs.push({ text, tail: false })
+  }
+  if (split.unstable.length > 0) {
+    // Consecutive blank lines are collapsed by the splitter rather than becoming empty
+    // renderer rows, so a tail that is still only structural whitespace contributes
+    // nothing.  Its delimiter is stripped unconditionally: the old condition（只在它前面
+    // 确实提交过块时才裁）会把前导空行留在行文本里，渲染成 `'\n\n快'` 一类的行。
+    const text = trimRowStructuralWhitespace(split.unstable)
+    if (text.length > 0) specs.push({ text, tail: !final })
+  }
+  return { specs, paragraphs: split.stableBlocks.length + (split.unstable.length > 0 ? 1 : 0) }
+}
+
 function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; inline?: boolean }) {
   let nextId = 1
-  let committedText = ''
-  // Blank leading lines are kept out of the visible rows while remaining a
-  // prefix of every future snapshot, so lossless reconciliation keeps working.
-  let hiddenLeading = ''
-  let stableRows: StreamingBlockRow[] = []
-  let tailRow = createStreamingBlockRow(nextId++, '')
+  // 行集合 = 当前文本的函数。这里刻意不保留任何独立于文本的累积状态：旧实现里的
+  // committedText / hiddenLeading / stableRows 累积 + reset() 正是漂移的来源。
+  let rendered: StreamingBlockRow[] = []
+  let lastText = ''
   const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
-  const reset = (text: string, final: boolean) => {
-    committedText = ''
-    hiddenLeading = ''
-    stableRows = []
-    tailRow = createStreamingBlockRow(nextId++, '')
-    reconcile(text, final)
-  }
 
   const reconcile = (text: string, final: boolean) => {
-    let visible = text
-    if (committedText === '') {
-      // Providers may open an assistant stream with blank lines (for example
-      // right after a reasoning phase). CommonMark drops them once the parser
-      // runs, but the plain fast path renders each as an empty pre-wrap line,
-      // pushing the first generated characters below the assistant indicator.
-      visible = trimLeadingBlankLines(text)
-      hiddenLeading = text.slice(0, text.length - visible.length)
-    } else if (hiddenLeading.length > 0 && visible.startsWith(hiddenLeading)) {
-      visible = visible.slice(hiddenLeading.length)
+    // 非后继输入（回退/换挡/重放）只作为只读计数，不再需要特殊分支：推导只看当前文本。
+    const reset = !text.startsWith(lastText)
+    lastText = text
+    // Providers may open an assistant stream with blank lines (for example right after a
+    // reasoning phase). CommonMark drops them once the parser runs, but the plain fast
+    // path renders each as an empty pre-wrap line, pushing the first generated characters
+    // below the assistant indicator.
+    const derived = deriveRowSpecs(trimLeadingBlankLines(text), final)
+    // S0 只读计数：rows / textParagraphs > 1 说明行集合里出现了文本之外的边界（issue #55 判据）。
+    noteStreamingRowSet({ rows: derived.specs.length, paragraphs: derived.paragraphs, reset })
+    const nextRows: StreamingBlockRow[] = []
+    for (let index = 0; index < derived.specs.length; index += 1) {
+      const spec = derived.specs[index]!
+      const candidate = rendered[index]
+      if (candidate === undefined) {
+        nextRows.push(createStreamingBlockRow(nextId++, spec.text, spec.tail))
+        continue
+      }
+      // 位置对账：文本未变就不碰 signal（不多余重解析），变了就地更新——保持 DOM 身份是
+      // 尾块逐拍增长不闪烁、稳定块（含代码块）不重挂载的前提。
+      if (candidate.text !== spec.text) candidate.update(spec.text)
+      candidate.tail = spec.tail
+      nextRows.push(candidate)
     }
-    if (!visible.startsWith(committedText)) {
-      reset(text, final)
-      return
-    }
-    const pending = visible.slice(committedText.length)
-    const split = splitStreamingMarkdownBlocks(pending)
-    for (const block of split.stableBlocks) {
-      // The splitter includes the blank-line delimiter in each stable block
-      // so `committedText` remains lossless.  That delimiter is structural,
-      // though—not content that should become an extra `pre-wrap` line inside
-      // the row.  The shared `.term-p + .term-p` cadence below represents the
-      // separator; strip it from the visible stable text to keep streaming
-      // geometry identical to the completed Markdown path.
-      tailRow.tail = false
-      tailRow.update(trimStableBlockDelimiter(block))
-      stableRows.push(tailRow)
-      committedText += block
-      tailRow = createStreamingBlockRow(nextId++, '')
-    }
-    // Consecutive blank lines are intentionally collapsed by the splitter
-    // rather than becoming empty renderer rows.  If the remaining tail starts
-    // with another delimiter, drop that structural prefix as well; otherwise
-    // `pre-wrap` would re-introduce an extra empty line after the CSS paragraph
-    // cadence has already represented the boundary.
-    const unstableText = split.stableBlocks.length > 0
-      ? trimStreamingDelimiterStart(split.unstable)
-      : split.unstable
-    tailRow.update(unstableText)
-    if (final && split.unstable.length > 0) {
-      tailRow.tail = false
-      stableRows.push(tailRow)
-      committedText += split.unstable
-      tailRow = createStreamingBlockRow(nextId++, '')
-    }
-    setRows(split.unstable.length > 0 && !final ? [...stableRows, tailRow] : [...stableRows])
+    rendered = nextRows
+    setRows(nextRows)
   }
 
   createEffect(() => {
@@ -129,21 +150,22 @@ function trimLeadingBlankLines(text: string): string {
   return text.replace(/^(?:[^\S\r\n]*\r?\n)+/, '')
 }
 
-function trimStableBlockDelimiter(block: string): string {
-  // A stable block is emitted only after at least one blank line.  Consume all
-  // trailing line terminators/indent-only lines from the rendered fragment;
-  // the canonical text remains untouched in `committedText` above.  Supporting
-  // CRLF here keeps the visual result independent of provider line endings.
-  return block.replace(/(?:\r?\n[\t ]*)+$/u, '')
+/**
+ * 行文本不变式：行的文本不以结构性空白（整行空白）开头或结尾。
+ *
+ * 分隔空行属于「行与行之间」的结构（由 `.term-p + .term-p` 的节奏承担），不属于行内容：
+ * 留着它 `pre-wrap` 会多画一行，也会让流式几何与终态解析出的 Markdown 漂移。只裁整行空白，
+ * **不裁末行内容里的空格与缩进**（例如代码缩进）。
+ *
+ * 支持 CRLF，使可见结果与 provider 的换行形式无关。
+ */
+function trimRowStructuralWhitespace(text: string): string {
+  return text.replace(/(?:\r?\n[\t ]*)+$/u, '').replace(/^(?:\r?\n[\t ]*)+/u, '')
 }
 
-function trimStreamingDelimiterStart(text: string): string {
-  return text.replace(/^(?:\r?\n[\t ]*)+/u, '')
-}
-
-function createStreamingBlockRow(id: number, initialText: string): StreamingBlockRow {
+function createStreamingBlockRow(id: number, initialText: string, tail: boolean): StreamingBlockRow {
   const [text, setText] = createSignal(initialText)
-  return { id, tail: true, get text() { return text() }, update: setText }
+  return { id, tail, get text() { return text() }, update: setText }
 }
 
 function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; inline?: boolean }) {

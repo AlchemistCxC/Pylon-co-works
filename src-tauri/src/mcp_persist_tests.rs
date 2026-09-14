@@ -39,7 +39,7 @@ fn sample_servers() -> Vec<mcp::McpServerConfig> {
 
 #[test]
 fn load_round_trips_servers_with_secrets() {
-    let dir = std::env::temp_dir().join(format!("pylon-mcp-dir-{}", std::process::id()));
+    let dir = crate::test_utils::unique_temp("mcp-dir");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("pylon-mcp.json");
     std::fs::write(&path, serde_json::to_string(&sample_servers()).unwrap()).unwrap();
@@ -57,7 +57,7 @@ fn load_round_trips_servers_with_secrets() {
 
 #[test]
 fn load_missing_or_corrupt_returns_none() {
-    let dir = std::env::temp_dir().join(format!("pylon-mcp-bad-{}", std::process::id()));
+    let dir = crate::test_utils::unique_temp("mcp-bad");
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("missing.json");
     assert!(load_mcp_persisted(&missing).is_none(), "缺失文件应降级");
@@ -69,7 +69,7 @@ fn load_missing_or_corrupt_returns_none() {
 
 #[test]
 fn load_rejects_hand_edited_invalid_config() {
-    let dir = std::env::temp_dir().join(format!("pylon-mcp-invalid-{}", std::process::id()));
+    let dir = crate::test_utils::unique_temp("mcp-invalid");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("invalid.json");
     // 重复 identity：validate 应拒绝 → 整体不加载（防手改文件注入非法配置）

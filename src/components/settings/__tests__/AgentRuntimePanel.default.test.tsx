@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import AgentRuntimePanel from '../AgentRuntimePanel'
 import { useIdentityStore } from '../../../identityStore'
 import { useWorkspaceStore } from '../../../workspaceStore'
@@ -9,6 +10,20 @@ import { resetStores } from '../../../test/resetStores'
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+
+// P91 §9 夹具收敛：invoke 桥接到共享 FakeInvoke。未注册命令 resolve null
+//（对齐原 mockImplementation 的兜底返回）；断言面全部经由桥接 vi.fn，保持原样。
+// per-test 整体重接 = 重新赋值 fakeInvoke（桥接闭包读取外层变量，等价原整体替换 mockImplementation）。
+class NullFallbackFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return null
+      throw error
+    })
+  }
+}
+
+let fakeInvoke: NullFallbackFakeInvoke
 
 describe('AgentRuntimePanel 默认 Agent', () => {
   beforeEach(() => {
@@ -20,23 +35,18 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         { id: 'hermes', name: 'Hermes', transport: 'subprocess', exe: 'hermes', args: ['acp'], effectiveArgs: ['acp'], default: false },
       ],
     })
+    fakeInvoke = new NullFallbackFakeInvoke()
     invoke.mockReset()
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
-      if (command === 'agent_config_snapshot') {
-        return Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' })
-      }
-      if (command === 'update_agents_config') {
-        return Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' })
-      }
-      if (command === 'initialize_agents_config') return Promise.resolve({ applied: true })
-      if (command === 'list_agents') {
-        return Promise.resolve([
-          { id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', default: false },
-          { id: 'hermes', name: 'Hermes', transport: 'subprocess', exe: 'hermes', default: true },
-        ])
-      }
-      return Promise.resolve(null)
+    invoke.mockImplementation((command: string, args?: Record<string, unknown>) => fakeInvoke.invoke(command, args))
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false }),
+      agent_config_snapshot: () => Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' }),
+      update_agents_config: () => Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' }),
+      initialize_agents_config: () => Promise.resolve({ applied: true }),
+      list_agents: () => Promise.resolve([
+        { id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', default: false },
+        { id: 'hermes', name: 'Hermes', transport: 'subprocess', exe: 'hermes', default: true },
+      ]),
     })
   })
 
@@ -71,11 +81,11 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   })
 
   it('外部配置新建 Agent 时发送结构化单 Agent DTO，而不是嵌套 agents 文档', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -139,12 +149,12 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   it('手动创建写盘期间禁用主动作，避免重复 CAS 请求', async () => {
     let finishWrite: (() => void) | undefined
     const writePending = new Promise<void>(resolve => { finishWrite = resolve })
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return writePending.then(() => ({ applied: true, revision: 'rev-2' }))
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => writePending.then(() => ({ applied: true, revision: 'rev-2' })),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
     fireEvent.click(screen.getByRole('button', { name: '新建 Agent' }))
@@ -190,13 +200,13 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   })
 
   it('编辑现有 Agent 时先测试连接再保存参数数组，并预览后端追加的 effective 参数', async () => {
-    invoke.mockImplementation((command: string) => {
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
       // 新契约（5b43c183：require verified agent edits）：保存前必须先测试连接成功。
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -249,18 +259,18 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       protocolAvailability: 'not_tested',
       warnings: [],
     }
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({
         candidates: [candidate],
         diagnostics: [{ code: 'version_probe_timeout', stage: 'version_probe', detectorId: 'detector.test', message: 'version timeout', retryable: true }],
         elapsedMs: 101,
         truncated: false,
-      })
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'detected', durationMs: 12 })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+      }),
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'detected', durationMs: 12 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -311,26 +321,25 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       evidence: [{ kind: 'path', detail: 'F:\\A-I\\Agent\\bin\\ccb.cmd' }],
       identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
     }
-    invoke.mockImplementation((command: string) => command === 'detect_agent_runtimes'
-      ? Promise.resolve({
-        candidates: [claude], diagnostics: [], elapsedMs: 2, truncated: false,
-        providers: [{
-          provider: 'claude-code', detectorId: 'builtin.detector.claude-code',
-          adapterRelationDeclared: true,
-          acpCommands: [{ kind: 'acp-command', path: 'F:\\A-I\\Agent\\bin\\ccb.cmd', source: 'path' }],
-          nativeCommands: [],
-          sharedConfigPresent: true,
-        }],
-        preflight: [{
-          provider: 'claude-code', status: 'nativeMissing', passed: false,
-          adapter: {
-            nativeCmd: 'claude', nativeLabel: 'Claude Code CLI', nativePresent: false, acpPresent: true,
-            sharedConfigDir: '~/.claude', sharedConfigPresent: true,
-          },
-          checks: [],
-        }],
-      })
-      : Promise.resolve(null))
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [claude], diagnostics: [], elapsedMs: 2, truncated: false,
+      providers: [{
+        provider: 'claude-code', detectorId: 'builtin.detector.claude-code',
+        adapterRelationDeclared: true,
+        acpCommands: [{ kind: 'acp-command', path: 'F:\\A-I\\Agent\\bin\\ccb.cmd', source: 'path' }],
+        nativeCommands: [],
+        sharedConfigPresent: true,
+      }],
+      preflight: [{
+        provider: 'claude-code', status: 'nativeMissing', passed: false,
+        adapter: {
+          nativeCmd: 'claude', nativeLabel: 'Claude Code CLI', nativePresent: false, acpPresent: true,
+          sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+        },
+        checks: [],
+      }],
+    }))
     render(<AgentRuntimePanel />)
 
     // 候选行列出 provider 与置信度，展开后默认填 ACP 入口 `ccb --acp`。
@@ -350,9 +359,9 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       suggestedAgentId: id, name, executable: `C:\\Agents\\${id}.exe`, args: ['acp'],
       evidence: [], identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
     })
-    invoke.mockImplementation((command: string) => command === 'detect_agent_runtimes'
-      ? Promise.resolve({ candidates: [makeCandidate('first', 'First Agent'), makeCandidate('second', 'Second Agent')], diagnostics: [], elapsedMs: 2, truncated: false })
-      : Promise.resolve(null))
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () =>
+      Promise.resolve({ candidates: [makeCandidate('first', 'First Agent'), makeCandidate('second', 'Second Agent')], diagnostics: [], elapsedMs: 2, truncated: false }))
     render(<AgentRuntimePanel />)
 
     expect(await screen.findByRole('button', { name: /First Agent.*first/ })).toBeInTheDocument()
@@ -372,11 +381,11 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       suggestedAgentId: 'hermes', name: 'Hermes Detected', executable: 'hermes', args: ['acp'], evidence: [],
       identityConfidence: 'exact', protocolAvailability: 'verified', alreadyImportedAgentId: 'hermes', warnings: [],
     }
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 2, truncated: false })
-      if (command === 'switch_agent') return Promise.resolve(null)
-      if (command === 'agent_status') return Promise.resolve({ agent: 'hermes', status: 'connected', generation: 2 })
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 2, truncated: false }),
+      switch_agent: () => Promise.resolve(null),
+      agent_status: () => Promise.resolve({ agent: 'hermes', status: 'connected', generation: 2 }),
     })
     render(<AgentRuntimePanel />)
 
@@ -400,13 +409,13 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       protocolAvailability: 'not_tested',
       warnings: [],
     }
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 4, truncated: false })
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'quick-start', durationMs: 8 })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 4, truncated: false }),
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'quick-start', durationMs: 8 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -446,15 +455,15 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       suggestedAgentId: 'ready-agent', name: 'Ready Agent', executable: 'C:\\Agents\\ready.exe',
       args: ['acp'], evidence: [], identityConfidence: 'exact', protocolAvailability: 'not_tested', warnings: [],
     }
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 4, truncated: false })
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'ready-agent', durationMs: 8 })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([{ id: 'ready-agent', name: 'Ready Agent', exe: candidate.executable, default: true }])
-      if (command === 'switch_agent') return Promise.resolve(null)
-      if (command === 'agent_status') return Promise.resolve({ agent: 'ready-agent', status: 'connected', generation: 1 })
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 4, truncated: false }),
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'ready-agent', durationMs: 8 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([{ id: 'ready-agent', name: 'Ready Agent', exe: candidate.executable, default: true }]),
+      switch_agent: () => Promise.resolve(null),
+      agent_status: () => Promise.resolve({ agent: 'ready-agent', status: 'connected', generation: 1 }),
     })
     render(<AgentRuntimePanel />)
 
@@ -473,12 +482,12 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   it('草稿验证可取消，取消后旧结果不落地且保存仍被拒绝', async () => {
     let finishTest: ((value: { ok: boolean; agentId: string; durationMs: number }) => void) | undefined
     const testPending = new Promise<{ ok: boolean; agentId: string; durationMs: number }>(resolve => { finishTest = resolve })
-    invoke.mockImplementation((command: string) => {
-      if (command === 'test_agent_candidate') return testPending
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      test_agent_candidate: () => testPending,
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -504,12 +513,12 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   /** B1：验证成功后修改任一草稿字段，旧验证立即失效，必须重新验证才能保存。 */
   it('验证成功后再改草稿字段必须重新验证才能保存', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 9 })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'peri', durationMs: 9 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -527,15 +536,15 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   /** B1：连接测试返回的启动计划与结果一并展示（与真实 spawn 同源，env 已掩码）。 */
   it('草稿验证成功后展示后端下发的启动计划', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'test_agent_candidate') return Promise.resolve({
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      test_agent_candidate: () => Promise.resolve({
         ok: true, agentId: 'peri', durationMs: 7,
         launchPlan: { provider: 'peri', executable: 'peri', argv: ['peri', 'acp'], cwd: null, env: [{ name: 'PERI_TOKEN', value: 'value withheld' }], diagnostics: [] },
-      })
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+      }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -548,11 +557,11 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   /** B1：自定义 profile 复用 Codeg 规则——id 借用内置 provider 名而 provider 另指他处时拒绝创建。 */
   it('新建 Agent 拒绝内置 provider id 冲突并给出可行动原因', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -569,18 +578,16 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {
     let snapshotCalls = 0
-    invoke.mockImplementation((command: string) => {
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
       // 新契约（5b43c183）：CAS 冲突路径同样需先通过连接验证才能到达保存。
-      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 })
-      if (command === 'agent_config_snapshot') {
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'peri', durationMs: 12 }),
+      agent_config_snapshot: () => {
         snapshotCalls += 1
         return Promise.resolve({ revision: `rev-${snapshotCalls}`, agents: [] })
-      }
-      if (command === 'update_agents_config') {
-        return Promise.reject({ code: 'config_revision_conflict', message: 'expected rev-1 actual rev-2' })
-      }
-      if (command === 'list_agents') return Promise.resolve([])
-      return Promise.resolve(null)
+      },
+      update_agents_config: () => Promise.reject({ code: 'config_revision_conflict', message: 'expected rev-1 actual rev-2' }),
+      list_agents: () => Promise.resolve([]),
     })
     render(<AgentRuntimePanel />)
 
@@ -608,13 +615,13 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         effectiveArgs: ['acp'], default: true, configActivationState: 'pendingRestart',
       }],
     })
-    invoke.mockImplementation((command: string) => {
-      if (command === 'restart_agent_runtime') return Promise.resolve({ agentId: 'peri', configActivationState: 'activated' })
-      if (command === 'list_agents') return Promise.resolve([{
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      restart_agent_runtime: () => Promise.resolve({ agentId: 'peri', configActivationState: 'activated' }),
+      list_agents: () => Promise.resolve([{
         id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', args: ['acp'],
         effectiveArgs: ['acp'], default: true, configActivationState: 'activated',
-      }])
-      return Promise.resolve(null)
+      }]),
     })
     render(<AgentRuntimePanel />)
 
@@ -629,10 +636,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       activeAgent: 'peri',
       agents: [{ id: 'peri', name: 'Peri', exe: 'peri', configActivationState: 'pendingRestart' }],
     })
-    invoke.mockImplementation((command: string) => {
-      if (command === 'restart_agent_runtime') return Promise.reject({ code: 'agent_initialize_failed', message: 'bad initialize' })
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('restart_agent_runtime', () => Promise.reject({ code: 'agent_initialize_failed', message: 'bad initialize' }))
     render(<AgentRuntimePanel />)
     fireEvent.click(screen.getByRole('button', { name: '立即重启应用此配置' }))
 
@@ -645,36 +650,32 @@ describe('AgentRuntimePanel 默认 Agent', () => {
    * 不在」，而不是只说一句“未验证”。数据来自后端 preflight，不在组件里重新推断。
    */
   it('把后端 preflight 渲染成可行动的安装状态，而不是空白或“未验证”', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') {
-        return Promise.resolve({
-          candidates: [],
-          diagnostics: [],
-          elapsedMs: 3,
-          truncated: false,
-          providers: [{
-            provider: 'claude-code',
-            detectorId: 'builtin.detector.claude-code',
-            adapterRelationDeclared: true,
-            acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }],
-            nativeCommands: [],
-            sharedConfigPresent: true,
-          }],
-          preflight: [{
-            provider: 'claude-code',
-            status: 'nativeMissing',
-            passed: false,
-            adapter: {
-              nativeCmd: 'claude', nativeLabel: 'Claude Code CLI',
-              nativePresent: false, acpPresent: true,
-              sharedConfigDir: '~/.claude', sharedConfigPresent: true,
-            },
-            checks: [{ checkId: 'version-gate:steering-prompt-required', label: 'adapter version', status: 'PASS', message: 'adapter version >= 0.65.0', fixes: [] }],
-          }],
-        })
-      }
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [],
+      diagnostics: [],
+      elapsedMs: 3,
+      truncated: false,
+      providers: [{
+        provider: 'claude-code',
+        detectorId: 'builtin.detector.claude-code',
+        adapterRelationDeclared: true,
+        acpCommands: [{ kind: 'acp-command', path: 'C:/x/ccb.cmd', source: 'path' }],
+        nativeCommands: [],
+        sharedConfigPresent: true,
+      }],
+      preflight: [{
+        provider: 'claude-code',
+        status: 'nativeMissing',
+        passed: false,
+        adapter: {
+          nativeCmd: 'claude', nativeLabel: 'Claude Code CLI',
+          nativePresent: false, acpPresent: true,
+          sharedConfigDir: '~/.claude', sharedConfigPresent: true,
+        },
+        checks: [{ checkId: 'version-gate:steering-prompt-required', label: 'adapter version', status: 'PASS', message: 'adapter version >= 0.65.0', fixes: [] }],
+      }],
+    }))
     render(<AgentRuntimePanel />)
 
     const section = await screen.findByLabelText('本机 Agent 安装状态')
@@ -694,26 +695,22 @@ describe('AgentRuntimePanel 默认 Agent', () => {
    * Pylon 看不见的目录”。这条测试把“面板消费 cause”钉住。
    */
   it('优先渲染后端下发的本机原因，而不是只看状态名的静态文案', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') {
-        return Promise.resolve({
-          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
-          preflight: [{
-            provider: 'gemini',
-            status: 'notInstalled',
-            passed: false,
-            adapter: null,
-            checks: [],
-            cause: {
-              level: 'warn',
-              code: 'path_gap_restart_required',
-              summary: '未检测到该 Agent；但你的 PATH 中有 1 个目录是本进程看不到的（如 C:\\Users\\me\\AppData\\Roaming\\npm）。若你刚安装过它，重启 Pylon 即可。',
-            },
-          }],
-        })
-      }
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+      preflight: [{
+        provider: 'gemini',
+        status: 'notInstalled',
+        passed: false,
+        adapter: null,
+        checks: [],
+        cause: {
+          level: 'warn',
+          code: 'path_gap_restart_required',
+          summary: '未检测到该 Agent；但你的 PATH 中有 1 个目录是本进程看不到的（如 C:\\Users\\me\\AppData\\Roaming\\npm）。若你刚安装过它，重启 Pylon 即可。',
+        },
+      }],
+    }))
     render(<AgentRuntimePanel />)
 
     const section = await screen.findByLabelText('本机 Agent 安装状态')
@@ -729,26 +726,22 @@ describe('AgentRuntimePanel 默认 Agent', () => {
    * 真实问题就会被噪声淹没。
    */
   it('level 为 ok 的本机原因不占行，避免给正常 provider 加噪声', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') {
-        return Promise.resolve({
-          candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
-          preflight: [{
-            provider: 'peri',
-            status: 'installed',
-            passed: true,
-            adapter: null,
-            checks: [],
-            cause: {
-              level: 'ok',
-              code: 'ok_absolute_path',
-              summary: '该 Agent 可用：命令位于 F:\\A-I\\Agent\\bin\\peri.cmd，不在 PATH 上。',
-            },
-          }],
-        })
-      }
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [], diagnostics: [], elapsedMs: 2, truncated: false, providers: [],
+      preflight: [{
+        provider: 'peri',
+        status: 'installed',
+        passed: true,
+        adapter: null,
+        checks: [],
+        cause: {
+          level: 'ok',
+          code: 'ok_absolute_path',
+          summary: '该 Agent 可用：命令位于 F:\\A-I\\Agent\\bin\\peri.cmd，不在 PATH 上。',
+        },
+      }],
+    }))
     render(<AgentRuntimePanel />)
 
     const section = await screen.findByLabelText('本机 Agent 安装状态')
@@ -758,16 +751,12 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   /** 已安装的 provider 不给可行动原因，避免噪声。 */
   it('已安装的 provider 不显示故障原因', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') {
-        return Promise.resolve({
-          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
-          providers: [],
-          preflight: [{ provider: 'peri', status: 'installed', passed: true, adapter: null, checks: [] }],
-        })
-      }
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+      providers: [],
+      preflight: [{ provider: 'peri', status: 'installed', passed: true, adapter: null, checks: [] }],
+    }))
     render(<AgentRuntimePanel />)
 
     const section = await screen.findByLabelText('本机 Agent 安装状态')
@@ -777,19 +766,86 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   /** 不可解释的状态不得渲染成看起来正常的行（归一化阶段即丢弃）。 */
   it('未知安装状态不会渲染成空白行', async () => {
-    invoke.mockImplementation((command: string) => {
-      if (command === 'detect_agent_runtimes') {
-        return Promise.resolve({
-          candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
-          providers: [],
-          preflight: [{ provider: 'future', status: 'somethingNew', passed: false, checks: [] }],
-        })
-      }
-      return Promise.resolve(null)
-    })
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.register('detect_agent_runtimes', () => Promise.resolve({
+      candidates: [], diagnostics: [], elapsedMs: 1, truncated: false,
+      providers: [],
+      preflight: [{ provider: 'future', status: 'somethingNew', passed: false, checks: [] }],
+    }))
     render(<AgentRuntimePanel />)
 
     expect(await screen.findByText(/未发现可自动配置的 ACP Agent/)).toBeInTheDocument()
     expect(screen.queryByLabelText('本机 Agent 安装状态')).toBeNull()
+  })
+
+  // ── issue #67A：删除已连接 agent runtime（仅摘配置 + 停 runtime；会话/记录保留） ──
+
+  it('删除非 active Agent 前先确认影响面，确认后按 agent_delete scope 写配置', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, scope: 'agent_delete', agentCount: 1, revision: 'rev-2' }),
+      list_agents: () => Promise.resolve([
+        { id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', args: ['acp'], effectiveArgs: ['acp'], default: true },
+      ]),
+    })
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', expect.objectContaining({ scope: 'agent_delete', agentId: 'hermes' })))
+    const message = String(confirmSpy.mock.calls[0]?.[0] ?? '')
+    expect(message).toContain('将移除：')
+    expect(message).toContain('配置条目 hermes（agents.yaml）')
+    expect(message).toContain('保留不动：')
+    expect(message).toContain('该 Agent 的历史会话与记录数据')
+    expect(await screen.findByText(/已删除 Hermes（hermes）/)).toBeInTheDocument()
+    expect(screen.queryByText('Hermes')).toBeNull()
+    confirmSpy.mockRestore()
+  })
+
+  it('取消确认时不发送任何配置写请求', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    const confirmationsBefore = confirmSpy.mock.calls.length
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    expect(confirmSpy.mock.calls.length - confirmationsBefore).toBe(1)
+    expect(invoke.mock.calls.filter(([command]) => command === 'update_agents_config')).toEqual([])
+    expect(screen.getByText('Hermes')).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  it('active Agent 不可删除，并直接给出切换原因', async () => {
+    render(<AgentRuntimePanel />)
+
+    const periCard = (await screen.findByText('Peri')).closest('.agent-runtime-card') as HTMLElement
+    expect(within(periCard).getByRole('button', { name: '删除' })).toBeDisabled()
+    expect(within(periCard).getByText(/当前正在使用的 Agent 不能删除/)).toBeInTheDocument()
+    const hermesCard = screen.getByText('Hermes').closest('.agent-runtime-card') as HTMLElement
+    expect(within(hermesCard).getByRole('button', { name: '删除' })).toBeEnabled()
+  })
+
+  it('删除失败时展示可行动提示且列表不变', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fakeInvoke = new NullFallbackFakeInvoke()
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.reject({ code: 'config_active_agent_protected', message: 'config_active_agent_protected: 候选配置删除了当前 active agent: hermes' }),
+    })
+    render(<AgentRuntimePanel />)
+
+    const hermesCard = (await screen.findByText('Hermes')).closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(hermesCard).getByRole('button', { name: '删除' }))
+
+    expect(await screen.findByText(/删除 Agent失败，详情见右下角错误中心/)).toBeInTheDocument()
+    expect(screen.getByText('Hermes')).toBeInTheDocument()
+    confirmSpy.mockRestore()
   })
 })

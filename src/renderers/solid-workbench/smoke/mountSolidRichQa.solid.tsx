@@ -1,4 +1,7 @@
 import '../../../index.css'
+// Tailwind v4 utilities 基线（TW 施工书 20260914 / P85）：无 preflight；
+// token canary 在下方，端到端验证类扫描与 @theme inline 映射。
+import '../../../styles/tailwind.css'
 import { createWorkbenchEnvelope, type WorkbenchSemanticEvent } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
@@ -134,6 +137,20 @@ const documentSnapshot = projectWorkbench([
     rawOutput: 'skill loaded',
   } }, { toolCallId: 'tool-skill-rich' }),
 ]).document
+
+// Tailwind token canary（TW 施工书 20260914 / P85）：端到端验证「类扫描 →
+// @theme inline token 映射 → layer 层叠」。utility 值必须是 var(…) 引用形态；
+// 对 body 注入 --surface-raised 等覆盖时 canary 应即时跟随（换肤解析域验证）。
+const tailwindCanary = document.createElement('div')
+tailwindCanary.className = 'tw-token-canary rounded-md bg-surface-raised p-2 text-text-dim'
+tailwindCanary.dataset.twCanary = 'true'
+tailwindCanary.textContent = 'Tailwind token canary'
+tailwindCanary.style.position = 'fixed'
+tailwindCanary.style.right = '16px'
+tailwindCanary.style.bottom = '16px'
+tailwindCanary.style.zIndex = '9999'
+document.body.append(tailwindCanary)
+window.addEventListener('beforeunload', () => { tailwindCanary.remove() }, { once: true })
 
 const services = createPreviewWorkbenchServices()
 services.appearance.setTheme({

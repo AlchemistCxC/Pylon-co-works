@@ -32,7 +32,9 @@ describe('SettingsValueAdapter', () => {
     expect(adapter.getSnapshot()).toBe(first)
     const seen: number[] = []
     const stop = adapter.subscribe(() => seen.push(adapter.getSnapshot().revision))
-    store.set('pylon:11:plugin.demo:8:page.one', 'external', 'value')
+    // 第二 adapter 模拟外部写：经公共 API 写入同一 store 坐标，不手拼内部存储键
+    const externalWriter = createPluginSettingsValueAdapter({ store, ownerPluginId: 'plugin.demo', contributionId: 'page.one', namespace: 'plugin-page' })
+    externalWriter.setValue('external', 'value')
     expect(adapter.getSnapshot().values.external).toBe('value')
     expect(seen).toEqual([1])
     stop()

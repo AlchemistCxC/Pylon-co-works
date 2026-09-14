@@ -37,9 +37,11 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
 
   it('file 模式：打开后直接保持编辑态，read 经 typed client 带 source/相对路径', async () => {
     const { container } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitFor(() => expect(fileViewOf(container)).not.toBeNull())
-    expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
-    expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
+    // 挂载与首读完成是两拍渲染：只等元素存在会在 data-path 尚未落入 DOM 时断言（P91 C 批退役 retry 后暴露的游走 flake）。
+    await waitFor(() => {
+      expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
+      expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
+    })
     expect(await waitForFileEditor('const x = 1')).toBeTruthy()
     expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
     expect(screen.getByText('1 行')).toBeTruthy()

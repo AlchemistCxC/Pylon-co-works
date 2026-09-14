@@ -493,7 +493,9 @@ mod tests {
     fn unique_app_data_dir() -> std::path::PathBuf {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        std::env::temp_dir().join(format!("pylon-gw-cmds-cred-{}-{}", std::process::id(), n))
+        // P91 批 C1（横切 §3）：准 pid 路径收敛 unique_temp——计数器继续区分同测试
+        // 内多次调用，pid+nanos 兜底跨进程/崩溃残留。
+        crate::test_utils::unique_temp(&format!("gw-cmds-cred-{n}"))
     }
 
     fn state_with_credentials(app_data: &std::path::Path) -> AppState {

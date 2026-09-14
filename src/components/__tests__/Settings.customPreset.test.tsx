@@ -1,12 +1,32 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../../test/fakeInvoke'
 import Settings from '../Settings.tsx'
 import { useStore } from '../../store.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({ default: () => <div /> }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
+
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined——预设状态断言不关心后台 invoke 返回值 */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
+
+const fakeInvoke = new TolerantFakeInvoke()
+invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
 
 describe('Settings custom preset controls', () => {
   beforeEach(() => {

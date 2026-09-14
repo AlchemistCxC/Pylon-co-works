@@ -54,4 +54,24 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+  {
+    // P91 §10 / P95：Plugin Host 依赖边界——原 pluginHostSeam.test.ts 的 readFileSync
+    // 源码正则（3 个 seam 文件禁 import ../kernel/ 与 *runtimeServices）迁移至此，由
+    // linter 静态执行。scope 收窄到与原测试完全相同的 3 个文件：plugin-runtime 内
+    // 其余模块不在该边界内（pluginManagementWiring 的 KernelBootstrap type import、
+    // runtimeServices 模块自身及其消费方都是既有合法引用，扩大 scope 会误伤打红）。
+    files: [
+      'src/plugin-runtime/pluginRuntime.ts',
+      'src/plugin-runtime/pluginInstance.ts',
+      'src/plugin-runtime/pluginActivationContext.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['**/kernel', '**/kernel/*'], message: 'Plugin Host seam 不得依赖 kernel（激活期经 scope API 注入）。' },
+          { group: ['**/*runtimeServices', '**/*runtimeServices/*'], message: 'Plugin Host seam 不得依赖全局 runtimeServices。' },
+        ],
+      }],
+    },
+  },
 )

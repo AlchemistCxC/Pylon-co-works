@@ -22,7 +22,7 @@ fn export_sanitizer_removes_secret_payloads() {
 
 #[test]
 fn export_file_write_rejects_existing_path_and_commits_new_file() {
-    let root = std::env::temp_dir().join(format!("pylon-export-test-{}", std::process::id()));
+    let root = crate::test_utils::unique_temp("export-test");
     std::fs::create_dir_all(&root).expect("create export test directory");
     let output = root.join("session.json");
     write_export_atomically(&output, b"first").expect("write export");

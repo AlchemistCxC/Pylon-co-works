@@ -5,15 +5,18 @@ import { readPluginContributionFacts } from '../../../plugin-runtime/management/
 describe('sixth first-party package (builtin.pylon-plugin-manager)', () => {
   it('loads seven product packages in dependency order with the gateway last (P77)', () => {
     const packages = loadFirstPartyProductPackages()
-    expect(packages.map(pkg => pkg.manifest.id)).toEqual([
-      'builtin.pylon-workspace',
-      'builtin.pylon-renderers',
-      'builtin.pylon-tools',
-      'builtin.pylon-agent-adapters',
-      'builtin.pylon-shell',
-      'builtin.pylon-plugin-manager',
-      'builtin.pylon-gateway',
-    ])
+    const ids = packages.map(pkg => pkg.manifest.id)
+    // 封闭 id 集合由 builtinProductPlugins.test.ts 锁定（= BUILTIN_PYLON_PRODUCT_PLUGIN_IDS），
+    // 此处不再重复字面 id 列表；只锁装载序契约：顺序尊重各包 manifest.dependencies（P77），
+    // 且 gateway 收尾。
+    const position = new Map(ids.map((id, index) => [id, index]))
+    for (const pkg of packages) {
+      for (const dependency of Object.keys(pkg.manifest.dependencies)) {
+        expect(position.get(dependency)!, `${pkg.manifest.id} 必须后于其依赖 ${dependency} 装载`)
+          .toBeLessThan(position.get(pkg.manifest.id)!)
+      }
+    }
+    expect(ids.at(-1)).toBe('builtin.pylon-gateway')
   })
 
   it('declares api 1.2 with the plugin.management capability and full composition fields', () => {

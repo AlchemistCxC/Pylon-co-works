@@ -15,6 +15,7 @@ import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidService
 import { canonicalTokenCount } from './solidWorkbenchProjectionSupport.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
+import { createStreamingDisplayPublishCostRecorder, registerStreamingDisplayDiagnostics } from './streamingDiagnostics.ts'
 import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
 
 /**
@@ -69,8 +70,19 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
   // Runtime facts stay lossless and latest-wins. Only the snapshot consumed by
   // the Solid tree is paced, so a dense token burst cannot trigger a render
   // storm while canonical/replay consumers continue to see every event.
+  const publishCost = createStreamingDisplayPublishCostRecorder()
   const streamingDisplay = createStreamingDisplayScheduler(snapshot => {
-    if (!destroyed && !paused) setRuntimeSnapshot(snapshot)
+    if (destroyed || paused) return
+    const startedAt = performance.now()
+    setRuntimeSnapshot(snapshot)
+    // P89/S5a 只读：发布耗时（含 Solid 提交）。不含布局/绘制——那部分用帧间隔代理观测。
+    publishCost.record(performance.now() - startedAt)
+  })
+  // P89/S0 只读读数：经验收桥按需拉取（不新增全局、不新增协议）。
+  const unregisterStreamingDisplayDiagnostics = registerStreamingDisplayDiagnostics({
+    host,
+    scheduler: streamingDisplay,
+    publishCost,
   })
   const publishRuntimeSnapshot = (snapshot: WorkbenchRuntimeSnapshot) => {
     // Preview fixtures intentionally remain deterministic; production mounts
@@ -163,6 +175,7 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
       if (destroyed) return
       destroyed = true
       streamingDisplay.dispose()
+      unregisterStreamingDisplayDiagnostics()
       unsubscribeRuntime()
       unsubscribeAppearance()
       dispose()

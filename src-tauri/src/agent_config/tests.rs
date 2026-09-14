@@ -1244,6 +1244,48 @@ fn agent_create_inserts_new_agent_and_rejects_duplicate() {
 }
 
 #[test]
+fn agent_delete_removes_only_the_target_and_preserves_other_sections() {
+    // issue #67A：删除只摘掉目标条目；tool_dictionary 等顶层其它段必须逐字保留。
+    let content = "agents:\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: python\n  hermes:\n    name: Hermes\n    transport: subprocess\n    exe: python\n    default: true\ntool_dictionary:\n  peri:\n    - name: read\n      aliases: [cat]\n      kind: file\n      action: read\n";
+    let updated = apply_agent_delete(content, "peri").expect("删除已有 agent 必须成功");
+    let agents = parse(&updated).unwrap();
+    assert!(!agents.contains_key("peri"), "目标条目必须消失");
+    assert!(agents.contains_key("hermes"), "其它 agent 不受影响");
+    assert_eq!(
+        default_agent_id(&agents).unwrap(),
+        Some("hermes".to_string())
+    );
+    assert!(
+        updated.contains("tool_dictionary"),
+        "无关段必须保留，不得整文档重写丢字段"
+    );
+    assert!(
+        validate_candidate(&updated, None).is_ok(),
+        "删除后的候选仍是合法配置"
+    );
+}
+
+#[test]
+fn agent_delete_rejects_unknown_agent_instead_of_silently_succeeding() {
+    let content = "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: python\n";
+    let error = apply_agent_delete(content, "ghost").expect_err("幂等删除不算成功");
+    assert!(
+        error.to_string().contains("不存在"),
+        "错误必须指明目标不存在: {error}"
+    );
+}
+
+#[test]
+fn agent_delete_of_the_last_agent_is_rejected_by_candidate_validation() {
+    let content = "agents:\n  only:\n    name: Only\n    transport: subprocess\n    exe: python\n";
+    let candidate = apply_agent_delete(content, "only").expect("纯函数层允许生成空表候选");
+    assert!(
+        validate_candidate(&candidate, None).is_err(),
+        "空 agents 表必须在命令层校验被拒（不得删到无 agent）"
+    );
+}
+
+#[test]
 fn structured_agents_document_round_trips_special_characters() {
     let document = serde_json::json!({
         "agents": {

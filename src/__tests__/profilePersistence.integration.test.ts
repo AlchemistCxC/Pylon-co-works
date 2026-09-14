@@ -5,7 +5,7 @@
  * versioned envelope；删除 Profile 时 active 原子 fallback；配置导出/导入白名单
  * 包含 profiles。阶段 0 以 RED 锁定缺陷（无写盘）；阶段 1（F09-F11）后全绿。
  */
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { useIdentityStore } from '../identityStore'
 import { resetStores } from '../test/resetStores'
 import { MemoryStorage } from '../test/memoryStorage'
@@ -33,19 +33,23 @@ describe('FE-AUD-002 Profile 持久化', () => {
     resetStores()
   })
 
-  it('addProfile 后持久化包含新 profile（当前实现无写盘 → RED）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('addProfile 后持久化包含新 profile', () => {
     useIdentityStore.getState().addProfile(NEO)
     const persisted = readPersistedProfiles()
     expect(persisted.profiles.some(profile => profile.id === 'neo')).toBe(true)
   })
 
-  it('setActiveProfile 后持久化 activeProfileId（当前实现 → RED）', () => {
+  it('setActiveProfile 后持久化 activeProfileId', () => {
     useIdentityStore.getState().addProfile(NEO)
     useIdentityStore.getState().setActiveProfile('neo')
     expect(readPersistedProfiles().activeProfileId).toBe('neo')
   })
 
-  it('removeProfile 后持久化移除并 active fallback（当前实现 → RED）', () => {
+  it('removeProfile 后持久化移除并 active fallback', () => {
     useIdentityStore.getState().addProfile(NEO)
     useIdentityStore.getState().setActiveProfile('neo')
     useIdentityStore.getState().removeProfile('neo')
@@ -55,19 +59,19 @@ describe('FE-AUD-002 Profile 持久化', () => {
     expect(persisted.activeProfileId).not.toBe('neo')
   })
 
-  it('编辑 Profile 字段（name/persona/model）持久化（当前实现 → RED）', () => {
+  it('编辑 Profile 字段（name/persona/model）持久化', () => {
     useIdentityStore.getState().addProfile({ ...NEO, name: 'Neo 改' })
     const persisted = readPersistedProfiles()
     expect(persisted.profiles.find(profile => profile.id === 'neo')?.name).toBe('Neo 改')
   })
 
-  it('配置导出包含 profiles（当前白名单无 → RED）', () => {
+  it('配置导出包含 profiles', () => {
     useIdentityStore.getState().addProfile(NEO)
     const envelope = JSON.parse(buildExportPayload(localStorage)) as { data: Record<string, string> }
     expect(envelope.data[PROFILE_KEY]).toBeDefined()
   })
 
-  it('配置导入接受 profiles key（当前白名单拒绝 → RED）', () => {
+  it('配置导入接受 profiles key', () => {
     const payload = JSON.stringify({
       app: 'pylon',
       version: 1,
@@ -109,11 +113,7 @@ describe('FE-AUD-002 Profile 持久化', () => {
   })
 
   it('配置写盘失败时 lastPersistError 可见且内存继续（1C L1）', () => {
-    Object.defineProperty(globalThis, 'localStorage', {
-      value: new MemoryStorage({ quotaExceeded: true }),
-      configurable: true,
-      writable: true,
-    })
+    vi.stubGlobal('localStorage', new MemoryStorage({ quotaExceeded: true }))
     useIdentityStore.getState().addProfile(NEO)
     const state = useIdentityStore.getState()
     expect(state.profiles.some(profile => profile.id === 'neo')).toBe(true)
@@ -122,7 +122,7 @@ describe('FE-AUD-002 Profile 持久化', () => {
 
   it('写盘恢复后 lastPersistError 清空（1C L1）', () => {
     const storage = new MemoryStorage()
-    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true, writable: true })
+    vi.stubGlobal('localStorage', storage)
     useIdentityStore.getState().addProfile(NEO)
     expect(useIdentityStore.getState().lastPersistError).toBeNull()
     storage.setQuotaExceeded(true)

@@ -27,6 +27,7 @@ import {
 } from '../sessionPersistence'
 import type { PersistedProfile } from '../profilePersistence'
 import type { Session } from '../identityStore'
+import { CORE_COMMAND_SET_PLUGIN_ID } from '../contracts/agentCommandSet'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 import { resetStores } from '../test/resetStores'
@@ -106,6 +107,34 @@ describe('ISSUE-01 Session owner schema v2', () => {
     it('非法 JSON → corrupt', () => {
       const result = parseSessions('{broken', PROFILES)
       expect(result.kind).toBe('corrupt')
+    })
+  })
+
+  describe('Session.commandSetPlugins 持久化（M2）', () => {
+    function commandSetSession(commandSetPlugins?: string[]): Session {
+      return {
+        id: 's1', agentId: 'peri', name: 'S', source: 'local:s1', profileId: 'p1',
+        createdAt: 1, lastActiveAt: 2, platform: 'local', workdir: '', sessionPrompt: '',
+        skills: [], hooks: [],
+        ...(commandSetPlugins ? { commandSetPlugins } : {}),
+        autoName: '',
+      }
+    }
+
+    it('显式启用集合 roundtrip 保留', () => {
+      const result = parseSessions(serializeSessions([commandSetSession([CORE_COMMAND_SET_PLUGIN_ID])]), PROFILES)
+      expect(result.kind).toBe('ready')
+      if (result.kind === 'ready') {
+        expect(result.sessions[0].commandSetPlugins).toEqual([CORE_COMMAND_SET_PLUGIN_ID])
+      }
+    })
+
+    it('旧数据缺省字段归一化为 undefined（resolver 按全部 active 处理）', () => {
+      const result = parseSessions(serializeSessions([commandSetSession()]), PROFILES)
+      expect(result.kind).toBe('ready')
+      if (result.kind === 'ready') {
+        expect(result.sessions[0].commandSetPlugins).toBeUndefined()
+      }
     })
   })
 

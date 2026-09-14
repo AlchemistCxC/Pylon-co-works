@@ -41,6 +41,25 @@ describe('WorkbenchProjector lifecycle slices (C13)', () => {
     expect(document.messages).toEqual([expect.objectContaining({ content: 'partial', running: false })])
   })
 
+  // 归并自 workbenchProjector.test.ts（P91 A5：终态 settle 用例与 Lifecycle 文件同域）
+  it('settles running messages when a turn failure diagnostic arrives', () => {
+    const running = envelope(1, { type: 'message.started', role: 'assistant', parts: [{ kind: 'text', text: 'partial' }] })
+    const failed = envelope(2, { type: 'diagnostic.notice', level: 'error', message: 'timeout', code: 'turn.failed' })
+    const document = reduce([running, failed])
+    expect(document.messages[0].running).toBe(false)
+    expect(document.session.status).toBe('error')
+  })
+
+  it('settles every running segment and marks the session errored on provider.error', () => {
+    const document = reduce([
+      envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'partial thought' }] }),
+      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'partial answer' }] }),
+      envelope(3, { type: 'diagnostic.notice', level: 'error', message: 'transport failed', code: 'provider.error' }),
+    ])
+    expect(document.messages.map(message => message.running)).toEqual([false, false])
+    expect(document.session.status).toBe('error')
+  })
+
   it('does not rewrite a completed terminal status when a provider error arrives late', () => {
     const document = reduce([
       envelope(1, { type: 'session.completed' }),

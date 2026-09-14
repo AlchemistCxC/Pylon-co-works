@@ -80,6 +80,23 @@
   --state-danger-surface: color-mix(in srgb, var(--danger) 11%, var(--surface-raised));
   --state-warning-surface: color-mix(in srgb, var(--warning) 11%, var(--surface-raised));
   --state-success-surface: color-mix(in srgb, var(--success) 10%, var(--surface-raised));
+
+  /* 派生色调层（样式绞杀地基 20260914）：utilities/组件表达「主色淡化背景、
+     描边融合」用。全部 color-mix(var) 组合、零字面量；var 在使用元素作用域
+     解析，主题/模式换肤自动跟随。档位归一：soft 14%、soft-strong 20%、
+     edge 55–58% 混 border。 */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-soft-strong: color-mix(in srgb, var(--accent) 20%, transparent);
+  --accent-edge: color-mix(in srgb, var(--accent) 55%, var(--border));
+  --success-soft: color-mix(in srgb, var(--success) 14%, transparent);
+  --success-edge: color-mix(in srgb, var(--success) 45%, var(--border));
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
+  --danger-soft-strong: color-mix(in srgb, var(--danger) 18%, transparent);
+  --danger-edge: color-mix(in srgb, var(--danger) 58%, var(--border));
+  --stroke-faint: color-mix(in srgb, var(--border) 40%, transparent);
+  --text-faint: color-mix(in srgb, var(--text) 4%, transparent);
+
   --brand-node-ready: var(--tool-ok, #56d38b);
   --brand-node-warn: var(--ekgYellow, #f2c94c);
   --brand-node-error: var(--spinner-stalled-color, #ff7188);

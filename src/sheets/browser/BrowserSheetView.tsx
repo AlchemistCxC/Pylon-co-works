@@ -436,36 +436,36 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   }, [browserRuntimeAvailable])
 
   return (
-    <div className={`browser-sheet ${sidebarCollapsed ? 'browser-sidebar-collapsed' : ''}`} data-browser-mode={browserPreview ? 'preview' : 'runtime'}>
-      <aside className="browser-sidebar">
-        <div className="browser-sidebar-head">
-          {!sidebarCollapsed && <span className="browser-sidebar-title">TOOLS</span>}
+    <div className={`browser-sheet ${sidebarCollapsed ? 'browser-sidebar-collapsed' : ''} flex flex-1 min-w-0 min-h-0 overflow-hidden text-text font-[family-name:var(--font)] bg-[var(--global-bg-color,var(--bg))]`} data-browser-mode={browserPreview ? 'preview' : 'runtime'}>
+      <aside className={`browser-sidebar flex w-[156px] basis-[156px] min-h-0 flex-col border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_82%,transparent)] max-[720px]:w-[42px] max-[720px]:basis-[42px] ${sidebarCollapsed ? 'w-[42px] basis-[42px]' : ''}`}>
+        <div className={`browser-sidebar-head min-h-[36px] flex items-center px-3 border-b border-border max-[720px]:justify-center max-[720px]:px-0 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}>
+          {!sidebarCollapsed && <span className="browser-sidebar-title text-text-dim font-bold text-[10px] font-[family-name:var(--mono)] tracking-[.12em] max-[720px]:hidden">TOOLS</span>}
         </div>
-        <nav className="browser-tool-list" aria-label="浏览器工具栏">
+        <nav className="browser-tool-list flex flex-col gap-[2px] py-2 px-1.5 max-[720px]:px-[5px]" aria-label="浏览器工具栏">
           {TOOL_ITEMS.map(item => {
             const Icon = item.icon
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`browser-tool-item ${activeTool === item.id ? 'active' : ''}`}
+                className={`browser-tool-item flex min-h-[34px] items-center gap-2 px-2 border border-transparent rounded-[4px] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent max-[720px]:justify-center max-[720px]:px-0 ${sidebarCollapsed ? 'justify-center px-0' : ''} ${activeTool === item.id ? 'border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] text-text bg-bg-active' : 'border-transparent text-text-dim bg-transparent hover:text-text hover:bg-bg-hover'}`}
                 onClick={() => chooseTool(item.id)}
                 title={item.label}
                 aria-label={item.label}
                 aria-pressed={activeTool === item.id}
               >
                 <Icon size={18} aria-hidden="true" />
-                {!sidebarCollapsed && <span>{item.label}</span>}
+                {!sidebarCollapsed && <span className="text-[12px] max-[720px]:hidden">{item.label}</span>}
               </button>
             )
           })}
         </nav>
-        {!sidebarCollapsed && <div className="browser-sidebar-note">WebView session<br /><span>{snapshot.phase}</span></div>}
+        {!sidebarCollapsed && <div className={`browser-sidebar-note mt-auto py-2.5 px-3 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5] max-[720px]:hidden ${sidebarCollapsed ? 'hidden' : ''}`}>WebView session<br /><span className="text-text-dim">{snapshot.phase}</span></div>}
       </aside>
-      <main className="browser-main">
+      <main className="browser-main flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden">
         {/* 保留语义节点供旧主题/可访问性选择器兼容；视觉上 Browser Sheet 不再重复显示
             BROWSER + Browser 两层标题，浏览器 chrome 直接成为主区入口。 */}
-        <div className="browser-header browser-header-legacy">
+        <div className="browser-header browser-header-legacy hidden">
           <div>
             <div className="file-main-kicker">BROWSER</div>
             <h2 className="file-main-title">Browser</h2>
@@ -473,30 +473,30 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
           <span className="browser-status" data-phase={snapshot.phase}>{snapshot.phase}</span>
         </div>
         {snapshot.tabs.length > 0 && (
-          <div className="browser-tab-strip" role="tablist" aria-label="浏览器标签">
+          <div className="browser-tab-strip flex min-w-0 min-h-9 shrink-0 items-stretch gap-[3px] m-0 pt-1 px-2 overflow-x-auto border-0 border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_88%,var(--global-bg-color)_12%)] [scrollbar-width:thin]" role="tablist" aria-label="浏览器标签">
             {snapshot.tabs.map(tab => {
               const active = snapshot.activeTabId === tab.id
               return (
-                <div key={tab.id} className={`browser-tab ${active ? 'active' : ''}`}>
-                  <button type="button" className="browser-tab-select" role="tab" aria-selected={active} onClick={() => void tabCommand('select', tab.id)} title={tab.title || tab.url || '新标签'}>
+                <div key={tab.id} className={`browser-tab flex min-w-[112px] max-w-[240px] basis-[190px] shrink grow-0 items-center border border-transparent border-b-0 text-text-dim bg-transparent max-[720px]:min-w-[100px] ${active ? 'border-[color-mix(in_srgb,var(--accent)_46%,var(--border))] text-text bg-bg-active shadow-[inset_0_-2px_var(--accent)]' : 'hover:text-text hover:bg-bg-hover'}`}>
+                  <button type="button" className="browser-tab-select flex min-w-0 h-[30px] flex-1 items-center gap-1.5 pt-0 pr-1 pb-0 pl-[9px] overflow-hidden border-0 text-inherit bg-transparent font-[family-name:var(--font)] text-[11px] cursor-pointer" role="tab" aria-selected={active} onClick={() => void tabCommand('select', tab.id)} title={tab.title || tab.url || '新标签'}>
                     <Globe2 size={13} aria-hidden="true" />
-                    <span>{browserTabLabel(tab)}</span>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">{browserTabLabel(tab)}</span>
                   </button>
-                  <button type="button" className="browser-tab-close" onClick={() => void tabCommand('close', tab.id)} aria-label={`关闭 ${browserTabLabel(tab)}`}><X size={12} /></button>
+                  <button type="button" className="browser-tab-close grid w-[26px] h-[26px] shrink-0 basis-[26px] place-items-center border border-transparent rounded-[4px] text-text-placeholder bg-transparent cursor-pointer hover:border-border hover:text-text hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent" onClick={() => void tabCommand('close', tab.id)} aria-label={`关闭 ${browserTabLabel(tab)}`}><X size={12} /></button>
                 </div>
               )
             })}
-            <button type="button" className="browser-tab-new" onClick={() => void tabCommand('new')} aria-label="新建浏览器标签"><Plus size={14} /></button>
+            <button type="button" className="browser-tab-new self-center mr-0.5 mb-1 ml-px grid w-[26px] h-[26px] shrink-0 basis-[26px] place-items-center border border-transparent rounded-[4px] text-text-placeholder bg-transparent cursor-pointer hover:border-border hover:text-text hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent" onClick={() => void tabCommand('new')} aria-label="新建浏览器标签"><Plus size={14} /></button>
           </div>
         )}
-        <div className="browser-toolbar" aria-label="浏览器导航栏">
-          <button type="button" className="browser-toolbar-button" onClick={() => void browserCommand('browser_back')} disabled={snapshot.phase !== 'ready'} aria-label="后退"><ChevronLeft size={18} /></button>
-          <button type="button" className="browser-toolbar-button" onClick={() => void browserCommand('browser_forward')} disabled={snapshot.phase !== 'ready'} aria-label="前进"><ChevronRight size={18} /></button>
-          <button type="button" className="browser-toolbar-button" onClick={() => void browserCommand('browser_reload')} disabled={snapshot.phase !== 'ready'} aria-label="刷新"><RefreshCw size={15} /></button>
-          <div className="browser-address-wrap"><Search size={14} /><input className="browser-address" value={address} onChange={event => setAddress(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void navigate() }} placeholder="输入网址…" aria-label="网址" /></div>
+        <div className="browser-toolbar flex shrink-0 min-w-0 min-h-[44px] items-center gap-1 m-0 py-1.5 px-2 border-0 border-b border-border rounded-none bg-bg-panel max-[720px]:px-[5px]" aria-label="浏览器导航栏">
+          <button type="button" className="browser-toolbar-button grid w-[30px] h-[30px] shrink-0 basis-[30px] place-items-center border border-transparent rounded-[4px] text-text-dim bg-transparent cursor-pointer enabled:hover:text-text enabled:hover:bg-bg-hover disabled:opacity-[0.35] disabled:cursor-not-allowed" onClick={() => void browserCommand('browser_back')} disabled={snapshot.phase !== 'ready'} aria-label="后退"><ChevronLeft size={18} /></button>
+          <button type="button" className="browser-toolbar-button grid w-[30px] h-[30px] shrink-0 basis-[30px] place-items-center border border-transparent rounded-[4px] text-text-dim bg-transparent cursor-pointer enabled:hover:text-text enabled:hover:bg-bg-hover disabled:opacity-[0.35] disabled:cursor-not-allowed" onClick={() => void browserCommand('browser_forward')} disabled={snapshot.phase !== 'ready'} aria-label="前进"><ChevronRight size={18} /></button>
+          <button type="button" className="browser-toolbar-button grid w-[30px] h-[30px] shrink-0 basis-[30px] place-items-center border border-transparent rounded-[4px] text-text-dim bg-transparent cursor-pointer enabled:hover:text-text enabled:hover:bg-bg-hover disabled:opacity-[0.35] disabled:cursor-not-allowed" onClick={() => void browserCommand('browser_reload')} disabled={snapshot.phase !== 'ready'} aria-label="刷新"><RefreshCw size={15} /></button>
+          <div className="browser-address-wrap flex min-w-0 flex-1 items-center gap-[7px] h-[30px] px-2.5 border border-border rounded-[5px] text-text-dim bg-bg-input focus-within:border-border-focus focus-within:shadow-[inset_0_-2px_0_var(--accent)]"><Search size={14} /><input className="browser-address min-w-0 flex-1 h-[28px] p-0 border-0 outline-none text-text bg-transparent font-[family-name:var(--mono)] text-[12px] placeholder:text-text-placeholder focus-visible:outline-[1px] focus-visible:outline-offset-[-1px] focus-visible:outline-[var(--state-focus-ring)]" value={address} onChange={event => setAddress(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void navigate() }} placeholder="输入网址…" aria-label="网址" /></div>
           <button
             type="button"
-            className={`browser-toolbar-button browser-bookmark-button ${library.bookmarks.some(item => item.url === snapshot.url) ? 'active' : ''}`}
+            className={`browser-toolbar-button browser-bookmark-button grid w-[30px] h-[30px] shrink-0 basis-[30px] place-items-center border border-transparent rounded-[4px] text-text-dim bg-transparent cursor-pointer enabled:hover:text-text enabled:hover:bg-bg-hover disabled:opacity-[0.35] disabled:cursor-not-allowed ${library.bookmarks.some(item => item.url === snapshot.url) ? 'active' : ''}`}
             onClick={toggleCurrentBookmark}
             disabled={!snapshot.url || snapshot.url === 'about:blank'}
             aria-label={library.bookmarks.some(item => item.url === snapshot.url) ? '移除当前页书签' : '添加当前页书签'}
@@ -506,7 +506,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
           </button>
           <button
             type="button"
-            className="browser-zoom-toggle"
+            className="browser-zoom-toggle min-w-[52px] h-[30px] shrink-0 px-2 border border-transparent rounded-[4px] text-text-dim bg-transparent font-[family-name:var(--mono)] text-[11px] cursor-pointer hover:border-border hover:text-text hover:bg-bg-hover aria-expanded:border-border aria-expanded:text-text aria-expanded:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
             onClick={() => setZoomSettingsOpen(open => !open)}
             aria-expanded={zoomSettingsOpen}
             aria-controls="browser-zoom-settings"
@@ -514,15 +514,15 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
           >
             {snapshot.zoomPercent}%
           </button>
-          <span className="browser-status browser-status-inline" data-phase={snapshot.phase} data-runtime={snapshot.runtime} title={browserPreview ? '开发预览：页面由 iframe 加载' : '桌面 WebView2 会话'}>
+          <span className={`browser-status browser-status-inline inline-flex min-w-[58px] h-[26px] items-center justify-center px-[7px] border rounded-[4px] text-text-dim bg-bg-panel font-[family-name:var(--mono)] text-[10px] tracking-[.04em] uppercase max-[720px]:min-w-[50px] ${snapshot.phase === 'ready' ? 'text-[var(--tool-ok)] border-[color-mix(in_srgb,var(--tool-ok)_38%,var(--border))]' : snapshot.phase === 'starting' ? 'text-[var(--tool-run)] border-[color-mix(in_srgb,var(--tool-run)_38%,var(--border))]' : snapshot.phase === 'error' ? 'text-[var(--tool-err,var(--danger))] border-[color-mix(in_srgb,var(--tool-err,var(--danger))_38%,var(--border))]' : ''} ${snapshot.runtime === 'iframe-preview' ? 'text-accent border-[color-mix(in_srgb,var(--accent)_38%,var(--border))]' : ''}`} data-phase={snapshot.phase} data-runtime={snapshot.runtime} title={browserPreview ? '开发预览：页面由 iframe 加载' : '桌面 WebView2 会话'}>
             {browserPreview ? 'preview' : snapshot.phase}
           </span>
         </div>
         {zoomSettingsOpen && (
-          <div id="browser-zoom-settings" className="browser-zoom-settings" role="group" aria-label="页面缩放设置">
-            <button type="button" className="browser-zoom-button" onClick={() => void setZoom(snapshot.zoomPercent - ZOOM_STEP)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent <= MIN_ZOOM_PERCENT} aria-label="缩小页面"><Minus size={14} /></button>
+          <div id="browser-zoom-settings" className="browser-zoom-settings flex min-h-[38px] shrink-0 items-center gap-2 m-0 py-1 px-2 border-0 border-b border-border text-text-dim bg-bg-panel" role="group" aria-label="页面缩放设置">
+            <button type="button" className="browser-zoom-button grid w-7 h-7 shrink-0 basis-7 place-items-center border border-border rounded-[4px] text-text bg-bg-input cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:border-accent enabled:hover:text-text enabled:hover:bg-bg-hover" onClick={() => void setZoom(snapshot.zoomPercent - ZOOM_STEP)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent <= MIN_ZOOM_PERCENT} aria-label="缩小页面"><Minus size={14} /></button>
             <input
-              className="browser-zoom-range"
+              className="browser-zoom-range min-w-[100px] flex-1 accent-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
               type="range"
               min={MIN_ZOOM_PERCENT}
               max={MAX_ZOOM_PERCENT}
@@ -532,9 +532,9 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
               disabled={snapshot.phase !== 'ready'}
               aria-label="页面缩放"
             />
-            <output className="browser-zoom-value" aria-live="polite">{snapshot.zoomPercent}%</output>
-            <button type="button" className="browser-zoom-button" onClick={() => void setZoom(snapshot.zoomPercent + ZOOM_STEP)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent >= MAX_ZOOM_PERCENT} aria-label="放大页面"><Plus size={14} /></button>
-            <button type="button" className="browser-zoom-reset" onClick={() => void setZoom(DEFAULT_ZOOM_PERCENT)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent === DEFAULT_ZOOM_PERCENT} aria-label="恢复默认缩放"><RotateCcw size={13} />默认 90%</button>
+            <output className="browser-zoom-value w-[44px] text-text font-[family-name:var(--mono)] text-[11px] text-right" aria-live="polite">{snapshot.zoomPercent}%</output>
+            <button type="button" className="browser-zoom-button grid w-7 h-7 shrink-0 basis-7 place-items-center border border-border rounded-[4px] text-text bg-bg-input cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:border-accent enabled:hover:text-text enabled:hover:bg-bg-hover" onClick={() => void setZoom(snapshot.zoomPercent + ZOOM_STEP)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent >= MAX_ZOOM_PERCENT} aria-label="放大页面"><Plus size={14} /></button>
+            <button type="button" className="browser-zoom-reset inline-flex h-7 items-center gap-[5px] px-2 border border-border rounded-[4px] text-text-dim bg-bg-input font-[family-name:var(--mono)] text-[10px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:border-accent enabled:hover:text-text enabled:hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent" onClick={() => void setZoom(DEFAULT_ZOOM_PERCENT)} disabled={snapshot.phase !== 'ready' || snapshot.zoomPercent === DEFAULT_ZOOM_PERCENT} aria-label="恢复默认缩放"><RotateCcw size={13} />默认 90%</button>
           </div>
         )}
         {activeTool && (
@@ -553,22 +553,22 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
             onDownloadUrlInputChange={setDownloadUrlInput}
           />
         )}
-        <div ref={viewportRef} className="browser-viewport">
+        <div ref={viewportRef} className="browser-viewport relative flex flex-1 min-w-0 min-h-0 items-stretch justify-stretch overflow-hidden border-0 rounded-none bg-bg-panel">
           {browserPreview && snapshot.phase === 'ready' && snapshot.url && snapshot.url !== 'about:blank' && (
             <iframe
               key={`${snapshot.activeTabId ?? 'tab'}:${snapshot.url}:${previewRevision}`}
-              className="browser-preview-frame"
+              className="browser-preview-frame block w-full h-full flex-1 border-0 bg-white"
               src={browserPreviewUrl(snapshot.url)}
               title={snapshot.title || snapshot.url}
               referrerPolicy="no-referrer"
             />
           )}
-          <div className={`browser-empty-state ${snapshot.phase === 'ready' ? 'browser-empty-hidden' : ''}`} role="status">
-            <div className="browser-empty-mark" aria-hidden="true">◌</div>
-            <strong>{browserPreview ? '输入网址开始浏览' : '浏览器会话尚未启动'}</strong>
-            <span>{browserPreview ? '开发预览加载真实网页；桌面端会切换为嵌入式 WebView2。' : '启动后，完整 WebView 将占据主工作区。'}</span>
-            <span className="browser-empty-note">{browserPreview ? 'preview runtime · 不伪装成桌面 WebView' : 'WebView2 子进程由 Browser Sheet 生命周期管理'}</span>
-            <div className="browser-actions"><button type="button" className="template-apply" onClick={() => void start()} disabled={snapshot.phase === 'starting'}>新建标签</button></div>
+          <div className={`browser-empty-state absolute inset-0 flex items-center justify-center flex-col gap-2 w-auto p-[var(--ui-space-7)] border-0 rounded-none text-text-dim bg-bg-panel text-center ${snapshot.phase === 'ready' ? 'invisible pointer-events-none' : ''}`} role="status">
+            <div className="browser-empty-mark grid w-[46px] h-[46px] place-items-center mb-2 border border-[color-mix(in_srgb,var(--accent)_42%,var(--border))] rounded-full text-accent bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-panel))] font-bold text-[22px] font-[family-name:var(--mono)]" aria-hidden="true">◌</div>
+            <strong className="text-text text-[15px]">{browserPreview ? '输入网址开始浏览' : '浏览器会话尚未启动'}</strong>
+            <span className="max-w-[520px] text-[12px] leading-[1.5]">{browserPreview ? '开发预览加载真实网页；桌面端会切换为嵌入式 WebView2。' : '启动后，完整 WebView 将占据主工作区。'}</span>
+            <span className="browser-empty-note mt-2 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5]">{browserPreview ? 'preview runtime · 不伪装成桌面 WebView' : 'WebView2 子进程由 Browser Sheet 生命周期管理'}</span>
+            <div className="browser-actions flex gap-[var(--ui-space-2)] mt-[var(--ui-space-4)]"><button type="button" className="template-apply" onClick={() => void start()} disabled={snapshot.phase === 'starting'}>新建标签</button></div>
           </div>
         </div>
         {state.error && <div className="file-tree-error browser-error" role="alert">{state.error}</div>}
@@ -609,70 +609,71 @@ function BrowserToolPanel({
   const labels: Record<BrowserToolId, string> = { history: '历史', bookmarks: '书签', downloads: '下载', console: '控制台' }
   const clearable = activeTool
   return (
-    <section className="browser-tool-panel" aria-label={`${labels[activeTool]}面板`}>
-      <header className="browser-tool-panel-head">
-        <strong>{labels[activeTool]}</strong>
-        <div className="browser-tool-panel-actions">
-          {activeTool === 'console' && <button type="button" className="browser-panel-action" onClick={onInspect}>刷新快照</button>}
-          <button type="button" className="browser-panel-action" onClick={() => onClear(clearable)} disabled={library[clearable].length === 0}>清空</button>
-          <button type="button" className="browser-panel-close" onClick={onClose} aria-label={`关闭${labels[activeTool]}面板`}><X size={14} /></button>
+    <section className="browser-tool-panel flex shrink-0 min-h-0 max-h-[250px] flex-col border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)]" aria-label={`${labels[activeTool]}面板`}>
+      <header className="browser-tool-panel-head flex min-h-[34px] items-center gap-2 px-2.5 border-b border-border">
+        <strong className="text-text text-[12px]">{labels[activeTool]}</strong>
+        <div className="browser-tool-panel-actions flex items-center gap-[5px] ml-auto">
+          {activeTool === 'console' && <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onInspect}>刷新快照</button>}
+          <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={() => onClear(clearable)} disabled={library[clearable].length === 0}>清空</button>
+          <button type="button" className="browser-panel-close grid w-6 place-items-center p-0 min-h-6 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer hover:border-accent hover:text-text" onClick={onClose} aria-label={`关闭${labels[activeTool]}面板`}><X size={14} /></button>
         </div>
       </header>
 
       {activeTool === 'history' && (
-        <div className="browser-library-list">
-          {library.history.length === 0 && <p className="browser-library-empty">暂无浏览记录</p>}
+        <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
+          {library.history.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无浏览记录</p>}
           {library.history.map(entry => (
-            <button key={entry.id} type="button" className="browser-library-item" onClick={() => onNavigate(entry.url)}>
-              <span className="browser-library-item-title">{entry.title || entry.url}</span>
-              <span className="browser-library-item-meta">{entry.url} · {formatBrowserTime(entry.visitedAt)}</span>
+            <button key={entry.id} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onNavigate(entry.url)}>
+              <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.title || entry.url}</span>
+              <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{entry.url} · {formatBrowserTime(entry.visitedAt)}</span>
             </button>
           ))}
         </div>
       )}
 
       {activeTool === 'bookmarks' && (
-        <div className="browser-library-list">
-          {library.bookmarks.length === 0 && <p className="browser-library-empty">暂无书签；点击地址栏旁的书签图标添加。</p>}
+        <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
+          {library.bookmarks.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无书签；点击地址栏旁的书签图标添加。</p>}
           {library.bookmarks.map(entry => (
-            <button key={entry.id} type="button" className="browser-library-item" onClick={() => onNavigate(entry.url)}>
-              <span className="browser-library-item-title">{entry.title || entry.url}</span>
-              <span className="browser-library-item-meta">{entry.url} · {formatBrowserTime(entry.createdAt)}</span>
+            <button key={entry.id} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onNavigate(entry.url)}>
+              <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.title || entry.url}</span>
+              <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{entry.url} · {formatBrowserTime(entry.createdAt)}</span>
             </button>
           ))}
         </div>
       )}
 
       {activeTool === 'downloads' && (
-        <div className="browser-download-panel">
-          <form className="browser-download-form" onSubmit={event => { event.preventDefault(); if (downloadUrlInput.trim()) { onDownload(downloadUrlInput); onDownloadUrlInputChange('') } }}>
+        <div className="browser-download-panel min-h-0 overflow-hidden">
+          <form className="browser-download-form flex gap-[5px] pt-1.5 px-2 pb-[3px]" onSubmit={event => { event.preventDefault(); if (downloadUrlInput.trim()) { onDownload(downloadUrlInput); onDownloadUrlInputChange('') } }}>
             <input
               value={downloadUrlInput}
               onChange={event => onDownloadUrlInputChange(event.target.value)}
               placeholder="粘贴 http(s) 下载地址"
               aria-label="下载地址"
               inputMode="url"
+              className="min-w-0 flex-1 h-[26px] px-[7px] border border-border rounded-[3px] text-text bg-bg-input font-[family-name:var(--mono)] text-[10px] focus:border-accent focus:outline-none"
             />
-            <button type="submit" className="browser-panel-action" disabled={!downloadUrlInput.trim()}>开始</button>
+            <button type="submit" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" disabled={!downloadUrlInput.trim()}>开始</button>
           </form>
           {pageSnapshot?.links?.some(link => link.download && typeof link.href === 'string') && (
             <div className="browser-discovered-downloads">
-              <span className="browser-library-caption">当前页面的下载链接</span>
+              <span className="browser-library-caption block mx-1 mt-[5px] mb-0.5 text-text-dim text-[10px]">当前页面的下载链接</span>
               {pageSnapshot.links.filter(link => link.download && typeof link.href === 'string').map((link, index) => (
-                <button key={`${link.href}-${index}`} type="button" className="browser-library-item" onClick={() => onDownload(link.href!, link.downloadName ?? undefined)}>
-                  <span className="browser-library-item-title">{link.text || link.downloadName || link.href}</span>
-                  <span className="browser-library-item-meta">{link.href}</span>
+                <button key={`${link.href}-${index}`} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onDownload(link.href!, link.downloadName ?? undefined)}>
+                  <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{link.text || link.downloadName || link.href}</span>
+                  <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{link.href}</span>
                 </button>
               ))}
             </div>
           )}
-          <div className="browser-library-list">
-            {library.downloads.length === 0 && <p className="browser-library-empty">暂无下载记录</p>}
+          <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
+            {library.downloads.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无下载记录</p>}
             {library.downloads.map(entry => (
-              <div key={entry.id} className="browser-library-item browser-download-entry">
-                <span className="browser-library-item-title">{entry.filename || entry.url}</span>
-                <span className="browser-library-item-meta" data-status={entry.status}>{entry.status === 'started' ? '已发起' : '失败'} · {entry.url} · {formatBrowserTime(entry.startedAt)}</span>
-                {entry.error && <span className="browser-library-item-error">{entry.error}</span>}
+              <div key={entry.id} className="browser-library-item browser-download-entry flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover">
+                <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.filename || entry.url}</span>
+                <span className={`browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap ${entry.status === 'started' ? 'text-[var(--tool-ok)]' : 'text-[var(--tool-err,var(--danger))]'}`} data-status={entry.status}>{entry.status === 'started' ? '已发起' : '失败'} · {entry.url} · {formatBrowserTime(entry.startedAt)}</span>
+                {entry.error && <span className="browser-library-item-error text-[var(--tool-err,var(--danger))]">{entry.error}</span>}
               </div>
             ))}
           </div>
@@ -680,22 +681,22 @@ function BrowserToolPanel({
       )}
 
       {activeTool === 'console' && (
-        <div className="browser-console-panel">
-          <div className="browser-console-toolbar">
-            <label>级别
-              <select value={consoleFilter} onChange={event => onConsoleFilterChange(event.target.value as 'all' | ConsoleEntry['level'])} aria-label="控制台级别">
+        <div className="browser-console-panel min-h-0 overflow-hidden">
+          <div className="browser-console-toolbar flex items-center gap-2.5 py-1 px-2 text-text-dim text-[10px]">
+            <label className="inline-flex items-center gap-1">级别
+              <select className="h-[23px] border border-border rounded-[3px] text-text bg-bg-input text-[10px]" value={consoleFilter} onChange={event => onConsoleFilterChange(event.target.value as 'all' | ConsoleEntry['level'])} aria-label="控制台级别">
                 <option value="all">全部</option><option value="info">信息</option><option value="success">成功</option><option value="error">错误</option>
               </select>
             </label>
-            {pageSnapshot && <span className="browser-console-snapshot">快照：{pageSnapshot.links?.length ?? 0} links · {(pageSnapshot.text?.length ?? 0).toLocaleString()} chars</span>}
+            {pageSnapshot && <span className="browser-console-snapshot ml-auto text-text-placeholder font-[family-name:var(--mono)]">快照：{pageSnapshot.links?.length ?? 0} links · {(pageSnapshot.text?.length ?? 0).toLocaleString()} chars</span>}
           </div>
-          <div className="browser-console-list">
-            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).length === 0 && <p className="browser-library-empty">暂无操作记录</p>}
+          <div className="browser-console-list min-h-0 overflow-auto py-1 px-2">
+            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无操作记录</p>}
             {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).map(entry => (
-              <div key={entry.id} className="browser-console-entry" data-level={entry.level}>
-                <span className="browser-console-time">{formatBrowserTime(entry.at)}</span>
-                <code>{entry.command}</code>
-                {entry.detail && <span className="browser-console-detail">{entry.detail}</span>}
+              <div key={entry.id} className={`browser-console-entry grid grid-cols-[76px_130px_minmax(0,1fr)] gap-[7px] items-baseline py-1 px-[5px] border-b border-[color-mix(in_srgb,var(--border)_55%,transparent)] text-[10px] ${entry.level === 'error' ? 'text-[var(--tool-err,var(--danger))]' : entry.level === 'success' ? 'text-[var(--tool-ok)]' : ''}`} data-level={entry.level}>
+                <span className="browser-console-time text-text-placeholder font-[family-name:var(--mono)] text-[9px]">{formatBrowserTime(entry.at)}</span>
+                <code className="text-text font-[family-name:var(--mono)] text-[10px]">{entry.command}</code>
+                {entry.detail && <span className="browser-console-detail min-w-0 overflow-hidden text-text-dim text-ellipsis whitespace-nowrap">{entry.detail}</span>}
               </div>
             ))}
           </div>

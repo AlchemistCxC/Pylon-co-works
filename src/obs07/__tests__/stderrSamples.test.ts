@@ -247,7 +247,11 @@ describe('buildP5Checks', () => {
     expect(checks.samplesAvailable).toBe(true)
     expect(checks.totalStderrLines).toBe(1)
     expect(checks.correlationDroppedFrontend).toBe(false) // LOG-03：normalize 保留 correlation
-    expect(checks.windowIdentified.evidence).toContain('src/workspace-sheets/sheetRegistry.ts:10')
+    // 文件锚而非行号锚：证据指向 sheetRegistry（行号易漂移，文件锚即可定位登记点）
+    expect(checks.windowIdentified.evidence.length).toBeGreaterThanOrEqual(2)
+    for (const entry of checks.windowIdentified.evidence) {
+      expect(entry).toContain('sheetRegistry')
+    }
   })
 
   it('无 stderr 数据 → doubleWriteConfirmed=false、samplesAvailable=false', () => {

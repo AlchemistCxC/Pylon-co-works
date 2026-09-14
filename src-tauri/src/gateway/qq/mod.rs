@@ -55,6 +55,44 @@ const DEAD_TARGET_TTL: Duration = Duration::from_secs(30 * 60);
 /// 死目标期间每条 agent 输出都触发 deliver，逐条 warn 会刷屏。
 const DEAD_TARGET_WARN_INTERVAL: Duration = Duration::from_secs(1);
 
+/// P91 批 C1（横切 §5）：可注入单调时钟——短路告警节流的时间源。
+/// 生产 = [`SystemClock`]（恒 `Instant::now()`，行为不变）；测试注入
+/// [`ManualClock`] 推进，消除节流测试的真 sleep（~1.1s/用例）。
+/// pub(crate)：出现在 pub(crate) 构造器签名里，可见性须对齐（private_interfaces）。
+pub(crate) trait MonotonicClock: Send + Sync {
+    fn now(&self) -> Instant;
+}
+
+struct SystemClock;
+
+impl MonotonicClock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct ManualClock(std::sync::Mutex<Instant>);
+
+#[cfg(test)]
+impl ManualClock {
+    fn starting_now() -> Arc<Self> {
+        Arc::new(Self(std::sync::Mutex::new(Instant::now())))
+    }
+
+    fn advance(&self, by: Duration) {
+        *self.0.lock().unwrap() += by;
+    }
+}
+
+#[cfg(test)]
+impl MonotonicClock for ManualClock {
+    fn now(&self) -> Instant {
+        *self.0.lock().unwrap()
+    }
+}
+
 /// 发送失败分类（B10 收尾，参考 Hermes 发送重试/死目标模式）。
 #[derive(Debug)]
 enum SendFailure {
@@ -192,6 +230,8 @@ pub struct QqAdapter {
     short_circuit_warns: Mutex<HashMap<String, Instant>>,
     /// W2 T12-4：适配器关闭标志（shutdown 后置位）——新投递拒绝、新入站丢弃。
     closed: Arc<AtomicBool>,
+    /// P91 批 C1（横切 §5）：节流时钟（生产恒 SystemClock；测试注入可推进时钟）。
+    clock: Arc<dyn MonotonicClock>,
 }
 
 /// 平台入站白名单检查（B10.3，Hermes group_allow_from / allow_from 模式）：
@@ -259,6 +299,7 @@ impl QqAdapter {
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
             short_circuit_warns: Mutex::new(HashMap::new()),
             closed: Arc::new(AtomicBool::new(false)),
+            clock: Arc::new(SystemClock),
         })
     }
 
@@ -270,6 +311,18 @@ impl QqAdapter {
         auth: Arc<QqAuth>,
         base_url: String,
     ) -> Arc<Self> {
+        Self::for_testing_with_clock(core, http, auth, base_url, Arc::new(SystemClock))
+    }
+
+    /// 测试构造：注入手动时钟（P91 批 C1 §5——节流测试推进时钟代替真 sleep）。
+    #[cfg(test)]
+    pub(crate) fn for_testing_with_clock(
+        core: Arc<GatewayCore>,
+        http: Client,
+        auth: Arc<QqAuth>,
+        base_url: String,
+        clock: Arc<dyn MonotonicClock>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             dedup: Mutex::new(DedupState::new()),
             core,
@@ -280,6 +333,7 @@ impl QqAdapter {
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
             short_circuit_warns: Mutex::new(HashMap::new()),
             closed: Arc::new(AtomicBool::new(false)),
+            clock,
         })
     }
 
@@ -436,7 +490,7 @@ impl PlatformAdapter for QqAdapter {
                     .short_circuit_warns
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let now = Instant::now();
+                let now = self.clock.now();
                 warns.retain(|_, last| now.duration_since(*last) < DEAD_TARGET_WARN_INTERVAL);
                 if !warns.contains_key(&key) {
                     tracing::warn!(
@@ -1402,7 +1456,20 @@ gateway:
         // 重建缓存强制按当前 subscriber 重新评估所有 callsite，消除该顺序依赖。
         tracing::callsite::rebuild_interest_cache();
         let core = core_with_route();
-        let adapter = test_adapter(core);
+        // P91 批 C1（横切 §5）：注入手动时钟——推进时钟代替真 sleep（原 ~1.1s/次）。
+        let clock = ManualClock::starting_now();
+        let auth = Arc::new(QqAuth::new(
+            Client::new(),
+            "test-app".to_string(),
+            "test-secret".to_string(),
+        ));
+        let adapter = QqAdapter::for_testing_with_clock(
+            core,
+            Client::new(),
+            auth,
+            types::API_BASE.to_string(),
+            clock.clone(),
+        );
         adapter.dead_targets.lock().unwrap().insert(
             "group:456".to_string(),
             ("forbidden".to_string(), Instant::now()),
@@ -1427,8 +1494,8 @@ gateway:
             1,
             "节流表只记录一条"
         );
-        // 间隔超过 1s 后再次投递 → 恢复告警
-        std::thread::sleep(DEAD_TARGET_WARN_INTERVAL + Duration::from_millis(100));
+        // 间隔超过 1s 后再次投递 → 恢复告警（推进手动时钟，不真 sleep）
+        clock.advance(DEAD_TARGET_WARN_INTERVAL + Duration::from_millis(100));
         adapter
             .deliver_text("qq:group:456", "hi")
             .expect("短路返回 Ok");

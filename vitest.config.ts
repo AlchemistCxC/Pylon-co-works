@@ -18,10 +18,11 @@ export default defineConfig({
     include: ['scripts/*.test.mts', 'src/**/*.test.{ts,tsx}'],
     environment: 'node',
     setupFiles: ['vitest.setup.ts'],
-    testTimeout: 60000,
+    // P91 C2 §7：全局 60s 收紧为 30s（node 纯逻辑/jsdom 组件共用一档；esbuild/dist
+    // 重型 integration 文件内用 vi.setConfig 个别放宽到 60s）。retry 已退役——
+    // 出口判据：无 retry 连续 5 轮全量全绿。
+    testTimeout: 30_000,
     pool: 'forks',
-    // CI 偶发 providerCoverage 时序 flake（本地稳定）——失败重试一次
-    retry: 1,
     coverage: {
       provider: 'v8',
       include: ['src/**'],

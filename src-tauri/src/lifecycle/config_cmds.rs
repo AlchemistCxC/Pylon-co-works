@@ -99,13 +99,31 @@ pub(crate) async fn update_agents_config(
     config: serde_json::Value,
     expected_revision: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
+    update_agents_config_via(state, scope, agent_id, config, expected_revision, None).await
+}
+
+/// P91 批 C1（横切 §4）：配置路径参数化入口——生产恒走
+/// `effective_config_path()`（`config_path_override=None`，行为不变）；测试注入
+/// 临时配置路径，不再 `set_var` 进程全局 `PYLON_AGENTS_CONFIG`（进程级 env 变异
+/// 与并行测试竞态）。
+pub(crate) async fn update_agents_config_via(
+    state: tauri::State<'_, AppState>,
+    scope: String,
+    agent_id: Option<String>,
+    config: serde_json::Value,
+    expected_revision: Option<String>,
+    config_path_override: Option<std::path::PathBuf>,
+) -> Result<serde_json::Value, PylonError> {
     use crate::agent_config::ConfigError;
     let inner = state.inner();
     // 写序锁：读当前→生成候选→校验→写盘→内存提交全程串行，防基于旧版本互相覆盖
     let _write_guard = inner.config_write_lock.lock().await;
     // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
-    let path = crate::agent_config::effective_config_path()
-        .ok_or(PylonError::Config(ConfigError::ReadOnly))?;
+    let path = match config_path_override {
+        Some(path) => path,
+        None => crate::agent_config::effective_config_path()
+            .ok_or(PylonError::Config(ConfigError::ReadOnly))?,
+    };
     let expected_revision =
         expected_revision.ok_or(PylonError::Config(ConfigError::RevisionRequired))?;
     // 跨进程 lease 覆盖“重读 baseline → 生成/校验候选 → 提交”整个窗口。
@@ -131,30 +149,12 @@ pub(crate) async fn update_agents_config(
     let config_owned = config.clone();
     let base_dir = path.parent().map(|p| p.to_path_buf());
     let candidate = tokio::task::spawn_blocking(move || {
-        let candidate = match scope_owned.as_str() {
-            "agent" => {
-                let agent_id = agent_id_owned
-                    .ok_or_else(|| ConfigError::Invalid("scope=agent 缺少 agentId".to_string()))?;
-                let patch_yaml = config_owned.as_str().ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent 的 config 必须为 YAML 字符串".to_string())
-                })?;
-                crate::agent_config::apply_agent_patch(&content, &agent_id, patch_yaml)?
-            }
-            "agent_fields" => {
-                let agent_id = agent_id_owned.ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent_fields 缺少 agentId".to_string())
-                })?;
-                crate::agent_config::apply_agent_field_patch(&content, &agent_id, &config_owned)?
-            }
-            "agent_create" => {
-                let agent_id = agent_id_owned.ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent_create 缺少 agentId".to_string())
-                })?;
-                crate::agent_config::apply_agent_create(&content, &agent_id, &config_owned)?
-            }
-            "gateway" => crate::agent_config::apply_gateway_patch(&content, &config_owned)?,
-            other => return Err(ConfigError::Invalid(format!("未知 scope: {other}"))),
-        };
+        let candidate = build_scope_candidate(
+            &content,
+            &scope_owned,
+            agent_id_owned.as_deref(),
+            &config_owned,
+        )?;
         let agents = crate::agent_config::validate_candidate(&candidate, base_dir.as_deref())?;
         Ok::<
             (
@@ -173,16 +173,7 @@ pub(crate) async fn update_agents_config(
     let removed: Vec<String> = {
         let active = inner.active_agent.lock().map_err(|e| e.to_string())?;
         let agents = inner.agents.lock().map_err(|e| e.to_string())?;
-        if !new_agents.contains_key(&*active) {
-            return Err(PylonError::Config(ConfigError::ActiveAgentProtected(
-                format!("候选配置删除了当前 active agent: {}", *active),
-            )));
-        }
-        agents
-            .keys()
-            .filter(|id| !new_agents.contains_key(*id) && **id != *active)
-            .cloned()
-            .collect()
+        removed_agents_guard(&agents, &new_agents, &active)?
     };
     // 5. 原子写盘（替换语义）。先落盘、后提交内存：写盘失败时 registry 不变
     // （施工文档 §2.1 必测失败链）。
@@ -374,4 +365,170 @@ pub(crate) async fn initialize_agents_config(
         "defaultAgentId": inner.active_agent.lock().map(|a| a.clone()).unwrap_or_default(),
         "revision": revision,
     }))
+}
+
+/// scope 分派 → 候选文档（纯函数：不经 env / 文件系统，可直接单测）。
+///
+/// 只做"读当前原文 → 造候选"；双域校验、active 保护、写盘与内存提交仍在调用方，
+/// 候选生成与提交链路的边界不变。
+fn build_scope_candidate(
+    content: &str,
+    scope: &str,
+    agent_id: Option<&str>,
+    config: &serde_json::Value,
+) -> Result<String, crate::agent_config::ConfigError> {
+    use crate::agent_config::ConfigError;
+    match scope {
+        "agent" => {
+            let agent_id = agent_id
+                .ok_or_else(|| ConfigError::Invalid("scope=agent 缺少 agentId".to_string()))?;
+            let patch_yaml = config.as_str().ok_or_else(|| {
+                ConfigError::Invalid("scope=agent 的 config 必须为 YAML 字符串".to_string())
+            })?;
+            crate::agent_config::apply_agent_patch(content, agent_id, patch_yaml)
+        }
+        "agent_fields" => {
+            let agent_id = agent_id.ok_or_else(|| {
+                ConfigError::Invalid("scope=agent_fields 缺少 agentId".to_string())
+            })?;
+            crate::agent_config::apply_agent_field_patch(content, agent_id, config)
+        }
+        "agent_create" => {
+            let agent_id = agent_id.ok_or_else(|| {
+                ConfigError::Invalid("scope=agent_create 缺少 agentId".to_string())
+            })?;
+            crate::agent_config::apply_agent_create(content, agent_id, config)
+        }
+        // issue #67A：删除单个 agent 配置条目（仅摘配置，会话/记录数据不动）。
+        // runtime 停止、active agent 保护、空表拒绝、revision/lease 全部复用下游既有链路。
+        "agent_delete" => {
+            let agent_id = agent_id.ok_or_else(|| {
+                ConfigError::Invalid("scope=agent_delete 缺少 agentId".to_string())
+            })?;
+            crate::agent_config::apply_agent_delete(content, agent_id)
+        }
+        "gateway" => crate::agent_config::apply_gateway_patch(content, config),
+        other => Err(ConfigError::Invalid(format!("未知 scope: {other}"))),
+    }
+}
+
+/// active agent 保护 + removed diff（纯函数，写盘前只读判定）。
+///
+/// 候选不得删除当前 active agent——那会让界面失去"当前"目标，必须先显式切换；
+/// 返回的 removed 供写盘成功后清理幽灵 runtime（施工文档 §2.1）。
+fn removed_agents_guard(
+    current: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
+    candidate: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
+    active: &str,
+) -> Result<Vec<String>, crate::agent_config::ConfigError> {
+    use crate::agent_config::ConfigError;
+    if !candidate.contains_key(active) {
+        return Err(ConfigError::ActiveAgentProtected(format!(
+            "候选配置删除了当前 active agent: {active}"
+        )));
+    }
+    Ok(current
+        .keys()
+        .filter(|id| !candidate.contains_key(*id) && id.as_str() != active)
+        .cloned()
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TWO_AGENTS: &str = "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n  doomed:\n    name: doomed\n    transport: subprocess\n    exe: doomed-agent\n";
+    const ONE_AGENT: &str =
+        "agents:\n  only:\n    name: only\n    transport: subprocess\n    exe: only-agent\n";
+
+    fn parsed(content: &str) -> std::collections::HashMap<String, crate::agent_config::AgentDef> {
+        crate::agent_config::validate_candidate(content, None).expect("fixture 必须合法")
+    }
+
+    fn delete_candidate(agent_id: &str) -> String {
+        build_scope_candidate(
+            TWO_AGENTS,
+            "agent_delete",
+            Some(agent_id),
+            &serde_json::Value::Null,
+        )
+        .expect("删除候选必须生成")
+    }
+
+    #[test]
+    fn scope_dispatch_builds_an_agent_delete_candidate_for_existing_agents_only() {
+        let candidate = delete_candidate("doomed");
+        let agents = parsed(&candidate);
+        assert!(!agents.contains_key("doomed"), "目标条目必须消失");
+        assert!(agents.contains_key("keep"), "其它 agent 不受影响");
+        assert!(
+            build_scope_candidate(
+                TWO_AGENTS,
+                "agent_delete",
+                Some("ghost"),
+                &serde_json::Value::Null
+            )
+            .is_err(),
+            "幂等删除不算成功"
+        );
+    }
+
+    #[test]
+    fn scope_dispatch_requires_an_agent_id_and_rejects_unknown_scopes() {
+        let missing =
+            build_scope_candidate(TWO_AGENTS, "agent_delete", None, &serde_json::Value::Null)
+                .expect_err("缺少 agentId 必须拒绝");
+        assert!(missing.to_string().contains("缺少 agentId"), "{missing}");
+        assert!(build_scope_candidate(
+            TWO_AGENTS,
+            "agent_purge",
+            Some("doomed"),
+            &serde_json::Value::Null
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn deleting_the_last_agent_leaves_an_empty_table_that_validation_rejects() {
+        let candidate = build_scope_candidate(
+            ONE_AGENT,
+            "agent_delete",
+            Some("only"),
+            &serde_json::Value::Null,
+        )
+        .expect("纯函数层允许生成空表候选");
+        assert!(
+            crate::agent_config::validate_candidate(&candidate, None).is_err(),
+            "空 agents 表必须在命令层校验被拒"
+        );
+    }
+
+    #[test]
+    fn active_agent_guard_rejects_deleting_the_active_agent_and_reports_removed() {
+        let current = parsed(TWO_AGENTS);
+        let delete_active = parsed(&delete_candidate("keep"));
+        let error = removed_agents_guard(&current, &delete_active, "keep")
+            .expect_err("删除 active agent 必须被拒");
+        assert!(
+            matches!(
+                error,
+                crate::agent_config::ConfigError::ActiveAgentProtected(_)
+            ),
+            "{error}"
+        );
+
+        let delete_other = parsed(&delete_candidate("doomed"));
+        assert_eq!(
+            removed_agents_guard(&current, &delete_other, "keep").unwrap(),
+            vec!["doomed".to_string()],
+            "removed diff 必须只含被删除的非 active agent"
+        );
+        assert!(
+            removed_agents_guard(&current, &current, "keep")
+                .unwrap()
+                .is_empty(),
+            "无变化时候选不产生清理名单"
+        );
+    }
 }

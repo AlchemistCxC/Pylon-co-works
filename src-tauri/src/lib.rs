@@ -28,7 +28,6 @@ mod mcp;
 #[cfg(test)]
 mod mcp_persist_tests;
 #[cfg(test)]
-mod obs03_evidence_tests;
 #[cfg(test)]
 mod p1_wire_regression_tests;
 mod paths;

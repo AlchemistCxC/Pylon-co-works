@@ -217,6 +217,28 @@ pub(crate) fn apply_agent_create(
         .map_err(|error| ConfigError::Invalid(format!("配置序列化失败: {error}")))
 }
 
+/// 删除单个 Agent（scope="agent_delete"，issue #67A）。
+///
+/// 语义仅为"摘掉这条配置"，与产品裁定一致：**不**触碰会话与记录数据，也**不**在此处
+/// 动 runtime——运行中的实例由命令层按 removed diff 清理（`remove_stale_runtimes`）。
+/// 幂等删除不算成功：目标不存在时返回错误，避免掩盖 revision/口径问题。
+/// 删除当前 active agent、或删除到空 agents 表，分别由命令层的 active 保护与
+/// `validate_candidate` 拒绝——本函数不自行放宽任一门槛。
+pub(crate) fn apply_agent_delete(content: &str, agent_id: &str) -> Result<String, ConfigError> {
+    let mut document = parse_config_document(content)?;
+    let agents = document
+        .get_mut("agents")
+        .and_then(|value| value.as_mapping_mut())
+        .ok_or_else(|| ConfigError::Invalid("配置缺少 agents 段".to_string()))?;
+    if agents.remove(agent_id).is_none() {
+        return Err(ConfigError::Invalid(format!(
+            "agent {agent_id} 不存在（删除只作用于已有 agent）"
+        )));
+    }
+    serde_yml::to_string(&document)
+        .map_err(|error| ConfigError::Invalid(format!("配置序列化失败: {error}")))
+}
+
 /// 将结构化的完整 `{ agents: ... }` document 序列化为配置文件内容。
 /// 与 `apply_agent_create` 的单 Agent node interface 分离，避免 wire shape 混用。
 pub(crate) fn serialize_agents_document(

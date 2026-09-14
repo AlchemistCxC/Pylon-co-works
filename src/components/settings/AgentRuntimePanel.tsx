@@ -568,6 +568,42 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     }
   }
 
+  /** issue #67A：删除已连接的 agent runtime 配置条目。
+   *  用户裁定口径：仅摘配置 + 停 runtime，**不**删该 agent 的会话与记录数据；
+   *  删除前必须让用户看清"将移除什么 / 保留什么"。active agent 先由前端拦一道
+   *  （后端 `config_active_agent_protected` 仍是唯一真值）。 */
+  const deleteAgent = async (agent: AgentEntry) => {
+    if (savingId || testingId) return
+    if (agent.id === activeAgent) {
+      setFeedback('当前正在使用的 Agent 不能删除，请先切换到其它 Agent。')
+      return
+    }
+    const confirmed = typeof window.confirm === 'function'
+      ? window.confirm(
+        `确认删除 Agent「${agent.name}」？\n\n将移除：\n  · 配置条目 ${agent.id}（agents.yaml）\n  · 运行中的 runtime 实例（若在运行，将停止）\n\n保留不动：\n  · 该 Agent 的历史会话与记录数据\n  · 其它 Agent 配置`,
+      )
+      : false
+    if (!confirmed) return
+    setSavingId(agent.id)
+    setFeedback(null)
+    try {
+      await agentClient.deleteAgent(agent.id)
+      if (editingId === agent.id) {
+        setEditingId(null)
+        setDraftMachine(initialAgentDraftState())
+      }
+      await refreshAgents()
+      setConfigConflict(false)
+      setFeedback(null)
+      resolvePanelError('删除 Agent', agent.id)
+      notify(`已删除 ${agent.name}（${agent.id}）`)
+    } catch (error) {
+      reportConfigMutationError('删除 Agent', error, agent.id)
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const testConnection = async (agentId: string) => {
     if (testingId) return
     setTestingId(agentId)
@@ -665,6 +701,8 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     setSavingId(id)
     setFeedback(null)
     const config = agentConfig(createDraft.name, createDraft.exe, createDraft.args, createDraft.provider, agents.length === 0)
+    // SAFETY: AgentCreateConfig 是扁平 JSON 对象的命名类型；此断言只把它扩宽为按**键名**读取的
+    // 视图（assertCustomProfileFieldsAllowed 仅遍历 Object.keys，不读值），结构不变、不丢字段。
     assertCustomProfileFieldsAllowed(config as unknown as Record<string, unknown>)
     try {
       await agentClient.ensureConfigRevision()
@@ -766,6 +804,18 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
                 <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={() => void restartRuntime(agent.id)}>
                   {savingId === agent.id ? '正在重启…' : '立即重启应用此配置'}
                 </button>
+              )}
+              {/* issue #67A：删除入口。active agent 禁用（禁用按钮不弹 tooltip，故用内联说明）。 */}
+              <button
+                className="ps-btn sm"
+                type="button"
+                disabled={savingId !== null || testingId !== null || agent.id === activeAgent}
+                onClick={() => void deleteAgent(agent)}
+              >
+                {savingId === agent.id ? '删除中…' : '删除'}
+              </button>
+              {agent.id === activeAgent && (
+                <span className="set-hint" role="note">当前正在使用的 Agent 不能删除，请先切换到其它 Agent</span>
               )}
             </div>
           </div>

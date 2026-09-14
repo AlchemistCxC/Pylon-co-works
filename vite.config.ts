@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import solid from 'vite-plugin-solid'
+// @tailwindcss/vite 4.x 只有 default 导出（无命名导出 tailwindcss）。
+import tailwindcss from '@tailwindcss/vite'
 
 const SOLID_WORKBENCH_FILES = /src\/renderers\/solid-workbench\/.*\.solid(?:\.test)?\.tsx$/
 
@@ -113,6 +115,9 @@ function injectBrowserPreviewBridge(html: string, pageUrl: string): string {
 
 export default defineConfig({
   plugins: [
+    // Tailwind v4（TW 施工书 20260914）：只处理 src/styles/tailwind.css 入口，
+    // 无 preflight，不触碰 React/Solid 编译。
+    tailwindcss(),
     browserPreviewProxy(),
     solid({ include: SOLID_WORKBENCH_FILES }),
     react({ exclude: SOLID_WORKBENCH_FILES }),

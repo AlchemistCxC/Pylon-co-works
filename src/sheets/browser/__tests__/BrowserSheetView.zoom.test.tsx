@@ -3,14 +3,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({
   IS_TAURI: true,
   hasTauriRuntime: () => true,
 }))
 
-const invokeMock = vi.fn()
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 class MockResizeObserver {
@@ -43,18 +48,17 @@ const ctx: SheetContext = {
   sessionBySource: () => undefined,
 }
 
+let fakeInvoke: FakeInvoke
+
 describe('Browser 页面缩放', () => {
   beforeEach(() => {
-    invokeMock.mockReset()
-    invokeMock.mockImplementation((cmd: string, args?: { zoomPercent?: number }) => {
-      if (cmd === 'browser_status') {
-        return Promise.resolve({ instanceId: 1, phase: 'ready', url: 'https://example.com', title: '', zoomPercent: 90 })
-      }
-      if (cmd === 'browser_set_zoom') {
-        return Promise.resolve({ instanceId: 1, phase: 'ready', url: 'https://example.com', title: '', zoomPercent: args?.zoomPercent })
-      }
-      if (cmd === 'browser_set_bounds' || cmd === 'browser_close') return Promise.resolve({})
-      return Promise.reject(new Error(`unexpected invoke: ${cmd}`))
+    fakeInvoke = new FakeInvoke()
+    invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
+    fakeInvoke.registerMany({
+      browser_status: () => Promise.resolve({ instanceId: 1, phase: 'ready', url: 'https://example.com', title: '', zoomPercent: 90 }),
+      browser_set_zoom: args => Promise.resolve({ instanceId: 1, phase: 'ready', url: 'https://example.com', title: '', zoomPercent: (args as { zoomPercent?: number }).zoomPercent }),
+      browser_set_bounds: () => Promise.resolve({}),
+      browser_close: () => Promise.resolve({}),
     })
   })
 
@@ -72,7 +76,7 @@ describe('Browser 页面缩放', () => {
 
     fireEvent.change(range, { target: { value: '120' } })
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('browser_set_zoom', { zoomPercent: 120 })
+      expect(fakeInvoke.calls).toContainEqual({ cmd: 'browser_set_zoom', args: { zoomPercent: 120 } })
       expect(screen.getByRole('button', { name: '页面缩放，当前 120%' })).toBeTruthy()
     })
   })
