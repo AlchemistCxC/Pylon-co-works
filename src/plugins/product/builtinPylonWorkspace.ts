@@ -11,6 +11,7 @@ import { BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS } from '../core/file/builtinFileWo
 import { createBuiltinFileCommandDefinitions } from '../core/file/builtinFileCommands.ts'
 import { createBuiltinWorkspaceCommandDefinitions } from '../core/sheet/builtinWorkspaceCommands.ts'
 import { createBuiltinBrowserCommandDefinitions } from '../core/browser/builtinBrowserCommands.ts'
+import { registerBuiltinBrowserAgentSessionAccess } from '../core/browser/builtinBrowserAgentSessionAccess.ts'
 
 const ChatSessionsPanel = lazy(() => import('../../components/sidebar/ChatSessionsPanel.tsx'))
 const WorkspacesPanel = lazy(() => import('../../components/sidebar/WorkspacesPanel.tsx'))
@@ -38,6 +39,8 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
       for (const command of [...createBuiltinFileCommandDefinitions(), ...createBuiltinWorkspaceCommandDefinitions(), ...createBuiltinBrowserCommandDefinitions()]) {
         context.commands.register(command, { contributionId: `${BUILTIN_PYLON_WORKSPACE_ID}.${command.id}`, layer: 'feature', priority: command.priority })
       }
+      // issue #82：浏览器 Agent 会话贡献——session/new 前按档位注入浏览器 MCP 桥。
+      registerBuiltinBrowserAgentSessionAccess(context.sessionCreation)
       context.contextPanel.register({
         id: 'builtin.context-panel.agent',
         workspaceKind: 'agent',

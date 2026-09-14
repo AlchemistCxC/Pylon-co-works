@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { CommandDefinition } from '../../../plugin-runtime/commands/commandRegistry.ts'
 import { useWorkspaceStore } from '../../../workspaceStore.ts'
+import { loadBrowserLibrary } from '../../../domains/browser/browserLibrary.ts'
+import {
+  BrowserAgentToolError,
+  createBrowserAgentClient,
+} from '../../../infrastructure/tauri/browserAgentClient.ts'
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -15,6 +20,11 @@ function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+function optionalNumber(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function tabId(value: unknown): number {
   const id = typeof value === 'number' ? value : Number(value)
   if (!Number.isInteger(id) || id <= 0) throw new Error('tabId 必须是正整数')
@@ -23,6 +33,36 @@ function tabId(value: unknown): number {
 
 const transport = {
   invoke: (command: string, args?: unknown) => invoke(command, args as Record<string, unknown> | undefined),
+}
+
+const agentClient = createBrowserAgentClient((command, args) => transport.invoke(command, args))
+
+/**
+ * browser.agent-* 命令族的参数透传约定：桥进程（MCP）与 pylon_cli 工具字典
+ * 都把 `sessionKey`（--session 注入）放进 args；Rust 侧以其为 claim/审计键。
+ */
+function agentArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const output: Record<string, unknown> = {}
+  const copy = (key: string, ...aliases: string[]) => {
+    for (const alias of [key, ...aliases]) {
+      if (args[alias] !== undefined && args[alias] !== null && args[alias] !== '') {
+        output[key] = args[alias]
+        return
+      }
+    }
+  }
+  copy('sessionKey', 'session_key')
+  copy('workspaceId', 'workspace_id')
+  copy('tabId', 'tab_id')
+  return output
+}
+
+/** Agent 命令统一错误呈现：保留 Rust 策略信封的 code。 */
+function wrapAgentError(command: string, error: unknown): never {
+  if (error instanceof BrowserAgentToolError) {
+    throw new Error(`[${error.code}] ${error.message}`)
+  }
+  throw error instanceof Error ? error : new Error(`${command} 失败：${String(error)}`)
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -172,6 +212,192 @@ export function createBuiltinBrowserCommandDefinitions(): CommandDefinition[] {
         const value = record(args).zoomPercent
         if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error('zoomPercent 必须是整数')
         return transport.invoke('browser_set_zoom', { zoomPercent: value })
+      },
+    },
+
+    // ── browser.agent-*（issue #82）：桥进程（MCP）与 pylon_cli 共用的工具面。 ──
+    // 策略/claim/审计在 Rust `browser_agent_*` 命令层单点强制；这里的失败一律
+    // 以 `[code] message` 抛出，MCP 工具结果与聊天渲染都能看到结构化错误码。
+    {
+      id: 'browser.agent-ensure', name: 'browser.agent-ensure', description: '确保 Browser Sheet 已打开并就绪（首次使用浏览器前调用）',
+      permission: 'read', priority: base + 40,
+      agentPromptSnippet: 'browser.agent-ensure：确保浏览器可用，返回当前会话状态。',
+      execute: () => ensureBrowserSheet(),
+    },
+    {
+      id: 'browser.agent-navigate', name: 'browser.agent-navigate', description: '在指定浏览器标签导航到 http/https URL',
+      permission: 'execute', priority: base + 41, inputHint: '{ "url": "https://example.com", "tabId?": 1 }',
+      agentPromptSnippet: 'browser.agent-navigate {url}：打开 URL（受白名单与黑名单约束）。',
+      execute: ({ args }) => {
+        const input = record(args)
+        const url = requiredText(input.url, 'url')
+        return agentClient.navigate({ ...agentArgs(input), url }).catch(error => wrapAgentError('browser.agent-navigate', error))
+      },
+    },
+    {
+      id: 'browser.agent-snapshot', name: 'browser.agent-snapshot', description: '读取当前页面：可交互元素（ref/role/name/坐标）+ 正文文本',
+      permission: 'read', priority: base + 42,
+      agentPromptSnippet: 'browser.agent-snapshot：先 snapshot 拿 ref，再用 ref 点击/输入。',
+      execute: ({ args }) => agentClient.snapshot(agentArgs(record(args))).catch(error => wrapAgentError('browser.agent-snapshot', error)),
+    },
+    {
+      id: 'browser.agent-screenshot', name: 'browser.agent-screenshot', description: '当前页面 PNG 截图（base64；仅 Windows）',
+      permission: 'read', priority: base + 43,
+      agentPromptSnippet: 'browser.agent-screenshot：视觉型任务时截取当前页面。',
+      execute: ({ args }) => agentClient.screenshot(agentArgs(record(args))).catch(error => wrapAgentError('browser.agent-screenshot', error)),
+    },
+    {
+      id: 'browser.agent-wait', name: 'browser.agent-wait', description: '等待页面条件：until = load | network_idle | selector',
+      permission: 'read', priority: base + 44, inputHint: '{ "until": "load" | "network_idle" | "selector", "selector?": "...", "timeoutMs?": 8000 }',
+      agentPromptSnippet: 'browser.agent-wait {until}：导航后等待加载/网络静默/元素出现。',
+      execute: ({ args }) => {
+        const input = record(args)
+        const until = requiredText(input.until, 'until')
+        return agentClient.wait({
+          ...agentArgs(input),
+          until,
+          ...(optionalText(input.selector) ? { selector: optionalText(input.selector) } : {}),
+          ...(optionalNumber(input.timeoutMs) !== undefined ? { timeoutMs: optionalNumber(input.timeoutMs) } : {}),
+        }).catch(error => wrapAgentError('browser.agent-wait', error))
+      },
+    },
+    {
+      id: 'browser.agent-read-network', name: 'browser.agent-read-network', description: '读取最近网络请求；带 requestId 时返回响应体文本预览（仅 Windows）',
+      permission: 'read', priority: base + 45,
+      agentPromptSnippet: 'browser.agent-read-network：观察 API/XHR 响应（≤64KiB 文本预览）。',
+      execute: ({ args }) => {
+        const input = record(args)
+        return agentClient.readNetwork({
+          ...agentArgs(input),
+          ...(optionalNumber(input.limit) !== undefined ? { limit: optionalNumber(input.limit) } : {}),
+          ...(optionalText(input.requestId) ? { requestId: optionalText(input.requestId) } : {}),
+        }).catch(error => wrapAgentError('browser.agent-read-network', error))
+      },
+    },
+    {
+      id: 'browser.agent-save-page', name: 'browser.agent-save-page', description: '把当前页面存为 MHTML 归档，返回文件路径（仅 Windows）',
+      permission: 'read', priority: base + 46,
+      agentPromptSnippet: 'browser.agent-save-page：整页存档供后续阅读。',
+      execute: ({ args }) => agentClient.savePage(agentArgs(record(args))).catch(error => wrapAgentError('browser.agent-save-page', error)),
+    },
+    {
+      id: 'browser.agent-scroll', name: 'browser.agent-scroll', description: '滚动当前页面',
+      permission: 'read', priority: base + 47, inputHint: '{ "deltaY": 600, "deltaX?": 0 }',
+      execute: ({ args }) => {
+        const input = record(args)
+        return agentClient.scroll({
+          ...agentArgs(input),
+          deltaX: optionalNumber(input.deltaX) ?? 0,
+          deltaY: optionalNumber(input.deltaY) ?? 600,
+        }).catch(error => wrapAgentError('browser.agent-scroll', error))
+      },
+    },
+    {
+      id: 'browser.agent-tab-list', name: 'browser.agent-tab-list', description: '列出浏览器标签（id/url/title/活动态）',
+      permission: 'read', priority: base + 48,
+      execute: () => agentClient.tabList().catch(error => wrapAgentError('browser.agent-tab-list', error)),
+    },
+    {
+      id: 'browser.agent-tab-new', name: 'browser.agent-tab-new', description: '新建浏览器标签；background=true 后台打开不切换视图',
+      permission: 'read', priority: base + 49, inputHint: '{ "url?": "https://…", "background?": false }',
+      execute: ({ args }) => {
+        const input = record(args)
+        return agentClient.tabNew({
+          ...agentArgs(input),
+          ...(optionalText(input.url) ? { url: optionalText(input.url) } : {}),
+          ...(typeof input.background === 'boolean' ? { background: input.background } : {}),
+        }).catch(error => wrapAgentError('browser.agent-tab-new', error))
+      },
+    },
+    {
+      id: 'browser.agent-tab-select', name: 'browser.agent-tab-select', description: '切换活动浏览器标签',
+      permission: 'read', priority: base + 50, inputHint: '{ "tabId": 2 }',
+      execute: ({ args }) => agentClient.tabSelect({ ...agentArgs(record(args)), tabId: tabId(record(args).tabId) }).catch(error => wrapAgentError('browser.agent-tab-select', error)),
+    },
+    {
+      id: 'browser.agent-tab-close', name: 'browser.agent-tab-close', description: '关闭浏览器标签（full 档）',
+      permission: 'execute', priority: base + 51, inputHint: '{ "tabId": 2 }',
+      execute: ({ args }) => agentClient.tabClose({ ...agentArgs(record(args)), tabId: tabId(record(args).tabId) }).catch(error => wrapAgentError('browser.agent-tab-close', error)),
+    },
+    {
+      id: 'browser.agent-click', name: 'browser.agent-click', description: '点击页面元素（full 档）；优先 snapshot 返回的 ref，也接受 CSS selector',
+      permission: 'execute', priority: base + 52, inputHint: '{ "ref": "e12" } 或 { "selector": "button.submit" }',
+      agentPromptSnippet: 'browser.agent-click {ref}：点击前自动高亮与指纹复核（stale_ref 需重新 snapshot）。',
+      execute: ({ args }) => {
+        const input = record(args)
+        const reference = optionalText(input.ref) ?? optionalText(input.reference)
+        const selector = optionalText(input.selector)
+        if (!reference && !selector) throw new Error('ref 或 selector 至少提供一个')
+        return agentClient.click({
+          ...agentArgs(input),
+          ...(reference ? { reference } : {}),
+          ...(selector ? { selector } : {}),
+        }).catch(error => wrapAgentError('browser.agent-click', error))
+      },
+    },
+    {
+      id: 'browser.agent-type', name: 'browser.agent-type', description: '向输入元素写入文本（full 档）；submit=true 追加回车',
+      permission: 'execute', priority: base + 53, inputHint: '{ "text": "hello", "ref?": "e3", "selector?": "input[name=q]", "submit?": true }',
+      execute: ({ args }) => {
+        const input = record(args)
+        const text = requiredText(input.text, 'text')
+        const reference = optionalText(input.ref) ?? optionalText(input.reference)
+        const selector = optionalText(input.selector)
+        if (!reference && !selector) throw new Error('ref 或 selector 至少提供一个')
+        return agentClient.type({
+          ...agentArgs(input),
+          text,
+          ...(reference ? { reference } : {}),
+          ...(selector ? { selector } : {}),
+          ...(typeof input.submit === 'boolean' ? { submit: input.submit } : {}),
+        }).catch(error => wrapAgentError('browser.agent-type', error))
+      },
+    },
+    {
+      id: 'browser.agent-press', name: 'browser.agent-press', description: '向当前焦点派发按键（full 档）：Enter/Tab/Arrow* 或单个字符',
+      permission: 'execute', priority: base + 54, inputHint: '{ "key": "Enter" }',
+      execute: ({ args }) => agentClient.press({ ...agentArgs(record(args)), key: requiredText(record(args).key, 'key') }).catch(error => wrapAgentError('browser.agent-press', error)),
+    },
+    {
+      id: 'browser.agent-download', name: 'browser.agent-download', description: '从当前页面触发显式下载（full 档）',
+      permission: 'execute', priority: base + 55, inputHint: '{ "url": "https://…", "filename?": "x.zip" }',
+      execute: ({ args }) => {
+        const input = record(args)
+        return agentClient.download({
+          ...agentArgs(input),
+          url: requiredText(input.url, 'url'),
+          ...(optionalText(input.filename) ? { filename: optionalText(input.filename) } : {}),
+        }).catch(error => wrapAgentError('browser.agent-download', error))
+      },
+    },
+    {
+      id: 'browser.agent-emulate', name: 'browser.agent-emulate', description: '设备仿真：viewport（width+height）与 userAgent；clear=true 恢复（仅 Windows）',
+      permission: 'read', priority: base + 56,
+      execute: ({ args }) => {
+        const input = record(args)
+        return agentClient.emulate({
+          ...agentArgs(input),
+          ...(optionalNumber(input.width) !== undefined ? { width: optionalNumber(input.width) } : {}),
+          ...(optionalNumber(input.height) !== undefined ? { height: optionalNumber(input.height) } : {}),
+          ...(optionalText(input.userAgent) ? { userAgent: optionalText(input.userAgent) } : {}),
+          ...(typeof input.clear === 'boolean' ? { clear: input.clear } : {}),
+        }).catch(error => wrapAgentError('browser.agent-emulate', error))
+      },
+    },
+    {
+      id: 'browser.agent-history', name: 'browser.agent-history', description: '读取 Browser Sheet 最近浏览历史（本地库，只读）',
+      permission: 'read', priority: base + 57, inputHint: '{ "limit?": 20 }',
+      execute: ({ args }) => {
+        const limit = optionalNumber(record(args).limit) ?? 20
+        const library = loadBrowserLibrary()
+        return {
+          ok: true,
+          history: library.history.slice(0, Math.max(1, Math.min(100, Math.trunc(limit)))).map(entry => ({
+            url: entry.url,
+            title: entry.title ?? null,
+            visitedAt: entry.visitedAt,
+          })),
+        }
       },
     },
   ]
