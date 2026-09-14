@@ -2208,7 +2208,7 @@ mod tests {
         );
         ev["typedPayload"] =
             serde_json::json!({ "text": "a", "foldedCount": 1, "seqSpan": [4, 4] });
-        ev["eventId"] = serde_json::json!(format!("[\"p1\",\"peri\",\"local:s1\"]#3"));
+        ev["eventId"] = serde_json::json!("[\"p1\",\"peri\",\"local:s1\"]#3".to_string());
         assert!(matches!(
             parse_canonical_event(&ev),
             Err(EventError::Invalid(_))

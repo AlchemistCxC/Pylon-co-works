@@ -48,7 +48,7 @@ impl RefRegistry {
         targets: impl IntoIterator<Item = RefTarget>,
     ) -> Vec<String> {
         let targets: Vec<RefTarget> = targets.into_iter().take(MAX_REFS_PER_TAB).collect();
-        let refs: Vec<String> = (0..targets.len()).map(|index| ref_name(index)).collect();
+        let refs: Vec<String> = (0..targets.len()).map(ref_name).collect();
         self.by_tab.insert(tab_id, targets);
         refs
     }

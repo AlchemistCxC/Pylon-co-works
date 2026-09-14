@@ -784,9 +784,11 @@ pub(crate) async fn evt_rollup_trim(
         .map_err(|error| EventError::Unavailable(error.to_string()))?;
     let policy_json = policy.map(|row| row.payload);
     if !crate::session::retention::trim_rolledup_enabled(policy_json.as_deref()) {
-        let mut report = RollupTrimReport::default();
-        report.policy_blocked = true;
-        report.remaining_units = service.count_remaining_rollup_units().await?;
+        let report = RollupTrimReport {
+            policy_blocked: true,
+            remaining_units: service.count_remaining_rollup_units().await?,
+            ..Default::default()
+        };
         return Ok(report);
     }
     service.rollup_trim(budget_ms).await

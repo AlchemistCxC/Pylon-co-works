@@ -134,8 +134,10 @@ mod tests {
     fn save_load_roundtrip_preserves_overrides() {
         let dir = temp_dir("roundtrip");
         let path = dir.join("pylon-browser-agent.json");
-        let mut settings = BrowserAgentSettings::default();
-        settings.default_mode = BrowserAccessMode::Full;
+        let mut settings = BrowserAgentSettings {
+            default_mode: BrowserAccessMode::Full,
+            ..Default::default()
+        };
         settings
             .workspace_modes
             .insert("ws-1".into(), BrowserAccessMode::Off);
@@ -172,8 +174,10 @@ mod tests {
     fn save_caps_blocklist_entries() {
         let dir = temp_dir("cap");
         let path = dir.join("pylon-browser-agent.json");
-        let mut settings = BrowserAgentSettings::default();
-        settings.domain_blocklist = (0..400).map(|index| format!("d{index}.example")).collect();
+        let settings = BrowserAgentSettings {
+            domain_blocklist: (0..400).map(|index| format!("d{index}.example")).collect(),
+            ..Default::default()
+        };
         settings.save(&path).unwrap();
         let loaded = BrowserAgentSettings::load(&path);
         assert_eq!(loaded.domain_blocklist.len(), MAX_DOMAIN_BLOCKLIST);

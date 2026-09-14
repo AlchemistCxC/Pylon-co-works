@@ -94,11 +94,11 @@ pub(crate) async fn append_audit(
     entry: BrowserAuditEntry,
 ) -> Result<(), String> {
     for _attempt in 0..3 {
-        let envelope = match service.load(UserDataKey::BrowserAgentOps).await {
-            Ok(envelope) => envelope,
-            // 载入损坏：从空 buffer 重写（审计不是事实源，可牺牲）。
-            Err(_) => None,
-        };
+        // 载入损坏：从空 buffer 重写（审计不是事实源，可牺牲）。
+        let envelope: Option<UserDataEnvelope> = service
+            .load(UserDataKey::BrowserAgentOps)
+            .await
+            .unwrap_or_default();
         let expected_revision = envelope.as_ref().map(|envelope| envelope.revision);
         let mut buffer = envelope
             .as_ref()

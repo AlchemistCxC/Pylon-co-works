@@ -857,7 +857,7 @@ pub(crate) async fn browser_agent_save_page(
         let save_result = state
             .inner()
             .data_dirs_cloned()
-            .map_err(|error| PylonError::Protocol(error))
+            .map_err(PylonError::Protocol)
             .and_then(|dirs| {
                 let dir = dirs.data_root.join("agent-pages");
                 std::fs::create_dir_all(&dir)
@@ -1313,6 +1313,8 @@ pub(crate) async fn browser_agent_scroll(
     .await
 }
 
+/// tauri command 签名即 invoke 参数面（参数名 = wire 字段），不可收敛入参。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_agent_emulate(
     state: tauri::State<'_, AppState>,
@@ -1496,19 +1498,17 @@ pub(crate) async fn browser_agent_click(
     // CDP 可信点击优先；失败降级合成点击。
     #[cfg(windows)]
     {
-        if mode == BrowserAccessMode::Full {
-            if cdp::trusted_click(&webview, x, y).await.is_ok() {
-                let payload = serde_json::json!({ "ok": true, "driver": "cdp", "x": x, "y": y, "detail": verified });
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    summary,
-                    "ok".into(),
-                    payload,
-                )
-                .await);
-            }
+        if mode == BrowserAccessMode::Full && cdp::trusted_click(&webview, x, y).await.is_ok() {
+            let payload = serde_json::json!({ "ok": true, "driver": "cdp", "x": x, "y": y, "detail": verified });
+            return Ok(finish(
+                state.inner(),
+                &session_key,
+                tool.as_str(),
+                summary,
+                "ok".into(),
+                payload,
+            )
+            .await);
         }
     }
     let _ = mode;
@@ -1537,6 +1537,7 @@ pub(crate) async fn browser_agent_click(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_agent_type(
     state: tauri::State<'_, AppState>,

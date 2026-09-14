@@ -36,21 +36,12 @@ const MAX_BODY_PREVIEW_BYTES: usize = 64 * 1024;
 
 type NetworkRegistry = Arc<Mutex<HashMap<u64, NetworkRing>>>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct CdpDispatch {
     /// 已注册过 Network 事件监听的 tab（监听器生命周期 = WebView 生命周期）。
     network_attached: bool,
     /// Fetch 拦截当前是否启用（随设置切换 enable/disable，监听器只注册一次）。
     fetch_enabled: bool,
-}
-
-impl Default for CdpDispatch {
-    fn default() -> Self {
-        Self {
-            network_attached: false,
-            fetch_enabled: false,
-        }
-    }
 }
 
 /// 每个 tab 的 CDP 状态（attach 标记 + 网络环形缓冲）。
@@ -177,15 +168,18 @@ fn event_params(
 
 /// 订阅一个 CDP 事件（receiver 路径；token 由 WebView 自管理，无需注销——
 /// 监听器生命周期即 WebView 生命周期）。
+/// CDP 事件回调签名（type alias 仅收敛 clippy::type_complexity）。
+type CdpEventHandler = Box<
+    dyn FnMut(
+        Option<ICoreWebView2>,
+        Option<ICoreWebView2DevToolsProtocolEventReceivedEventArgs>,
+    ) -> windows::core::Result<()>,
+>;
+
 fn subscribe_event(
     core: &ICoreWebView2,
     event: &'static str,
-    handler: Box<
-        dyn FnMut(
-            Option<ICoreWebView2>,
-            Option<ICoreWebView2DevToolsProtocolEventReceivedEventArgs>,
-        ) -> windows::core::Result<()>,
-    >,
+    handler: CdpEventHandler,
 ) -> windows::core::Result<()> {
     let event_name = HSTRING::from(event);
     let boxed = DevToolsProtocolEventReceivedEventHandler::create(handler);
@@ -745,6 +739,6 @@ mod tests {
         state.dispatch_mut(1).network_attached = true;
         state.dispatch_mut(1).fetch_enabled = true;
         state.drop_tab(1);
-        assert!(state.dispatch.get(&1).is_none());
+        assert!(!state.dispatch.contains_key(&1));
     }
 }
