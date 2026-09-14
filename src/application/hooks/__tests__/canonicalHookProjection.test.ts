@@ -66,7 +66,7 @@ describe('projectCanonicalEventToHooks 派发', () => {
     sessionsRef.current = [{ id: 'a', agentId: 'peri', source: 'local:a', hooks: ['test.hook'] }]
     projectCanonicalEventToHooks(canonicalEvent('tool.call.started', { tool: { name: 'Read' } }, { toolCallId: 'tc-1' }))
     expect(invokeMock).toHaveBeenCalledOnce()
-    const [anchor, event, enabled] = invokeMock.mock.calls[0]!
+    const [anchor, event, enabled] = invokeMock.mock.calls[0] as unknown as [string, Record<string, unknown>, string[]]
     expect(anchor).toBe('tool.started')
     expect(event).toMatchObject({
       owner: { agentId: 'peri', localSessionId: 'local:a' },
