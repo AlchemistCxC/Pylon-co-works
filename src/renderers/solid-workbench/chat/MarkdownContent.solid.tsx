@@ -68,6 +68,9 @@ interface DerivedRows {
  *
  * 切分语义仍单一由 `splitStreamingMarkdownBlocks` 负责：空行切块、容器行不越界、未闭合
  * 围栏不劈开——本次不触碰它。
+ *
+ * 行文本不变式：每一行的文本都不以结构性空白开头或结尾（见
+ * `trimRowStructuralWhitespace`），且不为空——分隔空行是行与行之间的结构，不是行内容。
  */
 function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
   const split = splitStreamingMarkdownBlocks(visible)
@@ -78,16 +81,16 @@ function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
     // content that should become an extra `pre-wrap` line inside the row.  The shared
     // `.term-p + .term-p` cadence represents the separator; strip it from the visible
     // stable text to keep streaming geometry identical to the completed Markdown path.
-    specs.push({ text: trimStableBlockDelimiter(block), tail: false })
+    const text = trimRowStructuralWhitespace(block)
+    if (text.length > 0) specs.push({ text, tail: false })
   }
   if (split.unstable.length > 0) {
     // Consecutive blank lines are collapsed by the splitter rather than becoming empty
-    // renderer rows, so the tail's leading delimiter is only structural when a stable
-    // block was actually committed before it.
-    specs.push({
-      text: split.stableBlocks.length > 0 ? trimStreamingDelimiterStart(split.unstable) : split.unstable,
-      tail: !final,
-    })
+    // renderer rows, so a tail that is still only structural whitespace contributes
+    // nothing.  Its delimiter is stripped unconditionally: the old condition（只在它前面
+    // 确实提交过块时才裁）会把前导空行留在行文本里，渲染成 `'\n\n快'` 一类的行。
+    const text = trimRowStructuralWhitespace(split.unstable)
+    if (text.length > 0) specs.push({ text, tail: !final })
   }
   return { specs, paragraphs: split.stableBlocks.length + (split.unstable.length > 0 ? 1 : 0) }
 }
@@ -147,16 +150,17 @@ function trimLeadingBlankLines(text: string): string {
   return text.replace(/^(?:[^\S\r\n]*\r?\n)+/, '')
 }
 
-function trimStableBlockDelimiter(block: string): string {
-  // A stable block is emitted only after at least one blank line.  Consume all
-  // trailing line terminators/indent-only lines from the rendered fragment;
-  // the canonical text remains untouched in `committedText` above.  Supporting
-  // CRLF here keeps the visual result independent of provider line endings.
-  return block.replace(/(?:\r?\n[\t ]*)+$/u, '')
-}
-
-function trimStreamingDelimiterStart(text: string): string {
-  return text.replace(/^(?:\r?\n[\t ]*)+/u, '')
+/**
+ * 行文本不变式：行的文本不以结构性空白（整行空白）开头或结尾。
+ *
+ * 分隔空行属于「行与行之间」的结构（由 `.term-p + .term-p` 的节奏承担），不属于行内容：
+ * 留着它 `pre-wrap` 会多画一行，也会让流式几何与终态解析出的 Markdown 漂移。只裁整行空白，
+ * **不裁末行内容里的空格与缩进**（例如代码缩进）。
+ *
+ * 支持 CRLF，使可见结果与 provider 的换行形式无关。
+ */
+function trimRowStructuralWhitespace(text: string): string {
+  return text.replace(/(?:\r?\n[\t ]*)+$/u, '').replace(/^(?:\r?\n[\t ]*)+/u, '')
 }
 
 function createStreamingBlockRow(id: number, initialText: string, tail: boolean): StreamingBlockRow {
