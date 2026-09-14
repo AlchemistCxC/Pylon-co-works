@@ -68,7 +68,12 @@ fn restores_old_data_by_clamping_and_recomputing_derived_stats() {
     let restored = PetState::restore(saved, 86_400_000);
 
     assert_eq!(restored.name.chars().count(), 12);
-    assert_eq!(restored.happiness, 98);
+    // I18 W4（用户 2026-08-12 拍板）：缺席改涨 loneliness、不再扣 happiness——
+    // 旧断言 happiness==98 编码的是已废止的「缺席扣快乐」契约（P91 后修 P94）。
+    // 现在：钳制 250→100 后 1 天缺席（elapsed=1 × VISIT_LONELY_PER_DAY=2）
+    // 只推 loneliness，happiness 保持 100。
+    assert_eq!(restored.happiness, 100);
+    assert_eq!(restored.loneliness, 2);
     assert_eq!(restored.energy, 100);
     assert_eq!(restored.stats.tool_success_rate, 75);
     assert_eq!(restored.age_days(86_400_000), 2);
