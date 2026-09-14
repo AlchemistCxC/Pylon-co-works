@@ -69,8 +69,15 @@ async fn finish(
     outcome: String,
     payload: Value,
 ) -> Value {
-    let summary = summary.as_ref();
-    audit_outcome(state, session_key, tool, summary, outcome.clone()).await;
+    let mut summary = summary.as_ref().to_string();
+    if let Some(driver) = payload.get("driver").and_then(Value::as_str) {
+        if !summary.is_empty() {
+            summary.push(' ');
+        }
+        summary.push_str("driver=");
+        summary.push_str(driver);
+    }
+    audit_outcome(state, session_key, tool, &summary, outcome.clone()).await;
     if outcome == "ok" {
         return payload;
     }
@@ -370,12 +377,13 @@ pub(crate) async fn browser_agent_snapshot(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
     tab_id: Option<u64>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Snapshot;
     let summary = "";
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -479,11 +487,12 @@ pub(crate) async fn browser_agent_snapshot(
 pub(crate) async fn browser_agent_tab_list(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::TabList;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -713,11 +722,12 @@ pub(crate) async fn browser_agent_screenshot(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
     tab_id: Option<u64>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Screenshot;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -798,11 +808,12 @@ pub(crate) async fn browser_agent_save_page(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
     tab_id: Option<u64>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::SavePage;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -911,11 +922,12 @@ pub(crate) async fn browser_agent_read_network(
     tab_id: Option<u64>,
     limit: Option<usize>,
     request_id: Option<String>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::ReadNetwork;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -956,12 +968,18 @@ pub(crate) async fn browser_agent_read_network(
             )
             .await);
         }
-        // 响应体预览：单个 requestId 的文本负载（≤64KiB，仅文本类 MIME）。
+        // 响应体预览：单个 requestId 的文本负载（≤64KiB，超限截断并标注）。
         if let Some(request_id) = request_id {
             let body = cdp::response_body(&webview, &request_id).await;
             return match body {
-                Ok(Some(preview)) => {
-                    let payload = serde_json::json!({ "ok": true, "driver": "cdp", "requestId": request_id, "body": preview });
+                Ok(Some((preview, truncated))) => {
+                    let payload = serde_json::json!({
+                        "ok": true,
+                        "driver": "cdp",
+                        "requestId": request_id,
+                        "body": preview,
+                        "truncated": truncated,
+                    });
                     Ok(finish(
                         state.inner(),
                         &session_key,
@@ -1064,11 +1082,12 @@ pub(crate) async fn browser_agent_wait(
     until: String,
     selector: Option<String>,
     timeout_ms: Option<u64>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Wait;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -1281,10 +1300,12 @@ pub(crate) async fn browser_agent_scroll(
     tab_id: Option<u64>,
     delta_x: Option<i32>,
     delta_y: Option<i32>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     scroll_impl(
         state,
         session_key,
+        workspace_id,
         tab_id,
         delta_x.unwrap_or(0),
         delta_y.unwrap_or(600),
@@ -1301,10 +1322,12 @@ pub(crate) async fn browser_agent_emulate(
     height: Option<u32>,
     user_agent: Option<String>,
     clear: Option<bool>,
+    workspace_id: Option<String>,
 ) -> Result<Value, PylonError> {
     emulate_impl(
         state,
         session_key,
+        workspace_id,
         tab_id,
         width,
         height,
@@ -1843,8 +1866,17 @@ pub(crate) async fn browser_agent_download(
         )
         .await);
     }
-    resolve_tab(state.inner(), tab_id)
-        .map_err(|denied| PylonError::Protocol(denied["message"].to_string()))?;
+    if let Err(denied) = resolve_tab(state.inner(), tab_id) {
+        return Ok(finish(
+            state.inner(),
+            &session_key,
+            tool.as_str(),
+            summary,
+            format!("denied:{}", denied["code"]),
+            denied,
+        )
+        .await);
+    }
     match state.browser.download(&url, filename).await {
         Ok(result) => {
             let payload = serde_json::json!({ "ok": true, "download": result });
@@ -1914,6 +1946,7 @@ fn resolve_click_target(
 async fn scroll_impl(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
+    workspace_id: Option<String>,
     tab_id: Option<u64>,
     delta_x: i32,
     delta_y: i32,
@@ -1921,7 +1954,7 @@ async fn scroll_impl(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Scroll;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -1976,16 +2009,38 @@ async fn scroll_impl(
         .await
         .is_ok()
         {
-            return Ok(
+            return Ok(finish(
+                state.inner(),
+                &session_key,
+                tool.as_str(),
+                "",
+                "ok".into(),
                 serde_json::json!({ "ok": true, "driver": "cdp", "deltaX": delta_x, "deltaY": delta_y }),
-            );
+            )
+            .await);
         }
     }
     #[cfg(not(windows))]
     let _ = webview;
     match state.browser.scroll(delta_x, delta_y).await {
-        Ok(result) => Ok(serde_json::json!({ "ok": true, "driver": "js", "scroll": result })),
-        Err(error) => Ok(denial("scroll_failed", error)),
+        Ok(result) => Ok(finish(
+            state.inner(),
+            &session_key,
+            tool.as_str(),
+            "",
+            "ok".into(),
+            serde_json::json!({ "ok": true, "driver": "js", "scroll": result }),
+        )
+        .await),
+        Err(error) => Ok(finish(
+            state.inner(),
+            &session_key,
+            tool.as_str(),
+            "",
+            "error".into(),
+            denial("scroll_failed", error),
+        )
+        .await),
     }
 }
 
@@ -1993,6 +2048,7 @@ async fn scroll_impl(
 async fn emulate_impl(
     state: tauri::State<'_, AppState>,
     session_key: Option<String>,
+    workspace_id: Option<String>,
     tab_id: Option<u64>,
     width: Option<u32>,
     height: Option<u32>,
@@ -2002,7 +2058,7 @@ async fn emulate_impl(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Emulate;
-    if let Err(denied) = authorize(&hub, None, tool) {
+    if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
         return Ok(finish(
             state.inner(),
             &session_key,
@@ -2032,10 +2088,26 @@ async fn emulate_impl(
         let effective = if clear { (None, None) } else { (width, height) };
         match cdp::emulate(&webview, effective.0, effective.1, user_agent).await {
             Ok(()) => {
-                return Ok(serde_json::json!({ "ok": true, "driver": "cdp" }));
+                return Ok(finish(
+                    state.inner(),
+                    &session_key,
+                    tool.as_str(),
+                    "",
+                    "ok".into(),
+                    serde_json::json!({ "ok": true, "driver": "cdp" }),
+                )
+                .await);
             }
             Err(error) => {
-                return Ok(denial("emulate_failed", error));
+                return Ok(finish(
+                    state.inner(),
+                    &session_key,
+                    tool.as_str(),
+                    "",
+                    "error".into(),
+                    denial("emulate_failed", error),
+                )
+                .await);
             }
         }
     }

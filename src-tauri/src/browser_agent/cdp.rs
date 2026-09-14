@@ -479,7 +479,7 @@ pub(crate) async fn capture_mhtml(webview: &tauri::Webview) -> Result<String, St
 pub(crate) async fn response_body(
     webview: &tauri::Webview,
     request_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, bool)>, String> {
     let result = call_cdp(
         webview,
         "Network.getResponseBody",
@@ -501,14 +501,26 @@ pub(crate) async fn response_body(
             .decode(body)
             .map_err(|error| format!("响应体 base64 解码失败: {error}"))?;
         if bytes.len() > MAX_BODY_PREVIEW_BYTES {
-            return Ok(None);
+            return Ok(Some((lossy_prefix(&bytes, MAX_BODY_PREVIEW_BYTES), true)));
         }
-        return Ok(String::from_utf8(bytes).ok());
+        return Ok(String::from_utf8(bytes).ok().map(|text| (text, false)));
     }
     if body.len() > MAX_BODY_PREVIEW_BYTES {
-        return Ok(None);
+        return Ok(Some((
+            lossy_prefix(body.as_bytes(), MAX_BODY_PREVIEW_BYTES),
+            true,
+        )));
     }
-    Ok(Some(body.to_string()))
+    Ok(Some((body.to_string(), false)))
+}
+
+/// 按字符边界截断字节前缀（UTF-8 lossy）。
+fn lossy_prefix(bytes: &[u8], limit: usize) -> String {
+    let mut end = limit.min(bytes.len());
+    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 /// 可信点击：mouseMoved → mousePressed → mouseReleased（viewport 坐标，CSS px）。

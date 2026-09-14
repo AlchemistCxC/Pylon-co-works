@@ -30,8 +30,7 @@ pub(crate) enum ClaimUseError {
     ClaimRequired,
     /// 被其他会话持有。
     HeldBy { session_key: String },
-    /// 原持有者已被用户抢占（语义别名；空闲释放路径报 ClaimRequired）。
-    #[allow(dead_code)]
+    /// 原持有者已被用户抢占（仅对被抢占会话的第一次写操作返回）。
     Lost,
 }
 
@@ -39,6 +38,9 @@ pub(crate) enum ClaimUseError {
 pub(crate) struct ClaimManager {
     state: ClaimState,
     idle_timeout: Duration,
+    /// 用户抢占的受害者：其下一次写操作收到 `Lost`（而非静默重新持有），
+    /// 之后回归正常语义。spec 验收 7。
+    pending_lost: Option<String>,
 }
 
 impl Default for ClaimManager {
@@ -52,6 +54,7 @@ impl ClaimManager {
         Self {
             state: ClaimState::Free,
             idle_timeout: CLAIM_IDLE_TIMEOUT,
+            pending_lost: None,
         }
     }
 
@@ -61,6 +64,7 @@ impl ClaimManager {
         Self {
             state: ClaimState::Free,
             idle_timeout,
+            pending_lost: None,
         }
     }
 
@@ -139,6 +143,14 @@ impl ClaimManager {
         now_ms: u64,
     ) -> Result<(), ClaimUseError> {
         self.expire_idle(now_ms);
+        if self.state == ClaimState::Free {
+            if let Some(victim) = self.pending_lost.take() {
+                if victim == session_key {
+                    return Err(ClaimUseError::Lost);
+                }
+                self.pending_lost = Some(victim);
+            }
+        }
         match &self.state {
             ClaimState::Free => Err(ClaimUseError::ClaimRequired),
             ClaimState::Held {
@@ -163,6 +175,7 @@ impl ClaimManager {
     /// 用户手动交互：无条件抢占，返回被挤掉的持有者（用于 UI/审计提示）。
     pub(crate) fn preempt_by_user(&mut self) -> Option<String> {
         let previous = self.holder().map(str::to_string);
+        self.pending_lost = previous.clone();
         self.state = ClaimState::Free;
         previous
     }
@@ -171,6 +184,9 @@ impl ClaimManager {
     /// （预留：session close 钩子接线前由 5 分钟空闲释放兜底。）
     #[allow(dead_code)]
     pub(crate) fn release(&mut self, session_key: &str) -> bool {
+        if self.pending_lost.as_deref() == Some(session_key) {
+            self.pending_lost = None;
+        }
         if self.held_by(session_key) {
             self.state = ClaimState::Free;
             true
@@ -256,9 +272,14 @@ mod tests {
         let previous = claim.preempt_by_user();
         assert_eq!(previous.as_deref(), Some("s1"));
         assert_eq!(claim.holder(), None);
-        // 用户抢占后原持有者立即失去写权限。
+        // 用户抢占后，原持有者的下一次写操作收到 Lost（而非静默重持）。
         assert_eq!(
             claim.ensure_usable("s1", 1_000).unwrap_err(),
+            ClaimUseError::Lost
+        );
+        // Lost 只报一次：之后回归 Free 语义（写操作可重新自动持有）。
+        assert_eq!(
+            claim.ensure_usable("s1", 2_000).unwrap_err(),
             ClaimUseError::ClaimRequired
         );
         // 空闲态抢占返回 None 且无副作用。

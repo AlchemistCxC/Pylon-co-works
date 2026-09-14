@@ -245,8 +245,8 @@ async fn call_tool(options: &BridgeOptions, name: &str, arguments: Value) -> (St
     // 会话/工作区身份注入（Rust 策略与 claim 的绑定键）。
     args.insert("sessionKey".into(), json!(options.session_key));
     if let Some(workspace_id) = &options.workspace_id {
-        args.entry("workspaceId".to_string())
-            .or_insert(json!(workspace_id));
+        // 身份权威在 --workspace 注入侧：覆写而非 or_insert，防 agent 传参升权。
+        args.insert("workspaceId".to_string(), json!(workspace_id));
     }
     let command_args = json!({ "commandId": tool.command_id, "args": Value::Object(args) });
     let outcome = pylon_core::cli_client::invoke_running_kernel(

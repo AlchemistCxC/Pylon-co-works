@@ -142,3 +142,44 @@ Windows 实机验收清单（cargo test 无法覆盖实窗 CDP；需在桌面端
 - composer 跨域草稿 API 缺位，「问 AI」发送是即时直达（无预览编辑以外的确认步）。
 - CDP `Overlay`/`Accessibility` 域未实测；如需 AX 树原生快照可在此基础上加
   Cdp 型 ref target（类型已预留）。
+
+## 子代理双轴复审（2026-09-15，Standards + Spec）与修复提交
+
+复审发现并已修复：
+
+1. **lib.rs 覆盖事故**（Laplace 在途工具覆写，1fa020a0 披露）：setup 初始化与
+   invoke_handler 注册被抹掉——已重新应用并验证（24 命令注册、设置路径初始化、
+   ref 失效钩子）。
+2. **workspaceId 升权缝**：桥以 `or_insert` 注入工作区身份，agent 自传其他
+   workspace id 可借其档位升权——改为权威覆写（`--workspace`/`--session` 永远
+   胜出）。
+3. **工作区档位旁路**：snapshot/screenshot/wait/read_network/save_page/scroll/
+   emulate/tab_list 八个命令 `authorize(None)` 使工作区级 off 覆盖失效——全部
+   补 `workspace_id` 参数并贯通 authorize。
+4. **审计漏洞**：scroll/emulate 成功路径与 download 的 resolve_tab 拒绝绕过
+   `finish()` 不写审计——统一收口；download 不再走 Err 通道。
+5. **审计缺 driver**：`finish()` 现从 payload 提取 driver 并入审计摘要。
+6. **claim_lost 不可达**：用户抢占后 agent 写操作原会静默重持——`pending_lost`
+   机制使被抢占会话的下一次写操作收到 `claim_lost`（仅一次），`Lost` 变体转正。
+7. **响应体截断语义**：>64KiB 由 `body_unavailable` 改为按字符边界截断 +
+   `truncated:true`（对齐 spec 验收 8）。
+8. **TS 类串 color-mix**：Agent 面板 3 处新增 color-mix 换 `border-border`/
+   `border-accent` 工具类（dev-standards 样式规则）。
+9. **AGENT_CLIENT 每渲染重建**：致 refreshAgentPanel 身份漂移、面板 effect 反复
+   触发——提升为模块级单例。
+10. **ADR 缺位**：新增 ADR-0002（Rust 侧策略权威 + 持久化契约 + PageLoadHook
+    依赖方向）。
+
+复审 findings 的接受项（不修，理由）：
+
+- `browser.agent-history` 直读前端本地库不经 Rust 审计：只读、数据本就是前端
+  localStorage 的，风险面为零；Rust 接管无增益。
+- `browser_ensure` 工具与 click 的 selector 回退：ensure 保证 agent 可启动浏览器
+  （readonly 必需），selector 回退即 spec §3 的"旧参数保留兼容"。
+- claim 检查与 CDP 派发非原子（TOCTOU）：claim 是公平/UX 语义而非安全边界；
+  最终权威是用户抢占与策略档位，接受。
+- MHTML 写 `data_root/agent-pages/` 而非浏览器下载管线：路径确定、可验证，
+  偏差在此申报。
+
+复审后复验：`cargo test --lib` 1020 绿（含新增 `user_preemption` Lost 语义断言）、
+`cargo fmt` ✅、`tsc -b` ✅、`bun run build` ✅、目标 Vitest ✅。

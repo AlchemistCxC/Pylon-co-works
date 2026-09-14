@@ -125,7 +125,6 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   snapshotRef.current = snapshot
 
   // ── Agent 面板（issue #82）：档位/黑名单/claim/审计/页面变化提示/问AI ──
-  const agentClient = createBrowserAgentClient((command, args) => invoke(command, args as Record<string, unknown> | undefined))
   const [agentSettings, setAgentSettings] = useState<BrowserAgentSettingsView | null>(null)
   const [agentClaim, setAgentClaim] = useState<{ mode?: string; holder?: string | null } | null>(null)
   const [agentOps, setAgentOps] = useState<BrowserAgentOp[]>([])
@@ -146,9 +145,9 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     if (!browserRuntimeAvailable || browserPreview) return
     try {
       const [settings, claim, ops] = await Promise.all([
-        agentClient.getSettings(),
-        agentClient.claimStatus(null),
-        agentClient.recentOps().catch(() => ({ ops: [] as BrowserAgentOp[] })),
+        AGENT_CLIENT.getSettings(),
+        AGENT_CLIENT.claimStatus(null),
+        AGENT_CLIENT.recentOps().catch(() => ({ ops: [] as BrowserAgentOp[] })),
       ])
       setAgentSettings(settings)
       setAgentClaim(claim)
@@ -158,8 +157,8 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     } catch (error) {
       setAgentError(agentErrorMessage(error))
     }
-    // agentClient 无状态；refreshAgentPanel 只依赖环境探测。
-  }, [agentClient, browserPreview, browserRuntimeAvailable])
+    // AGENT_CLIENT 无状态；refreshAgentPanel 只依赖环境探测。
+  }, [browserPreview, browserRuntimeAvailable])
 
   useEffect(() => {
     if (activeTool === 'agent') void refreshAgentPanel()
@@ -169,10 +168,10 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     if (!agentSettings || agentBusy) return
     setAgentBusy(true)
     try {
-      const saved = await agentClient.setSettings({ ...agentSettings, ...patch })
+      const saved = await AGENT_CLIENT.setSettings({ ...agentSettings, ...patch })
       setAgentSettings(saved)
       setAgentBlocklistDraft((saved.domainBlocklist ?? []).join('\n'))
-      const claim = await agentClient.claimStatus(null)
+      const claim = await AGENT_CLIENT.claimStatus(null)
       setAgentClaim(claim)
       setAgentError(null)
     } catch (error) {
@@ -180,15 +179,15 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     } finally {
       setAgentBusy(false)
     }
-  }, [agentBusy, agentClient, agentSettings])
+  }, [agentBusy, agentSettings])
 
   /** 用户手动交互：抢占 agent claim（写操作此后要求重新持有）。 */
   const notifyUserActivity = useCallback(() => {
     if (!browserRuntimeAvailable || browserPreview) return
-    void agentClient.userActivity().then(() => {
+    void AGENT_CLIENT.userActivity().then(() => {
       if (activeToolRef.current === 'agent') void refreshAgentPanel()
     }).catch(() => {})
-  }, [agentClient, browserPreview, browserRuntimeAvailable, refreshAgentPanel])
+  }, [browserPreview, browserRuntimeAvailable, refreshAgentPanel])
 
   const buildAskAiContext = useCallback(() => {
     const url = snapshot.url || '(未知页面)'
@@ -926,11 +925,11 @@ function BrowserToolPanel({
               <span className="text-text-placeholder text-[10px]">当前 claim：{agentClaim?.holder ? <code className="text-text font-[family-name:var(--mono)]">{agentClaim.holder}</code> : '空闲（写操作由首个请求的会话自动持有；你的手动操作立即抢占）'}</span>
             </div>
           </div>
-          <div className="browser-agent-askai mb-2 border-t border-[color-mix(in_srgb,var(--border)_55%,transparent)] pt-2">
+          <div className="browser-agent-askai mb-2 border-t border-border pt-2">
             <span className="browser-library-caption block mx-1 mb-1 text-text-dim text-[10px]">问 AI 关于当前页面</span>
             <div className="flex items-center gap-2 mb-1">
               <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onBuildAskAi}>生成上下文</button>
-              <button type="button" className="browser-agent-askai-send inline-flex min-h-6 items-center gap-1 px-[7px] py-0.5 border border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] rounded-[3px] text-text bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:bg-bg-hover disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onSendAskAi} disabled={!askAiDraft.trim() || agentBusy}><Send size={11} />{canSendAskAi ? '发送到当前会话' : '复制到剪贴板'}</button>
+              <button type="button" className="browser-agent-askai-send inline-flex min-h-6 items-center gap-1 px-[7px] py-0.5 border border-accent rounded-[3px] text-text bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:bg-bg-hover disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onSendAskAi} disabled={!askAiDraft.trim() || agentBusy}><Send size={11} />{canSendAskAi ? '发送到当前会话' : '复制到剪贴板'}</button>
             </div>
             <textarea
               className="min-h-[64px] w-full resize-y border border-border rounded-[3px] p-[6px] text-text bg-bg-input font-[family-name:var(--mono)] text-[10px] focus:border-accent focus:outline-none"
@@ -940,7 +939,7 @@ function BrowserToolPanel({
               aria-label="问 AI 消息草稿"
             />
           </div>
-          <div className="browser-agent-ops border-t border-[color-mix(in_srgb,var(--border)_55%,transparent)] pt-2">
+          <div className="browser-agent-ops border-t border-border pt-2">
             <span className="browser-library-caption block mx-1 mb-0.5 text-text-dim text-[10px]">最近 Agent 操作（新到旧）</span>
             {agentOps.length === 0 && <p className="browser-library-empty mx-1 mt-2 mb-0 text-text-placeholder text-[11px]">暂无记录</p>}
             {[...agentOps].reverse().map((op, index) => (
@@ -980,3 +979,9 @@ function browserTabLabel(tab: BrowserTabSnapshot): string {
 function browserPreviewUrl(url: string): string {
   return `/__pylon_browser_proxy?url=${encodeURIComponent(url)}`
 }
+
+// 无状态客户端放模块级：避免组件每渲染重建导致 refreshAgentPanel 身份漂移、
+// 面板 effect 反复触发（issue #82 review 发现）。
+const AGENT_CLIENT = createBrowserAgentClient((command, args) =>
+  invoke(command, args as Record<string, unknown> | undefined),
+)

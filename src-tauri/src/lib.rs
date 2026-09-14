@@ -892,6 +892,18 @@ pub fn run() {
                 crate::browser_cmds::browser_snapshot, crate::browser_cmds::browser_download, crate::browser_cmds::browser_click, crate::browser_cmds::browser_type,
                 crate::browser_cmds::browser_press, crate::browser_cmds::browser_scroll,
                  crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_visible, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
+                crate::browser_agent_cmds::browser_agent_get_settings, crate::browser_agent_cmds::browser_agent_set_settings,
+                crate::browser_agent_cmds::browser_agent_resolve_access, crate::browser_agent_cmds::browser_agent_exe_path,
+                crate::browser_agent_cmds::browser_agent_claim_status, crate::browser_agent_cmds::browser_agent_user_activity,
+                crate::browser_agent_cmds::browser_agent_recent_ops,
+                crate::browser_agent_cmds::browser_agent_navigate, crate::browser_agent_cmds::browser_agent_snapshot,
+                crate::browser_agent_cmds::browser_agent_tab_list, crate::browser_agent_cmds::browser_agent_tab_new,
+                crate::browser_agent_cmds::browser_agent_tab_select, crate::browser_agent_cmds::browser_agent_tab_close,
+                crate::browser_agent_cmds::browser_agent_screenshot, crate::browser_agent_cmds::browser_agent_save_page,
+                crate::browser_agent_cmds::browser_agent_read_network, crate::browser_agent_cmds::browser_agent_wait,
+                crate::browser_agent_cmds::browser_agent_scroll, crate::browser_agent_cmds::browser_agent_emulate,
+                crate::browser_agent_cmds::browser_agent_click, crate::browser_agent_cmds::browser_agent_type,
+                crate::browser_agent_cmds::browser_agent_press, crate::browser_agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])
@@ -969,6 +981,19 @@ pub fn run() {
                     window.as_ref().window(),
                     app.handle().clone(),
                 );
+                // issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
+                {
+                    let state = app.state::<AppState>();
+                    state.browser_agent.init_settings_path(
+                        crate::paths::browser_agent_settings_path(&dirs),
+                    );
+                    let hub = state.browser_agent.clone();
+                    state.browser.register_page_load_hook(std::sync::Arc::new(move |tab_id| {
+                        if let Ok(mut registry) = hub.refs().lock() {
+                            registry.invalidate_tab(tab_id);
+                        }
+                    }));
+                }
                 // 插件基建 v2：启动即创建用户插件目录树（installed/staging），
                 // 让用户无需先安装也能在文件管理器里看到插件目录。
                 if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {
