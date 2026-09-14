@@ -25,6 +25,14 @@ const manifestSchema = readJson(join(root, 'shared/pylon-plugin-manifest.schema.
 const supportedPluginApiVersions = manifestSchema.properties?.api?.enum
   ?.filter((value): value is string => typeof value === 'string') ?? []
 assert.ok(supportedPluginApiVersions.length > 0, 'manifest schema 必须声明 Plugin API allowlist')
+// capabilities/dangerousHooks 自 API 1.2 起合法（与宿主 apiVersionAtLeast 同规则，ADR-0001）：
+// 宿主升 1.3 后旧 manifest 不得被误按 removed-field 拒绝。
+const apiMinorOrder = new Map(supportedPluginApiVersions.map((version, index) => [version, index]))
+const apiVersionAtLeast12 = (api: unknown): boolean => {
+  const order = typeof api === 'string' ? apiMinorOrder.get(api) : undefined
+  const threshold = supportedPluginApiVersions.indexOf('1.2')
+  return order !== undefined && threshold >= 0 && order >= threshold
+}
 const forbidden = [
   'src/contracts/plugin.ts',
   'src/host/pluginRegistry.ts',
@@ -59,7 +67,7 @@ for (const base of ['examples', 'src/plugins/product/packages']) {
       `${path} 必须使用受支持的 Plugin API（${supportedPluginApiVersions.join('/')}）`,
     )
     assert.equal(typeof (manifest.web as { entry?: unknown } | undefined)?.entry, 'string', `${path} 必须声明 web.entry`)
-    const deletedFields = manifest.api === '1.2'
+    const deletedFields = apiVersionAtLeast12(manifest.api)
       ? ['trust', 'contributes', 'signature', 'entry']
       : ['trust', 'capabilities', 'dangerousHooks', 'contributes', 'signature', 'entry']
     for (const deleted of deletedFields) {

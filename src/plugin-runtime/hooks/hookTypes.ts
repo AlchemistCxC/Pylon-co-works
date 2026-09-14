@@ -115,11 +115,12 @@ export interface ToolBeforeCallEvent {
   options: ReadonlyArray<Record<string, unknown> & { optionId: string }>
 }
 
-/** context.beforeBuild / context.afterBuild:prompt 块构建缝,observe-only。 */
+/** context.beforeBuild / context.afterBuild:prompt 块构建缝,observe-only。
+ * blockCount 仅 after 携带(构建前无块数);transform 不适用(宿主忽略改写)。 */
 export interface ContextBuildEvent {
   source: string
-  blockCount: number
   phase: 'before' | 'after'
+  blockCount?: number
 }
 
 /** turn.started / turn.cancelled:发送链出站/取消路径派发(字段以实际派发为准)。 */

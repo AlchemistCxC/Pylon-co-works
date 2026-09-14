@@ -26,7 +26,7 @@ hook 系统存在两层重叠契约:
 
 1. **删除七 phase 契约层**:`src/contracts/agentHook.ts`、`src/host/hookPipeline.ts`、`src/plugin-runtime/hooks/hookPhaseAdapter.ts`、`src/components/chat/hookRuntime.ts`(shim)全部移除;`sessionHookTransactions` 重写为对 `HookRuntime.invoke` 的直接类型化调用。三效应语义由词表模式覆盖:observe→notification、gate→pipeline+cancel、transform→pipeline+event 改写。
 2. **词表定稿为 API 1.3 契约**:23 锚点(移除 `agent.chunk`、`message.agent.committed`,新增 `permission.request`),每锚点一份类型化事件 schema 与超时预算;`message.user.beforeSend` 统一 `{source, content, blocks}` 方言。`PYLON_PLUGIN_API_LATEST = '1.3'`,`capabilities`/`dangerousHooks` 校验谓词改为 `>= 1.2`。
-3. **词表三方同源门禁**:TS `HOOK_NAMES`、Rust 锚点常量、开发者手册 §6.2 词表块由 `scripts/check-hook-anchor-parity.mts` 强制相等,防 #37 类漂移复发。
+3. **词表三方同源门禁**:TS `HOOK_NAMES` 为单一事实源;开发者手册 §6.2 词表块与其**全等**,Rust 锚点常量为其**子集**(Rust 只承载 kernel 派发面,其余锚点由前端域派发),由 `scripts/check-hook-anchor-parity.mts` 强制,防 #37 类漂移复发。
 
 ## 后果
 

@@ -1,10 +1,12 @@
 /**
  * canonicalHookProjection 测试（API 1.3）：canonical 事件 → 观察锚点映射表、
- * stopReason=cancelled 细分、未 opt-in 会话零派发、会话按 source/id 命中。
+ * stopReason=cancelled 细分、未 opt-in 会话零派发、会话按 source/id 命中、
+ * install 幂等（重复安装只订阅一次 bus）。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const invokeMock = vi.hoisted(() => vi.fn(async () => ({ action: 'continue', event: {}, executed: 0, skipped: 0 })))
+const subscribeSpy = vi.hoisted(() => vi.fn(() => () => undefined))
 const sessionsRef = vi.hoisted(() => ({ current: [] as Array<{ id: string; agentId: string; source: string; hooks: string[] }> }))
 
 vi.mock('../../../identityStore.ts', () => ({
@@ -13,8 +15,12 @@ vi.mock('../../../identityStore.ts', () => ({
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({
   getHookRuntime: () => ({ invoke: invokeMock }),
   getPluginEventBus: () => ({
-    subscribe: () => ({ dispose: async () => undefined }),
+    subscribe: subscribeSpy,
   }),
+}))
+vi.mock('../../../infrastructure/events/pluginEventBus.ts', () => ({
+  subscribePluginEvents: (...args: unknown[]) => subscribeSpy(...(args as [])),
+  publishPluginEvent: vi.fn(),
 }))
 
 import type { CanonicalConversationEvent } from '../../../domains/events/eventSchema'
@@ -38,6 +44,7 @@ function canonicalEvent(eventType: CanonicalConversationEvent['eventType'], type
 
 beforeEach(() => {
   invokeMock.mockClear()
+  subscribeSpy.mockClear()
   sessionsRef.current = []
   resetCanonicalHookProjectionForTests()
 })
@@ -85,14 +92,18 @@ describe('projectCanonicalEventToHooks 派发', () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
-  it('install 幂等：重复安装只订阅一次', () => {
+  it('install 幂等：重复安装只订阅一次 bus，重置后可重装', () => {
     sessionsRef.current = [{ id: 'a', agentId: 'peri', source: 'local:a', hooks: ['test.hook'] }]
     const unsubscribe1 = installCanonicalHookProjection()
     const unsubscribe2 = installCanonicalHookProjection()
-    // 直接调用投影入口两次验证底层路径；install 幂等性以不抛错且返回解订函数为准。
+    expect(subscribeSpy).toHaveBeenCalledTimes(1)
     projectCanonicalEventToHooks(canonicalEvent('turn.completed'))
     expect(invokeMock).toHaveBeenCalledOnce()
     unsubscribe1()
     unsubscribe2()
+    // 解订后须显式 reset 才重装（installation 引用同一 disposable）。
+    resetCanonicalHookProjectionForTests()
+    installCanonicalHookProjection()
+    expect(subscribeSpy).toHaveBeenCalledTimes(2)
   })
 })

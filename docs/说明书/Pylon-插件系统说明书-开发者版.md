@@ -428,6 +428,8 @@ context.hooks.register('permission.request', {
 
 锚点事件形状与超时预算（gate 类 3000 ms / 通知类 1000 ms）以 `hookTypes.ts` 内的类型与 `HOOK_TIMEOUT_BUDGET_MS` 为准：`message.user.beforeSend`（transform 改写 `content`/`blocks`）、`message.received`（改写 `content`）、`permission.request`、`tool.beforeCall`（cancel → 按 reject 选项应答）为 gate 类；其余为通知/投影类（`session.*` 携带 `{ session, source }`，canonical 投影类携带 `{ owner, event }`）。注意：`message.user.beforeSend` 全宿主唯一方言是 `{ source, content, blocks }`——改写 `message` 字段自 1.3 起无效。
 
+权限钩子的实际权力（知情声明）：`permission.request` 的 allow/deny 在 bypass/auto 判定**之前**短路；modify 过滤掉全部 allow 语义项时，bypass/auto 会按过滤后集合选取（极端等价于自动拒绝）。即插件可逆转 bypass 语义——宿主当前仅做声明校验，不设执行时确认（与 D16 全信任前提一致）。钩子驱动的 allow/deny 应答只匹配对应语义选项（allow 前缀 / reject 前缀），请求不含该语义项时不伪造应答、交回常规流程。
+
 结果：
 
 ```ts

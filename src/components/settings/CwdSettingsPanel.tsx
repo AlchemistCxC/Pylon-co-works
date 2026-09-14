@@ -211,7 +211,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
           <small>勾选的插件才有权在本工作区新建会话中执行钩子；快照随会话创建固定。</small>
           {hookIds.filter(id => !activePluginIds.includes(id)).map(id => (
             <label key={id} className="cwd-check">
-              <input type="checkbox" checked disabled aria-label={`保留未激活 Hook 插件 ${id}`} />
+              <input type="checkbox" checked disabled readOnly aria-label={`保留未激活 Hook 插件 ${id}`} />
               <span>{id}（未激活，保留声明）</span>
               <button
                 type="button"

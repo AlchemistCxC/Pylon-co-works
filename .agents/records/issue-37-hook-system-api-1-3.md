@@ -60,8 +60,8 @@
 | API 1.3 + 1.2 manifest dangerousHooks 兼容（`>=1.2` 谓词） | ✅ 回归测试 |
 | GUI 删除序列 closing→deleting→deleted→closed | ✅ removeSessionTransaction 测试（含失败路径只发 closing） |
 | canonical 投影映射 + opt-in 过滤 | ✅ canonicalHookProjection 测试 |
-| Rust 权限钩子：allow/deny/modify/不可映射诊断 | ✅ hook_bridge 11 测试；全量 972 绿 |
-| tool.beforeCall cancel → reject 应答短路 | ✅ dispatcher 顺序实现 + 解释器单测 |
+| Rust 权限钩子：allow/deny/modify/不可映射诊断 | ✅ hook_bridge 新增 2 例（四态/身份规范化）；dispatcher 级端到端（deny 应答到达 agent、modify 生效、不可映射 warn 分支）未自动化，见「与 spec 的偏差」6 |
+| tool.beforeCall cancel → reject 应答短路 | ✅ 严格 reject 选择（评审修复后）+ 解释器单测；dispatcher 级测试未覆盖，见「与 spec 的偏差」6 |
 | context.*/turn.started spawn 不阻塞 | ✅ cargo build + prompt 测试不红 |
 | CLI 方言迁移（只认 content） | ✅ sessionHookTransactions 测试 |
 | picker 持久化 + 文本框移除 | ✅ CwdSettingsPanel.hookPicker 测试 |
@@ -83,8 +83,22 @@
 ## 与 spec 的偏差
 
 1. **turn.cancelled 改为 canonical 投影单源**：spec 原计划 Rust cancel 缝派发；实施发现 normalizer 已把 wire `cancelled` 标注为 `turn.failed(stopReason='cancelled')`（canonicalNormalizer.ts:216），走投影可避免与终态锚点双发，且少一处 Rust 缝。spec 未决问题节已预告此假设。
-2. **context.beforeBuild 的 `blockCount`**：构建前无块数，payload 仅 `after` 携带 `blockCount`；schema `ContextBuildEvent` 相应调整。
+2. **context.beforeBuild 的 `blockCount`**：构建前无块数，payload 仅 `after` 携带 `blockCount`；schema `ContextBuildEvent.blockCount` 已改为可选（评审后核实并落实）。
+3. **spec 验收 6 的「replay 入口不经过投影」断言未实现**：投影注释改为披露实际边界——canonicalEventFeed 的 gap 回填/recovered 行同样经 bus 触发投影（seed 纪律 + cursor 去重保证不重放打开前历史、不双发），未另加 feed 级测试。
+4. **删除事务 awaited 通知的最坏延迟**：opt-in 会话删除前置 4 锚点 × 挂起 handler × 1s 通知预算（closing 在本地删除之前）；未 opt-in 零开销。属决策 8 通知语义的可接受代价，未加事务级兜底。
+5. **bypass 语义可被 modify 逆转**：已在开发者手册权限章节作知情声明（评审 P3）。
 3. 其余按 spec 与用户 13 项决策落实；两项用户自择偏离推荐（dangerousHooks 仅校验、单大 PR）已在决策记录标注后果。
+
+## 评审与修复（2026-09-15，双 agent 评审后）
+
+两位独立评审（Rust 内核缝 / TS 契约与 UI）结论均为「通过但有 P1」。已修复：
+- **[P1] tool.beforeCall/permission.request 钩子拒绝路径的 first() 回退缺陷**：`pick_option(prefer_reject)` 回退 `options.first()`，对不含 reject 语义选项的请求会把 deny gate 应答成 allow 选项。新增 `pick_reject_option`/`pick_allow_option`（严格语义匹配、无回退），钩子驱动的 allow/deny 应答一律改用；无匹配语义项时不伪造应答、交回常规流程。
+- **[P2] 钩子短路应答绕过 C4 代际复核**：派发窗口（最长 ~3s/段）内客户端换代后旧决策可能误写新进程同 id 请求——三处钩子应答前补 `client_generation` 复核，不匹配丢弃应答并 warn。
+- **[P1] CLI 域三处全局派发残留**：`message.user.sent`/`sendFailed`/`session.closing` 未按 opt-in 过滤——改为 `enabledHookIds` 门禁 / `runSessionNotificationHook`（fail-closed 闭环）。
+- **[P1] API 1.3 发布面不完整**：`shared/pylon-plugin-manifest.schema.json` api enum 增 1.3；`scripts/check-plugin-manifests.mts` deletedFields 谓词改为与宿主 `apiVersionAtLeast` 同规则。
+- **[P3]**：`ContextBuildEvent.blockCount` 改可选；picker 禁用 checkbox 补 `readOnly`；投影 install 幂等测试改为订阅计数断言；投影模块注释披露 recovered 行边界；ADR 门禁措辞修正为「手册全等 + Rust ⊆ TS」；手册补权限钩子知情声明。
+
+评审确认的既有约定（未改，供后续裁决）：bypass/auto 自动批准路径的 `pick_option` first() 回退是超时场景既定约定（permission.rs 既有语义），本次仅钩子驱动路径改严格选择。
 
 ## 未解问题
 
