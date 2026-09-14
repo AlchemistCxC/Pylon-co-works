@@ -820,6 +820,7 @@ pub fn run() {
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
                 crate::session::send_message_streaming, crate::session::load_persisted_session, crate::session::list_persisted_sessions,
                 crate::session::evt_append, crate::session::evt_revision, crate::session::evt_list, crate::session::evt_export_raw, crate::session::evt_search,
+                crate::session::evt_load_compact, crate::session::evt_rollup_trim,
                 crate::session::user_data_load, crate::session::user_data_save,
                 crate::session::user_profile_delete, crate::session::user_session_delete,
                 crate::session::user_session_delete_finalize,
