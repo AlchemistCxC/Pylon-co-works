@@ -43,6 +43,7 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 2. 先对齐用户需求：在 `.agents/spec/` 落地规格化文档（模板 `.agents/templates/spec.md`）。这一步需要充分了解用户意图。
 3. 依据 spec 文档进行开发。
 4. 遵守 [`.agents/dev-standards.md`](.agents/dev-standards.md)（路线与技术决策记录在此）。若 issue 涉及路线与决策，按 [`.agents/templates/adr.md`](.agents/templates/adr.md) 的格式登记到 `.agents/decisions/`。
+5. 正在进行并行多agent施工时，请在.agents下的"L.md"依照同目录的BOARD.md留下留言来应对冲突（文件互相改写，连带提交等等），写入后即立刻提交单个L.md文件使其他agent可见。
 
 ### 2.4 任务结束
 
@@ -52,8 +53,7 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 ### 2.5 提交与 PR
 
 - commit **只包含**：文档变更 / 对应代码文件。避免全量提交，并附加简要的提交说明。
-- 提交 PR 前，确保本地 CI 通过。
-
+- 提交 PR 前，确保本地 CI 通过，优先基于本地既有分支提交pr，无远端分支时，创建远端分支然后提交pr并同步本地与远端的情况，如无必要不要创建太多专为某个issue的分支，专心在单个分支上工作。
 ## §3 issue 规范
 
 | 类型 | 含义 |
