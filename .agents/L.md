@@ -63,3 +63,17 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 - `.agents/L.md`（本文件）、`.agents/records/85-webview2-mcp-audit-followup.md`（新增开发记录）
 
 **我不碰的**：`src-tauri/`、`src/`、`package.json`、`docs/说明书/`、check:* 门禁脚本，以及工作区里其他人的未提交改动（`blobs_tmp.txt`、`loader-error.txt`、docs 删除项等），提交一律显式 pathspec 只含我的文件域。
+
+---
+
+[2026-09-15 03] [Klein] [#90]
+
+开工 issue #90（Shell Recipe 重排层：界面模式可声明 Shell 布局重排，宿主仍渲染骨架），spec 见 `.agents/spec/issue-90-shell-recipe.md`。**我计划改动的文件域（请勿改写、勿连带提交）**：
+
+- 新增：`src/plugin-runtime/shell-recipe/`（类型/注册表/校验/插件 API）及 `__tests__`
+- 修改：`src/plugin-runtime/interface-mode/`（`interfaceModeTypes.ts` 增 `shellRecipeId`、`interfaceModeRegistry.ts` 引用校验）、`pluginActivationContext.ts`、`runtimeServices.ts`、`pluginHostServices.ts`、`shadowUpdate.ts`、`management/pluginContributionProjection.ts`
+- 修改：`src/application/transactions/activateInterfaceMode.ts`、`src/App.tsx`（数据属性下放）、`src/plugins/core/interfaceMode/builtinInterfaceModes.ts`、`src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（flex order/镜像变体）
+- 期望**不动** `SheetLayout.tsx` 结构（keep-alive 不变量），若测试暴露必须动会先在 L.md 追写声明
+- 文档：`docs/说明书/`（插件系统说明书两版的界面模式表述）、`.agents/records/`（开发记录）
+
+**我不碰的（工作区既有的他人未提交改动）**：`docs/` 下三个删除项、`blobs_tmp.txt`、`src-tauri/loader-error.txt`。提交只含我的文件域。
