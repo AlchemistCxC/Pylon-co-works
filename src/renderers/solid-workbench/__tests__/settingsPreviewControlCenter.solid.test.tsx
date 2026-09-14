@@ -22,7 +22,7 @@ describe('settingsPreviewControlCenter（P52 D4 Solid 中控预览）', () => {
     const statusWidgetIds = [...host.querySelectorAll(
       '.cc-status-primary [data-widget-id], .cc-status-secondary [data-widget-id], .cc-actions [data-widget-id]',
     )].map(el => el.getAttribute('data-widget-id'))
-    expect(statusWidgetIds).toEqual(['model'])
+    expect(statusWidgetIds).toEqual(['model', 'reasoning'])
 
     handle.destroy()
     expect(host.childElementCount).toBe(0)

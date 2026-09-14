@@ -20,8 +20,16 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
 /**
  * 主题域 schema 版本（A4：独立于 PROFILE_SCHEMA_VERSION=4）。
  * 沿用共享编号的续号 5：保证存量数据（version 4）升级时触发 migrate。
+ *
+ * v8（2026-09-14）：中控新增 reasoning 控件。normalizeCcLayout 本会把旧布局补齐
+ * 新增控件默认位置，但该逻辑只挂在 migrate 钩子上；而 migrate 仅在持久化版本
+ * 变化时触发。旧安装存的是 v7，与当时常量同号 → 钩子不跑 → 老浏览器里
+ * ccLayout.placements 缺 reasoning 项 → ControlCenter 的槽位过滤把它剔掉，
+ * 控件永远不出现（刷新无效，因为布局存在 localStorage）。
+ * bump 到 8 迫使存量安装再跑一次迁移，补入 reasoning（合并按 widget ID 进行，
+ * 可重复执行且保留用户既有拖拽位置）。
  */
-export const THEME_SCHEMA_VERSION = 7
+export const THEME_SCHEMA_VERSION = 8
 
 export type ThemeMigrationDefaults = {
   base: object
@@ -133,6 +141,8 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
   if (fromVersion < 6 && state.globalFont === 'mono') state.globalFont = 'system'
   // v7：normalizeThemeMigrationState 已把旧中控布局升级到开放的 v7 widget 集合；
   // bump 持久化版本确保同为主题 schema v6 的存量安装也执行该迁移。
+  // v8（2026-09-14）：新增 reasoning 控件后再次 bump，理由同 v7——normalizeCcLayout
+  // 的补位逻辑只在 migrate 内执行，存量 v7 安装不 bump 就永远不会补入新控件。
   // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
   Object.assign(state, normalizeThemeState(state))
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）

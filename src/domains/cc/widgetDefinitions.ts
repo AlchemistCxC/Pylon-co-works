@@ -9,7 +9,7 @@
 import type { ThemeSettings } from '../../store.ts'
 
 /** 全部中控 widget id（含输入栏、上下文、会话身份、运行态与动作按钮）。 */
-export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'activity', 'ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'tasks'] as const
+export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'model', 'reasoning', 'mode', 'activity', 'ekg', 'pct', 'tokens', 'send', 'tasks'] as const
 export type CcWidgetId = (typeof CC_WIDGET_IDS)[number]
 
 /** 状态区 widget（除 input 外全部计入中控最小高度约束）——由 id 列表派生，不平行维护 */
@@ -21,7 +21,8 @@ export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' |
 export type CcNumberPropertyKey =
   | 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'modeVariant' | 'sendVariant'
+  | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'modeVariant' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor'
 export type CcBooleanPropertyKey = 'barFillFollow'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
 
@@ -106,6 +107,16 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'number', key: 'modelRadius', label: '模型圆角', min: 0, max: 40, step: 1 },
     { kind: 'number', key: 'modelFontSize', label: '模型字号', min: 8, max: 32, step: 1 },
     { kind: 'chips', key: 'modelTextColor', label: '模型文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
+  ],
+  reasoning: [
+    { kind: 'section', title: '思考强度控件' },
+    { kind: 'chips', key: 'reasoningSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
+    { kind: 'chips', key: 'reasoningBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'reasoningWidth', label: '宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'reasoningHeight', label: '高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'reasoningRadius', label: '圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'reasoningFontSize', label: '字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'reasoningTextColor', label: '文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   mode: [
     { kind: 'section', title: '模式控件外观' },

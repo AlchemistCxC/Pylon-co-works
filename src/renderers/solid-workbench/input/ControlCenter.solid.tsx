@@ -6,7 +6,7 @@ import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../cc
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
-import { SolidCcSendButton, SolidModeWidget, SolidModelWidget } from './WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
@@ -24,10 +24,10 @@ const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', '
  * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
  * 共用同一名单，保持单一真值。
  */
-const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model']
+const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
-  ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', mode: '权限模式',
+  ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', reasoning: '思考强度', mode: '权限模式',
   send: '发送按钮', tasks: '任务',
 }
 
@@ -357,10 +357,10 @@ export function SolidControlCenter() {
         return <SolidModelWidget
           draftValue={emptyVisual() ? modelId : undefined}
           onDraftChange={emptyVisual() ? setModelId : undefined}
-          reasoningValue={emptyVisual() ? reasoningLevel : undefined}
-          onReasoningChange={emptyVisual() ? setReasoningLevel : undefined}
           forceDropdown={emptyVisual()}
         />
+      case 'reasoning':
+        return <SolidReasoningWidget draftValue={emptyVisual() ? reasoningLevel : undefined} onDraftChange={emptyVisual() ? setReasoningLevel : undefined} />
       case 'mode':
         return <SolidModeWidget
           draftValue={emptyVisual() ? mode : undefined}

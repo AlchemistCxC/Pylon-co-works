@@ -8,7 +8,7 @@ import { normalizeSessionConfigOptions } from '../../../../domains/workbench/ses
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
 import type { SolidWorkbenchInput } from '../../workbenchContracts.ts'
-import { SolidCcSendButton, SolidModeWidget, SolidModelWidget } from '../WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from '../WorkbenchWidgets.solid.tsx'
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
 
@@ -67,8 +67,8 @@ describe('Solid Workbench widgets', () => {
   })
 
   // 思考强度已从模型菜单移除，待独立控件接手后恢复
-  it.skip('live reasoning sends the advertised config id and renders only confirmed values', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
+  it('live reasoning sends the advertised config id and renders only confirmed values', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
     const publish = (value: string) => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
@@ -78,20 +78,20 @@ describe('Solid Workbench widgets', () => {
     }
     publish('low')
     services.commands.setHandler('setConfigOption', async () => { publish('high'); return { ok: true } })
-    fireEvent.click(screen.getByRole('button', { name: /（low）/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
     expect(screen.queryByRole('option', { name: 'ultra' })).toBeNull()
     fireEvent.click(screen.getByRole('option', { name: 'high' }))
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual([
       'preview-session', 'reasoning_effort', 'high', { expectedValue: 'low', expectedVersion: 7 },
     ]))
-    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'high' })).toBeTruthy()
     services.commands.setHandler('setConfigOption', async () => ({ ok: false, error: 'reasoning denied' }))
-    fireEvent.click(screen.getByRole('button', { name: /（high）/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'high' }))
     fireEvent.click(screen.getByRole('option', { name: 'low' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('reasoning denied')
-    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'high' })).toBeTruthy()
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'))
-    expect(screen.queryByRole('button', { name: /（high）/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'high' })).toBeNull()
   })
 
   it('Model dropdown 枚举 runtime models，并经 facade 切换', async () => {
@@ -110,8 +110,6 @@ describe('Solid Workbench widgets', () => {
         forceDropdown
         draftValue={() => 'deepseek-v4-flash'}
         onDraftChange={() => {}}
-        reasoningValue={() => 'medium'}
-        onReasoningChange={() => {}}
       />,
       { modelSwitchMode: 'cycle' },
     )
@@ -128,8 +126,6 @@ describe('Solid Workbench widgets', () => {
         forceDropdown
         draftValue={() => 'kimi-k2'}
         onDraftChange={() => {}}
-        reasoningValue={() => 'medium'}
-        onReasoningChange={() => {}}
       />,
       { modelSwitchMode: 'menu' },
       { sessionId: null, agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }, { id: 'glm-5', label: 'GLM · 5' }] },
@@ -174,8 +170,7 @@ describe('Solid Workbench widgets', () => {
 
   it('模型/模式弹层支持 Escape 与外部点击关闭，并把焦点还给触发器', async () => {
     renderWidget(() => <div>
-      <SolidModelWidget forceDropdown draftValue={() => 'deepseek-v4-flash'} onDraftChange={() => {}}
-        reasoningValue={() => 'medium'} onReasoningChange={() => {}} />
+      <SolidModelWidget forceDropdown draftValue={() => 'deepseek-v4-flash'} onDraftChange={() => {}} />
       <SolidModeWidget forceDropdown draftValue={() => 'auto'} onDraftChange={() => {}} />
     </div>);
 
@@ -201,20 +196,52 @@ describe('Solid Workbench widgets', () => {
     expect(modeTrigger).toHaveFocus()
   })
 
-  // 思考强度已从模型菜单移除，待独立控件接手后恢复
-  it.skip('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {
-    const selected: string[] = []
-    renderWidget(() => <SolidModelWidget
-      forceDropdown
-      draftValue={() => 'deepseek-v4-flash'}
-      onDraftChange={() => {}}
-      reasoningValue={() => 'medium'}
-      onReasoningChange={value => selected.push(value)}
-    />)
-    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
-    fireEvent.click(screen.getByRole('option', { name: 'xhigh' }))
-    expect(selected).toEqual(['xhigh'])
-    expect(screen.getByRole('button', { name: /deepseek-v4-flash（medium）/ })).toBeTruthy()
+
+  it('reasoning widget renders menu, filters current value, and cycles', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
+    const trigger = screen.getByRole('button', { name: 'none' })
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('listbox', { name: '思考强度选项' })
+    expect(menu).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'none' })).toBeNull()
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), reasoningSwitchMode: 'cycle' })
+    fireEvent.click(trigger)
+    await waitFor(() => expect(services.commands.calls.length).toBeGreaterThan(0))
+  })
+  it('切换中按钮显示静态 ...... 且不重复发命令', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
+    const publish = (value: string) => {
+      const document = createWorkbenchDocument('preview-session')
+      services.runtime.replaceDocument({ ...document, session: { ...document.session,
+        options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
+          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+      } })
+    }
+    publish('low')
+    let release: (result: { ok: boolean }) => void = () => {}
+    services.commands.setHandler('setConfigOption', () => new Promise(resolve => { release = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '......' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    expect(services.commands.calls).toHaveLength(1)
+    release({ ok: true })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'low' })).toBeTruthy())
+  })
+
+  it('空会话草稿态走 onDraftChange 且不发命令', () => {
+    const drafts: string[] = []
+    const services = renderWidget(
+      () => <SolidReasoningWidget draftValue={() => 'low'} onDraftChange={value => drafts.push(value)} />,
+      { reasoningSwitchMode: 'menu' },
+      { sessionId: '' },
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    expect(drafts).toEqual(['high'])
+    expect(services.commands.calls).toHaveLength(0)
   })
 
   it('Model cycle 模式循环切换', async () => {

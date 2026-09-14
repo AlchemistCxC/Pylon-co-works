@@ -69,6 +69,13 @@ export interface WorkbenchAppearanceSnapshot {
   inputShowPlaceholder: boolean
   inputShowHistoryHint: boolean
   inputSubmitButtonMode: string
+  reasoningSwitchMode: string
+  reasoningBgColor: string
+  reasoningWidth: number
+  reasoningHeight: number
+  reasoningRadius: number
+  reasoningFontSize: number
+  reasoningTextColor: string
   sendButtonColor: string
   sendButtonRadius: string
   sendButtonBorderColor: string
@@ -193,6 +200,13 @@ export function selectWorkbenchAppearance(
     modelRadius: theme.modelRadius,
     modelFontSize: theme.modelFontSize,
     modelTextColor: theme.modelTextColor,
+    reasoningSwitchMode: theme.reasoningSwitchMode,
+    reasoningBgColor: theme.reasoningBgColor,
+    reasoningWidth: theme.reasoningWidth,
+    reasoningHeight: theme.reasoningHeight,
+    reasoningRadius: theme.reasoningRadius,
+    reasoningFontSize: theme.reasoningFontSize,
+    reasoningTextColor: theme.reasoningTextColor,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
     cliHintMode: theme.cliHintMode,
@@ -286,6 +300,13 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     modelRadius: theme.modelRadius,
     modelFontSize: theme.modelFontSize,
     modelTextColor: theme.modelTextColor,
+    reasoningSwitchMode: theme.reasoningSwitchMode,
+    reasoningBgColor: theme.reasoningBgColor,
+    reasoningWidth: theme.reasoningWidth,
+    reasoningHeight: theme.reasoningHeight,
+    reasoningRadius: theme.reasoningRadius,
+    reasoningFontSize: theme.reasoningFontSize,
+    reasoningTextColor: theme.reasoningTextColor,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
   }

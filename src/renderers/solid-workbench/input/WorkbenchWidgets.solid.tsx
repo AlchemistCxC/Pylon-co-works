@@ -1,9 +1,11 @@
-import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
+﻿import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
   optionLabel,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
+  resolveReasoningOptionEntries,
+  resolveDocumentOptionValue,
 } from './workbenchOptionCatalog.ts'
 
 function nextValue(values: readonly string[], current: string): string {
@@ -12,7 +14,7 @@ function nextValue(values: readonly string[], current: string): string {
   return values[(index + 1 + values.length) % values.length] ?? values[0] ?? current
 }
 
-export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; reasoningValue?: () => string; onReasoningChange?: (value: string) => void; forceDropdown?: boolean } = {}) {
+export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; forceDropdown?: boolean } = {}) {
   const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
   const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
   let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; const menuId=`cc-model-menu-${createUniqueId()}`
@@ -20,14 +22,14 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
   // 上一次会话的菜单进入新会话。与 SolidModeWidget 的会话切换处理保持一致。
   let previousSessionId = workbench.input().sessionId
   const entries=()=>resolveModelOptionEntries(runtime(),props.draftValue?.(),props.draftValue?workbench.input().agentAdvertisedModels:undefined); const models=()=>entries().map(x=>x.id)
-  const model=()=>props.draftValue?.()||runtime().activeModel||entries()[0]?.id||'未配置模型'; const mode=()=>props.forceDropdown?'menu':(appearance().modelSwitchMode??'menu')
+  const model=()=>props.draftValue?.()||runtime().activeModel||entries()[0]?.id||'unconfigured-model'; const mode=()=>props.forceDropdown?'menu':(appearance().modelSwitchMode??'menu')
   const width=()=>appearance().modelWidth??120, height=()=>appearance().modelHeight??28, radius=()=>appearance().modelRadius??0, fontSize=()=>appearance().modelFontSize??12
   const bg=()=>appearance().modelBgColor==='black'?'#000':'#fff', fg=()=>appearance().modelTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
   const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(r.error||'未配置模型?')} finally {setPending(false);close(true)} }
   createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
-  const rootStyle=()=>({'margin-top':`${height()/2}px`}); const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg(),display:'flex','align-items':'center','justify-content':'center'}); const itemStyle=triggerStyle
-  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert">{m()}</span>}</Show><div class="cc-model-root" style={rootStyle()}><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`,height:`${height()*5.25}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><For each={entries().filter(x=>x.id!==model())}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" style={itemStyle()} onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></div></Show></div></div>
+  const rootStyle=()=>({'margin-top':`${height()/2}px`}); const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg(),display:'flex','align-items':'center','justify-content':'center'})
+  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert">{m()}</span>}</Show><div class="cc-model-root" style={rootStyle()}><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><For each={entries().filter(x=>x.id!==model())}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></div></Show></div></div>
 }
 
 export function SolidModeWidget(props: {
@@ -132,7 +134,7 @@ export function SolidModeWidget(props: {
             aria-expanded={open()}
             aria-controls={menuId}
             onClick={() => setOpen(value => !value)}
-          ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ▾</button>
+          ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ?</button>
           <Show when={open()}>
             <div
               ref={node => { menu = node }}
@@ -167,13 +169,23 @@ export function SolidModeWidget(props: {
 
 /** Session-create reasoning preference. It uses the same compact control language
  * as the mode widget and remains available in the normal control center. */
-export function SolidReasoningWidget(props: { value: () => string; onChange: (value: string) => void }) {
-  return <label class="cc-reasoning-widget" title="思考强度">
-    <span class="cc-reasoning-label">思考</span>
-    <select aria-label="思考强度" value={props.value()} onChange={event => props.onChange(event.currentTarget.value)}>
-      <option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option>
-    </select>
-  </label>
+const REASONING_GAP_PX = 12
+export function SolidReasoningWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void } = {}) {
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; let previousSessionId = workbench.input().sessionId
+  const menuId=`cc-reasoning-menu-${createUniqueId()}`
+  const entries=()=>resolveReasoningOptionEntries(runtime(), resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning'))
+  const current=()=>resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') || props.draftValue?.() || entries()[0]?.id || ''
+    const choose=async(value:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(value);close(true);return}; const sid=workbench.input().sessionId;if(!sid||value===current()){close(true);return}; const option=runtime().document?.session.options?.find(o=>o.id==='reasoning_effort'||o.id==='reasoning'); const previous=current(); setPending(true);setError(''); try {const result=await workbench.commands.setConfigOption(sid,option?.id||'reasoning_effort',value,{expectedValue:previous,...(option?.version==null?{}:{expectedVersion:option.version})});if(!result.ok)setError(result.error||'切换失败')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const mode=()=>appearance().reasoningSwitchMode??'menu'
+  const cycle=()=>{const ids=entries().map(e=>e.id);const i=ids.indexOf(current());void choose(ids[(i+1+ids.length)%ids.length]||current())}
+  const width=()=>appearance().reasoningWidth??120, height=()=>appearance().reasoningHeight??28, radius=()=>appearance().reasoningRadius??0, fontSize=()=>appearance().reasoningFontSize??12
+  const bg=()=>appearance().reasoningBgColor==='black'?'#000':'#fff', fg=()=>appearance().reasoningTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg()})
+  return <div ref={el=>root=el} class="solid-reasoning-widget" style={{'margin-left':`${REASONING_GAP_PX}px`,'margin-top':`${height()/2}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert">{m()}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-reasoning-trigger" style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':current()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="思考强度选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==current())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
 /** First-batch host renderer: the registered send block includes its icon layer;
@@ -212,4 +224,6 @@ export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 
     onClick={() => runtime().generating ? cancel() : send()}
   ><svg viewBox="0 0 24 24" class={iconClass()} aria-hidden="true"><path d={path()} /></svg></button>
 }
+
+
 

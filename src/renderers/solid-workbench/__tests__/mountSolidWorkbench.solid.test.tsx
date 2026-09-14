@@ -1168,8 +1168,8 @@ describe('mountSolidWorkbench', () => {
     })
     // 2026-09-14：模型控件常态显示；其余旧状态控件在活跃会话里仍然收起。
     expect([...row.querySelectorAll('[data-widget-id]')]
-      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model'])
-    expect(row.querySelector('.cc-widget-separator')).toBeNull()
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning'])
+    expect(row.querySelector('.cc-widget-separator')).toBeTruthy()
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {

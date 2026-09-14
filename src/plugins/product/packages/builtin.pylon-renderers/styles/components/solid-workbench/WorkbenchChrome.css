@@ -581,13 +581,13 @@
    Keep these menus in the same square, dense visual language as the terminal
    titlebar.  StatusBar.css still supplies the legacy fallback defaults; the
    scoped rules below are deliberately later and more specific for Solid. */
-.solid-workbench-control-center-slot :is(.cc-model-root, .cc-mode-dropdown) {
+.solid-workbench-control-center-slot :is(.cc-model-root, .cc-mode-dropdown, .solid-reasoning-widget) {
   position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 0;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select) {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger) {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -605,14 +605,14 @@
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select):hover,
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select)[aria-expanded='true'] {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger):hover,
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger)[aria-expanded='true'] {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   text-decoration: none;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select):focus-visible {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -629,7 +629,8 @@
   width: max-content;
   min-width: 0;
   max-width: min(380px, calc(100vw - 24px));
-  max-height: none;
+  /* 自适应高度：选项少则全展开，多了内部滚动，不再被写死的高度裁掉 */
+  max-height: min(320px, 45vh);
   padding: 4px 0;
   overflow-x: hidden;
   overflow-y: auto;
