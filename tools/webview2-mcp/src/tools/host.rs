@@ -192,6 +192,7 @@ pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
     let mut scanned_files = 0usize;
     let mut skipped_roots: Vec<String> = Vec::new();
     let mut dynamic_sites = 0usize;
+    let budget = ScanBudget::new(MAX_FILES);
 
     for root in &roots {
         let path = cx.cwd.join(root);
@@ -199,13 +200,13 @@ pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
             skipped_roots.push(format!("{root}（不是目录）"));
             continue;
         }
-        walk(&path, &cx.cwd, &mut |file, relative| {
+        walk(&path, &cx.cwd, 0, &budget, &mut |file, relative| {
             scanned_files += 1;
             if let Ok(text) = std::fs::read_to_string(file) {
                 scan_source(&text, relative, &mut hits, &mut dynamic_sites);
             }
         });
-        if scanned_files >= MAX_FILES {
+        if budget.stopped.get() {
             break;
         }
     }
@@ -265,18 +266,65 @@ struct Hit {
     context: String,
 }
 
-fn walk(dir: &Path, root: &Path, visit: &mut impl FnMut(&Path, &str)) {
+/// 目录遍历的共享预算：剩余可扫描文件数（归零即提前终止）。
+struct ScanBudget {
+    remaining: std::cell::Cell<usize>,
+    stopped: std::cell::Cell<bool>,
+}
+
+impl ScanBudget {
+    fn new(max_files: usize) -> Self {
+        Self {
+            remaining: std::cell::Cell::new(max_files),
+            stopped: std::cell::Cell::new(false),
+        }
+    }
+
+    fn consume(&self) {
+        let remaining = self.remaining.get().saturating_sub(1);
+        self.remaining.set(remaining);
+        if remaining == 0 {
+            self.stopped.set(true);
+        }
+    }
+}
+
+/// 单次扫描的最深目录层数。配 [`ScanBudget`] 一起兜住病态目录树，
+/// 防止恶意或异常的 roots 把 `tauri_event_catalog` 拖死。
+const MAX_WALK_DEPTH: usize = 48;
+
+fn walk(
+    dir: &Path,
+    root: &Path,
+    depth: usize,
+    budget: &ScanBudget,
+    visit: &mut impl FnMut(&Path, &str),
+) {
+    if budget.stopped.get() || depth > MAX_WALK_DEPTH {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
+        if budget.stopped.get() {
+            return;
+        }
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_dir() {
+        // `DirEntry::file_type` 不跟随符号链接：junction / 软链目录直接跳过，
+        // 否则环状链接会让递归无限展开。显式传入的 root 不受此限（用户自己的选择）。
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             if SKIP_DIRECTORIES.contains(&name.as_str()) {
                 continue;
             }
-            walk(&path, root, visit);
+            walk(&path, root, depth + 1, budget, visit);
             continue;
         }
         let Some(extension) = path.extension().and_then(|e| e.to_str()) else {
@@ -301,6 +349,7 @@ fn walk(dir: &Path, root: &Path, visit: &mut impl FnMut(&Path, &str)) {
             .to_string_lossy()
             .replace('\\', "/");
         visit(&path, &relative);
+        budget.consume();
     }
 }
 
@@ -537,7 +586,7 @@ pub async fn backend_logs(cx: &Context, args: &Value) -> Result<ToolResult> {
             "ok": false,
             "query": query,
             "error": outcome.get("error").cloned().unwrap_or(Value::Null),
-            "hint": "该工具依赖 Pylon 的 list_runtime_logs 命令（#[[tauri::command]]，src-tauri/src/logs_cmds.rs）。命令不存在或被拒时后端日志改从 stderr 或 RuntimeSheet 读取。",
+            "hint": "该工具依赖 Pylon 的 list_runtime_logs 命令（#[tauri::command]，src-tauri/src/logs_cmds.rs）。命令不存在或被拒时后端日志改从 stderr 或 RuntimeSheet 读取。",
         }));
         result.is_error = true;
         return Ok(result);

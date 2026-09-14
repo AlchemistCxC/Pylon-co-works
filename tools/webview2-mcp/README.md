@@ -157,7 +157,7 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 ## 工具
 
-共 18 个。全部接受可选的 `target`（目标 id / id 前缀 / url 或 title 子串）；
+共 22 个。全部接受可选的 `target`（目标 id / id 前缀 / url 或 title 子串）；
 只有一个页面目标时可省略。全部接受 `timeout_ms`。
 
 ### 页面级（CDP）
@@ -167,16 +167,20 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | `webview_targets` | 列出可附加目标 + 浏览器版本。**排障第一步**，也是「端口通不通」的探针 |
 | `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await` |
 | `webview_raw_cdp` | 直调任意 CDP 方法，返回原始 result。覆盖本服务器未包装的域 |
-| `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志，**默认只读增量** |
-| `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录 |
+| `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志，**默认只读增量**；返回体带 `reconnected`，连接断开重连后缓冲从零开始会明确告知 |
+| `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录，同样带 `reconnected` |
 | `webview_network_body` | 按 requestId 取响应体；base64 会解码后再判断是否为文本 |
 | `webview_dom` | DOM 结构轮廓（标签/id/class/属性，可选盒模型与文本） |
 | `webview_query` | 单元素详查：盒模型、计算样式、可见性、祖先链、滚动尺寸 |
 | `webview_screenshot` | 截图，返回图片内容。支持整页与裁剪 |
-| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下） |
+| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；坐标模式同样先报告该点落在了谁身上 |
 | `webview_type` | 输入文本；`insert`（默认）或 `keys` 逐字符真实按键 |
-| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 等） |
-| `webview_navigate` | goto / reload / back / forward，就绪判定用轮询 `readyState` |
+| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等） |
+| `webview_hover` | 悬停元素或坐标（触发 hover 菜单 / tooltip），附带与 click 相同的命中测试 |
+| `webview_scroll` | 滚动窗口或容器（滚进视口 / top / bottom / 绝对 / 相对），返回滚动后位置 |
+| `webview_select` | 选中 `<select>` 选项（value / label / 下标），派发 input + change 让受控组件同步 |
+| `webview_wait` | 动作之间的同步原语：等元素出现/消失、等 JS 条件、等 URL、等文档就绪 |
+| `webview_navigate` | goto / reload / back / forward；就绪判定要求「先见到导航证据，再等 readyState=complete」，旧文档的 complete 不会被误当成新页就绪 |
 
 ### Tauri 宿主侧
 
@@ -199,6 +203,11 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 `limit` 和 `scan` 是两个独立上限：`limit` 限制**返回**多少条，`scan` 限制**检视**多少条。
 分开的理由是「最近 50 条 error」不该因为中间夹了上千条 info 就搜不到；
 返回里的 `scanned` 与 `buffer.evicted` 用来判断窗口是否够大、有没有缺口。
+
+**断线恢复对读类工具同样生效。** 连接断开后，`webview_console` / `webview_network`
+的下一次调用会自动重连——而不是拿着死会话的空缓冲永远读出空增量。
+代价是事件缓冲属于旧会话、无法带回：返回体里的 `reconnected: true` 与
+`reconnectNote` 会明确说明这一点，不会让缺口伪装成「页面很安静」。
 
 **点击会做命中测试。** `webview_click` 返回 `hitIsSelfOrDescendant`：
 为 `false` 说明该坐标上实际落的是别的元素，即目标被遮挡——这正是「点了没反应」最常见的成因，
@@ -256,7 +265,7 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | `ambiguous_target` | 有多个页面目标。用返回列表里的 id 作为 `target` 参数 |
 | 端口冲突 / 连上的是别的 app | 一个调试端口只能被一个 WebView2 进程占用。给不同实例配不同端口并用 `--port` 指定 |
 | `webview_console` 一直为空 | 事件域没打开。查看服务器 stderr——`Runtime.enable` 等失败会逐条打印原因 |
-| 工具报 `target_gone` | 页面 reload 或 app 重启导致连接断开。直接重试；下次调用会自动重连 |
+| 工具报 `target_gone` | 页面 reload 或 app 重启导致连接断开。`webview_console` / `webview_network` 的下次调用会自动重连（返回体 `reconnected: true` 会标明缓冲从零开始）；其它工具直接重试即可 |
 | 点了没反应 | 看 `webview_click` 返回的 `hitIsSelfOrDescendant`；为 false 即被遮挡 |
 
 服务器所有诊断输出都走 **stderr**。stdout 只承载 JSON-RPC 报文——往 stdout 混一个字符，

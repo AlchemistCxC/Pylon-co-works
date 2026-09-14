@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::args::Args;
 use crate::cdp::events::Kind;
 use crate::cdp::session::EvalOptions;
+use crate::cdp::SessionOrigin;
 use crate::error::{Error, Result};
 use crate::jsscript;
 use crate::tools::{pretty, resolve_scan, Context, ToolResult, DEFAULT_LIMIT};
@@ -134,12 +135,13 @@ pub async fn console(cx: &Context, args: &Value) -> Result<ToolResult> {
         cx.cdp.reset_events(target, Kind::Console).await?;
     }
 
-    let (outcome, stats) = cx
+    let (outcome, stats, origin) = cx
         .cdp
         .read_events(target, Kind::Console, since, scan, limit, |record| {
             console_matches(record, &types, pattern.as_deref())
         })
         .await?;
+    let reconnected = origin == SessionOrigin::Reconnected;
 
     Ok(ToolResult::json(&json!({
         "entries": outcome.entries,
@@ -148,6 +150,7 @@ pub async fn console(cx: &Context, args: &Value) -> Result<ToolResult> {
         "cursor": outcome.cursor,
         "explicitSinceSeq": since,
         "buffer": stats,
+        "reconnected": reconnected,
         "cursorNote": if since.is_none() {
             "游标已推进到本次扫描末尾；下次省略 since_seq 即从那里继续。"
         } else {
@@ -157,6 +160,11 @@ pub async fn console(cx: &Context, args: &Value) -> Result<ToolResult> {
             "缓冲已淘汰过记录（见 buffer.evicted）；早期事件可能已不在缓冲内。"
         } else {
             "缓冲未发生淘汰。"
+        },
+        "reconnectNote": if reconnected {
+            "本次调用前连接已断开并已自动重连；事件缓冲属于旧会话，无法带回，本返回从新会话的零点开始。"
+        } else {
+            "会话延续自上次调用，缓冲完整。"
         },
     })))
 }
@@ -210,7 +218,7 @@ pub async fn network(cx: &Context, args: &Value) -> Result<ToolResult> {
         cx.cdp.reset_events(target, Kind::Network).await?;
     }
 
-    let (outcome, stats) = cx
+    let (outcome, stats, origin) = cx
         .cdp
         .read_events(target, Kind::Network, since, scan, limit, |record| {
             network_matches(
@@ -222,6 +230,7 @@ pub async fn network(cx: &Context, args: &Value) -> Result<ToolResult> {
             )
         })
         .await?;
+    let reconnected = origin == SessionOrigin::Reconnected;
 
     Ok(ToolResult::json(&json!({
         "entries": outcome.entries,
@@ -230,7 +239,13 @@ pub async fn network(cx: &Context, args: &Value) -> Result<ToolResult> {
         "cursor": outcome.cursor,
         "explicitSinceSeq": since,
         "buffer": stats,
+        "reconnected": reconnected,
         "bodyNote": "要看响应体请把 entries[].requestId 传给 webview_network_body。",
+        "reconnectNote": if reconnected {
+            "本次调用前连接已断开并已自动重连；网络记录属于旧会话，无法带回，且断线期间的请求没有进入任何缓冲。"
+        } else {
+            "会话延续自上次调用，缓冲完整。"
+        },
     })))
 }
 
@@ -591,10 +606,9 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
     }
 
     // 目标解析：selector 先滚进视口再算中心点，并做命中测试。
-    let mut resolution = Value::Null;
-    let (point_x, point_y) = match selector {
+    let (point_x, point_y, resolution) = match selector {
         Some(selector) => {
-            let script = jsscript::resolve_click_target(selector);
+            let script = jsscript::resolve_pointer_target(selector);
             let resolved = cx
                 .cdp
                 .evaluate(target_arg, &script, EvalOptions::interactive())
@@ -609,10 +623,27 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
             }
             let point_x = resolved.get("x").and_then(Value::as_f64).unwrap_or(0.0);
             let point_y = resolved.get("y").and_then(Value::as_f64).unwrap_or(0.0);
-            resolution = resolved;
-            (point_x, point_y)
+            (point_x, point_y, resolved)
         }
-        None => (x.unwrap_or(0.0), y.unwrap_or(0.0)),
+        None => {
+            let point_x = x.unwrap_or(0.0);
+            let point_y = y.unwrap_or(0.0);
+            // 坐标模式同样先做命中测试：点之前先知道这个坐标上是谁——
+            // 「点了没反应」在坐标模式下同样要能看出打到了谁。
+            let hit = cx
+                .cdp
+                .evaluate(
+                    target_arg,
+                    &jsscript::point_hit(point_x, point_y),
+                    EvalOptions {
+                        await_promise: false,
+                        ..EvalOptions::default()
+                    },
+                )
+                .await
+                .unwrap_or(Value::Null);
+            (point_x, point_y, hit)
+        }
     };
 
     if mode == "dom" {
@@ -709,7 +740,7 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
     if mode == "keys" {
         for ch in text.chars() {
             let specification = key_spec(&ch.to_string());
-            dispatch_key(cx, target_arg, &specification, true).await?;
+            dispatch_key(cx, target_arg, &specification).await?;
             if delay_ms > 0 {
                 sleep_ms(delay_ms).await;
             }
@@ -721,7 +752,7 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
     }
 
     if submit {
-        dispatch_key(cx, target_arg, &key_spec("Enter"), true).await?;
+        dispatch_key(cx, target_arg, &key_spec("Enter")).await?;
     }
 
     // 回读输入后状态：受控组件可能拒绝了这次输入（例如校验失败后清空），
@@ -780,7 +811,7 @@ pub async fn key(cx: &Context, args: &Value) -> Result<ToolResult> {
 
     let specification = key_spec(name);
     for _ in 0..repeat {
-        dispatch_key(cx, target_arg, &specification, true).await?;
+        dispatch_key(cx, target_arg, &specification).await?;
     }
     sleep_ms(settle_ms).await;
 
@@ -805,8 +836,9 @@ struct KeySpec {
 
 /// 按键名 → CDP 派发所需的信息。
 ///
-/// 分两层：先查命名键表（导航/编辑/提交这类「不产生字符但仍要有真实按键」的键），
-/// 再退化成「当作单个字符处理」并带上说明，避免调用方以为任意名字都能用。
+/// 分三层：先查命名键表（导航/编辑/提交这类「不产生字符但仍要有真实按键」的键），
+/// 再查标点表（VK 码在 OEM 区段，不等于 ASCII），最后退化成「当作单个字符处理」
+/// 并带上说明，避免调用方以为任意名字都能用。
 fn key_spec(name: &str) -> KeySpec {
     let lowered = name.to_ascii_lowercase();
     if let Some(spec) = named_key(&lowered) {
@@ -819,6 +851,15 @@ fn key_spec(name: &str) -> KeySpec {
             code,
             virtual_key_code: 111 + index as i64,
             text: None,
+            note: None,
+        };
+    }
+    if let Some((code, virtual_key_code)) = punctuation_key(&lowered) {
+        return KeySpec {
+            key: lowered.clone(),
+            code: code.to_string(),
+            virtual_key_code,
+            text: Some(lowered.clone()),
             note: None,
         };
     }
@@ -845,6 +886,28 @@ fn key_spec(name: &str) -> KeySpec {
             )),
         },
     }
+}
+
+/// 美式键盘标点的 `(KeyboardEvent.code, Windows VK)`。
+///
+/// 这一段是 VK_OEM 区段，**VK 码不等于 ASCII 码**：照 ASCII 派发会打错键——
+/// 例如 `.` 的 ASCII 是 46，而 46 作为 VK 是 Delete。
+fn punctuation_key(ch: &str) -> Option<(&'static str, i64)> {
+    let (code, virtual_key_code) = match ch {
+        ";" => ("Semicolon", 186),
+        "=" => ("Equal", 187),
+        "," => ("Comma", 188),
+        "-" => ("Minus", 189),
+        "." => ("Period", 190),
+        "/" => ("Slash", 191),
+        "`" => ("Backquote", 192),
+        "[" => ("BracketLeft", 219),
+        "\\" => ("Backslash", 220),
+        "]" => ("BracketRight", 221),
+        "'" => ("Quote", 222),
+        _ => return None,
+    };
+    Some((code, virtual_key_code))
 }
 
 /// 命名键表。返回 `None` 表示不在表内。
@@ -882,12 +945,7 @@ fn function_key_index(name: &str) -> Option<u8> {
     (1..=12).contains(&index).then_some(index)
 }
 
-async fn dispatch_key(
-    cx: &Context,
-    target: Option<&str>,
-    specification: &KeySpec,
-    with_events: bool,
-) -> Result<()> {
+async fn dispatch_key(cx: &Context, target: Option<&str>, specification: &KeySpec) -> Result<()> {
     let mut down = json!({
         "type": "keyDown",
         "key": specification.key,
@@ -899,9 +957,7 @@ async fn dispatch_key(
         down["text"] = json!(text);
         down["unmodifiedText"] = json!(text);
     }
-    if with_events {
-        cx.cdp.call(target, "Input.dispatchKeyEvent", down).await?;
-    }
+    cx.cdp.call(target, "Input.dispatchKeyEvent", down).await?;
 
     let up = json!({
         "type": "keyUp",
@@ -910,9 +966,7 @@ async fn dispatch_key(
         "windowsVirtualKeyCode": specification.virtual_key_code,
         "nativeVirtualKeyCode": specification.virtual_key_code,
     });
-    if with_events {
-        cx.cdp.call(target, "Input.dispatchKeyEvent", up).await?;
-    }
+    cx.cdp.call(target, "Input.dispatchKeyEvent", up).await?;
     Ok(())
 }
 
@@ -926,6 +980,11 @@ pub async fn navigate(cx: &Context, args: &Value) -> Result<ToolResult> {
     let timeout = cx.timeout_from(a.u64("timeout_ms")?);
 
     let before = current_location(cx, target_arg).await;
+    let before_href = before
+        .get("href")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
 
     match action.as_str() {
         "goto" => {
@@ -978,7 +1037,7 @@ pub async fn navigate(cx: &Context, args: &Value) -> Result<ToolResult> {
         }
     }
 
-    let settled = wait_for_ready(cx, target_arg, settle_ms).await;
+    let settled = wait_for_ready(cx, target_arg, settle_ms, &before_href).await;
     let after = current_location(cx, target_arg).await;
 
     Ok(ToolResult::json(&json!({
@@ -986,6 +1045,11 @@ pub async fn navigate(cx: &Context, args: &Value) -> Result<ToolResult> {
         "settled": settled,
         "before": before,
         "after": after,
+        "settleNote": if settled {
+            "已等到导航后的文档就绪（以导航证据 + readyState=complete 判定）。"
+        } else {
+            "在 settle_ms 内未等到导航后的文档就绪；after 字段给出当前位置，可调大 settle_ms 或用 webview_wait 继续等。"
+        },
         "injectedStateNote": "reload / goto 会清空页内 MCP 状态（事件订阅缓冲会随之消失，游标归零）；这是预期行为，不是故障。",
     })))
 }
@@ -1006,28 +1070,58 @@ async fn current_location(cx: &Context, target: Option<&str>) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// 轮询 `document.readyState` 直到 `complete` 或超时。
+/// 轮询直到「导航后的文档」就绪，分两个阶段：
 ///
-/// 不用 `Page.loadEventFired`：SPA 的路由切换根本不触发该事件，
-/// 而这里真正想知道的是「现在能不能安全地对 DOM 做断言」。
-async fn wait_for_ready(cx: &Context, target: Option<&str>, settle_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + Duration::from_millis(settle_ms);
+/// 1. **等导航证据**：href 变化、readyState 离开 complete，或 evaluate 报错
+///    （旧 execution context 已销毁）。`Page.navigate` 返回得比导航提交更早，
+///    旧文档的 complete 会在 goto/reload 刚发出时就被读到——没有这一步，
+///    `settled` 会立刻误报 true。
+/// 2. **等 readyState 回到 complete**。
+///
+/// 同址导航（href 不变、readyState 始终 complete）在宽限期 [`READY_GRACE`]
+/// 后按就绪放行，避免死等。
+async fn wait_for_ready(
+    cx: &Context,
+    target: Option<&str>,
+    settle_ms: u64,
+    before_href: &str,
+) -> bool {
+    let started = std::time::Instant::now();
+    let grace = started + Duration::from_millis(READY_GRACE_MS);
+    let deadline = started + Duration::from_millis(settle_ms.max(READY_GRACE_MS));
+    let mut saw_navigation = false;
     loop {
         let state = cx
             .cdp
             .evaluate(
                 target,
-                &jsscript::as_sync_body("return document.readyState;"),
+                &jsscript::as_sync_body(
+                    "return { href: location.href, readyState: document.readyState };",
+                ),
                 EvalOptions {
                     await_promise: false,
                     ..EvalOptions::default()
                 },
             )
             .await;
-        if let Ok(state) = state {
-            if state.as_str() == Some("complete") {
-                return true;
+        match state {
+            Ok(state) => {
+                let ready = state.get("readyState").and_then(Value::as_str) == Some("complete");
+                let href = state
+                    .get("href")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let href_changed = !before_href.is_empty() && href != before_href;
+                if !ready || href_changed {
+                    saw_navigation = true;
+                }
+                if ready && (saw_navigation || std::time::Instant::now() >= grace) {
+                    return true;
+                }
             }
+            // 求值失败 = 旧上下文销毁中，本身就是导航证据。
+            Err(_) => saw_navigation = true,
         }
         if std::time::Instant::now() >= deadline {
             return false;
@@ -1036,10 +1130,273 @@ async fn wait_for_ready(cx: &Context, target: Option<&str>, settle_ms: u64) -> b
     }
 }
 
+/// 同址导航的放行宽限：href 不变且一直 complete 时，等这么久才承认「就绪」。
+const READY_GRACE_MS: u64 = 250;
+
 async fn sleep_ms(ms: u64) {
     if ms > 0 {
         tokio::time::sleep(Duration::from_millis(ms)).await;
     }
+}
+
+// ───────────────────────────── 网页界面增强 ─────────────────────────────
+
+pub async fn hover(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_hover", args);
+    let target_arg = a.str("target")?;
+    let selector = a.str("selector")?;
+    let x = a.f64("x")?;
+    let y = a.f64("y")?;
+    let settle_ms = a.u64_or("settle_ms", 60)?;
+
+    if selector.is_none() && (x.is_none() || y.is_none()) {
+        return Err(Error::bad_args(
+            "webview_hover",
+            "需要 selector，或同时给出 x 与 y",
+        ));
+    }
+
+    let (point_x, point_y, resolution) = match selector {
+        Some(selector) => {
+            let resolved = cx
+                .cdp
+                .evaluate(
+                    target_arg,
+                    &jsscript::resolve_pointer_target(selector),
+                    EvalOptions::interactive(),
+                )
+                .await?;
+            if resolved.get("found").and_then(Value::as_bool) != Some(true) {
+                return Ok(ToolResult::json(&json!({
+                    "hovered": false,
+                    "reason": "selector 未命中任何元素",
+                    "selector": selector,
+                    "hint": "用 webview_query 或 webview_dom 确认选择器与当前 DOM。",
+                })));
+            }
+            let point_x = resolved.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+            let point_y = resolved.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+            (point_x, point_y, resolved)
+        }
+        None => {
+            let point_x = x.unwrap_or(0.0);
+            let point_y = y.unwrap_or(0.0);
+            let hit = cx
+                .cdp
+                .evaluate(
+                    target_arg,
+                    &jsscript::point_hit(point_x, point_y),
+                    EvalOptions {
+                        await_promise: false,
+                        ..EvalOptions::default()
+                    },
+                )
+                .await
+                .unwrap_or(Value::Null);
+            (point_x, point_y, hit)
+        }
+    };
+
+    cx.cdp
+        .call(
+            target_arg,
+            "Input.dispatchMouseEvent",
+            json!({ "type": "mouseMoved", "x": point_x, "y": point_y, "button": "none", "buttons": 0 }),
+        )
+        .await?;
+    sleep_ms(settle_ms).await;
+
+    let occluded = selector.as_ref().and_then(|_| {
+        resolution
+            .get("hitIsSelfOrDescendant")
+            .and_then(Value::as_bool)
+            .map(|hit| !hit)
+    });
+
+    Ok(ToolResult::json(&json!({
+        "hovered": true,
+        "point": { "x": point_x, "y": point_y },
+        "resolution": resolution,
+        "occludedWarning": match occluded {
+            Some(true) => Some(format!(
+                "命中测试落在 {} 上，不是目标元素 —— 该点被遮挡，真实用户的悬停也到不了目标上。",
+                resolution.get("hitPath").and_then(Value::as_str).unwrap_or("其它元素")
+            )),
+            _ => None,
+        },
+        "note": "只派发了 mouseMoved。hover 触发的浮层（菜单/tooltip）在鼠标移走后可能收起，需要连续操作时把后续动作紧跟在本工具之后。",
+    })))
+}
+
+pub async fn scroll(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_scroll", args);
+    let target_arg = a.str("target")?;
+    let selector = a.str("selector")?;
+    let to = a.str("to")?;
+    if let Some(to) = to {
+        if to != "top" && to != "bottom" {
+            return Err(Error::bad_args(
+                "webview_scroll",
+                format!("to 只支持 top / bottom，收到 {to:?}"),
+            ));
+        }
+    }
+    let x = a.f64("x")?;
+    let y = a.f64("y")?;
+    let dx = a.f64("dx")?;
+    let dy = a.f64("dy")?;
+
+    let script = jsscript::scroll_page(selector, to, x, y, dx, dy);
+    let value = cx
+        .cdp
+        .evaluate(
+            target_arg,
+            &script,
+            EvalOptions {
+                await_promise: false,
+                ..EvalOptions::default()
+            },
+        )
+        .await?;
+    Ok(ToolResult::json(&value))
+}
+
+pub async fn select(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_select", args);
+    let target_arg = a.str("target")?;
+    let selector = a.required_str("selector")?;
+    let values = a.str_list("value")?;
+    let labels = a.str_list("label")?;
+    let indexes = a.u64_list("index")?;
+
+    // 三种匹配方式互斥：全空与多给都报 bad_args，不让工具猜调用方想用哪种。
+    let provided = [!values.is_empty(), !labels.is_empty(), !indexes.is_empty()]
+        .into_iter()
+        .filter(|given| *given)
+        .count();
+    if provided != 1 {
+        return Err(Error::bad_args(
+            "webview_select",
+            "value / label / index 恰好给出一种",
+        ));
+    }
+    let (mode, wanted) = if !values.is_empty() {
+        ("value", json!(values))
+    } else if !labels.is_empty() {
+        ("label", json!(labels))
+    } else {
+        ("index", json!(indexes))
+    };
+
+    let value = cx
+        .cdp
+        .evaluate(
+            target_arg,
+            &jsscript::select_options(selector, mode, &wanted),
+            EvalOptions {
+                await_promise: false,
+                ..EvalOptions::default()
+            },
+        )
+        .await?;
+    Ok(ToolResult::json(&value))
+}
+
+pub async fn wait(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_wait", args);
+    let target_arg = a.str("target")?;
+    let selector = a.str("selector")?;
+    let hidden = a.bool_or("hidden", false)?;
+    let condition = a.str("condition")?;
+    let href_contains = a.str("href_contains")?;
+    let ready = matches!(a.bool("ready")?, Some(true));
+    let poll_ms = a.u64_or("poll_ms", 100)?.clamp(10, 2_000);
+    let budget_ms = a.u64_or("timeout_ms", 10_000)?;
+
+    if hidden && selector.is_none() {
+        return Err(Error::bad_args(
+            "webview_wait",
+            "hidden 只在 selector 条件下有意义",
+        ));
+    }
+    let conditions = [
+        selector.is_some(),
+        condition.is_some(),
+        href_contains.is_some(),
+        ready,
+    ]
+    .into_iter()
+    .filter(|given| *given)
+    .count();
+    if conditions != 1 {
+        return Err(Error::bad_args(
+            "webview_wait",
+            "selector / condition / href_contains / ready 四种等待条件恰好给出一种",
+        ));
+    }
+
+    let probe = if let Some(selector) = selector {
+        jsscript::wait_selector(selector, hidden)
+    } else if let Some(condition) = condition {
+        jsscript::wait_condition(condition)
+    } else if let Some(fragment) = href_contains {
+        jsscript::wait_href(fragment)
+    } else {
+        jsscript::wait_ready()
+    };
+
+    let started = std::time::Instant::now();
+    let deadline = started + Duration::from_millis(budget_ms);
+    // 单次探针的 CDP 调用超时取「等待预算」与 5s 的较小者：探针是同步表达式，
+    // 正常几毫秒就返回，大超时只会让真正的故障（上下文卡死）拖满预算。
+    let probe_timeout = Some(Duration::from_millis(budget_ms.min(5_000)));
+
+    let mut last = Value::Null;
+    let mut satisfied = false;
+    loop {
+        match cx
+            .cdp
+            .evaluate(
+                target_arg,
+                &probe,
+                EvalOptions {
+                    await_promise: false,
+                    timeout: probe_timeout,
+                    ..EvalOptions::default()
+                },
+            )
+            .await
+        {
+            Ok(state) => {
+                last = state.clone();
+                if state.get("satisfied").and_then(Value::as_bool) == Some(true) {
+                    satisfied = true;
+                    break;
+                }
+            }
+            // 条件表达式写错了：立即把异常带回，空转到预算耗尽只会浪费轮次。
+            Err(error @ Error::JsException { .. }) => return Err(error),
+            // 导航导致的瞬时求值失败（旧上下文销毁中）→ 继续轮询。
+            Err(_) => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        sleep_ms(poll_ms).await;
+    }
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    Ok(ToolResult::json(&json!({
+        "satisfied": satisfied,
+        "timedOut": !satisfied,
+        "elapsedMs": elapsed_ms,
+        "lastProbe": last,
+        "note": if satisfied {
+            "条件已满足，可以继续下一步。"
+        } else {
+            "等待预算内条件未满足；lastProbe 给出最后一次探针读数，可调大 timeout_ms 重试或先排查页面状态。"
+        },
+    })))
 }
 
 #[cfg(test)]
@@ -1120,6 +1477,23 @@ mod tests {
     }
 
     #[test]
+    fn punctuation_keys_use_oem_virtual_key_codes_not_ascii() {
+        // `.` 的 ASCII 是 46，而 46 作为 VK 是 Delete——标点绝不能按 ASCII 取 VK。
+        let period = key_spec(".");
+        assert_eq!(period.code, "Period");
+        assert_eq!(period.virtual_key_code, 190);
+        assert_eq!(period.text.as_deref(), Some("."));
+        assert!(period.note.is_none(), "表内标点是已知键，不该再提示不可靠");
+
+        assert_eq!(key_spec(";").virtual_key_code, 186);
+        assert_eq!(key_spec("=").virtual_key_code, 187);
+        assert_eq!(key_spec("[").code, "BracketLeft");
+        assert_eq!(key_spec("]").code, "BracketRight");
+        assert_eq!(key_spec("'").virtual_key_code, 222);
+        assert_eq!(key_spec("\\").code, "Backslash");
+    }
+
+    #[test]
     fn function_keys_map_to_112_through_123() {
         assert_eq!(key_spec("F1").virtual_key_code, 112);
         assert_eq!(key_spec("f12").virtual_key_code, 123);
@@ -1168,5 +1542,89 @@ mod tests {
         assert!(required.contains("--remote-allow-origins=*"));
         // 漏掉这一项会静默丢行为，所以必须在提示里出现。
         assert!(required.contains("msWebOOUI"));
+    }
+
+    // ── 网页界面增强工具的参数校验（校验发生在任何 CDP 调用之前）──
+
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn test_context() -> Context {
+        Context {
+            cdp: Arc::new(crate::cdp::Cdp::new(
+                "127.0.0.1",
+                9222,
+                Duration::from_millis(100),
+            )),
+            cwd: Arc::new(PathBuf::from(".")),
+            timeout_ms: 100,
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_requires_exactly_one_condition() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(&cx, "webview_wait", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("恰好给出一种"), "{error}");
+
+        let error = crate::tools::dispatch(
+            &cx,
+            "webview_wait",
+            &json!({ "selector": "#a", "ready": true }),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("恰好给出一种"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn wait_hidden_is_only_meaningful_with_a_selector() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(
+            &cx,
+            "webview_wait",
+            &json!({ "condition": "true", "hidden": true }),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("hidden"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn select_requires_exactly_one_match_mode() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(&cx, "webview_select", &json!({ "selector": "#s" }))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("恰好给出一种"), "{error}");
+
+        let error = crate::tools::dispatch(
+            &cx,
+            "webview_select",
+            &json!({ "selector": "#s", "value": "a", "index": 0 }),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("恰好给出一种"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn hover_requires_selector_or_both_coordinates() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(&cx, "webview_hover", &json!({ "x": 1.0 }))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("selector"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn scroll_rejects_unknown_to_value() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(&cx, "webview_scroll", &json!({ "to": "middle" }))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("top / bottom"), "{error}");
     }
 }

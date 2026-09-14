@@ -245,10 +245,10 @@ pub fn query_element(selector: &str, properties: &[String]) -> String {
 
 /// 把目标元素滚进视口并算出可点击的中心点，同时做命中测试。
 ///
-/// `hitIsSelfOrDescendant === false` 是排障时最有价值的信号：
-/// 说明该点被别的元素盖住了，`Input.dispatchMouseEvent` 会打到覆盖物上——
-/// 这类「点了没反应」靠 `element.click()` 是查不出来的。
-pub fn resolve_click_target(selector: &str) -> String {
+/// `webview_click` 与 `webview_hover` 共用这份解析。`hitIsSelfOrDescendant === false`
+/// 是排障时最有价值的信号：说明该点被别的元素盖住了，`Input.dispatchMouseEvent`
+/// 会打到覆盖物上——这类「点了没反应」靠 `element.click()` 是查不出来的。
+pub fn resolve_pointer_target(selector: &str) -> String {
     as_sync_body(&render(
         r#"
   const SELECTOR = {SELECTOR};
@@ -591,6 +591,227 @@ pub fn events_drain(since_seq: Option<u64>, scan: usize, limit: usize) -> String
     ))
 }
 
+// ─────────────────────── 网页界面增强：等待 / 滚动 / 命中 / 选择 ───────────────────────
+
+/// `webview_wait` 探针：等待 selector 命中的元素出现（`hidden=true` 时等它消失或不可见）。
+///
+/// 由 Rust 侧按 `poll_ms` 轮询，一次求值只回答「现在满足了吗」。
+/// 可见性优先 `checkVisibility`，旧引擎退化为盒尺寸非零。
+pub fn wait_selector(selector: &str, hidden: bool) -> String {
+    as_sync_body(&render(
+        r#"
+  const SELECTOR = {SELECTOR};
+  const HIDDEN = {HIDDEN};
+
+  const visible = (el) => {
+    if (!el) return false;
+    if (typeof el.checkVisibility === 'function') {
+      return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const el = document.querySelector(SELECTOR);
+  if (HIDDEN) return { satisfied: !visible(el), present: !!el, visible: visible(el) };
+  return { satisfied: !!el, present: !!el, visible: visible(el) };
+"#,
+        &[
+            ("{SELECTOR}", js_str(selector)),
+            ("{HIDDEN}", hidden.to_string()),
+        ],
+    ))
+}
+
+/// `webview_wait` 探针：任意 JS 表达式按 `Boolean` 截断后为真。
+/// `return Boolean(` 与 `)` 之间强制换行——表达式末尾的 `//` 行注释
+/// 不能把闭合一起注释掉（与 [`as_async_expression`] 同一条纪律）。
+pub fn wait_condition(expression: &str) -> String {
+    as_sync_body(&render(
+        r#"
+  return { satisfied: Boolean(
+{EXPR}
+  ) };
+"#,
+        &[("{EXPR}", expression.to_string())],
+    ))
+}
+
+/// `webview_wait` 探针：等待 `location.href` 包含给定子串（大小写不敏感），
+/// 用于等待 SPA 路由切换。
+pub fn wait_href(fragment: &str) -> String {
+    as_sync_body(&render(
+        r#"
+  const FRAGMENT = {FRAGMENT};
+  return { satisfied: location.href.toLowerCase().includes(FRAGMENT.toLowerCase()), href: location.href };
+"#,
+        &[("{FRAGMENT}", js_str(fragment))],
+    ))
+}
+
+/// `webview_wait` 探针：等待 `document.readyState` 到 `complete`。
+pub fn wait_ready() -> String {
+    as_sync_body(
+        "return { satisfied: document.readyState === 'complete', readyState: document.readyState };",
+    )
+}
+
+/// `webview_click` 坐标模式的命中测试：这个坐标上实际是什么元素。
+/// 没有目标元素可比对，但「点之前先知道打到谁」同样是「点了没反应」的第一手证据。
+pub fn point_hit(x: f64, y: f64) -> String {
+    as_sync_body(&render(
+        r#"
+  const X = {X};
+  const Y = {Y};
+  const hit = document.elementFromPoint(X, Y);
+  return {
+    hitTag: hit ? hit.tagName.toLowerCase() : null,
+    hitPath: hit ? (hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '')) : null,
+    pointerEvents: hit ? getComputedStyle(hit).pointerEvents : null,
+  };
+"#,
+        &[("{X}", x.to_string()), ("{Y}", y.to_string())],
+    ))
+}
+
+/// 滚动窗口或指定容器。定位方式按优先级：`to` → 相对位移 → 绝对坐标 →
+/// selector 居中（无任何参数时回顶部）。返回滚动后的三层位置供回读。
+pub fn scroll_page(
+    selector: Option<&str>,
+    to: Option<&str>,
+    x: Option<f64>,
+    y: Option<f64>,
+    dx: Option<f64>,
+    dy: Option<f64>,
+) -> String {
+    let number = |value: Option<f64>| {
+        value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    };
+    as_sync_body(&render(
+        r#"
+  const SELECTOR = {SELECTOR};
+  const TO = {TO};
+  const X = {X};
+  const Y = {Y};
+  const DX = {DX};
+  const DY = {DY};
+
+  const el = SELECTOR === null ? null : document.querySelector(SELECTOR);
+  if (SELECTOR !== null && !el) return { found: false, selector: SELECTOR };
+
+  if (el) {
+    if (TO === 'top') el.scrollTop = 0;
+    else if (TO === 'bottom') el.scrollTop = el.scrollHeight;
+    else if (DX !== null || DY !== null) { el.scrollLeft += DX || 0; el.scrollTop += DY || 0; }
+    else if (X !== null || Y !== null) { el.scrollLeft = X || 0; el.scrollTop = Y || 0; }
+    else el.scrollIntoView({ block: 'center', inline: 'center' });
+  } else if (TO === 'top') {
+    window.scrollTo(0, 0);
+  } else if (TO === 'bottom') {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  } else if (DX !== null || DY !== null) {
+    window.scrollBy(DX || 0, DY || 0);
+  } else {
+    window.scrollTo(X || 0, Y || 0);
+  }
+
+  return {
+    found: true,
+    selector: SELECTOR,
+    window: { scrollX: window.scrollX, scrollY: window.scrollY },
+    document: {
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientHeight: window.innerHeight,
+    },
+    element: el ? {
+      scrollTop: el.scrollTop,
+      scrollLeft: el.scrollLeft,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    } : null,
+  };
+"#,
+        &[
+            ("{SELECTOR}", js_optional_str(selector)),
+            (
+                "{TO}",
+                match to {
+                    Some(value) => js_str(value),
+                    None => "null".to_string(),
+                },
+            ),
+            ("{X}", number(x)),
+            ("{Y}", number(y)),
+            ("{DX}", number(dx)),
+            ("{DY}", number(dy)),
+        ],
+    ))
+}
+
+/// `webview_select`：按 value / label / 下标选中 `<select>` 的选项。
+///
+/// 选中后派发 `input` + `change`——受控组件只有收到事件才会同步内部状态，
+/// 只改 `selected` 会让 UI 与状态脱节。匹配不到时把现有选项带回去，
+/// 让调用方不必再发一次 `webview_query` 猜选项名。
+pub fn select_options(selector: &str, mode: &str, wanted: &Value) -> String {
+    as_sync_body(&render(
+        r#"
+  const SELECTOR = {SELECTOR};
+  const MODE = {MODE};
+  const WANTED = {WANTED};
+
+  const el = document.querySelector(SELECTOR);
+  if (!el) return { found: false, selector: SELECTOR };
+  if (el.tagName !== 'SELECT') {
+    return { found: true, selector: SELECTOR, reason: 'not-a-select', tag: el.tagName.toLowerCase() };
+  }
+
+  const options = Array.from(el.options);
+  const matches = (option) => {
+    if (MODE === 'value') return WANTED.includes(option.value);
+    if (MODE === 'label') return WANTED.includes(option.label.trim());
+    return WANTED.includes(option.index);
+  };
+  const matched = options.filter(matches).map((option) => ({
+    value: option.value, label: option.label, index: option.index,
+  }));
+  if (matched.length === 0) {
+    return {
+      found: true,
+      reason: 'no-matching-option',
+      wanted: WANTED,
+      available: options.slice(0, 50).map((option) => ({ value: option.value, label: option.label })),
+    };
+  }
+
+  if (!el.multiple) el.selectedIndex = -1;
+  for (const option of options) {
+    if (matches(option)) {
+      option.selected = true;
+      if (!el.multiple) break;
+    }
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+
+  return {
+    found: true,
+    multiple: el.multiple,
+    matched,
+    selectedValues: Array.from(el.selectedOptions).map((option) => option.value),
+    changed: true,
+  };
+"#,
+        &[
+            ("{SELECTOR}", js_str(selector)),
+            ("{MODE}", js_str(mode)),
+            ("{WANTED}", js_value(wanted)),
+        ],
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,11 +917,90 @@ mod tests {
     #[test]
     fn click_target_selector_is_escaped_not_interpolated() {
         // 选择器里带引号必须被转义，不能逃逸成 JS 代码。
-        let script = resolve_click_target("a[title=\"x\"]");
+        let script = resolve_pointer_target("a[title=\"x\"]");
         assert!(
             script.contains(r#"const SELECTOR = "a[title=\"x\"]";"#),
             "{script}"
         );
+    }
+
+    #[test]
+    fn wait_selector_probe_encodes_hidden_flag() {
+        let appear = wait_selector("#toast", false);
+        assert!(
+            appear.contains(r##"const SELECTOR = "#toast";"##),
+            "{appear}"
+        );
+        assert!(appear.contains("const HIDDEN = false;"));
+        let disappear = wait_selector("#toast", true);
+        assert!(disappear.contains("const HIDDEN = true;"));
+    }
+
+    #[test]
+    fn wait_condition_keeps_closing_paren_after_a_trailing_line_comment() {
+        // 与 as_async_expression 同一条纪律：注释不能吃掉 Boolean( 的闭合。
+        let script = wait_condition("x === 1 // only now");
+        let close = script.rfind(")").unwrap();
+        let comment = script.find("// only now").unwrap();
+        assert!(script[comment..close].contains('\n'), "{script}");
+    }
+
+    #[test]
+    fn wait_href_and_ready_probes_embed_their_inputs() {
+        let href = wait_href("/sessions/42");
+        assert!(
+            href.contains(r#"const FRAGMENT = "/sessions/42";"#),
+            "{href}"
+        );
+        assert!(href.contains("toLowerCase()"));
+        let ready = wait_ready();
+        assert!(
+            ready.contains("document.readyState === 'complete'"),
+            "{ready}"
+        );
+    }
+
+    #[test]
+    fn point_hit_reports_what_is_at_the_coordinates() {
+        let script = point_hit(12.5, 40.0);
+        assert!(script.contains("const X = 12.5;"), "{script}");
+        assert!(script.contains("const Y = 40;"), "{script}");
+        assert!(script.contains("elementFromPoint"));
+    }
+
+    #[test]
+    fn scroll_page_embeds_every_axis_and_optional_selector() {
+        let window_scroll = scroll_page(None, Some("bottom"), None, None, Some(-120.0), None);
+        assert!(
+            window_scroll.contains("const TO = \"bottom\";"),
+            "{window_scroll}"
+        );
+        assert!(window_scroll.contains("const DX = -120;"));
+        assert!(window_scroll.contains("const DY = null;"));
+        assert!(window_scroll.contains("const SELECTOR = null;"));
+
+        let element_scroll = scroll_page(Some(".list"), None, None, Some(300.0), None, None);
+        assert!(
+            element_scroll.contains(r#"const SELECTOR = ".list";"#),
+            "{element_scroll}"
+        );
+        assert!(element_scroll.contains("const Y = 300;"));
+    }
+
+    #[test]
+    fn select_options_embeds_mode_and_wanted_values() {
+        let by_value = select_options("#lang", "value", &json!(["zh-Hans", "en"]));
+        assert!(
+            by_value.contains(r##"const SELECTOR = "#lang";"##),
+            "{by_value}"
+        );
+        assert!(by_value.contains(r#"const MODE = "value";"#));
+        assert!(by_value.contains(r#"const WANTED = ["zh-Hans","en"];"#));
+        assert!(by_value.contains("dispatchEvent(new Event('change'"));
+
+        let by_index = select_options("#lang", "index", &json!([2]));
+        assert!(by_index.contains(r#"const MODE = "index";"#), "{by_index}");
+        assert!(by_index.contains("const WANTED = [2];"));
     }
 
     #[test]
@@ -777,7 +1077,7 @@ mod tests {
         let scripts = [
             dom_outline(Some("#a"), 2, 10, true, true),
             query_element("#a", &["color".to_string()]),
-            resolve_click_target("#a"),
+            resolve_pointer_target("#a"),
             focus_for_typing(Some("#a"), false),
             focus_for_typing(None, true),
             window_state("main"),
@@ -785,6 +1085,24 @@ mod tests {
             events_subscribe(&["e".to_string()], &json!({ "kind": "Any" }), 10, false),
             events_drain(None, 10, 10),
             events_drain(Some(1), 10, 10),
+            wait_selector("#a", false),
+            wait_selector("#a", true),
+            wait_condition("x === 1"),
+            wait_condition("location.hash === '#/done'"),
+            wait_href("/sessions/42"),
+            wait_ready(),
+            point_hit(1.5, 2.0),
+            scroll_page(None, None, None, None, None, None),
+            scroll_page(
+                Some(".list"),
+                Some("bottom"),
+                None,
+                None,
+                Some(-1.0),
+                Some(2.5),
+            ),
+            select_options("#lang", "value", &json!(["zh-Hans"])),
+            select_options("#lang", "index", &json!([0, 2])),
             as_async_expression("1 + 1", true),
         ];
         for script in scripts {

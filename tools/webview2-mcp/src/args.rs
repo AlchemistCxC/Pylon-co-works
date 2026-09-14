@@ -94,6 +94,33 @@ impl<'a> Args<'a> {
         Ok(self.u64(key)?.unwrap_or(default))
     }
 
+    /// 非负整数数组。同时接受单个数字，理由同 [`Args::str_list`]。
+    pub fn u64_list(&self, key: &str) -> Result<Vec<u64>> {
+        match self.get(key) {
+            None => Ok(Vec::new()),
+            Some(Value::Number(n)) => match n.as_u64() {
+                Some(value) => Ok(vec![value]),
+                None => self.type_error(key, "非负整数"),
+            },
+            Some(Value::Array(items)) => {
+                let mut out = Vec::with_capacity(items.len());
+                for (i, item) in items.iter().enumerate() {
+                    match item.as_u64() {
+                        Some(value) => out.push(value),
+                        None => {
+                            return Err(Error::bad_args(
+                                self.tool,
+                                format!("字段 `{key}[{i}]` 应为非负整数"),
+                            ))
+                        }
+                    }
+                }
+                Ok(out)
+            }
+            Some(_) => self.type_error(key, "非负整数或非负整数数组"),
+        }
+    }
+
     /// 字符串数组。同时接受单个字符串（`"error"` 与 `["error"]` 等价），
     /// 因为 LLM 经常在这两种写法间摇摆，为此报错只是浪费一轮。
     pub fn str_list(&self, key: &str) -> Result<Vec<String>> {
@@ -175,5 +202,16 @@ mod tests {
         let args = Args::new("tauri_events", &value);
         let error = args.str_list("events").unwrap_err();
         assert!(error.to_string().contains("events[1]"), "{error}");
+    }
+
+    #[test]
+    fn u64_list_accepts_bare_number_and_rejects_bad_items() {
+        let value = json!({ "index": 2, "multi": [0, 2], "bad": [0, "x"], "neg": -1 });
+        let args = Args::new("webview_select", &value);
+        assert_eq!(args.u64_list("index").unwrap(), vec![2]);
+        assert_eq!(args.u64_list("multi").unwrap(), vec![0, 2]);
+        let error = args.u64_list("bad").unwrap_err();
+        assert!(error.to_string().contains("bad[1]"), "{error}");
+        assert!(args.u64_list("neg").is_err());
     }
 }

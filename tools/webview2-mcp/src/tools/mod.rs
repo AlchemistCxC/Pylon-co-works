@@ -122,6 +122,10 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_click" => page::click(cx, args).await,
         "webview_type" => page::type_text(cx, args).await,
         "webview_key" => page::key(cx, args).await,
+        "webview_hover" => page::hover(cx, args).await,
+        "webview_scroll" => page::scroll(cx, args).await,
+        "webview_select" => page::select(cx, args).await,
+        "webview_wait" => page::wait(cx, args).await,
         "webview_navigate" => page::navigate(cx, args).await,
         "tauri_invoke" => host::invoke(cx, args).await,
         "tauri_events" => host::events(cx, args).await,
@@ -146,6 +150,7 @@ const KNOWN_TYPE_SPECS: &[&str] = &[
     "object",
     "string_array",
     "string_or_string_array",
+    "integer_or_array",
 ];
 
 /// 类型描述 → JSON Schema 片段。
@@ -164,6 +169,9 @@ fn type_schema(spec: &str) -> Value {
         "string_array" => json!({ "type": "array", "items": { "type": "string" } }),
         "string_or_string_array" => {
             json!({ "type": ["string", "array"], "items": { "type": "string" } })
+        }
+        "integer_or_array" => {
+            json!({ "type": ["integer", "array"], "items": { "type": "integer" } })
         }
         // 兜底成 string：未知描述由测试兜住，运行期不 panic。
         _ => json!({ "type": "string" }),
@@ -473,6 +481,110 @@ static TOOLS: &[ToolSpec] = &[
         required: &["key"],
     },
     ToolSpec {
+        name: "webview_hover",
+        description: "把鼠标悬停到元素或坐标上（只派发 mouseMoved），用于触发 hover 菜单、tooltip、悬浮高亮。selector 会先滚进视口再取中心点，并附带与 webview_click 相同的命中测试报告：hitIsSelfOrDescendant 为 false 即该点被遮挡，真实用户的悬停同样到不了目标。注意 hover 出现的浮层在鼠标移走后可能收起，需要连续操作时把后续动作紧跟在本工具之后。",
+        properties: &[
+            (
+                "selector",
+                "目标元素选择器。与 x/y 二选一；selector 会先 scrollIntoView 再取中心点。",
+                "string",
+            ),
+            ("x", "视口坐标 X（CSS 像素）。", "number"),
+            ("y", "视口坐标 Y（CSS 像素）。", "number"),
+            (
+                "settle_ms",
+                "悬停后等待多少毫秒再返回，给 hover 态反应时间，默认 60。",
+                "integer",
+            ),
+            ("target", TARGET_DOC, "string"),
+            ("timeout_ms", TIMEOUT_DOC, "integer"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
+        name: "webview_scroll",
+        description: "滚动页面或指定容器。selector 给定时滚动该元素内部（无其他参数时把元素滚进视口中央），否则滚动窗口。定位方式：to=top|bottom、绝对坐标 x/y、相对位移 dx/dy；全部省略时回页面顶部。返回滚动后 window / document / element 三个层面的位置，供后续断言滚动状态。",
+        properties: &[
+            (
+                "selector",
+                "滚动目标容器；省略则滚动窗口。仅给 selector 时将其滚进视口中央。",
+                "string",
+            ),
+            ("to", "滚到顶部或底部：top / bottom。", "enum:top|bottom"),
+            (
+                "x",
+                "绝对横向位置。窗口模式是 scrollTo 的 x；selector 模式是元素 scrollLeft。",
+                "number",
+            ),
+            (
+                "y",
+                "绝对纵向位置。窗口模式是 scrollTo 的 y；selector 模式是元素 scrollTop。",
+                "number",
+            ),
+            ("dx", "相对横向位移（scrollBy）。", "number"),
+            ("dy", "相对纵向位移（scrollBy）。", "number"),
+            ("target", TARGET_DOC, "string"),
+            ("timeout_ms", TIMEOUT_DOC, "integer"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
+        name: "webview_select",
+        description: "选中 <select> 的选项：value / label / 下标三种匹配方式恰好给一种（multiple 可给数组选多项），选中后派发 input 与 change 事件让受控组件同步状态。返回匹配到的 option 与选中后的 selectedValues，可直接确认这次选择是否真的生效。目标不是 select 元素时返回 reason=not-a-select；没有匹配项时返回 reason=no-matching-option 并带回现有选项列表。",
+        properties: &[
+            ("selector", "select 元素选择器。", "string"),
+            (
+                "value",
+                "按 option 的 value 全等匹配，可给数组（multiple 时选中多项）。",
+                "string_or_string_array",
+            ),
+            (
+                "label",
+                "按 option 显示文本（trim 后全等）匹配，可给数组。",
+                "string_or_string_array",
+            ),
+            ("index", "按 option 下标匹配，可给数组。", "integer_or_array"),
+            ("target", TARGET_DOC, "string"),
+            ("timeout_ms", TIMEOUT_DOC, "integer"),
+        ],
+        required: &["selector"],
+    },
+    ToolSpec {
+        name: "webview_wait",
+        description: "等页面满足条件后再继续：元素出现/消失（selector，配 hidden）、JS 条件为真（condition，按 Boolean 截断的表达式）、URL 含子串（href_contains）、或 readyState 到 complete（ready）。四种条件恰好给一种。这是动作之间的同步原语，替代「点击后盲等固定毫秒」的猜法。轮询 poll_ms（10-2000，默认 100），预算 timeout_ms（默认 10000，超时返回 satisfied=false 而不是报错；单次探针调用超时取预算与 5s 的较小者）。条件表达式抛异常会立即带回异常；导航造成的瞬时求值失败会继续轮询。",
+        properties: &[
+            (
+                "selector",
+                "等待该 CSS 选择器命中元素出现；配合 hidden=true 则等待其消失或不可见。",
+                "string",
+            ),
+            (
+                "hidden",
+                "仅 selector 条件有效。true 表示等待元素从 DOM 消失或变为不可见（checkVisibility，旧引擎退化为盒尺寸为零）。默认 false。",
+                "boolean",
+            ),
+            (
+                "condition",
+                "等待该 JS 表达式为真（是表达式不是函数，例如 location.hash === '#/done'）。",
+                "string",
+            ),
+            (
+                "href_contains",
+                "等待 location.href 包含该子串（大小写不敏感），适合等待路由切换。",
+                "string",
+            ),
+            ("ready", "等待 document.readyState 变为 complete。", "boolean"),
+            ("poll_ms", "轮询间隔毫秒，10-2000，默认 100。", "integer"),
+            (
+                "timeout_ms",
+                "等待预算毫秒，默认 10000。超时返回 satisfied=false，不算工具失败。",
+                "integer",
+            ),
+            ("target", TARGET_DOC, "string"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
         name: "webview_navigate",
         description: "导航、重载、前进后退。就绪判定用轮询 document.readyState，而不是依赖 Page.loadEventFired——后者对 SPA 路由切换根本不触发。",
         properties: &[
@@ -688,6 +800,11 @@ mod tests {
             type_schema("string_or_string_array")["type"],
             json!(["string", "array"])
         );
+        assert_eq!(type_schema("integer_or_array")["items"]["type"], "integer");
+        assert_eq!(
+            type_schema("integer_or_array")["type"],
+            json!(["integer", "array"])
+        );
     }
 
     #[test]
@@ -750,8 +867,8 @@ mod tests {
         }
         assert_eq!(
             TOOLS.len(),
-            18,
-            "工具数量变化时请同步更新 README 与 instructions"
+            22,
+            "工具数量变化时请同步更新 README、smoke 脚本与 instructions"
         );
     }
 }

@@ -39,10 +39,14 @@ const INSTRUCTIONS: &str = "\
 3. webview_network —— 请求/响应/失败三态合并成一条记录；要看响应体用 webview_network_body。
 4. webview_query / webview_dom —— 布局与样式。webview_query 给盒模型与计算样式。
 5. webview_screenshot —— 视觉确认；返回图片内容。
-6. webview_click / webview_type / webview_key —— 真实输入事件。webview_click 会报告 \
-hitIsSelfOrDescendant，为 false 说明目标被遮挡，这是「点了没反应」的常见成因。
-7. tauri_invoke —— 直接调后端命令（例如 list_runtime_logs 拿后端日志时间轴）。
-8. tauri_event_catalog → tauri_events —— 先扫出事件名，再显式订阅并读增量。
+6. webview_click / webview_type / webview_key / webview_hover / webview_select —— 真实输入事件。\
+webview_click / webview_hover 会报告 hitIsSelfOrDescendant，为 false 说明目标被遮挡，\
+这是「点了没反应」的常见成因。
+7. webview_wait —— 动作之间用它同步：等元素出现/消失、等条件为真、等 URL 或文档就绪，\
+不要用盲等固定毫秒代替。
+8. webview_scroll / webview_navigate —— 滚动容器或页面；导航与重载。
+9. tauri_invoke —— 直接调后端命令（例如 list_runtime_logs 拿后端日志时间轴）。
+10. tauri_event_catalog → tauri_events —— 先扫出事件名，再显式订阅并读增量。
    事件订阅必须给名字，无法全量旁路捕获（tauri 的 __TAURI_INTERNALS__.invoke 不可改写）。
 
 多窗口时用 target 参数指定目标 id（支持前缀匹配）。所有工具都接受 timeout_ms。";
