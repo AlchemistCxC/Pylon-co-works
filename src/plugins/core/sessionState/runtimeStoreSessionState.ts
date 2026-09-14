@@ -37,11 +37,12 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
     // an ACP config option, so retaining its selected value keeps the selector
     // aligned after restart without creating a second message authority.
     // P56/D3.3：modelChoices（id/label 分离真源）与 models（id 投影）同写。
-    if (cfg.models || reasoning.thinkingEffort) {
+    if (cfg.models || reasoning.thinkingEffort || reasoning.reasoning) {
       useRuntimeStore.getState().setSessionConfig(ctx, {
         ...(cfg.models ? { models: cfg.models } : {}),
         ...(cfg.modelChoices ? { modelChoices: cfg.modelChoices } : {}),
         ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
+        ...(reasoning.reasoning ? { reasoning: reasoning.reasoning } : {}),
       })
     }
   },
@@ -84,10 +85,11 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
         if (Array.isArray(upd.configOptions)) {
           const cfg = extractModelConfig(upd.configOptions)
           const reasoning = extractReasoningConfig(upd.configOptions)
-          if (cfg.model || cfg.models || reasoning.thinkingEffort) {
+          if (cfg.model || cfg.models || reasoning.thinkingEffort || reasoning.reasoning) {
             useRuntimeStore.getState().setSessionConfig(ctx, {
               ...cfg,
               ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
+              ...(reasoning.reasoning ? { reasoning: reasoning.reasoning } : {}),
               raw: upd.configOptions,
             })
           }

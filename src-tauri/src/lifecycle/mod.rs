@@ -1610,31 +1610,10 @@ sys.exit(7)
     async fn update_agents_config_write_failure_keeps_memory_and_disk_unchanged() {
         // 施工文档 §2.1 必测失败链：目标文件可读但 backup replace 失败
         // → 主文件与内存 registry 都不变。
-        struct EnvGuard(Option<std::ffi::OsString>);
-        impl EnvGuard {
-            fn set(key: &str, value: &std::path::Path) -> Self {
-                let previous = std::env::var_os(key);
-                std::env::set_var(key, value.as_os_str());
-                Self(previous)
-            }
-        }
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                match &self.0 {
-                    Some(value) => std::env::set_var("PYLON_AGENTS_CONFIG", value),
-                    None => std::env::remove_var("PYLON_AGENTS_CONFIG"),
-                }
-            }
-        }
-
-        let dir = std::env::temp_dir().join(format!(
-            "pylon-config-write-fail-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
-        ));
+        // P91 批 C1（横切 §4）：配置路径经 update_agents_config_via 参数注入，
+        // 不再 set_var/remove_var 进程全局 PYLON_AGENTS_CONFIG（原 EnvGuard 是
+        // 进程级 env 变异，与并行测试竞态）。
+        let dir = crate::test_utils::unique_temp("config-write-fail");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("agents.yaml");
         let original =
@@ -1644,7 +1623,6 @@ sys.exit(7)
         std::fs::create_dir_all(&backup_blocker).unwrap();
         let revision = crate::agent_config::config_revision_for_bytes(original.as_bytes());
 
-        let _guard = EnvGuard::set("PYLON_AGENTS_CONFIG", &path);
         let agent = crate::test_utils::fake_acp_agent("keep", "print('x')");
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("keep")
@@ -1655,12 +1633,13 @@ sys.exit(7)
             .expect("mock app must build");
         app.manage(state);
 
-        let result = update_agents_config(
+        let result = config_cmds::update_agents_config_via(
             app.state::<AppState>(),
             "agent".to_string(),
             Some("keep".to_string()),
             serde_json::json!("name: Renamed\n  transport: subprocess\n  exe: keep-agent\n"),
             Some(revision),
+            Some(path.clone()),
         )
         .await;
         assert!(result.is_err(), "写盘失败必须返回错误");

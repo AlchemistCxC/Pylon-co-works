@@ -87,7 +87,7 @@ describe('SolidToolCard', () => {
       appearance={TOOL_APPEARANCE}
     />)
     await fireEvent.click(result.getByRole('button'))
-    expect(result.container.querySelector('.term-diff-card')).not.toBeNull()
+    expect(result.container.querySelector('[data-diff-card]')).not.toBeNull()
     expect(result.container.textContent).toContain('1 additions · 1 deletions')
   })
 })
@@ -97,8 +97,8 @@ describe('SolidDiffCard', () => {
     const result = render(() => <SolidDiffCard
       output={JSON.stringify({ oldText: 'const mode = "react"', newText: 'const mode = "solid"' })}
     />)
-    expect(result.container.querySelector('.term-diff-word-removed')).not.toBeNull()
-    expect(result.container.querySelector('.term-diff-word-added')).not.toBeNull()
+    expect(result.container.querySelector('[data-diff-word="removed"]')).not.toBeNull()
+    expect(result.container.querySelector('[data-diff-word="added"]')).not.toBeNull()
     const button = result.getByRole('button', { name: /变更预览/ })
     await fireEvent.click(button)
     expect(button.getAttribute('aria-expanded')).toBe('false')

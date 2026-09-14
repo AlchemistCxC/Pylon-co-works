@@ -1,0 +1,60 @@
+/* workspace 包自适应残量（样式绞杀地基 20260914，lifecycle=adaptive）：
+   只收 utilities 不宜表达的规则（mode 切换等）；?inline 随插件生命周期挂载回收。
+   history-* 类名是锚点（HistorySheetView 保留）。 */
+.app[data-interface-mode="modern-gui"] .history-sidebar-total,
+.app[data-interface-mode="modern-gui"] .history-sidebar nav button,
+.app[data-interface-mode="modern-gui"] .history-row,
+.app[data-interface-mode="modern-gui"] .history-sheet .template-apply { border-radius: 10px; }
+.app[data-interface-mode="modern-gui"] .history-row {
+  margin-bottom: 7px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+.app[data-interface-mode="modern-gui"] .search-sidebar-scope,
+.app[data-interface-mode="modern-gui"] .search-sidebar-action,
+.app[data-interface-mode="modern-gui"] .search-sheet-input { border-radius: 10px; }
+.app[data-interface-mode="modern-gui"] .search-result-row {
+  margin-bottom: 7px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 4%, transparent);
+}
+.app[data-interface-mode="modern-gui"] .search-result-row:hover { border-left-color: var(--accent); }
+
+/* browser-* 类名是锚点（BrowserSheetView 保留）。
+   adaptive.css 在 glob 序中先于 sheets/ 注入，同特异性会输给 FileSheet 基座；
+   browser-error 需压过 file-tree-error 的外边距，故升为后代选择器（0,2,0）。 */
+.browser-main .browser-error { position: relative; flex: 0 0 auto; margin: 0; }
+
+/* Modern GUI 只改变材质，不改变浏览器视图的主区比例。 */
+.app[data-interface-mode="modern-gui"] .browser-toolbar {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 6px 8px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 5%, transparent);
+}
+.app[data-interface-mode="modern-gui"] .browser-tab-strip { border-radius: 8px 8px 0 0; margin-inline: 8px; }
+.app[data-interface-mode="modern-gui"] .browser-viewport { margin: 0 8px 8px; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 26px color-mix(in srgb, var(--text) 6%, transparent); }
+
+/* runtime-* 类名是锚点（RuntimeSheetView 保留）：mode 变量覆写与 tactical-blue 材质。
+   （原 modern-gui 规则中 .runtime-log-item 无 JSX 消费方，系死锚点，未迁移。） */
+.app[data-interface-mode="tactical-blue"] .runtime-sheet { background: #05132ba6; --danger: #ff9bab; --warning: #ffda83; --tool-ok: #77e4b6; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar { background: #091b37ed; border-right: 1px solid #74c4fa55; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-head { border-left: 3px solid #76e8ff; padding-left: 16px; }
+.app[data-interface-mode="tactical-blue"] .runtime-sidebar-title { font-size: 22px; font-weight: 800; }
+.app[data-interface-mode="tactical-blue"] .runtime-main { background: #07172bcc; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-list { background: #091931e8; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row { min-height: 44px; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-row[aria-expanded="true"] { background: #164276; }
+.app[data-interface-mode="tactical-blue"] .runtime-log-error { color: #ff9bab; }
+.app[data-interface-mode="tactical-blue"] :is(.runtime-filter-input, .runtime-filter-select) { background: #071329; border-color: #527ea5; border-radius: 2px; }
+
+.app[data-interface-mode="modern-gui"] .runtime-filter-select,
+.app[data-interface-mode="modern-gui"] .runtime-filter-input,
+.app[data-interface-mode="modern-gui"] .runtime-clear { border-radius: 9px; }
+.app[data-interface-mode="modern-gui"] .runtime-diagnostics,
+.app[data-interface-mode="modern-gui"] .runtime-markers { border-radius: 12px; }

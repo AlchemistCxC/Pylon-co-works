@@ -1,17 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 import type { Session } from '../../../identityStore.ts'
 import { createAgentWorkbenchSession } from '../../../sheets/agent-workbench/agentWorkbenchSessionCreation.ts'
 import { AgentWorkbenchLifecycle } from '../../../sheets/agent-workbench/agentWorkbenchLifecycle.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
 
 const mocks = vi.hoisted(() => ({
-  identity: vi.fn(), runtime: vi.fn(), preflight: vi.fn(), invoke: vi.fn(),
+  identity: vi.fn(), runtime: vi.fn(), preflight: vi.fn(),
   hook: vi.fn(), boundary: vi.fn(), apply: vi.fn(), report: vi.fn(),
 }))
+
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve undefined（对齐 mockReset 后 vi.fn 的默认行为） */
+class TolerantFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return undefined
+      throw error
+    })
+  }
+}
 vi.mock('../../../identityStore.ts', () => ({ useIdentityStore: { getState: mocks.identity } }))
 vi.mock('../../../runtimeStore.ts', () => ({ useRuntimeStore: { getState: mocks.runtime } }))
 vi.mock('../../../workspaceEntityStore.ts', () => ({ useWorkspaceEntityStore: { getState: () => ({ workspaces: [] }) } }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({ runSessionPreflight: mocks.preflight }))
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({ getHookRuntime: () => ({ invoke: mocks.hook }) }))
 vi.mock('../../../application/transactions/sessionHookTransactions.ts', () => ({ runSessionBoundaryHook: mocks.boundary }))
@@ -45,14 +62,18 @@ function create(path: Path, signal = new AbortController().signal, isCurrent = (
   return new AgentWorkbenchLifecycle().activate(session, { isCurrent })
 }
 
+let fakeInvoke: TolerantFakeInvoke
+
 beforeEach(() => {
   vi.clearAllMocks()
+  fakeInvoke = new TolerantFakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   identity.profiles = [profile]
   mocks.identity.mockReturnValue(identity)
   mocks.runtime.mockReturnValue(runtime)
   mocks.hook.mockImplementation(async (_phase, event) => ({ action: 'continue', event }))
   mocks.preflight.mockResolvedValue({ mcpServers: [{ name: 'mcp' }] })
-  mocks.invoke.mockResolvedValue({ sessionId: 'remote', configOptions: [] })
+  fakeInvoke.register('new_session', () => ({ sessionId: 'remote', configOptions: [] }))
 })
 
 describe.each(paths)('%s session creation contract', path => {
@@ -61,14 +82,18 @@ describe.each(paths)('%s session creation contract', path => {
     mocks.preflight.mockReturnValue(gate.promise)
     const pending = create(path)
     await vi.waitFor(() => expect(mocks.preflight).toHaveBeenCalledTimes(1))
-    expect(mocks.invoke).not.toHaveBeenCalled()
+    expect(fakeInvoke.calls).toHaveLength(0)
     expect(identity.setSessionPeriId).not.toHaveBeenCalled()
     gate.resolve({ mcpServers: [{ name: 'mcp' }] })
     await pending
-    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('new_session', {
-      agentId: 'owner', profileId: 'profile', source: 'local:source',
-      cwd: '/workspace', workspaceId: 'workspace', persona: 'persona', model: 'model',
-      mcpServers: [{ name: 'mcp' }],
+    expect(fakeInvoke.calls).toHaveLength(1)
+    expect(fakeInvoke.calls[0]).toEqual({
+      cmd: 'new_session',
+      args: {
+        agentId: 'owner', profileId: 'profile', source: 'local:source',
+        cwd: '/workspace', workspaceId: 'workspace', persona: 'persona', model: 'model',
+        mcpServers: [{ name: 'mcp' }],
+      },
     })
     expect(identity.setSessionPeriId).toHaveBeenCalledExactlyOnceWith('local-id', 'remote')
     if (path !== 'cli') expect(runtime.setBindingGeneration).toHaveBeenCalledWith({ agentId: 'owner', source: 'local:source' }, 7)
@@ -81,16 +106,19 @@ describe.each(paths)('%s session creation contract', path => {
       return { mcpServers: [] }
     })
     await create(path)
-    expect(mocks.invoke).toHaveBeenCalledWith('new_session', expect.objectContaining({
-      persona: 'persona', model: path === 'recovery' ? 'changed-model' : 'model',
-    }))
-    expect(mocks.invoke.mock.calls[0][1]).not.toHaveProperty('mcpServers')
+    expect(fakeInvoke.calls).toContainEqual({
+      cmd: 'new_session',
+      args: expect.objectContaining({
+        persona: 'persona', model: path === 'recovery' ? 'changed-model' : 'model',
+      }),
+    })
+    expect(fakeInvoke.calls[0]!.args).not.toHaveProperty('mcpServers')
   })
 
   it.each(['preflight', 'remote'] as const)('%s failure preserves the entry-specific rollback policy', async stage => {
     const error = new Error(`${stage} failed`)
     if (stage === 'preflight') mocks.preflight.mockRejectedValue(error)
-    else mocks.invoke.mockRejectedValue(error)
+    else fakeInvoke.register('new_session', () => { throw error })
     const pending = create(path)
     if (path === 'recovery') {
       await pending
@@ -101,7 +129,7 @@ describe.each(paths)('%s session creation contract', path => {
       expect(identity.removeSession).toHaveBeenCalledExactlyOnceWith('local-id')
     }
     expect(identity.setSessionPeriId).not.toHaveBeenCalled()
-    if (stage === 'preflight') expect(mocks.invoke).not.toHaveBeenCalled()
+    if (stage === 'preflight') expect(fakeInvoke.calls).toHaveLength(0)
   })
 })
 
@@ -110,7 +138,10 @@ it('workbench preserves explicit model/reasoning/mode and projection-before-bind
   await createAgentWorkbenchSession({ model: 'selected', reasoningLevel: 'high', mode: 'plan' }, {
     agentId: 'owner', workspaceMode: 'chat', applySessionResponse: project,
   })
-  expect(mocks.invoke).toHaveBeenCalledWith('new_session', expect.objectContaining({ model: 'selected', reasoningLevel: 'high', mode: 'plan' }))
+  expect(fakeInvoke.calls).toContainEqual({
+    cmd: 'new_session',
+    args: expect.objectContaining({ model: 'selected', reasoningLevel: 'high', mode: 'plan' }),
+  })
   expect(project).toHaveBeenCalledWith('local-id', expect.objectContaining({ sessionId: 'remote' }))
   expect(project.mock.invocationCallOrder[0]).toBeLessThan(runtime.setBindingGeneration.mock.invocationCallOrder[0])
 })
@@ -118,7 +149,7 @@ it('workbench preserves explicit model/reasoning/mode and projection-before-bind
 it('CLI cancellation after a remote response rolls back without committing it', async () => {
   const controller = new AbortController()
   const reason = new Error('cancelled')
-  mocks.invoke.mockImplementation(async () => { controller.abort(reason); return 'remote-string' })
+  fakeInvoke.register('new_session', () => { controller.abort(reason); return 'remote-string' })
   await expect(create('cli', controller.signal)).rejects.toBe(reason)
   expect(mocks.preflight).toHaveBeenCalledWith(session, controller.signal)
   expect(identity.removeSession).toHaveBeenCalledWith('local-id')
@@ -128,7 +159,7 @@ it('CLI cancellation after a remote response rolls back without committing it', 
 
 it('recovery ignores a late response after the visible session changes', async () => {
   let current = true
-  mocks.invoke.mockImplementation(async () => { current = false; return { sessionId: 'late' } })
+  fakeInvoke.register('new_session', () => { current = false; return { sessionId: 'late' } })
   await create('recovery', undefined, () => current)
   expect(identity.setSessionPeriId).not.toHaveBeenCalled()
   expect(mocks.apply).not.toHaveBeenCalled()

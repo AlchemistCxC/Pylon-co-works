@@ -110,3 +110,121 @@ describe('statusLabel — 全状态文案', () => {
     expect(statusLabel(status)).toBe(label)
   })
 })
+
+// ── 迁移自 scripts/test-agent-contracts.mts（P91 A1）P2-01 段：capabilities 原始字段透传——normalize 只搬运不解释，不丢未知键 ──
+describe('normalizeAgentStatus — capabilities 透传矩阵（P2-01，迁移自 scripts/test-agent-contracts.mts，P91 A1）', () => {
+  it('capabilities 为对象：内容深相等透传（含嵌套未知键），不断言对象引用相等', () => {
+    const caps = {
+      promptImage: false,
+      sessionClose: true,
+      mcp: { http: true, sse: false },
+      fork: null,
+      extraUnknownKey: { nested: [1, 2, 3] },
+    }
+    const withCaps = normalizeAgentStatus({ agentId: 'peri', status: 'connected', capabilities: caps }, 'fallback')
+    expect(withCaps.capabilities).toEqual(caps)
+    expect(withCaps.agentId).toBe('peri')
+    expect(withCaps.status).toBe('connected')
+    expect(withCaps.agent).toBe('fallback')
+  })
+
+  it('capabilities 为 null（断线信号）：原样透传为 null，不得丢弃或替换为 {}', () => {
+    expect(normalizeAgentStatus({ agentId: 'peri', status: 'disconnected', capabilities: null }).capabilities).toBeNull()
+  })
+
+  it('capabilities 缺失：结果为 undefined，不得凭空造默认值', () => {
+    expect(normalizeAgentStatus({ agentId: 'peri', status: 'connected' }).capabilities).toBeUndefined()
+  })
+
+  it('未知 status 且携带 capabilities：status 归 error 并带诊断，capabilities 仍透传不丢', () => {
+    const unknownStatus = normalizeAgentStatus({ agentId: 'peri', status: 'weird-status', capabilities: { promptImage: true } }, 'peri')
+    expect(unknownStatus.status).toBe('error')
+    expect(unknownStatus.recentError || '').toMatch(/未知 Agent 状态/)
+    expect(unknownStatus.capabilities).toEqual({ promptImage: true })
+  })
+
+  it('crashed 派生路径同样保留 capabilities', () => {
+    expect(normalizeAgentStatus({ agentId: 'peri', crashed: true, capabilities: null }).status).toBe('crashed')
+    expect(normalizeAgentStatus({ agentId: 'peri', crashed: true, capabilities: null }).capabilities).toBeNull()
+  })
+
+  it('既有字段行为不回归：transport/cwd/error/generation/lastConnectedAt 照常搬运', () => {
+    const enriched = normalizeAgentStatus(
+      { agentId: 'prism', agent: 'Prism', status: 'connected', transport: 'stdio', cwd: '/tmp', error: 'boom', generation: 3, lastConnectedAt: 99, capabilities: { promptImage: true } },
+      'peri',
+    )
+    expect(enriched.agent).toBe('Prism')
+    expect(enriched.transport).toBe('stdio')
+    expect(enriched.cwd).toBe('/tmp')
+    expect(enriched.recentError).toBe('boom')
+    expect(enriched.generation).toBe(3)
+    expect(enriched.lastConnectedAt).toBe(99)
+    expect(enriched.capabilities).toEqual({ promptImage: true })
+  })
+})
+
+// ── 迁移自 scripts/test-agent-unknown-status.mts（P91 A1）：先查重后仅补既有矩阵未覆盖的断言
+//（status 归一化、paused 诊断、selector unknown/inactive 已由上方矩阵覆盖，不再重复）。──
+describe('normalizeAgentStatus — 未知状态安全处理补遗（迁移自 scripts/test-agent-unknown-status.mts，P91 A1）', () => {
+  it('缺失 status：payload.agent 透传，不落 fallback', () => {
+    const missingStatus = normalizeAgentStatus({ agent: 'missing-status' }, 'peri')
+    expect(missingStatus.agent).toBe('missing-status')
+  })
+
+  it('legacy crashed：payload.agent 透传且无诊断', () => {
+    const legacyCrashed = normalizeAgentStatus({ agent: 'legacy-crashed', crashed: true }, 'peri')
+    expect(legacyCrashed.agent).toBe('legacy-crashed')
+    expect(legacyCrashed.recentError).toBeUndefined()
+  })
+
+  it('非法显式 status：payload.agent 透传且不假绿', () => {
+    const unknownExplicitStatus = normalizeAgentStatus({ agent: 'unknown-status', status: 'paused' }, 'peri')
+    expect(unknownExplicitStatus.agent).toBe('unknown-status')
+  })
+
+  it('非法 status 且带上游 error：status 归 error（不假绿），诊断优先透传上游 error', () => {
+    const unknownStatusWithDiagnostic = normalizeAgentStatus({
+      agent: 'unknown-with-error',
+      status: 'future-status',
+      error: '上游返回了未识别状态',
+    }, 'peri')
+    expect(unknownStatusWithDiagnostic.status).toBe('error')
+    expect(unknownStatusWithDiagnostic.status).not.toBe('connected')
+    expect(unknownStatusWithDiagnostic.recentError).toBe('上游返回了未识别状态')
+  })
+
+  it('payload 缺 agent：回填 fallbackAgent，诊断携带原始 status', () => {
+    const fallbackAgentStatus = normalizeAgentStatus({ status: 'mystery' }, 'peri')
+    expect(fallbackAgentStatus.agent).toBe('peri')
+    expect(fallbackAgentStatus.status).toBe('error')
+    expect(fallbackAgentStatus.recentError || '').toMatch(/未知 Agent 状态：mystery/)
+  })
+})
+
+// ── 迁移自 scripts/test-agent-status-transaction.mts（P91 A1）：normalize/statusLabel 纯函数断言
+//（App/Settings/runtimeStore 源码 include 段按处置不迁；重连事务部分见 agentState.test.ts）。──
+describe('normalizeAgentStatus/statusLabel — transaction 矩阵（迁移自 scripts/test-agent-status-transaction.mts，P91 A1）', () => {
+  it('状态归一：crashed/reconnecting/connecting/inactive 透传；connected 优先于 crashed；unknown 归 error 带诊断', () => {
+    expect(normalizeAgentStatus({ crashed: true }, 'peri').status).toBe('crashed')
+    expect(normalizeAgentStatus({ status: 'reconnecting' }, 'peri').status).toBe('reconnecting')
+    expect(normalizeAgentStatus({ status: 'connecting' }, 'peri').status).toBe('connecting')
+    expect(normalizeAgentStatus({ status: 'inactive' }, 'peri').status).toBe('inactive')
+    expect(normalizeAgentStatus({ status: 'unknown' }, 'peri').status).toBe('error')
+    expect(normalizeAgentStatus({ status: 'unknown' }, 'peri').recentError || '').toMatch(/未知 Agent 状态/)
+    expect(normalizeAgentStatus({ status: 'connected', crashed: true }, 'peri').status).toBe('connected')
+  })
+
+  it('enriched 字段照常搬运', () => {
+    const enriched = normalizeAgentStatus({ agentId: 'prism', agent: 'Prism', status: 'connected', generation: 7, lastConnectedAt: 1234 }, 'peri')
+    expect(enriched.agentId).toBe('prism')
+    expect(enriched.agent).toBe('Prism')
+    expect(enriched.generation).toBe(7)
+    expect(enriched.lastConnectedAt).toBe(1234)
+  })
+
+  it('statusLabel 文案', () => {
+    expect(statusLabel('connecting')).toBe('连接中')
+    expect(statusLabel('inactive')).toBe('未激活')
+    expect(statusLabel('reconnecting')).toBe('重连中')
+  })
+})

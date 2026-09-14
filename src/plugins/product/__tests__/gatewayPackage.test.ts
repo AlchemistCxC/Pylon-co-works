@@ -54,14 +54,15 @@ describe('seventh first-party package (builtin.pylon-gateway, P77)', () => {
 
     const mounted = document.querySelectorAll<HTMLElement>('style[data-pylon-plugin-style="builtin.pylon-gateway"]')
     expect(mounted.length).toBe(1)
-    expect(mounted[0]!.dataset.pylonPluginStylePath).toContain('GatewaySheet.css')
+    // 53bc4d56 gateway 绞杀后包内样式收敛为 adaptive 残量层（原 GatewaySheet.css 已删）。
+    expect(mounted[0]!.dataset.pylonPluginStylePath).toContain('adaptive.css')
     expect(scopeAdds.length).toBe(1)
   })
 
   it('style loader yields exactly the gateway sheet asset', () => {
     const assets = loadBuiltinPylonGatewayStyles()
     expect(assets).toHaveLength(1)
-    expect(assets[0]!.path).toContain('GatewaySheet.css')
+    expect(assets[0]!.path).toContain('adaptive.css')
     // vitest 默认 css:false 时 `?inline` 内容为空串——内容注入属构建管线，不在此断言。
     expect(typeof assets[0]!.css).toBe('string')
   })

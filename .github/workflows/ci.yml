@@ -24,7 +24,7 @@ jobs:
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
 
-      # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
+      # ISSUE-20 W1：统一入口——lint + vitest（P91 A5：legacy spawn 套件已全部退役，vitest 单轨）+ 覆盖率 + tsc/build
       - name: 统一前端门禁（check:frontend）
         run: bun run check:frontend
 
@@ -68,6 +68,17 @@ jobs:
       # CI runner 上不可复现——跳过；本地 check:all 保持全量。
       - name: Rust 测试与构建（check:rust）
         run: cd src-tauri && cargo test --lib -- --skip b11_inject_integration_tests --skip obs03_evidence_tests --skip p1_wire_regression_tests && cargo build
+
+      # P91 B1：fmt 门禁——4 个 manifest 分别 --check（无 [workspace] 不可 --all，与 clippy
+      # 4-crate 同形态）；本地等价命令在 package.json 的 check:rust 链尾。
+      - name: fmt（4 crate --check）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          cargo fmt --manifest-path src-tauri/pylon-core/Cargo.toml --check
+          cargo fmt --manifest-path src-tauri/pylon-foundations/Cargo.toml --check
+          cargo fmt --manifest-path src-tauri/pet-core/Cargo.toml --check
 
       # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
       # 依赖刚构建的 test 二进制与 spawn fake agent 回环，故放在 Rust job（不是前端 job）。

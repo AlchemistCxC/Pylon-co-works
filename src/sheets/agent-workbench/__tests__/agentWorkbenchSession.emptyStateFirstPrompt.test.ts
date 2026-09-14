@@ -94,6 +94,44 @@ describe('empty-state first prompt publishes the terminal summary without a rebi
     service.destroy()
   })
 
+  it('publishes the display-only summary when the terminal frame lands before bind', async () => {
+    const feed = getCanonicalEventFeed()
+    const active = session('session-empty-terminal-first', 'local:empty-terminal-first')
+    const service = createAgentWorkbenchSessionRuntime({
+      // 终帧先到、journal 随后落盘：bind 读到的 journal 已含终态行。
+      loadAll: async () => [
+        canonicalRow(1, 'user_message_chunk', active.source, { content: { type: 'text', text: '首条消息' } }),
+        canonicalRow(2, 'done', active.source),
+      ],
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: () => active,
+        nextClientMessageId: () => 'client-terminal-first-1',
+        sendMessage: async () => {},
+        optimisticUser: () => {},
+        rejectOptimisticUser: () => {},
+        resolvePersona: () => 'default',
+        requestCancel: () => {},
+      },
+    })
+
+    // 空态发送（尚未 bind）⇒ 终帧抢先到达（此刻 source 还不是已绑定的会话）。
+    const sent = await service.commands.send(active.id, { text: '首条消息' })
+    expect(sent.status).toBe('sent')
+    await feed.acceptFrame({ event: 'pylon:done', payload: { source: active.source } })
+
+    // bind 完成后摘要仍必须出现（走 displayOnly 兜底，不依赖重挂载）。
+    await service.bind(active)
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating).toBe(false)
+    expect(snapshot.summary).toMatchObject({
+      reason: 'done',
+      displayOnly: true,
+      elapsedMs: 1000,
+    })
+    service.destroy()
+  })
+
   it('a rejected empty-state send does not resurrect a stuck indicator after bind', async () => {
     const active = session('session-empty-rejected', 'local:empty-rejected')
     const service = createAgentWorkbenchSessionRuntime({

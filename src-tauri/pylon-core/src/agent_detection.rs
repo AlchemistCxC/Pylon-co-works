@@ -625,6 +625,141 @@ fn provider_evidence(
     }
 }
 
+/// 候选排序元组：产出、身份合并与排序三步共用（候选本体 / rule.priority / 身份可信度 /
+/// alias 序号 / 是否在 PATH 外 / 规范化路径键 / 原始来源标记）。
+type RankedCandidate = (
+    AgentRuntimeCandidate,
+    i32,
+    IdentityConfidence,
+    usize,
+    bool,
+    String,
+    String,
+);
+
+fn identity_rank(confidence: IdentityConfidence) -> u8 {
+    match confidence {
+        IdentityConfidence::Exact => 0,
+        IdentityConfidence::High => 1,
+        IdentityConfidence::Medium => 2,
+        IdentityConfidence::Low => 3,
+    }
+}
+
+/// 已测试过的 ACP 握手是最强证据；未测试次之（未知）；握手失败最弱。
+fn protocol_rank(availability: ProtocolAvailability) -> u8 {
+    match availability {
+        ProtocolAvailability::Verified => 0,
+        ProtocolAvailability::NotTested => 1,
+        ProtocolAvailability::Failed => 2,
+    }
+}
+
+fn startability_rank(startability: Startability) -> u8 {
+    match startability {
+        Startability::Verified => 0,
+        Startability::NotTested => 1,
+        Startability::Failed => 2,
+    }
+}
+
+/// 证据强度序（小者强）：身份可信度 → ACP 可用性 → 可启动性 → 既有稳定序
+/// （rule.priority / alias 序号 / PATH 内优先 / 路径键 / args）。与调用方排序同源，
+/// 保证合并结果确定且与既有候选排序口径一致。
+fn compare_candidate_strength(
+    left: &RankedCandidate,
+    right: &RankedCandidate,
+) -> std::cmp::Ordering {
+    identity_rank(left.2)
+        .cmp(&identity_rank(right.2))
+        .then(
+            protocol_rank(left.0.protocol_availability)
+                .cmp(&protocol_rank(right.0.protocol_availability)),
+        )
+        .then(startability_rank(left.0.startability).cmp(&startability_rank(right.0.startability)))
+        .then(right.1.cmp(&left.1))
+        .then(left.3.cmp(&right.3))
+        .then(left.4.cmp(&right.4))
+        .then(left.5.cmp(&right.5))
+        .then(left.0.args.cmp(&right.0.args))
+}
+
+fn candidate_version(candidate: &AgentRuntimeCandidate) -> Option<String> {
+    candidate
+        .evidence
+        .iter()
+        .find(|item| item.kind == "version")
+        .map(|item| item.detail.clone())
+}
+
+/// issue #67B（Codeg 口径）：同一 agent 的多重证据合并为**一条**候选。
+///
+/// 身份由 `detector_id` / provider 决定，与安装路径无关（Codeg `registry.rs::registry_id_for`）；
+/// vendor CLI 与 ACP 适配器是同一 agent 的两个证据面（`acp_adapter_relation`），不是两个实例。
+///
+/// 合并取最强证据作代表，但被折叠的形式**不静默丢弃**：写入 `evidence`
+/// （kind=`folded-runtime`）与 `warnings`，并在版本不一致时显式告警；已导入的变体优先
+/// 当代表，否则"已导入"会在合并后丢失并诱导重复导入。
+fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<RankedCandidate> {
+    let mut groups: Vec<(String, Vec<RankedCandidate>)> = Vec::new();
+    for entry in ranked {
+        let identity = entry.0.detector_id.clone();
+        match groups.iter_mut().find(|(key, _)| *key == identity) {
+            Some((_, bucket)) => bucket.push(entry),
+            None => groups.push((identity, vec![entry])),
+        }
+    }
+    let mut merged = Vec::with_capacity(groups.len());
+    for (_, mut bucket) in groups {
+        if bucket.len() == 1 {
+            if let Some(entry) = bucket.pop() {
+                merged.push(entry)
+            }
+            continue;
+        }
+        bucket.sort_by(compare_candidate_strength);
+        let winner_index = bucket
+            .iter()
+            .position(|entry| entry.0.already_imported_agent_id.is_some())
+            .unwrap_or(0);
+        let mut winner = bucket.remove(winner_index);
+        let winner_version = candidate_version(&winner.0);
+        for variant in bucket {
+            let variant_version = candidate_version(&variant.0);
+            if let (Some(winner_version), Some(variant_version)) =
+                (&winner_version, &variant_version)
+            {
+                if winner_version != variant_version {
+                    winner.0.warnings.push(format!(
+                        "同一 Agent 的多个安装版本不一致：{winner_version} / {variant_version}"
+                    ));
+                }
+            }
+            winner.0.warnings.push(format!(
+                "同一 Agent 另有可执行形式：{} {}（未采用为导入目标）",
+                variant.0.executable,
+                variant.0.args.join(" ")
+            ));
+            winner.0.evidence.push(AgentDetectionEvidence {
+                kind: "folded-runtime".into(),
+                detail: format!(
+                    "{} {} · 来源 {} · alias #{} · 版本 {}",
+                    variant.0.executable,
+                    variant.0.args.join(" "),
+                    variant.6,
+                    variant.3,
+                    variant_version.unwrap_or_else(|| "未知".into())
+                ),
+            });
+            if winner.0.already_imported_agent_id.is_none() {
+                winner.0.already_imported_agent_id = variant.0.already_imported_agent_id.clone();
+            }
+        }
+        merged.push(winner);
+    }
+    merged
+}
+
 fn dedup_roots(roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     roots
@@ -1411,12 +1546,35 @@ pub async fn detect_agent_runtime_candidates_inner(
         let source = located.source;
         let key = path_key(&path);
         let candidate_args = located.args;
-        let imported = configured
+        // issue #67B：导入侧同口径——“已导入”按 **provider 身份** 判定，不再要求 exe/args
+        // 逐字相等。否则同一 agent 换一种启动形式（不同 invocation / 不同安装路径）会被显示
+        // 成"未导入"，前端随后把 id 追加 -2 后缀，重复导入由此发生（探测侧的去重必须与
+        // 导入侧的判定同一口径，issue #67B 明确要求两侧都做）。
+        // 多命中时取 id 字典序最小者，保证候选字段与提示文本稳定。
+        let imported_exact = configured
             .iter()
             .find(|(_, (provider, executable, args))| {
                 provider == &rule.provider && executable == &key && args == &candidate_args
             })
             .map(|(id, _)| id.clone());
+        let imported_provider = imported_exact.clone().or_else(|| {
+            let mut same_provider: Vec<&String> = configured
+                .iter()
+                .filter(|(_, (provider, _, _))| provider == &rule.provider)
+                .map(|(id, _)| id)
+                .collect();
+            same_provider.sort();
+            same_provider.first().map(|id| (*id).clone())
+        });
+        let imported_form_hint = match (&imported_exact, &imported_provider) {
+            (None, Some(id)) => Some(format!(
+                "已存在同 provider 的 agent 配置 {}；当前候选使用不同可执行形式（{} {}）",
+                id,
+                path.to_string_lossy(),
+                candidate_args.join(" ")
+            )),
+            _ => None,
+        };
         let mut evidence = located.evidence;
         evidence.extend(config);
         let structured_config_match = evidence.iter().any(|item| item.kind == "config-fields");
@@ -1444,7 +1602,7 @@ pub async fn detect_agent_runtime_candidates_inner(
             identity_confidence,
             startability,
             protocol_availability: ProtocolAvailability::NotTested,
-            already_imported_agent_id: imported,
+            already_imported_agent_id: imported_provider,
             warnings: {
                 let mut warnings = located.warnings;
                 if source != "path" {
@@ -1457,6 +1615,9 @@ pub async fn detect_agent_runtime_candidates_inner(
                 } else if version.is_none() {
                     warnings.push("未能读取版本；导入前建议执行 ACP initialize 验证".into())
                 }
+                if let Some(hint) = imported_form_hint {
+                    warnings.push(hint)
+                }
                 warnings
             },
         };
@@ -1467,8 +1628,12 @@ pub async fn detect_agent_runtime_candidates_inner(
             alias_index,
             source != "path",
             key,
+            source,
         ));
     }
+    // issue #67B：身份级合并必须在排序与截断**之前**——否则同一 agent 的多条证据会各自
+    // 占用 max_candidates 预算，并各自展开一条导入流（重复导入的直接诱因）。
+    let mut ranked_candidates = merge_candidates_by_identity(ranked_candidates);
     fn confidence_rank(confidence: IdentityConfidence) -> u8 {
         match confidence {
             IdentityConfidence::Exact => 0,
@@ -1756,6 +1921,39 @@ mod tests {
         ))
     }
 
+    /// P91 批 C1（横切 §3）：fixture 根目录 RAII 守卫——断言失败 panic / 提前
+    /// return 也清理（旧式测试尾部手工 remove_dir_all 在失败路径泄漏目录）。
+    /// 经 Deref 透明使用：`root.join(..)` / `&root` / `root.clone()` 语义与原
+    /// PathBuf 一致（clone 走解歧到 PathBuf，不再克隆守卫）。
+    struct FixtureRoot(PathBuf);
+
+    impl FixtureRoot {
+        fn new(label: &str) -> Self {
+            Self(fixture_root(label))
+        }
+    }
+
+    impl Drop for FixtureRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for FixtureRoot {
+        type Target = PathBuf;
+
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    // fs::create_dir_all(&root) 等 AsRef<Path> 泛型边界不走路由解强制转换，需显式实现。
+    impl AsRef<Path> for FixtureRoot {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
     /// 写入一个名为 `command` 的假可执行文件；`version` 为 `None` 时以非零退出，
     /// 模拟「存在但读不出」（与 `make_hanging_executable` 同一夹具手法）。
     fn plant_version_tool(root: &Path, command: &str, version: Option<&str>) {
@@ -1833,7 +2031,7 @@ mod tests {
     /// 三态是关键：存在→Known、存在但读不出→Unknown（不是违规）、不存在→Absent。
     #[tokio::test]
     async fn runtime_tool_probe_maps_known_unknown_and_absent() {
-        let root = fixture_root("tool-probe");
+        let root = FixtureRoot::new("tool-probe");
         std::fs::create_dir_all(&root).unwrap();
 
         // 1）存在且可读 → Known
@@ -1891,8 +2089,6 @@ mod tests {
             0,
             "工具探针不得创建任何文件/目录"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1973,7 +2169,7 @@ mod tests {
 
     #[test]
     fn structured_config_evidence_reports_field_names_without_values() {
-        let root = fixture_root("config");
+        let root = FixtureRoot::new("config");
         let home = root.join("home");
         let config_dir = home.join(".hermes");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -1998,13 +2194,11 @@ mod tests {
         assert!(!structured.detail.contains("private-provider"));
         assert!(!structured.detail.contains("private-model"));
         assert!(!structured.detail.contains("super-secret"));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn all_installed_invocation_aliases_are_discovered() {
-        let root = fixture_root("aliases");
+        let root = FixtureRoot::new("aliases");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2014,17 +2208,16 @@ mod tests {
             .find(|rule| rule.provider == "hermes")
             .unwrap();
 
-        let found = find_rule(&rule, Some(std::slice::from_ref(&root)));
+        let found = find_rule(&rule, Some(std::slice::from_ref(&*root)));
 
         assert_eq!(found.len(), 2, "首个 alias 不得遮蔽后续已安装 alias");
         assert_eq!(found[0].args, ["acp"]);
         assert!(found[1].args.is_empty());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn standalone_entry_uses_the_same_structured_evidence_engine() {
-        let root = fixture_root("standalone");
+        let root = FixtureRoot::new("standalone");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".hermes")).unwrap();
@@ -2056,15 +2249,13 @@ mod tests {
             .evidence
             .iter()
             .any(|item| item.kind == "config-fields"));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A1 验收：wrapper provider 的 ACP 与原生 CLI 证据分开展开，且即使 ACP
     /// 候选缺失也会产出 provider 级证据（这是 `adapterMissing` 可观察的前提）。
     #[tokio::test]
     async fn wrapper_evidence_separates_acp_from_native_cli() {
-        let root = fixture_root("adapter-relation");
+        let root = FixtureRoot::new("adapter-relation");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
@@ -2101,14 +2292,12 @@ mod tests {
             Some("claude")
         );
         assert!(evidence.shared_config_present);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// 非 wrapper provider 不探测第二 CLI，也不报共享配置目录存在。
     #[tokio::test]
     async fn native_acp_provider_has_no_second_cli_evidence() {
-        let root = fixture_root("native-evidence");
+        let root = FixtureRoot::new("native-evidence");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(&home).unwrap();
@@ -2133,14 +2322,12 @@ mod tests {
         assert!(!evidence.shared_config_present);
         assert_eq!(evidence.acp_commands.len(), 1);
         assert_eq!(evidence.acp_commands[0].kind, "acp-command");
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A1 零安装副作用：探测只读，不创建目录。
     #[tokio::test]
     async fn evidence_scan_has_no_install_side_effects() {
-        let root = fixture_root("no-side-effects");
+        let root = FixtureRoot::new("no-side-effects");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(&home).unwrap();
@@ -2159,15 +2346,13 @@ mod tests {
         assert!(!home.join(".claude").exists());
         assert_eq!(std::fs::read_dir(&home).unwrap().count(), before);
         assert_eq!(std::fs::read_dir(&search).unwrap().count(), 0);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A5①：codex 的 wrapper 双证据。本机真实状态是「vendor CLI 在、ACP 适配器
     /// 不在」（`codex` 已装、`codex-acp` 未装），必须产出可行动的 `adapterMissing`。
     #[tokio::test]
     async fn codex_wrapper_reports_adapter_missing_with_native_cli_present() {
-        let root = fixture_root("codex-adapter-missing");
+        let root = FixtureRoot::new("codex-adapter-missing");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".codex")).unwrap();
@@ -2218,8 +2403,6 @@ mod tests {
         assert!(adapter.native_present);
         assert!(!adapter.acp_present);
         assert!(adapter.shared_config_present);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -2243,7 +2426,7 @@ mod tests {
 
     #[tokio::test]
     async fn discovery_reports_identity_separately_from_protocol_availability() {
-        let root = fixture_root("identity-protocol");
+        let root = FixtureRoot::new("identity-protocol");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2257,22 +2440,302 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(report.candidates.len(), 2);
-        assert_ne!(
-            report.candidates[0].candidate_id, report.candidates[1].candidate_id,
-            "不同 invocation 必须有不同稳定 id"
+        // issue #67B 契约变更（原断言：两种 invocation → 两条候选、候选 id 互不相同）：
+        // 同一 agent 的多种证据（hermes acp / hermes-acp）是**同一身份**的证据面，
+        // 必须折叠为一条候选；被折叠形式保留在 evidence + warnings 中，不得静默丢掉。
+        assert_eq!(
+            report.candidates.len(),
+            1,
+            "同一 detector 的多重证据必须合并为一条候选"
         );
-        assert!(report.candidates.iter().all(|candidate| {
-            candidate.identity_confidence == IdentityConfidence::Medium
-                && candidate.startability == Startability::Failed
-                && candidate.protocol_availability == ProtocolAvailability::NotTested
-        }));
-        std::fs::remove_dir_all(root).unwrap();
+        let candidate = &report.candidates[0];
+        assert_eq!(candidate.provider, "hermes");
+        assert_eq!(candidate.args, ["acp"], "代表取既有稳定序的更优形式");
+        assert!(
+            candidate
+                .evidence
+                .iter()
+                .any(|evidence| evidence.kind == "folded-runtime"
+                    && evidence.detail.contains("hermes-acp")),
+            "被折叠形式必须以 folded-runtime 证据留痕"
+        );
+        assert!(
+            candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("同一 Agent 另有可执行形式")),
+            "合并必须显式告警，而不是静默丢弃一条真实安装"
+        );
+        // 原意图保留：身份可信度 / 启动性 / 协议可用性三个维度仍分别上报。
+        assert_eq!(candidate.identity_confidence, IdentityConfidence::Medium);
+        assert_eq!(candidate.startability, Startability::Failed);
+        assert_eq!(
+            candidate.protocol_availability,
+            ProtocolAvailability::NotTested
+        );
+    }
+
+    /// issue #67B：同一 invocation 在多个安装位置命中（PATH 与 known-path / 多个搜索根）
+    /// 也是同一 agent 的多重证据，必须折叠；折叠后仍能看出存在第二处安装。
+    #[tokio::test]
+    async fn same_agent_found_in_multiple_roots_folds_into_one_candidate() {
+        let root = FixtureRoot::new("identity-multi-root");
+        let first = root.join("bin-a");
+        let second = root.join("bin-b");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(second.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec!["builtin.detector.hermes".into()]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![first.clone(), second.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(report.candidates.len(), 1, "同一 agent 的两处安装必须合并");
+        let candidate = &report.candidates[0];
+        let folded: Vec<&AgentDetectionEvidence> = candidate
+            .evidence
+            .iter()
+            .filter(|evidence| evidence.kind == "folded-runtime")
+            .collect();
+        assert_eq!(
+            folded.len(),
+            1,
+            "另一处安装必须留下一条 folded-runtime 证据"
+        );
+        assert!(
+            folded[0].detail.contains("bin-b") || folded[0].detail.contains("bin-a"),
+            "折叠证据必须写明被折叠的可执行文件路径：{}",
+            folded[0].detail
+        );
+        assert_eq!(candidate.already_imported_agent_id, None);
+    }
+
+    /// issue #67B：身份键包含 provider——不同 agent 的多重证据**永不**互相合并。
+    #[tokio::test]
+    async fn different_providers_are_never_merged() {
+        let root = FixtureRoot::new("identity-cross-provider");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("peri")[0]), b"fixture").unwrap();
+
+        let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+            detector_ids: Some(vec![
+                "builtin.detector.hermes".into(),
+                "builtin.detector.peri".into(),
+            ]),
+            home_dir: Some(root.join("home")),
+            search_roots: Some(vec![root.clone()]),
+            ..AgentDetectionOptions::default()
+        })
+        .await
+        .unwrap();
+
+        let mut providers: Vec<&str> = report
+            .candidates
+            .iter()
+            .map(|candidate| candidate.provider.as_str())
+            .collect();
+        providers.sort();
+        assert_eq!(
+            providers,
+            vec!["hermes", "peri"],
+            "跨 provider 的候选绝不合并"
+        );
+    }
+
+    /// issue #67B：导入侧判定改用 provider 身份——已配置的 agent 即使使用另一种启动形式
+    /// 也必须被认出来（否则界面显示"未导入"并诱导重复导入），且已导入变体优先当代表。
+    #[tokio::test]
+    async fn configured_agent_matches_by_provider_identity_across_launch_forms() {
+        let root = FixtureRoot::new("identity-imported-form");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
+        std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
+
+        // 已配置的 agent 采用 hermes-acp 形式（alias_index 更靠后 → 默认不是代表）。
+        let mut configured: ConfiguredRuntimes = HashMap::new();
+        configured.insert(
+            "hermes-existing".to_string(),
+            (
+                "hermes".to_string(),
+                path_key(&root.join(&executable_names("hermes-acp")[0])),
+                Vec::new(),
+            ),
+        );
+
+        let report = detect_agent_runtime_candidates_inner(
+            AgentDetectionOptions {
+                detector_ids: Some(vec!["builtin.detector.hermes".into()]),
+                home_dir: Some(root.join("home")),
+                search_roots: Some(vec![root.clone()]),
+                ..AgentDetectionOptions::default()
+            },
+            &configured,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.candidates.len(), 1);
+        let candidate = &report.candidates[0];
+        assert_eq!(
+            candidate.already_imported_agent_id.as_deref(),
+            Some("hermes-existing"),
+            "同 provider 的既有配置必须被认出来"
+        );
+        assert_eq!(
+            candidate.args,
+            ["acp"],
+            "provider 身份回退让同一 provider 的所有变体都属于已导入，代表仍取既有稳定序的更优形式"
+        );
+        assert!(
+            candidate
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("同一 Agent 另有可执行形式")),
+            "合并后的代表与折叠形式必须都有留痕"
+        );
+    }
+
+    fn synthetic_candidate(
+        detector_id: &str,
+        provider: &str,
+        executable: &str,
+        args: &[&str],
+        alias_index: usize,
+        imported: Option<&str>,
+        version: Option<&str>,
+    ) -> RankedCandidate {
+        let mut evidence = vec![AgentDetectionEvidence {
+            kind: "path".into(),
+            detail: executable.into(),
+        }];
+        if let Some(version) = version {
+            evidence.push(AgentDetectionEvidence {
+                kind: "version".into(),
+                detail: version.into(),
+            });
+        }
+        (
+            AgentRuntimeCandidate {
+                candidate_id: format!("{provider}:{executable}:{}", args.join("_")),
+                detector_id: detector_id.into(),
+                provider: provider.into(),
+                suggested_agent_id: provider.into(),
+                name: provider.into(),
+                executable: executable.into(),
+                args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                evidence,
+                identity_confidence: IdentityConfidence::Medium,
+                startability: Startability::NotTested,
+                protocol_availability: ProtocolAvailability::NotTested,
+                already_imported_agent_id: imported.map(str::to_string),
+                warnings: Vec::new(),
+            },
+            100,
+            IdentityConfidence::Medium,
+            alias_index,
+            false,
+            executable.into(),
+            "path".into(),
+        )
+    }
+
+    /// 合并规则（纯函数层）：已导入变体优先当代表（否则"已导入"会在合并后丢失）；
+    /// 版本不一致必须显式告警；被折叠形式逐条写入 evidence 与 warnings。
+    #[test]
+    fn merge_prefers_the_imported_variant_and_warns_on_version_conflict() {
+        let merged = merge_candidates_by_identity(vec![
+            synthetic_candidate(
+                "d",
+                "hermes",
+                "C:/a/hermes",
+                &["acp"],
+                0,
+                None,
+                Some("1.0.0"),
+            ),
+            synthetic_candidate(
+                "d",
+                "hermes",
+                "C:/b/hermes-acp",
+                &[],
+                1,
+                Some("hermes-existing"),
+                Some("2.0.0"),
+            ),
+        ]);
+        assert_eq!(merged.len(), 1, "同一 detector 必须合并");
+        let candidate = &merged[0];
+        assert_eq!(
+            candidate.0.already_imported_agent_id.as_deref(),
+            Some("hermes-existing")
+        );
+        assert_eq!(
+            candidate.0.executable, "C:/b/hermes-acp",
+            "已导入变体必须成为代表"
+        );
+        assert!(
+            candidate
+                .0
+                .evidence
+                .iter()
+                .any(|evidence| evidence.kind == "folded-runtime"
+                    && evidence.detail.contains("C:/a/hermes")),
+            "折叠形式必须留证"
+        );
+        assert!(
+            candidate
+                .0
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("版本不一致")
+                    && warning.contains("1.0.0")
+                    && warning.contains("2.0.0")),
+            "版本冲突必须显式告警"
+        );
+        assert!(candidate
+            .0
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("同一 Agent 另有可执行形式")));
+    }
+
+    /// 身份键含 detector/provider：不同 agent 的候选绝不互相合并（防御路径）。
+    #[test]
+    fn merge_never_collapses_different_detectors() {
+        let merged = merge_candidates_by_identity(vec![
+            synthetic_candidate(
+                "builtin.detector.hermes",
+                "hermes",
+                "C:/a/hermes",
+                &["acp"],
+                0,
+                None,
+                None,
+            ),
+            synthetic_candidate(
+                "builtin.detector.peri",
+                "peri",
+                "C:/a/peri",
+                &[],
+                0,
+                None,
+                None,
+            ),
+        ]);
+        assert_eq!(merged.len(), 2, "跨 detector 的候选绝不合并");
     }
 
     #[tokio::test]
     async fn candidate_limit_is_stable_and_explicitly_truncated() {
-        let root = fixture_root("candidate-limit");
+        let root = FixtureRoot::new("candidate-limit");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(&executable_names("hermes")[0]), b"fixture").unwrap();
         std::fs::write(root.join(&executable_names("hermes-acp")[0]), b"fixture").unwrap();
@@ -2296,12 +2759,11 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "candidate_limit_reached"));
         assert_eq!(report.candidates[0].args, ["acp"]);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn exact_name_lookup_reaches_search_roots_after_the_sixteenth_entry() {
-        let root = fixture_root("root-limit");
+        let root = FixtureRoot::new("root-limit");
         let roots = (0..17)
             .map(|index| root.join(format!("bin-{index}")))
             .collect::<Vec<_>>();
@@ -2332,12 +2794,11 @@ mod tests {
             roots[16].join(&executable_names("peri")[0]),
         );
         assert!(!report.truncated, "精确文件名检查不应被搜索目录数量截断");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn version_probe_uses_catalog_arguments_and_standard_default() {
-        let root = fixture_root("version-args");
+        let root = FixtureRoot::new("version-args");
         std::fs::create_dir_all(&root).unwrap();
         #[cfg(windows)]
         let (executable, args) = {
@@ -2371,7 +2832,6 @@ mod tests {
             assert_eq!(invalid.startability, Startability::Failed);
             assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
         }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// C1：失败也必须进缓存，而且缓存是**按 key** 而不是全局「记住最后一次」。
@@ -2384,7 +2844,7 @@ mod tests {
     /// 既避开带空格的路径，也让两个夹具能各自独立计数。
     #[tokio::test]
     async fn a_failed_version_probe_is_cached_like_a_successful_one() {
-        let root = fixture_root("probe-failure-cache");
+        let root = FixtureRoot::new("probe-failure-cache");
         let failing_dir = root.join("failing");
         let working_dir = root.join("working");
         std::fs::create_dir_all(&failing_dir).unwrap();
@@ -2434,8 +2894,6 @@ mod tests {
             2,
             "缓存必须按 (路径, 参数, mtime) 分键，不得互相驱逐"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// 安置一个每次运行都向自身目录的 `count.txt` 追加一行的探针夹具。
@@ -2476,7 +2934,7 @@ mod tests {
     /// 侧各自**不同**的来源词汇（候选区分 path/known-path，证据只报 known-path）。
     #[tokio::test]
     async fn candidate_and_evidence_scans_agree_on_what_exists() {
-        let root = fixture_root("scan-agreement");
+        let root = FixtureRoot::new("scan-agreement");
         let on_path = root.join("on-path");
         let off_path = root.join("off-path");
         std::fs::create_dir_all(&on_path).unwrap();
@@ -2547,13 +3005,11 @@ mod tests {
             peri.warnings.iter().any(|w| w.contains("不在当前 PATH")),
             "候选侧必须保留 off-PATH 警告"
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn version_probe_timeout_is_bounded_and_visible() {
-        let root = fixture_root("probe-timeout");
+        let root = FixtureRoot::new("probe-timeout");
         std::fs::create_dir_all(&root).unwrap();
         make_hanging_executable(&root, "peri");
 
@@ -2577,7 +3033,6 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
         assert_eq!(report.candidates[0].startability, Startability::Failed);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2615,7 +3070,7 @@ mod tests {
             GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
-        let root = fixture_root("probe-tree");
+        let root = FixtureRoot::new("probe-tree");
         std::fs::create_dir_all(&root).unwrap();
         let pid_file = root.join("child.pid");
         let escaped_pid_file = pid_file.to_string_lossy().replace("'", "''");
@@ -2659,24 +3114,23 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     // ── B0：DetectionSnapshot 组装、缓存策略与快照级 fixture ──
 
     #[test]
     fn search_roots_fingerprint_tracks_the_controlled_roots() {
-        let left = fixture_root("fingerprint-left");
-        let right = fixture_root("fingerprint-right");
+        let left = FixtureRoot::new("fingerprint-left");
+        let right = FixtureRoot::new("fingerprint-right");
         std::fs::create_dir_all(&left).unwrap();
         std::fs::create_dir_all(&right).unwrap();
 
-        let a = search_roots_fingerprint(Some(std::slice::from_ref(&left)));
+        let a = search_roots_fingerprint(Some(std::slice::from_ref(&*left)));
         let b = search_roots_fingerprint(Some(&[left.clone(), right.clone()]));
         let reordered = search_roots_fingerprint(Some(&[right.clone(), left.clone()]));
         assert_eq!(
             a,
-            search_roots_fingerprint(Some(std::slice::from_ref(&left))),
+            search_roots_fingerprint(Some(std::slice::from_ref(&*left))),
             "同 roots 必须同指纹"
         );
         assert_ne!(a, b, "roots 集合不同必须产生不同指纹");
@@ -2684,9 +3138,6 @@ mod tests {
             b, reordered,
             "顺序影响候选优先级，顺序不同的搜索不是同一搜索"
         );
-
-        std::fs::remove_dir_all(left).unwrap();
-        std::fs::remove_dir_all(right).unwrap();
     }
 
     #[test]
@@ -2759,7 +3210,7 @@ mod tests {
     /// preflight 结论为 notInstalled（裸机不会被报成更具体的状态）。
     #[tokio::test]
     async fn snapshot_fixture_machine_with_nothing_installed() {
-        let root = fixture_root("snapshot-empty");
+        let root = FixtureRoot::new("snapshot-empty");
         let home = root.join("home");
         std::fs::create_dir_all(&home).unwrap();
 
@@ -2792,15 +3243,13 @@ mod tests {
             DetectionOutcome::classify(&Ok(snapshot.report.clone())),
             DetectionOutcome::Success
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：版本超时——探针超时是 retryable 诊断，快照 outcome 必须是
     /// Unknown（degraded），不是 Success。
     #[tokio::test]
     async fn snapshot_fixture_version_timeout_is_degraded() {
-        let root = fixture_root("snapshot-timeout");
+        let root = FixtureRoot::new("snapshot-timeout");
         std::fs::create_dir_all(&root).unwrap();
         make_hanging_executable(&root, "peri");
 
@@ -2825,15 +3274,13 @@ mod tests {
             DetectionOutcome::classify(&Ok(snapshot.report.clone())),
             DetectionOutcome::Unknown
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：PATH 缺口——候选在搜索 roots 内但不在进程 PATH 上，快照必须
     /// 保留该警告（导入会保存绝对路径这一事实不可丢失）。
     #[tokio::test]
     async fn snapshot_fixture_off_path_candidate_keeps_warning() {
-        let root = fixture_root("snapshot-path-gap");
+        let root = FixtureRoot::new("snapshot-path-gap");
         std::fs::create_dir_all(&root).unwrap();
         plant_version_tool(&root, "peri", Some("1.0.0"));
 
@@ -2868,8 +3315,6 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("不在当前 PATH")));
         }
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：wrapper/native 双证据 + 版本门槛——`ccb` 与 `claude` 同时在
@@ -2877,7 +3322,7 @@ mod tests {
     /// installed 收尾（版本 0.75.1 高于 0.65.0 门槛）。
     #[tokio::test]
     async fn snapshot_fixture_wrapper_dual_evidence_installs() {
-        let root = fixture_root("snapshot-dual");
+        let root = FixtureRoot::new("snapshot-dual");
         let home = root.join("home");
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
@@ -2929,15 +3374,13 @@ mod tests {
             .adapter
             .as_ref()
             .is_some_and(|adapter| adapter.native_present && adapter.acp_present));
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：配置仅存在——共享配置目录在、可执行文件不在，preflight 必须
     /// 报 configOnly 而不是 notInstalled。
     #[tokio::test]
     async fn snapshot_fixture_config_only_without_executables() {
-        let root = fixture_root("snapshot-config-only");
+        let root = FixtureRoot::new("snapshot-config-only");
         let home = root.join("home");
         let search = root.join("bin");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
@@ -2960,15 +3403,13 @@ mod tests {
             verdict.status,
             crate::agent_preflight::PreflightStatus::ConfigOnly
         );
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// B0 fixture：路径不可访问——搜索 root 指向一个普通文件（无法当目录枚举），
     /// 扫描不得 panic、不得整报失败，只是该 root 无候选。
     #[tokio::test]
     async fn snapshot_fixture_inaccessible_root_is_not_an_error() {
-        let root = fixture_root("snapshot-inaccessible");
+        let root = FixtureRoot::new("snapshot-inaccessible");
         std::fs::create_dir_all(&root).unwrap();
         let not_a_dir = root.join("blocker.txt");
         std::fs::write(&not_a_dir, b"this is a regular file").unwrap();
@@ -2985,7 +3426,5 @@ mod tests {
         assert!(report.candidates.is_empty());
         let snapshot = assemble_detection_snapshot(report, 7, Some(&[not_a_dir]));
         assert_eq!(snapshot.report.candidates.len(), 0);
-
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

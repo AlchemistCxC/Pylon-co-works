@@ -136,3 +136,23 @@ describe('ACP chat contract extraction', () => {
     expect(extractMachineIdString({ current: { name: 'wrapped display' } })).toBeUndefined()
   })
 })
+
+// 迁移自 scripts/test-acp-types.mts（P91 A1）；源文件的正则结构守卫段不迁（类型已由 tsc 锁定）。
+describe('sessionResponseObject camelCase/legacy 兼容（迁移自 scripts/test-acp-types.mts，P91 A1）', () => {
+  it('接受 camelCase 载荷与裸 sessionId 字符串，透传 model/mode 提取', () => {
+    const response = sessionResponseObject({
+      sessionId: 'peri-a',
+      modes: { currentModeId: 'edit' },
+      configOptions: [{ id: 'model', currentValue: 'sonnet', options: [{ id: 'sonnet' }, { id: 'opus' }] }],
+    })
+    expect(response.sessionId).toBe('peri-a')
+    expect(extractModelConfig(response.configOptions)).toEqual({
+      model: 'sonnet',
+      models: ['sonnet', 'opus'],
+      modelChoices: [{ id: 'sonnet' }, { id: 'opus' }],
+    })
+    expect(extractMode(response)).toBe('edit')
+    expect(sessionResponseObject('legacy-id')).toEqual({ sessionId: 'legacy-id' })
+    expect(extractModelConfig(undefined)).toEqual({})
+  })
+})

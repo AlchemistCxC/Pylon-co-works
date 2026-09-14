@@ -8,8 +8,27 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import HistorySheetView from '../HistorySheetView'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve({})) }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
+}))
+
+/** 未注册命令 resolve {}（对齐原内联 mock `vi.fn(() => Promise.resolve({}))` 的宽松路径） */
+class PermissiveFakeInvoke extends FakeInvoke {
+  override invoke(cmd: string, args?: unknown): Promise<unknown> {
+    return super.invoke(cmd, args).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('Command not found')) return {}
+      throw error
+    })
+  }
+}
+
+invokeRef.current = (cmd, args) => new PermissiveFakeInvoke().invoke(cmd, args)
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn() }))
 vi.mock('../../../infrastructure/acp/sessionClient', () => ({
   createSessionClient: () => ({

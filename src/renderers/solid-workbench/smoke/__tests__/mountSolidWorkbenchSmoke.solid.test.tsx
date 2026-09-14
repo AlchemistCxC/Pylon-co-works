@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@solidjs/testing-library'
+import { screen } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mountSolidWorkbenchSmoke } from '../mountSolidWorkbenchSmoke.solid.tsx'
 
@@ -25,11 +25,5 @@ describe('mountSolidWorkbenchSmoke', () => {
     lifecycle.destroy()
     lifecycle.destroy()
     expect(host.childElementCount).toBe(0)
-  })
-
-  it('testing-library 能渲染隔离的 Solid JSX', () => {
-    const result = render(() => <div data-testid="solid-direct">Solid direct</div>)
-    expect(screen.getByTestId('solid-direct').textContent).toBe('Solid direct')
-    result.unmount()
   })
 })

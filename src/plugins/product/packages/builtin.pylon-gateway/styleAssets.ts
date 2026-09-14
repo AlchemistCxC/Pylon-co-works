@@ -3,7 +3,7 @@ import type { FirstPartyStyleAsset } from '../../firstPartyStyleRuntime.ts'
 const styleModules = typeof document === 'undefined'
   ? {}
   : import.meta.glob<string>([
-  './styles/sheets/gateway/GatewaySheet.css',
+  './styles/adaptive.css',
 ], { query: '?inline', import: 'default', eager: true })
 
 export function loadBuiltinPylonGatewayStyles(): readonly FirstPartyStyleAsset[] {

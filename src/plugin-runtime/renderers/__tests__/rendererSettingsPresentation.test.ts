@@ -3,7 +3,6 @@ import {
   DISPLAY_DEFAULTS,
   isSettingVisible,
   resolvePresentation,
-  validateRendererSettingsSchema,
   type RenderSettingField,
 } from '../rendererSettingsTypes.ts'
 import { resolveFieldOptions } from '../renderAppearanceResolver.ts'
@@ -53,24 +52,5 @@ describe('S1 resolvePresentation 两层解析', () => {
   })
 })
 
-describe('S1 presentation 可选化校验', () => {
-  it('validate 接受未声明 presentation 的字段（未声明合法，运行时由默认补齐）', () => {
-    const schema = {
-      schemaVersion: 1,
-      groups: [{ id: 'g', label: '组', fields: [
-        { key: 'scale', label: '缩放', type: 'number', min: 0, max: 10, default: 1 },
-      ] }],
-    }
-    expect(() => validateRendererSettingsSchema(schema as never)).not.toThrow()
-  })
-
-  it('声明了非法 presentation 仍然报错（条件校验语义不变）', () => {
-    const schema = {
-      schemaVersion: 1,
-      groups: [{ id: 'g', label: '组', fields: [
-        { key: 'style', label: '风格', type: 'choice', presentation: 'magic', options: [{ value: 'a' }] },
-      ] }],
-    }
-    expect(() => validateRendererSettingsSchema(schema as never)).toThrow(/presentation 非法|choice presentation 非法/)
-  })
-})
+// presentation 可选化校验例（validate 接受未声明 / 拒绝非法 presentation）已并入
+// rendererSettingsSchema.test.ts 的 schema 校验组。

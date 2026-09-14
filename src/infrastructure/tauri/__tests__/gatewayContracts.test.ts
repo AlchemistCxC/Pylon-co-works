@@ -8,7 +8,7 @@
  * instanceId 会让「normalize 后整体回写」静默清空所有实例绑定（ISSUE-12 问题 1）。
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeGatewayStatus, type GatewayRoute } from '../gatewayContracts'
+import { normalizeGatewayStatus, classifyGatewayWriteError, type GatewayRoute } from '../gatewayContracts'
 
 const FULL_WIRE_ROUTE = {
   source: 'qq:group:123',
@@ -69,5 +69,24 @@ describe('normalizeGatewayStatus route strict fixture（I12 W6）', () => {
     expect(normalizeGatewayStatus({ adapters: [], routes: [], qq: null, inject: null, unboundPolicy: 'active-agent' }).unboundPolicy).toBe('active-agent')
     expect(normalizeGatewayStatus({ adapters: [], routes: [], qq: null, inject: null, unboundPolicy: 'silent' }).unboundPolicy).toBeUndefined()
     expect(normalizeGatewayStatus({ adapters: [], routes: [], qq: null, inject: null }).unboundPolicy).toBeUndefined()
+  })
+})
+
+// 迁移自 scripts/test-gateway-sheet.mts（P91 A1）——W3-02 写回错误分类
+describe('classifyGatewayWriteError 写回错误分类', () => {
+  it('命令缺失（not found）→ blocked（待后端）', () => {
+    expect(classifyGatewayWriteError(new Error('Command not found: update_agents_config'))).toEqual({ kind: 'blocked' })
+  })
+
+  it('锁中毒（snake_case token）→ lock-poisoned', () => {
+    expect(classifyGatewayWriteError('gateway_config_lock_poisoned')).toEqual({ kind: 'lock-poisoned' })
+  })
+
+  it('锁中毒（中文文案）→ lock-poisoned', () => {
+    expect(classifyGatewayWriteError('锁中毒')).toEqual({ kind: 'lock-poisoned' })
+  })
+
+  it('其余错误 → error 且保留原始 message', () => {
+    expect(classifyGatewayWriteError(new Error('protocol_error'))).toEqual({ kind: 'error', message: 'protocol_error' })
   })
 })

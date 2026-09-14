@@ -12,7 +12,18 @@ import { resolvePermissionButtons } from '../domains/permission/permissionButton
  * options[] 按 wire 顺序动态生成按钮，optionId 原样回传 controller.choose
  * （D15——不硬编码 Peri/Hermes 按钮集）；answering 禁用全部按钮防双击。
  * P1 结构化 diff 未落地前仅展示 prompt，不阻塞审批（后续增强）。
+ *
+ * 样式绞杀（P93）：原 PermissionDialog.css 的 utility 化；--settings-* 为
+ * Settings 域供给的 token，color-mix 遮罩为存量值原样平移。
  */
+const OVERLAY = 'fixed inset-0 z-[200] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]'
+const DIALOG = 'min-w-[320px] max-w-[480px] p-4 border border-border rounded-none bg-[var(--settings-surface)] shadow-[var(--settings-shadow)] text-text font-[family-name:var(--font)]'
+const TITLE = 'font-semibold text-md mb-2'
+const META = 'font-mono text-[11px] text-text-dim mb-2 break-all'
+const PROMPT = 'text-[13px] text-text bg-bg-input border border-border rounded-none px-2.5 py-2 mb-3 max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words'
+const OPTIONS = 'flex flex-wrap gap-2'
+const BTN = 'flex-[1_1_auto] min-w-[96px] px-3 py-1.5 text-[13px] font-[family-name:var(--font)] text-text bg-bg-active border border-border rounded-none cursor-pointer enabled:hover:bg-bg-hover enabled:hover:border-border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-[var(--state-disabled-opacity)] disabled:cursor-not-allowed'
+
 export default function PermissionDialog() {
   // P1-1：permission 状态按 agent 切片隔离——只展示当前 agent 的 active（后台 agent 停放）
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
@@ -28,17 +39,17 @@ export default function PermissionDialog() {
   }
 
   return (
-    <div className="permission-dialog-overlay" role="dialog" aria-modal="true" aria-label="工具权限请求">
-      <div className="permission-dialog">
-        <div className="permission-dialog-title">{request.title || '工具权限请求'}</div>
-        {request.toolCallId && <div className="permission-dialog-meta">toolCallId: {request.toolCallId}</div>}
-        {request.prompt && <div className="permission-dialog-prompt">{request.prompt}</div>}
-        <div className="permission-dialog-options">
+    <div className={OVERLAY} role="dialog" aria-modal="true" aria-label="工具权限请求">
+      <div className={DIALOG}>
+        <div className={TITLE}>{request.title || '工具权限请求'}</div>
+        {request.toolCallId && <div className={META}>toolCallId: {request.toolCallId}</div>}
+        {request.prompt && <div className={PROMPT}>{request.prompt}</div>}
+        <div className={OPTIONS}>
           {buttons.map(button => (
             <button
               key={button.optionId}
               type="button"
-              className="permission-dialog-btn"
+              className={BTN}
               disabled={answering}
               onClick={() => onChoose(button.optionId)}
             >

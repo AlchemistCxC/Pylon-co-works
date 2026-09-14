@@ -6,7 +6,6 @@ import type { RegistryEntry } from '../../registry/types.ts'
 import type { PluginSettingOptionsContribution } from '../../settings/pluginSettingsTypes.ts'
 import type { RenderCatalogSnapshot } from '../rendererRegistry.ts'
 import { resolveProductionRenderAppearance } from '../productionRenderAppearance.ts'
-import { resolveRenderAppearance } from '../renderAppearanceResolver.ts'
 
 function entry<T>(id: string, value: T): RegistryEntry<T> {
   return {
@@ -63,14 +62,6 @@ describe('production render appearance', () => {
       .toBe('user-override')
   })
 
-  it('preserves an unloaded palette color as unavailable instead of silently defaulting', () => {
-    const resolution = resolveRenderAppearance({
-      schema: { schemaVersion: 1, groups: [{ id: 'colors', label: 'Colors', fields: [{ key: 'accent', type: 'color', presentation: 'palette', default: '#fff' }] }] },
-      userOverrides: { accent: '#old' },
-      availableOptions: { accent: ['#fff', '#000'] },
-    })
-    expect(resolution.values.accent).toBe('#fff')
-    expect(resolution.unavailable.accent).toBe('#old')
-    expect(resolution.diagnostics.some(item => item.code === 'renderer.setting.unavailable')).toBe(true)
-  })
+  // "palette 候选被移除 → unavailable + diagnostic" 契约由 renderAppearanceResolver.test.ts
+  // "option 被插件移除时标记 unavailable，不静默改写当前值" 一例锁定，此处不再重复。
 })

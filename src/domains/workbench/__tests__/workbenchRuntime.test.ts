@@ -360,7 +360,8 @@ describe('createPreviewWorkbenchRuntime', () => {
       generationPhase: { kind: 'thinking' },
     })
 
-    vi.spyOn(Date, 'now').mockReturnValue(now)
+    // P91 C2：必须 restore，否则冻结时钟跨用例泄漏（同文件 :312 stringifySpy 同规）。
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
     const base = createWorkbenchDocument('session-a')
     runtime.applyDocument({
       ...base,
@@ -372,6 +373,7 @@ describe('createPreviewWorkbenchRuntime', () => {
       generationStart: start,
       lastTokenAt: start + 12_000,
     })
+    dateNowSpy.mockRestore()
   })
 
   it('session switch 保留新会话 pending interaction，且拒绝旧 owner/generation 串入', () => {

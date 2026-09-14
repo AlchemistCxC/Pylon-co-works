@@ -70,3 +70,49 @@ describe('applySessionModelChange 权威回声覆盖（P56/D3）', () => {
     expect(applyResponseConfig).not.toHaveBeenCalled()
   })
 })
+
+// 迁移自 scripts/test-session-model.mts（P91 A1）：model 回滚矩阵并入本文件
+// （点名清单处置「并入 sessionModelState.test」）。逐断言平移。
+describe('applySessionModelChange 回滚矩阵（原 test-session-model.mts）', () => {
+  it('成功路径：写新 model 并按 Session.source 调用后端', async () => {
+    const writes: Array<string | undefined> = []
+    const calls: Array<{ source: string; model: string }> = []
+    await applySessionModelChange({
+      source: 'local:a',
+      nextModel: 'model-new',
+      previousModel: 'model-old',
+      writeModel: model => writes.push(model),
+      invokeSet: async (source, model) => { calls.push({ source, model }) },
+    })
+    expect(writes).toEqual(['model-new'])
+    expect(calls).toEqual([{ source: 'local:a', model: 'model-new' }])
+  })
+
+  it('后端失败必须回滚旧模型', async () => {
+    const writes: Array<string | undefined> = []
+    await expect(applySessionModelChange({
+      source: 'local:b',
+      nextModel: 'model-b-new',
+      previousModel: 'model-b-old',
+      writeModel: model => writes.push(model),
+      invokeSet: async () => { throw new Error('agent unavailable') },
+    })).rejects.toThrow(/agent unavailable/)
+    expect(writes).toEqual(['model-b-new', 'model-b-old'])
+  })
+
+  it('非法旧模型（undefined/空串/空白/null）必须回滚 default，且回滚不能写入 undefined', async () => {
+    const writes: Array<string | undefined> = []
+    for (const previousModel of [undefined, '', '   ', null as unknown as string]) {
+      writes.length = 0
+      await expect(applySessionModelChange({
+        source: 'local:c',
+        nextModel: 'model-c-new',
+        previousModel,
+        writeModel: model => writes.push(model),
+        invokeSet: async () => { throw new Error('agent unavailable') },
+      })).rejects.toThrow(/agent unavailable/)
+      expect(writes).toEqual(['model-c-new', 'default'])
+      expect(writes.includes(undefined)).toBe(false)
+    }
+  })
+})

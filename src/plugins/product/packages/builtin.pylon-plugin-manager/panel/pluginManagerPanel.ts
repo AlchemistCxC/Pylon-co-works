@@ -3,8 +3,10 @@
  *
  * Dogfood rule: all data and operations flow through the activation context's
  * `management` API — importing host singletons (pluginCompositionRoot etc.) is
- * forbidden. Styles come from pluginManagerPanel.css which consumes host visual
- * semantic tokens; no copied host opacity/shadow values.
+ * forbidden. Styling comes from Tailwind utilities (kernel-level layer,
+ * `src/styles/tailwind.css`) whose values are mapped onto host visual semantic
+ * tokens via `@theme inline`; no copied host opacity/shadow values, and no
+ * semantic class names — tests locate rows via data attributes.
  *
  * Pre-consent state: when `management` is absent the panel renders a consent
  * guide instead of throwing. After the user grants via the host authorization
@@ -24,6 +26,30 @@ export interface PluginManagerPanelOptions {
 
 const LOG_LIMIT = 12
 
+// ── Tailwind utility 常量（J 施工书 20260914）──────────────────────────
+// 值全部经 kernel utilities 层的 @theme inline 引用宿主视觉语义 token。
+// 红线：同属性 utility 不跨常量组合（utilities 层内同 specificity，胜负
+// 取决于生成顺序），每个按钮变体必须自足完整，不做「基串 + 修饰」拼接。
+const PANEL = 'flex flex-col gap-4 text-base leading-[1.6] text-content-text'
+const OVERVIEW = 'flex flex-wrap gap-4 rounded-lg bg-surface-panel px-3 py-2.5'
+const GROUP = 'flex flex-col gap-2 rounded-lg bg-surface-panel px-3 py-2.5'
+const GROUP_TITLE = 'text-sm font-semibold uppercase tracking-[0.04em] text-content-muted'
+const LIST = 'flex flex-col gap-1.5'
+const ROW = 'flex flex-wrap items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-hover-bg'
+const ROW_TITLE = 'font-semibold'
+const MUTED_MONO = 'font-mono text-sm text-content-muted'
+const MUTED_TEXT = 'text-sm text-content-muted'
+const CONSENT_TEXT = 'text-content-muted'
+const ACTIONS = 'ml-auto flex flex-wrap gap-2'
+const BTN_INVARIANT = 'appearance-none cursor-pointer rounded-md border bg-transparent px-2.5 py-0.75 text-sm enabled:hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-50'
+const BTN = `${BTN_INVARIANT} border-border text-content-text`
+const BTN_PRIMARY = `${BTN_INVARIANT} border-accent text-accent`
+const BTN_DANGER = `${BTN_INVARIANT} border-border text-danger`
+const HINT = MUTED_TEXT
+const LOG_LINE = MUTED_MONO
+const CONSENT = 'flex flex-col gap-2 rounded-lg border border-dashed border-border bg-surface-panel p-4'
+const CONSENT_TITLE = 'text-md'
+
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag)
   if (className) node.className = className
@@ -32,8 +58,14 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 }
 
 function button(label: string, className?: string): HTMLButtonElement {
-  const node = el('button', className ?? 'pypm-btn', label) as HTMLButtonElement
+  const node = el('button', className ?? BTN, label) as HTMLButtonElement
   node.type = 'button'
+  return node
+}
+
+function groupTitle(text: string): HTMLElement {
+  const node = el('div', GROUP_TITLE, text)
+  node.dataset.pypmGroupTitle = 'true'
   return node
 }
 
@@ -54,7 +86,7 @@ export function mountPluginManagerPanel(
   container: HTMLElement,
   options: PluginManagerPanelOptions,
 ): PluginManagerPanelHandle {
-  const root = el('div', 'pypm-panel')
+  const root = el('div', PANEL)
   let disposed = false
   const log: string[] = []
   const notice = (message: string) => {
@@ -90,10 +122,11 @@ export function mountPluginManagerPanel(
   let contributionVisible = false
 
   const renderConsentGuide = (parent: HTMLElement) => {
-    const guide = el('div', 'pypm-consent')
+    const guide = el('div', CONSENT)
+    guide.dataset.pypmConsent = 'true'
     guide.append(
-      el('h3', 'pypm-consent-title', '等待能力授权'),
-      el('p', 'pypm-consent-text',
+      el('h3', CONSENT_TITLE, '等待能力授权'),
+      el('p', CONSENT_TEXT,
         '本插件声明了 plugin.management 能力。请在宿主「设置 → 插件」页的授权卡中批准后，重试激活本插件。'),
     )
     parent.append(guide)
@@ -102,6 +135,7 @@ export function mountPluginManagerPanel(
   const render = () => {
     if (disposed) return
     root.replaceChildren()
+    root.dataset.pypmPanel = options.management ? 'manager' : 'consent'
     if (!options.management) {
       renderConsentGuide(root)
       return
@@ -112,14 +146,14 @@ export function mountPluginManagerPanel(
   const renderManager = (parent: HTMLElement) => {
     const management = options.management!
 
-    const overview = el('div', 'pypm-overview')
+    const overview = el('div', OVERVIEW)
     overview.setAttribute('aria-label', '插件概览')
     parent.append(overview)
 
-    const userPlugins = el('div', 'pypm-group')
-    userPlugins.append(el('div', 'pypm-group-title', '用户插件'))
-    const userActions = el('div', 'pypm-actions')
-    const installButton = button('安装/更新包…', 'pypm-btn primary')
+    const userPlugins = el('div', GROUP)
+    userPlugins.append(groupTitle('用户插件'))
+    const userActions = el('div', ACTIONS)
+    const installButton = button('安装/更新包…', BTN_PRIMARY)
     installButton.disabled = !options.pickDirectory
     installButton.addEventListener('click', () => { void runInstall(management) })
     const installZipButton = button('从 zip 安装…')
@@ -152,84 +186,84 @@ export function mountPluginManagerPanel(
     })
     userActions.append(installButton, installZipButton, installUrlButton, refreshButton, contributionButton)
     userPlugins.append(userActions)
-    const userList = el('div', 'pypm-list')
+    const userList = el('div', LIST)
     userPlugins.append(userList)
     parent.append(userPlugins)
 
-    const builtins = el('div', 'pypm-group')
-    builtins.append(el('div', 'pypm-group-title', '内置组件'))
-    const builtinList = el('div', 'pypm-list')
+    const builtins = el('div', GROUP)
+    builtins.append(groupTitle('内置组件'))
+    const builtinList = el('div', LIST)
     builtins.append(builtinList)
     parent.append(builtins)
 
-    const bootstrap = el('div', 'pypm-group')
-    bootstrap.append(el('div', 'pypm-group-title', '启动故障'))
-    const bootstrapList = el('div', 'pypm-list')
+    const bootstrap = el('div', GROUP)
+    bootstrap.append(groupTitle('启动故障'))
+    const bootstrapList = el('div', LIST)
     bootstrap.append(bootstrapList)
     parent.append(bootstrap)
 
-    const diagnostics = el('div', 'pypm-group')
-    diagnostics.append(el('div', 'pypm-group-title', '契约诊断'))
-    const diagnosticsList = el('div', 'pypm-list')
+    const diagnostics = el('div', GROUP)
+    diagnostics.append(groupTitle('契约诊断'))
+    const diagnosticsList = el('div', LIST)
     diagnostics.append(diagnosticsList)
     parent.append(diagnostics)
 
-    const shadow = el('div', 'pypm-group')
-    shadow.append(el('div', 'pypm-group-title', 'Shadow Update 诊断'))
-    const shadowList = el('div', 'pypm-list')
+    const shadow = el('div', GROUP)
+    shadow.append(groupTitle('Shadow Update 诊断'))
+    const shadowList = el('div', LIST)
     shadow.append(shadowList)
     parent.append(shadow)
 
     // P53 D5：运行时监管（进程）+ 存储配额 + 依赖关系图
-    const processes = el('div', 'pypm-group')
-    processes.append(el('div', 'pypm-group-title', '插件进程'))
-    const processList = el('div', 'pypm-list')
+    const processes = el('div', GROUP)
+    processes.append(groupTitle('插件进程'))
+    const processList = el('div', LIST)
     processes.append(processList)
     parent.append(processes)
 
-    const storage = el('div', 'pypm-group')
-    storage.append(el('div', 'pypm-group-title', '存储配额'))
-    const storageList = el('div', 'pypm-list')
+    const storage = el('div', GROUP)
+    storage.append(groupTitle('存储配额'))
+    const storageList = el('div', LIST)
     storage.append(storageList)
     parent.append(storage)
 
-    const dependencies = el('div', 'pypm-group')
-    dependencies.append(el('div', 'pypm-group-title', '依赖与冲突'))
-    const dependencyList = el('div', 'pypm-list')
+    const dependencies = el('div', GROUP)
+    dependencies.append(groupTitle('依赖与冲突'))
+    const dependencyList = el('div', LIST)
     dependencies.append(dependencyList)
     parent.append(dependencies)
 
     let contributionsGroup: HTMLElement | undefined
     if (contributionVisible) {
-      contributionsGroup = el('div', 'pypm-group')
-      contributionsGroup.append(el('div', 'pypm-group-title', '贡献清单'))
-      const contributionList = el('div', 'pypm-list')
+      contributionsGroup = el('div', GROUP)
+      contributionsGroup.append(groupTitle('贡献清单'))
+      const contributionList = el('div', LIST)
       contributionsGroup.append(contributionList)
       parent.append(contributionsGroup)
       try {
         const facts = management.contributionOverview()
         if (facts.length === 0) {
-          contributionList.append(el('p', 'pypm-hint', '当前无注册贡献。'))
+          contributionList.append(el('p', HINT, '当前无注册贡献。'))
         } else {
           for (const fact of facts) {
-            const row = el('div', 'pypm-row')
+            const row = el('div', ROW)
             row.setAttribute('data-contribution-plugin', fact.pluginId)
             row.append(
-              el('span', 'pypm-row-title', fact.pluginId),
-              el('span', 'pypm-hint', contributionSummaryLine(fact)),
+              el('span', ROW_TITLE, fact.pluginId),
+              el('span', HINT, contributionSummaryLine(fact)),
             )
             contributionList.append(row)
           }
         }
       } catch (error) {
-        contributionList.append(el('p', 'pypm-hint', `读取失败：${error instanceof Error ? error.message : String(error)}`))
+        contributionList.append(el('p', HINT, `读取失败：${error instanceof Error ? error.message : String(error)}`))
       }
     }
-    const logGroup = el('div', 'pypm-group')
-    logGroup.append(el('div', 'pypm-group-title', '操作日志'))
-    const logList = el('div', 'pypm-list')
-    if (log.length === 0) logList.append(el('p', 'pypm-hint', '暂无操作日志。'))
-    for (const line of log) logList.append(el('p', 'pypm-log-line', line))
+    const logGroup = el('div', GROUP)
+    logGroup.append(groupTitle('操作日志'))
+    const logList = el('div', LIST)
+    if (log.length === 0) logList.append(el('p', HINT, '暂无操作日志。'))
+    for (const line of log) logList.append(el('p', LOG_LINE, line))
     logGroup.append(logList)
     parent.append(logGroup)
 
@@ -249,14 +283,14 @@ export function mountPluginManagerPanel(
 
         userList.replaceChildren()
         if (installed.length === 0) {
-          userList.append(el('p', 'pypm-hint', '尚无用户插件。'))
+          userList.append(el('p', HINT, '尚无用户插件。'))
         }
         for (const item of installed) {
           const pluginId = item.package.pluginId
           const manifestName = typeof item.package.manifest?.name === 'string'
             ? item.package.manifest.name
             : pluginId
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.setAttribute('data-plugin-id', pluginId)
           const toggle = button(item.enabled ? '停用' : '启用')
           toggle.addEventListener('click', () => {
@@ -266,16 +300,16 @@ export function mountPluginManagerPanel(
           reload.addEventListener('click', () => {
             void runOperation(`重载 ${pluginId}`, () => management.reload(pluginId))
           })
-          const uninstall = button('卸载', 'pypm-btn danger')
+          const uninstall = button('卸载', BTN_DANGER)
           uninstall.addEventListener('click', () => {
             void runOperation(`卸载 ${pluginId}`, () => management.uninstall(pluginId))
           })
-          const actions = el('div', 'pypm-actions')
+          const actions = el('div', ACTIONS)
           actions.append(toggle, reload, uninstall)
           row.append(
-            el('span', 'pypm-row-title', manifestName),
-            el('span', 'pypm-row-id', pluginId),
-            el('span', 'pypm-row-state', item.enabled ? '已启用' : '已停用'),
+            el('span', ROW_TITLE, manifestName),
+            el('span', MUTED_MONO, pluginId),
+            el('span', MUTED_TEXT, item.enabled ? '已启用' : '已停用'),
             actions,
           )
           userList.append(row)
@@ -285,10 +319,10 @@ export function mountPluginManagerPanel(
         // review P1-2：只渲染 builtin 实例（activePluginIds 含用户包，不可直接遍历）
         const builtinActive = runtime.instances.filter(instance => instance.builtin)
         if (builtinActive.length === 0) {
-          builtinList.append(el('p', 'pypm-hint', '当前没有激活的内置组件。'))
+          builtinList.append(el('p', HINT, '当前没有激活的内置组件。'))
         }
         for (const instance of builtinActive) {
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.setAttribute('data-builtin-id', instance.pluginId)
           const isActive = instance.status === 'active'
           const toggle = button(isActive ? '停用' : '启用')
@@ -299,8 +333,8 @@ export function mountPluginManagerPanel(
             )
           })
           row.append(
-            el('span', 'pypm-row-title', instance.pluginId),
-            el('span', 'pypm-row-state', instance.status === 'active' ? '运行中' : instance.status),
+            el('span', ROW_TITLE, instance.pluginId),
+            el('span', MUTED_TEXT, instance.status === 'active' ? '运行中' : instance.status),
             toggle,
           )
           builtinList.append(row)
@@ -308,13 +342,13 @@ export function mountPluginManagerPanel(
 
         bootstrapList.replaceChildren()
         if (bootstrapState.failures.length === 0) {
-          bootstrapList.append(el('p', 'pypm-hint', `启动状态：${bootstrapState.state}。`))
+          bootstrapList.append(el('p', HINT, `启动状态：${bootstrapState.state}。`))
         }
         for (const failure of bootstrapState.failures) {
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.append(
-            el('span', 'pypm-row-id', failure.pluginId),
-            el('span', 'pypm-hint', `${failure.stage} · ${failure.message}`),
+            el('span', MUTED_MONO, failure.pluginId),
+            el('span', HINT, `${failure.stage} · ${failure.message}`),
           )
           if (failure.retryable) {
             const retry = button(`重试 ${failure.pluginId}`)
@@ -325,7 +359,7 @@ export function mountPluginManagerPanel(
           }
           bootstrapList.append(row)
         }
-        const safeMode = button('进入安全模式', 'pypm-btn danger')
+        const safeMode = button('进入安全模式', BTN_DANGER)
         safeMode.addEventListener('click', () => {
           void runOperation('进入安全模式', () => management.enterSafeMode())
         })
@@ -333,33 +367,33 @@ export function mountPluginManagerPanel(
 
         diagnosticsList.replaceChildren()
         if (contract.diagnostics.length === 0) {
-          diagnosticsList.append(el('p', 'pypm-hint', '当前无契约诊断。'))
+          diagnosticsList.append(el('p', HINT, '当前无契约诊断。'))
         }
         for (const diagnostic of contract.diagnostics) {
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.append(
-            el('span', 'pypm-row-id', diagnostic.pluginId),
-            el('span', 'pypm-hint', `${diagnostic.code} · ${diagnostic.message}`),
+            el('span', MUTED_MONO, diagnostic.pluginId),
+            el('span', HINT, `${diagnostic.code} · ${diagnostic.message}`),
           )
           diagnosticsList.append(row)
         }
 
         shadowList.replaceChildren()
         for (const item of runtime.switches) {
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.setAttribute('data-switch-plugin', item.pluginId)
           row.append(
-            el('span', 'pypm-row-id', item.pluginId),
-            el('span', 'pypm-hint', `声明 ${item.declaredMode} · 实际采用 ${item.adoptedMode}`),
+            el('span', MUTED_MONO, item.pluginId),
+            el('span', HINT, `声明 ${item.declaredMode} · 实际采用 ${item.adoptedMode}`),
           )
           shadowList.append(row)
         }
         const cleanupFailures = runtime.instances.filter(instance => instance.status === 'cleanup-failed')
         if (runtime.switches.length === 0 && cleanupFailures.length === 0) {
-          shadowList.append(el('p', 'pypm-hint', '本次运行尚无 Shadow Update 诊断。'))
+          shadowList.append(el('p', HINT, '本次运行尚无 Shadow Update 诊断。'))
         } else if (cleanupFailures.length > 0) {
           for (const instance of cleanupFailures) {
-            const row = el('div', 'pypm-row')
+            const row = el('div', ROW)
             row.setAttribute('data-cleanup-failed', instance.pluginId)
             const retry = button('重试清理')
             retry.addEventListener('click', () => {
@@ -369,8 +403,8 @@ export function mountPluginManagerPanel(
               })
             })
             row.append(
-              el('span', 'pypm-row-id', instance.pluginId),
-              el('span', 'pypm-row-state', '清理失败'),
+              el('span', MUTED_MONO, instance.pluginId),
+              el('span', MUTED_TEXT, '清理失败'),
               retry,
             )
             shadowList.append(row)
@@ -381,33 +415,33 @@ export function mountPluginManagerPanel(
         try {
           const processes = await management.processOverview()
           if (processes.length === 0) {
-            processList.append(el('p', 'pypm-hint', '当前没有插件附带进程。'))
+            processList.append(el('p', HINT, '当前没有插件附带进程。'))
           }
           for (const process of processes) {
-            const row = el('div', 'pypm-row')
+            const row = el('div', ROW)
             row.setAttribute('data-process-id', process.processId)
             const terminate = button('终止/重启')
             terminate.addEventListener('click', () => {
               void runOperation(`终止进程 ${process.pluginId}`, () => management.terminatePluginProcess(process.processId))
             })
             row.append(
-              el('span', 'pypm-row-id', process.pluginId),
-              el('span', 'pypm-row-state', `${process.status}（重启 ${process.restartAttempts} 次）`),
+              el('span', MUTED_MONO, process.pluginId),
+              el('span', MUTED_TEXT, `${process.status}（重启 ${process.restartAttempts} 次）`),
               terminate,
             )
             processList.append(row)
           }
         } catch (error) {
-          processList.append(el('p', 'pypm-hint', `进程读取失败：${error instanceof Error ? error.message : String(error)}`))
+          processList.append(el('p', HINT, `进程读取失败：${error instanceof Error ? error.message : String(error)}`))
         }
 
         storageList.replaceChildren()
         const usage = management.storageUsage()
         if (usage.length === 0) {
-          storageList.append(el('p', 'pypm-hint', '当前没有插件持久数据。'))
+          storageList.append(el('p', HINT, '当前没有插件持久数据。'))
         }
         for (const entry of usage) {
-          const row = el('div', 'pypm-row')
+          const row = el('div', ROW)
           row.setAttribute('data-storage-plugin', entry.pluginId)
           const clear = button('清空')
           clear.addEventListener('click', () => {
@@ -416,8 +450,8 @@ export function mountPluginManagerPanel(
             })
           })
           row.append(
-            el('span', 'pypm-row-id', entry.pluginId),
-            el('span', 'pypm-row-state', `${entry.usedBytes}/${entry.budgetBytes} 字节 · ${entry.keyCount} 键`),
+            el('span', MUTED_MONO, entry.pluginId),
+            el('span', MUTED_TEXT, `${entry.usedBytes}/${entry.budgetBytes} 字节 · ${entry.keyCount} 键`),
             clear,
           )
           storageList.append(row)
@@ -427,10 +461,10 @@ export function mountPluginManagerPanel(
         try {
           const graph = await management.dependencyGraph()
           if (graph.length === 0) {
-            dependencyList.append(el('p', 'pypm-hint', '当前无依赖声明。'))
+            dependencyList.append(el('p', HINT, '当前无依赖声明。'))
           }
           for (const node of graph) {
-            const row = el('div', 'pypm-row')
+            const row = el('div', ROW)
             row.setAttribute('data-dependency-node', node.pluginId)
             const relations = [
               ...(node.dependencies.length > 0 ? [`依赖 ${node.dependencies.join(', ')}`] : []),
@@ -438,14 +472,14 @@ export function mountPluginManagerPanel(
               ...(node.conflicts.length > 0 ? [`冲突 ${node.conflicts.join(', ')}`] : []),
             ]
             row.append(
-              el('span', 'pypm-row-title', node.pluginId),
-              el('span', 'pypm-row-state', node.builtin ? '内置' : '外置'),
-              el('span', 'pypm-hint', relations.length > 0 ? relations.join(' · ') : '无依赖'),
+              el('span', ROW_TITLE, node.pluginId),
+              el('span', MUTED_TEXT, node.builtin ? '内置' : '外置'),
+              el('span', HINT, relations.length > 0 ? relations.join(' · ') : '无依赖'),
             )
             dependencyList.append(row)
           }
         } catch (error) {
-          dependencyList.append(el('p', 'pypm-hint', `依赖图读取失败：${error instanceof Error ? error.message : String(error)}`))
+          dependencyList.append(el('p', HINT, `依赖图读取失败：${error instanceof Error ? error.message : String(error)}`))
         }
       } catch (error) {
         // 只记日志不重入 render：持续性失败（如授权失效）会形成

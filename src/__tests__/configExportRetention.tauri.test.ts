@@ -6,10 +6,13 @@
  * - loadRetentionPolicyPayload 返回原始 payload（不解析/不回退）
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeInvoke } from '../test/fakeInvoke'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
+const { invokeRef } = vi.hoisted(() => ({
+  invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
+}))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
+  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
 }))
 vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
 
@@ -20,6 +23,13 @@ import {
   overwriteRetentionPolicy,
   syncImportedRetentionPolicy,
 } from '../retentionPolicyRepository'
+
+let fakeInvoke: FakeInvoke
+
+beforeEach(() => {
+  fakeInvoke = new FakeInvoke()
+  invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
+})
 
 interface StorageLike {
   getItem(key: string): string | null
@@ -35,11 +45,9 @@ function memoryStorage(seed: Record<string, string> = {}): StorageLike {
 }
 
 describe('I13-W6 Tauri 导出聚合保留策略', () => {
-  beforeEach(() => { invokeMock.mockReset() })
-
   it('buildExportPayloadAsync 经 loadRetention 聚合后端 payload', async () => {
     const retentionPayload = '{"mode":"by_time","days":180}'
-    invokeMock.mockResolvedValueOnce({ version: 1, revision: 4, payload: retentionPayload })  // retention_policy_get
+    fakeInvoke.register('retention_policy_get', () => ({ version: 1, revision: 4, payload: retentionPayload }))
     const json = await buildExportPayloadAsync(memoryStorage(), {
       loadProfiles: async () => null,
       loadSessions: async () => null,
@@ -50,11 +58,11 @@ describe('I13-W6 Tauri 导出聚合保留策略', () => {
     })
     const data = (JSON.parse(json) as { data: Record<string, string> }).data
     expect(data[RETENTION_STORAGE_KEY]).toBe(retentionPayload)
-    expect(invokeMock.mock.calls[0][0]).toBe('retention_policy_get')
+    expect(fakeInvoke.calls[0]?.cmd).toBe('retention_policy_get')
   })
 
   it('后端无策略 → 不写入 data（localStorage 无该 key 则缺省）', async () => {
-    invokeMock.mockResolvedValueOnce(null)
+    fakeInvoke.register('retention_policy_get', () => null)
     const json = await buildExportPayloadAsync(memoryStorage(), {
       loadProfiles: async () => null,
       loadSessions: async () => null,
@@ -68,12 +76,12 @@ describe('I13-W6 Tauri 导出聚合保留策略', () => {
   })
 
   it('overwriteRetentionPolicy 盲写（expectedRevision=null，导入覆盖语义）', async () => {
-    invokeMock.mockResolvedValueOnce(5)
+    fakeInvoke.register('retention_policy_set', () => 5)
     const rev = await overwriteRetentionPolicy({ mode: 'by_count', count: 5000 })
     expect(rev).toBe(5)
-    expect(invokeMock).toHaveBeenCalledWith('retention_policy_set', {
-      json: '{"mode":"by_count","count":5000}',
-      expectedRevision: null,
+    expect(fakeInvoke.calls).toContainEqual({
+      cmd: 'retention_policy_set',
+      args: { json: '{"mode":"by_count","count":5000}', expectedRevision: null },
     })
   })
 
@@ -81,21 +89,21 @@ describe('I13-W6 Tauri 导出聚合保留策略', () => {
     // localStorage 残留旧策略值 + 导入 keys 不含策略 key → 不得盲写覆盖后端
     const storage = memoryStorage({ [RETENTION_STORAGE_KEY]: '{"mode":"by_time","days":180}' })
     await syncImportedRetentionPolicy(storage, ['pylon-theme'])
-    expect(invokeMock).not.toHaveBeenCalled()
+    expect(fakeInvoke.calls).toHaveLength(0)
   })
 
   it('syncImportedRetentionPolicy：导入含策略 key → 盲写后端权威', async () => {
     const storage = memoryStorage({ [RETENTION_STORAGE_KEY]: '{"mode":"by_count","count":1000}' })
-    invokeMock.mockResolvedValueOnce(3)
+    fakeInvoke.register('retention_policy_set', () => 3)
     await syncImportedRetentionPolicy(storage, ['pylon-theme', RETENTION_STORAGE_KEY])
-    expect(invokeMock).toHaveBeenCalledWith('retention_policy_set', {
-      json: '{"mode":"by_count","count":1000}',
-      expectedRevision: null,
+    expect(fakeInvoke.calls).toContainEqual({
+      cmd: 'retention_policy_set',
+      args: { json: '{"mode":"by_count","count":1000}', expectedRevision: null },
     })
   })
 
   it('syncImportedRetentionPolicy：导入含 key 但本地无值 → 不写穿', async () => {
     await syncImportedRetentionPolicy(memoryStorage(), [RETENTION_STORAGE_KEY])
-    expect(invokeMock).not.toHaveBeenCalled()
+    expect(fakeInvoke.calls).toHaveLength(0)
   })
 })

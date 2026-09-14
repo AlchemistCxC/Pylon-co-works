@@ -1,0 +1,11 @@
+/* renderers 包自适应残量（样式绞杀地基 20260914，lifecycle=adaptive）：
+   只收 utilities 不宜表达的通用后代规则；?inline 随插件生命周期挂载回收。
+   solid-diff-content / solid-lsp-diagnostic 类名是本文件的锚点（组件保留）。 */
+@media (prefers-reduced-motion: reduce) {
+  .solid-diff-content *,
+  .solid-lsp-diagnostic * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -128,7 +128,7 @@ export function SolidModelWidget(props: {
 
   return (
     <div ref={node => { root = node }} class="solid-model-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
+      <Show when={error()}>{message => <span class="cc-widget-error" role="alert" aria-live="assertive" title={message()}>{message()}</span>}</Show>
       <Show when={dropdown() || (appearance().modelVariant !== 'badge' && appearance().modelVariant !== 'minimal')} fallback={
         <Show when={appearance().modelVariant === 'badge'} fallback={
           <button
@@ -317,7 +317,7 @@ export function SolidModeWidget(props: {
 
   return (
     <div class="solid-mode-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
+      <Show when={error()}>{message => <span class="cc-widget-error" role="alert" aria-live="assertive" title={message()}>{message()}</span>}</Show>
       <Show when={dropdown()} fallback={
         <Show when={appearance().modeVariant === 'badge'} fallback={
           <Show when={appearance().modeVariant === 'minimal'} fallback={

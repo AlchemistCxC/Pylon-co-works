@@ -121,15 +121,35 @@ async fn run_git_with_timeout(
     args: &[&str],
     timeout: Duration,
 ) -> Result<(String, String), String> {
+    run_git_with_timeout_env(cwd, args, timeout, None).await
+}
+
+/// P91 批 C1（横切 §4）：`host_env` 参数化变体——在**子进程内**注入模拟宿主环境
+/// （Command env），供 locale 契约测试使用；本进程全局 env 不再被 `set_var` 变异
+/// （进程级操作与并行测试竞态）。应用顺序：先 host_env、后固定 LC_ALL/LANG=C
+/// 覆盖，与生产 env 语义一致（固定 C locale 压过宿主 locale）；生产入口
+/// [`run_git_with_timeout`] 恒传 `None`（行为不变）。
+async fn run_git_with_timeout_env(
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+    host_env: Option<&[(&str, &str)]>,
+) -> Result<(String, String), String> {
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
     // 超时后 git 会滞留并占用 index 锁）。
     let mut cmd = Command::new("git");
-    cmd.args(args)
-        .current_dir(cwd)
+    cmd.args(args).current_dir(cwd);
+    if let Some(host_env) = host_env {
+        for (key, value) in host_env {
+            cmd.env(key, value);
+        }
+    }
+    cmd
         // G5-5：固定 C locale——is_git_error 依赖英文文案（"not a git
         // repository"），宿主 locale（如 zh_CN）下 git 输出本地化文案会误判普通
         // 失败（message 语义漂移）。只覆盖 LC_ALL/LANG 两个变量，不 env_clear
-        // （保留 PATH 等）；Windows 无 locale 变量时零影响。
+        // （保留 PATH 等）；Windows 无 locale 变量时零影响。放在 host_env 之后
+        // 以保证固定值压过模拟宿主值（与生产 env 语义一致）。
         .env("LC_ALL", "C")
         .env("LANG", "C")
         // 写操作不能弹出终端/GCM 凭据窗口；缺少凭据时明确失败并交给 UI 展示。
@@ -558,9 +578,21 @@ mod tests {
         }
     }
 
+    /// P91 批 C1（横切 §3）：唯一临时仓库名（pid + nanos）——原纯 pid 命名在
+    /// 上次运行崩溃残留同名目录时会被 create_dir_all 静默复用（最危险形态）。
+    fn unique_git_temp(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "pylon-git-test-{label}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
     fn temp_repo(name: &str) -> TempRepo {
-        let dir =
-            std::env::temp_dir().join(format!("pylon-git-test-{name}-{}", std::process::id()));
+        let dir = unique_git_temp(name);
         std::fs::create_dir_all(&dir).unwrap();
         init_repo(&dir);
         TempRepo(dir)
@@ -1107,16 +1139,23 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
         // zh_CN 仍英文），故本测试钉住可观测契约：宿主 locale 被设为 zh_CN 时，
         // 非 git 目录错误仍命中 is_git_error 的英文检测（在 locale 感知的 git
         // 构建上该测试修复前必失败、修复后通过；本机为契约钉）。限制记录：
-        // run_git 不支持注入命令/环境参数（Command::new("git") 固定），机制级
+        // run_git 不支持注入命令参数（Command::new("git") 固定），机制级
         // 直测（PATH 前置 fake git）已实测不可行（std 对无扩展名程序按 .exe
         // 解析，.bat 不命中）且会污染并行测试的 PATH——采用方案 G5-5 兜底形态。
+        // P91 批 C1（横切 §4）：宿主 locale 改经 run_git_with_timeout_env 在
+        // **子进程内**注入（Command env）——不再 set_var/remove_var 本进程全局
+        // LC_ALL/LANG（进程级 env 变异与并行测试竞态）。错误映射发生在
+        // run_git_with_timeout 内层，与 git_status 同层断言同一契约。
         let dir = std::env::temp_dir().join(format!("pylon-git-nonrepo-zh-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("LC_ALL", "zh_CN.UTF-8");
-        std::env::set_var("LANG", "zh_CN.UTF-8");
-        let error = git_status(&dir).await.expect_err("non-repo must fail");
-        std::env::remove_var("LC_ALL");
-        std::env::remove_var("LANG");
+        let error = run_git_with_timeout_env(
+            &dir,
+            &["status"],
+            GIT_TIMEOUT,
+            Some(&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "zh_CN.UTF-8")]),
+        )
+        .await
+        .expect_err("non-repo must fail");
         std::fs::remove_dir_all(&dir).ok();
         assert!(
             error.contains("not a git repository"),

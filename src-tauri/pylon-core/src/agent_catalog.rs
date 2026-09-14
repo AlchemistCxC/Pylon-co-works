@@ -1415,7 +1415,8 @@ mod tests {
         for launch in [
             serde_json::json!({"kind": "path", "command": "agent", "args": ["/bin/sh", "-c", "agent"]}),
             serde_json::json!({"kind": "path", "command": "sh", "args": ["-c", "agent"]}),
-            serde_json::json!({"kind": "path", "command": "agent", "args": ["--signal", "SIGTERM"]}),
+            // P91 批 C1：原第 3、4 两个向量逐字段重复（P72 §7.2 点名例外——
+            // 仅去重向量，断言集不动），保留一份。
             serde_json::json!({"kind": "path", "command": "agent", "args": ["--signal", "SIGTERM"]}),
             serde_json::json!({"kind": "path", "command": "C:\\tools\\agent.exe"}),
             serde_json::json!({"kind": "path", "command": "agent", "env": [{"name": "ANTHROPIC_API_KEY", "value": ""}]}),

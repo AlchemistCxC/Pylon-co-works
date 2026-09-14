@@ -113,11 +113,11 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
-          className="dialog-content settings-surface settings-dialog session-settings"
+          className="dialog-content settings-surface settings-dialog session-settings w-[min(760px,calc(100vw-32px))] max-w-[760px] max-h-[min(88vh,860px)] flex flex-col"
           aria-describedby="session-settings-description"
         >
           <Dialog.Title asChild>
-            <header className="session-settings-header settings-dialog-header">
+            <header className="settings-dialog-header shrink-0">
               <div>
                 <h3 className="settings-dialog-title">会话设置</h3>
                 <p id="session-settings-description" className="settings-dialog-description">管理当前会话的名称与基础操作。</p>
@@ -129,36 +129,36 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             </header>
           </Dialog.Title>
 
-          <div className="session-settings-body">
-            <section className="session-settings-section" aria-labelledby="session-basic-title">
-              <div className="session-settings-section-heading">
+          <div className="min-h-0 overflow-y-auto pt-[22px] px-6 pb-7 flex flex-col gap-4 max-[640px]:px-[18px]">
+            <section className="session-settings-section shrink-0 p-[18px] border border-[var(--settings-border)] rounded-[var(--settings-radius-md)] bg-[var(--settings-raised)]" aria-labelledby="session-basic-title">
+              <div className="flex items-start justify-between gap-4 mb-3.5">
                 <div>
                   <h4 id="session-basic-title" className="settings-section-title">基本信息</h4>
                   <p className="session-settings-section-description settings-section-description">用于侧栏识别。</p>
                 </div>
               </div>
-              <div className="session-settings-grid">
-                <div className="sess-field">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(190px,.55fr)] gap-3.5 max-[640px]:grid-cols-1">
+                <div className="sess-field min-w-0">
                   <label htmlFor="session-name">名称</label>
                   <input id="session-name" className="settings-control" value={name} onChange={event => setName(event.target.value)} />
                 </div>
               </div>
             </section>
 
-            <section className="session-settings-danger" aria-labelledby="session-danger-title">
+            <section className="session-settings-danger shrink-0 flex items-center justify-between gap-[22px] px-[18px] py-4 border border-[color-mix(in_srgb,var(--danger)_34%,var(--settings-border))] rounded-[var(--settings-radius-md)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] max-[640px]:items-stretch max-[640px]:flex-col" aria-labelledby="session-danger-title">
               <div>
-                <h4 id="session-danger-title">危险区域</h4>
-                <p>删除后会关闭后端会话并清理本地消息缓存，无法撤销。</p>
+                <h4 id="session-danger-title" className="m-0 text-danger text-[13px] font-[680]">危险区域</h4>
+                <p className="mt-[5px] mb-0 text-text-dim text-sm leading-[1.5]">删除后会关闭后端会话并清理本地消息缓存，无法撤销。</p>
               </div>
-              <button type="button" className="ps-btn danger" onClick={del}>删除会话</button>
+              <button type="button" className="ps-btn danger shrink-0" onClick={del}>删除会话</button>
             </section>
           </div>
 
-          <footer className="session-settings-footer settings-dialog-footer">
+          <footer className="settings-dialog-footer static shrink-0">
             <span className={`session-settings-dirty settings-dirty-state ${dirty ? 'active' : ''}`} role="status">
               {dirty ? '有未保存修改' : '所有修改已保存'}
             </span>
-            <div className="session-settings-footer-actions">
+            <div className="flex gap-2 max-[640px]:justify-end">
               <button type="button" className="ps-btn settings-action" onClick={beforeClose}>取消</button>
               <button type="button" className="ps-btn primary settings-action primary" onClick={save} disabled={!dirty}>保存修改</button>
             </div>

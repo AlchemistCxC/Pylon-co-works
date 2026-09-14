@@ -6,7 +6,7 @@
  * 闭环 OBS-07 P5 correlationDroppedFrontend。宽容收窄：非法值省略不报错。
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeRuntimeLogEntry } from '../runtimeLogContracts'
+import { normalizeRuntimeLogEntry, normalizeRuntimeLogList } from '../runtimeLogContracts.ts'
 
 function wireEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -114,5 +114,24 @@ describe('normalizeRuntimeLogEntry（LOG-03 增量字段）', () => {
     expect(entry!.level).toBe('info')
     expect(entry!.timestamp).toBe(1234)
     expect(entry!.fields).toEqual({ a: 'x' })
+  })
+})
+
+// ── 迁移自 scripts/test-logs-api-normalization.mts（P91 A1）──
+// W2-12（遗留 7 迁移）：logs 归一化从旧 right-panel/logsApi 迁到 W1-08 的 runtimeLogContracts
+describe('normalizeRuntimeLogList（迁移自 scripts/test-logs-api-normalization.mts，P91 A1）', () => {
+  it('缺 message/null 项丢弃；非法 level 归 info；非数组输入返回 []', () => {
+    const entries = normalizeRuntimeLogList([
+      { id: 1, timestamp: '1722500000000', level: 'warn', source: 'runtime', message: 'warning' },
+      { id: 2, timestamp: 'bad', level: 'unknown', source: 'session', message: 'safe fallback' },
+      { id: 3, source: 'runtime' },
+      null,
+    ])
+    expect(entries.length).toBe(2)
+    expect(entries[0]?.id).toBe(1)
+    expect(entries[0]?.level).toBe('warn')
+    expect(entries[1]?.level).toBe('info') // 非法 level 归 info
+    expect(normalizeRuntimeLogList({})).toEqual([])
+    expect(normalizeRuntimeLogList('not-array')).toEqual([])
   })
 })

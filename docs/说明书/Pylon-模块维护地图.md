@@ -1,6 +1,6 @@
 # Pylon 模块维护地图
 
-本页说明当前源码的责任边界，不是将来必须照着搬目录的施工计划。术语见 [CONTEXT](../../CONTEXT.md)，协作与命名见 [开发规范](Pylon-开发与协作规范.md)。目录清单的可执行来源是 [audit-maintenance.mts](../../scripts/audit-maintenance.mts)；用 `bun run check:maintenance` 查看当前数量、未归属文件和大文件定位。数量随代码计算，不在文档复制。
+本页说明当前源码的责任边界，不是将来必须照着搬目录的施工计划。术语见 [CONTEXT](../../CONTEXT.md)，命名与模块规则见 [开发规范](../../.agents/dev-standards.md)。目录清单的可执行来源是 [audit-maintenance.mts](../../scripts/audit-maintenance.mts)；用 `bun run check:maintenance` 查看当前数量、未归属文件和大文件定位。数量随代码计算，不在文档复制。
 
 ## 责任与入口
 
@@ -63,10 +63,8 @@ flowchart LR
 | OBS 04—07 的采集对象、trace 包装与返回 API 不同 | 不把相似安装守卫抽成泛用全局注册器；保留 DEV 隔离和各自证据语义 |
 | 根 store 与部分产品模块仍在 runtime 边界白名单 | 已知迁移债务仍报告；不能通过新增豁免宣称模块化完成 |
 
-## 验证与 Skill
+## 验证
 
 `bun scripts/audit-maintenance.mts --naming` 额外输出生产 TS 绑定命名发现；它复用 ESLint 配置，不维护第二套规则。`bun run lint` 是包含测试代码的命名门禁。Rust casing 由 Rust lint 维护，语义名与单位仍需 code review。
 
 整体入口是 `check:frontend`、`check:solid` 和当前 CI 的 Rust / ACP / 四 crate Clippy；`check:maintenance` 已接入 `check:docs`，随前端 CI 执行。各阶段的测试日志和 CI 结果放在本次工作记录，避免把一次绿色运行写成永久保证。
-
-仓库维护工作流见 [pylon-astra-maintenance](../../.agents/skills/pylon-astra-maintenance/SKILL.md)。将整个 skill 目录复制到本机 Codex skills 目录即可安装；更新时比较版本化副本，避免本机说明与团队规范漂移。

@@ -127,3 +127,28 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.term-md-skeleton\s*\{[^}]*min-height:\s*1em;/)
   })
 })
+
+// 真浏览器实测（Chrome headless 1280px，直接加载本文件；探针与数据见台账 P85）：
+// `data-msg-style="bubble"`（行 shrink-to-fit）+ `data-message-layout="classic"`
+// （正文零 basis）+ assistantDot 三者同开时，正文被压成 row=44px / body=0px /
+// 91 行（同一段落其余组合均 3 行）——这正是「输出少数几个字符就换行」的碎裂。
+describe('assistant body width contract', () => {
+  it('keeps a shrink-to-fit bubble row out of the zero-basis assistant body rule', () => {
+    // 前提：气泡行的宽度来自 msg-style（与 message-layout 无关）；内建预设
+    // terminal-modern 恰好是 bubble + classic + assistantDot 三者同开。
+    const bubbleRow = css.match(/\.app\[data-msg-style="bubble"\] \.term-row-user,[\s\S]*?width:fit-content/)?.[0] ?? ''
+    expect(bubbleRow).toContain('width:fit-content')
+
+    // 守卫必须排除气泡行，否则零 basis 会在 shrink-to-fit 行里塌成标记列宽。
+    const zeroBasis = css.match(/\.app\[data-message-layout="classic"\][^{]*\.term-assistant\.has-dot > \.term-assistant-body\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(zeroBasis).toContain('flex:1 1 0')
+    expect(zeroBasis).toContain('width:0')
+    expect(zeroBasis).toContain(':not([data-msg-style="bubble"])')
+
+    // 非气泡行仍走内容驱动的基础规则（588 行给 flex/min-width，2144 行给
+    // width:auto/max-width:100%；后者正是气泡行回落的那一条）。
+    const widthAutoRule = css.match(/\.term-assistant\.has-dot > \.term-assistant-body\s*\{([^}]*width:auto;[^}]*)\}/)?.[1] ?? ''
+    expect(widthAutoRule).toContain('flex:1 1 auto')
+    expect(widthAutoRule).toContain('max-width:100%')
+  })
+})

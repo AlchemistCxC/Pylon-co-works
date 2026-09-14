@@ -456,8 +456,7 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn fake_acp_request_permission_pends_then_resolves_on_wire() {
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-permission-{}.jsonl", std::process::id()));
+    let trace_path = crate::test_utils::unique_temp("permission").with_extension("jsonl");
     let mut env = std::collections::HashMap::new();
     env.insert("FAKE_MODE".to_string(), "alive".to_string());
     let mut agent = crate::test_utils::fake_acp_agent_with(

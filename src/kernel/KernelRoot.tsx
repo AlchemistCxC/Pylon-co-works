@@ -5,6 +5,7 @@ import ApplicationMount from './ApplicationMount'
 import KernelRecoveryLayer from './KernelRecoveryLayer'
 import { applicationRuntime } from '../application/applicationRuntimeServices.ts'
 import { shouldExposeKernelAcceptanceControls } from './kernelAcceptanceControls'
+import { listRendererDiagnosticsKeys, readRendererDiagnostics } from '../plugin-runtime/renderers/rendererDiagnosticsRegistry.ts'
 import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import { kernelBootstrap } from './kernelBootstrapServices.ts'
 import type { KernelBootstrap } from './kernelBootstrap.ts'
@@ -36,6 +37,14 @@ export function KernelRoot({
       unmountApplication: () => runtime.unmount(),
       remountApplication: () => runtime.mount(BUILTIN_PYLON_APPLICATION_ID),
       getSnapshot: () => runtime.getSnapshot(),
+      /**
+       * P89/S0 只读诊断读数：子系统登记、调用时懒取。
+       * 例：`__PYLON_KERNEL_DEV__.diagnostics.read('streamingDisplay')`
+       */
+      diagnostics: {
+        keys: () => listRendererDiagnosticsKeys(),
+        read: (key: string) => readRendererDiagnostics(key),
+      },
     }
     window.__PYLON_KERNEL_DEV__ = controls
     return () => {
@@ -70,6 +79,10 @@ declare global {
       unmountApplication: () => void
       remountApplication: () => void
       getSnapshot: () => ReturnType<typeof applicationRuntime.getSnapshot>
+      diagnostics: {
+        keys: () => readonly string[]
+        read: (key: string) => ReturnType<typeof readRendererDiagnostics>
+      }
     }
   }
 }

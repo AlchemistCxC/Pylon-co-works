@@ -4,10 +4,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   normalizePetState,
+  normalizePetStats,
   resolvePetStateConflict,
   toPetStateEnvelope,
   type PetState,
-} from '../petContracts'
+} from '../petContracts.ts'
 
 function petState(overrides: Partial<PetState>): PetState {
   const base: PetState = {
@@ -69,5 +70,41 @@ describe('normalizePetState 保留仲裁键', () => {
     const state = normalizePetState(raw)
     expect(state.last_tick_at_ms).toBe(1234)
     expect(toPetStateEnvelope(state, 'backend').updatedAtMs).toBe(1234)
+  })
+})
+
+// ── 迁移自 scripts/test-pet-contracts.mts（P91 A1）──
+// H2：宠物 snake_case DTO 收窄——脏数据按字段类型兜底，杜绝污染 localStorage
+describe('petContracts snake_case DTO 收窄（迁移自 scripts/test-pet-contracts.mts，P91 A1）', () => {
+  it('normalizePetStats：非数字字段回退 0', () => {
+    const stats = normalizePetStats({ messages: 'bad', prompts_completed: 3, tokens_total: 99 })
+    expect(stats.messages).toBe(0) // 非数字字段回退 0
+    expect(stats.prompts_completed).toBe(3)
+    expect(stats.tokens_total).toBe(99)
+  })
+
+  it('normalizePetState：脏数据按字段类型兜底', () => {
+    const state = normalizePetState({
+      happiness: 'high',
+      energy: 50,
+      xp: 120,
+      stage: 'hooper', // 非法 stage → seed
+      stats: { tokens_total: 'x' },
+      memories: ['a', 42, 'b'],
+      first_chunk_at_ms: null,
+    })
+    expect(state.happiness).toBe(0) // 非法 happiness 回退 0
+    expect(state.energy).toBe(50)
+    expect(state.stage).toBe('seed') // 非法 stage 回退 seed
+    expect(state.stats.tokens_total).toBe(0)
+    expect(state.memories).toEqual(['a', 'b']) // memories 只留字符串
+    expect(state.first_chunk_at_ms).toBeNull()
+    expect(state.name).toBe('宠物') // 缺省 name 回退
+  })
+
+  it('完全缺失的输入 → 全默认（不崩、可持久化）', () => {
+    const empty = normalizePetState(undefined)
+    expect(empty.name).toBe('宠物')
+    expect(empty.stats.messages).toBe(0)
   })
 })

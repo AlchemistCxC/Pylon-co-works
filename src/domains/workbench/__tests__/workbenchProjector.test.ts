@@ -166,13 +166,7 @@ describe('WorkbenchProjector', () => {
     ]))
   })
 
-  it('settles running messages when a turn failure diagnostic arrives', () => {
-    const running = envelope(1, { type: 'message.started', role: 'assistant', parts: [{ kind: 'text', text: 'partial' }] })
-    const failed = envelope(2, { type: 'diagnostic.notice', level: 'error', message: 'timeout', code: 'turn.failed' })
-    const document = reduce([running, failed])
-    expect(document.messages[0].running).toBe(false)
-    expect(document.session.status).toBe('error')
-  })
+  // 「turn failure / provider.error 终态 settle」两用例已归并至 workbenchProjectorLifecycle.test.ts
 
   it('live, restart and recovery provenance produce the same document', () => {
     const live = envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'same' }] })
@@ -364,16 +358,5 @@ describe('WorkbenchProjector', () => {
 
     expect(document.messages.map(message => message.content)).toEqual(['continue', 'old answer', 'continue'])
     expect(document.messages.at(-1)?.optimistic).toBe(true)
-  })
-
-  it('settles every running segment and marks the session errored on provider.error', () => {
-    const document = reduce([
-      envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'partial thought' }] }),
-      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'partial answer' }] }),
-      envelope(3, { type: 'diagnostic.notice', level: 'error', message: 'transport failed', code: 'provider.error' }),
-    ])
-
-    expect(document.messages.map(message => message.running)).toEqual([false, false])
-    expect(document.session.status).toBe('error')
   })
 })

@@ -41,8 +41,20 @@ describe('commandSetResolver（v2 Command Registry）', () => {
       'model', 'compact', 'new', 'export', 'clear', 'mode',
     ])
     expect(commands[0].agentPromptSnippet).toContain('/model')
-    // Skin 命令由 builtin.skin 单独持有，不影响 core 命令集排序与数量
-    expect(resolvePluginCommands().filter(command => command.name.startsWith('skin.'))).toHaveLength(11)
+    // Skin 命令由 builtin.skin 单独持有，不影响 core 命令集排序与数量（来源断言，不写死数量）
+    const skinOwnedNames = getCommandRegistry()
+      .list({ ownerPluginIds: ['builtin.skin'] })
+      .map(command => command.name)
+    expect(skinOwnedNames.length).toBeGreaterThan(0)
+    for (const command of getCommandRegistry().list()) {
+      if (command.name.startsWith('skin.')) {
+        expect(command.ownerPluginId, `${command.name} 应由 builtin.skin 持有`).toBe('builtin.skin')
+      }
+    }
+    const coreNames = new Set(resolvePluginCommands([CORE_COMMAND_SET_PLUGIN_ID]).map(command => command.name))
+    for (const name of skinOwnedNames) {
+      expect(coreNames.has(name), `skin 命令 ${name} 不得进入 core 集合`).toBe(false)
+    }
   })
 
   it('enabledPluginIds 过滤贡献（旧数据缺省 = 全部 active）', () => {

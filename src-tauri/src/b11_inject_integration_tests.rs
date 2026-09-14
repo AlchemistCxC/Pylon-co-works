@@ -2,10 +2,6 @@ use super::*;
 
 use crate::gateway::route;
 use crate::session::EventService;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 /// 记录收到 session/prompt 请求的 fake ACP（trace 文件 + 标准响应）。
@@ -64,79 +60,10 @@ fn trace_acp_agent(trace_path: &std::path::Path, chunk: bool) -> AgentDef {
     )
 }
 
-const STUB_RESPONSE_BODY: &str =
-    r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
-
-/// Prism /inject 桩：非阻塞轮询处理 expected_requests 次请求（超时自动退出，
-/// 防"不应有请求"的测试卡死 join），完整请求文本发 channel。
-fn spawn_inject_stub(
-    expected_requests: usize,
-) -> (
-    std::net::SocketAddr,
-    mpsc::Receiver<String>,
-    thread::JoinHandle<()>,
-) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
-    listener.set_nonblocking(true).expect("nonblocking");
-    let address = listener.local_addr().expect("address");
-    let (request_tx, request_rx) = mpsc::channel();
-    let server = thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let mut handled = 0usize;
-        while handled < expected_requests {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    let mut bytes = Vec::new();
-                    let mut buffer = [0_u8; 1024];
-                    loop {
-                        match stream.read(&mut buffer) {
-                            Ok(0) => break,
-                            Ok(count) => {
-                                bytes.extend_from_slice(&buffer[..count]);
-                                if let Some(headers_end) =
-                                    bytes.windows(4).position(|window| window == b"\r\n\r\n")
-                                {
-                                    let headers = String::from_utf8_lossy(&bytes[..headers_end]);
-                                    let length = headers
-                                        .lines()
-                                        .find_map(|line| line.strip_prefix("Content-Length: "))
-                                        .and_then(|value| value.trim().parse::<usize>().ok())
-                                        .unwrap_or(0);
-                                    if bytes.len() >= headers_end + 4 + length {
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                                if std::time::Instant::now() > deadline {
-                                    return;
-                                }
-                                thread::sleep(Duration::from_millis(20));
-                            }
-                            Err(_) => return,
-                        }
-                    }
-                    let _ = request_tx.send(String::from_utf8(bytes).expect("request UTF-8"));
-                    handled += 1;
-                    let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                            STUB_RESPONSE_BODY.len(),
-                            STUB_RESPONSE_BODY
-                        );
-                    let _ = stream.write_all(response.as_bytes());
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if std::time::Instant::now() > deadline {
-                        return;
-                    }
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Err(_) => return,
-            }
-        }
-    });
-    (address, request_rx, server)
-}
+/// /inject 桩应答（P91 批 D1：自拷 HTTP 桩收敛至共享
+/// `crate::test_utils::spawn_http_stub`，应答字节对齐原自拷桩——
+/// Content-Length = body 的 UTF-8 字节数）。
+const INJECT_STUB_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 67\r\nConnection: close\r\n\r\n{\"context\":\"\xe6\xb3\xa8\xe5\x85\xa5\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96\x87\",\"activated\":[\"uid-1\"],\"source\":\"vein\"}";
 
 fn gateway_with_inject(yaml: &str) -> Arc<gateway::GatewayCore> {
     Arc::new(gateway::GatewayCore::from_config(
@@ -383,9 +310,9 @@ async fn complete_session_load_replay_is_imported_into_the_empty_kernel_journal(
 
 #[tokio::test]
 async fn inject_prepends_context_and_advances_round_per_message() {
-    let (address, request_rx, server) = spawn_inject_stub(2);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-trace-{}.jsonl", std::process::id()));
+    let (address, request_rx, server) =
+        crate::test_utils::spawn_http_stub(&[INJECT_STUB_RESPONSE, INJECT_STUB_RESPONSE]);
+    let trace_path = crate::test_utils::unique_temp("b11-trace").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -421,9 +348,12 @@ gateway:
     .await
     .expect("first message must send");
     assert_eq!(inject_prompt_text(&trace_path), "注入上下文\n\n你好");
-    let first_request = request_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("first inject request");
+    let first_request = String::from_utf8(
+        request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first inject request"),
+    )
+    .expect("request UTF-8");
     let first_body: serde_json::Value = first_request
         .split("\r\n\r\n")
         .nth(1)
@@ -450,9 +380,12 @@ gateway:
     )
     .await
     .expect("second message must send");
-    let second_request = request_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("second inject request");
+    let second_request = String::from_utf8(
+        request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second inject request"),
+    )
+    .expect("request UTF-8");
     let second_body: serde_json::Value = second_request
         .split("\r\n\r\n")
         .nth(1)
@@ -468,9 +401,8 @@ gateway:
 
 #[tokio::test]
 async fn inject_disabled_passes_plain_text_through() {
-    let (address, request_rx, server) = spawn_inject_stub(1);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-disabled-{}.jsonl", std::process::id()));
+    let (address, request_rx, server) = crate::test_utils::spawn_http_stub(&[INJECT_STUB_RESPONSE]);
+    let trace_path = crate::test_utils::unique_temp("b11-disabled").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -555,9 +487,8 @@ gateway:
 
 #[tokio::test]
 async fn command_message_skips_injection() {
-    let (address, request_rx, server) = spawn_inject_stub(1);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-cmd-{}.jsonl", std::process::id()));
+    let (address, request_rx, server) = crate::test_utils::spawn_http_stub(&[INJECT_STUB_RESPONSE]);
+    let trace_path = crate::test_utils::unique_temp("b11-cmd").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, false);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -597,9 +528,9 @@ gateway:
 
 #[tokio::test]
 async fn persist_prism_mode_sends_round_with_streamed_response() {
-    let (address, request_rx, server) = spawn_inject_stub(2);
-    let trace_path =
-        std::env::temp_dir().join(format!("pylon-b11-persist-{}.jsonl", std::process::id()));
+    let (address, request_rx, server) =
+        crate::test_utils::spawn_http_stub(&[INJECT_STUB_RESPONSE, INJECT_STUB_RESPONSE]);
+    let trace_path = crate::test_utils::unique_temp("b11-persist").with_extension("jsonl");
     let agent = trace_acp_agent(&trace_path, true);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -652,14 +583,20 @@ gateway:
     .expect("message must send");
 
     // 第一个请求 = /inject（round 0）
-    let first = request_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("inject request");
+    let first = String::from_utf8(
+        request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("inject request"),
+    )
+    .expect("request UTF-8");
     assert!(first.starts_with("POST /inject HTTP/1.1"));
     // 第二个请求 = /persist（round 0 + 流式回复文本）
-    let second = request_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("persist request");
+    let second = String::from_utf8(
+        request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("persist request"),
+    )
+    .expect("request UTF-8");
     assert!(second.starts_with("POST /persist HTTP/1.1"));
     let body: serde_json::Value = second
         .split("\r\n\r\n")
