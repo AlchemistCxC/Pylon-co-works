@@ -1685,6 +1685,111 @@ mod tests {
         );
     }
 
+    /// #81 L1：sink batch 行（跨度占用 sequence）在后端的落盘契约——
+    /// event_type 原样接受、raw 数组不变形、revision = MAX(sequence)（跨度中间
+    /// 编号不占用、无连续性假设）、expected_revision 语义不变。
+    #[test]
+    fn batch_row_occupies_span_tail_and_revision_follows_max_sequence() {
+        let repo = repo();
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        let first = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            1,
+            "user.message",
+            serde_json::json!({ "text": "q" }),
+        ))
+        .unwrap();
+        let chunk = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            2,
+            "assistant.text.delta",
+            serde_json::json!({ "update": { "sessionUpdate": "agent_message_chunk" } }),
+        ))
+        .unwrap();
+        let mut batch = event_json(
+            "peri",
+            "local:s1",
+            5,
+            "assistant.text.delta.batch",
+            serde_json::json!([
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "a" } } },
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "b" } } },
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "c" } } },
+            ]),
+        );
+        batch["typedPayload"] =
+            serde_json::json!({ "text": "abc", "foldedCount": 3, "seqSpan": [3, 5] });
+        let batch = parse_canonical_event(&batch).unwrap();
+        repo.append_events(&[first, chunk], None).unwrap();
+        let result = repo.append_events(&[batch], Some(2)).unwrap();
+        assert_eq!(
+            result.revision, 5,
+            "revision = MAX(sequence)，跨度中间编号不影响"
+        );
+        assert_eq!(repo.revision(&owner_key).unwrap(), 5);
+
+        // expected_revision 以 MAX(sequence) 为基准：5 可写，4 冲突
+        let next = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            6,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap();
+        assert!(repo
+            .append_events(std::slice::from_ref(&next), Some(5))
+            .is_ok());
+        let late = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            7,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap();
+        assert!(matches!(
+            repo.append_events(std::slice::from_ref(&late), Some(4)),
+            Err(EventError::RevisionConflict { .. })
+        ));
+
+        // 回读：batch 行原样保留（raw 数组 + typedPayload 不变形、不截断）
+        let page = repo.list_events(&owner_key, None, 10).unwrap();
+        let batch_row = page
+            .events
+            .iter()
+            .find(|event| event.event_type == "assistant.text.delta.batch")
+            .expect("batch row persisted");
+        assert_eq!(batch_row.sequence, 5);
+        assert_eq!(batch_row.raw_payload.as_array().map(Vec::len), Some(3));
+        assert_eq!(batch_row.typed_payload.as_ref().unwrap()["seqSpan"][0], 3);
+        assert_eq!(batch_row.typed_payload.as_ref().unwrap()["seqSpan"][1], 5);
+        assert!(!batch_row.raw_truncated);
+    }
+
+    /// #81 L1：batch 行同样受 rule 1 约束——eventId 与 owner+sequence 推导一致。
+    #[test]
+    fn batch_row_enforces_event_id_consistency() {
+        let repo = repo();
+        let mut ev = event_json(
+            "peri",
+            "local:s1",
+            4,
+            "assistant.thinking.delta.batch",
+            serde_json::json!([
+                { "update": { "sessionUpdate": "agent_thought_chunk", "content": { "text": "a" } } },
+            ]),
+        );
+        ev["typedPayload"] = serde_json::json!({ "text": "a", "foldedCount": 1, "seqSpan": [4, 4] });
+        ev["eventId"] = serde_json::json!(format!("[\"p1\",\"peri\",\"local:s1\"]#3"));
+        assert!(matches!(
+            parse_canonical_event(&ev),
+            Err(EventError::Invalid(_))
+        ));
+    }
+
     #[tokio::test]
     async fn complete_replay_imports_atomically_only_into_an_empty_journal() {
         let service = EventService::in_memory().expect("event service");

@@ -9,6 +9,10 @@
  *   rebase/retry，不丢弃冲突批次。
  * - `event_session_deleted`（DEL-04 tombstone gate）：后端拒绝迟到写——整 owner
  *   停用，不再播种/重试（不复活已删会话）。
+ * - #81 L1：pending 始终保存逐 chunk 事件；markDirty/append 前经
+ *   `mergeAdjacentDeltaChunks` 把相邻同类 delta 合并为 batch 行（跨度占用
+ *   sequence）。id 分配（processReady）与 conflict rebase 共用同一合并函数，
+ *   规则不分叉；写成功后 pending 按 seqSpan 覆盖范围移除对应 chunk。
  *
  * 不负责：UI dispatch、replay（调用方保证 replay 不进入本 sink）。
  */
@@ -18,6 +22,7 @@ import {
   type CanonicalConversationEvent,
   type CanonicalEventOwner,
 } from '../../domains/events/eventSchema'
+import { canonicalBatchSpanOf, mergeAdjacentDeltaChunks } from './canonicalEventBatch'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import {
   asCanonicalEventRepositoryError,
@@ -46,6 +51,7 @@ export interface CanonicalEventSink {
 
 export interface CanonicalEventSinkDeps {
   repository?: CanonicalEventRepository
+  /** 写入窗口（trailing debounce）；#81 L1 起默认 1000 ms（裁决 3：准许放大）。 */
   debounceMs?: number
   onError?: (ownerKey: string, error: unknown) => void
   /** seed/reseed 失败后的基础退避；测试可缩短。 */
@@ -60,7 +66,8 @@ interface OwnerState {
   status: OwnerStatus
   /** 已分配给最后一条事件的 sequence（服务端 revision 播种后从 revision 起）。 */
   seq: number
-  /** 尚未确认写成功的已归一事件（latest-wins 批次；写成功后按 sequence 移除）。 */
+  /** 尚未确认写成功的已归一事件（逐 chunk 保存；markDirty 时合并为 batch 行，
+   * 写成功后按 sequence/seqSpan 覆盖范围移除）。 */
   pending: CanonicalConversationEvent[]
   /** 播种期间的原始事件队列。 */
   queue: Array<{ raw: unknown; force: boolean }>
@@ -97,7 +104,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
   }
 
   const scheduler = createCanonicalEventPersistScheduler({
-    debounceMs: deps.debounceMs ?? 300,
+    debounceMs: deps.debounceMs ?? 1000,
     persist: async (ownerKey, events, expectedRevision) => {
       const canonicalEvents = events as CanonicalConversationEvent[]
       try {
@@ -106,10 +113,19 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
         // durable-before-publish：插件/渲染订阅者只能看到已由 canonical_events 接受的事实。
         // append 失败时保持 pending，绝不把未提交事件广播成 committed 事实。
         for (const event of canonicalEvents) publishPluginEvent(event)
-        // 写成功的 sequence 从 pending 移除；更新期间到达的新事件保留。
+        // 写成功的 sequence 从 pending 移除（batch 行按 seqSpan 覆盖范围移除 chunk）；
+        // 更新期间到达的新事件保留。
         const state = states.get(ownerKey)
         if (state) {
-          const written = new Set(canonicalEvents.map(event => event.sequence))
+          const written = new Set<number>()
+          for (const event of canonicalEvents) {
+            const span = canonicalBatchSpanOf(event)
+            if (span) {
+              for (let sequence = span[0]; sequence <= span[1]; sequence += 1) written.add(sequence)
+            } else {
+              written.add(event.sequence)
+            }
+          }
           state.pending = state.pending.filter(event => !written.has(event.sequence))
         }
         return revision
@@ -159,7 +175,8 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       current.seedError = null
       resolveError(ownerKey)
       if (current.pending.length > 0) {
-        scheduler.markDirty(ownerKey, [...current.pending], true)
+        // rebase 与 processReady 共用同一合并函数（#81 L1：规则不分叉）。
+        scheduler.markDirty(ownerKey, mergeAdjacentDeltaChunks(current.pending), true)
       }
       const queued = current.queue
       current.queue = []
@@ -196,7 +213,9 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
     })
     state.seq = normalized.event.sequence
     state.pending.push(normalized.event)
-    scheduler.markDirty(ownerKey, [...state.pending], force)
+    // 落盘前合并相邻同类 delta（#81 L1）；pending 本身保持逐 chunk，
+    // rebase（重排 chunk sequence）与合并因此天然共用同一规则。
+    scheduler.markDirty(ownerKey, mergeAdjacentDeltaChunks(state.pending), force)
   }
 
   return {

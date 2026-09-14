@@ -35,7 +35,9 @@ describe('Workbench event envelope schema', () => {
     const expectedTypes: Record<(typeof CANONICAL_EVENT_TYPES)[number], string> = {
       'user.message': 'message.delta',
       'assistant.text.delta': 'message.delta',
+      'assistant.text.delta.batch': 'message.delta',
       'assistant.thinking.delta': 'reasoning.delta',
+      'assistant.thinking.delta.batch': 'reasoning.delta',
       'tool.call.started': 'tool.started',
       'tool.call.updated': 'tool.progress',
       'tool.call.completed': 'tool.completed',

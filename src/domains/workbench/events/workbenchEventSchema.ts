@@ -418,6 +418,10 @@ export const CANONICAL_SEMANTIC_PROJECTION_REGISTRY: Readonly<Record<string, Can
   'assistant.text.delta': ({ text }) => ({ type: 'message.delta', role: 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
   'assistant.reasoning.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
   'assistant.thinking.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
+  // #81 L1：sink 聚合行的注册表兜底（正常消费在 canonicalRowToWorkbench 按
+  // seqSpan 展开；此条目仅保证类型全盖与迁移路径语义合理）。
+  'assistant.text.delta.batch': ({ text }) => ({ type: 'message.delta', role: 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
+  'assistant.thinking.delta.batch': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
   'tool.started': toolProjection('tool.started'),
   'tool.progress': toolProjection('tool.progress'),
   'tool.completed': toolProjection('tool.completed'),

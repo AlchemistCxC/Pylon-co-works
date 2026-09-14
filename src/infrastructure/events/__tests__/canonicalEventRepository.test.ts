@@ -13,6 +13,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import {
   asCanonicalEventRepositoryError,
   loadCanonicalEventRange,
+  loadCanonicalEventsIncremental,
   tauriCanonicalEventRepository,
   type CanonicalEventRow,
 } from '../canonicalEventRepository'
@@ -217,5 +218,67 @@ describe('tauriCanonicalEventRepository', () => {
     const page = await repo.list(OWNER_KEY, null, 100)
     expect(page.events[0].owner).toEqual({ profileId: 'p1', agentId: 'peri', localSessionId: 'local:s1' })
     expect(page.events[0].sequence).toBe(7)
+  })
+})
+
+describe('loadCanonicalEventsIncremental（#81 L1 双读修复）', () => {
+  /** 计数型 fake：loadAll 调用次数即"全量读"次数。 */
+  function fakeRepository(rows: CanonicalEventRow[], revision: number) {
+    const repository = {
+      async append() { return revision },
+      async revision() { return revision },
+      async list(_ownerKey: string, beforeSequence: number | null, limit?: number) {
+        const through = (beforeSequence ?? Number.MAX_SAFE_INTEGER) - 1
+        const candidates = rows.filter(row => row.sequence <= through)
+        // backward cursor：返回游标前最新的一页（升序），next = 页内最早 sequence
+        const page = candidates.slice(-Math.min(limit ?? 100, 1000))
+        const nextBeforeSequence = page.length > 0 && candidates.some(row => row.sequence < page[0].sequence)
+          ? page[0].sequence
+          : null
+        return { events: page, nextBeforeSequence }
+      },
+      loadAll: vi.fn(async () => rows),
+      async exportRaw() { return null },
+      async searchOwners() { return [] },
+    }
+    return { repository, loadAll: repository.loadAll }
+  }
+
+  it('有差量时补读区间：结果与全量重读逐行一致且不触发 loadAll', async () => {
+    const full = [event(1), event(2), event(3), event(4), event(5)]
+    const fake = fakeRepository(full, 5)
+    const baseRows = [event(1), event(2), event(3)]
+    const fullSnapshot = await fake.loadAll()
+    const incremental = await loadCanonicalEventsIncremental(fake.repository, OWNER_KEY, baseRows)
+    expect(incremental.map(row => row.sequence)).toEqual([1, 2, 3, 4, 5])
+    expect(JSON.stringify(incremental)).toBe(JSON.stringify(fullSnapshot))
+    // 除上方对照快照外，增量路径本身不得触发全量读
+    expect(fake.loadAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('无差量（revision ≤ 游标）时原样返回占位行', async () => {
+    const fake = fakeRepository([event(1), event(2)], 2)
+    const baseRows = [event(1), event(2)]
+    const incremental = await loadCanonicalEventsIncremental(fake.repository, OWNER_KEY, baseRows)
+    expect(incremental).toEqual(baseRows)
+    expect(fake.loadAll).not.toHaveBeenCalled()
+  })
+
+  it('revision 读失败回退全量读，结果仍与全量重读一致', async () => {
+    const full = [event(1), event(2)]
+    const fake = fakeRepository(full, 2)
+    fake.repository.revision = async () => { throw new Error('db unavailable') }
+    const incremental = await loadCanonicalEventsIncremental(fake.repository, OWNER_KEY, [event(1)])
+    expect(incremental.map(row => row.sequence)).toEqual([1, 2])
+    expect(fake.loadAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('区间读失败同样回退全量读', async () => {
+    const full = [event(1), event(2)]
+    const fake = fakeRepository(full, 2)
+    fake.repository.list = async () => { throw new Error('range read failed') }
+    const incremental = await loadCanonicalEventsIncremental(fake.repository, OWNER_KEY, [event(1)])
+    expect(incremental.map(row => row.sequence)).toEqual([1, 2])
+    expect(fake.loadAll).toHaveBeenCalledTimes(1)
   })
 })

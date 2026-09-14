@@ -30,6 +30,9 @@ export const CANONICAL_EVENT_TYPES = [
   'user.message',
   'assistant.text.delta',
   'assistant.thinking.delta',
+  /** sink 写入窗口聚合行（#81 L1）：typedPayload = { text, foldedCount, seqSpan }，rawPayload = 原始 chunk 数组。 */
+  'assistant.text.delta.batch',
+  'assistant.thinking.delta.batch',
   'tool.call.started',
   'tool.call.updated',
   'tool.call.completed',
