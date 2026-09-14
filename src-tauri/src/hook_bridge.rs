@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tokio::sync::oneshot;
@@ -37,6 +37,14 @@ pub(crate) const DEFAULT_HOOK_TIMEOUT_MS: u64 = 3_000;
 pub(crate) const HOOK_MESSAGE_USER_BEFORE_SEND: &str = "message.user.beforeSend";
 /// 平台入站锚点名（#3）。
 pub(crate) const HOOK_MESSAGE_RECEIVED: &str = "message.received";
+/// API 1.3 新增锚点：prompt 块构建缝（prepare_prompt_blocks 前后，观察语义）。
+pub(crate) const HOOK_CONTEXT_BEFORE_BUILD: &str = "context.beforeBuild";
+pub(crate) const HOOK_CONTEXT_AFTER_BUILD: &str = "context.afterBuild";
+/// API 1.3 新增锚点：出站成功即回合开始（观察语义）。
+pub(crate) const HOOK_TURN_STARTED: &str = "turn.started";
+/// 权限缝锚点名（D2 / #37）：tool.beforeCall gate 与 permission.request 决策。
+pub(crate) const HOOK_TOOL_BEFORE_CALL: &str = "tool.beforeCall";
+pub(crate) const HOOK_PERMISSION_REQUEST: &str = "permission.request";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -341,14 +349,126 @@ pub(crate) fn interpret_message_received_response(
     }
 }
 
-/// D2：解释 permission.request 钩子结果。只有显式 allow/deny 才短路，
-/// 其它结果（包括超时/continue）交回既有权限流程。
-pub(crate) fn interpret_permission_hook_response(response: &Value) -> Option<bool> {
+/// D2/API 1.3（#37）：permission.request 钩子结果。
+/// - `Allow`：`{action:"respond", output:{decision:"allow"}}` → 短路批准；
+/// - `Deny`：`{action:"cancel", reason?}` → 短路拒绝；
+/// - `Modify`：`{action:"continue", event:{options:[...]}}` → 选项过滤/重排
+///   （仅原 optionId 子集，逐项校验；含未知/重复 id 或空集 → 整体按未短路放行）；
+/// - `Pass`：其余（超时/continue 无 options/形状非法）→ 交回既有权限流程。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PermissionHookDecision {
+    Allow,
+    Deny,
+    Modify(Vec<crate::permission::PermissionOption>),
+    Pass,
+}
+
+pub(crate) fn interpret_permission_hook_response(
+    response: &Value,
+    original_options: &[crate::permission::PermissionOption],
+) -> PermissionHookDecision {
     match response.get("action").and_then(Value::as_str) {
-        Some("allow") => Some(true),
-        Some("deny") | Some("cancel") => Some(false),
+        Some("respond") => {
+            if response.pointer("/output/decision").and_then(Value::as_str) == Some("allow") {
+                PermissionHookDecision::Allow
+            } else {
+                PermissionHookDecision::Pass
+            }
+        }
+        Some("cancel") => PermissionHookDecision::Deny,
+        Some("continue") => {
+            let Some(options) = response.pointer("/event/options").and_then(Value::as_array) else {
+                return PermissionHookDecision::Pass;
+            };
+            if options.is_empty() {
+                return PermissionHookDecision::Pass;
+            }
+            let mut modified = Vec::with_capacity(options.len());
+            let mut seen = HashSet::new();
+            for option in options {
+                let Some(option_id) = option.get("optionId").and_then(Value::as_str) else {
+                    return PermissionHookDecision::Pass;
+                };
+                // modify 只允许「原选项的过滤/重排」：未知/新增 id 一律整体放行，
+                // 防止插件伪造宿主从未提供的授权选项。
+                let Some(original) = original_options
+                    .iter()
+                    .find(|candidate| candidate.option_id == option_id)
+                else {
+                    return PermissionHookDecision::Pass;
+                };
+                if !seen.insert(option_id.to_string()) {
+                    return PermissionHookDecision::Pass;
+                }
+                modified.push(original.clone());
+            }
+            PermissionHookDecision::Modify(modified)
+        }
+        _ => PermissionHookDecision::Pass,
+    }
+}
+
+/// #37：身份规范化——ACP 远端会话 id（peri_id）→ 本地会话身份（source）。
+/// owner agentId 优先（同 agent 内唯一命中）；跨 runtime 重复远端 id 或找不到
+/// → None（调用方记可诊断日志并跳过派发，fail-open 至常规审批流；
+/// **禁止**前端做无 owner 的全局回退映射）。
+pub(crate) fn resolve_local_source(
+    runtimes: &crate::runtime::AgentRuntimeManager,
+    agent_id: Option<&str>,
+    remote_session_id: &str,
+) -> Option<String> {
+    let scoped: Vec<(String, Arc<crate::runtime::AgentRuntime>)> = match agent_id {
+        Some(agent) => runtimes
+            .get(agent)
+            .map(|runtime| vec![(agent.to_string(), runtime)])
+            .unwrap_or_default(),
+        None => runtimes.all_with_ids(),
+    };
+    let mut candidates: Vec<String> = Vec::new();
+    for (_, runtime) in scoped {
+        let Ok(sessions) = crate::session_store::snapshot(&runtime) else {
+            continue;
+        };
+        for (source, info) in sessions {
+            if info.peri_id == remote_session_id {
+                candidates.push(source);
+            }
+        }
+    }
+    match candidates.as_slice() {
+        [only] => Some(only.clone()),
         _ => None,
     }
+}
+
+/// 通知类锚点（turn.started / context.*）派发超时：不阻塞主链，故取 1s 预算
+/// （对齐前端 HOOK_TIMEOUT_BUDGET_MS 通知档）。
+pub(crate) const HOOK_NOTIFY_TIMEOUT_MS: u64 = 1_000;
+
+/// 通知类锚点 spawn 派发（prompt 发送链用）：tokio::spawn 不阻塞主链；
+/// 失败仅 debug 日志（通知语义：钩子故障永不阻断主循环）。零注册 =
+/// NotRegistered = 无 IPC，spawn 成本可忽略。
+pub(crate) fn spawn_notification_hook<R: tauri::Runtime + 'static>(
+    bridge: Arc<HookBridge>,
+    window: Option<tauri::Window<R>>,
+    hook: &'static str,
+    session_id: String,
+    payload: Value,
+) {
+    tokio::spawn(async move {
+        if let HookDispatchOutcome::Failed(error) = bridge
+            .dispatch_with_timeout(
+                window.as_ref(),
+                hook,
+                &session_id,
+                payload,
+                HOOK_NOTIFY_TIMEOUT_MS,
+            )
+            .await
+        {
+            tracing::debug!("notification hook {hook} dispatch failed (ignored): {error}");
+        }
+    });
 }
 
 /// #1 发送链缝派发（prompt.rs 调用；窗口可缺——无窗口即 fail-open）。
@@ -723,18 +843,122 @@ mod tests {
     }
 
     #[test]
-    fn permission_hook_interpretation_only_short_circuits_explicit_actions() {
+    fn permission_hook_interpretation_covers_allow_deny_modify_and_pass() {
+        let options = vec![
+            crate::permission::PermissionOption::plain("allow_once"),
+            crate::permission::PermissionOption::plain("reject_once"),
+        ];
+        // allow：respond + output.decision。
         assert_eq!(
-            interpret_permission_hook_response(&json!({"action":"allow"})),
-            Some(true)
+            interpret_permission_hook_response(
+                &json!({"action":"respond","output":{"decision":"allow"}}),
+                &options
+            ),
+            PermissionHookDecision::Allow
+        );
+        // deny：cancel（可带 reason）。
+        assert_eq!(
+            interpret_permission_hook_response(&json!({"action":"cancel","reason":"no"}), &options),
+            PermissionHookDecision::Deny
+        );
+        // modify：原 optionId 子集的过滤/重排。
+        assert_eq!(
+            interpret_permission_hook_response(
+                &json!({"action":"continue","event":{"options":[{"optionId":"reject_once"},{"optionId":"allow_once"}]}}),
+                &options
+            ),
+            PermissionHookDecision::Modify(vec![
+                crate::permission::PermissionOption::plain("reject_once"),
+                crate::permission::PermissionOption::plain("allow_once"),
+            ])
+        );
+        // 未知/新增 id → 整体放行（防伪造选项）。
+        assert_eq!(
+            interpret_permission_hook_response(
+                &json!({"action":"continue","event":{"options":[{"optionId":"forge"}]}}),
+                &options
+            ),
+            PermissionHookDecision::Pass
+        );
+        // 重复 id / 空 options / 缺 event / respond 非 allow → 放行。
+        assert_eq!(
+            interpret_permission_hook_response(
+                &json!({"action":"continue","event":{"options":[{"optionId":"allow_once"},{"optionId":"allow_once"}]}}),
+                &options
+            ),
+            PermissionHookDecision::Pass
         );
         assert_eq!(
-            interpret_permission_hook_response(&json!({"action":"deny"})),
-            Some(false)
+            interpret_permission_hook_response(
+                &json!({"action":"continue","event":{"options":[]}}),
+                &options
+            ),
+            PermissionHookDecision::Pass
         );
         assert_eq!(
-            interpret_permission_hook_response(&json!({"action":"continue"})),
+            interpret_permission_hook_response(&json!({"action":"continue"}), &options),
+            PermissionHookDecision::Pass
+        );
+        assert_eq!(
+            interpret_permission_hook_response(
+                &json!({"action":"respond","output":{"decision":"escalate"}}),
+                &options
+            ),
+            PermissionHookDecision::Pass
+        );
+    }
+
+    /// #37 身份规范化：owner 优先命中；未指定 owner 可命中；未知远端 id → None；
+    /// 跨 runtime 重复远端 id → 歧义 None（不做无 owner 全局回退）。
+    #[test]
+    fn resolve_local_source_prefers_owner_and_rejects_ambiguity() {
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        let new_runtime_with = |source: &str, peri: &str| {
+            let runtime = crate::runtime::AgentRuntime::new_disconnected();
+            crate::session_store::insert(
+                &runtime,
+                source,
+                crate::session::SessionInfo::new(
+                    peri.to_string(),
+                    String::new(),
+                    String::new(),
+                    false,
+                    1,
+                ),
+                false,
+                64,
+            )
+            .expect("insert session");
+            runtime
+        };
+        state
+            .runtimes
+            .insert("peri".into(), new_runtime_with("local:a", "remote-1"));
+
+        assert_eq!(
+            resolve_local_source(&state.runtimes, Some("peri"), "remote-1").as_deref(),
+            Some("local:a")
+        );
+        assert_eq!(
+            resolve_local_source(&state.runtimes, None, "remote-1").as_deref(),
+            Some("local:a")
+        );
+        assert_eq!(
+            resolve_local_source(&state.runtimes, Some("peri"), "missing"),
             None
+        );
+
+        // 跨 runtime 重复远端 id：无 owner → 歧义 None；带 owner → 命中对应 source。
+        state
+            .runtimes
+            .insert("hermes".into(), new_runtime_with("local:b", "remote-1"));
+        assert_eq!(
+            resolve_local_source(&state.runtimes, None, "remote-1"),
+            None
+        );
+        assert_eq!(
+            resolve_local_source(&state.runtimes, Some("hermes"), "remote-1").as_deref(),
+            Some("local:b")
         );
     }
 

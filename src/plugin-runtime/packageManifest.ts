@@ -3,10 +3,10 @@ import type { HotSwapMode } from './shadowUpdate.ts'
 import { HOOK_NAMES, type HookName } from './hooks/hookTypes.ts'
 
 export const PYLON_PLUGIN_API_MIN = '1.0' as const
-export const PYLON_PLUGIN_API_LATEST = '1.2' as const
+export const PYLON_PLUGIN_API_LATEST = '1.3' as const
 /** 宿主接受的全部 API 小版本（allowlist）：minor 只做加法且向后兼容，
- *  1.0 插件在 1.1/1.2 宿主继续激活；未知更高版本拒绝并提示升级宿主。 */
-export const PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, '1.1' as const, PYLON_PLUGIN_API_LATEST] as const
+ *  1.0 插件在 1.1/1.2/1.3 宿主继续激活；未知更高版本拒绝并提示升级宿主。 */
+export const PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, '1.1' as const, '1.2' as const, PYLON_PLUGIN_API_LATEST] as const
 export type PylonPluginApiVersion = (typeof PYLON_PLUGIN_API_SUPPORTED)[number]
 /** @deprecated 语义是宿主接受的最低版本，改用 PYLON_PLUGIN_API_MIN */
 export const PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN
@@ -67,10 +67,19 @@ const HOT_SWAP_MODES = new Set<HotSwapMode>([
 ])
 const API_SUPPORTED_SET = new Set<string>(PYLON_PLUGIN_API_SUPPORTED)
 const CAPABILITY_SET = new Set<string>(PYLON_PLUGIN_CAPABILITIES)
+/** minor 升版只做加法，顺序表用于「自某版本起合法」谓词（ADR-0001）。 */
+const API_MINOR_ORDER: Readonly<Record<string, number>> = { '1.0': 0, '1.1': 1, '1.2': 2, '1.3': 3 }
+
+/** capabilities / dangerousHooks 自 API 1.2 起为合法字段；1.3 仅扩充锚点词表，字段形状不变。
+ *  用 `>=` 谓词而非 `=== LATEST`，避免宿主升版后旧 manifest 被误按 removed-field 拒绝。 */
+export function apiVersionAtLeast(api: unknown, minor: Extract<PylonPluginApiVersion, '1.2'>): boolean {
+  const order = typeof api === 'string' ? API_MINOR_ORDER[api] : undefined
+  return order !== undefined && order >= API_MINOR_ORDER[minor]
+}
 
 /** capabilities 自 API 1.2 起为合法字段；1.0/1.1 出现即按 removed-field 拒绝。 */
 function removedFieldsFor(api: unknown): readonly string[] {
-  return api === PYLON_PLUGIN_API_LATEST
+  return apiVersionAtLeast(api, '1.2')
     ? ['trust', 'contributes', 'signature', 'entry']
     : ['trust', 'capabilities', 'dangerousHooks', 'contributes', 'signature', 'entry']
 }
@@ -116,7 +125,7 @@ export function parsePylonPluginManifest(source: string | unknown): PylonPluginM
       `pylon-plugin.json api 仅支持 ${PYLON_PLUGIN_API_SUPPORTED.join('/')}（更高版本需升级宿主）`,
     )
   }
-  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.capabilities !== undefined) {
+  if (apiVersionAtLeast(manifest.api, '1.2') && manifest.capabilities !== undefined) {
     if (!Array.isArray(manifest.capabilities)
       || manifest.capabilities.some(value => typeof value !== 'string' || !value.trim())) {
       throw new PluginManifestError('capabilities', '必须是字符串数组')
@@ -135,7 +144,7 @@ export function parsePylonPluginManifest(source: string | unknown): PylonPluginM
       seen.add(capability)
     })
   }
-  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.dangerousHooks !== undefined) {
+  if (apiVersionAtLeast(manifest.api, '1.2') && manifest.dangerousHooks !== undefined) {
     if (!Array.isArray(manifest.dangerousHooks)
       || manifest.dangerousHooks.some(value => typeof value !== 'string' || !value.trim())) {
       throw new PluginManifestError('dangerousHooks', '必须是字符串数组')

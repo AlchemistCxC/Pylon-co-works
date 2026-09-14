@@ -439,6 +439,10 @@ const SCHEMA_MANIFEST: &[(&str, &[&str])] = &[
         &["singleton", "version", "revision", "payload", "updated_at"],
     ),
     (
+        "rollup_migration_state",
+        &["owner_key", "unit_event_id", "state", "updated_at"],
+    ),
+    (
         "canonical_events",
         &[
             "event_id",
@@ -467,6 +471,8 @@ const SCHEMA_MANIFEST: &[(&str, &[&str])] = &[
             "raw_retained_bytes",
             "raw_omitted_bytes",
             "raw_truncation_reason",
+            "rollup_seq_start",
+            "rollup_seq_end",
         ],
     ),
     (
@@ -634,6 +640,25 @@ fn migrate(conn: &mut Connection) -> Result<(), PylonError> {
             }
         }
     }
+    // #81 L3（v14）：rollup 覆盖跨度列 + 裁剪进度表；存量单元行回填跨度列。
+    if current < 14 {
+        for (column, statement) in [
+            (
+                "rollup_seq_start",
+                "ALTER TABLE canonical_events ADD COLUMN rollup_seq_start INTEGER",
+            ),
+            (
+                "rollup_seq_end",
+                "ALTER TABLE canonical_events ADD COLUMN rollup_seq_end INTEGER",
+            ),
+        ] {
+            if !has_column(&tx, "canonical_events", column) {
+                tx.execute_batch(statement).map_err(repo_err)?;
+            }
+        }
+        tx.execute_batch(ROLLUP_V14_SQL).map_err(repo_err)?;
+        backfill_rollup_columns(&tx)?;
+    }
     tx.execute_batch(DEL_02_TOMBSTONE_INDEX_SQL)
         .map_err(repo_err)?;
     validate_schema_manifest(&tx)?;
@@ -675,4 +700,47 @@ pub(crate) fn connect(conn: &mut Connection) -> Result<(), PylonError> {
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(repo_err)?;
     validate_schema_manifest(conn)
+}
+
+/// #81 L3（v14）：裁剪进度表（列在 SCHEMA_SQL 中同步创建）。
+const ROLLUP_V14_SQL: &str = "CREATE TABLE IF NOT EXISTS rollup_migration_state (
+    owner_key TEXT NOT NULL,
+    unit_event_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_key, unit_event_id)
+);";
+
+/// v14：存量 turn.unit 行回填 rollup 覆盖跨度列（读 typedPayload JSON；
+/// 无 JSON1 依赖；形状异常的行保持 NULL——裁剪侧有 JSON 防御分支）。
+fn backfill_rollup_columns(tx: &rusqlite::Transaction<'_>) -> Result<(), PylonError> {
+    let units: Vec<(String, Option<String>)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT event_id, typed_payload FROM canonical_events WHERE event_type = 'turn.unit'",
+            )
+            .map_err(repo_err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(repo_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(repo_err)?;
+        rows
+    };
+    for (event_id, typed) in units {
+        let Some(typed_json) = typed else { continue };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&typed_json) else {
+            continue;
+        };
+        let start = value.get("seqStart").and_then(serde_json::Value::as_i64);
+        let end = value.get("seqEnd").and_then(serde_json::Value::as_i64);
+        if let (Some(start), Some(end)) = (start, end) {
+            tx.execute(
+                "UPDATE canonical_events SET rollup_seq_start = ?1, rollup_seq_end = ?2 WHERE event_id = ?3",
+                rusqlite::params![start, end, event_id],
+            )
+            .map_err(repo_err)?;
+        }
+    }
+    Ok(())
 }

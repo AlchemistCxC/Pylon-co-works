@@ -5,6 +5,7 @@ import WorkspacesPanel from '../sidebar/WorkspacesPanel'
 import { resetStores } from '../../test/resetStores'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
 const { invoke, open } = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -93,21 +94,24 @@ describe('WorkspacesPanel', () => {
 
   it('工作区设置会实际保存名称、目录、Skills 与 Hook，而不是安慰按钮', async () => {
     useWorkspaceEntityStore.setState({ workspaces: [workspace], hydrated: true })
+    const runtime = getPluginRuntime()
+    runtime.activateBuiltinSync({ id: 'test.hooks.audit', activate: () => undefined })
     render(<WorkspacesPanel {...createProps()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Pylon 工作区设置' }))
 
     fireEvent.change(screen.getByRole('textbox', { name: '工作区名称' }), { target: { value: 'Pylon Desktop' } })
     fireEvent.change(screen.getByRole('textbox', { name: '工作目录' }), { target: { value: '/path/to/project' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Skills（逗号分隔）' }), { target: { value: 'review, test' } })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Hook 插件（逗号分隔）' }), { target: { value: 'hooks.audit' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Hook 插件 test.hooks.audit' }))
     fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => expect(useWorkspaceEntityStore.getState().workspaces[0]).toMatchObject({
       name: 'Pylon Desktop',
       rootPath: '/path/to/project',
       skills: ['review', 'test'],
-      hookPluginIds: ['hooks.audit'],
+      hookPluginIds: ['test.hooks.audit'],
     }))
+    await runtime.disable('test.hooks.audit')
   })
 
   it('持久化每个工作区的展开状态，并支持键盘选择会话', async () => {

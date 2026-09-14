@@ -43,11 +43,17 @@ export interface RemoveSessionDeps {
   removeSession: (id: string) => void
   clearMessages: (id: string) => void
   reportError: (action: string, error: unknown) => void
+  /** API 1.3 生命周期通知:GUI 删除路径的 closing→deleting→deleted→closed 序列(观察语义)。 */
+  notifySessionHook?: (anchor: 'session.closing' | 'session.deleting' | 'session.deleted' | 'session.closed', session: Session) => Promise<void>
 }
 
 export async function removeSessionTransaction(id: string, deps: RemoveSessionDeps): Promise<TransactionResult<string>> {
   const session = deps.findSession(id)
   if (!session) return { ok: false, kind: 'validation', message: '会话不存在' }
+  const notifyHook = (anchor: 'session.closing' | 'session.deleting' | 'session.deleted' | 'session.closed') =>
+    deps.notifySessionHook?.(anchor, session) ?? Promise.resolve()
+  // 生命周期通知:删除发起即 closing(观察语义,不阻断删除)。
+  await notifyHook('session.closing')
   // DEL-03（§5.13 本地优先）：先本地删除（OwnerKey 校验 → deleting tombstone → 本地事务删除）——失败可重试，本地会话保留
   try {
     await deps.deleteSessionLocal(session)
@@ -70,8 +76,10 @@ export async function removeSessionTransaction(id: string, deps: RemoveSessionDe
   }
   // 本地删除成功即完成：DEL-04 主动 cancel 调度器未落盘写（不得复活）→ 清理 UI/localStorage
   deps.markSessionDeleted(id)
+  await notifyHook('session.deleting')
   deps.removeSession(id)
   deps.clearMessages(id)
+  await notifyHook('session.deleted')
   // §5.13 远端 close best effort：失败仅报告，不阻断本地删除
   try {
     await deps.closeSession(session)
@@ -84,5 +92,6 @@ export async function removeSessionTransaction(id: string, deps: RemoveSessionDe
   } catch (error) {
     deps.reportError('确认删除', error)
   }
+  await notifyHook('session.closed')
   return { ok: true, value: id }
 }

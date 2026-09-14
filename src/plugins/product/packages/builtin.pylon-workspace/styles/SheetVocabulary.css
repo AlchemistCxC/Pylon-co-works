@@ -1,0 +1,60 @@
+/* ═══════════════════════════════════════════════════════════
+   Sheet 共享词汇基座（解耦评估批 2 · issue #83，自 FileSheet.css 剥出）。
+
+   lifecycle=shared：跨 sheet / 跨面板消费的类名契约，由本包 styleAssets
+   以 ?inline 全局挂载、随插件生命周期回收。**只收外部消费面**——file 域
+   内部类（search-result-line/file、file-section-panel/muted、file-main 等）
+   仍留在 FileSheet.css。
+
+   消费方矩阵（2026-09-14）：
+   - file-main-kicker / file-main-title ………… BrowserSheetView
+   - file-section-title / file-section-hint … SearchSheet、GatewaySheet、
+     FileContextPanel、AgentContextPanel、TemplateLibrary，及 file 域内部
+   - search-result-list / row / path / text … SearchSheet、GatewaySheet、
+     两个 ContextPanel（row 类名同时是 workspace adaptive.css 的
+     modern-gui 覆写锚点，依赖下方的 border 透明基线）
+   - file-tree-error …………………………………… BrowserSheet、GatewaySheet、file 域内部
+
+   压平说明：原 FileSheet.css 中同类多代定义（源码顺序级联、后代规则覆盖
+   前代）已解析为下方的单一 canonical 版本；其中 search-result-row 保留了
+   首代的 font-size / font-family（末代 grid 版未覆盖，此前一直生效）。
+   FileSheet.css 自此不再定义这些类；「.file-section-panel > 子类」的
+   margin-inline 上下文覆写因父类属 file 域内部，留在 FileSheet.css。
+   ═══════════════════════════════════════════════════════════ */
+
+.file-main-kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--text-dim); }
+.file-main-title { font-size: 20px; font-weight: 700; margin: 8px 0; }
+
+.file-section-title {
+  display: flex;
+  align-items: center;
+  min-height: var(--ui-control-compact);
+  margin: 0 0 var(--ui-space-2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.file-section-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.file-tree-error { margin: 4px; padding: 8px; border: 1px solid color-mix(in srgb, var(--state-danger) 34%, var(--stroke-default)); border-radius: var(--ui-radius-sm); font-size: 12px; color: var(--state-danger); background: var(--state-danger-surface); }
+
+.search-result-list { display: grid; gap: 3px; margin: 4px 0 0; padding: 0; list-style: none; }
+.search-result-row {
+  display: grid; grid-template-columns: minmax(82px, .8fr) minmax(0, 1.5fr); gap: 8px;
+  width: 100%; min-width: 0; min-height: 40px; align-items: center;
+  padding: 5px 7px; border: 1px solid transparent; border-radius: 0;
+  color: var(--text); background: transparent; text-align: left; cursor: pointer;
+  /* 首代残留：末代 grid 版未覆盖、持续生效的两项声明。 */
+  font-size: 12px; font-family: var(--font);
+}
+.search-result-row:hover { border-color: var(--border); background: var(--bg-hover); }
+.search-result-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-result-path { font-family: var(--mono); font-size: 11px; color: var(--accent); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.search-result-text { min-width: 0; max-width: none; overflow: hidden; color: var(--text-dim); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.search-result-text mark { padding: 0 1px; color: var(--text); background: color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 0; }

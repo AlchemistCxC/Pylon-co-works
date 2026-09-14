@@ -15,7 +15,7 @@ import {
   type AgentRuntimeDetectorMetadata,
 } from '../domains/agent/agentDetector.ts'
 import { getHookRuntime, getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
+import { enabledHookIds, runSessionNotificationHook, runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
 import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
 import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
@@ -193,7 +193,7 @@ export function createCliSessionControlPort(): SessionControlPort {
         throwIfAborted(signal)
         const remoteId = responseSessionId(response)
         if (remoteId) useIdentityStore.getState().setSessionPeriId(session.id, remoteId)
-        await runSessionBoundaryHook('session.start', session)
+        await runSessionBoundaryHook('session.created', session)
         return { sessionId: session.id, source: session.source, remoteId: remoteId ?? null }
       } catch (error) {
         useIdentityStore.getState().removeSession(session.id)
@@ -219,10 +219,13 @@ export function createCliSessionControlPort(): SessionControlPort {
           attachments: [],
         }))
         throwIfAborted(signal)
-        void getHookRuntime().invoke('message.user.sent', { session, content: before.content })
+        // API 1.3 fail-closed：通知锚点同样只对 opt-in 会话派发（空 hooks 零 invoke）。
+        const notifyIds = enabledHookIds(session)
+        if (notifyIds) void getHookRuntime().invoke('message.user.sent', { session, content: before.content }, notifyIds)
         return result
       } catch (error) {
-        void getHookRuntime().invoke('message.user.sendFailed', { session, content: before.content, error: String(error) })
+        const notifyIds = enabledHookIds(session)
+        if (notifyIds) void getHookRuntime().invoke('message.user.sendFailed', { session, content: before.content, error: String(error) }, notifyIds)
         throw error
       } finally {
         signal.removeEventListener('abort', cancel)
@@ -232,10 +235,10 @@ export function createCliSessionControlPort(): SessionControlPort {
       const session = resolveSession(sessionId)
       if (!session) return false
       throwIfAborted(signal)
-      await getHookRuntime().invoke('session.closing', { session })
+      await runSessionNotificationHook('session.closing', session)
       await sessionClient.closeSession({ agentId: session.agentId, source: session.source })
       throwIfAborted(signal)
-      await runSessionBoundaryHook('session.end', session)
+      await runSessionBoundaryHook('session.closed', session)
       return true
     },
     async cancel(sessionId) {

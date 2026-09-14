@@ -901,7 +901,28 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     .await?;
 
     // R33a：content 构造 + persona 拼接 + B11.1 注入 + attachments 块构建。
+    // API 1.3：context.beforeBuild 观察锚点（构建前，spawn 不阻塞发送链）。
+    crate::hook_bridge::spawn_notification_hook(
+        state.hook_bridge.clone(),
+        window.cloned(),
+        crate::hook_bridge::HOOK_CONTEXT_BEFORE_BUILD,
+        source.to_string(),
+        serde_json::json!({ "source": source, "phase": "before" }),
+    );
     prepare_prompt_blocks(&mut flow).await?;
+
+    // API 1.3：context.afterBuild 观察锚点（构建成功后，携带块数）。
+    crate::hook_bridge::spawn_notification_hook(
+        state.hook_bridge.clone(),
+        window.cloned(),
+        crate::hook_bridge::HOOK_CONTEXT_AFTER_BUILD,
+        source.to_string(),
+        serde_json::json!({
+            "source": source,
+            "phase": "after",
+            "blockCount": flow.prompt_blocks.len(),
+        }),
+    );
 
     state
         .pet
@@ -997,6 +1018,14 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     };
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = flow.peri_id.clone();
+    // API 1.3：turn.started 观察锚点——出站成功即回合开始（spawn 不阻塞响应等待）。
+    crate::hook_bridge::spawn_notification_hook(
+        state.hook_bridge.clone(),
+        window.cloned(),
+        crate::hook_bridge::HOOK_TURN_STARTED,
+        source.to_string(),
+        serde_json::json!({ "source": source, "periId": flow.peri_id }),
+    );
     // G2-06：超时参数化（per-agent 协议配置，缺省 300/30 = 现状常量值）。
     let protocol = state.protocol_for_runtime(runtime);
     let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();

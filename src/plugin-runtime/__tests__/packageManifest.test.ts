@@ -128,17 +128,42 @@ describe('api=1.2 package manifest (capabilities)', () => {
     expect(PYLON_PLUGIN_CAPABILITIES).toEqual(['plugin.management'])
   })
 
-  it('rejects api=1.3 as an unsupported version', () => {
-    expect(() => parsePylonPluginManifest({ ...v12, api: '1.3' })).toThrow(/仅支持/)
+  it('accepts api=1.3 and still rejects unknown higher versions', () => {
+    expect(parsePylonPluginManifest({ ...valid, api: '1.3' }).api).toBe('1.3')
+    expect(() => parsePylonPluginManifest({ ...valid, api: '1.4' })).toThrow(/仅支持/)
   })
 
   it('accepts and validates dangerous hook declarations', () => {
-    expect(parsePylonPluginManifest({ ...v12, dangerousHooks: ['agent.chunk'] })).toMatchObject({
-      dangerousHooks: ['agent.chunk'],
+    expect(parsePylonPluginManifest({ ...v12, dangerousHooks: ['turn.started'] })).toMatchObject({
+      dangerousHooks: ['turn.started'],
     })
     expect(() => parsePylonPluginManifest({ ...v12, dangerousHooks: ['unknown.hook'] }))
       .toThrow(/dangerousHooks\.0/)
-    expect(() => parsePylonPluginManifest({ ...valid, dangerousHooks: ['agent.chunk'] }))
+    expect(() => parsePylonPluginManifest({ ...valid, dangerousHooks: ['turn.started'] }))
       .toThrow(/dangerousHooks.*API 1\.0/)
+  })
+})
+
+describe('api=1.3 package manifest (ADR-0001 vocabulary contract)', () => {
+  const v13 = { ...valid, api: '1.3' as const }
+
+  it('accepts api=1.3 manifests', () => {
+    expect(parsePylonPluginManifest(v13)).toEqual(v13)
+  })
+
+  it('keeps capabilities/dangerousHooks legal for 1.2 manifests after the host bumped to 1.3 (>= predicate)', () => {
+    expect(() => parsePylonPluginManifest({
+      ...valid, api: '1.2', capabilities: ['plugin.management'], dangerousHooks: ['permission.request'],
+    })).not.toThrow()
+  })
+
+  it('validates dangerousHooks against the API 1.3 vocabulary (permission.request in, retired anchors out)', () => {
+    expect(parsePylonPluginManifest({ ...v13, dangerousHooks: ['permission.request'] })).toMatchObject({
+      dangerousHooks: ['permission.request'],
+    })
+    expect(() => parsePylonPluginManifest({ ...v13, dangerousHooks: ['agent.chunk'] }))
+      .toThrow(/dangerousHooks\.0/)
+    expect(() => parsePylonPluginManifest({ ...v13, dangerousHooks: ['message.agent.committed'] }))
+      .toThrow(/dangerousHooks\.0/)
   })
 })

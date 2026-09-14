@@ -64,6 +64,11 @@ pub(crate) struct CanonicalEventRow {
     /// 读路径承接 raw_payload_json 列原文。不入 wire（serde skip）。
     #[serde(skip)]
     pub(crate) raw_payload_json: String,
+    /// #81 L2/L3：turn.unit 行的覆盖跨度（其余事件为 NULL）。裁剪迁移的查询列。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollup_seq_start: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollup_seq_end: Option<i64>,
 }
 
 struct StoredCanonicalEventRow {
@@ -149,6 +154,22 @@ const TOMBSTONE_STATE_SQL: &str = "SELECT state FROM deleted_sessions
      WHERE owner_key = ?1 OR (session_id = ?2 AND owner_scope = 'legacy')
      LIMIT 1";
 const MAX_SEQUENCE_SQL: &str = "SELECT MAX(sequence) FROM canonical_events WHERE owner_key = ?1";
+/// #81 L2：终结边界查询（上一 turn 的 terminal/unit 最大 sequence）。
+const LAST_TURN_BOUNDARY_SQL: &str = "SELECT COALESCE(MAX(sequence), 0) FROM canonical_events
+     WHERE owner_key = ?1 AND event_type IN ('turn.completed', 'turn.failed', 'turn.unit') AND sequence < ?2";
+/// #81 L2：行集列清单（list/compact/trim 三路共用；尾部 rollup 列为 turn.unit 专用）。
+const EVENT_COLUMNS: &str = "event_id, owner_key, profile_id, agent_id, local_session_id,         remote_session_id, client_generation, sequence, occurred_at, received_at, event_type,         payload_version, identity, typed_payload, raw_payload, created_at, schema_version,         provenance_origin, provenance_trust, provenance_provider, provenance_import_id,         raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes,         raw_truncation_reason, rollup_seq_start, rollup_seq_end";
+/// #81 L2：turn.unit 行 INSERT（额外填充 rollup 覆盖跨度列）。
+const INSERT_UNIT_EVENT_SQL: &str = "INSERT INTO canonical_events
+     (event_id, owner_key, profile_id, agent_id, local_session_id,
+      remote_session_id, client_generation, sequence, occurred_at,
+      received_at, event_type, payload_version, identity, typed_payload,
+      raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
+      provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
+      raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason,
+      rollup_seq_start, rollup_seq_end)
+ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
+ ON CONFLICT(event_id) DO NOTHING";
 
 fn is_journal_credential_key(key: &str, interaction_payload: bool) -> bool {
     let normalized = key
@@ -639,6 +660,8 @@ fn normalize_kernel_event(
         raw_retained_bytes,
         raw_omitted_bytes,
         raw_truncation_reason: raw_truncated.then(|| "size".to_string()),
+        rollup_seq_start: None,
+        rollup_seq_end: None,
     })
 }
 
@@ -810,7 +833,92 @@ pub(crate) fn parse_canonical_event(
         raw_retained_bytes,
         raw_omitted_bytes,
         raw_truncation_reason: raw_truncated.then(|| "size".to_string()),
+        rollup_seq_start: None,
+        rollup_seq_end: None,
     })
+}
+
+/// 事件行映射（EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。
+fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredCanonicalEventRow> {
+    let identity: Option<String> = row.get(12)?;
+    let typed: Option<String> = row.get(13)?;
+    let raw: String = row.get(14)?;
+    Ok(StoredCanonicalEventRow {
+        event: CanonicalEventRow {
+            event_id: row.get(0)?,
+            owner_key: row.get(1)?,
+            profile_id: row.get(2)?,
+            agent_id: row.get(3)?,
+            local_session_id: row.get(4)?,
+            remote_session_id: row.get(5)?,
+            client_generation: row.get(6)?,
+            sequence: row.get(7)?,
+            occurred_at: row.get(8)?,
+            received_at: row.get(9)?,
+            event_type: row.get(10)?,
+            payload_version: row.get(11)?,
+            identity: None,
+            typed_payload: None,
+            raw_payload: serde_json::Value::Null,
+            raw_payload_json: String::new(),
+            created_at: row.get(15)?,
+            schema_version: row.get(16)?,
+            provenance_origin: row.get(17)?,
+            provenance_trust: row.get(18)?,
+            provenance_provider: row.get(19)?,
+            provenance_import_id: row.get(20)?,
+            raw_truncated: row.get::<_, i64>(21)? != 0,
+            raw_original_bytes: row.get(22)?,
+            raw_retained_bytes: row.get(23)?,
+            raw_omitted_bytes: row.get(24)?,
+            raw_truncation_reason: row.get(25)?,
+            rollup_seq_start: row.get(26)?,
+            rollup_seq_end: row.get(27)?,
+        },
+        identity_json: identity,
+        typed_payload_json: typed,
+        raw_payload_json: raw,
+    })
+}
+
+/// 读取升序行集 [start, end]（含端点；ingest 单元构建与 trim 校验共用）。
+fn query_event_rows(
+    conn: &Connection,
+    owner_key: &str,
+    start: i64,
+    end: i64,
+) -> Result<Vec<CanonicalEventRow>, EventError> {
+    let sql = format!(
+        "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 AND sequence >= ?2 AND sequence <= ?3 ORDER BY sequence ASC"
+    );
+    let mut stmt = conn.prepare_cached(&sql).map_err(EventError::from)?;
+    let rows = stmt
+        .query_map(params![owner_key, start, end], map_event_row)
+        .map_err(EventError::from)?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(EventError::from)?.decode()?);
+    }
+    Ok(events)
+}
+
+/// #81 L3：裁剪迁移报告（wire camelCase）。
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RollupTrimReport {
+    pub(crate) processed_units: i64,
+    pub(crate) trimmed_units: i64,
+    pub(crate) resumed_units: i64,
+    pub(crate) mismatch_units: i64,
+    pub(crate) remaining_units: i64,
+    pub(crate) vacuumed: bool,
+    pub(crate) policy_blocked: bool,
+}
+
+enum RollupUnitOutcome {
+    Trimmed,
+    AlreadyGone,
+    ShaMismatch,
 }
 
 /// 事件仓库：单一 SQLite 连接 + 互斥（SQLite 单写者）。
@@ -1039,10 +1147,77 @@ impl EventRepo {
                 event.raw_truncation_reason,
             ])
             .map_err(EventError::from)?;
+        // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
+        // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
+        let mut result_events = vec![event.clone()];
+        let mut final_revision = revision + 1;
+        if super::turn_rollup::is_turn_terminal(&event.event_type) {
+            let prev_boundary: i64 = tx
+                .prepare_cached(LAST_TURN_BOUNDARY_SQL)
+                .map_err(EventError::from)?
+                .query_row(params![owner_key, event.sequence], |row| row.get(0))
+                .optional()
+                .map_err(EventError::from)?
+                .flatten()
+                .unwrap_or(0);
+            let turn_rows = query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
+            match super::turn_rollup::build_turn_unit_row(&event, &turn_rows, event.sequence + 1) {
+                Ok(unit) => {
+                    let unit_sequence = unit.sequence;
+                    let inserted = tx
+                        .prepare_cached(INSERT_UNIT_EVENT_SQL)
+                        .map_err(EventError::from)?
+                        .execute(rusqlite::params![
+                            unit.event_id,
+                            unit.owner_key,
+                            unit.profile_id,
+                            unit.agent_id,
+                            unit.local_session_id,
+                            unit.remote_session_id,
+                            unit.client_generation,
+                            unit.sequence,
+                            unit.occurred_at,
+                            unit.received_at,
+                            unit.event_type,
+                            unit.payload_version,
+                            unit.identity.as_ref().map(serde_json::Value::to_string),
+                            unit.typed_payload
+                                .as_ref()
+                                .map(serde_json::Value::to_string),
+                            unit.raw_payload_json.as_str(),
+                            unit.created_at,
+                            unit.schema_version,
+                            unit.provenance_origin,
+                            unit.provenance_trust,
+                            unit.provenance_provider,
+                            unit.provenance_import_id,
+                            unit.raw_truncated,
+                            unit.raw_original_bytes,
+                            unit.raw_retained_bytes,
+                            unit.raw_omitted_bytes,
+                            unit.raw_truncation_reason,
+                            unit.rollup_seq_start,
+                            unit.rollup_seq_end,
+                        ])
+                        .map_err(EventError::from)?;
+                    // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
+                    // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
+                    if inserted > 0 {
+                        result_events.push(unit);
+                        final_revision = unit_sequence;
+                    }
+                }
+                Err(error) => {
+                    // best effort：单元缺席仅损失读放大优化，不影响事实与等价性。
+                    // 注意 INSERT/查询的 DB 错误不走此分支——与终态同事务原子回滚。
+                    tracing::warn!(owner = %owner_key, error = %error, "turn.unit 构建失败，本轮不折叠");
+                }
+            }
+        }
         tx.commit().map_err(EventError::from)?;
         Ok(EventAppendResult {
-            events: vec![event],
-            revision: revision + 1,
+            events: result_events,
+            revision: final_revision,
         })
     }
 
@@ -1088,7 +1263,8 @@ impl EventRepo {
                         received_at, event_type, payload_version, identity, typed_payload,
                         raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
                         provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
-                        raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason
+                        raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason,
+                        rollup_seq_start, rollup_seq_end
                  FROM canonical_events
                  WHERE owner_key = ?1 AND (?2 IS NULL OR sequence < ?2)
                  ORDER BY sequence DESC
@@ -1131,6 +1307,8 @@ impl EventRepo {
                             raw_retained_bytes: row.get(23)?,
                             raw_omitted_bytes: row.get(24)?,
                             raw_truncation_reason: row.get(25)?,
+                            rollup_seq_start: row.get(26)?,
+                            rollup_seq_end: row.get(27)?,
                         },
                         identity_json: identity,
                         typed_payload_json: typed,
@@ -1150,6 +1328,217 @@ impl EventRepo {
             events,
             next_before_sequence,
         })
+    }
+
+    /// #81 L2：compact 读——返回「单元 + 未覆盖行」（升序）。被 turn.unit 覆盖的
+    /// 行不再读取（L3 裁剪后这些行已删除），前端读/解析行数随单元粒度下降。
+    pub(crate) fn load_events_compact(
+        &self,
+        owner_key: &str,
+    ) -> Result<Vec<CanonicalEventRow>, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 ORDER BY sequence ASC"
+        );
+        let mut stmt = conn.prepare_cached(&sql).map_err(EventError::from)?;
+        let rows = stmt
+            .query_map(params![owner_key], map_event_row)
+            .map_err(EventError::from)?;
+        let mut all: Vec<CanonicalEventRow> = Vec::new();
+        for row in rows {
+            all.push(row.map_err(EventError::from)?.decode()?);
+        }
+        let mut ranges: Vec<(i64, i64)> = Vec::new();
+        for row in &all {
+            if row.event_type == super::turn_rollup::TURN_UNIT_EVENT_TYPE {
+                if let (Some(start), Some(end)) = (row.rollup_seq_start, row.rollup_seq_end) {
+                    ranges.push((start, end));
+                }
+            }
+        }
+        let covered = |sequence: i64| {
+            ranges
+                .iter()
+                .any(|(start, end)| sequence >= *start && sequence <= *end)
+        };
+        Ok(all
+            .into_iter()
+            .filter(|row| {
+                row.event_type == super::turn_rollup::TURN_UNIT_EVENT_TYPE || !covered(row.sequence)
+            })
+            .collect())
+    }
+
+    /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。
+    /// 逐 turn 单事务；进度落 `rollup_migration_state`（trimmed/mismatch 永久跳过）。
+    /// budget_ms 用尽即在 turn 边界暂停；全部完成后 VACUUM 回收（仅当本次有删行）。
+    pub(crate) fn rollup_trim(
+        &self,
+        budget_ms: Option<u64>,
+    ) -> Result<RollupTrimReport, EventError> {
+        let started = std::time::Instant::now();
+        let mut report = RollupTrimReport::default();
+        loop {
+            if let Some(budget) = budget_ms {
+                if report.processed_units > 0 && started.elapsed().as_millis() as u64 >= budget {
+                    break;
+                }
+            }
+            let claimed = self.claim_next_rollup_unit()?;
+            let Some((owner_key, unit)) = claimed else {
+                break;
+            };
+            report.processed_units += 1;
+            let outcome = self.trim_one_unit(&owner_key, &unit)?;
+            match outcome {
+                RollupUnitOutcome::Trimmed => report.trimmed_units += 1,
+                RollupUnitOutcome::AlreadyGone => report.resumed_units += 1,
+                RollupUnitOutcome::ShaMismatch => report.mismatch_units += 1,
+            }
+        }
+        report.remaining_units = self.count_remaining_rollup_units()?;
+        // resumed>0 也可能对应"此前运行删行未回收"的收尾（审核 P2：避免漏 VACUUM）
+        if report.remaining_units == 0 && (report.trimmed_units > 0 || report.resumed_units > 0) {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+            conn.execute_batch("VACUUM").map_err(EventError::from)?;
+            report.vacuumed = true;
+        }
+        Ok(report)
+    }
+
+    /// 取下一个未处理单元（state 表无 trimmed/mismatch 记录；单事务内落 'verifying'）。
+    fn claim_next_rollup_unit(&self) -> Result<Option<(String, CanonicalEventRow)>, EventError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let tx = conn.transaction().map_err(EventError::from)?;
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM canonical_events e
+             WHERE e.event_type = 'turn.unit'
+               AND NOT EXISTS (SELECT 1 FROM rollup_migration_state s
+                               WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.event_id
+                                 AND s.state IN ('trimmed', 'mismatch'))
+             ORDER BY e.sequence ASC LIMIT 1"
+        );
+        let mapped = tx
+            .prepare_cached(&sql)
+            .map_err(EventError::from)?
+            .query_row([], map_event_row)
+            .optional()
+            .map_err(EventError::from)?;
+        let Some(stored) = mapped else {
+            return Ok(None);
+        };
+        let unit = stored.decode()?;
+        let owner_key = unit.owner_key.clone();
+        tx.prepare_cached(
+            "INSERT OR IGNORE INTO rollup_migration_state (owner_key, unit_event_id, state, updated_at)
+             VALUES (?1, ?2, 'verifying', ?3)",
+        )
+        .map_err(EventError::from)?
+        .execute(params![owner_key, unit.event_id, now_millis()])
+        .map_err(EventError::from)?;
+        tx.commit().map_err(EventError::from)?;
+        Ok(Some((owner_key, unit)))
+    }
+
+    /// 校验并裁剪单个单元（独立事务；行已被删/校验失败均不删行）。
+    fn trim_one_unit(
+        &self,
+        owner_key: &str,
+        unit: &CanonicalEventRow,
+    ) -> Result<RollupUnitOutcome, EventError> {
+        let span = match (unit.rollup_seq_start, unit.rollup_seq_end) {
+            (Some(start), Some(end)) => (start, end),
+            // 迁移回填前的防御分支：从 typedPayload JSON 解析
+            _ => {
+                // 与"缺 seqStart/seqEnd"同口径：防御分支一律保留行并永久跳过，
+                // 不得让整个迁移卡死（审核 P1：缺 typedPayload 曾直接 Err）。
+                let Some(typed) = unit.typed_payload.clone() else {
+                    return Ok(RollupUnitOutcome::ShaMismatch);
+                };
+                let start = typed.get("seqStart").and_then(serde_json::Value::as_i64);
+                let end = typed.get("seqEnd").and_then(serde_json::Value::as_i64);
+                match (start, end) {
+                    (Some(start), Some(end)) => (start, end),
+                    _ => return Ok(RollupUnitOutcome::ShaMismatch),
+                }
+            }
+        };
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let tx = conn.transaction().map_err(EventError::from)?;
+        let rows = query_event_rows(&tx, owner_key, span.0, span.1)?;
+        if rows.is_empty() {
+            // 续跑：行已删除（上次运行在标记前中断）→ 只补标记
+            Self::mark_rollup_state(&tx, owner_key, &unit.event_id, "trimmed")?;
+            tx.commit().map_err(EventError::from)?;
+            return Ok(RollupUnitOutcome::AlreadyGone);
+        }
+        let rebuilt = super::turn_rollup::fold_turn_rows(&rows);
+        let expected = unit
+            .typed_payload
+            .as_ref()
+            .and_then(|typed| typed.get("contentSha256"))
+            .and_then(serde_json::Value::as_str);
+        if expected != Some(rebuilt.content_sha256.as_str()) {
+            // 折叠前后文本等价校验失败：保留行（不丢弃），永久跳过并计入
+            Self::mark_rollup_state(&tx, owner_key, &unit.event_id, "mismatch")?;
+            tx.commit().map_err(EventError::from)?;
+            return Ok(RollupUnitOutcome::ShaMismatch);
+        }
+        tx.prepare_cached("DELETE FROM canonical_events WHERE owner_key = ?1 AND sequence >= ?2 AND sequence <= ?3")
+            .map_err(EventError::from)?
+            .execute(params![owner_key, span.0, span.1])
+            .map_err(EventError::from)?;
+        Self::mark_rollup_state(&tx, owner_key, &unit.event_id, "trimmed")?;
+        tx.commit().map_err(EventError::from)?;
+        Ok(RollupUnitOutcome::Trimmed)
+    }
+
+    fn mark_rollup_state(
+        tx: &rusqlite::Transaction<'_>,
+        owner_key: &str,
+        unit_event_id: &str,
+        state: &str,
+    ) -> Result<(), EventError> {
+        tx.prepare_cached(
+            "INSERT INTO rollup_migration_state (owner_key, unit_event_id, state, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(owner_key, unit_event_id) DO UPDATE SET state = ?3, updated_at = ?4",
+        )
+        .map_err(EventError::from)?
+        .execute(params![owner_key, unit_event_id, state, now_millis()])
+        .map_err(EventError::from)?;
+        Ok(())
+    }
+
+    pub(crate) fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let remaining: i64 = conn
+            .prepare_cached(
+                "SELECT COUNT(*) FROM canonical_events e
+                 WHERE e.event_type = 'turn.unit'
+                   AND NOT EXISTS (SELECT 1 FROM rollup_migration_state s
+                                   WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.event_id
+                                     AND s.state IN ('trimmed', 'mismatch'))",
+            )
+            .map_err(EventError::from)?
+            .query_row([], |row| row.get(0))
+            .map_err(EventError::from)?;
+        Ok(remaining)
     }
 
     pub(crate) fn export_raw_event(
@@ -1422,6 +1811,42 @@ impl EventService {
             })?
     }
 
+    /// #81 L2：compact 读（单元 + 未覆盖行；文档投影/搜索的读取入口）。
+    pub(crate) async fn load_events_compact(
+        &self,
+        owner_key: String,
+    ) -> Result<Vec<CanonicalEventRow>, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.load_events_compact(&owner_key))
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo compact task failed: {error}"))
+            })?
+    }
+
+    /// #81 L3：裁剪迁移（应用关闭时调用；budget_ms 控制单次预算，可续跑）。
+    pub(crate) async fn rollup_trim(
+        &self,
+        budget_ms: Option<u64>,
+    ) -> Result<RollupTrimReport, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.rollup_trim(budget_ms))
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo trim task failed: {error}"))
+            })?
+    }
+
+    /// #81 L3：剩余未裁剪单元数（策略关闭时的报告数据源）。
+    pub(crate) async fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.count_remaining_rollup_units())
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo trim count task failed: {error}"))
+            })?
+    }
+
     pub(crate) async fn export_raw_event(
         &self,
         event_id: String,
@@ -1683,6 +2108,323 @@ mod tests {
             result.events[0].typed_payload.as_ref().unwrap()["text"],
             "next"
         );
+    }
+
+    /// #81 L1：sink batch 行（跨度占用 sequence）在后端的落盘契约——
+    /// event_type 原样接受、raw 数组不变形、revision = MAX(sequence)（跨度中间
+    /// 编号不占用、无连续性假设）、expected_revision 语义不变。
+    #[test]
+    fn batch_row_occupies_span_tail_and_revision_follows_max_sequence() {
+        let repo = repo();
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        let first = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            1,
+            "user.message",
+            serde_json::json!({ "text": "q" }),
+        ))
+        .unwrap();
+        let chunk = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            2,
+            "assistant.text.delta",
+            serde_json::json!({ "update": { "sessionUpdate": "agent_message_chunk" } }),
+        ))
+        .unwrap();
+        let mut batch = event_json(
+            "peri",
+            "local:s1",
+            5,
+            "assistant.text.delta.batch",
+            serde_json::json!([
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "a" } } },
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "b" } } },
+                { "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "c" } } },
+            ]),
+        );
+        batch["typedPayload"] =
+            serde_json::json!({ "text": "abc", "foldedCount": 3, "seqSpan": [3, 5] });
+        let batch = parse_canonical_event(&batch).unwrap();
+        repo.append_events(&[first, chunk], None).unwrap();
+        let result = repo.append_events(&[batch], Some(2)).unwrap();
+        assert_eq!(
+            result.revision, 5,
+            "revision = MAX(sequence)，跨度中间编号不影响"
+        );
+        assert_eq!(repo.revision(&owner_key).unwrap(), 5);
+
+        // expected_revision 以 MAX(sequence) 为基准：5 可写，4 冲突
+        let next = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            6,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap();
+        assert!(repo
+            .append_events(std::slice::from_ref(&next), Some(5))
+            .is_ok());
+        let late = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            7,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap();
+        assert!(matches!(
+            repo.append_events(std::slice::from_ref(&late), Some(4)),
+            Err(EventError::RevisionConflict { .. })
+        ));
+
+        // 回读：batch 行原样保留（raw 数组 + typedPayload 不变形、不截断）
+        let page = repo.list_events(&owner_key, None, 10).unwrap();
+        let batch_row = page
+            .events
+            .iter()
+            .find(|event| event.event_type == "assistant.text.delta.batch")
+            .expect("batch row persisted");
+        assert_eq!(batch_row.sequence, 5);
+        assert_eq!(batch_row.raw_payload.as_array().map(Vec::len), Some(3));
+        assert_eq!(batch_row.typed_payload.as_ref().unwrap()["seqSpan"][0], 3);
+        assert_eq!(batch_row.typed_payload.as_ref().unwrap()["seqSpan"][1], 5);
+        assert!(!batch_row.raw_truncated);
+    }
+
+    /// #81 L1：batch 行同样受 rule 1 约束——eventId 与 owner+sequence 推导一致。
+    #[test]
+    fn batch_row_enforces_event_id_consistency() {
+        let mut ev = event_json(
+            "peri",
+            "local:s1",
+            4,
+            "assistant.thinking.delta.batch",
+            serde_json::json!([
+                { "update": { "sessionUpdate": "agent_thought_chunk", "content": { "text": "a" } } },
+            ]),
+        );
+        ev["typedPayload"] =
+            serde_json::json!({ "text": "a", "foldedCount": 1, "seqSpan": [4, 4] });
+        ev["eventId"] = serde_json::json!("[\"p1\",\"peri\",\"local:s1\"]#3".to_string());
+        assert!(matches!(
+            parse_canonical_event(&ev),
+            Err(EventError::Invalid(_))
+        ));
+    }
+
+    /// #81 L2：kernel 终结写入 → 同一事务追加 turn.unit（segment 折叠 + sha256 +
+    /// rollup 列）；compact 读只返回单元 + 未覆盖行。
+    #[test]
+    fn terminal_ingest_appends_turn_unit_and_compact_read_skips_covered_rows() {
+        let repo = repo();
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        let delta = |text: &str| {
+            serde_json::json!({
+                "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": text } }
+            })
+        };
+        repo.ingest_kernel_event(kernel_input(delta("你"))).unwrap();
+        repo.ingest_kernel_event(kernel_input(delta("好"))).unwrap();
+        repo.ingest_kernel_event(kernel_input(serde_json::json!({
+            "update": { "sessionUpdate": "tool_call", "toolCallId": "tool-1", "title": "Read", "kind": "read" }
+        }))).unwrap();
+        let terminal = repo
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "update": { "sessionUpdate": "done", "stopReason": "end_turn" }
+            })))
+            .expect("terminal ingest");
+
+        // 终态事件 + 单元行原子追加
+        assert_eq!(terminal.events.len(), 2, "terminal + turn.unit");
+        let terminal_row = &terminal.events[0];
+        let unit = &terminal.events[1];
+        assert_eq!(terminal_row.sequence, 4);
+        assert_eq!(unit.event_type, "turn.unit");
+        assert_eq!(unit.sequence, 5);
+        assert_eq!(terminal.revision, 5);
+        assert_eq!(repo.revision(&owner_key).unwrap(), 5);
+
+        // 单元 payload：跨度、折叠计数、segments 保序（delta-run / event 穿插）
+        let typed = unit.typed_payload.as_ref().unwrap();
+        assert_eq!(typed["aggregateKind"], "turn-rollup");
+        assert_eq!(typed["seqStart"], 1);
+        assert_eq!(typed["seqEnd"], 4);
+        assert_eq!(typed["foldedCount"], 4);
+        let segments = typed["segments"].as_array().unwrap();
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[0]["kind"], "delta-run");
+        assert_eq!(segments[0]["seqStart"], 1);
+        assert_eq!(segments[0]["seqEnd"], 2);
+        assert_eq!(segments[0]["text"], "你好");
+        assert_eq!(segments[1]["kind"], "event");
+        assert_eq!(segments[1]["event"]["eventType"], "tool.call.started");
+        assert_eq!(segments[2]["kind"], "event");
+        assert_eq!(segments[2]["event"]["eventType"], "turn.completed");
+        assert_eq!(typed["terminal"]["eventType"], "turn.completed");
+        assert_eq!(unit.rollup_seq_start, Some(1));
+        assert_eq!(unit.rollup_seq_end, Some(4));
+
+        // compact 读：被单元覆盖的行不再返回；未覆盖新行保留
+        let compact = repo.load_events_compact(&owner_key).unwrap();
+        assert_eq!(compact.len(), 1);
+        assert_eq!(compact[0].event_type, "turn.unit");
+
+        repo.ingest_kernel_event(kernel_input(delta("后续")))
+            .unwrap();
+        let compact_after = repo.load_events_compact(&owner_key).unwrap();
+        assert_eq!(compact_after.len(), 2);
+        assert_eq!(compact_after[1].event_type, "assistant.text.delta");
+        assert_eq!(compact_after[1].sequence, 6, "单元行占用 seq 5");
+    }
+
+    /// #81 L2：非终结事件不折叠（未终结 turn 不产生单元行）。
+    #[test]
+    fn non_terminal_ingest_does_not_build_unit() {
+        let repo = repo();
+        let result = repo.ingest_kernel_event(kernel_input(serde_json::json!({
+            "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "未终结" } }
+        }))).unwrap();
+        assert_eq!(result.events.len(), 1);
+        let compact = repo
+            .load_events_compact(&serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap())
+            .unwrap();
+        assert_eq!(compact.len(), 1);
+        assert_eq!(compact[0].event_type, "assistant.text.delta");
+    }
+
+    /// #81 L3：预算暂停 / 续跑 / 幂等；sha256 校验通过才删行；完成后 VACUUM。
+    #[test]
+    fn rollup_trim_pauses_on_budget_and_resumes() {
+        let repo = repo();
+        let delta = |text: &str| {
+            serde_json::json!({
+                "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": text } }
+            })
+        };
+        // 两个 turn → 两个单元
+        for text in ["a", "b"] {
+            repo.ingest_kernel_event(kernel_input(delta(text))).unwrap();
+            repo.ingest_kernel_event(kernel_input(serde_json::json!({
+                "update": { "sessionUpdate": "done" }
+            })))
+            .unwrap();
+        }
+
+        // 预算 0：单事务边界暂停——一次只裁剪一个单元
+        let first = repo.rollup_trim(Some(0)).unwrap();
+        assert_eq!(first.processed_units, 1);
+        assert_eq!(first.trimmed_units, 1);
+        assert_eq!(first.remaining_units, 1);
+
+        // 续跑：剩余单元完成并 VACUUM
+        let second = repo.rollup_trim(None).unwrap();
+        assert_eq!(second.trimmed_units, 1);
+        assert_eq!(second.remaining_units, 0);
+        assert!(second.vacuumed);
+
+        // 幂等：再跑无事可做、不 VACUUM
+        let again = repo.rollup_trim(None).unwrap();
+        assert_eq!(again.processed_units, 0);
+        assert_eq!(again.remaining_units, 0);
+        assert!(!again.vacuumed);
+    }
+
+    /// #81 L3：行已删除（claim 后崩溃 / 部分删除）→ 续跑只补标记，不重复不丢失。
+    #[test]
+    fn rollup_trim_resume_when_rows_already_gone() {
+        let repo = repo();
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        repo.ingest_kernel_event(kernel_input(serde_json::json!({
+            "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "ok" } }
+        })))
+        .unwrap();
+        repo.ingest_kernel_event(kernel_input(serde_json::json!({
+            "update": { "sessionUpdate": "done" }
+        })))
+        .unwrap();
+        // 模拟"claim 后崩溃、行已被外部清理"：手工删除覆盖行
+        {
+            let conn = repo.conn.lock().unwrap();
+            conn.execute("DELETE FROM canonical_events WHERE sequence <= 2", [])
+                .unwrap();
+        }
+        let report = repo.rollup_trim(None).unwrap();
+        assert_eq!(report.resumed_units, 1, "行已删路径只补标记");
+        assert_eq!(report.trimmed_units, 0);
+        let rows = repo.list_events(&owner_key, None, 100).unwrap();
+        assert_eq!(rows.events.len(), 1, "只剩单元行");
+    }
+
+    /// #81 L3：sha256 不匹配 → 保留行（不丢弃）、永久跳过（不重试）。
+    /// （行经 append_events 直写——不经 kernel ingest，因此无真实单元干扰。）
+    #[test]
+    fn rollup_trim_keeps_rows_on_sha_mismatch() {
+        let repo = repo();
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        let rows = vec![
+            parse_canonical_event(&event_json(
+                "peri",
+                "local:s1",
+                1,
+                "assistant.text.delta",
+                serde_json::json!({ "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "real" } } }),
+            ))
+            .unwrap(),
+            parse_canonical_event(&event_json(
+                "peri",
+                "local:s1",
+                2,
+                "turn.completed",
+                serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+            ))
+            .unwrap(),
+        ];
+        repo.append_events(&rows, None).unwrap();
+        let mut unit_value = event_json(
+            "peri",
+            "local:s1",
+            3,
+            "turn.unit",
+            serde_json::json!({ "kind": "turn-unit" }),
+        );
+        unit_value["typedPayload"] = serde_json::json!({
+            "aggregateKind": "turn-rollup",
+            "seqStart": 1,
+            "seqEnd": 2,
+            "foldedCount": 2,
+            "foldScheme": "adjacent-delta-fold-v1",
+            "contentSha256": "deadbeef",
+            "terminal": { "eventType": "turn.completed", "occurredAt": "2026-08-14T00:00:00.000Z" },
+            "segments": [],
+        });
+        let unit_row = parse_canonical_event(&unit_value).unwrap();
+        repo.append_events(&[unit_row], Some(2)).unwrap();
+
+        let report = repo.rollup_trim(None).unwrap();
+        assert_eq!(report.mismatch_units, 1, "sha 不匹配 → 保留行并跳过");
+        let remaining = repo.list_events(&owner_key, None, 100).unwrap();
+        let plain_rows = remaining
+            .events
+            .iter()
+            .filter(|e| e.event_type != "turn.unit")
+            .count();
+        assert_eq!(plain_rows, 2, "行未被删除");
+        let again = repo.rollup_trim(None).unwrap();
+        assert_eq!(again.mismatch_units, 0, "mismatch 永久跳过不重试");
+        assert_eq!(again.remaining_units, 0);
+    }
+
+    /// #81 L3：空 journal 上裁剪为 no-op（不 VACUUM）。
+    #[test]
+    fn rollup_trim_report_is_empty_on_fresh_journal() {
+        let repo = repo();
+        let report = repo.rollup_trim(None).unwrap();
+        assert_eq!(report.processed_units, 0);
+        assert_eq!(report.remaining_units, 0);
+        assert!(!report.vacuumed);
     }
 
     #[tokio::test]

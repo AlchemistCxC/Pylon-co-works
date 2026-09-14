@@ -44,6 +44,14 @@ pub(crate) struct RetentionPolicy {
     pub(crate) days: Option<u32>,
     #[serde(default)]
     pub(crate) count: Option<u32>,
+    /// #81 L3：「是否裁剪已 rollup（单元覆盖）行」开关（默认开——裁决 1 准许彻底
+    /// 丢弃；关闭后 evt_rollup_trim 只报告不删行）。
+    #[serde(default = "default_true")]
+    pub(crate) trim_rolledup: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl RetentionPolicy {
@@ -54,6 +62,7 @@ impl RetentionPolicy {
             mode: RetentionMode::Permanent,
             days: None,
             count: None,
+            trim_rolledup: true,
         }
     }
 
@@ -243,6 +252,15 @@ impl RetentionService {
     }
 }
 
+/// #81 L3：读取「裁剪已 rollup 行」开关（策略缺席/解析失败按默认开启处理——
+/// 与 D-15 的永久保存回退语义无关，该开关只影响 L3 迁移是否删行）。
+pub(crate) fn trim_rolledup_enabled(policy_json: Option<&str>) -> bool {
+    policy_json
+        .and_then(|json| serde_json::from_str::<RetentionPolicy>(json).ok())
+        .map(|policy| policy.trim_rolledup)
+        .unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,24 +371,28 @@ mod tests {
             mode: RetentionMode::ByTime,
             days: Some(25),
             count: None,
+            trim_rolledup: true,
         }
         .is_valid());
         assert!(!RetentionPolicy {
             mode: RetentionMode::ByCount,
             days: None,
             count: Some(250),
+            trim_rolledup: true,
         }
         .is_valid());
         assert!(!RetentionPolicy {
             mode: RetentionMode::ByTime,
             days: None,
             count: None,
+            trim_rolledup: true,
         }
         .is_valid());
         assert!(!RetentionPolicy {
             mode: RetentionMode::ByCount,
             days: None,
             count: None,
+            trim_rolledup: true,
         }
         .is_valid());
         assert!(RetentionPolicy::default_policy().is_valid());

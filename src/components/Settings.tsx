@@ -42,6 +42,7 @@ import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
 import { useRightRailStore } from '../rightRailStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
@@ -752,6 +753,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         const managerPage = pluginSettingsPages.find(entry => entry.contributionId === 'pylon-plugin-manager')
         return managerPage ? <PluginSettingsPageHost pageId={managerPage.contributionId} /> : <PluginManager />
       }
+      case 'hookDiagnostics':
+        return <HookDiagnosticsPanel />
     }
   }
 

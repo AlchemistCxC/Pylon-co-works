@@ -447,6 +447,7 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
   return Object.freeze({
     ...document,
     appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
+    appliedRanges: document.appliedRanges === previous?.appliedRanges && Object.isFrozen(document.appliedRanges) ? document.appliedRanges : Object.freeze(document.appliedRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number])),
     timeline: freezeItems(document.timeline, previous?.timeline),
     messages: freezeItems(document.messages, previous?.messages, freezeDeepSnapshot),
     activities: freezeItems(document.activities, previous?.activities, freezeDeepSnapshot),

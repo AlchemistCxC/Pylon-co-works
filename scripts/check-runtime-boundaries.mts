@@ -22,6 +22,7 @@ const productionFile = (path: string): boolean =>
 /** Existing production paths; additions require an explicit review entry. */
 export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/App.tsx',
+  'src/infrastructure/events/rollupTrim.ts',
   'src/application/transactions/openOwnedSessionTransaction.ts',
   'src/cli/pylonCliBridge.ts',
   'src/cli/pylonCliDomainPorts.ts',
@@ -39,6 +40,9 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/components/Sidebar.tsx',
   'src/infrastructure/events/canonicalEventRepository.ts',
   'src/infrastructure/acp/chatClient.ts',
+  // issue #82 浏览器 Agent 会话注入：sessionCreation preflight handler 须自行
+  // IPC（说明书 §6.4.3 的文档化形态），查询 Rust 档位后决定是否产出 mcpServers。
+  'src/plugins/core/browser/builtinBrowserAgentSessionAccess.ts',
   // 内核 hook 桥：与 pylonCliBridge 同形态的基础设施 IPC 桥（Rust 锚点缝 ↔ HookRuntime），
   // 非产品 domain client；P55 D1（3bc8ef13）引入时漏登记，2026-09-10 经架构师裁定按先例登记。
   'src/infrastructure/hooks/hookBridgeDispatcher.ts',

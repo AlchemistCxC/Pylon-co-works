@@ -5,6 +5,7 @@ import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
+import { runSessionNotificationHook } from '../application/transactions/sessionHookTransactions'
 
 import { getCanonicalEventFeed } from '../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from './chat/messagePersistence'
@@ -102,6 +103,8 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       removeSession: id => useIdentityStore.getState().removeSession(id),
       clearMessages: id => clearMessageStorage(id, localStorage),
       reportError: (action, error) => reportRuntimeError(action, error),
+      // API 1.3 生命周期通知:closing→deleting→deleted→closed(观察语义)。
+      notifySessionHook: runSessionNotificationHook,
     })
     if (!result.ok) return
     onClose()

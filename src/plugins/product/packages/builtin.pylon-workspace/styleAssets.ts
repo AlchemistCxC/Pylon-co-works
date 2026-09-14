@@ -3,6 +3,7 @@ import type { FirstPartyStyleAsset } from '../../firstPartyStyleRuntime.ts'
 const styleModules = typeof document === 'undefined'
   ? {}
   : import.meta.glob<string>([
+  './styles/SheetVocabulary.css',
   './styles/adaptive.css',
   './styles/components/PrismSheet.css',
   './styles/components/Sidebar.css',
