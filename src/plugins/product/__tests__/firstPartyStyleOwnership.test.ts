@@ -21,6 +21,8 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css',
   'src/plugins/product/packages/builtin.pylon-gateway/styles/adaptive.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css',
+  // 解耦评估批 2（issue #83）：FileSheet.css 的跨 sheet 共享词汇剥出为独立基座。
+  'src/plugins/product/packages/builtin.pylon-workspace/styles/SheetVocabulary.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css',
@@ -56,7 +58,7 @@ describe('first-party CSS ownership inventory', () => {
       'src/components/kernel/SkinPreviewBar.css',
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(4) // -PermissionDialog/-SessionOwnerRecoveryDialog/-ProfileEditor（已绞杀，P93）
-    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(6) // -HistorySheet/-BrowserSheet/-RuntimeSheet（已绞杀，P93 批 2/4）
+    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(7) // -HistorySheet/-BrowserSheet/-RuntimeSheet（已绞杀，P93 批 2/4）；+SheetVocabulary.css（共享词汇基座，issue #83）
     expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(7) // -MessageSearchBar（已绞杀，J/绞杀流水线 20260914）；+WorkbenchChrome.css（Solid 壳层过渡态）
     expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
   })
@@ -64,7 +66,8 @@ describe('first-party CSS ownership inventory', () => {
   it('产品 CSS 全部进入 PluginScope（或 adaptive 残量），Smoke 不进入生产 owner', () => {
     const productStyles = FIRST_PARTY_STYLE_OWNERSHIP.filter(item => item.owner.startsWith('builtin.'))
     // 样式绞杀地基（P92）：adaptive 是产品包合法生命周期（每包至多一个自适应残量）。
-    // 解耦评估批 1（P93）：FileSheet.css 含共享词汇基线，lifecycle 升格为 shared。
+    // 解耦评估批 2（issue #83）：共享词汇基线独立为 SheetVocabulary.css，lifecycle=shared；
+    // FileSheet.css 回落 plugin-scope。
     expect(productStyles.every(item => ['plugin-scope', 'adaptive', 'shared'].includes(item.lifecycle))).toBe(true)
     expect(productStyles.every(item => item.path.includes('/packages/'))).toBe(true)
     expect(listFirstPartyStylesByOwner('solid-smoke')).toEqual([
