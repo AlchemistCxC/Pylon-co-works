@@ -9,6 +9,7 @@ import { useWorkspaceEntityStore } from '../workspaceEntityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
+import { runSessionNotificationHook } from '../application/transactions/sessionHookTransactions'
 import { getCanonicalEventFeed } from '../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from './chat/messagePersistence'
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
@@ -91,6 +92,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       removeSession: sessionId => removeSession(sessionId),
       clearMessages: sessionId => clearMessageStorage(sessionId, localStorage),
       reportError: (action, error) => reportRuntimeError(action, error),
+      // API 1.3 生命周期通知:closing→deleting→deleted→closed(观察语义)。
+      notifySessionHook: runSessionNotificationHook,
     })
     if (!result.ok) return
     if (activeSession === id) onSelectSession(null)

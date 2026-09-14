@@ -58,7 +58,7 @@ describe('addSession source 唯一性（隔离）', () => {
       workdir: 'G:/workspace',
       workspaceId: 'workspace-a',
       skills: ['review'],
-      hooks: ['session.start'],
+      hookPluginIds: ['test.hook'],
     })
     useIdentityStore.getState().updateSession(originalId, {
       periId: 'remote-original',

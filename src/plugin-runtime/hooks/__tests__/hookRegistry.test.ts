@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { HookRegistry } from '../hookRegistry.ts'
-import type { HookDefinition } from '../hookTypes.ts'
+import { HOOK_TIMEOUT_BUDGET_MS, type HookDefinition } from '../hookTypes.ts'
 
 describe('HookRegistry normalization contract', () => {
   it.each([false, true])('keeps live and shadow normalization equivalent (explicit=%s)', (explicit) => {
@@ -15,7 +15,7 @@ describe('HookRegistry normalization contract', () => {
     registry.register(old, 'session.created', definition)
     const before = registry.getSnapshot()
     const expected = { ...definition, hookName: 'session.created', priority: 1000,
-      execution: 'blocking', timeoutMs: 3000, failurePolicy: 'continue', ...options }
+      execution: 'blocking', timeoutMs: HOOK_TIMEOUT_BUDGET_MS['session.created'], failurePolicy: 'continue', ...options }
     expect(before.entries[0].value).toEqual(expected)
     expect(before.entries[0].value).not.toBe(definition)
     expect(Object.isFrozen(before.entries[0].value)).toBe(true)

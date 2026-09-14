@@ -1,10 +1,11 @@
 import type { RegistryEntry } from '../registry/types.ts'
 import { HookRegistry, type RegisteredHookDefinition } from './hookRegistry.ts'
-import type {
-  HookCircuitDescriptor,
-  HookInvocationResult,
-  HookName,
-  HookTraceEntry,
+import {
+  HOOK_TIMEOUT_BUDGET_MS,
+  type HookCircuitDescriptor,
+  type HookInvocationResult,
+  type HookName,
+  type HookTraceEntry,
 } from './hookTypes.ts'
 
 interface CircuitState {
@@ -140,7 +141,7 @@ export class HookRuntime {
         continue
       }
 
-      const timeoutMs = definition.timeoutMs ?? 3000
+      const timeoutMs = definition.timeoutMs ?? HOOK_TIMEOUT_BUDGET_MS[definition.hookName]
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined
       try {
         const timeout = new Promise<symbol>(resolve => {

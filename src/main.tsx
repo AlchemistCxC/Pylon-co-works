@@ -4,6 +4,7 @@ import KernelRoot from './kernel/KernelRoot'
 import { bindSkinPersistence, restoreSkinFromStorage } from './infrastructure/skin/skinRuntimeServices'
 import { installPylonCliBridge } from './cli/pylonCliBridge'
 import { installPylonHookBridge } from './infrastructure/hooks/hookBridgeDispatcher'
+import { installCanonicalHookProjection } from './application/hooks/canonicalHookProjection'
 import './index.css'
 // Tailwind v4 utilities 基线（TW 施工书 20260914）：无 preflight，@theme inline
 // 只读消费 index.css token；必须在 index.css 之后引入。
@@ -55,6 +56,8 @@ bindSkinPersistence()
 void installPylonCliBridge().catch(error => console.error('Pylon CLI bridge failed to start', error))
 // P55-D1：kernel hook 桥 dispatcher（Rust 锚点 → 插件 handler 应答回路）。
 void installPylonHookBridge().catch(error => console.error('Pylon hook bridge failed to start', error))
+// API 1.3：canonical 事实 → turn.*/tool.* 观察锚点投影（durable-before-publish 订阅）。
+installCanonicalHookProjection()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

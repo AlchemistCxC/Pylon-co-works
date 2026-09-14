@@ -126,4 +126,45 @@ describe('removeSessionTransaction（DEL-03 本地优先）', () => {
     if (!second.ok) expect(second.kind).toBe('validation')
     expect(calls.filter(call => call.startsWith('delete:')).length).toBe(1)
   })
+
+  it('API 1.3 生命周期通知：closing→deleting→deleted→closed 依序派发（观察语义）', async () => {
+    const hooks: string[] = []
+    const events: string[] = []
+    const deps = {
+      ...createDeps().deps,
+      deleteSessionLocal: async (session: Session) => { events.push(`delete:${session.id}`) },
+      markSessionDeleted: (id: string) => { events.push(`markDeleted:${id}`) },
+      removeSession: (id: string) => { events.push(`remove:${id}`) },
+      notifySessionHook: async (anchor: 'session.closing' | 'session.deleting' | 'session.deleted' | 'session.closed') => {
+        hooks.push(anchor)
+        events.push(`hook:${anchor}`)
+      },
+    }
+    await removeSessionTransaction('s1', deps)
+    expect(hooks).toEqual(['session.closing', 'session.deleting', 'session.deleted', 'session.closed'])
+    // 交错顺序：closing 在本地删除前，deleting 在 remove 前，deleted 在 remove 后，closed 收尾。
+    expect(events).toEqual([
+      'hook:session.closing',
+      'delete:s1',
+      'markDeleted:s1',
+      'hook:session.deleting',
+      'remove:s1',
+      'hook:session.deleted',
+      'hook:session.closed',
+    ])
+  })
+
+  it('本地删除失败：只派发 closing，不派发 deleting/deleted/closed', async () => {
+    const hooks: string[] = []
+    const deps = {
+      ...createDeps().deps,
+      deleteSessionLocal: async () => { throw new Error('user_session_delete failed') },
+      notifySessionHook: async (anchor: 'session.closing' | 'session.deleting' | 'session.deleted' | 'session.closed') => {
+        hooks.push(anchor)
+      },
+    }
+    const result = await removeSessionTransaction('s1', deps)
+    expect(result.ok).toBe(false)
+    expect(hooks).toEqual(['session.closing'])
+  })
 })

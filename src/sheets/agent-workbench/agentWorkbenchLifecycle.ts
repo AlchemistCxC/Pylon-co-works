@@ -137,8 +137,8 @@ export class AgentWorkbenchLifecycle {
   }
 
   private async invokeSessionStartHook(session: Session): Promise<void> {
-    const { runSessionBoundaryHook } = await import('../../components/chat/hookRuntime.ts')
-    void runSessionBoundaryHook('session.start', session)
+    const { runSessionBoundaryHook } = await import('../../application/transactions/sessionHookTransactions.ts')
+    void runSessionBoundaryHook('session.created', session)
   }
 
   private async createSession(session: Session, context: ReturnType<typeof sessionContext>, persona: string, isCurrent: () => boolean): Promise<void> {

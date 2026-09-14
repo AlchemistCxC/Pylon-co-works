@@ -193,7 +193,7 @@ export function createCliSessionControlPort(): SessionControlPort {
         throwIfAborted(signal)
         const remoteId = responseSessionId(response)
         if (remoteId) useIdentityStore.getState().setSessionPeriId(session.id, remoteId)
-        await runSessionBoundaryHook('session.start', session)
+        await runSessionBoundaryHook('session.created', session)
         return { sessionId: session.id, source: session.source, remoteId: remoteId ?? null }
       } catch (error) {
         useIdentityStore.getState().removeSession(session.id)
@@ -235,7 +235,7 @@ export function createCliSessionControlPort(): SessionControlPort {
       await getHookRuntime().invoke('session.closing', { session })
       await sessionClient.closeSession({ agentId: session.agentId, source: session.source })
       throwIfAborted(signal)
-      await runSessionBoundaryHook('session.end', session)
+      await runSessionBoundaryHook('session.closed', session)
       return true
     },
     async cancel(sessionId) {
