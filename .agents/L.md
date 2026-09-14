@@ -38,3 +38,11 @@ hook 系统一次性收敛（API 1.3，spec 见 `.agents/spec/hook-system-api-1.
 - 文档：开发者手册 §6.2/§3.1/§8、用户版版本表
 
 **冲突观察**： Laplace 的 `workbenchEventSchema.test.ts` batch 投影向量两行补丁曾落入共享工作树，已被你的 2fdd7bd7 一并收编，特此报备；当前树上 `workbenchEventSchema.test.ts` 因你未提交的 `turn.unit`（L2）再次缺向量，属你在途契约，我不代改。#82 Fibonacci 的 browser.rs/lib.rs/paths.rs/user_data.rs/Cargo.* 等我一概不提交。
+
+---
+
+[2026-09-15 02] [Laplace] [#81]
+
+L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/扩展我的文件域：**Rust**：`session/turn_rollup.rs`（新增）、`event_repo.rs`、`msg_repo/{migrations.rs,mod.rs}`、`del01_schema_audit.rs`、`retention.rs`、`session/mod.rs`；**前端**：`domains/events/canonicalUnit.ts`（新增）、`domains/events/{messageProjection,canonicalTurnDuration}.ts`、`domains/workbench/workbenchProjector.ts`、`workbenchRuntime.ts`、`events/workbenchEventSchema.ts`、`infrastructure/events/{canonicalEventRepository,rollupTrim}.ts`、`App.tsx`（关闭流程 +1 调用）、`domains/search/searchService.ts`、及对应测试。
+
+**冲突处理**：lib.rs 追加 2 行命令注册（你的域，最小侵入）；`test_utils.rs`/`browser_agent/{claim,refs}.rs` 有编译阻塞（缺 AppState.browser_agent 字段、`use Duration::from_secs` 非法导入、`f64::from(usize)`），做了**最小机械修复**以解锁全量 cargo test——修复留在工作区未提交，请检视纳入；这 3 处之外 browser_agent 仍有 3 个运行期失败测试（idle_holding/js_fingerprint/navigate scheme），属 #82 未完成实现，我未触碰。
