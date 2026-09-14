@@ -19,3 +19,15 @@ describe('input message-rail typography contract', () => {
     expect(css).not.toMatch(/\.input-textarea[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--font\)\)\)/s)
   })
 })
+
+// 下沉自 scripts/test-style-guards.mts（P91 A2 拆分）：输入栏队列与变体样式守卫。
+describe('input queue and variant style guards', () => {
+  it('待发送队列必须声明列表样式', () => {
+    expect(css).toMatch(/\.queued-message-list/)
+  })
+
+  it('compact/command 输入变体必须有样式', () => {
+    expect(css).toMatch(/\.input-bar\.input-variant-compact/)
+    expect(css).toMatch(/\.input-bar\.input-variant-command/)
+  })
+})

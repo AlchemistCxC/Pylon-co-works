@@ -2146,21 +2146,14 @@
   width:auto;
   max-width:100%;
 }
-/* Full-width terminal rails can use a zero basis to ignore a transient Slot's
-   max-content contribution.  The guard keys on the row's *width source*, not on
-   the message layout: `data-msg-style="bubble"` is what makes the row
-   shrink-to-fit (`.app[data-msg-style="bubble"] .term-row-assistant { width:
-   fit-content }`), and that attribute is independent of `data-message-layout`.
-   Built-in preset `terminal-modern` sets msgStyle=bubble + messageLayout=classic
-   + assistantDot together; while this rule ignored msg-style, the zero basis
-   collapsed that row to the marker column — measured in Chrome at 1280px, the
-   same paragraph laid out in 91 lines (about two CJK glyphs per line, the body's
-   used width falling back to its min-content) instead of 3, and no width could
-   recover it once the bad column was measured.  Keep the guard, or keep bubble
-   rows free of a zero basis in any other form. */
-.app[data-message-layout="classic"]:not([data-msg-style="bubble"]) .term-assistant.has-dot > .term-assistant-body {
-  flex:1 1 0;
-  width:0;
+/* Keep the content column width-bearing in every message layout. A zero flex
+   basis combined with a shrink-to-fit row collapses the body to the marker's
+   min-content width, producing the characteristic few-characters-per-line
+   fracture. The shared auto basis works for both full-width rails and bubbles. */
+.term-assistant.has-dot > .term-assistant-body {
+  flex:1 1 auto;
+  width:auto;
+  max-width:100%;
 }
 .term-reasoning-body {
   box-sizing:border-box;
