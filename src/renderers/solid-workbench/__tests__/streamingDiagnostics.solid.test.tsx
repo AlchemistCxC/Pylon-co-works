@@ -16,6 +16,7 @@ import {
   diagnoseStreamingRows,
   registerStreamingDisplayDiagnostics,
 } from '../streamingDiagnostics.ts'
+import { noteStreamingRowSet, resetStreamingRowCounters, streamingRowCounters } from '../chat/streamingRowCounters.ts'
 import {
   listRendererDiagnosticsKeys,
   readRendererDiagnostics,
@@ -31,7 +32,7 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
           <div class="term-row term-row-assistant">
             <div class="term-assistant has-dot">
               <span class="term-assistant-dot">◆</span>
-              <div class="term-assistant-body"><p>hello</p></div>
+              <div class="term-assistant-body"><p>hello world</p></div>
             </div>
           </div>
         </div>
@@ -39,7 +40,7 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
           <div class="term-row term-row-reasoning">
             <div class="term-reasoning">
               <div class="term-collapse" data-open="true">
-                <div class="term-collapse-content"><div class="term-reasoning-body">thinking</div></div>
+                <div class="term-collapse-content"><div class="term-reasoning-body"><p>thinking</p><p>de</p></div></div>
               </div>
             </div>
           </div>
@@ -54,6 +55,22 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
       expect(Number.isFinite(row.markerWidth)).toBe(true)
       expect(Number.isFinite(row.textLines)).toBe(true)
     }
+    // 行集合规模读数（issue #55 判据）：顶层块数与其中的小块数（< 6 字）。
+    expect(rows[0]).toMatchObject({ blocks: 1, tinyRows: 0 })
+    expect(rows[1]).toMatchObject({ blocks: 2, tinyRows: 1 })
+
+    // 只读计数：rows / textParagraphs > 1 即行集合出现文本之外的边界；resets 记非后继输入。
+    resetStreamingRowCounters()
+    noteStreamingRowSet({ rows: 3, paragraphs: 3, reset: false })
+    noteStreamingRowSet({ rows: 4, paragraphs: 2, reset: true })
+    expect(streamingRowCounters()).toEqual({
+      publications: 2,
+      resets: 1,
+      rows: 4,
+      textParagraphs: 2,
+      rowsPerTextLength: 2,
+      maxRowsPerTextLength: 2,
+    })
 
     const scheduler = createStreamingDisplayScheduler(() => {}, { now: () => 0 })
     const publishCost = createStreamingDisplayPublishCostRecorder()
@@ -69,7 +86,18 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
       value: {
         snapshot: { publishes: 0, lastPublicationKind: 'whole' },
         publishCost: { samples: 2, lastMs: 8, maxMs: 8, p95Ms: 8 },
-        rows: [{ messageId: 'm1', role: 'assistant' }, { messageId: 'm2', role: 'reasoning' }],
+        rowSet: {
+          publications: 2,
+          resets: 1,
+          rows: 4,
+          textParagraphs: 2,
+          rowsPerTextLength: 2,
+          maxRowsPerTextLength: 2,
+        },
+        rows: [
+          { messageId: 'm1', role: 'assistant', blocks: 1, tinyRows: 0 },
+          { messageId: 'm2', role: 'reasoning', blocks: 2, tinyRows: 1 },
+        ],
       },
     })
 

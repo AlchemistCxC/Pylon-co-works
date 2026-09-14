@@ -105,15 +105,15 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
 
   const reconcile = (text: string, final: boolean) => {
     // 非后继输入（回退/换挡/重放）只作为只读计数，不再需要特殊分支：推导只看当前文本。
-    const retreat = !text.startsWith(lastText)
+    const reset = !text.startsWith(lastText)
     lastText = text
     // Providers may open an assistant stream with blank lines (for example right after a
     // reasoning phase). CommonMark drops them once the parser runs, but the plain fast
     // path renders each as an empty pre-wrap line, pushing the first generated characters
     // below the assistant indicator.
     const derived = deriveRowSpecs(trimLeadingBlankLines(text), final)
-    // S0 只读计数：rows / paragraphs > 1 说明行集合里出现了文本之外的边界（issue #55 判据）。
-    noteStreamingRowSet({ rows: derived.specs.length, paragraphs: derived.paragraphs, retreat })
+    // S0 只读计数：rows / textParagraphs > 1 说明行集合里出现了文本之外的边界（issue #55 判据）。
+    noteStreamingRowSet({ rows: derived.specs.length, paragraphs: derived.paragraphs, reset })
     const nextRows: StreamingBlockRow[] = []
     for (let index = 0; index < derived.specs.length; index += 1) {
       const spec = derived.specs[index]!
