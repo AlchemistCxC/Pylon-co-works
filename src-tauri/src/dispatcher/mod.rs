@@ -10,7 +10,9 @@ use crate::agent_runtime::{
     session_mapping_matches, source_for_peri_id_in_generation, AgentLifecycleStatus,
 };
 use crate::lifecycle::do_connect_and_replace;
-use crate::permission::{permission_response, pick_option, PendingPermission};
+use crate::permission::{
+    permission_response, pick_allow_option, pick_option, pick_reject_option, PendingPermission,
+};
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
 use crate::session::{
@@ -671,7 +673,18 @@ async fn handle_permission_request<R: tauri::Runtime>(
                     reason = %reason,
                     "tool.beforeCall hook denied tool call"
                 );
-                if let Some(option_id) = pick_option(&permission.options, true) {
+                // 钩子驱动的拒绝用严格 reject 选择（无 first() 回退）：请求不含
+                // reject 语义项时不伪造 optionId（ACP-04 §5.6），落回常规流程。
+                if let Some(option_id) = pick_reject_option(&permission.options) {
+                    if client_generation.load(Ordering::Acquire) != permission.client_generation {
+                        // C4：钩子派发窗口（最长 ~3s）内客户端已换代——旧决策不得
+                        // 写到新进程同 id 请求，丢弃应答交由 agent 侧超时收敛。
+                        tracing::warn!(
+                            request_id = %request_id,
+                            "hook deny decision dropped: client generation advanced during hook dispatch"
+                        );
+                        return;
+                    }
                     let responder = {
                         let acp = acp.lock().await;
                         acp.responder()
@@ -681,7 +694,6 @@ async fn handle_permission_request<R: tauri::Runtime>(
                         .await;
                     return;
                 }
-                // 无 reject 语义项：不伪造 optionId（ACP-04 §5.6），落回常规流程。
                 tracing::warn!("tool.beforeCall 拒绝但请求无 reject 选项，跳过应答交回常规流程");
             }
         }
@@ -709,7 +721,16 @@ async fn handle_permission_request<R: tauri::Runtime>(
                 &permission.options,
             ) {
                 crate::hook_bridge::PermissionHookDecision::Allow => {
-                    if let Some(option_id) = pick_option(&permission.options, false) {
+                    // 钩子驱动的批准用严格 allow 选择 + C4 代际复核（同 deny 路径）。
+                    if let Some(option_id) = pick_allow_option(&permission.options) {
+                        if client_generation.load(Ordering::Acquire) != permission.client_generation
+                        {
+                            tracing::warn!(
+                                request_id = %request_id,
+                                "hook allow decision dropped: client generation advanced during hook dispatch"
+                            );
+                            return;
+                        }
                         let responder = {
                             let acp = acp.lock().await;
                             acp.responder()
@@ -719,9 +740,20 @@ async fn handle_permission_request<R: tauri::Runtime>(
                             .await;
                         return;
                     }
+                    tracing::warn!(
+                        "permission.request 钩子允许但请求无 allow 语义项，跳过应答交回常规流程"
+                    );
                 }
                 crate::hook_bridge::PermissionHookDecision::Deny => {
-                    if let Some(option_id) = pick_option(&permission.options, true) {
+                    if let Some(option_id) = pick_reject_option(&permission.options) {
+                        if client_generation.load(Ordering::Acquire) != permission.client_generation
+                        {
+                            tracing::warn!(
+                                request_id = %request_id,
+                                "hook deny decision dropped: client generation advanced during hook dispatch"
+                            );
+                            return;
+                        }
                         let responder = {
                             let acp = acp.lock().await;
                             acp.responder()
@@ -731,6 +763,9 @@ async fn handle_permission_request<R: tauri::Runtime>(
                             .await;
                         return;
                     }
+                    tracing::warn!(
+                        "permission.request 钩子拒绝但请求无 reject 语义项，跳过应答交回常规流程"
+                    );
                 }
                 crate::hook_bridge::PermissionHookDecision::Modify(options) => {
                     tracing::info!(

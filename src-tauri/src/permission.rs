@@ -204,6 +204,58 @@ pub(crate) fn pick_option(options: &[PermissionOption], prefer_reject: bool) -> 
     chosen.map(|option| option.option_id.as_str())
 }
 
+/// 严格 reject 选择：只匹配 reject_once / reject 前缀语义，**绝无 first() 回退**。
+/// 供钩子驱动的拒绝路径（tool.beforeCall cancel / permission.request Deny）使用：
+/// 请求不含 reject 语义选项时返回 None，调用方不得伪造应答、应交回常规流程
+/// （对比 [`pick_option`] 的 first() 回退——那是超时/自动批准场景的既定约定，
+/// 不适用于「钩子显式拒绝」：对一个 deny gate 回答 allow 语义项是 fail-open 缺陷）。
+pub(crate) fn pick_reject_option(options: &[PermissionOption]) -> Option<&str> {
+    let semantic = |option: &PermissionOption, needle: &str, prefix: bool| {
+        std::iter::once(option.option_id.as_str())
+            .chain(option.kind.iter().map(String::as_str))
+            .any(|value| {
+                let value = value.to_ascii_lowercase().replace('_', "");
+                let needle = needle.replace('_', "");
+                if prefix {
+                    value.starts_with(&needle)
+                } else {
+                    value == needle
+                }
+            })
+    };
+    options
+        .iter()
+        .find(|option| semantic(option, "reject_once", false))
+        .or_else(|| {
+            options
+                .iter()
+                .find(|option| semantic(option, "reject", true))
+        })
+        .map(|option| option.option_id.as_str())
+}
+
+/// 严格 allow 选择（钩子驱动的批准路径）：只匹配 allow 前缀语义
+/// （allow_once / allow_always），无 first() 回退——理由同 [`pick_reject_option`]。
+pub(crate) fn pick_allow_option(options: &[PermissionOption]) -> Option<&str> {
+    let semantic = |option: &PermissionOption, needle: &str, prefix: bool| {
+        std::iter::once(option.option_id.as_str())
+            .chain(option.kind.iter().map(String::as_str))
+            .any(|value| {
+                let value = value.to_ascii_lowercase().replace('_', "");
+                let needle = needle.replace('_', "");
+                if prefix {
+                    value.starts_with(&needle)
+                } else {
+                    value == needle
+                }
+            })
+    };
+    options
+        .iter()
+        .find(|option| semantic(option, "allow", true))
+        .map(|option| option.option_id.as_str())
+}
+
 /// 单临界区（P1-2 TOCTOU 修复）：acp 锁内查条目 + C4 generation 校验 +
 /// tool_call_id 校验 + 选项校验 + claim；锁外发送（O9：10s 超时，语义对齐
 /// acp::send_line），不再持 acp 锁 await。客户端替换（replace_agent_client）
@@ -733,6 +785,44 @@ mod tests {
                 raw: None,
             })
             .collect()
+    }
+
+    #[test]
+    fn pick_reject_option_never_falls_back_to_first() {
+        // 严格 reject：无 reject 语义项返回 None，绝不回退首个选项（评审 P1）。
+        assert_eq!(
+            pick_reject_option(&opts(&["allow_once", "ask_again"])),
+            None
+        );
+        assert_eq!(
+            pick_reject_option(&opts(&["allow_once", "reject_once"])),
+            Some("reject_once")
+        );
+        // 前缀语义（reject_forever）与 kind 归一（rejectOnce）均命中。
+        assert_eq!(
+            pick_reject_option(&opts(&["allow_once", "reject_forever"])),
+            Some("reject_forever")
+        );
+        assert_eq!(
+            pick_reject_option(&opts_kind(&[("demand", Some("RejectOnce"))])),
+            Some("demand")
+        );
+    }
+
+    #[test]
+    fn pick_allow_option_matches_allow_prefix_without_fallback() {
+        assert_eq!(
+            pick_allow_option(&opts(&["reject_once", "ask_again"])),
+            None
+        );
+        assert_eq!(
+            pick_allow_option(&opts(&["reject_once", "allow_always"])),
+            Some("allow_always")
+        );
+        assert_eq!(
+            pick_allow_option(&opts_kind(&[("ok", Some("AllowOnce"))])),
+            Some("ok")
+        );
     }
 
     #[test]
