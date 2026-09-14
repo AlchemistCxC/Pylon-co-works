@@ -95,7 +95,7 @@
 | 1 | `cargo test` 全绿 | ✅ 126 passed; 0 failed（原 111 + 新增 15） |
 | 2 | `cargo clippy --all-targets -- -D warnings` 退出码 0 | ✅ 0 |
 | 3 | `cargo fmt --check` 无 diff | ✅ 0 |
-| 4 | `python scripts/stdio-smoke.py` 退出码 0 | ✅ 27 项断言全过，22 工具 |
+| 4 | `python scripts/stdio-smoke.py` 退出码 0 | ✅ 28 项断言全过，22 工具 |
 | 5 | 生产代码 `.unwrap()` / `.expect()` / `panic!` 计数为 0 | ✅ 0 |
 | 6 | README 工具数与 `tools/list` 一致 | ✅ 22 = 22 |
 | 7 | 只改 `tools/webview2-mcp/**` 与 `.agents/records/**` | ✅ 显式 pathspec 提交 |
