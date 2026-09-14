@@ -1164,7 +1164,8 @@ impl EventRepo {
             match super::turn_rollup::build_turn_unit_row(&event, &turn_rows, event.sequence + 1) {
                 Ok(unit) => {
                     let unit_sequence = unit.sequence;
-                    tx.prepare_cached(INSERT_UNIT_EVENT_SQL)
+                    let inserted = tx
+                        .prepare_cached(INSERT_UNIT_EVENT_SQL)
                         .map_err(EventError::from)?
                         .execute(rusqlite::params![
                             unit.event_id,
@@ -1199,11 +1200,17 @@ impl EventRepo {
                             unit.rollup_seq_end,
                         ])
                         .map_err(EventError::from)?;
-                    result_events.push(unit);
-                    final_revision = unit_sequence;
+                    // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
+                    // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
+                    if inserted > 0 {
+                        result_events.push(unit);
+                        final_revision = unit_sequence;
+                    }
                 }
-                Err(_) => {
-                    // best effort：单元缺席仅损失读放大优化，不影响事实与等价性
+                Err(error) => {
+                    // best effort：单元缺席仅损失读放大优化，不影响事实与等价性。
+                    // 注意 INSERT/查询的 DB 错误不走此分支——与终态同事务原子回滚。
+                    tracing::warn!(owner = %owner_key, error = %error, "turn.unit 构建失败，本轮不折叠");
                 }
             }
         }
@@ -1393,7 +1400,8 @@ impl EventRepo {
             }
         }
         report.remaining_units = self.count_remaining_rollup_units()?;
-        if report.remaining_units == 0 && report.trimmed_units > 0 {
+        // resumed>0 也可能对应"此前运行删行未回收"的收尾（审核 P2：避免漏 VACUUM）
+        if report.remaining_units == 0 && (report.trimmed_units > 0 || report.resumed_units > 0) {
             let conn = self
                 .conn
                 .lock()
@@ -1451,10 +1459,11 @@ impl EventRepo {
             (Some(start), Some(end)) => (start, end),
             // 迁移回填前的防御分支：从 typedPayload JSON 解析
             _ => {
-                let typed = unit
-                    .typed_payload
-                    .clone()
-                    .ok_or_else(|| EventError::Invalid("unit 缺 typedPayload".into()))?;
+                // 与"缺 seqStart/seqEnd"同口径：防御分支一律保留行并永久跳过，
+                // 不得让整个迁移卡死（审核 P1：缺 typedPayload 曾直接 Err）。
+                let Some(typed) = unit.typed_payload.clone() else {
+                    return Ok(RollupUnitOutcome::ShaMismatch);
+                };
                 let start = typed.get("seqStart").and_then(serde_json::Value::as_i64);
                 let end = typed.get("seqEnd").and_then(serde_json::Value::as_i64);
                 match (start, end) {

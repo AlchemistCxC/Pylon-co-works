@@ -115,10 +115,20 @@ function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly Wo
 function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: string): readonly WorkbenchEventEnvelope[] {
   const payload = parseTurnUnitPayload(event)
   if (!payload) {
-    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
   }
   const provider = event.provenance?.provider ?? event.owner.agentId
   const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
+  for (const segment of payload.segments) {
+    // 整行 segment 交给单行路径；validate 失败（undefined/[]）会让信封丢失且外层
+    // 不计 malformed ⇒ 整单元退回单行归一（event.unknown，raw 证据不丢）。
+    if (segment.kind === 'event') {
+      const inner = canonicalRowToWorkbench(segment.event)
+      if (inner === undefined || inner.length === 0) {
+        return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
+      }
+    }
+  }
   return payload.segments.flatMap(segment => {
     if (segment.kind === 'event') {
       const inner = canonicalRowToWorkbench(segment.event)
@@ -648,11 +658,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // the load buffer. Otherwise those events would remain stranded behind
         // the invalidated bind promise.
         const bufferedAtRefresh = buffered
-        // #81 L2：journal（compact 读，含单元行）是 live 文档的权威超集；从全新文档
-        // 投影，journal 信封与在飞 live/缓冲信封按 coverage 区间互斥（单元 segment
-        // 与逐 chunk 行粒度不同，无法按 id 对齐）。optimistic 等非 journal 事实仍由
-        // withPendingOptimistic / response 通道回放。
-        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: createWorkbenchDocument(refreshSource) }).document
+        const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
+        // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
+        // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
+        // live 已应用区间完全覆盖者跳过（审核修复：恢复基线的 initialDocument: current）。
+        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0
           ? withJournalDiagnostic(reconciled, refreshMalformedCount)

@@ -21,15 +21,28 @@ export interface RollupTrimReport {
 /** 关闭前运行裁剪迁移；默认总预算 10s（超时即停，下次关闭续跑）。 */
 export async function runRollupTrimBeforeClose(deadlineMs = 10_000): Promise<RollupTrimReport | undefined> {
   if (!IS_TAURI) return undefined
-  const started = Date.now()
-  let last: RollupTrimReport | undefined
-  try {
-    while (Date.now() - started < deadlineMs) {
-      last = await invoke<RollupTrimReport>('evt_rollup_trim', { budgetMs: 2_000 })
-      if (last.policyBlocked || last.remainingUnits === 0) return last
+  // 硬超时兜底（审核 P1-3）：deadline 循环只在每次 invoke 返回后生效，后端若
+  // 单次挂起会卡死关窗流程 ⇒ 整体 Promise.race，超时放弃本次（迁移可续跑，无损）。
+  const hardStop = new Promise<undefined>(resolve => {
+    const timer = setTimeout(() => resolve(undefined), deadlineMs)
+    if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+      (timer as { unref: () => void }).unref()
     }
+  })
+  try {
+    return await Promise.race([runTrimLoop(deadlineMs), hardStop])
   } catch {
     // 关闭路径不因裁剪失败阻塞（迁移可续跑；错误不在关窗时呈现）
+    return undefined
+  }
+}
+
+async function runTrimLoop(deadlineMs: number): Promise<RollupTrimReport | undefined> {
+  const started = Date.now()
+  let last: RollupTrimReport | undefined
+  while (Date.now() - started < deadlineMs) {
+    last = await invoke<RollupTrimReport>('evt_rollup_trim', { budgetMs: 2_000 })
+    if (last.policyBlocked || last.remainingUnits === 0) return last
   }
   return last
 }

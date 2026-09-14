@@ -22,6 +22,7 @@ const productionFile = (path: string): boolean =>
 /** Existing production paths; additions require an explicit review entry. */
 export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/App.tsx',
+  'src/infrastructure/events/rollupTrim.ts',
   'src/application/transactions/openOwnedSessionTransaction.ts',
   'src/cli/pylonCliBridge.ts',
   'src/cli/pylonCliDomainPorts.ts',

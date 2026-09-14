@@ -110,14 +110,14 @@ describe('messageProjection batch 等价性（#81 L1 golden）', () => {
     ])
   })
 
-  it('空文本 chunk 混入 run：拼接结果不变', () => {
+  it('空文本 chunk 混入 run：无 string text 的 chunk 不合并（审核 P1-2），但投影仍等价', () => {
     expectEquivalence([
       rawUser('问题'),
       rawText('x'),
       rawText(''),
       rawText('y'),
       rawDone(),
-    ])
+    ], { expectMerge: false })
   })
 
   it('终态后再续流：settle 语义不受聚合影响（done 切断 run，不发生合并）', () => {

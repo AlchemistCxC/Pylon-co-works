@@ -79,7 +79,8 @@ describe('workbenchProjector appliedRanges（#81 L2）', () => {
   it('重放 == 增量：同一 compact 行集任意分批投影，文档逐字节相等', () => {
     // compact 读 = 1 个单元 segment（覆盖 [1..6]）+ 未覆盖行 seq 7（tool 语义此处用文本替代）
     const unitEnvelope = deltaEnvelope({ sequence: 6, text: '你好世界', coverage: [1, 6] })
-    const uncovered = deltaEnvelope({ sequence: 7, text: '!' })
+    // 真实 compact 读的未覆盖单行走 normalizeCanonicalRowToEnvelopes，同样带 [seq,seq]
+    const uncovered = deltaEnvelope({ sequence: 7, text: '!', coverage: [7, 7] })
     const all = [unitEnvelope, uncovered]
     const replay = projectWorkbench(all, { initialDocument: createWorkbenchDocument('session-ranges') }).document
     const incrementalFirst = projectWorkbench([unitEnvelope], { initialDocument: createWorkbenchDocument('session-ranges') }).document

@@ -167,6 +167,24 @@ describe('canonicalEventSink batch（#81 L1）', () => {
     ])
   })
 
+  it('全空文本 chunk 的 run 不合并（逐行投影为 no-op，合并会新建空消息破坏等价）', async () => {
+    const fake = fakeRepository()
+    fake.revision.mockResolvedValue(0)
+    fake.append.mockResolvedValue(3)
+    const sink = createCanonicalEventSink({ repository: fake.repository })
+    const emptyDelta = { source: 'local:s1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '' } } }
+    sink.offer(context, emptyDelta)
+    sink.offer(context, emptyDelta)
+    sink.offer(context, rawUser('x'), true)
+    const rows = await flushOnce(fake, sink)
+    expect(rows.map(row => row.eventType)).toEqual([
+      'assistant.text.delta',
+      'assistant.text.delta',
+      'user.message',
+    ])
+    expect(rows[0].typedPayload).toBeUndefined()
+  })
+
   it('字节上限先于条数上限生效：2002 条小 chunk 切成多行且跨度无缝铺满', async () => {
     const fake = fakeRepository()
     fake.revision.mockResolvedValue(0)

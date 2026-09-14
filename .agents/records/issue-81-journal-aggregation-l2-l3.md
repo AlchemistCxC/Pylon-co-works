@@ -98,3 +98,17 @@
 
 - `lib.rs`（#82 声明域）：仅追加 2 个命令注册行；`App.tsx`：仅关闭流程 + 1 import；`test_utils.rs`/`browser_agent/{claim,refs}.rs`：#82 WIP 的编译阻塞，做了最小机械修复（**未提交**，留其工作区）。
 - 提交只含 #81 文件域；协调见 `.agents/L.md`。
+
+## 独立审核与修复（2026-09-15，两个并行子 agent 审核）
+
+**前端审核**（结论：需修后合入）与 **Rust 审核**（结论：可合入）。已修复：
+
+| 级别 | 发现 | 修复 |
+| --- | --- | --- |
+| FE-P1-1 | refresh 全新投影在"读快照建立→行提交→replaceDocument"窗口会丢弃 live 已应用行（基线的 initialDocument:current 防护被移除） | 恢复折入式投影；粒度互斥由 coverage 区间承担（已验证兼容两种粒度） |
+| FE-P1-2 | 全空文本 chunk 的 run 合并后 text=''（string），投影从 no-op 变成新建空消息，破坏 Message[] 等价 | 无 string text 的 delta 一律不参与合并、原样落盘；补回归测试 |
+| FE-P1-3 | rollupTrim 的 invoke 无硬超时，后端挂起会卡死关窗 | 整体 Promise.race 硬超时（超时放弃本次，迁移可续跑） |
+| RS-P1 | trim 防御分支对缺 typedPayload 的单元硬失败 → 整个迁移永久卡死 | 与缺 span 同口径：保留行标 mismatch 永久跳过 |
+| P2 | 单元构建失败静默；INSERT ON CONFLICT 未查 rows_affected；VACUUM 可能漏（续跑收尾）；损坏单元兜底缺 coverage；嵌套 event 段损坏被静默吞；isSpanCovered 部分重叠语义注释；ranges 测试保真；markdown 启发式前提；claim 不排 verifying（并发双跑计数重复，无数据危害）；claim 全表扫描；rollupTrim 边界 allowlist 登记 | 已修：tracing::warn+注释、rows_affected 防御、VACUUM 条件含 resumed、兜底补 coverage、嵌套失败整单元退单行归一、注释固化约束、测试补 [seq,seq]、allowlist 登记。遗留（记录在案）：部分重叠整段重投（正常路径不可达）、markdown 子串启发前提、claim 扫描性能、并发双跑互斥 |
+
+**流程教训**（L.md 已披露）：v2 分支 L.md 的并发追加曾以带冲突标记的状态提交（本轮清理）；共享工作区覆盖事故见 L.md 事故披露条目。
