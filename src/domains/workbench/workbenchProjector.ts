@@ -258,7 +258,12 @@ function coverageSpanOf(envelope: WorkbenchEventEnvelope): readonly [number, num
   return [span[0], span[1]]
 }
 
-/** 区间 [start,end] 是否被升序不重叠覆盖集完整包含。 */
+/**
+ * 区间 [start,end] 是否被升序不重叠覆盖集完整包含。
+ * 约束：coverage 信封必须"完整覆盖已应用区间或从全新文档到达"；部分重叠时整段
+ * 仍会投影（内容重复拼接）——正常路径（bind 全新投影 / live 顺序到达 / 单元覆盖
+ * ⊆ 已应用行）不可达，见审核 P2-1。
+ */
 function isSpanCovered(ranges: readonly (readonly [number, number])[], start: number, end: number): boolean {
   for (const [from, to] of ranges) {
     if (from > start) return false

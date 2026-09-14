@@ -103,9 +103,15 @@ function encodedByteLength(value: unknown): number {
   return byteEncoder.encode(JSON.stringify(value ?? null)).length
 }
 
-function deltaTextOf(event: CanonicalConversationEvent): string {
+/**
+ * delta 的折叠文本；**typedPayload 无 string text（如空文本 chunk）返回 undefined**。
+ * 这类 chunk 在逐行投影中是 no-op（textOf === undefined），若并入 batch 行会让
+ * text 变成 string，投影从 no-op 变成新建消息 ⇒ 破坏 Message[] 等价（审核 P1-2）。
+ * 因此无 string text 的 delta 一律不参与合并、原样落盘。
+ */
+function deltaTextOf(event: CanonicalConversationEvent): string | undefined {
   const text = (event.typedPayload as { text?: unknown } | undefined)?.text
-  return typeof text === 'string' ? text : ''
+  return typeof text === 'string' ? text : undefined
 }
 
 interface BatchRun {
@@ -132,7 +138,9 @@ export function mergeAdjacentDeltaChunks(
   }
   for (const event of events) {
     const batchType = batchEventTypeOf(event.eventType)
+    const foldText = batchType === undefined ? undefined : deltaTextOf(event)
     if (run
+      && foldText !== undefined
       && run.batchType === batchType
       && sameIdentity(run.chunks[0].identity, event.identity)
       && run.chunks.length < limits.maxFoldedCount
@@ -142,11 +150,12 @@ export function mergeAdjacentDeltaChunks(
       continue
     }
     flushRun()
-    if (batchType !== undefined) {
+    if (batchType !== undefined && foldText !== undefined) {
       run = { chunks: [event], batchType, bytes: rawPayloadBytes(event) }
       // 单条已超上限的 delta 无法成批，保持原样（不截断）。
       if (run.bytes > limits.maxRawBytes) flushRun()
     } else {
+      // 非 delta、无 string text 的 delta：原样保留（no-op 语义/unknown 不丢）
       rows.push(event)
     }
   }
@@ -158,7 +167,7 @@ export function mergeAdjacentDeltaChunks(
 function buildBatchRow(run: BatchRun): CanonicalConversationEvent {
   const first = run.chunks[0]
   const last = run.chunks[run.chunks.length - 1]
-  const text = run.chunks.map(deltaTextOf).join('')
+  const text = run.chunks.map(deltaTextOf).join('') // run 内均已通过 string text 门控
   // rawMetadata 只描述单条 chunk 的截断状态，不适用于聚合行（聚合行不截断）。
   const { rawMetadata: _omitted, ...firstWithoutRawMetadata } = first
   return {
