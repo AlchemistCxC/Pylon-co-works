@@ -139,7 +139,7 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 `skin.schema`、`skin.inspect`、`skin.draft.create`、`skin.draft.patch`、`skin.validate`、`skin.preview`、`skin.preview.patch`、`skin.inspect-computed`、`skin.capture`、`skin.rollback`、`skin.commit`。
 
-### 3.7 Browser Sheet（16 个）
+### 3.7 Browser Sheet（16 个）+ Agent 工具族（18 个，issue #82）
 
 Browser Sheet 的 Agent 控制面复用同一个 `pylon_cli` 工具和 Command Registry。桌面端命令
 实际操作嵌入式 WebView2；浏览器开发预览会明确返回 `iframe-preview`，不把预览伪装成
@@ -165,6 +165,41 @@ Browser Sheet 的 Agent 控制面复用同一个 `pylon_cli` 工具和 Command R
 避免 Agent 的非信任 click 事件被浏览器弹窗策略吞掉。开发浏览器通过 Vite 的
 真实网页代理提供同源 iframe 桥接；无法代理或被页面策略阻断时会返回 `preview_only`。
 桌面 WebView2 仍是完整操作面。
+
+#### 3.7.1 `browser.agent-*` 工具族（issue #82）
+
+MCP 桥（`pylon.exe browser-bridge`）与 `pylon_cli` 字典共用的浏览器工具面。策略
+分档（off/readonly/full，默认 readonly）、claim 共享、审计、URL 白名单与域名黑名单
+在 Rust `browser_agent_*` 命令层单点强制，两条通道都绕不开。拒绝以
+`[code] message` 抛出（`readonly_restricted` / `stale_ref` / `claim_held` /
+`unsupported_on_platform` / `domain_blocked` 等）。桥进程经 sessionCreation 管线
+在 `session/new` 前按工作区档位注入 ACP `mcpServers`，off 档不注入。
+
+| Command ID | 参数 | 档位 | 行为 |
+|:--|:--|:--|:--|
+| `browser.agent-ensure` | — | read | 确保浏览器就绪 |
+| `browser.agent-navigate` | `url`、`tabId?`、`workspaceId?` | execute | 导航（白名单+黑名单） |
+| `browser.agent-snapshot` | `tabId?` | read | 结构化快照：可交互元素（ref/role/name/坐标）+ 正文 |
+| `browser.agent-screenshot` | `tabId?` | read | PNG 截图（CDP，仅 Windows） |
+| `browser.agent-wait` | `until`、`selector?`、`timeoutMs?` | read | 等待 load / network_idle / selector |
+| `browser.agent-read-network` | `tabId?`、`limit?`、`requestId?` | read | 网络观测与文本响应体预览（CDP） |
+| `browser.agent-save-page` | `tabId?` | read | MHTML 整页存档（CDP） |
+| `browser.agent-scroll` | `deltaX?`、`deltaY?` | read | 滚动（可信滚轮优先） |
+| `browser.agent-tab-list` | — | read | 列出标签 |
+| `browser.agent-tab-new` | `url?`、`background?` | read | 新建标签（可后台并行） |
+| `browser.agent-tab-select` | `tabId` | read | 切换活动标签 |
+| `browser.agent-tab-close` | `tabId` | execute | 关闭标签 |
+| `browser.agent-click` | `ref` 或 `selector` | execute | 点击（高亮+指纹复核，CDP 可信事件优先） |
+| `browser.agent-type` | `text`、`ref`/`selector`、`submit?` | execute | 输入（可信 insertText 优先） |
+| `browser.agent-press` | `key` | execute | 按键（CDP 可信按键优先） |
+| `browser.agent-download` | `url`、`filename?` | execute | 显式下载 |
+| `browser.agent-emulate` | `width?`/`height?`、`userAgent?`、`clear?` | read | 设备仿真（CDP） |
+| `browser.agent-history` | `limit?` | read | Sheet 本地浏览历史（只读） |
+
+Agent 操作审计写入 SQLite（`user_data` 表 `browser-agent-ops` 行，50 条 ring
+buffer）。Browser Sheet「Agent」面板提供档位切换、域名黑名单、广告过滤开关、
+claim 持有者与最近操作展示；用户在 Sheet 上的手动交互（导航/标签/缩放）会立即
+抢占 agent claim。
 
 ## 4. 常用示例
 
