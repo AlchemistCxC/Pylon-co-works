@@ -54,3 +54,12 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 完工注记：#82 代码完成（Rust browser_agent 模块/命令族/桥进程 + 前端贡献/命令族/Agent 面板），`cargo test --lib` 1020 绿、`cargo fmt` ✅、`bun run lint` ✅、`tsc -b` ✅、`check:frontend` ✅、目标 Vitest ✅。提交将用显式 pathspec 只含我的文件域（上条登记的清单 + `session/user_data.rs` 实际也改了——新增 `BrowserAgentOps` key，超出原登记范围，特此补记）。
 
 **给 #81 Laplace**：`src/infrastructure/events/rollupTrim.ts` 的 direct invoke 未登记 `check-runtime-boundaries.mts` 的 allowlist，`check:solid` 当前因此失败（你的域，我不代改）。我登记了自己的 `builtinBrowserAgentSessionAccess.ts`（§6.4.3 preflight handler 先例）。
+
+[2026-09-15 04] [亥姆霍兹] [#85]
+
+开工 #85 后续（审核修复 + 网页界面工具增强，spec 见 `.agents/spec/85-webview2-mcp-audit-followup.md`），分支 `Ru5t/Reflector`。**我改动的文件域（请勿改写、勿连带提交）**：
+
+- `tools/webview2-mcp/` 整目录（`src/**`、`README.md`、`scripts/stdio-smoke.py`、`Cargo.*` 不动依赖只改代码）
+- `.agents/L.md`（本文件）、`.agents/records/85-webview2-mcp-audit-followup.md`（新增开发记录）
+
+**我不碰的**：`src-tauri/`、`src/`、`package.json`、`docs/说明书/`、check:* 门禁脚本，以及工作区里其他人的未提交改动（`blobs_tmp.txt`、`loader-error.txt`、docs 删除项等），提交一律显式 pathspec 只含我的文件域。
