@@ -41,6 +41,9 @@ export const CANONICAL_EVENT_TYPES = [
   'interaction.answered',
   'turn.completed',
   'turn.failed',
+  /** #81 L2：终结时追加的 turn 级单元行（保序 segment 数组 + content_sha256）。
+   * 只由 kernel/Rust 在写入 turn.completed|failed 的同一事务内产生；读侧优先消费单元。 */
+  'turn.unit',
   'usage.updated',
   'plan.replaced',
   'session.mode-updated',

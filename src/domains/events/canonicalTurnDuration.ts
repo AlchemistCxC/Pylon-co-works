@@ -39,7 +39,9 @@ export function deriveCanonicalTurnDuration(
       if (timestamp !== undefined && startedAt === undefined) startedAt = timestamp
       continue
     }
-    if (event.eventType !== 'turn.completed' && event.eventType !== 'turn.failed') continue
+    // #81 L2：单元行（occurredAt = 其 terminal 的 occurredAt）同样封存 turn 边界——
+    // compact 读返回单元 + 未覆盖行，terminal 行可能已被 L3 裁剪。
+    if (event.eventType !== 'turn.completed' && event.eventType !== 'turn.failed' && event.eventType !== 'turn.unit') continue
     if (startedAt === undefined || timestamp === undefined || timestamp < startedAt) continue
     latest = {
       elapsedMs: timestamp - startedAt,
@@ -64,7 +66,7 @@ export function deriveCanonicalTurnDuration(
 export function hasCanonicalTurnTerminal(
   events: readonly Pick<CanonicalTurnBoundaryEvent, 'eventType'>[],
 ): boolean {
-  return events.some(event => event.eventType === 'turn.completed' || event.eventType === 'turn.failed')
+  return events.some(event => event.eventType === 'turn.completed' || event.eventType === 'turn.failed' || event.eventType === 'turn.unit')
 }
 
 function parseTimestamp(value: string | undefined): number | undefined {

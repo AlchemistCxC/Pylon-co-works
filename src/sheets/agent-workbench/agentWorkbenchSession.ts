@@ -7,6 +7,7 @@ import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './s
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
+import { parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
 import {
   canonicalBatchChunksOf,
   canonicalBatchSpanOf,
@@ -61,6 +62,7 @@ function normalizeCanonicalRowToEnvelopes(
   raw: unknown,
   sequence: number,
   eventId: string,
+  coverage?: readonly [number, number],
 ): readonly WorkbenchEventEnvelope[] {
   const provider = event.provenance?.provider ?? event.owner.agentId
   const optimistic = isOptimisticUserEvent(raw)
@@ -80,27 +82,63 @@ function normalizeCanonicalRowToEnvelopes(
     ...envelope,
     eventId: normalized.events.length === 1 ? eventId : envelope.eventId,
     identity: Object.freeze({ ...event.identity, ...envelope.identity }),
+    ...(coverage ? { coverage: Object.freeze([coverage[0], coverage[1]]) as readonly [number, number] } : {}),
   }))
 }
 
 /**
  * #81 L1：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
  * 按跨度逐 chunk 展开重建：sub-envelope 的 sequence = seqSpan[0]+i、eventId =
- * owner#(seqSpan[0]+i)，与"逐 chunk 存储"的 appliedEventIds 逐一相同 ⇒ refresh()
- * 幂等与 projectWorkbench 去重无需改动（等价性按构造成立）。形状损坏的 batch 行
- * 退回单行归一（产出 event.unknown，raw 不丢）。
+ * owner#(seqSpan[0]+i)，coverage = [sequence, sequence]（journal 权威）。
+ * 形状损坏的 batch 行退回单行归一（产出 event.unknown，raw 不丢）。
  */
 function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly WorkbenchEventEnvelope[] {
   const ownerKey = toCanonicalOwnerKey(event.owner)
   const chunks = canonicalBatchChunksOf(event)
   if (!chunks) {
-    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
   }
   const first = canonicalBatchSpanOf(event)![0]
   return chunks.flatMap((raw, index) => {
     const sequence = first + index
     const eventId = `${ownerKey}#${sequence}`
-    return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId)
+    return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId, [sequence, sequence])
+  })
+}
+
+/**
+ * #81 L2：turn.unit 单元行按 segments 展开为 segment 级信封——delta-run 段重建为
+ * message/reasoning delta 信封（coverage = [seqStart, seqEnd]，journal 权威跨度，
+ * appliedRanges 覆盖判断据此与逐 chunk 行互斥）；整行 segment 递归走既有单行路径。
+ * 形状损坏的单元行退回单行归一（产出 event.unknown，不丢证据）。
+ */
+function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: string): readonly WorkbenchEventEnvelope[] {
+  const payload = parseTurnUnitPayload(event)
+  if (!payload) {
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
+  }
+  const provider = event.provenance?.provider ?? event.owner.agentId
+  const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
+  return payload.segments.flatMap(segment => {
+    if (segment.kind === 'event') {
+      const inner = canonicalRowToWorkbench(segment.event)
+      return inner ?? []
+    }
+    const seqEnd = segment.seqEnd
+    const part: { kind: 'text' | 'markdown'; text: string } = { kind: segment.markdown ? 'markdown' : 'text', text: segment.text }
+    return [Object.freeze(createWorkbenchEnvelope({
+      sessionId: event.owner.localSessionId,
+      sequence: seqEnd,
+      recordedAt: segment.occurredAt,
+      occurredAt: segment.occurredAt,
+      source: { provider, sourceId: `${ownerKey}#${seqEnd}` },
+      identity: segment.identity ?? {},
+      provenance,
+      coverage: [segment.seqStart, segment.seqEnd],
+      event: segment.eventType === 'assistant.text.delta'
+        ? { type: 'message.delta', role: 'assistant', parts: [part] }
+        : { type: 'reasoning.delta', parts: [part] },
+    }))]
   })
 }
 
@@ -108,8 +146,9 @@ function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[
   if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
   if (validateCanonicalEvent(row).length > 0) return []
   const event = row as CanonicalConversationEvent
+  if (event.eventType === 'turn.unit') return expandCanonicalUnitRow(event, toCanonicalOwnerKey(event.owner))
   if (isCanonicalBatchDeltaType(event.eventType)) return expandCanonicalBatchRow(event)
-  return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
+  return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
 }
 
 function isOptimisticUserEvent(raw: unknown): boolean {
@@ -168,7 +207,8 @@ function withJournalDiagnostic(document: WorkbenchDocument, count: number): Work
 function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   return {
     loadAll: ownerKey => {
-      if (IS_TAURI && !isBrowserMockRuntime()) return tauriCanonicalEventRepository().loadAll(ownerKey)
+      // #81 L2：投影读走 compact（单元 + 未覆盖行）；被覆盖行不再传输/解析。
+      if (IS_TAURI && !isBrowserMockRuntime()) return tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey)
       // Browser snapshots are keyed by local Session.id, not the JSON owner key.
       // bind() adds that compatibility source once it has the concrete Session.
       return Promise.resolve([])
@@ -608,11 +648,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // the load buffer. Otherwise those events would remain stranded behind
         // the invalidated bind promise.
         const bufferedAtRefresh = buffered
-        const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
-        // Start from the live document so already-applied event ids remain
-        // idempotent while newly persisted terminal updates (for example a tool
-        // completion that raced the initial read) are folded in place.
-        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        // #81 L2：journal（compact 读，含单元行）是 live 文档的权威超集；从全新文档
+        // 投影，journal 信封与在飞 live/缓冲信封按 coverage 区间互斥（单元 segment
+        // 与逐 chunk 行粒度不同，无法按 id 对齐）。optimistic 等非 journal 事实仍由
+        // withPendingOptimistic / response 通道回放。
+        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: createWorkbenchDocument(refreshSource) }).document
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0
           ? withJournalDiagnostic(reconciled, refreshMalformedCount)

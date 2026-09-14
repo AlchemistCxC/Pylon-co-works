@@ -100,7 +100,8 @@ export class AgentWorkbenchLifecycle {
     // （不再整读第二遍；失败自动回退全量读，结果与全量重读逐行一致）。
     const placeholder = await this.coordinator.readCanonicalPlaceholder({
       ownerKey,
-      loadCanonical: () => tauriCanonicalEventRepository().loadAll(ownerKey),
+      // #81 L2：投影读走 compact（单元 + 未覆盖行）。
+      loadCanonical: () => tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey),
       projectCanonical: rows => projectMessagesFromCanonical(rows),
     }).catch((error: unknown): undefined => {
       // The canonical read can finish after a session switch/reload. A late
@@ -194,7 +195,7 @@ export class AgentWorkbenchLifecycle {
       // （首屏读取失败等）保持全量读。
       loadCanonical: () => placeholderRows
         ? loadCanonicalEventsIncremental(tauriCanonicalEventRepository(), ownerKey, placeholderRows)
-        : tauriCanonicalEventRepository().loadAll(ownerKey),
+        : tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey),
       projectCanonical: rows => projectMessagesFromCanonical(rows),
       isCurrent,
     })
