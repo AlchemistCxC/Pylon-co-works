@@ -251,19 +251,17 @@
 .file-tab-mode { font-size: 10px; line-height: 1; padding: 2px 4px; color: var(--text-dim); background: var(--bg-hover); border: 1px solid var(--border); border-radius: var(--ui-radius-xs); white-space: nowrap; }
 
 .file-tab-view {
-  flex: 1; min-height: 0; overflow: auto;
-  font-size: var(--editor-font-size, 13px);
-  line-height: var(--editor-line-height, 1.5);
+  background: var(--bg-panel);
 }
-.file-tab-code { display: flex; min-height: 100%; }
+/* issue #69：两态投影的几何（盒宽/内边距/字体度量/tab 列宽/容器布局）全部由文末
+   「File code projection contract」统一声明；下面这些旧块只保留颜色、背景与交互态，
+   避免它们继续「穿透契约」影响只读/编辑两态的度量。 */
 .file-tab-gutter {
-  flex: 0 0 3em; text-align: right; padding-right: 8px; user-select: none;
+  user-select: none;
   color: var(--editor-gutter-color, #65737e);
   background: var(--editor-gutter-bg, rgba(0,0,0,0.03));
 }
-.file-tab-gutter-line { height: 1.5em; }
-.file-tab-pre { flex: 1; margin: 0; padding: 0 12px; overflow: visible; }
-.file-tab-line { display: block; font-family: var(--mono); }
+.file-tab-pre { overflow: visible; }
 .file-tab-plain { font-family: var(--mono); color: var(--text); white-space: pre-wrap; }
 .file-tab-md { padding: 12px; color: var(--text); }
 .file-tab-md p { margin: 0 0 8px; }
@@ -533,59 +531,23 @@
 
 .file-tab-view {
   background: var(--bg-panel);
-  scrollbar-width: thin;
 }
 
 .file-tab-code {
-  min-width: max-content;
   background: var(--bg-panel);
 }
 
 .file-tab-gutter {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  flex-basis: 56px;
-  min-width: 56px;
-  padding: 12px 12px 12px 8px;
-  border-right: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   color: var(--editor-gutter-color, var(--text-dim));
   background: var(--editor-gutter-bg, var(--bg-panel));
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: var(--editor-line-height, 1.5);
-}
-
-.file-tab-gutter-line {
-  height: calc(var(--editor-font-size, 13px) * var(--editor-line-height, 1.5));
-  line-height: inherit;
 }
 
 .file-tab-pre {
-  min-width: max-content;
-  padding: 12px 24px 32px 16px;
   color: var(--text);
-  tab-size: 2;
-}
-
-.file-tab-line {
-  min-height: calc(var(--editor-font-size, 13px) * var(--editor-line-height, 1.5));
-  padding: 0 8px;
-  border-left: 2px solid transparent;
 }
 
 .file-tab-line:hover {
   background: var(--editor-active-line);
-}
-
-.file-tab-line[data-changed="true"] {
-  border-left-color: var(--editor-modified-mark, var(--warning));
-}
-
-.file-tab-line[data-changed="true"]::before {
-  content: '·';
-  color: var(--editor-modified-mark, var(--warning));
-  margin-right: 6px;
 }
 
 .file-tab-code .pl-k  { color: var(--syn-kw, #b48ead); }
@@ -998,25 +960,16 @@
 .file-conflict-reload { padding: 4px 10px; }
 .file-conflict-reload:hover { background: var(--bg-hover); }
 .file-code-editor {
-  width: 100%;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
   color: var(--editor-fg, var(--text));
   background: var(--editor-bg, var(--bg-panel));
 }
-.file-code-editor .cm-editor { height: 100%; color: inherit; background: inherit; }
+.file-code-editor .cm-editor { color: inherit; background: inherit; }
 .file-code-editor .cm-editor.cm-focused { outline: 1px solid color-mix(in srgb, var(--accent) 68%, transparent); outline-offset: -1px; }
-.file-code-editor .cm-scroller { overflow: auto; font: var(--editor-font-size, 13px)/var(--editor-line-height, 1.5) var(--mono); }
-.file-code-editor .cm-content { min-height: 100%; padding: 10px 0 32px; caret-color: var(--editor-cursor, var(--text)); }
-.file-code-editor .cm-line { padding: 0 16px; }
+.file-code-editor .cm-content { caret-color: var(--editor-cursor, var(--text)); }
 .file-code-editor .cm-gutters {
-  min-width: 56px;
-  border-right: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   color: var(--editor-gutter-color, var(--text-dim));
   background: var(--editor-gutter-bg, var(--bg-panel));
 }
-.file-code-editor .cm-lineNumbers .cm-gutterElement { min-width: 32px; padding: 0 12px 0 8px; }
 .file-code-editor .cm-activeLine { background: var(--editor-active-line); }
 .file-code-editor .cm-activeLineGutter { color: var(--text); background: var(--editor-active-line); }
 .file-code-editor .cm-selectionBackground,
@@ -1035,23 +988,33 @@
 }
 .file-working-diff { padding: 4px 10px 0; }
 .file-status-dirty { color: var(--editor-modified-mark, var(--warning)); font-weight: 700; }
-.file-tab-edit {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
 .app[data-interface-mode="modern-gui"] .file-activity-button,.app[data-interface-mode="modern-gui"] .file-tree-row,.app[data-interface-mode="modern-gui"] .file-tab,.app[data-interface-mode="modern-gui"] .file-tab-close{border-radius:8px}
 .app[data-interface-mode="modern-gui"] .file-editor{margin:8px 8px 8px 0;overflow:hidden;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 58%,transparent)}
 
 /*
- * File code projection contract (issue38).
+ * File code projection contract (issue38 · issue #69 unified geometry model).
  *
- * Read-only code and CodeMirror are two renderers of the same file, so their
- * first text baseline, line box and gutter must not change when edit mode is
- * toggled. Keep the geometry in one token set and let both DOM trees consume
- * it.  The token names intentionally stay local to FileSheet; theme authors
- * can still override the editor font/line-height variables above.
+ * 只读投影（.file-tab-*）与 CodeMirror 编辑投影是同一文件的两个渲染器：进出编辑态时
+ * 首字符基线、行号列、行盒、tab 列宽必须零漂移。**本块是两个投影几何的唯一真源**：
+ * 旧块 A/B 与编辑块里不再残留任何几何声明（issue #69 的交接口径——不再靠“契约块恰好
+ * 在文件末尾所以赢了级联”；配套“无旁路”断言见 __tests__/FileSheet.css.test.ts）。
+ *
+ * 导轨模型（两态同一构造）：
+ *   盒宽       = --file-code-gutter-width + --file-code-fold-width
+ *   行号右缘   = 盒左 + --file-code-gutter-width − --file-code-gutter-pad-right
+ *   首字符左缘 = 盒左 + 盒宽 + --file-code-mark-rail + --file-code-line-inset
+ * 编辑态的折叠列（basicSetup 的 foldGutter）是**额外一条轨**：它占的宽度由
+ * --file-code-fold-width 显式声明，只读态同样预留该轨。两态因此由构造相等，而不是
+ * 靠行号位数（内容宽度）或级联顺序碰巧一致——vendor 的 `.cm-gutter{width:auto}` 再也
+ * 换不出位移。
+ *
+ * 分隔线用 box-shadow inset 画而不写 border：border 会吃掉盒内 1px 布局宽度，让只读态
+ * 的行号右缘比编辑态少 1px（#69“轻微漂移”的来源之一）。
+ *
+ * token 名刻意留在 FileSheet 局部；主题作者仍可通过 --editor-font-size /
+ * --editor-line-height 覆盖字号与行高。tab 列宽 token 由只读态 CSS 与编辑态的
+ * EditorState.tabSize（FileCodeEditor.tsx 读同一 token）共同消费：CodeMirror 用 tabSize
+ * 同时算「渲染宽度」与「坐标↔偏移」，只在 CSS 覆盖会让含 tab 的行点击错位。
  */
 .file-tab-view,
 .file-code-editor {
@@ -1060,10 +1023,20 @@
   --file-code-top-padding: 10px;
   --file-code-bottom-padding: 32px;
   --file-code-gutter-width: 56px;
+  --file-code-fold-width: 16px;
+  --file-code-gutter-pad-left: 8px;
+  --file-code-gutter-pad-right: 12px;
   --file-code-line-inset: 16px;
+  --file-code-mark-rail: 2px;
+  --file-code-tab-size: 2;
 }
 
+/* 容器：两态的滚动容器与字体度量同源（含只读态的 scrollbar-width） */
 .file-tab-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
   font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
 }
@@ -1071,85 +1044,153 @@
 .file-tab-code {
   display: flex;
   min-height: 100%;
+  min-width: max-content;
   font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
 }
 
-.file-tab-gutter {
-  box-sizing: border-box;
-  flex: 0 0 var(--file-code-gutter-width);
-  width: var(--file-code-gutter-width);
-  min-width: var(--file-code-gutter-width);
-  padding: var(--file-code-top-padding) 12px var(--file-code-bottom-padding) 8px;
-  font-size: inherit;
-  line-height: var(--file-code-line-height);
-}
-
-.file-tab-gutter-line {
-  height: calc(var(--file-code-font-size) * var(--file-code-line-height));
-  line-height: inherit;
-}
-
-.file-tab-pre {
-  box-sizing: border-box;
-  flex: 1 0 auto;
-  min-width: max-content;
-  margin: 0;
-  padding: var(--file-code-top-padding) 24px var(--file-code-bottom-padding) 0;
-  font: inherit;
-  line-height: inherit;
-}
-
-.file-tab-line {
-  display: block;
-  box-sizing: border-box;
-  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
-  padding: 0 var(--file-code-line-inset);
-  line-height: var(--file-code-line-height);
+.file-tab-edit {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .file-code-editor {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
   font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
 }
 
+.file-code-editor .cm-editor { height: 100%; }
+
 .file-code-editor .cm-scroller {
+  overflow: auto;
+  scrollbar-width: thin;
   font: var(--file-code-font-size)/var(--file-code-line-height) var(--mono);
 }
 
-.file-code-editor .cm-content {
-  padding: var(--file-code-top-padding) 0 var(--file-code-bottom-padding);
-  line-height: var(--file-code-line-height);
-}
-
-.file-code-editor .cm-line {
-  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
-  padding: 0 var(--file-code-line-inset);
-  line-height: var(--file-code-line-height);
-}
-
+/* 行号轨：只读态 .file-tab-gutter 与编辑态 .cm-gutters 同一盒宽、同一分隔线画法 */
+.file-tab-gutter,
 .file-code-editor .cm-gutters {
   box-sizing: border-box;
-  flex: 0 0 var(--file-code-gutter-width);
-  width: var(--file-code-gutter-width);
-  min-width: var(--file-code-gutter-width);
+  /* vendor 基础主题在同一边上还画一条 1px border-right（`.cm-gutters-before`），
+     会吃掉盒内 1px 并用自己的灰色；显式归零，让分隔线只由下面的 inset 阴影表达。 */
+  border: 0;
+  flex: 0 0 calc(var(--file-code-gutter-width) + var(--file-code-fold-width));
+  width: calc(var(--file-code-gutter-width) + var(--file-code-fold-width));
+  min-width: calc(var(--file-code-gutter-width) + var(--file-code-fold-width));
   padding-top: var(--file-code-top-padding);
   padding-bottom: var(--file-code-bottom-padding);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 65%, transparent);
+  font-family: var(--mono);
   font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
 }
 
-/* issue #69：CodeMirror 的 gutter 列默认按行号内容定宽（vendor 默认 CSS
-   `.cm-gutter { flex-shrink: 0; width: auto }`），不铺满上面这个固定宽度的
-   gutter 盒，行号文字因此比只读态左移约一个右内边距（约 12px）。让列填满盒子
-   后，行号文字右边缘才与 `.file-tab-gutter`（右内边距同为 12px）对齐。
-   不变量：两态行号文字的右内边距必须相等（56px − 12px = 44px）。 */
-.file-code-editor .cm-gutters .cm-gutter {
+/* 只读态行号轨：右内边距 + 折叠轨预留 ⇒ 行号右缘与编辑态同值 */
+.file-tab-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding-left: var(--file-code-gutter-pad-left);
+  padding-right: calc(var(--file-code-gutter-pad-right) + var(--file-code-fold-width));
+  text-align: right;
+}
+
+.file-code-editor .cm-gutters {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 编辑态列：行号列 = 行号轨（右缘落在折叠轨左边界），折叠列 = 剩余（即折叠轨） */
+.file-code-editor .cm-gutters .cm-lineNumbers {
+  box-sizing: border-box;
+  flex: 0 0 var(--file-code-gutter-width);
+  min-width: 0;
+}
+
+.file-code-editor .cm-gutters .cm-foldGutter {
+  box-sizing: border-box;
   flex: 1 1 auto;
   min-width: 0;
 }
 
+/* 行号单元：两态同一行高、同一右对齐、同一左右内边距 */
+.file-tab-gutter-line,
 .file-code-editor .cm-lineNumbers .cm-gutterElement {
   box-sizing: border-box;
+  height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  line-height: var(--file-code-line-height);
+  text-align: right;
+}
+
+.file-code-editor .cm-lineNumbers .cm-gutterElement {
+  min-width: 32px;
+  padding: 0 var(--file-code-gutter-pad-right) 0 var(--file-code-gutter-pad-left);
+}
+
+/* 正文容器：两态同一上下内边距、同一字体度量 */
+.file-tab-pre,
+.file-code-editor .cm-content {
+  box-sizing: border-box;
+  padding-top: var(--file-code-top-padding);
+  padding-bottom: var(--file-code-bottom-padding);
+  font-family: var(--mono);
+  font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
 }
+
+.file-tab-pre {
+  flex: 1 0 auto;
+  min-width: max-content;
+  margin: 0;
+  padding-left: 0;
+  padding-right: 24px;
+  tab-size: var(--file-code-tab-size);
+}
+
+.file-code-editor .cm-content {
+  min-height: 100%;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 行盒 + 标记轨：两态同一 min-height / 内边距 / 标记轨宽度。
+   position: relative 供变更行标记（.file-tab-line[data-changed]::before）绝对定位，
+   使行装饰不占布局宽度。 */
+.file-tab-line,
+.file-code-editor .cm-line {
+  display: block;
+  box-sizing: border-box;
+  position: relative;
+  min-height: calc(var(--file-code-font-size) * var(--file-code-line-height));
+  padding: 0 var(--file-code-line-inset);
+  border-left: var(--file-code-mark-rail) solid transparent;
+  font-family: var(--mono);
+  line-height: var(--file-code-line-height);
+}
+
+/* 变更行标记（行装饰）与行盒同源：标记色只改标记轨颜色，标记点绝对定位在标记轨后、
+   行内边距里（不占布局宽度）。旧实现用行内 ::before + margin-right: 6px，把变更行的
+   正文推右约 10px，两态与行内都不一致（issue #69 的“行装饰不同源”）。 */
+.file-tab-line[data-changed="true"] {
+  border-left-color: var(--editor-modified-mark, var(--warning));
+}
+
+.file-tab-line[data-changed="true"]::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--editor-modified-mark, var(--warning));
+  line-height: inherit;
+  pointer-events: none;
+}
+
+/* 变更行标记在编辑态（CodeMirror）的对应载体：working-diff 面板 + 行背景，
+   行盒本身保留同宽标记轨（border-left 透明），因此正文左缘不因是否有变更而位移。 */
