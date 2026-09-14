@@ -235,6 +235,29 @@ export async function loadCanonicalEventRange(
   return [...unique.values()].sort((a, b) => a.sequence - b.sequence)
 }
 
+/**
+ * #81 L1 搭车（双读修复）：会话打开时占位 `loadAll` 之后，权威恢复不再整读第二遍——
+ * 以占位行的 max(sequence) 为游标，revision + 前向区间读补差量，结果与全量重读
+ * 逐行一致（占位行 ≤ 游标升序 + 差量 > 游标升序）。任何失败回退到全量读，不改变
+ * 权威恢复的可用性语义。
+ */
+export async function loadCanonicalEventsIncremental(
+  repository: CanonicalEventRepository,
+  ownerKey: string,
+  baseRows: readonly CanonicalEventRow[],
+): Promise<CanonicalEventRow[]> {
+  const baseRevision = baseRows.reduce((max, row) => Math.max(max, row.sequence), 0)
+  try {
+    const revision = await repository.revision(ownerKey)
+    const delta = revision > baseRevision
+      ? await loadCanonicalEventRange(repository, ownerKey, baseRevision, revision)
+      : []
+    return [...baseRows, ...delta]
+  } catch {
+    return repository.loadAll(ownerKey)
+  }
+}
+
 export function tauriCanonicalEventRepository(): CanonicalEventRepository {
   const appendImpl = async (
     events: readonly CanonicalConversationEvent[],

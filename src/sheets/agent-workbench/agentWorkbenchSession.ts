@@ -7,6 +7,11 @@ import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './s
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
+import {
+  canonicalBatchChunksOf,
+  canonicalBatchSpanOf,
+  isCanonicalBatchDeltaType,
+} from '../../infrastructure/events/canonicalEventBatch.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
@@ -51,17 +56,19 @@ export function workbenchSessionBindingKey(session: Session | undefined): string
   ].join('\u0000')
 }
 
-function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
-  if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
-  if (validateCanonicalEvent(row).length > 0) return []
-  const event = row as CanonicalConversationEvent
+function normalizeCanonicalRowToEnvelopes(
+  event: CanonicalConversationEvent,
+  raw: unknown,
+  sequence: number,
+  eventId: string,
+): readonly WorkbenchEventEnvelope[] {
   const provider = event.provenance?.provider ?? event.owner.agentId
-  const optimistic = isOptimisticUserEvent(event.rawPayload)
-  const normalized = normalizeAgentEvent(event.rawPayload, {
+  const optimistic = isOptimisticUserEvent(raw)
+  const normalized = normalizeAgentEvent(raw, {
     provider,
     sessionId: event.owner.localSessionId,
-    sourceId: event.eventId,
-    sequence: event.sequence,
+    sourceId: eventId,
+    sequence,
     recordedAt: event.receivedAt,
     occurredAt: event.occurredAt,
     agentId: event.owner.agentId,
@@ -71,9 +78,38 @@ function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[
   })
   return normalized.events.map(envelope => Object.freeze({
     ...envelope,
-    eventId: normalized.events.length === 1 ? event.eventId : envelope.eventId,
+    eventId: normalized.events.length === 1 ? eventId : envelope.eventId,
     identity: Object.freeze({ ...event.identity, ...envelope.identity }),
   }))
+}
+
+/**
+ * #81 L1：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
+ * 按跨度逐 chunk 展开重建：sub-envelope 的 sequence = seqSpan[0]+i、eventId =
+ * owner#(seqSpan[0]+i)，与"逐 chunk 存储"的 appliedEventIds 逐一相同 ⇒ refresh()
+ * 幂等与 projectWorkbench 去重无需改动（等价性按构造成立）。形状损坏的 batch 行
+ * 退回单行归一（产出 event.unknown，raw 不丢）。
+ */
+function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly WorkbenchEventEnvelope[] {
+  const ownerKey = toCanonicalOwnerKey(event.owner)
+  const chunks = canonicalBatchChunksOf(event)
+  if (!chunks) {
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
+  }
+  const first = canonicalBatchSpanOf(event)![0]
+  return chunks.flatMap((raw, index) => {
+    const sequence = first + index
+    const eventId = `${ownerKey}#${sequence}`
+    return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId)
+  })
+}
+
+function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
+  if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
+  if (validateCanonicalEvent(row).length > 0) return []
+  const event = row as CanonicalConversationEvent
+  if (isCanonicalBatchDeltaType(event.eventType)) return expandCanonicalBatchRow(event)
+  return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId)
 }
 
 function isOptimisticUserEvent(raw: unknown): boolean {

@@ -251,7 +251,7 @@ SQLite schema 当前包括：
 
 - `sessions`：legacy 会话行；旧 state 只保留供可证明迁移/取证，不再是生产状态权威。
 - `session_state_snapshots`：owner-keyed usage/commands 等可恢复快照；不是历史存储。
-- `canonical_events`：owner-scoped canonical event stream。
+- `canonical_events`：owner-scoped canonical event stream。sink 自写轨（kernel 未提交的 live wire）以 1000 ms per-owner trailing debounce 批量落盘，落盘前把批次内**相邻同类流式 delta**（`assistant.text.delta` / `assistant.thinking.delta`，identity 全字段相等）合并为 `*.delta.batch` 聚合行：行占跨度末位 sequence（`seqSpan` 记录 `[first, last]`，中间编号不占用），`typedPayload = { text, foldedCount, seqSpan }`，`rawPayload = 原始 chunk 数组`；单行受 rawPayload 字节与 foldedCount 上限约束，超限切断成多行（不截断）。读侧（`canonicalRowToWorkbench`）按 `seqSpan` 展开 batch 行并重建原始 eventId，投影与逐 chunk 存储等价；未知事件与非 delta 事件仍逐条落盘。
 - `legacy_message_backfill_audit`：v11 升级审计，仅记录旧 message 会话的回填/归档结论，不存第二份活动历史。
 - `user_data`：Profile、Session metadata、active Profile 等 versioned envelope。
 - `deleted_sessions`：v12 durable-owner keyed 删除 tombstone；`owner_scope=exact` 精确 gate，`legacy` 保守 gate 同 source；旧 v11 表仅作 forensic archive。

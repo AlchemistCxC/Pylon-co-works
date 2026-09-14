@@ -113,10 +113,16 @@ export function reduceCanonicalMessageEvent(
     }
 
     case 'assistant.text.delta':
-    case 'assistant.thinking.delta': {
+    case 'assistant.thinking.delta':
+    case 'assistant.text.delta.batch':
+    case 'assistant.thinking.delta.batch': {
+      // #81 L1：sink 聚合行。run 内 chunk 同 role 同 identity ⇒ 折叠决策与逐 chunk
+      // 一致，text 为精确拼接（typedPayload.text）；time 沿用 run 首条（行时间戳）。
       const text = textOf(event)
       if (text === undefined) return state
-      const role = event.eventType === 'assistant.text.delta' ? 'assistant' : 'reasoning'
+      const role = event.eventType === 'assistant.text.delta' || event.eventType === 'assistant.text.delta.batch'
+        ? 'assistant'
+        : 'reasoning'
       const last = state.messages[state.messages.length - 1]
       const identity = identityOf(event)
       const append = resolveChunkAppend({
