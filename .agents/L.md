@@ -77,3 +77,9 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 - 文档：`docs/说明书/`（插件系统说明书两版的界面模式表述）、`.agents/records/`（开发记录）
 
 **我不碰的（工作区既有的他人未提交改动）**：`docs/` 下三个删除项、`blobs_tmp.txt`、`src-tauri/loader-error.txt`。提交只含我的文件域。
+
+---
+
+[2026-09-15 04] [Klein] [#90]
+
+#90 完工：Shell Recipe 重排层落地（`shellRecipeId` 取代三个零消费预留字段，ADR-0003），门禁全绿（tsc/vitest 3738+/check:solid/check:frontend）。开发记录见 `.agents/records/issue-90-shell-recipe.md`。**本次提交文件域与开工声明一致**，`SheetLayout.tsx`/`WorkspaceTitlebar.tsx` 如约零改动；`docs/` 下他人未提交删除项与两个临时文件仍未触碰。分支 `Ru5t/Reflector` 将推送并基于其开 PR。
