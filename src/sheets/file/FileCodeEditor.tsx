@@ -1,11 +1,29 @@
 import { useEffect, useRef } from 'react'
 import { basicSetup, EditorView } from 'codemirror'
-import { Compartment } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { resolveFileLanguageProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
+
+/**
+ * 两态几何契约（FileSheet.css 的 `--file-code-tab-size`）在编辑侧的镜像值。
+ *
+ * 只读投影用 CSS 消费该 token；CodeMirror 则必须把同一个值写进 `EditorState.tabSize`：
+ * CM 用 tabSize 同时计算「tab 字符的渲染宽度」与「坐标 ↔ 偏移」换算，只靠 CSS 覆盖
+ * （`.cm-line { tab-size }`）会让含 tab 的行上点击/选区落点偏移。构造时从宿主元素的
+ * 计算样式读 token（jsdom 里读不到时回退此常量，其值由契约测试锁定与 CSS 一致）。
+ */
+export const FILE_CODE_TAB_SIZE_FALLBACK = 2
+
+/** 读契约 token（导出供契约测试覆盖“读到值 / 读到空 / 读到脏值”三条路径）。 */
+export function resolveTabSize(host: HTMLElement | null): number {
+  if (!host || typeof getComputedStyle !== 'function') return FILE_CODE_TAB_SIZE_FALLBACK
+  const raw = getComputedStyle(host).getPropertyValue('--file-code-tab-size').trim()
+  const parsed = Number.parseFloat(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : FILE_CODE_TAB_SIZE_FALLBACK
+}
 
 // Language metadata is sizeable (it enumerates every CodeMirror language) and
 // is only needed once an editor is opened.  Keep it out of the initial shell
@@ -59,12 +77,15 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
     const language = new Compartment()
     const languageAbort = new AbortController()
     let disposed = false
+    // issue #69：编辑态 tab 列宽与只读投影同源（读契约 token，见 resolveTabSize）。
+    const tabSize = resolveTabSize(parent)
 
     const view = new EditorView({
       doc: value,
       parent,
       extensions: [
         basicSetup,
+        EditorState.tabSize.of(tabSize),
         keymap.of([{
           key: 'Mod-s',
           preventDefault: true,
