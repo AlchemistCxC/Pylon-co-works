@@ -39,6 +39,8 @@ import { createPluginSessionCreationApi, type PluginSessionCreationApi } from '.
 import type { SessionCreationRegistryTransaction } from './session-creation/sessionCreationRegistry.ts'
 import { createPluginInterfaceModeApi, type PluginInterfaceModeApi } from './interface-mode/pluginInterfaceModeApi.ts'
 import type { InterfaceModeContribution } from './interface-mode/interfaceModeTypes.ts'
+import { createPluginShellRecipeApi, type PluginShellRecipeApi } from './shell-recipe/pluginShellRecipeApi.ts'
+import type { ShellRecipeContribution } from './shell-recipe/shellRecipeTypes.ts'
 import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/pluginTitlebarApi.ts'
 import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
 import { createPluginStorageApi } from './storage/pluginStorageApi.ts'
@@ -63,6 +65,7 @@ export interface PluginActivationTransactions {
   readonly fonts: RegistryTransaction<FontContribution>
   readonly sessionCreation: SessionCreationRegistryTransaction
   readonly interfaceModes: RegistryTransaction<InterfaceModeContribution>
+  readonly shellRecipes: RegistryTransaction<ShellRecipeContribution>
   readonly titlebar: RegistryTransaction<TitlebarContribution>
 }
 
@@ -87,6 +90,7 @@ export interface BuiltinPluginActivationContext {
   readonly fonts: PluginFontApi
   readonly sessionCreation: PluginSessionCreationApi
   readonly interfaceModes: PluginInterfaceModeApi
+  readonly shellRecipes: PluginShellRecipeApi
   readonly titlebar: PluginTitlebarApi
   /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
   readonly storage: PluginStorageApi
@@ -162,6 +166,12 @@ export function createPluginActivationContext(
       identity,
       scope,
       transactions?.interfaceModes,
+    ),
+    shellRecipes: createPluginShellRecipeApi(
+      registries.shellRecipeRegistry,
+      identity,
+      scope,
+      transactions?.shellRecipes,
     ),
     titlebar: createPluginTitlebarApi(
       registries.titlebarRegistry,

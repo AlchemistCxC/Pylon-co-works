@@ -315,6 +315,7 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     fonts: recordingApi('fonts', recorded),
     sessionCreation: recordingApi('sessionCreation', recorded),
     interfaceModes: recordingApi('interfaceModes', recorded),
+    shellRecipes: recordingApi('shellRecipes', recorded),
     titlebar: recordingApi('titlebar', recorded),
     storage: storageHarness.api,
   } satisfies BuiltinPluginActivationContext

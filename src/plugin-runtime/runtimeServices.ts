@@ -16,6 +16,7 @@ import { PluginSettingOptionsRegistry } from './settings/pluginSettingOptionsReg
 import { FontContributionRegistry } from './fonts/fontContributionRegistry.ts'
 import { SessionCreationRegistry } from './session-creation/sessionCreationRegistry.ts'
 import { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts'
+import { ShellRecipeRegistry } from './shell-recipe/shellRecipeRegistry.ts'
 import { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
 import {
   setWorkspaceRegistryStore,
@@ -57,6 +58,7 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
     fontContributionRegistry: new FontContributionRegistry(),
     sessionCreationRegistry: new SessionCreationRegistry(),
     interfaceModeRegistry: new InterfaceModeRegistry(),
+    shellRecipeRegistry: new ShellRecipeRegistry(),
     titlebarRegistry: new TitlebarRegistry(),
     workspaceRegistry,
   })
@@ -132,4 +134,5 @@ export function getPluginSettingOptionsRegistry(): PluginSettingOptionsRegistry 
 export function getFontContributionRegistry(): FontContributionRegistry { return runtimeServices.fontContributionRegistry }
 export function getSessionCreationRegistry(): SessionCreationRegistry { return runtimeServices.sessionCreationRegistry }
 export function getInterfaceModeRegistry(): InterfaceModeRegistry { return runtimeServices.interfaceModeRegistry }
+export function getShellRecipeRegistry(): ShellRecipeRegistry { return runtimeServices.shellRecipeRegistry }
 export function getTitlebarRegistry(): TitlebarRegistry { return runtimeServices.titlebarRegistry }
