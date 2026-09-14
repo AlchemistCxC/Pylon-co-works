@@ -546,7 +546,9 @@ context.presentation.registerProfile({
 
 Profile 只能声明 `themeFieldDefs` 中已验证的结构令牌，不直接挂载 UI，也不决定 React/Solid。`interfaceMode` 只声明 Profile 在哪个现有模式的选择器中出现，可选 `modern-gui` / `terminal-like`；省略时按兼容规则归入 `terminal-like`。它不能注册或切换新的 Interface Mode。注册项由 owner/scope 管理，并参与 shadow hot-swap。
 
-Interface Mode 是 Application Shell 的第一方应用级契约，不是 Renderer、Presentation Profile、Theme Preset 或 Skin。外置插件目前不能贡献新的完整 Interface Mode 或替换整个 Agent Workbench；可通过 Profile、Renderer、Workspace、UI Surface 和作用域 CSS 扩展现有两个模式。
+Interface Mode 是 Application Shell 的应用级契约，不是 Renderer、Presentation Profile、Theme Preset 或 Skin。插件通过 `context.interfaceModes.registerMode(contribution)` 注册完整模式（`workbench` 支持 `renderer-suite` / `host` / `isolated-surface` 三种渲染来源，激活期做跨注册表引用校验），并随 Scope 回收、参与 shadow hot-swap。
+
+模式可用 `shellRecipeId` 引用一个 **Shell Recipe**（`context.shellRecipes.registerRecipe`）：声明会话侧栏与上下文面板的所在侧（`sidebarSide` / `contextPanelSide`，枚举 `left` / `right`，二者必须互斥）。Shell Recipe 只参数化排列——骨架（标题栏、侧栏壳、右栏壳、拖拽区、窗口控制）始终由宿主渲染，重排经 `.app` 上的解析值数据属性（`data-shell-sidebar-side` 等）驱动 CSS flex order 实现，DOM 结构不变；引用悬空的模式在激活期被拒绝，并走既有回退链落回默认模式（ADR-0003）。
 
 ### 6.4.2 字体贡献与视觉语义
 
