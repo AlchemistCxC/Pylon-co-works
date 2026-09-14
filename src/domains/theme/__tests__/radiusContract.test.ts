@@ -10,10 +10,12 @@ const settingsCss = css('../../../plugins/product/packages/builtin.pylon-shell/s
 const settingsComponentCss = css('../../../plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css')
 const classicRendererCss = [
   'ChatView.css',
-  'DiffCard.css',
   'InputBar.css',
   'StatusBar.css',
 ].map(file => css(`../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/${file}`))
+  // DiffCard.css 已由样式绞杀删除（faba2db2）：圆角契约改锁 DiffCard.solid.tsx 的
+  // utilities（其 rounded-none 显式维持无壳层圆角，同样不得消费 --ui-radius-*）。
+  .concat([css('../../../renderers/solid-workbench/chat/DiffCard.solid.tsx')])
 
 describe('第一方圆角语义', () => {
   it('基础尺度保持克制，只有语义胶囊使用全圆角', () => {

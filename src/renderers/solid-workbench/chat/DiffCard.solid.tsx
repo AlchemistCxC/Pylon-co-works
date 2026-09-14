@@ -105,7 +105,7 @@ function DiffRow(props: { row: DiffRenderRow }) {
   return (
     <div class={`${DIFF_LINE} ${DIFF_LINE_BG[props.row.lineKind]}`}>
       <span class={`${DIFF_SIGN} ${DIFF_SIGN_TONE[props.row.lineKind]}`}>{props.row.lineKind === 'added' ? '+' : '-'}</span>
-      <code className={CODE_INHERIT}>
+      <code class={CODE_INHERIT}>
         <For each={props.row.segments}>{segment => segment.kind === 'common'
           ? <span>{segment.text}</span>
           : <span data-diff-word={segment.kind} class={`${WORD_BASE} ${WORD_TONE[segment.kind]}`}>{segment.text}</span>}
@@ -118,7 +118,7 @@ function DiffRow(props: { row: DiffRenderRow }) {
 function DiffLineRow(props: { line: DiffLine }) {
   const tone = props.line.kind === 'added' || props.line.kind === 'removed' ? DIFF_SIGN_TONE[props.line.kind] : ''
   return (
-    <div class={`${DIFF_LINE} ${DIFF_LINE_BG[props.line.kind] ?? ''}`}>
+    <div class={`${DIFF_LINE} ${props.line.kind === 'context' ? '' : DIFF_LINE_BG[props.line.kind]}`}>
       <span class={`${DIFF_SIGN} ${tone}`}>{props.line.kind === 'added' ? '+' : props.line.kind === 'removed' ? '-' : ' '}</span>
       <code class={CODE_INHERIT}>{props.line.text || '\u00a0'}</code>
     </div>
