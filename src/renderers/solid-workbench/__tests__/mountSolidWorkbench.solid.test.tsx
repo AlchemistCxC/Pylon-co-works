@@ -1159,14 +1159,16 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
 
-  it('中控状态行关闭旧控件，仅保留命令提示', async () => {
+  it('中控状态行仅保留常态控件（模型）与命令提示，其余旧控件关闭', async () => {
     const { host } = mountPreview()
     const row = await waitFor(() => {
       const value = host.querySelector<HTMLElement>('.cc-status-row')
       expect(value).not.toBeNull()
       return value!
     })
-    expect(row.querySelector('[data-widget-id]')).toBeNull()
+    // 2026-09-14：模型控件常态显示；其余旧状态控件在活跃会话里仍然收起。
+    expect([...row.querySelectorAll('[data-widget-id]')]
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model'])
     expect(row.querySelector('.cc-widget-separator')).toBeNull()
   })
 
@@ -1491,7 +1493,10 @@ describe('mountSolidWorkbench', () => {
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
-    expect(host.querySelector('[data-widget-id="model"]')).toBeNull()
+    // 2026-09-14：模型控件常态显示，且遵循 placements 权威 —— 此处已从
+    // status-secondary 移到 actions 槽，故应出现在 actions 而非状态槽。
+    expect(host.querySelector('.cc-actions [data-widget-id="model"]')).toBeTruthy()
+    expect(host.querySelector('.cc-status-secondary [data-widget-id="model"], .cc-status-primary [data-widget-id="model"]')).toBeNull()
 
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
@@ -1587,12 +1592,12 @@ describe('mountSolidWorkbench', () => {
     fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '7' } })
     fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '12' } })
     fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '125' } })
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+    fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
     await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ slot: 'actions', order: 7, offsetX: 12 }))
     expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
-    expect(services.appearance.getSnapshot().modelVariant).toBe('minimal')
-    expect(host.querySelector('[data-widget-id="model"] .cc-model-minimal')).toBeTruthy()
+    expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle')
+    expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeTruthy()
   })
 
   it('属性面板数字输入清空时保留上次有效值', async () => {
@@ -1645,9 +1650,9 @@ describe('mountSolidWorkbench', () => {
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+    fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
-    await waitFor(() => expect(services.appearance.getSnapshot().modelVariant).toBe('minimal'))
+    await waitFor(() => expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle'))
     lifecycle.destroy()
   })
 

@@ -18,8 +18,10 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
 // ── C4：属性表单 schema（PropertyPanel 由 registry 派生，消灭硬编码）──
 
 export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' | 'ekgGreen' | 'ekgYellow' | 'ekgRed' | 'barTrackColor' | 'barFillColor'
-export type CcNumberPropertyKey = 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelVariant' | 'modeVariant' | 'sendVariant'
+export type CcNumberPropertyKey =
+  | 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
+  | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'modeVariant' | 'sendVariant'
 export type CcBooleanPropertyKey = 'barFillFollow'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
 
@@ -90,15 +92,20 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'color', key: 'barFillColor', label: '填充颜色', showIf: t => t.ccStyle === 'bar' && t.barFillFollow === false },
   ],
   model: [
-    { kind: 'section', title: '模型控件外观' },
+    { kind: 'section', title: '模型控件' },
     {
-      kind: 'chips', key: 'modelVariant', label: '外观风格',
+      kind: 'chips', key: 'modelSwitchMode', label: '模型切换方式',
       options: [
-        { value: 'dropdown', label: '下拉' },
-        { value: 'minimal', label: '简洁' },
-        { value: 'badge', label: '徽章' },
+        { value: 'menu', label: '弹菜单' },
+        { value: 'cycle', label: '点击轮换' },
       ],
     },
+    { kind: 'chips', key: 'modelBgColor', label: '模型背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'modelWidth', label: '模型宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'modelHeight', label: '模型高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'modelRadius', label: '模型圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'modelFontSize', label: '模型字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'modelTextColor', label: '模型文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   mode: [
     { kind: 'section', title: '模式控件外观' },

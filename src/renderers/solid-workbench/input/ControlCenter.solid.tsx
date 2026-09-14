@@ -15,6 +15,16 @@ import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
+
+/**
+ * 常态显示的状态控件（2026-09-14）——不受"活跃会话收起旧状态控件"影响。
+ *
+ * 背景：`showStatusSlots()` 原先只在空态或编辑模式放行状态行，目的是让活跃
+ * 对话界面干净（旧控件多）。模型控件是每轮对话都要看的当前状态，不属于该类，
+ * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
+ * 共用同一名单，保持单一真值。
+ */
+const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
   ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', mode: '权限模式',
@@ -273,8 +283,14 @@ export function SolidControlCenter() {
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
+  // 状态行门户：仅对状态槽生效。常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGETS）
+  // 在活跃会话里也放行；其它状态控件仍受"活跃会话收起"约束。input 槽（输入栏）
+  // 从不经过这个门户，否则活跃会话会把输入栏一并过滤掉。
+  const passesStatusGate = (id: CcWidgetId, slot: CcSlot) =>
+    slot === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGETS.includes(id)
   const idsForSlot = (slot: CcSlot) => visibleIds()
     .filter(id => appearance().ccLayout.placements[id]?.slot === slot)
+    .filter(id => passesStatusGate(id, slot))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
@@ -490,6 +506,10 @@ export function SolidControlCenter() {
   // Keep empty-state/edit-mode controls available for session setup and layout
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
+  // 例外（2026-09-14）：模型控件常态显示，见 ALWAYS_VISIBLE_STATUS_WIDGETS。
+  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGETS
+    .some(id => isWidgetVisible(id, visibilityContext()))
+  const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
 
   onMount(() => {
     const slot = controlCenterElement?.querySelector<HTMLElement>('.cc-input-slot')
@@ -579,12 +599,12 @@ export function SolidControlCenter() {
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
         <div class="cc-footer-status">
-          <Show when={showStatusSlots()}>{statusSlots()}</Show>
+          <Show when={statusRowContent()}>{statusSlots()}</Show>
           {commandHint()}
         </div>
       </div> : <>
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
-        <div class="cc-status-row"><Show when={showStatusSlots()}>{statusSlots()}</Show>{commandHint()}</div>
+        <div class="cc-status-row"><Show when={statusRowContent()}>{statusSlots()}</Show>{commandHint()}</div>
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (

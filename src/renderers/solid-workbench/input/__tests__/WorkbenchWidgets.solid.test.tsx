@@ -49,16 +49,15 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
 
 describe('Solid Workbench widgets', () => {
   it('switching model variants closes stale menus and preserves the dropdown interaction', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
     expect(screen.getAllByRole('listbox')).toHaveLength(1)
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'badge' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'cycle' })
     expect(screen.queryByRole('listbox')).toBeNull()
-    expect(screen.queryByRole('button')).toBeNull()
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'minimal' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'cycle' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
     await waitFor(() => expect(services.commands.calls).toHaveLength(1))
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'dropdown' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'menu' })
     const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(trigger)
@@ -67,8 +66,9 @@ describe('Solid Workbench widgets', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it('live reasoning sends the advertised config id and renders only confirmed values', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+  // 思考强度已从模型菜单移除，待独立控件接手后恢复
+  it.skip('live reasoning sends the advertised config id and renders only confirmed values', async () => {
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     const publish = (value: string) => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
@@ -95,7 +95,7 @@ describe('Solid Workbench widgets', () => {
   })
 
   it('Model dropdown 枚举 runtime models，并经 facade 切换', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
     expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
     fireEvent.click(screen.getByRole('option', { name: 'deepseek-v4-pro' }))
@@ -113,13 +113,11 @@ describe('Solid Workbench widgets', () => {
         reasoningValue={() => 'medium'}
         onReasoningChange={() => {}}
       />,
-      { modelVariant: 'badge' },
+      { modelSwitchMode: 'cycle' },
     )
     const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
     expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
     fireEvent.click(trigger)
-    expect(screen.getByRole('group', { name: '思考强度' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'xhigh' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
     services.destroy()
   })
@@ -133,13 +131,13 @@ describe('Solid Workbench widgets', () => {
         reasoningValue={() => 'medium'}
         onReasoningChange={() => {}}
       />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { sessionId: null, agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }, { id: 'glm-5', label: 'GLM · 5' }] },
     )
     services.runtime.update({ availableModels: [], activeModel: '' })
     const trigger = await screen.findByRole('button', { name: /kimi-k2/ })
     fireEvent.click(trigger)
-    expect(screen.getByRole('option', { name: 'Kimi K2' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'Kimi K2' })).toBeNull()
     expect(screen.getByRole('option', { name: 'GLM · 5' })).toBeTruthy()
     expect(screen.queryByRole('option', { name: 'deepseek-v4-flash' })).toBeNull()
     expect(screen.queryByRole('option', { name: 'deepseek-v4-pro' })).toBeNull()
@@ -153,20 +151,20 @@ describe('Solid Workbench widgets', () => {
         draftValue={() => 'my-default-model'}
         onDraftChange={() => {}}
       />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { sessionId: null, agentAdvertisedModels: [] },
     )
     services.runtime.update({ availableModels: [], activeModel: '' })
     fireEvent.click(await screen.findByRole('button', { name: /my-default-model/ }))
     const menu = screen.getByRole('listbox', { name: '模型列表' })
-    expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual(['my-default-model'])
+    expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual([])
     services.destroy()
   })
 
   it('有会话时不并入 agent 宣告集合，协商快照保持权威（issue #53 A2）', async () => {
     renderWidget(
       () => <SolidModelWidget />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }] },
     )
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
@@ -203,7 +201,8 @@ describe('Solid Workbench widgets', () => {
     expect(modeTrigger).toHaveFocus()
   })
 
-  it('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {
+  // 思考强度已从模型菜单移除，待独立控件接手后恢复
+  it.skip('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {
     const selected: string[] = []
     renderWidget(() => <SolidModelWidget
       forceDropdown
@@ -218,16 +217,15 @@ describe('Solid Workbench widgets', () => {
     expect(screen.getByRole('button', { name: /deepseek-v4-flash（medium）/ })).toBeTruthy()
   })
 
-  it('Model minimal 循环；badge 只读不产生按钮', async () => {
-    const minimal = renderWidget(() => <SolidModelWidget />, { modelVariant: 'minimal' })
+  it('Model cycle 模式循环切换', async () => {
+    const minimal = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'cycle' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
     await waitFor(() => expect(minimal.commands.calls[0]?.args).toEqual(['preview-session', 'deepseek-v4-pro']))
     cleanup()
     minimal.destroy()
 
-    renderWidget(() => <SolidModelWidget />, { modelVariant: 'badge' })
-    expect(screen.getByText('deepseek-v4-flash').className).toContain('cc-model-badge')
-    expect(screen.queryByRole('button')).toBeNull()
+    renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'cycle' })
+    expect(screen.getByRole('button', { name: 'deepseek-v4-flash' })).toBeTruthy()
   })
 
   it('Mode pill/badge/minimal 保留 class/data-mode，点击循环 mode', async () => {
@@ -257,7 +255,7 @@ describe('Solid Workbench widgets', () => {
 
   it('Model/Mode facade 失败显示可见错误', async () => {
     const services = renderWidget(() => <><SolidModelWidget /><SolidModeWidget /></>, {
-      modelVariant: 'minimal',
+      modelSwitchMode: 'cycle',
       modeVariant: 'minimal',
     })
     services.commands.setHandler('setModel', vi.fn(async () => ({ ok: false, error: 'model denied' })))

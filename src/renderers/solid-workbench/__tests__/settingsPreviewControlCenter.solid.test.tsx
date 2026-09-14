@@ -17,8 +17,12 @@ describe('settingsPreviewControlCenter（P52 D4 Solid 中控预览）', () => {
     expect(host.querySelector('.control-center')).toBeTruthy()
     // 真实中控结构：输入栏（fixture 提供会话 composer）
     expect(host.querySelector('textarea, input, .cc-input, [class*="input" i]')).toBeTruthy()
-    // A6-3：正常会话视图隐藏旧状态行（仅空态/编辑模式保留状态槽）
-    expect(host.querySelector('.cc-status-primary, .cc-status-secondary, .cc-actions')).toBeNull()
+    // A6-3 更新（2026-09-14）：模型控件常态显示（每轮对话都要看的当前状态）；
+    // 其余旧状态控件在会话态仍然隐藏，仅空态/编辑模式保留。
+    const statusWidgetIds = [...host.querySelectorAll(
+      '.cc-status-primary [data-widget-id], .cc-status-secondary [data-widget-id], .cc-actions [data-widget-id]',
+    )].map(el => el.getAttribute('data-widget-id'))
+    expect(statusWidgetIds).toEqual(['model'])
 
     handle.destroy()
     expect(host.childElementCount).toBe(0)

@@ -17,18 +17,11 @@
 .prism-tag:hover { text-decoration:underline; }
 
 /* ── 模型控件 variants ── */
-.model-tag { font-size:12px; color:var(--pill-text,#999); padding:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
-.model-tag:hover { text-decoration:underline; }
 .model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius: 0; overflow:hidden; min-width:180px; z-index:100; }
 .model-item { padding:6px 14px; font-size:12px; font-family:var(--mono); color:#999; cursor:pointer; }
 .model-item:hover { background:#373737; color:#fff; }
 .model-item.active { color:var(--pill-text,#999); font-weight:600; }
 
-.cc-model-minimal { font-family:var(--mono); font-size:inherit; color:var(--accent,#D77757); cursor:pointer; padding:0; }
-.cc-model-minimal:hover { color:var(--text); text-decoration:underline; }
-.cc-model-badge { font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius: 0; background:var(--pill-bg,rgba(0,0,0,0.05)); color:var(--pill-text,#999); border:1px solid rgba(0,0,0,0.1); }
-
-/* ── ModeWidget variants ── */
 .cc-mode-widget { display:flex; align-items:center; background:transparent; border:none; padding:0; cursor:pointer; color:inherit; font:inherit; }
 .mode-pill { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius: 0; background:var(--pill-bg,rgba(0,0,0,0.05)); border:1px solid rgba(0,0,0,0.08); }
 .mode-pill[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
@@ -53,8 +46,6 @@
 .cc-reasoning-label { font-size:.86em; opacity:.78; }
 .cc-reasoning-widget select { appearance:none; border:0; border-radius:0; padding:0; color:inherit; background:transparent; font:inherit; cursor:pointer; }
 .cc-reasoning-widget select:hover { color:var(--text); }
-
-.cc-model-minimal { background:transparent; border:0; color:var(--pill-text,#999); font-family:var(--mono); cursor:pointer; }
 
 @media (prefers-reduced-motion:reduce) {
   .ekg-bar-fill,

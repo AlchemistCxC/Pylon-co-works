@@ -2,13 +2,8 @@ import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMou
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
   optionLabel,
-  isReasoningOption,
-  resolveDocumentOptionEntries,
-  resolveDocumentOptionValue,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
-  resolveReasoningOptionEntries,
-  type WorkbenchOptionEntry,
 } from './workbenchOptionCatalog.ts'
 
 function nextValue(values: readonly string[], current: string): string {
@@ -17,229 +12,22 @@ function nextValue(values: readonly string[], current: string): string {
   return values[(index + 1 + values.length) % values.length] ?? values[0] ?? current
 }
 
-export function SolidModelWidget(props: {
-  draftValue?: () => string
-  onDraftChange?: (value: string) => void
-  reasoningValue?: () => string
-  onReasoningChange?: (value: string) => void
-  /** Empty-state controls remain selectable with compact/badge presets. */
-  forceDropdown?: boolean
-} = {}) {
-  const workbench = useSolidWorkbench()
-  const runtime = () => workbench.runtimeSnapshot()
-  const appearance = () => workbench.appearanceSnapshot()
-  const [open, setOpen] = createSignal(false)
-  const [error, setError] = createSignal('')
-  let root: HTMLDivElement | undefined
-  let trigger: HTMLButtonElement | undefined
+export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; reasoningValue?: () => string; onReasoningChange?: (value: string) => void; forceDropdown?: boolean } = {}) {
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; const menuId=`cc-model-menu-${createUniqueId()}`
+  // 会话切换时关闭菜单（2026-09-14）：控件常态显示后，若残留 open 状态会带着
+  // 上一次会话的菜单进入新会话。与 SolidModeWidget 的会话切换处理保持一致。
   let previousSessionId = workbench.input().sessionId
-  const menuId = `cc-model-menu-${createUniqueId()}`
-  // Issue #53: the draft binding is the empty-state/entering seam — while it
-  // is active the owning agent's advertised set (host-provided plain data)
-  // joins the candidates so the dropdown no longer falls back to a hardcoded
-  // catalogue the agent never declared. Live sessions keep snapshot-only
-  // sourcing so negotiated candidates stay authoritative.
-  const modelEntries = () => resolveModelOptionEntries(
-    runtime(),
-    props.draftValue?.(),
-    props.draftValue ? workbench.input().agentAdvertisedModels : undefined,
-  )
-  const models = () => modelEntries().map(item => item.id)
-  const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
-  const reasoningOption = () => runtime().document?.session.options.find(isReasoningOption)
-  const reasoningValue = () => props.reasoningValue?.()
-    ?? resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') ?? ''
-  const displayModel = () => reasoningValue() ? `${model()}（${reasoningValue()}）` : model()
-  const scale = () => appearance().ccScale.model ?? 100
-  const reasoningEntries = () => props.onReasoningChange
-    ? resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
-    : reasoningOption()?.editable === false ? []
-      : resolveDocumentOptionEntries(reasoningOption() ? [reasoningOption()!] : [], 'reasoning')
-  let reasoningRequest = 0
-  const [reasoningPending, setReasoningPending] = createSignal(false)
-  const dropdown = () => props.forceDropdown === true || appearance().modelVariant === 'dropdown'
-  const close = (restoreFocus = false) => {
-    setOpen(false)
-    if (restoreFocus) queueMicrotask(() => trigger?.focus())
-  }
-  createEffect(() => {
-    const currentSessionId = workbench.input().sessionId
-    if (currentSessionId !== previousSessionId) {
-      reasoningRequest++
-      setReasoningPending(false)
-      setError('')
-    }
-    if (currentSessionId !== previousSessionId || !dropdown()) close()
-    previousSessionId = currentSessionId
-  })
-  onMount(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!open() || root?.contains(event.target as Node)) return
-      close()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!open() || event.key !== 'Escape') return
-      event.preventDefault()
-      close(true)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    onCleanup(() => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    })
-  })
-  const choose = async (target: string) => {
-    const sessionId = workbench.input().sessionId
-    // A draft setter is an explicit empty-state (or transition-state) binding.
-    // Prefer it even when the host has already published a session id: session
-    // selection and renderer updates can arrive in the same tick, and sending
-    // a live-session command here would race the create transaction.
-    if (props.onDraftChange) { props.onDraftChange(target); close(true); return }
-    if (!sessionId || target === model()) { close(true); return }
-    const result = await workbench.commands.setModel(sessionId, target)
-    if (!result.ok) setError(result.error || '模型切换失败')
-    else setError('')
-    close(true)
-  }
-  const chooseReasoning = async (target: string) => {
-    if (props.onReasoningChange) { props.onReasoningChange(target); return }
-    const sessionId = workbench.input().sessionId
-    const option = reasoningOption()
-    if (!sessionId || !option || option.editable === false || reasoningPending()
-      || !reasoningEntries().some(entry => entry.id === target) || target === reasoningValue()) return
-    const request = ++reasoningRequest
-    setReasoningPending(true)
-    setError('')
-    try {
-      const result = await workbench.commands.setConfigOption(sessionId, option.id, target, {
-        expectedValue: option.value,
-        ...(option.version !== undefined ? { expectedVersion: option.version } : {}),
-      })
-      if (request === reasoningRequest && workbench.input().sessionId === sessionId && !result.ok)
-        setError(result.error || '思考等级切换失败')
-    } catch (cause) {
-      if (request === reasoningRequest && workbench.input().sessionId === sessionId)
-        setError(cause instanceof Error ? cause.message : '思考等级切换失败')
-    } finally {
-      if (request === reasoningRequest) setReasoningPending(false)
-    }
-  }
-
-  return (
-    <div ref={node => { root = node }} class="solid-model-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert">{message()}</span>}</Show>
-      <Show when={dropdown() || (appearance().modelVariant !== 'badge' && appearance().modelVariant !== 'minimal')} fallback={
-        <Show when={appearance().modelVariant === 'badge'} fallback={
-          <button
-            type="button"
-            class="cc-model-minimal"
-            title="点击切换模型"
-            style={{ 'font-size': `${scale()}%` }}
-            onClick={() => void choose(nextValue(models(), model()))}
-          >{displayModel()}</button>
-        }>
-          <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
-        </Show>
-      }>
-        <ModelDropdown
-          menuId={menuId}
-          triggerRef={node => { trigger = node }}
-          rootRef={node => { root = node }}
-          open={open}
-          setOpen={setOpen}
-          close={close}
-          scale={scale}
-          displayModel={displayModel}
-          model={model}
-          modelEntries={modelEntries}
-          reasoningEntries={reasoningEntries}
-          reasoningValue={reasoningValue}
-          onReasoningChange={value => void chooseReasoning(value)}
-          choose={choose}
-        />
-      </Show>
-    </div>
-  )
-}
-
-function ModelDropdown(props: {
-  menuId: string
-  triggerRef: (node: HTMLButtonElement) => void
-  rootRef: (node: HTMLDivElement) => void
-  open: () => boolean
-  setOpen: (value: boolean | ((previous: boolean) => boolean)) => void
-  close: (restoreFocus?: boolean) => void
-  scale: () => number
-  displayModel: () => string
-  model: () => string
-  modelEntries: () => readonly WorkbenchOptionEntry[]
-  reasoningEntries: () => readonly WorkbenchOptionEntry[]
-  reasoningValue?: () => string
-  onReasoningChange?: (value: string) => void
-  choose: (value: string) => Promise<void>
-}) {
-  let menu: HTMLDivElement | undefined
-  createEffect(() => {
-    if (!props.open()) return
-    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
-  })
-  return <div ref={props.rootRef} class="cc-model-dropdown">
-    <button
-      ref={props.triggerRef}
-      type="button"
-      class="model-tag"
-      style={{ 'font-size': `${props.scale()}%` }}
-      aria-haspopup="listbox"
-      aria-expanded={props.open()}
-      aria-controls={props.menuId}
-      onClick={() => props.setOpen(value => !value)}
-    >{props.displayModel()} ▾</button>
-    <Show when={props.open()}>
-      <div
-        ref={node => { menu = node }}
-        id={props.menuId}
-        class="model-menu"
-        data-popover="control-center"
-        role="listbox"
-        aria-label="模型列表"
-        tabIndex="-1"
-        onKeyDown={event => {
-          if (event.key !== 'Escape') return
-          event.preventDefault()
-          event.stopPropagation()
-          props.close(true)
-        }}
-      >
-        <Show when={props.reasoningValue && props.onReasoningChange && props.reasoningEntries().length > 0}>
-          <div class="model-menu-section" role="group" aria-label="思考强度">
-            <span>思考强度</span>
-            <For each={props.reasoningEntries()}>{effort => <button
-              type="button"
-              role="option"
-              aria-selected={effort.id === props.reasoningValue?.()}
-              class={`model-item${effort.id === props.reasoningValue?.() ? ' active' : ''}`}
-              tabIndex={-1}
-              onClick={() => {
-                props.onReasoningChange?.(effort.id)
-                props.close(true)
-              }}
-            >{optionLabel('reasoning', effort.id, effort.label)}</button>}</For>
-          </div>
-        </Show>
-        <For each={props.modelEntries()}>{item => (
-          <button
-            type="button"
-            role="option"
-            aria-selected={item.id === props.model()}
-            class={`model-item${item.id === props.model() ? ' active' : ''}`}
-            tabIndex={-1}
-            onClick={() => void props.choose(item.id)}
-          >{item.label || item.id}</button>
-        )}</For>
-      </div>
-    </Show>
-  </div>
+  const entries=()=>resolveModelOptionEntries(runtime(),props.draftValue?.(),props.draftValue?workbench.input().agentAdvertisedModels:undefined); const models=()=>entries().map(x=>x.id)
+  const model=()=>props.draftValue?.()||runtime().activeModel||entries()[0]?.id||'未配置模型'; const mode=()=>props.forceDropdown?'menu':(appearance().modelSwitchMode??'menu')
+  const width=()=>appearance().modelWidth??120, height=()=>appearance().modelHeight??28, radius=()=>appearance().modelRadius??0, fontSize=()=>appearance().modelFontSize??12
+  const bg=()=>appearance().modelBgColor==='black'?'#000':'#fff', fg=()=>appearance().modelTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(r.error||'未配置模型?')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const rootStyle=()=>({'margin-top':`${height()/2}px`}); const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg(),display:'flex','align-items':'center','justify-content':'center'}); const itemStyle=triggerStyle
+  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert">{m()}</span>}</Show><div class="cc-model-root" style={rootStyle()}><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`,height:`${height()*5.25}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><For each={entries().filter(x=>x.id!==model())}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" style={itemStyle()} onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></div></Show></div></div>
 }
 
 export function SolidModeWidget(props: {
@@ -349,7 +137,7 @@ export function SolidModeWidget(props: {
             <div
               ref={node => { menu = node }}
               id={menuId}
-              class="mode-menu model-menu"
+              class="mode-menu cc-model-menu"
               data-popover="control-center"
               role="listbox"
               aria-label="模式列表"
@@ -365,7 +153,7 @@ export function SolidModeWidget(props: {
                 type="button"
                 role="option"
                 aria-selected={item.id === mode()}
-                class={`model-item${item.id === mode() ? ' active' : ''}`}
+                class={`cc-model-item${item.id === mode() ? ' active' : ''}`}
                 tabIndex={-1}
                 onClick={() => { void chooseMode(item.id) }}
               >{optionLabel('mode', item.id, item.label)}</button>}</For>
@@ -424,3 +212,4 @@ export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 
     onClick={() => runtime().generating ? cancel() : send()}
   ><svg viewBox="0 0 24 24" class={iconClass()} aria-hidden="true"><path d={path()} /></svg></button>
 }
+

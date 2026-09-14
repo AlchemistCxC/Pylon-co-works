@@ -345,12 +345,12 @@ describe('Agent Workbench canonical session runtime', () => {
   it('生产 appearance 命令经 Zustand adapter 写回主题权威', () => {
     const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
     try {
-      service.appearance.dispatch({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })
+      service.appearance.dispatch({ type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle' })
       service.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 18 } })
 
-      expect(useStore.getState().modelVariant).toBe('minimal')
+      expect(useStore.getState().modelSwitchMode).toBe('cycle')
       expect(useStore.getState().ccLayout.placements.model.offsetX).toBe(18)
-      expect(service.appearance.getSnapshot()).toMatchObject({ modelVariant: 'minimal' })
+      expect(service.appearance.getSnapshot()).toMatchObject({ modelSwitchMode: 'cycle' })
     } finally {
       service.destroy()
       useStore.setState(useStore.getInitialState(), true)

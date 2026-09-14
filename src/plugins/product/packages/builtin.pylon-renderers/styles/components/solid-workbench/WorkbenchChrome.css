@@ -581,13 +581,13 @@
    Keep these menus in the same square, dense visual language as the terminal
    titlebar.  StatusBar.css still supplies the legacy fallback defaults; the
    scoped rules below are deliberately later and more specific for Solid. */
-.solid-workbench-control-center-slot :is(.cc-model-dropdown, .cc-mode-dropdown) {
+.solid-workbench-control-center-slot :is(.cc-model-root, .cc-mode-dropdown) {
   position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 0;
 }
-.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select) {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select) {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -605,18 +605,18 @@
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
-.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select):hover,
-.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select)[aria-expanded='true'] {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select):hover,
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select)[aria-expanded='true'] {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   text-decoration: none;
 }
-.solid-workbench-control-center-slot :is(.model-tag, .cc-mode-select):focus-visible {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.solid-workbench-control-center-slot .model-menu {
+.solid-workbench-control-center-slot .cc-model-menu {
   position: absolute;
   right: auto;
   bottom: calc(100% + 7px);
@@ -627,38 +627,25 @@
   gap: 1px;
   box-sizing: border-box;
   width: max-content;
-  min-width: 224px;
+  min-width: 0;
   max-width: min(380px, calc(100vw - 24px));
-  max-height: min(420px, 60vh);
+  max-height: none;
   padding: 4px 0;
   overflow-x: hidden;
   overflow-y: auto;
-  border: 1px solid color-mix(in srgb, var(--border-focus, var(--accent)) 58%, var(--border));
+  border: 0;
   border-radius: 0;
   color: var(--text);
   background: var(--surface-overlay, var(--bg-panel));
-  box-shadow: 0 10px 28px color-mix(in srgb, #000 28%, transparent);
+  box-shadow: none;
   animation: cc-popover-in 100ms ease-out both;
 }
-.solid-workbench-control-center-slot .cc-mode-dropdown .model-menu {
+.solid-workbench-control-center-slot .cc-mode-dropdown .cc-model-menu {
   right: 0;
   left: auto;
 }
-.solid-workbench-control-center-slot .model-menu-section {
-  display: grid;
-  gap: 2px;
-  padding: 2px 0 5px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-}
-.solid-workbench-control-center-slot .model-menu-section > span {
-  display: block;
-  padding: 3px 10px 4px;
-  color: var(--text-dim);
-  font: 700 var(--font-size-2xs)/1.2 var(--font);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.solid-workbench-control-center-slot .model-item {
+
+.solid-workbench-control-center-slot .cc-model-item {
   display: flex;
   align-items: center;
   width: 100%;
@@ -677,25 +664,14 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.solid-workbench-control-center-slot .model-item::after {
-  content: '✓';
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--accent);
-  opacity: 0;
-}
-.solid-workbench-control-center-slot .model-item[aria-selected='true'] {
+
+.solid-workbench-control-center-slot .cc-model-item[aria-selected='true'] {
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
-.solid-workbench-control-center-slot .model-item[aria-selected='true']::after { opacity: 1; }
-.solid-workbench-control-center-slot .model-item:hover,
-.solid-workbench-control-center-slot .model-item:focus-visible {
-  color: var(--text);
-  outline: none;
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-hover, transparent));
-}
-.solid-workbench-control-center-slot .model-item:focus-visible {
+.solid-workbench-control-center-slot .cc-model-item[aria-selected='true']::after { opacity: 1; }
+
+.solid-workbench-control-center-slot .cc-model-item:focus-visible {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 @keyframes cc-popover-in {
@@ -703,7 +679,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .solid-workbench-control-center-slot .model-menu { animation: none; }
+  .solid-workbench-control-center-slot .cc-model-menu { animation: none; }
 }
 
 

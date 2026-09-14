@@ -51,7 +51,7 @@ describe('主题设置展示文案契约', () => {
       cliHintMode: ['hidden', 'compact', 'full'],
       footerLayout: ['free', 'peri'],
       cliOverflowMode: ['fixed-scroll', 'grow', 'overlay'],
-      modelVariant: ['dropdown', 'minimal', 'badge'],
+      modelSwitchMode: ['menu', 'cycle'],
       modeVariant: ['pill', 'badge', 'minimal'],
       sendVariant: ['icon', 'square', 'minimal'],
     } as const

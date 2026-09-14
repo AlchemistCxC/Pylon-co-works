@@ -100,7 +100,7 @@ export interface ThemeSettings {
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
   ccStyle: string
   ccVariant: string
-  modelVariant: string; modeVariant: string; sendVariant: string
+  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; modeVariant: string; sendVariant: string
   /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
   modeAutoColor: string; modeEditColor: string
   ccHidden: string[]

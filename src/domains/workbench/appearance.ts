@@ -76,7 +76,13 @@ export interface WorkbenchAppearanceSnapshot {
   sendButtonIconGenerating: string
   sendButtonIconRound: string
   sendButtonIconColor: string
-  modelVariant: string
+  modelSwitchMode: string
+  modelBgColor: string
+  modelWidth: number
+  modelHeight: number
+  modelRadius: number
+  modelFontSize: number
+  modelTextColor: string
   modeVariant: string
   sendVariant: string
   cliHintMode: string
@@ -180,7 +186,13 @@ export function selectWorkbenchAppearance(
     sendButtonIconGenerating: theme.sendButtonIconGenerating,
     sendButtonIconRound: theme.sendButtonIconRound,
     sendButtonIconColor: theme.sendButtonIconColor,
-    modelVariant: theme.modelVariant,
+    modelSwitchMode: theme.modelSwitchMode,
+    modelBgColor: theme.modelBgColor,
+    modelWidth: theme.modelWidth,
+    modelHeight: theme.modelHeight,
+    modelRadius: theme.modelRadius,
+    modelFontSize: theme.modelFontSize,
+    modelTextColor: theme.modelTextColor,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
     cliHintMode: theme.cliHintMode,
@@ -267,7 +279,13 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     barHeight: theme.barHeight,
     barFillFollow: theme.barFillFollow,
     barFillColor: theme.barFillColor,
-    modelVariant: theme.modelVariant,
+    modelSwitchMode: theme.modelSwitchMode,
+    modelBgColor: theme.modelBgColor,
+    modelWidth: theme.modelWidth,
+    modelHeight: theme.modelHeight,
+    modelRadius: theme.modelRadius,
+    modelFontSize: theme.modelFontSize,
+    modelTextColor: theme.modelTextColor,
     modeVariant: theme.modeVariant,
     sendVariant: theme.sendVariant,
   }

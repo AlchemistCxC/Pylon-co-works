@@ -191,10 +191,10 @@ describe('createStaticWorkbenchAppearanceStore', () => {
 
     store.dispatch({ type: 'set-cc-height', height: 160 })
     store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 99, offsetY: -99 } })
-    store.dispatch({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })
+    store.dispatch({ type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle' })
 
-    expect(store.getSnapshot()).toMatchObject({ ccHeight: 160, modelVariant: 'minimal' })
-    expect(store.getSnapshot().ccProperties.modelVariant).toBe('minimal')
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 160, modelSwitchMode: 'cycle' })
+    expect(store.getSnapshot().ccProperties.modelSwitchMode).toBe('cycle')
     expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 48, offsetY: -16 })
     store.destroy()
   })
