@@ -355,10 +355,7 @@ pub(crate) fn spawn_http_stub(
                             None
                         }
                     });
-                    break match declared {
-                        Some(length) => Some(headers_end + 4 + length),
-                        None => None,
-                    };
+                    break declared.map(|length| headers_end + 4 + length);
                 }
                 match stream.read(&mut buffer) {
                     Ok(0) | Err(_) => break None,
