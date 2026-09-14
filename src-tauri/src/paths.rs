@@ -155,6 +155,11 @@ pub(crate) fn mcp_persist_path(dirs: &DataDirs) -> PathBuf {
     dirs.config_root.join("pylon-mcp.json")
 }
 
+/// Agent 浏览器设置（issue #82：档位/黑名单/广告过滤；Rust 侧权威）。
+pub(crate) fn browser_agent_settings_path(dirs: &DataDirs) -> PathBuf {
+    dirs.config_root.join("pylon-browser-agent.json")
+}
+
 pub(crate) fn pet_persist_path(dirs: &DataDirs) -> PathBuf {
     dirs.config_root.join("pylon-pet.json")
 }
@@ -190,6 +195,7 @@ const BUSINESS_FILE_NAMES: &[&str] = &[
     "pylon-master.key",
     "pylon-mcp.json",
     "pylon-pet.json",
+    "pylon-browser-agent.json",
 ];
 const BUSINESS_DIR_NAMES: &[&str] = &["pylon-credentials", "pylon/plugins"];
 
@@ -202,7 +208,12 @@ const APPDATA_BUSINESS_NAMES: &[&str] = &[
     "pylon-credentials",
 ];
 /// AppConfig 侧旧数据集合（MCP/pet/plugins）。
-const APPCONFIG_BUSINESS_NAMES: &[&str] = &["pylon-mcp.json", "pylon-pet.json", "pylon/plugins"];
+const APPCONFIG_BUSINESS_NAMES: &[&str] = &[
+    "pylon-mcp.json",
+    "pylon-pet.json",
+    "pylon-browser-agent.json",
+    "pylon/plugins",
+];
 
 fn path_present(root: &Path, name: &str) -> bool {
     root.join(name).exists()

@@ -114,6 +114,8 @@ pub(crate) fn is_allowed_browser_url(url: &url::Url) -> bool {
 
 pub(crate) struct BrowserManager {
     inner: Mutex<BrowserInner>,
+    /// 页面加载钩子（issue #82）：Agent 层在此失效 ref 注册表等 per-tab 状态。
+    page_load_hooks: Mutex<Vec<crate::browser_agent::PageLoadHook>>,
 }
 
 struct BrowserInner {
@@ -155,6 +157,14 @@ impl BrowserManager {
                 accept_new_windows: false,
                 visible: true,
             }),
+            page_load_hooks: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// 注册页面加载钩子（tab 导航完成时以 tab_id 回调；失败静默）。
+    pub(crate) fn register_page_load_hook(&self, hook: crate::browser_agent::PageLoadHook) {
+        if let Ok(mut hooks) = self.page_load_hooks.lock() {
+            hooks.push(hook);
         }
     }
 
@@ -236,6 +246,22 @@ impl BrowserManager {
     /// 创建并激活一个指定 URL 的内部标签。链接回调和 Agent open-tab 共用此路径，
     /// 避免“先建空标签、再异步导航”造成活动标签/地址事件短暂错位。
     pub(crate) fn open_tab(self: &Arc<Self>, initial_url: &str) -> Result<BrowserSnapshot, String> {
+        self.open_tab_in(initial_url, true)
+    }
+
+    /// 后台标签（issue #82 P2）：创建但不切换活动标签、不抢走用户视野。
+    pub(crate) fn open_tab_background(
+        self: &Arc<Self>,
+        initial_url: &str,
+    ) -> Result<BrowserSnapshot, String> {
+        self.open_tab_in(initial_url, false)
+    }
+
+    fn open_tab_in(
+        self: &Arc<Self>,
+        initial_url: &str,
+        activate: bool,
+    ) -> Result<BrowserSnapshot, String> {
         let parsed = url::Url::parse(initial_url).map_err(|e| format!("URL 非法: {e}"))?;
         if !is_allowed_browser_url(&parsed) {
             return Err(format!(
@@ -333,15 +359,18 @@ impl BrowserManager {
             self.emit_status(&inner);
             return Err(message);
         }
-        if let Some(active) = inner
-            .active_tab_id
-            .and_then(|id| inner.tabs.iter().find(|tab| tab.id == id))
-        {
-            let _ = active.webview.hide();
+        if activate {
+            if let Some(active) = inner
+                .active_tab_id
+                .and_then(|id| inner.tabs.iter().find(|tab| tab.id == id))
+            {
+                let _ = active.webview.hide();
+            }
         }
         // add_child 创建的 WebView 默认可见；keep-alive 的非活动 Browser
         // 需要在原生层同步隐藏，不能只依赖 React 父节点的 display:none。
-        if !inner.visible {
+        // 后台标签无论 Sheet 可见性如何都保持隐藏。
+        if !inner.visible || !activate {
             let _ = webview.hide();
         }
         inner.tabs.push(BrowserTab {
@@ -350,7 +379,9 @@ impl BrowserManager {
             title: None,
             webview,
         });
-        inner.active_tab_id = Some(tab_id);
+        if activate {
+            inner.active_tab_id = Some(tab_id);
+        }
         inner.phase = BrowserPhase::Ready;
         let snapshot = Self::build_snapshot(&inner);
         self.emit_status(&inner);
@@ -385,9 +416,33 @@ impl BrowserManager {
                 }),
             );
         }
+        drop(inner);
+        if let Ok(hooks) = self.page_load_hooks.lock() {
+            for hook in hooks.iter() {
+                hook(tab_id);
+            }
+        }
     }
 
     pub(crate) fn navigate(&self, url: &str) -> Result<BrowserSnapshot, String> {
+        // 保持既有错误优先级：URL 校验先于会话状态检查（既有测试契约）。
+        let parsed = url::Url::parse(url).map_err(|e| format!("URL 非法: {e}"))?;
+        if !is_allowed_browser_url(&parsed) {
+            return Err(format!(
+                "仅允许 http/https，收到 scheme={}",
+                parsed.scheme()
+            ));
+        }
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let active_id = inner
+            .active_tab_id
+            .ok_or_else(|| "浏览器未启动".to_string())?;
+        drop(inner);
+        self.navigate_on(active_id, url)
+    }
+
+    /// 定向导航（issue #82）：指定 tab 导航，不切换活动标签。
+    pub(crate) fn navigate_on(&self, tab_id: u64, url: &str) -> Result<BrowserSnapshot, String> {
         let parsed = url::Url::parse(url).map_err(|e| format!("URL 非法: {e}"))?;
         if !is_allowed_browser_url(&parsed) {
             return Err(format!(
@@ -396,14 +451,11 @@ impl BrowserManager {
             ));
         }
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let active_id = inner
-            .active_tab_id
-            .ok_or_else(|| "浏览器未启动".to_string())?;
         let tab = inner
             .tabs
             .iter_mut()
-            .find(|tab| tab.id == active_id)
-            .ok_or_else(|| "浏览器未启动".to_string())?;
+            .find(|tab| tab.id == tab_id)
+            .ok_or_else(|| format!("浏览器标签不存在：{tab_id}"))?;
         tab.url = Some(url.to_string());
         tab.webview
             .navigate(parsed)
@@ -628,9 +680,18 @@ impl BrowserManager {
     }
 
     async fn eval_json(&self, script: &str) -> Result<Value, String> {
+        self.eval_json_on(None, script).await
+    }
+
+    /// 在指定标签（缺省活动标签）执行返回 `JSON.stringify(...)` 的脚本。
+    pub(crate) async fn eval_json_on(
+        &self,
+        tab_id: Option<u64>,
+        script: &str,
+    ) -> Result<Value, String> {
         let webview = {
             let inner = self.inner.lock().map_err(|e| e.to_string())?;
-            Self::active_webview(&inner)?.clone()
+            Self::webview_for(&inner, tab_id)?.webview.clone()
         };
         let (sender, receiver) = tokio::sync::oneshot::channel::<String>();
         // Tauri 的 callback trait 是 `Fn`（理论上可能被调用多次），而 oneshot
@@ -657,6 +718,13 @@ impl BrowserManager {
         } else {
             Ok(encoded)
         }
+    }
+
+    /// 解析目标标签句柄（issue #82）：`None` = 活动标签；`Some` 必须存在。
+    pub(crate) fn tab_webview(&self, tab_id: Option<u64>) -> Result<(u64, tauri::Webview), String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let tab = Self::webview_for(&inner, tab_id)?;
+        Ok((tab.id, tab.webview.clone()))
     }
 
     pub(crate) fn set_zoom(&self, zoom_percent: u16) -> Result<BrowserSnapshot, String> {
@@ -827,6 +895,27 @@ impl BrowserManager {
             .find(|tab| tab.id == active_id)
             .map(|tab| &tab.webview)
             .ok_or_else(|| "浏览器未启动".to_string())
+    }
+
+    /// tab 寻址解析：`Some` 校验存在性；`None` 回落活动标签。
+    fn webview_for(inner: &BrowserInner, tab_id: Option<u64>) -> Result<&BrowserTab, String> {
+        match tab_id {
+            Some(id) => inner
+                .tabs
+                .iter()
+                .find(|tab| tab.id == id)
+                .ok_or_else(|| format!("浏览器标签不存在：{id}")),
+            None => {
+                let active_id = inner
+                    .active_tab_id
+                    .ok_or_else(|| "浏览器未启动".to_string())?;
+                inner
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.id == active_id)
+                    .ok_or_else(|| "浏览器未启动".to_string())
+            }
+        }
     }
 }
 

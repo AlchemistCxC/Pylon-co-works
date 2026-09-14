@@ -10,6 +10,8 @@ mod b10_gateway_integration_tests;
 #[cfg(test)]
 mod b11_inject_integration_tests;
 mod browser;
+mod browser_agent;
+mod browser_agent_cmds;
 mod browser_cmds;
 mod correlation;
 mod cwd;
@@ -181,6 +183,8 @@ pub(crate) struct AppState {
     pub(crate) pet: Arc<Mutex<pet::PetState>>,
     pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     pub(crate) runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
+    /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
+    pub(crate) browser_agent: Arc<browser_agent::hub::BrowserAgentHub>,
     pub(crate) prism: PrismClient,
     pub(crate) gateway: Arc<GatewayCore>,
     /// R5（P1-3）：启动诊断快照（run() 构建主体，setup 解析 DataDirs 后补写 storage）。
@@ -762,6 +766,7 @@ pub fn run() {
                 gateway,
                 startup: Arc::new(RwLock::new((*startup).clone())),
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
+                browser_agent: Arc::new(browser_agent::hub::BrowserAgentHub::new()),
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),

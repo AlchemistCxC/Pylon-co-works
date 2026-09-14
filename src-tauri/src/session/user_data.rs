@@ -27,11 +27,13 @@ use serde::Serialize;
 pub(crate) const MAX_USER_DATA_BYTES: usize = 2 * 1024 * 1024;
 
 /// user_data 行的 key。profiles = Profile + activeProfileId envelope；
-/// sessions = Session（v2 + legacy unresolved 混合）envelope。
+/// sessions = Session（v2 + legacy unresolved 混合）envelope；
+/// browser-agent-ops = Agent 浏览器操作审计 ring buffer（issue #82）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UserDataKey {
     Profiles,
     Sessions,
+    BrowserAgentOps,
 }
 
 impl UserDataKey {
@@ -39,6 +41,7 @@ impl UserDataKey {
         match self {
             Self::Profiles => "profiles",
             Self::Sessions => "sessions",
+            Self::BrowserAgentOps => "browser-agent-ops",
         }
     }
 
@@ -46,6 +49,7 @@ impl UserDataKey {
         match value {
             "profiles" => Some(Self::Profiles),
             "sessions" => Some(Self::Sessions),
+            "browser-agent-ops" => Some(Self::BrowserAgentOps),
             _ => None,
         }
     }
@@ -223,6 +227,60 @@ fn validate_sessions(payload: &serde_json::Value) -> Result<i64, UserDataError> 
     Ok(version)
 }
 
+/// browser-agent-ops envelope 校验（issue #82 审计 ring buffer）：
+/// `{version:1, ops:[{atMs, sessionKey, tool, summary, outcome}, …]}`。
+/// 条目数在读取侧由审计模块截断，这里只做结构完整性防守。
+fn validate_browser_agent_ops(payload: &serde_json::Value) -> Result<i64, UserDataError> {
+    const AUDIT_ENVELOPE_VERSION: i64 = 1;
+    const MAX_AUDIT_PAYLOAD_ENTRIES: usize = 1000;
+    let version = payload
+        .get("version")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| as_corrupt(UserDataKey::BrowserAgentOps, "version 必须为整数"))?;
+    if version != AUDIT_ENVELOPE_VERSION {
+        return Err(as_corrupt(
+            UserDataKey::BrowserAgentOps,
+            format!("未知 envelope version {version}"),
+        ));
+    }
+    let ops = payload
+        .get("ops")
+        .ok_or_else(|| as_corrupt(UserDataKey::BrowserAgentOps, "缺少 ops 数组"))?
+        .as_array()
+        .ok_or_else(|| as_corrupt(UserDataKey::BrowserAgentOps, "ops 必须为数组"))?;
+    if ops.len() > MAX_AUDIT_PAYLOAD_ENTRIES {
+        return Err(as_corrupt(
+            UserDataKey::BrowserAgentOps,
+            format!("ops 超过 {MAX_AUDIT_PAYLOAD_ENTRIES} 条上限"),
+        ));
+    }
+    for entry in ops {
+        let object = entry
+            .as_object()
+            .ok_or_else(|| as_corrupt(UserDataKey::BrowserAgentOps, "审计条目必须为对象"))?;
+        if object
+            .get("atMs")
+            .and_then(serde_json::Value::as_u64)
+            .is_none()
+        {
+            return Err(as_corrupt(
+                UserDataKey::BrowserAgentOps,
+                "审计条目缺少 atMs",
+            ));
+        }
+        let has_text = ["sessionKey", "tool", "outcome"]
+            .iter()
+            .all(|field| text_of(object.get(*field).unwrap_or(&serde_json::Value::Null)).is_some());
+        if !has_text {
+            return Err(as_corrupt(
+                UserDataKey::BrowserAgentOps,
+                "审计条目缺少 sessionKey/tool/outcome 文本字段",
+            ));
+        }
+    }
+    Ok(version)
+}
+
 /// 打开（或创建）仓库并迁移到最新 schema（复用 msg_repo 的统一迁移链）。
 /// 调用方须先创建 DB 父目录；失败返回 Err——启动路径不得静默回退。
 pub(crate) fn open_user_data_db(path: &Path) -> Result<UserDataStore, UserDataError> {
@@ -304,6 +362,7 @@ impl UserDataStore {
         let version = match key {
             UserDataKey::Profiles => validate_profiles(&payload)?,
             UserDataKey::Sessions => validate_sessions(&payload)?,
+            UserDataKey::BrowserAgentOps => validate_browser_agent_ops(&payload)?,
         };
         let payload_str = serde_json::to_string(&payload)
             .map_err(|error| UserDataError::Corrupt(format!("payload 序列化失败：{error}")))?;
