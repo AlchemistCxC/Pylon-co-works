@@ -86,6 +86,7 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
       value: {
         snapshot: { publishes: 0, lastPublicationKind: 'whole' },
         publishCost: { samples: 2, lastMs: 8, maxMs: 8, p95Ms: 8 },
+        rowScope: 'host',
         rowSet: {
           publications: 2,
           resets: 1,
@@ -117,5 +118,40 @@ describe('streaming display diagnostics readout (P89/S0)', () => {
     expect(readRendererDiagnostics('p89-throwing')).toEqual({ status: 'missing', key: 'p89-throwing' })
 
     scheduler.dispose()
+  })
+
+  it('host 不含行时回退到文档作用域，并在读数里自描述作用域', () => {
+    // issue #55 真机现场：读数以全局 key 注册，而同一应用会挂载多个 workbench（例如设置预览），
+    // 后注册者覆盖前一个；若它的 host 不含当前会话的行，rows 就会恒为空（而 document 里明明有行）。
+    const documentHost = document.createElement('div')
+    documentHost.innerHTML = `
+      <div class="plain-message-list__row" data-message-id="m-doc" data-message-role="reasoning">
+        <div class="term-row term-row-reasoning">
+          <div class="term-reasoning">
+            <div class="term-collapse" data-open="true">
+              <div class="term-collapse-content">
+                <div class="term-reasoning-body"><p>段落一的内容足够长不算小块</p><p>de</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`
+    document.body.appendChild(documentHost)
+    const emptyHost = document.createElement('div')
+    document.body.appendChild(emptyHost)
+
+    const scheduler = createStreamingDisplayScheduler(() => {}, { now: () => 0 })
+    const publishCost = createStreamingDisplayPublishCostRecorder()
+    const unregister = registerStreamingDisplayDiagnostics({ host: emptyHost, scheduler, publishCost })
+    expect(readRendererDiagnostics(STREAMING_DISPLAY_DIAGNOSTICS_KEY)).toMatchObject({
+      status: 'ok',
+      value: { rowScope: 'document', rows: [{ messageId: 'm-doc', role: 'reasoning', blocks: 2, tinyRows: 1 }] },
+    })
+    expect(diagnoseStreamingRows(emptyHost).map(row => row.messageId)).toEqual(['m-doc'])
+
+    unregister()
+    scheduler.dispose()
+    documentHost.remove()
+    emptyHost.remove()
   })
 })

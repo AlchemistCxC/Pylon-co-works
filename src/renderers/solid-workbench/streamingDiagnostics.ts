@@ -48,8 +48,10 @@ function isContentWrapper(element: Element): boolean {
 /** 向下走过「唯一子节点且是包装层」的链，回到真正承载行元素的那一层。 */
 function contentRoot(body: HTMLElement): HTMLElement {
   let node = body
-  while (node.children.length === 1 && isContentWrapper(node.children[0]!)) {
-    node = node.children[0] as HTMLElement
+  while (node.children.length === 1) {
+    const only = node.children.item(0)
+    if (!(only instanceof HTMLElement) || !isContentWrapper(only)) break
+    node = only
   }
   return node
 }
@@ -59,7 +61,7 @@ function contentRoot(body: HTMLElement): HTMLElement {
  * 注意：jsdom 里没有布局，几何值恒为 0；真实数值只能在真浏览器取得（CDP 探针）。
  */
 export function diagnoseStreamingRows(host: HTMLElement): readonly StreamingRowGeometry[] {
-  const rows = host.querySelectorAll<HTMLElement>('.term-row-assistant, .term-row-reasoning')
+  const rows = resolveRowScope(host).scope.querySelectorAll<HTMLElement>(ROW_SELECTOR)
   const geometry: StreamingRowGeometry[] = []
   rows.forEach(row => {
     const body = row.querySelector<HTMLElement>('.term-assistant-body, .term-reasoning-body')
@@ -132,12 +134,29 @@ export function registerStreamingDisplayDiagnostics(input: {
     publishCost: input.publishCost.snapshot(),
     // 行集合的规模读数（纯观测）：rows / textParagraphs > 1 即出现文本之外的边界。
     rowSet: streamingRowCounters(),
+    // 实际用的行读取作用域（多 workbench 挂载时注册 host 可能不含当前会话的行）。
+    rowScope: resolveRowScope(input.host).scopeName,
     rows: diagnoseStreamingRows(input.host),
   }))
 }
 
-/** 行集合规模：顶层块总数与其中的“小块”数（读取不修改任何状态）。 */
-function countBlocks(body: HTMLElement): { length: number; tiny: number } {
+const ROW_SELECTOR = '.term-row-assistant, .term-row-reasoning'
+
+/**
+ * 行的读取作用域：host 里有行就用 host，否则回退到文档。
+ *
+ * 为什么需要回退（issue #55 真机实测）：读数以**全局 key** 注册，而同一个应用可能挂载多个
+ * workbench（例如设置里的预览 workbench），后注册者会覆盖前一个；若它的 host 不含当前会话的
+ * 消息行，`rows` 就会恒为空（真机现场正是如此，而 document 里明明有 19 个行元素）。
+ * 回退后读数总能取到真实行，并对外报告实际作用域（`rowScope`）供判读。
+ */
+function resolveRowScope(host: HTMLElement): { scope: ParentNode; scopeName: 'host' | 'document' } {
+  if (host.querySelector(ROW_SELECTOR) !== null) return { scope: host, scopeName: 'host' }
+  const fallback = host.ownerDocument
+  return fallback === null ? { scope: host, scopeName: 'host' } : { scope: fallback, scopeName: 'document' }
+}
+
+/** 行集合规模：顶层块总数与其中的“小块”数（读取不修改任何状态）。 */function countBlocks(body: HTMLElement): { length: number; tiny: number } {
   const children = contentRoot(body).children
   let tiny = 0
   for (const child of children) {
