@@ -4,7 +4,7 @@
 >
 > 生产契约：Plugin API 1.0 / 1.1 / 1.2（最新 1.2），`pylon-plugin.json` schema 1
 
-本文基于当前源码契约编写。旧 API 0.1 的 `trust`、`contributes`、`signature`、顶层 `entry`、CapabilityBroker、旧 Host/ExtensionPoint 均已删除，不得用于新插件。`capabilities` 与 `dangerousHooks` 自 API 1.2 起以新语义回归（见 §3.1）。
+本文基于当前源码契约编写。旧 API 0.1 的 `trust`、`contributes`、`signature`、顶层 `entry`、CapabilityBroker、旧 Host/ExtensionPoint 均已删除，不得用于新插件。`capabilities` 与 `dangerousHooks` 自 API 1.2 起以新语义回归（见 §3.1）。API 1.3 定稿 Hook 锚点词表与事件 schema（见 §6.2）：新增 `permission.request`，移除 `agent.chunk`、`message.agent.committed`。
 
 普通用户请阅读[用户版](Pylon-插件系统说明书-用户版.md)。
 
@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -380,17 +380,53 @@ context.hooks.register('message.user.beforeSend', {
 })
 ```
 
-Hook 名称：
+Hook 名称（API 1.3 词表，与 `src/plugin-runtime/hooks/hookTypes.ts` 的 `HOOK_NAMES` 逐项一致，由 `scripts/check-hook-anchor-parity.mts` 门禁强制；每行一个全名，禁止简写）：
 
 ```text
-session.creating / created / loading / loaded / closing / closed / deleting / deleted
-message.user.beforeSend / sent / sendFailed
-message.received / message.agent.committed
-agent.chunk（API 1.2 新增锚点）
-turn.started / completed / failed / cancelled
-tool.beforeCall / started / afterCall / failed
-context.beforeBuild / afterBuild
+context.afterBuild
+context.beforeBuild
+message.received
+message.user.beforeSend
+message.user.sendFailed
+message.user.sent
+permission.request
+session.closed
+session.closing
+session.creating
+session.created
+session.deleted
+session.deleting
+session.loaded
+session.loading
+tool.afterCall
+tool.beforeCall
+tool.failed
+tool.started
+turn.cancelled
+turn.completed
+turn.failed
+turn.started
 ```
+
+相对 API 1.2 的变更：新增 `permission.request`（权限缝决策锚点，见下）；移除 `agent.chunk` 与 `message.agent.committed`（二者自 1.0 起从未有宿主派发方，1.3 起注册即校验失败）。`context.beforeBuild`/`context.afterBuild`/`turn.started`/`turn.cancelled`/`tool.started`/`tool.afterCall`/`tool.failed`/`session.deleting`/`session.deleted` 自 1.3 起有宿主派发方。
+
+permission.request（权限缝，仅此锚点可短路 ACP 权限审批）：
+
+```js
+context.hooks.register('permission.request', {
+  id: 'example.permission-gate',
+  mode: 'pipeline',
+  handler: ({ event }) => {
+    // event: { source, provider, agentId, requestId, toolCallId, title, prompt, options }
+    // 允许：{ action: 'respond', output: { decision: 'allow' } }
+    // 拒绝：{ action: 'cancel', reason: '…' }
+    // 改写（只允许原 optionId 的过滤/重排，不可新增）：
+    return { action: 'continue', event: { ...event, options: event.options.filter(option => option.optionId !== 'allow_once') } }
+  },
+})
+```
+
+锚点事件形状与超时预算（gate 类 3000 ms / 通知类 1000 ms）以 `hookTypes.ts` 内的类型与 `HOOK_TIMEOUT_BUDGET_MS` 为准：`message.user.beforeSend`（transform 改写 `content`/`blocks`）、`message.received`（改写 `content`）、`permission.request`、`tool.beforeCall`（cancel → 按 reject 选项应答）为 gate 类；其余为通知/投影类（`session.*` 携带 `{ session, source }`，canonical 投影类携带 `{ owner, event }`）。注意：`message.user.beforeSend` 全宿主唯一方言是 `{ source, content, blocks }`——改写 `message` 字段自 1.3 起无效。
 
 结果：
 
@@ -409,7 +445,7 @@ execution: blocking | background
 failurePolicy: continue | abort | disable-hook | disable-plugin
 ```
 
-阻塞 Hook 默认超时 3000 ms。Runtime 保留最近 trace，并在连续失败达到阈值后熔断。`failurePolicy: 'disable-plugin'` 会调用唯一产品 `PluginRuntime` 停用整个插件；若 cleanup 不完整，trace 会追加 `plugin-disable-failed`，实例进入 `cleanup-failed`，而不是只静默禁用当前 handler。
+Hook 默认超时按锚点预算表执行：gate 类（`message.user.beforeSend` / `message.received` / `permission.request` / `tool.beforeCall`）3000 ms，通知与投影类 1000 ms（`hookTypes.ts` 的 `HOOK_TIMEOUT_BUDGET_MS` 为单一来源）；definition 显式 `timeoutMs` 可覆盖。Runtime 保留最近 trace，并在连续失败达到阈值后熔断（按 pluginId 键控：同插件任一钩子连续失败，该插件全部钩子一同熔断一个冷却周期）。`failurePolicy: 'disable-plugin'` 会调用唯一产品 `PluginRuntime` 停用整个插件；若 cleanup 不完整，trace 会追加 `plugin-disable-failed`，实例进入 `cleanup-failed`，而不是只静默禁用当前 handler。
 
 ### 6.3 Workspace
 
@@ -853,10 +889,10 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2`（`PYLON_PLUGIN_API_SUPPORTED`）；
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3`（`PYLON_PLUGIN_API_SUPPORTED`）；
   旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
 - minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
-- `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。
+- `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。1.3 仅扩充 Hook 锚点词表（§6.2），manifest 字段形状相对 1.2 不变。
 
 #### 6.11.4 SDK 发行形态
 
