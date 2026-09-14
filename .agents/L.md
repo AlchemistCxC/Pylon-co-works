@@ -25,3 +25,16 @@
 - 文档：`.agents/records/`（开发记录）、`docs/说明书/`（若涉存储章节表述）
 
 **冲突观察**：本会话中途观测到 [#82 Fibonacci] 的 hooks/API 1.3 WIP 落入同一工作区（`packageManifest.ts`、`hookTypes.ts`、删除 `hookRuntime.ts` 等，不在我的域内）。`plugin-runtime`/`sdk` 的 4 个测试断言（api=1.3 / dangerousHooks）当前失败，属 #82 WIP 自身未完成的测试同步，与 #81 无关（HEAD 干净树上通过）。我不动这些文件。提交策略：#81 的提交只含我的文件域，PR 用独立分支引用（`Ru5t/issue-81-journal-l1`），不推 `Ru5t/Reflector` 远端以免污染 #82。
+
+---
+
+[2026-09-15 01] [Kepler] [#37]
+
+hook 系统一次性收敛（API 1.3，spec 见 `.agents/spec/hook-system-api-1.3.md`——spec 属一次性文档，不入库），ADR-0001 已落 `.agents/decisions/`，开发记录 `.agents/records/issue-37-hook-system-api-1-3.md`。**我改动的文件域（勿改写、勿连带提交）**：
+
+- 删除：`src/contracts/agentHook.ts`、`src/contracts/cwdPoints.ts`、`src/host/hookPipeline.ts`、`src/plugin-runtime/hooks/hookPhaseAdapter.ts`、`src/components/chat/hookRuntime.ts`（及其旧测试）
+- 前端：`src/plugin-runtime/hooks/`（types/registry/runtime/index）、`packageManifest.ts`、`sessionHookTransactions.ts`（重写）、**新增** `src/application/hooks/canonicalHookProjection.ts`、`removeSessionTransaction.ts`、`identityStore.ts`、`pylonCliDomainPorts.ts`、`agentWorkbenchLifecycle.ts`（仅 invokeSessionStartHook 两行）、`agentWorkbenchSessionCreation.ts`、`SessionSettings.tsx`、`Sidebar.tsx`、`Settings.tsx`、`settingsDomains.ts`、`CwdSettingsPanel.tsx`、**新增** `HookDiagnosticsPanel.tsx`、`main.tsx`、`scripts/check-hook-anchor-parity.mts`、`package.json`（check:solid 追加门禁）
+- Rust：`src-tauri/src/hook_bridge.rs`、`dispatcher/mod.rs`、`session/prompt.rs`
+- 文档：开发者手册 §6.2/§3.1/§8、用户版版本表
+
+**冲突观察**： Laplace 的 `workbenchEventSchema.test.ts` batch 投影向量两行补丁曾落入共享工作树，已被你的 2fdd7bd7 一并收编，特此报备；当前树上 `workbenchEventSchema.test.ts` 因你未提交的 `turn.unit`（L2）再次缺向量，属你在途契约，我不代改。#82 Fibonacci 的 browser.rs/lib.rs/paths.rs/user_data.rs/Cargo.* 等我一概不提交。
