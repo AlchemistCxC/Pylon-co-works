@@ -44,11 +44,17 @@ pub(crate) use stderr_tail::StderrTail;
 mod state;
 #[allow(unused_imports)]
 pub use state::{AcpSessionState, AcpStateDelta};
+pub(crate) mod turn_ledger;
+pub(crate) use turn_ledger::{
+    empty_turn_cause, terminal_cause_from_prompt_result, BeginOutcome, SettleOutcome, TurnKey,
+    TurnLedger, TurnTerminalCause,
+};
 pub(crate) mod wire_trace;
 #[cfg(test)]
 pub(crate) use engine::wait_prompt_with_cancel;
 pub(crate) use engine::{
-    wait_prompt_with_recovery, PreparedRpc, PromptTimeoutKind, PromptWaitOutcome,
+    wait_prompt_with_recovery, CancelSettleResolution, PreparedRpc, PromptTimeoutKind,
+    PromptWaitOutcome,
 };
 pub use engine::{CrashReason, BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP};
 pub(crate) use protocol::{

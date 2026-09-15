@@ -902,6 +902,8 @@ async fn handle_session_update<R: tauri::Runtime>(
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
     wire_ordinal: Option<u64>,
+    turn_ledger: &Arc<crate::acp::TurnLedger>,
+    ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
     mut payload: serde_json::Value,
 ) -> bool {
@@ -1075,6 +1077,16 @@ async fn handle_session_update<R: tauri::Runtime>(
         }
         if decision.collect_response {
             let effects = routing::agent_message_chunk_effects(update, decision);
+            // #99：live 活动 → turn 账本推进（Streaming 阶段 + ingress cursor +
+            // 文本标志）；回合未登记或已终态时为迟到活动，仅计诊断，不产生终态。
+            let _ = turn_ledger.note_session_activity(
+                &source,
+                &peri_id,
+                generation,
+                ingress_seq,
+                effects.text.is_some(),
+                false,
+            );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
             }
@@ -1119,6 +1131,28 @@ async fn handle_session_update<R: tauri::Runtime>(
         } else if let Some(session) = items.get_mut(&source) {
             if !decision.mutate_session {
                 return true;
+            }
+            // #99（评审 E3）：live 工具活动同样喂给账本——saw_tool 是
+            // empty-turn 判定（tool-only vs agent-empty）的输入；文本 chunk
+            // 与工具调用都会在 dispatcher 处理瞬间写入账本，settle 侧以此
+            // 为判定源（残余窗口见 refine_empty_turn 注释）。
+            if !is_replay
+                && matches!(
+                    variant,
+                    Some(
+                        crate::acp::SessionUpdateVariant::ToolCall
+                            | crate::acp::SessionUpdateVariant::ToolCallUpdate
+                    )
+                )
+            {
+                let _ = turn_ledger.note_session_activity(
+                    &source,
+                    &peri_id,
+                    generation,
+                    ingress_seq,
+                    false,
+                    true,
+                );
             }
             pet_events.extend(apply_update_event_routed(
                 session, update, variant, decision,
@@ -1621,11 +1655,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
+                // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
                 break;
             }
             let raw = tokio::select! {
                 biased;
-                // A7：watch 分支——崩溃信号不依赖 broadcast 容量，洪泛 Lagged 后仍触发
+                // #99 优先级规则（可测试）：crash watch > 控制帧（agent 请求/崩溃广播）
+                // > 普通通知。控制帧独立有界通道，通知洪泛时仍能有界时间内被路由；
+                // 每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
                 changed = crashed_rx.changed() => {
                     if changed.is_ok() && *crashed_rx.borrow_and_update() {
                         // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
@@ -1633,6 +1670,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     }
                     continue;
                 }
+                raw = notification_inbox.recv_control() => raw,
                 raw = notification_inbox.recv() => raw,
             };
             let classified = match raw {
@@ -1643,6 +1681,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 raw,
                 classification,
                 wire_ordinal,
+                ingress_seq,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1957,6 +1996,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         raw.method
                     );
                 }
+                // #99（评审 E4）：带 id + method 的 agent 请求落到此处 = 没有任何
+                // 分支认识它——spec 禁止静默丢弃（Responder 会永久滞留 pending
+                // 表、agent 侧请求挂死）。统一回 JSON-RPC Method Not Found，
+                // 应答同时消费 Responder、收敛 pending 条目。
+                if let (Some(request_id), Some(method)) = (raw.id.clone(), raw.method.as_deref()) {
+                    let responder = { acp.lock().await.responder() };
+                    let _ = responder
+                        .respond_error(
+                            request_id,
+                            -32601,
+                            &format!("method not supported by client: {method}"),
+                        )
+                        .await;
+                }
                 continue;
             }
             let payload = match raw.params {
@@ -1981,6 +2034,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 message_service.as_ref(),
                 classification,
                 wire_ordinal,
+                &runtime_for_reconnect.turn_ledger,
+                ingress_seq,
                 wire_trace.clone(),
                 payload,
             )
@@ -1988,6 +2043,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             {
                 break;
             }
+        }
+        // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
+        // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
+        // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn
+        // （可观测，且永远无法改写新代际状态）。
+        let dropped = runtime_for_reconnect
+            .turn_ledger
+            .drop_generation(generation);
+        if dropped > 0 {
+            tracing::info!(
+                dropped,
+                generation,
+                "stale-generation turn entries dropped by turn ledger"
+            );
         }
     }));
 }

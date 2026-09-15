@@ -46,13 +46,14 @@ pub(crate) fn connect_failure_cause(failure: &AgentConnectFailure) -> Diagnostic
     }
 }
 
-/// 运行时退出 → 统一 cause。code 词表 = `CrashReason::as_str` 的四个值。
+/// 运行时退出 → 统一 cause。code 词表 = `CrashReason::as_str` 的封闭集。
 pub(crate) fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
     let summary = match reason {
         CrashReason::WriterFailed => "Agent 进程 stdin 写入失败，连接已按崩溃收敛",
         CrashReason::WriterTimeout => "Agent 进程长时间不读 stdin（写超时），连接已按崩溃收敛",
         CrashReason::StdoutClosed => "Agent 进程已退出（stdout 关闭）",
         CrashReason::PendingLockPoisoned => "内部 pending 状态锁中毒，连接已按崩溃收敛",
+        CrashReason::Overloaded => "Agent 入站事件速率超过背压上限，连接已按过载收敛（显式 gap）",
     };
     DiagnosticCause {
         level: "fail",
@@ -70,6 +71,7 @@ pub(crate) fn crash_reason_from_code(code: &str) -> Option<CrashReason> {
         "writer_timeout" => Some(CrashReason::WriterTimeout),
         "stdout_closed" => Some(CrashReason::StdoutClosed),
         "pending_lock_poisoned" => Some(CrashReason::PendingLockPoisoned),
+        "overloaded" => Some(CrashReason::Overloaded),
         _ => None,
     }
 }
@@ -108,7 +110,7 @@ mod tests {
         );
     }
 
-    /// 崩溃 cause 的 code 词表 = CrashReason 的四个值，且全部 fail 级。
+    /// 崩溃 cause 的 code 词表 = CrashReason 的封闭集，且全部 fail 级。
     #[test]
     fn crash_cause_uses_the_crash_reason_vocabulary() {
         let codes: Vec<String> = [
@@ -116,6 +118,7 @@ mod tests {
             CrashReason::WriterTimeout,
             CrashReason::StdoutClosed,
             CrashReason::PendingLockPoisoned,
+            CrashReason::Overloaded,
         ]
         .iter()
         .map(|reason| crash_reason_cause(*reason).code)
@@ -127,6 +130,7 @@ mod tests {
                 "writer_timeout",
                 "stdout_closed",
                 "pending_lock_poisoned",
+                "overloaded",
             ],
             "崩溃 cause code 必须与 CrashReason::as_str 一一对应"
         );
@@ -135,6 +139,7 @@ mod tests {
             CrashReason::WriterTimeout,
             CrashReason::StdoutClosed,
             CrashReason::PendingLockPoisoned,
+            CrashReason::Overloaded,
         ] {
             let cause = crash_reason_cause(reason);
             assert_eq!(cause.level, "fail");
