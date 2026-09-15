@@ -136,3 +136,18 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 - 文档：`.agents/records/`（开发记录）、`.agents/L.md`（本文件）、`docs/说明书/`（若涉模型状态表述漂移）
 
 **我不碰**：#99 图灵在途的 `acp/engine.rs`、`acp/client.rs`、`acp/wire_trace.rs`、`runtime.rs`、`dispatcher/routing.rs`、`session/event_repo.rs`、`session/prompt.rs`；#98 的 `acp/capabilities.rs`、`initialize_plan.rs`、`lifecycle/`；工作区他人未提交改动。提交一律显式 pathspec 只含我的文件域。
+
+---
+
+[2026-09-15 23] [Noether] [#98]
+
+开工 issue #98（ACP 能力协商与生命周期消费者闭环，spec 见 `.agents/spec/issue-acp-capability-lifecycle-closed-loop.md`），分支 `Ru5t/Reflector`（已含 github/main `c7aa7e3f` 合并）。**我改动的文件域（请勿改写、勿连带提交）**：
+
+- Rust 新增：`src-tauri/src/acp/negotiated.rs`（能力矩阵快照 + 测试）、`src-tauri/src/acp/interaction_queue.rs`（统一 request-id 队列 + 测试）、`src-tauri/src/session/fork.rs`（session/fork raw 消费者 + 测试）
+- Rust 修改：`acp/capabilities.rs`、`acp/initialize_plan.rs`、`acp/mod.rs`、`lifecycle/mod.rs`（probe 消费快照）、`protocol_adapter.rs`（方法驱动注册表 + elicitation 适配器）、`permission.rs`（timeout/drain 终态事件）、`private_interaction.rs`、`agent_runtime.rs`（挂队列字段）、`lib.rs`（agent_status 增 capabilitySnapshot/pendingInteractions + replace drain 终态 + 命令注册）、`pylon-foundations/src/event_names.rs`（新增事件常量）
+- Rust 共享文件最小侵入声明：`dispatcher/mod.rs` 我只动 permission/interaction 路径（handle_permission_request 挂队列、interaction 拒绝路径方法驱动查找、私有桥 elicitation 分支），**不碰模型/config option 路由（#97 Gödel 域）**；`session/create.rs` 我只在 revive_session_slot 内加「远端 identity 变化显式 rebind 事件」与 fork 委托，**不碰 create_session_slot/apply_initial_session_options（#97 域）**
+- 前端：`src/infrastructure/acp/agentContracts.ts`、`src/components/settings/agentTypes.ts`、`src/runtimeStore.ts`、`src/infrastructure/acp/sessionClient.ts`（fork 方法）、`src/infrastructure/acp/__tests__/`、`src/components/settings/__tests__/agentStatusEventMatrix.test.ts`（如需）
+- 文档：`.agents/decisions/0004-*.md`（alias 兼容窗口 ADR）、`.agents/records/`、`docs/说明书/`（ACP 章节）、`.agents/L.md`
+
+**给 #99 图灵**：我不改 `acp/client.rs`/`engine.rs`/`wire_trace.rs`，fork RPC 走既有 pub `prepare_rpc`/`acp_rpc_generation_checked`，wire trace 走引擎既有自动记录。
+**我不碰**：#99 的 `engine.rs`/`client.rs`/`wire_trace.rs`/`runtime.rs`/`dispatcher/routing.rs`/`session/event_repo.rs`/`session/prompt.rs`；#97 的 `session/model.rs`/`session/control.rs` 与模型面逻辑；工作区他人未提交改动。提交一律显式 pathspec 只含我的文件域。
