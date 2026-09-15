@@ -4,6 +4,7 @@
 //! client_type=agent-tool)── Pylon 主进程 ── 前端 command registry ──
 //! browser_agent_* 命令（策略/claim/审计单点）`。
 //!
+//! 经 `pylon.exe browser-bridge` 子命令拉起（run() 顶部分发，GUI 之前退出）。
 //! 本进程是无状态薄转换层：不做策略判断（Rust 命令层强制）、不持有浏览器
 //! 状态。会话身份经 `--session <key>` 注入每个工具调用的 `sessionKey`。
 
@@ -22,7 +23,7 @@ struct BridgeOptions {
 }
 
 fn usage() -> &'static str {
-    "usage: pylon browser-bridge [--session <key>] [--workspace <id>]\n\nMCP stdio server（newline-delimited JSON-RPC 2.0）。由 Pylon 在 session/new\n前经 mcpServers 配置注入，由支持 MCP 的 agent 自行拉起，不要手动运行。"
+    "usage: pylon.exe browser-bridge [--session <key>] [--workspace <id>]\n\nMCP stdio server（newline-delimited JSON-RPC 2.0）。由 Pylon 在 session/new\n前经 mcpServers 配置注入，由支持 MCP 的 agent 自行拉起，不要手动运行。"
 }
 
 fn parse_options() -> Result<BridgeOptions, String> {
@@ -282,15 +283,29 @@ fn rpc_error(id: &Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-#[tokio::main]
-async fn main() {
+/// 子命令入口（`pylon.exe browser-bridge`）：返回进程退出码。
+pub fn run_stdio_bridge() -> i32 {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("bridge runtime 启动失败: {error}");
+            return 1;
+        }
+    };
     let options = match parse_options() {
         Ok(options) => options,
         Err(error) => {
             eprintln!("{}\n{}", error, usage());
-            std::process::exit(2);
+            return 2;
         }
     };
+    runtime.block_on(bridge_loop(options))
+}
+
+async fn bridge_loop(options: BridgeOptions) -> i32 {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     let mut reader = stdin.lock();
@@ -301,7 +316,7 @@ async fn main() {
             Ok(read) => read,
             Err(error) => {
                 eprintln!("stdin 读取失败: {error}");
-                std::process::exit(1);
+                return 1;
             }
         };
         if read == 0 {
@@ -366,4 +381,5 @@ async fn main() {
             break;
         }
     }
+    0
 }
