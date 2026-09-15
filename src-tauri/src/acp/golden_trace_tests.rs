@@ -540,3 +540,219 @@ fn golden_trace_normalization_drops_volatile_fields() {
     assert_eq!(value["idKind"], "number");
     assert_eq!(value["status"], "sent");
 }
+
+// ── #99：wire parity 与 replay 序列契约 ──
+
+/// #99 验收：typed SDK engine 与 raw wire 观测对同一帧产生一致的
+/// method/direction——inbox 帧的 `wire_ordinal` 必须能对上 wire capture 中
+/// 同 method 的记录（raw/typed 双轨一致）；response 不进 inbox（SentRequest
+/// 直达），但其 raw wire 记录必须存在（id 保真：Number 形态）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn inbound_envelope_agrees_with_wire_capture() {
+    let agent = golden_agent("prompt");
+    let mut client = AcpClient::connect_with_generation(&agent, None, 1)
+        .await
+        .expect("connect");
+    let inbox = client.notification_inbox();
+    new_session(&client).await.expect("session/new");
+    let mut prompt_rx = client
+        .prepare_prompt(SESSION_ID, vec![text_block()])
+        .expect("prepare prompt")
+        .send_keep_rx()
+        .await
+        .expect("send prompt");
+    let response = tokio::time::timeout(Duration::from_secs(10), &mut prompt_rx)
+        .await
+        .expect("prompt response must arrive")
+        .expect("prompt rx must stay open");
+
+    // 收集 inbox 帧（typed lane），直到静默。
+    let mut frames = Vec::new();
+    loop {
+        match tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await {
+            Ok(Some(frame)) => frames.push(frame),
+            _ => break,
+        }
+    }
+
+    // prompt 响应必须走 SentRequest 路径（不进 inbox），其 stopReason 可读。
+    assert_eq!(
+        response.result.as_ref().unwrap()["stopReason"],
+        serde_json::json!("end_turn")
+    );
+
+    let trace = client.wire_trace().expect("client must expose wire trace");
+    let records = trace.snapshot();
+    assert!(
+        !frames.is_empty(),
+        "prompt scenario must deliver at least one session/update"
+    );
+    let mut seqs = Vec::new();
+    for frame in &frames {
+        let ordinal = frame.wire_ordinal.expect("inbox frame must carry ordinal");
+        let record = records
+            .iter()
+            .find(|record| record.monotonic_seq == ordinal)
+            .unwrap_or_else(|| panic!("wire ordinal {ordinal} must resolve to a raw wire record"));
+        assert_eq!(
+            record.method.as_deref(),
+            frame.raw.method.as_deref(),
+            "typed lane 与 raw lane 必须对同一帧报告同一 method"
+        );
+        assert_eq!(record.direction, WireDirection::AgentToPylon);
+        seqs.push(frame.ingress_seq);
+    }
+    let mut sorted = seqs.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        seqs, sorted,
+        "ingress 序列必须按投递顺序单调递增（无 gap / 无乱序）"
+    );
+
+    // 响应帧的 raw 证据：请求-响应 id 保真——响应记录的 id_kind/id_value 必须
+    // 与出站 prompt 请求同形同值（SDK 出站 id 为 UUID 字符串，响应原样回带；
+    // 禁止 null/absent 静默当 0 或形态改写）。
+    let prompt_request = records
+        .iter()
+        .find(|record| {
+            record.direction == WireDirection::PylonToAgent
+                && record.method.as_deref() == Some("session/prompt")
+        })
+        .expect("prompt request must be on wire");
+    let response_record = records
+        .iter()
+        .find(|record| {
+            record.direction == WireDirection::AgentToPylon
+                && record.method.is_none()
+                && record
+                    .result
+                    .as_ref()
+                    .is_some_and(|result| result.get("stopReason").is_some())
+        })
+        .expect("prompt response must be on wire");
+    assert_eq!(
+        response_record.id_kind, prompt_request.id_kind,
+        "响应 id 形态必须与请求一致"
+    );
+    assert_eq!(
+        response_record.id_value, prompt_request.id_value,
+        "响应 id 值必须与请求一致（request-response correlation）"
+    );
+
+    let _ = client.kill();
+}
+
+/// #99 验收：session/load replay 的 begin/update/boundary/end 顺序可由
+/// 单一序列（wire monotonicSeq + ingress_seq）重建；replay 帧的分类为
+/// Replay（request id 绑定），不与 live 混淆。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_boundary_order_is_reconstructible_from_sequences() {
+    use crate::agent_config::McpServersMode;
+
+    let agent = golden_agent("new_load");
+    let mut client = AcpClient::connect_with_generation(&agent, None, 1)
+        .await
+        .expect("connect");
+    let inbox = client.notification_inbox();
+    new_session(&client).await.expect("session/new");
+
+    let capture = client
+        .begin_replay_capture(SESSION_ID)
+        .expect("replay capture");
+    let request_id = capture.request_id;
+    let (_response, batch) = super::load_session_with_replay(
+        capture,
+        SESSION_ID,
+        ".",
+        Vec::new(),
+        McpServersMode::Always,
+    )
+    .await
+    .expect("load with replay");
+
+    // replay 收集完整：2 条 history update（fake agent 脚本 new_load 分支）。
+    assert_eq!(batch.events.len(), 2, "两条 history update 必须完整收集");
+    assert!(batch.metadata.complete, "replay 不得静默截断");
+    assert_eq!(batch.metadata.boundary.observed_count, 2);
+    assert_eq!(
+        batch.metadata.boundary.kind, "session-load-response",
+        "边界 = load 响应（确定性边界）"
+    );
+
+    // wire 单序列重建：load 请求 → 2 条 update → load 响应。
+    let trace = client.wire_trace().expect("client must expose wire trace");
+    let records = trace.snapshot();
+    let load_request = records
+        .iter()
+        .find(|record| {
+            record.direction == WireDirection::PylonToAgent
+                && record.method.as_deref() == Some(super::METHOD_SESSION_LOAD)
+        })
+        .expect("load request must be on wire");
+    let load_request_seq = load_request.monotonic_seq;
+    let load_request_id = load_request.id_value.clone();
+    let load_response_seq = records
+        .iter()
+        .find(|record| {
+            record.direction == WireDirection::AgentToPylon
+                && record.method.is_none()
+                // id 保真：响应 id 与请求 id 同形同值（request-response correlation）。
+                && record.id_value == load_request_id
+                && record.result.as_ref().is_some_and(|result| {
+                    result
+                        .get("loaded")
+                        .is_some_and(|loaded| loaded.as_bool() == Some(true))
+                })
+        })
+        .expect("load response boundary must be on wire")
+        .monotonic_seq;
+    let replay_update_seqs: Vec<u64> = records
+        .iter()
+        .filter(|record| {
+            record.direction == WireDirection::AgentToPylon
+                && record.method.as_deref() == Some(super::NOTIF_SESSION_UPDATE)
+        })
+        .map(|record| record.monotonic_seq)
+        .collect();
+    assert_eq!(
+        replay_update_seqs.len(),
+        2,
+        "load 期间的 2 条 update 必须在 wire 上可见"
+    );
+    for seq in &replay_update_seqs {
+        assert!(
+            *seq > load_request_seq && *seq < load_response_seq,
+            "replay update 必须落在 load 请求与响应边界之间（{load_request_seq} < {seq} < {load_response_seq}）"
+        );
+    }
+
+    // typed lane：replay update 帧分类为 Replay（request id 绑定），ingress 序
+    // 列严格递增，且落在 wire 边界之间。
+    let mut replay_frames = Vec::new();
+    loop {
+        match tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await {
+            Ok(Some(frame)) => replay_frames.push(frame),
+            _ => break,
+        }
+    }
+    let classified: Vec<&crate::acp::ClassifiedMessage> = replay_frames
+        .iter()
+        .filter(|frame| frame.raw.method.as_deref() == Some(super::NOTIF_SESSION_UPDATE))
+        .collect();
+    assert_eq!(classified.len(), 2);
+    for frame in classified {
+        match frame.classification {
+            crate::acp::ReplayClassification::Replay { request_id: id } => {
+                assert_eq!(id, request_id, "replay 帧必须绑定本次 load 的 request id");
+            }
+            other => panic!("load 期间 update 必须分类为 Replay，got {other:?}"),
+        }
+        let ordinal = frame.wire_ordinal.expect("replay frame carries ordinal");
+        assert!(
+            ordinal > load_request_seq && ordinal < load_response_seq,
+            "typed lane 与 raw lane 的序列必须可对齐"
+        );
+    }
+
+    let _ = client.kill();
+}

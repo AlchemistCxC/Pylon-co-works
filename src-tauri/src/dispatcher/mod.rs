@@ -902,6 +902,8 @@ async fn handle_session_update<R: tauri::Runtime>(
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
     wire_ordinal: Option<u64>,
+    turn_ledger: &Arc<crate::acp::TurnLedger>,
+    ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
     mut payload: serde_json::Value,
 ) -> bool {
@@ -1075,6 +1077,15 @@ async fn handle_session_update<R: tauri::Runtime>(
         }
         if decision.collect_response {
             let effects = routing::agent_message_chunk_effects(update, decision);
+            // #99：live 活动 → turn 账本推进（Streaming 阶段 + ingress cursor +
+            // 文本标志）；回合未登记或已终态时为迟到活动，仅计诊断，不产生终态。
+            let _ = turn_ledger.note_session_activity(
+                &source,
+                &peri_id,
+                generation,
+                ingress_seq,
+                effects.text.is_some(),
+            );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
             }
@@ -1621,11 +1632,26 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
+                // #99：代际硬隔离清理——旧代际 dispatcher 退出时收敛其全部 turn
+                // 条目；此后旧代际的迟到结算归 UnknownTurn（可观测，且永远无法
+                // 改写新代际状态）。
+                let dropped = runtime_for_reconnect
+                    .turn_ledger
+                    .drop_generation(generation);
+                if dropped > 0 {
+                    tracing::info!(
+                        dropped,
+                        generation,
+                        "stale-generation turn entries dropped by turn ledger"
+                    );
+                }
                 break;
             }
             let raw = tokio::select! {
                 biased;
-                // A7：watch 分支——崩溃信号不依赖 broadcast 容量，洪泛 Lagged 后仍触发
+                // #99 优先级规则（可测试）：crash watch > 控制帧（agent 请求/崩溃广播）
+                // > 普通通知。控制帧独立有界通道，通知洪泛时仍能有界时间内被路由；
+                // 每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
                 changed = crashed_rx.changed() => {
                     if changed.is_ok() && *crashed_rx.borrow_and_update() {
                         // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
@@ -1633,6 +1659,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     }
                     continue;
                 }
+                raw = notification_inbox.recv_control() => raw,
                 raw = notification_inbox.recv() => raw,
             };
             let classified = match raw {
@@ -1643,6 +1670,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 raw,
                 classification,
                 wire_ordinal,
+                ingress_seq,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1981,6 +2009,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 message_service.as_ref(),
                 classification,
                 wire_ordinal,
+                &runtime_for_reconnect.turn_ledger,
+                ingress_seq,
                 wire_trace.clone(),
                 payload,
             )

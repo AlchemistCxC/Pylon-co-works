@@ -73,6 +73,9 @@ pub struct AgentRuntime {
     /// （稳定码 `prompt_in_progress`），不排队。
     pub prompt_gate: Arc<tokio::sync::Mutex<()>>,
     pub host_tools_policy: Arc<Mutex<crate::acp::host_tools::HostToolsPolicy>>,
+    /// #99：prompt/turn 终态账本——本 runtime 的 live turn 权威状态
+    /// （CAS 单终态、generation 硬隔离、冷挂载快照数据源）。
+    pub turn_ledger: Arc<crate::acp::TurnLedger>,
 }
 
 impl AgentRuntime {
@@ -99,6 +102,7 @@ impl AgentRuntime {
             host_tools_policy: Arc::new(Mutex::new(
                 crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
             )),
+            turn_ledger: crate::acp::TurnLedger::new(),
         })
     }
 
@@ -162,6 +166,46 @@ impl AgentRuntime {
         if let Ok(mut map) = self.update_channels.lock() {
             map.clear();
         }
+    }
+
+    /// #99：冷挂载/前端刷新可依赖的后端 turn 快照（camelCase JSON）。
+    ///
+    /// 数据面全部来自后端权威状态，不依赖一次性 Tauri event：
+    /// - `turn`：turn 账本的单条记录（在途优先，否则最近终态——含 `turnState`/
+    ///   `terminalCause`）；会话无已知 turn 时缺省；
+    /// - `sequence`：入站 ingress 序列 cursor（lastIngressSeq/spill/drop/overloaded）；
+    /// - `lastError`：runtime 生命周期错误；
+    /// - `replayLoading`：session/load 回放进行中标志（replay progress 输入）。
+    /// 会话映射不存在时返回 None（调用方不得伪造空快照）。
+    pub(crate) async fn cold_mount_turn_snapshot(&self, source: &str) -> Option<serde_json::Value> {
+        let (peri_id, generation, replay_loading) = {
+            let sessions = self.sessions.lock().ok()?;
+            let session = sessions.get(source)?;
+            (
+                session.peri_id.clone(),
+                session.generation,
+                session.replay_loading,
+            )
+        };
+        let last_error = self
+            .agent_runtime
+            .lock()
+            .ok()
+            .and_then(|state| state.last_error.clone());
+        let sequence = self.acp.lock().await.backend.telemetry.snapshot();
+        let turn = self
+            .turn_ledger
+            .latest_session_snapshot(source, &peri_id, generation)
+            .and_then(|record| serde_json::to_value(record).ok());
+        Some(serde_json::json!({
+            "source": source,
+            "periId": peri_id,
+            "generation": generation,
+            "turn": turn,
+            "sequence": serde_json::to_value(sequence).unwrap_or(serde_json::Value::Null),
+            "replayLoading": replay_loading,
+            "lastError": last_error,
+        }))
     }
 
     /// O1：prompt 锁表随会话生命周期收敛（单 key 移除）——映射删除 = 该 source
