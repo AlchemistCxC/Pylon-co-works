@@ -274,3 +274,17 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 清出 `scripts/` 四个零引用孤儿脚本与根目录垃圾（`nul`、误落盘模板行、调试日志、pycache）。只 git rm 下列四个 tracked 文件：acceptance-pet-runtime.mts、hermes-wire-test.py、smoke-release-sdk.mjs、convert-presets-to-delta.mts，另本地清理未跟踪垃圾。**不碰** scripts/ 其他在岗脚本、pack-plugin-devkit 链、backup-portable-data.sh、src-tauri 他人 WIP。
 
 ---
+
+[2026-09-16 06] [Lovelace] [#106] 正式开工
+
+大一统测试基建施工开始，**本地分支 `Ru5t/issue-106-test-harness`**（基线 = 3aa2e5e4 + main 合并节点 73b1bf00；因不可抗力仅本地提交，不推远端，PR 后补）。执行序 P0→P7 一个大 PR 形态（本地多提交）。spec 见 `.agents/spec/issue-106-unified-test-harness.md`（定稿），ADR-0005 已入库。
+
+**我改动的文件域（请勿改写、勿连带提交）**：
+
+- Rust：`src-tauri/Cargo.toml`（+workspace/+features/+bin）、`src-tauri/.cargo/config.toml`（新增）、删 3 个子 `Cargo.lock`、`src-tauri/src/bin/pylon-fake-agent.rs`（新增）、`src-tauri/src/test_utils.rs`、`src-tauri/src/test_harness/`（新增）、`src-tauri/src/lib.rs`（run() 三段提取 + mod 声明）、`src-tauri/tests/`（新增 integration target + golden-traces 基线不动）、四个集成测试文件 + `session/model_switch_wire_tests.rs` + `acp/golden_trace_tests.rs`（迁移/换装配）
+- 门禁与 CI：`.github/workflows/ci.yml`（去 skip、workspace 单命令、rust-cache、证据包）、`.github/dependabot.yml`（新增）、`.github/workflows/cargo-mutants.yml`（新增）、`package.json`（check:ipc、check:rust 改写）、`scripts/check-ipc-contract.mts`（新增）、`vitest.config.ts`、`vitest.setup.ts`
+- 文档：`.agents/L.md`（本文件）、`.agents/records/`、`.agents/decisions/0005`（状态转已采用）、`docs/说明书/`（涉测试/CI 章节表述）
+
+**我不碰**：`src-tauri/src` 生产模块本体语义（acp/dispatcher/session/browser_agent 等仅按 P3a 提取所需最小接触）、`scripts/` 其他在岗脚本语义（check-acp-shadow-parity 保持）、`tools/webview2-mcp/`。提交一律显式 pathspec。工作区如出现他人未提交改动一概不提交。
+
+---
