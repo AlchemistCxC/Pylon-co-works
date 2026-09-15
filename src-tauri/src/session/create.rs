@@ -424,16 +424,10 @@ fn plan_initial_model(
     declared: Option<crate::agent_config::SetModelApi>,
 ) -> Result<InitialModelAction, PylonError> {
     use crate::agent_config::ModelSwitchTarget;
-    // ACP wrappers in the wild emit the model catalog either under
-    // `models.availableModels` or at the response root. Feed both shapes into
-    // the same planner so an advertised initial model is never silently
-    // skipped and replaced by the agent's default.
-    let model_surface = response.get("models").or_else(|| {
-        response
-            .get("availableModels")
-            .or_else(|| response.get("available_models"))
-            .map(|_| response)
-    });
+    // #97/D97-1：models 状态统一走 response_models_state——嵌套 `models` 与根级
+    // availableModels/available_models 等价进入规划，与 SessionInfo 响应刷新、
+    // 异步 session_info_update 共用同一套模型面解析规则（验收 1）。
+    let model_surface = super::response_models_state(response);
     let info = super::determine_model_surface(
         response
             .get("configOptions")

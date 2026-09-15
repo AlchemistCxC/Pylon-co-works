@@ -53,6 +53,59 @@ describe('applySessionModelChange 权威回声覆盖（P56/D3）', () => {
     expect(applyResponseConfig).not.toHaveBeenCalled()
   })
 
+  it('#97：只带 current 不带模型列表的回声只更新 current，不压塌已存 catalog', async () => {
+    // 空回声（无 configOptions、无 availableModels，仅 models.currentModelId）时
+    // 后端契约：current 是权威，但响应没有宣告任何列表——已存的 modelChoices
+    // （两项 catalog）绝不能被覆盖成空/单项。
+    const applyResponseConfig = vi.fn()
+    await applySessionModelChange({
+      ...base,
+      nextModel: 'm-2',
+      writeModel: vi.fn(),
+      applyResponseConfig,
+      invokeSet: async () => ({ models: { currentModelId: 'm-2' } }),
+    })
+    expect(applyResponseConfig).toHaveBeenCalledTimes(1)
+    const arg = applyResponseConfig.mock.calls[0][0] as { model?: string; modelChoices?: unknown }
+    expect(arg.model).toBe('m-2')
+    expect('modelChoices' in arg).toBe(false)
+    // snake_case 变体同契约。
+    applyResponseConfig.mockClear()
+    await applySessionModelChange({
+      ...base,
+      nextModel: 'm-2',
+      writeModel: vi.fn(),
+      applyResponseConfig,
+      invokeSet: async () => ({ models: { current_model_id: 'm-2' } }),
+    })
+    const snakeArg = applyResponseConfig.mock.calls[0][0] as { modelChoices?: unknown }
+    expect('modelChoices' in snakeArg).toBe(false)
+  })
+
+  it('#97：Agent 权威回显的 adopted 列表是唯一合法的 catalog 来源', async () => {
+    // 对照组：只有响应真的宣告列表（哪怕单项）时，catalog 才允许被替换——
+    // 这是 Agent 权威，不是客户端合成。
+    const applyResponseConfig = vi.fn()
+    await applySessionModelChange({
+      ...base,
+      nextModel: 'm-only',
+      writeModel: vi.fn(),
+      applyResponseConfig,
+      invokeSet: async () => ({
+        configOptions: [{
+          id: 'model-selection',
+          category: 'model',
+          options: [{ valueId: 'm-only', name: 'Only' }],
+          currentValue: 'm-only',
+        }],
+      }),
+    })
+    expect(applyResponseConfig).toHaveBeenCalledWith({
+      model: 'm-only',
+      modelChoices: [{ id: 'm-only', label: 'Only' }],
+    })
+  })
+
   it('rolls back to the previous model on failure (unchanged behavior)', async () => {
     const writeModel = vi.fn()
     const applyResponseConfig = vi.fn()

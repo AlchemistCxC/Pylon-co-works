@@ -16,8 +16,7 @@ use crate::permission::{
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
 use crate::session::{
-    config_option_key_matches, extract_tool_file_name, value_as_machine_id, value_as_string,
-    SessionInfo,
+    config_option_key_matches, extract_tool_file_name, value_as_string, SessionInfo,
 };
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
@@ -211,28 +210,22 @@ fn apply_update_event_with_pet_policy(
             if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
                 session.title = title.to_string();
             }
-            // P56/D2.3：payload 带 models.currentModelId（camelCase/snake_case）时更新
-            // session.model（对齐 usage_update._meta.model 现状——hermes 未来若推此
-            // 通道即可消费；machine-id-only 提取，显示名不当 id）。
-            if let Some(model) = update
-                .get("models")
-                .and_then(|models| {
-                    models
-                        .get("currentModelId")
-                        .or_else(|| models.get("current_model_id"))
-                        .or_else(|| models.get("currentModel"))
-                        .or_else(|| models.get("current_model"))
-                        .or_else(|| models.get("current"))
-                })
-                .and_then(value_as_machine_id)
-            {
-                session.model = model;
+            // P56/D2.3 + #97/D97-3：payload 带 models 状态（camelCase/snake_case）时
+            // 全量消费——current 提取 + 模型面/choices 完整刷新（不再只更新当前值），
+            // 并清除客户端 requested 未确认态（Agent 推送的完整状态是权威）。
+            // apply_models_state 内置 fingerprint 幂等（#97/D97-4）：完全相同的
+            // models push 重复到达只提交一次，丢弃计数留在 session 诊断字段。
+            if let Some(models) = update.get("models") {
+                session.apply_models_state(models);
             }
         }
         Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
             if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
-                session.config_options = options.clone();
-                session.apply_config_options(options);
+                // #97/D97-4：有界替换——超限 envelope 拒绝入库（已知 selector 状态
+                // 保持不变 + 计数），未知 option kind 随原样数组保留。
+                if session.replace_config_options(options) {
+                    session.apply_config_options(options);
+                }
             } else {
                 // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
                 // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
@@ -255,8 +248,11 @@ fn apply_update_event_with_pet_policy(
                     if let Some(model) = current {
                         // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
                         // model 为空必误判 changed（对齐 usage/tool 全部门控）。
+                        // #97/D97-3：Agent 推送的 current 是权威值——清除客户端
+                        // requested 未确认态。
                         let changed = session.model != model;
                         session.model = model.clone();
+                        session.model_pending = None;
                         if changed && apply_pet {
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
@@ -2492,5 +2488,104 @@ mod tests {
             false,
         );
         assert_eq!(session.model, "keep");
+    }
+
+    /// #97/D97-3：session_info_update 的完整模型列表同步刷新 choices/current
+    /// （验收 4），并清除客户端 requested 未确认态。
+    #[test]
+    fn session_info_update_refreshes_full_model_catalog_and_clears_pending() {
+        let mut session = dispatcher_session();
+        session.model = "m-old".to_string();
+        session.model_pending = Some("m-old".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {
+                "currentModelId": "m-new",
+                "availableModels": [{"modelId": "m-new", "name": "New"}, {"modelId": "m-legacy"}],
+            },
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-new");
+        assert_eq!(
+            session.model_choices,
+            vec!["m-new".to_string(), "m-legacy".to_string()]
+        );
+        assert_eq!(session.model_pending, None);
+    }
+
+    /// #97/D97-4：完全相同的 models push 重复两次只提交一次状态；丢弃计数留在
+    /// 诊断字段，且不产生第二次 model 变更。
+    #[test]
+    fn duplicate_session_info_push_is_deduplicated_with_diagnostic_count() {
+        let mut session = dispatcher_session();
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {
+                "currentModelId": "m-new",
+                "availableModels": [{"modelId": "m-new"}, {"modelId": "m-legacy"}],
+            },
+        });
+        for _ in 0..2 {
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+                false,
+            );
+        }
+        assert_eq!(session.model, "m-new");
+        assert_eq!(session.selector_duplicate_pushes, 1);
+        assert_eq!(
+            session.model_choices,
+            vec!["m-new".to_string(), "m-legacy".to_string()]
+        );
+    }
+
+    /// #97/D97-4：config_option_update 的超限 configOptions envelope 被拒绝入库，
+    /// 已知 selector 状态保持不变。
+    #[test]
+    fn oversized_config_option_envelope_does_not_corrupt_session_catalog() {
+        use crate::session::SELECTOR_ENVELOPE_MAX_BYTES;
+        let mut session = dispatcher_session();
+        let known = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "model-selection",
+                "category": "model",
+                "options": [{"valueId": "m-a"}],
+                "currentValue": "m-a"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &known,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-a");
+        let blob = "x".repeat(SELECTOR_ENVELOPE_MAX_BYTES + 1);
+        let oversized = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{"id": "future-kind", "payload": blob}],
+        });
+        apply_update_event(
+            &mut session,
+            &oversized,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.selector_envelope_dropped, 1);
+        assert_eq!(session.model, "m-a");
+        assert_eq!(
+            session.model_surface,
+            crate::session::ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
     }
 }

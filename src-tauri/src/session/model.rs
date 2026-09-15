@@ -29,6 +29,53 @@ pub(crate) struct ModelSurfaceInfo {
     pub(crate) choices: Vec<String>,
 }
 
+/// #97/D97-2：一次 model 切换 RPC 响应的收敛结果（结构化，供调用方发诊断/回执）。
+/// `Confirmed` = Agent 回显与 requested 一致；`Clamped` = Agent 实际值与 requested
+/// 不同（拒绝/钳制，会话状态已回到实际值）；`Pending` = 无权威回显（乐观值保留，
+/// 但标记未确认）；`Authoritative` = 有权威回显但本响应未携带 model 维度（例如仅
+/// 刷新了其它 config option）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModelSwitchSettlement {
+    Confirmed { settled: String },
+    Clamped { requested: String, settled: String },
+    Pending { requested: String },
+    /// 权威响应已收敛；`confirmed_model` = 是否携带 model 维度的确认值。
+    Authoritative {
+        requested: Option<String>,
+        confirmed_model: bool,
+    },
+    NotModel,
+}
+
+/// D97-4：raw selector envelope（configOptions 数组）保留上限。超过即拒绝替换
+/// （已知 selector 状态保持不变 + 计数），防止异常响应撑爆会话状态。
+pub(crate) const SELECTOR_ENVELOPE_MAX_BYTES: usize = 256 * 1024;
+
+/// D97-1：响应中 models 状态的统一读取——优先嵌套 `models`，缺席时根级
+/// `availableModels`/`available_models` 视作 models 状态本身（返回整个响应）。
+/// session/new 初值计划与 SessionInfo 响应/异步刷新共用，保证全链路同一套
+/// 模型面解析规则。
+pub(crate) fn response_models_state(response: &serde_json::Value) -> Option<&serde_json::Value> {
+    response.get("models").or_else(|| {
+        response
+            .get("availableModels")
+            .or_else(|| response.get("available_models"))
+            .map(|_| response)
+    })
+}
+
+/// D97-4：异步 selector push 的幂等指纹（稳定 JSON 序列化的 FNV-1a）。
+fn selector_echo_fingerprint(value: &serde_json::Value) -> u64 {
+    // to_string 对 Value 是确定性的（BTreeMap 键序），可直接做指纹输入。
+    let serialized = value.to_string();
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in serialized.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 #[derive(Clone)]
 pub(crate) struct SessionInfo {
     /// ACP typed live state. This is an ingest-side projection only; canonical
@@ -57,6 +104,18 @@ pub(crate) struct SessionInfo {
     /// P56/D1：宣告的 model machine id 集合（发送不变量：任何上 wire 的模型值必须
     /// ∈ 本集合；空集合 = 会话未宣告可校验列表，跳过校验放行现状行为）。
     pub(crate) model_choices: Vec<String>,
+    /// #97/D97-2：requested-but-unconfirmed 模型值。仅当 set_config_option/set_model
+    /// 响应不含任何权威回显（configOptions 列表 / models.current）时置位——上层与
+    /// 后续收敛据此可辨识「未确认」状态；任何权威回显（RPC 响应或异步
+    /// session_info_update）到达即清除。纯内部状态，不落 wire、不持久化。
+    pub(crate) model_pending: Option<String>,
+    /// D97-4：selector 回显幂等——最近一次异步 push 的指纹（config_id/value 或完整
+    /// models 列表 JSON）。相同指纹的重复 push 只提交一次状态，计数留诊断。
+    selector_echo_fingerprint: Option<u64>,
+    /// D97-4：诊断计数（重复 push 丢弃 / 超限 envelope 拒绝）。内部观测字段，
+    /// 不落 wire、不持久化。
+    pub(crate) selector_duplicate_pushes: u64,
+    pub(crate) selector_envelope_dropped: u64,
     pub(crate) tokens_in: u64,
     pub(crate) tokens_out: u64,
     pub(crate) tokens_total: u64,
@@ -143,6 +202,10 @@ impl SessionInfo {
             model: String::new(),
             model_surface: ModelSurface::None,
             model_choices: Vec::new(),
+            model_pending: None,
+            selector_echo_fingerprint: None,
+            selector_duplicate_pushes: 0,
+            selector_envelope_dropped: 0,
             tokens_in: 0,
             tokens_out: 0,
             tokens_total: 0,
@@ -167,16 +230,20 @@ impl SessionInfo {
             .or_else(|| response.get("config_options"))
             .and_then(|value| value.as_array())
         {
-            if !(options.is_empty() && !self.config_options.is_empty()) {
-                self.config_options = options.clone();
+            // D97-4：非空且未超限才替换（空回声保护与超限拒绝都保留本地宣告）。
+            if !(options.is_empty() && !self.config_options.is_empty())
+                && self.replace_config_options(options)
+            {
+                effective_options = self.config_options.clone();
+                self.apply_config_options(&effective_options);
             }
-            effective_options = self.config_options.clone();
-            self.apply_config_options(&effective_options);
         }
         // ACP 1.4 and Hermes expose the selected model in different places.
         // Prefer the standard `models.currentModelId` state when present, then
         // retain the config-option fallback handled above.  P56/D2：model 的
         // current 提取用 machine-id-only 变体（name/label 显示名不得当 id）。
+        // #97/D97-1：根级 currentModelId/current_model_id 变体与嵌套 models 状态
+        // 等价消费（同一解析规则覆盖 current 维度）。
         if let Some(model) = response
             .get("models")
             .and_then(|models| {
@@ -186,6 +253,11 @@ impl SessionInfo {
                     .or_else(|| models.get("currentModel"))
                     .or_else(|| models.get("current_model"))
                     .or_else(|| models.get("current"))
+            })
+            .or_else(|| {
+                response
+                    .get("currentModelId")
+                    .or_else(|| response.get("current_model_id"))
             })
             .and_then(value_as_machine_id)
         {
@@ -231,8 +303,11 @@ impl SessionInfo {
             self.usage_snapshot = Some(usage);
         }
         // P56/D1.2：按响应形状刷新模型面（configOptions 优先，models.availableModels
-        // 兜底，都没有 → None 只读）。
-        let info = determine_model_surface(&effective_options, response.get("models"));
+        // 兜底，都没有 → None 只读）。D97-1：models 状态解析走与初值计划
+        // （plan_initial_model）同一 helper——根级 availableModels/available_models
+        // 与嵌套变体等价进入模型面，session/new、session/load 与运行中切换共用
+        // 同一套解析规则。
+        let info = determine_model_surface(&effective_options, response_models_state(response));
         self.model_surface = info.surface;
         self.model_choices = info.choices;
         capture_session_state(self, response);
@@ -266,16 +341,23 @@ impl SessionInfo {
         }
     }
 
-    /// P56/D1.6：set_config_option 响应写回。响应含非空 configOptions → 权威全量
-    /// 覆盖（含 model/mode current 提取）；configOptions 为空数组且本地非空 →
-    /// 空回声保护（hermes set_config_option 恒空回声，不得清空本地宣告）；其余 →
-    /// 语义键乐观写回（切换响应未给权威状态时保留乐观语义）。
+    /// #97/D97-2：set_config_option / set_model 响应写回 + 收敛结果。响应含非空
+    /// configOptions → 权威全量覆盖（含 model/mode current 提取）；configOptions 为
+    /// 空数组且本地非空 → 空回声保护（hermes set_config_option 恒空回声，不得清空
+    /// 本地宣告）；models.current 权威确认优先于语义键乐观写回。返回
+    /// [`ModelSwitchSettlement`]：requested != settled 的钳制、无权威回显的
+    /// pending（可辨识的未确认态）都结构化上抛，调用方据此发诊断。
     pub(crate) fn apply_config_option_response(
         &mut self,
         response: &serde_json::Value,
         key: &str,
         value: &serde_json::Value,
-    ) {
+    ) -> ModelSwitchSettlement {
+        let requested = if key == "model" {
+            value.as_str().map(str::to_string)
+        } else {
+            None
+        };
         let mut authoritative = false;
         // Some ACP agents (notably set_model implementations) return the
         // settled model in `models.currentModelId` while leaving
@@ -303,24 +385,48 @@ impl SessionInfo {
             .get("configOptions")
             .and_then(|value| value.as_array())
         {
-            if !(options.is_empty() && !self.config_options.is_empty()) {
-                self.config_options = options.clone();
+            if !(options.is_empty() && !self.config_options.is_empty())
+                && self.replace_config_options(options)
+            {
                 self.apply_config_options(options);
                 authoritative = true;
             }
         }
-        if authoritative {
-            return;
+        if authoritative || acknowledged_model.is_some() {
+            // D97-2：权威回显到达——requested 与 settled 不同即钳制（Agent 实际值
+            // 胜出，回显 choices/catalog 已同步刷新）；一致即确认。pending 只在
+            // 响应确实携带 model 维度时清除（权威列表但无 model 选项 ≠ model 确认）。
+            let settled = acknowledged_model.clone().or_else(|| {
+                find_config_option(&self.config_options, "model")
+                    .and_then(config_option_current_machine_id)
+            });
+            if settled.is_some() {
+                self.model_pending = None;
+            }
+            return match (requested.as_ref(), settled) {
+                (Some(requested), Some(settled)) => {
+                    if requested != &settled {
+                        return ModelSwitchSettlement::Clamped {
+                            requested: requested.clone(),
+                            settled,
+                        };
+                    }
+                    ModelSwitchSettlement::Confirmed { settled }
+                }
+                (requested, settled) => ModelSwitchSettlement::Authoritative {
+                    requested: requested.cloned(),
+                    confirmed_model: settled.is_some(),
+                },
+            };
         }
-        if acknowledged_model.is_some() {
-            return;
+        if let Some(requested) = requested {
+            // D97-2：无权威回显——乐观写回但保留可辨识的 pending（未确认）态；
+            // 后续权威回显或 session_info_update 覆盖它。
+            self.model = requested.clone();
+            self.model_pending = Some(requested.clone());
+            return ModelSwitchSettlement::Pending { requested };
         }
         match key {
-            "model" => {
-                if let Some(value) = value.as_str() {
-                    self.model = value.to_string();
-                }
-            }
             "mode" => {
                 if let Some(value) = value.as_str() {
                     self.mode = Some(value.to_string());
@@ -328,6 +434,61 @@ impl SessionInfo {
             }
             _ => {}
         }
+        ModelSwitchSettlement::NotModel
+    }
+
+    /// #97/D97-3：异步 `session_info_update` 的 models 状态全量消费——current 提取
+    /// （machine-id-only）+ 模型面/choices 刷新（configOptions 优先、嵌套/根级列表
+    /// 兼容，与 apply_session_response 同一解析入口）+ pending 清除（Agent 推送的
+    /// 完整状态是权威，覆盖客户端 requested 未确认态）。幂等：与上一次 push 完全
+    /// 相同的 fingerprint 重复到达时跳过提交并计数（D97-4），调用方无需自行去重。
+    /// 返回是否实际提交（false = 重复 push 被丢弃）。
+    pub(crate) fn apply_models_state(&mut self, models: &serde_json::Value) -> bool {
+        let fingerprint = selector_echo_fingerprint(models);
+        if self.selector_echo_fingerprint == Some(fingerprint) {
+            self.selector_duplicate_pushes += 1;
+            return false;
+        }
+        self.selector_echo_fingerprint = Some(fingerprint);
+        if let Some(model) = models
+            .get("currentModelId")
+            .or_else(|| models.get("current_model_id"))
+            .or_else(|| models.get("currentModel"))
+            .or_else(|| models.get("current_model"))
+            .or_else(|| models.get("current"))
+            .and_then(value_as_machine_id)
+        {
+            self.model = model;
+        }
+        let info = determine_model_surface(&self.config_options, Some(models));
+        // configOptions 中的 model 选项仍是第一宣告面；models 状态只在它缺席时
+        // 提供通道与 choices（与 apply_session_response 的优先级一致）。
+        if !matches!(info.surface, ModelSurface::ConfigOption { .. }) {
+            self.model_surface = info.surface;
+        }
+        if !info.choices.is_empty() {
+            self.model_choices = info.choices;
+        } else if matches!(self.model_surface, ModelSurface::ConfigOption { .. }) {
+            // models 状态不携带 choices 且 ConfigOption 面在宣告——保留其 choices。
+        } else if matches!(self.model_surface, ModelSurface::ModelsState) {
+            self.model_choices = Vec::new();
+        }
+        self.model_pending = None;
+        true
+    }
+
+    /// D97-4：raw selector envelope 的有界替换。configOptions 数组（含未知 option
+    /// kind 的原样字段）超过 [`SELECTOR_ENVELOPE_MAX_BYTES`] 时拒绝替换并计数——
+    /// 已知 selector 状态保持不变，不做截断（半份 envelope 比旧份更危险）。
+    /// 返回是否接受。
+    pub(crate) fn replace_config_options(&mut self, options: &[serde_json::Value]) -> bool {
+        let serialized = serde_json::to_vec(options).unwrap_or_default();
+        if serialized.len() > SELECTOR_ENVELOPE_MAX_BYTES {
+            self.selector_envelope_dropped += 1;
+            return false;
+        }
+        self.config_options = options.to_vec();
+        true
     }
 
     /// 将 GUI Profile 绑定到 runtime session。第一次绑定与相同 owner 的重复请求
@@ -650,7 +811,8 @@ fn config_option_identity(option: &serde_json::Value) -> Option<String> {
 
 /// P56/D1：select 选项宣告的 choice machine id 集合（保持宣告顺序、去重；
 /// 无 machine id 的 choice 直接丢弃，不降级为显示名——与 TS modelChoices 同契约）。
-fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String> {
+/// #97/D97-6：control 层对依赖 option（reasoning 组）发送校验复用。
+pub(crate) fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String> {
     fn collect(value: &serde_json::Value, depth: usize, seen: &mut Vec<String>) {
         if depth > 4 {
             return;
@@ -741,13 +903,30 @@ pub(crate) fn determine_model_surface(
 /// 未声明且 key=="model" 时按响应判定的 [`ModelSurface`] 路由；None → 结构化错误。
 /// 返回 (路由目标, 宣告的 configId)——ConfigOption 通道统一使用宣告 configId
 /// （D1.5，消除初值 advertised / 运行时硬编码 "model" 的不一致）。
+/// #97/D97-5：显式 ConfigOption 声明 + model 键 + 会话已宣告 ConfigOption 面时，
+/// 一律返回宣告的真实 config id（例如 `model-selection`），禁止把广告 id 降级成
+/// 语义键 `model`；面未宣告 config id 时返回 None，由控制层按兼容规则（语义键 +
+/// 诊断）发送。
 pub(crate) fn resolve_model_switch_target(
     declared: Option<SetModelApi>,
     key: &str,
     surface: &ModelSurface,
 ) -> Result<(crate::agent_config::ModelSwitchTarget, Option<String>), PylonError> {
     if let Some(api) = declared {
-        return Ok((api.route(key), None));
+        let target = api.route(key);
+        if key == "model" {
+            if let (
+                crate::agent_config::ModelSwitchTarget::ConfigOption,
+                ModelSurface::ConfigOption { config_id },
+            ) = (target, surface)
+            {
+                return Ok((
+                    crate::agent_config::ModelSwitchTarget::ConfigOption,
+                    Some(config_id.clone()),
+                ));
+            }
+        }
+        return Ok((target, None));
     }
     if key != "model" {
         // key != "model" 的既有路径（mode/reasoning 等）行为不变。
@@ -770,17 +949,29 @@ pub(crate) fn resolve_model_switch_target(
     Ok((target, None))
 }
 
-/// P56/D1.4：发送不变量——任何上 wire 的模型值必须 ∈ 当次会话宣告的 choices。
-/// choices 非空且目标不在列表 → 结构化错误（文案含 `model_not_advertised` 与宣告
-/// 列表摘要）；choices 为空 = 会话未宣告可校验列表 → 放行（现状行为，兼容优先）。
-pub(crate) fn validate_model_advertised(value: &str, choices: &[String]) -> Result<(), PylonError> {
+/// P56/D1.4/#97-D97-6：发送不变量——语义选择器（model / reasoning 等依赖 option）
+/// 上 wire 的值必须 ∈ 当次会话宣告的 choices。choices 非空且目标不在列表 → 结构化
+/// 错误（文案含稳定 code 前缀与宣告列表摘要）；choices 为空 = 会话未宣告可校验
+/// 列表 → 放行（现状行为，兼容优先）。模型切换刷新宣告后，依赖 option 的失效值
+/// 据此在发送前被拒，不遗留旧模型状态。
+pub(crate) fn validate_advertised_choice(
+    value: &str,
+    choices: &[String],
+    code: &str,
+) -> Result<(), PylonError> {
     if choices.is_empty() || choices.iter().any(|choice| choice == value) {
         return Ok(());
     }
     Err(PylonError::Protocol(format!(
-        "model_not_advertised: requested model {value:?} is not in the agent-advertised choices [{}]",
+        "{code}: requested value {value:?} is not in the agent-advertised choices [{}]",
         choices.join(", ")
     )))
+}
+
+/// P56/D1.4：model 键发送校验（[`validate_advertised_choice`] 的稳定入口，
+/// code=`model_not_advertised`）。
+pub(crate) fn validate_model_advertised(value: &str, choices: &[String]) -> Result<(), PylonError> {
+    validate_advertised_choice(value, choices, "model_not_advertised")
 }
 
 #[cfg(test)]
@@ -1112,5 +1303,287 @@ mod tests {
             &serde_json::json!("new-model"),
         );
         assert_eq!(session.model, "agent-normalized-model");
+    }
+
+    // ── #97/D97-1：根级模型列表与嵌套变体等价进入 SessionInfo ──
+
+    #[test]
+    fn root_level_model_catalogs_enter_session_info_equivalently() {
+        // 验收 2：models.availableModels、根级 availableModels/available_models、
+        // camel/snake 变体产生等价的 surface + choices。
+        let shapes = [
+            serde_json::json!({
+                "models": {
+                    "availableModels": [{"modelId": "a-one", "name": "One"}, {"modelId": "a-two"}],
+                    "currentModelId": "a-two"
+                }
+            }),
+            serde_json::json!({
+                "models": {
+                    "available_models": [{"model_id": "a-one", "name": "One"}, {"model_id": "a-two"}],
+                    "current_model_id": "a-two"
+                }
+            }),
+            serde_json::json!({
+                "availableModels": [{"modelId": "a-one", "name": "One"}, {"modelId": "a-two"}],
+                "currentModelId": "a-two"
+            }),
+            serde_json::json!({
+                "available_models": [{"model_id": "a-one", "name": "One"}, {"model_id": "a-two"}],
+                "current_model_id": "a-two"
+            }),
+        ];
+        for shape in &shapes {
+            let mut session = session();
+            session.apply_session_response(shape);
+            assert_eq!(session.model_surface, ModelSurface::ModelsState, "{shape}");
+            assert_eq!(
+                session.model_choices,
+                vec!["a-one".to_string(), "a-two".to_string()],
+                "{shape}"
+            );
+            assert_eq!(session.model, "a-two", "{shape}");
+        }
+        // 同一形状喂给初值计划（plan_initial_model 消费的同一解析入口）→ 等价 choices。
+        for shape in &shapes {
+            let info = determine_model_surface(&[], response_models_state(shape));
+            assert_eq!(info.surface, ModelSurface::ModelsState);
+            assert_eq!(info.choices, vec!["a-one".to_string(), "a-two".to_string()]);
+        }
+    }
+
+    // ── #97/D97-2：requested/pending/confirmed 三态收敛矩阵 ──
+
+    #[test]
+    fn model_switch_settlement_matrix_distinguishes_confirmed_clamped_pending() {
+        let model_option = |current: &str| {
+            serde_json::json!([{
+                "id": "model-selection",
+                "category": "model",
+                "options": [{"valueId": "m-a"}, {"valueId": "m-b"}],
+                "currentValue": current
+            }])
+        };
+        // requested == settled → Confirmed，pending 清除。
+        let mut confirmed = session();
+        confirmed.model_pending = Some("m-a".to_string());
+        let settlement = confirmed.apply_config_option_response(
+            &serde_json::json!({"configOptions": model_option("m-a")}),
+            "model",
+            &serde_json::json!("m-a"),
+        );
+        assert_eq!(
+            settlement,
+            ModelSwitchSettlement::Confirmed {
+                settled: "m-a".to_string()
+            }
+        );
+        assert_eq!(confirmed.model_pending, None);
+
+        // requested 被钳制为 Agent 实际值 → Clamped，catalog/current 一致收敛到实际值。
+        let mut clamped = session();
+        clamped.apply_config_option_response(
+            &serde_json::json!({"configOptions": model_option("m-a")}),
+            "model",
+            &serde_json::json!("m-a"),
+        );
+        let settlement = clamped.apply_config_option_response(
+            &serde_json::json!({"configOptions": model_option("m-b")}),
+            "model",
+            &serde_json::json!("m-a"),
+        );
+        assert_eq!(
+            settlement,
+            ModelSwitchSettlement::Clamped {
+                requested: "m-a".to_string(),
+                settled: "m-b".to_string()
+            }
+        );
+        assert_eq!(clamped.model, "m-b");
+        assert_eq!(clamped.model_pending, None);
+        // catalog（choices）随权威列表刷新，不得残留旧模型状态。
+        assert_eq!(clamped.model_choices, vec!["m-a".to_string(), "m-b".to_string()]);
+
+        // 空回声 → Pending（乐观值保留但可辨识为未确认），catalog 不被清空。
+        let mut pending = session();
+        pending.config_options = model_option("m-a").as_array().unwrap().clone();
+        pending.model_surface = ModelSurface::ConfigOption {
+            config_id: "model-selection".to_string(),
+        };
+        pending.model_choices = vec!["m-a".to_string(), "m-b".to_string()];
+        let settlement = pending.apply_config_option_response(
+            &serde_json::json!({"configOptions": []}),
+            "model",
+            &serde_json::json!("m-b"),
+        );
+        assert_eq!(
+            settlement,
+            ModelSwitchSettlement::Pending {
+                requested: "m-b".to_string()
+            }
+        );
+        assert_eq!(pending.model, "m-b");
+        assert_eq!(pending.model_pending.as_deref(), Some("m-b"));
+        assert_eq!(pending.model_choices, vec!["m-a".to_string(), "m-b".to_string()]);
+
+        // 后续 session_info_update 的完整 models 状态覆盖 pending。
+        let committed = pending.apply_models_state(&serde_json::json!({
+            "currentModelId": "m-b",
+            "availableModels": [{"modelId": "m-a"}, {"modelId": "m-b"}]
+        }));
+        assert!(committed);
+        assert_eq!(pending.model_pending, None);
+
+        // 非 model 键不受 pending 语义影响。
+        let mut mode_key = session();
+        let settlement = mode_key.apply_config_option_response(
+            &serde_json::json!({}),
+            "mode",
+            &serde_json::json!("accept_edits"),
+        );
+        assert_eq!(settlement, ModelSwitchSettlement::NotModel);
+        assert_eq!(mode_key.mode.as_deref(), Some("accept_edits"));
+    }
+
+    // ── #97/D97-3/D97-4：异步全量刷新与重复 push 幂等 ──
+
+    #[test]
+    fn apply_models_state_refreshes_full_catalog_and_dedups_repeated_pushes() {
+        // 验收 4：session_info_update 的完整模型列表同步 choices + current。
+        let mut session = session();
+        session.model = "m-old".to_string();
+        session.model_pending = Some("m-old".to_string());
+        let committed = session.apply_models_state(&serde_json::json!({
+            "currentModelId": "m-new",
+            "availableModels": [{"modelId": "m-new", "name": "New"}, {"modelId": "m-legacy"}]
+        }));
+        assert!(committed);
+        assert_eq!(session.model, "m-new");
+        assert_eq!(session.model_surface, ModelSurface::ModelsState);
+        assert_eq!(
+            session.model_choices,
+            vec!["m-new".to_string(), "m-legacy".to_string()]
+        );
+        assert_eq!(session.model_pending, None);
+
+        // 完全相同的 push 重复到达 → 丢弃 + 计数，不再提交。
+        let committed = session.apply_models_state(&serde_json::json!({
+            "currentModelId": "m-new",
+            "availableModels": [{"modelId": "m-new", "name": "New"}, {"modelId": "m-legacy"}]
+        }));
+        assert!(!committed);
+        assert_eq!(session.selector_duplicate_pushes, 1);
+        assert_eq!(session.model, "m-new");
+
+        // 新列表到达 → 正常提交并刷新。
+        let committed = session.apply_models_state(&serde_json::json!({
+            "currentModelId": "m-new",
+            "availableModels": [{"modelId": "m-new"}, {"modelId": "m-extra"}]
+        }));
+        assert!(committed);
+        assert_eq!(session.model_choices, vec!["m-new".to_string(), "m-extra".to_string()]);
+        assert_eq!(session.selector_duplicate_pushes, 1);
+
+        // models 状态不携带 choices 且 ConfigOption 面在宣告 → 不清空其 choices。
+        let mut config_backed = SessionInfo::new(
+            "remote-1".to_string(),
+            String::new(),
+            "C:/workspace".to_string(),
+            false,
+            1,
+        );
+        config_backed.config_options = vec![serde_json::json!({
+            "id": "model-selection",
+            "category": "model",
+            "options": [{"valueId": "m-a"}, {"valueId": "m-b"}],
+            "currentValue": "m-a"
+        })];
+        config_backed.model_surface = ModelSurface::ConfigOption {
+            config_id: "model-selection".to_string(),
+        };
+        config_backed.model_choices = vec!["m-a".to_string(), "m-b".to_string()];
+        let committed = config_backed.apply_models_state(&serde_json::json!({"currentModelId": "m-b"}));
+        assert!(committed);
+        assert_eq!(config_backed.model, "m-b");
+        assert_eq!(config_backed.model_surface, ModelSurface::ConfigOption {
+            config_id: "model-selection".to_string()
+        });
+        assert_eq!(config_backed.model_choices, vec!["m-a".to_string(), "m-b".to_string()]);
+    }
+
+    // ── #97/D97-4：raw selector envelope 有界保留 ──
+
+    #[test]
+    fn oversized_selector_envelope_is_refused_without_corrupting_known_state() {
+        let mut session = session();
+        let known = serde_json::json!([{
+            "id": "model-selection",
+            "category": "model",
+            "options": [{"valueId": "m-a"}],
+            "currentValue": "m-a"
+        }]);
+        session.config_options = known.as_array().unwrap().clone();
+        // 构造超过 256KiB 的未知 kind 巨型 option 数组。
+        let blob = "x".repeat(SELECTOR_ENVELOPE_MAX_BYTES + 1);
+        let oversized = serde_json::json!([{"id": "future-kind", "payload": blob}]);
+        assert!(!session.replace_config_options(oversized.as_array().unwrap()));
+        assert_eq!(session.selector_envelope_dropped, 1);
+        // 已知 selector 状态原样保留（不截断、不部分替换）。
+        assert_eq!(&session.config_options, known.as_array().unwrap());
+        // 正常大小仍可替换。
+        assert!(session.replace_config_options(serde_json::json!([{"id": "m"}]).as_array().unwrap()));
+        assert_eq!(session.config_options.len(), 1);
+    }
+
+    // ── #97/D97-5：显式声明 + 宣告面的 config id 保留 ──
+
+    #[test]
+    fn explicit_config_option_declaration_keeps_advertised_config_id() {
+        // 显式 ConfigOption 声明 + 会话宣告了非标准 config id → 原样返回，不降级 "model"。
+        let (target, config_id) = resolve_model_switch_target(
+            Some(SetModelApi::ConfigOption),
+            "model",
+            &ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id.as_deref(), Some("model-selection"));
+
+        // 声明了 ConfigOption 但会话未宣告 config id → None（兼容规则：语义键 + 诊断）。
+        let (target, config_id) =
+            resolve_model_switch_target(Some(SetModelApi::ConfigOption), "model", &ModelSurface::None)
+                .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id, None);
+
+        // 非 model 键（mode/reasoning）不受模型面影响：语义键即 config id。
+        let (target, config_id) = resolve_model_switch_target(
+            Some(SetModelApi::ConfigOption),
+            "reasoning_effort",
+            &ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id, None);
+    }
+
+    #[test]
+    fn validate_advertised_choice_carries_stable_code_for_dependent_options() {
+        // D97-6：依赖 option（reasoning 组）发送校验复用同一不变量，code 稳定。
+        let error = validate_advertised_choice(
+            "ultra",
+            &["low".to_string(), "high".to_string()],
+            "reasoning_not_advertised",
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("reasoning_not_advertised"), "{message}");
+        assert!(validate_advertised_choice("high", &["high".to_string()], "reasoning_not_advertised").is_ok());
+        // 未宣告列表 → 放行（现状兼容）。
+        assert!(validate_advertised_choice("anything", &[], "reasoning_not_advertised").is_ok());
     }
 }

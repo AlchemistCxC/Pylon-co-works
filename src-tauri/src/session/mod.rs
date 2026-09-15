@@ -83,6 +83,10 @@ mod del03_local_first_delete;
 mod del05_error_code_matrix;
 #[cfg(test)]
 mod revive_tests;
+// #97：模型选择器切换闭环 wire 级集成测试（真实广告 config id、发送前拒绝、
+// 钳制收敛、session/load 复活零 selector RPC）。
+#[cfg(test)]
+mod model_switch_wire_tests;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 

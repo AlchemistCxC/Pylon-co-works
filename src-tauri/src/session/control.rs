@@ -42,8 +42,9 @@ pub(crate) async fn set_config_option(
     let runtime = state.inner().resolve_owner_runtime(&owner)?;
     let generation = state.current_generation(&runtime);
     // P56/D1：会话状态一次读取（peri_id + 模型面 + 宣告 choices）——surface 路由与
-    // 发送校验都以「当次会话宣告」为准。
-    let (peri_id, model_surface, model_choices) = {
+    // 发送校验都以「当次会话宣告」为准。#97/D97-6：依赖 option（reasoning 组）的
+    // 宣告 choices 一并读出，供发送前校验。
+    let (peri_id, model_surface, model_choices, reasoning_choices) = {
         let sessions = runtime
             .sessions
             .lock()
@@ -51,10 +52,14 @@ pub(crate) async fn set_config_option(
         let session = sessions
             .get(&source)
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))?;
+        let reasoning_choices = super::find_config_option(&session.config_options, "reasoning")
+            .map(super::config_option_choice_ids)
+            .unwrap_or_default();
         (
             session.peri_id.clone(),
             session.model_surface.clone(),
             session.model_choices.clone(),
+            reasoning_choices,
         )
     };
     // G2-03：D2 路由收敛——set_model_api 枚举三路（ConfigOption 默认 / SetModel /
@@ -71,11 +76,37 @@ pub(crate) async fn set_config_option(
         .and_then(|acp| acp.set_model_api);
     let (target, advertised_config_id) =
         resolve_model_switch_target(declared, &key, &model_surface)?;
+    // #97/D97-5：model 键走 ConfigOption 通道但会话未宣告 config id——按显式兼容
+    // 规则以语义键发送（现状行为，兼容优先），warn 留痕（Agent 广告不完整，
+    // code=model_config_id_missing）。宣告了真实 id 时绝不允许降级成 `model`。
+    if key == "model"
+        && matches!(
+            target,
+            crate::agent_config::ModelSwitchTarget::ConfigOption
+        )
+        && advertised_config_id.is_none()
+    {
+        tracing::warn!(
+            source = source,
+            code = "model_config_id_missing",
+            "model config option route has no advertised config id; sending semantic key as-is"
+        );
+    }
     // P56/D1.4：发送不变量——目标 model 值必须 ∈ 当次会话宣告的 choices；
     // 不在列表 → 结构化错误（model_not_advertised + 宣告列表摘要），本地状态不变。
+    // #97/D97-6：reasoning 组依赖 option 在会话宣告了 choices 时同样校验——模型
+    // 切换刷新宣告后，失效的旧值在发送前被拒，不遗留旧模型状态。
     if key == "model" {
         if let Some(model_id) = value.as_str() {
             validate_model_advertised(model_id, &model_choices)?;
+        }
+    } else if super::config_option_key_matches(&key, "reason") {
+        if let Some(reasoning) = value.as_str() {
+            super::validate_advertised_choice(
+                reasoning,
+                &reasoning_choices,
+                "reasoning_not_advertised",
+            )?;
         }
     }
     let response = match target {
@@ -110,11 +141,34 @@ pub(crate) async fn set_config_option(
         }
     };
     state.ensure_generation(&runtime, generation)?;
-    state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
-        // P56/D1.6：写回收敛——非空 configOptions 权威覆盖；空数组回声保护本地
-        // 宣告；其余语义键乐观写回。
-        session.apply_config_option_response(&response, &key, &value);
-    })?;
+    let settlement = state
+        .with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
+            // P56/D1.6：写回收敛——非空 configOptions 权威覆盖；空数组回声保护本地
+            // 宣告；其余语义键乐观写回并标记 pending（未确认）。收敛结果结构化
+            // 上抛，钳制/暂定在锁外发诊断（#97/D97-2）。
+            session.apply_config_option_response(&response, &key, &value)
+        })
+        .map_err(PylonError::Protocol)?;
+    match &settlement {
+        super::ModelSwitchSettlement::Clamped { requested, settled } => {
+            tracing::warn!(
+                source = source,
+                code = "model_switch_clamped",
+                requested = requested,
+                settled = settled,
+                "agent settled the model switch to a different value; session state converged to the agent value"
+            );
+        }
+        super::ModelSwitchSettlement::Pending { requested } => {
+            tracing::info!(
+                source = source,
+                code = "model_switch_pending",
+                requested = requested,
+                "model switch acknowledged without authoritative echo; value kept as unconfirmed pending"
+            );
+        }
+        _ => {}
+    }
     Ok(response)
 }
 
