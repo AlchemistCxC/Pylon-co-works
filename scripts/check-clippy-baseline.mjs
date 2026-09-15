@@ -9,12 +9,18 @@
 //   --crate=<label>     该份 clippy 输出所属 crate 名，默认 "pylon"
 //   --crate-dir=<dir>   该 crate 根目录（clippy 诊断里的文件路径相对它生成），默认 "src-tauri"
 //
+// #106 P0（workspace 化）新增：
+//   --package=<name>    输入是一份 workspace 级 clippy json（含全部成员的诊断）时，
+//                       按每行 compiler-message 的 package_id 过滤出该包的诊断再比对。
+//                       省去 4 次 --manifest-path 全量重编；其余语义不变。
+//
 //   cd src-tauri
 //   cargo clippy --manifest-path pylon-core/Cargo.toml --all-targets --message-format=json > ../artifacts/clippy-pylon-core.json
 //   node ../scripts/check-clippy-baseline.mjs ../artifacts/clippy-pylon-core.json ../artifacts/clippy-baseline.json --crate=pylon-core --crate-dir=pylon-core
 //
 //   ⚠️ 不要用 `cargo clippy -p pylon-core`（从 src-tauri 起跑）：实测静默返回 0 警告，
-//      path 依赖即便 `-p` 指名也只被当作依赖编译，lint 不会上报。必须 --manifest-path。
+//      path 依赖即便 `-p` 指名也只被当作依赖编译，lint 不会上报。必须 --manifest-path
+//      或（#106 后）`cargo clippy --workspace`——workspace 成员都是主 crate，lint 正常上报。
 //
 // 语义：
 //   - 基线文件不存在 → 写入当前诊断作为基线，退出 0（首次建立基线）；
@@ -53,6 +59,7 @@ for (const arg of argv) {
 const [clippyPath, baselinePath] = positional;
 const crate = flags.get("crate") ?? "pylon";
 const crateDir = flags.get("crate-dir") ?? "src-tauri";
+const workspacePackage = flags.get("package");
 const write = flags.get("write") === true || flags.get("write") === "true";
 
 if (!clippyPath || !baselinePath) {
@@ -87,6 +94,15 @@ for (const line of readFileSync(resolve(root, clippyPath), "utf8").split(
   const message = payload?.message;
   if (!message || (message.level !== "error" && message.level !== "warning"))
     continue;
+  if (workspacePackage) {
+    // workspace 级输入：package_id 形如 `path+file:///...#pylon-core@1.0.0`，
+    // 取 # 与 @ 之间的包名过滤；非 compiler-message 行（无 package_id）跳过。
+    const packageId = typeof payload.package_id === "string" ? payload.package_id : "";
+    const hash = packageId.lastIndexOf("#");
+    const at = packageId.lastIndexOf("@");
+    const name = hash >= 0 ? packageId.slice(hash + 1, at > hash ? at : undefined) : "";
+    if (name !== workspacePackage) continue;
+  }
   const code = message.code?.code ?? `rustc-${message.level}`;
   const span = message.spans?.[0];
   const file = span?.file_name ? toRepoRelative(span.file_name) : "<unknown>";
