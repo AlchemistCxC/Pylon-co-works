@@ -1761,7 +1761,7 @@ mod tests {
     async fn inbound_pump_exits_on_shutdown() {
         let (updates_tx, updates_rx) = mpsc::channel(8);
         let (control_tx, control_rx) = mpsc::channel(8);
-        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (shutdown, _shutdown_rx) = watch::channel(false);
         let shutdown_tx = shutdown.clone();
         let (crashed_watch, _crashed_rx) = watch::channel(false);
         let relay = InboundRelay {

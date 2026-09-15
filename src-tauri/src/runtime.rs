@@ -181,6 +181,7 @@ impl AgentRuntime {
     /// - `sequence`：入站 ingress 序列 cursor（lastIngressSeq/spill/drop/overloaded）；
     /// - `lastError`：runtime 生命周期错误；
     /// - `replayLoading`：session/load 回放进行中标志（replay progress 输入）。
+    ///
     /// 会话映射不存在时返回 None（调用方不得伪造空快照）。
     pub(crate) async fn cold_mount_turn_snapshot(&self, source: &str) -> Option<serde_json::Value> {
         let (peri_id, generation, replay_loading) = {
@@ -361,7 +362,6 @@ mod tests {
         assert_eq!(snapshot["turn"]["key"]["turnId"], serde_json::json!(5));
         assert_eq!(snapshot["lastError"], serde_json::Value::Null);
     }
-    use super::*;
 
     #[test]
     fn agent_context_key_keeps_agent_dimension() {
