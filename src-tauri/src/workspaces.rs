@@ -362,7 +362,7 @@ mod tests {
     use super::*;
     use crate::runtime::AgentRuntime;
     use crate::session::SessionInfo;
-    use crate::test_utils::{fake_acp_agent, TestStateBuilder};
+    use crate::test_utils::{fake_acp_agent_stub, TestStateBuilder};
     use std::sync::Arc;
 
     fn temp_data_dirs() -> (std::path::PathBuf, crate::paths::DataDirs) {
@@ -421,7 +421,7 @@ mod tests {
         (
             TestStateBuilder::bare()
                 .with_active_agent("peri")
-                .with_agent(fake_acp_agent("peri", ""))
+                .with_agent(fake_acp_agent_stub("peri"))
                 .with_runtime("peri", runtime.clone())
                 .build(),
             runtime,
@@ -547,7 +547,7 @@ mod tests {
         let (_, runtime) = state_with_session(Some("ws-1"), "C:\\frozen-cwd");
         let state = TestStateBuilder::bare()
             .with_active_agent("peri")
-            .with_agent(fake_acp_agent("peri", ""))
+            .with_agent(fake_acp_agent_stub("peri"))
             .with_runtime("peri", runtime.clone())
             .with_workspace(sample_workspace("ws-1", "C:\\root"))
             .build();

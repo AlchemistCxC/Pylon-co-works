@@ -7,79 +7,16 @@ use super::*;
 use crate::acp::AcpClient;
 use crate::agent_config::{AcpProtocolConfig, SetModelApi};
 use crate::test_utils::TestStateBuilder;
-use std::collections::HashMap;
+
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 
-/// 标准 config-option Agent：模型面为 category=="model" 的选项，广告 id 是
-/// 非标准 `model-selection`（刻意不是语义键 `model`），另有 reasoning 依赖选项。
-/// argv：[1]=模式 [2]=trace 路径 [3][4]=barrier ready/release（仅 barrier 模式）。
-/// 模式：
-/// - `echo-empty`：set_config_option 恒空 result（空回声，hermes 形态）
-/// - `echo-adopted:<current>`：回权威 adopted 列表，current 为指定值（钳制）
-/// - `reject`：set_config_option 回 JSON-RPC error（Agent 拒绝）
-/// - `barrier`：set_config_option 先触 ready 等 release 再权威回显（generation 竞态）
-/// - 默认：回权威列表 current==requested（确认）
-const CONFIG_OPTION_SCRIPT: &str = r#"import json,sys,time,os
-mode=sys.argv[1]
-trace=open(sys.argv[2],'w',encoding='utf-8')
-ready=sys.argv[3] if len(sys.argv)>3 else ''
-release=sys.argv[4] if len(sys.argv)>4 else ''
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n'); trace.flush()
-    method=request.get('method'); params=request.get('params') or {}
-    if method == 'session/new':
-        result={'sessionId':'ms-session','configOptions':[
-            {'id':'model-selection','category':'model',
-             'options':[{'valueId':'m-1','name':'One'},{'valueId':'m-2','name':'Two'}],
-             'currentValue':'m-1'},
-            {'id':'reasoning_effort','category':'thought_level',
-             'options':[{'valueId':'low'},{'valueId':'high'}],
-             'currentValue':'low'}]}
-    elif method == 'session/set_config_option':
-        if mode == 'reject':
-            print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),
-                'error':{'code':-32000,'message':'model rejected by agent'}}),flush=True)
-            continue
-        if mode == 'barrier':
-            open(ready,'w').close()
-            deadline=time.monotonic()+10
-            while not os.path.exists(release):
-                if time.monotonic()>deadline: raise SystemExit('barrier timed out')
-                time.sleep(0.01)
-        if mode == 'echo-empty':
-            result={}
-        elif mode.startswith('echo-adopted:'):
-            current=mode.split(':',1)[1]
-            result={'configOptions':[
-                {'id':'model-selection','category':'model',
-                 'options':[{'valueId':'m-1'},{'valueId':'m-2'}],
-                 'currentValue':current},
-                {'id':'reasoning_effort','category':'thought_level',
-                 'options':[{'valueId':'low'},{'valueId':'high'}],
-                 'currentValue':'low'}]}
-        else:
-            result={'configOptions':[
-                {'id':'model-selection','category':'model',
-                 'options':[{'valueId':'m-1'},{'valueId':'m-2'}],
-                 'currentValue':params.get('value')},
-                {'id':'reasoning_effort','category':'thought_level',
-                 'options':[{'valueId':'low'},{'valueId':'high'}],
-                 'currentValue':'low'}]}
-    else:
-        result={}
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result}),flush=True)
-"#;
-
-/// 空宣告 Agent：session/new 不广告任何模型面（验收 14 第三形态 + 重绑不泄漏对照）。
-const EMPTY_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    result={'sessionId':'empty-session'} if method == 'session/new' else {}
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result}),flush=True)
-"#;
+// 标准 config-option Agent：模型面为 category=="model" 的选项，广告 id 是
+// 非标准 `model-selection`（刻意不是语义键 `model`），另有 reasoning 依赖选项。
+// 行为在 `pylon-fake-agent --scenario set-config-option --mode <m>`：
+// 模式与旗标语义见 bin 侧 `handle_request`（echo-empty / echo-adopted:<current> /
+// reject / barrier / 默认 confirm）；trace 与文件屏障经 `--trace-file` /
+// `--barrier-ready/--barrier-release` 传入。
 
 /// 测试期持有 trace 文件路径，Drop 时无条件清理（断言失败也不泄漏 temp 文件）。
 struct TraceFile(std::path::PathBuf);
@@ -124,20 +61,29 @@ async fn config_option_app(
     echo_mode: &str,
     barrier: Option<(String, String)>,
 ) -> (tauri::App<tauri::test::MockRuntime>, Arc<AgentRuntime>) {
-    let mut args = vec![echo_mode.to_string(), trace.to_string_lossy().into_owned()];
+    let mut args: Vec<String> = [
+        "--scenario",
+        "set-config-option",
+        "--mode",
+        echo_mode,
+        "--trace-file",
+        &trace.to_string_lossy(),
+        "--trace-mode",
+        "all",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
     if let Some((ready, release)) = barrier {
+        args.push("--barrier-ready".to_string());
         args.push(ready);
+        args.push("--barrier-release".to_string());
         args.push(release);
     }
-    let agent = crate::test_utils::fake_acp_agent_with(
-        "ms-agent",
-        CONFIG_OPTION_SCRIPT,
-        args,
-        HashMap::new(),
-    );
+    let mut agent = crate::test_utils::fake_acp_agent("ms-agent", &[]);
+    agent.args = args;
     // 显式 set_model_api 声明（现状兼容路径）——旧实现在该路径会把广告 id
     // `model-selection` 降级成语义键 `model` 发上 wire（#97 缺口）。
-    let mut agent = agent;
     agent.acp = Some(AcpProtocolConfig {
         set_model_api: Some(SetModelApi::ConfigOption),
         ..Default::default()
@@ -506,25 +452,27 @@ async fn stale_generation_discards_switch_write_back() {
 #[tokio::test]
 async fn rebind_on_other_runtime_starts_with_clean_selector_snapshot() {
     let trace_a = TraceFile::new("ms-rebind-a");
-    let trace_b = TraceFile::new("ms-rebind-b");
-    let mut agent_a = crate::test_utils::fake_acp_agent_with(
+    let _trace_b = TraceFile::new("ms-rebind-b");
+    let mut agent_a = crate::test_utils::fake_acp_agent(
         "rebind-a",
-        CONFIG_OPTION_SCRIPT,
-        vec![
-            "echo-empty".to_string(),
-            trace_a.path().to_string_lossy().into_owned(),
+        &[
+            "--scenario",
+            "set-config-option",
+            "--mode",
+            "echo-empty",
+            "--trace-file",
+            &trace_a.path().to_string_lossy(),
+            "--trace-mode",
+            "all",
         ],
-        HashMap::new(),
     );
     agent_a.acp = Some(AcpProtocolConfig {
         set_model_api: Some(SetModelApi::ConfigOption),
         ..Default::default()
     });
-    let agent_b = crate::test_utils::fake_acp_agent_with(
+    let agent_b = crate::test_utils::fake_acp_agent(
         "rebind-b",
-        EMPTY_SCRIPT,
-        vec![trace_b.path().to_string_lossy().into_owned()],
-        HashMap::new(),
+        &["--scenario", "empty", "--session-id", "empty-session"],
     );
     let runtime_a = AgentRuntime::new_disconnected();
     *runtime_a.acp.lock().await = AcpClient::connect_with_logs(&agent_a, None)
@@ -596,29 +544,32 @@ async fn rebind_on_other_runtime_starts_with_clean_selector_snapshot() {
 /// availableModels 进入 SessionInfo 模型面。
 #[tokio::test]
 async fn load_revive_applies_root_level_catalog_without_selector_rpcs() {
-    const SCRIPT: &str = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n'); trace.flush()
-    method=request.get('method')
-    result={}
-    if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
-    elif method == 'session/load':
-        result={'sessionId':'remote-original','availableModels':[
-            {'modelId':'root:alpha','name':'Alpha'},{'modelId':'root:beta','name':'Beta'}],
-            'currentModelId':'root:beta','configOptions':[{
-            'id':'reasoning_effort','category':'thought_level',
-            'options':[{'valueId':'low'},{'valueId':'high'}],'currentValue':'low'}]}
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result}),flush=True)
-"#;
     let trace = TraceFile::new("ms-revive");
-    let agent = crate::test_utils::fake_acp_agent_with(
+    let advertise = serde_json::json!({
+        "sessionId": "remote-original",
+        "availableModels": [
+            {"modelId": "root:alpha", "name": "Alpha"},
+            {"modelId": "root:beta", "name": "Beta"}
+        ],
+        "currentModelId": "root:beta",
+        "configOptions": [{
+            "id": "reasoning_effort", "category": "thought_level",
+            "options": [{"valueId": "low"}, {"valueId": "high"}], "currentValue": "low"
+        }]
+    })
+    .to_string();
+    let agent = crate::test_utils::fake_acp_agent(
         "ms-revive-agent",
-        SCRIPT,
-        vec![trace.path().to_string_lossy().into_owned()],
-        HashMap::new(),
+        &[
+            "--scenario",
+            "revive-load",
+            "--advertise-models",
+            &advertise,
+            "--trace-file",
+            &trace.path().to_string_lossy(),
+            "--trace-mode",
+            "all",
+        ],
     );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)

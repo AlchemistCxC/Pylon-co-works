@@ -2,36 +2,19 @@ use super::*;
 
 use crate::agent_config::AgentDef;
 
-/// fake ACP 脚本：FAKE_MODE=crash 时响应首个请求（initialize）后立即退出
-/// → stdout EOF → 崩溃通知；FAKE_MODE=alive 时保持存活并响应请求。
+/// fake ACP（P1 后为 `pylon-fake-agent` bin）：`alive` 常驻应答；`crash` 响应首个
+/// 请求后立即退出 → stdout EOF → 崩溃通知。
 ///
 /// initialize 必须声明 `loadSession`：重连后的会话连续性探针
 /// （probe_unknown_session_continuity）在宿主不支持 loadSession 时会把保留会话标为
 /// detached 而**不迁移代际**；本文件那条「kept sessions must migrate generation」
-/// 验的正是「确认连续后迁移」这条路径，故 fixture 需提供该能力。
-const FAKE_SCRIPT: &str = r#"import json,sys,os
-mode = os.environ.get('FAKE_MODE', 'alive')
-for line in sys.stdin:
-    request = json.loads(line)
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    method = request.get('method')
-    if method == 'initialize':
-        response['result'] = {'agentCapabilities':{'loadSession':True}}
-    elif method == 'session/new':
-        response['result'] = {'sessionId':'fake-session-1'}
-    elif method == 'session/load':
-        response['result'] = {'sessionId':request.get('params',{}).get('sessionId','fake-session-1')}
-    elif method == 'session/prompt':
-        response['result'] = {'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-    if mode == 'crash':
-        sys.exit(0)
-"#;
-
+/// 验的正是「确认连续后迁移」这条路径，故 fixture 需提供该能力（alive 场景内置）。
 fn fake_agent(mode: &str) -> AgentDef {
-    let mut env = std::collections::HashMap::new();
-    env.insert("FAKE_MODE".to_string(), mode.to_string());
-    crate::test_utils::fake_acp_agent_with("fake-acp", FAKE_SCRIPT, Vec::new(), env)
+    let scenario = match mode {
+        "crash" => "crash-after-init",
+        _ => "alive",
+    };
+    crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", scenario])
 }
 
 /// G5-2：state 构造收敛到 test_utils::test_state_with_acp；本模块特有的
@@ -174,22 +157,6 @@ async fn fake_acp_crash_triggers_auto_reconnect() {
 /// 200ms 延迟是刻意的：replace_agent_client 的 is_crashed() 检查在激活时发生，
 /// 立即退出会让每次重连都撞上 "crashed before activation"（走 Err 分支，generation
 /// 从不前进，"成功后又崩"不可观察）；延迟到激活之后才崩，才能覆盖 A5 场景。
-const CRASH_LOOP_SCRIPT: &str = r#"import json,sys,time
-for line in sys.stdin:
-    request = json.loads(line)
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    method = request.get('method')
-    if method == 'session/new':
-        response['result'] = {'sessionId':'fake-session-1'}
-    elif method == 'session/prompt':
-        response['result'] = {'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-    time.sleep(0.2)
-    sys.exit(0)
-"#;
-
-/// A5 回归：重连成功后又立即崩溃时，成功分支复查 still_stale 后继续退避重连，
-/// agent 不会因防重入标志吞掉第二次崩溃通知而永久下线。
 #[tokio::test]
 async fn fake_acp_crash_loop_keeps_reconnecting_then_flag_releases() {
     let app = tauri::test::mock_builder()
@@ -204,11 +171,9 @@ async fn fake_acp_crash_loop_keeps_reconnecting_then_flag_releases() {
     .expect("mock window must build");
 
     // 初始连接 crash-loop 模式：initialize 成功后 200ms 退出 → EOF → 崩溃通知
-    let crash_agent = crate::test_utils::fake_acp_agent_with(
+    let crash_agent = crate::test_utils::fake_acp_agent(
         "fake-acp",
-        CRASH_LOOP_SCRIPT,
-        Vec::new(),
-        std::collections::HashMap::new(),
+        &["--scenario", "crash-after-init", "--delay-ms", "200"],
     );
     let initial_acp = AcpClient::connect_with_logs(&crash_agent, None)
         .await
@@ -311,22 +276,7 @@ async fn flood_crash_still_triggers_auto_reconnect_via_watch() {
 
     // 洪泛崩溃 agent：initialize 成功后连发 300 条 session/update 再退出。
     // 300 > BROADCAST_CAP(256)——广播路径的崩溃通知必然丢失，只有 watch 通道可靠。
-    let flood_script = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        for i in range(300):
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'flood','update':{'sessionUpdate':'agent_message_chunk','content':{'text':'x'}}}}), flush=True)
-        break
-sys.exit(0)
-"#;
-    let flood_agent = crate::test_utils::fake_acp_agent_with(
-        "fake-acp",
-        flood_script,
-        Vec::new(),
-        std::collections::HashMap::new(),
-    );
+    let flood_agent = crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", "flood"]);
     let initial_acp = AcpClient::connect_with_logs(&flood_agent, None)
         .await
         .expect("flood fake ACP must initialize");
@@ -434,37 +384,35 @@ async fn manual_reconnect_releases_auto_reconnect_flag() {
 
 /// fake ACP：initialize 后主动发 request_permission（id 5），随后把 stdin 收到的
 /// 每一行写入 trace（验证客户端应答 wire）。
-const PERMISSION_SCRIPT: &str = r#"import json,sys,time
-trace=open(sys.argv[1],'w',encoding='utf-8')
-def emit(obj):
-    print(json.dumps(obj), flush=True)
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        emit({'jsonrpc':'2.0','id':request.get('id'),'result':{}})
-        time.sleep(0.5)
-        emit({'jsonrpc':'2.0','id':5,'method':'session/request_permission','params':{
-            'sessionId':'fake-session-p1',
-            'toolCall':{'toolCallId':'call-9','title':'edit_file','rawInput':'{"token=SECRET}","path":"x"}'},
-            'options':[{'optionId':'allow_once','name':'Allow once','kind':'allowOnce'},
-                       {'optionId':'reject_once','name':'Reject','kind':'rejectOnce'}]
-        }})
-    else:
-        trace.write(line)
-        trace.flush()
-"#;
-
 #[tokio::test]
 async fn fake_acp_request_permission_pends_then_resolves_on_wire() {
     let trace_path = crate::test_utils::unique_temp("permission").with_extension("jsonl");
-    let mut env = std::collections::HashMap::new();
-    env.insert("FAKE_MODE".to_string(), "alive".to_string());
-    let mut agent = crate::test_utils::fake_acp_agent_with(
+    let permission_params = serde_json::json!({
+        "sessionId": "fake-session-p1",
+        "toolCall": {"toolCallId": "call-9", "title": "edit_file",
+                     "rawInput": "{\"token=SECRET}\",\"path\":\"x\"}"},
+        "options": [
+            {"optionId": "allow_once", "name": "Allow once", "kind": "allowOnce"},
+            {"optionId": "reject_once", "name": "Reject", "kind": "rejectOnce"}
+        ]
+    })
+    .to_string();
+    let mut agent = crate::test_utils::fake_acp_agent(
         "fake-permission",
-        PERMISSION_SCRIPT,
-        vec![trace_path.to_string_lossy().into_owned()],
-        env,
+        &[
+            "--scenario",
+            "permission-proactive",
+            "--permission-id",
+            "5",
+            "--permission-delay-ms",
+            "500",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+        ],
     );
+    // params 是动态 JSON，拼进场景旗标（Command 直传 argv，无 shell 转义问题）。
+    agent.args.push("--permission-params".to_string());
+    agent.args.push(permission_params);
     // P0-3（R2-WI03）：request_permission 走 provider-scoped adapter dispatch，
     // fake agent 必须声明 provider=peri（未注册 provider 会被 dispatcher 丢弃）。
     agent.provider = Some("peri".to_string());

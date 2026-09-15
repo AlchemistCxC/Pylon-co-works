@@ -4,59 +4,68 @@ use crate::gateway::route;
 use crate::session::EventService;
 use std::time::Duration;
 
-/// 记录收到 session/prompt 请求的 fake ACP（trace 文件 + 标准响应）。
-/// 可选流式 chunk（PERSIST_CHUNK 环境变量开启）——先发 agent_message_chunk
-/// 再响应 stopReason（延迟 0.2s 让 dispatcher 先收集回复文本）。
-const TRACE_ACP_SCRIPT: &str = r#"import json,sys,os,time
-trace=open(sys.argv[1],'w',encoding='utf-8')
-persist_chunk = os.environ.get('PERSIST_CHUNK', '') == '1'
-prompt_error = os.environ.get('PROMPT_ERROR', '')
-replay_load = os.environ.get('REPLAY_LOAD', '') == '1'
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={'sessionId':'fake-inject-session'}
-    elif method == 'session/load' and replay_load:
-        session_id=request['params']['sessionId']
-        for update in [
-            {'sessionUpdate':'user_message_chunk','content':{'text':'persona\n\n---\n\nold question'}},
-            {'sessionUpdate':'agent_message_chunk','content':{'text':'old answer'}}
-        ]:
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':update}}), flush=True)
-        response['result']={'loaded':True}
-    elif method == 'session/prompt':
-        if persist_chunk:
-            session_id=request['params']['sessionId']
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'回复文本'}}}}), flush=True)
-            time.sleep(0.2)
-        trace.write(json.dumps(request)+'\n')
-        trace.flush()
-        if prompt_error:
-            response.pop('result', None)
-            response['error']={'code':-32000,'message':prompt_error}
-        else:
-            response['result']={'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
-
+/// 记录收到 session/prompt 请求的 fake ACP（P1 后为 bin 场景 + trace 旗标）。
+/// 可选流式 chunk——先发 agent_message_chunk 再响应 stopReason（延迟 0.2s 让
+/// dispatcher 先收集回复文本）；错误注入与回放装载见 [`trace_acp_agent_error`] /
+/// [`trace_acp_agent_replay`]。
 fn trace_acp_agent(trace_path: &std::path::Path, chunk: bool) -> AgentDef {
-    let mut env = std::collections::HashMap::new();
-    env.insert("FAKE_MODE".to_string(), "alive".to_string());
-    env.insert(
-        "PERSIST_CHUNK".to_string(),
-        if chunk {
-            "1".to_string()
-        } else {
-            "0".to_string()
-        },
-    );
-    crate::test_utils::fake_acp_agent_with(
+    let mut args: Vec<String> = [
+        "--scenario",
+        "stream",
+        "--session-id",
+        "fake-inject-session",
+        "--trace-file",
+        &trace_path.to_string_lossy(),
+        "--trace-mode",
+        "prompt-only",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    if chunk {
+        args.push("--prompt-chunk".into());
+        args.push("回复文本".into());
+        args.push("--prompt-delay-ms".into());
+        args.push("200".into());
+    }
+    let mut agent = crate::test_utils::fake_acp_agent("fake-acp-trace", &[]);
+    agent.args = args;
+    agent
+}
+
+/// 错误注入变体：prompt 回 JSON-RPC error（-32000）。
+fn trace_acp_agent_error(trace_path: &std::path::Path, message: &str) -> AgentDef {
+    crate::test_utils::fake_acp_agent(
         "fake-acp-trace",
-        TRACE_ACP_SCRIPT,
-        vec![trace_path.to_string_lossy().into_owned()],
-        env,
+        &[
+            "--scenario",
+            "prompt-error",
+            "--session-id",
+            "fake-inject-session",
+            "--prompt-error",
+            message,
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "prompt-only",
+        ],
+    )
+}
+
+/// 回放装载变体：session/load 先发两条历史 chunk 再回 loaded:true。
+fn trace_acp_agent_replay(trace_path: &std::path::Path) -> AgentDef {
+    crate::test_utils::fake_acp_agent(
+        "fake-acp-trace",
+        &[
+            "--scenario",
+            "replay-load",
+            "--session-id",
+            "fake-inject-session",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "prompt-only",
+        ],
     )
 }
 
@@ -186,11 +195,7 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
         "pylon-kernel-prompt-failure-{}.jsonl",
         std::process::id()
     ));
-    let mut agent = trace_acp_agent(&trace_path, false);
-    agent.env.insert(
-        "PROMPT_ERROR".to_string(),
-        "provider unavailable".to_string(),
-    );
+    let agent = trace_acp_agent_error(&trace_path, "provider unavailable");
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP must initialize");
@@ -251,8 +256,7 @@ async fn complete_session_load_replay_is_imported_into_the_empty_kernel_journal(
         "pylon-kernel-replay-import-{}.jsonl",
         std::process::id()
     ));
-    let mut agent = trace_acp_agent(&trace_path, false);
-    agent.env.insert("REPLAY_LOAD".to_string(), "1".to_string());
+    let agent = trace_acp_agent_replay(&trace_path);
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP must initialize");

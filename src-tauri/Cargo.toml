@@ -84,6 +84,16 @@ embed-resource = "3"
 [dev-dependencies]
 tauri = { version = "2", features = ["test", "unstable"] }
 
+# #106 P1：测试专用假 ACP agent（Rust 替代全部内嵌 Python 脚本）。
+# 默认不开：cargo build / 打包不编译不发行该 bin（验收：默认产物不含 pylon-fake-agent）。
+[features]
+test-agent = []
+
+[[bin]]
+name = "pylon-fake-agent"
+path = "src/bin/pylon-fake-agent.rs"
+required-features = ["test-agent"]
+
 [lib]
 name = "prism_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]

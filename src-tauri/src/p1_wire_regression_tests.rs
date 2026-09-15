@@ -29,7 +29,7 @@ use crate::acp::{AcpWireHub, WireIdKind, WireRecord};
 use crate::agent_config::AgentDef;
 use crate::permission::resolve_permission;
 use crate::runtime_log::{RuntimeLogHub, RuntimeLogLayer, RuntimeLogQuery};
-use std::collections::HashMap;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,28 +40,26 @@ use tracing_subscriber::layer::Layer as _;
 /// permission.rs 私有常量）——测试按契约硬编码对照值，语义见 `permission_deadline_ms`。
 const DEADLINE_OFFSET_MS: u64 = 300_000;
 
-/// fake ACP 脚本：initialize 应答后发一条 request_permission（id 形态/params 由参数
-/// 嵌入），此后把收到的每一行 stdin 请求写入 trace 文件；stderr 输出标记行（证据源 #6）。
-/// `id_expr`：number 用 `1100`；string 用 `'perm-pa'`（python 字面量）。
-fn permission_script(id_expr: &str, params: &str) -> String {
-    format!(
-        r#"import json,sys,time
-trace=open(sys.argv[1],'w',encoding='utf-8')
-def emit(obj):
-    print(json.dumps(obj), flush=True)
-sys.stderr.write('p1-fake-acp-stderr-marker\n')
-sys.stderr.flush()
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        emit({{'jsonrpc':'2.0','id':request.get('id'),'result':{{}}}})
-        time.sleep(0.3)
-        emit({{'jsonrpc':'2.0','id':{id_expr},'method':'session/request_permission','params':{params}}})
-    else:
-        trace.write(line)
-        trace.flush()
-"#
-    )
+/// fake ACP（P1 后为 bin 场景 permission-proactive）旗标：initialize 应答后发一条
+/// request_permission（id 形态/params 由旗标注入），此后把收到的每一行 stdin 请求
+/// 写入 trace 文件；stderr 输出标记行（证据源 #6）。
+/// `id_json`：number 用 `1100`；string 用 `"perm-pa"`（JSON 字面量）。
+fn permission_args(id_json: &str, params: &str) -> Vec<String> {
+    [
+        "--scenario",
+        "permission-proactive",
+        "--permission-delay-ms",
+        "300",
+        "--stderr-marker",
+        "p1-fake-acp-stderr-marker",
+        "--permission-id",
+        id_json,
+        "--permission-params",
+        params,
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect()
 }
 
 /// 合法 params：options = allow_once（allowOnce）+ deny（rejectOnce），各带
@@ -92,14 +90,24 @@ fn invalid_params(session: &str) -> String {
 }
 
 /// 构造 fake ACP agent（provider 由参数决定——peri/hermes 注册同名适配器；
-/// trace 路径进 argv[1]）。
-fn fake_provider_agent(name: &str, script: &str, trace_path: &Path, provider: &str) -> AgentDef {
-    let mut agent = crate::test_utils::fake_acp_agent_with(
-        name,
-        script,
-        vec![trace_path.to_string_lossy().into_owned()],
-        HashMap::new(),
-    );
+/// trace 路径进场景旗标，post-init 全量落盘）。
+fn fake_provider_agent(
+    name: &str,
+    extra_args: Vec<String>,
+    trace_path: &Path,
+    provider: &str,
+) -> AgentDef {
+    let mut agent = crate::test_utils::fake_acp_agent(name, &[]);
+    agent.args = [
+        "--trace-file",
+        &trace_path.to_string_lossy(),
+        "--trace-mode",
+        "post-init",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .chain(extra_args)
+    .collect();
     agent.provider = Some(provider.to_string());
     agent
 }
@@ -253,7 +261,7 @@ fn temp_trace(label: &str) -> PathBuf {
     crate::test_utils::unique_temp(&format!("p1-{label}")).with_extension("jsonl")
 }
 
-/// id 形态参数：python 字面量（fake ACP 脚本）、挂起键 RequestId、期望回显、
+/// id 形态参数：JSON 字面量（bin --permission-id 旗标）、挂起键 RequestId、期望回显、
 /// wire id 形态（ACP-01 §5.4 原变体保留）。
 struct IdCase {
     id_expr: String,
@@ -275,7 +283,7 @@ fn number_id_case(label: &'static str, n: u64) -> IdCase {
 
 fn string_id_case(label: &'static str, s: &str) -> IdCase {
     IdCase {
-        id_expr: format!("'{s}'"),
+        id_expr: format!("\"{s}\""),
         request_id: crate::acp::RequestId::String(s.to_string()),
         echo: serde_json::json!(s),
         kind: WireIdKind::String,
@@ -300,10 +308,9 @@ struct PendingFixture {
 async fn build_pending_fixture(provider: &str, id_case: &IdCase, params: &str) -> PendingFixture {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace(id_case.label);
-    let script = permission_script(&id_case.id_expr, params);
     let agent = fake_provider_agent(
         &format!("p1-{}", id_case.label),
-        &script,
+        permission_args(&id_case.id_expr, params),
         &trace_path,
         provider,
     );
@@ -709,8 +716,12 @@ async fn matrix_hermes_string_cancel() {
 async fn case_a_number_id_pends_and_resolves_with_consistent_id_value() {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace("obs03-case-a");
-    let script = permission_script("5", &valid_params("fake-session-a", "call-a"));
-    let agent = fake_provider_agent("obs03-a", &script, &trace_path, "peri");
+    let agent = fake_provider_agent(
+        "obs03-a",
+        permission_args("5", &valid_params("fake-session-a", "call-a")),
+        &trace_path,
+        "peri",
+    );
     let initial_acp = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
         .expect("fake ACP must initialize");
@@ -803,8 +814,12 @@ async fn case_a_number_id_pends_and_resolves_with_consistent_id_value() {
 async fn case_b_string_id_round_trip_echoes_original_variant() {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace("obs03-case-b");
-    let script = permission_script("'perm-b'", &valid_params("fake-session-b", "call-b"));
-    let agent = fake_provider_agent("obs03-b", &script, &trace_path, "peri");
+    let agent = fake_provider_agent(
+        "obs03-b",
+        permission_args("\"perm-b\"", &valid_params("fake-session-b", "call-b")),
+        &trace_path,
+        "peri",
+    );
     let initial_acp = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
         .expect("fake ACP must initialize");
@@ -907,8 +922,12 @@ async fn case_b_string_id_round_trip_echoes_original_variant() {
 async fn case_e_string_id_invalid_params_answers_jsonrpc_error() {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace("obs03-case-e");
-    let script = permission_script("'perm-e'", &invalid_params("fake-session-e"));
-    let agent = fake_provider_agent("obs03-e", &script, &trace_path, "peri");
+    let agent = fake_provider_agent(
+        "obs03-e",
+        permission_args("\"perm-e\"", &invalid_params("fake-session-e")),
+        &trace_path,
+        "peri",
+    );
     let initial_acp = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
         .expect("fake ACP must initialize");
@@ -990,8 +1009,12 @@ async fn case_e_string_id_invalid_params_answers_jsonrpc_error() {
 async fn case_e2_number_id_invalid_params_answers_jsonrpc_error() {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace("obs03-case-e2");
-    let script = permission_script("9", &invalid_params("fake-session-e2"));
-    let agent = fake_provider_agent("obs03-e2", &script, &trace_path, "peri");
+    let agent = fake_provider_agent(
+        "obs03-e2",
+        permission_args("9", &invalid_params("fake-session-e2")),
+        &trace_path,
+        "peri",
+    );
     let initial_acp = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
         .expect("fake ACP must initialize");
@@ -1048,8 +1071,12 @@ async fn case_e2_number_id_invalid_params_answers_jsonrpc_error() {
 async fn case_f_number_id_pending_cancel_converges_to_cancelled() {
     let logs = RuntimeLogHub::new(128);
     let trace_path = temp_trace("obs03-case-f");
-    let script = permission_script("7", &valid_params("fake-session-f", "call-f"));
-    let agent = fake_provider_agent("obs03-f", &script, &trace_path, "peri");
+    let agent = fake_provider_agent(
+        "obs03-f",
+        permission_args("7", &valid_params("fake-session-f", "call-f")),
+        &trace_path,
+        "peri",
+    );
     let initial_acp = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
         .expect("fake ACP must initialize");

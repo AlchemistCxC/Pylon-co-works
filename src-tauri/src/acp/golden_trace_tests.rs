@@ -67,73 +67,22 @@ const SESSION_ID: &str = "golden-session";
 /// permission 场景的 agent 请求 id（数字形态，便于测试用 responder 应答）。
 const PERMISSION_REQUEST_ID: u64 = 9001;
 
-/// 单一 fake agent 脚本，按 `GOLDEN_SCENARIO` 分支；避免为 8 个场景维护 8 份脚本。
-const GOLDEN_AGENT_SCRIPT: &str = r#"import json,sys,os
-scenario = os.environ.get('GOLDEN_SCENARIO', 'initialize')
-pending_prompt = None
-def emit(payload):
-    print(json.dumps(payload), flush=True)
-def emit_reply(session_id):
-    emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
-        'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'text': 'golden reply'}}}})
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    if method is None:
-        # 客户端应答（permission）——收到后结束当前 prompt。
-        if pending_prompt is not None:
-            emit({'jsonrpc': '2.0', 'id': pending_prompt, 'result': {'stopReason': 'end_turn'}})
-            pending_prompt = None
-        continue
-    rid = request.get('id')
-    params = request.get('params') or {}
-    session_id = params.get('sessionId', 'golden-session')
-    if method == 'initialize':
-        emit({'jsonrpc': '2.0', 'id': rid, 'result': {'agentCapabilities': {'loadSession': True}}})
-    elif method == 'session/new':
-        emit({'jsonrpc': '2.0', 'id': rid, 'result': {'sessionId': 'golden-session'}})
-    elif method == 'session/load':
-        for text in ['history-1', 'history-2']:
-            emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
-                'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'text': text}}}})
-        emit({'jsonrpc': '2.0', 'id': rid, 'result': {'loaded': True}})
-    elif method == 'session/prompt':
-        pending_prompt = rid
-        if scenario != 'cancel':
-            emit_reply(session_id)
-        if scenario == 'tool':
-            emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
-                'update': {'sessionUpdate': 'tool_call', 'toolCallId': 'tc-golden', 'title': 'golden tool',
-                           'status': 'in_progress'}}})
-            emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session_id,
-                'update': {'sessionUpdate': 'tool_call_update', 'toolCallId': 'tc-golden', 'status': 'completed',
-                           'content': [{'type': 'text', 'text': 'tool output'}]}}})
-            emit({'jsonrpc': '2.0', 'id': rid, 'result': {'stopReason': 'end_turn'}})
-            pending_prompt = None
-        elif scenario == 'permission':
-            emit({'jsonrpc': '2.0', 'id': 9001, 'method': 'session/request_permission',
-                  'params': {'sessionId': session_id, 'toolCallId': 'tc-golden',
-                             'options': [{'optionId': 'allow_once', 'name': 'Allow once'},
-                                         {'optionId': 'deny', 'name': 'Deny'}]}})
-        elif scenario == 'done_error':
-            emit({'jsonrpc': '2.0', 'id': rid, 'error': {'code': -32000, 'message': 'golden failure'}})
-            pending_prompt = None
-        elif scenario == 'cancel':
-            pass
-        else:
-            emit({'jsonrpc': '2.0', 'id': rid, 'result': {'stopReason': 'end_turn'}})
-            pending_prompt = None
-    elif method == 'session/cancel':
-        if pending_prompt is not None:
-            # Preserve the committed cancel-before-tail trace by causality,
-            # not by racing prompt output against the client's notification.
-            if scenario == 'cancel':
-                emit_reply(session_id)
-            emit({'jsonrpc': '2.0', 'id': pending_prompt, 'result': {'stopReason': 'cancelled'}})
-            pending_prompt = None
-    else:
-        emit({'jsonrpc': '2.0', 'id': rid, 'result': {}})
-"#;
+/// 单一 fake agent（`pylon-fake-agent --scenario <名>`，P1 后不再有内嵌脚本）。
+/// 场景名 = [`SCENARIOS`] 元素，bin 侧 `handle_golden` 逐行对照原 GOLDEN_AGENT_SCRIPT；
+/// wrapper 两场景的 agent 侧行为与 `prompt` 完全一致（provider 是客户端身份，
+/// 走 AgentDef.provider 注入，bin 无需感知）。
+fn golden_agent(scenario: &str) -> crate::agent_config::AgentDef {
+    let bin_scenario = match scenario {
+        "wrapper_claude" | "wrapper_codex" => "prompt",
+        other => other,
+    };
+    let mut agent =
+        crate::test_utils::fake_acp_agent("fake-acp-golden", &["--scenario", bin_scenario]);
+    // A5①：wrapper 场景带真实 provider，使 catalog 声明的 clientCapabilities 与
+    // provider 身份一起进入 wire 基线；其余场景保持 provider = None（P60 基线不变）。
+    agent.provider = scenario_provider(scenario).map(str::to_string);
+    agent
+}
 
 fn trace_dir() -> Option<PathBuf> {
     std::env::var("PYLON_GOLDEN_TRACE_DIR")
@@ -149,11 +98,8 @@ async fn cancel_fixture_reply_waits_for_cancel() {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
 
-    let mut python = crate::test_utils::test_python_exe().split_whitespace();
-    let mut child = tokio::process::Command::new(python.next().expect("python executable"))
-        .args(python)
-        .args(["-u", "-c", GOLDEN_AGENT_SCRIPT])
-        .env("GOLDEN_SCENARIO", "cancel")
+    let mut child = tokio::process::Command::new(crate::test_utils::fake_agent_bin())
+        .args(["--scenario", "cancel"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -190,21 +136,6 @@ async fn cancel_fixture_reply_waits_for_cancel() {
     assert_eq!(records[1]["method"], "session/update");
     assert_eq!(records[2]["id"], 1);
     assert_eq!(records[2]["result"]["stopReason"], "cancelled");
-}
-
-fn golden_agent(scenario: &str) -> crate::agent_config::AgentDef {
-    let mut env = std::collections::HashMap::new();
-    env.insert("GOLDEN_SCENARIO".to_string(), scenario.to_string());
-    let mut agent = crate::test_utils::fake_acp_agent_with(
-        "fake-acp-golden",
-        GOLDEN_AGENT_SCRIPT,
-        Vec::new(),
-        env,
-    );
-    // A5①：wrapper 场景带真实 provider，使 catalog 声明的 clientCapabilities 与
-    // provider 身份一起进入 wire 基线；其余场景保持 provider = None（P60 基线不变）。
-    agent.provider = scenario_provider(scenario).map(str::to_string);
-    agent
 }
 
 fn owner_key() -> String {

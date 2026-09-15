@@ -3,23 +3,20 @@ use super::*;
 use crate::gateway::qq::{auth::QqAuth, QqAdapter};
 use std::time::Duration;
 
-/// fake ACP：prompt 时先发一条流式 chunk（deliver 回发的文本），再响应 end_turn。
-const CHUNK_ACP_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={'sessionId':'b10-session'}
-    elif method == 'session/prompt':
-        session_id=request['params']['sessionId']
-        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'QQ 回复内容'}}}}), flush=True)
-        response['result']={'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
-
+/// fake ACP（P1 后为 bin 场景）：prompt 时先发一条流式 chunk（deliver 回发的文本），
+/// 再响应 end_turn。
 fn chunk_acp_agent() -> AgentDef {
-    crate::test_utils::fake_acp_agent("fake-acp-chunk", CHUNK_ACP_SCRIPT)
+    crate::test_utils::fake_acp_agent(
+        "fake-acp-chunk",
+        &[
+            "--scenario",
+            "stream",
+            "--session-id",
+            "b10-session",
+            "--prompt-chunk",
+            "QQ 回复内容",
+        ],
+    )
 }
 
 #[tokio::test]

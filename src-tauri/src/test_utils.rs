@@ -3,6 +3,11 @@
 //! 消除 acp.rs 测试（14 块 AgentDef 字面量）与 lib.rs 集成测试（auto_reconnect /
 //! b11 inject / gateway 平台测试）之间的重复构造；AppState 字面量（10 处）与
 //! build_state_with 包装（4 份）收敛到 TestStateBuilder。仅 cfg(test) 编译。
+//!
+//! #106 P1：fake agent 一律为本 crate 的 `pylon-fake-agent` bin（feature
+//! `test-agent`），内嵌 Python 脚本与解释器探测链已删除——测试不再依赖宿主
+//! 解释器与 locale（cp1252 surrogate escape 问题随之消失）。场景旗标见
+//! `src/bin/pylon-fake-agent.rs` 模块文档。
 
 use crate::acp::AcpClient;
 use crate::agent_config::AgentDef;
@@ -12,47 +17,6 @@ use crate::runtime::{AgentRuntime, AgentRuntimeManager};
 use crate::AppState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-
-/// 探测结果进程级缓存：`py -3 --version` 探测本身有子进程启动开销，单测多次
-/// 构造 agent 时只探测一次（once 惰性求值，无副作用）。
-static TEST_PYTHON_EXE: OnceLock<String> = OnceLock::new();
-
-/// 探测测试用 python 解释器：`PYLON_TEST_PYTHON`（显式覆盖，命中即用）→
-/// `python` → `py -3` → `python3`（Windows 下 `py -3` 比裸 `python` 更可靠；
-/// 链式兜底保证跨平台可用）。全部不可用时回落 `python`（保持原有报错行为，
-/// 由子进程启动失败显式暴露）。
-pub(crate) fn test_python_exe() -> &'static str {
-    TEST_PYTHON_EXE.get_or_init(probe_test_python).as_str()
-}
-
-fn probe_test_python() -> String {
-    if let Ok(custom) = std::env::var("PYLON_TEST_PYTHON") {
-        if !custom.trim().is_empty() {
-            return custom;
-        }
-    }
-    ["python", "py -3", "python3"]
-        .into_iter()
-        .find(|candidate| python_available(candidate))
-        .unwrap_or("python")
-        .to_string()
-}
-
-/// 探测 candidate（`py -3` 形式按空白拆 program + args）能否成功执行 --version。
-fn python_available(candidate: &str) -> bool {
-    let mut parts = candidate.split_whitespace();
-    let Some(program) = parts.next() else {
-        return false;
-    };
-    let mut command = std::process::Command::new(program);
-    command.args(parts).arg("--version");
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
 
 /// P70/P91（批 C1 横切 §3）：同型临时路径的唯一命名（pid + nanos）。
 /// pid 隔离跨进程并发，nanos 隔离同进程内先后/并发调用——上次崩溃残留的
@@ -66,39 +30,47 @@ pub(crate) fn unique_temp(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("pylon-{label}-{}-{nanos}", std::process::id()))
 }
 
-/// 构造 fake ACP 子进程 agent：`python -u -c <script>`，无额外参数与环境。
-pub(crate) fn fake_acp_agent(name: &str, script: &str) -> AgentDef {
-    fake_acp_agent_with(name, script, Vec::new(), HashMap::new())
+/// 定位 `pylon-fake-agent` bin：`PYLON_FAKE_AGENT_BIN` 显式覆盖 →
+/// `current_exe()` 祖先目录找 `target/<profile>/pylon-fake-agent(.exe)`。
+/// 找不到即 panic 并提示构建命令（测试环境缺 bin 属配置错误，早失败优于静默）。
+pub(crate) fn fake_agent_bin() -> std::path::PathBuf {
+    if let Ok(path) = std::env::var("PYLON_FAKE_AGENT_BIN") {
+        if !path.trim().is_empty() {
+            return std::path::PathBuf::from(path);
+        }
+    }
+    let exe = std::env::current_exe().expect("current_exe must resolve");
+    let bin_names: &[&str] = if cfg!(windows) {
+        &["pylon-fake-agent.exe"]
+    } else {
+        &["pylon-fake-agent"]
+    };
+    for ancestor in exe.ancestors() {
+        for name in bin_names {
+            let candidate = ancestor.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    panic!(
+        "pylon-fake-agent bin not found（先构建：cargo build --bin pylon-fake-agent \
+         --features test-agent；或设 PYLON_FAKE_AGENT_BIN 指向已有 bin）"
+    )
 }
 
-/// 构造 fake ACP 子进程 agent：`python -u -c <script> [extra_args...]` + 自定义环境。
-/// extra_args 通常携带 trace 文件路径（fake 脚本把收到的请求逐行写入，测试回读断言）。
-pub(crate) fn fake_acp_agent_with(
-    name: &str,
-    script: &str,
-    extra_args: Vec<String>,
-    env: HashMap<String, String>,
-) -> AgentDef {
-    let mut args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
-    args.extend(extra_args);
-    // fake ACP 子进程通过 stdin/stdout 说 UTF-8 的 JSON-RPC 线（真实 ACP wire 即 UTF-8）。
-    // Python 默认按宿主 locale 解 stdin，而 CI runner 的 locale 是 cp1252：中文 payload
-    // 的 UTF-8 字节里 0x81/0x8D/0x8F/0x90/0x9D 在 cp1252 未定义，被 surrogateescape 成
-    // 孤代理（\udcXX）；子进程再 json.dumps 写进 trace，Rust 侧 serde_json 读回即报
-    // "lone leading surrogate in hex escape"（run 34597826814 实证，列 223）。
-    // 本地不复现是因为开发机 locale 是 cp936/UTF-8（能整字节解码，只是 mojibake）。
-    // 固定子进程 stdio 编码，测试行为就不再随宿主 locale 变化；显式传同名变量者可覆盖。
-    let mut env = env;
-    env.entry("PYTHONIOENCODING".to_string())
-        .or_insert_with(|| "utf-8".to_string());
+/// 构造 fake ACP 子进程 agent：`pylon-fake-agent <args...>`（场景旗标）。
+/// `args` 形如 `["--scenario", "alive"]`；场景清单见 bin 模块文档。
+pub(crate) fn fake_acp_agent(name: &str, args: &[&str]) -> AgentDef {
+    let owned: Vec<String> = args.iter().map(|value| value.to_string()).collect();
     AgentDef {
         name: name.to_string(),
         provider: None,
         transport: "subprocess".to_string(),
-        exe: test_python_exe().to_string(),
-        args,
+        exe: fake_agent_bin().to_string_lossy().into_owned(),
+        args: owned,
         cwd: None,
-        env,
+        env: HashMap::new(),
         default: false,
         set_model_api: false,
         model: None,
@@ -106,6 +78,12 @@ pub(crate) fn fake_acp_agent_with(
         acp_args: Vec::new(),
         acp: None,
     }
+}
+
+/// 便捷别名：占位 agent（旧 `print('x')` 脚本形态）——进程内测试从不 spawn，
+/// 只需要一个合法 AgentDef 字面量。
+pub(crate) fn fake_acp_agent_stub(name: &str) -> AgentDef {
+    fake_acp_agent(name, &["--scenario", "alive"])
 }
 
 // ── AppState 测试构造 builder（G5-1）──
@@ -399,7 +377,7 @@ mod tests {
 
     #[test]
     fn builder_with_chain_registers_agent_runtime_and_overrides() {
-        let def = fake_acp_agent("peri", "print('x')");
+        let def = fake_acp_agent_stub("peri");
         let runtime = connected_runtime();
         let gateway = Arc::new(GatewayCore::new());
         let state = TestStateBuilder::bare()
@@ -430,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_state_with_acp_injects_client_and_sets_active() {
-        let agent = fake_acp_agent("fake-acp", "print('x')");
+        let agent = fake_acp_agent_stub("fake-acp");
         let initial_acp = AcpClient::disconnected();
         initial_acp
             .crashed

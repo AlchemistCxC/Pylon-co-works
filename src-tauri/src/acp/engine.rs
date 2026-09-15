@@ -1485,7 +1485,7 @@ mod tests {
     #[tokio::test]
     async fn wire_bridge_records_both_directions_with_id_kind() {
         let (mut sdk_end, inspect_left, inspect_right, child_end) = bridge_channels();
-        let agent = crate::test_utils::fake_acp_agent("fake-acp-bridge", "");
+        let agent = crate::test_utils::fake_acp_agent_stub("fake-acp-bridge");
         let hub = AcpWireHub::for_agent(&agent, 1);
         let bridge = tokio::spawn(run_wire_bridge(inspect_left, inspect_right, hub.clone()));
 

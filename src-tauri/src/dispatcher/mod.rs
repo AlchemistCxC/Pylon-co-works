@@ -2500,7 +2500,7 @@ mod tests {
     fn resolve_agent_provider_follows_live_config() {
         use std::collections::HashMap;
         let mut agents = HashMap::new();
-        let mut peri = crate::test_utils::fake_acp_agent("peri", "print('x')");
+        let mut peri = crate::test_utils::fake_acp_agent_stub("peri");
         peri.provider = Some("peri".to_string());
         agents.insert("peri-copy".to_string(), peri);
         assert_eq!(
@@ -2509,7 +2509,7 @@ mod tests {
             "活配置解析 provider"
         );
         // reload 把该实例 provider 改为 hermes → 新请求即用新 provider
-        let mut reloaded = crate::test_utils::fake_acp_agent("peri", "print('x')");
+        let mut reloaded = crate::test_utils::fake_acp_agent_stub("peri");
         reloaded.provider = Some("hermes".to_string());
         agents.insert("peri-copy".to_string(), reloaded);
         assert_eq!(

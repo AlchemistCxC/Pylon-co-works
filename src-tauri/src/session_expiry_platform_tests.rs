@@ -1,16 +1,10 @@
 use super::*;
 
-const ECHO_ACP_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if request.get('method') == 'session/new':
-        response['result']={'sessionId':'expiry-session'}
-    print(json.dumps(response), flush=True)
-"#;
-
 fn echo_agent() -> AgentDef {
-    crate::test_utils::fake_acp_agent("fake-acp-echo", ECHO_ACP_SCRIPT)
+    crate::test_utils::fake_acp_agent(
+        "fake-acp-echo",
+        &["--scenario", "alive", "--session-id", "expiry-session"],
+    )
 }
 
 #[tokio::test]

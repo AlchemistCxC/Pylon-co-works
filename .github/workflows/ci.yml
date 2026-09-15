@@ -65,11 +65,16 @@ jobs:
 
       # ISSUE-20 W1：同一命令形态，不复制语义（fmt/clippy/shadow 在下方独立步骤）。
       # #106 P0 workspace 化：--workspace 关闭子 crate 测试黑洞（pylon-core /
-      # foundations / pet-core 的内嵌测试首次进 CI）；b11/obs03/p1_wire 等集成
-      # 形态测试解除 skip 进 CI（历史 skip 系 locale 不可复现 + 本地 Python 依赖，
-      # 本 PR 的 P1 假 agent Rust bin 落地后两类环境变量一并消失）。
+      # foundations / pet-core 的内嵌测试首次进 CI）。
+      # #106 P1：b11/obs03/p1_wire 等集成形态测试解除 skip 进 CI（历史 skip 系
+      # locale 不可复现 + 本地 Python 依赖）；假 agent = pylon-fake-agent bin，
+      # 先构建再跑测试——测试进程经 current_exe 祖先目录定位该 bin。
       - name: Rust 测试与构建
-        run: cd src-tauri && cargo test --workspace --lib && cargo build
+        run: |
+          cd src-tauri
+          cargo build --bin pylon-fake-agent --features test-agent
+          cargo test --workspace --lib --features test-agent
+          cargo build
 
       # P91 B1：fmt 门禁——#106 P0 后 workspace 单命令（替代 4 个 --manifest-path 步骤）。
       - name: fmt（workspace --all --check）

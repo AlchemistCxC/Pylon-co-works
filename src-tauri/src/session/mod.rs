@@ -1111,25 +1111,20 @@ gateway:
     /// （若仍按 active agent 解析会报 too many attachments: maximum is 1）。
     #[tokio::test]
     async fn attachment_limits_follow_runtime_agent_not_active_agent() {
-        const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    method = request.get('method')
-    if method == 'session/new':
-        response['result'] = {'sessionId':'e11-session'}
-    elif method == 'session/prompt':
-        response['result'] = {'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
         // active agent：max_attachments=1（若按 active agent 解析，3 附件必拒）
-        let mut active_def = crate::test_utils::fake_acp_agent("active-a", FAKE_SCRIPT);
+        let mut active_def = crate::test_utils::fake_acp_agent(
+            "active-a",
+            &["--scenario", "alive", "--session-id", "e11-session"],
+        );
         active_def.acp = Some(crate::agent_config::AcpProtocolConfig {
             max_attachments: Some(1),
             ..Default::default()
         });
         // runtime 归属 agent：max_attachments=8
-        let mut runtime_def = crate::test_utils::fake_acp_agent("runtime-b", FAKE_SCRIPT);
+        let mut runtime_def = crate::test_utils::fake_acp_agent(
+            "runtime-b",
+            &["--scenario", "alive", "--session-id", "e11-session"],
+        );
         runtime_def.acp = Some(crate::agent_config::AcpProtocolConfig {
             max_attachments: Some(8),
             ..Default::default()
@@ -1178,16 +1173,8 @@ for line in sys.stdin:
     /// method-not-found 降级不报错、普通 RPC 错误按 strict 决定上抛/吞掉。
     #[tokio::test]
     async fn close_session_rpc_respects_policy_and_method_not_found() {
-        const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get('method') == 'session/close':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32601,'message':'Method not found'}}
-    else:
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    print(json.dumps(response), flush=True)
-"#;
-        let agent = crate::test_utils::fake_acp_agent("p6-agent", FAKE_SCRIPT);
+        let agent =
+            crate::test_utils::fake_acp_agent("p6-agent", &["--scenario", "close-unsupported"]);
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1227,21 +1214,18 @@ for line in sys.stdin:
     /// 时锁内拦截，不发送——旧 periId 的控制请求不进入新 ACP。
     #[tokio::test]
     async fn generation_checked_rpc_blocks_stale_control_request() {
-        const FAKE_SCRIPT: &str = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request = json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
         let trace_path =
             std::env::temp_dir().join(format!("pylon-p5-{}.jsonl", std::process::id()));
-        let agent = crate::test_utils::fake_acp_agent_with(
+        let agent = crate::test_utils::fake_acp_agent(
             "p5-agent",
-            FAKE_SCRIPT,
-            vec![trace_path.to_string_lossy().into_owned()],
-            HashMap::new(),
+            &[
+                "--scenario",
+                "trace-all",
+                "--trace-file",
+                &trace_path.to_string_lossy(),
+                "--trace-mode",
+                "all",
+            ],
         );
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
@@ -1280,36 +1264,39 @@ for line in sys.stdin:
     /// session/set_config_option，绝不走 session/set_model。
     #[tokio::test]
     async fn set_config_option_uses_runtime_agent_protocol_not_active_agent() {
-        const FAKE_SCRIPT: &str = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request = json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    method = request.get('method')
-    if method == 'session/new':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'p4-session'}}
-    elif method == 'session/set_config_option':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'configOptions':[{'key':'model','value':'gpt-4'}]}}
-    else:
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    print(json.dumps(response), flush=True)
-"#;
         let trace_path =
             std::env::temp_dir().join(format!("pylon-p4-{}.jsonl", std::process::id()));
         // active agent A：set_model_api = SetModel（若误用其协议 → 走 session/set_model）
-        let mut active_def =
-            crate::test_utils::fake_acp_agent_with("active-a", FAKE_SCRIPT, vec![], HashMap::new());
+        let mut active_def = crate::test_utils::fake_acp_agent(
+            "active-a",
+            &[
+                "--scenario",
+                "set-config-option",
+                "--mode",
+                "legacy",
+                "--session-id",
+                "p4-session",
+            ],
+        );
         active_def.acp = Some(crate::agent_config::AcpProtocolConfig {
             set_model_api: Some(crate::agent_config::SetModelApi::SetModel),
             ..Default::default()
         });
         // runtime 归属 agent B：set_model_api = ConfigOption（正确应走 set_config_option）
-        let mut runtime_def = crate::test_utils::fake_acp_agent_with(
+        let mut runtime_def = crate::test_utils::fake_acp_agent(
             "runtime-b",
-            FAKE_SCRIPT,
-            vec![trace_path.to_string_lossy().into_owned()],
-            HashMap::new(),
+            &[
+                "--scenario",
+                "set-config-option",
+                "--mode",
+                "legacy",
+                "--session-id",
+                "p4-session",
+                "--trace-file",
+                &trace_path.to_string_lossy(),
+                "--trace-mode",
+                "all",
+            ],
         );
         runtime_def.acp = Some(crate::agent_config::AcpProtocolConfig {
             set_model_api: Some(crate::agent_config::SetModelApi::ConfigOption),
@@ -1392,51 +1379,20 @@ for line in sys.stdin:
     /// 的实际接缝。
     #[tokio::test]
     async fn new_session_applies_initial_options_in_wire_order_and_returns_merged_state() {
-        const FAKE_SCRIPT: &str = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    method=request.get('method')
-    params=request.get('params') or {}
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={
-            'sessionId':'p28-session',
-            'models':{
-                'currentModelId':'provider:old',
-                'availableModels':[{'modelId':'provider:old','name':'Old'},{'modelId':'provider:new','name':'New'}]
-            },
-            'modes':{
-                'currentModeId':'default',
-                'availableModes':[{'id':'default','name':'Default'}, {'id':'accept_edits','name':'Accept Edits'}]
-            },
-            'configOptions':[{
-                'id':'reasoning_effort',
-                'name':'Reasoning effort',
-                'category':'thought_level',
-                'options':[{'id':'none'}, {'id':'high'}],
-                'currentValue':'none'
-            }]
-        }
-    elif method == 'session/set_model':
-        response['result']={'models':{'currentModelId':params.get('modelId')}}
-    elif method == 'session/set_mode':
-        response['result']={'modes':{'currentModeId':params.get('modeId')}}
-    elif method == 'session/set_config_option':
-        response['result']={'configOptions':[{'id':params.get('configId'),'currentValue':params.get('value')}]}
-    print(json.dumps(response), flush=True)
-"#;
         let trace_path = std::env::temp_dir().join(format!(
             "pylon-p28-initial-options-{}.jsonl",
             std::process::id()
         ));
-        let mut agent = crate::test_utils::fake_acp_agent_with(
+        let mut agent = crate::test_utils::fake_acp_agent(
             "p28-agent",
-            FAKE_SCRIPT,
-            vec![trace_path.to_string_lossy().into_owned()],
-            HashMap::new(),
+            &[
+                "--scenario",
+                "initial-options-echo",
+                "--trace-file",
+                &trace_path.to_string_lossy(),
+                "--trace-mode",
+                "all",
+            ],
         );
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             set_model_api: Some(crate::agent_config::SetModelApi::SetModel),
@@ -1803,16 +1759,17 @@ for line in sys.stdin:
     /// 而非消息滞留 + 生成指示器空转 300s）。
     #[tokio::test]
     async fn session_new_failure_logs_ensure_failed_and_returns_error() {
-        const FAIL_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get('method') == 'session/new':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32603,'message':'No LLM provider configured'}}
-    else:
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    print(json.dumps(response), flush=True)
-"#;
-        let agent = crate::test_utils::fake_acp_agent("i1-fail-agent", FAIL_SCRIPT);
+        let agent = crate::test_utils::fake_acp_agent(
+            "i1-fail-agent",
+            &[
+                "--scenario",
+                "new-error",
+                "--error-code",
+                "-32603",
+                "--error-message",
+                "No LLM provider configured",
+            ],
+        );
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1858,19 +1815,10 @@ for line in sys.stdin:
     /// fake agent 对 session/prompt 永不响应（挂起），配 1s 超时 + 1s settle。
     #[tokio::test]
     async fn prompt_timeout_without_content_logs_distinguished_fields() {
-        const HANG_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    if method == 'session/new':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'i2-session'}}
-        print(json.dumps(response), flush=True)
-    elif method != 'session/prompt':
-        # initialize 等握手方法统一应答；session/prompt 永不响应 → 触发超时
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-        print(json.dumps(response), flush=True)
-"#;
-        let mut agent = crate::test_utils::fake_acp_agent("i2-hang-agent", HANG_SCRIPT);
+        let mut agent = crate::test_utils::fake_acp_agent(
+            "i2-hang-agent",
+            &["--scenario", "prompt-silent", "--session-id", "i2-session"],
+        );
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             // The configured prompt budget is intentionally much larger than
             // the first-token bound.  The surfaced error must name the bound
@@ -1962,29 +1910,17 @@ for line in sys.stdin:
     /// idle=1s / first_token=2s（chunk 持续到达 → idle 永不触发）。2.5s 内不得超时。
     #[tokio::test]
     async fn prompt_sustained_by_streaming_activity_is_not_truncated() {
-        const STREAM_SCRIPT: &str = r#"import json,sys,time
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    if method == 'session/new':
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'s2-stream'}}
-        print(json.dumps(response), flush=True)
-    elif method == 'session/prompt':
-        # 持续流式 chunk，永不回终态 → 只应靠"停止输出"才截，活动期间不截
-        try:
-            for i in range(100):
-                print(json.dumps({'jsonrpc':'2.0','method':'session/update',
-                    'params':{'sessionId':'s2-stream','update':{'sessionUpdate':'agent_message_chunk',
-                    'content':{'text':'chunk%d' % i}}}}), flush=True)
-                time.sleep(0.15)
-        except Exception:
-            pass
-    else:
-        # initialize 等握手方法统一应答；永不给 session/prompt 终态响应
-        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-        print(json.dumps(response), flush=True)
-"#;
-        let mut agent = crate::test_utils::fake_acp_agent("i2-stream-agent", STREAM_SCRIPT);
+        let mut agent = crate::test_utils::fake_acp_agent(
+            "i2-stream-agent",
+            &[
+                "--scenario",
+                "stream-forever",
+                "--session-id",
+                "s2-stream",
+                "--chunk-interval-ms",
+                "150",
+            ],
+        );
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             // 关键：把"闲置超时"与"首 token 超时"设短，但仍在 chunk 持续到达下永不触发。
             idle_timeout_secs: Some(1),
