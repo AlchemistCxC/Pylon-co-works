@@ -1940,7 +1940,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             // #98: unified interaction queue admission (drain
                             // terminal states + cold-mount snapshot source).
                             if let Some(runtime) = runtimes.get(&agent_id) {
-                                let _ = runtime.interactions.admit(
+                                if let Err(error) = runtime.interactions.admit(
                                     crate::acp::interaction_queue::InteractionQueueEntry {
                                         request_id: request_id.to_string(),
                                         method: method.to_string(),
@@ -1960,7 +1960,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                         event: interaction_event.clone(),
                                         state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                                     },
-                                );
+                                ) {
+                                    tracing::warn!("interaction queue admit failed: {error}");
+                                }
                             }
                             emit_event(&window, crate::event_names::INTERACTION, interaction_event);
                             continue;

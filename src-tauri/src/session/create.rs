@@ -954,19 +954,21 @@ async fn revive_session_slot(
     let establishment_channels = capability_snapshot
         .establishment_channels()
         .map_err(PylonError::Protocol)?;
-    let resume_advertised = capability_snapshot.advertised("resume");
+    // resume 通道 gate = 协商（广告 ∧ catalog 声明，与 load 对称）；纯广告视图
+    // 只用于下方的 raw 平价断言。
+    let resume_negotiated = capability_snapshot.negotiated("resume");
     {
         // Keep the protocol projection as a parity assertion while the typed
         // snapshot is the actual decision source.
         let acp = runtime.acp.lock().await;
         debug_assert_eq!(
-            resume_advertised,
+            capability_snapshot.advertised("resume"),
             crate::acp::resume_capability_advertised(
                 acp.capabilities().raw().unwrap_or(&serde_json::Value::Null)
             )
         );
     }
-    let response = if resume_advertised {
+    let response = if resume_negotiated {
         let resume_params =
             crate::acp::resume_params(peri_id, session_cwd).map_err(PylonError::Protocol)?;
         match state

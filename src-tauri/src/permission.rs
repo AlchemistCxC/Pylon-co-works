@@ -386,9 +386,53 @@ fn restore_pending(
     claimed: Option<PendingPermission>,
 ) {
     if let Some(permission) = claimed {
-        let _ = runtime.pending_permissions.lock().map(|mut pending| {
-            pending.entry(request_id).or_insert(permission);
-        });
+        let inserted = runtime
+            .pending_permissions
+            .lock()
+            .map(|mut pending| {
+                pending
+                    .insert(request_id.clone(), permission.clone())
+                    .is_none()
+            })
+            .unwrap_or(false);
+        // #98（P2-1 评审修复）：发送失败恢复 pending 时同步回灌交互队列——
+        // 否则超时路径的 settle(TimedOut) 先行移除后，重试中的请求会从
+        // pendingInteractions 冷挂载快照消失（队列与 pending store 失配）。
+        // 回灌事件载荷与 dispatcher admit 同构重建。
+        if inserted {
+            // provider 在 restore 路径不可得（pending store 不持有）——置空串；
+            // 事件消费方（冷挂载 normalize→receive）不依赖该字段做归属。
+            let event = serde_json::json!({
+                "provider": "",
+                "agentId": "",
+                "sessionId": permission.session_id,
+                "eventType": "permission.request",
+                "requestId": request_id.to_string(),
+                "toolCallId": permission.tool_call_id,
+                "clientGeneration": permission.client_generation,
+                "payload": {
+                    "title": permission.title,
+                    "prompt": permission.prompt,
+                    "options": permission.options,
+                    "requestedAt": permission.requested_at,
+                    "deadlineMs": permission_deadline_ms(permission.requested_at),
+                },
+            });
+            let _ =
+                runtime
+                    .interactions
+                    .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                        request_id: request_id.to_string(),
+                        method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                        kind: "approval".to_string(),
+                        session_id: permission.session_id,
+                        agent_id: String::new(),
+                        client_generation: permission.client_generation,
+                        enqueued_at: permission.requested_at,
+                        event,
+                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                    });
+        }
     }
 }
 
@@ -414,6 +458,14 @@ pub(crate) async fn respond_pending_permissions_cancelled(
         // 则由崩溃处理/客户端替换清理，不向新进程误写）。
         let _ = resolve_pending(runtime, request_id, Some(&tool_call_id), "").await;
     }
+    // #98（P1-3 评审修复）：session close/expiry 的 drain 必须覆盖全部 waiter——
+    // elicitation/ask-user 等非 approval 条目不经 resolve_pending，若不在此
+    // 终结会滞留队列并被冷挂载快照复活成死交互（spec §6：cancel 必须 drain
+    // 并给每个 waiter 一个终态）。
+    let _ = runtime.interactions.drain_where(
+        |entry| entry.session_id == session_id,
+        crate::acp::interaction_queue::InteractionTerminalReason::Cancelled,
+    );
 }
 
 /// 应答挂起的权限请求（B9.4 契约）：option_id 必须是请求提供的选项之一。
@@ -555,10 +607,18 @@ pub(crate) async fn respond_interaction(
             crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
                 // #98：elicitation 应答 = ESM 风格 action 三值。decline/cancel
                 // 由前端 optionId 表达；accept 携带 values/text 原样 content。
+                // P2-3（评审修复）：optionId 白名单 fail-closed——未知值显式
+                // 报错而非静默 accept（不伪造成功）。缺省 optionId + values/text
+                // = 自由作答（accept）。
                 let action = match answer.option_id.as_deref() {
+                    None | Some("accept") => "accept",
                     Some("declined") => "decline",
                     Some("cancel") => "cancel",
-                    _ => "accept",
+                    Some(other) => {
+                        return Err(PylonError::Protocol(format!(
+                            "elicitation action unsupported: {other}"
+                        )))
+                    }
                 };
                 let content = match (&answer.values, &answer.text) {
                     (Some(values), _) if values.is_object() => Some(values.clone()),

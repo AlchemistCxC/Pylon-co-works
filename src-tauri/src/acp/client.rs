@@ -38,8 +38,9 @@ pub struct AcpClient {
     /// `session_ready()` 消费，禁止任何绕过握手的会话建立。
     session_ready: AtomicBool,
     /// B2：catalog 声明的会话建立顺序（connect 时按 provider 解析；无 catalog
-    /// profile 时为默认 resume→load→new）。revive 链与
-    /// `session_establishment_channels` 一起做「声明 ∩ 服务端广告」交集。
+    /// profile 时为默认 resume→load→new）。revive 链经协商快照
+    /// `negotiated::NegotiatedCapabilitySnapshot::establishment_channels` 做
+    /// 「声明 ∩ 服务端广告」交集。
     establishment_order: Vec<String>,
 }
 
