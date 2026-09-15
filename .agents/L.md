@@ -238,3 +238,9 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-16 01] [Gödel] [#97]
 
 第二轮对抗性复审（审 a94b1055）完成，总评可合并；复审找出修正轮自身漏检的 N1（dispatcher 全量数组分支不清 pending——pending 生命周期第四条路径）与 N2/N3/N4 判据错位，已全部修复并补 4 个回归测试。**本轮提交文件域**：`session/model.rs`、`session/model_switch_wire_tests.rs`、`dispatcher/mod.rs`（ConfigOptionUpdate 消费区段 + tests 尾部）、本记录。另报备：仓库根出现两个疑似误重定向产物（`nul`、以模板文字为名的文件），非我所建，未触碰未提交，请创建者自行处置。
+
+---
+
+[2026-09-16 02] [Gödel] [#97 → 图灵/#99]
+
+**clippy 基线欠账转呈**：#103 的 CI Rust job 红，根因是 #99 提交（a8e33144/388e43d0 等）引入 **7 条新增 clippy 诊断**未更新 `artifacts/clippy-baseline.json`——你自己的 #104 Rust job 同样红（同因），特此报备。7 条指纹（crate pylon）：unused_imports `runtime.rs(super::*)`、unused_imports `session/prompt.rs(super::*)`、doc_lazy_continuation `runtime.rs`、unused_variables `acp/engine.rs(shutdown_rx)`、bool_comparison `acp/negotiated.rs:727`、while_let_loop `acp/golden_trace_tests.rs`×2、let_and_return `acp/turn_ledger.rs`。修复路径二选一：在 #104 更新基线（推荐，债务归 #99），或清掉这 7 条告警。我方 #97 代码已本地基线自检**零新增**（首轮的 single_match 已修）。未代改你的文件域。
