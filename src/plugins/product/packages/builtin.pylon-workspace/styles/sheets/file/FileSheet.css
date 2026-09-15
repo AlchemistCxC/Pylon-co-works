@@ -1,5 +1,5 @@
 /* W2-03 FileSheet 分区壳：消费现有主题变量，零新样式体系 */
-/* issue #83：跨 sheet 共享词汇（file-main-*/file-section-title/hint/
+/* issue #83：跨 sheet 共享词汇（file-main-* / file-section-title / hint /
    search-result-list/row/path/text、file-tree-error）已剥至
    styles/SheetVocabulary.css（lifecycle=shared）；本文件只含 file 域内部
    样式（tree/tab/CodeMirror/git/dispatch），不再定义这些类。仅保留
@@ -1003,6 +1003,8 @@
  *   盒宽       = --file-code-gutter-width + --file-code-fold-width
  *   行号右缘   = 盒左 + --file-code-gutter-width − --file-code-gutter-pad-right
  *   首字符左缘 = 盒左 + 盒宽 + --file-code-mark-rail + --file-code-line-inset
+ *   正文右留白 = --file-code-line-inset + --file-code-content-pad-right
+ *              （容器自身不加横向内边距 ⇒ 两态同值由构造保证，见 issue #93）
  * 编辑态的折叠列（basicSetup 的 foldGutter）是**额外一条轨**：它占的宽度由
  * --file-code-fold-width 显式声明，只读态同样预留该轨。两态因此由构造相等，而不是
  * 靠行号位数（内容宽度）或级联顺序碰巧一致——vendor 的 `.cm-gutter{width:auto}` 再也
@@ -1027,6 +1029,7 @@
   --file-code-gutter-pad-left: 8px;
   --file-code-gutter-pad-right: 12px;
   --file-code-line-inset: 16px;
+  --file-code-content-pad-right: 0px;
   --file-code-mark-rail: 2px;
   --file-code-tab-size: 2;
 }
@@ -1134,12 +1137,17 @@
   padding: 0 var(--file-code-gutter-pad-right) 0 var(--file-code-gutter-pad-left);
 }
 
-/* 正文容器：两态同一上下内边距、同一字体度量 */
+/* 正文容器：两态同一上下内边距、同一字体度量、同一水平内边距。
+   水平留白由行盒的 --file-code-line-inset 单点承担，容器自身不加横向内边距
+   （两态同值因此由构造保证：#93 之前只读态自带 24px、编辑态 0，宽行滚到最右
+   时右端留白差 24px）。 */
 .file-tab-pre,
 .file-code-editor .cm-content {
   box-sizing: border-box;
   padding-top: var(--file-code-top-padding);
   padding-bottom: var(--file-code-bottom-padding);
+  padding-left: 0;
+  padding-right: var(--file-code-content-pad-right);
   font-family: var(--mono);
   font-size: var(--file-code-font-size);
   line-height: var(--file-code-line-height);
@@ -1149,15 +1157,11 @@
   flex: 1 0 auto;
   min-width: max-content;
   margin: 0;
-  padding-left: 0;
-  padding-right: 24px;
   tab-size: var(--file-code-tab-size);
 }
 
 .file-code-editor .cm-content {
   min-height: 100%;
-  padding-left: 0;
-  padding-right: 0;
 }
 
 /* 行盒 + 标记轨：两态同一 min-height / 内边距 / 标记轨宽度。
