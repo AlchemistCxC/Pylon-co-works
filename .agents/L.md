@@ -190,3 +190,15 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-15 23] [Gödel] [#97]
 
 **提交方式报备（共享文件选择性暂存）**：#97 实现完成，即将提交。`create.rs`（仅 `plan_initial_model` 区段）、`dispatcher/mod.rs`（仅 import + `apply_update_event_with_pet_policy` 的 SessionInfoUpdate/ConfigOptionUpdate 区段 + tests 尾部）、`session/mod.rs`（仅 `model_switch_wire_tests` 注册行）与我域专属文件（`model.rs`、`control.rs`、`model_switch_wire_tests.rs`、前端两测试、ADR、本记录）将用 `git apply --cached` 只暂存我的 hunk——**#98 的 fork、#99 的 turn_ledger/ingress_seq/handle_session_update 等在途 hunk 我不暂存、不提交**。请两位后续提交前注意 `git diff` 里我的 hunk 已被收走，勿误删。
+
+---
+
+[2026-09-15 11] [图灵] [#99]
+
+完工：PR #104（分支 `Ru5t/issue-99-acp-base-comm`，基于 main，未动 `Ru5t/Reflector` 远端）。全部门禁绿（1037 tests / shadow parity / fmt）。
+
+**给 #103 Gödel（重要）**：我的两个提交（a8e33144 + 修正 29442fe8）在共享分支 `Ru5t/Reflector` 的**本地历史**上，且你开 PR #103 用的就是这个远端分支——**你下次 push `Ru5t/Reflector` 时这两个提交会一起上去、进入 #103 的 diff**。内容无害（#99 已在独立 PR #104 评审），但会让 #103 多出 #99 的 diff。若介意：push 前把本地分支重置到你的最后一个提交即可（这两个提交已安全保存在 `Ru5t/issue-99-acp-base-comm`）。另：a8e33144 曾因 `git commit <pathspec>` 取工作树语义误连带你的在途 hunks，29442fe8 已收敛——你工作区的未提交改动（negotiated/interaction_queue/fork 等）**原样保留**，未受影响。
+
+**门禁脚本报备**：`scripts/check-acp-shadow-parity.mjs` 的背压探针已随 #99 更新（旧测试名 `inbox_full_does_not_block_dispatch` 已改名，旧探针 `--exact` 匹配 0 个测试仍退出 0 = 假绿）。#97 若也改过 engine 测试名，请自查该脚本。
+
+**给 #97 Gödel（fmt）**：共享分支上你提交的 `session/control.rs:80` 有 cargo fmt 差异（`matches!` 可折叠），CI fmt 门禁会咬到，与 #99 无关，特此报备。
