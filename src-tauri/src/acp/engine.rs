@@ -42,6 +42,296 @@ pub const BROADCAST_CAP: usize = 256;
 pub const NOTIFICATION_CHAN_CAP: usize = 4096;
 /// 写通道/取消等待超时（秒）——agent 忙碌不读 stdin 时防止无限挂起。
 pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
+/// #99：控制帧 inbox 容量（agent 请求/崩溃广播走优先级通道，不被通知洪泛饿死）。
+pub(crate) const CONTROL_INBOX_CAP: usize = 64;
+/// #99：入站 spill 缓冲容量（inbox 满时的有界溢出区；溢出 = 显式过载终态）。
+/// inbox(4096) + spill(8192) 构成有界总内存，禁止用无限队列掩盖慢消费者。
+pub(crate) const INBOUND_SPILL_CAP: usize = 8192;
+
+/// #99：入站投遥测（每连接一份）。
+///
+/// `next_seq` 是本连接入站帧的单调 ingress ordinal 分配器；spill/drop 计数是
+/// 背压的可观测面——任何 drop 都必须显式记录并伴随过载终态，禁止静默丢帧。
+#[derive(Debug, Default)]
+pub(crate) struct InboundTelemetry {
+    next_seq: AtomicU64,
+    spilled_total: AtomicU64,
+    dropped_total: AtomicU64,
+    overloaded: AtomicBool,
+}
+
+/// 遥测快照（冷挂载/诊断只读投影；serde camelCase）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InboundTelemetrySnapshot {
+    pub(crate) last_ingress_seq: u64,
+    pub(crate) spilled_total: u64,
+    pub(crate) dropped_total: u64,
+    pub(crate) overloaded: bool,
+}
+
+impl InboundTelemetry {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// 分配下一个 ingress ordinal（1 起单调递增；调度回调单线程串行调用）。
+    fn allocate_seq(&self) -> u64 {
+        self.next_seq.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub(crate) fn snapshot(&self) -> InboundTelemetrySnapshot {
+        InboundTelemetrySnapshot {
+            last_ingress_seq: self.next_seq.load(Ordering::Relaxed),
+            spilled_total: self.spilled_total.load(Ordering::Relaxed),
+            dropped_total: self.dropped_total.load(Ordering::Relaxed),
+            overloaded: self.overloaded.load(Ordering::Acquire),
+        }
+    }
+}
+
+/// 入站帧的目标通道：控制帧（agent 请求/崩溃广播）优先于普通通知。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InboundLane {
+    Control,
+    Updates,
+}
+
+/// spill 缓冲（有界；两个 lane 各自保序）。
+#[derive(Debug)]
+struct SpillState {
+    control: std::collections::VecDeque<ClassifiedMessage>,
+    updates: std::collections::VecDeque<ClassifiedMessage>,
+    capacity: usize,
+}
+
+/// #99：可靠入站投递中继。
+///
+/// 入站帧必须经本中继进入 Kernel inbox：`try_send` 失败不再是可忽略的日志，
+/// 而是转入有界 spill 缓冲由泵任务续投；spill 也满 = 显式过载终态（连接按
+/// 崩溃收敛 + `dropped_total` 记录 gap），三选一策略取「spill + 过载终止」，
+/// 杜绝静默丢帧（issue #99 方案不变量 §1）。
+#[derive(Clone)]
+pub(crate) struct InboundRelay {
+    updates_tx: mpsc::Sender<ClassifiedMessage>,
+    control_tx: mpsc::Sender<ClassifiedMessage>,
+    spill: Arc<Mutex<SpillState>>,
+    wake: Arc<tokio::sync::Notify>,
+    pub(crate) telemetry: Arc<InboundTelemetry>,
+    shutdown: watch::Sender<bool>,
+    crashed: Arc<AtomicBool>,
+    crashed_watch: watch::Sender<bool>,
+}
+
+/// 单帧投递结果（可观测背压的机器可判定面）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PublishOutcome {
+    /// 已进入 inbox。
+    Published,
+    /// inbox 满已转入 spill（泵任务续投；消费端最终收到）。
+    Spilled,
+    /// spill 溢出：本帧被显式丢弃且已记录 gap，连接将以过载终态收敛。
+    Overloaded,
+}
+
+impl InboundRelay {
+    fn lane_of(classified: &ClassifiedMessage) -> InboundLane {
+        match classified.raw.kind {
+            // 崩溃广播是控制帧（洪泛时不得被 session/update 饿死）。
+            super::AcpKind::Crashed => InboundLane::Control,
+            // 带 id 且带 method = agent 发来的 JSON-RPC 请求（permission/terminal/
+            // fs/私有交互）——也是控制帧。Response 不经 inbox（SDK SentRequest 直达）。
+            _ if classified.raw.id.is_some() && classified.raw.method.is_some() => {
+                InboundLane::Control
+            }
+            _ => InboundLane::Updates,
+        }
+    }
+
+    /// 投递一帧：先分配单调 ingress ordinal，再按 lane 入队。
+    ///
+    /// #99 不变量（结构性保证，调用方无法绕过）：每帧必有 ordinal；
+    /// inbox 满转 spill；spill 溢出 = 显式过载终态，绝不静默丢帧。
+    fn relay(&self, mut classified: ClassifiedMessage) -> PublishOutcome {
+        classified.ingress_seq = self.telemetry.allocate_seq();
+        let lane = Self::lane_of(&classified);
+        let result = match lane {
+            InboundLane::Control => self.control_tx.try_send(classified),
+            InboundLane::Updates => self.updates_tx.try_send(classified),
+        };
+        match result {
+            Ok(()) => PublishOutcome::Published,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(classified)) => {
+                self.spill_push(classified, lane)
+            }
+            // 下游已关闭 = 连接正在收敛；不视为丢帧（连接终止本身是显式终态）。
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => PublishOutcome::Published,
+        }
+    }
+
+    fn spill_push(&self, classified: ClassifiedMessage, lane: InboundLane) -> PublishOutcome {
+        let mut spill = self
+            .spill
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if spill.control.len() + spill.updates.len() >= spill.capacity {
+            // 显式 gap：丢弃必须计数；首个 gap 触发过载终态收敛连接，
+            // 后续溢出帧只计数（终止流程已启动，不再重复触发）。
+            self.telemetry.dropped_total.fetch_add(1, Ordering::AcqRel);
+            let first_gap = !self.telemetry.overloaded.swap(true, Ordering::AcqRel);
+            drop(spill);
+            if first_gap {
+                self.terminate_overloaded();
+            }
+            return PublishOutcome::Overloaded;
+        }
+        match lane {
+            InboundLane::Control => spill.control.push_back(classified),
+            InboundLane::Updates => spill.updates.push_back(classified),
+        }
+        self.telemetry.spilled_total.fetch_add(1, Ordering::AcqRel);
+        drop(spill);
+        self.wake.notify_one();
+        PublishOutcome::Spilled
+    }
+
+    /// 过载终态：携带原因的控制帧 + 崩溃信号 + 主动关闭连接。
+    ///
+    /// 控制帧让 dispatcher 以稳定 code `overloaded` 收敛 turn/UI；crashed 标志
+    /// 阻断新出站请求；shutdown 结束 SDK 泵任务、触发传输关闭（EOF 路径随后
+    /// 自然收敛）。即使 watch 分支先以缺省原因触发 handle_crash，控制帧随后
+    /// 到达仍会把 reason 修正为 `overloaded`（handle_crash 幂等，双通知已被
+    /// 既有防重入语义容忍）。
+    fn terminate_overloaded(&self) {
+        tracing::error!(
+            dropped_total = self.telemetry.dropped_total.load(Ordering::Acquire),
+            spilled_total = self.telemetry.spilled_total.load(Ordering::Acquire),
+            "acp inbound relay overloaded; terminating connection with explicit gap"
+        );
+        let crash = ClassifiedMessage::live(RawMessage {
+            id: None,
+            kind: super::AcpKind::Crashed,
+            method: Some(super::NOTIF_AGENT_CRASHED.to_string()),
+            result: None,
+            params: Some(serde_json::json!({
+                "reason": CrashReason::Overloaded.as_str()
+            })),
+            error: None,
+        });
+        let _ = self.relay(crash);
+        self.crashed.store(true, Ordering::Release);
+        let _ = self.crashed_watch.send(true);
+        let _ = self.shutdown.send(true);
+    }
+
+    /// 测试构造：返回 (relay, updates_rx, control_rx, shutdown_rx)。
+    /// 生产路径的构造在 `spawn_sdk_engine`（含真实 crash/shutdown 句柄）。
+    #[cfg(test)]
+    pub(crate) fn for_test_with_receivers(
+        updates_cap: usize,
+        control_cap: usize,
+        spill_cap: usize,
+    ) -> (
+        Self,
+        mpsc::Receiver<ClassifiedMessage>,
+        mpsc::Receiver<ClassifiedMessage>,
+        watch::Receiver<bool>,
+    ) {
+        let (updates_tx, updates_rx) = mpsc::channel(updates_cap);
+        let (control_tx, control_rx) = mpsc::channel(control_cap);
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (crashed_watch, _crashed_rx) = watch::channel(false);
+        (
+            Self {
+                updates_tx,
+                control_tx,
+                spill: Arc::new(Mutex::new(SpillState {
+                    control: std::collections::VecDeque::new(),
+                    updates: std::collections::VecDeque::new(),
+                    capacity: spill_cap,
+                })),
+                wake: Arc::new(tokio::sync::Notify::new()),
+                telemetry: Arc::new(InboundTelemetry::new()),
+                shutdown,
+                crashed: Arc::new(AtomicBool::new(false)),
+                crashed_watch,
+            },
+            updates_rx,
+            control_rx,
+            shutdown_rx,
+        )
+    }
+}
+
+/// #99：spill 续投泵。
+///
+/// inbox 满时帧进 spill；泵任务在 inbox 有空位后按「控制优先、各自保序」续投。
+/// 过载位被置上后泵退出（连接进入终态收敛，不再续投）。
+pub(crate) fn spawn_inbound_pump(relay: InboundRelay) {
+    tokio::spawn(async move {
+        let retry = std::time::Duration::from_millis(5);
+        loop {
+            let next = {
+                let mut spill = relay
+                    .spill
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                spill
+                    .control
+                    .pop_front()
+                    .map(|message| (InboundLane::Control, message))
+                    .or_else(|| {
+                        spill
+                            .updates
+                            .pop_front()
+                            .map(|message| (InboundLane::Updates, message))
+                    })
+            };
+            match next {
+                Some((lane, message)) => {
+                    let result = match lane {
+                        InboundLane::Control => relay.control_tx.try_send(message),
+                        InboundLane::Updates => relay.updates_tx.try_send(message),
+                    };
+                    match result {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
+                            // inbox 仍满：放回队首保序，稍候重试（锁在 helper 内
+                            // 取放，不跨 await）。
+                            spill_push_front(&relay, lane, message);
+                            relay.wake.notify_one();
+                            tokio::time::sleep(retry).await;
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                    }
+                }
+                None => {
+                    if relay.telemetry.overloaded.load(Ordering::Acquire) {
+                        break;
+                    }
+                    // 等新 spill 入队；超时兜底重查过载/关闭。
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(200),
+                        relay.wake.notified(),
+                    )
+                    .await;
+                }
+            }
+        }
+    });
+}
+
+/// 把已取出的帧放回 spill 队首（保序）；同步函数内取放锁，绝不跨 await。
+fn spill_push_front(relay: &InboundRelay, lane: InboundLane, message: ClassifiedMessage) {
+    let mut spill = relay
+        .spill
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match lane {
+        InboundLane::Control => spill.control.push_front(message),
+        InboundLane::Updates => spill.updates.push_front(message),
+    }
+}
 
 /// SDK 后端（官方 `agent-client-protocol` 连接）的传输状态。
 ///
@@ -52,6 +342,8 @@ pub(crate) struct SdkBackend {
     /// D12：Pylon 相关 id 的本地计数器（wire id 永不暴露）。
     pub(crate) next_id: Arc<AtomicU64>,
     pub(crate) inbound: NotificationInbox,
+    /// #99：入站投递遥测（ingress 序列 cursor / spill / 过载 gap 计数）。
+    pub(crate) telemetry: Arc<InboundTelemetry>,
     /// A1b：入站帧的 replay 观察扇出（legacy `rx` 的对应物）。
     pub(crate) replay_events: broadcast::Sender<ClassifiedMessage>,
     /// A1b：进行中的 replay 采集（Pylon id → sessionId），用于把匹配通知标记为 Replay。
@@ -358,13 +650,17 @@ fn sdk_request_id_to_pylon(
     }
 }
 
-/// A1b：标记 replay 分类并发布（broadcast 扇出 + 有界 inbox，满时丢帧不阻塞）。
+/// A1b：标记 replay 分类并投递（broadcast 扇出 + 可靠中继）。
+///
+/// #99 变更：ingress ordinal 分配与投递全部收敛在 [`InboundRelay::relay`]——
+/// inbox 满转入有界 spill 续投，spill 溢出以显式过载终态收敛连接。禁止
+/// `try_send` 失败后仅打日志继续运行（旧行为会静默丢帧，已被本函数取代）。
 fn publish_inbound(
     mut classified: ClassifiedMessage,
     replay_events: &broadcast::Sender<ClassifiedMessage>,
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
-    tx: &mpsc::Sender<ClassifiedMessage>,
-) {
+    relay: &InboundRelay,
+) -> PublishOutcome {
     // A replay response is the deterministic boundary of the load operation.
     // Keep this classification on the transport message itself so observers
     // do not have to infer it from the response channel.
@@ -396,14 +692,7 @@ fn publish_inbound(
         }
     }
     let _ = replay_events.send(classified.clone());
-    if let Err(error) = tx.try_send(classified) {
-        match error {
-            tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                tracing::warn!("acp sdk engine: inbound queue full, dropping frame");
-            }
-            tokio::sync::mpsc::error::TrySendError::Closed(_) => {}
-        }
-    }
+    relay.relay(classified)
 }
 
 /// 构造 SDK 侧 transport 与观测桥之间的四端 `Channel` 拓扑。
@@ -483,15 +772,16 @@ where
     ByteStreams::new(write.compat_write(), read.compat())
 }
 
-/// 启动 SDK 客户端连接任务：非类型化 dispatch → 有界入站队列（满时丢帧不阻塞），
-/// `on_close` 置关闭信号；`shutdown` 触发时 `main_fn` 返回、连接收敛。
+/// 启动 SDK 客户端连接任务：非类型化 dispatch → 可靠入站中继（有界 inbox +
+/// 有界 spill + 过载显式终态 + 控制帧优先通道），`on_close` 置关闭信号；
+/// `shutdown` 触发时 `main_fn` 返回、连接收敛。
 #[allow(
     clippy::too_many_arguments,
     reason = "装配函数：参数量随 A1b replay 扇出增加；A1c 收敛后端后合并为结构体"
 )]
 pub(crate) fn spawn_sdk_client(
     config: SdkEngineConfig,
-    inbound_tx: tokio::sync::mpsc::Sender<ClassifiedMessage>,
+    relay: InboundRelay,
     mut outbound_rx: tokio::sync::mpsc::Receiver<SdkOutbound>,
     transport: impl ConnectTo<Client> + 'static,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -504,13 +794,15 @@ pub(crate) fn spawn_sdk_client(
     let crashed_eof = crashed.clone();
     let crashed_watch_eof = crashed_watch.clone();
     let wire = config.wire.clone();
+    // #99：spill 续投泵（inbox 满时的续投者；过载后退出）。
+    spawn_inbound_pump(relay.clone());
     tokio::spawn(async move {
         let result = Client
             .builder()
             .name(config.name)
             .on_receive_dispatch(
                 move |message: Dispatch<UntypedMessage, UntypedMessage>, _cx| {
-                    let tx = inbound_tx.clone();
+                    let relay = relay.clone();
                     let replay_events = replay_events.clone();
                     let active_replay_requests = active_replay_requests.clone();
                     let pending_requests = pending_requests.clone();
@@ -543,7 +835,7 @@ pub(crate) fn spawn_sdk_client(
                                     classified,
                                     &replay_events,
                                     &active_replay_requests,
-                                    &tx,
+                                    &relay,
                                 );
                             }
                             Dispatch::Notification(notification) => {
@@ -560,7 +852,7 @@ pub(crate) fn spawn_sdk_client(
                                     classified,
                                     &replay_events,
                                     &active_replay_requests,
-                                    &tx,
+                                    &relay,
                                 );
                             }
                         }
@@ -699,7 +991,9 @@ pub(crate) fn spawn_sdk_engine(
         let _ = child_crashed_watch.send(true);
     });
 
-    let (inbound_tx, inbound_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
+    let (updates_tx, updates_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
+    // #99：控制帧通道（agent 请求/崩溃广播走优先级 lane）+ 可靠中继。
+    let (control_tx, control_rx) = mpsc::channel(CONTROL_INBOX_CAP);
     let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CHAN_CAP);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (replay_events, _) = broadcast::channel(super::BROADCAST_CAP);
@@ -707,6 +1001,21 @@ pub(crate) fn spawn_sdk_engine(
         Arc::new(Mutex::new(HashMap::new()));
     let pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let telemetry = Arc::new(InboundTelemetry::new());
+    let relay = InboundRelay {
+        updates_tx,
+        control_tx,
+        spill: Arc::new(Mutex::new(SpillState {
+            control: std::collections::VecDeque::new(),
+            updates: std::collections::VecDeque::new(),
+            capacity: INBOUND_SPILL_CAP,
+        })),
+        wake: Arc::new(tokio::sync::Notify::new()),
+        telemetry: telemetry.clone(),
+        shutdown: shutdown_tx.clone(),
+        crashed: crashed.clone(),
+        crashed_watch: crashed_watch.clone(),
+    };
 
     let join = spawn_sdk_client(
         SdkEngineConfig {
@@ -714,7 +1023,7 @@ pub(crate) fn spawn_sdk_engine(
             client_generation,
             wire: wire.clone(),
         },
-        inbound_tx,
+        relay,
         outbound_rx,
         sdk_end,
         shutdown_rx,
@@ -729,7 +1038,8 @@ pub(crate) fn spawn_sdk_engine(
         backend: SdkBackend {
             outbound: outbound_tx,
             next_id: Arc::new(AtomicU64::new(1)),
-            inbound: NotificationInbox::new(inbound_rx),
+            inbound: NotificationInbox::new(updates_rx, control_rx),
+            telemetry,
             replay_events,
             active_replay_requests,
             pending_requests,
@@ -777,7 +1087,8 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client_io);
         let (_, mut agent_write) = tokio::io::split(agent_io);
 
-        let (inbound_tx, mut inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (relay, mut updates_rx, _control_rx, _shutdown_rx) =
+            InboundRelay::for_test_with_receivers(8, 8, 64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let _outbound_tx = outbound_tx;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -785,7 +1096,7 @@ mod tests {
         let (crashed_watch, mut crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
-            inbound_tx,
+            relay,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
@@ -807,7 +1118,7 @@ mod tests {
             .expect("agent write");
         agent_write.flush().await.expect("agent flush");
 
-        let inbound = tokio::time::timeout(Duration::from_secs(5), inbound_rx.recv())
+        let inbound = tokio::time::timeout(Duration::from_secs(5), updates_rx.recv())
             .await
             .expect("inbound notification must arrive")
             .expect("inbound channel must stay open");
@@ -840,13 +1151,14 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client_io);
         let (agent_read, mut agent_write) = tokio::io::split(agent_io);
 
-        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (relay, _updates_rx, _control_rx, _relay_shutdown_rx) =
+            InboundRelay::for_test_with_receivers(8, 8, 64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
-            inbound_tx,
+            relay,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
@@ -905,21 +1217,28 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
 
-    /// A1a 步骤 6（**硬门**）：入站队列满时丢帧、不阻塞 dispatch loop。
+    /// A1a 步骤 6（**硬门**）+ #99 背压契约：入站队列满时**不丢帧**——溢出帧
+    /// 进有界 spill 由泵任务续投（ingress 序列保序），同时 dispatch loop 保持
+    /// 响应（出站请求在 inbox 满时仍被处理）。
+    ///
+    /// 预期行为变化（对比旧 `inbox_full_does_not_block_dispatch`）：旧契约断言
+    /// 「容量 1 时后 2 帧被静默丢弃」；#99 禁止静默丢帧，本测试改为断言全部
+    /// 3 帧按 ingress 序列完整送达。
     #[tokio::test]
-    async fn inbox_full_does_not_block_dispatch() {
+    async fn inbox_full_spills_then_delivers_every_frame_in_order() {
         let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
         let (client_read, client_write) = tokio::io::split(client_io);
         let (agent_read, mut agent_write) = tokio::io::split(agent_io);
 
-        // 入站队列容量 1：连发 3 条通知必有 2 条被丢。
-        let (inbound_tx, mut inbound_rx) = tokio::sync::mpsc::channel(1);
+        // 入站队列容量 1：连发 3 条通知必有 2 条先入 spill，再由泵续投。
+        let (relay, mut updates_rx, _control_rx, _shutdown_rx) =
+            InboundRelay::for_test_with_receivers(1, 8, 64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let (crashed_watch, _crashed_rx) = tokio::sync::watch::channel(false);
         let handle = spawn_sdk_client(
             engine_config(),
-            inbound_tx,
+            relay,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
@@ -982,20 +1301,120 @@ mod tests {
             .expect("outbound request must succeed");
         assert_eq!(response["ok"], true);
 
-        // 队列只保留 1 条，其余被丢帧（try_send 失败不影响转发）。
-        let first = inbound_rx.recv().await.expect("first notification kept");
-        assert_eq!(first.raw.method.as_deref(), Some("session/update"));
-        assert_eq!(
-            first.raw.params,
-            Some(
-                serde_json::json!({"sessionId": "s-1", "update": {"sessionUpdate": "agent_message_chunk", "index": 0}})
-            )
-        );
+        // #99：三帧全部送达（无静默丢帧），ingress 序列严格递增。
+        let mut seqs = Vec::new();
+        for index in 0..3 {
+            let frame = tokio::time::timeout(Duration::from_secs(5), updates_rx.recv())
+                .await
+                .expect("spilled frame must be delivered by the pump")
+                .expect("updates channel must stay open");
+            assert_eq!(
+                frame.raw.params.as_ref().unwrap()["update"]["index"],
+                serde_json::json!(index),
+                "帧必须按序送达（无记录的丢弃 = 门禁失败）"
+            );
+            seqs.push(frame.ingress_seq);
+        }
+        assert_eq!(seqs, vec![1, 2, 3], "ingress ordinal 必须单调递增且无 gap");
 
         let _ = hold_tx.send(());
         agent_task.await.expect("agent task");
         let _ = shutdown_tx.send(true);
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
+    /// #99：spill 溢出 = 显式过载终态。丢弃必须计数（gap 可观测）、崩溃广播
+    /// 携带稳定 code `overloaded`、shutdown 触发连接收敛；禁止静默继续运行。
+    #[tokio::test]
+    async fn spill_overflow_terminates_connection_with_explicit_overload() {
+        let (relay, updates_rx, mut control_rx, shutdown_rx) =
+            InboundRelay::for_test_with_receivers(1, 8, 1);
+
+        let update = |index: u64| {
+            ClassifiedMessage::live(RawMessage {
+                id: None,
+                kind: super::AcpKind::SessionUpdate,
+                method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+                result: None,
+                params: Some(serde_json::json!({"sessionId": "s-1", "update": {"index": index}})),
+                error: None,
+            })
+        };
+
+        // 消费端不读 updates_rx：inbox(1) + spill(1) 后第 3 帧必须触发过载。
+        assert_eq!(relay.relay(update(0)), PublishOutcome::Published);
+        assert_eq!(relay.relay(update(1)), PublishOutcome::Spilled);
+        assert_eq!(relay.relay(update(2)), PublishOutcome::Overloaded);
+
+        let telemetry = relay.telemetry.snapshot();
+        assert_eq!(
+            telemetry.dropped_total, 1,
+            "溢出帧必须显式计数（gap marker）"
+        );
+        assert_eq!(telemetry.spilled_total, 1);
+        assert!(telemetry.overloaded, "过载位必须置上");
+
+        // 崩溃广播走控制通道，reason = 稳定 code "overloaded"。
+        let crash = tokio::time::timeout(Duration::from_secs(2), control_rx.recv())
+            .await
+            .expect("crash frame must be queued")
+            .expect("control channel must stay open");
+        assert_eq!(crash.raw.kind, super::AcpKind::Crashed);
+        assert_eq!(
+            crash.raw.params.as_ref().unwrap()["reason"],
+            serde_json::json!("overloaded")
+        );
+        // shutdown 已触发（连接收敛），且 updates_rx 未被消费过。
+        assert!(
+            *shutdown_rx.borrow(),
+            "shutdown must be requested on overload"
+        );
+        drop(updates_rx);
+    }
+
+    /// #99：控制帧优先级——updates 通道满 + spill 非空时，agent 请求（带 id）
+    /// 仍经控制通道立即被消费端读到；优先级不改写各帧 ingress 序列。
+    #[tokio::test]
+    async fn control_lane_delivers_requests_while_update_flood_is_queued() {
+        let (relay, mut updates_rx, mut control_rx, _shutdown_rx) =
+            InboundRelay::for_test_with_receivers(1, 8, 64);
+
+        let update = |index: u64| {
+            ClassifiedMessage::live(RawMessage {
+                id: None,
+                kind: super::AcpKind::SessionUpdate,
+                method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+                result: None,
+                params: Some(serde_json::json!({"sessionId": "s-1", "update": {"index": index}})),
+                error: None,
+            })
+        };
+        assert_eq!(relay.relay(update(0)), PublishOutcome::Published);
+        assert_eq!(relay.relay(update(1)), PublishOutcome::Spilled);
+
+        // 洪泛未消费时，permission 请求必须立即可读（控制通道）。
+        let request = ClassifiedMessage::live(RawMessage {
+            id: Some(super::super::RequestId::String("perm-1".to_string())),
+            kind: super::AcpKind::PermissionRequest,
+            method: Some("session/request_permission".to_string()),
+            result: None,
+            params: Some(serde_json::json!({"sessionId": "s-1"})),
+            error: None,
+        });
+        assert_eq!(relay.relay(request), PublishOutcome::Published);
+        let control_frame = tokio::time::timeout(Duration::from_secs(2), control_rx.recv())
+            .await
+            .expect("control frame must bypass the update flood")
+            .expect("control channel must stay open");
+        assert_eq!(control_frame.raw.kind, super::AcpKind::PermissionRequest);
+        assert_eq!(control_frame.ingress_seq, 3, "优先级不改写 ingress 序列");
+
+        // 普通 lane 数据未动：第一帧仍在 inbox。
+        let first = tokio::time::timeout(Duration::from_secs(2), updates_rx.recv())
+            .await
+            .expect("update frame")
+            .expect("updates channel");
+        assert_eq!(first.ingress_seq, 1);
     }
 
     /// A1a 步骤 3 证据：观测桥逐帧写入 `AcpWireHub`（两个方向、id 形态保持）。
@@ -1070,7 +1489,8 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client_io);
         let (agent_read, mut agent_write) = tokio::io::split(agent_io);
 
-        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (relay, _updates_rx, _control_rx, _relay_shutdown_rx) =
+            InboundRelay::for_test_with_receivers(8, 8, 64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let _outbound_tx = outbound_tx;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -1080,7 +1500,7 @@ mod tests {
 
         let handle = spawn_sdk_client(
             engine_config(),
-            inbound_tx,
+            relay,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
@@ -1156,7 +1576,8 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client_io);
         let (_, mut agent_write) = tokio::io::split(agent_io);
 
-        let (inbound_tx, _inbound_rx) = tokio::sync::mpsc::channel(8);
+        let (relay, _updates_rx, _control_rx, _relay_shutdown_rx) =
+            InboundRelay::for_test_with_receivers(8, 8, 64);
         let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(8);
         let _outbound_tx = outbound_tx;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -1167,7 +1588,7 @@ mod tests {
 
         let handle = spawn_sdk_client(
             engine_config(),
-            inbound_tx,
+            relay,
             outbound_rx,
             byte_streams(client_read, client_write),
             shutdown_rx,
@@ -1365,8 +1786,23 @@ pub enum PromptWaitOutcome {
         timeout_kind: PromptTimeoutKind,
         timeout_bound: std::time::Duration,
         elapsed: std::time::Duration,
+        /// #99：cancel 后 settle 窗口的可判定解析——Agent 在窗口内回终态、
+        /// 窗口超时、或响应通道消失（引擎任务已终止），三者不再合并为 None。
+        settle: CancelSettleResolution,
     },
     ConnectionClosed,
+}
+
+/// #99：超时触发 cancel 后 settle 窗口的解析结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelSettleResolution {
+    /// Agent 在 settle 窗口内回终态——使用该终态（issue #99 验收：窗口内回的
+    /// 终态必须胜出）。
+    Responded,
+    /// settle 窗口超时且无终态。
+    SettleTimeout,
+    /// 响应 oneshot 被丢弃（引擎任务终止 = 连接级失败）。
+    ResponderDropped,
 }
 
 /// Wait for a prompt response. On truncation, send session/cancel and keep the
@@ -1448,10 +1884,12 @@ where
                     Some("ACP write timeout".to_string())
                 }
             };
-            let response = match tokio::time::timeout(cancel_settle_timeout, &mut *rx).await {
-                Ok(Ok(raw)) => Some(raw),
-                Ok(Err(_)) | Err(_) => None,
-            };
+            let (response, settle) =
+                match tokio::time::timeout(cancel_settle_timeout, &mut *rx).await {
+                    Ok(Ok(raw)) => (Some(raw), CancelSettleResolution::Responded),
+                    Ok(Err(_)) => (None, CancelSettleResolution::ResponderDropped),
+                    Err(_) => (None, CancelSettleResolution::SettleTimeout),
+                };
             if response.is_none() {
                 // A provider can acknowledge neither session/cancel nor the
                 // pending prompt (the Hermes/MSYS deadlock observed on
@@ -1473,6 +1911,7 @@ where
                 timeout_kind: fire_reason.kind,
                 timeout_bound: fire_reason.bound,
                 elapsed: fire_reason.elapsed,
+                settle,
             };
         }
         tokio::select! {
@@ -1558,6 +1997,8 @@ pub enum CrashReason {
     StdoutClosed,
     /// pending 分片锁中毒（保守收敛，fail-closed）。
     PendingLockPoisoned,
+    /// #99：入站投递过载（inbox+spill 均满，显式 gap 终止连接）。
+    Overloaded,
 }
 
 impl CrashReason {
@@ -1567,6 +2008,7 @@ impl CrashReason {
             CrashReason::WriterTimeout => "writer_timeout",
             CrashReason::StdoutClosed => "stdout_closed",
             CrashReason::PendingLockPoisoned => "pending_lock_poisoned",
+            CrashReason::Overloaded => "overloaded",
         }
     }
 }

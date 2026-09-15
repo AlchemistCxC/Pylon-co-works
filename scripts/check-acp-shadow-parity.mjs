@@ -209,8 +209,11 @@ function snapshot(name, records) {
     finalState: finalState(name, records),
     queue: {
       bounded: true,
-      backpressure: "drop-on-full",
-      evidence: "acp::engine::tests::inbox_full_does_not_block_dispatch",
+      // #99：入站背压 = 有界 inbox + 有界 spill 续投；spill 溢出以显式
+      // overloaded 终态关闭连接并记录 gap 计数。静默 drop-on-full 已废除。
+      backpressure: "bounded-spill-then-overload-terminal",
+      evidence:
+        "acp::engine::tests::inbox_full_spills_then_delivers_every_frame_in_order + spill_overflow_terminates_connection_with_explicit_overload",
     },
     traceBytes,
     memoryBound: traceBytes <= 4 * 1024 * 1024,
@@ -219,16 +222,47 @@ function snapshot(name, records) {
 }
 
 function runBackpressureCheck() {
+  // #99：背压探针必须命中的测试用 `--exact` 逐一运行。注意 `cargo test` 对
+  // 匹配 0 个测试的情况也退出 0，因此这里的测试名必须与源码同步维护
+  // （名字失效 = 探针假绿），两个测试分别锁定「spill 续投不丢帧」与
+  // 「溢出显式过载终态」两半契约。
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
-  return run(cargo, [
-    "test",
-    "--manifest-path",
-    "src-tauri/Cargo.toml",
-    "--lib",
-    "acp::engine::tests::inbox_full_does_not_block_dispatch",
-    "--",
-    "--exact",
-  ]);
+  const tests = [
+    "acp::engine::tests::inbox_full_spills_then_delivers_every_frame_in_order",
+    "acp::engine::tests::spill_overflow_terminates_connection_with_explicit_overload",
+  ];
+  let elapsedMs = 0;
+  let stdout = "";
+  let stderr = "";
+  for (const name of tests) {
+    const result = run(cargo, [
+      "test",
+      "--manifest-path",
+      "src-tauri/Cargo.toml",
+      "--lib",
+      name,
+      "--",
+      "--exact",
+    ]);
+    // `--exact` 下目标测试必须真实运行（cargo 对匹配 0 个测试也退出 0，
+    // 所以必须检查 "1 passed" 而不仅是退出码）。
+    if (!/test result: ok\..*1 passed/.test(result.stdout)) {
+      return {
+        status: result.status === 0 ? 1 : result.status,
+        elapsedMs,
+        stdout,
+        stderr: `${stderr}${result.stderr}
+backpressure probe matched no test: ${name}`,
+      };
+    }
+    elapsedMs += result.elapsedMs;
+    stdout += result.stdout;
+    stderr += result.stderr;
+    if (result.status !== 0) {
+      return { status: result.status, elapsedMs, stdout, stderr };
+    }
+  }
+  return { status: 0, elapsedMs, stdout, stderr };
 }
 
 const generation = run(process.execPath, [generator, "--check"]);

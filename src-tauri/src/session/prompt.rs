@@ -2,7 +2,10 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
-use crate::acp::{AcpError, PromptTimeoutKind};
+use crate::acp::{
+    terminal_cause_from_prompt_result, AcpError, CancelSettleResolution, PromptTimeoutKind,
+    TurnKey, TurnTerminalCause,
+};
 
 /// Additive failure provenance carried by `pylon:error`.  The legacy top-level
 /// `error` string remains the user-facing compatibility field; this structure
@@ -61,6 +64,84 @@ impl PromptFailureMetadata {
 
 fn elapsed_millis(start: std::time::Instant) -> u64 {
     start.elapsed().as_millis().min(u64::MAX as u128) as u64
+}
+
+/// #99：turn 终态判定的 Unix 毫秒时间戳（账本/冷挂载快照用）。
+fn now_ms() -> u64 {
+    crate::time::Timestamp::now().as_u64()
+}
+
+/// #99：把 ledger settle 结果落到诊断日志——`Published` 静默（正常收敛），
+/// `Late`/`UnknownTurn` 告警（竞态被 CAS 拦截 / 未登记 turn）。
+fn report_settle(
+    runtime: &Arc<AgentRuntime>,
+    turn_key: &crate::acp::TurnKey,
+    cause: crate::acp::TurnTerminalCause,
+    detail: Option<String>,
+) {
+    let outcome = runtime
+        .turn_ledger
+        .settle(turn_key, cause, now_ms(), detail);
+    match outcome {
+        crate::acp::SettleOutcome::Published => {}
+        crate::acp::SettleOutcome::Late { existing } => tracing::warn!(
+            turn_id = turn_key.turn_id,
+            existing = existing.as_str(),
+            "late terminal event rejected by turn ledger (CAS); diagnostic counter incremented"
+        ),
+        crate::acp::SettleOutcome::UnknownTurn => tracing::warn!(
+            turn_id = turn_key.turn_id,
+            "turn ledger settle hit an unregistered turn; lifecycle evidence lost"
+        ),
+    }
+}
+
+/// #99：empty-turn 细分——成功/MaxTurn 但无文本时按会话 live 状态推导
+/// （tool-only / agent-empty），其余 cause 原样返回。
+fn refine_empty_turn(
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    cause: crate::acp::TurnTerminalCause,
+) -> crate::acp::TurnTerminalCause {
+    if !matches!(
+        cause,
+        crate::acp::TurnTerminalCause::Completed | crate::acp::TurnTerminalCause::MaxTurn
+    ) {
+        return cause;
+    }
+    let (saw_text, saw_tool) = match runtime.sessions.lock() {
+        Ok(sessions) => match sessions.get(source) {
+            Some(session) => (
+                !session.last_response_text.trim().is_empty(),
+                !session.acp_state.tools.is_empty(),
+            ),
+            None => (false, false),
+        },
+        Err(_) => (false, false),
+    };
+    match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool) {
+        Some(empty) => crate::acp::TurnTerminalCause::EmptyTurn { cause: empty },
+        None => cause,
+    }
+}
+
+/// #99：从 prompt 响应帧结算 turn 终态（wire 权威，先于展示/持久化路径执行，
+/// 保证 ensure_generation 等后续失败也不会让 turn 悬在账本外）。
+fn settle_turn_from_response(
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    turn_key: &crate::acp::TurnKey,
+    raw: &acp::RawMessage,
+) {
+    let mut cause = if raw.error.is_some() {
+        crate::acp::TurnTerminalCause::ProtocolError
+    } else {
+        let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
+        crate::acp::terminal_cause_from_prompt_result(&data)
+    };
+    cause = refine_empty_turn(runtime, source, cause);
+    let detail = raw.error.as_ref().map(|error| error.to_string());
+    report_settle(runtime, turn_key, cause, detail);
 }
 
 fn failure_for_acp_error(error: &AcpError, elapsed_ms: Option<u64>) -> PromptFailureMetadata {
@@ -1016,6 +1097,22 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             return Err(PylonError::from(error));
         }
     };
+    // #99：出站成功即回合在账本登记（Prompting 起点）；后续每条路径都必须
+    // 收敛到唯一终态（CAS 保证重复结算只计诊断）。
+    let turn_key = TurnKey {
+        local_session_id: source.to_string(),
+        remote_session_id: flow.peri_id.clone(),
+        generation: flow.generation,
+        turn_id: flow.request_id,
+    };
+    if let crate::acp::BeginOutcome::AlreadyActive =
+        runtime.turn_ledger.begin(turn_key.clone(), now_ms())
+    {
+        tracing::warn!(
+            turn_id = flow.request_id,
+            "duplicate turn begin in ledger; keeping original registration"
+        );
+    }
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = flow.peri_id.clone();
     // API 1.3：turn.started 观察锚点——出站成功即回合开始（spawn 不阻塞响应等待）。
@@ -1100,6 +1197,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
+            // #99：wire 终态判定先于展示/持久化——ensure_generation 等后续失败
+            // 也不能让 turn 悬在账本外；一个 prompt 至多一个 terminal transition。
+            settle_turn_from_response(runtime, source, &turn_key, &raw);
             state.ensure_generation(runtime, flow.generation)?;
             if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
                 return Err(PylonError::Protocol(format!(
@@ -1135,6 +1235,8 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
+            // #99：连接关闭 = 回合终态 ConnectionLost（不再悬置）。
+            report_settle(runtime, &turn_key, TurnTerminalCause::ConnectionLost, None);
             *failure = Some(PromptFailureMetadata {
                 source: "connection",
                 actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
@@ -1178,7 +1280,38 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             timeout_kind,
             timeout_bound,
             elapsed,
+            settle,
         } => {
+            // #99：settle 窗口解析映射到稳定终态——窗口内回的终态胜出（含空回合
+            // 细分）；窗口超时 = CancelSettleTimeout（触发超时类别进 detail）；
+            // 响应通道消失（引擎任务终止）= ConnectionLost。
+            let (cause, settle_detail) = match (response.as_ref(), settle) {
+                (Some(raw), CancelSettleResolution::Responded) => {
+                    let detail = raw.error.as_ref().map(|error| error.to_string());
+                    let cause = if raw.error.is_some() {
+                        TurnTerminalCause::ProtocolError
+                    } else {
+                        let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
+                        terminal_cause_from_prompt_result(&data)
+                    };
+                    (refine_empty_turn(runtime, source, cause), detail)
+                }
+                (None, CancelSettleResolution::SettleTimeout) => (
+                    TurnTerminalCause::CancelSettleTimeout,
+                    Some(format!("triggered_by:{}", timeout_kind.as_str())),
+                ),
+                (_, CancelSettleResolution::ResponderDropped) => {
+                    (TurnTerminalCause::ConnectionLost, None)
+                }
+                // 理论不可达（Responded 必有 response / SettleTimeout 必无）：
+                // 保守按协议错误收敛，不猜。
+                (Some(_), CancelSettleResolution::SettleTimeout)
+                | (None, CancelSettleResolution::Responded) => (
+                    TurnTerminalCause::ProtocolError,
+                    Some("inconsistent cancel settle resolution".to_string()),
+                ),
+            };
+            report_settle(runtime, &turn_key, cause, settle_detail);
             runtime.acp.lock().await.remove_pending(flow.request_id);
             if let Some(cancel_error) = cancel_error {
                 tracing::warn!("cancel timed-out prompt {}: {}", flow.peri_id, cancel_error);

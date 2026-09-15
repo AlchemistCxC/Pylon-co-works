@@ -15,6 +15,9 @@ struct PersistedSessionLoadResult {
     collection: ReplayCollection,
     import: Option<ReplayImport>,
     diagnostics: Vec<serde_json::Value>,
+    /// #99：冷挂载 turn 快照（turnState/terminalCause/sequence/lastError/
+    /// replayLoading）——前端恢复只凭本响应，不依赖一次性 Tauri event。
+    turn: Option<serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -284,6 +287,9 @@ pub(crate) async fn load_persisted_session(
                     "recoverability": "retry-or-export",
                 })]
             };
+            // #99：冷挂载 turn 快照——在 replay_loading 清位后从后端权威状态
+            // （turn 账本 + ingress 序列 cursor + lastError）合成。
+            let turn_snapshot = runtime.cold_mount_turn_snapshot(&source).await;
             serde_json::to_value(PersistedSessionLoadResult {
                 response,
                 replay: replay.events,
@@ -295,6 +301,7 @@ pub(crate) async fn load_persisted_session(
                 collection,
                 import,
                 diagnostics,
+                turn: turn_snapshot,
             })
             .map_err(|error| PylonError::from(error.to_string()))
         }

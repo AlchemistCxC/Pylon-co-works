@@ -439,8 +439,11 @@ async fn timeout_sends_cancel_and_waits_for_final_response() {
             timeout_kind,
             timeout_bound,
             elapsed,
+            settle,
         } => {
             assert!(cancel_error.is_none());
+            // #99：settle 窗口内回的终态胜出——Responded 必须与 response 成对。
+            assert_eq!(settle, crate::acp::CancelSettleResolution::Responded);
             assert_eq!(timeout_kind, PromptTimeoutKind::FirstToken);
             assert_eq!(timeout_bound, std::time::Duration::from_millis(10));
             assert!(elapsed >= timeout_bound);
@@ -1521,8 +1524,10 @@ for line in sys.stdin:
             timeout_kind,
             timeout_bound,
             elapsed,
+            settle,
         } => {
             assert!(cancel_error.is_none());
+            assert_eq!(settle, crate::acp::CancelSettleResolution::Responded);
             assert_eq!(timeout_kind, PromptTimeoutKind::FirstToken);
             assert_eq!(timeout_bound, std::time::Duration::from_millis(20));
             assert!(elapsed >= timeout_bound);
@@ -1560,8 +1565,10 @@ for line in sys.stdin:
         .await
         .expect("fake ACP must initialize");
     // agent 先发一条 id=42 的请求；等它进入 Kernel inbox 后用后端中立 responder 应答。
+    // #99 行为变化：agent JSON-RPC 请求走控制 lane（recv_control），不再与
+    // session/update 同队——控制帧优先，通知洪泛不饿死交互请求。
     let inbox = client.notification_inbox();
-    let request = tokio::time::timeout(std::time::Duration::from_secs(5), inbox.recv())
+    let request = tokio::time::timeout(std::time::Duration::from_secs(5), inbox.recv_control())
         .await
         .expect("agent request must arrive")
         .expect("inbox must stay open");
