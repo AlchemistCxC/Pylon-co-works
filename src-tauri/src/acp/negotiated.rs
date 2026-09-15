@@ -724,7 +724,7 @@ mod tests {
         );
         assert!(snapshot.load_supported());
         assert!(
-            snapshot.usable("promptImage") == false,
+            !snapshot.usable("promptImage"),
             "未注册消费者不可 usable"
         );
         let raw = snapshot.raw().expect("原文保留");
