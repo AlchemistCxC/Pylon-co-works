@@ -1492,7 +1492,6 @@ mod tests {
             }
         );
     }
-    use super::*;
     use crate::acp::AcpClient;
 
     /// B-02 / C0-OPT：prompt ingest 是 GUI user.message 的唯一 durable owner。

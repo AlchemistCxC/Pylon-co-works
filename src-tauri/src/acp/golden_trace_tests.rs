@@ -568,11 +568,9 @@ async fn inbound_envelope_agrees_with_wire_capture() {
 
     // 收集 inbox 帧（typed lane），直到静默。
     let mut frames = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await {
-            Ok(Some(frame)) => frames.push(frame),
-            _ => break,
-        }
+    while let Ok(Some(frame)) = tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await
+    {
+        frames.push(frame);
     }
 
     // prompt 响应必须走 SentRequest 路径（不进 inbox），其 stopReason 可读。
@@ -729,11 +727,9 @@ async fn replay_boundary_order_is_reconstructible_from_sequences() {
     // typed lane：replay update 帧分类为 Replay（request id 绑定），ingress 序
     // 列严格递增，且落在 wire 边界之间。
     let mut replay_frames = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await {
-            Ok(Some(frame)) => replay_frames.push(frame),
-            _ => break,
-        }
+    while let Ok(Some(frame)) = tokio::time::timeout(Duration::from_millis(300), inbox.recv()).await
+    {
+        replay_frames.push(frame);
     }
     let classified: Vec<&crate::acp::ClassifiedMessage> = replay_frames
         .iter()

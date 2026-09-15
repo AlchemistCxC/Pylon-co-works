@@ -740,10 +740,8 @@ mod tests {
             .latest_session_snapshot("local:s1", "peri-s1", 1)
             .expect("最近终态必须保留");
         assert_eq!(retained.key.turn_id, 12, "保留的必须是最新终态");
-        let mut terminal_turns: Vec<u64> = {
-            let records = ledger.snapshot_records_for_test("local:s1", "peri-s1", 1);
-            records
-        };
+        let mut terminal_turns: Vec<u64> =
+            ledger.snapshot_records_for_test("local:s1", "peri-s1", 1);
         terminal_turns.sort_unstable();
         assert_eq!(
             terminal_turns.len(),
