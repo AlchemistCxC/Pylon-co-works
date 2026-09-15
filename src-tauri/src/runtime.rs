@@ -58,6 +58,10 @@ pub struct AgentRuntime {
     /// （超时默认拒绝）。id 保留 wire 原始 variant——响应用原 variant 回写。
     pub pending_permissions: Arc<Mutex<HashMap<RequestId, PendingPermission>>>,
     pub private_interactions: PrivateInteractionOwner,
+    /// #98：统一交互队列（permission/elicitation/question 等阻塞请求的 request-id
+    /// 生命周期）：FIFO、单一 Active、queued depth、cancel/timeout/disconnect drain。
+    /// 只管理排序与终态，不持有 wire responder（应答仍走既有 pending store）。
+    pub interactions: crate::acp::interaction_queue::InteractionQueue,
     /// 会话映射就绪通知（R6，吸收 O5）：new_session / send_prompt_core 自动建会话 /
     /// load_persisted_session 的 sessions 映射插入成功后 notify_waiters，dispatcher
     /// 对未知 periId 的等待由 20×5ms 轮询改为事件驱动（100ms 窗口语义不变）。
@@ -91,6 +95,7 @@ impl AgentRuntime {
             auto_reconnect_active: Arc::new(AtomicBool::new(false)),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             private_interactions: PrivateInteractionOwner::default(),
+            interactions: crate::acp::interaction_queue::InteractionQueue::default(),
             mapping_ready: tokio::sync::Notify::new(),
             update_channels: Arc::new(Mutex::new(HashMap::new())),
             terminal_registry: Arc::new(crate::acp::terminal_runtime::TerminalRegistry::default()),
