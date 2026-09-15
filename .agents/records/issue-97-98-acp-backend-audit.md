@@ -69,6 +69,12 @@ spec 文件按 `.gitignore` 约定保留在本地，不进入提交；issue 正�
 - #97 的 tentative requested 状态是否持久化，需要实现时对齐现有 session schema。
 - #98 的根级 capability alias 保留窗口、以及 sessionClose/MCP 缺失默认值迁移策略，需要实现前用现有 wire fixtures 决定并登记 ADR。
 
+## 本轮复核修正（2026-09-15）
+
+- 目标能力不得写成当前能力。代码核查确认 `src-tauri/src/acp/engine.rs:399-404` 在有界 inbox 满时仍会 `try_send` 后丢帧；#99 必须补背压、spill 或显式 gap/终止结果，并用测试证明。
+- `runtime.rs` 尚无统一 terminal ledger；`dispatcher/routing.rs` 尚无 ingress sequence/gap 与冷挂载 snapshot 的完整契约。#97/#98 的模型面和 capability projection 也按“现有代码 + 明确缺口”解释，未验证策略继续列为实现前决策。
+- GitHub API 在本次离线环境不可访问（代理连接被拒绝），无法安全改写远端 issue 正文；本地 spec 与审计记录已同步，网络恢复后应将对应修正原样更新至 #97/#98/#99。
+
 ## 并行交集
 
 三个 issue 可并行开发。若未来分支同时修改共享 ACP fixture/helper，应先在 `.agents/L.md` 留言并拆成只读公共测试基础；不得把一条 issue 的运行时状态改动偷偷带入另一条。
