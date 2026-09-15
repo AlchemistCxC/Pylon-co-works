@@ -559,21 +559,27 @@ describe('Agent Workbench canonical session runtime', () => {
       },
     }, active.id)
     const modelOptions = () => service.runtime.getSnapshot().document?.session.options.find(item => item.id === 'model')
+    // schema 是 JsonValue 联合：先收窄到对象再取 options（tsc 严格索引）。
+    const schemaOptions = (): unknown => {
+      const schema = modelOptions()?.schema
+      if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return undefined
+      return (schema as { readonly options?: unknown }).options
+    }
     const twoChoices = expect.objectContaining({
       options: expect.arrayContaining([expect.objectContaining({ id: 'm1' }), expect.objectContaining({ id: 'm2' })]),
     })
     expect(modelOptions()?.schema).toEqual(twoChoices)
     // 评审补强：恰两项——arrayContaining 会掩盖「附加合成第三项」的劣化。
-    expect(modelOptions()?.schema?.options).toHaveLength(2)
+    expect(schemaOptions()).toHaveLength(2)
 
     // 空对象回声：document options 完整保留。
     service.applySessionResponse({}, active.id)
     expect(modelOptions()?.schema).toEqual(twoChoices)
-    expect(modelOptions()?.schema?.options).toHaveLength(2)
+    expect(schemaOptions()).toHaveLength(2)
     // 恒空 configOptions 回声（hermes set_config_option 形态）：同样不得清空 catalog。
     service.applySessionResponse({ configOptions: [] }, active.id)
     expect(modelOptions()?.schema).toEqual(twoChoices)
-    expect(modelOptions()?.schema?.options).toHaveLength(2)
+    expect(schemaOptions()).toHaveLength(2)
     service.destroy()
   })
 
