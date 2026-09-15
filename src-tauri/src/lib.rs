@@ -57,6 +57,8 @@ mod session_info_tests;
 mod session_store;
 mod startup;
 #[cfg(test)]
+mod test_harness;
+#[cfg(test)]
 mod test_utils;
 mod workspace_cmds;
 mod workspaces;
