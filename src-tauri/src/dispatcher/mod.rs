@@ -1166,6 +1166,28 @@ async fn handle_session_update<R: tauri::Runtime>(
             if !decision.mutate_session {
                 return true;
             }
+            // #99（评审 E3）：live 工具活动同样喂给账本——saw_tool 是
+            // empty-turn 判定（tool-only vs agent-empty）的输入；文本 chunk
+            // 与工具调用都会在 dispatcher 处理瞬间写入账本，settle 侧以此
+            // 为判定源（残余窗口见 refine_empty_turn 注释）。
+            if !is_replay
+                && matches!(
+                    variant,
+                    Some(
+                        crate::acp::SessionUpdateVariant::ToolCall
+                            | crate::acp::SessionUpdateVariant::ToolCallUpdate
+                    )
+                )
+            {
+                let _ = turn_ledger.note_session_activity(
+                    &source,
+                    &peri_id,
+                    generation,
+                    ingress_seq,
+                    false,
+                    true,
+                );
+            }
             pet_events.extend(apply_update_event_routed(
                 session, update, variant, decision,
             ));
@@ -1667,19 +1689,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
-                // #99：代际硬隔离清理——旧代际 dispatcher 退出时收敛其全部 turn
-                // 条目；此后旧代际的迟到结算归 UnknownTurn（可观测，且永远无法
-                // 改写新代际状态）。
-                let dropped = runtime_for_reconnect
-                    .turn_ledger
-                    .drop_generation(generation);
-                if dropped > 0 {
-                    tracing::info!(
-                        dropped,
-                        generation,
-                        "stale-generation turn entries dropped by turn ledger"
-                    );
-                }
+                // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
                 break;
             }
             let raw = tokio::select! {
@@ -2049,6 +2059,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         raw.method
                     );
                 }
+                // #99（评审 E4）：带 id + method 的 agent 请求落到此处 = 没有任何
+                // 分支认识它——spec 禁止静默丢弃（Responder 会永久滞留 pending
+                // 表、agent 侧请求挂死）。统一回 JSON-RPC Method Not Found，
+                // 应答同时消费 Responder、收敛 pending 条目。
+                if let (Some(request_id), Some(method)) = (raw.id.clone(), raw.method.as_deref()) {
+                    let responder = { acp.lock().await.responder() };
+                    let _ = responder
+                        .respond_error(
+                            request_id,
+                            -32601,
+                            &format!("method not supported by client: {method}"),
+                        )
+                        .await;
+                }
                 continue;
             }
             let payload = match raw.params {
@@ -2082,6 +2106,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             {
                 break;
             }
+        }
+        // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
+        // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
+        // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn
+        // （可观测，且永远无法改写新代际状态）。
+        let dropped = runtime_for_reconnect
+            .turn_ledger
+            .drop_generation(generation);
+        if dropped > 0 {
+            tracing::info!(
+                dropped,
+                generation,
+                "stale-generation turn entries dropped by turn ledger"
+            );
         }
     }));
 }

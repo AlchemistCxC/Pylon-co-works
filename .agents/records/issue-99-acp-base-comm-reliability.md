@@ -75,7 +75,7 @@ capability/fork/交互队列（#98）、provider registry 迁移、canonical jou
 | first-token/idle/cancel-settle/writer/EOF/protocol/refusal/max-turn/empty 全映射稳定终态且快照可恢复 | ✅ `terminal_cause_mapping_covers_protocol_stop_reasons` + prompt 路径 settle 分支；`TurnTerminalCause` 词表完备（writer/overloaded 等由测试锁定语义） |
 | 超时触发 cancel 后 settle 窗口内终态胜出；窗口外迟到只记 stale/late | ✅ `CancelledAfterTimeout.settle == Responded` 断言 + CAS `Late`；代际迟到由 key 隔离（`generation_isolation_rejects_stale_settle`）+ dispatcher 退出 `drop_generation` |
 | session/load replay 顺序可由 sequence 重建；replay 不进 live accumulator | ✅ `replay_boundary_order_is_reconstructible_from_sequences`；replay 不进 live collector 为既有 routing 契约（`replay_decision_never_persists_or_applies_pet` 等全绿） |
-| 冷挂载只凭 snapshot + cursor 恢复 | ✅ `cold_mount_turn_snapshot`（turn/sequence/lastError/replayLoading）随 `PersistedSessionLoadResult.turn` 下发；不依赖一次性 Tauri event |
+| 冷挂载只凭 snapshot + cursor 恢复 | ✅（后端数据面）`cold_mount_turn_snapshot` 随 `PersistedSessionLoadResult.turn` 下发，形状由 `cold_mount_turn_snapshot_exposes_settled_turn_and_cursor` 钉定（`turn.phase`/`turn.terminal.cause`/`sequence.lastIngressSeq`/`lastError`/`replayLoading`）；不依赖一次性 Tauri event。前端 TS 归一化层透传未接线（sessionClient.ts 属并行 issue 文件域），已在记录中列为后续接入 |
 | generation replacement 后旧 client 不能改写新代际；旧 waiter 有终态 | ✅ key 隔离 + `drop_generation_clears_only_stale_entries` + 既有 generation 回归全绿（1071 tests） |
 | 官方 ACP golden fixture 与 SDK engine/raw observer method/id/params/result/error 一致 | ✅ `check:acp-shadow` 8 场景 parity 全 true（含新增诚实背压探针）+ golden trace 双向 id 形态测试 |
 | Job Object/taskkill、stderr tail、redaction、canonical journal、owner/generation、permission 语义不回归 | ✅ 全量 `cargo test --lib` 1071 通过（0 failed） |
@@ -110,8 +110,8 @@ golden 2 个（wire parity/replay 序列）。
   - `cargo test --lib dispatcher::routing`：6 passed
   - `cargo test --lib session::prompt`：4 passed
   - `cargo test --lib acp::golden_trace_tests`：8 passed
-  - `cargo test --lib acp::turn_ledger`：11 passed
-  - `cargo test --lib`：**1071 passed, 0 failed**
+  - `cargo test --lib acp::turn_ledger`：12 passed
+  - `cargo test --lib`：首版 1071 passed / 0 failed；评审修复后在本分支验证 1040+ passed / 0 failed（计数随 #97/#98 并行测试增减）
   - `bun.cmd run check:acp-shadow`：ok=true，8 场景 parity 全 true
 - 过载终态链路：spill 溢出 → `dropped_total` 计数 → 控制通道崩溃广播（reason=
   `overloaded`）→ dispatcher `handle_crash` 稳定文案 + cause DTO → shutdown 收敛。
@@ -120,11 +120,37 @@ golden 2 个（wire parity/replay 序列）。
 
 - 「背压/spill/gap 终态三选一」：实现为组合策略——有界 spill 续投为主，
   spill 溢出后取显式 gap/过载终态（spec 允许的组合，杜绝静默丢帧）。
+- malformed/batch 帧「raw capture 原样记录」降级为未锁定声称：capture 观测点
+  在 SDK 拆包之后，malformed 是否到达观测点取决于 SDK `bridge_with_inspection`
+  内部行为，本切片无测试锁定（评审 E11）；原 `observe_frame` 死代码已删。
 - `TurnTerminalCause` 的 writer/EOF 等传输侧变体在本切片由测试锁定语义、
   运行路径部分接线（ConnectionLost 覆盖 EOF/writer 大多数场景）；writer 细分
   接线留给消费方 #97/#98（词表完备性先行，`allow(dead_code)` 已注明理由）。
 - turn ledger 未持久化到 session snapshot（spec 未决问题拍板：仅运行时权威 +
   load 响应投影快照，不复制第二套 durable journal）。
+
+## 评审处置（2026-09-16，独立子 agent 行级评审 E1–E12）
+
+| 项 | 处置 |
+| --- | --- |
+| E1 泵重试窗口破坏 lane FIFO | ✅ 修复：relay 锁内决策（lane 有滞留一律排尾）+ 泵改为 peek/clone 占位试发、成功才出队；新增 `relay_with_lane_backlog_keeps_new_frames_behind_spilled` 回归锁 |
+| E2 冷挂载快照字段名漂移 + TS 层未透传 | ✅ 文档/记录按 payload 实形修正（`turn.phase`/`turn.terminal.cause`）；新增 runtime 契约测试钉形状；TS 透传列入 L.md 协调（sessionClient.ts 属并行 issue 文件域） |
+| E3 empty-turn 判定与 dispatcher 收集竞态 | ✅ 缓解：dispatcher 把工具活动也喂给账本（saw_tool），refine 以账本标志 ∨ 会话状态为判定源；响应先于滞留 chunk 的残余窗口已在注释/记录声明（终态本身不受影响） |
+| E4 未知 agent 请求静默丢弃 + Responder 滞留 | ✅ 修复：fall-through 对带 id+method 的帧统一回 JSON-RPC -32601（应答即消费 Responder） |
+| E5 泵任务泄漏 | ✅ 修复：泵订阅 shutdown watch（现值检查 + changed）+ 通道 Closed 退出；新增 `inbound_pump_exits_on_shutdown` 回归锁 |
+| E6 drop_generation 只覆盖 1/4 退出路径 | ✅ 修复：清理收口到 dispatcher 循环后单点，覆盖全部 break 路径 |
+| E7 Closed 丢帧不计数 / crash 帧链路 best-effort 未声明 | ✅ 修复：新增 `closed_dropped` 遥测 + `PublishOutcome::DroppedClosed`；terminate_overloaded 文档改为如实声明 reason 修正为 best-effort |
+| E8 release 死代码 / 终态记录无上界 | ✅ 修复：settle 内建每会话终态保留裁剪（保留最新 8 条）；新增 `terminal_retention_is_bounded_per_session` |
+| E9 note_session_activity 任意命中 | ✅ 修复：统一 min(turn_id) |
+| E10 broadcast 副本 ingress_seq=0 | ✅ 修复：seq 分配提前到 publish_inbound（clone 之前），relay 只兜底直调 |
+| E11 observe_frame 死代码 + malformed 声称未锁定 | ✅ 删除死代码；记录中该声称降级（见偏差区） |
+| E12 handle_crash 双触发注释失实 | ✅ 文档改为「有界容忍（非幂等）」如实表述 |
+
+### 评审后遗留盲区（明示不阻塞合并）
+
+- 过载终态的 dispatcher 端到端链路（真实 SDK → spill 溢出 → handle_crash）无集成测试，当前由单测分side覆盖。
+- 未知请求 -32601 的 dispatcher 循环级测试缺失（分支内联于主循环，测试需完整 window/state 装置）。
+- malformed/batch wire capture 证据（依赖 SDK 内部行为）。
 
 ## 未解问题
 
