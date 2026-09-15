@@ -542,7 +542,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
     request_id: crate::acp::RequestId,
     params: Option<&serde_json::Value>,
 ) {
-    let Some(adapter) = crate::protocol_adapter::get_protocol_adapter(provider) else {
+    // #98: method-driven dispatch - adapter lookup by ACP method, provider name
+    // no longer a gate; unknown methods get a stable method_unsupported with the
+    // raw params kept observable via the rejection event.
+    let Some(adapter) =
+        crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
+    else {
         reject_interaction_request(
             window,
             acp,
@@ -551,9 +556,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
             method,
             Some(request_id),
             params,
-            "provider_unsupported",
+            "method_unsupported",
             -32601,
-            &format!("interaction provider unsupported: {provider}"),
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
         )
         .await;
         return;
@@ -836,20 +844,48 @@ async fn handle_permission_request<R: tauri::Runtime>(
             // 前端只做倒计时展示，不自行持有 300s 常量。
             "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
         });
-        emit_event(
-            window,
-            crate::event_names::INTERACTION,
-            serde_json::json!({
-                "provider": provider,
-                "agentId": agent_id,
-                "sessionId": permission.session_id,
-                "eventType": "permission.request",
-                "requestId": request_id.to_string(),
-                "toolCallId": permission.tool_call_id,
-                "clientGeneration": permission.client_generation,
-                "payload": payload,
-            }),
-        );
+        // #98: unified interaction queue admission (FIFO / single Active /
+        // queued depth). The queue feeds cancel/timeout/disconnect drain
+        // terminal states and the cold-mount snapshot; kind = "approval" and
+        // the stored event payload is identical to pylon:interaction.
+        let interaction_event = serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": permission.session_id,
+            "eventType": "permission.request",
+            "requestId": request_id.to_string(),
+            "toolCallId": permission.tool_call_id,
+            "clientGeneration": permission.client_generation,
+            "payload": payload,
+        });
+        if let Some(runtime) = runtimes.get(agent_id) {
+            match runtime
+                .interactions
+                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                    request_id: request_id.to_string(),
+                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                    kind: "approval".to_string(),
+                    session_id: permission.session_id.clone(),
+                    agent_id: agent_id.to_string(),
+                    client_generation: permission.client_generation,
+                    enqueued_at: permission.requested_at,
+                    event: interaction_event.clone(),
+                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                }) {
+                Ok(admission) => {
+                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
+                    tracing::trace!(
+                        agent_id = %agent_id,
+                        request_id = %request_id,
+                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
+                        waiting,
+                        "interaction queue admitted permission request"
+                    );
+                }
+                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
+            }
+        }
+        emit_event(window, crate::event_names::INTERACTION, interaction_event);
     }
 }
 
@@ -1855,6 +1891,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "_x.ai/exit_plan_mode" => {
                             Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
                         }
+                        // #98: elicitation/create generic protocol bridge - routed
+                        // by method name, no provider match required (AC11).
+                        "elicitation/create" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::Elicitation)
+                        }
                         _ => None,
                     };
                     if let Some(bridge) = bridge {
@@ -1865,7 +1906,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 crate::acp::adapter::private_ext::parse_questions(bridge, &params)
                                     .ok()
                             }
-                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => None,
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan
+                            | crate::acp::adapter::private_ext::PrivateBridge::Elicitation => None,
                         };
                         let session_id = params
                             .get("sessionId")
@@ -1886,15 +1928,43 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     client_generation: generation,
                                 },
                             );
-                            emit_event(
-                                &window,
-                                crate::event_names::INTERACTION,
-                                serde_json::json!({
-                                    "provider": provider, "agentId": agent_id, "sessionId": session_id,
-                                    "eventType": if matches!(bridge, crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan) { "approval.request" } else { "ask-user" }, "requestId": request_id.to_string(),
-                                    "clientGeneration": generation, "payload": params,
-                                }),
-                            );
+                            let interaction_event = serde_json::json!({
+                                "provider": provider, "agentId": agent_id, "sessionId": session_id,
+                                "eventType": match bridge {
+                                    crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
+                                    crate::acp::adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
+                                    _ => "ask-user",
+                                }, "requestId": request_id.to_string(),
+                                "clientGeneration": generation, "payload": params,
+                            });
+                            // #98: unified interaction queue admission (drain
+                            // terminal states + cold-mount snapshot source).
+                            if let Some(runtime) = runtimes.get(&agent_id) {
+                                if let Err(error) = runtime.interactions.admit(
+                                    crate::acp::interaction_queue::InteractionQueueEntry {
+                                        request_id: request_id.to_string(),
+                                        method: method.to_string(),
+                                        kind: match bridge {
+                                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                                                "approval".to_string()
+                                            }
+                                            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
+                                                "elicitation".to_string()
+                                            }
+                                            _ => "ask-user".to_string(),
+                                        },
+                                        session_id,
+                                        agent_id: agent_id.clone(),
+                                        client_generation: generation,
+                                        enqueued_at: crate::time::Timestamp::now(),
+                                        event: interaction_event.clone(),
+                                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                                    },
+                                ) {
+                                    tracing::warn!("interaction queue admit failed: {error}");
+                                }
+                            }
+                            emit_event(&window, crate::event_names::INTERACTION, interaction_event);
                             continue;
                         }
                     }
@@ -1917,12 +1987,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    let reason =
-                        if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                            "method_unsupported"
-                        } else {
-                            "provider_unsupported"
-                        };
+                    // #98: provider name is no longer a dispatch gate - unknown
+                    // client requests report a stable method-level unsupported
+                    // (raw diagnostics kept on the rejection event).
+                    let reason = "method_unsupported";
                     (
                         reason,
                         -32601,

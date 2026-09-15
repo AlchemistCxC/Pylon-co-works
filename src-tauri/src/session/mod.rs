@@ -26,6 +26,9 @@ pub(crate) use inspector::*;
 // 方案 11：会话创建域搬移至子模块。
 mod create;
 pub(crate) use create::*;
+// #98：session/fork 通用消费者（能力 gate + 受限 raw envelope + parent/child）。
+mod fork;
+pub(crate) use fork::*;
 // 方案 11：prompt 域搬移至子模块。
 mod session_state;
 pub(crate) use session_state::*;

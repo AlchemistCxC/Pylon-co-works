@@ -28,6 +28,11 @@ export interface AgentStatus {
   lastConnectedAt?: string | number
   /** 后端能力信息：原样透传不解释；null 表示断线，缺失表示未提供 */
   capabilities?: unknown | null
+  /** #98：后端能力矩阵结构化快照（advertised/negotiated/usable 三层 + 诊断）。
+   * 消费侧见 infrastructure/acp/agentContracts.ts；原样透传不在此解释。 */
+  capabilitySnapshot?: unknown | null
+  /** #98：pending 交互摘要（统一交互队列快照，冷挂载恢复 active 卡/queued 深度）。 */
+  pendingInteractions?: unknown
   sessionBindings?: SessionBindingSnapshot[]
 }
 
@@ -42,6 +47,8 @@ export interface AgentStatusPayload {
   generation?: number
   lastConnectedAt?: string | number
   capabilities?: unknown | null
+  capabilitySnapshot?: unknown | null
+  pendingInteractions?: unknown
   sessionBindings?: unknown
 }
 
@@ -95,6 +102,8 @@ export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent 
     generation: payload.generation,
     lastConnectedAt: payload.lastConnectedAt,
     capabilities: payload.capabilities,
+    capabilitySnapshot: payload.capabilitySnapshot,
+    pendingInteractions: payload.pendingInteractions,
     sessionBindings: normalizeSessionBindings(payload.sessionBindings),
   }
 }

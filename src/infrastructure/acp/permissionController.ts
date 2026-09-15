@@ -36,6 +36,9 @@ export interface PermissionControllerDeps {
 export interface PermissionController {
   /** 用户/超时选择 option：choose → invoke → resolve；失败回 pending 可重试 */
   choose: (requestId: string, optionId: string) => Promise<void>
+  /** #98：冷挂载种子——从 agent_status.pendingInteractions 恢复 pending 卡
+   * （reducer 按 (requestId, clientGeneration) 去重，与 live 事件天然幂等）。 */
+  seedFromSnapshot: (payload: unknown) => void
   /** 停止 listener 并清全部 timer；不向后端发送任何拒绝（防热重载误拒工具） */
   dispose: () => Promise<void>
 }
@@ -203,6 +206,25 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     await approve(requestId, optionId)
   }
 
+  // #98（AC14）：冷挂载/刷新只凭 agent_status 快照恢复 pending interaction——
+  // 队列条目的 event 与 pylon:interaction 事件同构（含 eventType
+  // permission.request 的完整 payload），直接走同一 normalize → receive 链；
+  // reducer 双键去重保证与 live 事件不重复入队。
+  const seedFromSnapshot = (payload: unknown) => {
+    if (disposed) return
+    if (!isPlainObject(payload)) return
+    const entries = payload.pendingInteractions
+    if (!Array.isArray(entries)) return
+    for (const entry of entries) {
+      if (!isPlainObject(entry)) continue
+      const event = isPlainObject(entry.payload) ? entry.payload : null
+      if (!event) continue
+      const request = normalizePermissionRequest(event)
+      if (!request) continue
+      dispatch({ type: 'receive', request, now: deps.now ? deps.now() : Date.now() })
+    }
+  }
+
   const dispose = async () => {
     if (disposed) return
     disposed = true
@@ -214,5 +236,5 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     }
   }
 
-  return { choose, dispose }
+  return { choose, seedFromSnapshot, dispose }
 }

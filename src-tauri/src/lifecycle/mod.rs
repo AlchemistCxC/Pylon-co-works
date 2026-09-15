@@ -262,12 +262,21 @@ async fn probe_unknown_session_continuity(
     if candidates.is_empty() {
         return;
     }
-    let load_supported = runtime
-        .acp
-        .lock()
+    // #98：探针与 session 建立/revive 消费同一份协商快照——不再用根级
+    // `loadSession` 裸路径判断（旧实现与标准嵌套 `sessionCapabilities.loadSession`
+    // 不一致：同一 Agent 可能在建立时被判支持 load、重连探针却判不支持）。
+    // 快照读取失败按 fail-closed 处理（等价不支持 load → 全部 detached 收敛）。
+    let load_supported = crate::acp::NegotiatedCapabilitySnapshot::capture(runtime)
         .await
-        .capabilities()
-        .supports(&["loadSession"]);
+        .map(|snapshot| {
+            tracing::debug!(
+                target: "capability",
+                generation = snapshot.generation,
+                "continuity probe consumes the negotiated capability snapshot"
+            );
+            snapshot.load_supported()
+        })
+        .unwrap_or(false);
     if !load_supported {
         for candidate in candidates {
             let _ = crate::session_store::mark_detached_if_current(

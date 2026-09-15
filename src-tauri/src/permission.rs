@@ -353,6 +353,16 @@ async fn resolve_pending(
         restore_pending(runtime, canonical_id, claimed);
         return false;
     }
+    // #98：统一交互队列终态——成功送达即 settle（Answered/Cancelled）并晋升
+    // 下一个 waiter（FIFO single-visible）。发送失败路径不入队终态（保留可重试）。
+    let _ = runtime.interactions.settle(
+        &canonical_id.to_string(),
+        if option_id.is_empty() {
+            crate::acp::interaction_queue::InteractionTerminalReason::Cancelled
+        } else {
+            crate::acp::interaction_queue::InteractionTerminalReason::Answered
+        },
+    );
     // The pending entry carries the only reliable session binding.  Update the
     // reducer only after the wire response commits, so a failed send remains
     // retryable and cannot prematurely drain state.
@@ -376,9 +386,53 @@ fn restore_pending(
     claimed: Option<PendingPermission>,
 ) {
     if let Some(permission) = claimed {
-        let _ = runtime.pending_permissions.lock().map(|mut pending| {
-            pending.entry(request_id).or_insert(permission);
-        });
+        let inserted = runtime
+            .pending_permissions
+            .lock()
+            .map(|mut pending| {
+                pending
+                    .insert(request_id.clone(), permission.clone())
+                    .is_none()
+            })
+            .unwrap_or(false);
+        // #98（P2-1 评审修复）：发送失败恢复 pending 时同步回灌交互队列——
+        // 否则超时路径的 settle(TimedOut) 先行移除后，重试中的请求会从
+        // pendingInteractions 冷挂载快照消失（队列与 pending store 失配）。
+        // 回灌事件载荷与 dispatcher admit 同构重建。
+        if inserted {
+            // provider 在 restore 路径不可得（pending store 不持有）——置空串；
+            // 事件消费方（冷挂载 normalize→receive）不依赖该字段做归属。
+            let event = serde_json::json!({
+                "provider": "",
+                "agentId": "",
+                "sessionId": permission.session_id,
+                "eventType": "permission.request",
+                "requestId": request_id.to_string(),
+                "toolCallId": permission.tool_call_id,
+                "clientGeneration": permission.client_generation,
+                "payload": {
+                    "title": permission.title,
+                    "prompt": permission.prompt,
+                    "options": permission.options,
+                    "requestedAt": permission.requested_at,
+                    "deadlineMs": permission_deadline_ms(permission.requested_at),
+                },
+            });
+            let _ =
+                runtime
+                    .interactions
+                    .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                        request_id: request_id.to_string(),
+                        method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                        kind: "approval".to_string(),
+                        session_id: permission.session_id,
+                        agent_id: String::new(),
+                        client_generation: permission.client_generation,
+                        enqueued_at: permission.requested_at,
+                        event,
+                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                    });
+        }
     }
 }
 
@@ -404,6 +458,14 @@ pub(crate) async fn respond_pending_permissions_cancelled(
         // 则由崩溃处理/客户端替换清理，不向新进程误写）。
         let _ = resolve_pending(runtime, request_id, Some(&tool_call_id), "").await;
     }
+    // #98（P1-3 评审修复）：session close/expiry 的 drain 必须覆盖全部 waiter——
+    // elicitation/ask-user 等非 approval 条目不经 resolve_pending，若不在此
+    // 终结会滞留队列并被冷挂载快照复活成死交互（spec §6：cancel 必须 drain
+    // 并给每个 waiter 一个终态）。
+    let _ = runtime.interactions.drain_where(
+        |entry| entry.session_id == session_id,
+        crate::acp::interaction_queue::InteractionTerminalReason::Cancelled,
+    );
 }
 
 /// 应答挂起的权限请求（B9.4 契约）：option_id 必须是请求提供的选项之一。
@@ -466,8 +528,10 @@ pub(crate) struct InteractionAnswerInput {
 }
 
 /// 统一 Interaction response transport 的后端入口。
-/// P0-3（R2-WI03）：按 provider 从协议适配器注册表 dispatch——不再硬编码 provider=="peri"；
-/// 未注册 provider 返回明确 unsupported，不生成假 RPC。
+/// P0-3（R2-WI03）：协议适配器 dispatch。#98：私有桥/elicitation 先按
+/// request id 路由（方法驱动，不要求 provider 名称匹配）；兜底路径按
+/// method 查适配器（provider 键控表仅剩诊断用途）——未注册 provider 的
+/// 合法 ACP 交互不再被拒。
 #[tauri::command]
 pub(crate) async fn respond_interaction(
     state: tauri::State<'_, AppState>,
@@ -475,13 +539,6 @@ pub(crate) async fn respond_interaction(
     kind: String,
     answer: InteractionAnswerInput,
 ) -> Result<(), PylonError> {
-    let adapter =
-        crate::protocol_adapter::get_protocol_adapter(&identity.provider).ok_or_else(|| {
-            PylonError::Protocol(format!(
-                "interaction response unsupported: provider={}",
-                identity.provider
-            ))
-        })?;
     let runtime = state.runtimes.get(&identity.agent_id).ok_or_else(|| {
         PylonError::Protocol(format!("agent runtime not found: {}", identity.agent_id))
     })?;
@@ -547,6 +604,35 @@ pub(crate) async fn respond_interaction(
                     answer.text.as_deref().unwrap_or(""),
                 )
             }
+            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
+                // #98：elicitation 应答 = ESM 风格 action 三值。decline/cancel
+                // 由前端 optionId 表达；accept 携带 values/text 原样 content。
+                // P2-3（评审修复）：optionId 白名单 fail-closed——未知值显式
+                // 报错而非静默 accept（不伪造成功）。缺省 optionId + values/text
+                // = 自由作答（accept）。
+                let action = match answer.option_id.as_deref() {
+                    None | Some("accept") => "accept",
+                    Some("declined") => "decline",
+                    Some("cancel") => "cancel",
+                    Some(other) => {
+                        return Err(PylonError::Protocol(format!(
+                            "elicitation action unsupported: {other}"
+                        )))
+                    }
+                };
+                let content = match (&answer.values, &answer.text) {
+                    (Some(values), _) if values.is_object() => Some(values.clone()),
+                    (None, Some(text)) if !text.is_empty() => {
+                        Some(serde_json::json!({ "text": text }))
+                    }
+                    _ => None,
+                };
+                crate::acp::adapter::private_ext::build_elicitation_response(
+                    action,
+                    content.as_ref(),
+                )
+                .map_err(PylonError::Protocol)?
+            }
         };
         let responder = { runtime.acp.lock().await.responder() };
         if !responder.respond(request_id.clone(), response).await {
@@ -555,8 +641,23 @@ pub(crate) async fn respond_interaction(
             ));
         }
         let _ = runtime.private_interactions.take(&request_id);
+        // #98：队列终态——私有桥/elicitation 应答同样 settle 并晋升下一个 waiter。
+        let _ = runtime.interactions.settle(
+            &request_id.to_string(),
+            crate::acp::interaction_queue::InteractionTerminalReason::Answered,
+        );
         return Ok(());
     }
+    // 兜底：permission 应答路径（方法驱动——不再要求 provider 注册）。
+    let adapter = crate::protocol_adapter::get_protocol_adapter_for_method(
+        crate::acp::METHOD_SESSION_REQUEST_PERMISSION,
+    )
+    .ok_or_else(|| {
+        PylonError::Protocol(
+            "interaction response unsupported: no adapter for session/request_permission"
+                .to_string(),
+        )
+    })?;
     adapter
         .respond_interaction(&runtime, &identity, &kind, &answer)
         .await
@@ -679,6 +780,11 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
                 .pending_permissions
                 .lock()
                 .map(|mut pending| pending.clear());
+            // #98：崩溃 = 连接已死——队列全量 drain，每个 waiter 拿到 Disconnected
+            // 终态（不悬挂）。
+            let _ = runtime
+                .interactions
+                .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
             continue;
         }
         let expired: Vec<(RequestId, String, String, u64, Vec<PermissionOption>)> = runtime
@@ -728,6 +834,12 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
                         );
                         return None;
                     };
+                    // #98：队列先以 TimedOut 终结（超时事实先于默认拒绝应答成立；
+                    // resolve_pending 内部的 settle 对已终结条目幂等让位）。
+                    let _ = runtime.interactions.settle(
+                        &request_id.to_string(),
+                        crate::acp::interaction_queue::InteractionTerminalReason::TimedOut,
+                    );
                     let resolved =
                         resolve_pending(&runtime, request_id.clone(), None, &option_id).await;
                     tracing::warn!(
