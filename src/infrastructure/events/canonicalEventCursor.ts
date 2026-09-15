@@ -1,9 +1,8 @@
 import { toCanonicalOwnerKey, validateCanonicalEvent } from '../../domains/events/eventSchema.ts'
+import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
 import {
   loadCanonicalEventRange,
-  normalizeCanonicalEventRow,
   type CanonicalEventRepository,
-  type CanonicalEventRow,
 } from './canonicalEventRepository.ts'
 
 export class CanonicalEventCursorError extends Error {

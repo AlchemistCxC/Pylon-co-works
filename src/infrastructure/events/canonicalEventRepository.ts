@@ -15,136 +15,14 @@
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
  */
 import { invoke } from '@tauri-apps/api/core'
-import type {
-  CanonicalConversationEvent,
-  CanonicalEventIdentity,
-  CanonicalEventOwner,
-  CanonicalEventType,
-} from '../../domains/events/eventSchema'
+import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
+import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
+export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 
 /** evt_append 结果：实际写入事件 + owner 最新 revision。 */
 export interface CanonicalEventAppendResult {
   events: unknown[]
   revision: number
-}
-
-/**
- * canonical_events 后端回读扁平行（EVT-02 wire，camelCase）：
- * 后端表为扁平列（profile_id/agent_id/local_session_id），`evt_list` 不回嵌套 owner。
- * `normalizeCanonicalEventRow` 负责归一为嵌套 owner 的 canonical 事件。
- */
-export interface CanonicalEventWireRow {
-  eventId?: string
-  ownerKey?: string
-  profileId?: string
-  agentId?: string
-  localSessionId?: string
-  remoteSessionId?: string | null
-  clientGeneration?: number
-  sequence?: number
-  occurredAt?: string
-  receivedAt?: string
-  eventType?: string
-  payloadVersion?: number
-  identity?: unknown
-  typedPayload?: unknown
-  rawPayload?: unknown
-  createdAt?: number
-  owner?: CanonicalEventOwner
-  schemaVersion?: number
-  provenanceOrigin?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { origin: infer O } ? O : never : never
-  provenanceTrust?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { trust: infer T } ? T : never : never
-  provenanceProvider?: string | null
-  provenanceImportId?: string | null
-  rawTruncated?: boolean
-  rawOriginalBytes?: number | null
-  rawRetainedBytes?: number | null
-  rawOmittedBytes?: number | null
-  rawTruncationReason?: string | null
-}
-
-/** canonical 事件（嵌套 owner；测试与前端内部使用形状）。 */
-export type CanonicalEventRow = CanonicalConversationEvent & { createdAt?: number }
-
-/**
- * 后端扁平行 → 嵌套 owner 的 canonical 事件；已是嵌套形状（测试/mock/未来 wire）原样保留。
- * 缺 owner 三元组的行会被归一为 unknown 事件（不抛错，调用方仍可取证）。
- */
-export function normalizeCanonicalEventRow(value: unknown): CanonicalEventRow {
-  const row = (value ?? {}) as CanonicalEventWireRow
-  if (row.owner) {
-    return {
-      ...(row as unknown as CanonicalEventRow),
-      ...(row.schemaVersion !== undefined ? { schemaVersion: row.schemaVersion } : {}),
-      ...(row.provenanceOrigin && row.provenanceTrust
-        ? {
-            provenance: {
-              origin: row.provenanceOrigin,
-              trust: row.provenanceTrust,
-              ...(row.provenanceProvider ? { provider: row.provenanceProvider } : {}),
-              ...(row.provenanceImportId ? { importId: row.provenanceImportId } : {}),
-            },
-          }
-        : {}),
-      ...(row.rawTruncated !== undefined
-        ? {
-            rawMetadata: {
-              truncated: row.rawTruncated,
-              originalBytes: row.rawOriginalBytes ?? 0,
-              retainedBytes: row.rawRetainedBytes ?? 0,
-              omittedBytes: row.rawOmittedBytes ?? 0,
-              ...(row.rawTruncationReason ? { reason: row.rawTruncationReason } : {}),
-            },
-          }
-        : {}),
-    }
-  }
-  const owner: CanonicalEventOwner = {
-    profileId: row.profileId ?? '',
-    agentId: row.agentId ?? '',
-    localSessionId: row.localSessionId ?? '',
-    ...(row.remoteSessionId ? { remoteSessionId: row.remoteSessionId } : {}),
-  }
-  return {
-    eventId: row.eventId ?? '',
-    owner,
-    ...(row.schemaVersion !== undefined ? { schemaVersion: row.schemaVersion } : {}),
-    ...(row.provenanceOrigin && row.provenanceTrust
-      ? {
-          provenance: {
-            origin: row.provenanceOrigin,
-            trust: row.provenanceTrust,
-            ...(row.provenanceProvider ? { provider: row.provenanceProvider } : {}),
-            ...(row.provenanceImportId ? { importId: row.provenanceImportId } : {}),
-          },
-        }
-      : {}),
-    ...(row.rawTruncated !== undefined
-      ? {
-          rawMetadata: {
-            truncated: row.rawTruncated,
-            originalBytes: row.rawOriginalBytes ?? 0,
-            retainedBytes: row.rawRetainedBytes ?? 0,
-            omittedBytes: row.rawOmittedBytes ?? 0,
-            ...(row.rawTruncationReason ? { reason: row.rawTruncationReason } : {}),
-          },
-        }
-      : {}),
-    clientGeneration: row.clientGeneration ?? 0,
-    sequence: row.sequence ?? 0,
-    occurredAt: row.occurredAt ?? '',
-    receivedAt: row.receivedAt ?? '',
-    eventType: (row.eventType as CanonicalEventType | undefined) ?? 'unknown',
-    payloadVersion: row.payloadVersion ?? 1,
-    ...(row.identity !== undefined && row.identity !== null
-      ? { identity: row.identity as CanonicalEventIdentity }
-      : {}),
-    ...(row.typedPayload !== undefined && row.typedPayload !== null
-      ? { typedPayload: row.typedPayload }
-      : {}),
-    rawPayload: row.rawPayload,
-    ...(row.createdAt !== undefined ? { createdAt: row.createdAt } : {}),
-  }
 }
 
 /** evt_list 事件页（升序返回；nextBeforeSequence 为下一页游标，null=已到最早）。 */
