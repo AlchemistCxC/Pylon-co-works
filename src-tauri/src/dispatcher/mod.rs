@@ -1085,6 +1085,7 @@ async fn handle_session_update<R: tauri::Runtime>(
                 generation,
                 ingress_seq,
                 effects.text.is_some(),
+                false,
             );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
