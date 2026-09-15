@@ -330,10 +330,10 @@ describe('WorkbenchHostPort', () => {
       suiteId: 'suite.third-party', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
     })
 
-    expect(authorized.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })).toBe(true)
-    expect(authorizedAppearance.getSnapshot().modelVariant).toBe('minimal')
-    expect(denied.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })).toBe(false)
-    expect(deniedAppearance.getSnapshot().modelVariant).toBe(DEFAULTS.modelVariant)
+    expect(authorized.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle' })).toBe(true)
+    expect(authorizedAppearance.getSnapshot().modelSwitchMode).toBe('cycle')
+    expect(denied.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle' })).toBe(false)
+    expect(deniedAppearance.getSnapshot().modelSwitchMode).toBe(DEFAULTS.modelSwitchMode)
   })
 
   it('production Solid appearance adapter writes through HostPort or reports a denied diagnostic', () => {
@@ -354,14 +354,14 @@ describe('WorkbenchHostPort', () => {
     })
 
     createSolidWorkbenchServicesFromHostPort(authorized).appearance.dispatch({
-      type: 'set-cc-property', key: 'modelVariant', value: 'minimal',
+      type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle',
     })
     createSolidWorkbenchServicesFromHostPort(denied).appearance.dispatch({
-      type: 'set-cc-property', key: 'modelVariant', value: 'minimal',
+      type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle',
     })
 
-    expect(authorizedAppearance.getSnapshot().modelVariant).toBe('minimal')
-    expect(deniedAppearance.getSnapshot().modelVariant).toBe(DEFAULTS.modelVariant)
+    expect(authorizedAppearance.getSnapshot().modelSwitchMode).toBe('cycle')
+    expect(deniedAppearance.getSnapshot().modelSwitchMode).toBe(DEFAULTS.modelSwitchMode)
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
       code: 'renderer.appearance.command.denied', phase: 'action', recoverability: 'none',
       suiteId: 'suite.third-party',

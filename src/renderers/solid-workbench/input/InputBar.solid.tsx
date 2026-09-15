@@ -22,8 +22,6 @@ export interface QueuedWorkbenchMessage {
 }
 
 export interface SolidInputBarProps {
-  externalSend?: boolean
-  externalAttach?: boolean
   disabled?: boolean
   /** Optional LLM provider; requests are debounced, cancellable and rate limited. */
   predictionProvider?: InputPredictionProvider
@@ -60,13 +58,56 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [providerPrediction, setProviderPrediction] = createSignal<string | null>(null)
   const predictionScheduler = props.predictionProvider ? createPredictionScheduler(props.predictionProvider) : null
   let textarea: HTMLTextAreaElement | undefined
+  let inputBar: HTMLDivElement | undefined
   let composing = false
   let historyDraft = ''
   let autoQueueSessionId: string | null | undefined
   let autoQueueArmed = false
-  let fileInput: HTMLInputElement | undefined
   const emptyState = () => typeof props.empty === 'function' ? props.empty() : props.empty
   const isDisabled = () => Boolean(props.disabled || emptyState()?.submitting?.())
+
+  const resizeInput = () => {
+    if (!textarea) return
+    const slot = textarea.closest<HTMLElement>('.cc-input-slot')
+    if (!slot) return
+    const styles = getComputedStyle(slot)
+    const staticHeight = Number.parseFloat(styles.getPropertyValue('--cc-input-height')) || textarea.clientHeight || 40
+    const controlCenter = slot.closest<HTMLElement>('.control-center')
+    if (inputBar?.classList.contains('cli-mode')) {
+      slot.style.height = ''
+      controlCenter?.style.removeProperty('--cc-input-extra-height')
+      textarea.style.height = ''
+      textarea.style.maxHeight = ''
+      textarea.style.overflowY = ''
+      inputBar.dataset.expanded = 'false'
+      return
+    }
+    const maxHeight = staticHeight * 3
+    textarea.style.height = 'auto'
+    const contentHeight = Math.max(textarea.scrollHeight, staticHeight)
+    const nextHeight = Math.min(maxHeight, Math.max(staticHeight, contentHeight))
+    slot.style.height = `${nextHeight}px`
+    const extraHeight = nextHeight - staticHeight
+    if (extraHeight > 0) controlCenter?.style.setProperty('--cc-input-extra-height', `${extraHeight}px`)
+    else controlCenter?.style.removeProperty('--cc-input-extra-height')
+    textarea.style.height = '100%'
+    textarea.style.maxHeight = `${maxHeight}px`
+    textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
+    if (inputBar) inputBar.dataset.expanded = String(nextHeight > staticHeight)
+  }
+
+  createEffect(() => {
+    const inputHeight = appearance().inputHeight
+    const inputFontSize = appearance().inputFontSize
+    const inputLineHeight = appearance().inputLineHeight
+    const currentDraft = draft()
+    void inputHeight
+    void inputFontSize
+    void inputLineHeight
+    void currentDraft
+    queueMicrotask(resizeInput)
+  })
+  onMount(() => queueMicrotask(resizeInput))
 
   const [commandRevision, setCommandRevision] = createSignal(0)
   const suggestions = createMemo(() => {
@@ -136,21 +177,14 @@ export function SolidInputBar(props: SolidInputBarProps) {
   })
   onCleanup(() => predictionScheduler?.dispose())
   const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
-  // 与 React 中控一致：external 表示布局偏好；只有对应外置 send 实际可见时，
-  // ControlCenter 才传 externalSend=true。外置 send 被隐藏时必须恢复内置发送按钮。
-  const inlineSubmit = () => appearance().inputSubmitButtonMode !== 'hidden' && !props.externalSend
-  const placeholder = () => {
-    if (!appearance().inputShowPlaceholder) return ''
-    if (inputVariant() === 'cli') return ''
-    if (inputVariant() === 'command') return '/ 命令或消息…'
-    return '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'
-  }
+  // Placeholder copy is deferred to the send/indicator work; keep the
+  // textarea free of a standalone instruction line.
+  const placeholder = () => ''
 
   onMount(() => {
     textarea?.focus()
     const unsubscribeCommands = subscribePluginCommands(() => setCommandRevision(value => value + 1))
     const sendFromWidget = () => void send()
-    const attachFromWidget = () => void attach()
     const resetEmptyDraft = () => {
       if (!emptyState()) return
       setDraft('')
@@ -159,12 +193,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
       queueMicrotask(() => textarea?.focus())
     }
     window.addEventListener('pylon:solid-input-send', sendFromWidget)
-    window.addEventListener('pylon:solid-input-attach', attachFromWidget)
     window.addEventListener('pylon:new-session', resetEmptyDraft)
     onCleanup(() => {
       unsubscribeCommands()
       window.removeEventListener('pylon:solid-input-send', sendFromWidget)
-      window.removeEventListener('pylon:solid-input-attach', attachFromWidget)
       window.removeEventListener('pylon:new-session', resetEmptyDraft)
     })
   })
@@ -368,30 +400,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
     if (result.status === 'rejected') ui.set('input-error', result.error || '取消失败')
   }
 
-  const attach = async () => {
-    if (isDisabled()) return
-    const id = sessionId()
-    if (!id) {
-      fileInput?.click()
-      return
-    }
-    const ui = workbench.sessionUi.capture(id)
-    try {
-      const selected = await workbench.commands.attach(id)
-      ui.update<readonly WorkbenchAttachment[]>('attachments', [], previous => {
-        const seen = new Set(previous.map(item => item.path))
-        const additions = selected.filter(item => {
-          if (seen.has(item.path)) return false
-          seen.add(item.path)
-          return true
-        })
-        return [...previous, ...additions]
-      })
-    } catch (error) {
-      ui.set('input-error', error instanceof Error ? error.message : String(error))
-    }
-  }
-
   const browseHistory = (direction: 'up' | 'down') => {
     const entries = history()
     if (entries.length === 0) return
@@ -501,33 +509,14 @@ export function SolidInputBar(props: SolidInputBarProps) {
 
   return (
     <div
+      ref={inputBar}
       class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}${emptyState() ? ' input-empty' : ''}`}
       data-expanded="false"
     >
       {/* Empty state is intentionally quiet: the control-center itself already
           communicates the affordance, so keyboard-hint chrome would make the
           centered composer look like a second instruction panel. */}
-      <Show when={inputVariant() !== 'cli' && !emptyState()}>
-        <div class="input-composer-meta" aria-hidden="true">
-          <span class="input-composer-kind"><span class="input-composer-glyph">{inputVariant() === 'command' ? '⌘' : '✦'}</span>{inputVariant() === 'command' ? '命令与消息' : '新消息'}</span>
-          <span class="input-composer-shortcut">↵ Enter 发送 · Shift+Enter 换行</span>
-        </div>
-      </Show>
       <Show when={sendError()}>{error => <div class="input-error" role="alert">{error()}</div>}</Show>
-      <Show when={attachments().length > 0}>
-        <div class="attached-files" aria-label="附件">
-          <For each={attachments()}>{item => (
-            <button
-              type="button"
-              class="attached-chip"
-              onClick={() => setAttachments(previous => previous.filter(current => current.id !== item.id))}
-              aria-label={`移除附件 ${item.name || item.path}`}
-            >
-              {item.name || item.path} ×
-            </button>
-          )}</For>
-        </div>
-      </Show>
       <Show when={!emptyState() && suggestionList().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
           <For each={suggestionList()}>{(suggestion, index) => (
@@ -588,9 +577,6 @@ export function SolidInputBar(props: SolidInputBarProps) {
       <Show when={emptyState()?.before}>{content => <div class="input-empty-before">{content()}</div>}</Show>
       <div class="input-row">
         <Show when={inputVariant() === 'cli'}><span class="cli-prefix">❯</span></Show>
-        <Show when={(inputVariant() !== 'cli' || Boolean(emptyState())) && !props.externalAttach}>
-          <button type="button" class="input-btn attach" disabled={isDisabled()} onClick={() => void attach()} aria-label="添加附件">＋</button>
-        </Show>
         <div class="input-editor-stack">
           <Show when={prediction()}>{candidate => (
             <div class="input-ghost-suggestion" aria-hidden="true">
@@ -607,44 +593,18 @@ export function SolidInputBar(props: SolidInputBarProps) {
               setDismissedPrediction(null)
               setCommandIndex(0)
               if (historyIndex() >= 0) setHistoryIndex(-1)
+              resizeInput()
             }}
             onKeyDown={onKeyDown}
             onCompositionStart={() => { composing = true }}
             onCompositionEnd={() => { composing = false }}
-            placeholder={prediction() && !emptyState() ? '' : (emptyState() ? '描述你想让 Agent 完成什么…' : placeholder())}
+            placeholder={placeholder()}
             rows={1}
             disabled={isDisabled()}
           />
         </div>
-        <Show when={inputVariant() !== 'cli' && inlineSubmit()}>
-          <button
-            type="button"
-            disabled={isDisabled()}
-            class={`input-btn ${runtime().generating ? 'stop' : 'send'}`}
-            onClick={() => void (runtime().generating ? cancel() : send())}
-            aria-label={runtime().generating ? '停止生成' : '发送消息'}
-          >
-            {runtime().generating ? '■' : '↑'}
-          </button>
-        </Show>
       </div>
       <Show when={emptyState()?.after}>{content => <div class="input-empty-after">{content()}</div>}</Show>
-      <input
-        ref={fileInput}
-        type="file"
-        multiple
-        hidden
-        onChange={event => {
-          const files = event.currentTarget.files
-          if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({
-            id: `${file.name}:${file.size}:${file.lastModified}`,
-            name: file.name,
-            path: (file as File & { path?: string }).path || file.name,
-            mediaType: file.type || undefined,
-          }))])
-          event.currentTarget.value = ''
-        }}
-      />
     </div>
   )
 }

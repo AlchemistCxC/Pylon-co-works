@@ -49,20 +49,67 @@ export interface WorkbenchAppearanceSnapshot {
   toolConnectorOpacity: number
   inputMode: string
   inputVariant: string
+  inputOffsetTop: number
+  inputHeight: number
+  inputMarginX: number
+  inputSurfaceBg: string
+  inputSurfaceOpacity: number
+  inputFocusRingEnabled: boolean
+  inputFocusRingColor: string
+  inputHighlightOpacity: number
+  inputShadowEnabled: boolean
+  inputBorder: string
+  inputBorderWidth: number
+  inputBorderOpacity: number
+  inputRadius: number
+  inputFontSize: number
+  inputLineHeight: string
+  inputTextColor: string
+  inputPlaceholder: string
   inputShowPlaceholder: boolean
   inputShowHistoryHint: boolean
   inputSubmitButtonMode: string
-  modelVariant: string
-  modeVariant: string
+  reasoningSwitchMode: string
+  reasoningBgColor: string
+  reasoningWidth: number
+  reasoningHeight: number
+  reasoningRadius: number
+  reasoningFontSize: number
+  reasoningTextColor: string
+  sendButtonColor: string
+  sendButtonRadius: string
+  sendButtonBorderColor: string
+  sendButtonIcon: string
+  sendButtonIconGenerating: string
+  sendButtonIconRound: string
+  sendButtonIconColor: string
+  modelSwitchMode: string
+  modelBgColor: string
+  modelWidth: number
+  modelHeight: number
+  modelRadius: number
+  modelFontSize: number
+  modelTextColor: string
   sendVariant: string
-  attachVariant: string
+  permissionSwitchMode: string
+  permissionBgColor: string
+  permissionWidth: number
+  permissionHeight: number
+  permissionRadius: number
+  permissionFontSize: number
+  permissionTextColor: string
   cliHintMode: string
   footerLayout: string
   cliOverflowMode: string
   ccVariant: string
   ccStyle: string
   ccHeight: number
-  ccBgHeight: number
+  ccBg: string
+  ccBgImage: string
+  ccSurfaceOpacity: number
+  ccMarginX: number
+  ccMarginBottom: number
+  ccRadius: number
   ccLayout: CcLayoutV3
   ccHidden: readonly string[]
   ccScale: Readonly<Record<string, number>>
@@ -125,20 +172,67 @@ export function selectWorkbenchAppearance(
     toolConnectorOpacity: theme.toolConnectorOpacity,
     inputMode: theme.inputMode,
     inputVariant: theme.inputVariant,
+    inputOffsetTop: theme.inputOffsetTop,
+    inputHeight: theme.inputHeight,
+    inputMarginX: theme.inputMarginX,
+    inputSurfaceBg: theme.inputSurfaceBg,
+    inputSurfaceOpacity: theme.inputSurfaceOpacity,
+    inputFocusRingEnabled: theme.inputFocusRingEnabled !== 'hidden',
+    inputFocusRingColor: theme.inputFocusRingColor || 'var(--accent)',
+    inputHighlightOpacity: theme.inputHighlightOpacity,
+    inputShadowEnabled: theme.inputShadowEnabled !== 'hidden',
+    inputBorder: theme.inputBorder,
+    inputBorderWidth: theme.inputBorderWidth,
+    inputBorderOpacity: theme.inputBorderOpacity,
+    inputRadius: theme.inputRadius,
+    inputFontSize: theme.inputFontSize,
+    inputLineHeight: theme.inputLineHeight,
+    inputTextColor: theme.inputTextColor,
+    inputPlaceholder: theme.inputPlaceholder,
     inputShowPlaceholder: theme.inputShowPlaceholder !== false,
     inputShowHistoryHint: theme.inputShowHistoryHint !== false,
     inputSubmitButtonMode: theme.inputSubmitButtonMode,
-    modelVariant: theme.modelVariant,
-    modeVariant: theme.modeVariant,
+    sendButtonColor: theme.sendButtonColor,
+    sendButtonRadius: theme.sendButtonRadius,
+    sendButtonBorderColor: theme.sendButtonBorderColor,
+    sendButtonIcon: theme.sendButtonIcon,
+    sendButtonIconGenerating: theme.sendButtonIconGenerating,
+    sendButtonIconRound: theme.sendButtonIconRound,
+    sendButtonIconColor: theme.sendButtonIconColor,
+    modelSwitchMode: theme.modelSwitchMode,
+    modelBgColor: theme.modelBgColor,
+    modelWidth: theme.modelWidth,
+    modelHeight: theme.modelHeight,
+    modelRadius: theme.modelRadius,
+    modelFontSize: theme.modelFontSize,
+    modelTextColor: theme.modelTextColor,
+    reasoningSwitchMode: theme.reasoningSwitchMode,
+    reasoningBgColor: theme.reasoningBgColor,
+    reasoningWidth: theme.reasoningWidth,
+    reasoningHeight: theme.reasoningHeight,
+    reasoningRadius: theme.reasoningRadius,
+    reasoningFontSize: theme.reasoningFontSize,
+    reasoningTextColor: theme.reasoningTextColor,
+    permissionSwitchMode: theme.permissionSwitchMode,
+    permissionBgColor: theme.permissionBgColor,
+    permissionWidth: theme.permissionWidth,
+    permissionHeight: theme.permissionHeight,
+    permissionRadius: theme.permissionRadius,
+    permissionFontSize: theme.permissionFontSize,
+    permissionTextColor: theme.permissionTextColor,
     sendVariant: theme.sendVariant,
-    attachVariant: theme.attachVariant,
     cliHintMode: theme.cliHintMode,
     footerLayout: theme.footerLayout,
     cliOverflowMode: theme.cliOverflowMode,
     ccVariant: theme.ccVariant,
     ccStyle: theme.ccStyle,
     ccHeight: theme.ccHeight,
-    ccBgHeight: theme.ccBgHeight,
+    ccBg: theme.ccBg,
+    ccBgImage: theme.ccBgImage,
+    ccSurfaceOpacity: theme.ccSurfaceOpacity,
+    ccMarginX: theme.ccMarginX,
+    ccMarginBottom: theme.ccMarginBottom,
+    ccRadius: theme.ccRadius,
     ccLayout: cloneCcLayout(theme.ccLayout),
     ccHidden: [...theme.ccHidden],
     ccScale: { ...theme.ccScale },
@@ -197,6 +291,9 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     inputTextColor: theme.inputTextColor,
     inputFontSize: theme.inputFontSize,
     inputMinHeight: theme.inputMinHeight,
+    inputHeight: theme.inputHeight,
+    inputOffsetTop: theme.inputOffsetTop,
+    inputLineHeight: theme.inputLineHeight,
     inputMode: theme.inputMode,
     inputVariant: theme.inputVariant,
     cliLineWidth: theme.cliLineWidth,
@@ -211,9 +308,27 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     barHeight: theme.barHeight,
     barFillFollow: theme.barFillFollow,
     barFillColor: theme.barFillColor,
-    modelVariant: theme.modelVariant,
-    modeVariant: theme.modeVariant,
+    modelSwitchMode: theme.modelSwitchMode,
+    modelBgColor: theme.modelBgColor,
+    modelWidth: theme.modelWidth,
+    modelHeight: theme.modelHeight,
+    modelRadius: theme.modelRadius,
+    modelFontSize: theme.modelFontSize,
+    modelTextColor: theme.modelTextColor,
+    reasoningSwitchMode: theme.reasoningSwitchMode,
+    reasoningBgColor: theme.reasoningBgColor,
+    reasoningWidth: theme.reasoningWidth,
+    reasoningHeight: theme.reasoningHeight,
+    reasoningRadius: theme.reasoningRadius,
+    reasoningFontSize: theme.reasoningFontSize,
+    reasoningTextColor: theme.reasoningTextColor,
+    permissionSwitchMode: theme.permissionSwitchMode,
+    permissionBgColor: theme.permissionBgColor,
+    permissionWidth: theme.permissionWidth,
+    permissionHeight: theme.permissionHeight,
+    permissionRadius: theme.permissionRadius,
+    permissionFontSize: theme.permissionFontSize,
+    permissionTextColor: theme.permissionTextColor,
     sendVariant: theme.sendVariant,
-    attachVariant: theme.attachVariant,
   }
 }
