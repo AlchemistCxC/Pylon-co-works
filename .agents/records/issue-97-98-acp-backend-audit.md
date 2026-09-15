@@ -1,4 +1,4 @@
-# Dev Record — #97/#98 ACP 后端模型与能力审计落单
+# Dev Record — #97/#98/#99 ACP 后端通信与能力审计落单
 
 > 本记录保留 issue/spec 落地事实；本次没有实现代码、没有修改 ACP wire 或前端行为。
 
@@ -8,7 +8,7 @@
 - issue：[ #98 ACP 能力协商与生命周期消费者闭环](https://github.com/AlchemistCxC/Pylon-co-works/issues/98)
 - issue：[ #99 ACP 基础会话通信可靠性与回合生命周期](https://github.com/AlchemistCxC/Pylon-co-works/issues/99)
 - 分支：`Ru5t/Reflector`
-- 提交范围：`90c97b73..90c97b73`（仅审计与 issue/spec 落单，无代码提交）
+- 提交范围：`90c97b73..c2df3141`（仅审计与 issue/spec 落单，无产品代码提交）
 - 日期：2026-09-15
 
 ## 目标与范围
