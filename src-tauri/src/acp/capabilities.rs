@@ -4,6 +4,10 @@
 //! renderer. Unknown paths deliberately resolve to `false`; an adapter may
 //! register a private path without changing the standard capability surface.
 
+/// 单条能力的 typed 事实视图。#98 后生产路径统一走
+/// `negotiated::NegotiatedCapabilitySnapshot`（矩阵真源）；本视图保留给
+/// 单元测试与诊断（fail-closed 语义的可执行规格）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityState {
     Supported,
@@ -29,6 +33,7 @@ impl CapabilityRegistry {
 
     /// Each segment is a literal JSON object key, including dots in private
     /// extension names. Non-boolean values do not advertise a boolean ability.
+    #[allow(dead_code)] // typed 视图（测试/诊断规格）；生产路径走 negotiated 快照
     pub fn state(&self, path: &[&str]) -> CapabilityState {
         let mut value = self.raw.as_ref();
         for key in path {
@@ -45,12 +50,14 @@ impl CapabilityRegistry {
     }
 
     /// Fail-closed standard check: only an explicit `true` is supported.
+    #[allow(dead_code)] // typed 视图（测试/诊断规格）；生产路径走 negotiated 快照
     pub fn supports(&self, path: &[&str]) -> bool {
         self.state(path) == CapabilityState::Supported
     }
 
     /// Object-valued capabilities (for example `sessionCapabilities.resume`)
     /// are advertised by presence of an object, not by a boolean leaf.
+    #[allow(dead_code)] // typed 视图（测试/诊断规格）；生产路径走 negotiated 快照
     pub fn supports_object(&self, path: &[&str]) -> bool {
         let mut value = self.raw.as_ref();
         for key in path {

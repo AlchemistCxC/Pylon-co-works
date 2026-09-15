@@ -1,18 +1,40 @@
 import type { AgentStatus } from '../../components/settings/agentTypes'
 
 /**
- * agentContracts — 能力快照归一化层（P2-02，F4-A/F4-D）。
+ * agentContracts — 能力快照归一化层（P2-02 / #98 协商快照三层投影）。
  *
- * infrastructure 收边界：把 agent-status 链路携带的 capabilities 原始 Value（Peri/Hermes
- * 形状不同且会漂移）收窄为组件可消费的稳定 boolean 快照。组件不读原始 capabilities，
- * 只读快照；纯函数，零 React 依赖，可被 scripts 直接 import。
+ * infrastructure 收边界：agent-status 链路携带两种能力数据：
+ * - `capabilitySnapshot`：后端能力矩阵（Rust `acp/negotiated.rs`）产出的结构化
+ *   三层快照（advertised/negotiated/usable + fact/source/diagnostics）——权威
+ *   来源。组件只消费 usable；usable=false 的能力（含「已广告但未注册消费者」
+ *   的 fork/elicitation）不得对外表现为可点击。
+ * - `capabilities`：initialize agentCapabilities 原始 Value——诊断保留，不再
+ *   由前端逐键解释。
  *
- * 语义判据（写死，测试守卫）：
- * - 快照键一律「能力存在 = true」命名，读取宽容（?. + 缺省）。
- * - 例外① sessionClose 缺省 true（Peri 有、Hermes 显式无、未来 agent 未声明按 ACP 基线有）。
- * - 例外② mcpHttp/mcpSse 缺省 true，显式 false 才关闭（未声明 ≠ 不支持）。
- * - lifecycle status 是 connected 唯一真值；capabilities 缺失只表示能力未协商。
+ * 无结构化快照时（旧载荷/demo/非法形状）按矩阵同语义做 raw 兜底推导，缺失
+ * 一律 fail-closed：未知/缺省能力不再默认 true（旧 sessionClose/mcp 缺省 true
+ * 的 fail-open 兼容默认废除，迁移决策见 ADR-0004）。canonical 路径为
+ * `sessionCapabilities.<id>`；根级 `loadSession: true` 是唯一登记的兼容 alias
+ * （canonical 缺失时生效）。
+ *
+ * lifecycle status 是 connected 唯一真值；capabilities 缺失只表示能力未协商。
  */
+
+/** 后端能力矩阵单条能力的投影（与 Rust `CapabilityDecision::wire_value` 同构）。 */
+export interface CapabilityLayerState {
+  fact?: 'unknown' | 'advertised' | 'negotiated' | 'usable'
+  source?: 'canonical' | 'root-alias' | 'host' | 'none'
+  advertised?: boolean | null
+  negotiated?: boolean
+  usable?: boolean
+  diagnostics?: string[]
+}
+
+/** agent_status.capabilitySnapshot 的形状（与 Rust `NegotiatedCapabilitySnapshot::wire_value` 同构）。 */
+export interface CapabilitySnapshotPayload {
+  generation?: number
+  capabilities?: Record<string, CapabilityLayerState>
+}
 
 export interface AgentCapabilitySnapshot {
   connected: boolean
@@ -31,7 +53,17 @@ export interface AgentCapabilitySnapshot {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/** 能力快照派生：lifecycle 决定连接，capabilities 独立表达协商是否完成。 */
+/** 结构化快照 usable 投影：只有显式 usable=true 才算可用（fail-closed）。 */
+const usableFromSnapshot = (
+  snapshot: CapabilitySnapshotPayload,
+  id: string,
+): boolean => isPlainObject(snapshot.capabilities) && snapshot.capabilities[id]?.usable === true
+
+/** raw 兜底：canonical object capability（object 值才算广告，与 Rust 矩阵一致）。 */
+const rawObjectCapability = (session: Record<string, unknown> | null, id: string): boolean =>
+  isPlainObject(session?.[id])
+
+/** 能力快照派生：lifecycle 决定连接，结构化协商快照优先，raw 兜底 fail-closed。 */
 export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined): AgentCapabilitySnapshot {
   const capabilities = status == null ? undefined : status.capabilities
   const connected = status?.status === 'connected'
@@ -44,17 +76,38 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
   const prompt = isPlainObject(promptCaps) ? promptCaps : null
   const mcp = isPlainObject(mcpCaps) ? mcpCaps : null
   const authMethods = caps?.authMethods
+  const snapshotPayload = isPlainObject(status?.capabilitySnapshot)
+    ? (status.capabilitySnapshot as CapabilitySnapshotPayload)
+    : null
+  if (snapshotPayload) {
+    // 权威路径：后端矩阵三层快照（与 session 建立/重连探针同一份协商结论）。
+    return {
+      connected,
+      capabilitiesKnown,
+      loadSession: usableFromSnapshot(snapshotPayload, 'load'),
+      promptImage: usableFromSnapshot(snapshotPayload, 'promptImage'),
+      sessionFork: usableFromSnapshot(snapshotPayload, 'fork'),
+      sessionResume: usableFromSnapshot(snapshotPayload, 'resume'),
+      sessionClose: usableFromSnapshot(snapshotPayload, 'close'),
+      sessionList: usableFromSnapshot(snapshotPayload, 'list'),
+      mcpHttp: usableFromSnapshot(snapshotPayload, 'mcpHttp'),
+      mcpSse: usableFromSnapshot(snapshotPayload, 'mcpSse'),
+      hasAuthMethods: Array.isArray(authMethods) && authMethods.length > 0,
+    }
+  }
   return {
     connected,
     capabilitiesKnown,
-    loadSession: caps?.loadSession === true,
+    // canonical 缺失时根级布尔 alias 兼容生效（唯一登记的 alias）。
+    loadSession: rawObjectCapability(session, 'loadSession') || caps?.loadSession === true,
     promptImage: prompt?.image === true,
-    sessionFork: session?.fork === true,
-    sessionResume: session?.resume === true,
-    sessionClose: session?.close !== false,
+    // raw 无消费者登记信息：fork 恒 fail-closed（ghost capability 防线）。
+    sessionFork: false,
+    sessionResume: rawObjectCapability(session, 'resume'),
+    sessionClose: session?.close === true,
     sessionList: session?.list === true,
-    mcpHttp: mcp?.http !== false,
-    mcpSse: mcp?.sse !== false,
+    mcpHttp: mcp?.http === true,
+    mcpSse: mcp?.sse === true,
     hasAuthMethods: Array.isArray(authMethods) && authMethods.length > 0,
   }
 }

@@ -310,6 +310,7 @@ mod tests {
             raw,
             classification,
             wire_ordinal: None,
+            ingress_seq: 0,
         }
     }
 

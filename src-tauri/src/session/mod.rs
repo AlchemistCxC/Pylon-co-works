@@ -26,6 +26,9 @@ pub(crate) use inspector::*;
 // 方案 11：会话创建域搬移至子模块。
 mod create;
 pub(crate) use create::*;
+// #98：session/fork 通用消费者（能力 gate + 受限 raw envelope + parent/child）。
+mod fork;
+pub(crate) use fork::*;
 // 方案 11：prompt 域搬移至子模块。
 mod session_state;
 pub(crate) use session_state::*;
@@ -83,6 +86,10 @@ mod del03_local_first_delete;
 mod del05_error_code_matrix;
 #[cfg(test)]
 mod revive_tests;
+// #97：模型选择器切换闭环 wire 级集成测试（真实广告 config id、发送前拒绝、
+// 钳制收敛、session/load 复活零 selector RPC）。
+#[cfg(test)]
+mod model_switch_wire_tests;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
@@ -1313,7 +1320,11 @@ for line in sys.stdin:
             .await
             .expect("fake ACP must initialize");
         let state = crate::test_utils::TestStateBuilder::bare()
-            .with_active_agent("runtime-b")
+            // #97 评审修正：active agent 必须与 runtime 归属 agent **不同**——
+            // 旧写法 with_active_agent("runtime-b") 使 active==runtime，即使实现
+            // 回归成读 active agent 的协议，wire 结果也相同（测试无判别力）。
+            // active-a 声明 SetModel：误读 active 协议 → wire 会出现 set_model。
+            .with_active_agent("active-a")
             .with_agent(active_def)
             .with_agent(runtime_def)
             .with_runtime("runtime-b", runtime.clone())

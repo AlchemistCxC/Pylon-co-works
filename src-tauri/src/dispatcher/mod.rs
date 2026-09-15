@@ -16,8 +16,7 @@ use crate::permission::{
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
 use crate::session::{
-    config_option_key_matches, extract_tool_file_name, value_as_machine_id, value_as_string,
-    SessionInfo,
+    config_option_key_matches, extract_tool_file_name, value_as_string, SessionInfo,
 };
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
@@ -177,6 +176,10 @@ fn apply_update_event_with_pet_policy(
             if let Some(meta) = update.get("_meta") {
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
+                    // #97/D97-3（评审修正）：usage _meta.model 是权威 current 通道，
+                    // 与单值 config_option_update 分支同契约——清除客户端 requested
+                    // 未确认态，三态收敛不留漏口。
+                    session.model_pending = None;
                 }
             }
             if apply_pet {
@@ -211,28 +214,22 @@ fn apply_update_event_with_pet_policy(
             if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
                 session.title = title.to_string();
             }
-            // P56/D2.3：payload 带 models.currentModelId（camelCase/snake_case）时更新
-            // session.model（对齐 usage_update._meta.model 现状——hermes 未来若推此
-            // 通道即可消费；machine-id-only 提取，显示名不当 id）。
-            if let Some(model) = update
-                .get("models")
-                .and_then(|models| {
-                    models
-                        .get("currentModelId")
-                        .or_else(|| models.get("current_model_id"))
-                        .or_else(|| models.get("currentModel"))
-                        .or_else(|| models.get("current_model"))
-                        .or_else(|| models.get("current"))
-                })
-                .and_then(value_as_machine_id)
-            {
-                session.model = model;
+            // P56/D2.3 + #97/D97-3：payload 带 models 状态（camelCase/snake_case）时
+            // 全量消费——current 提取 + 模型面/choices 完整刷新（不再只更新当前值），
+            // 并清除客户端 requested 未确认态（Agent 推送的完整状态是权威）。
+            // apply_models_state 内置 fingerprint 幂等（#97/D97-4）：完全相同的
+            // models push 重复到达只提交一次，丢弃计数留在 session 诊断字段。
+            if let Some(models) = update.get("models") {
+                session.apply_models_state(models);
             }
         }
         Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
             if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
-                session.config_options = options.clone();
-                session.apply_config_options(options);
+                // #97/D97-4：有界替换——超限 envelope 拒绝入库（已知 selector 状态
+                // 保持不变 + 计数），未知 option kind 随原样数组保留。
+                // N1（第二轮评审）：数组携带可提取 model currentValue（权威回显的
+                // model 维度）时清除 requested 未确认态，pending 生命周期无漏口。
+                session.apply_config_options_push(options);
             } else {
                 // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
                 // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
@@ -247,16 +244,27 @@ fn apply_update_event_with_pet_policy(
                     option_key.is_some_and(|key| config_option_key_matches(key, "model"));
                 let is_mode_key =
                     option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
+                // N4（第二轮评审）：model 值走 machine-id-only 提取（显示名不当 id，
+                // 与 models-state 通道同一不变量）；mode 等其余语义保持宽容提取。
                 let current = update
                     .get("currentValue")
                     .or_else(|| update.get("value"))
-                    .and_then(value_as_string);
+                    .and_then(|value| {
+                        if is_model_key {
+                            crate::session::value_as_machine_id(value)
+                        } else {
+                            value_as_string(value)
+                        }
+                    });
                 if is_model_key {
                     if let Some(model) = current {
                         // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
                         // model 为空必误判 changed（对齐 usage/tool 全部门控）。
+                        // #97/D97-3：Agent 推送的 current 是权威值——清除客户端
+                        // requested 未确认态。
                         let changed = session.model != model;
                         session.model = model.clone();
+                        session.model_pending = None;
                         if changed && apply_pet {
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
@@ -542,7 +550,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
     request_id: crate::acp::RequestId,
     params: Option<&serde_json::Value>,
 ) {
-    let Some(adapter) = crate::protocol_adapter::get_protocol_adapter(provider) else {
+    // #98：方法驱动 dispatch——adapter 按 ACP method 注册表查找，provider 名称
+    // 不再是 gate（任何 agent 的 session/request_permission 都由通用适配器处理，
+    // 未注册方法得到稳定 method_unsupported，raw 参数随拒绝事件保留可诊断）。
+    let Some(adapter) =
+        crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
+    else {
         reject_interaction_request(
             window,
             acp,
@@ -551,9 +564,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
             method,
             Some(request_id),
             params,
-            "provider_unsupported",
+            "method_unsupported",
             -32601,
-            &format!("interaction provider unsupported: {provider}"),
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
         )
         .await;
         return;
@@ -827,6 +843,9 @@ async fn handle_permission_request<R: tauri::Runtime>(
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id.clone(), effective_permission.clone());
         });
+        // #98：统一交互队列登记（FIFO / 单一 Active / queued depth）。队列是
+        // cancel/timeout/disconnect drain 终态与冷挂载快照的数据源；permission
+        // 即 kind="approval"，队列里的事件载荷与 pylon:interaction 完全同构。
         let payload = serde_json::json!({
             "title": effective_permission.title,
             "prompt": effective_permission.prompt,
@@ -836,20 +855,44 @@ async fn handle_permission_request<R: tauri::Runtime>(
             // 前端只做倒计时展示，不自行持有 300s 常量。
             "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
         });
-        emit_event(
-            window,
-            crate::event_names::INTERACTION,
-            serde_json::json!({
-                "provider": provider,
-                "agentId": agent_id,
-                "sessionId": permission.session_id,
-                "eventType": "permission.request",
-                "requestId": request_id.to_string(),
-                "toolCallId": permission.tool_call_id,
-                "clientGeneration": permission.client_generation,
-                "payload": payload,
-            }),
-        );
+        let interaction_event = serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": permission.session_id,
+            "eventType": "permission.request",
+            "requestId": request_id.to_string(),
+            "toolCallId": permission.tool_call_id,
+            "clientGeneration": permission.client_generation,
+            "payload": payload,
+        });
+        if let Some(runtime) = runtimes.get(agent_id) {
+            match runtime
+                .interactions
+                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                    request_id: request_id.to_string(),
+                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                    kind: "approval".to_string(),
+                    session_id: permission.session_id.clone(),
+                    agent_id: agent_id.to_string(),
+                    client_generation: permission.client_generation,
+                    enqueued_at: permission.requested_at,
+                    event: interaction_event.clone(),
+                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                }) {
+                Ok(admission) => {
+                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
+                    tracing::trace!(
+                        agent_id = %agent_id,
+                        request_id = %request_id,
+                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
+                        waiting,
+                        "interaction queue admitted permission request"
+                    );
+                }
+                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
+            }
+        }
+        emit_event(window, crate::event_names::INTERACTION, interaction_event);
     }
 }
 
@@ -902,6 +945,8 @@ async fn handle_session_update<R: tauri::Runtime>(
     message_service: Option<&Arc<crate::session::MessageService>>,
     classification: crate::acp::ReplayClassification,
     wire_ordinal: Option<u64>,
+    turn_ledger: &Arc<crate::acp::TurnLedger>,
+    ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
     mut payload: serde_json::Value,
 ) -> bool {
@@ -1075,6 +1120,16 @@ async fn handle_session_update<R: tauri::Runtime>(
         }
         if decision.collect_response {
             let effects = routing::agent_message_chunk_effects(update, decision);
+            // #99：live 活动 → turn 账本推进（Streaming 阶段 + ingress cursor +
+            // 文本标志）；回合未登记或已终态时为迟到活动，仅计诊断，不产生终态。
+            let _ = turn_ledger.note_session_activity(
+                &source,
+                &peri_id,
+                generation,
+                ingress_seq,
+                effects.text.is_some(),
+                false,
+            );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
             }
@@ -1119,6 +1174,28 @@ async fn handle_session_update<R: tauri::Runtime>(
         } else if let Some(session) = items.get_mut(&source) {
             if !decision.mutate_session {
                 return true;
+            }
+            // #99（评审 E3）：live 工具活动同样喂给账本——saw_tool 是
+            // empty-turn 判定（tool-only vs agent-empty）的输入；文本 chunk
+            // 与工具调用都会在 dispatcher 处理瞬间写入账本，settle 侧以此
+            // 为判定源（残余窗口见 refine_empty_turn 注释）。
+            if !is_replay
+                && matches!(
+                    variant,
+                    Some(
+                        crate::acp::SessionUpdateVariant::ToolCall
+                            | crate::acp::SessionUpdateVariant::ToolCallUpdate
+                    )
+                )
+            {
+                let _ = turn_ledger.note_session_activity(
+                    &source,
+                    &peri_id,
+                    generation,
+                    ingress_seq,
+                    false,
+                    true,
+                );
             }
             pet_events.extend(apply_update_event_routed(
                 session, update, variant, decision,
@@ -1621,11 +1698,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         let wire_trace = acp.lock().await.wire_trace();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
+                // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
                 break;
             }
             let raw = tokio::select! {
                 biased;
-                // A7：watch 分支——崩溃信号不依赖 broadcast 容量，洪泛 Lagged 后仍触发
+                // #99 优先级规则（可测试）：crash watch > 控制帧（agent 请求/崩溃广播）
+                // > 普通通知。控制帧独立有界通道，通知洪泛时仍能有界时间内被路由；
+                // 每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
                 changed = crashed_rx.changed() => {
                     if changed.is_ok() && *crashed_rx.borrow_and_update() {
                         // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
@@ -1633,6 +1713,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     }
                     continue;
                 }
+                raw = notification_inbox.recv_control() => raw,
                 raw = notification_inbox.recv() => raw,
             };
             let classified = match raw {
@@ -1643,6 +1724,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 raw,
                 classification,
                 wire_ordinal,
+                ingress_seq,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
@@ -1855,6 +1937,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "_x.ai/exit_plan_mode" => {
                             Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
                         }
+                        // #98：elicitation/create 通用协议桥——按方法名路由，
+                        // 不要求 provider 名称匹配（AC11）。
+                        "elicitation/create" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::Elicitation)
+                        }
                         _ => None,
                     };
                     if let Some(bridge) = bridge {
@@ -1865,7 +1952,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 crate::acp::adapter::private_ext::parse_questions(bridge, &params)
                                     .ok()
                             }
-                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => None,
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan
+                            | crate::acp::adapter::private_ext::PrivateBridge::Elicitation => None,
                         };
                         let session_id = params
                             .get("sessionId")
@@ -1886,15 +1974,40 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     client_generation: generation,
                                 },
                             );
-                            emit_event(
-                                &window,
-                                crate::event_names::INTERACTION,
-                                serde_json::json!({
-                                    "provider": provider, "agentId": agent_id, "sessionId": session_id,
-                                    "eventType": if matches!(bridge, crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan) { "approval.request" } else { "ask-user" }, "requestId": request_id.to_string(),
-                                    "clientGeneration": generation, "payload": params,
-                                }),
-                            );
+                            let interaction_event = serde_json::json!({
+                                "provider": provider, "agentId": agent_id, "sessionId": session_id,
+                                "eventType": match bridge {
+                                    crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
+                                    crate::acp::adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
+                                    _ => "ask-user",
+                                }, "requestId": request_id.to_string(),
+                                "clientGeneration": generation, "payload": params,
+                            });
+                            // #98：统一交互队列登记（drain 终态 + 冷挂载快照数据源）。
+                            if let Some(runtime) = runtimes.get(&agent_id) {
+                                let _ = runtime.interactions.admit(
+                                    crate::acp::interaction_queue::InteractionQueueEntry {
+                                        request_id: request_id.to_string(),
+                                        method: method.to_string(),
+                                        kind: match bridge {
+                                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                                                "approval".to_string()
+                                            }
+                                            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
+                                                "elicitation".to_string()
+                                            }
+                                            _ => "ask-user".to_string(),
+                                        },
+                                        session_id,
+                                        agent_id: agent_id.clone(),
+                                        client_generation: generation,
+                                        enqueued_at: crate::time::Timestamp::now(),
+                                        event: interaction_event.clone(),
+                                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                                    },
+                                );
+                            }
+                            emit_event(&window, crate::event_names::INTERACTION, interaction_event);
                             continue;
                         }
                     }
@@ -1917,12 +2030,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    let reason =
-                        if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                            "method_unsupported"
-                        } else {
-                            "provider_unsupported"
-                        };
+                    // #98：provider 名称不再是 dispatch gate——未注册的 client
+                    // request 一律按方法维度报稳定 unsupported（raw 诊断随事件
+                    // 保留，不伪造 option 或成功）。
+                    let reason = "method_unsupported";
                     (
                         reason,
                         -32601,
@@ -1957,6 +2068,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         raw.method
                     );
                 }
+                // #99（评审 E4）：带 id + method 的 agent 请求落到此处 = 没有任何
+                // 分支认识它——spec 禁止静默丢弃（Responder 会永久滞留 pending
+                // 表、agent 侧请求挂死）。统一回 JSON-RPC Method Not Found，
+                // 应答同时消费 Responder、收敛 pending 条目。
+                if let (Some(request_id), Some(method)) = (raw.id.clone(), raw.method.as_deref()) {
+                    let responder = { acp.lock().await.responder() };
+                    let _ = responder
+                        .respond_error(
+                            request_id,
+                            -32601,
+                            &format!("method not supported by client: {method}"),
+                        )
+                        .await;
+                }
                 continue;
             }
             let payload = match raw.params {
@@ -1981,6 +2106,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 message_service.as_ref(),
                 classification,
                 wire_ordinal,
+                &runtime_for_reconnect.turn_ledger,
+                ingress_seq,
                 wire_trace.clone(),
                 payload,
             )
@@ -1988,6 +2115,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             {
                 break;
             }
+        }
+        // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
+        // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
+        // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn
+        // （可观测，且永远无法改写新代际状态）。
+        let dropped = runtime_for_reconnect
+            .turn_ledger
+            .drop_generation(generation);
+        if dropped > 0 {
+            tracing::info!(
+                dropped,
+                generation,
+                "stale-generation turn entries dropped by turn ledger"
+            );
         }
     }));
 }
@@ -2492,5 +2633,241 @@ mod tests {
             false,
         );
         assert_eq!(session.model, "keep");
+    }
+
+    /// #97/D97-3：session_info_update 的完整模型列表同步刷新 choices/current
+    /// （验收 4），并清除客户端 requested 未确认态。
+    #[test]
+    fn session_info_update_refreshes_full_model_catalog_and_clears_pending() {
+        let mut session = dispatcher_session();
+        session.model = "m-old".to_string();
+        session.model_pending = Some("m-old".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {
+                "currentModelId": "m-new",
+                "availableModels": [{"modelId": "m-new", "name": "New"}, {"modelId": "m-legacy"}],
+            },
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-new");
+        assert_eq!(
+            session.model_choices,
+            vec!["m-new".to_string(), "m-legacy".to_string()]
+        );
+        assert_eq!(session.model_pending, None);
+    }
+
+    /// #97/D97-4：完全相同的 models push 重复两次只提交一次状态；丢弃计数留在
+    /// 诊断字段，且不产生第二次 model 变更。
+    #[test]
+    fn duplicate_session_info_push_is_deduplicated_with_diagnostic_count() {
+        let mut session = dispatcher_session();
+        let update = serde_json::json!({
+            "sessionUpdate": "session_info_update",
+            "models": {
+                "currentModelId": "m-new",
+                "availableModels": [{"modelId": "m-new"}, {"modelId": "m-legacy"}],
+            },
+        });
+        for _ in 0..2 {
+            apply_update_event(
+                &mut session,
+                &update,
+                Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate),
+                false,
+            );
+        }
+        assert_eq!(session.model, "m-new");
+        assert_eq!(session.selector_duplicate_pushes, 1);
+        assert_eq!(
+            session.model_choices,
+            vec!["m-new".to_string(), "m-legacy".to_string()]
+        );
+    }
+
+    /// #97/D97-4：config_option_update 的超限 configOptions envelope 被拒绝入库，
+    /// 已知 selector 状态保持不变。
+    #[test]
+    fn oversized_config_option_envelope_does_not_corrupt_session_catalog() {
+        use crate::session::SELECTOR_ENVELOPE_MAX_BYTES;
+        let mut session = dispatcher_session();
+        let known = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "model-selection",
+                "category": "model",
+                "options": [{"valueId": "m-a"}],
+                "currentValue": "m-a"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &known,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-a");
+        let blob = "x".repeat(SELECTOR_ENVELOPE_MAX_BYTES + 1);
+        let oversized = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{"id": "future-kind", "payload": blob}],
+        });
+        apply_update_event(
+            &mut session,
+            &oversized,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.selector_envelope_dropped, 1);
+        assert_eq!(session.model, "m-a");
+        assert_eq!(
+            session.model_surface,
+            crate::session::ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
+    }
+
+    /// #97/D97-7（评审补强）：config_option_update 全量数组同时含已知 model 选项与
+    /// 未知 kind 时，已知 selector 照常刷新，未知 kind 不降级已知面。
+    #[test]
+    fn config_option_update_with_unknown_kind_preserves_known_selector() {
+        let mut session = dispatcher_session();
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [
+                {
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-b"}],
+                    "currentValue": "m-b"
+                },
+                {"id": "future-kind", "payload": {"opaque": true}}
+            ],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-b");
+        assert_eq!(
+            session.model_surface,
+            crate::session::ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
+        assert_eq!(session.config_options.len(), 2, "未知 kind 原样保留");
+    }
+
+    /// #97/D97-3（评审补强）：usage _meta.model 是权威 current 通道——清除客户端
+    /// requested 未确认态，与单值 config_option_update 分支同契约。
+    #[test]
+    fn usage_meta_model_clears_pending_state() {
+        let mut session = dispatcher_session();
+        session.model_pending = Some("m-old".to_string());
+        let update = serde_json::json!({"_meta": {"model": "usage-channel-model"}});
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::UsageUpdate),
+            false,
+        );
+        assert_eq!(session.model, "usage-channel-model");
+        assert_eq!(session.model_pending, None);
+    }
+
+    /// #97/N1（第二轮评审回归）：config_option_update 全量数组携带可提取 model
+    /// currentValue 时清除 pending（权威回显的 model 维度）；无 model 维度的数组
+    /// 不构成确认，pending 保留——pending 生命周期在全量数组分支无漏口。
+    #[test]
+    fn config_option_update_full_array_clears_pending_only_with_model_dimension() {
+        // 有 model 维度：current + pending 一致收敛，pending 清除。
+        let mut session = dispatcher_session();
+        session.model_pending = Some("m-stale".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "model-selection",
+                "category": "model",
+                "options": [{"valueId": "m-b"}],
+                "currentValue": "m-b"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-b");
+        assert_eq!(session.model_pending, None);
+
+        // 无 model 维度（仅 reasoning 选项）：model 与 pending 均不动。
+        let mut session = dispatcher_session();
+        session.model = "m-keep".to_string();
+        session.model_pending = Some("m-keep".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "category": "thought_level",
+                "options": [{"valueId": "low"}, {"valueId": "high"}],
+                "currentValue": "high"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-keep");
+        assert_eq!(session.model_pending.as_deref(), Some("m-keep"));
+    }
+
+    /// #97/N4（第二轮评审回归）：单值 config_option_update 的 model 值走
+    /// machine-id-only 提取——显示名不得进入 session.model（与 models-state
+    /// 通道同一不变量）；mode 通道保持宽容提取不受影响。
+    #[test]
+    fn single_value_model_push_is_machine_id_only() {
+        let mut session = dispatcher_session();
+        session.model = "m-keep".to_string();
+        session.model_pending = Some("m-keep".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "model",
+            "currentValue": {"name": "Display Only"},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-keep", "显示名不得当 model id");
+        assert_eq!(session.model_pending.as_deref(), Some("m-keep"));
+
+        // machine id 照常消费。
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "model",
+            "currentValue": {"modelId": "m-real"},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-real");
+        assert_eq!(session.model_pending, None);
     }
 }

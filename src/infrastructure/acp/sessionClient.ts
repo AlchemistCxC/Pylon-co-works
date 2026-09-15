@@ -210,10 +210,20 @@ export interface CloseSessionPayload {
   source: string
 }
 
+/** #98：session/fork 请求载荷——childSource 命名权在本地身份层，由调用方提供。 */
+export interface ForkSessionPayload {
+  source: string
+  childSource: string
+}
+
 export function createSessionClient(transport: ClientTransport) {
   return {
     newSession: (payload: NewSessionPayload): Promise<unknown> => transport.invoke('new_session', payload),
     closeSession: (payload: CloseSessionPayload): Promise<unknown> => transport.invoke('close_session', payload),
+    // #98：fork 消费者——后端仅在协商快照判定 usable 时发送 session/fork raw
+    // RPC；不可用时稳定报 session_fork_unavailable，不伪造 child identity。
+    forkSession: (payload: ForkSessionPayload): Promise<unknown> =>
+      transport.invoke('session_fork', payload),
     loadPersistedSession: (payload: LoadPersistedSessionPayload): Promise<PersistedSessionLoadResult> =>
       transport.invoke('load_persisted_session', payload).then(normalizePersistedSessionLoadResult),
     listPersistedSessions: (): Promise<PersistedSessionSummary[]> =>

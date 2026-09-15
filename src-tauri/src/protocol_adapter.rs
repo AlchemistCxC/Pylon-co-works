@@ -249,9 +249,17 @@ async fn respond_request_permission(
 type AdapterRef = Arc<dyn AgentProtocolAdapter>;
 
 static PROTOCOL_ADAPTERS: OnceLock<Mutex<HashMap<String, AdapterRef>>> = OnceLock::new();
+/// #98：方法键控 dispatch 注册表——core dispatch（请求受理与应答路由）按 ACP
+/// method 查找适配器，provider 名称不再是 gate。provider 键控表仅保留给
+/// 诊断 catalog 投影（build_protocol_adapter_catalog）。
+static PROTOCOL_METHOD_ADAPTERS: OnceLock<Mutex<HashMap<String, AdapterRef>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, AdapterRef>> {
     PROTOCOL_ADAPTERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn method_registry() -> &'static Mutex<HashMap<String, AdapterRef>> {
+    PROTOCOL_METHOD_ADAPTERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn normalize_provider(provider: &str) -> String {
@@ -334,19 +342,35 @@ pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
     .any(|needle| words.iter().any(|word| word == needle))
 }
 
-/// 注册 provider 适配器（应用启动时；同 provider 重复注册覆盖）。
+/// 注册协议适配器（应用启动时；同 provider / 同 method 重复注册覆盖）。
+/// 同时登记 provider 键控（诊断视图）与方法键控（dispatch 真源）两张表。
 pub(crate) fn register_protocol_adapter(adapter: AdapterRef) {
-    let _ = registry()
-        .lock()
-        .map(|mut adapters| adapters.insert(normalize_provider(adapter.provider()), adapter));
+    let _ = registry().lock().map(|mut adapters| {
+        adapters.insert(normalize_provider(adapter.provider()), adapter.clone())
+    });
+    if let Ok(mut by_method) = method_registry().lock() {
+        for method in adapter.interaction_methods() {
+            by_method.insert((*method).to_string(), adapter.clone());
+        }
+    }
 }
 
-/// 按 provider 取适配器；未注册返回 None（调用方返回明确 unsupported，不生成 RPC）。
+/// 按 provider 取适配器（诊断/catalog 视图与测试用；dispatch 不再经此路径）。
+#[allow(dead_code)] // dispatch 已方法键控（#98）；provider 视图保留给测试与诊断
 pub(crate) fn get_protocol_adapter(provider: &str) -> Option<AdapterRef> {
     registry()
         .lock()
         .ok()
         .and_then(|adapters| adapters.get(&normalize_provider(provider)).cloned())
+}
+
+/// #98：按 ACP method 取适配器——dispatch 真源。任何 agent 的请求只要方法
+/// 已注册即受理，与 provider 名称无关。
+pub(crate) fn get_protocol_adapter_for_method(method: &str) -> Option<AdapterRef> {
+    method_registry()
+        .lock()
+        .ok()
+        .and_then(|adapters| adapters.get(method).cloned())
 }
 
 /// Stable list used by both the dispatcher probe and the diagnostics command.

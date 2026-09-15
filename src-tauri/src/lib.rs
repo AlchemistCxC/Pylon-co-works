@@ -429,6 +429,31 @@ impl AppStateHandles {
         let capabilities = runtime
             .and_then(|runtime| runtime.acp.try_lock().ok())
             .and_then(|acp| acp.agent_capabilities().cloned());
+        // #98：结构化能力快照（advertised/negotiated/usable 三层 + 诊断）。
+        // 与 session 建立/重连探针消费同一矩阵（negotiated.rs from_parts）——
+        // 前端只消费 usable，不再自行解析 raw capabilities（fail-closed 一致）。
+        let capability_snapshot = runtime.and_then(|runtime| {
+            let generation = runtime.client_generation.load(Ordering::Acquire);
+            let acp = runtime.acp.try_lock().ok()?;
+            let declared: Vec<String> = acp.establishment_order().to_vec();
+            Some(
+                crate::acp::NegotiatedCapabilitySnapshot::from_parts(
+                    acp.capabilities(),
+                    &declared,
+                    generation,
+                    &crate::acp::negotiated::registered_capability_consumers(),
+                )
+                .wire_value(),
+            )
+        });
+        // #98：pending 交互摘要（含事件载荷全文）——前端冷挂载/刷新只凭本快照
+        // + generation 即可恢复 active 卡与 queued 深度，不依赖一次性 live event。
+        let pending_interactions =
+            runtime.and_then(|runtime| {
+                runtime.interactions.snapshot().ok().map(|entries| {
+                    crate::acp::interaction_queue::pending_interactions_wire(&entries)
+                })
+            });
         let mut session_bindings = runtime
             .and_then(|runtime| runtime.binding_health.lock().ok())
             .map(|health| {
@@ -460,6 +485,8 @@ impl AppStateHandles {
             "lastConnectedAt": last_connected_at,
             "generation": generation,
             "capabilities": capabilities,
+            "capabilitySnapshot": capability_snapshot,
+            "pendingInteractions": pending_interactions,
             "sessionBindings": session_bindings,
             "active": agent.is_some(),
             "available": available,
@@ -576,6 +603,36 @@ impl AppStateHandles {
                 }
             }
             runtime.private_interactions.cancel_all();
+            // #98：断线/替换 drain——每个 waiter 拿到 Disconnected 终态（AC10），
+            // 并向前端广播终态事件：permission 卡不再悬挂到 300s 超时。
+            let drained_interactions = runtime
+                .interactions
+                .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected)
+                .unwrap_or_default();
+            for entry in drained_interactions {
+                let reason = if entry.kind == "approval" {
+                    serde_json::json!({
+                        "eventType": "permission.resolved",
+                        "agentId": entry.agent_id,
+                        "sessionId": entry.session_id,
+                        "requestId": entry.request_id,
+                        "clientGeneration": entry.client_generation,
+                        "optionId": "",
+                        "reason": "disconnected",
+                    })
+                } else {
+                    serde_json::json!({
+                        "eventType": "interaction.resolved",
+                        "agentId": entry.agent_id,
+                        "sessionId": entry.session_id,
+                        "requestId": entry.request_id,
+                        "clientGeneration": entry.client_generation,
+                        "kind": entry.kind,
+                        "reason": "disconnected",
+                    })
+                };
+                emit_event(&window, crate::event_names::INTERACTION, reason);
+            }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             (stale_sources, probe_candidates)
         };
@@ -652,6 +709,22 @@ pub fn run() {
     protocol_adapter::register_protocol_adapter(std::sync::Arc::new(
         protocol_adapter::RequestPermissionAdapter { provider: "hermes" },
     ));
+    // #98：能力消费者注册表——「声明—协商—消费者」矩阵第三列。只有注册了
+    // 消费者的能力才会被协商快照投影为 usable（IPC/UI 可点击 gate）；fork 与
+    // elicitation 的消费者在本切片落地（session/fork.rs / elicitation 桥）。
+    use crate::acp::CapabilityConsumer as CC;
+    for consumer in [
+        CC::SessionEstablishment,
+        CC::SessionClose,
+        CC::SessionList,
+        CC::SessionFork,
+        CC::Elicitation,
+        CC::PromptImage,
+        CC::McpHttp,
+        CC::McpSse,
+    ] {
+        crate::acp::negotiated::register_capability_consumer(consumer);
+    }
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
     let loaded = agent_config::load_app_config();
@@ -813,6 +886,7 @@ pub fn run() {
                 crate::prism_cmds::prism_delete_block, crate::prism_cmds::prism_add_scenario_block, crate::prism_cmds::prism_edit_scenario_block,
                 crate::prism_cmds::prism_delete_scenario_block, crate::prism_cmds::prism_reorder_scenario_blocks, crate::prism_cmds::prism_reload, crate::prism_cmds::prism_llm_test,
                 crate::session::new_session, crate::session::send_message, crate::session::set_mode, crate::session::set_config_option, crate::session::close_session, crate::session::cancel_prompt, crate::session::load_sessions,
+                crate::session::session_fork,
                 crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::restart_agent_runtime, crate::lifecycle::agent_status, crate::lifecycle::acp_wire_trace_snapshot, crate::lifecycle::reload_agents, crate::lifecycle::get_mcp_servers, crate::lifecycle::set_mcp_servers,
                 crate::lifecycle::list_tool_dictionary,
                 crate::lifecycle::set_session_state,
