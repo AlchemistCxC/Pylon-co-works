@@ -1,5 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/apmantza/pi-lens/master/docs/schema/pi-lens-config-v1.json",
   "format": { "enabled": false },
-  "autofix": { "enabled": false }
+  "autofix": { "enabled": false },
+  "ignore": [
+    "src-tauri/resources/sdk/**",
+    "dist/**",
+    "dist-plugin-devkit/**",
+    "dist-plugin-sdk/**",
+    "dist-solid-smoke/**",
+    "coverage/**"
+  ]
 }
