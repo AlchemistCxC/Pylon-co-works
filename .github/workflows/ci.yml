@@ -21,10 +21,18 @@ jobs:
         with:
           node-version: 22
 
+      # #106 P6：bun 安装缓存（与 rust job 合计省约 40s）。
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
 
-      # ISSUE-20 W1：统一入口——lint + vitest（P91 A5：legacy spawn 套件已全部退役，vitest 单轨）+ 覆盖率 + tsc/build
+      # ISSUE-20 W1：统一入口——lint + IPC 契约（#106 P3b）+ vitest（P91 A5：legacy
+      # spawn 套件已全部退役，vitest 单轨）+ 覆盖率 + tsc/build
       - name: 统一前端门禁（check:frontend）
         run: bun run check:frontend
 
@@ -55,6 +63,13 @@ jobs:
       # 本机（开发）未装 Windows SDK（rc.exe 缺失），CI 同样不依赖 SDK。
       - name: 使用 MSVC 工具链（CI runner 自带链接器）
         run: rustup override set stable-x86_64-pc-windows-msvc
+
+      # #106 P6：workspace 单 target 目录整树缓存——依赖冷编译是 rust job 最大
+      # 痛点（check:rust 406s 基线），clippy 指纹产物随 target 跨 run 命中。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
 
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
@@ -108,6 +123,37 @@ jobs:
       # 必要 bundle（debug 二进制），不上传 secret/data
       - name: 上传 debug 构建产物
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: pylon-debug-windows
           path: src-tauri/target/debug/pylon.exe
+          if-no-files-found: warn
+
+      # #106 P7.1：失败证据包——测试挂掉时 harness 证据（journal/事件导出、
+      # wire snapshot、测试 stderr、temp 清单）打包为可下载 artifact，debug
+      # 无需本地复现。与 P2 证据收集器同一数据面；成功 run 不产生该 artifact。
+      - name: 失败证据包（CI evidence bundle）
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ci-evidence
+          # 测试进程的临时目录残留（harness TempPath 正常不残留；崩溃残留即证据）
+          find "${TEMP:-/tmp}" -maxdepth 1 -name 'pylon-*' -newer src-tauri/Cargo.toml \
+            -print > artifacts/ci-evidence/temp-residue.txt 2>/dev/null || true
+          # clippy/workspace 原始诊断与 stderr（失败步的直接输出）
+          cp -f artifacts/clippy-workspace.err artifacts/ci-evidence/ 2>/dev/null || true
+          cp -f artifacts/clippy-workspace.json artifacts/ci-evidence/ 2>/dev/null || true
+          # 本地门禁输出（fmt/clippy/测试的可见错误摘要）
+          cargo check --manifest-path src-tauri/Cargo.toml --workspace --all-targets \
+            > artifacts/ci-evidence/cargo-check.txt 2>&1 || true
+          tree /F src-tauri/target > /dev/null 2>&1 || true
+
+      - name: 上传失败证据包
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-evidence
+          path: artifacts/ci-evidence/**
+          retention-days: 14
+          if-no-files-found: warn
