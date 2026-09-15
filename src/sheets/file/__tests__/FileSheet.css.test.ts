@@ -225,4 +225,22 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(legacy).not.toContain('tab-size: 2')
     expect(legacy).not.toContain('border-left: 2px solid transparent')
   })
+
+  // ── 注释完整性：注释里的 “*/” 会提前闭合注释，把紧随的规则整条吞掉 ──────────
+  // #83 的头部注释里写过 `file-main-*/`，浏览器（与本文件的 rulesOf 同口径的非贪婪
+  // 剥离）都在那处提前收尾，紧随的 `.file-sheet { display: flex }` 因此整条消失——
+  // sheet 外壳退化成块级堆叠、编辑器不再被约束宽度（横向滚动随之失效）。本断言把
+  // “壳规则必须真的被解析出来”钉住，并禁止注释残渣漏进选择器。
+  it('parses the sheet shell out of the file, with no comment residue in selectors', () => {
+    const rules = rulesOf(css)
+    const shell = rules.find(rule => rule.selector === '.file-sheet')
+    expect(shell, '.file-sheet 规则未被解析出来：头部注释可能提前闭合').toBeTruthy()
+    expect(shell!.body).toContain('display: flex')
+    expect(shell!.body).toContain('flex: 1')
+
+    const leaked = rules
+      .filter(rule => /[\u4e00-\u9fff]|\*\//.test(rule.selector))
+      .map(rule => rule.selector.slice(0, 80))
+    expect(leaked, `注释残渣漏进了选择器：\n${leaked.join('\n')}`).toEqual([])
+  })
 })
