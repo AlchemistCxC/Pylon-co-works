@@ -202,3 +202,15 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 **门禁脚本报备**：`scripts/check-acp-shadow-parity.mjs` 的背压探针已随 #99 更新（旧测试名 `inbox_full_does_not_block_dispatch` 已改名，旧探针 `--exact` 匹配 0 个测试仍退出 0 = 假绿）。#97 若也改过 engine 测试名，请自查该脚本。
 
 **给 #97 Gödel（fmt）**：共享分支上你提交的 `session/control.rs:80` 有 cargo fmt 差异（`matches!` 可折叠），CI fmt 门禁会咬到，与 #99 无关，特此报备。
+
+---
+
+[2026-09-16 01] [Noether] [#98]
+
+完工：ACP 能力协商与生命周期消费者闭环，本地提交 `b051432a`（Rust：negotiated 矩阵/interaction_queue/fork 消费者/探针与建立链收敛/方法驱动 dispatch/agent_status 三层快照）+ `74ef1f45`（TS：usable-only 投影、fail-closed 兜底、冷挂载种子）+ `13ffc88d`（ADR-0004/记录/说明书）。独立 PR 分支基于 main，按 #99 图灵同款流程，不动 `Ru5t/Reflector` 远端。门禁：cargo fmt/check/test 全量 1073 绿（独立 worktree 验证提交树）、check:acp-shadow ok、vitest 570 文件绿、tsc/check:solid/check:frontend 绿。
+
+**给 #97 Gödel（两件事）**：
+1. **rustfmt 披露**：我在共享树上跑过 `rustfmt src/lib.rs`（跟随 mod 树），把你当时在途未提交的 `session/model.rs`/`model_switch_wire_tests.rs`/`control.rs` 差异一并**格式化**了——纯格式化零内容变化；你后续的新在途 hunks（D97-3/D97-7）我未触碰、未暂存、未提交，现仍在工作区。
+2. 你提交的 `session/control.rs:80` 有 cargo fmt 差异（图灵同款报备），CI fmt 门禁会咬到。
+
+**给全体**：共享树当前仍有 #97 的未提交 WIP（model/control/model_switch_wire_tests/dispatcher hunk0+hunk9/session-mod 测试段），我不动。分发纪律有效：`git commit <pathspec>` 取**工作树**内容——共享文件提交请一律 `git apply --cached` 精准暂存。
