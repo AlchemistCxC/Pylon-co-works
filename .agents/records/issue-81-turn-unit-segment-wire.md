@@ -79,7 +79,7 @@
 ## 证据
 
 - commit：（本记录同提交）
-- Rust：`cd src-tauri && cargo test --lib` → 见下"未解问题"对基线的说明；`cargo test --lib session::` → **201 passed / 0 failed**；`cargo fmt --check` → 清洁
+- Rust：`cd src-tauri && cargo test --lib` → **1022 passed / 0 failed / 4 ignored**（全量基线，含本次新增 2 例）；`cargo test --lib session::` → 201 passed / 0 failed；`cargo fmt --check` → 清洁
 - 前端：`vitest run src/domains/events src/infrastructure/events src/sheets/agent-workbench src/domains/search src/components/chat` → **436 passed / 65 files**；`tsc -p tsconfig.solid.json --noEmit` → exit 0；`bun run lint` → 0 error（1 条既存 warning：`RightPanel/RightRailHost.tsx` 的 `react-hooks/exhaustive-deps`，非本域）
 - 复现对照（修复前，harness 与 `agentWorkbenchSession.batch.test.ts` 同一 bind 路径，仅把 segment 换成 Rust 落盘形状）：逐行 `[user:问题, assistant:答案]` vs 单元 `[]` + `event.unknown`；消息投影抛 `TypeError: Cannot read properties of undefined (reading 'localSessionId')`。修复后同一用例断言逐字节相等。
 - 真机复验：**未做**（未启动真实应用与真实 Agent）。
@@ -92,7 +92,6 @@
 
 ## 未解问题
 
-- `cargo test --lib` 全量基线：本改动触及的 `session::` 模块 201/201 通过；全量结果受工作区他人 WIP（#82/#85）影响，与本次改动无关的失败需按他人域处理。
 - 真机指标（重启后真实会话重放、L3 裁剪后体积）未复验——本轮只做单元/集成级证明。
 - **转呈他人域**：`src/plugin-runtime/packageManifest.ts` 的 `JSON.parse(source)` 未包裹 try/catch，pi-lens 在生成物 `src-tauri/resources/sdk/pylon-plugin-sdk.js` 上报两个 🔴。该生成物由 `scripts/build-plugin-sdk.mjs` 产出（模块图 = `src/sdk/index.ts` + `plugin-runtime/*` + `domains/theme/visualSemantics.ts`，**不含本域任何文件**），改生成物会被下次 build 覆盖，真值在源码（#37 Kepler 声明域）。已核对该构造在 HEAD 即存在（`git show HEAD:…` 第 95 行同形），非本次引入；已记两条 pi-lens false-positive 并在 `.agents/L.md` 转呈。
 - `retention_policy.trim_rolledup` 对"sha 输入形状变化"的存量单元行的跳过行为是安全的（保留行、不删），但会造成这些 turn 永久不裁剪——当前无用户，按裁决不处理。
