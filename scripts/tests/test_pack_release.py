@@ -7,20 +7,51 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from typing import Any, cast
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "pack_release.py"
 SPEC = importlib.util.spec_from_file_location("pack_release", SCRIPT_PATH)
-pack = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
+assert SPEC is not None and SPEC.loader is not None
+# 动态加载的模块没有静态属性表：cast(Any) 让 pack.<name> 的读取与测试里的
+# 模块级替身（OUT_ROOT / SRC_TAURI_DIR）都按测试惯用法通过类型检查。
+pack = cast(Any, importlib.util.module_from_spec(SPEC))
 SPEC.loader.exec_module(pack)
 
 
 class VersionTests(unittest.TestCase):
     def test_three_version_files_are_consistent(self) -> None:
-        self.assertEqual(pack.resolve_version(), "1.1.0")
+        # 三个版本源必须互相等。**不写死具体版本号**：字面量会在每次发版时假红，
+        # 而且测不出本测试名承诺的"三处漂移"（旧写法只对着 "1.1.0" 断言，
+        # 既从未比较过这三个文件，也在版本升到 1.6.0 后长期假红）。
+        package = pack.parse_version_from_package_json()
+        tauri = pack.parse_version_from_tauri_conf()
+        cargo = pack.parse_version_from_cargo_toml()
+        self.assertTrue(package)
+        self.assertEqual(package, tauri)
+        self.assertEqual(package, cargo)
+        self.assertEqual(pack.resolve_version(), package)
 
     def test_cargo_toml_version_parser(self) -> None:
-        self.assertEqual(pack.parse_version_from_cargo_toml(), "1.1.0")
+        # 与权威源（package.json）一致即可判定解析成功，不写死版本号。
+        self.assertEqual(
+            pack.parse_version_from_cargo_toml(),
+            pack.parse_version_from_package_json(),
+        )
+
+    def test_cargo_toml_version_parser_reads_only_package_section(self) -> None:
+        # [dependencies] 里的 version 不得被误当作包版本（合成输入，故可写死字面量）。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Cargo.toml").write_text(
+                '[dependencies]\nversion = "9.9.9"\n\n[package]\nname = "x"\nversion = "2.3.4"\n',
+                encoding="utf-8",
+            )
+            previous = pack.SRC_TAURI_DIR
+            pack.SRC_TAURI_DIR = root
+            try:
+                self.assertEqual(pack.parse_version_from_cargo_toml(), "2.3.4")
+            finally:
+                pack.SRC_TAURI_DIR = previous
 
     def test_top_dir_pattern(self) -> None:
         self.assertIsNotNone(pack.TOP_DIR_PATTERN.match("pylon-1.1.0-win64"))
@@ -106,6 +137,53 @@ class StagingTests(unittest.TestCase):
         staging = pack.OUT_ROOT / "pylon-1.1.0-win64"
         self.assertTrue((staging / "new.txt").exists())
         self.assertFalse((staging / "old.txt").exists())
+
+
+class ManualPackagingTests(unittest.TestCase):
+    """发行包必须打包 `docs/说明书/` **整个活目录**（2026-09-01 规则）。
+
+    2026-09-15 仓库主决定：库内不再保留预打包的 `docs/说明书.zip`——它不会随文档更新、
+    会变成陈旧副本；发行包改为每次从活目录全量收集。本测试把该约束钉住，防止有人改回
+    “打一个预压包”或换成固定文件清单。
+    """
+
+    MANUAL_REL = "docs/说明书"
+
+    def collected_manual(self) -> list[str]:
+        manual = pack.REPO_DIR / "docs" / "说明书"
+        files: list[tuple[Path, str]] = []
+        pack.append_tree_files(files, manual, self.MANUAL_REL)
+        return [rel for _src, rel in files]
+
+    def test_every_manual_file_is_collected_recursively(self) -> None:
+        manual = pack.REPO_DIR / "docs" / "说明书"
+        self.assertTrue(manual.is_dir(), "发行包要求 docs/说明书/ 存在")
+        expected = {
+            f"{self.MANUAL_REL}/{path.relative_to(manual).as_posix()}"
+            for path in manual.rglob("*")
+            if path.is_file()
+        }
+        self.assertTrue(expected, "说明书目录不应为空")
+        self.assertEqual(set(self.collected_manual()), expected)
+        self.assertTrue(any(rel.endswith(".md") for rel in expected))
+
+    def test_manual_is_packed_as_loose_files_not_a_prebuilt_archive(self) -> None:
+        # 预压包不随文档更新 ⇒ 既不得在库内存在，也不得出现在收集结果里。
+        self.assertFalse((pack.REPO_DIR / "docs" / "说明书.zip").exists())
+        self.assertFalse([rel for rel in self.collected_manual() if rel.endswith(".zip")])
+
+    def test_nested_subdirectories_are_walked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "说明书"
+            (root / "sub").mkdir(parents=True)
+            (root / "a.md").write_text("a", encoding="utf-8")
+            (root / "sub" / "b.md").write_text("b", encoding="utf-8")
+            files: list[tuple[Path, str]] = []
+            pack.append_tree_files(files, root, self.MANUAL_REL)
+            self.assertEqual(
+                sorted(rel for _src, rel in files),
+                [f"{self.MANUAL_REL}/a.md", f"{self.MANUAL_REL}/sub/b.md"],
+            )
 
 
 if __name__ == "__main__":
