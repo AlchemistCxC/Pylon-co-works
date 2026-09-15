@@ -329,5 +329,14 @@ describe('agentWorkbenchSession turn.unit 生产形状（#81 回归修复）', (
     expect(snapshot.document?.diagnostics.some(item => item.code === 'event.unknown')).toBe(true)
     // 未被污染的终态段仍提供完成态证据
     expect(snapshot.summary?.reason).toBe('done')
+
+    // 更烂的段（连 payloadVersion/rawPayload 都没有）也不得抛异常或吞掉整轮：
+    // 隔离路径必须容忍任意形状的坏段。
+    const bare = unitRowFromTurn(perRows)
+    const typed = bare.typedPayload as { segments: Record<string, unknown>[] }
+    typed.segments[0] = { kind: 'event', event: { sequence: 1, eventType: 'user.message' } }
+    const bareSnapshot = await bindWith([bare])
+    expect(messagesOf(bareSnapshot)?.map(message => message.content)).toEqual(['答案'])
+    expect(bareSnapshot.document?.diagnostics.some(item => item.code === 'event.unknown')).toBe(true)
   })
 })
