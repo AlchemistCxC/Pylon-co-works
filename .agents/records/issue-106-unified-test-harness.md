@@ -102,6 +102,10 @@
 3. CI 侧验证项（验收 3/14/16/17/18 的 ⚠️ 部分）待分支可推远端后由 PR run 判定。
 4. release 构建在 rust-lld 下的 bundle 验证（P6 预案：异常则 release 工作流环境变量回退 MSVC link.exe）。
 
+## 稳定性观测
+
+最终门禁复验曾出现 1 次 pylon-core 单测失败（92/1），随后 **5 次连续全量 workspace 复跑全绿**、pylon-core 单独 2 次复跑全绿——判定为并发重载下的偶发 flake（pylon-core 含 powershell/ping 真实进程夹具 managed_probe_cleanup_kills_descendant_processes，对负载时序敏感；该夹具系既有代码，非本期引入）。
+
 ## 并行交集
 
 本次碰过的共享文件（其他贡献者避让）：`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`package.json`、`.github/workflows/ci.yml`、`scripts/check-clippy-baseline.mjs`、`src-tauri/src/lib.rs`、`src-tauri/src/test_utils.rs`、`src-tauri/src/dispatcher/mod.rs`（仅 stub 行）、`src-tauri/src/session/mod.rs`/`session/prompt.rs`（仅测试夹具段）、`src-tauri/src/acp/engine.rs`（仅 stub 行）、`docs/说明书/` 两处命令表述。其他 agent 的未提交内容一概未动。
