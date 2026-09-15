@@ -187,6 +187,14 @@
 .cc-widget.cc-natural { container-type:normal; width:max-content !important; height:auto !important; min-width:0 !important; }
 .cc-widget.cc-natural > * { flex:none; }
 .cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
+/* 可点击的按钮型控件（model / reasoning / mode / tasks）恒不压缩。
+   窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠（S10 回归根因：
+   槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
+   新增"按钮型"控件时需登记到下面这组选择器。 */
+.cc-widget.cc-natural[data-widget-id='model'],
+.cc-widget.cc-natural[data-widget-id='reasoning'],
+.cc-widget.cc-natural[data-widget-id='mode'],
+.cc-widget.cc-natural[data-widget-id='tasks'] { flex:0 0 auto; }
 
 .cc-context-ring {
   --context-ring-color: var(--text-dim);
@@ -380,6 +388,11 @@
 .cc-status-secondary,
 .cc-actions {
   gap: var(--ui-space-1);
+  /* 窄窗（面板被侧栏挤到约 300px 时）容不下按钮型控件的自然宽：
+     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让槽内换行，
+     保证控件完整可见（宁可信息栏升到两行，也不压扁/裁掉控件）。 */
+  flex-wrap: wrap;
+  align-content: center;
 }
 
 .cc-status-row .cc-widget + .cc-widget::before,
