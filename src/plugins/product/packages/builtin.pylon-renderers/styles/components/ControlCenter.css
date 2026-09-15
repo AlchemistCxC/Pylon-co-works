@@ -168,7 +168,9 @@
   padding:3px 7px;
   border:1px solid color-mix(in srgb, var(--danger, #d66) 60%, transparent);
   border-radius:4px;
-  background:var(--cc-bg, #1b1b1b);
+  /* --cc-bg 归 CLI 输入栏消费（InputBar.css）；中控子树内的底色一律走全局面板色，
+     否则浅色主题下会掉进 #1b1b1b 硬编码深灰（问题 3 的同类残留，2026-09-15 清） */
+  background:var(--bg-panel, #1b1b1b);
   color:var(--danger, #f08a8a);
   font-size:.78em;
   line-height:1.3;
