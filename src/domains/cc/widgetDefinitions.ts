@@ -19,11 +19,11 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
 
 export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' | 'ekgGreen' | 'ekgYellow' | 'ekgRed' | 'barTrackColor' | 'barFillColor'
 export type CcNumberPropertyKey =
-  | 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
+  | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
   | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
   | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
 export type CcBooleanPropertyKey = 'barFillFollow'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
 
