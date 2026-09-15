@@ -122,6 +122,7 @@ const TOKEN_DEFAULTS: Record<string, string> = {
   '--file-code-gutter-pad-left': '8px',
   '--file-code-gutter-pad-right': '12px',
   '--file-code-line-inset': '16px',
+  '--file-code-content-pad-right': '0px',
   '--file-code-mark-rail': '2px',
   '--file-code-tab-size': '2',
 }
@@ -197,6 +198,22 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(contentHost.body).toContain('padding-top: var(--file-code-top-padding)')
     expect(contentHost.body).toContain('padding-bottom: var(--file-code-bottom-padding)')
     expect(contentHost.body).toContain('font-family: var(--mono)')
+  })
+
+  // issue #93：正文容器的右内边距两态必须同值，且同值要由构造保证——共享规则体 +
+  // 同一 token，而不是两态各写一个数字碰巧相等（改前只读态 24px、编辑态 0，宽行滚到
+  // 最右时右端留白差 24px）。因此这里同时钉住「共享规则消费 token」与「两态各自
+  // 规则体不得再自带水平内边距」。
+  it('gives both projections one content inset, owned by the shared rule and token', () => {
+    const contentHost = grouped('file-tab-pre', 'cm-content')
+    expect(contentHost.body).toContain('padding-right: var(--file-code-content-pad-right)')
+    expect(contentHost.body).toContain('padding-left: 0')
+
+    for (const selector of ['.file-tab-pre', '.file-code-editor .cm-content']) {
+      const body = bySelector(selector).body
+      expect(body, `${selector} 不得自带水平内边距（会绕开共享 token）`).not.toContain('padding-right')
+      expect(body, `${selector} 不得自带水平内边距（会绕开共享 token）`).not.toContain('padding-left')
+    }
   })
 
   it('paints the changed-line decoration without consuming layout width', () => {
