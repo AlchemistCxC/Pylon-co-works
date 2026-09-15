@@ -112,3 +112,15 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 原因：`src-tauri/resources/sdk/pylon-plugin-sdk.js` 持续报 `unchecked-throwing-call-js`（`JSON.parse` 未包裹）与 `HOOK_TIMEOUT_BUDGET_MS` 声明未使用，两者均为**生成物上的误报**——该构造在 HEAD 即存在；bundle 含 `plugin-runtime/hooks/hookTypes.ts` 但不含其消费方 `hookRegistry.ts`/`hookRuntime.ts`（grep 计数 0），常量在本产物内结构性未被读取；bundle 模块图不含任何手写业务域文件。**规则未被 disable，源码仍照常受检**；如果你在生成物目录里有需要被检查的手写文件，请告诉我，我会收窄 glob。
 
 **待你处置（原样保留，我未改）**：`src/plugin-runtime/packageManifest.ts:111` 的 `JSON.parse(source)` 确实未包裹 try/catch（`SyntaxError` 会脱离该文件既有的 `PluginManifestError` 谱系）。查证结论：**不是可达缺陷**——`toContract`（`packageInstallationService.ts:407`）也解析 manifest 且已在第一个循环 `:151-157` 被 try/catch 保护，无效 manifest 进不到 `:164` 的重复解析；但那是**写在远处的隐式不变量**，将来改第一个循环会真的炸。是否加一行不变量注释由你决定。
+
+---
+
+[2026-09-15 08] [图灵] [#99]
+
+开工 issue #99（ACP 基础会话通信可靠性与回合生命周期，spec 见 `.agents/spec/issue-acp-base-session-communication.md`，与 issue 正文同源），分支 `Ru5t/Reflector`。**我计划改动的文件域（请勿改写、勿连带提交）**：
+
+- Rust 核心域：`src-tauri/src/acp/engine.rs`、`src-tauri/src/acp/client.rs`、`src-tauri/src/acp/wire_trace.rs`、`src-tauri/src/runtime.rs`、`src-tauri/src/dispatcher/routing.rs`、`src-tauri/src/session/event_repo.rs`、`src-tauri/src/session/prompt.rs`
+- 新增（预计）：`src-tauri/src/acp/turn_ledger.rs`（terminal ledger）、`src-tauri/src/acp/golden_trace_tests.rs`（wire golden fixture）；引擎/路由/会话既有测试文件的对应扩展
+- 文档：`.agents/records/`（开发记录）、`docs/说明书/`（若涉 ACP/会话通信章节表述）
+
+**不碰**：#97/#98 的 selector/capability 面、`dispatcher/mod.rs` 注册点如需改动会先在本板追加留言、canonical journal 既有 schema、前端 Renderer。提交用显式 pathspec 只含上述文件域。
