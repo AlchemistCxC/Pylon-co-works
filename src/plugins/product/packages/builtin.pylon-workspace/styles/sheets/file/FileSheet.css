@@ -1,5 +1,5 @@
 /* W2-03 FileSheet 分区壳：消费现有主题变量，零新样式体系 */
-/* issue #83：跨 sheet 共享词汇（file-main-*/file-section-title/hint/
+/* issue #83：跨 sheet 共享词汇（file-main-* / file-section-title / hint /
    search-result-list/row/path/text、file-tree-error）已剥至
    styles/SheetVocabulary.css（lifecycle=shared）；本文件只含 file 域内部
    样式（tree/tab/CodeMirror/git/dispatch），不再定义这些类。仅保留
