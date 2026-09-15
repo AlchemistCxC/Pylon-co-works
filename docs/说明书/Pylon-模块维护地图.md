@@ -23,8 +23,8 @@
 | Native ACP | `src-tauri/src/acp/`、`dispatcher/`、`lifecycle/` | 传输、协商、通知路由、实例连接；lifecycle 锁序与 generation 保持一个入口。#98 起：`acp/negotiated.rs` 是能力协商快照唯一真源（canonical 矩阵 + 四态 + 消费者注册表，session 建立/重连探针/agent_status 消费同一份），`acp/interaction_queue.rs` 是 permission/elicitation/question 等 client request 的统一 request-id 队列（FIFO、单一 Active、cancel/timeout/disconnect drain 终态、冷挂载快照），`session/fork.rs` 是 `session/fork` raw RPC 消费者（能力 usable gate + 受限 envelope + parent/child 登记） | Rust ACP / dispatcher / lifecycle 测试；`check:acp-shadow` |
 | Native session | `src-tauri/src/session/`；[mod.rs](../../src-tauri/src/session/mod.rs) | session 事务、journal 与 replay；持久化提交先于发布，删除 tombstone 阻止复活 | Rust session / event_repo / replay 测试 |
 | Native host | `src-tauri/src/` 其余模块 | Tauri 命令注册、文件/终端/Gateway/安装等 native adapters；专业子目录优先归属 | host 库测试、构建与 Clippy |
-| 可复用 Agent 能力 | `src-tauri/pylon-core/src/` | catalog、检测、preflight；保持受控探测与配置身份区分 | 用该 crate 的 `--manifest-path` 运行测试 / Clippy |
-| Native 基础 / 宠物 | `src-tauri/pylon-foundations/src/`、`src-tauri/pet-core/src/` | 基础类型与独立宠物领域；不从 renderer 或 Tauri UI 反向导入 | 分别运行 crate 测试 / Clippy |
+| 可复用 Agent 能力 | `src-tauri/pylon-core/src/` | catalog、检测、preflight；保持受控探测与配置身份区分 | workspace 化后随 `cargo test --workspace --lib` 进门禁；Clippy 走 workspace 单跑 |
+| Native 基础 / 宠物 | `src-tauri/pylon-foundations/src/`、`src-tauri/pet-core/src/` | 基础类型与独立宠物领域；不从 renderer 或 Tauri UI 反向导入 | 同上（单锁单 target，`--workspace` 一条命令覆盖全 crate） |
 | 构建与工具 | `src-tauri/*` 的构建文件、`scripts/` | 开发、审计、打包工具；不是产品运行时依赖 | 脚本测试、发行校验、`check:docs` |
 
 `check:maintenance` 覆盖上述根下受 Git 管理或未忽略的新 TS/JS（含 m/c 变体）、Rust、Python、PowerShell、shell 源文件；排除 tests、fixtures、vendor、target、node_modules、声明文件与打包资源。CSS、图片、配置及文档不是该源码计数的对象，分别由样式、主题、manifest、bundle 和文档门禁维护。Rust 行数包含内联单测，只能用于定位；不能由行数断言生产复杂度。资源 SDK 是构建产物，不能当作第二份可编辑实现。

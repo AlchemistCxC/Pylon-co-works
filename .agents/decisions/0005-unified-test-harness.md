@@ -1,7 +1,7 @@
 # ADR-0005 测试大一统基建：Rust 假 ACP agent、统一 harness 与 CI 门禁集成
 
 - **日期**：2026-09-16
-- **状态**：提议（方向经用户四项决策裁决，待实施验证后转"已采用"；规格见 `.agents/spec/issue-106-unified-test-harness.md`）
+- **状态**：已采用（部分）——P0/P1/P2/P3a/P3b/P6/P7 已实施并验证（2026-09-16）；P4/P5 未落地，遗留清单见开发记录 `.agents/records/issue-106-unified-test-harness.md`
 
 ## 背景与约束
 

@@ -288,3 +288,7 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`src-tauri/src` 生产模块本体语义（acp/dispatcher/session/browser_agent 等仅按 P3a 提取所需最小接触）、`scripts/` 其他在岗脚本语义（check-acp-shadow-parity 保持）、`tools/webview2-mcp/`。提交一律显式 pathspec。工作区如出现他人未提交改动一概不提交。
 
 ---
+
+[2026-09-16 07] [Lovelace] [#106]
+
+阶段性完工（本地分支 `Ru5t/issue-106-test-harness`，未推远端）：P0 workspace 化、P1 假 agent Rust bin（22 份 Python 脚本清零、golden 基线逐字节一致）、P2 harness 核心+冒烟、P3a run() 三段提取（E18 退役）、P3b check:ipc、P6 提速（热增量 9s）、P7（证据包/mutants/dependabot）。**遗留**：P4 前端聚合与 P5 集成测试抽离未落地（P4 实测 projects 分层后 transform 翻倍引发 solid 桥接测试延迟，按预算整体回退；P5 门面地基已就绪），已在开发记录 `.agents/records/issue-106-unified-test-harness.md` 完整记录。共享文件改动清单见记录尾部「并行交集」。clippy 基线零新增、fmt 绿、全量 1243 Rust 测 + 3789 前端测绿。
