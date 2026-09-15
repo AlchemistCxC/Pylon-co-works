@@ -866,6 +866,32 @@ pub(crate) async fn ensure_session_mapping(
         )
         .await?
         {
+            // #98：revive 成功但远端 identity 变化（server 返回了不同的
+            // sessionId）——不得静默复用旧映射。复用 recreated 事件通道显式
+            // 广播新 id（前端回写持久化），runtime log 记录 rebind 细节。
+            if mapping.peri_id != peri_id {
+                *recreated_peri_id = Some(mapping.peri_id.clone());
+                state.log_runtime_summary(
+                    "info",
+                    "session",
+                    Some(source.to_string()),
+                    "Remote session identity changed during revive; rebinding explicitly",
+                    serde_json::Map::from_iter([
+                        (
+                            "previousPeriId".to_string(),
+                            serde_json::Value::String(peri_id.to_string()),
+                        ),
+                        (
+                            "periId".to_string(),
+                            serde_json::Value::String(mapping.peri_id.clone()),
+                        ),
+                        (
+                            "reason".to_string(),
+                            serde_json::Value::String("rebound".into()),
+                        ),
+                    ]),
+                );
+            }
             return Ok(mapping);
         }
     }
@@ -911,25 +937,21 @@ async fn revive_session_slot(
         state.protocol_for_runtime(runtime).mcp_servers,
     )
     .map_err(PylonError::Protocol)?;
-    // B2：建立通道 = catalog 声明顺序 ∩ 服务端能力广告。声明侧是 connect 时按
+    // B2/#98：建立通道 = catalog 声明顺序 ∩ 服务端能力广告，真源是协商快照
+    // （与 continuity probe、agent_status 消费同一份）。声明侧是 connect 时按
     // provider 解析的 establishment_order（无 profile = 默认 resume→load→new，
-    // 与旧行为一致）；广告侧要求 object 值。resume/load 任一不满足即跳过该通道，
-    // new 恒备。
-    let establishment_channels = {
-        let acp = runtime.acp.lock().await;
-        let declared: Vec<&str> = acp
-            .establishment_order()
-            .iter()
-            .map(String::as_str)
-            .collect();
-        crate::acp::initialize_plan::session_establishment_channels(&declared, acp.capabilities())
-            .map_err(PylonError::Protocol)?
-    };
-    let resume_advertised =
-        establishment_channels.contains(&crate::acp::initialize_plan::EstablishmentChannel::Resume);
+    // 与旧行为一致）；广告侧 canonical 嵌套 object 优先、根级 alias 仅兼容表
+    // 登记（load）生效。resume/load 任一不满足即跳过该通道，new 恒备。
+    let capability_snapshot = crate::acp::NegotiatedCapabilitySnapshot::capture(runtime)
+        .await
+        .map_err(PylonError::Protocol)?;
+    let establishment_channels = capability_snapshot
+        .establishment_channels()
+        .map_err(PylonError::Protocol)?;
+    let resume_advertised = capability_snapshot.advertised("resume");
     {
         // Keep the protocol projection as a parity assertion while the typed
-        // registry is the actual decision source.
+        // snapshot is the actual decision source.
         let acp = runtime.acp.lock().await;
         debug_assert_eq!(
             resume_advertised,

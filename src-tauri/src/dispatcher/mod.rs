@@ -176,6 +176,10 @@ fn apply_update_event_with_pet_policy(
             if let Some(meta) = update.get("_meta") {
                 if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
                     session.model = model.to_string();
+                    // #97/D97-3（评审修正）：usage _meta.model 是权威 current 通道，
+                    // 与单值 config_option_update 分支同契约——清除客户端 requested
+                    // 未确认态，三态收敛不留漏口。
+                    session.model_pending = None;
                 }
             }
             if apply_pet {
@@ -538,7 +542,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
     request_id: crate::acp::RequestId,
     params: Option<&serde_json::Value>,
 ) {
-    let Some(adapter) = crate::protocol_adapter::get_protocol_adapter(provider) else {
+    // #98：方法驱动 dispatch——adapter 按 ACP method 注册表查找，provider 名称
+    // 不再是 gate（任何 agent 的 session/request_permission 都由通用适配器处理，
+    // 未注册方法得到稳定 method_unsupported，raw 参数随拒绝事件保留可诊断）。
+    let Some(adapter) =
+        crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
+    else {
         reject_interaction_request(
             window,
             acp,
@@ -547,9 +556,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
             method,
             Some(request_id),
             params,
-            "provider_unsupported",
+            "method_unsupported",
             -32601,
-            &format!("interaction provider unsupported: {provider}"),
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
         )
         .await;
         return;
@@ -823,6 +835,9 @@ async fn handle_permission_request<R: tauri::Runtime>(
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id.clone(), effective_permission.clone());
         });
+        // #98：统一交互队列登记（FIFO / 单一 Active / queued depth）。队列是
+        // cancel/timeout/disconnect drain 终态与冷挂载快照的数据源；permission
+        // 即 kind="approval"，队列里的事件载荷与 pylon:interaction 完全同构。
         let payload = serde_json::json!({
             "title": effective_permission.title,
             "prompt": effective_permission.prompt,
@@ -832,20 +847,44 @@ async fn handle_permission_request<R: tauri::Runtime>(
             // 前端只做倒计时展示，不自行持有 300s 常量。
             "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
         });
-        emit_event(
-            window,
-            crate::event_names::INTERACTION,
-            serde_json::json!({
-                "provider": provider,
-                "agentId": agent_id,
-                "sessionId": permission.session_id,
-                "eventType": "permission.request",
-                "requestId": request_id.to_string(),
-                "toolCallId": permission.tool_call_id,
-                "clientGeneration": permission.client_generation,
-                "payload": payload,
-            }),
-        );
+        let interaction_event = serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": permission.session_id,
+            "eventType": "permission.request",
+            "requestId": request_id.to_string(),
+            "toolCallId": permission.tool_call_id,
+            "clientGeneration": permission.client_generation,
+            "payload": payload,
+        });
+        if let Some(runtime) = runtimes.get(agent_id) {
+            match runtime
+                .interactions
+                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                    request_id: request_id.to_string(),
+                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                    kind: "approval".to_string(),
+                    session_id: permission.session_id.clone(),
+                    agent_id: agent_id.to_string(),
+                    client_generation: permission.client_generation,
+                    enqueued_at: permission.requested_at,
+                    event: interaction_event.clone(),
+                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                }) {
+                Ok(admission) => {
+                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
+                    tracing::trace!(
+                        agent_id = %agent_id,
+                        request_id = %request_id,
+                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
+                        waiting,
+                        "interaction queue admitted permission request"
+                    );
+                }
+                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
+            }
+        }
+        emit_event(window, crate::event_names::INTERACTION, interaction_event);
     }
 }
 
@@ -1879,6 +1918,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "_x.ai/exit_plan_mode" => {
                             Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
                         }
+                        // #98：elicitation/create 通用协议桥——按方法名路由，
+                        // 不要求 provider 名称匹配（AC11）。
+                        "elicitation/create" => {
+                            Some(crate::acp::adapter::private_ext::PrivateBridge::Elicitation)
+                        }
                         _ => None,
                     };
                     if let Some(bridge) = bridge {
@@ -1889,7 +1933,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 crate::acp::adapter::private_ext::parse_questions(bridge, &params)
                                     .ok()
                             }
-                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => None,
+                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan
+                            | crate::acp::adapter::private_ext::PrivateBridge::Elicitation => None,
                         };
                         let session_id = params
                             .get("sessionId")
@@ -1910,15 +1955,40 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     client_generation: generation,
                                 },
                             );
-                            emit_event(
-                                &window,
-                                crate::event_names::INTERACTION,
-                                serde_json::json!({
-                                    "provider": provider, "agentId": agent_id, "sessionId": session_id,
-                                    "eventType": if matches!(bridge, crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan) { "approval.request" } else { "ask-user" }, "requestId": request_id.to_string(),
-                                    "clientGeneration": generation, "payload": params,
-                                }),
-                            );
+                            let interaction_event = serde_json::json!({
+                                "provider": provider, "agentId": agent_id, "sessionId": session_id,
+                                "eventType": match bridge {
+                                    crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
+                                    crate::acp::adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
+                                    _ => "ask-user",
+                                }, "requestId": request_id.to_string(),
+                                "clientGeneration": generation, "payload": params,
+                            });
+                            // #98：统一交互队列登记（drain 终态 + 冷挂载快照数据源）。
+                            if let Some(runtime) = runtimes.get(&agent_id) {
+                                let _ = runtime.interactions.admit(
+                                    crate::acp::interaction_queue::InteractionQueueEntry {
+                                        request_id: request_id.to_string(),
+                                        method: method.to_string(),
+                                        kind: match bridge {
+                                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                                                "approval".to_string()
+                                            }
+                                            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
+                                                "elicitation".to_string()
+                                            }
+                                            _ => "ask-user".to_string(),
+                                        },
+                                        session_id,
+                                        agent_id: agent_id.clone(),
+                                        client_generation: generation,
+                                        enqueued_at: crate::time::Timestamp::now(),
+                                        event: interaction_event.clone(),
+                                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                                    },
+                                );
+                            }
+                            emit_event(&window, crate::event_names::INTERACTION, interaction_event);
                             continue;
                         }
                     }
@@ -1941,12 +2011,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    let reason =
-                        if crate::protocol_adapter::get_protocol_adapter(&provider).is_some() {
-                            "method_unsupported"
-                        } else {
-                            "provider_unsupported"
-                        };
+                    // #98：provider 名称不再是 dispatch gate——未注册的 client
+                    // request 一律按方法维度报稳定 unsupported（raw 诊断随事件
+                    // 保留，不伪造 option 或成功）。
+                    let reason = "method_unsupported";
                     (
                         reason,
                         -32601,
@@ -2617,5 +2685,55 @@ mod tests {
                 config_id: "model-selection".to_string()
             }
         );
+    }
+
+    /// #97/D97-7（评审补强）：config_option_update 全量数组同时含已知 model 选项与
+    /// 未知 kind 时，已知 selector 照常刷新，未知 kind 不降级已知面。
+    #[test]
+    fn config_option_update_with_unknown_kind_preserves_known_selector() {
+        let mut session = dispatcher_session();
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [
+                {
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-b"}],
+                    "currentValue": "m-b"
+                },
+                {"id": "future-kind", "payload": {"opaque": true}}
+            ],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-b");
+        assert_eq!(
+            session.model_surface,
+            crate::session::ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string()
+            }
+        );
+        assert_eq!(session.config_options.len(), 2, "未知 kind 原样保留");
+    }
+
+    /// #97/D97-3（评审补强）：usage _meta.model 是权威 current 通道——清除客户端
+    /// requested 未确认态，与单值 config_option_update 分支同契约。
+    #[test]
+    fn usage_meta_model_clears_pending_state() {
+        let mut session = dispatcher_session();
+        session.model_pending = Some("m-old".to_string());
+        let update = serde_json::json!({"_meta": {"model": "usage-channel-model"}});
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::UsageUpdate),
+            false,
+        );
+        assert_eq!(session.model, "usage-channel-model");
+        assert_eq!(session.model_pending, None);
     }
 }

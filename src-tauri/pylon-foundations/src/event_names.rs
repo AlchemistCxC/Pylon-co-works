@@ -16,6 +16,10 @@ pub const SESSION_DONE: &str = "pylon:done";
 pub const SESSION_ERROR: &str = "pylon:error";
 /// 用户消息回显（§4.4，{source, content, replay?, injectActivated?}；不投平台）。
 pub const USER_ECHO: &str = "pylon:user";
+/// #98：session/fork 完成（{parentSource, parentPeriId, childSource, periId,
+/// generation, fork}）。fork 是显式执行链事件——parent/child identity 变化
+/// 必须可观测，不静默复用旧映射。
+pub const SESSION_FORKED: &str = "pylon:session-forked";
 /// Unified interaction event envelope (provider/agent/session/request identity + payload).
 pub const INTERACTION: &str = "pylon:interaction";
 /// Interaction request rejected by the host (unsupported provider/method or malformed
