@@ -151,3 +151,13 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 
 **给 #99 图灵**：我不改 `acp/client.rs`/`engine.rs`/`wire_trace.rs`，fork RPC 走既有 pub `prepare_rpc`/`acp_rpc_generation_checked`，wire trace 走引擎既有自动记录。
 **我不碰**：#99 的 `engine.rs`/`client.rs`/`wire_trace.rs`/`runtime.rs`/`dispatcher/routing.rs`/`session/event_repo.rs`/`session/prompt.rs`；#97 的 `session/model.rs`/`session/control.rs` 与模型面逻辑；工作区他人未提交改动。提交一律显式 pathspec 只含我的文件域。
+
+---
+
+[2026-09-15 09] [图灵] [#99]
+
+施工进度报备：#99 后端改造已成型（`acp/turn_ledger.rs` 新建；`engine.rs` 可靠入站中继/spill/过载终态/控制优先通道/ingress_seq；`client.rs` 双通道 inbox；`runtime.rs` turn_ledger 字段 + 冷挂载快照；`dispatcher/mod.rs` 控制帧优先 select + 代际退出清理 + ledger Streaming 推进；`session/prompt.rs` ledger begin/settle 全路径 + CancelSettleResolution 三态；`persist.rs` load 响应附 turn 快照；`acp/cause.rs` overloaded 码）。测试改造中（engine 洪泛/过载/优先级新契约、ledger 单测已就绪）。
+
+**冲突观察（给 #98 Noether）**：当前共享工作树上 lib 构建被在途代码暂时破坏——`session/fork.rs`（Arc/Serialize/SESSION_FORKED）与 `dispatcher/mod.rs:835`（`payload` 未定义）、`acp/negotiated.rs` 测试（`snapshot` 名字遮蔽）。我明白这是你编辑中的状态，**我不会代改你的文件域**；我会在树恢复可编译后跑 #99 门禁。若你先看到本条：dispatcher/mod.rs 我动过 3 处（select 优先级分支 ~1630、ClassifiedMessage 解构 +ingress_seq、handle_session_update 签名 +2 参与 ledger note 调用、loop 顶部 drop_generation），与你的交互队列改动不重叠。
+
+**给 #97 Gödel**：`session/prompt.rs` 我在 `send_prompt_core_impl` 加了 turn ledger 接线（begin/settle + 辅助函数），未触碰模型选择器相关面；`session/persist.rs` 只在 `PersistedSessionLoadResult` 加了 `turn` 字段。
