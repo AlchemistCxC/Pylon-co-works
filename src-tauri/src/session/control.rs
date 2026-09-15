@@ -79,11 +79,12 @@ pub(crate) async fn set_config_option(
     // #97/D97-5：model 键走 ConfigOption 通道但会话未宣告 config id——按显式兼容
     // 规则以语义键发送（现状行为，兼容优先），warn 留痕（Agent 广告不完整，
     // code=model_config_id_missing）。宣告了真实 id 时绝不允许降级成 `model`。
-    if key == "model"
-        && matches!(
-            target,
-            crate::agent_config::ModelSwitchTarget::ConfigOption
-        )
+    // D97-8（评审修正）：model 判别与 reasoning 组一致用语义别名匹配（P56 路由的
+    // `key != "model"` 特判保持不变——路由是现状行为，校验/诊断是本 issue 新增
+    // 不变量，别名键不得绕过）。
+    let is_model_key = super::config_option_key_matches(&key, "model");
+    if is_model_key
+        && matches!(target, crate::agent_config::ModelSwitchTarget::ConfigOption)
         && advertised_config_id.is_none()
     {
         tracing::warn!(
@@ -96,7 +97,7 @@ pub(crate) async fn set_config_option(
     // 不在列表 → 结构化错误（model_not_advertised + 宣告列表摘要），本地状态不变。
     // #97/D97-6：reasoning 组依赖 option 在会话宣告了 choices 时同样校验——模型
     // 切换刷新宣告后，失效的旧值在发送前被拒，不遗留旧模型状态。
-    if key == "model" {
+    if is_model_key {
         if let Some(model_id) = value.as_str() {
             validate_model_advertised(model_id, &model_choices)?;
         }

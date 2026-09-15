@@ -116,17 +116,50 @@
 3. 「stale generation push 丢弃计数」由 dispatcher/routing 的 generation 门控负责
    （#99 文件域），本 issue 只落地了重复 push 的 dropped 计数；两者合并构成 spec 的
    dropped/stale 诊断。
+4. **钳制/暂定结算当前为 log-only**：`ModelSwitchSettlement` 的 Clamped/Pending 以
+   结构化 tracing 诊断（`model_switch_clamped`/`model_switch_pending`）输出，不进
+   set_config_option 的 IPC 返回值——命令原样返回 Agent 响应，UI 从响应内容本身
+   （P56/D3 权威回声覆盖）间接收敛。若 UI 需要可判定的 rejected/settled 事件，
+   按向后兼容规则补 wire 字段（见未解问题）。
+
+## 评审轮修正（2026-09-16，三路子 agent 行级审核后）
+
+三个独立审核（spec 合规 / Rust 正确性 / 测试质量）对首轮提交 `aa6f5e19` 的发现与处置：
+
+| 级别 | 发现 | 处置 |
+| --- | --- | --- |
+| P0 | `apply_models_state` 对 current-only models push（无列表，仓库既有测试定义的合法形状）把 ModelsState 面降级成 None——模型选择器在第一次增量推送后永久只读；门禁全绿是因新测试恰好全用带列表形状 | 已修：增量 push 语义与快照替换分离（D97-7）——push 未携带宣告 ≠ 撤销宣告，面与 choices 原样保留；补 `models_push_without_catalog_preserves_models_state_surface` 回归（含 resolve 可切换断言、models:null 边界） |
+| P1 | `apply_session_response` 不清 `model_pending`——persist.rs 原位 load 路径让陈旧未确认态跨快照滞留 | 已修：快照携带权威 model 维度（configOptions model 选项 / models.current / 根级 current）时清除；补三条路径 + 负例测试 |
+| P1 | usage `_meta.model` 权威通道不清 pending，与单值 config_option_update 分支不一致 | 已修：同契约清除；补 dispatcher 测试 |
+| P1 | 验收 13 引用的既有 G2-03 owner 路由测试无判别力（`with_active_agent("runtime-b")` 使 active==runtime，误读 active 协议也绿） | 已修：改 `with_active_agent("active-a")`（其声明 SetModel），误读即 wire 出现 set_model，测试变有判别力 |
+| P1 | 「过期 generation 丢弃回写」零测试（规格逐字要求） | 已修：新增 wire 测试 `stale_generation_discards_switch_write_back`——barrier 脚本挂起在途 RPC，测试中 `client_generation.fetch_add`，断言命令 stale 错误、current/pending 不变、请求恰上 wire 一次 |
+| P1 | 验收 8 依赖 option 校验只测到纯函数，control 接线无测试 | 已修：新增 wire 测试 `reasoning_switch_is_validated_against_advertised_choices`（失效值拒且不上 wire、广告值按语义键上 wire） |
+| P1 | 验收 6「Agent 拒绝」形态无测试（adopted 矩阵 7 形缺 3 形之一） | 已修：新增 wire 测试 `agent_rejected_switch_propagates_error_without_state_change`（JSON-RPC error 上抛、状态不变、不重试） |
+| P1 | 验收 12 跨 owner 重绑零测试 | 已修：新增 wire 测试 `rebind_on_other_runtime_starts_with_clean_selector_snapshot`（同 source 跨两 runtime 重建，断言新 snapshot 无旧 config id/model id/choices，原会话不受扰） |
+| P2 | model 校验/诊断用精确 `key == "model"`，reasoning 用别名匹配——同函数判据不一致，别名键绕过校验 | 已修：model 校验/诊断门改 `config_option_key_matches(&key,"model")`（P56 路由的 `key != "model"` 特判不动——路由是现状行为，校验是本 issue 新增不变量，D97-8） |
+| P2 | `apply_models_state` 无 current 维度也清 pending，与 `apply_config_option_response` 判据不一致 | 已修：仅当 push 携带 current 维度才清（D97-2） |
+| P2 | 诊断不可观测：envelope 拒绝/重复 push 丢弃无日志 | 已修：`selector_envelope_dropped` warn、`selector_push_duplicate_dropped` debug 结构化日志 |
+| P2 | 指纹字段 doc 虚指「config_id/value」去重；文件头 doc 过期 | 已修：doc 与实现对齐（单值推送按 value 相等天然幂等，不走指纹槽），文件头补 #97 职责说明 |
+| P2 | 弱断言：wire 空回声 `map_or(true,…)` 过宽、clamp 测试无 trace 计数、workbench `arrayContaining` 掩盖附加项、根级等价测试无交叉键形状 | 已修：精确 `assert_eq!(result, json!({}))`、clamp 断言恰一次 set-config、workbench 补 `toHaveLength(2)`、根级测试补 camel/snake 交叉形状 |
+| P3 | wire 测试 trace 临时文件断言失败时泄漏 | 已修：`TraceFile` Drop guard 无条件清理 |
+| 未采纳 | AC11 的 `(owner, generation, config_id, value)` 元组去重：评审指出 models 通道单槽指纹窄于 spec | 裁决为记录而非实现——Pylon 的 RPC 响应路径天然一一对应（无重复响应），异步 adopted(configOptions) 全量推送走幂等覆盖（重复提交无可观测副作用）；spec 的元组去重针对 codge 的自动补偿 loop，Pylon 结构上不存在该 loop。若未来引入自动补偿需先补元组去重 |
+| 未采纳 | AC9 子情形「未知-kind-only push 降级 ConfigOption 面」 | 裁决为正确语义——完整 adopted 列表是权威，model 选项缺席 = Agent 撤销宣告，降级是正确行为（评审亦确认「未知 kind 与已知选项共存时保面」为真命题，已补测试） |
+
+修正后门禁：`session::model` 34（30 单测 + 8 wire，其中 4 为本轮新增）、`dispatcher` 23（+2）、G2-03 修复后单测绿、`session::create` 8、全量 lib 测试见下、`cargo fmt --check` 全树通过、vitest 34（workbench 用例补强后）。
 
 ## 未解问题
 
 - `model_pending` 目前仅内部可辨识（诊断日志 + 状态字段），未上 IPC wire；若 UI 需要
-  显示「未确认」角标，需按 ADR-0004 的向后兼容规则补 wire 字段。
+  显示「未确认」角标，需按 ADR-0004 的向后兼容规则补 wire 字段。同理，
+  Clamped/Pending 结算事件如需 UI 可判定（而非 tracing 日志），也走同一路径。
 - workbench singleton mirror 的前端整改（见偏差 2）。
+- dispatcher 侧「旧 generation 的 models push 静默丢弃计数」属 routing 门控（#99
+  文件域），当前只有 tracing 无计数器字段。
 
 ## 并行交集
 
-- `session/mod.rs`：仅追加一行 `#[cfg(test)] mod` 注册（与 #98 的 `mod fork;` 注册
-  同文件不同位置）。
+- `session/mod.rs`：追加一行 `#[cfg(test)] mod` 注册 + 评审修正轮对既有 G2-03 测试的
+  `with_active_agent` 单行修正（与 #98 的 `mod fork;` 注册同文件不同位置）。
 - `create.rs`：仅 `plan_initial_model` 区段；`revive_session_slot`/`ensure_session_mapping`
   区段属 #99 在途重构，本 issue 提交未包含其 hunk。
 - `dispatcher/mod.rs`：`apply_update_event_with_pet_policy` 的 SessionInfoUpdate/
