@@ -187,12 +187,12 @@ describe('Solid Workbench widgets', () => {
     fireEvent.pointerDown(document.body)
     await waitFor(() => expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull())
 
-    const modeTrigger = screen.getByRole('button', { name: /全自动/ })
+    const modeTrigger = screen.getByRole('button', { name: 'auto' })
     fireEvent.click(modeTrigger)
-    const modeMenu = screen.getByRole('listbox', { name: '模式列表' })
+    const modeMenu = screen.getByRole('listbox', { name: '权限模式选项' })
     expect(modeMenu).toHaveAttribute('data-popover', 'control-center')
     fireEvent.keyDown(modeMenu, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('listbox', { name: '模式列表' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: '权限模式选项' })).toBeNull())
     expect(modeTrigger).toHaveFocus()
   })
 
@@ -255,35 +255,54 @@ describe('Solid Workbench widgets', () => {
     expect(screen.getByRole('button', { name: 'deepseek-v4-flash' })).toBeTruthy()
   })
 
-  it('Mode pill/badge/minimal 保留 class/data-mode，点击循环 mode', async () => {
-    const services = renderWidget(() => <SolidModeWidget />, { modeVariant: 'badge' })
-    const button = screen.getByRole('button', { name: '[auto]' })
-    expect(button.className).toContain('cc-mode-badge')
+  it('权限控件：本体只显示机器值（不翻译），点击循环 mode', async () => {
+    const services = renderWidget(() => <SolidModeWidget />, { permissionSwitchMode: 'cycle' })
+    const button = screen.getByRole('button', { name: 'auto' })
+    expect(button.className).toContain('cc-permission-trigger')
     expect(button.getAttribute('data-mode')).toBe('auto')
+    expect(button.textContent).toBe('auto')
+    // 定位定案：排在思考强度右边，中间留 12px（PERMISSION_GAP_PX）
+    expect((button.closest('.solid-permission-widget') as HTMLElement).style.marginLeft).toBe('12px')
     fireEvent.click(button)
 
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual(['preview-session', 'bypass']))
   })
 
-  it('空态 mode 下拉显示全自动但提交 raw auto', async () => {
+  it('权限控件：菜单选项显示机器值（不翻译），不出现中文标签', async () => {
+    renderWidget(() => <SolidModeWidget />, { permissionSwitchMode: 'menu' })
+    fireEvent.click(screen.getByRole('button', { name: 'auto' }))
+    expect(screen.getByRole('listbox', { name: '权限模式选项' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'bypass' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: '绕过确认' })).toBeNull()
+  })
+
+  it('权限控件：permissionTextColor=mode 不写 inline color（交语义色），white 时覆盖', () => {
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'mode' })
+    expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('')
+    cleanup()
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'white' })
+    expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('rgb(255, 255, 255)')
+  })
+
+  it('空态 mode 下拉显示机器值且提交 raw auto', async () => {
     const services = renderWidget(() => <SolidModeWidget
       forceDropdown
       draftValue={() => 'auto'}
       onDraftChange={value => services.runtime.update({ activeMode: value })}
     />)
-    const trigger = screen.getByRole('button', { name: /全自动/ })
+    const trigger = screen.getByRole('button', { name: 'auto' })
     fireEvent.click(trigger)
-    expect(screen.getByRole('listbox', { name: '模式列表' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: '全自动' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: '接受编辑' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('option', { name: '绕过确认' }))
+    expect(screen.getByRole('listbox', { name: '权限模式选项' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'bypass' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: '绕过确认' })).toBeNull()
+    fireEvent.click(screen.getByRole('option', { name: 'bypass' }))
     await waitFor(() => expect(services.runtime.getSnapshot().activeMode).toBe('bypass'))
   })
 
   it('Model/Mode facade 失败显示可见错误', async () => {
     const services = renderWidget(() => <><SolidModelWidget /><SolidModeWidget /></>, {
       modelSwitchMode: 'cycle',
-      modeVariant: 'minimal',
+      permissionSwitchMode: 'cycle',
     })
     services.commands.setHandler('setModel', vi.fn(async () => ({ ok: false, error: 'model denied' })))
     services.commands.setHandler('setMode', vi.fn(async () => ({ ok: false, error: 'mode denied' })))

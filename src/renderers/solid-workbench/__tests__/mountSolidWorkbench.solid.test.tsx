@@ -1166,9 +1166,9 @@ describe('mountSolidWorkbench', () => {
       expect(value).not.toBeNull()
       return value!
     })
-    // 2026-09-14：模型控件常态显示；其余旧状态控件在活跃会话里仍然收起。
+    // 2026-09-15：模型/思考强度/权限三控件常态显示；其余旧状态控件在活跃会话里仍然收起。
     expect([...row.querySelectorAll('[data-widget-id]')]
-      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning'])
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode'])
     expect(row.querySelector('.cc-widget-separator')).toBeTruthy()
   })
 

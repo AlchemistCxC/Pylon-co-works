@@ -28,8 +28,12 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
  * 控件永远不出现（刷新无效，因为布局存在 localStorage）。
  * bump 到 8 迫使存量安装再跑一次迁移，补入 reasoning（合并按 widget ID 进行，
  * 可重复执行且保留用户既有拖拽位置）。
+ *
+ * v9（权限选择控件）：新增 permission* 字段组（权限控件外观与交互）。控件 id `mode`
+ * 早已存在、布局无需变更，但存量安装的 localStorage 里没有这 7 个键，而字段归一化
+ * 只挂在 migrate 钩子上跑；不 bump 则它们永远是 undefined（控件尺寸会算成 NaN）。
  */
-export const THEME_SCHEMA_VERSION = 8
+export const THEME_SCHEMA_VERSION = 9
 
 export type ThemeMigrationDefaults = {
   base: object
@@ -143,6 +147,9 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
   // bump 持久化版本确保同为主题 schema v6 的存量安装也执行该迁移。
   // v8（2026-09-14）：新增 reasoning 控件后再次 bump，理由同 v7——normalizeCcLayout
   // 的补位逻辑只在 migrate 内执行，存量 v7 安装不 bump 就永远不会补入新控件。
+  // v9（2026-09-15）：新增 permission* 字段组（权限选择控件）。控件 id `mode` 早已存在、
+  // 布局无需补位，但字段归一化同样只在 migrate 内执行——不 bump，存量安装里这 7 个键
+  // 永远是 undefined，权限控件会按 NaN 尺寸渲染。
   // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
   Object.assign(state, normalizeThemeState(state))
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）

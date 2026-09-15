@@ -450,7 +450,7 @@
    layer while the same control-center node travels to its session position;
    the regular session widgets are then revealed by the existing render path. */
 .solid-workbench-control-center-slot.is-session-entering
-  :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+  :is(.cc-empty-workspace-control, .solid-model-widget, .solid-permission-widget) {
   opacity: 0;
   transition: opacity 220ms ease;
 }
@@ -459,7 +459,7 @@
   .solid-workbench:not([data-session-id]) .solid-workbench-control-center-slot.is-empty { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering { animation: none; }
   .solid-workbench-control-center-slot.is-session-entering
-    :is(.cc-empty-workspace-control, .solid-model-widget, .solid-mode-widget) {
+    :is(.cc-empty-workspace-control, .solid-model-widget, .solid-permission-widget) {
     transition: none;
   }
 }
@@ -581,13 +581,13 @@
    Keep these menus in the same square, dense visual language as the terminal
    titlebar.  StatusBar.css still supplies the legacy fallback defaults; the
    scoped rules below are deliberately later and more specific for Solid. */
-.solid-workbench-control-center-slot :is(.cc-model-root, .cc-mode-dropdown, .solid-reasoning-widget) {
+.solid-workbench-control-center-slot :is(.cc-model-root, .solid-permission-widget, .solid-reasoning-widget) {
   position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 0;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger) {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger) {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -605,14 +605,14 @@
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger):hover,
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger)[aria-expanded='true'] {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger):hover,
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger)[aria-expanded='true'] {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   text-decoration: none;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-mode-select, .cc-reasoning-trigger):focus-visible {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -640,10 +640,6 @@
   background: var(--surface-overlay, var(--bg-panel));
   box-shadow: none;
   animation: cc-popover-in 100ms ease-out both;
-}
-.solid-workbench-control-center-slot .cc-mode-dropdown .cc-model-menu {
-  right: 0;
-  left: auto;
 }
 
 .solid-workbench-control-center-slot .cc-model-item {

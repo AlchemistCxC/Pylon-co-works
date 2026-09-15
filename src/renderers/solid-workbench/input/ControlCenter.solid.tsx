@@ -24,7 +24,7 @@ const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', '
  * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
  * 共用同一名单，保持单一真值。
  */
-const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning']
+const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
   ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', reasoning: '思考强度', mode: '权限模式',

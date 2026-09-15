@@ -1,7 +1,6 @@
 ﻿import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
-  optionLabel,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
   resolveReasoningOptionEntries,
@@ -32,139 +31,32 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
   return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><div class="cc-model-root" style={rootStyle()}><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><For each={entries().filter(x=>x.id!==model())}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></div></Show></div></div>
 }
 
+/** 权限模式控件：本体只显示后端机器值（不翻译），外观与交互跟模型／思考强度控件同一套语言。
+ *  颜色：permissionTextColor='mode' 时不写 inline color，交给 CSS 的 [data-mode] 语义色
+ *  （auto 黄 / bypass 红 / edit 紫 / default 灰）—— 危险模式一眼可见。 */
+const PERMISSION_GAP_PX = 12
 export function SolidModeWidget(props: {
   draftValue?: () => string
   onDraftChange?: (value: string) => void
   forceDropdown?: boolean
 } = {}) {
-  const workbench = useSolidWorkbench()
-  const runtime = () => workbench.runtimeSnapshot()
-  const appearance = () => workbench.appearanceSnapshot()
-  const [error, setError] = createSignal('')
-  const [open, setOpen] = createSignal(false)
-  let root: HTMLDivElement | undefined
-  let trigger: HTMLButtonElement | undefined
-  let previousSessionId = workbench.input().sessionId
-  const menuId = `cc-mode-menu-${createUniqueId()}`
-  const modeEntries = () => resolveModeOptionEntries(runtime(), props.draftValue?.())
-  const modes = () => modeEntries().map(item => item.id)
-  const mode = () => props.draftValue?.() || runtime().activeMode || modeEntries()[0]?.id || 'default'
-  const scale = () => appearance().ccScale.mode ?? 100
-  const dropdown = () => props.forceDropdown === true
-  const displayMode = () => dropdown() ? optionLabel('mode', mode()) : mode()
-  const close = (restoreFocus = false) => {
-    setOpen(false)
-    if (restoreFocus) queueMicrotask(() => trigger?.focus())
-  }
-  createEffect(() => {
-    const currentSessionId = workbench.input().sessionId
-    if (currentSessionId !== previousSessionId || !dropdown()) close()
-    previousSessionId = currentSessionId
-  })
-  onMount(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!open() || root?.contains(event.target as Node)) return
-      close()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!open() || event.key !== 'Escape') return
-      event.preventDefault()
-      close(true)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    onCleanup(() => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    })
-  })
-  let menu: HTMLDivElement | undefined
-  createEffect(() => {
-    if (!open()) return
-    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
-  })
-  const chooseMode = async (target: string) => {
-    const sessionId = workbench.input().sessionId
-    if (props.onDraftChange) {
-      props.onDraftChange(target)
-      close(true)
-      return
-    }
-    if (!sessionId) { close(true); return }
-    const result = await workbench.commands.setMode(sessionId, target)
-    if (!result.ok) setError(result.error || '权限模式切换失败')
-    else setError('')
-    close(true)
-  }
-  const cycle = async () => {
-    const sessionId = workbench.input().sessionId
-    if (props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
-    if (!sessionId) return
-    const result = await workbench.commands.setMode(sessionId, nextValue(modes(), mode()))
-    if (!result.ok) setError(result.error || '权限模式切换失败')
-    else setError('')
-  }
-
-  return (
-    <div class="solid-mode-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert" aria-live="assertive" title={message()}>{message()}</span>}</Show>
-      <Show when={dropdown()} fallback={
-        <Show when={appearance().modeVariant === 'badge'} fallback={
-          <Show when={appearance().modeVariant === 'minimal'} fallback={
-            <button type="button" class="cc-mode-widget" title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-              <span class="mode-pill" data-mode={mode()}>{mode()}</span>
-            </button>
-          }>
-            <button type="button" class="cc-mode-minimal" data-mode={mode()} style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>{mode()}</button>
-          </Show>
-        }>
-          <button type="button" class="cc-mode-badge" data-mode={mode()} title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-            [{mode()}]
-          </button>
-        </Show>
-      }>
-        <div ref={node => { root = node }} class="cc-mode-dropdown">
-          <button
-            ref={node => { trigger = node }}
-            type="button"
-            class="cc-mode-widget cc-mode-select"
-            title="选择权限模式"
-            style={{ 'font-size': `${scale()}%` }}
-            aria-haspopup="listbox"
-            aria-expanded={open()}
-            aria-controls={menuId}
-            onClick={() => setOpen(value => !value)}
-          ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ?</button>
-          <Show when={open()}>
-            <div
-              ref={node => { menu = node }}
-              id={menuId}
-              class="mode-menu cc-model-menu"
-              data-popover="control-center"
-              role="listbox"
-              aria-label="模式列表"
-              tabIndex="-1"
-              onKeyDown={event => {
-                if (event.key !== 'Escape') return
-                event.preventDefault()
-                event.stopPropagation()
-                close(true)
-              }}
-            >
-              <For each={modeEntries()}>{item => <button
-                type="button"
-                role="option"
-                aria-selected={item.id === mode()}
-                class={`cc-model-item${item.id === mode() ? ' active' : ''}`}
-                tabIndex={-1}
-                onClick={() => { void chooseMode(item.id) }}
-              >{optionLabel('mode', item.id, item.label)}</button>}</For>
-            </div>
-          </Show>
-        </div>
-      </Show>
-    </div>
-  )
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; let previousSessionId = workbench.input().sessionId
+  const menuId=`cc-mode-menu-${createUniqueId()}`
+  const entries=()=>resolveModeOptionEntries(runtime(), props.draftValue?.())
+  const mode=()=>props.draftValue?.()||runtime().activeMode||entries()[0]?.id||'default'
+  const switchMode=()=>props.forceDropdown?'menu':(appearance().permissionSwitchMode??'menu')
+  const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===mode()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setMode(sid,target);if(!r.ok)setError(r.error||'权限模式切换失败')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const cycle=()=>{void choose(nextValue(entries().map(e=>e.id), mode()))}
+  const width=()=>appearance().permissionWidth??120, height=()=>appearance().permissionHeight??28, radius=()=>appearance().permissionRadius??0, fontSize=()=>appearance().permissionFontSize??12
+  const bg=()=>appearance().permissionBgColor==='black'?'#000':'#fff'
+  const color=()=>{const c=appearance().permissionTextColor??'mode';return c==='mode'?undefined:c==='white'?'#fff':'#000'}
+  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),...(color()?{color:color()}:{})})
+  return <div ref={el=>root=el} class="solid-permission-widget" style={{'margin-left':`${PERMISSION_GAP_PX}px`,'margin-top':`${height()/2}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-permission-trigger" data-mode={mode()} style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={switchMode()==='menu'?'listbox':undefined} aria-expanded={switchMode()==='menu'?open():undefined} aria-controls={switchMode()==='menu'?menuId:undefined} onClick={()=>switchMode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':mode()}</button><Show when={switchMode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="权限模式选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==mode())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
 /** Session-create reasoning preference. It uses the same compact control language

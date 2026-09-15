@@ -22,7 +22,8 @@ export type CcNumberPropertyKey =
   | 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
   | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'modeVariant' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor'
+  | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
 export type CcBooleanPropertyKey = 'barFillFollow'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
 
@@ -119,15 +120,14 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'chips', key: 'reasoningTextColor', label: '文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   mode: [
-    { kind: 'section', title: '模式控件外观' },
-    {
-      kind: 'chips', key: 'modeVariant', label: '外观风格',
-      options: [
-        { value: 'pill', label: '胶囊' },
-        { value: 'badge', label: '方括号' },
-        { value: 'minimal', label: '极简' },
-      ],
-    },
+    { kind: 'section', title: '权限控件' },
+    { kind: 'chips', key: 'permissionSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
+    { kind: 'chips', key: 'permissionBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'permissionWidth', label: '宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'permissionHeight', label: '高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'permissionRadius', label: '圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'permissionFontSize', label: '字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'permissionTextColor', label: '文字颜色', options: [{ value: 'mode', label: '跟模式' }, { value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   send: [
     { kind: 'section', title: '发送按钮外观' },

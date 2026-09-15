@@ -157,7 +157,7 @@
 /* Widget failures must not participate in the status-row layout. Backend
    diagnostics can include an advertised model list and therefore be long. */
 .solid-model-widget,
-.solid-mode-widget { position:relative; min-width:0; }
+.solid-permission-widget { position:relative; min-width:0; }
 .cc-widget-error {
   position:absolute;
   z-index:20;

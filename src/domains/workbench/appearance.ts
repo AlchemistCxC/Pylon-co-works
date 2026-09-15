@@ -90,8 +90,14 @@ export interface WorkbenchAppearanceSnapshot {
   modelRadius: number
   modelFontSize: number
   modelTextColor: string
-  modeVariant: string
   sendVariant: string
+  permissionSwitchMode: string
+  permissionBgColor: string
+  permissionWidth: number
+  permissionHeight: number
+  permissionRadius: number
+  permissionFontSize: number
+  permissionTextColor: string
   cliHintMode: string
   footerLayout: string
   cliOverflowMode: string
@@ -207,7 +213,13 @@ export function selectWorkbenchAppearance(
     reasoningRadius: theme.reasoningRadius,
     reasoningFontSize: theme.reasoningFontSize,
     reasoningTextColor: theme.reasoningTextColor,
-    modeVariant: theme.modeVariant,
+    permissionSwitchMode: theme.permissionSwitchMode,
+    permissionBgColor: theme.permissionBgColor,
+    permissionWidth: theme.permissionWidth,
+    permissionHeight: theme.permissionHeight,
+    permissionRadius: theme.permissionRadius,
+    permissionFontSize: theme.permissionFontSize,
+    permissionTextColor: theme.permissionTextColor,
     sendVariant: theme.sendVariant,
     cliHintMode: theme.cliHintMode,
     footerLayout: theme.footerLayout,
@@ -307,7 +319,13 @@ function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings,
     reasoningRadius: theme.reasoningRadius,
     reasoningFontSize: theme.reasoningFontSize,
     reasoningTextColor: theme.reasoningTextColor,
-    modeVariant: theme.modeVariant,
+    permissionSwitchMode: theme.permissionSwitchMode,
+    permissionBgColor: theme.permissionBgColor,
+    permissionWidth: theme.permissionWidth,
+    permissionHeight: theme.permissionHeight,
+    permissionRadius: theme.permissionRadius,
+    permissionFontSize: theme.permissionFontSize,
+    permissionTextColor: theme.permissionTextColor,
     sendVariant: theme.sendVariant,
   }
 }

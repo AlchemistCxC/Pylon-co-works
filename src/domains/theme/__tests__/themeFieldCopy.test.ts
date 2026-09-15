@@ -52,7 +52,9 @@ describe('主题设置展示文案契约', () => {
       footerLayout: ['free', 'peri'],
       cliOverflowMode: ['fixed-scroll', 'grow', 'overlay'],
       modelSwitchMode: ['menu', 'cycle'],
-      modeVariant: ['pill', 'badge', 'minimal'],
+      permissionSwitchMode: ['menu', 'cycle'],
+      permissionBgColor: ['white', 'black'],
+      permissionTextColor: ['mode', 'black', 'white'],
       sendVariant: ['icon', 'square', 'minimal'],
     } as const
 

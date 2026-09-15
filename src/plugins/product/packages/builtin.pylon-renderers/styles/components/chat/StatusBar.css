@@ -22,26 +22,14 @@
 .model-item:hover { background:#373737; color:#fff; }
 .model-item.active { color:var(--pill-text,#999); font-weight:600; }
 
-.cc-mode-widget { display:flex; align-items:center; background:transparent; border:none; padding:0; cursor:pointer; color:inherit; font:inherit; }
-.mode-pill { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius: 0; background:var(--pill-bg,rgba(0,0,0,0.05)); border:1px solid rgba(0,0,0,0.08); }
-.mode-pill[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
-.mode-pill[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
-.mode-pill[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
-.mode-pill[data-mode="default"]{ color:var(--text-dim,#999); }
-
-.cc-mode-badge { font-family:var(--mono); font-size:12px; cursor:pointer; color:var(--text-dim); background:transparent; border:0; padding:0; }
-.cc-mode-badge[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
-.cc-mode-badge[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
-.cc-mode-badge[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
-.cc-mode-badge[data-mode="default"]{ color:var(--text-dim,#999); }
-
-.cc-mode-minimal { font-family:var(--mono); font-size:inherit; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
-.cc-mode-minimal[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
-.cc-mode-minimal[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
-.cc-mode-minimal[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
-.cc-mode-minimal[data-mode="default"]{ color:var(--text-dim,#999); }
-
-.cc-mode-group { display:inline-flex; align-items:center; gap:8px; }
+/* 权限模式控件（S10 重构）：本体只显示后端机器值（不翻译）。
+   颜色＝[data-mode] 语义色；当 permissionTextColor 不是 'mode' 时，
+   组件会写 inline color 覆盖以下规则（内联样式优先级高于本文件）。 */
+.cc-permission-trigger { display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:none; padding:0; cursor:pointer; font-family:var(--mono); color:inherit; }
+.cc-permission-trigger[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
+.cc-permission-trigger[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
+.cc-permission-trigger[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
+.cc-permission-trigger[data-mode="default"]{ color:var(--text-dim,#999); }
 
 @media (prefers-reduced-motion:reduce) {
   .ekg-bar-fill,
@@ -52,7 +40,6 @@
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 
 .cc-variant-terminal .cc-model-minimal,
-.cc-variant-terminal .cc-mode-minimal,
 .cc-variant-terminal .ekg-pct,
 .cc-variant-terminal .pill-mono {
   border:0; border-radius: 0; background:transparent; padding:0;
