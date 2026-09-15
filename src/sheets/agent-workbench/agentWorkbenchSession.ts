@@ -111,6 +111,10 @@ function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly Wo
  * message/reasoning delta 信封（coverage = [seqStart, seqEnd]，journal 权威跨度，
  * appliedRanges 覆盖判断据此与逐 chunk 行互斥）；整行 segment 递归走既有单行路径。
  * 形状损坏的单元行退回单行归一（产出 event.unknown，不丢证据）。
+ *
+ * **段级隔离**：单个整行 segment 不可读（形状损坏/校验失败）时，只把**该段**退化为
+ * `event.unknown`（raw 保留、coverage 取该段自身跨度），其余段照常展开——一个坏段
+ * 不得吞掉整轮的正文内容（#81 回归的放大源：形状不匹配曾使整轮塌成一条 unknown）。
  */
 function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: string): readonly WorkbenchEventEnvelope[] {
   const payload = parseTurnUnitPayload(event)
@@ -119,20 +123,20 @@ function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: str
   }
   const provider = event.provenance?.provider ?? event.owner.agentId
   const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
-  for (const segment of payload.segments) {
-    // 整行 segment 交给单行路径；validate 失败（undefined/[]）会让信封丢失且外层
-    // 不计 malformed ⇒ 整单元退回单行归一（event.unknown，raw 证据不丢）。
+  return payload.segments.flatMap((segment, index) => {
     if (segment.kind === 'event') {
       const inner = canonicalRowToWorkbench(segment.event)
-      if (inner === undefined || inner.length === 0) {
-        return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
-      }
-    }
-  }
-  return payload.segments.flatMap(segment => {
-    if (segment.kind === 'event') {
-      const inner = canonicalRowToWorkbench(segment.event)
-      return inner ?? []
+      if (inner !== undefined && inner.length > 0) return inner
+      // 段级隔离：该段退化为单行归一。eventId 缺失时用 `<unit>#segment-<i>` 保唯一，
+      // 否则两条坏段会共用同一 id 而被 appliedEventIds 去重吃掉一条。
+      const innerEventId = segment.event.eventId
+      return normalizeCanonicalRowToEnvelopes(
+        segment.event,
+        segment.event.rawPayload,
+        segment.event.sequence,
+        typeof innerEventId === 'string' && innerEventId.length > 0 ? innerEventId : `${event.eventId}#segment-${index}`,
+        [segment.event.sequence, segment.event.sequence],
+      )
     }
     const seqEnd = segment.seqEnd
     const part: { kind: 'text' | 'markdown'; text: string } = { kind: segment.markdown ? 'markdown' : 'text', text: segment.text }

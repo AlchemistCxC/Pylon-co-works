@@ -4,7 +4,9 @@
 //! （只加不减；生产唯一写路径是 kernel——前端 sink 自写轨无生产 offer 调用方）。
 //! payload = 保序 segment 数组：相邻同类 delta（assistant.text/thinking.delta）
 //! 且 identity 全字段相等合成一段（text 精确拼接、occurredAt 取 run 首条、
-//! markdown 取 run 内是否出现）；tool/user/状态/unknown 行整行保留为 event 段。
+//! markdown 取 run 内是否出现）；tool/user/状态/unknown 行整行保留为 event 段——
+//! 嵌入形状是 **EVT-01 canonical 事件**（嵌套 owner/provenance，由
+//! `canonical_event_wire` 产出），与前端 `CanonicalConversationEvent` 契约同构。
 //! `contentSha256` 覆盖 segments 的规范化序列化字节，L3 裁剪迁移按
 //! 「重折叠 sha256 == 单元 sha256」校验通过后才删行（裁决 1：允许彻底丢弃）。
 //!
@@ -13,7 +15,9 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::event_repo::{parse_canonical_event, CanonicalEventRow, EventError};
+use super::event_repo::{
+    canonical_event_wire, parse_canonical_event, CanonicalEventRow, EventError,
+};
 
 pub(crate) const TURN_UNIT_EVENT_TYPE: &str = "turn.unit";
 pub(crate) const TURN_UNIT_AGGREGATE_KIND: &str = "turn-rollup";
@@ -57,9 +61,11 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     for row in rows {
         if !is_foldable_delta(&row.event_type) {
-            // 整行 segment：camelCase wire 形状（与 EventPage 回读一致；raw 恒存）。
-            let wire = serde_json::to_value(row).unwrap_or(Value::Null);
-            segments.push(Segment::Event(wire));
+            // 整行 segment：EVT-01 canonical 事件（嵌套 owner/provenance），与前端
+            // `CanonicalConversationEvent` 契约同构；raw 恒存。不得改回
+            // `serde_json::to_value(row)`——那是数据库扁平列形状，会绕过前端读边界
+            // 的归一化（#81 回归：重启后整轮历史丢失）。
+            segments.push(Segment::Event(canonical_event_wire(row)));
             continue;
         }
         let text = row
