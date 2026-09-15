@@ -250,7 +250,11 @@ impl SessionInfo {
             {
                 effective_options = self.config_options.clone();
                 self.apply_config_options(&effective_options);
-                authoritative_current = find_config_option(&effective_options, "model").is_some();
+                // N2（第二轮评审）：value-based 判据——model 选项存在但无可提取
+                // currentValue 时不构成 model 维度确认，pending 保留。
+                authoritative_current = find_config_option(&effective_options, "model")
+                    .and_then(config_option_current_machine_id)
+                    .is_some();
             }
         }
         // ACP 1.4 and Hermes expose the selected model in different places.
@@ -496,7 +500,8 @@ impl SessionInfo {
         let info = determine_model_surface(&self.config_options, Some(models));
         // configOptions 中的 model 选项仍是第一宣告面；models 状态只在它缺席且
         // 确实宣告了列表时提供通道与 choices（与 apply_session_response 的优先级
-        // 一致；本次未宣告则保留现状，见 D97-7）。
+        // 一致；本次未宣告则保留现状，见 D97-7）。显式空列表（availableModels: []）
+        // 与「未携带」同待——push 通道不表达撤销宣告，撤销走快照路径（N9 注记）。
         match info.surface {
             ModelSurface::ModelsState => {
                 self.model_surface = ModelSurface::ModelsState;
@@ -506,6 +511,25 @@ impl SessionInfo {
             ModelSurface::ConfigOption { .. } | ModelSurface::None => {}
         }
         if had_current {
+            self.model_pending = None;
+        }
+        true
+    }
+
+    /// #97/D97-3（第二轮评审 N1）：异步 config_option_update **全量数组**推送的
+    /// 统一消费——有界替换 + 已知 selector 刷新 + pending 清除。数组携带可提取
+    /// model currentValue（权威回显的 model 维度）时清除 requested 未确认态，
+    /// 判据与 apply_config_option_response 的 settled 一致（value-based）；
+    /// 无 model 维度的数组不构成确认。返回是否接受（false = 超限拒绝）。
+    pub(crate) fn apply_config_options_push(&mut self, options: &[serde_json::Value]) -> bool {
+        if !self.replace_config_options(options) {
+            return false;
+        }
+        self.apply_config_options(options);
+        if find_config_option(options, "model")
+            .and_then(config_option_current_machine_id)
+            .is_some()
+        {
             self.model_pending = None;
         }
         true
@@ -954,7 +978,11 @@ pub(crate) fn resolve_model_switch_target(
 ) -> Result<(crate::agent_config::ModelSwitchTarget, Option<String>), PylonError> {
     if let Some(api) = declared {
         let target = api.route(key);
-        if key == "model" {
+        // N3（第二轮评审）：提取判据与 control 层校验/诊断门同款别名匹配——别名键
+        // + 宣告面时宣告 id 同样生效，杜绝「校验按 model、提取按精确键」的错位
+        // （此前别名键会误发 model_config_id_missing 诊断）。注意：P56 的路由
+        // 特判（api.route 与下方 `key != "model"` 早退）保持精确键现状不变量。
+        if config_option_key_matches(key, "model") {
             if let (
                 crate::agent_config::ModelSwitchTarget::ConfigOption,
                 ModelSurface::ConfigOption { config_id },
@@ -1659,6 +1687,20 @@ mod tests {
             assert_eq!(session.model, "m-a");
             assert_eq!(session.model_pending, None);
         }
+        // N2（第二轮评审）：model 选项存在但无可提取 currentValue → 不构成确认，
+        // pending 保留。
+        {
+            let mut session = session();
+            session.model_pending = Some("keep".to_string());
+            session.apply_session_response(&serde_json::json!({
+                "configOptions": [{
+                    "id": "model-selection",
+                    "category": "model",
+                    "options": [{"valueId": "m-a"}]
+                }]
+            }));
+            assert_eq!(session.model_pending.as_deref(), Some("keep"));
+        }
         // 无 model 维度的响应：pending 保留（快照未构成确认）。
         let mut session = session();
         session.model_pending = Some("keep".to_string());
@@ -1757,6 +1799,19 @@ mod tests {
         let (target, config_id) = resolve_model_switch_target(
             Some(SetModelApi::ConfigOption),
             "model",
+            &ModelSurface::ConfigOption {
+                config_id: "model-selection".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(target, crate::agent_config::ModelSwitchTarget::ConfigOption);
+        assert_eq!(config_id.as_deref(), Some("model-selection"));
+
+        // N3（第二轮评审）：model 语义别名键 + 宣告面 → 宣告 id 同样生效
+        //（提取判据与 control 层校验/诊断门同款别名匹配）。
+        let (target, config_id) = resolve_model_switch_target(
+            Some(SetModelApi::ConfigOption),
+            "models",
             &ModelSurface::ConfigOption {
                 config_id: "model-selection".to_string(),
             },

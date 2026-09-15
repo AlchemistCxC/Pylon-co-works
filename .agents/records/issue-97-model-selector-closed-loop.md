@@ -147,6 +147,24 @@
 
 修正后门禁：`session::model` 34（30 单测 + 8 wire，其中 4 为本轮新增）、`dispatcher` 23（+2）、G2-03 修复后单测绿、`session::create` 8、全量 lib 测试见下、`cargo fmt --check` 全树通过、vitest 34（workbench 用例补强后）。
 
+## 第二轮对抗性复审（2026-09-16，独立子 agent 审 `a94b1055`）
+
+复审总评「可合并」：P0 修复经攻击无新缺口、回归测试真钉住（把旧实现代回必红）、G2-03 判别力成立、四个 wire 测试时序无竞态、两个不采纳裁决均站得住（元组去重论证复核成立；未知-kind-only 降级附条件——未来若出现分页/截断式 configOptions 推送需翻案）。复审同时找出一处修正轮自身漏检与三处判据错位，本轮（`<修正提交 2>`）全部闭环：
+
+| 级别 | 发现 | 处置 |
+| --- | --- | --- |
+| P1 | N1：dispatcher 全量数组分支经 `apply_config_options` 更新 model 后不清 pending——pending 生命周期第四条路径（首轮与修正轮两轮审核均漏检） | 已修：新增 `SessionInfo::apply_config_options_push` 统一消费（有界替换 + 刷新 + 数组携带可提取 model currentValue 时清 pending，判据与 apply_config_option_response 的 settled 同款 value-based）；补正反两例测试 |
+| P2 | N2：快照路径 authoritative_current 用 presence（model 选项存在）而非 value（可提取 currentValue）判据 | 已修：改 value-based；补「选项存在但无 currentValue 时 pending 保留」负例 |
+| P2 | N3：resolve_model_switch_target 的宣告 config id 提取用精确 `key=="model"`，与 control 层校验/诊断门的别名判据错位——别名键 + 宣告面时误发 `model_config_id_missing` 诊断 | 已修：提取判据改同款别名匹配；P56 路由特判（`api.route` 与 `key != "model"` 早退）保持精确键现状不变量不动；补别名键提取测试 |
+| P2 | N4：单值 config_option_update 的 model 值走 `value_as_string`（含 name/label 兜底），显示名可进入 session.model，违反 P56/D2 machine-id-only 不变量 | 已修：model 分支改 `value_as_machine_id`（mode 等其余语义保持宽容提取）；补显示名拒绝 + machine id 消费两例 |
+| P3 | N6：barrier 信号文件（ready/release）断言失败路径泄漏 | 已修：`SignalFiles` Drop guard |
+| P3 | N9：models push 对显式空列表与「未携带」同待，push 通道不表达撤销 | 记录为契约：撤销宣告走快照路径（session/new/load），已在 D97-7 doc 补注 |
+| P3 | N5/N7/N8 | 记录不修：别名门双向残缺口根治需按「选项身份」而非键名校验（后续 issue）；session/mod.rs 既有 p4/p5 测试的 trace 手动清理属他人域；configOptions 通道推送观测性可并入后续诊断增强 |
+
+复审对 G2（pending 生命周期）给出「部分闭合 → N1」的严谨表述：交叉核对全部 `self.model =` 写点与 pending 清除点后确认生产代码共五条路径（快照、RPC 收敛、models push、单值 config push、全量 config push、usage meta），本轮后全部闭合。
+
+第二轮修正后门禁：`session::model` 34、`dispatcher` 25（+2）、`session::create` 8、G2-03 绿、全量 lib **1088 passed / 0 failed**、`cargo fmt --check` 全树通过。
+
 ## 未解问题
 
 - `model_pending` 目前仅内部可辨识（诊断日志 + 状态字段），未上 IPC wire；若 UI 需要

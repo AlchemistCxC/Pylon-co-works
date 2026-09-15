@@ -107,6 +107,18 @@ impl Drop for TraceFile {
     }
 }
 
+/// N6（第二轮评审）：barrier 信号文件（ready/release）的 Drop 清理——断言失败
+/// 路径也不泄漏 temp 文件。
+struct SignalFiles(Vec<std::path::PathBuf>);
+
+impl Drop for SignalFiles {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            std::fs::remove_file(path).ok();
+        }
+    }
+}
+
 async fn config_option_app(
     trace: &std::path::Path,
     echo_mode: &str,
@@ -426,6 +438,7 @@ async fn stale_generation_discards_switch_write_back() {
     let release = ready.with_extension("release");
     std::fs::remove_file(&ready).ok();
     std::fs::remove_file(&release).ok();
+    let _signals = SignalFiles(vec![ready.clone(), release.clone()]);
     let trace = TraceFile::new("ms-stale-gen");
     let (app, runtime) = config_option_app(
         trace.path(),
@@ -486,8 +499,6 @@ async fn stale_generation_discards_switch_write_back() {
         .filter(|(method, _)| method == "session/set_config_option")
         .count();
     assert_eq!(switches, 1, "请求确实上过 wire（被测的是写回丢弃）");
-    std::fs::remove_file(&ready).ok();
-    std::fs::remove_file(&release).ok();
 }
 
 /// 验收（跨 runtime/Agent 重绑不泄漏）：同一 source 在不同 Agent runtime 上重建

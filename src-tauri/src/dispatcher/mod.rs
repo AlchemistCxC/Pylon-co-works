@@ -227,9 +227,9 @@ fn apply_update_event_with_pet_policy(
             if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
                 // #97/D97-4：有界替换——超限 envelope 拒绝入库（已知 selector 状态
                 // 保持不变 + 计数），未知 option kind 随原样数组保留。
-                if session.replace_config_options(options) {
-                    session.apply_config_options(options);
-                }
+                // N1（第二轮评审）：数组携带可提取 model currentValue（权威回显的
+                // model 维度）时清除 requested 未确认态，pending 生命周期无漏口。
+                session.apply_config_options_push(options);
             } else {
                 // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
                 // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
@@ -244,10 +244,18 @@ fn apply_update_event_with_pet_policy(
                     option_key.is_some_and(|key| config_option_key_matches(key, "model"));
                 let is_mode_key =
                     option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
+                // N4（第二轮评审）：model 值走 machine-id-only 提取（显示名不当 id，
+                // 与 models-state 通道同一不变量）；mode 等其余语义保持宽容提取。
                 let current = update
                     .get("currentValue")
                     .or_else(|| update.get("value"))
-                    .and_then(value_as_string);
+                    .and_then(|value| {
+                        if is_model_key {
+                            crate::session::value_as_machine_id(value)
+                        } else {
+                            value_as_string(value)
+                        }
+                    });
                 if is_model_key {
                     if let Some(model) = current {
                         // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
@@ -1120,6 +1128,7 @@ async fn handle_session_update<R: tauri::Runtime>(
                 generation,
                 ingress_seq,
                 effects.text.is_some(),
+                false,
             );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
@@ -2772,6 +2781,93 @@ mod tests {
             false,
         );
         assert_eq!(session.model, "usage-channel-model");
+        assert_eq!(session.model_pending, None);
+    }
+
+    /// #97/N1（第二轮评审回归）：config_option_update 全量数组携带可提取 model
+    /// currentValue 时清除 pending（权威回显的 model 维度）；无 model 维度的数组
+    /// 不构成确认，pending 保留——pending 生命周期在全量数组分支无漏口。
+    #[test]
+    fn config_option_update_full_array_clears_pending_only_with_model_dimension() {
+        // 有 model 维度：current + pending 一致收敛，pending 清除。
+        let mut session = dispatcher_session();
+        session.model_pending = Some("m-stale".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "model-selection",
+                "category": "model",
+                "options": [{"valueId": "m-b"}],
+                "currentValue": "m-b"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-b");
+        assert_eq!(session.model_pending, None);
+
+        // 无 model 维度（仅 reasoning 选项）：model 与 pending 均不动。
+        let mut session = dispatcher_session();
+        session.model = "m-keep".to_string();
+        session.model_pending = Some("m-keep".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "category": "thought_level",
+                "options": [{"valueId": "low"}, {"valueId": "high"}],
+                "currentValue": "high"
+            }],
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-keep");
+        assert_eq!(session.model_pending.as_deref(), Some("m-keep"));
+    }
+
+    /// #97/N4（第二轮评审回归）：单值 config_option_update 的 model 值走
+    /// machine-id-only 提取——显示名不得进入 session.model（与 models-state
+    /// 通道同一不变量）；mode 通道保持宽容提取不受影响。
+    #[test]
+    fn single_value_model_push_is_machine_id_only() {
+        let mut session = dispatcher_session();
+        session.model = "m-keep".to_string();
+        session.model_pending = Some("m-keep".to_string());
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "model",
+            "currentValue": {"name": "Display Only"},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-keep", "显示名不得当 model id");
+        assert_eq!(session.model_pending.as_deref(), Some("m-keep"));
+
+        // machine id 照常消费。
+        let update = serde_json::json!({
+            "sessionUpdate": "config_option_update",
+            "configId": "model",
+            "currentValue": {"modelId": "m-real"},
+        });
+        apply_update_event(
+            &mut session,
+            &update,
+            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate),
+            false,
+        );
+        assert_eq!(session.model, "m-real");
         assert_eq!(session.model_pending, None);
     }
 }
