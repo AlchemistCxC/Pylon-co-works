@@ -6,18 +6,20 @@
 
 - issue：[ #97 通用 ACP 模型选择器与切换闭环](https://github.com/AlchemistCxC/Pylon-co-works/issues/97)
 - issue：[ #98 ACP 能力协商与生命周期消费者闭环](https://github.com/AlchemistCxC/Pylon-co-works/issues/98)
+- issue：[ #99 ACP 基础会话通信可靠性与回合生命周期](https://github.com/AlchemistCxC/Pylon-co-works/issues/99)
 - 分支：`Ru5t/Reflector`
 - 提交范围：`90c97b73..90c97b73`（仅审计与 issue/spec 落单，无代码提交）
 - 日期：2026-09-15
 
 ## 目标与范围
 
-将后端补强拆成两个互不依赖的 vertical slice：
+将后端补强扩展成三个互不抢责任的 vertical slice：
 
 1. #97 负责通用 ACP 模型面解析、模型切换路由、异步回写、权威状态和 generation 收敛。
 2. #98 负责 capability canonical path、协商快照、生命周期消费者矩阵和 fail-closed 语义。
+3. #99 负责基础 transport 投递、request/response 相关性、prompt/turn terminal ledger、live/replay sequence、冷挂载 snapshot 和 EOF/背压收敛。
 
-两个 issue 都明确禁止按 Hermes/Peri 等 provider 写死分支；#98 不改模型状态，#97 不改 capability 协商。
+三个 issue 都明确禁止按 Hermes/Peri 等 provider 写死分支；#99 不实现 selector/capability consumer，#98 不改模型状态，#97 不改 capability 协商。
 
 ## 变更清单
 
@@ -27,6 +29,7 @@
 | `.agents/spec/issue-acp-capability-lifecycle-closed-loop.md` | #98 目标、现状证据、方案、不变量、验收、门禁 | 新增（本地一次性 spec，按仓库约定不入库） |
 | GitHub #97 | 模型切换后端 vertical slice | 新建 issue，`enhancement` |
 | GitHub #98 | ACP 能力/生命周期后端 vertical slice | 新建 issue，`enhancement` |
+| GitHub #99 | ACP 基础通信可靠性与回合生命周期 | 新建 issue，`enhancement` |
 | `.agents/records/issue-97-98-acp-backend-audit.md` | 本次审计和落单记录 | 新增 |
 
 ## 方案要点
@@ -42,6 +45,7 @@
 | issue 正文包含 Parent / What to build / Acceptance criteria / Blocked by | 通过 |
 | spec 含现状证据、范围边界、通用化约束、测试和门禁 | 通过 |
 | issue/spec 纳入 codge 大缺口而非 provider 特判 | 通过：#97/#98 已列 adopted selector、依赖重算、fork、raw 扩展、交互队列和 identity continuity |
+| 基础通信 issue 覆盖 codge 对照出的 transport/turn 大缺口 | 通过：#99 已列静默丢帧、terminal ledger、raw 双轨、replay cursor、冷挂载和 EOF/generation 清理 |
 | 本轮不施工代码 | 通过：未修改 `src/`、`src-tauri/`、`package.json` |
 
 ## 测试处置
@@ -52,6 +56,7 @@
 
 - GitHub issue #97：<https://github.com/AlchemistCxC/Pylon-co-works/issues/97>
 - GitHub issue #98：<https://github.com/AlchemistCxC/Pylon-co-works/issues/98>
+- GitHub issue #99：<https://github.com/AlchemistCxC/Pylon-co-works/issues/99>
 - 审计依据：`src-tauri/src/session/{control,model,create}.rs`、`src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/acp/{capabilities,initialize_plan}.rs`、`src-tauri/src/lifecycle/mod.rs` 及前端 capability/model projection。
 - 参考实现：本地 `codeg-src`；未联网搜索。
 
@@ -66,4 +71,4 @@ spec 文件按 `.gitignore` 约定保留在本地，不进入提交；issue 正�
 
 ## 并行交集
 
-两个 issue 可并行开发。若未来两条分支同时修改共享 ACP fixture/helper，应先在 `.agents/L.md` 留言并拆成只读公共测试基础；不得把一条 issue 的运行时状态改动偷偷带入另一条。
+三个 issue 可并行开发。若未来分支同时修改共享 ACP fixture/helper，应先在 `.agents/L.md` 留言并拆成只读公共测试基础；不得把一条 issue 的运行时状态改动偷偷带入另一条。
