@@ -4,36 +4,49 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
 
 // src/plugin-runtime/hooks/hookTypes.ts
 var HOOK_NAMES = [
+  "context.afterBuild",
+  "context.beforeBuild",
+  "message.received",
+  "message.user.beforeSend",
+  "message.user.sendFailed",
+  "message.user.sent",
+  "permission.request",
+  "session.closed",
+  "session.closing",
   "session.creating",
   "session.created",
-  "session.loading",
-  "session.loaded",
-  "session.closing",
-  "session.closed",
-  "session.deleting",
   "session.deleted",
-  "message.user.beforeSend",
-  "message.user.sent",
-  "message.user.sendFailed",
-  "message.received",
-  "message.agent.committed",
-  "agent.chunk",
-  "turn.started",
+  "session.deleting",
+  "session.loaded",
+  "session.loading",
+  "tool.afterCall",
+  "tool.beforeCall",
+  "tool.failed",
+  "tool.started",
+  "turn.cancelled",
   "turn.completed",
   "turn.failed",
-  "turn.cancelled",
-  "tool.beforeCall",
-  "tool.started",
-  "tool.afterCall",
-  "tool.failed",
-  "context.beforeBuild",
-  "context.afterBuild"
+  "turn.started"
 ];
+var HOOK_GATE_TIMEOUT_MS = 3e3;
+var HOOK_NOTIFY_TIMEOUT_MS = 1e3;
+var GATE_ANCHORS = /* @__PURE__ */ new Set([
+  "message.received",
+  "message.user.beforeSend",
+  "permission.request",
+  "tool.beforeCall"
+]);
+var HOOK_TIMEOUT_BUDGET_MS = Object.freeze(
+  Object.fromEntries(HOOK_NAMES.map((name) => [
+    name,
+    GATE_ANCHORS.has(name) ? HOOK_GATE_TIMEOUT_MS : HOOK_NOTIFY_TIMEOUT_MS
+  ]))
+);
 
 // src/plugin-runtime/packageManifest.ts
 var PYLON_PLUGIN_API_MIN = "1.0";
-var PYLON_PLUGIN_API_LATEST = "1.2";
-var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", PYLON_PLUGIN_API_LATEST];
+var PYLON_PLUGIN_API_LATEST = "1.3";
+var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", "1.2", PYLON_PLUGIN_API_LATEST];
 var PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN;
 var PYLON_PLUGIN_MANIFEST_FILE = "pylon-plugin.json";
 var PYLON_PLUGIN_CAPABILITIES = ["plugin.management"];
@@ -67,8 +80,13 @@ var HOT_SWAP_MODES = /* @__PURE__ */ new Set([
 ]);
 var API_SUPPORTED_SET = new Set(PYLON_PLUGIN_API_SUPPORTED);
 var CAPABILITY_SET = new Set(PYLON_PLUGIN_CAPABILITIES);
+var API_MINOR_ORDER = { "1.0": 0, "1.1": 1, "1.2": 2, "1.3": 3 };
+function apiVersionAtLeast(api, minor) {
+  const order = typeof api === "string" ? API_MINOR_ORDER[api] : void 0;
+  return order !== void 0 && order >= API_MINOR_ORDER[minor];
+}
 function removedFieldsFor(api) {
-  return api === PYLON_PLUGIN_API_LATEST ? ["trust", "contributes", "signature", "entry"] : ["trust", "capabilities", "dangerousHooks", "contributes", "signature", "entry"];
+  return apiVersionAtLeast(api, "1.2") ? ["trust", "contributes", "signature", "entry"] : ["trust", "capabilities", "dangerousHooks", "contributes", "signature", "entry"];
 }
 function record(value, field) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -109,7 +127,7 @@ function parsePylonPluginManifest(source) {
       `pylon-plugin.json api \u4EC5\u652F\u6301 ${PYLON_PLUGIN_API_SUPPORTED.join("/")}\uFF08\u66F4\u9AD8\u7248\u672C\u9700\u5347\u7EA7\u5BBF\u4E3B\uFF09`
     );
   }
-  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.capabilities !== void 0) {
+  if (apiVersionAtLeast(manifest.api, "1.2") && manifest.capabilities !== void 0) {
     if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((value) => typeof value !== "string" || !value.trim())) {
       throw new PluginManifestError("capabilities", "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4");
     }
@@ -127,7 +145,7 @@ function parsePylonPluginManifest(source) {
       seen.add(capability);
     });
   }
-  if (manifest.api === PYLON_PLUGIN_API_LATEST && manifest.dangerousHooks !== void 0) {
+  if (apiVersionAtLeast(manifest.api, "1.2") && manifest.dangerousHooks !== void 0) {
     if (!Array.isArray(manifest.dangerousHooks) || manifest.dangerousHooks.some((value) => typeof value !== "string" || !value.trim())) {
       throw new PluginManifestError("dangerousHooks", "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4");
     }
