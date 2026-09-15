@@ -7,7 +7,7 @@
 
 - issue：[#97 通用 ACP 模型选择器与切换闭环](https://github.com/AlchemistCxC/Pylon-co-works/issues/97)
 - 分支：`Ru5t/Reflector`
-- 提交范围：`416aabab..（本次实现提交）`
+- 提交范围：`416aabab..d6251d82`（代码 `aa6f5e19`；文档 `d6251d82`）
 - 日期：2026-09-15
 - ADR：[ADR-0004 模型选择器切换收敛与兼容发送规则](../decisions/0004-model-selector-convergence.md)
 
@@ -93,7 +93,7 @@
 
 ## 证据
 
-- commit：`<本次实现提交>`（见 PR）
+- commit：`aa6f5e19`（代码）+ `d6251d82`（本记录/ADR）；PR：https://github.com/AlchemistCxC/Pylon-co-works/pull/103
 - 测试：worktree（HEAD + 本 issue hunks）`cargo test --lib` 全量绿、
   `session::model` 26 passed、`model_switch_wire_tests` 4 passed、`dispatcher` 21
   passed、`session::create` 8 passed、`cargo fmt --check` 通过；前端 vitest 目标两文件
