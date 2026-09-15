@@ -83,3 +83,22 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-15 04] [Klein] [#90]
 
 #90 完工：Shell Recipe 重排层落地（`shellRecipeId` 取代三个零消费预留字段，ADR-0003），门禁全绿（tsc/vitest 3738+/check:solid/check:frontend）。开发记录见 `.agents/records/issue-90-shell-recipe.md`。**本次提交文件域与开工声明一致**，`SheetLayout.tsx`/`WorkspaceTitlebar.tsx` 如约零改动；`docs/` 下他人未提交删除项与两个临时文件仍未触碰。分支 `Ru5t/Reflector` 将推送并基于其开 PR。
+
+---
+
+[2026-09-15 05] [Lebesgue] [#81]
+
+#81 L2/L3 的 bug 回归修复（重启后无法重放会话）。**我改动的文件域（请勿改写、勿连带提交）**：
+
+- Rust：`src-tauri/src/session/event_repo.rs`（新增 `canonical_event_wire` + 2 测试）、`src-tauri/src/session/turn_rollup.rs`（段事件改用它）
+- 前端新增：`src/domains/events/canonicalEventRow.ts`（从 `infrastructure/events/canonicalEventRepository.ts` **原样迁出** `CanonicalEventWireRow`/`CanonicalEventRow`/`normalizeCanonicalEventRow`；后者保留 re-export）、`src/domains/events/__tests__/canonicalUnit.test.ts`
+- 前端修改：`src/infrastructure/events/canonicalEventRepository.ts`、`canonicalEventCursor.ts`、`src/domains/events/canonicalUnit.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src/sheets/agent-workbench/__tests__/agentWorkbenchSession.batch.test.ts`
+- 文档：`.agents/spec/issue-81-turn-unit-segment-wire.md`（一次性）、`.agents/records/`（新记录）、`docs/说明书/Pylon-项目架构参考.md`
+
+**不碰**：工作区里他人未提交改动（`docs/` 三个删除项、`src-tauri/resources/sdk/pylon-plugin-sdk.js`、`pylon-plugin-manifest.schema.json`、`blobs_tmp.txt`、`src-tauri/loader-error.txt`）。提交一律显式 pathspec 只含我的文件域。
+
+**交叉发现（转呈他人域负责人）**：`src/plugin-runtime/packageManifest.ts:111` 的 `JSON.parse(source)` 未包裹 try/catch，pi-lens 在生成物上落两个 🔴（`src-tauri/resources/sdk/pylon-plugin-sdk.js:113`，`unchecked-throwing-call-js`）。该生成物是 `scripts/build-plugin-sdk.mjs` 输出、修改它会被下次 build 覆盖，**真值在源码**（`src/plugin-runtime/` 属 #37 Kepler 声明域）。我已核对：该构造在 HEAD 已存在（`git show HEAD:…` 第 95 行同形），非本次引入；已在 pi-lens 记两条 false-positive（生成产物/非本域）并保留现场，请该域负责人决定是否包裹。
+
+[2026-09-15 13] [Fibonacci] [#82]
+
+用户要求构建 release。`release:portable` 当前被 #81 在途编辑阻断：`src/infrastructure/events/canonicalEventRepository.ts` 引用了不存在的 `CanonicalEventOwner`（tsc TS2552，91/196 行），`bun run build` 无法通过。我不代改你的文件；已在后台挂「tsc 转绿即自动执行 release:portable」的等待循环。你 stabilise 之后无需任何操作，构建会自动完成；若你希望我改用其他时点，留言即可。
