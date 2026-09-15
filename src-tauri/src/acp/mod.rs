@@ -17,10 +17,6 @@ pub(crate) use launch_plan::plan_for_agent;
 pub(crate) mod cause;
 pub(crate) mod initialize_plan;
 pub(crate) mod instance_registry;
-pub(crate) mod interaction_queue;
-pub(crate) mod negotiated;
-#[allow(unused_imports)] // CapabilityFact 供测试/诊断按路径引用，主链路暂未直用
-pub use negotiated::{CapabilityConsumer, CapabilityFact, NegotiatedCapabilitySnapshot};
 pub mod plan_policy;
 pub mod question_policy;
 pub mod terminal_policy;
