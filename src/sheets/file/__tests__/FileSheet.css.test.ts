@@ -122,6 +122,7 @@ const TOKEN_DEFAULTS: Record<string, string> = {
   '--file-code-gutter-pad-left': '8px',
   '--file-code-gutter-pad-right': '12px',
   '--file-code-line-inset': '16px',
+  '--file-code-content-pad-right': '0px',
   '--file-code-mark-rail': '2px',
   '--file-code-tab-size': '2',
 }
@@ -199,6 +200,22 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(contentHost.body).toContain('font-family: var(--mono)')
   })
 
+  // issue #93：正文容器的右内边距两态必须同值，且同值要由构造保证——共享规则体 +
+  // 同一 token，而不是两态各写一个数字碰巧相等（改前只读态 24px、编辑态 0，宽行滚到
+  // 最右时右端留白差 24px）。因此这里同时钉住「共享规则消费 token」与「两态各自
+  // 规则体不得再自带水平内边距」。
+  it('gives both projections one content inset, owned by the shared rule and token', () => {
+    const contentHost = grouped('file-tab-pre', 'cm-content')
+    expect(contentHost.body).toContain('padding-right: var(--file-code-content-pad-right)')
+    expect(contentHost.body).toContain('padding-left: 0')
+
+    for (const selector of ['.file-tab-pre', '.file-code-editor .cm-content']) {
+      const body = bySelector(selector).body
+      expect(body, `${selector} 不得自带水平内边距（会绕开共享 token）`).not.toContain('padding-right')
+      expect(body, `${selector} 不得自带水平内边距（会绕开共享 token）`).not.toContain('padding-left')
+    }
+  })
+
   it('paints the changed-line decoration without consuming layout width', () => {
     const marker = bySelector('.file-tab-line[data-changed="true"]::before')
     expect(marker.body).toContain('position: absolute')
@@ -224,5 +241,23 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(legacy).not.toContain('.file-tab-gutter-line {')
     expect(legacy).not.toContain('tab-size: 2')
     expect(legacy).not.toContain('border-left: 2px solid transparent')
+  })
+
+  // ── 注释完整性：注释里的 “*/” 会提前闭合注释，把紧随的规则整条吞掉 ──────────
+  // #83 的头部注释里写过 `file-main-*/`，浏览器（与本文件的 rulesOf 同口径的非贪婪
+  // 剥离）都在那处提前收尾，紧随的 `.file-sheet { display: flex }` 因此整条消失——
+  // sheet 外壳退化成块级堆叠、编辑器不再被约束宽度（横向滚动随之失效）。本断言把
+  // “壳规则必须真的被解析出来”钉住，并禁止注释残渣漏进选择器。
+  it('parses the sheet shell out of the file, with no comment residue in selectors', () => {
+    const rules = rulesOf(css)
+    const shell = rules.find(rule => rule.selector === '.file-sheet')
+    expect(shell, '.file-sheet 规则未被解析出来：头部注释可能提前闭合').toBeTruthy()
+    expect(shell!.body).toContain('display: flex')
+    expect(shell!.body).toContain('flex: 1')
+
+    const leaked = rules
+      .filter(rule => /[\u4e00-\u9fff]|\*\//.test(rule.selector))
+      .map(rule => rule.selector.slice(0, 80))
+    expect(leaked, `注释残渣漏进了选择器：\n${leaked.join('\n')}`).toEqual([])
   })
 })
