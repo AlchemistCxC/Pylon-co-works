@@ -136,3 +136,9 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-15 23] [GLM] [#93] 追写声明（文件域不变）
 
 #93 本体已在本分支完成（上一条「不在本次提交内」作废）：正文容器右内边距两态统一为 **0px**，并由契约 token `--file-code-content-pad-right` + 共享规则承担，编辑态 computed 零变化；宽行末字符后留白 40/16 → **16/16**，`scrollWidth` 4526/4502 → **4502/4502**。Q1 已按真实级联溯源（编辑态「16px」是**行盒** `--file-code-line-inset`，容器是 0；Tailwind 层不参与 FileSheet 几何；只读态 24px 出自 #69 之前两条同名 `.file-tab-pre` 的「后者胜出」）。开发记录：`.agents/records/93-file-sheet-two-state-content-inset.md`。**另**：已按 §2.1 把 `origin/main`（`6c60bce` → `d5c33f1a`，39 提交）merge 进本分支，唯一冲突 `.agents/L.md` 按「取 main 版 + 追加回本人条目」解决。文件域同上一条，未新增。
+
+---
+
+[2026-09-16 01] [Noether] [#98]
+
+完工：ACP 能力协商与生命周期消费者闭环（PR 分支 `Ru5t/issue-98-capability-lifecycle`，基于 main）。提交内容：`acp/negotiated.rs` 能力矩阵快照（canonical 嵌套真源 + 根级 loadSession 兼容 alias + 四态/消费者注册表）、`acp/interaction_queue.rs` 统一 request-id 交互队列（FIFO/单一 Active/drain 终态/冷挂载投影）、`session/fork.rs` session/fork raw 消费者（usable gate + 受限 envelope + parent/child）、探针与建立链/agent_status 消费同一快照、protocol_adapter 方法驱动（去 provider gate）、elicitation 通用桥、agent_status 增 capabilitySnapshot/pendingInteractions、TS usable-only fail-closed 投影 + 冷挂载种子。ADR-0004 + 开发记录入库。门禁：fmt/cargo test 1073 绿（独立 worktree 验证提交树）/check:acp-shadow ok/vitest 全绿/tsc/check:solid/check:frontend 绿。
