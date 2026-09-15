@@ -32,7 +32,7 @@ const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
   // Agent 与连接
   'agent', 'session', 'gateway', 'prediction',
   // 插件
-  'pluginManager',
+  'pluginManager', 'hookDiagnostics',
 ]
 
 const allSections = (): SettingsSectionId[] =>
@@ -46,7 +46,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
       ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'],
       ['window', 'pet', 'history', 'backup'],
       ['agent', 'session', 'gateway', 'prediction'],
-      ['pluginManager'],
+      ['pluginManager', 'hookDiagnostics'],
     ])
   })
 

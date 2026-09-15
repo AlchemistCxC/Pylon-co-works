@@ -7,6 +7,12 @@ import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './s
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
+import { parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
+import {
+  canonicalBatchChunksOf,
+  canonicalBatchSpanOf,
+  isCanonicalBatchDeltaType,
+} from '../../infrastructure/events/canonicalEventBatch.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
@@ -51,17 +57,20 @@ export function workbenchSessionBindingKey(session: Session | undefined): string
   ].join('\u0000')
 }
 
-function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
-  if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
-  if (validateCanonicalEvent(row).length > 0) return []
-  const event = row as CanonicalConversationEvent
+function normalizeCanonicalRowToEnvelopes(
+  event: CanonicalConversationEvent,
+  raw: unknown,
+  sequence: number,
+  eventId: string,
+  coverage?: readonly [number, number],
+): readonly WorkbenchEventEnvelope[] {
   const provider = event.provenance?.provider ?? event.owner.agentId
-  const optimistic = isOptimisticUserEvent(event.rawPayload)
-  const normalized = normalizeAgentEvent(event.rawPayload, {
+  const optimistic = isOptimisticUserEvent(raw)
+  const normalized = normalizeAgentEvent(raw, {
     provider,
     sessionId: event.owner.localSessionId,
-    sourceId: event.eventId,
-    sequence: event.sequence,
+    sourceId: eventId,
+    sequence,
     recordedAt: event.receivedAt,
     occurredAt: event.occurredAt,
     agentId: event.owner.agentId,
@@ -71,9 +80,85 @@ function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[
   })
   return normalized.events.map(envelope => Object.freeze({
     ...envelope,
-    eventId: normalized.events.length === 1 ? event.eventId : envelope.eventId,
+    eventId: normalized.events.length === 1 ? eventId : envelope.eventId,
     identity: Object.freeze({ ...event.identity, ...envelope.identity }),
+    ...(coverage ? { coverage: Object.freeze([coverage[0], coverage[1]]) as readonly [number, number] } : {}),
   }))
+}
+
+/**
+ * #81 L1：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
+ * 按跨度逐 chunk 展开重建：sub-envelope 的 sequence = seqSpan[0]+i、eventId =
+ * owner#(seqSpan[0]+i)，coverage = [sequence, sequence]（journal 权威）。
+ * 形状损坏的 batch 行退回单行归一（产出 event.unknown，raw 不丢）。
+ */
+function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly WorkbenchEventEnvelope[] {
+  const ownerKey = toCanonicalOwnerKey(event.owner)
+  const chunks = canonicalBatchChunksOf(event)
+  if (!chunks) {
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
+  }
+  const first = canonicalBatchSpanOf(event)![0]
+  return chunks.flatMap((raw, index) => {
+    const sequence = first + index
+    const eventId = `${ownerKey}#${sequence}`
+    return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId, [sequence, sequence])
+  })
+}
+
+/**
+ * #81 L2：turn.unit 单元行按 segments 展开为 segment 级信封——delta-run 段重建为
+ * message/reasoning delta 信封（coverage = [seqStart, seqEnd]，journal 权威跨度，
+ * appliedRanges 覆盖判断据此与逐 chunk 行互斥）；整行 segment 递归走既有单行路径。
+ * 形状损坏的单元行退回单行归一（产出 event.unknown，不丢证据）。
+ */
+function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: string): readonly WorkbenchEventEnvelope[] {
+  const payload = parseTurnUnitPayload(event)
+  if (!payload) {
+    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
+  }
+  const provider = event.provenance?.provider ?? event.owner.agentId
+  const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
+  for (const segment of payload.segments) {
+    // 整行 segment 交给单行路径；validate 失败（undefined/[]）会让信封丢失且外层
+    // 不计 malformed ⇒ 整单元退回单行归一（event.unknown，raw 证据不丢）。
+    if (segment.kind === 'event') {
+      const inner = canonicalRowToWorkbench(segment.event)
+      if (inner === undefined || inner.length === 0) {
+        return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
+      }
+    }
+  }
+  return payload.segments.flatMap(segment => {
+    if (segment.kind === 'event') {
+      const inner = canonicalRowToWorkbench(segment.event)
+      return inner ?? []
+    }
+    const seqEnd = segment.seqEnd
+    const part: { kind: 'text' | 'markdown'; text: string } = { kind: segment.markdown ? 'markdown' : 'text', text: segment.text }
+    return [Object.freeze(createWorkbenchEnvelope({
+      sessionId: event.owner.localSessionId,
+      sequence: seqEnd,
+      recordedAt: segment.occurredAt,
+      occurredAt: segment.occurredAt,
+      source: { provider, sourceId: `${ownerKey}#${seqEnd}` },
+      identity: segment.identity ?? {},
+      provenance,
+      coverage: [segment.seqStart, segment.seqEnd],
+      event: segment.eventType === 'assistant.text.delta'
+        ? { type: 'message.delta', role: 'assistant', parts: [part] }
+        : { type: 'reasoning.delta', parts: [part] },
+    }))]
+  })
+}
+
+function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
+  if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
+  if (validateCanonicalEvent(row).length > 0) return []
+  const event = row as CanonicalConversationEvent
+  if (event.eventType === 'turn.unit') return expandCanonicalUnitRow(event, toCanonicalOwnerKey(event.owner))
+  if (isCanonicalBatchDeltaType(event.eventType)) return expandCanonicalBatchRow(event)
+  return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
 }
 
 function isOptimisticUserEvent(raw: unknown): boolean {
@@ -132,7 +217,8 @@ function withJournalDiagnostic(document: WorkbenchDocument, count: number): Work
 function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   return {
     loadAll: ownerKey => {
-      if (IS_TAURI && !isBrowserMockRuntime()) return tauriCanonicalEventRepository().loadAll(ownerKey)
+      // #81 L2：投影读走 compact（单元 + 未覆盖行）；被覆盖行不再传输/解析。
+      if (IS_TAURI && !isBrowserMockRuntime()) return tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey)
       // Browser snapshots are keyed by local Session.id, not the JSON owner key.
       // bind() adds that compatibility source once it has the concrete Session.
       return Promise.resolve([])
@@ -573,9 +659,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // the invalidated bind promise.
         const bufferedAtRefresh = buffered
         const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
-        // Start from the live document so already-applied event ids remain
-        // idempotent while newly persisted terminal updates (for example a tool
-        // completion that raced the initial read) are folded in place.
+        // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
+        // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
+        // live 已应用区间完全覆盖者跳过（审核修复：恢复基线的 initialDocument: current）。
         const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0

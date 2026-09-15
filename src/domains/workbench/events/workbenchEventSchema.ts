@@ -217,6 +217,10 @@ export interface WorkbenchEventEnvelope {
   readonly event: WorkbenchSemanticEvent
   readonly raw?: JsonValue
   readonly rawMetadata?: WorkbenchRawMetadata
+  /** #81 L2：journal 权威覆盖跨度（展开信封为其来源行的 sequence 区间）。
+   * 携带 coverage 的信封参与 appliedRanges 覆盖判断；不带（optimistic/session-response
+   * 等非 journal 信封）保持 eventId 幂等，不变。 */
+  readonly coverage?: readonly [number, number]
 }
 
 export type WorkbenchEnvelopeInput = Omit<WorkbenchEventEnvelope, 'schemaVersion' | 'eventId' | 'identity' | 'raw' | 'rawMetadata'> & {
@@ -259,6 +263,7 @@ export function createWorkbenchEnvelope(input: WorkbenchEnvelopeInput): Workbenc
     identity: { ...identity },
     provenance: { ...input.provenance },
     event: input.event,
+    ...(input.coverage ? { coverage: Object.freeze([...input.coverage]) as readonly [number, number] } : {}),
     ...(raw !== undefined ? { raw } : {}),
     ...(rawMetadata ? { rawMetadata } : {}),
   } satisfies Omit<WorkbenchEventEnvelope, 'eventId'>
@@ -290,6 +295,17 @@ export function parseWorkbenchEnvelope(value: unknown): SchemaResult<WorkbenchEv
   const eventResult = parseSemanticEvent(value.event)
   if (!eventResult.ok) issues.push(...eventResult.issues.map(item => ({ ...item, path: ['event', ...item.path] })))
   if (value.raw !== undefined && !isJsonValue(value.raw)) issues.push(schemaIssue(['raw'], 'json.invalid', 'JSON value', value.raw))
+  let coveragePair: readonly [number, number] | undefined
+  if (value.coverage !== undefined) {
+    const coverage = value.coverage
+    const valid = Array.isArray(coverage) && coverage.length === 2
+      && Number.isSafeInteger(coverage[0]) && Number.isSafeInteger(coverage[1]) && (coverage[0] as number) >= 1 && (coverage[0] as number) <= (coverage[1] as number)
+    if (!valid) {
+      issues.push(schemaIssue(['coverage'], 'shape.coverage', '[start, end] safe integers', value.coverage))
+    } else {
+      coveragePair = [coverage[0] as number, coverage[1] as number]
+    }
+  }
   if (value.raw !== undefined && isJsonValue(value.raw) && jsonBytes(value.raw) > DEFAULT_RAW_MAX_BYTES && (!isRecord(value.rawMetadata) || value.rawMetadata.truncated !== true)) {
     issues.push(schemaIssue(['rawMetadata'], 'raw.truncation-required', 'truncation metadata for oversized raw', value.rawMetadata))
   }
@@ -304,6 +320,7 @@ export function parseWorkbenchEnvelope(value: unknown): SchemaResult<WorkbenchEv
       sequence: value.sequence as number,
       recordedAt: value.recordedAt as string,
       ...(value.occurredAt !== undefined ? { occurredAt: value.occurredAt as string } : {}),
+      ...(coveragePair ? { coverage: Object.freeze([coveragePair[0], coveragePair[1]]) as readonly [number, number] } : {}),
       source: value.source as WorkbenchEventSource,
       identity: value.identity as WorkbenchEventIdentity,
       provenance: value.provenance as WorkbenchEventProvenance,
@@ -418,6 +435,10 @@ export const CANONICAL_SEMANTIC_PROJECTION_REGISTRY: Readonly<Record<string, Can
   'assistant.text.delta': ({ text }) => ({ type: 'message.delta', role: 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
   'assistant.reasoning.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
   'assistant.thinking.delta': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
+  // #81 L1：sink 聚合行的注册表兜底（正常消费在 canonicalRowToWorkbench 按
+  // seqSpan 展开；此条目仅保证类型全盖与迁移路径语义合理）。
+  'assistant.text.delta.batch': ({ text }) => ({ type: 'message.delta', role: 'assistant', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : { parts: [] }) }),
+  'assistant.thinking.delta.batch': ({ text }) => ({ type: 'reasoning.delta', ...(text !== undefined ? { parts: [{ kind: 'text', text }] } : {}) }),
   'tool.started': toolProjection('tool.started'),
   'tool.progress': toolProjection('tool.progress'),
   'tool.completed': toolProjection('tool.completed'),
@@ -460,6 +481,9 @@ export const CANONICAL_SEMANTIC_PROJECTION_REGISTRY: Readonly<Record<string, Can
   'diagnostic.notice': diagnosticProjection('diagnostic.notice'),
   unknown: unknownCanonicalProjection('unknown'),
   'history.snapshot': unknownCanonicalProjection('history.snapshot'),
+  // #81 L2：turn 单元行的注册表兜底（正常消费在 canonicalRowToWorkbench 按
+  // segments 展开；此条目仅保证类型全盖）。
+  'turn.unit': unknownCanonicalProjection('turn.unit'),
 })
 
 function migrateCanonicalEvent(eventType: string, typed: Record<string, JsonValue>, text: string | undefined, raw: JsonValue): WorkbenchSemanticEvent {

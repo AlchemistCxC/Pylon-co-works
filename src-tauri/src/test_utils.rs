@@ -211,6 +211,7 @@ impl TestStateBuilder {
             gateway: self.gateway,
             startup: self.startup,
             approval_mode: Arc::new(Mutex::new(self.approval_mode)),
+            browser_agent: Arc::new(crate::browser_agent::hub::BrowserAgentHub::new()),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),

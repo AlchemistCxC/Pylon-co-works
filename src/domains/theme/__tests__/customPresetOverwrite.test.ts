@@ -4,7 +4,8 @@ import { useStore } from '../../../store.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { useInterfaceModeStore } from '../../interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
-import { getInterfaceModeRegistry, getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { getInterfaceModeRegistry, getPresentationProfileRegistry, getShellRecipeRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { DEFAULT_SHELL_RECIPE } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
@@ -24,6 +25,8 @@ describe('custom preset overwrite', () => {
     const profileRegs = BUILTIN_PRESENTATION_PROFILES.map(profile =>
       getPresentationProfileRegistry().register(owner, profile),
     )
+    // 内置模式声明 shellRecipeId；激活期跨注册表校验要求该 recipe 在场。
+    const recipeReg = getShellRecipeRegistry().register(owner, DEFAULT_SHELL_RECIPE)
     const modeRegs = BUILTIN_INTERFACE_MODES.map(mode =>
       getInterfaceModeRegistry().register(owner, {
         ...mode,
@@ -62,7 +65,7 @@ describe('custom preset overwrite', () => {
       expect(presets.find(item => item.id === firstId)?.createdAt).toBe(firstCreatedAt)
       expect(presets.find(item => item.id === firstId)?.bundle?.id).toBe(firstId)
     } finally {
-      for (const registration of [...modeRegs, ...profileRegs]) await registration.dispose()
+      for (const registration of [recipeReg, ...modeRegs, ...profileRegs]) await registration.dispose()
     }
   })
 

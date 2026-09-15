@@ -50,6 +50,8 @@ export type { PluginContextPanelApi } from '../plugin-runtime/context-panel/plug
 export type { PluginFontApi } from '../plugin-runtime/fonts/pluginFontApi.ts'
 export type { PluginSessionCreationApi } from '../plugin-runtime/session-creation/pluginSessionCreationApi.ts'
 export type { PluginInterfaceModeApi } from '../plugin-runtime/interface-mode/pluginInterfaceModeApi.ts'
+export type { PluginShellRecipeApi } from '../plugin-runtime/shell-recipe/pluginShellRecipeApi.ts'
+export type { ShellRecipeContribution, ShellRailSide } from '../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 export type { PluginTitlebarApi } from '../plugin-runtime/titlebar/pluginTitlebarApi.ts'
 export type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.ts'
 /** API 1.2 capability-gated 管理面：仅当 manifest 声明 `plugin.management`

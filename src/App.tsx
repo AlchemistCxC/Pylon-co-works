@@ -28,6 +28,7 @@ import { normalizeAgentStatus, type AgentStatusPayload } from './components/sett
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
+import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
@@ -45,10 +46,11 @@ import {
   getFontContributionRegistry,
   getInterfaceModeRegistry,
   getPluginServiceRegistry,
+  getShellRecipeRegistry,
 } from './plugin-runtime/runtimeServices.ts'
 import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
-import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget } from './application/transactions/activateInterfaceMode.ts'
+import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { selectAvailableContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
@@ -76,6 +78,9 @@ const getFontContributionSnapshot = () => fontContributionRegistry.getSnapshot()
 const interfaceModeRegistry = getInterfaceModeRegistry()
 const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
 const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
+const shellRecipeRegistry = getShellRecipeRegistry()
+const subscribeShellRecipes = (listener: () => void) => shellRecipeRegistry.subscribe(listener)
+const getShellRecipeSnapshot = () => shellRecipeRegistry.getSnapshot()
 
 // Bootstrap notification identity is application-scoped and intentionally
 // stable across retries/remounts. Keeping it outside the effect avoids
@@ -126,6 +131,14 @@ export default function App() {
   const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!
   const quickInterfaceMode = interfaceModeQuickTarget(interfaceMode)
+  // Shell Recipe（ADR-0003）：激活期已硬校验引用；此处订阅仅保证插件热换后
+  // 数据属性跟随 registry 快照更新。解析兜底 classic，瞬态不崩壳。
+  useSyncExternalStore(
+    subscribeShellRecipes,
+    getShellRecipeSnapshot,
+    getShellRecipeSnapshot,
+  )
+  const shellRecipe = resolveShellRecipe(interfaceModeContribution)
   useEffect(() => {
     document.documentElement.dataset.interfaceMode = interfaceMode
     document.body.dataset.interfaceMode = interfaceMode
@@ -407,10 +420,15 @@ export default function App() {
   }, [resolved])
 
   const appWindow = appWindowSingleton
-  const drainBeforeClose = () => drainPersistentStateBeforeClose({
-    flushCanonical: () => getCanonicalEventFeed().flushAsync(),
-    flushIdentity: flushIdentityBackend,
-  })
+  const drainBeforeClose = async () => {
+    await drainPersistentStateBeforeClose({
+      flushCanonical: () => getCanonicalEventFeed().flushAsync(),
+      flushIdentity: flushIdentityBackend,
+    })
+    // #81 L3：前端 pending 已清空（kernel 单写者）→ 安全窗口内运行裁剪迁移
+    // （可暂停/续跑；超时不阻塞关窗；trim_rolledup 策略关闭时后端只报告）。
+    await runRollupTrimBeforeClose()
+  }
   const closeWindowWithFlush = async () => {
     try {
       await drainBeforeClose()
@@ -446,7 +464,7 @@ export default function App() {
   const settingsOpen = showSettings
 
   return (
-    <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId}>
+    <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>
       {interfaceMode === 'tactical-blue' && <TacticalScene />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}

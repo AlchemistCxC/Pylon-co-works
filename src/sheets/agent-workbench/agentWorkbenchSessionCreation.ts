@@ -49,7 +49,6 @@ export async function createAgentWorkbenchSession(
     workdir: workspace.rootPath,
     workspaceId: workspace.id,
     skills: [...workspace.skills],
-    hooks: [...workspace.hookPluginIds],
     mcpServerIds: [...workspace.mcpServerIds],
     hookPluginIds: [...workspace.hookPluginIds],
   } : undefined)

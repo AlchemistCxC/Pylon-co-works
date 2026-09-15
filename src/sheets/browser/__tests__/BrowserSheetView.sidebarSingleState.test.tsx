@@ -80,7 +80,7 @@ describe('I09-A-FE-02 Browser 单一折叠状态（ctx.sidebarCollapsed）', () 
   })
 })
 
-describe('Browser 工具栏在展开/折叠态保持可用（历史/书签/下载/控制台）', () => {
+describe('Browser 工具栏在展开/折叠态保持可用（Agent/历史/书签/下载/控制台）', () => {
   beforeEach(() => {
     localStorage.clear()
   })
@@ -88,7 +88,7 @@ describe('Browser 工具栏在展开/折叠态保持可用（历史/书签/下�
   it('展开态：label 与标题/note 正常渲染，工具不是 disabled 占位', () => {
     const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
     const items = container.querySelectorAll('.browser-tool-item')
-    expect(items.length).toBe(4)
+    expect(items.length).toBe(5)
     expect(container.querySelector('.browser-sidebar-title')).toBeTruthy()
     expect(container.querySelector('.browser-sidebar-note')).toBeTruthy()
     items.forEach(item => {
@@ -102,7 +102,7 @@ describe('Browser 工具栏在展开/折叠态保持可用（历史/书签/下�
   it('折叠态：不渲染 label 文字，只保留图标；aria-label/title 保留', () => {
     const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
     const items = container.querySelectorAll('.browser-tool-item')
-    expect(items.length).toBe(4)
+    expect(items.length).toBe(5)
     expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
     expect(container.querySelector('.browser-sidebar-title')).toBeNull()
     expect(container.querySelector('.browser-sidebar-note')).toBeNull()
@@ -112,11 +112,11 @@ describe('Browser 工具栏在展开/折叠态保持可用（历史/书签/下�
       expect(item.textContent).toBe('')
       expect(item.querySelector('.browser-tool-unavailable')).toBeNull()
     })
-    // 工具的可访问名仍由 aria-label/title 承担
-    const history = container.querySelectorAll('.browser-tool-item')[0] as HTMLButtonElement
-    expect(history.disabled).toBe(false)
-    expect(history.getAttribute('aria-label')).toBe('历史')
-    expect(history.title).toBe('历史')
+    // 工具的可访问名仍由 aria-label/title 承担（首位工具为 issue #82 新增的 Agent）
+    const firstTool = container.querySelectorAll('.browser-tool-item')[0] as HTMLButtonElement
+    expect(firstTool.disabled).toBe(false)
+    expect(firstTool.getAttribute('aria-label')).toBe('Agent')
+    expect(firstTool.title).toBe('Agent')
   })
 
   it('往返：展开→折叠→展开后文字恢复渲染', () => {

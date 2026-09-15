@@ -42,11 +42,12 @@ describe('Pylon API 1.0 SDK', () => {
     })).toThrow(/trust.*API 1\.0/)
   })
 
-  it('api 按 allowlist 接受 1.0/1.1/1.2，拒绝未知更高版本', () => {
+  it('api 按 allowlist 接受 1.0/1.1/1.2/1.3，拒绝未知更高版本', () => {
     const base = { ...manifest }
     expect(validatePluginManifest({ ...base, api: '1.1' }).api).toBe('1.1')
     expect(validatePluginManifest({ ...base, api: '1.2' }).api).toBe('1.2')
-    expect(() => validatePluginManifest({ ...base, api: '1.3' })).toThrow(/api 仅支持 1\.0\/1\.1\/1\.2/)
+    expect(validatePluginManifest({ ...base, api: '1.3' }).api).toBe('1.3')
+    expect(() => validatePluginManifest({ ...base, api: '1.4' })).toThrow(/api 仅支持 1\.0\/1\.1\/1\.2\/1\.3/)
   })
 
   it('creates a plugin logger with the id prefix', () => {

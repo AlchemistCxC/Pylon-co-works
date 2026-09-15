@@ -1,0 +1,47 @@
+[package]
+name = "pylon-webview2-mcp"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "MCP debug server driving Pylon's Tauri 2 / WebView2 frontend over CDP"
+
+[[bin]]
+name = "pylon-webview2-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# stdio 与窗口通信协议载荷的唯一真源：MCP 的 wire 就是 JSON-RPC 2.0 原样透传，
+# 不做自造 DTO，避免协议版本漂移。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# rt-multi-thread：每个 MCP 请求一个 task，一个卡住的 Runtime.evaluate 不能堵住
+# 后续请求；net/time/sync 分别用于 TcpStream、超时、mpsc。
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "io-util",
+    "io-std",
+] }
+
+# 默认 features = connect + handshake，不含任何 TLS —— CDP 端点只可能是本机
+# plain ws://，引入 TLS 只会拖长编译且扩大攻击面。
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+# 只取 /json 的 HTTP GET。/json 走明文 HTTP，因此关闭 default-features
+# 一并去掉 default-tls；保留 json 仅为复用其 serde_json 反序列化管线。
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+# CDP 的 Network.getResponseBody 对非文本响应会回 base64Encoded: true；
+# 解码后才能判断该响应到底是不是可读文本。
+base64 = "0.22"
+
+thiserror = "2"
+
+[profile.release]
+# 与 src-tauri 一致：本地开发工具，去掉符号表。
+strip = true

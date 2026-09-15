@@ -5,7 +5,7 @@
  * - skills / MCP 选择的编辑与保存；
  * - MCP 选项来自 agent 级暴露列表（get_mcp_servers）；
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { FolderSearch, X } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -15,11 +15,22 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import type { Workspace } from '../../workspaceEntities'
 import { isAbsolutePath } from '../../workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
+import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
 interface McpOption { id?: string; name?: string; transport?: string; enabled?: boolean; disabled?: boolean }
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]
+}
+
+/** 已激活插件 id 列表（hook opt-in picker 数据源；快照经字符串原语保持引用稳定）。 */
+function useActivePluginIds(): string[] {
+  const runtime = getPluginRuntime()
+  const joined = useSyncExternalStore(
+    listener => runtime.subscribe(listener),
+    () => runtime.snapshot().active.map(identity => identity.pluginId).join('\u0000'),
+  )
+  return useMemo(() => joined.split('\u0000').filter(Boolean), [joined])
 }
 
 function ListPreview({ value, onChange, empty }: { value: string; onChange: (value: string) => void; empty: string }) {
@@ -53,7 +64,8 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
   const [name, setName] = useState(workspace.name)
   const [rootPath, setRootPath] = useState(workspace.rootPath)
   const [skills, setSkills] = useState(workspace.skills.join(', '))
-  const [hookPluginIds, setHookPluginIds] = useState(workspace.hookPluginIds.join(', '))
+  const [hookIds, setHookIds] = useState<string[]>([...workspace.hookPluginIds])
+  const activePluginIds = useActivePluginIds()
   const [mcpIds, setMcpIds] = useState<Set<string>>(new Set(workspace.mcpServerIds))
   const [mcpOptions, setMcpOptions] = useState<McpOption[]>([])
   const [saving, setSaving] = useState(false)
@@ -64,7 +76,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
     setName(workspace.name)
     setRootPath(workspace.rootPath)
     setSkills(workspace.skills.join(', '))
-    setHookPluginIds(workspace.hookPluginIds.join(', '))
+    setHookIds([...workspace.hookPluginIds])
     setMcpIds(new Set(workspace.mcpServerIds))
     setSaveError(null)
     setSaveErrorIsValidation(false)
@@ -93,9 +105,9 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
     name.trim() !== workspace.name
     || rootPath.trim() !== workspace.rootPath
     || parseList(skills).join('\u0000') !== workspace.skills.join('\u0000')
-    || parseList(hookPluginIds).join('\u0000') !== workspace.hookPluginIds.join('\u0000')
+    || [...hookIds].sort().join('\u0000') !== [...workspace.hookPluginIds].sort().join('\u0000')
     || [...mcpIds].sort().join('\u0000') !== [...workspace.mcpServerIds].sort().join('\u0000')
-  ), [hookPluginIds, mcpIds, name, rootPath, skills, workspace])
+  ), [hookIds, mcpIds, name, rootPath, skills, workspace])
 
   const mcpCapabilities = useMemo(() => buildCapabilityOptions(
     'mcp',
@@ -141,7 +153,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
         rootPath: rootPath.trim(),
         skills: parseList(skills),
         mcpServerIds: [...mcpIds],
-        hookPluginIds: parseList(hookPluginIds),
+        hookPluginIds: hookIds,
       })
       resolveRuntimeErrors({ key: `cwd:${workspace.id}:save` })
       onClose()
@@ -194,10 +206,45 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
           <StructuredIdField label="Skills" value={skills} onChange={setSkills} placeholder="code-review, trpg-master" empty="尚未指定 Skill" />
         </label>
 
-        <label className="sess-field">
-          <span>Hook 插件（逗号分隔）</span>
-          <StructuredIdField label="Hook 插件" value={hookPluginIds} onChange={setHookPluginIds} placeholder="plugin.workspace-hooks" empty="尚未指定 Hook" />
-        </label>
+        <div className="sess-field">
+          <span>Hook 插件（会话 opt-in）</span>
+          <small>勾选的插件才有权在本工作区新建会话中执行钩子；快照随会话创建固定。</small>
+          {hookIds.filter(id => !activePluginIds.includes(id)).map(id => (
+            <label key={id} className="cwd-check">
+              <input type="checkbox" checked disabled readOnly aria-label={`保留未激活 Hook 插件 ${id}`} />
+              <span>{id}（未激活，保留声明）</span>
+              <button
+                type="button"
+                className="settings-action"
+                aria-label={`移除未激活 Hook 插件 ${id}`}
+                onClick={() => setHookIds(current => current.filter(candidate => candidate !== id))}
+              >
+                移除
+              </button>
+            </label>
+          ))}
+          {activePluginIds.length === 0 && hookIds.every(id => !activePluginIds.includes(id)) && (
+            <div className="set-hint">暂无已激活插件可供勾选。</div>
+          )}
+          {activePluginIds.map(id => {
+            const checked = hookIds.includes(id)
+            return (
+              <label key={id} className="cwd-check">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  aria-label={`Hook 插件 ${id}`}
+                  onChange={event => {
+                    setHookIds(current => (
+                      event.target.checked ? [...current, id] : current.filter(candidate => candidate !== id)
+                    ))
+                  }}
+                />
+                <span>{id}</span>
+              </label>
+            )
+          })}
+        </div>
 
         <div className="sess-field">
         <span>MCP 服务</span>

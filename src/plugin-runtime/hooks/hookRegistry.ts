@@ -1,7 +1,7 @@
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistrySnapshot } from '../registry/types.ts'
-import type { HookDefinition, HookName } from './hookTypes.ts'
+import { HOOK_TIMEOUT_BUDGET_MS, type HookDefinition, type HookName } from './hookTypes.ts'
 
 export interface HookRegistryTransaction {
   register<TEvent>(hookName: HookName, definition: HookDefinition<TEvent>): AsyncDisposable
@@ -22,7 +22,7 @@ function normalizeHook<TEvent>(hookName: HookName, definition: HookDefinition<TE
     hookName,
     priority: definition.priority ?? 1000,
     execution: definition.execution ?? 'blocking',
-    timeoutMs: definition.timeoutMs ?? 3000,
+    timeoutMs: definition.timeoutMs ?? HOOK_TIMEOUT_BUDGET_MS[hookName],
     failurePolicy: definition.failurePolicy ?? 'continue',
   })
 }

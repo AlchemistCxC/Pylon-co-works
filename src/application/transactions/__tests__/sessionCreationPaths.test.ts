@@ -32,7 +32,6 @@ vi.mock('../../../workspaceEntityStore.ts', () => ({ useWorkspaceEntityStore: { 
 vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({ runSessionPreflight: mocks.preflight }))
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({ getHookRuntime: () => ({ invoke: mocks.hook }) }))
 vi.mock('../../../application/transactions/sessionHookTransactions.ts', () => ({ runSessionBoundaryHook: mocks.boundary }))
-vi.mock('../../../components/chat/hookRuntime.ts', () => ({ runSessionBoundaryHook: mocks.boundary }))
 vi.mock('../../../domains/sessionState/sessionStateSync.ts', () => ({ applySessionStateResponse: mocks.apply }))
 vi.mock('../../../runtimeError.ts', () => ({ reportRuntimeError: mocks.report, resolveRuntimeErrors: vi.fn() }))
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))

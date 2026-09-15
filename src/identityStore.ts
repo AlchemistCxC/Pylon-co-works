@@ -177,7 +177,7 @@ interface IdentityStoreState {
   hydrateProfilesLocal: (legacy?: ProfilePersistenceState) => void
   /** I14-W6 CR-01：导入等"本地已写入"场景——本地读回 + 写穿后端（Tauri 权威源同步） */
   hydrateFromLocal: (legacy?: ProfilePersistenceState) => void | Promise<void>
-  addSession: (name: string, agentId?: string, cwd?: { workdir?: string; workspaceId?: string; skills?: string[]; hooks?: string[]; mcpServerIds?: string[]; hookPluginIds?: string[] }) => string
+  addSession: (name: string, agentId?: string, cwd?: { workdir?: string; workspaceId?: string; skills?: string[]; mcpServerIds?: string[]; hookPluginIds?: string[] }) => string
   /** D5：从恢复失败的会话显式创建独立本地分叉；原 Session/remote binding 保持不变。 */
   forkSession: (id: string) => string
   removeSession: (id: string) => void
@@ -461,7 +461,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       ...(cwd?.workspaceId ? { workspaceId: cwd.workspaceId } : {}),
       sessionPrompt: '',
       skills: cwd?.skills ?? [],
-      hooks: cwd?.hooks ?? [],
+      hooks: cwd?.hookPluginIds ?? [],
       commandSetPlugins: [CORE_COMMAND_SET_PLUGIN_ID],
       autoName: '',
       metadata: {},

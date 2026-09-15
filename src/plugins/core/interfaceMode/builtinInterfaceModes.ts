@@ -1,4 +1,5 @@
 import type { InterfaceModeContribution } from '../../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import { DEFAULT_SHELL_RECIPE_ID } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 
 export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Object.freeze([
   Object.freeze({
@@ -11,6 +12,7 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     quickSwitchTargetId: 'terminal-like',
     chromeStyle: 'icons',
     workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
+    shellRecipeId: DEFAULT_SHELL_RECIPE_ID,
   }),
   Object.freeze({
     id: 'terminal-like',
@@ -22,6 +24,7 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     quickSwitchTargetId: 'modern-gui',
     chromeStyle: 'glyphs',
     workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
+    shellRecipeId: DEFAULT_SHELL_RECIPE_ID,
   }),
   Object.freeze({
     id: 'tactical-blue',
@@ -33,5 +36,6 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     quickSwitchTargetId: 'modern-gui',
     chromeStyle: 'icons',
     workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
+    shellRecipeId: DEFAULT_SHELL_RECIPE_ID,
   }),
 ])

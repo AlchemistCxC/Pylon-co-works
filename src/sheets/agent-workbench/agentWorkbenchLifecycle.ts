@@ -27,7 +27,11 @@ import { sessionContext } from '../../agentContext.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
-import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
+import {
+  loadCanonicalEventsIncremental,
+  tauriCanonicalEventRepository,
+  type CanonicalEventRow,
+} from '../../infrastructure/events/canonicalEventRepository.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
@@ -92,15 +96,18 @@ export class AgentWorkbenchLifecycle {
 
     // A1-c P4：先读 canonical_events 投影作为首屏占位（读失败按空缓存降级并可见
     // 上报），再走 load_persisted_session 权威恢复。localStorage 旧快照不再读写。
-    const cached = await this.coordinator.readCanonicalPlaceholder({
+    // #81 L1 搭车：占位行保留为游标基线，权威恢复的 canonical 读改为增量补读
+    // （不再整读第二遍；失败自动回退全量读，结果与全量重读逐行一致）。
+    const placeholder = await this.coordinator.readCanonicalPlaceholder({
       ownerKey,
-      loadCanonical: () => tauriCanonicalEventRepository().loadAll(ownerKey),
+      // #81 L2：投影读走 compact（单元 + 未覆盖行）。
+      loadCanonical: () => tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey),
       projectCanonical: rows => projectMessagesFromCanonical(rows),
-    }).then(result => result.messages).catch(error => {
+    }).catch((error: unknown): undefined => {
       // The canonical read can finish after a session switch/reload. A late
       // failure belongs to that abandoned generation and must not create a
       // notification for the currently visible session.
-      if (!isCurrent()) return []
+      if (!isCurrent()) return undefined
       reportRuntimeError(`读取 canonical 首屏占位失败（${session.id}）`, error, session.agentId, {
         key: `session-placeholder:${session.id}`,
         scope: { kind: 'session', id: session.id },
@@ -108,12 +115,12 @@ export class AgentWorkbenchLifecycle {
         recovery: { kind: 'open-runtime-log', sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       })
-      return []
+      return undefined
     })
     if (!isCurrent()) return undefined
     // D7：旧 localStorage 快照整体废弃——访问过该会话即清理旧 key，不再读写。
     clearMessageStorage(session.id, localStorage)
-    await this.startPersistedLoad(session, ownerKey, cached, isCurrent)
+    await this.startPersistedLoad(session, ownerKey, placeholder?.messages ?? [], isCurrent, placeholder?.rows)
     return { kind: 'placeholder-read' }
   }
 
@@ -131,8 +138,8 @@ export class AgentWorkbenchLifecycle {
   }
 
   private async invokeSessionStartHook(session: Session): Promise<void> {
-    const { runSessionBoundaryHook } = await import('../../components/chat/hookRuntime.ts')
-    void runSessionBoundaryHook('session.start', session)
+    const { runSessionBoundaryHook } = await import('../../application/transactions/sessionHookTransactions.ts')
+    void runSessionBoundaryHook('session.created', session)
   }
 
   private async createSession(session: Session, context: ReturnType<typeof sessionContext>, persona: string, isCurrent: () => boolean): Promise<void> {
@@ -168,7 +175,13 @@ export class AgentWorkbenchLifecycle {
     }
   }
 
-  private async startPersistedLoad(session: Session, ownerKey: string, cached: Message[], isCurrent: () => boolean): Promise<void> {
+  private async startPersistedLoad(
+    session: Session,
+    ownerKey: string,
+    cached: Message[],
+    isCurrent: () => boolean,
+    placeholderRows?: readonly CanonicalEventRow[],
+  ): Promise<void> {
     const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     // OWNER-02：load_persisted_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
@@ -178,7 +191,11 @@ export class AgentWorkbenchLifecycle {
       ownerKey,
       cached,
       load: () => sessionClient.loadPersistedSession({ owner: { profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }, periId: session.periId, cwd: session.workdir || undefined, workspaceId: session.workspaceId || undefined }),
-      loadCanonical: () => tauriCanonicalEventRepository().loadAll(ownerKey),
+      // #81 L1：占位行可用时增量补读差量（省掉第二次全量 loadAll）；无占位基线
+      // （首屏读取失败等）保持全量读。
+      loadCanonical: () => placeholderRows
+        ? loadCanonicalEventsIncremental(tauriCanonicalEventRepository(), ownerKey, placeholderRows)
+        : tauriCanonicalEventRepository().loadAllPreferUnits(ownerKey),
       projectCanonical: rows => projectMessagesFromCanonical(rows),
       isCurrent,
     })

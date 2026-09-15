@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { activateInterfaceMode, presentationProfileInterfaceMode, resetThemeForActiveInterfaceMode, resolveInterfaceModeSuite } from '../../../application/transactions/activateInterfaceMode.ts'
+import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeIsUsable, presentationProfileInterfaceMode, resetThemeForActiveInterfaceMode, resolveInterfaceMode, resolveInterfaceModeSuite, resolveShellRecipe } from '../../../application/transactions/activateInterfaceMode.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
-import { getInterfaceModeRegistry, getPresentationProfileRegistry, getRendererRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { getInterfaceModeRegistry, getPresentationProfileRegistry, getRendererRegistry, getShellRecipeRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
 import { useStore } from '../../../store.ts'
@@ -45,8 +46,28 @@ function registerBuiltinAppearanceContributions(): void {
     requiredKinds: ['content.unknown'],
     factory: () => ({}),
   }))
+  const recipes = getShellRecipeRegistry()
+  registrations.push(recipes.register(owner, DEFAULT_SHELL_RECIPE))
   for (const profile of BUILTIN_PRESENTATION_PROFILES) registrations.push(profiles.register(owner, profile))
   for (const mode of BUILTIN_INTERFACE_MODES) registrations.push(modes.register(owner, mode))
+}
+
+function registerModeWithRecipe(modeId: string, recipe: ShellRecipeContribution | undefined): void {
+  const owner = createPluginIdentity(`test.${modeId}`, 'one')
+  const profiles = getPresentationProfileRegistry()
+  const modes = getInterfaceModeRegistry()
+  registrations.push(profiles.register(owner, {
+    id: `${modeId}.profile`, label: modeId, family: 'custom', interfaceMode: modeId, tokens: {},
+  }))
+  registrations.push(modes.register(owner, {
+    id: modeId,
+    label: modeId,
+    defaultPresentationProfileId: `${modeId}.profile`,
+    chromeStyle: 'icons',
+    workbench: { renderKind: 'host', renderer: 'modern' },
+    ...(recipe ? { shellRecipeId: recipe.id } : {}),
+  }))
+  if (recipe) registrations.push(getShellRecipeRegistry().register(owner, recipe))
 }
 
 beforeEach(() => {
@@ -152,6 +173,56 @@ describe('Interface Mode contract', () => {
     expect(terminalThenModern).toEqual(resetThenModern)
     expect(terminalResetThenModern).toEqual(resetThenModern)
     expect(terminalModernThenReset).toEqual(resetThenModern)
+  })
+
+  it('Shell Recipe：引用已注册 recipe 的模式可激活，悬空引用被拒绝并回退', () => {
+    registerBuiltinAppearanceContributions()
+    const mirrored: ShellRecipeContribution = {
+      id: 'test.shell.mirrored', label: 'Mirrored', sidebarSide: 'right', contextPanelSide: 'left',
+    }
+    registerModeWithRecipe('recipe.ok', mirrored)
+    expect(activateInterfaceMode('recipe.ok')).toBe(true)
+    expect(resolveShellRecipe(resolveInterfaceMode('recipe.ok'))).toMatchObject({
+      id: 'test.shell.mirrored', sidebarSide: 'right', contextPanelSide: 'left',
+    })
+    expect(useInterfaceModeStore.getState().interfaceMode).toBe('recipe.ok')
+
+    // recipe.dangling 声明了不存在的 recipe id：注册表接受（结构合法），但可用性为假。
+    // 先注册再激活——跨注册表校验遍历全图，悬空引用在场时任何激活都被拒绝（既有语义）。
+    const danglingOwner = createPluginIdentity('test.recipe.dangling', 'one')
+    registrations.push(getPresentationProfileRegistry().register(danglingOwner, {
+      id: 'recipe.dangling.profile', label: 'dangling', family: 'custom', interfaceMode: 'recipe.dangling', tokens: {},
+    }))
+    registrations.push(getInterfaceModeRegistry().register(danglingOwner, {
+      id: 'recipe.dangling',
+      label: 'dangling',
+      defaultPresentationProfileId: 'recipe.dangling.profile',
+      chromeStyle: 'icons',
+      workbench: { renderKind: 'host', renderer: 'modern' },
+      shellRecipeId: 'missing.recipe',
+    }))
+    expect(interfaceModeIsUsable(resolveInterfaceMode('recipe.dangling')!)).toBe(false)
+    expect(activateInterfaceMode('recipe.dangling')).toBe(false)
+    expect(useInterfaceModeStore.getState().interfaceMode).toBe('recipe.ok')
+
+    // 渲染期兜底：模式缺失或引用悬空都解析到内置 classic，瞬态不崩壳
+    expect(resolveShellRecipe(undefined)).toMatchObject({ id: 'builtin.shell.classic', sidebarSide: 'left' })
+    expect(resolveShellRecipe(resolveInterfaceMode('recipe.dangling'))).toMatchObject({ id: 'builtin.shell.classic' })
+  })
+
+  it('插件注销携带的 recipe 后，active 模式在冷启动守卫下回退默认模式', async () => {
+    registerBuiltinAppearanceContributions()
+    const builtinMark = registrations.length
+    const mirrored: ShellRecipeContribution = {
+      id: 'test.shell.mirrored', label: 'Mirrored', sidebarSide: 'right', contextPanelSide: 'left',
+    }
+    registerModeWithRecipe('recipe.ok', mirrored)
+    expect(activateInterfaceMode('recipe.ok')).toBe(true)
+    expect(useInterfaceModeStore.getState().interfaceMode).toBe('recipe.ok')
+    // 原子注销该插件的 mode + profile + recipe（模拟插件卸载）；内置贡献保持在场
+    while (registrations.length > builtinMark) await registrations.pop()?.dispose()
+    expect(ensureInterfaceModeProfile()).toBe(true)
+    expect(useInterfaceModeStore.getState().interfaceMode).toBe(DEFAULT_INTERFACE_MODE)
   })
 
   it('蓝调战术沿用 Solid，切回原模式恢复输入，且不写入会话身份与用户配色', () => {

@@ -10,6 +10,8 @@ mod b10_gateway_integration_tests;
 #[cfg(test)]
 mod b11_inject_integration_tests;
 mod browser;
+mod browser_agent;
+mod browser_agent_cmds;
 mod browser_cmds;
 mod correlation;
 mod cwd;
@@ -181,6 +183,8 @@ pub(crate) struct AppState {
     pub(crate) pet: Arc<Mutex<pet::PetState>>,
     pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     pub(crate) runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
+    /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
+    pub(crate) browser_agent: Arc<browser_agent::hub::BrowserAgentHub>,
     pub(crate) prism: PrismClient,
     pub(crate) gateway: Arc<GatewayCore>,
     /// R5（P1-3）：启动诊断快照（run() 构建主体，setup 解析 DataDirs 后补写 storage）。
@@ -762,6 +766,7 @@ pub fn run() {
                 gateway,
                 startup: Arc::new(RwLock::new((*startup).clone())),
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
+                browser_agent: Arc::new(browser_agent::hub::BrowserAgentHub::new()),
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
@@ -820,6 +825,7 @@ pub fn run() {
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
                 crate::session::send_message_streaming, crate::session::load_persisted_session, crate::session::list_persisted_sessions,
                 crate::session::evt_append, crate::session::evt_revision, crate::session::evt_list, crate::session::evt_export_raw, crate::session::evt_search,
+                crate::session::evt_load_compact, crate::session::evt_rollup_trim,
                 crate::session::user_data_load, crate::session::user_data_save,
                 crate::session::user_profile_delete, crate::session::user_session_delete,
                 crate::session::user_session_delete_finalize,
@@ -886,6 +892,18 @@ pub fn run() {
                 crate::browser_cmds::browser_snapshot, crate::browser_cmds::browser_download, crate::browser_cmds::browser_click, crate::browser_cmds::browser_type,
                 crate::browser_cmds::browser_press, crate::browser_cmds::browser_scroll,
                  crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_visible, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
+                crate::browser_agent_cmds::browser_agent_get_settings, crate::browser_agent_cmds::browser_agent_set_settings,
+                crate::browser_agent_cmds::browser_agent_resolve_access, crate::browser_agent_cmds::browser_agent_exe_path,
+                crate::browser_agent_cmds::browser_agent_claim_status, crate::browser_agent_cmds::browser_agent_user_activity,
+                crate::browser_agent_cmds::browser_agent_recent_ops,
+                crate::browser_agent_cmds::browser_agent_navigate, crate::browser_agent_cmds::browser_agent_snapshot,
+                crate::browser_agent_cmds::browser_agent_tab_list, crate::browser_agent_cmds::browser_agent_tab_new,
+                crate::browser_agent_cmds::browser_agent_tab_select, crate::browser_agent_cmds::browser_agent_tab_close,
+                crate::browser_agent_cmds::browser_agent_screenshot, crate::browser_agent_cmds::browser_agent_save_page,
+                crate::browser_agent_cmds::browser_agent_read_network, crate::browser_agent_cmds::browser_agent_wait,
+                crate::browser_agent_cmds::browser_agent_scroll, crate::browser_agent_cmds::browser_agent_emulate,
+                crate::browser_agent_cmds::browser_agent_click, crate::browser_agent_cmds::browser_agent_type,
+                crate::browser_agent_cmds::browser_agent_press, crate::browser_agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])
@@ -963,6 +981,19 @@ pub fn run() {
                     window.as_ref().window(),
                     app.handle().clone(),
                 );
+                // issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
+                {
+                    let state = app.state::<AppState>();
+                    state.browser_agent.init_settings_path(
+                        crate::paths::browser_agent_settings_path(&dirs),
+                    );
+                    let hub = state.browser_agent.clone();
+                    state.browser.register_page_load_hook(std::sync::Arc::new(move |tab_id| {
+                        if let Ok(mut registry) = hub.refs().lock() {
+                            registry.invalidate_tab(tab_id);
+                        }
+                    }));
+                }
                 // 插件基建 v2：启动即创建用户插件目录树（installed/staging），
                 // 让用户无需先安装也能在文件管理器里看到插件目录。
                 if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {

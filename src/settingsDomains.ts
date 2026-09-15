@@ -38,6 +38,7 @@ export type SettingsSectionId =
   | 'gateway'
   | 'prediction'
   | 'pluginManager'
+  | 'hookDiagnostics'
 
 export interface SettingsIntent {
   readonly domain: SettingsDomainId
@@ -57,7 +58,7 @@ export const SETTINGS_DOMAINS: readonly SettingsDomain[] = [
   { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'] },
   { id: 'workspace', label: '工作区', sections: ['window', 'pet', 'history', 'backup'] },
   { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway', 'prediction'] },
-  { id: 'plugins', label: '插件', sections: ['pluginManager'] },
+  { id: 'plugins', label: '插件', sections: ['pluginManager', 'hookDiagnostics'] },
 ] as const
 
 export const SETTINGS_DOMAIN_BY_ID: Record<SettingsDomainId, SettingsDomain> = Object.fromEntries(
@@ -100,6 +101,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   gateway: 'Gateway',
   prediction: '输入预测',
   pluginManager: '插件管理',
+  hookDiagnostics: 'Hook 诊断',
 }
 
 const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>(Object.keys(SETTINGS_SECTION_LABELS) as SettingsSectionId[])

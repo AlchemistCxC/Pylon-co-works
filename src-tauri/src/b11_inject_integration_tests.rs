@@ -167,7 +167,8 @@ async fn gui_prompt_persists_user_and_done_before_publishing_terminal_state() {
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        vec!["user.message", "turn.completed"]
+        // #81 L2：kernel 终结写入时同事务追加 turn.unit（保序 segment 单元行）
+        vec!["user.message", "turn.completed", "turn.unit"]
     );
     assert_eq!(
         page.events[0].typed_payload.as_ref().unwrap()["text"],
@@ -229,7 +230,8 @@ async fn gui_prompt_failure_is_committed_after_user_in_the_same_journal() {
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        vec!["user.message", "turn.failed"]
+        // #81 L2：kernel 终结写入时同事务追加 turn.unit（保序 segment 单元行）
+        vec!["user.message", "turn.failed", "turn.unit"]
     );
     assert_eq!(
         page.events[1].typed_payload.as_ref().unwrap()["error"],
