@@ -1,11 +1,13 @@
 import type { InterfaceModeContribution } from '../interface-mode/interfaceModeTypes.ts'
 import type { PresentationProfileContribution } from '../presentation/presentationProfileTypes.ts'
+import type { ShellRecipeContribution } from '../shell-recipe/shellRecipeTypes.ts'
 import type { RendererSuiteContribution } from './rendererSuiteTypes.ts'
 
 export interface RendererSuiteReferenceGraph {
   readonly suites: readonly RendererSuiteContribution[]
   readonly modes: readonly InterfaceModeContribution[]
   readonly profiles: readonly PresentationProfileContribution[]
+  readonly shellRecipes?: readonly ShellRecipeContribution[]
 }
 
 /**
@@ -17,6 +19,7 @@ export function validateRendererSuiteReferences(graph: RendererSuiteReferenceGra
   const suites = new Set(graph.suites.map(suite => suite.id))
   const modes = new Set(graph.modes.map(mode => mode.id))
   const profiles = new Set(graph.profiles.map(profile => profile.id))
+  const shellRecipes = new Set((graph.shellRecipes ?? []).map(recipe => recipe.id))
 
   for (const mode of graph.modes) {
     if (!profiles.has(mode.defaultPresentationProfileId)) {
@@ -27,6 +30,9 @@ export function validateRendererSuiteReferences(graph: RendererSuiteReferenceGra
     }
     if (mode.quickSwitchTargetId !== undefined && !modes.has(mode.quickSwitchTargetId)) {
       throw new Error(`Interface Mode quickSwitchTargetId 未注册：${mode.id} -> ${mode.quickSwitchTargetId}`)
+    }
+    if (mode.shellRecipeId !== undefined && !shellRecipes.has(mode.shellRecipeId)) {
+      throw new Error(`Interface Mode shellRecipeId 未注册：${mode.id} -> ${mode.shellRecipeId}`)
     }
   }
 

@@ -61,6 +61,7 @@ const CONTRIBUTION_REGISTRY_KEYS: readonly (readonly [
   ['fontContributionRegistry', 'fonts'],
   ['sessionCreationRegistry', 'session-creation'],
   ['interfaceModeRegistry', 'interface-modes'],
+  ['shellRecipeRegistry', 'shell-recipes'],
   ['titlebarRegistry', 'titlebar'],
   ['workspaceRegistry', 'workspaces'],
 ]

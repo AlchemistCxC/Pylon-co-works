@@ -46,10 +46,11 @@ import {
   getFontContributionRegistry,
   getInterfaceModeRegistry,
   getPluginServiceRegistry,
+  getShellRecipeRegistry,
 } from './plugin-runtime/runtimeServices.ts'
 import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
-import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget } from './application/transactions/activateInterfaceMode.ts'
+import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { selectAvailableContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
@@ -77,6 +78,9 @@ const getFontContributionSnapshot = () => fontContributionRegistry.getSnapshot()
 const interfaceModeRegistry = getInterfaceModeRegistry()
 const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
 const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
+const shellRecipeRegistry = getShellRecipeRegistry()
+const subscribeShellRecipes = (listener: () => void) => shellRecipeRegistry.subscribe(listener)
+const getShellRecipeSnapshot = () => shellRecipeRegistry.getSnapshot()
 
 // Bootstrap notification identity is application-scoped and intentionally
 // stable across retries/remounts. Keeping it outside the effect avoids
@@ -127,6 +131,14 @@ export default function App() {
   const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!
   const quickInterfaceMode = interfaceModeQuickTarget(interfaceMode)
+  // Shell Recipe（ADR-0003）：激活期已硬校验引用；此处订阅仅保证插件热换后
+  // 数据属性跟随 registry 快照更新。解析兜底 classic，瞬态不崩壳。
+  useSyncExternalStore(
+    subscribeShellRecipes,
+    getShellRecipeSnapshot,
+    getShellRecipeSnapshot,
+  )
+  const shellRecipe = resolveShellRecipe(interfaceModeContribution)
   useEffect(() => {
     document.documentElement.dataset.interfaceMode = interfaceMode
     document.body.dataset.interfaceMode = interfaceMode
@@ -452,7 +464,7 @@ export default function App() {
   const settingsOpen = showSettings
 
   return (
-    <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId}>
+    <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>
       {interfaceMode === 'tactical-blue' && <TacticalScene />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}

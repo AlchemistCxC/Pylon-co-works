@@ -8,6 +8,7 @@ import type { FileWorkbenchRegistry } from './file-workbench/fileWorkbenchRegist
 import type { FontContributionRegistry } from './fonts/fontContributionRegistry.ts'
 import type { HookRuntime } from './hooks/hookRuntime.ts'
 import type { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts'
+import type { ShellRecipeRegistry } from './shell-recipe/shellRecipeRegistry.ts'
 import type { PresentationProfileRegistry } from './presentation/presentationProfileRegistry.ts'
 import type { RegistryHub } from './registry/registryHub.ts'
 import type { RendererRegistry } from './renderers/rendererRegistry.ts'
@@ -37,6 +38,7 @@ export interface RuntimeRegistries {
   readonly fontContributionRegistry: FontContributionRegistry
   readonly sessionCreationRegistry: SessionCreationRegistry
   readonly interfaceModeRegistry: InterfaceModeRegistry
+  readonly shellRecipeRegistry: ShellRecipeRegistry
   readonly titlebarRegistry: TitlebarRegistry
   readonly workspaceRegistry: WorkspaceRegistryStore
 }

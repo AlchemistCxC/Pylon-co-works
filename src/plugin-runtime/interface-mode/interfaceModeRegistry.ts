@@ -22,6 +22,10 @@ export function validateInterfaceModeContribution(
     && !INTERFACE_MODE_ID_PATTERN.test(contribution.quickSwitchTargetId)) {
     throw new Error(`Interface Mode quickSwitchTargetId 非法：${contribution.id}`)
   }
+  if (contribution.shellRecipeId !== undefined
+    && !INTERFACE_MODE_ID_PATTERN.test(contribution.shellRecipeId)) {
+    throw new Error(`Interface Mode shellRecipeId 非法：${contribution.id}`)
+  }
   if (contribution.chromeStyle !== 'icons' && contribution.chromeStyle !== 'glyphs') {
     throw new Error(`Interface Mode chromeStyle 非法：${contribution.id}`)
   }

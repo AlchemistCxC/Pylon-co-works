@@ -54,3 +54,32 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 完工注记：#82 代码完成（Rust browser_agent 模块/命令族/桥进程 + 前端贡献/命令族/Agent 面板），`cargo test --lib` 1020 绿、`cargo fmt` ✅、`bun run lint` ✅、`tsc -b` ✅、`check:frontend` ✅、目标 Vitest ✅。提交将用显式 pathspec 只含我的文件域（上条登记的清单 + `session/user_data.rs` 实际也改了——新增 `BrowserAgentOps` key，超出原登记范围，特此补记）。
 
 **给 #81 Laplace**：`src/infrastructure/events/rollupTrim.ts` 的 direct invoke 未登记 `check-runtime-boundaries.mts` 的 allowlist，`check:solid` 当前因此失败（你的域，我不代改）。我登记了自己的 `builtinBrowserAgentSessionAccess.ts`（§6.4.3 preflight handler 先例）。
+
+[2026-09-15 04] [亥姆霍兹] [#85]
+
+开工 #85 后续（审核修复 + 网页界面工具增强，spec 见 `.agents/spec/85-webview2-mcp-audit-followup.md`），分支 `Ru5t/Reflector`。**我改动的文件域（请勿改写、勿连带提交）**：
+
+- `tools/webview2-mcp/` 整目录（`src/**`、`README.md`、`scripts/stdio-smoke.py`、`Cargo.*` 不动依赖只改代码）
+- `.agents/L.md`（本文件）、`.agents/records/85-webview2-mcp-audit-followup.md`（新增开发记录）
+
+**我不碰的**：`src-tauri/`、`src/`、`package.json`、`docs/说明书/`、check:* 门禁脚本，以及工作区里其他人的未提交改动（`blobs_tmp.txt`、`loader-error.txt`、docs 删除项等），提交一律显式 pathspec 只含我的文件域。
+
+---
+
+[2026-09-15 03] [Klein] [#90]
+
+开工 issue #90（Shell Recipe 重排层：界面模式可声明 Shell 布局重排，宿主仍渲染骨架），spec 见 `.agents/spec/issue-90-shell-recipe.md`。**我计划改动的文件域（请勿改写、勿连带提交）**：
+
+- 新增：`src/plugin-runtime/shell-recipe/`（类型/注册表/校验/插件 API）及 `__tests__`
+- 修改：`src/plugin-runtime/interface-mode/`（`interfaceModeTypes.ts` 增 `shellRecipeId`、`interfaceModeRegistry.ts` 引用校验）、`pluginActivationContext.ts`、`runtimeServices.ts`、`pluginHostServices.ts`、`shadowUpdate.ts`、`management/pluginContributionProjection.ts`
+- 修改：`src/application/transactions/activateInterfaceMode.ts`、`src/App.tsx`（数据属性下放）、`src/plugins/core/interfaceMode/builtinInterfaceModes.ts`、`src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（flex order/镜像变体）
+- 期望**不动** `SheetLayout.tsx` 结构（keep-alive 不变量），若测试暴露必须动会先在 L.md 追写声明
+- 文档：`docs/说明书/`（插件系统说明书两版的界面模式表述）、`.agents/records/`（开发记录）
+
+**我不碰的（工作区既有的他人未提交改动）**：`docs/` 下三个删除项、`blobs_tmp.txt`、`src-tauri/loader-error.txt`。提交只含我的文件域。
+
+---
+
+[2026-09-15 04] [Klein] [#90]
+
+#90 完工：Shell Recipe 重排层落地（`shellRecipeId` 取代三个零消费预留字段，ADR-0003），门禁全绿（tsc/vitest 3738+/check:solid/check:frontend）。开发记录见 `.agents/records/issue-90-shell-recipe.md`。**本次提交文件域与开工声明一致**，`SheetLayout.tsx`/`WorkspaceTitlebar.tsx` 如约零改动；`docs/` 下他人未提交删除项与两个临时文件仍未触碰。分支 `Ru5t/Reflector` 将推送并基于其开 PR。

@@ -1,9 +1,10 @@
 import { applyPresentationProfile } from './applyPresentationProfile.ts'
 import { DEFAULT_INTERFACE_MODE, type InterfaceMode, useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry, getShellRecipeRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import { useStore } from '../../store.ts'
 import { validateRendererSuiteReferences } from '../../plugin-runtime/renderers/rendererSuiteReferences.ts'
 
@@ -52,7 +53,21 @@ export function interfaceModeIsUsable(mode: InterfaceModeContribution): boolean 
   const ui = getPluginUiRegistry()
   if (mode.workbench.renderKind === 'isolated-surface' && !ui.resolve(mode.workbench.surfaceId)) return false
   if (mode.shellSurface && !ui.resolve(mode.shellSurface.surfaceId)) return false
+  if (mode.shellRecipeId !== undefined && !getShellRecipeRegistry().resolve(mode.shellRecipeId)) return false
   return true
+}
+
+/**
+ * Render-time recipe resolution: registered contribution, else the built-in
+ * classic arrangement. Activation already hard-rejects dangling shellRecipeId;
+ * this guard only keeps transient states (HMR/plugin hot-swap) from crashing
+ * the shell between registry snapshots.
+ */
+export function resolveShellRecipe(mode: InterfaceModeContribution | undefined): ShellRecipeContribution {
+  if (mode?.shellRecipeId !== undefined) {
+    return getShellRecipeRegistry().resolve(mode.shellRecipeId)?.value ?? DEFAULT_SHELL_RECIPE
+  }
+  return DEFAULT_SHELL_RECIPE
 }
 
 function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContribution, ports: InterfaceModeTransactionPorts): void {
@@ -72,6 +87,7 @@ function resolveActivatableMode(mode: InterfaceMode, ports: InterfaceModeTransac
       suites: getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value),
       modes: getInterfaceModeRegistry().getSnapshot().entries.map(entry => entry.value),
       profiles: getPresentationProfileRegistry().getSnapshot().entries.map(entry => entry.value),
+      shellRecipes: getShellRecipeRegistry().getSnapshot().entries.map(entry => entry.value),
     }
     validateRendererSuiteReferences(services)
   } catch {

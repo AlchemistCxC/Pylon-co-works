@@ -264,9 +264,9 @@ Pylon 会：
 
 Pylon 当前不提供 CSS selector 沙箱。插件作者应使用插件 id 前缀或稳定 `data-*` 属性限制选择器作用域。
 
-Pylon 有两个顶层界面模式：Modern GUI 与 Terminal-like。插件样式可以使用 `[data-interface-mode="modern-gui"]` 或 `[data-interface-mode="terminal-like"]` 只影响指定模式。切换界面模式不会停用插件，也不会切换内置主题预设（当前 10 套）。
+Pylon 内置三个顶层界面模式：Modern GUI、Terminal-like 与 蓝调战术（tactical-blue）；插件也可以通过 `interfaceModes.registerMode` 注册自己的完整模式（含 workbench 声明，见开发者版）。插件样式可以使用 `[data-interface-mode="…"]` 只影响指定模式。切换界面模式不会停用插件，也不会切换内置主题预设（当前 10 套）。
 
-插件可以为现有模式贡献渲染风格、字体、图标化 Workspace 和局部界面，但当前不能安装第三种完整界面模式，也不能替换整个 Agent 工作台。如果某插件把普通主题选项宣传成“完整界面模式”，应以实际可见功能为准。
+插件可以为现有模式贡献渲染风格、字体、图标化 Workspace 和局部界面。Shell 骨架（标题栏、侧栏壳、右栏壳）始终由宿主渲染：模式可通过 `shellRecipeId` 引用一个 Shell Recipe 声明双栏所在侧（会话侧栏 / 上下文面板，`shellRecipes.registerRecipe`），宿主只重排列序，不重挂 DOM；原生窗口控制、拖拽区与 keep-alive 行为不受影响。如果某插件把普通主题选项宣传成"完整界面模式"或"Shell 替换"，应以实际可见功能为准。
 
 ### 8.1 新会话 Skill、MCP 与操作能力
 

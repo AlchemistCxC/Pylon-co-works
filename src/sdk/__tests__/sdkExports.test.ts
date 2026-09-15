@@ -10,6 +10,7 @@ import type {
   PluginInterfaceModeApi,
   PluginServiceApi,
   PluginSessionCreationApi,
+  PluginShellRecipeApi,
   PluginSidebarApi,
   PluginTitlebarApi,
   PluginWorkspaceApi,
@@ -27,6 +28,7 @@ describe('SDK public exports', () => {
     expectTypeOf<PluginActivationContext['fonts']>().toExtend<PluginFontApi>()
     expectTypeOf<PluginActivationContext['sessionCreation']>().toExtend<PluginSessionCreationApi>()
     expectTypeOf<PluginActivationContext['interfaceModes']>().toExtend<PluginInterfaceModeApi>()
+    expectTypeOf<PluginActivationContext['shellRecipes']>().toExtend<PluginShellRecipeApi>()
     expectTypeOf<PluginActivationContext['titlebar']>().toExtend<PluginTitlebarApi>()
   })
 

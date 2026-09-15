@@ -13,6 +13,7 @@ import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-rendere
 import { BUILTIN_PRESENTATION_PROFILES } from '../core/renderer/builtinPresentationProfiles.ts'
 import { createBuiltinPresentationCommandDefinitions } from '../core/renderer/builtinPresentationCommands.ts'
 import { BUILTIN_INTERFACE_MODES } from '../core/interfaceMode/builtinInterfaceModes.ts'
+import { DEFAULT_SHELL_RECIPE } from '../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import { createBuiltinSolidContentSlot, createBuiltinSolidRendererSuite } from '../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 const rendererDefinitions = Object.freeze([
@@ -51,6 +52,7 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
       context.renderer.registerSuite(createBuiltinSolidRendererSuite())
       context.renderer.registerSlot(createBuiltinSolidContentSlot())
       for (const profile of BUILTIN_PRESENTATION_PROFILES) context.presentation.registerProfile(profile)
+      context.shellRecipes.registerRecipe(DEFAULT_SHELL_RECIPE)
       for (const mode of BUILTIN_INTERFACE_MODES) context.interfaceModes.registerMode(mode)
       context.fonts.registerFont({
         id: 'system',
