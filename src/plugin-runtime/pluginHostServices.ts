@@ -20,6 +20,7 @@ import type { PluginSettingsStore } from './settings/pluginSettingsStore.ts'
 import type { AgentSidebarRegistry } from './sidebar/sidebarRegistry.ts'
 import type { PluginUiRegistry } from './ui/pluginUiRegistry.ts'
 import type { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
+import type { CcWidgetRegistry } from './cc-widget/ccWidgetRegistry.ts'
 
 export interface RuntimeRegistries {
   readonly registryHub: RegistryHub
@@ -41,6 +42,7 @@ export interface RuntimeRegistries {
   readonly shellRecipeRegistry: ShellRecipeRegistry
   readonly titlebarRegistry: TitlebarRegistry
   readonly workspaceRegistry: WorkspaceRegistryStore
+  readonly ccWidgetRegistry: CcWidgetRegistry
 }
 
 export interface PluginHostServices {

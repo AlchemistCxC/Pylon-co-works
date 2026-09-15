@@ -25,7 +25,7 @@ afterEach(() => {
 })
 afterAll(() => { void modelCommand.dispose() })
 
-function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider) {
+function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider, inInputSlot = false) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ sessionId, generating: false })
   const theme = structuredClone(DEFAULTS)
@@ -56,7 +56,9 @@ function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' =
     })
     return (
       <SolidWorkbenchContext.Provider value={context}>
-        <SolidInputBar predictionProvider={predictionProvider} />
+        {inInputSlot
+          ? <div class="control-center" style="--cc-height:150px"><div class="cc-input-slot" style="--cc-input-height:40px;--cc-input-offset-top:10px"><SolidInputBar predictionProvider={predictionProvider} /></div></div>
+          : <SolidInputBar predictionProvider={predictionProvider} />}
       </SolidWorkbenchContext.Provider>
     )
   })
@@ -67,10 +69,35 @@ function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' =
       setActiveSessionId(nextSessionId)
       services.runtime.update({ sessionId: nextSessionId })
     },
+    slot: inInputSlot ? document.querySelector<HTMLElement>('.cc-input-slot') : undefined,
+    controlCenter: inInputSlot ? document.querySelector<HTMLElement>('.control-center') : undefined,
   }
 }
 
 describe('SolidInputBar', () => {
+  it('temporarily expands upward to three times the static input height without writing to appearance', async () => {
+    const { services, textarea, slot, controlCenter } = renderInput('session-a', 'composer', undefined, true)
+    expect(slot).toBeTruthy()
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 100 })
+
+    fireEvent.input(textarea, { target: { value: '第一行\n第二行' } })
+    await waitFor(() => expect(slot?.style.height).toBe('100px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('60px')
+    expect(services.appearance.getSnapshot().inputHeight).toBe(40)
+
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 500 })
+    fireEvent.input(textarea, { target: { value: '更多内容' } })
+    await waitFor(() => expect(slot?.style.height).toBe('120px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('80px')
+    expect(textarea.style.overflowY).toBe('auto')
+    expect(services.appearance.getSnapshot().inputHeight).toBe(40)
+
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 40 })
+    fireEvent.input(textarea, { target: { value: '保留一行' } })
+    await waitFor(() => expect(slot?.style.height).toBe('40px'))
+    expect(controlCenter?.style.getPropertyValue('--cc-input-extra-height')).toBe('')
+  })
+
   it('Enter 发送，Shift+Enter 与 IME composition 不发送', async () => {
     const { services, textarea } = renderInput()
     fireEvent.input(textarea, { target: { value: '正常消息' } })
@@ -200,30 +227,6 @@ describe('SolidInputBar', () => {
       command: 'send', args: ['session-a', { text: '第二条待发', attachments: [] }],
     })
     await waitFor(() => expect(screen.queryByText('第二条待发')).toBeNull())
-  })
-
-  it('生成期间排队的消息保留当时选择的附件', async () => {
-    const { services, textarea } = renderInput()
-    services.commands.setHandler('attach', vi.fn(async () => [
-      { id: 'a', path: 'C:/a.txt', name: 'a.txt' },
-    ]))
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
-
-    services.commands.reset()
-    services.runtime.update({ generating: true })
-    fireEvent.input(textarea, { target: { value: '稍后读取附件' } })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-    services.runtime.update({ generating: false })
-    fireEvent.click(await screen.findByRole('button', { name: '发送待发送消息' }))
-
-    await waitFor(() => expect(services.commands.calls).toContainEqual({
-      command: 'send',
-      args: ['session-a', {
-        text: '稍后读取附件',
-        attachments: [{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }],
-      }],
-    }))
   })
 
   it('待发消息发送未完成时禁用队列按钮，避免重复提交', async () => {
@@ -376,38 +379,6 @@ describe('SolidInputBar', () => {
     })]).document, { ownerKey: 'owner-a', generation: 2 })
     fireEvent.input(textarea, { target: { value: '/audit' } })
     expect(await screen.findByText('全量审计')).toBeTruthy()
-  })
-
-  it('附件通过 facade 注入，去重并可移除', async () => {
-    const { services } = renderInput()
-    services.commands.setHandler('attach', vi.fn(async () => [
-      { id: 'a', path: 'C:/a.txt', name: 'a.txt' },
-      { id: 'a-copy', path: 'C:/a.txt', name: 'a.txt' },
-    ]))
-
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
-    expect(screen.getAllByText(/a\.txt/)).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: '移除附件 a.txt' }))
-    expect(screen.queryByRole('button', { name: '移除附件 a.txt' })).toBeNull()
-  })
-
-  it('附件选择未完成时切换会话，结果只归属发起会话', async () => {
-    let resolveAttach: ((value: Array<{ id: string; path: string; name: string }>) => void) | undefined
-    const attachPromise = new Promise<Array<{ id: string; path: string; name: string }>>(resolve => { resolveAttach = resolve })
-    const { services, switchSession } = renderInput()
-    services.commands.setHandler('attach', vi.fn(() => attachPromise))
-
-    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
-    await waitFor(() => expect(services.commands.calls[0]?.command).toBe('attach'))
-    switchSession('session-b')
-    resolveAttach?.([{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }])
-    await attachPromise
-    await Promise.resolve()
-
-    expect(screen.queryByRole('button', { name: '移除附件 a.txt' })).toBeNull()
-    switchSession('session-a')
-    expect(await screen.findByRole('button', { name: '移除附件 a.txt' })).toBeTruthy()
   })
 
   it('Esc/Ctrl+C 在生成时取消，失败结果展示可见错误', async () => {

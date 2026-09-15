@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout } from '../../../ccLayoutState.ts'
 import { CC_WIDGET_IDS } from '../widgetDefinitions.ts'
 
-describe('Control Center layout v7', () => {
+describe('Control Center layout v8', () => {
   it('默认布局覆盖全部 widget，新增上下文控件使用稳定槽位', () => {
-    expect(CC_LAYOUT_SCHEMA_VERSION).toBe(7)
+    expect(CC_LAYOUT_SCHEMA_VERSION).toBe(8)
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements).sort()).toEqual([...CC_WIDGET_IDS].sort())
     expect(DEFAULT_CC_LAYOUT.placements.session).toMatchObject({ slot: 'status-secondary', order: 0 })
     expect(DEFAULT_CC_LAYOUT.placements.workspace).toMatchObject({ slot: 'status-secondary', order: 1 })
     expect(DEFAULT_CC_LAYOUT.placements.activity).toMatchObject({ slot: 'status-primary', order: 0 })
+    // S11：pct 并入 tokens；用量控件默认排在权限控件右侧
+    expect(DEFAULT_CC_LAYOUT.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
+    expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('pct')
   })
 
   it('v6 用户布局保留旧控件位置并补入新控件', () => {

@@ -1,18 +1,67 @@
 .control-center {
   position:relative;
   flex-shrink:0;
-  height:var(--cc-height,120px);
+  height:calc(var(--cc-height,120px) + var(--cc-input-extra-height,0px));
   min-height:var(--cc-min-height,64px);
   margin-top:auto;
+  margin-inline:var(--cc-margin-x,20px);
+  margin-bottom:var(--cc-margin-bottom,10px);
+  border-radius:var(--cc-radius,8px);
 }
 .cc-bg {
   position:absolute; bottom:0; left:0; right:0;
-  height:var(--cc-bg-height, var(--cc-height, 120px));
-  background:var(--cc-bg, transparent);
-  background-image:var(--cc-bg-image, none);
+  height:calc(var(--cc-height,120px) + var(--cc-input-extra-height,0px));
+  background:color-mix(in srgb,var(--cc-surface, transparent) var(--cc-surface-opacity, 100%),transparent);
+  background-image:var(--cc-surface-image, none);
   background-size:cover;
   background-position:center;
+  border-radius:inherit;
   z-index:0;
+}
+.cc-send-button {
+  position:absolute;
+  top:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+  right:var(--cc-input-offset-top,10px);
+  z-index:3;
+  width:var(--cc-send-size,32px);
+  height:var(--cc-send-size,32px);
+  padding:0;
+  box-sizing:border-box;
+  border:calc(var(--cc-send-size,32px) * 0.05) solid var(--cc-send-border-color,rgba(255,255,255,.5));
+  border-radius:var(--cc-send-radius,50%);
+  background:var(--cc-send-color,#000);
+  cursor:pointer;
+}
+.cc-send-icon { width:60%; height:60%; pointer-events:none; }
+.cc-send-icon--lg { width:80%; height:80%; }
+.cc-send-icon--stroke { fill:none; stroke:var(--cc-send-icon-color,#fff); stroke-width:2.2; }
+.cc-send-icon--double { width:70%; height:70%; stroke-width:2.6; }
+.cc-send-icon--stroke.cc-send-icon--round { stroke-linejoin:round; stroke-linecap:round; }
+.cc-send-icon--solid { fill:var(--cc-send-icon-color,#fff); stroke:none; }
+.cc-send-button[data-mode="inline"] {
+  right:calc(var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+}
+.cc-send-button:disabled { cursor:default; }
+.cc-input-shadow-clip {
+  position:absolute; inset:0; z-index:1; pointer-events:none;
+  clip-path:inset(0 round var(--cc-radius,8px));
+}
+.cc-input-shadow-clip::before {
+  content:'';
+  position:absolute;
+  top:var(--cc-input-offset-top,10px);
+  left:var(--cc-input-margin-x,10px);
+  right:var(--cc-input-margin-x,10px);
+  height:calc(var(--cc-input-height,40px) + var(--cc-input-extra-height,0px));
+  border-radius:var(--cc-input-radius,var(--input-radius,12px));
+  transition:box-shadow 180ms ease;
+}
+.app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .control-center:has(.input-bar:not(.cli-mode)) .cc-input-shadow-clip::before {
+  box-shadow:var(--cc-input-shadow,0 10px 30px rgba(15,23,42,.22));
+}
+.app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .control-center:has(.input-bar:not(.cli-mode):hover) .cc-input-shadow-clip::before,
+.app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .control-center:has(.input-bar:not(.cli-mode):focus-within) .cc-input-shadow-clip::before {
+  box-shadow:var(--cc-input-focus-ring-shadow,var(--cc-input-shadow,0 10px 30px rgba(15,23,42,.22)));
 }
 .cc-body {
   position:relative; z-index:1; height:100%;
@@ -33,11 +82,37 @@
 .control-center:has(.mode-menu) .cc-body {
   overflow: visible;
 }
-.cc-input-slot { display:flex; align-items:flex-end; min-width:0; min-height:0; }
+.cc-input-slot {
+  position:absolute;
+  top:var(--cc-input-offset-top,10px);
+  left:var(--cc-input-margin-x,10px);
+  right:var(--cc-input-margin-x,10px);
+  display:flex; align-items:flex-end; width:auto; height:var(--cc-input-height); min-width:0; min-height:0;
+  z-index:2;
+}
+.control-center:has(.cc-send-button[data-mode="external"]) .cc-input-slot {
+  right:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) + var(--cc-input-margin-x,10px));
+}
+/* 影子盒（阴影/焦点光环的载体）必须跟随外置让位，否则它的右端仍按 margin-x 铺满，
+   阴影与光环会画到按钮所在的那一段，视觉上表现为输入栏右侧多出一块发亮的区域。 */
+.control-center:has(.cc-send-button[data-mode="external"]) .cc-input-shadow-clip::before {
+  right:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) + var(--cc-input-margin-x,10px));
+}
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
+/* The slot owns the themed height; mounted widgets fill it. */
+.cc-input-slot > .cc-widget { height:100%; }
 .cc-footer { display:contents; }
 .cc-footer-peri { display:flex; flex-direction:column; gap:5px; min-width:0; min-height:0; }
-.cc-footer-peri .cc-input-slot { flex:0 0 auto; }
+/* peri 布局（输入栏 + 状态行纵向排队）下，输入栏必须回到文档流参与 flex 排列。
+   基类 .cc-input-slot 是 absolute（free 布局靠它浮在状态行上方），cli-mode 又重申一次；
+   若不在 peri 下复位，输入栏会脱离队列浮到状态行正上方，把状态行里的控件整个盖住
+   ——现代 GUI 走 default + peri，表现为模型控件看不见、也点不到。 */
+.control-center .cc-footer-peri .cc-input-slot,
+.control-center.cli-mode .cc-footer-peri .cc-input-slot {
+  position:relative; inset:auto;
+  margin-inline:var(--cc-input-margin-x,10px);
+  flex:0 0 auto;
+}
 .cc-footer-status { display:flex; flex-direction:column; gap:0; min-width:0; min-height:0; }
 .cc-footer-status-row {
   display:flex; align-items:center; min-width:0; min-height:18px;
@@ -82,7 +157,7 @@
 /* Widget failures must not participate in the status-row layout. Backend
    diagnostics can include an advertised model list and therefore be long. */
 .solid-model-widget,
-.solid-mode-widget { position:relative; min-width:0; }
+.solid-permission-widget { position:relative; min-width:0; }
 .cc-widget-error {
   position:absolute;
   z-index:20;
@@ -112,6 +187,15 @@
 .cc-widget.cc-natural { container-type:normal; width:max-content !important; height:auto !important; min-width:0 !important; }
 .cc-widget.cc-natural > * { flex:none; }
 .cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
+/* 按钮型控件恒不压缩：model / reasoning / mode / tasks 可点击，tokens（用量显示）
+   为同款外观但不可点击。窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠
+   （S10 回归根因：槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
+   新增"按钮型"控件时需登记到下面这组选择器。 */
+.cc-widget.cc-natural[data-widget-id='model'],
+.cc-widget.cc-natural[data-widget-id='reasoning'],
+.cc-widget.cc-natural[data-widget-id='mode'],
+.cc-widget.cc-natural[data-widget-id='tokens'],
+.cc-widget.cc-natural[data-widget-id='tasks'] { flex:0 0 auto; }
 
 .cc-context-ring {
   --context-ring-color: var(--text-dim);
@@ -162,7 +246,10 @@
   padding:2px calc(12px + var(--right-panel-inset, 0px)) 3px 12px; overflow:visible;
 }
 .control-center.cli-mode .cc-input-slot {
-  flex:0 0 auto;
+  position:absolute;
+  top:var(--cc-input-offset-top,10px);
+  left:var(--cc-input-margin-x,10px);
+  right:var(--cc-input-margin-x,10px);
   min-height:32px;
 }
 .control-center.cli-mode .cc-status-row {
@@ -302,6 +389,11 @@
 .cc-status-secondary,
 .cc-actions {
   gap: var(--ui-space-1);
+  /* 窄窗（面板被侧栏挤到约 300px 时）容不下按钮型控件的自然宽：
+     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让槽内换行，
+     保证控件完整可见（宁可信息栏升到两行，也不压扁/裁掉控件）。 */
+  flex-wrap: wrap;
+  align-content: center;
 }
 
 .cc-status-row .cc-widget + .cc-widget::before,

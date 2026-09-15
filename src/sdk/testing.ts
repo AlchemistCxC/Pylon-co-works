@@ -318,6 +318,7 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     shellRecipes: recordingApi('shellRecipes', recorded),
     titlebar: recordingApi('titlebar', recorded),
     storage: storageHarness.api,
+    ccWidget: recordingApi('ccWidget', recorded),
   } satisfies BuiltinPluginActivationContext
 
   const mock = context as MockPluginActivationContext

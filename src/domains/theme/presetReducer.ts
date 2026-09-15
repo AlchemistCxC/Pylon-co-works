@@ -16,6 +16,7 @@ import type { CcLayoutV3 } from '../../ccLayoutState.ts'
 import { normalizeCcLayout } from '../../ccLayoutState.ts'
 import {
   clampCcHeight,
+  clampInputTypography,
   resolveVisibleStatusWidgetCount,
   type CcFooterLayout,
   type CcHintMode,
@@ -60,7 +61,6 @@ export interface ThemePresetState {
   customPresets: CustomPreset[]
   ccLayout: CcLayoutV3
   ccHeight: number
-  ccBgHeight: number
   inputMode: string
   inputVariant: string
   inputSubmitButtonMode: string
@@ -72,7 +72,7 @@ export interface ThemePresetState {
 }
 
 /** reducer 返回的 patch：主题字段 + 预设路由/cc 同步字段（可赋值给 Partial<ThemeState>） */
-export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'appliedPreset' | 'custom' | 'customPresets' | 'ccLayout' | 'ccHeight' | 'ccBgHeight'>>
+export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'appliedPreset' | 'custom' | 'customPresets' | 'ccLayout' | 'ccHeight'>>
 
 /** cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState */
 function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
@@ -96,14 +96,8 @@ function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
   })
 }
 
-/**
- * 预设应用的 cc 高度同步：ccHeight 被 clamp 上调时，ccBgHeight 必须跟随
- * （否则背景比容器短，露出底部无背景条）。返回两者。
- */
-function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; ccBgHeight: number } {
-  const ccHeight = clampPresetCcHeight(theme)
-  const bgHeight = typeof theme.ccBgHeight === 'number' ? theme.ccBgHeight : Number(DEFAULTS.ccBgHeight)
-  return { ccHeight, ccBgHeight: Math.max(bgHeight, ccHeight) }
+function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number } {
+  return { ccHeight: clampPresetCcHeight(theme) }
 }
 
 /**
@@ -135,15 +129,29 @@ export function applyInputVariantInvariant(
  * 漏斗内聚三条布局不变量（此前只在 setCcHeight/预设 action/migrate 各自维护）：
  * - inputVariant↔inputMode 联动（cli ⟺ cli，否则 inputMode=default）
  * - ccHeight clamp（≥ resolveCcMinHeight 布局约束真值）
- * - ccBgHeight ≥ ccHeight（背景不短于容器）
  */
 export function setZoneFieldReducer(state: ThemePresetState, zone: string, partial: Record<string, unknown>): ThemePresetPatch {
   // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
   const patch = applyInputVariantInvariant(partial, state)
 
+  if (zone === 'cc' && ('inputHeight' in patch || 'inputOffsetTop' in patch || 'inputFontSize' in patch || 'inputLineHeight' in patch)) {
+    const merged = clampInputTypography({ ...state, ...patch } as ThemePresetState & { inputHeight: number; inputFontSize: number; inputLineHeight: string; inputOffsetTop: number })
+    if ('inputFontSize' in patch) patch.inputFontSize = merged.inputFontSize
+    if ('inputLineHeight' in patch) patch.inputLineHeight = merged.inputLineHeight
+    if ('inputHeight' in patch || 'inputFontSize' in patch || 'inputLineHeight' in patch) patch.inputHeight = merged.inputHeight
+    const ccHeight = Number(merged.ccHeight)
+    const inputHeight = Number(merged.inputHeight)
+    const inputOffsetTop = Number(merged.inputOffsetTop)
+    if (Number.isFinite(ccHeight) && Number.isFinite(inputHeight) && Number.isFinite(inputOffsetTop)
+      && inputHeight + inputOffsetTop > ccHeight) {
+      if ('inputHeight' in patch) patch.inputHeight = Math.max(0, ccHeight - inputOffsetTop)
+      else patch.inputOffsetTop = Math.max(0, ccHeight - inputHeight)
+    }
+  }
+
   // cc 高度不变量：高度或影响最小高的结构字段被写时整组收敛。
   // 属性面板/设置页恢复控件或切换 CLI 布局后，状态高度必须与 CSS 实际最小高一致。
-  if (zone === 'cc' || 'ccHeight' in patch || 'ccBgHeight' in patch) {
+  if (zone === 'cc' || 'ccHeight' in patch) {
     const merged = { ...state, ...patch } as ThemePresetState
     const clamped = clampCcHeight(Number(merged.ccHeight), {
       inputMode: String(merged.inputMode),
@@ -157,9 +165,7 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
       }),
       cliOverflowMode: String(merged.cliOverflowMode),
     })
-    const bg = Number('ccBgHeight' in patch ? patch.ccBgHeight : merged.ccBgHeight)
     patch.ccHeight = clamped
-    patch.ccBgHeight = Math.max(Number.isFinite(bg) ? bg : 0, clamped)
   }
 
   return {

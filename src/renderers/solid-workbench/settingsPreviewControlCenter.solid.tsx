@@ -6,12 +6,19 @@
  * 服务（与 RendererSettingsPreview 同源）；主题由宿主经 setTheme 同步。
  */
 import { render } from 'solid-js/web'
+import { createSignal } from 'solid-js'
 import { SolidWorkbenchContext } from './SolidWorkbenchContext.solid.tsx'
 import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { createPreviewWorkbenchServices } from './__fixtures__/previewWorkbenchServices.ts'
 
 export function mountSettingsPreviewControlCenter(host: HTMLElement) {
   const services = createPreviewWorkbenchServices()
+  // 预览必须对 setTheme 实时响应：把 appearance store 桥接成 Solid signal，
+  // 否则 appearanceSnapshot 是普通函数，Solid 追踪不到 store 变化（mount 后主题不刷新）。
+  const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
+  const unsubscribeAppearance = services.appearance.subscribe(() => {
+    setAppearanceSnapshot(services.appearance.getSnapshot())
+  })
   const input = () => ({
     sheetId: 'settings-preview',
     sessionId: 'preview-session',
@@ -27,7 +34,7 @@ export function mountSettingsPreviewControlCenter(host: HTMLElement) {
       runtime: services.runtime,
       runtimeSnapshot: () => services.runtime.getSnapshot(),
       appearance: services.appearance,
-      appearanceSnapshot: () => services.appearance.getSnapshot(),
+      appearanceSnapshot,
       sessionUi: services.sessionUi,
       commands: services.commands,
       paused: () => false,
@@ -38,6 +45,7 @@ export function mountSettingsPreviewControlCenter(host: HTMLElement) {
   return {
     setTheme: (theme: Record<string, unknown>) => { services.appearance.setTheme(theme as never) },
     destroy() {
+      unsubscribeAppearance()
       dispose()
       services.destroy()
       host.replaceChildren()

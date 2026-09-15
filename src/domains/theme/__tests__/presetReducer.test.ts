@@ -25,7 +25,6 @@ function makeState(customPresets: ThemePresetState['customPresets']): ThemePrese
     customPresets,
     ccLayout: DEFAULT_CC_LAYOUT,
     ccHeight: 150,
-    ccBgHeight: 150,
     inputMode: 'cli',
     inputVariant: 'cli',
     inputSubmitButtonMode: 'never',
@@ -113,7 +112,6 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
       customPresets: [],
       ccLayout: DEFAULT_CC_LAYOUT,
       ccHeight: 150,
-      ccBgHeight: 150,
       inputMode: 'cli',
       inputVariant: 'cli',
       inputSubmitButtonMode: 'inline',
@@ -126,13 +124,12 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
     }
   }
 
-  it('D1 校验漏斗：ccHeight clamp + ccBgHeight 跟随 + inputVariant↔inputMode 联动', () => {
+  it('D1 校验漏斗：ccHeight clamp + inputVariant↔inputMode 联动', () => {
     const state = makeZoneState()
-    // ccHeight 低于最小高（64 base）→ clamp 上调，ccBgHeight 跟随
+    // ccHeight 低于最小高（64 base）→ clamp 上调
     const lowPatch = setZoneFieldReducer(state, 'cc', { ccHeight: 5 })
     expect(typeof lowPatch.ccHeight).toBe('number')
     expect(lowPatch.ccHeight as number).toBeGreaterThanOrEqual(64) // ccHeight 必须 clamp 到最小高
-    expect(lowPatch.ccBgHeight as number).toBeGreaterThanOrEqual(lowPatch.ccHeight as number) // ccBgHeight 必须 ≥ ccHeight
     // inputVariant → inputMode 联动
     const variantPatch = setZoneFieldReducer(state, 'cc', { inputVariant: 'composer' })
     expect(variantPatch.inputMode).toBe('default') // inputVariant=composer → inputMode=default
@@ -188,14 +185,13 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
     expect(deriveZoneStatus({ ...allNord, custom: { ...allNord.custom, chat: true } }, 'chat')).toEqual({ appliedName: 'nord', isCustom: true })
   })
 
-  it('applyZonePreset cc 同步：ccLayout 恢复规范 + ccHeight clamp 且 ccBgHeight 跟随', () => {
+  it('applyZonePreset cc 同步：ccLayout 恢复规范 + ccHeight clamp', () => {
     const state = makeZoneState()
     const ccTheme = Object.fromEntries(ZONE_FIELDS.cc.map(f => [f, nord.theme[f]])) as Partial<ThemeSettings>
     const patch = applyZonePresetReducer(state, 'cc', 'nord', ccTheme)
     expect(patch.ccLayout?.version).toBe(DEFAULT_CC_LAYOUT.version) // cc zone 预设应恢复规范排布
     if (patch.ccHeight !== undefined) {
       expect(typeof patch.ccHeight).toBe('number')
-      expect(patch.ccBgHeight ?? 0).toBeGreaterThanOrEqual(patch.ccHeight) // ccBgHeight 必须 ≥ ccHeight（背景不短于容器）
     }
   })
 
@@ -221,7 +217,7 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
     expect(saved.updatedAt).toBe(1000)
     // W2-15（F3-B）：保存存 delta——ccHeight 150 与默认相等被过滤；非默认值必须捕获
     expect((saved.theme as Record<string, unknown>).ccHeight).toBeUndefined() // 默认相等字段不进 delta
-    const customState = makeZoneState({ ccHeight: 200, ccBgHeight: 200 })
+    const customState = makeZoneState({ ccHeight: 200 })
     const createdCustom = saveCustomPresetReducer(customState, { id: 'custom-x', name: '带高度', now: 1000 })
     expect((createdCustom.patch.customPresets![0].theme as Record<string, unknown>).ccHeight).toBe(200) // 保存应捕获非默认全主题（含 ccHeight）
 

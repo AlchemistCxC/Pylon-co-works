@@ -1,27 +1,58 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
-import { formatTokenCount } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isExternalSubmitMode, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import type { CcSlot, CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
-import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
+import { toCssBackgroundImage } from '../../../backgroundImage.ts'
+import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
+
+/**
+ * 常态显示的状态控件（2026-09-14）——不受"活跃会话收起旧状态控件"影响。
+ *
+ * 背景：`showStatusSlots()` 原先只在空态或编辑模式放行状态行，目的是让活跃
+ * 对话界面干净（旧控件多）。模型控件是每轮对话都要看的当前状态，不属于该类，
+ * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
+ * 共用同一名单，保持单一真值。
+ */
+const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode', 'tokens']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
-  ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', mode: '权限模式',
-  send: '发送按钮', attach: '附件按钮', tasks: '任务',
+  ekg: '用量条', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
+  send: '发送按钮', tasks: '任务',
 }
 
 export function SolidControlCenter() {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
+  // ccSurfaceOpacity is stored as a 0–1 ratio. Keep accepting legacy
+  // snapshots that carried the old 0–100 value so previews/renderers do not
+  // briefly emit values such as 7200% while an older theme is being loaded.
+  const surfaceOpacityPercent = () => {
+    const value = appearance().ccSurfaceOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputSurfaceOpacityPercent = () => {
+    const value = appearance().inputSurfaceOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputBorderOpacityPercent = () => {
+    const value = appearance().inputBorderOpacity
+    return value > 1 ? value : value * 100
+  }
+  const inputHighlightOpacityPercent = () => {
+    const value = appearance().inputHighlightOpacity
+    return value > 1 ? value : value * 100
+  }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
   const [selected, setSelected] = createSignal<CcWidgetId>()
@@ -46,6 +77,21 @@ export function SolidControlCenter() {
   const modeOptions = () => resolveModeOptionEntries(runtime(), mode()).map(item => item.id)
   const profileModel = () => runtime().activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
   const emptyVisual = () => !input().sessionId || sessionEntering()
+  // The body surface is now represented by the cc-widget registration channel.
+  // Keep the existing host-rendered background implementation and CSS intact;
+  // this lookup is the minimal P2 consumer seam and remains HMR-safe because
+  // the registry snapshot is read at render time.
+  const ccSurfaceRegistered = () => getCcWidgetRegistry().getSnapshot().entries.some(
+    entry => entry.value.id === 'cc-surface',
+  )
+  const ccSendButtonRegistered = () => getCcWidgetRegistry().getSnapshot().entries.some(
+    entry => entry.value.id === 'cc-send-button',
+  )
+  let controlCenterElement: HTMLDivElement | undefined
+  const sendButtonMode = () => {
+    if (appearance().ccHidden.includes('send')) return undefined
+    return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
+  }
   createEffect(() => {
     if (modelId() || !profileModel()) return
     setModelId(profileModel())
@@ -208,15 +254,9 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  const externalButtonMode = () => isExternalSubmitMode({
-    inputMode: appearance().inputMode,
-    submitButtonMode: appearance().inputSubmitButtonMode,
-  })
-  const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
-  const externalAttach = () => visibleIds().includes('attach')
   const hiddenWidgetIds = () => !emptyVisual()
     ? appearance().ccHidden
-    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]
+    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'tokens', 'tasks'])]
   const visibilityContext = () => ({
     hidden: hiddenWidgetIds(),
     inputMode: appearance().inputMode,
@@ -227,7 +267,9 @@ export function SolidControlCenter() {
     // for terminal-classic, whose normal session chrome hides context chips.
     presentationProfileId: input().sessionId ? input().presentationProfileId : undefined,
   })
-  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
+  // The registered cc-send-button owns the send block; keep the legacy id in
+  // layout/theme data for compatibility without mounting its old renderer.
+  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => id !== 'send' && isWidgetVisible(id, visibilityContext())))
   const minHeight = () => resolveCcMinHeight({
     inputMode: appearance().inputMode,
     footerLayout: appearance().footerLayout,
@@ -241,14 +283,20 @@ export function SolidControlCenter() {
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
+  // 状态行门户：仅对状态槽生效。常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGETS）
+  // 在活跃会话里也放行；其它状态控件仍受"活跃会话收起"约束。input 槽（输入栏）
+  // 从不经过这个门户，否则活跃会话会把输入栏一并过滤掉。
+  const passesStatusGate = (id: CcWidgetId, slot: CcSlot) =>
+    slot === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGETS.includes(id)
   const idsForSlot = (slot: CcSlot) => visibleIds()
     .filter(id => appearance().ccLayout.placements[id]?.slot === slot)
+    .filter(id => passesStatusGate(id, slot))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
-        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
+        return <SolidInputBar disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
       case 'session':
         return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
@@ -296,23 +344,32 @@ export function SolidControlCenter() {
         </span>
       case 'ekg':
         return <SolidUsageGauge usage={runtime().document?.session.usage} fallbackTokens={runtime().tokenCount} style={appearance().ccStyle} scale={appearance().ccScale.ekg} />
-      case 'pct':
-        return <span class="ekg-pct" style={{ 'font-size': `${appearance().ccScale.pct ?? 100}%` }}>{Math.round(contextRatio(runtime().document?.session.usage, runtime().tokenCount) * 100)}%</span>
       case 'tokens': {
+        // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
+        // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
+        // 但必须与 model/reasoning/mode 是同一族按钮，否则会退化成裸文字。
         const usage = () => runtime().document?.session.usage
         const limit = () => usage()?.contextLimit
-        return <span class="pill-mono" style={{ 'border-left': 'none', padding: '0', 'font-size': `${appearance().ccScale.tokens ?? 100}%` }}>
-          {formatTokenCount(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatTokenCount(limit()!) : '—'}
+        const pillStyle = () => ({
+          height: `${appearance().modelHeight ?? 28}px`,
+          'border-radius': `${appearance().modelRadius ?? 0}px`,
+          'font-size': `calc(${appearance().modelFontSize ?? 12}px * ${appearance().ccScale.tokens ?? 100} / 100)`,
+          background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
+          color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
+        })
+        return <span class="cc-usage-pill" style={pillStyle()}>
+          <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
+          <span class="cc-usage-percent">{formatUsagePercent(contextRatio(usage(), runtime().tokenCount))}</span>
         </span>
       }
       case 'model':
         return <SolidModelWidget
           draftValue={emptyVisual() ? modelId : undefined}
           onDraftChange={emptyVisual() ? setModelId : undefined}
-          reasoningValue={emptyVisual() ? reasoningLevel : undefined}
-          onReasoningChange={emptyVisual() ? setReasoningLevel : undefined}
           forceDropdown={emptyVisual()}
         />
+      case 'reasoning':
+        return <SolidReasoningWidget draftValue={emptyVisual() ? reasoningLevel : undefined} onDraftChange={emptyVisual() ? setReasoningLevel : undefined} />
       case 'mode':
         return <SolidModeWidget
           draftValue={emptyVisual() ? mode : undefined}
@@ -320,9 +377,7 @@ export function SolidControlCenter() {
           forceDropdown={emptyVisual()}
         />
       case 'send':
-        return <SolidSendWidget disabled={readonly()} />
-      case 'attach':
-        return <SolidAttachWidget disabled={readonly()} />
+        return null
       case 'tasks': {
         return <Show when={taskLabel(runtime().tasks)}>{label => (
           <button type="button" class="cc-tasks-pill" title="任务列表（点击展开/收起）" onClick={() => window.dispatchEvent(new CustomEvent('pylon:tasks-toggle'))}>{label()}</button>
@@ -457,8 +512,29 @@ export function SolidControlCenter() {
       {appearance().cliHintMode === 'full' && <span class="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
     </div>
     : null
+  // Keep empty-state/edit-mode controls available for session setup and layout
+  // editing; hide the legacy status widgets from the active conversation view.
+  const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
+  // 例外（2026-09-14）：模型控件常态显示，见 ALWAYS_VISIBLE_STATUS_WIDGETS。
+  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGETS
+    .some(id => isWidgetVisible(id, visibilityContext()))
+  const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
+
+  onMount(() => {
+    const slot = controlCenterElement?.querySelector<HTMLElement>('.cc-input-slot')
+    if (!slot) return
+    const update = () => {
+      const width = slot.getBoundingClientRect().width || slot.clientWidth
+      if (width > 0) controlCenterElement?.style.setProperty('--cc-input-text-inset-x', `${width * 0.05}px`)
+    }
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update)
+    observer?.observe(slot)
+    onCleanup(() => observer?.disconnect())
+  })
 
   return <div
+    ref={node => { controlCenterElement = node }}
     class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
     data-creation-state={sessionEntering() ? 'entering' : submitting() ? 'creating' : undefined}
@@ -468,7 +544,45 @@ export function SolidControlCenter() {
     style={{
       '--cc-height': `${appearance().ccHeight}px`,
       '--cc-min-height': `${minHeight()}px`,
-      '--cc-bg-height': `${appearance().ccBgHeight}px`,
+      '--cc-margin-x': `${appearance().ccMarginX}px`,
+      '--cc-margin-bottom': `${appearance().ccMarginBottom}px`,
+      '--cc-radius': `${appearance().ccRadius}px`,
+      '--cc-surface-opacity': `${surfaceOpacityPercent()}%`,
+      '--cc-surface': appearance().ccBg || 'transparent',
+      '--cc-surface-image': toCssBackgroundImage(appearance().ccBgImage),
+      '--cc-input-offset-top': `${appearance().inputOffsetTop}px`,
+      '--cc-input-height': `${appearance().inputHeight}px`,
+      '--cc-input-margin-x': `${appearance().inputMarginX}px`,
+      '--cc-input-surface': appearance().inputSurfaceBg || 'transparent',
+      '--cc-input-surface-opacity': `${inputSurfaceOpacityPercent()}%`,
+      '--cc-input-focus-ring-enabled': appearance().inputFocusRingEnabled ? '1' : '0',
+      '--cc-input-focus-ring-color': appearance().inputFocusRingColor || 'var(--accent)',
+      '--cc-input-highlight-opacity': `${inputHighlightOpacityPercent()}%`,
+      '--cc-input-shadow-enabled': appearance().inputShadowEnabled ? '1' : '0',
+      '--cc-input-shadow': appearance().inputShadowEnabled
+        ? '0 0 30px rgba(15,23,42,.22)'
+        : 'none',
+      // 光环独立于阴影（A6-1-FIX 1.3）：光环开启时只产出光环投影；关闭时不产出该变量，
+      // CSS 侧 hover/focus-within 回退到常态投影（阴影关闭即无变化）。常态阴影开关只控制 --cc-input-shadow。
+      '--cc-input-focus-ring-shadow': appearance().inputFocusRingEnabled
+        ? '0 0 24px color-mix(in srgb, var(--cc-input-focus-ring-color, var(--input-focus-ring-color, var(--accent))) 55%, transparent)'
+        : undefined,
+      '--cc-input-radius': `${appearance().inputRadius}px`,
+      '--cc-input-border': appearance().inputBorder || 'transparent',
+      '--cc-input-border-width': `${appearance().inputBorderWidth}px`,
+      '--cc-input-border-opacity': `${inputBorderOpacityPercent()}%`,
+      '--cc-input-font-size': `${appearance().inputFontSize}px`,
+      '--cc-input-line-height': appearance().inputLineHeight,
+      '--cc-input-text': appearance().inputTextColor,
+      '--cc-input-placeholder': appearance().inputPlaceholder,
+      '--cc-send-size': `calc(var(--cc-input-height) * ${sendButtonMode() === 'inline' ? '0.8' : '1'})`,
+      '--cc-send-color': appearance().sendButtonColor,
+      '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
+      '--cc-send-border-color': appearance().sendButtonBorderColor === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)',
+      '--cc-send-icon-color': appearance().sendButtonIconColor === 'black' ? '#000' : appearance().sendButtonIconColor === 'gray' ? 'rgba(0,0,0,.5)' : '#fff',
+      '--cc-input-text-right-inset': sendButtonMode() === 'inline'
+        ? 'calc(var(--cc-input-height) * 0.9 + var(--cc-input-text-inset-x, 5%))'
+        : 'var(--cc-input-text-inset-x, 5%)',
     }}
   >
     <Show when={appearance().ccEditMode}><div
@@ -487,17 +601,19 @@ export function SolidControlCenter() {
         workbench.appearance.dispatch({ type: 'set-cc-height', height: appearance().ccHeight + (event.key === 'ArrowUp' ? 4 : -4) })
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
-    <div class="cc-bg" />
+    <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
+    <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('send')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
+    <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
         <div class="cc-footer-status">
-          <div class="cc-footer-status-row">{statusSlots()}</div>
+          <Show when={statusRowContent()}>{statusSlots()}</Show>
           {commandHint()}
         </div>
       </div> : <>
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
-        <div class="cc-status-row">{statusSlots()}{commandHint()}</div>
+        <div class="cc-status-row"><Show when={statusRowContent()}>{statusSlots()}</Show>{commandHint()}</div>
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (

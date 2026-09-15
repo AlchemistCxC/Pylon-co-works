@@ -17,6 +17,69 @@ const PREVIEW_TOOLS = [
 ] as const
 
 /**
+ * TemplateLibrary keeps its preview theme as inherited CSS variables.  The
+ * Solid control-center root also emits CC surface/geometry variables inline, so
+ * project those local values into its appearance snapshot before mount;
+ * this preserves the existing local-preview ownership without touching the
+ * global store.  Standalone settings previews have no template ancestor and
+ * therefore continue to follow the live store exclusively.
+ */
+function localTemplateCcTheme(host: HTMLElement): Record<string, unknown> {
+  const template = host.closest<HTMLElement>('.template-preview')
+  if (!template) return {}
+  const readNumber = (name: string): number | undefined => {
+    const value = Number.parseFloat(template.style.getPropertyValue(name))
+    return Number.isFinite(value) ? value : undefined
+  }
+  const overrides: Record<string, unknown> = {}
+  const ccHeight = readNumber('--cc-height')
+  const ccMarginX = readNumber('--cc-margin-x')
+  const ccMarginBottom = readNumber('--cc-margin-bottom')
+  const ccRadius = readNumber('--cc-radius')
+  const ccSurfaceOpacity = readNumber('--cc-surface-opacity')
+  const ccBg = template.style.getPropertyValue('--cc-bg').trim()
+  const ccBgImage = template.style.getPropertyValue('--cc-bg-image').trim()
+  const ccVariant = template.style.getPropertyValue('--cc-variant').trim()
+  const inputOffsetTop = readNumber('--cc-input-offset-top')
+  const inputHeight = readNumber('--cc-input-height')
+  const inputMarginX = readNumber('--cc-input-margin-x')
+  const inputSurfaceOpacity = readNumber('--cc-input-surface-opacity')
+  const inputRadius = readNumber('--cc-input-radius')
+  const inputBorderWidth = readNumber('--cc-input-border-width')
+  const inputBorderOpacity = readNumber('--cc-input-border-opacity')
+  const inputFontSize = readNumber('--cc-input-font-size')
+  const inputSurfaceBg = template.style.getPropertyValue('--cc-input-surface').trim()
+  const inputBorder = template.style.getPropertyValue('--cc-input-border').trim()
+  const inputText = template.style.getPropertyValue('--cc-input-text').trim()
+  const inputPlaceholder = template.style.getPropertyValue('--cc-input-placeholder').trim()
+  if (ccHeight !== undefined) overrides.ccHeight = ccHeight
+  if (ccMarginX !== undefined) overrides.ccMarginX = ccMarginX
+  if (ccMarginBottom !== undefined) overrides.ccMarginBottom = ccMarginBottom
+  if (ccRadius !== undefined) overrides.ccRadius = ccRadius
+  if (ccSurfaceOpacity !== undefined) overrides.ccSurfaceOpacity = ccSurfaceOpacity
+  if (ccBg) overrides.ccBg = ccBg
+  // Background-image and variant are logical values (not ordinary numeric /
+  // color vars), so they are projected explicitly when a template supplies
+  // the corresponding local custom properties. A CSS `none` value explicitly
+  // clears an inherited/global image rather than leaking it into this card.
+  if (ccBgImage) overrides.ccBgImage = ccBgImage === 'none' ? '' : ccBgImage
+  if (ccVariant) overrides.ccVariant = ccVariant
+  if (inputOffsetTop !== undefined) overrides.inputOffsetTop = inputOffsetTop
+  if (inputHeight !== undefined) overrides.inputHeight = inputHeight
+  if (inputMarginX !== undefined) overrides.inputMarginX = inputMarginX
+  if (inputSurfaceOpacity !== undefined) overrides.inputSurfaceOpacity = inputSurfaceOpacity
+  if (inputRadius !== undefined) overrides.inputRadius = inputRadius
+  if (inputBorderWidth !== undefined) overrides.inputBorderWidth = inputBorderWidth
+  if (inputBorderOpacity !== undefined) overrides.inputBorderOpacity = inputBorderOpacity
+  if (inputFontSize !== undefined) overrides.inputFontSize = inputFontSize
+  if (inputSurfaceBg) overrides.inputSurfaceBg = inputSurfaceBg
+  if (inputBorder) overrides.inputBorder = inputBorder
+  if (inputText) overrides.inputTextColor = inputText
+  if (inputPlaceholder) overrides.inputPlaceholder = inputPlaceholder
+  return overrides
+}
+
+/**
  * P52 D4：中控预览挂真实 SolidControlCenter（用户拍板弃静态占位）。
  * 经 loader（import.meta.glob）加载 .solid 挂载文件；主题经 useStore 订阅实时
  * 同步。加载失败回退静态 cc 壳（预览不因 Solid 面异常整页崩）。
@@ -30,14 +93,19 @@ function PvSolidControlCenter() {
     let disposed = false
     let handle: SettingsPreviewControlCenterHandle | undefined
     let unsubscribeTheme: (() => void) | undefined
-    const themeSnapshot = () => Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]]))
+    // 模板卡片局部变量优先于全局 store（保留 A 系列"模板预览读取局部中控变量"能力）
+    const themeSnapshot = () => ({
+      ...THEME_DEFAULTS,
+      ...Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]])),
+      ...localTemplateCcTheme(host),
+    }) as Parameters<NonNullable<typeof handle>['setTheme']>[0]
     void loadSettingsPreviewControlCenter()
       .then(({ mountSettingsPreviewControlCenter }) => {
         if (disposed) return
         handle = mountSettingsPreviewControlCenter(host)
-        handle.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() })
+        handle.setTheme(themeSnapshot())
         unsubscribeTheme = useStore.subscribe(() => {
-          handle?.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() })
+          handle?.setTheme(themeSnapshot())
         })
       })
       .catch(() => { if (!disposed) setFailed(true) })
