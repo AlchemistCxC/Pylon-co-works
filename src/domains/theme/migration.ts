@@ -32,8 +32,14 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
  * v9（权限选择控件）：新增 permission* 字段组（权限控件外观与交互）。控件 id `mode`
  * 早已存在、布局无需变更，但存量安装的 localStorage 里没有这 7 个键，而字段归一化
  * 只挂在 migrate 钩子上跑；不 bump 则它们永远是 undefined（控件尺寸会算成 NaN）。
+ *
+ * v10（用量控件 S11）：`pct` 并入 `tokens` 成为单一「用量」控件，默认位置从状态区
+ * 首行移到次行、紧跟权限控件。同样受「归一化只挂 migrate」限制 —— 不 bump 则存量
+ * 布局里 tokens 仍停在旧位置（status-primary/3），新默认位不生效。
+ * 本版同时把 CC_LAYOUT_SCHEMA_VERSION 7→8：归一化遇到 v7 布局不在接受列表
+ * [3,4,5,6,8] 内 → 整份布局回落默认值（用户已确认接受排版重置的代价）。
  */
-export const THEME_SCHEMA_VERSION = 9
+export const THEME_SCHEMA_VERSION = 10
 
 export type ThemeMigrationDefaults = {
   base: object

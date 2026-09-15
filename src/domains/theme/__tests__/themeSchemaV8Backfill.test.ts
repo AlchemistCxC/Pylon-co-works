@@ -17,8 +17,8 @@ type Migrated = { ccLayout: { placements: Record<string, { slot: string; order: 
 describe('theme schema v8：老安装补入 reasoning 控件', () => {
   // 回归锚点：不 bump 版本号，存量 v7 安装的 migrate 钩子不触发，
   // normalizeCcLayout 的补位逻辑就永远跑不到 —— 控件在老浏览器里永远不出现。
-  it('持久化版本已推进到 9（v8 的补位逻辑仍然生效）', () => {
-    expect(THEME_SCHEMA_VERSION).toBe(9)
+  it('持久化版本已推进到 10（v8 的补位逻辑仍然生效）', () => {
+    expect(THEME_SCHEMA_VERSION).toBe(10)
   })
 
   it('存量 v7 布局缺 reasoning 时，migrate 后补入默认位置', () => {
@@ -70,5 +70,25 @@ describe('theme schema v9：老安装补入权限控件字段组（S10）', () =
     // 设置面板不再暴露、主题变量注入不再生成 --pill-bg。
     expect(Object.keys(THEME_FIELD_DEFS)).not.toContain('pillBg')
     expect(Object.keys(DEFAULTS)).not.toContain('pillBg')
+  })
+})
+
+describe('theme schema v10：用量控件（S11）', () => {
+  // 回归锚点（2026-09-15）：pct 控件并入 tokens，用量控件的默认槽位也从
+  // status-primary/3 挪到 status-secondary/5。布局补位只挂在 migrate 钩子上 ——
+  // 不 bump 主题版本，存量安装的用量控件会一直停在旧位置，老 pct 键也清不掉。
+  it('存量 v7 布局（pct 时代）迁移后：pct 消失，用量控件落到权限控件右侧', () => {
+    const legacy = {
+      version: 7,
+      placements: {
+        ...DEFAULT_CC_LAYOUT.placements,
+        pct: { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 },
+        tokens: { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
+      },
+    }
+    const migrated = themeDomainMigrate({ ccLayout: legacy }, defaults, 9) as unknown as Migrated
+
+    expect(migrated.ccLayout.placements.pct).toBeUndefined()
+    expect(migrated.ccLayout.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
   })
 })

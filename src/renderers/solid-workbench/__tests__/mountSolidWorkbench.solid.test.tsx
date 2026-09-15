@@ -1166,9 +1166,9 @@ describe('mountSolidWorkbench', () => {
       expect(value).not.toBeNull()
       return value!
     })
-    // 2026-09-15：模型/思考强度/权限三控件常态显示；其余旧状态控件在活跃会话里仍然收起。
+    // 2026-09-15：模型/思考强度/权限/用量四控件常态显示；其余旧状态控件在活跃会话里仍然收起。
     expect([...row.querySelectorAll('[data-widget-id]')]
-      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode'])
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens'])
     expect(row.querySelector('.cc-widget-separator')).toBeTruthy()
   })
 
@@ -1843,7 +1843,10 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
     expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
     expect(host.textContent).not.toContain('↓ 8 tokens')
-    expect(host.querySelector('[data-widget-id="tokens"]')).toBeNull()
+    // S11：用量控件常态显示为按钮型胶囊，但旧的 usage surface（会话用量标签 / ↓ N tokens）仍未回归；
+    // 且它是只读显示 —— 不得渲染成可点击控件。
+    expect(host.querySelector('[data-widget-id="tokens"] .cc-usage-pill')).toBeTruthy()
+    expect(host.querySelector('[data-widget-id="tokens"] button')).toBeNull()
     expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 

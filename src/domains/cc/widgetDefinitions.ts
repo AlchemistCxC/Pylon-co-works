@@ -9,7 +9,7 @@
 import type { ThemeSettings } from '../../store.ts'
 
 /** 全部中控 widget id（含输入栏、上下文、会话身份、运行态与动作按钮）。 */
-export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'model', 'reasoning', 'mode', 'activity', 'ekg', 'pct', 'tokens', 'send', 'tasks'] as const
+export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'model', 'reasoning', 'mode', 'activity', 'ekg', 'tokens', 'send', 'tasks'] as const
 export type CcWidgetId = (typeof CC_WIDGET_IDS)[number]
 
 /** 状态区 widget（除 input 外全部计入中控最小高度约束）——由 id 列表派生，不平行维护 */
@@ -140,7 +140,6 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
       ],
     },
   ],
-  pct: [],
   tokens: [],
   tasks: [],
   session: [],
@@ -169,9 +168,10 @@ export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   if (!edit
     && ctx.presentationProfileId === 'builtin.presentation.terminal-classic'
     && (id === 'session' || id === 'workspace' || id === 'activity')) return false
-  // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比
-  if (!edit && ctx.ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('pct')) return false
-  if (!edit && ctx.ccStyle === 'ring' && id === 'pct' && !ctx.hidden.includes('ekg')) return false
+  // numeric 模式：百分比由「用量」控件（tokens）表达，隐藏 ekg 数值避免重复。
+  // ring 模式的去重规则随 pct 控件一并移除（S11）——ring 环与用量百分比会重复显示，
+  // 已接受；待「把用量条整合进用量控件」那一单统一收口。
+  if (!edit && ctx.ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('tokens')) return false
   // 独立 send widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮
   if (id === 'send') {
     if (!edit && !isExternalSubmitMode(ctx)) return false

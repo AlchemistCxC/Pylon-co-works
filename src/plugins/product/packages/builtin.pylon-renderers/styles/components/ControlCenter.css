@@ -187,13 +187,14 @@
 .cc-widget.cc-natural { container-type:normal; width:max-content !important; height:auto !important; min-width:0 !important; }
 .cc-widget.cc-natural > * { flex:none; }
 .cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
-/* 可点击的按钮型控件（model / reasoning / mode / tasks）恒不压缩。
-   窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠（S10 回归根因：
-   槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
+/* 按钮型控件恒不压缩：model / reasoning / mode / tasks 可点击，tokens（用量显示）
+   为同款外观但不可点击。窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠
+   （S10 回归根因：槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
    新增"按钮型"控件时需登记到下面这组选择器。 */
 .cc-widget.cc-natural[data-widget-id='model'],
 .cc-widget.cc-natural[data-widget-id='reasoning'],
 .cc-widget.cc-natural[data-widget-id='mode'],
+.cc-widget.cc-natural[data-widget-id='tokens'],
 .cc-widget.cc-natural[data-widget-id='tasks'] { flex:0 0 auto; }
 
 .cc-context-ring {

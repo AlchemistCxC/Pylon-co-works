@@ -320,10 +320,9 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({
       inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
       ccHeight: 84,
-      ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'tasks'],
+      ccHidden: ['session', 'workspace', 'activity', 'tokens', 'send', 'tasks'],
     }))
 
-    store.dispatch({ type: 'set-cc-hidden', id: 'pct', hidden: false })
     store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false })
 
     expect(store.getSnapshot()).toMatchObject({ ccHeight: 109 })

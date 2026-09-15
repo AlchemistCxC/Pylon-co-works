@@ -414,7 +414,6 @@
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='session'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='activity'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='ekg'],
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='pct'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'],
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tasks'] { display: none; }
 .solid-workbench-control-center-slot.is-empty .cc-body {
@@ -587,7 +586,7 @@
   align-items: center;
   min-width: 0;
 }
-.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger) {
+.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger, .cc-usage-pill) {
   display: inline-flex;
   align-items: center;
   min-width: 0;
@@ -604,6 +603,14 @@
   white-space: nowrap;
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+/* 用量控件（S11）：沿用同族胶囊外观，但不可点击 —— 默认光标、无 hover/focus 反馈，
+   两组文案（已用/上限 与 百分比）之间留一个空格，数字等宽对齐。 */
+.solid-workbench-control-center-slot .cc-usage-pill {
+  gap: var(--ui-space-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
 }
 .solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger):hover,
 .solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger)[aria-expanded='true'] {

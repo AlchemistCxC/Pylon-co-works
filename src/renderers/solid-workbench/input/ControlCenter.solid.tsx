@@ -1,5 +1,5 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
-import { formatTokenCount } from '../../../tokenFormat.ts'
+import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import type { CcSlot, CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
@@ -24,10 +24,10 @@ const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', '
  * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
  * 共用同一名单，保持单一真值。
  */
-const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode']
+const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode', 'tokens']
 const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
   input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
-  ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', reasoning: '思考强度', mode: '权限模式',
+  ekg: '用量条', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
   send: '发送按钮', tasks: '任务',
 }
 
@@ -256,7 +256,7 @@ export function SolidControlCenter() {
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
   const hiddenWidgetIds = () => !emptyVisual()
     ? appearance().ccHidden
-    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'pct', 'tokens', 'tasks'])]
+    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'tokens', 'tasks'])]
   const visibilityContext = () => ({
     hidden: hiddenWidgetIds(),
     inputMode: appearance().inputMode,
@@ -344,13 +344,22 @@ export function SolidControlCenter() {
         </span>
       case 'ekg':
         return <SolidUsageGauge usage={runtime().document?.session.usage} fallbackTokens={runtime().tokenCount} style={appearance().ccStyle} scale={appearance().ccScale.ekg} />
-      case 'pct':
-        return <span class="ekg-pct" style={{ 'font-size': `${appearance().ccScale.pct ?? 100}%` }}>{Math.round(contextRatio(runtime().document?.session.usage, runtime().tokenCount) * 100)}%</span>
       case 'tokens': {
+        // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
+        // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
+        // 但必须与 model/reasoning/mode 是同一族按钮，否则会退化成裸文字。
         const usage = () => runtime().document?.session.usage
         const limit = () => usage()?.contextLimit
-        return <span class="pill-mono" style={{ 'border-left': 'none', padding: '0', 'font-size': `${appearance().ccScale.tokens ?? 100}%` }}>
-          {formatTokenCount(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatTokenCount(limit()!) : '—'}
+        const pillStyle = () => ({
+          height: `${appearance().modelHeight ?? 28}px`,
+          'border-radius': `${appearance().modelRadius ?? 0}px`,
+          'font-size': `calc(${appearance().modelFontSize ?? 12}px * ${appearance().ccScale.tokens ?? 100} / 100)`,
+          background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
+          color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
+        })
+        return <span class="cc-usage-pill" style={pillStyle()}>
+          <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
+          <span class="cc-usage-percent">{formatUsagePercent(contextRatio(usage(), runtime().tokenCount))}</span>
         </span>
       }
       case 'model':

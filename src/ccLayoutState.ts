@@ -16,7 +16,8 @@ export interface CcLayoutV3 {
 }
 
 // v7：新增会话、工作区与运行状态控件；旧布局按 ID 保留并补入新增默认位置。
-export const CC_LAYOUT_SCHEMA_VERSION = 7
+// v8：删除 pct 控件（并入「用量」tokens 控件）；用量控件默认移到状态区次行、紧跟权限控件。
+export const CC_LAYOUT_SCHEMA_VERSION = 8
 
 export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   version: CC_LAYOUT_SCHEMA_VERSION,
@@ -27,10 +28,9 @@ export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
     model: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
     reasoning: { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
     mode: { slot: 'status-secondary', order: 4, offsetX: 0, offsetY: 0 },
+    tokens: { slot: 'status-secondary', order: 5, offsetX: 0, offsetY: 0 },
     activity: { slot: 'status-primary', order: 0, offsetX: 0, offsetY: 0 },
     ekg: { slot: 'status-primary', order: 1, offsetX: 0, offsetY: 0 },
-    pct: { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 },
-    tokens: { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
     send: { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
     tasks: { slot: 'status-primary', order: 4, offsetX: 0, offsetY: 0 },
   },
