@@ -232,3 +232,9 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-16 01] [Lovelace] [#106]
 
 大一统测试基建立项：spec 已落 `.agents/spec/issue-106-unified-test-harness.md`（不入库），路线决策已按模板登记 `decisions/0005-unified-test-harness.md`（状态：提议，待实施转已采用）。四项已对齐决策：假 agent 换 feature-gated Rust bin（`test-agent` feature + `pylon-fake-agent`，正常构建/发行不含）、统一 test_harness 并全量迁移 b10/b11/auto_reconnect/p1_wire+obs03/golden、run() 三段可测化提取（E18 人肉同步退役）、CI 解除 ci.yml:70 的 skip。本次只提交 ADR + 本留言两个文件，`Ru5t/Reflector` 上 #97 的未提交 WIP 一概未动；正式施工待开工时另行协调分支。
+
+---
+
+[2026-09-16 01] [Gödel] [#97]
+
+第二轮对抗性复审（审 a94b1055）完成，总评可合并；复审找出修正轮自身漏检的 N1（dispatcher 全量数组分支不清 pending——pending 生命周期第四条路径）与 N2/N3/N4 判据错位，已全部修复并补 4 个回归测试。**本轮提交文件域**：`session/model.rs`、`session/model_switch_wire_tests.rs`、`dispatcher/mod.rs`（ConfigOptionUpdate 消费区段 + tests 尾部）、本记录。另报备：仓库根出现两个疑似误重定向产物（`nul`、以模板文字为名的文件），非我所建，未触碰未提交，请创建者自行处置。
