@@ -176,48 +176,36 @@ impl TestStateBuilder {
         self
     }
 
-    /// 同步构造（AppState 无 async 字段）；未覆盖字段全默认（E18 纪律见结构体文档）。
+    /// 同步构造（AppState 无 async 字段）；未覆盖字段经 build_app_state 与 run()
+    /// 同源（P3a：E18 人肉同步退役——AppState 增字段时编译失败点仅 build_app_state）。
     pub(crate) fn build(self) -> AppState {
-        AppState {
+        let startup = self
+            .startup
+            .read()
+            .expect("startup diagnostics lock")
+            .clone();
+        let state = crate::build_app_state(crate::AppStateParts {
             runtimes: self.runtimes,
-            agents: self.agents,
-            active_agent: Arc::new(Mutex::new(self.active_agent)),
-            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
+            agents: Arc::into_inner(self.agents)
+                .expect("agents Arc must be unique")
+                .into_inner()
+                .expect("agents lock"),
+            active_agent: self.active_agent,
             runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
             prism: self.prism,
             gateway: self.gateway,
-            startup: self.startup,
-            approval_mode: Arc::new(Mutex::new(self.approval_mode)),
-            browser_agent: Arc::new(crate::browser_agent::hub::BrowserAgentHub::new()),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-            config_write_lock: tokio::sync::Mutex::new(()),
-            browser: Arc::new(crate::browser::BrowserManager::new()),
-            // E18 纪律：默认值 = run() 现值（mcp_wire 初始 None）。
-            mcp_wire: Mutex::new(None),
-            frontend_log_throttle: Mutex::new(crate::runtime_log::FrontendLogThrottle::default()),
-            // I14-W1 机械后果：AppState 新字段默认 None（与 run() 一致，setup 填充）。
-            message_service: Arc::new(Mutex::new(None)),
-            // I14-W5 机械后果：AppState 新字段默认 None（与 run() 一致，setup 填充）。
-            user_data_service: Arc::new(Mutex::new(None)),
-            // M3 EVT-02 机械后果：canonical 事件仓库槽位默认 None（与 run() 一致，setup 填充）。
-            event_service: Arc::new(Mutex::new(None)),
-            // I12-W4 机械后果：gateway 实例服务默认空 registry，store 路径 None（测试不落盘）。
-            gateway_instances: crate::gateway::instance::GatewayInstanceService::new(),
-            gateway_instance_store_path: Arc::new(Mutex::new(None)),
-            // I12-W5 机械后果：凭据存储槽位默认 None（测试可注入临时目录 CredentialStore）。
-            gateway_credentials: Arc::new(Mutex::new(None)),
-            // CWD-03 机械后果：Workspace 注册表默认空（测试经 with_workspace 注入）。
-            workspaces: self.workspaces,
-            // 施工文档 §2.3 机械后果：数据目录槽位默认空（测试经 with_data_dirs 注入）。
-            data_dirs: self.data_dirs,
-            plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
-            pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
-            // P55：kernel hook 桥默认未 ready（测试经 bridge.mark_started() 显式开启）。
-            hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
+            startup,
+        });
+        // 测试专属字段覆盖（build_app_state 只承载 run() 生产语义的公共部分）：
+        *state.approval_mode.lock().expect("approval lock") = self.approval_mode;
+        *state.workspaces.lock().expect("workspaces lock") = Arc::into_inner(self.workspaces)
+            .expect("workspaces Arc must be unique")
+            .into_inner()
+            .expect("workspaces lock");
+        if let Some(dirs) = self.data_dirs.get() {
+            let _ = state.data_dirs.set(dirs.clone());
         }
+        state
     }
 }
 
@@ -231,14 +219,8 @@ pub(crate) async fn test_state_with_acp(
     gateway: Arc<GatewayCore>,
     prism: PrismClient,
 ) -> AppState {
-    // P0-3（R2-WI03）+ R2-WI06：镜像 run() 的协议适配器注册（单测进程不执行 run()）——
-    // request_permission 走 provider-scoped adapter dispatch 必需；幂等覆盖。
-    crate::protocol_adapter::register_protocol_adapter(std::sync::Arc::new(
-        crate::protocol_adapter::RequestPermissionAdapter { provider: "peri" },
-    ));
-    crate::protocol_adapter::register_protocol_adapter(std::sync::Arc::new(
-        crate::protocol_adapter::RequestPermissionAdapter { provider: "hermes" },
-    ));
+    // P3a（#106）：run() 同一注册入口（幂等）——手工镜像退役。
+    crate::install_process_registrations();
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = initial_acp;
     TestStateBuilder::bare()
@@ -428,6 +410,39 @@ mod tests {
         assert!(
             runtime.acp.lock().await.is_crashed(),
             "注入的 AcpClient 必须挂在 runtime.acp 上（新建 disconnected 默认未崩溃）"
+        );
+    }
+
+    /// P3a（#106）：单一构造点证明——TestStateBuilder::build() 与 run() 生产装配
+    /// 同源（build_app_state），测试默认值不再人肉同步（E18 退役回归锁）。
+    #[tokio::test]
+    async fn build_app_state_single_construction_point_defaults() {
+        let state = TestStateBuilder::bare().build();
+        assert_eq!(&*state.active_agent.lock().unwrap(), "ghost-agent");
+        assert_eq!(&*state.approval_mode.lock().unwrap(), "default");
+        assert!(state.runtime_mcp.lock().unwrap().is_none());
+        assert!(state.event_service.lock().unwrap().is_none());
+        assert!(state.data_dirs.get().is_none());
+        assert_eq!(
+            state.prism.status().await["status"],
+            "configuration_error",
+            "默认 prism 必须为 unavailable（与 run() 无配置路径一致）"
+        );
+    }
+
+    /// P3a（#106）：install_process_registrations 幂等——重复调用不 panic，
+    /// 协议适配器仍可按 provider 解析（run() 与测试装配共用的前提）。
+    #[test]
+    fn install_process_registrations_is_idempotent() {
+        crate::install_process_registrations();
+        crate::install_process_registrations();
+        assert!(
+            crate::protocol_adapter::get_protocol_adapter("peri").is_some(),
+            "peri adapter must resolve after install"
+        );
+        assert!(
+            crate::protocol_adapter::get_protocol_adapter("hermes").is_some(),
+            "hermes adapter must resolve after install"
         );
     }
 }
