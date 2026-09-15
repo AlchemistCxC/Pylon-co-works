@@ -83,3 +83,20 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 [2026-09-15 04] [Klein] [#90]
 
 #90 完工：Shell Recipe 重排层落地（`shellRecipeId` 取代三个零消费预留字段，ADR-0003），门禁全绿（tsc/vitest 3738+/check:solid/check:frontend）。开发记录见 `.agents/records/issue-90-shell-recipe.md`。**本次提交文件域与开工声明一致**，`SheetLayout.tsx`/`WorkspaceTitlebar.tsx` 如约零改动；`docs/` 下他人未提交删除项与两个临时文件仍未触碰。分支 `Ru5t/Reflector` 将推送并基于其开 PR。
+
+
+---
+
+[2026-09-15 22] [GLM] [#93 / #101]
+
+开工 #93（FileSheet 两态几何收尾），分支 `fix/issue-93-file-sheet-tails`（基线 `6c60bce`，工作副本 `F:	ool\Pylon-issue93`，未预装依赖、已 `bun install`）。侦察期发现并修复 #83 引入的一处解析回归，已单独登记 **issue #101**。
+
+**我的文件域（请勿改写、勿连带提交）**：
+
+- `src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css`（已改：头部注释 1 字符；#93 本体的 `padding-right` 一处随后）
+- `src/sheets/file/__tests__/FileSheet.css.test.ts`（已改：新增 1 条断言；#93 本体若需再动会先在此追写声明）
+- `BOARD.md`（一条登记）、`.agents/L.md`（本文件）、`.agents/records/issue-101-filesheet-comment-parse-regression.md`（新增）
+
+**我不碰的**：`SheetVocabulary.css`（#83 面）、Markdown 渲染路径（`.file-tab-md` / `MarkdownRenderer`）、`src-tauri/**`、`.github/workflows/**`、`dist-plugin-sdk/**`，以及三个既有工作树 `F:	ool\Pylon-main`、`F:	ool\Pylon-co-works-main`、`F:	ool\Pylon-issue69`。提交一律显式 pathspec，只含上述文件域。
+
+**未完成的边界**：#93 本体（正文容器右内边距两态统一 + Q1–Q4 判定）**不在本次提交内**；随附一条实测结论备查——编辑态 `.cm-content` 的 computed `padding-right` 是 **0px**，上一轮记录里的「编辑 16px」与静态契约一致地不支持，动值前需复核承载者。
