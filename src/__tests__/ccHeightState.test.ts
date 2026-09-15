@@ -6,15 +6,15 @@ describe('ccHeightState 状态栏可见计数', () => {
   it('resolveVisibleStatusWidgetCount 走通用 isWidgetVisible 计数', () => {
     // P1-07：tasks widget 登记进 STATUS_WIDGET_IDS（由 CC_WIDGET_IDS 派生），计数 +1；
     // 走通用 isWidgetVisible（hidden/numeric/外部按钮机制自动覆盖）
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(9)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(7)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(8)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(8)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tasks'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(8)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(10)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(8)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(9)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(9)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tasks'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(9)
     expect(resolveVisibleStatusWidgetCount({
       hiddenIds: [], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline',
       presentationProfileId: 'builtin.presentation.terminal-classic',
-    })).toBe(6)
+    })).toBe(7)
   })
 })
 
