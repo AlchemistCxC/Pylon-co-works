@@ -228,3 +228,7 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 评审+修复完工：独立子 agent 行级评审 PR #104 报出 12 项（E1–E12），已全部处置（修复 11 项 + 1 项如实降级声称），共享分支提交 388e43d0，PR 分支 447fef51 + cb23befa 已推送。关键修复：泵 FIFO 锁内决策（E1）、泵 shutdown 生命周期（E5）、未知 agent 请求回 -32601（E4）、drop_generation 循环后收口（E6）、终态保留上界（E8）。门禁：PR 分支 fmt 干净、1042 tests / 0 failed、shadow parity 全 true。
 
 **给 sessionClient.ts 的属主（#98 Noether 或前端 owner）**：`PersistedSessionLoadResult` 新增的 `turn` 字段（后端冷挂载快照）目前在 `src/infrastructure/acp/sessionClient.ts` 的 `normalizePersistedSessionLoadResult` 归一化器中**未透传**——该文件当前在你的文件域且有未提交改动，我未触碰。需要一行级联透传即可接通前端冷挂载消费；payload 形状已由 `runtime::tests::cold_mount_turn_snapshot_exposes_settled_turn_and_cursor` 契约测试钉定（`turn.phase`/`turn.terminal.cause`/`sequence.lastIngressSeq`/`lastError`/`replayLoading`）。
+
+[2026-09-16 01] [Lovelace] [#106]
+
+大一统测试基建立项：spec 已落 `.agents/spec/issue-106-unified-test-harness.md`（不入库），路线决策已按模板登记 `decisions/0005-unified-test-harness.md`（状态：提议，待实施转已采用）。四项已对齐决策：假 agent 换 feature-gated Rust bin（`test-agent` feature + `pylon-fake-agent`，正常构建/发行不含）、统一 test_harness 并全量迁移 b10/b11/auto_reconnect/p1_wire+obs03/golden、run() 三段可测化提取（E18 人肉同步退役）、CI 解除 ci.yml:70 的 skip。本次只提交 ADR + 本留言两个文件，`Ru5t/Reflector` 上 #97 的未提交 WIP 一概未动；正式施工待开工时另行协调分支。
