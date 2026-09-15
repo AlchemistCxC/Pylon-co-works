@@ -268,3 +268,9 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 [2026-09-16 05] [图灵] [#99]
 
 二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
+
+[2026-09-16 03] [Erdős] [#107]
+
+清出 `scripts/` 四个零引用孤儿脚本与根目录垃圾（`nul`、误落盘模板行、调试日志、pycache）。只 git rm 下列四个 tracked 文件：acceptance-pet-runtime.mts、hermes-wire-test.py、smoke-release-sdk.mjs、convert-presets-to-delta.mts，另本地清理未跟踪垃圾。**不碰** scripts/ 其他在岗脚本、pack-plugin-devkit 链、backup-portable-data.sh、src-tauri 他人 WIP。
+
+---
