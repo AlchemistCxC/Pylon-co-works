@@ -5,7 +5,12 @@
  * inventory.  A new path must be added to an explicit allowlist (and therefore
  * reviewed) before the checker can pass.  CustomEvent names are stricter: a
  * pylon DOM event must be present in the typed registry.
+ *
+ * 检查集合 = git 跟踪的 src 源码。工作区里未跟踪的在制品（个人草稿/实验目录）不属于
+ * 仓库，跳过并汇总提示：否则本地草稿会把门禁顶红，仓库里又会留下指向不存在文件的
+ * 白名单死条目。非 git 环境（导出源码包等）自动退回全量扫描，行为同旧版。
  */
+import { execFileSync } from 'node:child_process'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { extname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,7 +69,6 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/sheets/history/HistorySheetView.tsx',
   'src/sheets/OverviewSheetView.tsx',
   'src/sheets/RuntimeSheetView.tsx',
-  'src/ui-demo/immersiveStore.ts',
   'src/userDataRepository.ts',
   'src/workspaceEntityStore.ts',
   'src/workspace-sheets/activateAgentSheet.ts',
@@ -93,6 +97,22 @@ export const RENDERER_CUSTOM_EVENT_ALLOWLIST = new Set([
   'src/renderers/solid-workbench/input/ControlCenter.solid.tsx',
   'src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx',
 ])
+
+/**
+ * git 跟踪的文件清单（仓库根为基准、正斜杠，与 displayPath 同形）。
+ * 不是 git 仓库时返回 null，调用方退回全量扫描。
+ */
+function trackedSourcePaths(): Set<string> | null {
+  try {
+    const output = execFileSync('git', ['ls-files', '-z', '--', 'src'], {
+      cwd: projectRoot,
+      maxBuffer: 64 * 1024 * 1024,
+    }).toString('utf8')
+    return new Set(output.split('\0').filter(Boolean))
+  } catch {
+    return null
+  }
+}
 
 async function walk(directory: string): Promise<string[]> {
   let entries
@@ -151,14 +171,20 @@ async function registryNames(): Promise<Set<string>> {
   return new Set([...source.matchAll(/['"](pylon:[^'"]+)['"]/g)].map(match => match[1]))
 }
 
-export async function runRuntimeBoundaryCheck(): Promise<{ violations: string[]; reports: string[] }> {
+export async function runRuntimeBoundaryCheck(): Promise<{ violations: string[]; reports: string[]; skipped: string[] }> {
   const violations: string[] = []
   const reports: string[] = []
+  const skipped: string[] = []
+  const tracked = trackedSourcePaths()
   const registry = await registryNames()
   for (const file of await walk(resolve(projectRoot, 'src'))) {
     if (!sourceExtensions.has(extname(file))) continue
     const path = displayPath(file)
     if (!productionFile(`/${path}`)) continue
+    if (tracked && !tracked.has(path)) {
+      skipped.push(path)
+      continue
+    }
     const source = await readFile(file, 'utf8')
 
     if (hasDirectInvoke(source)) {
@@ -177,11 +203,15 @@ export async function runRuntimeBoundaryCheck(): Promise<{ violations: string[];
       else violations.push(`${path}: renderer 直发 pylon CustomEvent，须改走 semantic command（宪法 §3.2.5）`)
     }
   }
-  return { violations, reports }
+  return { violations, reports, skipped }
 }
 
 const result = await runRuntimeBoundaryCheck()
 for (const report of result.reports) console.warn(`边界遗留：${report}`)
+if (result.skipped.length > 0) {
+  const preview = result.skipped.slice(0, 3).join('、')
+  console.log(`未跟踪文件跳过 ${result.skipped.length} 个（不在 git 中，不计入门禁）：${preview}${result.skipped.length > 3 ? ' 等' : ''}`)
+}
 if (result.violations.length > 0) {
   console.error(`运行时边界门禁失败：\n${result.violations.map(item => `- ${item}`).join('\n')}`)
   process.exit(1)
