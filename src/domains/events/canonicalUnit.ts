@@ -10,12 +10,18 @@
  * 读侧优先消费单元：compact 读返回「单元 + 未覆盖行」，被单元覆盖的行不再读取
  * （L2）/已删除（L3）。展开按 segment 重建 canonical 事件（eventId = owner#seqEnd），
  * 投影结果与逐行投影逐字节等价。
+ *
+ * **段内事件形状**：单元载荷里的整行 segment 是**后端 canonical_events 行的形状**
+ * （`canonical_event_wire`：嵌套 owner/provenance 的 EVT-01 事件；历史数据可能是扁平
+ * 列形状）。两种形状都在本模块的解析边界经 `normalizeCanonicalEventRow` 归一——绕过
+ * 这一步会把扁平行当不可读（#81 回归：重启后整轮历史丢失，且消息投影缺 owner 抛错）。
  */
 import {
   createCanonicalEvent,
   type CanonicalConversationEvent,
   type CanonicalEventIdentity,
 } from './eventSchema'
+import { normalizeCanonicalEventRow } from './canonicalEventRow.ts'
 
 export const TURN_UNIT_AGGREGATE_KIND = 'turn-rollup'
 export const TURN_UNIT_FOLD_SCHEME = 'adjacent-delta-fold-v1'
@@ -43,7 +49,8 @@ export interface TurnUnitDeltaRunSegment {
 
 export interface TurnUnitEventSegment {
   readonly kind: 'event'
-  /** 原样保留的整行 canonical 事件（tool/user/状态/unknown；raw 不丢）。 */
+  /** 整行 segment：tool/user/状态/unknown 的原样保留事件（raw 不丢）。解析边界已归一为
+   * 嵌套 owner 的 EVT-01 canonical 事件；扁平落盘行不会泄漏到消费方。 */
   readonly event: CanonicalConversationEvent
 }
 
@@ -98,8 +105,10 @@ export function parseTurnUnitPayload(event: CanonicalConversationEvent): TurnUni
     }
     if (segment.kind === 'event') {
       const inner = segment.event
-      if (!inner || typeof inner !== 'object' || typeof (inner as CanonicalConversationEvent).sequence !== 'number') return undefined
-      parsedSegments.push({ kind: 'event', event: inner as CanonicalConversationEvent })
+      // 先在**载荷原文**上校验 sequence 存在（`normalizeCanonicalEventRow` 会把缺失的
+      // sequence 兜底为 0，先归一后校验会放行形状损坏的段），再归一为嵌套 canonical 事件。
+      if (!inner || typeof inner !== 'object' || typeof (inner as { sequence?: unknown }).sequence !== 'number') return undefined
+      parsedSegments.push({ kind: 'event', event: normalizeCanonicalEventRow(inner) })
       continue
     }
     return undefined

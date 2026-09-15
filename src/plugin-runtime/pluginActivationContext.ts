@@ -45,6 +45,8 @@ import { createPluginTitlebarApi, type PluginTitlebarApi } from './titlebar/plug
 import type { TitlebarContribution } from './titlebar/titlebarTypes.ts'
 import { createPluginStorageApi } from './storage/pluginStorageApi.ts'
 import type { PluginStorageApi } from './storage/pluginStorageTypes.ts'
+import { createPluginCcWidgetApi, type PluginCcWidgetApi } from './cc-widget/pluginCcWidgetApi.ts'
+import type { CcWidgetContribution } from './cc-widget/ccWidgetTypes.ts'
 import type { PluginManagementApi } from './management/pluginManagementTypes.ts'
 import type { BuiltinPluginDefinition } from './pluginRuntime.ts'
 
@@ -67,6 +69,7 @@ export interface PluginActivationTransactions {
   readonly interfaceModes: RegistryTransaction<InterfaceModeContribution>
   readonly shellRecipes: RegistryTransaction<ShellRecipeContribution>
   readonly titlebar: RegistryTransaction<TitlebarContribution>
+  readonly ccWidget: RegistryTransaction<CcWidgetContribution>
 }
 
 export interface BuiltinPluginActivationContext {
@@ -94,6 +97,7 @@ export interface BuiltinPluginActivationContext {
   readonly titlebar: PluginTitlebarApi
   /** API 1.1 新增：插件私有 KV 存储（按 pluginId 隔离，超软配额抛错） */
   readonly storage: PluginStorageApi
+  readonly ccWidget: PluginCcWidgetApi
   /** API 1.2 新增：capability-gated 管理面。仅当 manifest 声明 `plugin.management`
    *  且用户已授权时存在；未声明或未授权时属性不存在（C3：条件装配，不是空实现）。 */
   readonly management?: PluginManagementApi
@@ -180,6 +184,7 @@ export function createPluginActivationContext(
       transactions?.titlebar,
     ),
     storage: createPluginStorageApi(identity),
+    ccWidget: createPluginCcWidgetApi(registries.ccWidgetRegistry, identity, scope, transactions?.ccWidget),
     ...(management ? { management } : {}),
   }
 }

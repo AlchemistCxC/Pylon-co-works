@@ -49,6 +49,7 @@ export class PluginContributionTransaction {
       interfaceModes: registries.interfaceModeRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       shellRecipes: registries.shellRecipeRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
       titlebar: registries.titlebarRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      ccWidget: registries.ccWidgetRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
     }
   }
 

@@ -8,7 +8,7 @@ import { normalizeSessionConfigOptions } from '../../../../domains/workbench/ses
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../SolidWorkbenchContext.solid.tsx'
 import type { SolidWorkbenchInput } from '../../workbenchContracts.ts'
-import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from '../WorkbenchWidgets.solid.tsx'
+import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from '../WorkbenchWidgets.solid.tsx'
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
 
@@ -49,16 +49,15 @@ function renderWidget(view: () => JSX.Element, themePatch: Partial<typeof DEFAUL
 
 describe('Solid Workbench widgets', () => {
   it('switching model variants closes stale menus and preserves the dropdown interaction', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
     expect(screen.getAllByRole('listbox')).toHaveLength(1)
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'badge' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'cycle' })
     expect(screen.queryByRole('listbox')).toBeNull()
-    expect(screen.queryByRole('button')).toBeNull()
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'minimal' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'cycle' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
     await waitFor(() => expect(services.commands.calls).toHaveLength(1))
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelVariant: 'dropdown' })
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'menu' })
     const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(trigger)
@@ -67,8 +66,9 @@ describe('Solid Workbench widgets', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
+  // 思考强度已从模型菜单移除，待独立控件接手后恢复
   it('live reasoning sends the advertised config id and renders only confirmed values', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
     const publish = (value: string) => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
@@ -78,24 +78,24 @@ describe('Solid Workbench widgets', () => {
     }
     publish('low')
     services.commands.setHandler('setConfigOption', async () => { publish('high'); return { ok: true } })
-    fireEvent.click(screen.getByRole('button', { name: /（low）/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
     expect(screen.queryByRole('option', { name: 'ultra' })).toBeNull()
     fireEvent.click(screen.getByRole('option', { name: 'high' }))
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual([
       'preview-session', 'reasoning_effort', 'high', { expectedValue: 'low', expectedVersion: 7 },
     ]))
-    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'high' })).toBeTruthy()
     services.commands.setHandler('setConfigOption', async () => ({ ok: false, error: 'reasoning denied' }))
-    fireEvent.click(screen.getByRole('button', { name: /（high）/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'high' }))
     fireEvent.click(screen.getByRole('option', { name: 'low' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('reasoning denied')
-    expect(screen.getByRole('button', { name: /（high）/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'high' })).toBeTruthy()
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'))
-    expect(screen.queryByRole('button', { name: /（high）/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'high' })).toBeNull()
   })
 
   it('Model dropdown 枚举 runtime models，并经 facade 切换', async () => {
-    const services = renderWidget(() => <SolidModelWidget />, { modelVariant: 'dropdown' })
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
     expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
     fireEvent.click(screen.getByRole('option', { name: 'deepseek-v4-pro' }))
@@ -110,16 +110,12 @@ describe('Solid Workbench widgets', () => {
         forceDropdown
         draftValue={() => 'deepseek-v4-flash'}
         onDraftChange={() => {}}
-        reasoningValue={() => 'medium'}
-        onReasoningChange={() => {}}
       />,
-      { modelVariant: 'badge' },
+      { modelSwitchMode: 'cycle' },
     )
     const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
     expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
     fireEvent.click(trigger)
-    expect(screen.getByRole('group', { name: '思考强度' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'xhigh' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy()
     services.destroy()
   })
@@ -130,16 +126,14 @@ describe('Solid Workbench widgets', () => {
         forceDropdown
         draftValue={() => 'kimi-k2'}
         onDraftChange={() => {}}
-        reasoningValue={() => 'medium'}
-        onReasoningChange={() => {}}
       />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { sessionId: null, agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }, { id: 'glm-5', label: 'GLM · 5' }] },
     )
     services.runtime.update({ availableModels: [], activeModel: '' })
     const trigger = await screen.findByRole('button', { name: /kimi-k2/ })
     fireEvent.click(trigger)
-    expect(screen.getByRole('option', { name: 'Kimi K2' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'Kimi K2' })).toBeNull()
     expect(screen.getByRole('option', { name: 'GLM · 5' })).toBeTruthy()
     expect(screen.queryByRole('option', { name: 'deepseek-v4-flash' })).toBeNull()
     expect(screen.queryByRole('option', { name: 'deepseek-v4-pro' })).toBeNull()
@@ -153,20 +147,20 @@ describe('Solid Workbench widgets', () => {
         draftValue={() => 'my-default-model'}
         onDraftChange={() => {}}
       />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { sessionId: null, agentAdvertisedModels: [] },
     )
     services.runtime.update({ availableModels: [], activeModel: '' })
     fireEvent.click(await screen.findByRole('button', { name: /my-default-model/ }))
     const menu = screen.getByRole('listbox', { name: '模型列表' })
-    expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual(['my-default-model'])
+    expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual([])
     services.destroy()
   })
 
   it('有会话时不并入 agent 宣告集合，协商快照保持权威（issue #53 A2）', async () => {
     renderWidget(
       () => <SolidModelWidget />,
-      { modelVariant: 'dropdown' },
+      { modelSwitchMode: 'menu' },
       { agentAdvertisedModels: [{ id: 'kimi-k2', label: 'Kimi K2' }] },
     )
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
@@ -176,8 +170,7 @@ describe('Solid Workbench widgets', () => {
 
   it('模型/模式弹层支持 Escape 与外部点击关闭，并把焦点还给触发器', async () => {
     renderWidget(() => <div>
-      <SolidModelWidget forceDropdown draftValue={() => 'deepseek-v4-flash'} onDraftChange={() => {}}
-        reasoningValue={() => 'medium'} onReasoningChange={() => {}} />
+      <SolidModelWidget forceDropdown draftValue={() => 'deepseek-v4-flash'} onDraftChange={() => {}} />
       <SolidModeWidget forceDropdown draftValue={() => 'auto'} onDraftChange={() => {}} />
     </div>);
 
@@ -194,71 +187,122 @@ describe('Solid Workbench widgets', () => {
     fireEvent.pointerDown(document.body)
     await waitFor(() => expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull())
 
-    const modeTrigger = screen.getByRole('button', { name: /全自动/ })
+    const modeTrigger = screen.getByRole('button', { name: 'auto' })
     fireEvent.click(modeTrigger)
-    const modeMenu = screen.getByRole('listbox', { name: '模式列表' })
+    const modeMenu = screen.getByRole('listbox', { name: '权限模式选项' })
     expect(modeMenu).toHaveAttribute('data-popover', 'control-center')
     fireEvent.keyDown(modeMenu, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('listbox', { name: '模式列表' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: '权限模式选项' })).toBeNull())
     expect(modeTrigger).toHaveFocus()
   })
 
-  it('思考等级选项保留原始 id，显示格式为模型（思考等级）', () => {
-    const selected: string[] = []
-    renderWidget(() => <SolidModelWidget
-      forceDropdown
-      draftValue={() => 'deepseek-v4-flash'}
-      onDraftChange={() => {}}
-      reasoningValue={() => 'medium'}
-      onReasoningChange={value => selected.push(value)}
-    />)
-    fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
-    fireEvent.click(screen.getByRole('option', { name: 'xhigh' }))
-    expect(selected).toEqual(['xhigh'])
-    expect(screen.getByRole('button', { name: /deepseek-v4-flash（medium）/ })).toBeTruthy()
+
+  it('reasoning widget renders menu, filters current value, and cycles', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
+    const trigger = screen.getByRole('button', { name: 'none' })
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('listbox', { name: '思考强度选项' })
+    expect(menu).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'none' })).toBeNull()
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+    services.appearance.setTheme({ ...structuredClone(DEFAULTS), reasoningSwitchMode: 'cycle' })
+    fireEvent.click(trigger)
+    await waitFor(() => expect(services.commands.calls.length).toBeGreaterThan(0))
+  })
+  it('切换中按钮显示静态 ...... 且不重复发命令', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
+    const publish = (value: string) => {
+      const document = createWorkbenchDocument('preview-session')
+      services.runtime.replaceDocument({ ...document, session: { ...document.session,
+        options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
+          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+      } })
+    }
+    publish('low')
+    let release: (result: { ok: boolean }) => void = () => {}
+    services.commands.setHandler('setConfigOption', () => new Promise(resolve => { release = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '......' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    expect(services.commands.calls).toHaveLength(1)
+    release({ ok: true })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'low' })).toBeTruthy())
   })
 
-  it('Model minimal 循环；badge 只读不产生按钮', async () => {
-    const minimal = renderWidget(() => <SolidModelWidget />, { modelVariant: 'minimal' })
+  it('空会话草稿态走 onDraftChange 且不发命令', () => {
+    const drafts: string[] = []
+    const services = renderWidget(
+      () => <SolidReasoningWidget draftValue={() => 'low'} onDraftChange={value => drafts.push(value)} />,
+      { reasoningSwitchMode: 'menu' },
+      { sessionId: '' },
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'low' }))
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    expect(drafts).toEqual(['high'])
+    expect(services.commands.calls).toHaveLength(0)
+  })
+
+  it('Model cycle 模式循环切换', async () => {
+    const minimal = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'cycle' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
     await waitFor(() => expect(minimal.commands.calls[0]?.args).toEqual(['preview-session', 'deepseek-v4-pro']))
     cleanup()
     minimal.destroy()
 
-    renderWidget(() => <SolidModelWidget />, { modelVariant: 'badge' })
-    expect(screen.getByText('deepseek-v4-flash').className).toContain('cc-model-badge')
-    expect(screen.queryByRole('button')).toBeNull()
+    renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'cycle' })
+    expect(screen.getByRole('button', { name: 'deepseek-v4-flash' })).toBeTruthy()
   })
 
-  it('Mode pill/badge/minimal 保留 class/data-mode，点击循环 mode', async () => {
-    const services = renderWidget(() => <SolidModeWidget />, { modeVariant: 'badge' })
-    const button = screen.getByRole('button', { name: '[auto]' })
-    expect(button.className).toContain('cc-mode-badge')
+  it('权限控件：本体只显示机器值（不翻译），点击循环 mode', async () => {
+    const services = renderWidget(() => <SolidModeWidget />, { permissionSwitchMode: 'cycle' })
+    const button = screen.getByRole('button', { name: 'auto' })
+    expect(button.className).toContain('cc-permission-trigger')
     expect(button.getAttribute('data-mode')).toBe('auto')
+    expect(button.textContent).toBe('auto')
+    // 定位定案：排在思考强度右边，中间留 12px（PERMISSION_GAP_PX）
+    expect((button.closest('.solid-permission-widget') as HTMLElement).style.marginLeft).toBe('12px')
     fireEvent.click(button)
 
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual(['preview-session', 'bypass']))
   })
 
-  it('空态 mode 下拉显示全自动但提交 raw auto', async () => {
+  it('权限控件：菜单选项显示机器值（不翻译），不出现中文标签', async () => {
+    renderWidget(() => <SolidModeWidget />, { permissionSwitchMode: 'menu' })
+    fireEvent.click(screen.getByRole('button', { name: 'auto' }))
+    expect(screen.getByRole('listbox', { name: '权限模式选项' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'bypass' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: '绕过确认' })).toBeNull()
+  })
+
+  it('权限控件：permissionTextColor=mode 不写 inline color（交语义色），white 时覆盖', () => {
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'mode' })
+    expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('')
+    cleanup()
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'white' })
+    expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('rgb(255, 255, 255)')
+  })
+
+  it('空态 mode 下拉显示机器值且提交 raw auto', async () => {
     const services = renderWidget(() => <SolidModeWidget
       forceDropdown
       draftValue={() => 'auto'}
       onDraftChange={value => services.runtime.update({ activeMode: value })}
     />)
-    const trigger = screen.getByRole('button', { name: /全自动/ })
+    const trigger = screen.getByRole('button', { name: 'auto' })
     fireEvent.click(trigger)
-    expect(screen.getByRole('listbox', { name: '模式列表' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: '全自动' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: '接受编辑' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('option', { name: '绕过确认' }))
+    expect(screen.getByRole('listbox', { name: '权限模式选项' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'bypass' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: '绕过确认' })).toBeNull()
+    fireEvent.click(screen.getByRole('option', { name: 'bypass' }))
     await waitFor(() => expect(services.runtime.getSnapshot().activeMode).toBe('bypass'))
   })
 
   it('Model/Mode facade 失败显示可见错误', async () => {
     const services = renderWidget(() => <><SolidModelWidget /><SolidModeWidget /></>, {
-      modelVariant: 'minimal',
-      modeVariant: 'minimal',
+      modelSwitchMode: 'cycle',
+      permissionSwitchMode: 'cycle',
     })
     services.commands.setHandler('setModel', vi.fn(async () => ({ ok: false, error: 'model denied' })))
     services.commands.setHandler('setMode', vi.fn(async () => ({ ok: false, error: 'mode denied' })))
@@ -269,34 +313,23 @@ describe('Solid Workbench widgets', () => {
     expect(await screen.findByText('mode denied')).toBeTruthy()
   })
 
-  it('Send variant 派发输入事件；生成中改走 cancel facade', async () => {
+  it('注册发送底层块复用发送/停止语义且支持禁用', async () => {
     const sendEvent = vi.fn()
     window.addEventListener('pylon:solid-input-send', sendEvent)
-    const services = renderWidget(() => <SolidSendWidget />, { sendVariant: 'square' })
-    const sendButton = screen.getByRole('button', { name: '发送消息' })
-    expect(sendButton.className).toBe('cc-send-square')
-    fireEvent.click(sendButton)
+    const services = renderWidget(() => <SolidCcSendButton mode="inline" />)
+    const button = screen.getByRole('button', { name: '发送消息' })
+    fireEvent.click(button)
     expect(sendEvent).toHaveBeenCalledTimes(1)
 
     services.runtime.update({ generating: true })
     await waitFor(() => expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '停止生成' }))
     await waitFor(() => expect(services.commands.calls[0]?.command).toBe('cancel'))
+
+    cleanup()
+    const disabledServices = renderWidget(() => <SolidCcSendButton mode="external" disabled />)
+    expect(screen.getByRole('button')).toBeDisabled()
+    disabledServices.destroy()
     window.removeEventListener('pylon:solid-input-send', sendEvent)
-  })
-
-  it('Attach 反映 capability、图片提示与 variant，并派发输入事件', async () => {
-    const attachEvent = vi.fn()
-    window.addEventListener('pylon:solid-input-attach', attachEvent)
-    const services = renderWidget(() => <SolidAttachWidget />, { attachVariant: 'minimal' })
-    const attach = screen.getByRole('button', { name: '附件（当前 Agent 不支持图片）' })
-    expect(attach.className).toBe('cc-attach-minimal')
-    expect(attach.title).toContain('不支持图片')
-    fireEvent.click(attach)
-    expect(attachEvent).toHaveBeenCalledTimes(1)
-
-    services.runtime.update({ canAttach: false })
-    await waitFor(() => expect(screen.getByRole('button')).toBeDisabled())
-    window.removeEventListener('pylon:solid-input-attach', attachEvent)
   })
 })

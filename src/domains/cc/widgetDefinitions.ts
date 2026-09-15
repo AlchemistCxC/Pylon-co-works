@@ -9,7 +9,7 @@
 import type { ThemeSettings } from '../../store.ts'
 
 /** 全部中控 widget id（含输入栏、上下文、会话身份、运行态与动作按钮）。 */
-export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'activity', 'ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach', 'tasks'] as const
+export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'model', 'reasoning', 'mode', 'activity', 'ekg', 'tokens', 'send', 'tasks'] as const
 export type CcWidgetId = (typeof CC_WIDGET_IDS)[number]
 
 /** 状态区 widget（除 input 外全部计入中控最小高度约束）——由 id 列表派生，不平行维护 */
@@ -18,8 +18,12 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
 // ── C4：属性表单 schema（PropertyPanel 由 registry 派生，消灭硬编码）──
 
 export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' | 'ekgGreen' | 'ekgYellow' | 'ekgRed' | 'barTrackColor' | 'barFillColor'
-export type CcNumberPropertyKey = 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelVariant' | 'modeVariant' | 'sendVariant' | 'attachVariant'
+export type CcNumberPropertyKey =
+  | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
+  | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
+  | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
+  | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
 export type CcBooleanPropertyKey = 'barFillFollow'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
 
@@ -56,7 +60,7 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'section', title: '输入栏设置' },
     { kind: 'color', key: 'inputBg', label: '背景色' },
     { kind: 'color', key: 'inputTextColor', label: '文字色' },
-    { kind: 'number', key: 'inputFontSize', label: '字号', min: 12, max: 22, step: 0.1 },
+    { kind: 'number', key: 'inputFontSize', label: '字号', min: 12, max: 22, step: 1 },
     { kind: 'number', key: 'inputMinHeight', label: '最小高度', min: 36, max: 120, step: 0.1 },
     {
       kind: 'chips', key: 'inputMode', label: '模式',
@@ -90,26 +94,40 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'color', key: 'barFillColor', label: '填充颜色', showIf: t => t.ccStyle === 'bar' && t.barFillFollow === false },
   ],
   model: [
-    { kind: 'section', title: '模型控件外观' },
+    { kind: 'section', title: '模型控件' },
     {
-      kind: 'chips', key: 'modelVariant', label: '外观风格',
+      kind: 'chips', key: 'modelSwitchMode', label: '模型切换方式',
       options: [
-        { value: 'dropdown', label: '下拉' },
-        { value: 'minimal', label: '简洁' },
-        { value: 'badge', label: '徽章' },
+        { value: 'menu', label: '弹菜单' },
+        { value: 'cycle', label: '点击轮换' },
       ],
     },
+    { kind: 'chips', key: 'modelBgColor', label: '模型背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'modelWidth', label: '模型宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'modelHeight', label: '模型高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'modelRadius', label: '模型圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'modelFontSize', label: '模型字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'modelTextColor', label: '模型文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
+  ],
+  reasoning: [
+    { kind: 'section', title: '思考强度控件' },
+    { kind: 'chips', key: 'reasoningSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
+    { kind: 'chips', key: 'reasoningBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'reasoningWidth', label: '宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'reasoningHeight', label: '高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'reasoningRadius', label: '圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'reasoningFontSize', label: '字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'reasoningTextColor', label: '文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   mode: [
-    { kind: 'section', title: '模式控件外观' },
-    {
-      kind: 'chips', key: 'modeVariant', label: '外观风格',
-      options: [
-        { value: 'pill', label: '胶囊' },
-        { value: 'badge', label: '方括号' },
-        { value: 'minimal', label: '极简' },
-      ],
-    },
+    { kind: 'section', title: '权限控件' },
+    { kind: 'chips', key: 'permissionSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
+    { kind: 'chips', key: 'permissionBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+    { kind: 'number', key: 'permissionWidth', label: '宽度', min: 40, max: 400, step: 1 },
+    { kind: 'number', key: 'permissionHeight', label: '高度', min: 16, max: 80, step: 1 },
+    { kind: 'number', key: 'permissionRadius', label: '圆角', min: 0, max: 40, step: 1 },
+    { kind: 'number', key: 'permissionFontSize', label: '字号', min: 8, max: 32, step: 1 },
+    { kind: 'chips', key: 'permissionTextColor', label: '文字颜色', options: [{ value: 'mode', label: '跟模式' }, { value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
   send: [
     { kind: 'section', title: '发送按钮外观' },
@@ -122,18 +140,6 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
       ],
     },
   ],
-  attach: [
-    { kind: 'section', title: '附件按钮外观' },
-    {
-      kind: 'chips', key: 'attachVariant', label: '外观风格',
-      options: [
-        { value: 'icon', label: '圆形' },
-        { value: 'square', label: '方形' },
-        { value: 'minimal', label: '极简' },
-      ],
-    },
-  ],
-  pct: [],
   tokens: [],
   tasks: [],
   session: [],
@@ -162,11 +168,12 @@ export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   if (!edit
     && ctx.presentationProfileId === 'builtin.presentation.terminal-classic'
     && (id === 'session' || id === 'workspace' || id === 'activity')) return false
-  // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比
-  if (!edit && ctx.ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('pct')) return false
-  if (!edit && ctx.ccStyle === 'ring' && id === 'pct' && !ctx.hidden.includes('ekg')) return false
-  // 独立 send/attach widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮
-  if (id === 'send' || id === 'attach') {
+  // numeric 模式：百分比由「用量」控件（tokens）表达，隐藏 ekg 数值避免重复。
+  // ring 模式的去重规则随 pct 控件一并移除（S11）——ring 环与用量百分比会重复显示，
+  // 已接受；待「把用量条整合进用量控件」那一单统一收口。
+  if (!edit && ctx.ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('tokens')) return false
+  // 独立 send widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮
+  if (id === 'send') {
     if (!edit && !isExternalSubmitMode(ctx)) return false
   }
   return true
@@ -174,8 +181,7 @@ export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
 
 /**
  * 外部按钮模式（send/attach 独立 widget 渲染的前提）：非 CLI + submitButtonMode=external。
- * 单一真值：isWidgetVisible 与 ControlCenter 的 InputBar externalSend/externalAttach 传参
- * 共同消费，改判定一处即可。
+ * 单一真值：isWidgetVisible 统一消费此判定，改判定一处即可。
  */
 export function isExternalSubmitMode(ctx: Pick<WidgetVisibilityCtx, 'inputMode' | 'submitButtonMode'>): boolean {
   return ctx.inputMode !== 'cli' && ctx.submitButtonMode === 'external'

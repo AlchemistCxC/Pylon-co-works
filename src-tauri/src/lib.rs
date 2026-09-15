@@ -12,6 +12,7 @@ mod b11_inject_integration_tests;
 mod browser;
 mod browser_agent;
 mod browser_agent_cmds;
+pub mod browser_bridge;
 mod browser_cmds;
 mod correlation;
 mod cwd;
@@ -632,6 +633,11 @@ pub fn init_tracing() {
 ///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // issue #82：浏览器 MCP 桥以 `pylon.exe browser-bridge` 子命令形态运行
+    // （零发行包变更）。必须在 GUI 启动前分发：桥复用主二进制但不进 Tauri。
+    if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
+        std::process::exit(browser_bridge::run_stdio_bridge());
+    }
     // rustls 0.23 进程级 CryptoProvider：依赖树经 feature 统一同时启用
     // aws-lc-rs 与 ring（reqwest/hyper-rustls 与 tokio-tungstenite 各拉其一），
     // 自动探测必然失败——gateway QQ WSS 首次 TLS 握手即 panic（P78 真实平台

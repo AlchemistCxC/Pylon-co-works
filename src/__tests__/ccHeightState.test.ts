@@ -9,7 +9,7 @@ describe('ccHeightState 状态栏可见计数', () => {
     expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(9)
     expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(7)
     expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(8)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(8)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tokens'], inputMode: 'cli', ccStyle: 'numeric', submitButtonMode: 'inline' })).toBe(8)
     expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tasks'], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline' })).toBe(8)
     expect(resolveVisibleStatusWidgetCount({
       hiddenIds: [], inputMode: 'cli', ccStyle: 'wave', submitButtonMode: 'inline',

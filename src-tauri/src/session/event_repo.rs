@@ -838,6 +838,91 @@ pub(crate) fn parse_canonical_event(
     })
 }
 
+/// `CanonicalEventRow` → EVT-01 canonical 事件 JSON（`parse_canonical_event` 的逆）。
+///
+/// #81 回归修复：turn 单元行的整行 segment 必须嵌入 canonical 事件（嵌套
+/// `owner`/`provenance`），而不是数据库扁平列形状——前端唯一契约是嵌套 owner 的
+/// canonical 事件，嵌入扁平行会绕过读边界的归一化。载荷因此自描述：任何读者
+/// （前端展开、证据导出、未来消费者）拿到它都无需再猜落盘形状。
+///
+/// 不变量（由 `canonical_event_wire_round_trips_through_parse` 锁定）：
+/// `parse_canonical_event(&canonical_event_wire(row))` 与原行逐字段相等，例外是
+/// `created_at`（重取 now）与 `raw_*` 截断元数据：截断信息由 `rawPayload` 重算，
+/// 已裁剪的载荷很短 ⇒ 重解析会报「未截断」。故 wire 显式携带 `rawMetadata`
+/// （前端取证所需），但不指望它经 `parse_canonical_event` 往返（见
+/// `canonical_event_wire_keeps_truncation_metadata_in_payload`）。
+/// rollup 覆盖列属行存储细节，不属 EVT-01，故不输出。
+pub(crate) fn canonical_event_wire(row: &CanonicalEventRow) -> serde_json::Value {
+    let mut owner = serde_json::Map::new();
+    owner.insert("profileId".into(), serde_json::json!(row.profile_id));
+    owner.insert("agentId".into(), serde_json::json!(row.agent_id));
+    owner.insert(
+        "localSessionId".into(),
+        serde_json::json!(row.local_session_id),
+    );
+    if let Some(remote) = &row.remote_session_id {
+        owner.insert("remoteSessionId".into(), serde_json::json!(remote));
+    }
+    let mut provenance = serde_json::Map::new();
+    provenance.insert("origin".into(), serde_json::json!(row.provenance_origin));
+    provenance.insert("trust".into(), serde_json::json!(row.provenance_trust));
+    if let Some(provider) = &row.provenance_provider {
+        provenance.insert("provider".into(), serde_json::json!(provider));
+    }
+    if let Some(import_id) = &row.provenance_import_id {
+        provenance.insert("importId".into(), serde_json::json!(import_id));
+    }
+    let mut raw_metadata = serde_json::Map::new();
+    raw_metadata.insert("truncated".into(), serde_json::json!(row.raw_truncated));
+    raw_metadata.insert(
+        "originalBytes".into(),
+        serde_json::json!(row.raw_original_bytes),
+    );
+    raw_metadata.insert(
+        "retainedBytes".into(),
+        serde_json::json!(row.raw_retained_bytes),
+    );
+    raw_metadata.insert(
+        "omittedBytes".into(),
+        serde_json::json!(row.raw_omitted_bytes),
+    );
+    if let Some(reason) = &row.raw_truncation_reason {
+        raw_metadata.insert("reason".into(), serde_json::json!(reason));
+    }
+    let mut event = serde_json::Map::new();
+    event.insert("eventId".into(), serde_json::json!(row.event_id));
+    event.insert("owner".into(), serde_json::Value::Object(owner));
+    event.insert(
+        "clientGeneration".into(),
+        serde_json::json!(row.client_generation),
+    );
+    event.insert("sequence".into(), serde_json::json!(row.sequence));
+    event.insert("occurredAt".into(), serde_json::json!(row.occurred_at));
+    event.insert("receivedAt".into(), serde_json::json!(row.received_at));
+    event.insert("eventType".into(), serde_json::json!(row.event_type));
+    event.insert(
+        "payloadVersion".into(),
+        serde_json::json!(row.payload_version),
+    );
+    event.insert(
+        "schemaVersion".into(),
+        serde_json::json!(row.schema_version),
+    );
+    if let Some(identity) = &row.identity {
+        event.insert("identity".into(), identity.clone());
+    }
+    if let Some(typed) = &row.typed_payload {
+        event.insert("typedPayload".into(), typed.clone());
+    }
+    event.insert("rawPayload".into(), row.raw_payload.clone());
+    event.insert("provenance".into(), serde_json::Value::Object(provenance));
+    event.insert(
+        "rawMetadata".into(),
+        serde_json::Value::Object(raw_metadata),
+    );
+    serde_json::Value::Object(event)
+}
+
 /// 事件行映射（EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。
 fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredCanonicalEventRow> {
     let identity: Option<String> = row.get(12)?;
@@ -2263,6 +2348,22 @@ mod tests {
         assert_eq!(segments[1]["event"]["eventType"], "tool.call.started");
         assert_eq!(segments[2]["kind"], "event");
         assert_eq!(segments[2]["event"]["eventType"], "turn.completed");
+        // 回归（重启后无法重放）：嵌入事件必须是 EVT-01 canonical 事件（嵌套 owner），
+        // 不得是数据库扁平列形状——前端 `canonicalRowToWorkbench` 以 `owner` 为门槛，
+        // 扁平行会被判不可读而把整轮塔成 event.unknown。
+        for segment in segments.iter().filter(|item| item["kind"] == "event") {
+            assert!(
+                segment["event"]["owner"].is_object(),
+                "segment event 缺嵌套 owner: {segment}"
+            );
+            assert_eq!(segment["event"]["owner"]["agentId"], "peri");
+            assert_eq!(segment["event"]["owner"]["localSessionId"], "local:s1");
+            assert!(segment["event"]["provenance"].is_object());
+            assert!(
+                segment["event"]["profileId"].is_null(),
+                "不得落数据库扁平列形状: {segment}"
+            );
+        }
         assert_eq!(typed["terminal"]["eventType"], "turn.completed");
         assert_eq!(unit.rollup_seq_start, Some(1));
         assert_eq!(unit.rollup_seq_end, Some(4));
@@ -2278,6 +2379,70 @@ mod tests {
         assert_eq!(compact_after.len(), 2);
         assert_eq!(compact_after[1].event_type, "assistant.text.delta");
         assert_eq!(compact_after[1].sequence, 6, "单元行占用 seq 5");
+    }
+
+    /// #81 回归修复：`CanonicalEventRow → EVT-01` 序列化器与 `parse_canonical_event` 互逆。
+    #[test]
+    fn canonical_event_wire_round_trips_through_parse() {
+        let mut input = event_json(
+            "peri",
+            "local:s1",
+            3,
+            "tool.call.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "tool_call_update", "toolCallId": "tool-1" } }),
+        );
+        input["identity"] = serde_json::json!({ "toolCallId": "tool-1" });
+        input["typedPayload"] =
+            serde_json::json!({ "toolCallId": "tool-1", "status": "completed" });
+        input["provenance"] = serde_json::json!({
+            "origin": "local-observed",
+            "trust": "authoritative",
+            "provider": "peri",
+        });
+        let row = parse_canonical_event(&input).expect("canonical event parses");
+
+        let wire = canonical_event_wire(&row);
+        // 形状断言：嵌套 owner/provenance，不是扁平列。
+        assert!(wire["owner"].is_object());
+        assert!(wire["provenance"].is_object());
+        assert!(wire["rawMetadata"].is_object());
+        assert!(wire["profileId"].is_null());
+        assert!(wire["ownerKey"].is_null());
+        assert!(wire["rollupSeqStart"].is_null(), "rollup 列不属 EVT-01");
+
+        let mut reparsed = parse_canonical_event(&wire).expect("wire reparses");
+        // `created_at` 重取 now、`raw_payload_json` 是入库文本缓存 ⇒ 只归一这两项。
+        reparsed.created_at = row.created_at;
+        reparsed.raw_payload_json = row.raw_payload_json.clone();
+        assert_eq!(reparsed, row, "wire 必须逐字段往返");
+    }
+
+    /// #81 回归修复：超限 rawPayload 的截断元数据由 wire 显式携带（重解析会按裁剪后
+    /// 的短载荷重算而不报截断）——此不对称是已知且刻意的。
+    #[test]
+    fn canonical_event_wire_keeps_truncation_metadata_in_payload() {
+        let oversized = "x".repeat(MAX_CANONICAL_RAW_BYTES + 1024);
+        let input = event_json(
+            "peri",
+            "local:s1",
+            7,
+            "tool.call.started",
+            serde_json::json!({ "update": { "sessionUpdate": "tool_call", "blob": oversized } }),
+        );
+        let row = parse_canonical_event(&input).expect("oversized raw still parses");
+        assert!(row.raw_truncated);
+
+        let wire = canonical_event_wire(&row);
+        assert_eq!(wire["rawMetadata"]["truncated"], true);
+        assert_eq!(wire["rawMetadata"]["reason"], "size");
+        assert_eq!(
+            wire["rawMetadata"]["originalBytes"],
+            serde_json::json!(row.raw_original_bytes)
+        );
+        // 已裁剪载荷很短 ⇒ 重解析报未截断：前端取证依赖 rawMetadata，而非重解析。
+        let reparsed = parse_canonical_event(&wire).expect("wire reparses");
+        assert!(!reparsed.raw_truncated);
+        assert_eq!(reparsed.raw_payload, row.raw_payload);
     }
 
     /// #81 L2：非终结事件不折叠（未终结 turn 不产生单元行）。

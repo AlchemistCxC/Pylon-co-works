@@ -37,6 +37,11 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
+      # 打包脚本自测（发行前）：三处版本一致性 + docs/说明书/ 全量收集契约。
+      # 零新依赖：下一步 pack_release.py 本来就要 python。
+      - name: 打包脚本自测（scripts/tests）
+        run: bun run test:pack
+
       # 完整便携链：前端 build + tauri --no-bundle + pylon-detect + pack_release.py
       # 产物：release/pylon-<version>-win64.zip + .sha256 + .manifest.json
       - name: 打包发行包

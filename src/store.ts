@@ -56,10 +56,14 @@ export interface ThemeSettings {
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number
-  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFocusRingWidth: number; inputFontSize: number; inputMinHeight: number
+  inputOffsetTop: number; inputHeight: number; inputMarginX: number
+  inputSurfaceBg: string; inputSurfaceOpacity: number
+  inputBorder: string; inputBorderWidth: number; inputBorderOpacity: number
+  inputFocusRingEnabled: 'shown' | 'hidden'; inputFocusRingColor: string; inputHighlightOpacity: number; inputShadowEnabled: 'shown' | 'hidden'
+  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
   inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
-  statusBg: string; statusBgImage: string; ekgWidth: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
+  statusBg: string; statusBgImage: string; ekgWidth: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillText: string; prismOnColor: string
   barTrackColor: string; barFillColor: string; barFillFollow: boolean; barHeight: number  // 柱状图：外壳背景/柱子色/是否跟随用量三段色/高度
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
@@ -90,12 +94,15 @@ export interface ThemeSettings {
   assistantDotImage: string
   footerLayout: 'free' | 'peri'
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
-  ccHeight: number; ccBgHeight: number; ccBg: string
+  ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
   ccStatusFontSize: number
+  ccMarginX: number; ccMarginBottom: number; ccRadius: number
   ccStyle: string
   ccVariant: string
-  modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
+  reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
+  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; sendVariant: string
+  permissionSwitchMode: string; permissionBgColor: string; permissionWidth: number; permissionHeight: number; permissionRadius: number; permissionFontSize: number; permissionTextColor: string
   /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
   modeAutoColor: string; modeEditColor: string
   ccHidden: string[]
@@ -152,7 +159,7 @@ export const useStore = create<ThemeState>()(persist(
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
-    // D1：ccBgHeight 必须 ≥ ccHeight（背景不短于容器，与 setZoneField 漏斗同不变量）
+    // D1：ccHeight 经布局约束漏斗归一化。
     const ccHeight = clampCcHeight(height, {
       inputMode: state.inputMode,
       footerLayout: state.footerLayout,
@@ -165,7 +172,7 @@ export const useStore = create<ThemeState>()(persist(
       }),
       cliOverflowMode: state.cliOverflowMode,
     })
-    return { ccHeight, ccBgHeight: Math.max(state.ccBgHeight, ccHeight), ...markZoneCustom(state, 'cc') }
+    return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
   updateCcPlacement: (id, partial) => set(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
@@ -192,7 +199,6 @@ export const useStore = create<ThemeState>()(persist(
     return {
       ccHidden,
       ccHeight,
-      ccBgHeight: Math.max(state.ccBgHeight, ccHeight),
       ...markZoneCustom(state, 'cc'),
     }
   }),

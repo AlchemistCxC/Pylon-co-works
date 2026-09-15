@@ -23,7 +23,6 @@ export interface PylonCustomEventDetailMap {
   } | undefined
   'pylon:pick-workspace-folder': undefined
   'pylon:runtime-error': unknown
-  'pylon:solid-input-attach': undefined
   'pylon:solid-input-send': undefined
   'pylon:tasks-toggle': undefined
   'pylon:workspace-folder-picked': { path: string }
@@ -45,7 +44,6 @@ export const PYLON_CUSTOM_EVENT_NAMES: readonly PylonCustomEventName[] = [
   'pylon:open-settings',
   'pylon:pick-workspace-folder',
   'pylon:runtime-error',
-  'pylon:solid-input-attach',
   'pylon:solid-input-send',
   'pylon:tasks-toggle',
   'pylon:workspace-folder-picked',

@@ -1,14 +1,10 @@
-import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
+﻿import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import {
-  optionLabel,
-  isReasoningOption,
-  resolveDocumentOptionEntries,
-  resolveDocumentOptionValue,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
   resolveReasoningOptionEntries,
-  type WorkbenchOptionEntry,
+  resolveDocumentOptionValue,
 } from './workbenchOptionCatalog.ts'
 
 function nextValue(values: readonly string[], current: string): string {
@@ -17,425 +13,109 @@ function nextValue(values: readonly string[], current: string): string {
   return values[(index + 1 + values.length) % values.length] ?? values[0] ?? current
 }
 
-export function SolidModelWidget(props: {
-  draftValue?: () => string
-  onDraftChange?: (value: string) => void
-  reasoningValue?: () => string
-  onReasoningChange?: (value: string) => void
-  /** Empty-state controls remain selectable with compact/badge presets. */
-  forceDropdown?: boolean
-} = {}) {
-  const workbench = useSolidWorkbench()
-  const runtime = () => workbench.runtimeSnapshot()
-  const appearance = () => workbench.appearanceSnapshot()
-  const [open, setOpen] = createSignal(false)
-  const [error, setError] = createSignal('')
-  let root: HTMLDivElement | undefined
-  let trigger: HTMLButtonElement | undefined
+export function SolidModelWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void; forceDropdown?: boolean } = {}) {
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; const menuId=`cc-model-menu-${createUniqueId()}`
+  // 会话切换时关闭菜单（2026-09-14）：控件常态显示后，若残留 open 状态会带着
+  // 上一次会话的菜单进入新会话。与 SolidModeWidget 的会话切换处理保持一致。
   let previousSessionId = workbench.input().sessionId
-  const menuId = `cc-model-menu-${createUniqueId()}`
-  // Issue #53: the draft binding is the empty-state/entering seam — while it
-  // is active the owning agent's advertised set (host-provided plain data)
-  // joins the candidates so the dropdown no longer falls back to a hardcoded
-  // catalogue the agent never declared. Live sessions keep snapshot-only
-  // sourcing so negotiated candidates stay authoritative.
-  const modelEntries = () => resolveModelOptionEntries(
-    runtime(),
-    props.draftValue?.(),
-    props.draftValue ? workbench.input().agentAdvertisedModels : undefined,
-  )
-  const models = () => modelEntries().map(item => item.id)
-  const model = () => props.draftValue?.() || runtime().activeModel || modelEntries()[0]?.id || '未配置模型'
-  const reasoningOption = () => runtime().document?.session.options.find(isReasoningOption)
-  const reasoningValue = () => props.reasoningValue?.()
-    ?? resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') ?? ''
-  const displayModel = () => reasoningValue() ? `${model()}（${reasoningValue()}）` : model()
-  const scale = () => appearance().ccScale.model ?? 100
-  const reasoningEntries = () => props.onReasoningChange
-    ? resolveReasoningOptionEntries(runtime(), props.reasoningValue?.())
-    : reasoningOption()?.editable === false ? []
-      : resolveDocumentOptionEntries(reasoningOption() ? [reasoningOption()!] : [], 'reasoning')
-  let reasoningRequest = 0
-  const [reasoningPending, setReasoningPending] = createSignal(false)
-  const dropdown = () => props.forceDropdown === true || appearance().modelVariant === 'dropdown'
-  const close = (restoreFocus = false) => {
-    setOpen(false)
-    if (restoreFocus) queueMicrotask(() => trigger?.focus())
-  }
-  createEffect(() => {
-    const currentSessionId = workbench.input().sessionId
-    if (currentSessionId !== previousSessionId) {
-      reasoningRequest++
-      setReasoningPending(false)
-      setError('')
-    }
-    if (currentSessionId !== previousSessionId || !dropdown()) close()
-    previousSessionId = currentSessionId
-  })
-  onMount(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!open() || root?.contains(event.target as Node)) return
-      close()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!open() || event.key !== 'Escape') return
-      event.preventDefault()
-      close(true)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    onCleanup(() => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    })
-  })
-  const choose = async (target: string) => {
-    const sessionId = workbench.input().sessionId
-    // A draft setter is an explicit empty-state (or transition-state) binding.
-    // Prefer it even when the host has already published a session id: session
-    // selection and renderer updates can arrive in the same tick, and sending
-    // a live-session command here would race the create transaction.
-    if (props.onDraftChange) { props.onDraftChange(target); close(true); return }
-    if (!sessionId || target === model()) { close(true); return }
-    const result = await workbench.commands.setModel(sessionId, target)
-    if (!result.ok) setError(result.error || '模型切换失败')
-    else setError('')
-    close(true)
-  }
-  const chooseReasoning = async (target: string) => {
-    if (props.onReasoningChange) { props.onReasoningChange(target); return }
-    const sessionId = workbench.input().sessionId
-    const option = reasoningOption()
-    if (!sessionId || !option || option.editable === false || reasoningPending()
-      || !reasoningEntries().some(entry => entry.id === target) || target === reasoningValue()) return
-    const request = ++reasoningRequest
-    setReasoningPending(true)
-    setError('')
-    try {
-      const result = await workbench.commands.setConfigOption(sessionId, option.id, target, {
-        expectedValue: option.value,
-        ...(option.version !== undefined ? { expectedVersion: option.version } : {}),
-      })
-      if (request === reasoningRequest && workbench.input().sessionId === sessionId && !result.ok)
-        setError(result.error || '思考等级切换失败')
-    } catch (cause) {
-      if (request === reasoningRequest && workbench.input().sessionId === sessionId)
-        setError(cause instanceof Error ? cause.message : '思考等级切换失败')
-    } finally {
-      if (request === reasoningRequest) setReasoningPending(false)
-    }
-  }
-
-  return (
-    <div ref={node => { root = node }} class="solid-model-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert" aria-live="assertive" title={message()}>{message()}</span>}</Show>
-      <Show when={dropdown() || (appearance().modelVariant !== 'badge' && appearance().modelVariant !== 'minimal')} fallback={
-        <Show when={appearance().modelVariant === 'badge'} fallback={
-          <button
-            type="button"
-            class="cc-model-minimal"
-            title="点击切换模型"
-            style={{ 'font-size': `${scale()}%` }}
-            onClick={() => void choose(nextValue(models(), model()))}
-          >{displayModel()}</button>
-        }>
-          <span class="cc-model-badge" style={{ 'font-size': `${scale()}%` }}>{displayModel()}</span>
-        </Show>
-      }>
-        <ModelDropdown
-          menuId={menuId}
-          triggerRef={node => { trigger = node }}
-          rootRef={node => { root = node }}
-          open={open}
-          setOpen={setOpen}
-          close={close}
-          scale={scale}
-          displayModel={displayModel}
-          model={model}
-          modelEntries={modelEntries}
-          reasoningEntries={reasoningEntries}
-          reasoningValue={reasoningValue}
-          onReasoningChange={value => void chooseReasoning(value)}
-          choose={choose}
-        />
-      </Show>
-    </div>
-  )
+  const entries=()=>resolveModelOptionEntries(runtime(),props.draftValue?.(),props.draftValue?workbench.input().agentAdvertisedModels:undefined); const models=()=>entries().map(x=>x.id)
+  const model=()=>props.draftValue?.()||runtime().activeModel||entries()[0]?.id||'unconfigured-model'; const mode=()=>props.forceDropdown?'menu':(appearance().modelSwitchMode??'menu')
+  const width=()=>appearance().modelWidth??120, height=()=>appearance().modelHeight??28, radius=()=>appearance().modelRadius??0, fontSize=()=>appearance().modelFontSize??12
+  const bg=()=>appearance().modelBgColor==='black'?'#000':'#fff', fg=()=>appearance().modelTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(r.error||'未配置模型?')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const rootStyle=()=>({'margin-top':`${height()/2}px`}); const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg(),display:'flex','align-items':'center','justify-content':'center'})
+  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><div class="cc-model-root" style={rootStyle()}><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><For each={entries().filter(x=>x.id!==model())}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></div></Show></div></div>
 }
 
-function ModelDropdown(props: {
-  menuId: string
-  triggerRef: (node: HTMLButtonElement) => void
-  rootRef: (node: HTMLDivElement) => void
-  open: () => boolean
-  setOpen: (value: boolean | ((previous: boolean) => boolean)) => void
-  close: (restoreFocus?: boolean) => void
-  scale: () => number
-  displayModel: () => string
-  model: () => string
-  modelEntries: () => readonly WorkbenchOptionEntry[]
-  reasoningEntries: () => readonly WorkbenchOptionEntry[]
-  reasoningValue?: () => string
-  onReasoningChange?: (value: string) => void
-  choose: (value: string) => Promise<void>
-}) {
-  let menu: HTMLDivElement | undefined
-  createEffect(() => {
-    if (!props.open()) return
-    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
-  })
-  return <div ref={props.rootRef} class="cc-model-dropdown">
-    <button
-      ref={props.triggerRef}
-      type="button"
-      class="model-tag"
-      style={{ 'font-size': `${props.scale()}%` }}
-      aria-haspopup="listbox"
-      aria-expanded={props.open()}
-      aria-controls={props.menuId}
-      onClick={() => props.setOpen(value => !value)}
-    >{props.displayModel()} ▾</button>
-    <Show when={props.open()}>
-      <div
-        ref={node => { menu = node }}
-        id={props.menuId}
-        class="model-menu"
-        data-popover="control-center"
-        role="listbox"
-        aria-label="模型列表"
-        tabIndex="-1"
-        onKeyDown={event => {
-          if (event.key !== 'Escape') return
-          event.preventDefault()
-          event.stopPropagation()
-          props.close(true)
-        }}
-      >
-        <Show when={props.reasoningValue && props.onReasoningChange && props.reasoningEntries().length > 0}>
-          <div class="model-menu-section" role="group" aria-label="思考强度">
-            <span>思考强度</span>
-            <For each={props.reasoningEntries()}>{effort => <button
-              type="button"
-              role="option"
-              aria-selected={effort.id === props.reasoningValue?.()}
-              class={`model-item${effort.id === props.reasoningValue?.() ? ' active' : ''}`}
-              tabIndex={-1}
-              onClick={() => {
-                props.onReasoningChange?.(effort.id)
-                props.close(true)
-              }}
-            >{optionLabel('reasoning', effort.id, effort.label)}</button>}</For>
-          </div>
-        </Show>
-        <For each={props.modelEntries()}>{item => (
-          <button
-            type="button"
-            role="option"
-            aria-selected={item.id === props.model()}
-            class={`model-item${item.id === props.model() ? ' active' : ''}`}
-            tabIndex={-1}
-            onClick={() => void props.choose(item.id)}
-          >{item.label || item.id}</button>
-        )}</For>
-      </div>
-    </Show>
-  </div>
-}
-
+/** 权限模式控件：本体只显示后端机器值（不翻译），外观与交互跟模型／思考强度控件同一套语言。
+ *  颜色：permissionTextColor='mode' 时不写 inline color，交给 CSS 的 [data-mode] 语义色
+ *  （auto 黄 / bypass 红 / edit 紫 / default 灰）—— 危险模式一眼可见。 */
+const PERMISSION_GAP_PX = 12
 export function SolidModeWidget(props: {
   draftValue?: () => string
   onDraftChange?: (value: string) => void
   forceDropdown?: boolean
 } = {}) {
-  const workbench = useSolidWorkbench()
-  const runtime = () => workbench.runtimeSnapshot()
-  const appearance = () => workbench.appearanceSnapshot()
-  const [error, setError] = createSignal('')
-  const [open, setOpen] = createSignal(false)
-  let root: HTMLDivElement | undefined
-  let trigger: HTMLButtonElement | undefined
-  let previousSessionId = workbench.input().sessionId
-  const menuId = `cc-mode-menu-${createUniqueId()}`
-  const modeEntries = () => resolveModeOptionEntries(runtime(), props.draftValue?.())
-  const modes = () => modeEntries().map(item => item.id)
-  const mode = () => props.draftValue?.() || runtime().activeMode || modeEntries()[0]?.id || 'default'
-  const scale = () => appearance().ccScale.mode ?? 100
-  const dropdown = () => props.forceDropdown === true
-  const displayMode = () => dropdown() ? optionLabel('mode', mode()) : mode()
-  const close = (restoreFocus = false) => {
-    setOpen(false)
-    if (restoreFocus) queueMicrotask(() => trigger?.focus())
-  }
-  createEffect(() => {
-    const currentSessionId = workbench.input().sessionId
-    if (currentSessionId !== previousSessionId || !dropdown()) close()
-    previousSessionId = currentSessionId
-  })
-  onMount(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!open() || root?.contains(event.target as Node)) return
-      close()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!open() || event.key !== 'Escape') return
-      event.preventDefault()
-      close(true)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    onCleanup(() => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    })
-  })
-  let menu: HTMLDivElement | undefined
-  createEffect(() => {
-    if (!open()) return
-    queueMicrotask(() => menu?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
-  })
-  const chooseMode = async (target: string) => {
-    const sessionId = workbench.input().sessionId
-    if (props.onDraftChange) {
-      props.onDraftChange(target)
-      close(true)
-      return
-    }
-    if (!sessionId) { close(true); return }
-    const result = await workbench.commands.setMode(sessionId, target)
-    if (!result.ok) setError(result.error || '权限模式切换失败')
-    else setError('')
-    close(true)
-  }
-  const cycle = async () => {
-    const sessionId = workbench.input().sessionId
-    if (props.onDraftChange) { props.onDraftChange(nextValue(modes(), mode())); return }
-    if (!sessionId) return
-    const result = await workbench.commands.setMode(sessionId, nextValue(modes(), mode()))
-    if (!result.ok) setError(result.error || '权限模式切换失败')
-    else setError('')
-  }
-
-  return (
-    <div class="solid-mode-widget">
-      <Show when={error()}>{message => <span class="cc-widget-error" role="alert" aria-live="assertive" title={message()}>{message()}</span>}</Show>
-      <Show when={dropdown()} fallback={
-        <Show when={appearance().modeVariant === 'badge'} fallback={
-          <Show when={appearance().modeVariant === 'minimal'} fallback={
-            <button type="button" class="cc-mode-widget" title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-              <span class="mode-pill" data-mode={mode()}>{mode()}</span>
-            </button>
-          }>
-            <button type="button" class="cc-mode-minimal" data-mode={mode()} style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>{mode()}</button>
-          </Show>
-        }>
-          <button type="button" class="cc-mode-badge" data-mode={mode()} title="点击切换" style={{ 'font-size': `${scale()}%` }} onClick={() => void cycle()}>
-            [{mode()}]
-          </button>
-        </Show>
-      }>
-        <div ref={node => { root = node }} class="cc-mode-dropdown">
-          <button
-            ref={node => { trigger = node }}
-            type="button"
-            class="cc-mode-widget cc-mode-select"
-            title="选择权限模式"
-            style={{ 'font-size': `${scale()}%` }}
-            aria-haspopup="listbox"
-            aria-expanded={open()}
-            aria-controls={menuId}
-            onClick={() => setOpen(value => !value)}
-          ><span class="mode-pill" data-mode={mode()}>{displayMode()}</span> ▾</button>
-          <Show when={open()}>
-            <div
-              ref={node => { menu = node }}
-              id={menuId}
-              class="mode-menu model-menu"
-              data-popover="control-center"
-              role="listbox"
-              aria-label="模式列表"
-              tabIndex="-1"
-              onKeyDown={event => {
-                if (event.key !== 'Escape') return
-                event.preventDefault()
-                event.stopPropagation()
-                close(true)
-              }}
-            >
-              <For each={modeEntries()}>{item => <button
-                type="button"
-                role="option"
-                aria-selected={item.id === mode()}
-                class={`model-item${item.id === mode() ? ' active' : ''}`}
-                tabIndex={-1}
-                onClick={() => { void chooseMode(item.id) }}
-              >{optionLabel('mode', item.id, item.label)}</button>}</For>
-            </div>
-          </Show>
-        </div>
-      </Show>
-    </div>
-  )
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; let previousSessionId = workbench.input().sessionId
+  const menuId=`cc-mode-menu-${createUniqueId()}`
+  const entries=()=>resolveModeOptionEntries(runtime(), props.draftValue?.())
+  const mode=()=>props.draftValue?.()||runtime().activeMode||entries()[0]?.id||'default'
+  const switchMode=()=>props.forceDropdown?'menu':(appearance().permissionSwitchMode??'menu')
+  const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===mode()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setMode(sid,target);if(!r.ok)setError(r.error||'权限模式切换失败')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const cycle=()=>{void choose(nextValue(entries().map(e=>e.id), mode()))}
+  const width=()=>appearance().permissionWidth??120, height=()=>appearance().permissionHeight??28, radius=()=>appearance().permissionRadius??0, fontSize=()=>appearance().permissionFontSize??12
+  const bg=()=>appearance().permissionBgColor==='black'?'#000':'#fff'
+  const color=()=>{const c=appearance().permissionTextColor??'mode';return c==='mode'?undefined:c==='white'?'#fff':'#000'}
+  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),...(color()?{color:color()}:{})})
+  return <div ref={el=>root=el} class="solid-permission-widget" style={{'margin-left':`${PERMISSION_GAP_PX}px`,'margin-top':`${height()/2}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-permission-trigger" data-mode={mode()} style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={switchMode()==='menu'?'listbox':undefined} aria-expanded={switchMode()==='menu'?open():undefined} aria-controls={switchMode()==='menu'?menuId:undefined} onClick={()=>switchMode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':mode()}</button><Show when={switchMode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="权限模式选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==mode())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
 /** Session-create reasoning preference. It uses the same compact control language
  * as the mode widget and remains available in the normal control center. */
-export function SolidReasoningWidget(props: { value: () => string; onChange: (value: string) => void }) {
-  return <label class="cc-reasoning-widget" title="思考强度">
-    <span class="cc-reasoning-label">思考</span>
-    <select aria-label="思考强度" value={props.value()} onChange={event => props.onChange(event.currentTarget.value)}>
-      <option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option>
-    </select>
-  </label>
+const REASONING_GAP_PX = 12
+export function SolidReasoningWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void } = {}) {
+  const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
+  const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
+  let root: HTMLDivElement|undefined; let trigger: HTMLButtonElement|undefined; let previousSessionId = workbench.input().sessionId
+  const menuId=`cc-reasoning-menu-${createUniqueId()}`
+  const entries=()=>resolveReasoningOptionEntries(runtime(), resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning'))
+  const current=()=>resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') || props.draftValue?.() || entries()[0]?.id || ''
+    const choose=async(value:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(value);close(true);return}; const sid=workbench.input().sessionId;if(!sid||value===current()){close(true);return}; const option=runtime().document?.session.options?.find(o=>o.id==='reasoning_effort'||o.id==='reasoning'); const previous=current(); setPending(true);setError(''); try {const result=await workbench.commands.setConfigOption(sid,option?.id||'reasoning_effort',value,{expectedValue:previous,...(option?.version==null?{}:{expectedVersion:option.version})});if(!result.ok)setError(result.error||'切换失败')} finally {setPending(false);close(true)} }
+  createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
+  onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
+  const mode=()=>appearance().reasoningSwitchMode??'menu'
+  const cycle=()=>{const ids=entries().map(e=>e.id);const i=ids.indexOf(current());void choose(ids[(i+1+ids.length)%ids.length]||current())}
+  const width=()=>appearance().reasoningWidth??120, height=()=>appearance().reasoningHeight??28, radius=()=>appearance().reasoningRadius??0, fontSize=()=>appearance().reasoningFontSize??12
+  const bg=()=>appearance().reasoningBgColor==='black'?'#000':'#fff', fg=()=>appearance().reasoningTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg()})
+  return <div ref={el=>root=el} class="solid-reasoning-widget" style={{'margin-left':`${REASONING_GAP_PX}px`,'margin-top':`${height()/2}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-reasoning-trigger" style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':current()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="思考强度选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==current())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
-export function SolidSendWidget(props: { disabled?: boolean } = {}) {
+/** First-batch host renderer: the registered send block includes its icon layer;
+ * the effect layer (highlight/shadow) is still pending. */
+export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 'external' }) {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
-  const variant = () => appearance().sendVariant || 'icon'
-  const className = () => variant() === 'minimal' ? 'cc-send-minimal' : variant() === 'square' ? 'cc-send-square' : 'cc-send-icon'
-  const scale = () => appearance().ccScale.send ?? 100
   const send = () => window.dispatchEvent(new CustomEvent('pylon:solid-input-send'))
   const cancel = () => {
     const sessionId = workbench.input().sessionId
     if (sessionId) void workbench.commands.cancel(sessionId)
   }
-
-  return (
-    <button
-      type="button"
-      disabled={props.disabled}
-      class={className()}
-      style={{ 'font-size': `${scale()}%` }}
-      title={runtime().generating ? '停止生成' : 'Send (Enter)'}
-      aria-label={runtime().generating ? '停止生成' : '发送消息'}
-      onClick={() => runtime().generating ? cancel() : send()}
-    >{runtime().generating ? '■' : '↑'}</button>
-  )
+  const icon = () => runtime().generating ? appearance().sendButtonIconGenerating : appearance().sendButtonIcon
+  const round = () => appearance().sendButtonIconRound === 'on'
+  const iconClass = () => {
+    const value = icon()
+    const solid = value === 'triangle' || value === 'square'
+    return `cc-send-icon ${solid ? 'cc-send-icon--solid' : 'cc-send-icon--stroke'}${round() && !solid ? ' cc-send-icon--round' : ''}${value === 'triangle' ? ' cc-send-icon--lg' : ''}${value === 'double-arrow' ? ' cc-send-icon--double' : ''}`
+  }
+  const path = () => {
+    const value = icon()
+    if (value === 'arrow') return 'M12 20 V4.5 M5.3 11.2 L12 4.5 L18.7 11.2'
+    if (value === 'double-arrow') return 'M6.5 11 L12 6.5 L17.5 11 M6.5 17.5 L12 13 L17.5 17.5'
+    if (value === 'cross') return 'M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5'
+    if (value === 'triangle') return round() ? 'M10.94 9.31 A1.5 1.5 0 0 1 13.06 9.31 L16.94 13.19 A1.5 1.5 0 0 1 15.88 15.75 L8.12 15.75 A1.5 1.5 0 0 1 7.06 13.19 Z' : 'M12 8.25 L19.5 15.75 H4.5 Z'
+    return round() ? 'M7.5 6 H16.5 A1.5 1.5 0 0 1 18 7.5 V16.5 A1.5 1.5 0 0 1 16.5 18 H7.5 A1.5 1.5 0 0 1 6 16.5 V7.5 A1.5 1.5 0 0 1 7.5 6 Z' : 'M6 6 H18 V18 H6 Z'
+  }
+  return <button
+    type="button"
+    class="cc-send-button"
+    data-mode={props.mode}
+    disabled={props.disabled}
+    title={runtime().generating ? '停止生成' : '发送'}
+    aria-label={runtime().generating ? '停止生成' : '发送消息'}
+    onClick={() => runtime().generating ? cancel() : send()}
+  ><svg viewBox="0 0 24 24" class={iconClass()} aria-hidden="true"><path d={path()} /></svg></button>
 }
 
-export function SolidAttachWidget(props: { disabled?: boolean } = {}) {
-  const workbench = useSolidWorkbench()
-  const appearance = () => workbench.appearanceSnapshot()
-  const runtime = () => workbench.runtimeSnapshot()
-  const variant = () => appearance().attachVariant || 'icon'
-  const className = () => variant() === 'minimal' ? 'cc-attach-minimal' : variant() === 'square' ? 'cc-attach-square' : 'cc-attach-icon'
-  const scale = () => appearance().ccScale.attach ?? 100
-  const title = () => !runtime().canAttach
-    ? '附件暂不可用'
-    : runtime().promptImage
-      ? 'Attach file'
-      : '当前 Agent 不支持图片（文本附件可用）'
 
-  return (
-    <button
-      type="button"
-      class={className()}
-      style={{ 'font-size': `${scale()}%` }}
-      disabled={props.disabled || (Boolean(workbench.input().sessionId) && !runtime().canAttach)}
-      title={title()}
-      aria-label={runtime().promptImage ? '添加附件' : '附件（当前 Agent 不支持图片）'}
-      onClick={() => window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))}
-    >＋</button>
-  )
-}
+

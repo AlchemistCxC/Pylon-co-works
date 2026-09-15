@@ -55,6 +55,18 @@ codex.exe
 codex-code-mode-host.exe
 
 dist-plugin-devkit/
+
+# 本地 agent 施工约束（用户环境，不入库）
+AGENTS.md
+
+# 本地个人文件（用户环境，不入库）
+nodejs/
+public/
+*.html
+
+# 本地 bun 运行时（项目本地便携工具）
+bun/
+
 dist-plugin-sdk/
 
 # 临时产物目录（测试/静态分析输出）。唯一被跟踪的是 clippy 基线，用负向模式保留。

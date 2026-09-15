@@ -51,10 +51,11 @@ describe('主题设置展示文案契约', () => {
       cliHintMode: ['hidden', 'compact', 'full'],
       footerLayout: ['free', 'peri'],
       cliOverflowMode: ['fixed-scroll', 'grow', 'overlay'],
-      modelVariant: ['dropdown', 'minimal', 'badge'],
-      modeVariant: ['pill', 'badge', 'minimal'],
+      modelSwitchMode: ['menu', 'cycle'],
+      permissionSwitchMode: ['menu', 'cycle'],
+      permissionBgColor: ['white', 'black'],
+      permissionTextColor: ['mode', 'black', 'white'],
       sendVariant: ['icon', 'square', 'minimal'],
-      attachVariant: ['icon', 'square', 'minimal'],
     } as const
 
     for (const [key, options] of Object.entries(expectedOptions)) {

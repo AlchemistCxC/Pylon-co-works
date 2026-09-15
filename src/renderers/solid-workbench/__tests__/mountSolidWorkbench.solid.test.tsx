@@ -1159,21 +1159,17 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
 
-  it('中控状态分隔符只出现在实际可见控件之间，不产生前导中点', async () => {
+  it('中控状态行仅保留常态控件（模型）与命令提示，其余旧控件关闭', async () => {
     const { host } = mountPreview()
     const row = await waitFor(() => {
       const value = host.querySelector<HTMLElement>('.cc-status-row')
       expect(value).not.toBeNull()
       return value!
     })
-    const widgets = [...row.querySelectorAll('[data-widget-id]')]
-    const separators = [...row.querySelectorAll<HTMLElement>('.cc-widget-separator')]
-    expect(widgets.length).toBeGreaterThan(0)
-    expect(separators).toHaveLength(widgets.length - 1)
-    expect(row.querySelector('[data-separator-index="0"]')).toBeNull()
-    expect(separators.map(item => item.dataset.separatorIndex)).toEqual(
-      Array.from({ length: widgets.length - 1 }, (_, index) => String(index + 1)),
-    )
+    // 2026-09-15：模型/思考强度/权限/用量四控件常态显示；其余旧状态控件在活跃会话里仍然收起。
+    expect([...row.querySelectorAll('[data-widget-id]')]
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens'])
+    expect(row.querySelector('.cc-widget-separator')).toBeTruthy()
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {
@@ -1202,7 +1198,7 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
-    expect(screen.getByRole('button', { name: '添加附件' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '添加附件' })).toBeNull()
     expect(screen.queryByLabelText('输入快捷键提示')).toBeNull()
     expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.querySelectorAll('.input-textarea')).toHaveLength(1)
@@ -1210,16 +1206,6 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).toBeTruthy())
     expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.firstElementChild).toBe(root)
-  })
-
-  it.each([false, true])('#54 终端空态只有一个附件入口（编辑模式 %s）', async editMode => {
-    const { host, services, lifecycle } = mountPreview()
-    services.appearance.setTheme({ ...structuredClone(DEFAULTS), inputMode: 'cli', inputVariant: 'cli' })
-    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: editMode })
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true,
-      presentationProfileId: 'builtin.presentation.terminal-classic' })
-    await screen.findByRole('region', { name: 'Agent 工作台空态' })
-    expect(host.querySelectorAll('.input-btn.attach, .cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toHaveLength(1)
   })
 
   it('空态只有一个工作区时自动选中，并随首条请求创建会话', async () => {
@@ -1495,21 +1481,22 @@ describe('mountSolidWorkbench', () => {
     theme.inputSubmitButtonMode = 'inline'
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
     expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
-    expect(host.querySelector('.cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toBeNull()
-    expect(screen.getAllByRole('button', { name: '停止生成' })).toHaveLength(1)
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     theme.inputSubmitButtonMode = 'external'
-    theme.ccHidden = ['attach']
     theme.ccLayout.placements.send = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
     theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('.cc-actions [data-widget-id="send"]')).toBeTruthy())
-    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
-    expect(Array.from(host.querySelectorAll('.cc-actions [data-widget-id]')).map(node => node.getAttribute('data-widget-id')))
-      .toEqual(['send', 'model'])
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
+    // 2026-09-14：模型控件常态显示，且遵循 placements 权威 —— 此处已从
+    // status-secondary 移到 actions 槽，故应出现在 actions 而非状态槽。
+    expect(host.querySelector('.cc-actions [data-widget-id="model"]')).toBeTruthy()
+    expect(host.querySelector('.cc-status-secondary [data-widget-id="model"], .cc-status-primary [data-widget-id="model"]')).toBeNull()
 
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
@@ -1520,7 +1507,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-widget-id="activity"]')).toBeNull()
   })
 
-  it('外置按钮模式下单独隐藏发送或附件不会误吞掉输入栏另一按钮', async () => {
+  it('外置按钮模式下隐藏发送不会误吞掉输入栏按钮', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
     theme.inputMode = 'default'
@@ -1529,17 +1516,13 @@ describe('mountSolidWorkbench', () => {
     theme.ccHidden = ['send']
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('[data-widget-id="attach"]')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
-    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toHaveAttribute('aria-label', '停止生成')
-    expect(host.querySelector('.input-btn.attach')).toBeNull()
-
-    theme.ccHidden = ['attach']
-    services.appearance.setTheme(theme)
-    await waitFor(() => expect(host.querySelector('[data-widget-id="send"]')).toBeTruthy())
-    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
-    expect(host.querySelector('.input-btn.attach')).toHaveAttribute('aria-label', '添加附件')
+
+    services.appearance.setTheme(theme)
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
   })
 
   it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {
@@ -1609,12 +1592,12 @@ describe('mountSolidWorkbench', () => {
     fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '7' } })
     fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '12' } })
     fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '125' } })
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+    fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
     await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ slot: 'actions', order: 7, offsetX: 12 }))
     expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
-    expect(services.appearance.getSnapshot().modelVariant).toBe('minimal')
-    expect(host.querySelector('[data-widget-id="model"] .cc-model-minimal')).toBeTruthy()
+    expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle')
+    expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeTruthy()
   })
 
   it('属性面板数字输入清空时保留上次有效值', async () => {
@@ -1667,9 +1650,9 @@ describe('mountSolidWorkbench', () => {
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+    fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
-    await waitFor(() => expect(services.appearance.getSnapshot().modelVariant).toBe('minimal'))
+    await waitFor(() => expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle'))
     lifecycle.destroy()
   })
 
@@ -1860,7 +1843,10 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
     expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
     expect(host.textContent).not.toContain('↓ 8 tokens')
-    expect(host.querySelector('[data-widget-id="tokens"]')).toHaveTextContent('8/—')
+    // S11：用量控件常态显示为按钮型胶囊，但旧的 usage surface（会话用量标签 / ↓ N tokens）仍未回归；
+    // 且它是只读显示 —— 不得渲染成可点击控件。
+    expect(host.querySelector('[data-widget-id="tokens"] .cc-usage-pill')).toBeTruthy()
+    expect(host.querySelector('[data-widget-id="tokens"] button')).toBeNull()
     expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 
