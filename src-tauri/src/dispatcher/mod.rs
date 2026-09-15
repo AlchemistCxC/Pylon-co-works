@@ -859,8 +859,9 @@ async fn handle_permission_request<R: tauri::Runtime>(
             "payload": payload,
         });
         if let Some(runtime) = runtimes.get(agent_id) {
-            match runtime.interactions.admit(
-                crate::acp::interaction_queue::InteractionQueueEntry {
+            match runtime
+                .interactions
+                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
                     request_id: request_id.to_string(),
                     method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
                     kind: "approval".to_string(),
@@ -870,8 +871,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
                     enqueued_at: permission.requested_at,
                     event: interaction_event.clone(),
                     state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
-                },
-            ) {
+                }) {
                 Ok(admission) => {
                     let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
                     tracing::trace!(
