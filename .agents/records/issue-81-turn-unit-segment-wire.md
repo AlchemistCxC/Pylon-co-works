@@ -84,6 +84,17 @@
 - 复现对照（修复前，harness 与 `agentWorkbenchSession.batch.test.ts` 同一 bind 路径，仅把 segment 换成 Rust 落盘形状）：逐行 `[user:问题, assistant:答案]` vs 单元 `[]` + `event.unknown`；消息投影抛 `TypeError: Cannot read properties of undefined (reading 'localSessionId')`。修复后同一用例断言逐字节相等。
 - 真机复验：**未做**（未启动真实应用与真实 Agent）。
 
+## 测试有效性（变异验证）
+
+全量门禁绿 ≠ 测试在守门。为排除“新用例是空测试”，将两处修复分别改回旧行为做变异验证：
+
+| 变异 | 结果 |
+| --- | --- |
+| Rust：`Segment::Event` 改回 `serde_json::to_value(row)`（扁平行） | `terminal_ingest_appends_turn_unit_and_compact_read_skips_covered_rows` **红**：`segment event 缺嵌套 owner` |
+| 前端：`parseTurnUnitPayload` 改回不归一（`inner as CanonicalConversationEvent`） | **5 例红**，且精确复现原始故障模式：`TypeError: Cannot read properties of undefined (reading 'localSessionId')`（`messageProjectionRules.ts:106`）与整轮丢失 `expected [] to deeply equal ['答案']` |
+
+两处变异均已恢复（md5 与提交态比对一致、`git diff` 为空），恢复后套件重新全绿。
+
 ## 与 spec 的偏差
 
 1. spec 原列"修改 `src/domains/events/__tests__/messageProjection.batchEquivalence.test.ts`"：**改为在新增的 `canonicalUnit.test.ts` 覆盖**（同一投影入口、同一断言），避免两处重复用例；spec 的原意（锁定消息侧不抛异常且等价）已达成。
