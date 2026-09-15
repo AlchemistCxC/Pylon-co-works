@@ -723,10 +723,7 @@ mod tests {
             ESTABLISHMENT,
         );
         assert!(snapshot.load_supported());
-        assert!(
-            !snapshot.usable("promptImage"),
-            "未注册消费者不可 usable"
-        );
+        assert!(!snapshot.usable("promptImage"), "未注册消费者不可 usable");
         let raw = snapshot.raw().expect("原文保留");
         assert_eq!(raw.get("_futureRoot"), Some(&json!({"x": 1})));
         assert_eq!(
