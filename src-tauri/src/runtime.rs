@@ -304,6 +304,60 @@ impl Default for AgentRuntimeManager {
 mod tests {
     use super::*;
 
+    /// #99（评审 E2 回归锁）：冷挂载快照的真实 wire 形状——本测试钉住
+    /// `turn.phase` / `turn.terminal.cause` / `sequence.lastIngressSeq` /
+    /// `replayLoading` 的字段名，前端消费按此对接（防止文档与 payload 漂移）。
+    #[tokio::test]
+    async fn cold_mount_turn_snapshot_exposes_settled_turn_and_cursor() {
+        let runtime = AgentRuntime::new_disconnected();
+        let key = crate::acp::TurnKey {
+            local_session_id: "local:c1".to_string(),
+            remote_session_id: "peri-c1".to_string(),
+            generation: 3,
+            turn_id: 5,
+        };
+        runtime.turn_ledger.begin(key.clone(), 10);
+        assert_eq!(
+            runtime.turn_ledger.settle(
+                &key,
+                crate::acp::TurnTerminalCause::FirstTokenTimeout,
+                20,
+                Some("timeout detail".to_string()),
+            ),
+            crate::acp::SettleOutcome::Published
+        );
+        runtime.sessions.lock().unwrap().insert(
+            "local:c1".to_string(),
+            crate::session::SessionInfo::new(
+                "peri-c1".to_string(),
+                String::new(),
+                "cwd".to_string(),
+                true,
+                3,
+            ),
+        );
+        let snapshot = runtime
+            .cold_mount_turn_snapshot("local:c1")
+            .await
+            .expect("session mapping exists");
+        assert_eq!(snapshot["periId"], serde_json::json!("peri-c1"));
+        assert_eq!(snapshot["generation"], serde_json::json!(3));
+        assert_eq!(snapshot["replayLoading"], serde_json::json!(false));
+        assert_eq!(snapshot["sequence"]["lastIngressSeq"], serde_json::json!(0));
+        assert_eq!(snapshot["turn"]["phase"], serde_json::json!("terminal"));
+        assert_eq!(
+            snapshot["turn"]["terminal"]["cause"],
+            serde_json::json!("firstTokenTimeout")
+        );
+        assert_eq!(
+            snapshot["turn"]["terminal"]["detail"],
+            serde_json::json!("timeout detail")
+        );
+        assert_eq!(snapshot["turn"]["key"]["turnId"], serde_json::json!(5));
+        assert_eq!(snapshot["lastError"], serde_json::Value::Null);
+    }
+    use super::*;
+
     #[test]
     fn agent_context_key_keeps_agent_dimension() {
         let peri = AgentContextKey::new("peri", "local:shared");

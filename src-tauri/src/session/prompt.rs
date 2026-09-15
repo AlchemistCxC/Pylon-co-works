@@ -96,11 +96,17 @@ fn report_settle(
     }
 }
 
-/// #99：empty-turn 细分——成功/MaxTurn 但无文本时按会话 live 状态推导
+/// #99：empty-turn 细分——成功/MaxTurn 但无文本时推导细分原因
 /// （tool-only / agent-empty），其余 cause 原样返回。
+///
+/// 判定源（评审 E3）：账本活动标志（dispatcher 在处理 chunk/工具调用的同一
+/// 临界区写入）**或**会话 live 状态，两者取或。残余窗口：响应帧经
+/// SentRequest 直达、可能先于仍在 inbox/spill 中的滞留 chunk 被结算——此时
+/// 两路标志同为 false，空回合细分保守归类；terminal cause 本身不受影响
+/// （终态仍是终态，UI 不会停在 prompting），journal 仍是内容权威。
 fn refine_empty_turn(
     runtime: &Arc<AgentRuntime>,
-    source: &str,
+    turn_key: &crate::acp::TurnKey,
     cause: crate::acp::TurnTerminalCause,
 ) -> crate::acp::TurnTerminalCause {
     if !matches!(
@@ -109,8 +115,13 @@ fn refine_empty_turn(
     ) {
         return cause;
     }
+    let (ledger_text, ledger_tool) = runtime
+        .turn_ledger
+        .snapshot(turn_key)
+        .map(|record| (record.saw_text, record.saw_tool))
+        .unwrap_or((false, false));
     let (saw_text, saw_tool) = match runtime.sessions.lock() {
-        Ok(sessions) => match sessions.get(source) {
+        Ok(sessions) => match sessions.get(&turn_key.local_session_id) {
             Some(session) => (
                 !session.last_response_text.trim().is_empty(),
                 !session.acp_state.tools.is_empty(),
@@ -119,6 +130,8 @@ fn refine_empty_turn(
         },
         Err(_) => (false, false),
     };
+    let saw_text = ledger_text || saw_text;
+    let saw_tool = ledger_tool || saw_tool;
     match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool) {
         Some(empty) => crate::acp::TurnTerminalCause::EmptyTurn { cause: empty },
         None => cause,
@@ -129,7 +142,6 @@ fn refine_empty_turn(
 /// 保证 ensure_generation 等后续失败也不会让 turn 悬在账本外）。
 fn settle_turn_from_response(
     runtime: &Arc<AgentRuntime>,
-    source: &str,
     turn_key: &crate::acp::TurnKey,
     raw: &acp::RawMessage,
 ) {
@@ -139,7 +151,7 @@ fn settle_turn_from_response(
         let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
         crate::acp::terminal_cause_from_prompt_result(&data)
     };
-    cause = refine_empty_turn(runtime, source, cause);
+    cause = refine_empty_turn(runtime, turn_key, cause);
     let detail = raw.error.as_ref().map(|error| error.to_string());
     report_settle(runtime, turn_key, cause, detail);
 }
@@ -1199,7 +1211,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         PromptWaitOutcome::Response(raw) => {
             // #99：wire 终态判定先于展示/持久化——ensure_generation 等后续失败
             // 也不能让 turn 悬在账本外；一个 prompt 至多一个 terminal transition。
-            settle_turn_from_response(runtime, source, &turn_key, &raw);
+            settle_turn_from_response(runtime, &turn_key, &raw);
             state.ensure_generation(runtime, flow.generation)?;
             if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
                 return Err(PylonError::Protocol(format!(
@@ -1294,7 +1306,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                         let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
                         terminal_cause_from_prompt_result(&data)
                     };
-                    (refine_empty_turn(runtime, source, cause), detail)
+                    (refine_empty_turn(runtime, &turn_key, cause), detail)
                 }
                 (None, CancelSettleResolution::SettleTimeout) => (
                     TurnTerminalCause::CancelSettleTimeout,
@@ -1433,6 +1445,53 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// #99（评审 E3 回归锁）：empty-turn 细分以账本活动标志为判定源——
+    /// dispatcher 在处理 chunk/工具调用的同一临界区写入账本，settle 侧据此
+    /// 判定 tool-only / agent-empty，不受响应直达路径先于 inbox 排空的影响。
+    #[test]
+    fn refine_empty_turn_uses_ledger_activity_flags() {
+        let runtime = AgentRuntime::new_disconnected();
+        let key = crate::acp::TurnKey {
+            local_session_id: "local:r1".to_string(),
+            remote_session_id: "peri-r1".to_string(),
+            generation: 1,
+            turn_id: 1,
+        };
+        runtime.turn_ledger.begin(key.clone(), 0);
+        // 账本只见到工具活动 → tool-only
+        runtime
+            .turn_ledger
+            .note_session_activity("local:r1", "peri-r1", 1, 1, false, true);
+        assert_eq!(
+            refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
+            TurnTerminalCause::EmptyTurn {
+                cause: crate::acp::turn_ledger::EmptyTurnCause::ToolOnly
+            }
+        );
+        // 账本随后见到文本 → 不再是空回合
+        runtime
+            .turn_ledger
+            .note_session_activity("local:r1", "peri-r1", 1, 2, true, false);
+        assert_eq!(
+            refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
+            TurnTerminalCause::Completed
+        );
+        // 未登记 turn 且会话无活动 → agent-empty 保守归类
+        let ghost = crate::acp::TurnKey {
+            local_session_id: "local:ghost".to_string(),
+            remote_session_id: "peri-ghost".to_string(),
+            generation: 1,
+            turn_id: 9,
+        };
+        assert_eq!(
+            refine_empty_turn(&runtime, &ghost, TurnTerminalCause::Completed),
+            TurnTerminalCause::EmptyTurn {
+                cause: crate::acp::turn_ledger::EmptyTurnCause::AgentEmpty
+            }
+        );
+    }
     use super::*;
     use crate::acp::AcpClient;
 

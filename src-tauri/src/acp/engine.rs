@@ -24,8 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
-    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, Responder, TransportBatchEntry,
-    TransportFrame, UntypedMessage,
+    ByteStreams, Channel, Client, ConnectTo, Dispatch, Handled, Responder, UntypedMessage,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -51,12 +50,14 @@ pub(crate) const INBOUND_SPILL_CAP: usize = 8192;
 /// #99：入站投遥测（每连接一份）。
 ///
 /// `next_seq` 是本连接入站帧的单调 ingress ordinal 分配器；spill/drop 计数是
-/// 背压的可观测面——任何 drop 都必须显式记录并伴随过载终态，禁止静默丢帧。
+/// 背压的可观测面——任何 drop 都必须显式记录（过载 gap 或下游关闭计数），
+/// 禁止静默丢帧。
 #[derive(Debug, Default)]
 pub(crate) struct InboundTelemetry {
     next_seq: AtomicU64,
     spilled_total: AtomicU64,
     dropped_total: AtomicU64,
+    closed_dropped: AtomicU64,
     overloaded: AtomicBool,
 }
 
@@ -67,6 +68,7 @@ pub(crate) struct InboundTelemetrySnapshot {
     pub(crate) last_ingress_seq: u64,
     pub(crate) spilled_total: u64,
     pub(crate) dropped_total: u64,
+    pub(crate) closed_dropped: u64,
     pub(crate) overloaded: bool,
 }
 
@@ -85,6 +87,7 @@ impl InboundTelemetry {
             last_ingress_seq: self.next_seq.load(Ordering::Relaxed),
             spilled_total: self.spilled_total.load(Ordering::Relaxed),
             dropped_total: self.dropped_total.load(Ordering::Relaxed),
+            closed_dropped: self.closed_dropped.load(Ordering::Relaxed),
             overloaded: self.overloaded.load(Ordering::Acquire),
         }
     }
@@ -132,6 +135,9 @@ pub(crate) enum PublishOutcome {
     Spilled,
     /// spill 溢出：本帧被显式丢弃且已记录 gap，连接将以过载终态收敛。
     Overloaded,
+    /// 下游通道已关闭（消费端消失）：帧无法投递，计入 `closed_dropped`
+    /// 遥测。连接终止本身由既有 crash/shutdown 路径显式收敛（评审 E7）。
+    DroppedClosed,
 }
 
 impl InboundRelay {
@@ -148,60 +154,89 @@ impl InboundRelay {
         }
     }
 
-    /// 投递一帧：先分配单调 ingress ordinal，再按 lane 入队。
+    /// 投递一帧：先保证单调 ingress ordinal，再按 lane 入队。
     ///
     /// #99 不变量（结构性保证，调用方无法绕过）：每帧必有 ordinal；
     /// inbox 满转 spill；spill 溢出 = 显式过载终态，绝不静默丢帧。
+    /// lane 内严格 FIFO：决策与入队在 spill 锁内原子完成——某 lane 存在
+    /// 滞留帧时，该 lane 的新帧一律排到队尾（直发会越过滞留帧送达；
+    /// 泵侧以「队首占位直到发送成功」配合，两侧无交错窗口）（评审 E1）。
     fn relay(&self, mut classified: ClassifiedMessage) -> PublishOutcome {
-        classified.ingress_seq = self.telemetry.allocate_seq();
-        let lane = Self::lane_of(&classified);
-        let result = match lane {
-            InboundLane::Control => self.control_tx.try_send(classified),
-            InboundLane::Updates => self.updates_tx.try_send(classified),
-        };
-        match result {
-            Ok(()) => PublishOutcome::Published,
-            Err(tokio::sync::mpsc::error::TrySendError::Full(classified)) => {
-                self.spill_push(classified, lane)
-            }
-            // 下游已关闭 = 连接正在收敛；不视为丢帧（连接终止本身是显式终态）。
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => PublishOutcome::Published,
+        if classified.ingress_seq == 0 {
+            classified.ingress_seq = self.telemetry.allocate_seq();
         }
-    }
-
-    fn spill_push(&self, classified: ClassifiedMessage, lane: InboundLane) -> PublishOutcome {
+        let lane = Self::lane_of(&classified);
         let mut spill = self
             .spill
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lane_has_backlog = match lane {
+            InboundLane::Control => !spill.control.is_empty(),
+            InboundLane::Updates => !spill.updates.is_empty(),
+        };
+        let (outcome, first_gap) = if lane_has_backlog {
+            Self::spill_enqueue(&mut spill, &self.telemetry, classified, lane)
+        } else {
+            // 无滞留：锁内直发。`try_send` 非阻塞、不回调，持锁安全；
+            // 持锁发送消除「泵已取帧未落通道 + 新帧直发越过」的窗口。
+            let send_result = match lane {
+                InboundLane::Control => self.control_tx.try_send(classified),
+                InboundLane::Updates => self.updates_tx.try_send(classified),
+            };
+            match send_result {
+                Ok(()) => (PublishOutcome::Published, false),
+                Err(tokio::sync::mpsc::error::TrySendError::Full(classified)) => {
+                    Self::spill_enqueue(&mut spill, &self.telemetry, classified, lane)
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    self.telemetry.closed_dropped.fetch_add(1, Ordering::AcqRel);
+                    (PublishOutcome::DroppedClosed, false)
+                }
+            }
+        };
+        drop(spill);
+        if first_gap {
+            self.terminate_overloaded();
+        }
+        if outcome == PublishOutcome::Spilled {
+            self.wake.notify_one();
+        }
+        outcome
+    }
+
+    /// 锁内入队 spill（容量检查 + 计数）。返回 `(结果, 是否首个过载 gap)`；
+    /// 首个 gap 由调用方在**释放锁后**触发过载终态（std Mutex 不可重入，
+    /// terminate 内部会再次 relay 崩溃帧）。
+    fn spill_enqueue(
+        spill: &mut SpillState,
+        telemetry: &InboundTelemetry,
+        classified: ClassifiedMessage,
+        lane: InboundLane,
+    ) -> (PublishOutcome, bool) {
         if spill.control.len() + spill.updates.len() >= spill.capacity {
             // 显式 gap：丢弃必须计数；首个 gap 触发过载终态收敛连接，
             // 后续溢出帧只计数（终止流程已启动，不再重复触发）。
-            self.telemetry.dropped_total.fetch_add(1, Ordering::AcqRel);
-            let first_gap = !self.telemetry.overloaded.swap(true, Ordering::AcqRel);
-            drop(spill);
-            if first_gap {
-                self.terminate_overloaded();
-            }
-            return PublishOutcome::Overloaded;
+            telemetry.dropped_total.fetch_add(1, Ordering::AcqRel);
+            let first_gap = !telemetry.overloaded.swap(true, Ordering::AcqRel);
+            return (PublishOutcome::Overloaded, first_gap);
         }
         match lane {
             InboundLane::Control => spill.control.push_back(classified),
             InboundLane::Updates => spill.updates.push_back(classified),
         }
-        self.telemetry.spilled_total.fetch_add(1, Ordering::AcqRel);
-        drop(spill);
-        self.wake.notify_one();
-        PublishOutcome::Spilled
+        telemetry.spilled_total.fetch_add(1, Ordering::AcqRel);
+        (PublishOutcome::Spilled, false)
     }
 
     /// 过载终态：携带原因的控制帧 + 崩溃信号 + 主动关闭连接。
     ///
     /// 控制帧让 dispatcher 以稳定 code `overloaded` 收敛 turn/UI；crashed 标志
     /// 阻断新出站请求；shutdown 结束 SDK 泵任务、触发传输关闭（EOF 路径随后
-    /// 自然收敛）。即使 watch 分支先以缺省原因触发 handle_crash，控制帧随后
-    /// 到达仍会把 reason 修正为 `overloaded`（handle_crash 幂等，双通知已被
-    /// 既有防重入语义容忍）。
+    /// 自然收敛）。**reason 修正是 best-effort**：watch 分支可能先以缺省
+    /// `stdout_closed` 触发 handle_crash，控制帧随后到达通常会把 reason 修正
+    /// 为 `overloaded`（last-write-wins）；极端拥塞下（控制通道 + spill 均满）
+    /// 崩溃帧也可能被计入 gap，此时 reason 保持缺省——连接终止由
+    /// watch/shutdown 保证，与 reason 无关（评审 E7/E12）。
     fn terminate_overloaded(&self) {
         tracing::error!(
             dropped_total = self.telemetry.dropped_total.load(Ordering::Acquire),
@@ -266,71 +301,83 @@ impl InboundRelay {
 /// #99：spill 续投泵。
 ///
 /// inbox 满时帧进 spill；泵任务在 inbox 有空位后按「控制优先、各自保序」续投。
-/// 过载位被置上后泵退出（连接进入终态收敛，不再续投）。
-pub(crate) fn spawn_inbound_pump(relay: InboundRelay) {
+/// 保序机制（评审 E1）：锁内 **peek 队首并 clone 试发**——帧在成功发送前保持
+/// 队首占位，生产者（relay）因此始终看到非空滞留、把新帧排到队尾；
+/// 「取出-失败-放回」的重试窗口不复存在。
+/// 退出条件（评审 E5）：下游通道关闭、shutdown 触发（订阅 watch，连接
+/// kill/替换时随之退出，不残留定时任务）、或过载终态后 spill 排空。
+pub(crate) fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut shutdown_rx = relay.shutdown.subscribe();
         let retry = std::time::Duration::from_millis(5);
         loop {
-            let next = {
-                let mut spill = relay
+            let attempt = {
+                let spill = relay
                     .spill
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                spill
-                    .control
-                    .pop_front()
-                    .map(|message| (InboundLane::Control, message))
-                    .or_else(|| {
-                        spill
-                            .updates
-                            .pop_front()
-                            .map(|message| (InboundLane::Updates, message))
-                    })
-            };
-            match next {
-                Some((lane, message)) => {
-                    let result = match lane {
-                        InboundLane::Control => relay.control_tx.try_send(message),
-                        InboundLane::Updates => relay.updates_tx.try_send(message),
-                    };
-                    match result {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
-                            // inbox 仍满：放回队首保序，稍候重试（锁在 helper 内
-                            // 取放，不跨 await）。
-                            spill_push_front(&relay, lane, message);
-                            relay.wake.notify_one();
-                            tokio::time::sleep(retry).await;
-                        }
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                let front = if let Some(message) = spill.control.front() {
+                    Some((InboundLane::Control, message.clone()))
+                } else {
+                    spill
+                        .updates
+                        .front()
+                        .map(|message| (InboundLane::Updates, message.clone()))
+                };
+                match front {
+                    None => None,
+                    Some((lane, message)) => {
+                        // try_send 非阻塞、不回调，持 spill 锁调用安全；
+                        // 与 relay 的锁内直发决策互斥，无交错窗口。
+                        let result = match lane {
+                            InboundLane::Control => relay.control_tx.try_send(message),
+                            InboundLane::Updates => relay.updates_tx.try_send(message),
+                        };
+                        Some((lane, result))
                     }
                 }
+            };
+            match attempt {
                 None => {
                     if relay.telemetry.overloaded.load(Ordering::Acquire) {
                         break;
                     }
-                    // 等新 spill 入队；超时兜底重查过载/关闭。
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(200),
-                        relay.wake.notified(),
-                    )
-                    .await;
+                    // shutdown 可能在泵首次运行前就已触发（subscribe 之后才
+                    // 轮询）——现值检查兜底，changed() 只覆盖其后的变更。
+                    if *shutdown_rx.borrow_and_update() {
+                        break;
+                    }
+                    // 等 shutdown / 新 spill 入队；超时兜底重查过载与关闭。
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => break,
+                        _ = relay.wake.notified() => {}
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
+                    }
                 }
+                Some((lane, Ok(()))) => {
+                    // 发送成功此刻才真正出队——队首在成功前始终占位，
+                    // 生产者据此保持「滞留即排尾」的 FIFO 纪律。
+                    let mut spill = relay
+                        .spill
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    match lane {
+                        InboundLane::Control => {
+                            spill.control.pop_front();
+                        }
+                        InboundLane::Updates => {
+                            spill.updates.pop_front();
+                        }
+                    }
+                }
+                Some((_, Err(tokio::sync::mpsc::error::TrySendError::Full(_)))) => {
+                    // inbox 仍满：帧保持在队首占位，稍候重试（无取放窗口）。
+                    tokio::time::sleep(retry).await;
+                }
+                Some((_, Err(tokio::sync::mpsc::error::TrySendError::Closed(_)))) => break,
             }
         }
-    });
-}
-
-/// 把已取出的帧放回 spill 队首（保序）；同步函数内取放锁，绝不跨 await。
-fn spill_push_front(relay: &InboundRelay, lane: InboundLane, message: ClassifiedMessage) {
-    let mut spill = relay
-        .spill
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    match lane {
-        InboundLane::Control => spill.control.push_front(message),
-        InboundLane::Updates => spill.updates.push_front(message),
-    }
+    })
 }
 
 /// SDK 后端（官方 `agent-client-protocol` 连接）的传输状态。
@@ -661,6 +708,12 @@ fn publish_inbound(
     active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
     relay: &InboundRelay,
 ) -> PublishOutcome {
+    // ordinal 在 clone/broadcast 之前分配：broadcast（replay 观察扇出）副本与
+    // inbox 帧携带同一序号，live/replay/boundary 共用同一序列模型（评审 E10）。
+    // relay 内的 assign-if-zero 只兜底直调路径（测试/过载崩溃帧）。
+    if classified.ingress_seq == 0 {
+        classified.ingress_seq = relay.telemetry.allocate_seq();
+    }
     // A replay response is the deterministic boundary of the load operation.
     // Keep this classification on the transport message itself so observers
     // do not have to infer it from the response channel.
@@ -746,23 +799,6 @@ fn observe_message(
 }
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
-fn observe_frame(frame: &TransportFrame, hub: &AcpWireHub, direction: WireDirection) {
-    let observe = |message: &agent_client_protocol::RawJsonRpcMessage| {
-        observe_message(message, hub, direction);
-    };
-    match frame {
-        TransportFrame::Single(message) => observe(message),
-        TransportFrame::Malformed { .. } => {}
-        TransportFrame::Batch(batch) => {
-            for entry in batch.entries() {
-                if let TransportBatchEntry::Message(message) = entry {
-                    observe(message);
-                }
-            }
-        }
-    }
-}
-
 /// 用 `tokio_util::compat::Compat` 把 tokio 读写半流适配成 SDK 需要的 futures 字节流。
 pub(crate) fn byte_streams<R, W>(read: R, write: W) -> ByteStreams<Compat<W>, Compat<R>>
 where
@@ -795,7 +831,7 @@ pub(crate) fn spawn_sdk_client(
     let crashed_watch_eof = crashed_watch.clone();
     let wire = config.wire.clone();
     // #99：spill 续投泵（inbox 满时的续投者；过载后退出）。
-    spawn_inbound_pump(relay.clone());
+    let _pump = spawn_inbound_pump(relay.clone());
     tokio::spawn(async move {
         let result = Client
             .builder()
@@ -1678,6 +1714,78 @@ mod tests {
 
         agent_task.await.expect("agent task");
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+
+    /// #99（评审 E1 回归锁）：lane 存在滞留帧时，新帧必须排到 spill 队尾
+    ///（返回 Spilled）而不是直发越过滞留帧（旧实现返回 Published 且乱序送达）。
+    /// 消费端最终按 ingress 序列收齐，证明严格 FIFO。
+    #[tokio::test]
+    async fn relay_with_lane_backlog_keeps_new_frames_behind_spilled() {
+        let (relay, mut updates_rx, _control_rx, _shutdown_rx) =
+            InboundRelay::for_test_with_receivers(1, 8, 64);
+        let _pump = spawn_inbound_pump(relay.clone());
+        let update = |index: u64| {
+            ClassifiedMessage::live(RawMessage {
+                id: None,
+                kind: super::AcpKind::SessionUpdate,
+                method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+                result: None,
+                params: Some(serde_json::json!({
+                    "sessionId": "s-1", "update": {"index": index}
+                })),
+                error: None,
+            })
+        };
+        // U0 → inbox；U1 → spill（泵可能尚未投递）；U2 必须排在 U1 之后。
+        assert_eq!(relay.relay(update(0)), PublishOutcome::Published);
+        assert_eq!(relay.relay(update(1)), PublishOutcome::Spilled);
+        assert_eq!(
+            relay.relay(update(2)),
+            PublishOutcome::Spilled,
+            "滞留存在时新帧禁止直发（E1：直发会越过滞留帧破坏 FIFO）"
+        );
+        let mut seqs = Vec::new();
+        for _ in 0..3 {
+            let frame = tokio::time::timeout(Duration::from_secs(5), updates_rx.recv())
+                .await
+                .expect("frame must be delivered")
+                .expect("updates channel must stay open");
+            seqs.push(frame.ingress_seq);
+        }
+        assert_eq!(seqs, vec![1, 2, 3], "交付序必须等于 ingress 序");
+    }
+
+    /// #99（评审 E5 回归锁）：shutdown 触发后泵任务必须退出，不残留
+    /// 定时唤醒的僵尸任务。
+    #[tokio::test]
+    async fn inbound_pump_exits_on_shutdown() {
+        let (updates_tx, updates_rx) = mpsc::channel(8);
+        let (control_tx, control_rx) = mpsc::channel(8);
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let shutdown_tx = shutdown.clone();
+        let (crashed_watch, _crashed_rx) = watch::channel(false);
+        let relay = InboundRelay {
+            updates_tx,
+            control_tx,
+            spill: Arc::new(Mutex::new(SpillState {
+                control: std::collections::VecDeque::new(),
+                updates: std::collections::VecDeque::new(),
+                capacity: 64,
+            })),
+            wake: Arc::new(tokio::sync::Notify::new()),
+            telemetry: Arc::new(InboundTelemetry::new()),
+            shutdown,
+            crashed: Arc::new(AtomicBool::new(false)),
+            crashed_watch,
+        };
+        let pump = spawn_inbound_pump(relay);
+        drop(updates_rx);
+        drop(control_rx);
+        let _ = shutdown_tx.send(true);
+        tokio::time::timeout(Duration::from_secs(2), pump)
+            .await
+            .expect("pump must exit after shutdown")
+            .expect("pump task must not panic");
     }
 }
 

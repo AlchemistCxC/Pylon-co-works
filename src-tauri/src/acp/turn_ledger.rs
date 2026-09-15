@@ -148,6 +148,8 @@ pub(crate) struct TurnRecord {
     pub(crate) last_ingress_seq: u64,
     /// 本 turn 是否观测到 live 文本产出（empty-turn 判定输入）。
     pub(crate) saw_text: bool,
+    /// 本 turn 是否观测到 live 工具调用（empty-turn 判定输入）。
+    pub(crate) saw_tool: bool,
 }
 
 /// [`TurnKey`] 的可序列化快照形态。
@@ -193,8 +195,8 @@ pub(crate) enum SettleOutcome {
 ///
 /// 内部为 `Mutex<HashMap<TurnKey, TurnRecord>>`；所有操作锁内完成、锁外返回
 /// clone，避免把账本锁跨越 await（与 runtime.rs 锁序纪律一致）。
-/// 部分查询/清理面（note_activity/release/late_terminal_events 等）当前由
-/// 测试与 #97/#98 消费，运行路径按需接线。
+/// 内存上界（评审 E8）：settle 内建每会话终态保留裁剪，`drop_generation`
+/// 随代际退出收敛；`release`/`late_terminal_events` 为诊断辅助面。
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct TurnLedger {
@@ -227,6 +229,7 @@ impl TurnLedger {
                     terminal: None,
                     last_ingress_seq: 0,
                     saw_text: false,
+                    saw_tool: false,
                 });
                 BeginOutcome::Started
             }
@@ -249,17 +252,10 @@ impl TurnLedger {
         }
     }
 
-    /// 记录本 turn 观测到的 live 文本产出（empty-turn 判定输入）与 ingress cursor。
-    pub(crate) fn note_activity(&self, key: &TurnKey, ingress_seq: u64, saw_text: bool) {
-        let mut records = self.lock();
-        if let Some(record) = records.get_mut(key) {
-            record.last_ingress_seq = record.last_ingress_seq.max(ingress_seq);
-            record.saw_text |= saw_text;
-        }
-    }
-
     /// 会话作用域的活动推进（dispatcher 用：不持有 turn_id，命中该会话在途的
-    /// 唯一 turn）——刷新 ingress cursor / 文本标志，并把阶段推进到 Streaming。
+    /// 唯一 turn）——刷新 ingress cursor / 文本与工具标志，并把阶段推进到
+    /// Streaming。多活跃 turn（理论竞态）时取 turn_id 最小者，与
+    /// `settle_by_session`/`active_snapshot` 的选择语义一致（评审 E9）。
     /// 返回是否命中在途 turn（false = 回合未登记或已终态，迟到活动只算诊断）。
     pub(crate) fn note_session_activity(
         &self,
@@ -268,17 +264,19 @@ impl TurnLedger {
         generation: u64,
         ingress_seq: u64,
         saw_text: bool,
+        saw_tool: bool,
     ) -> bool {
         let mut records = self.lock();
         let target = records
             .values()
-            .find(|record| {
+            .filter(|record| {
                 record.terminal.is_none()
                     && record.key.local_session_id == local_session_id
                     && record.key.remote_session_id == remote_session_id
                     && record.key.generation == generation
             })
-            .map(|record| record.key.turn_id);
+            .map(|record| record.key.turn_id)
+            .min();
         match target {
             Some(turn_id) => {
                 let key = TurnKey {
@@ -290,6 +288,7 @@ impl TurnLedger {
                 if let Some(record) = records.get_mut(&key) {
                     record.last_ingress_seq = record.last_ingress_seq.max(ingress_seq);
                     record.saw_text |= saw_text;
+                    record.saw_tool |= saw_tool;
                     if phase_rank(record.phase) < phase_rank(TurnPhase::Streaming) {
                         record.phase = TurnPhase::Streaming;
                     }
@@ -301,6 +300,11 @@ impl TurnLedger {
     }
 
     /// CAS 终态：只有第一个 cause 获得发布权；迟到者只推进诊断计数。
+    ///
+    /// 保留上界（评审 E8）：settle 成功后按会话三元组做终态保留裁剪——至多
+    /// 保留 [`TERMINAL_RETENTION_PER_SESSION`] 条最新终态，更旧的即时释放
+    /// （`latest_session_snapshot` 的「最近终态」语义只需要一条）。在途记录
+    /// 不受裁剪影响。
     pub(crate) fn settle(
         &self,
         key: &TurnKey,
@@ -323,10 +327,57 @@ impl TurnLedger {
                     detail,
                 });
                 record.phase = TurnPhase::Terminal;
+                Self::prune_terminal_retention(&mut records, key);
                 SettleOutcome::Published
             }
             None => SettleOutcome::UnknownTurn,
         }
+    }
+
+    /// 每会话三元组保留的最新终态记录数（冷挂载语义只需最近一条，留少量
+    /// 余量供诊断对比）。
+    const TERMINAL_RETENTION_PER_SESSION: usize = 8;
+
+    /// 裁剪同会话三元组下超量的旧终态记录（settle 锁内调用）。
+    fn prune_terminal_retention(
+        records: &mut HashMap<TurnKey, TurnRecord>,
+        just_settled: &TurnKey,
+    ) {
+        let mut terminals: Vec<(u64, u64)> = records
+            .iter()
+            .filter(|(key, record)| {
+                record.terminal.is_some()
+                    && key.local_session_id == just_settled.local_session_id
+                    && key.remote_session_id == just_settled.remote_session_id
+                    && key.generation == just_settled.generation
+            })
+            .map(|(key, record)| {
+                (
+                    record
+                        .terminal
+                        .as_ref()
+                        .map(|t| t.settled_at_ms)
+                        .unwrap_or(0),
+                    key.turn_id,
+                )
+            })
+            .collect();
+        if terminals.len() <= Self::TERMINAL_RETENTION_PER_SESSION {
+            return;
+        }
+        // 最旧优先（时间戳同毫秒时以 turn_id 定序，保证确定性）。
+        terminals.sort_unstable_by_key(|(at, id)| (*at, *id));
+        let stale_ids: std::collections::HashSet<u64> = terminals
+            [..terminals.len() - Self::TERMINAL_RETENTION_PER_SESSION]
+            .iter()
+            .map(|(_, id)| *id)
+            .collect();
+        records.retain(|key, _| {
+            !(key.local_session_id == just_settled.local_session_id
+                && key.remote_session_id == just_settled.remote_session_id
+                && key.generation == just_settled.generation
+                && stale_ids.contains(&key.turn_id))
+        });
     }
 
     /// 按会话三元组结算该 source 当前唯一在途 turn。
@@ -427,6 +478,10 @@ impl TurnLedger {
     }
 
     /// 释放单个 turn 条目（终态发布完成后的生命周期收敛点）。
+    ///
+    /// 运行路径的常规收敛走 `settle` 内建的每会话终态保留裁剪与
+    /// `drop_generation`（评审 E8：保留上界，不再依赖显式调用）。
+    #[allow(dead_code)]
     pub(crate) fn release(&self, key: &TurnKey) {
         self.lock().remove(key);
     }
@@ -444,6 +499,19 @@ impl TurnLedger {
             records.remove(key);
         }
         stale.len()
+    }
+
+    #[cfg(test)]
+    fn snapshot_records_for_test(&self, local: &str, remote: &str, generation: u64) -> Vec<u64> {
+        self.lock()
+            .values()
+            .filter(|record| {
+                record.key.local_session_id == local
+                    && record.key.remote_session_id == remote
+                    && record.key.generation == generation
+            })
+            .map(|record| record.key.turn_id)
+            .collect()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<TurnKey, TurnRecord>> {
@@ -648,11 +716,44 @@ mod tests {
         let ledger = ledger();
         let k = key(9);
         ledger.begin(k.clone(), 0);
-        ledger.note_activity(&k, 5, true);
-        ledger.note_activity(&k, 3, false); // 乱序 cursor 不回退
+        ledger.note_session_activity("local:s1", "peri-s1", 1, 5, true, false);
+        ledger.note_session_activity("local:s1", "peri-s1", 1, 3, false, true); // 乱序 cursor 不回退
         let record = ledger.snapshot(&k).unwrap();
         assert_eq!(record.last_ingress_seq, 5);
         assert!(record.saw_text);
+        assert!(record.saw_tool);
+    }
+
+    #[test]
+    fn terminal_retention_is_bounded_per_session() {
+        let ledger = ledger();
+        // 同会话三元组连发 12 个 turn 并全部 settle：终态保留裁剪到上界。
+        for turn_id in 1..=12u64 {
+            let k = key(turn_id);
+            ledger.begin(k.clone(), turn_id);
+            assert_eq!(
+                ledger.settle(&k, TurnTerminalCause::Completed, 100 + turn_id, None),
+                SettleOutcome::Published
+            );
+        }
+        let retained = ledger
+            .latest_session_snapshot("local:s1", "peri-s1", 1)
+            .expect("最近终态必须保留");
+        assert_eq!(retained.key.turn_id, 12, "保留的必须是最新终态");
+        let mut terminal_turns: Vec<u64> = {
+            let records = ledger.snapshot_records_for_test("local:s1", "peri-s1", 1);
+            records
+        };
+        terminal_turns.sort_unstable();
+        assert_eq!(
+            terminal_turns.len(),
+            TurnLedger::TERMINAL_RETENTION_PER_SESSION,
+            "终态记录数必须收敛到保留上界"
+        );
+        // 在途 turn 不受裁剪影响
+        let active = key(13);
+        ledger.begin(active.clone(), 13);
+        assert!(ledger.snapshot(&active).is_some());
     }
 
     #[test]
