@@ -183,3 +183,19 @@ Windows 实机验收清单（cargo test 无法覆盖实窗 CDP；需在桌面端
 
 复审后复验：`cargo test --lib` 1020 绿（含新增 `user_preemption` Lost 语义断言）、
 `cargo fmt` ✅、`tsc -b` ✅、`bun run build` ✅、目标 Vitest ✅。
+
+## Release 构建与桥载体回归（2026-09-15）
+
+用户要求构建 release。首次 `release:portable` 后发现桥载体实现偏离 spec 决策：桥被
+做成独立 bin `pylon-browser-bridge.exe`（从未入包），而注入参数是
+`['browser-bridge', …]`（主程序无此分发）——真机上 agent 拉桥必然落空。已修复
+（cfe4b79a + 后续）：桥逻辑迁入 lib 模块 `browser_bridge`，`run()` 顶部分发
+`argv[1] == "browser-bridge"`（GUI 之前退出），主二进制即桥，发行包 exe 清单不变；
+parse 参数从 argv[2] 起（子命令偏移）。
+
+`bun run release:portable` 全链成功（期间一次 rustc STATUS_STACK_BUFFER_OVERRUN 与
+一次系统内存耗尽为环境性故障，重试通过；另一次失败为 #81 在途类型错误，等其
+stabilise 后通过，见 L.md）。包验证：`release/pylon-1.6.0-win64.zip`（≈40.9MB，
+manifest+ZIP 一致 207 项）；包内 pylon.exe 与最新构建哈希一致；从包内提取
+pylon.exe 实测 `browser-bridge --help` 退出 0、MCP `initialize` 握手返回
+`pylon-browser 1.6.0 / 2024-11-05`、`tools/list` 18 工具。

@@ -29,7 +29,8 @@ fn usage() -> &'static str {
 fn parse_options() -> Result<BridgeOptions, String> {
     let mut session_key = String::from("unnamed-session");
     let mut workspace_id = None;
-    let mut args = std::env::args().skip(1);
+    // 子命令形态：argv[0]=pylon.exe，argv[1]=browser-bridge，从 argv[2] 起解析。
+    let mut args = std::env::args().skip(2);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--session" => {
