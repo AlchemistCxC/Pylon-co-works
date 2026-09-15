@@ -20,7 +20,7 @@
 | 历史策略 | `src/css01/`、`src/css04/`、`src/cwd02/` | 已有布局、样式与 cwd 策略；目录编号本身不是删除或合并的证据 | 各目录测试；样式与边界门禁 |
 | 窄工具 / 演示 | `src/utils/`、`src/demo/` | 窄工具按消费者归属；demo 数据不能当真实 Agent 结果 | 对应工具测试；生产 bundle 检查 |
 | 前端根文件 | `src/*` 的直接文件 | 入口、schema、旧 store / 策略；不吸收新增子目录以掩盖归属缺失 | `lint`、`build` 与消费者测试 |
-| Native ACP | `src-tauri/src/acp/`、`dispatcher/`、`lifecycle/` | 传输、协商、通知路由、实例连接；lifecycle 锁序与 generation 保持一个入口 | Rust ACP / dispatcher / lifecycle 测试；`check:acp-shadow` |
+| Native ACP | `src-tauri/src/acp/`、`dispatcher/`、`lifecycle/` | 传输、协商、通知路由、实例连接；lifecycle 锁序与 generation 保持一个入口。#98 起：`acp/negotiated.rs` 是能力协商快照唯一真源（canonical 矩阵 + 四态 + 消费者注册表，session 建立/重连探针/agent_status 消费同一份），`acp/interaction_queue.rs` 是 permission/elicitation/question 等 client request 的统一 request-id 队列（FIFO、单一 Active、cancel/timeout/disconnect drain 终态、冷挂载快照），`session/fork.rs` 是 `session/fork` raw RPC 消费者（能力 usable gate + 受限 envelope + parent/child 登记） | Rust ACP / dispatcher / lifecycle 测试；`check:acp-shadow` |
 | Native session | `src-tauri/src/session/`；[mod.rs](../../src-tauri/src/session/mod.rs) | session 事务、journal 与 replay；持久化提交先于发布，删除 tombstone 阻止复活 | Rust session / event_repo / replay 测试 |
 | Native host | `src-tauri/src/` 其余模块 | Tauri 命令注册、文件/终端/Gateway/安装等 native adapters；专业子目录优先归属 | host 库测试、构建与 Clippy |
 | 可复用 Agent 能力 | `src-tauri/pylon-core/src/` | catalog、检测、preflight；保持受控探测与配置身份区分 | 用该 crate 的 `--manifest-path` 运行测试 / Clippy |
