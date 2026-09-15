@@ -450,13 +450,10 @@ impl SessionInfo {
             self.model_pending = Some(requested.clone());
             return ModelSwitchSettlement::Pending { requested };
         }
-        match key {
-            "mode" => {
-                if let Some(value) = value.as_str() {
-                    self.mode = Some(value.to_string());
-                }
+        if key == "mode" {
+            if let Some(value) = value.as_str() {
+                self.mode = Some(value.to_string());
             }
-            _ => {}
         }
         ModelSwitchSettlement::NotModel
     }
