@@ -96,8 +96,8 @@
 
 ## 未解问题
 
-- **#93 本体未做**：正文容器右内边距两态统一（只读 `.file-tab-pre { padding-right: 24px }` / 编辑 `.cm-content { padding-right: 0 }`）连同 Q1–Q4 的判定与实测矩阵仍待办。本次实测已顺带确认一条：编辑态 `.cm-content` 的 computed `padding-right` 是 **0px**（非记录里的 16px），记录中的「16px」需按同一装置复核承载者后另做。
-- **亚像素项**（超宽行行盒右缘 3000.266 / 3000.234）未动。
+- ~~**#93 本体未做**~~（**已追平**：本分支随后完成 #93 本体——正文容器右内边距两态统一为 0px，见 `.agents/records/93-file-sheet-two-state-content-inset.md`）。本次实测顺带确认一条：编辑态 `.cm-content` 的 computed `padding-right` 是 **0px**（非记录里的 16px）；「16px」的真实承载者是行盒 `--file-code-line-inset`，已在 #93 记录中按级联溯源坐实。
+- **亚像素项**（超宽行行盒右缘 3000.266 / 3000.234 一类的 `max-content` 取整）已在 #93 记录中判定「不修」并给出理由与复测证据。
 
 ## 并行交集
 

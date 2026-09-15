@@ -129,3 +129,10 @@ L2/L3 交付（终结 rollup + 破坏性裁剪），在 L1 域基础上新增/�
 **我不碰的**：`SheetVocabulary.css`（#83 面）、Markdown 渲染路径（`.file-tab-md` / `MarkdownRenderer`）、`src-tauri/**`、`.github/workflows/**`、`dist-plugin-sdk/**`，以及三个既有工作树 `F:/tool/Pylon-main`、`F:/tool/Pylon-co-works-main`、`F:/tool/Pylon-issue69`。提交一律显式 pathspec，只含上述文件域。
 
 **合并说明**：本次把 `origin/main`（`6c60bce` → `d5c33f1a`，39 个提交）merge 进本分支；唯一冲突是 `.agents/L.md`（双方都在文件尾追加留言），已按「取 main 版 + 追加回我的条目」解决，无内容丢失。
+
+
+---
+
+[2026-09-15 23] [GLM] [#93] 追写声明（文件域不变）
+
+#93 本体已在本分支完成（上一条「不在本次提交内」作废）：正文容器右内边距两态统一为 **0px**，并由契约 token `--file-code-content-pad-right` + 共享规则承担，编辑态 computed 零变化；宽行末字符后留白 40/16 → **16/16**，`scrollWidth` 4526/4502 → **4502/4502**。Q1 已按真实级联溯源（编辑态「16px」是**行盒** `--file-code-line-inset`，容器是 0；Tailwind 层不参与 FileSheet 几何；只读态 24px 出自 #69 之前两条同名 `.file-tab-pre` 的「后者胜出」）。开发记录：`.agents/records/93-file-sheet-two-state-content-inset.md`。**另**：已按 §2.1 把 `origin/main`（`6c60bce` → `d5c33f1a`，39 提交）merge 进本分支，唯一冲突 `.agents/L.md` 按「取 main 版 + 追加回本人条目」解决。文件域同上一条，未新增。
