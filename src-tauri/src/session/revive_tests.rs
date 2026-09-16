@@ -371,18 +371,9 @@ async fn ensure_session_mapping_without_peri_id_creates_directly() {
 // 同时覆盖「建立与复活消费同一协商快照」的 load 通道判定。──
 #[tokio::test]
 async fn revive_with_changed_remote_identity_rebinds_explicitly() {
-    const SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    result={}
-    if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
-    elif method == 'session/load':
-        result={'sessionId':'remote-rebound'}
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':result}
-    print(json.dumps(response),flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("rebind-identity", SCRIPT);
+    // 场景 `rebind` 复刻原 fixture 的 wire：只宣告 loadSession，session/load 回
+    // 一个新 id（remote-rebound）——正是「远端 identity 变化」这一事件的触发源。
+    let agent = crate::test_utils::fake_acp_agent("rebind-identity", &["--scenario", "rebind"]);
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await

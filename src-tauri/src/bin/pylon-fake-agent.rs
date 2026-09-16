@@ -168,6 +168,7 @@ impl Config {
          \x20 permission-proactive   initialize 后主动 request_permission（--permission-id/params）\n\
          \x20 set-config-option      #97 session/set_config_option 应答矩阵（--mode）\n\
          \x20 empty | session-capable | revive-echo | revive-load | resume-only\n\
+         \x20 fork | rebind             #98 fork 执行链 / revive 后 identity 变化的 rebind\n\
          \x20 echo-empty | close-unsupported | trace-all | id-kinds | caps | probe\n\
          \x20 recovery-generation | plugin-fixture | hang | exit-immediately\n\
          \x20 error-echo | bad-caps | env-probe | argv-probe | init-params-probe | silent\n\
@@ -774,6 +775,74 @@ impl FakeAgent {
                         Self::write_frame(out, &Self::response(&id, Some(json!({})), None));
                     }
                 }
+                Flow::Continue
+            }
+            // fork 执行链（#98 fork 用例；语义对照已删除的 FORK_SCRIPT）：
+            // initialize 同时宣告 fork 与 loadSession（gate 要 fork，parent 侧
+            // 的 load 判定要 loadSession）；session/fork 成功回 child id 与一个
+            // 未知厂商扩展字段——后者是「raw envelope 保真」的回归面；
+            // `--outcome error` 时回 -32000（失败回滚用例走这条）。
+            "fork" => {
+                match method {
+                    "initialize" => {
+                        Self::write_frame(
+                            out,
+                            &Self::response(
+                                &id,
+                                Some(
+                                    json!({"agentCapabilities": {"sessionCapabilities": {"fork": {}, "loadSession": {}}}}),
+                                ),
+                                None,
+                            ),
+                        );
+                    }
+                    "session/fork" => {
+                        let response = if config.outcome.as_deref() == Some("error") {
+                            Self::response(
+                                &id,
+                                None,
+                                Some(json!({
+                                    "code": config.error_code.unwrap_or(-32000),
+                                    "message": config
+                                        .error_message
+                                        .as_deref()
+                                        .unwrap_or("fork unavailable"),
+                                })),
+                            )
+                        } else {
+                            Self::response(
+                                &id,
+                                Some(json!({
+                                    "sessionId": config.session_id.as_deref().unwrap_or("remote-child"),
+                                    "_vendorExtension": {"future": true},
+                                })),
+                                None,
+                            )
+                        };
+                        Self::write_frame(out, &response);
+                    }
+                    // 其余方法沿用旧脚本的 parent 回显（load 等路径原样）。
+                    _ => {
+                        Self::write_frame(
+                            out,
+                            &Self::response(&id, Some(json!({"sessionId": "remote-parent"})), None),
+                        );
+                    }
+                }
+                Flow::Continue
+            }
+            // revive 后远端 identity 变化（#98 rebind 用例；语义对照已删除的
+            // rebind 脚本）：只宣告 loadSession，session/load 回一个**新** id
+            // （默认 remote-rebound，可用 `--session-id` 改），从而触发显式 rebind。
+            "rebind" => {
+                let result = if method == "initialize" {
+                    json!({"agentCapabilities": {"sessionCapabilities": {"loadSession": {}}}})
+                } else if method == "session/load" {
+                    json!({"sessionId": config.session_id.as_deref().unwrap_or("remote-rebound")})
+                } else {
+                    json!({})
+                };
+                Self::write_frame(out, &Self::response(&id, Some(result), None));
                 Flow::Continue
             }
             // lifecycle restart 矩阵：对一切请求回空 result。
