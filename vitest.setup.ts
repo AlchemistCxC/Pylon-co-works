@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 // 组件测试（jsdom）所需的最小浏览器 API 垫片
-import { afterAll, afterEach } from 'vitest'
+import { afterAll, afterEach, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
@@ -23,6 +23,12 @@ console.error = (...args: unknown[]) => {
 }
 
 afterAll(() => {
+  console.error = originalConsoleError
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+  vi.useRealTimers()
+  vi.resetModules()
   process.removeListener('unhandledRejection', onUnhandledRejection)
   if (consoleErrors.length > 0) {
     console.log(`[setup] 本测试文件出现 ${consoleErrors.length} 次 console.error（阶段 8 前仅记录）`)
