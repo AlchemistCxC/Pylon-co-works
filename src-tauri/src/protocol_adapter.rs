@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn protocol_catalog_adds_configured_unknown_provider_without_secrets() {
-        let mut agent = crate::test_utils::fake_acp_agent("custom", "print('x')");
+        let mut agent = crate::test_utils::fake_acp_agent_stub("custom");
         agent.provider = Some("Acme-ACP".to_string());
         let mut agents = HashMap::new();
         agents.insert("custom-agent".to_string(), agent);

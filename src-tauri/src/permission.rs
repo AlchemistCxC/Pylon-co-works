@@ -1126,17 +1126,18 @@ mod tests {
     /// 连接登记 Responder（fake agent 发 id=7 的 permission 请求）——应答送达才结算。
     #[tokio::test]
     async fn timeout_settles_and_reports_outcome_with_live_responder() {
-        let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    if method == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':7,'method':'session/request_permission','params':{'sessionId':'s1','toolCallId':'tc-1','options':[{'optionId':'allow_once'},{'optionId':'reject_once'}]}}), flush=True)
-    else:
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-        let agent = crate::test_utils::fake_acp_agent("fake-acp-perm-timeout", script);
+        let agent = crate::test_utils::fake_acp_agent(
+            "fake-acp-perm-timeout",
+            &[
+                "--scenario",
+                "permission-proactive",
+                "--permission-id",
+                "7",
+                "--post-init-respond",
+                "--permission-params",
+                r#"{"sessionId":"s1","toolCallId":"tc-1","options":[{"optionId":"allow_once"},{"optionId":"reject_once"}]}"#,
+            ],
+        );
         let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");

@@ -152,7 +152,7 @@ fn agent_status_exposes_only_binding_health_metadata() {
     );
     let state = crate::test_utils::TestStateBuilder::bare()
         .with_active_agent("peri")
-        .with_agent(crate::test_utils::fake_acp_agent("peri", "print('unused')"))
+        .with_agent(crate::test_utils::fake_acp_agent_stub("peri"))
         .with_runtime("peri", runtime)
         .build();
 

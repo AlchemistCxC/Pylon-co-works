@@ -35,16 +35,28 @@ function fail(message, details = "") {
   throw new Error(details ? `${message}\n${details}` : message);
 }
 
-function run(command, args, extraEnv = {}) {
+function run(command, args, extraEnv = {}, timeoutMs = 0) {
   const started = process.hrtime.bigint();
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
     shell: false,
     env: { ...process.env, ...extraEnv },
+    ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
   });
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
-  if (result.error) fail(`${command} 启动失败`, result.error.message);
+  if (result.error) {
+    // 超时是「fixture 挂死」这条失败路径，必须报成明确结论而不是笼统的启动失败。
+    const timedOut =
+      result.error.code === "ETIMEDOUT" || /timed?\s?out/i.test(result.error.message ?? "");
+    if (timedOut && timeoutMs > 0) {
+      fail(
+        `${command} 超过 ${Math.round(timeoutMs / 1000)}s 未返回（已终止）`,
+        "挂死的 fixture 要显式失败，不能让整个 job 干等。",
+      );
+    }
+    fail(`${command} 启动失败`, result.error.message);
+  }
   return {
     status: result.status,
     elapsedMs,
@@ -53,9 +65,19 @@ function run(command, args, extraEnv = {}) {
   };
 }
 
+/** fixture 的**测试本体**耗时（cargo 自报的 `finished in X.XXs`，取最后一次）。 */
+function reportedTestMs(stdout) {
+  const matches = [...stdout.matchAll(/finished in ([0-9.]+)s/g)];
+  if (matches.length === 0) return Number.NaN;
+  return Number.parseFloat(matches[matches.length - 1][1]) * 1000;
+}
+
+/** fixture 的挂死上限（含冷编译，故给得很宽：它只挡「永远不返回」）。 */
+const FIXTURE_TIMEOUT_MS = 600_000;
+
 function runFixtureInto(dir) {
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
-  return run(cargo, [
+  const result = run(cargo, [
     "test",
     "--manifest-path",
     "src-tauri/Cargo.toml",
@@ -64,7 +86,8 @@ function runFixtureInto(dir) {
     "--no-fail-fast",
     "--",
     "--exact",
-  ], { PYLON_GOLDEN_TRACE_DIR: dir });
+  ], { PYLON_GOLDEN_TRACE_DIR: dir }, FIXTURE_TIMEOUT_MS);
+  return { ...result, testMs: reportedTestMs(result.stdout) };
 }
 
 function parseScenarioFrom(dir, name) {
@@ -274,6 +297,7 @@ const runB = mkdtempSync(resolve(process.env.TEMP ?? process.cwd(), "pylon-shado
 let runs;
 let parity;
 let fixtureElapsedMs;
+let fixtureTestMs;
 try {
   const fixtureA = runFixtureInto(runA);
   const fixtureB = runFixtureInto(runB);
@@ -283,6 +307,14 @@ try {
   const filesB = readdirSync(runB).filter((name) => name.endsWith(".jsonl")).sort();
   if (filesA.join() !== filesB.join()) fail("shadow fixture file sets differ");
   fixtureElapsedMs = [fixtureA.elapsedMs, fixtureB.elapsedMs];
+  // 性能判定只用**测试本体**耗时：墙钟里裹着 cargo 的编译/链接，
+  // 拿它当"fixture 很慢"会误判（实测本机同一条命令：测试 0.22s、进程 128s）。
+  fixtureTestMs = [fixtureA.testMs, fixtureB.testMs];
+  if (fixtureTestMs.some((ms) => !Number.isFinite(ms)))
+    fail(
+      "fixture 没有报告测试时长（cargo 输出里找不到 'finished in'）——测试可能根本没跑",
+      `${fixtureA.stdout}${fixtureA.stderr}${fixtureB.stdout}${fixtureB.stderr}`,
+    );
   runs = scenarios.map((name) => [
     snapshot(name, parseScenarioFrom(runA, name)),
     snapshot(name, parseScenarioFrom(runB, name)),
@@ -296,7 +328,7 @@ try {
       errorCode: JSON.stringify(left.errorCode) === JSON.stringify(right.errorCode),
       finalState: left.finalState === right.finalState,
       queue: JSON.stringify(left.queue) === JSON.stringify(right.queue),
-      duration: fixtureElapsedMs.every((elapsed) => elapsed < 30_000),
+      duration: fixtureTestMs.every((ms) => ms < 30_000),
       memory: left.memoryBound && right.memoryBound,
       processExit: left.processExit.fixtureClientKill && right.processExit.fixtureClientKill,
     };
@@ -344,6 +376,7 @@ const report = {
     parity,
     generatorElapsedMs: Math.round(generation.elapsedMs),
     fixtureElapsedMs: fixtureElapsedMs.map((elapsed) => Math.round(elapsed)),
+    fixtureTestMs: fixtureTestMs.map((ms) => Math.round(ms)),
     backpressureElapsedMs: Math.round(backpressure.elapsedMs),
     memory: {
       maxTraceBytes: Math.max(...runs.flat().map((run) => run.traceBytes)),

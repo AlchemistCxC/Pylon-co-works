@@ -9,7 +9,7 @@ pub mod session;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -21,6 +21,15 @@ use crate::error::{Error, Result};
 
 /// 断线重连的尝试次数（含首次）。2 = 一次重试。
 const ATTEMPTS: usize = 2;
+
+/// 目标列表的缓存时长。
+///
+/// 一次工具调用内部会反复解析目标（点击 = 命中测试 + 三连 `Input.*`；
+/// `webview_type` 的 keys 模式 = 每字符两次按键；`webview_wait` = 每个轮询一次），
+/// 每次都打一遍 HTTP 发现端点纯属浪费。1 秒足够覆盖这些循环，又短到
+/// 「刚开的窗口/刚关的页面」最多延迟一次调用就能被看见——何况解析失败时
+/// [`Cdp::resolve`] 还会强制刷新一次。
+const TARGETS_TTL: Duration = Duration::from_millis(1_000);
 
 /// 一次 [`Cdp::session`] 取回的会话来源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,11 +43,19 @@ pub enum SessionOrigin {
     Reconnected,
 }
 
+struct CachedTargets {
+    at: Instant,
+    targets: Vec<TargetInfo>,
+}
+
 pub struct Cdp {
     pub host: String,
     pub port: u16,
     pub timeout: Duration,
+    /// 目标列表缓存时长。测试用它把 TTL 调小，生产走 [`TARGETS_TTL`]。
+    pub targets_ttl: Duration,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
+    targets: Mutex<Option<CachedTargets>>,
 }
 
 impl Cdp {
@@ -47,7 +64,9 @@ impl Cdp {
             host: host.into(),
             port,
             timeout,
+            targets_ttl: TARGETS_TTL,
             sessions: Mutex::new(HashMap::new()),
+            targets: Mutex::new(None),
         }
     }
 
@@ -55,8 +74,28 @@ impl Cdp {
         format!("http://{}:{}", self.host, self.port)
     }
 
-    pub async fn targets(&self) -> Result<Vec<TargetInfo>> {
-        http::fetch_targets(&self.host, self.port, self.timeout).await
+    /// 绕过缓存拉取目标列表。`webview_targets` 用它——它是「端口通不通」的探针，
+    /// 吃缓存就等于把「现在连不上」报成「刚才连得上」。
+    pub async fn targets_fresh(&self) -> Result<Vec<TargetInfo>> {
+        let targets = http::fetch_targets(&self.host, self.port, self.timeout).await?;
+        *self.targets.lock().await = Some(CachedTargets {
+            at: Instant::now(),
+            targets: targets.clone(),
+        });
+        Ok(targets)
+    }
+
+    /// 返回 `(目标列表, 是否来自缓存)`：解析失败时调用方要据此决定是否强制刷新。
+    async fn targets_cached(&self) -> Result<(Vec<TargetInfo>, bool)> {
+        {
+            let guard = self.targets.lock().await;
+            if let Some(cache) = guard.as_ref() {
+                if cache.at.elapsed() < self.targets_ttl {
+                    return Ok((cache.targets.clone(), true));
+                }
+            }
+        }
+        Ok((self.targets_fresh().await?, false))
     }
 
     pub async fn version(&self) -> Result<Value> {
@@ -67,63 +106,20 @@ impl Cdp {
     ///
     /// 不传时：只有一个页面目标就直接用；多个则报错并列出全部，
     /// 让 agent 用返回值里的 id 前缀重新调用——而不是替它猜一个。
+    ///
+    /// 缓存窗口内解析失败时会强制刷新重试一次：窗口刚打开、页面刚关闭这类
+    /// 变化不该被说成「目标不存在」。
     pub async fn resolve(&self, requested: Option<&str>) -> Result<TargetInfo> {
         let endpoint = self.endpoint();
-        let targets = self.targets().await?;
-        let pages: Vec<TargetInfo> = targets
-            .iter()
-            .filter(|target| target.is_page_like() && target.is_attachable())
-            .cloned()
-            .collect();
-        let candidates = if pages.is_empty() {
-            // 有些 WebView2 版本把页面报成别的 type；退一步用「可附加」当筛选条件。
-            targets
-                .iter()
-                .filter(|target| target.is_attachable())
-                .cloned()
-                .collect::<Vec<_>>()
-        } else {
-            pages
-        };
-
-        if candidates.is_empty() {
-            return Err(Error::NoTargets { endpoint });
-        }
-
-        match requested {
-            None => match candidates.len() {
-                1 => candidates
-                    .into_iter()
-                    .next()
-                    .ok_or(Error::NoTargets { endpoint }),
-                _ => Err(Error::AmbiguousTarget {
-                    endpoint,
-                    available: describe_all(&candidates),
-                }),
-            },
-            Some(needle) => {
-                // 精确 id → id 前缀 → url 子串 → title 子串，逐级放宽。
-                let found = candidates
-                    .iter()
-                    .find(|target| target.id == needle)
-                    .or_else(|| {
-                        candidates
-                            .iter()
-                            .find(|target| target.id.starts_with(needle))
-                    })
-                    .or_else(|| candidates.iter().find(|target| target.url.contains(needle)))
-                    .or_else(|| {
-                        candidates
-                            .iter()
-                            .find(|target| target.title.contains(needle))
-                    });
-                match found {
-                    Some(target) => Ok(target.clone()),
-                    None => Err(Error::UnknownTarget {
-                        requested: needle.to_string(),
-                        available: describe_all(&candidates),
-                    }),
+        let (targets, from_cache) = self.targets_cached().await?;
+        match pick_target(&targets, requested, &endpoint) {
+            Ok(target) => Ok(target),
+            Err(error) => {
+                if !from_cache {
+                    return Err(error);
                 }
+                let fresh = self.targets_fresh().await?;
+                pick_target(&fresh, requested, &endpoint)
             }
         }
     }
@@ -140,7 +136,11 @@ impl Cdp {
     ) -> Result<(TargetInfo, Arc<Session>, SessionOrigin)> {
         let target = self.resolve(requested).await?;
         {
-            let guard = self.sessions.lock().await;
+            let mut guard = self.sessions.lock().await;
+            // 顺带回收其它目标的死会话：`Session` 持有 writer 的 sender，
+            // 表里留着一份引用会让它的 writer task 永远挂在 recv() 上。
+            // 当前目标的死 entry 保留——下面要靠它判定这次是重连还是首次建连。
+            guard.retain(|id, existing| keep_session(id, &target.id, existing.is_alive()));
             if let Some(existing) = guard.get(&target.id) {
                 if existing.is_alive() {
                     return Ok((target, Arc::clone(existing), SessionOrigin::Reused));
@@ -163,9 +163,11 @@ impl Cdp {
         }
     }
 
-    /// 丢弃某个目标的会话（重连前调用）。
+    /// 丢弃某个目标的会话（重连前调用）。目标表缓存一并作废：
+    /// 连接断开往往意味着窗口被关掉或重建了，下次解析重新拉一遍更准。
     pub async fn invalidate(&self, target_id: &str) {
         self.sessions.lock().await.remove(target_id);
+        *self.targets.lock().await = None;
     }
 
     /// 调一个 CDP 方法，连接断开时自动重连并重试一次。
@@ -286,9 +288,75 @@ impl Cdp {
     }
 }
 
-fn describe_all(targets: &[TargetInfo]) -> String {
-    targets
+/// 会话表保留规则：当前目标总是保留（判定重连/首连要用），其余只保留活会话。
+fn keep_session(id: &str, target_id: &str, alive: bool) -> bool {
+    id == target_id || alive
+}
+
+/// 从一份目标列表里挑出唯一目标。
+fn pick_target(
+    targets: &[TargetInfo],
+    requested: Option<&str>,
+    endpoint: &str,
+) -> Result<TargetInfo> {
+    let pages: Vec<&TargetInfo> = targets
         .iter()
+        .filter(|target| target.is_page_like() && target.is_attachable())
+        .collect();
+    let candidates: Vec<&TargetInfo> = if pages.is_empty() {
+        // 有些 WebView2 版本把页面报成别的 type；退一步用「可附加」当筛选条件。
+        targets
+            .iter()
+            .filter(|target| target.is_attachable())
+            .collect()
+    } else {
+        pages
+    };
+
+    if candidates.is_empty() {
+        return Err(Error::NoTargets {
+            endpoint: endpoint.to_string(),
+        });
+    }
+
+    match requested {
+        None => match candidates.len() {
+            1 => Ok(candidates[0].clone()),
+            _ => Err(Error::AmbiguousTarget {
+                endpoint: endpoint.to_string(),
+                available: describe_all(candidates.iter().copied()),
+            }),
+        },
+        Some(needle) => {
+            // 精确 id → id 前缀 → url 子串 → title 子串，逐级放宽。
+            let found = candidates
+                .iter()
+                .find(|target| target.id == needle)
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .find(|target| target.id.starts_with(needle))
+                })
+                .or_else(|| candidates.iter().find(|target| target.url.contains(needle)))
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .find(|target| target.title.contains(needle))
+                });
+            match found {
+                Some(target) => Ok((*target).clone()),
+                None => Err(Error::UnknownTarget {
+                    requested: needle.to_string(),
+                    available: describe_all(candidates.iter().copied()),
+                }),
+            }
+        }
+    }
+}
+
+fn describe_all<'a>(targets: impl IntoIterator<Item = &'a TargetInfo>) -> String {
+    targets
+        .into_iter()
         .map(TargetInfo::describe)
         .collect::<Vec<_>>()
         .join(" | ")
@@ -303,7 +371,7 @@ fn describe_all(targets: &[TargetInfo]) -> String {
 #[cfg(test)]
 mod reconnect {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex as SyncMutex;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
@@ -319,6 +387,8 @@ mod reconnect {
         http: Arc<TcpListener>,
         ws: Arc<TcpListener>,
         running: Arc<AtomicBool>,
+        /// `/json` 被请求的次数。用于验证目标列表缓存真的省掉了 HTTP。
+        json_hits: Arc<AtomicUsize>,
         tasks: Arc<SyncMutex<JoinSet<()>>>,
     }
 
@@ -328,6 +398,7 @@ mod reconnect {
                 http: Arc::new(TcpListener::bind("127.0.0.1:0").await.unwrap()),
                 ws: Arc::new(TcpListener::bind("127.0.0.1:0").await.unwrap()),
                 running: Arc::new(AtomicBool::new(false)),
+                json_hits: Arc::new(AtomicUsize::new(0)),
                 tasks: Arc::new(SyncMutex::new(JoinSet::new())),
             }
         }
@@ -335,6 +406,10 @@ mod reconnect {
         /// CDP 的 HTTP 发现端口（`Cdp` 持有的那一个）。
         fn port(&self) -> u16 {
             self.http.local_addr().unwrap().port()
+        }
+
+        fn json_hits(&self) -> usize {
+            self.json_hits.load(Ordering::SeqCst)
         }
 
         fn start(&self) {
@@ -345,10 +420,11 @@ mod reconnect {
 
         fn spawn_accept_loop<F, Fut>(&self, listener: Arc<TcpListener>, handler: F)
         where
-            F: Fn(TcpStream, u16, Arc<AtomicBool>) -> Fut + Send + Copy + 'static,
+            F: Fn(TcpStream, u16, Arc<AtomicBool>, Arc<AtomicUsize>) -> Fut + Send + Copy + 'static,
             Fut: std::future::Future<Output = ()> + Send + 'static,
         {
             let running = Arc::clone(&self.running);
+            let hits = Arc::clone(&self.json_hits);
             let tasks = Arc::clone(&self.tasks);
             let ws_port = self.ws.local_addr().unwrap().port();
             self.tasks.lock().unwrap().spawn(async move {
@@ -360,8 +436,9 @@ mod reconnect {
                         break;
                     }
                     let running = Arc::clone(&running);
+                    let hits = Arc::clone(&hits);
                     tasks.lock().unwrap().spawn(async move {
-                        handler(stream, ws_port, running).await;
+                        handler(stream, ws_port, running, hits).await;
                     });
                 }
             });
@@ -393,13 +470,19 @@ mod reconnect {
         }
     }
 
-    async fn serve_http(mut stream: TcpStream, ws_port: u16, _running: Arc<AtomicBool>) {
+    async fn serve_http(
+        mut stream: TcpStream,
+        ws_port: u16,
+        _running: Arc<AtomicBool>,
+        hits: Arc<AtomicUsize>,
+    ) {
         let Some(head) = read_http_head(&mut stream).await else {
             return;
         };
         if !head.starts_with("GET /json") {
             return;
         }
+        hits.fetch_add(1, Ordering::SeqCst);
         let body = format!(
             r#"[{{"id":"{TARGET_ID}","type":"page","title":"reconnect test","url":"tauri://localhost/index.html","webSocketDebuggerUrl":"ws://127.0.0.1:{ws_port}/devtools/page/{TARGET_ID}"}}]"#
         );
@@ -412,7 +495,12 @@ mod reconnect {
         let _ = stream.shutdown().await;
     }
 
-    async fn serve_ws(stream: TcpStream, _ws_port: u16, running: Arc<AtomicBool>) {
+    async fn serve_ws(
+        stream: TcpStream,
+        _ws_port: u16,
+        running: Arc<AtomicBool>,
+        _hits: Arc<AtomicUsize>,
+    ) {
         let upgrade = tokio::time::timeout(
             Duration::from_secs(2),
             tokio_tungstenite::accept_async(stream),
@@ -504,5 +592,140 @@ mod reconnect {
         let origin = cdp(&server).session(None).await.unwrap().2;
         assert_eq!(origin, SessionOrigin::New);
         server.stop();
+    }
+
+    #[tokio::test]
+    async fn repeated_target_lookups_use_the_cache_and_fresh_reads_bypass_it() {
+        let server = FakeDevtools::bind().await;
+        server.start();
+        let cdp = cdp(&server);
+
+        cdp.targets_cached().await.unwrap();
+        cdp.targets_cached().await.unwrap();
+        cdp.targets_cached().await.unwrap();
+        assert_eq!(
+            server.json_hits(),
+            1,
+            "TTL 内的重复解析不该重复打 HTTP 发现端点"
+        );
+
+        cdp.targets_fresh().await.unwrap();
+        assert_eq!(server.json_hits(), 2, "fresh 读取必须真的走 HTTP");
+
+        server.stop();
+    }
+
+    #[tokio::test]
+    async fn an_expired_cache_entry_is_refetched() {
+        let server = FakeDevtools::bind().await;
+        server.start();
+        let mut cdp = cdp(&server);
+        cdp.targets_ttl = Duration::from_millis(0);
+
+        cdp.targets_cached().await.unwrap();
+        cdp.targets_cached().await.unwrap();
+        assert_eq!(server.json_hits(), 2, "TTL 过期后必须重新解析");
+
+        server.stop();
+    }
+
+    #[tokio::test]
+    async fn a_failed_cached_resolve_is_rechecked_against_a_fresh_list() {
+        let server = FakeDevtools::bind().await;
+        server.start();
+        let cdp = cdp(&server);
+
+        cdp.targets_cached().await.unwrap();
+        assert_eq!(server.json_hits(), 1);
+
+        let error = cdp.resolve(Some("no-such-target")).await.unwrap_err();
+        assert_eq!(error.kind(), "unknown_target");
+        assert_eq!(
+            server.json_hits(),
+            2,
+            "缓存解析失败必须用新鲜列表复核一次，而不是把缓存过时说成目标不存在"
+        );
+
+        server.stop();
+    }
+
+    // ── 目标挑选与会话保留规则（纯函数，不需要假端点） ──
+
+    fn target(id: &str, kind: &str, url: &str, title: &str, attachable: bool) -> TargetInfo {
+        TargetInfo {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            title: title.to_string(),
+            url: url.to_string(),
+            ws_url: attachable.then(|| format!("ws://127.0.0.1/devtools/page/{id}")),
+            devtools_frontend_url: None,
+        }
+    }
+
+    #[test]
+    fn pick_target_auto_selects_a_single_attachable_page() {
+        let targets = vec![target("A", "page", "tauri://localhost/", "Prism", true)];
+        assert_eq!(pick_target(&targets, None, "ep").unwrap().id, "A");
+    }
+
+    #[test]
+    fn pick_target_reports_ambiguity_with_the_available_list() {
+        let targets = vec![
+            target("A", "page", "tauri://localhost/", "Prism", true),
+            target("B", "page", "tauri://localhost/2", "Settings", true),
+        ];
+        let error = pick_target(&targets, None, "http://127.0.0.1:9222").unwrap_err();
+        assert_eq!(error.kind(), "ambiguous_target");
+        let text = error.to_string();
+        assert!(text.contains("A [page]"), "{text}");
+        assert!(text.contains("B [page]"), "{text}");
+    }
+
+    #[test]
+    fn pick_target_matches_id_prefix_then_url_then_title() {
+        let targets = vec![
+            target("AAA", "page", "tauri://localhost/index.html", "Prism", true),
+            target(
+                "BBB",
+                "page",
+                "tauri://localhost/settings.html",
+                "Settings",
+                true,
+            ),
+        ];
+        assert_eq!(pick_target(&targets, Some("AA"), "ep").unwrap().id, "AAA");
+        assert_eq!(
+            pick_target(&targets, Some("settings.html"), "ep")
+                .unwrap()
+                .id,
+            "BBB"
+        );
+        assert_eq!(
+            pick_target(&targets, Some("Prism"), "ep").unwrap().id,
+            "AAA"
+        );
+        assert_eq!(
+            pick_target(&targets, Some("nope"), "ep")
+                .unwrap_err()
+                .kind(),
+            "unknown_target"
+        );
+    }
+
+    #[test]
+    fn pick_target_ignores_non_attachable_targets_and_reports_none() {
+        let targets = vec![target("W", "worker", "blob:x", "sw", false)];
+        assert_eq!(
+            pick_target(&targets, None, "ep").unwrap_err().kind(),
+            "no_targets"
+        );
+    }
+
+    #[test]
+    fn keep_session_keeps_the_current_target_even_when_dead() {
+        // 当前的死会话要留着：重连逻辑靠它区分「重连」与「首次建连」。
+        assert!(keep_session("A", "A", false));
+        assert!(!keep_session("B", "A", false));
+        assert!(keep_session("B", "A", true));
     }
 }

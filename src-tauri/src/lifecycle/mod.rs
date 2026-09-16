@@ -870,7 +870,7 @@ mod tests {
     use tauri::Manager;
 
     fn agent() -> AgentDef {
-        crate::test_utils::fake_acp_agent("peri", "print('x')")
+        crate::test_utils::fake_acp_agent_stub("peri")
     }
 
     #[test]
@@ -1101,7 +1101,7 @@ mod tests {
         let runtime = crate::test_utils::connected_runtime();
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("peri")
-            .with_agent(crate::test_utils::fake_acp_agent("peri", "print('x')"))
+            .with_agent(crate::test_utils::fake_acp_agent_stub("peri"))
             .with_runtime("peri", runtime.clone())
             .build();
         let app = tauri::test::mock_builder()
@@ -1133,12 +1133,7 @@ mod tests {
 
     #[tokio::test]
     async fn restart_runtime_success_activates_stored_fingerprint_and_advances_generation() {
-        let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-        let agent = crate::test_utils::fake_acp_agent("peri", script);
+        let agent = crate::test_utils::fake_acp_agent_stub("peri");
         let expected_fingerprint = agent.runtime_fingerprint();
         let runtime = crate::test_utils::connected_runtime();
         runtime
@@ -1178,7 +1173,7 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn restart_runtime_failure_keeps_old_generation_and_pending_fingerprint() {
-        let mut agent = crate::test_utils::fake_acp_agent("peri", "print('unused')");
+        let mut agent = crate::test_utils::fake_acp_agent_stub("peri");
         agent.exe = std::env::temp_dir()
             .join("missing-pylon-restart-agent")
             .to_string_lossy()
@@ -1223,12 +1218,7 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn restart_runtime_session_migration_failure_is_atomic() {
-        let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-        let agent = crate::test_utils::fake_acp_agent("peri", script);
+        let agent = crate::test_utils::fake_acp_agent_stub("peri");
         let runtime = crate::test_utils::connected_runtime();
         runtime
             .client_generation
@@ -1275,24 +1265,7 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn unknown_continuity_probes_each_session_and_converges_health() {
-        let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    if method == 'initialize':
-        result={'agentCapabilities':{'loadSession':True}}
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result}), flush=True)
-    elif method == 'session/load':
-        session_id=request.get('params',{}).get('sessionId')
-        if session_id == 'remote-missing':
-            print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32602,'message':'session not found'}}), flush=True)
-        elif session_id != 'remote-timeout':
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'probe-replay-must-not-apply'}}}}), flush=True)
-            print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':session_id}}), flush=True)
-    else:
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-        let mut agent = crate::test_utils::fake_acp_agent("peri", script);
+        let mut agent = crate::test_utils::fake_acp_agent("peri", &["--scenario", "probe"]);
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             rpc_timeout_secs: Some(1),
             ..Default::default()
@@ -1373,8 +1346,8 @@ for line in sys.stdin:
         let runtime_b = crate::test_utils::connected_runtime();
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("a")
-            .with_agent(crate::test_utils::fake_acp_agent("a", "print('x')"))
-            .with_agent(crate::test_utils::fake_acp_agent("b", "print('x')"))
+            .with_agent(crate::test_utils::fake_acp_agent_stub("a"))
+            .with_agent(crate::test_utils::fake_acp_agent_stub("b"))
             .with_runtime("a", runtime_a.clone())
             .with_runtime("b", runtime_b.clone())
             .build();
@@ -1564,11 +1537,14 @@ for line in sys.stdin:
     async fn test_agent_candidate_native_process_returns_failure_diagnostics() {
         let agent = crate::test_utils::fake_acp_agent(
             "candidate-native-failure",
-            r#"
-import sys
-print("Provider profile was not selected", file=sys.stderr, flush=True)
-sys.exit(7)
-"#,
+            &[
+                "--scenario",
+                "exit-immediately",
+                "--exit-code",
+                "7",
+                "--stderr-marker",
+                "Provider profile was not selected",
+            ],
         );
         let state = crate::test_utils::TestStateBuilder::bare().build();
         let app = tauri::test::mock_builder()
@@ -1632,7 +1608,7 @@ sys.exit(7)
         std::fs::create_dir_all(&backup_blocker).unwrap();
         let revision = crate::agent_config::config_revision_for_bytes(original.as_bytes());
 
-        let agent = crate::test_utils::fake_acp_agent("keep", "print('x')");
+        let agent = crate::test_utils::fake_acp_agent_stub("keep");
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("keep")
             .with_agent(agent)
@@ -1682,8 +1658,8 @@ sys.exit(7)
         let doomed = AgentRuntime::new_disconnected();
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("keep")
-            .with_agent(crate::test_utils::fake_acp_agent("keep", "print('x')"))
-            .with_agent(crate::test_utils::fake_acp_agent("remove-me", "print('x')"))
+            .with_agent(crate::test_utils::fake_acp_agent_stub("keep"))
+            .with_agent(crate::test_utils::fake_acp_agent_stub("remove-me"))
             .with_runtime("keep", AgentRuntime::new_disconnected())
             .with_runtime("remove-me", doomed.clone())
             .build();

@@ -157,28 +157,32 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 ## 工具
 
-共 22 个。全部接受可选的 `target`（目标 id / id 前缀 / url 或 title 子串）；
+共 24 个。全部接受可选的 `target`（目标 id / id 前缀 / url 或 title 子串）；
 只有一个页面目标时可省略。全部接受 `timeout_ms`。
 
 ### 页面级（CDP）
 
 | 工具 | 用途 |
 | --- | --- |
-| `webview_targets` | 列出可附加目标 + 浏览器版本。**排障第一步**，也是「端口通不通」的探针 |
-| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await` |
+| `webview_targets` | 列出可附加目标 + 浏览器版本。**排障第一步**，也是「端口通不通」的探针。`scan_ports: true` 会顺带列出相邻端口上的其它 WebView2 实例（默认关） |
+| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await`。序列化后超过 64KB 会换成 `__truncated` 信封（带大小与前缀预览），需要完整原始结果时用 `webview_raw_cdp` |
 | `webview_raw_cdp` | 直调任意 CDP 方法，返回原始 result。覆盖本服务器未包装的域 |
 | `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志，**默认只读增量**；返回体带 `reconnected`，连接断开重连后缓冲从零开始会明确告知 |
 | `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录，同样带 `reconnected` |
 | `webview_network_body` | 按 requestId 取响应体；base64 会解码后再判断是否为文本 |
+
+| `webview_websocket` | WebSocket 流：连接级事件与**每一帧**各占一条记录（保持往返次序），可按 url / 载荷 / 方向 / 阶段过滤 |
 | `webview_dom` | DOM 结构轮廓（标签/id/class/属性，可选盒模型与文本） |
 | `webview_query` | 单元素详查：盒模型、计算样式、可见性、祖先链、滚动尺寸 |
+
+| `webview_snapshot` | 无障碍快照：角色 + 可访问名 + `ref` 的文本树。拿到的 ref 可直接喂给 click / type / key / select / hover（比 CSS 选择器稳） |
 | `webview_screenshot` | 截图，返回图片内容。支持整页与裁剪 |
-| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；坐标模式同样先报告该点落在了谁身上 |
-| `webview_type` | 输入文本；`insert`（默认）或 `keys` 逐字符真实按键 |
-| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等） |
-| `webview_hover` | 悬停元素或坐标（触发 hover 菜单 / tooltip），附带与 click 相同的命中测试 |
+| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；目标用 `selector` 或 `ref` 指定，坐标模式同样先报告该点落在了谁身上。`click_count: 2` 会派发两对 press/release，真的触发 `dblclick`；上限 3 |
+| `webview_type` | 输入文本；`insert`（默认）或 `keys` 逐字符真实按键。目标用 `selector` 或 `ref`（省略则用当前聚焦元素） |
+| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等）或单个 ASCII 字符；`modifiers` 组合出 Ctrl+A、Shift+Tab 这类快捷键，目标可用 `selector` 或 `ref`。无法派发的按键名直接报错，不会发出空键码 |
+| `webview_hover` | 悬停元素（`selector` / `ref`）或坐标（触发 hover 菜单 / tooltip），附带与 click 相同的命中测试 |
 | `webview_scroll` | 滚动窗口或容器（滚进视口 / top / bottom / 绝对 / 相对），返回滚动后位置 |
-| `webview_select` | 选中 `<select>` 选项（value / label / 下标），派发 input + change 让受控组件同步 |
+| `webview_select` | 选中 `<select>` 选项（value / label / 下标），派发 input + change 让受控组件同步；目标用 `selector` 或 `ref` 恰好给一个 |
 | `webview_wait` | 动作之间的同步原语：等元素出现/消失、等 JS 条件、等 URL、等文档就绪 |
 | `webview_navigate` | goto / reload / back / forward；就绪判定要求「先见到导航证据，再等 readyState=complete」，旧文档的 complete 不会被误当成新页就绪 |
 
@@ -187,12 +191,21 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | 工具 | 用途 |
 | --- | --- |
 | `tauri_invoke` | 调用任意已注册的 Tauri 命令（等价于页面里的 `__TAURI_INTERNALS__.invoke`） |
-| `tauri_events` | 订阅并读取事件增量 |
+| `tauri_events` | 订阅并读取事件增量。订阅会注册成「新文档注入」，页面 reload/导航后自动重建 |
 | `tauri_event_catalog` | 静态扫描源码，列出 emit / listen 调用点上的事件名 |
 | `tauri_window_state` | 窗口状态：宿主侧（装饰/可见性/最大化/缩放/显示器）+ DOM 侧 |
 | `tauri_backend_logs` | 读后端日志（调 Pylon 的 `list_runtime_logs`） |
 
-### 两条设计上的关键选择
+### 几条设计上的关键选择
+
+**目标发现走 1 秒 TTL 缓存。** 一次工具调用内部会反复解析目标：点击 = 命中测试 +
+三连 `Input.dispatchMouseEvent`，`webview_type` 的 keys 模式 = 每字符两次按键，
+`webview_wait` = 每个轮询一次——每次解析都是一趟 `GET /json`。TTL 之内直接复用，
+省掉这些重复发现。它在两个方向上都不会骗人：`webview_targets` 永远绕过缓存直读
+（它是「端口通不通」的探针），而解析失败时 `resolve` 会强制刷新复核一次，
+不会把「缓存过时」说成「目标不存在」。
+
+**用 ref 定位，少猜选择器。** `webview_snapshot` 把页面折成「角色 + 可访问名 + ref」的文本树，例如 `- button "发送" [ref=e3]`；把 `e3` 传给 click / type / key / select / hover 即可定位。角色与名字是用户看到的东西，不随 DOM 结构变化，比 `div:nth-child(3) > button` 稳得多。ref 存在页内映射里，页面重载或元素被重新渲染后会失效——那时工具会明确说「请重新快照」，不会悄悄点到别处。
 
 **读增量，不是全量。** `webview_console` / `webview_network` / `tauri_events` 有共同的游标语义：
 
@@ -227,7 +240,8 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 2. **`tauri_event_catalog` 是静态扫描。** 只扫描传入的 `roots`（默认 `src` 与
    `src-tauri/src`），跳过 `node_modules` / `target` / `dist` 等目录。插件目录或生成代码
-   需另外传 `roots`。
+   需另外传 `roots`。扫描有预算：最多 2 万个文件、总计 128MB，任一用尽即停——
+   返回里的 `truncated: true` 会明说清单不完整，不会假装扫全了。
 
 3. **DOM 走自序列化而不是 `DOM.*` 域。** `DOM.getDocument` 的 nodeId 会被任何 DOM 变更作废，
    拿着旧 id 调用只会收到 "Could not find node"。自序列化一次性拿到全部且无句柄失效问题。
@@ -236,8 +250,9 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 4. **整页截图在部分 WebView2 版本上不支持。** `captureBeyondViewport` 失败时会自动退回视口
    截图，并在返回的说明里写清——不会整次失败，但也不会假装截到了整页。
 
-5. **`reload` / `goto` 会清空页内注入状态。** 事件订阅与页内缓冲随之消失，游标归零。
-   这是预期行为。`tauri_events` 下次调用会自动重新订阅（订阅是幂等的），但 reload
+5. **`reload` / `goto` 会清空页内注入状态。** 事件订阅与页内缓冲、以及快照的 ref 都会消失。
+   `tauri_events` 的订阅已注册成「新文档注入」，新文档一建立就自动重建（注册状态见返回体的
+   `reloadSubscription`）；ref 则需要重新 `webview_snapshot`。但 reload
    期间的事件无法补回。
 
 6. **`webview_evaluate` 撞上永不 settle 的 Promise 会超时。** CDP 侧可能仍在执行。
@@ -267,6 +282,8 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | `webview_console` 一直为空 | 事件域没打开。查看服务器 stderr——`Runtime.enable` 等失败会逐条打印原因 |
 | 工具报 `target_gone` | 页面 reload 或 app 重启导致连接断开。`webview_console` / `webview_network` 的下次调用会自动重连（返回体 `reconnected: true` 会标明缓冲从零开始）；其它工具直接重试即可 |
 | 点了没反应 | 看 `webview_click` 返回的 `hitIsSelfOrDescendant`；为 false 即被遮挡 |
+| ref 定位报「请重新 webview_snapshot」 | ref 只在最近一次快照之后有效：页面重载、或该元素被重新渲染（列表虚拟化、条件挂载）都会让它失效。重新快照即可；要抗结构变化就用选择器 |
+| 调用等到超时，而不是立刻报 `target_gone` | 老版本上可能出现。本服务器每 15s 发一次 WS 心跳，10s 内没有 pong 就判定连接已死（半开连接：app 被强杀时 socket 常常不报错）。若端点从不回 pong（极旧版本），心跳会自行停用并在 stderr 说明 |
 
 服务器所有诊断输出都走 **stderr**。stdout 只承载 JSON-RPC 报文——往 stdout 混一个字符，
 客户端就会在解析层炸掉，而错误现场看起来跟本服务器毫无关系。
@@ -298,5 +315,6 @@ WebView2 的 Windows 机器、带调试端口启动的 Pylon，以及一次实�
 4. `tauri_window_state` → `tauriHostAvailable` 应为 true，`tauriHostErrors` 应为空
 5. `tauri_invoke`，命令 `list_runtime_logs`，参数 `{"query":{"limit":5}}` → 应返回日志数组
 6. `webview_screenshot` → 应返回一张能看懂的图
+7. `webview_snapshot` → 应返回角色 + 名字 + ref 的文本树；挑一个 `ref=eN` 传给 `webview_click` 应能点中
 
 第 3 步是分水岭：它同时证明「CDP 通道可用」与「Tauri 内部桥未改语义」。

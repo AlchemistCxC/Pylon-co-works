@@ -1,0 +1,18 @@
+# #106 P7.3：依赖更新自动化。
+# cargo ecosystem 指向 src-tauri——#106 P0 workspace 化后单 Cargo.lock 一次 PR
+# 更新全 workspace（4 把锁时代此配置无意义）；npm 覆盖前端（bun.lock 安装但
+# dependabot 仅支持 npm ecosystem，PR 中以 package.json 为准，合并后本地
+# `bun install` 重新冻结 bun.lock）。
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
