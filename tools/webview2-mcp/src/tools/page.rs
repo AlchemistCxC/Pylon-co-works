@@ -20,6 +20,7 @@ pub async fn targets(cx: &Context, args: &Value) -> Result<ToolResult> {
     let include_workers = a.bool_or("include_workers", false)?;
 
     let endpoint = cx.cdp.endpoint();
+    let scan_ports = a.bool_or("scan_ports", false)?;
     // 这是诊断工具：端点不可达时**不**报错，而是把不可达本身作为结果返回，
     // 这样 agent 拿到的是一份可读的状态表，而不是一个需要另外解释的失败。
     // 走 fresh 读取：它是「端口通不通」的探针，吃缓存会把「现在连不上」
@@ -27,11 +28,21 @@ pub async fn targets(cx: &Context, args: &Value) -> Result<ToolResult> {
     let targets = match cx.cdp.targets_fresh().await {
         Ok(targets) => targets,
         Err(error) => {
+            let sibling_ports = match scan_ports {
+                true => scan_sibling_ports(cx).await,
+                false => Vec::new(),
+            };
             return Ok(ToolResult::json(&json!({
                 "reachable": false,
                 "endpoint": endpoint,
                 "error": error.to_wire(),
                 "howToEnable": how_to_enable(cx.cdp.port),
+                "siblingPorts": sibling_ports,
+                "siblingNote": if sibling_ports.is_empty() {
+                    Value::Null
+                } else {
+                    json!("上面这些端口上也有 WebView2 调试端点——本服务器连的不是这些端口。多实例时给每个实例配不同端口，并用 --port 指给本服务器。")
+                },
             })));
         }
     };
@@ -56,6 +67,10 @@ pub async fn targets(cx: &Context, args: &Value) -> Result<ToolResult> {
             "url": target.url,
             "attachable": target.is_attachable(),
         })).collect::<Vec<Value>>(),
+        "siblingPorts": match scan_ports {
+            true => scan_sibling_ports(cx).await,
+            false => Vec::new(),
+        },
         "nextStep": if listed.is_empty() {
             "端口可达但没有可附加目标：窗口可能还没创建，稍后重试。"
         } else if targets.iter().filter(|t| t.is_page_like() && t.is_attachable()).count() == 1 {
@@ -64,6 +79,50 @@ pub async fn targets(cx: &Context, args: &Value) -> Result<ToolResult> {
             "有多个可附加目标，后续工具请用 targets[].id 作为 target 参数。"
         },
     })))
+}
+
+/// 扫一小段相邻端口，找出本机其它 WebView2 调试端点。
+///
+/// 只在显式要求时跑（`scan_ports: true`）：调试端口等于「谁连上谁能完全控制这个
+/// app」，主动去连别的端口不该是默认行为。它的用途很窄——同时跑多个实例、
+/// 又忘了哪个实例用的哪个端口。
+async fn scan_sibling_ports(cx: &Context) -> Vec<Value> {
+    /// 从当前端口往后扫多少个（含当前端口的下一跳）。
+    const SPAN: u16 = 10;
+    /// 每个端口的探测超时。连接被拒是立刻返回的，这个上限只挡「被防火墙丢包」。
+    const SCAN_TIMEOUT: Duration = Duration::from_millis(300);
+
+    let mut found = Vec::new();
+    for offset in 1..SPAN {
+        let Some(port) = cx.cdp.port.checked_add(offset) else {
+            break;
+        };
+        let Ok(targets) = crate::cdp::http::fetch_targets(&cx.cdp.host, port, SCAN_TIMEOUT).await
+        else {
+            continue;
+        };
+        let pages: Vec<Value> = targets
+            .iter()
+            .filter(|target| target.is_page_like() && target.is_attachable())
+            .map(|target| json!({ "id": target.id, "title": target.title, "url": target.url }))
+            .collect();
+        let browser = crate::cdp::http::fetch_version(&cx.cdp.host, port, SCAN_TIMEOUT)
+            .await
+            .ok()
+            .and_then(|version| {
+                version
+                    .get("Browser")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        found.push(json!({
+            "port": port,
+            "pageCount": pages.len(),
+            "pages": pages,
+            "browser": browser,
+        }));
+    }
+    found
 }
 
 fn how_to_enable(port: u16) -> Value {
@@ -343,9 +402,7 @@ pub async fn websocket(cx: &Context, args: &Value) -> Result<ToolResult> {
     let target = a.str("target")?;
     let request_id = a.string("request_id")?;
     let url_pattern = a.string("pattern")?.map(|text| text.to_lowercase());
-    let payload_pattern = a
-        .string("payload_pattern")?
-        .map(|text| text.to_lowercase());
+    let payload_pattern = a.string("payload_pattern")?.map(|text| text.to_lowercase());
     let direction = a.string("direction")?;
     if let Some(direction) = &direction {
         if direction != "sent" && direction != "received" {
@@ -590,6 +647,51 @@ pub async fn query(cx: &Context, args: &Value) -> Result<ToolResult> {
     Ok(ToolResult::json(&value))
 }
 
+/// 无障碍快照：把页面折成「角色 + 可访问名 + ref」的文本树，供 agent 用 ref 定位。
+pub async fn snapshot(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_snapshot", args);
+    let options = EvalOptions {
+        await_promise: false,
+        ..EvalOptions::default()
+    };
+    let script = jsscript::aria_snapshot(
+        a.str("selector")?,
+        a.u64_or("max_nodes", 300)? as usize,
+        a.bool_or("include_values", true)?,
+    );
+    let value = cx.cdp.evaluate(a.str("target")?, &script, options).await?;
+
+    if value.get("found").and_then(Value::as_bool) != Some(true) {
+        return Ok(ToolResult::json(&json!({
+            "found": false,
+            "reason": value.get("reason").cloned().unwrap_or(json!("selector 未命中任何元素")),
+            "selector": value.get("selector").cloned().unwrap_or(Value::Null),
+            "hint": "省略 selector 即整页快照。",
+        })));
+    }
+
+    let node_count = value.get("nodeCount").and_then(Value::as_u64).unwrap_or(0);
+    let truncated = value
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let tree = value
+        .get("snapshot")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let mut caption = format!(
+        "无障碍快照：{node_count} 个节点。把文本里的 ref（如 e12）直接传给 webview_click / webview_type / webview_select 的 ref 参数即可定位。"
+    );
+    if truncated {
+        caption
+            .push_str(" 已达 max_nodes 上限，树被截断——用 selector 缩小范围，或调大 max_nodes。");
+    }
+
+    Ok(ToolResult::text(format!("{caption}\n\n{tree}")))
+}
+
 // ───────────────────────────── 视觉 ─────────────────────────────
 
 pub async fn screenshot(cx: &Context, args: &Value) -> Result<ToolResult> {
@@ -752,6 +854,7 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("webview_click", args);
     let target_arg = a.str("target")?;
     let selector = a.str("selector")?;
+    let reference = a.str("ref")?;
     let x = a.f64("x")?;
     let y = a.f64("y")?;
     let mode = a.str("mode")?.unwrap_or("input").to_string();
@@ -760,17 +863,23 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
     let click_count = a.u64_or("click_count", 1)?.clamp(1, 3);
     let settle_ms = a.u64_or("settle_ms", 80)?;
 
-    if selector.is_none() && (x.is_none() || y.is_none()) {
+    if selector.is_some() && reference.is_some() {
         return Err(Error::bad_args(
             "webview_click",
-            "需要 selector，或同时给出 x 与 y",
+            "selector 与 ref 二选一：ref 来自 webview_snapshot",
+        ));
+    }
+    if selector.is_none() && reference.is_none() && (x.is_none() || y.is_none()) {
+        return Err(Error::bad_args(
+            "webview_click",
+            "需要 selector / ref，或同时给出 x 与 y",
         ));
     }
 
-    // 目标解析：selector 先滚进视口再算中心点，并做命中测试。
-    let (point_x, point_y, resolution) = match selector {
-        Some(selector) => {
-            let script = jsscript::resolve_pointer_target(selector);
+    // 目标解析：先滚进视口再算中心点，并做命中测试。selector 与 ref 走同一份脚本。
+    let (point_x, point_y, resolution) = match (selector, reference) {
+        (Some(_), _) | (_, Some(_)) => {
+            let script = jsscript::resolve_pointer_target(selector, reference);
             let resolved = cx
                 .cdp
                 .evaluate(target_arg, &script, EvalOptions::interactive())
@@ -778,16 +887,17 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
             if resolved.get("found").and_then(Value::as_bool) != Some(true) {
                 return Ok(ToolResult::json(&json!({
                     "clicked": false,
-                    "reason": "selector 未命中任何元素",
+                    "reason": resolved.get("reason").cloned().unwrap_or(json!("未命中任何元素")),
                     "selector": selector,
-                    "hint": "用 webview_query 或 webview_dom 确认选择器与当前 DOM。",
+                    "ref": reference,
+                    "hint": "用 webview_snapshot 拿 ref（或重新快照），或用 webview_query / webview_dom 确认选择器。",
                 })));
             }
             let point_x = resolved.get("x").and_then(Value::as_f64).unwrap_or(0.0);
             let point_y = resolved.get("y").and_then(Value::as_f64).unwrap_or(0.0);
             (point_x, point_y, resolved)
         }
-        None => {
+        (None, None) => {
             let point_x = x.unwrap_or(0.0);
             let point_y = y.unwrap_or(0.0);
             // 坐标模式同样先做命中测试：点之前先知道这个坐标上是谁——
@@ -809,25 +919,27 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
     };
 
     if mode == "dom" {
-        let Some(selector) = selector else {
+        if selector.is_none() && reference.is_none() {
             return Err(Error::bad_args(
                 "webview_click",
-                "mode=dom 需要 selector（DOM 模式没有坐标可以点）",
+                "mode=dom 需要 selector 或 ref（DOM 模式没有坐标可以点）",
             ));
-        };
-        let script = format!(
-            "(() => {{ const el = document.querySelector({}); if (!el) return {{ clicked: false }}; el.click(); return {{ clicked: true, tag: el.tagName.toLowerCase(), disabled: !!el.disabled }}; }})()",
-            jsscript::js_str(selector)
-        );
+        }
         let outcome = cx
             .cdp
-            .evaluate(target_arg, &script, EvalOptions::interactive())
+            .evaluate(
+                target_arg,
+                &jsscript::dom_click(selector, reference),
+                EvalOptions::interactive(),
+            )
             .await?;
         sleep_ms(settle_ms).await;
         return Ok(ToolResult::json(&json!({
             "clicked": outcome.get("clicked").and_then(Value::as_bool).unwrap_or(false),
             "mode": "dom",
             "selector": selector,
+            "ref": reference,
+            "reason": outcome.get("reason").cloned().unwrap_or(Value::Null),
             "resolution": resolution,
             "note": "DOM 模式绕过命中测试：适合目标被覆盖层遮挡的场景，但无法暴露「点不到」这类真实交互缺陷。",
         })));
@@ -893,6 +1005,13 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
     let target_arg = a.str("target")?;
     let text = a.required_str("text")?;
     let selector = a.str("selector")?;
+    let reference = a.str("ref")?;
+    if selector.is_some() && reference.is_some() {
+        return Err(Error::bad_args(
+            "webview_type",
+            "selector 与 ref 二选一：ref 来自 webview_snapshot",
+        ));
+    }
     let clear = a.bool_or("clear", false)?;
     let mode = a.str("mode")?.unwrap_or("insert").to_string();
     let delay_ms = a.u64_or("delay_ms", 12)?;
@@ -902,7 +1021,7 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
         .cdp
         .evaluate(
             target_arg,
-            &jsscript::focus_for_typing(selector, clear),
+            &jsscript::focus_for_typing(selector, reference, clear),
             EvalOptions::interactive(),
         )
         .await?;
@@ -911,6 +1030,7 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
             "typed": false,
             "reason": focus.get("reason").cloned().unwrap_or(json!("输入目标不存在")),
             "selector": selector,
+            "ref": reference,
             "focus": focus,
         })));
     }
@@ -977,21 +1097,32 @@ pub async fn key(cx: &Context, args: &Value) -> Result<ToolResult> {
     let target_arg = a.str("target")?;
     let name = a.required_str("key")?;
     let selector = a.str("selector")?;
+    let reference = a.str("ref")?;
+    if selector.is_some() && reference.is_some() {
+        return Err(Error::bad_args(
+            "webview_key",
+            "selector 与 ref 二选一：ref 来自 webview_snapshot",
+        ));
+    }
     let repeat = a.u64_or("repeat", 1)?.clamp(1, 64);
     let settle_ms = a.u64_or("settle_ms", 60)?;
     let modifiers = parse_modifiers("webview_key", &a.str_list("modifiers")?)?;
 
-    if let Some(selector) = selector {
-        let script = jsscript::focus_for_typing(Some(selector), false);
+    if selector.is_some() || reference.is_some() {
         let focus = cx
             .cdp
-            .evaluate(target_arg, &script, EvalOptions::interactive())
+            .evaluate(
+                target_arg,
+                &jsscript::focus_for_typing(selector, reference, false),
+                EvalOptions::interactive(),
+            )
             .await?;
         if focus.get("found").and_then(Value::as_bool) != Some(true) {
             return Ok(ToolResult::json(&json!({
                 "pressed": false,
-                "reason": "selector 未命中，无法聚焦",
+                "reason": focus.get("reason").cloned().unwrap_or(json!("未命中，无法聚焦")),
                 "selector": selector,
+                "ref": reference,
             })));
         }
     }
@@ -1409,40 +1540,48 @@ pub async fn hover(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("webview_hover", args);
     let target_arg = a.str("target")?;
     let selector = a.str("selector")?;
+    let reference = a.str("ref")?;
     let x = a.f64("x")?;
     let y = a.f64("y")?;
     let settle_ms = a.u64_or("settle_ms", 60)?;
 
-    if selector.is_none() && (x.is_none() || y.is_none()) {
+    if selector.is_some() && reference.is_some() {
         return Err(Error::bad_args(
             "webview_hover",
-            "需要 selector，或同时给出 x 与 y",
+            "selector 与 ref 二选一：ref 来自 webview_snapshot",
+        ));
+    }
+    if selector.is_none() && reference.is_none() && (x.is_none() || y.is_none()) {
+        return Err(Error::bad_args(
+            "webview_hover",
+            "需要 selector / ref，或同时给出 x 与 y",
         ));
     }
 
-    let (point_x, point_y, resolution) = match selector {
-        Some(selector) => {
+    let (point_x, point_y, resolution) = match (selector, reference) {
+        (Some(_), _) | (_, Some(_)) => {
             let resolved = cx
                 .cdp
                 .evaluate(
                     target_arg,
-                    &jsscript::resolve_pointer_target(selector),
+                    &jsscript::resolve_pointer_target(selector, reference),
                     EvalOptions::interactive(),
                 )
                 .await?;
             if resolved.get("found").and_then(Value::as_bool) != Some(true) {
                 return Ok(ToolResult::json(&json!({
                     "hovered": false,
-                    "reason": "selector 未命中任何元素",
+                    "reason": resolved.get("reason").cloned().unwrap_or(json!("未命中任何元素")),
                     "selector": selector,
-                    "hint": "用 webview_query 或 webview_dom 确认选择器与当前 DOM。",
+                    "ref": reference,
+                    "hint": "用 webview_snapshot 拿 ref（或重新快照），或用 webview_query / webview_dom 确认选择器。",
                 })));
             }
             let point_x = resolved.get("x").and_then(Value::as_f64).unwrap_or(0.0);
             let point_y = resolved.get("y").and_then(Value::as_f64).unwrap_or(0.0);
             (point_x, point_y, resolved)
         }
-        None => {
+        (None, None) => {
             let point_x = x.unwrap_or(0.0);
             let point_y = y.unwrap_or(0.0);
             let hit = cx
@@ -1470,12 +1609,14 @@ pub async fn hover(cx: &Context, args: &Value) -> Result<ToolResult> {
         .await?;
     sleep_ms(settle_ms).await;
 
-    let occluded = selector.as_ref().and_then(|_| {
-        resolution
-            .get("hitIsSelfOrDescendant")
-            .and_then(Value::as_bool)
-            .map(|hit| !hit)
-    });
+    let occluded = (selector.is_some() || reference.is_some())
+        .then_some(())
+        .and_then(|_| {
+            resolution
+                .get("hitIsSelfOrDescendant")
+                .and_then(Value::as_bool)
+                .map(|hit| !hit)
+        });
 
     Ok(ToolResult::json(&json!({
         "hovered": true,
@@ -1528,10 +1669,18 @@ pub async fn scroll(cx: &Context, args: &Value) -> Result<ToolResult> {
 pub async fn select(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("webview_select", args);
     let target_arg = a.str("target")?;
-    let selector = a.required_str("selector")?;
+    let selector = a.str("selector")?;
+    let reference = a.str("ref")?;
     let values = a.str_list("value")?;
     let labels = a.str_list("label")?;
     let indexes = a.u64_list("index")?;
+
+    if selector.is_some() == reference.is_some() {
+        return Err(Error::bad_args(
+            "webview_select",
+            "selector 与 ref 恰好给出一个：ref 来自 webview_snapshot",
+        ));
+    }
 
     // 三种匹配方式互斥：全空与多给都报 bad_args，不让工具猜调用方想用哪种。
     let provided = [!values.is_empty(), !labels.is_empty(), !indexes.is_empty()]
@@ -1556,7 +1705,7 @@ pub async fn select(cx: &Context, args: &Value) -> Result<ToolResult> {
         .cdp
         .evaluate(
             target_arg,
-            &jsscript::select_options(selector, mode, &wanted),
+            &jsscript::select_options(selector, reference, mode, &wanted),
             EvalOptions {
                 await_promise: false,
                 ..EvalOptions::default()
@@ -1723,16 +1872,72 @@ mod tests {
         });
 
         assert!(websocket_matches(&sent, None, None, None, None, None));
-        assert!(websocket_matches(&sent, Some("ws1"), Some("sent"), Some("frame"), None, None));
-        assert!(!websocket_matches(&sent, Some("ws2"), None, None, None, None));
-        assert!(!websocket_matches(&sent, None, Some("received"), None, None, None));
-        assert!(!websocket_matches(&sent, None, None, Some("closed"), None, None));
-        assert!(websocket_matches(&sent, None, None, None, Some("9000/agent"), None));
-        assert!(websocket_matches(&received, None, None, None, None, Some("result")));
+        assert!(websocket_matches(
+            &sent,
+            Some("ws1"),
+            Some("sent"),
+            Some("frame"),
+            None,
+            None
+        ));
+        assert!(!websocket_matches(
+            &sent,
+            Some("ws2"),
+            None,
+            None,
+            None,
+            None
+        ));
+        assert!(!websocket_matches(
+            &sent,
+            None,
+            Some("received"),
+            None,
+            None,
+            None
+        ));
+        assert!(!websocket_matches(
+            &sent,
+            None,
+            None,
+            Some("closed"),
+            None,
+            None
+        ));
+        assert!(websocket_matches(
+            &sent,
+            None,
+            None,
+            None,
+            Some("9000/agent"),
+            None
+        ));
+        assert!(websocket_matches(
+            &received,
+            None,
+            None,
+            None,
+            None,
+            Some("result")
+        ));
         // 载荷过滤是子串，但不该命中另一个方向的帧。
-        assert!(!websocket_matches(&sent, None, None, None, None, Some("result")));
+        assert!(!websocket_matches(
+            &sent,
+            None,
+            None,
+            None,
+            None,
+            Some("result")
+        ));
         // 大小写不敏感由工具层负责（handler 先把 pattern 小写化，与 console/network 同一约定）。
-        assert!(websocket_matches(&sent, None, None, None, None, Some("jsonrpc")));
+        assert!(websocket_matches(
+            &sent,
+            None,
+            None,
+            None,
+            None,
+            Some("jsonrpc")
+        ));
     }
 
     #[tokio::test]
@@ -2050,6 +2255,37 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("恰好给出一种"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn locator_arguments_are_mutually_exclusive() {
+        let cx = test_context();
+        for (tool, extra) in [
+            ("webview_click", json!({})),
+            ("webview_hover", json!({})),
+            ("webview_type", json!({ "text": "hi" })),
+            ("webview_key", json!({ "key": "Enter" })),
+        ] {
+            let mut args = extra;
+            args["selector"] = json!("#a");
+            args["ref"] = json!("e3");
+            let error = crate::tools::dispatch(&cx, tool, &args).await.unwrap_err();
+            assert_eq!(error.kind(), "bad_args", "{tool}");
+            assert!(error.to_string().contains("二选一"), "{tool}: {error}");
+        }
+
+        // select 是「恰好一个」：两个都不给也不行。
+        let error = crate::tools::dispatch(&cx, "webview_select", &json!({ "value": "a" }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), "bad_args");
+        assert!(error.to_string().contains("恰好给出一个"), "{error}");
+
+        // click 也不接受「只给 ref 又给坐标」之外的空配置。
+        let error = crate::tools::dispatch(&cx, "webview_click", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("ref"), "{error}");
     }
 
     #[tokio::test]

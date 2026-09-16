@@ -477,7 +477,11 @@ impl EventLog {
         let Some(request_id) = params.get("requestId").and_then(Value::as_str) else {
             return;
         };
-        let headers = clip_headers(params.get("request").and_then(|request| request.get("headers")));
+        let headers = clip_headers(
+            params
+                .get("request")
+                .and_then(|request| request.get("headers")),
+        );
         let record = json!({
             "kind": "websocket",
             "phase": "handshake-request",
@@ -1278,9 +1282,18 @@ mod tests {
         assert_eq!(outcome.entries.len(), 1);
         let record = &outcome.entries[0];
         assert_eq!(record["headers"]["X-Page"], "yes", "页面侧头部保留");
-        assert_eq!(record["rawRequestHeaders"]["Cookie"], "sid=1", "线上真实头部另存");
-        assert_eq!(record["extraStatus"], 403, "CORS 拦下时只有 extraInfo 有真实状态码");
-        assert_eq!(record["rawResponseHeaders"]["Access-Control-Allow-Origin"], "*");
+        assert_eq!(
+            record["rawRequestHeaders"]["Cookie"], "sid=1",
+            "线上真实头部另存"
+        );
+        assert_eq!(
+            record["extraStatus"], 403,
+            "CORS 拦下时只有 extraInfo 有真实状态码"
+        );
+        assert_eq!(
+            record["rawResponseHeaders"]["Access-Control-Allow-Origin"],
+            "*"
+        );
         assert_eq!(record["resourceIPAddressSpace"], "Private");
     }
 

@@ -69,7 +69,11 @@ enum Keepalive {
 /// `pong_supported` 表示本会话已经**至少收到过一次** pong。只有在这个前提下，
 /// 缺 pong 才能推出「连接已死」——否则旧版 WebView2（或中间有代理时）不回 ping
 /// 会被误判成断线，那比不做心跳还糟。
-fn keepalive_verdict(probe_age: Duration, pong_after_probe: bool, pong_supported: bool) -> Keepalive {
+fn keepalive_verdict(
+    probe_age: Duration,
+    pong_after_probe: bool,
+    pong_supported: bool,
+) -> Keepalive {
     if pong_after_probe {
         return Keepalive::Pong;
     }
@@ -202,7 +206,8 @@ impl Session {
                             }
                         }
                         Ok(Message::Pong(_)) => {
-                            last_pong_ms.store(started.elapsed().as_millis() as u64, Ordering::SeqCst);
+                            last_pong_ms
+                                .store(started.elapsed().as_millis() as u64, Ordering::SeqCst);
                         }
                         Ok(Message::Close(_)) => break,
                         Ok(_) => {}

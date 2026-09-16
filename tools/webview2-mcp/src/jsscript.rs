@@ -176,6 +176,209 @@ pub fn dom_outline(
     ))
 }
 
+/// 无障碍快照：把页面折成「角色 + 可访问名 + ref」的文本树。
+///
+/// 为什么不是 DOM 大纲：驱动 UI 时，agent 需要的是「那个按钮」而不是
+/// `div.chat > div:nth-child(3) > button`——选择器依赖结构，页面一改就失效，
+/// 而角色 + 名字是用户看到的东西。ref 则是给这份快照里每个节点起的一个短名字，
+/// 后续 `webview_click` / `webview_type` 直接用它定位（比选择器稳得多）。
+///
+/// 角色表是**简化版**：覆盖常见标签与显式 `role=`，不做完整的 ARIA 隐含角色推导。
+/// 名字按 aria-label → aria-labelledby → 关联 label → placeholder/alt → 文本
+/// 的顺序取。ref 存进 `window.__PYLON_MCP_REFS__`，页面重载即失效——那时
+/// 定位会明确报「请重新快照」，而不是悄悄点到别处。
+pub fn aria_snapshot(selector: Option<&str>, max_nodes: usize, include_values: bool) -> String {
+    as_sync_body(&render(
+        r#"
+  const SCOPE = {SCOPE};
+  const MAX_NODES = {MAX_NODES};
+  const INCLUDE_VALUES = {INCLUDE_VALUES};
+  const CLIP = 120;
+
+  const root = SCOPE === null ? document.documentElement : document.querySelector(SCOPE);
+  if (!root) return { found: false, reason: 'selector 未命中任何元素', selector: SCOPE };
+
+  const clip = (text) => {
+    const value = String(text).replace(/\s+/g, ' ').trim();
+    return value.length > CLIP ? value.slice(0, CLIP) + '…' : value;
+  };
+  const visible = (el) => {
+    if (typeof el.checkVisibility === 'function') {
+      return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    }
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const textOf = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+
+  const roleOf = (el) => {
+    const explicit = (el.getAttribute('role') || '').trim().toLowerCase();
+    if (explicit) return explicit.split(/\s+/)[0];
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a' || tag === 'area') return el.hasAttribute('href') ? 'link' : null;
+    if (tag === 'button') return 'button';
+    if (tag === 'input') {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'hidden') return null;
+      if (type === 'checkbox') return 'checkbox';
+      if (type === 'radio') return 'radio';
+      if (type === 'range') return 'slider';
+      if (type === 'file' || type === 'color' || type === 'submit' || type === 'reset' ||
+          type === 'button' || type === 'image') return 'button';
+      if (type === 'search') return 'searchbox';
+      return 'textbox';
+    }
+    if (tag === 'select') return el.multiple ? 'listbox' : 'combobox';
+    if (tag === 'option') return 'option';
+    if (tag === 'textarea') return 'textbox';
+    if (tag === 'img') return 'img';
+    if (/^h[1-6]$/.test(tag)) return 'heading';
+    if (tag === 'ul' || tag === 'ol') return 'list';
+    if (tag === 'li') return 'listitem';
+    if (tag === 'table') return 'table';
+    if (tag === 'tr') return 'row';
+    if (tag === 'td') return 'cell';
+    if (tag === 'th') return 'columnheader';
+    if (tag === 'nav') return 'navigation';
+    if (tag === 'main') return 'main';
+    if (tag === 'header') return 'banner';
+    if (tag === 'footer') return 'contentinfo';
+    if (tag === 'aside') return 'complementary';
+    if (tag === 'form') return 'form';
+    if (tag === 'dialog') return 'dialog';
+    if (tag === 'details' || tag === 'fieldset') return 'group';
+    if (tag === 'summary') return 'button';
+    if (tag === 'progress') return 'progressbar';
+    return null;
+  };
+
+  const labeledText = (el) => {
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (!labelledBy) return '';
+    return labelledBy
+      .split(/\s+/)
+      .map((id) => {
+        const target = document.getElementById(id);
+        return target ? textOf(target) : '';
+      })
+      .join(' ')
+      .trim();
+  };
+
+  const labelFor = (el) => {
+    if (!el.id) return '';
+    for (const candidate of document.querySelectorAll('label')) {
+      if (candidate.htmlFor === el.id) return textOf(candidate);
+    }
+    return '';
+  };
+
+  const nameOf = (el, role) => {
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return clip(ariaLabel);
+    const labelled = labeledText(el);
+    if (labelled) return clip(labelled);
+
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'img') {
+      const alt = el.getAttribute('alt');
+      if (alt && alt.trim()) return clip(alt);
+    }
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') {
+      const fromLabel = labelFor(el);
+      if (fromLabel) return clip(fromLabel);
+      const closest = el.closest('label');
+      if (closest) {
+        const text = textOf(closest);
+        if (text) return clip(text);
+      }
+      const placeholder = el.getAttribute('placeholder');
+      if (placeholder && placeholder.trim()) return clip(placeholder);
+    }
+    if (['button', 'link', 'heading', 'option', 'tab', 'menuitem', 'menuitemcheckbox',
+         'menuitemradio', 'listitem', 'cell', 'columnheader', 'rowheader', 'summary',
+         'treeitem'].indexOf(role) !== -1) {
+      const text = textOf(el);
+      if (text) return clip(text);
+    }
+    const title = el.getAttribute('title');
+    if (title && title.trim()) return clip(title);
+    return '';
+  };
+
+  const extrasOf = (el, role) => {
+    const parts = [];
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') parts.push('disabled');
+    if (role === 'checkbox' || role === 'radio' || role === 'switch') {
+      parts.push(el.checked ? 'checked' : 'unchecked');
+    }
+    if (role === 'heading') {
+      const match = /^h([1-6])$/.exec(el.tagName.toLowerCase());
+      const level = el.getAttribute('aria-level') || (match ? match[1] : '');
+      if (level) parts.push('level=' + level);
+    }
+    const expanded = el.getAttribute('aria-expanded');
+    if (expanded) parts.push('expanded=' + expanded);
+    const selected = el.getAttribute('aria-selected');
+    if (selected) parts.push('selected=' + selected);
+    if (INCLUDE_VALUES && (role === 'textbox' || role === 'searchbox' || role === 'combobox')) {
+      const value = typeof el.value === 'string' ? el.value : '';
+      if (value) parts.push('value=' + JSON.stringify(clip(value)));
+    }
+    return parts.length ? ' ' + parts.join(' ') : '';
+  };
+
+  const refs = {};
+  const lines = [];
+  let refSeq = 0;
+  let truncated = false;
+
+  const walk = (el, depth) => {
+    if (truncated) return;
+    if (el.nodeType !== 1) return;
+    if (el.getAttribute('aria-hidden') === 'true') return;
+    if (!visible(el)) return;
+
+    let childDepth = depth;
+    const role = roleOf(el);
+    if (role) {
+      if (refSeq >= MAX_NODES) {
+        truncated = true;
+        return;
+      }
+      const ref = 'e' + (++refSeq);
+      refs[ref] = el;
+      const name = nameOf(el, role);
+      lines.push(
+        '  '.repeat(depth) + '- ' + role +
+        (name ? ' ' + JSON.stringify(name) : '') +
+        extrasOf(el, role) +
+        ' [ref=' + ref + ']'
+      );
+      childDepth = depth + 1;
+    }
+    for (const child of el.children) walk(child, childDepth);
+  };
+
+  walk(root, 0);
+  window.__PYLON_MCP_REFS__ = { at: Date.now(), refs: refs };
+
+  return {
+    found: true,
+    scope: SCOPE,
+    nodeCount: refSeq,
+    truncated: truncated,
+    snapshot: lines.join('\n'),
+  };
+"#,
+        &[
+            ("{SCOPE}", js_optional_str(selector)),
+            ("{MAX_NODES}", max_nodes.to_string()),
+            ("{INCLUDE_VALUES}", include_values.to_string()),
+        ],
+    ))
+}
+
 /// 单元素详查：盒模型、计算样式、可见性、祖先链。
 pub fn query_element(selector: &str, properties: &[String]) -> String {
     let props: Vec<String> = properties.iter().map(|p| js_str(p)).collect();
@@ -248,12 +451,33 @@ pub fn query_element(selector: &str, properties: &[String]) -> String {
 /// `webview_click` 与 `webview_hover` 共用这份解析。`hitIsSelfOrDescendant === false`
 /// 是排障时最有价值的信号：说明该点被别的元素盖住了，`Input.dispatchMouseEvent`
 /// 会打到覆盖物上——这类「点了没反应」靠 `element.click()` 是查不出来的。
-pub fn resolve_pointer_target(selector: &str) -> String {
+pub fn resolve_pointer_target(selector: Option<&str>, reference: Option<&str>) -> String {
     as_sync_body(&render(
         r#"
   const SELECTOR = {SELECTOR};
-  const el = document.querySelector(SELECTOR);
-  if (!el) return { found: false, selector: SELECTOR };
+  const REF = {REF};
+  const refKey = (value) => (value === null ? null : (String(value).charAt(0) === 'e' ? String(value) : 'e' + String(value)));
+  const el = REF === null
+    ? (SELECTOR === null ? null : document.querySelector(SELECTOR))
+    : ((window.__PYLON_MCP_REFS__ && window.__PYLON_MCP_REFS__.refs[refKey(REF)]) || null);
+  if (!el) {
+    return {
+      found: false,
+      selector: SELECTOR,
+      ref: REF,
+      reason: REF === null
+        ? 'selector 未命中任何元素'
+        : 'ref 未命中：它可能来自更早的一次快照，或页面已重载——请重新调用 webview_snapshot',
+    };
+  }
+  if (!el.isConnected) {
+    return {
+      found: false,
+      selector: SELECTOR,
+      ref: REF,
+      reason: 'ref 指向的元素已不在文档中（多半被重新渲染）——请重新调用 webview_snapshot',
+    };
+  }
 
   el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
 
@@ -266,6 +490,8 @@ pub fn resolve_pointer_target(selector: &str) -> String {
   return {
     found: true,
     selector: SELECTOR,
+    ref: REF,
+    resolvedVia: REF === null ? 'selector' : 'ref',
     x, y,
     width: rect.width,
     height: rect.height,
@@ -279,7 +505,44 @@ pub fn resolve_pointer_target(selector: &str) -> String {
     hitIsSelfOrDescendant: hit ? (el === hit || el.contains(hit)) : false,
   };
 "#,
-        &[("{SELECTOR}", js_str(selector))],
+        &[
+            ("{SELECTOR}", js_optional_str(selector)),
+            ("{REF}", js_optional_str(reference)),
+        ],
+    ))
+}
+
+/// `mode=dom` 的点击：直接调 `element.click()`，绕过命中测试。
+pub fn dom_click(selector: Option<&str>, reference: Option<&str>) -> String {
+    as_sync_body(&render(
+        r#"
+  const SELECTOR = {SELECTOR};
+  const REF = {REF};
+  const refKey = (value) => (value === null ? null : (String(value).charAt(0) === 'e' ? String(value) : 'e' + String(value)));
+  const el = REF !== null
+    ? ((window.__PYLON_MCP_REFS__ && window.__PYLON_MCP_REFS__.refs[refKey(REF)]) || null)
+    : (SELECTOR === null ? null : document.querySelector(SELECTOR));
+  if (!el) {
+    return {
+      clicked: false,
+      selector: SELECTOR,
+      ref: REF,
+      reason: REF === null ? 'selector 未命中任何元素' : 'ref 未命中：请重新调用 webview_snapshot',
+    };
+  }
+  el.click();
+  return {
+    clicked: true,
+    selector: SELECTOR,
+    ref: REF,
+    tag: el.tagName.toLowerCase(),
+    disabled: !!el.disabled,
+  };
+"#,
+        &[
+            ("{SELECTOR}", js_optional_str(selector)),
+            ("{REF}", js_optional_str(reference)),
+        ],
     ))
 }
 
@@ -288,14 +551,27 @@ pub fn resolve_pointer_target(selector: &str) -> String {
 /// 「清空」走 DOM 赋值 + 派发 `input` 事件，而不是全选后覆盖：
 /// 受控组件（Solid/React 的受控输入）只有收到 `input` 才会同步内部状态，
 /// 只改 `value` 会让 UI 与状态脱节，后续输入的行文也会错位。
-pub fn focus_for_typing(selector: Option<&str>, clear: bool) -> String {
+pub fn focus_for_typing(selector: Option<&str>, reference: Option<&str>, clear: bool) -> String {
     as_sync_body(&render(
         r#"
   const SELECTOR = {SELECTOR};
+  const REF = {REF};
   const CLEAR = {CLEAR};
 
-  const el = SELECTOR === null ? document.activeElement : document.querySelector(SELECTOR);
-  if (!el) return { found: false, selector: SELECTOR, reason: SELECTOR === null ? '当前没有聚焦元素' : 'selector 未命中' };
+  const refKey = (value) => (value === null ? null : (String(value).charAt(0) === 'e' ? String(value) : 'e' + String(value)));
+  const el = REF !== null
+    ? ((window.__PYLON_MCP_REFS__ && window.__PYLON_MCP_REFS__.refs[refKey(REF)]) || null)
+    : (SELECTOR === null ? document.activeElement : document.querySelector(SELECTOR));
+  if (!el) {
+    return {
+      found: false,
+      selector: SELECTOR,
+      ref: REF,
+      reason: REF !== null
+        ? 'ref 未命中：它可能来自更早的一次快照，或页面已重载——请重新调用 webview_snapshot'
+        : (SELECTOR === null ? '当前没有聚焦元素' : 'selector 未命中'),
+    };
+  }
 
   if (typeof el.focus === 'function') el.focus();
 
@@ -318,6 +594,8 @@ pub fn focus_for_typing(selector: Option<&str>, clear: bool) -> String {
   return {
     found: true,
     selector: SELECTOR,
+    ref: REF,
+    resolvedVia: REF === null ? (SELECTOR === null ? 'activeElement' : 'selector') : 'ref',
     tag: el.tagName.toLowerCase(),
     isContentEditable: !!el.isContentEditable,
     readOnly: !!el.readOnly,
@@ -330,6 +608,7 @@ pub fn focus_for_typing(selector: Option<&str>, clear: bool) -> String {
 "#,
         &[
             ("{SELECTOR}", js_optional_str(selector)),
+            ("{REF}", js_optional_str(reference)),
             ("{CLEAR}", clear.to_string()),
         ],
     ))
@@ -802,15 +1081,31 @@ pub fn scroll_page(
 /// 选中后派发 `input` + `change`——受控组件只有收到事件才会同步内部状态，
 /// 只改 `selected` 会让 UI 与状态脱节。匹配不到时把现有选项带回去，
 /// 让调用方不必再发一次 `webview_query` 猜选项名。
-pub fn select_options(selector: &str, mode: &str, wanted: &Value) -> String {
+pub fn select_options(
+    selector: Option<&str>,
+    reference: Option<&str>,
+    mode: &str,
+    wanted: &Value,
+) -> String {
     as_sync_body(&render(
         r#"
   const SELECTOR = {SELECTOR};
+  const REF = {REF};
   const MODE = {MODE};
   const WANTED = {WANTED};
 
-  const el = document.querySelector(SELECTOR);
-  if (!el) return { found: false, selector: SELECTOR };
+  const refKey = (value) => (value === null ? null : (String(value).charAt(0) === 'e' ? String(value) : 'e' + String(value)));
+  const el = REF !== null
+    ? ((window.__PYLON_MCP_REFS__ && window.__PYLON_MCP_REFS__.refs[refKey(REF)]) || null)
+    : (SELECTOR === null ? null : document.querySelector(SELECTOR));
+  if (!el) {
+    return {
+      found: false,
+      selector: SELECTOR,
+      ref: REF,
+      reason: REF === null ? 'selector 未命中任何元素' : 'ref 未命中：请重新调用 webview_snapshot',
+    };
+  }
   if (el.tagName !== 'SELECT') {
     return { found: true, selector: SELECTOR, reason: 'not-a-select', tag: el.tagName.toLowerCase() };
   }
@@ -852,7 +1147,8 @@ pub fn select_options(selector: &str, mode: &str, wanted: &Value) -> String {
   };
 "#,
         &[
-            ("{SELECTOR}", js_str(selector)),
+            ("{SELECTOR}", js_optional_str(selector)),
+            ("{REF}", js_optional_str(reference)),
             ("{MODE}", js_str(mode)),
             ("{WANTED}", js_value(wanted)),
         ],
@@ -962,9 +1258,58 @@ mod tests {
     }
 
     #[test]
+    fn aria_snapshot_embeds_scope_limits_and_stores_refs() {
+        let script = aria_snapshot(Some("#chat"), 120, false);
+        assert!(script.contains(r##"const SCOPE = "#chat";"##), "{script}");
+        assert!(script.contains("const MAX_NODES = 120;"));
+        assert!(script.contains("const INCLUDE_VALUES = false;"));
+        // ref 必须写进页内映射，否则后续 click/type 拿不到元素。
+        assert!(script.contains("window.__PYLON_MCP_REFS__ = { at: Date.now(), refs: refs };"));
+        assert!(script.contains("' [ref=' + ref + ']'"));
+        assert!(
+            script.contains("snapshot: lines.join("),
+            "返回体必须给文本树"
+        );
+
+        let whole_page = aria_snapshot(None, 300, true);
+        assert!(whole_page.contains("const SCOPE = null;"));
+        assert!(whole_page.contains("const INCLUDE_VALUES = true;"));
+        // 不可见与 aria-hidden 的子树要跳过，否则树里会混进一堆隐藏节点。
+        assert!(whole_page.contains("aria-hidden"));
+        assert!(whole_page.contains("checkVisibility"));
+    }
+
+    #[test]
+    fn ref_lookup_uses_the_snapshot_map_and_reports_stale_refs() {
+        let by_ref = resolve_pointer_target(None, Some("e12"));
+        assert!(by_ref.contains(r#"const REF = "e12";"#), "{by_ref}");
+        assert!(by_ref.contains("const SELECTOR = null;"));
+        assert!(by_ref.contains("refKey"));
+        // 元素被重新渲染后 ref 会指向游离节点：必须明确报错而不是点到别处。
+        assert!(by_ref.contains("isConnected"), "{by_ref}");
+        assert!(by_ref.contains("请重新调用 webview_snapshot"));
+
+        let by_selector = resolve_pointer_target(Some("#a"), None);
+        assert!(by_selector.contains("const REF = null;"));
+        assert!(by_selector.contains(r##"const SELECTOR = "#a";"##));
+    }
+
+    #[test]
+    fn dom_click_and_select_also_accept_refs() {
+        let dom = dom_click(None, Some("e3"));
+        assert!(dom.contains(r#"const REF = "e3";"#), "{dom}");
+        assert!(dom.contains("el.click()"));
+
+        let select = select_options(None, Some("e4"), "value", &json!(["a"]));
+        assert!(select.contains("const SELECTOR = null;"), "{select}");
+        assert!(select.contains(r#"const REF = "e4";"#));
+        assert!(select.contains("请重新调用 webview_snapshot"));
+    }
+
+    #[test]
     fn click_target_selector_is_escaped_not_interpolated() {
         // 选择器里带引号必须被转义，不能逃逸成 JS 代码。
-        let script = resolve_pointer_target("a[title=\"x\"]");
+        let script = resolve_pointer_target(Some("a[title=\"x\"]"), None);
         assert!(
             script.contains(r#"const SELECTOR = "a[title=\"x\"]";"#),
             "{script}"
@@ -1036,7 +1381,7 @@ mod tests {
 
     #[test]
     fn select_options_embeds_mode_and_wanted_values() {
-        let by_value = select_options("#lang", "value", &json!(["zh-Hans", "en"]));
+        let by_value = select_options(Some("#lang"), None, "value", &json!(["zh-Hans", "en"]));
         assert!(
             by_value.contains(r##"const SELECTOR = "#lang";"##),
             "{by_value}"
@@ -1045,14 +1390,14 @@ mod tests {
         assert!(by_value.contains(r#"const WANTED = ["zh-Hans","en"];"#));
         assert!(by_value.contains("dispatchEvent(new Event('change'"));
 
-        let by_index = select_options("#lang", "index", &json!([2]));
+        let by_index = select_options(Some("#lang"), None, "index", &json!([2]));
         assert!(by_index.contains(r#"const MODE = "index";"#), "{by_index}");
         assert!(by_index.contains("const WANTED = [2];"));
     }
 
     #[test]
     fn typing_without_selector_falls_back_to_active_element() {
-        let script = focus_for_typing(None, true);
+        let script = focus_for_typing(None, None, true);
         assert!(script.contains("const SELECTOR = null;"));
         assert!(script.contains("const CLEAR = true;"));
     }
@@ -1108,11 +1453,17 @@ mod tests {
             500,
         );
         // 必须等 __TAURI_INTERNALS__：新文档注入与 Tauri init 的先后没有保证。
-        assert!(script.contains("typeof internals.invoke === 'function'"), "{script}");
+        assert!(
+            script.contains("typeof internals.invoke === 'function'"),
+            "{script}"
+        );
         assert!(script.contains("setTimeout(wait, 50)"), "{script}");
         // 订阅逻辑与直接注入那份是同一份体（避免两套逻辑漂移）。
         assert!(script.contains("plugin:event|listen"), "{script}");
-        assert!(script.contains(r#"const NAMES = ["session://update"];"#), "{script}");
+        assert!(
+            script.contains(r#"const NAMES = ["session://update"];"#),
+            "{script}"
+        );
         // 新文档本来就是干净的缓冲，不该 reset。
         assert!(script.contains("const RESET = false;"), "{script}");
         assert!(!script.contains("const RESET = true;"), "{script}");
@@ -1142,9 +1493,14 @@ mod tests {
         let scripts = [
             dom_outline(Some("#a"), 2, 10, true, true),
             query_element("#a", &["color".to_string()]),
-            resolve_pointer_target("#a"),
-            focus_for_typing(Some("#a"), false),
-            focus_for_typing(None, true),
+            resolve_pointer_target(Some("#a"), None),
+            resolve_pointer_target(None, Some("e3")),
+            dom_click(Some("#a"), None),
+            dom_click(None, Some("e3")),
+            aria_snapshot(Some("#a"), 50, true),
+            aria_snapshot(None, 50, false),
+            focus_for_typing(Some("#a"), None, false),
+            focus_for_typing(None, Some("e7"), true),
             window_state("main"),
             tauri_invoke("cmd", &json!({})),
             events_subscribe(&["e".to_string()], &json!({ "kind": "Any" }), 10, false),
@@ -1167,8 +1523,8 @@ mod tests {
                 Some(-1.0),
                 Some(2.5),
             ),
-            select_options("#lang", "value", &json!(["zh-Hans"])),
-            select_options("#lang", "index", &json!([0, 2])),
+            select_options(Some("#lang"), None, "value", &json!(["zh-Hans"])),
+            select_options(None, Some("e4"), "index", &json!([0, 2])),
             as_async_expression("1 + 1", true),
         ];
         for script in scripts {

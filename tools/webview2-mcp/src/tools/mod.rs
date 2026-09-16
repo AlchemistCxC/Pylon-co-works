@@ -119,6 +119,7 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_websocket" => page::websocket(cx, args).await,
         "webview_dom" => page::dom(cx, args).await,
         "webview_query" => page::query(cx, args).await,
+        "webview_snapshot" => page::snapshot(cx, args).await,
         "webview_screenshot" => page::screenshot(cx, args).await,
         "webview_click" => page::click(cx, args).await,
         "webview_type" => page::type_text(cx, args).await,
@@ -184,7 +185,7 @@ fn type_schema(spec: &str) -> Value {
 /// 这条例线按「对 app 的影响」划，不按「对 MCP 自己缓冲的影响」：
 /// `tauri_events` 会往页面里注册订阅、输入类工具会改 UI 状态，
 /// 因此都不在这里——标注成只读会让客户端在权限 UI 上给出错误的承诺。
-const READ_ONLY_TOOLS: [&str; 12] = [
+const READ_ONLY_TOOLS: [&str; 13] = [
     "webview_targets",
     "webview_console",
     "webview_network",
@@ -192,6 +193,7 @@ const READ_ONLY_TOOLS: [&str; 12] = [
     "webview_websocket",
     "webview_dom",
     "webview_query",
+    "webview_snapshot",
     "webview_screenshot",
     "webview_wait",
     "tauri_event_catalog",
@@ -251,11 +253,18 @@ static TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "webview_targets",
         description: "列出 WebView2 调试端点下所有可附加目标，并返回浏览器/协议版本。任何工具报 debug_endpoint_unreachable 时，第一步都回到这里确认端点是否活着——端点不可达时本工具不报错，而是返回 reachable=false 与开启步骤。",
-        properties: &[(
-            "include_workers",
-            "是否连同 worker / service_worker 等非页面目标一起列出（它们通常不可附加）。默认 false。",
-            "boolean",
-        )],
+        properties: &[
+            (
+                "include_workers",
+                "是否连同 worker / service_worker 等非页面目标一起列出（它们通常不可附加）。默认 false。",
+                "boolean",
+            ),
+            (
+                "scan_ports",
+                "是否顺便扫一段相邻端口（当前端口 +1..+9），列出本机其它 WebView2 调试端点。默认 false——调试端口是「谁连上谁能控制这个 app」的能力，主动去连别的端口不该是默认行为。仅在同时跑多个实例、又忘了谁用哪个端口时开它。",
+                "boolean",
+            ),
+        ],
         required: &[],
     },
     ToolSpec {
@@ -439,6 +448,30 @@ static TOOLS: &[ToolSpec] = &[
         required: &["selector"],
     },
     ToolSpec {
+        name: "webview_snapshot",
+        description: "无障碍快照：把页面折成「角色 + 可访问名 + ref」的文本树，例如 `- button \"发送\" [ref=e3]`。驱动 UI 时用它替代猜选择器——角色与名字是用户看到的东西，不随 DOM 结构变化；文本里的 ref 可直接传给 webview_click / webview_type / webview_key / webview_select 的 ref 参数（比 CSS 选择器稳）。ref 存在页内，页面重载后失效，那时定位会明确提示重新快照。角色表是简化版（常见标签 + 显式 role=），不做完整 ARIA 隐含角色推导。",
+        properties: &[
+            (
+                "selector",
+                "只快照这个子树；省略则整页。页面很大时用它可以避免触及 max_nodes 上限。",
+                "string",
+            ),
+            (
+                "max_nodes",
+                "节点上限，默认 300。到达上限即停止并在返回里标 truncated。",
+                "integer",
+            ),
+            (
+                "include_values",
+                "是否带上输入框当前值（value=...）。默认 true；值很长或含敏感内容时可关掉。",
+                "boolean",
+            ),
+            ("target", TARGET_DOC, "string"),
+            ("timeout_ms", TIMEOUT_DOC, "integer"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
         name: "webview_screenshot",
         description: "截图并作为图片内容返回。full_page 用 Page.getLayoutMetrics 的 cssContentSize 做整页捕获；该参数在部分 WebView2 版本不支持，失败时会自动退回视口截图并在说明里写清，而不是整次失败。",
         properties: &[
@@ -473,7 +506,12 @@ static TOOLS: &[ToolSpec] = &[
         properties: &[
             (
                 "selector",
-                "目标元素选择器。与 x/y 二选一；selector 会先 scrollIntoView 再取中心点。",
+                "目标元素选择器。与 ref、x/y 三选一；会先 scrollIntoView 再取中心点。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot——比选择器稳，页面结构变了也不失效（除非元素被重新渲染）。与 selector、x/y 三选一。",
                 "string",
             ),
             ("x", "视口坐标 X（CSS 像素）。", "number"),
@@ -506,7 +544,12 @@ static TOOLS: &[ToolSpec] = &[
             ("text", "要输入的文本。", "string"),
             (
                 "selector",
-                "输入目标选择器；省略则用当前聚焦元素。",
+                "输入目标选择器；与 ref 二选一，两个都省略则用当前聚焦元素。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 二选一。",
                 "string",
             ),
             ("clear", "输入前清空。默认 false。", "boolean"),
@@ -537,7 +580,12 @@ static TOOLS: &[ToolSpec] = &[
             ),
             (
                 "selector",
-                "先聚焦该元素再按键；省略则按在当前聚焦元素上。",
+                "先聚焦该元素再按键；与 ref 二选一，两个都省略则按在当前聚焦元素上。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 二选一。",
                 "string",
             ),
             (
@@ -558,7 +606,12 @@ static TOOLS: &[ToolSpec] = &[
         properties: &[
             (
                 "selector",
-                "目标元素选择器。与 x/y 二选一；selector 会先 scrollIntoView 再取中心点。",
+                "目标元素选择器。与 ref、x/y 三选一；会先 scrollIntoView 再取中心点。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot——比选择器稳，页面结构变了也不失效（除非元素被重新渲染）。与 selector、x/y 三选一。",
                 "string",
             ),
             ("x", "视口坐标 X（CSS 像素）。", "number"),
@@ -604,7 +657,12 @@ static TOOLS: &[ToolSpec] = &[
         name: "webview_select",
         description: "选中 <select> 的选项：value / label / 下标三种匹配方式恰好给一种（multiple 可给数组选多项），选中后派发 input 与 change 事件让受控组件同步状态。返回匹配到的 option 与选中后的 selectedValues，可直接确认这次选择是否真的生效。目标不是 select 元素时返回 reason=not-a-select；没有匹配项时返回 reason=no-matching-option 并带回现有选项列表。",
         properties: &[
-            ("selector", "select 元素选择器。", "string"),
+            ("selector", "select 元素选择器；与 ref 恰好给出一个。", "string"),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 恰好给出一个。",
+                "string",
+            ),
             (
                 "value",
                 "按 option 的 value 全等匹配，可给数组（multiple 时选中多项）。",
@@ -619,7 +677,7 @@ static TOOLS: &[ToolSpec] = &[
             ("target", TARGET_DOC, "string"),
             ("timeout_ms", TIMEOUT_DOC, "integer"),
         ],
-        required: &["selector"],
+        required: &[],
     },
     ToolSpec {
         name: "webview_wait",
@@ -983,7 +1041,7 @@ mod tests {
         }
         assert_eq!(
             TOOLS.len(),
-            23,
+            24,
             "工具数量变化时请同步更新 README、smoke 脚本与 instructions"
         );
     }
