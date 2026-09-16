@@ -1,5 +1,12 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -89,6 +96,7 @@ jobs:
           cd src-tauri
           cargo build --bin pylon-fake-agent --features test-agent
           cargo test --workspace --lib --features test-agent
+          cargo test --workspace --tests --features test-agent
           cargo build
 
       # P91 B1：fmt 门禁——#106 P0 后 workspace 单命令（替代 4 个 --manifest-path 步骤）。
