@@ -334,6 +334,123 @@ fn network_matches(
     true
 }
 
+/// WebSocket 流：连接级事件与帧各占一条记录，默认读增量。
+///
+/// 与 `webview_network` 的分工：后者按 requestId 把一次请求压成一条（看握手足够），
+/// 这里保持帧的顺序与条数——压成一条就看不见往返次序了。
+pub async fn websocket(cx: &Context, args: &Value) -> Result<ToolResult> {
+    let a = Args::new("webview_websocket", args);
+    let target = a.str("target")?;
+    let request_id = a.string("request_id")?;
+    let url_pattern = a.string("pattern")?.map(|text| text.to_lowercase());
+    let payload_pattern = a
+        .string("payload_pattern")?
+        .map(|text| text.to_lowercase());
+    let direction = a.string("direction")?;
+    if let Some(direction) = &direction {
+        if direction != "sent" && direction != "received" {
+            return Err(Error::bad_args(
+                "webview_websocket",
+                format!("direction 只支持 sent / received，收到 {direction:?}"),
+            ));
+        }
+    }
+    let phase = a.string("phase")?;
+    if let Some(phase) = &phase {
+        if !WS_PHASES.contains(&phase.as_str()) {
+            return Err(Error::bad_args(
+                "webview_websocket",
+                format!("phase 只支持 {}，收到 {phase:?}", WS_PHASES.join(" / ")),
+            ));
+        }
+    }
+    let since = a.u64("since_seq")?;
+    let limit = a.u64_or("limit", DEFAULT_LIMIT as u64)? as usize;
+    let scan = resolve_scan(a.u64("scan")?, limit);
+
+    if a.bool_or("reset", false)? {
+        cx.cdp.reset_events(target, Kind::WebSocket).await?;
+    }
+
+    let (outcome, stats, origin) = cx
+        .cdp
+        .read_events(target, Kind::WebSocket, since, scan, limit, |record| {
+            websocket_matches(
+                record,
+                request_id.as_deref(),
+                direction.as_deref(),
+                phase.as_deref(),
+                url_pattern.as_deref(),
+                payload_pattern.as_deref(),
+            )
+        })
+        .await?;
+    let reconnected = origin == SessionOrigin::Reconnected;
+
+    Ok(ToolResult::json(&json!({
+        "entries": outcome.entries,
+        "returned": outcome.entries.len(),
+        "scanned": outcome.scanned,
+        "cursor": outcome.cursor,
+        "explicitSinceSeq": since,
+        "buffer": stats,
+        "reconnected": reconnected,
+        "phaseNote": "phase 取值：created / handshake-request / handshake-response / frame / frame-error / closed。帧记录带 direction（sent / received）、opcodeName 与截断后的 payload（原文长度见 payloadLength）。",
+        "reconnectNote": if reconnected {
+            "本次调用前连接已断开并已自动重连；WS 记录属于旧会话，无法带回。"
+        } else {
+            "会话延续自上次调用，缓冲完整。"
+        },
+    })))
+}
+
+/// 可用的 `phase` 取值，同时也是过滤参数的校验白名单。
+const WS_PHASES: [&str; 6] = [
+    "created",
+    "handshake-request",
+    "handshake-response",
+    "frame",
+    "frame-error",
+    "closed",
+];
+
+fn websocket_matches(
+    record: &Value,
+    request_id: Option<&str>,
+    direction: Option<&str>,
+    phase: Option<&str>,
+    url_pattern: Option<&str>,
+    payload_pattern: Option<&str>,
+) -> bool {
+    let field = |key: &str| record.get(key).and_then(Value::as_str).unwrap_or("");
+    if let Some(want) = request_id {
+        if field("requestId") != want {
+            return false;
+        }
+    }
+    if let Some(want) = direction {
+        if field("direction") != want {
+            return false;
+        }
+    }
+    if let Some(want) = phase {
+        if field("phase") != want {
+            return false;
+        }
+    }
+    if let Some(pattern) = url_pattern {
+        if !field("url").to_lowercase().contains(pattern) {
+            return false;
+        }
+    }
+    if let Some(pattern) = payload_pattern {
+        if !field("payload").to_lowercase().contains(pattern) {
+            return false;
+        }
+    }
+    true
+}
+
 pub async fn network_body(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("webview_network_body", args);
     let request_id = a.required_str("request_id")?;
@@ -1591,6 +1708,51 @@ mod tests {
             true
         ));
         assert!(!network_matches(&bad, Some("Document"), None, None, true));
+    }
+
+    #[test]
+    fn websocket_filter_combines_connection_direction_phase_and_patterns() {
+        let sent = json!({
+            "kind": "websocket", "phase": "frame", "direction": "sent",
+            "requestId": "ws1", "url": "ws://127.0.0.1:9000/agent",
+            "payload": "{\"jsonrpc\":\"2.0\",\"method\":\"session/prompt\"}",
+        });
+        let received = json!({
+            "kind": "websocket", "phase": "frame", "direction": "received",
+            "requestId": "ws1", "url": "ws://127.0.0.1:9000/agent", "payload": "{\"result\":1}",
+        });
+
+        assert!(websocket_matches(&sent, None, None, None, None, None));
+        assert!(websocket_matches(&sent, Some("ws1"), Some("sent"), Some("frame"), None, None));
+        assert!(!websocket_matches(&sent, Some("ws2"), None, None, None, None));
+        assert!(!websocket_matches(&sent, None, Some("received"), None, None, None));
+        assert!(!websocket_matches(&sent, None, None, Some("closed"), None, None));
+        assert!(websocket_matches(&sent, None, None, None, Some("9000/agent"), None));
+        assert!(websocket_matches(&received, None, None, None, None, Some("result")));
+        // 载荷过滤是子串，但不该命中另一个方向的帧。
+        assert!(!websocket_matches(&sent, None, None, None, None, Some("result")));
+        // 大小写不敏感由工具层负责（handler 先把 pattern 小写化，与 console/network 同一约定）。
+        assert!(websocket_matches(&sent, None, None, None, None, Some("jsonrpc")));
+    }
+
+    #[tokio::test]
+    async fn websocket_rejects_unknown_phase_and_direction_before_touching_cdp() {
+        let cx = test_context();
+        let error = crate::tools::dispatch(&cx, "webview_websocket", &json!({ "phase": "nope" }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), "bad_args");
+        assert!(error.to_string().contains("created"), "{error}");
+
+        let error = crate::tools::dispatch(
+            &cx,
+            "webview_websocket",
+            &json!({ "direction": "sideways" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind(), "bad_args");
+        assert!(error.to_string().contains("sent"), "{error}");
     }
 
     #[test]

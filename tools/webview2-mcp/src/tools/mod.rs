@@ -116,6 +116,7 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_console" => page::console(cx, args).await,
         "webview_network" => page::network(cx, args).await,
         "webview_network_body" => page::network_body(cx, args).await,
+        "webview_websocket" => page::websocket(cx, args).await,
         "webview_dom" => page::dom(cx, args).await,
         "webview_query" => page::query(cx, args).await,
         "webview_screenshot" => page::screenshot(cx, args).await,
@@ -183,11 +184,12 @@ fn type_schema(spec: &str) -> Value {
 /// 这条例线按「对 app 的影响」划，不按「对 MCP 自己缓冲的影响」：
 /// `tauri_events` 会往页面里注册订阅、输入类工具会改 UI 状态，
 /// 因此都不在这里——标注成只读会让客户端在权限 UI 上给出错误的承诺。
-const READ_ONLY_TOOLS: [&str; 11] = [
+const READ_ONLY_TOOLS: [&str; 12] = [
     "webview_targets",
     "webview_console",
     "webview_network",
     "webview_network_body",
+    "webview_websocket",
     "webview_dom",
     "webview_query",
     "webview_screenshot",
@@ -355,6 +357,43 @@ static TOOLS: &[ToolSpec] = &[
             ("target", TARGET_DOC, "string"),
         ],
         required: &["request_id"],
+    },
+    ToolSpec {
+        name: "webview_websocket",
+        description: "读 WebSocket 流：连接级事件（created / handshake-request / handshake-response / closed / frame-error）与每一帧各占一条记录，保持往返次序——这一点与 webview_network 相反（那里按 requestId 把一次请求压成一条，看握手足够）。默认读增量，游标语义与 webview_console 一致。",
+        properties: &[
+            (
+                "pattern",
+                "按连接 url 子串过滤（大小写不敏感）。",
+                "string",
+            ),
+            (
+                "payload_pattern",
+                "按帧载荷文本子串过滤（大小写不敏感）。",
+                "string",
+            ),
+            (
+                "direction",
+                "只看某个方向：sent（页面发出）或 received（页面收到）。省略则两个方向都要。",
+                "enum:sent|received",
+            ),
+            (
+                "phase",
+                "只看某个阶段：created / handshake-request / handshake-response / frame / frame-error / closed。",
+                "enum:created|handshake-request|handshake-response|frame|frame-error|closed",
+            ),
+            (
+                "request_id",
+                "只看某条连接（webview_network 返回的 requestId）。",
+                "string",
+            ),
+            ("since_seq", SINCE_DOC, "integer"),
+            ("limit", LIMIT_DOC, "integer"),
+            ("scan", SCAN_DOC, "integer"),
+            ("reset", RESET_DOC, "boolean"),
+            ("target", TARGET_DOC, "string"),
+        ],
+        required: &[],
     },
     ToolSpec {
         name: "webview_dom",
@@ -944,7 +983,7 @@ mod tests {
         }
         assert_eq!(
             TOOLS.len(),
-            22,
+            23,
             "工具数量变化时请同步更新 README、smoke 脚本与 instructions"
         );
     }
