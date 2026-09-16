@@ -6,8 +6,6 @@ mod agent_runtime;
 #[cfg(test)]
 mod auto_reconnect_integration_tests;
 #[cfg(test)]
-mod b10_gateway_integration_tests;
-#[cfg(test)]
 mod b11_inject_integration_tests;
 mod browser;
 mod browser_agent;
@@ -56,10 +54,15 @@ mod session_expiry_platform_tests;
 mod session_info_tests;
 mod session_store;
 mod startup;
-#[cfg(test)]
-mod test_harness;
-#[cfg(test)]
-mod test_utils;
+// P5（#106）：harness 即门面——tests/ 集成目标经此消费产品表面；
+// AppState 等内部类型不加 pub，门面只出窄值（spec P5 五类面）。
+// cfg(test) 使既有 lib 内嵌测试不受 feature 影响；feature 使外部 test target 可见。
+#[cfg(any(test, feature = "test-agent"))]
+#[doc(hidden)]
+pub mod test_harness;
+#[cfg(any(test, feature = "test-agent"))]
+#[doc(hidden)]
+pub mod test_utils;
 mod workspace_cmds;
 mod workspaces;
 
