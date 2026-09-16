@@ -3,10 +3,6 @@ pub use pylon_core::agent_catalog;
 mod agent_config;
 pub mod agent_detection;
 mod agent_runtime;
-#[cfg(test)]
-mod auto_reconnect_integration_tests;
-#[cfg(test)]
-mod b11_inject_integration_tests;
 mod browser;
 mod browser_agent;
 mod browser_agent_cmds;
@@ -104,7 +100,7 @@ use crate::session::{check_session_expiry, send_prompt_core};
 #[cfg(test)]
 use crate::export::{is_export_sensitive_key, sanitize_export_messages, write_export_atomically};
 #[cfg(test)]
-use crate::lifecycle::{do_connect_and_replace, set_mcp_servers};
+use crate::lifecycle::set_mcp_servers;
 #[cfg(test)]
 use crate::permission::{
     parse_permission_request, permission_response, permission_response_cancelled,
@@ -112,9 +108,8 @@ use crate::permission::{
 };
 #[cfg(test)]
 use crate::session::{
-    build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
-    extract_tool_file_name, inject_applies_to, send_message, session_expired, InspectorSessionRow,
-    SessionListRow,
+    build_full_inspector_payload, config_option_current_value, session_expired,
+    InspectorSessionRow, SessionListRow,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)

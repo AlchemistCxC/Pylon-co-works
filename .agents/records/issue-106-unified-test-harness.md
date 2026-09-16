@@ -1,5 +1,10 @@
 # Dev Record — #106 后端大一统测试基建（统一 harness、Rust 假 ACP agent、IPC 接缝校验与 CI 解 skip）
 
+## 2026-09-16 continuation
+
+- P5：继续沿用本分支现有实现，auto_reconnect、b11_inject、model_switch 与 b10 均进入 `tests/integration.rs` 单一 integration target；`cargo test --manifest-path src-tauri/Cargo.toml --tests --features test-agent` 实测 21 个集成测试、1072 个 lib 测试及 fake-agent/bin 测试全部通过。
+- P4：尝试 projects 聚合（scripts=node、src=jsdom、isolate=false），实测触发大量跨文件 localStorage/初始化污染失败，已回退到原配置；P4 仍未验收，不能用不稳定结果冒充完成。
+
 > 入库保留。规格文档（spec）不保留，其目标、范围、方案与验收结论在此承接。
 
 ## 元信息

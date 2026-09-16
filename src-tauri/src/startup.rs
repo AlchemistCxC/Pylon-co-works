@@ -181,7 +181,8 @@ pub(crate) fn build_startup_diagnostics(
 
 impl StartupDiagnostics {
     /// 测试默认快照（全 Ready + embedded 来源）。
-    #[cfg(test)]
+    /// #106 P5：test-agent 下供外部 tests 目标的 TestStateBuilder 使用。
+    #[cfg(any(test, feature = "test-agent"))]
     pub(crate) fn test_default() -> Self {
         Self {
             agent_config: ComponentStatus {

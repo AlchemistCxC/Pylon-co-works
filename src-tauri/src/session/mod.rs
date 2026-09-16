@@ -1962,4 +1962,62 @@ gateway:
             outcome
         );
     }
+
+    // ── #106 P5：自 b11_inject_integration_tests 迁入的纯逻辑单测（集成形态之外的
+    // 组合/提取函数回归，留在 lib 靠近被测函数）──
+
+    #[test]
+    fn inject_prompt_composition_is_plain_and_conditional() {
+        assert_eq!(
+            compose_inject_prompt("世界书上下文", "用户消息"),
+            "世界书上下文\n\n用户消息"
+        );
+        assert_eq!(compose_inject_prompt("", "用户消息"), "用户消息");
+        assert_eq!(compose_inject_prompt("   ", "用户消息"), "用户消息");
+        assert_eq!(compose_inject_prompt("上下文", ""), "上下文\n\n");
+        assert!(inject_applies_to("普通消息"));
+        assert!(inject_applies_to("  hello"));
+        assert!(!inject_applies_to("/command"));
+        assert!(!inject_applies_to("  /command"));
+    }
+
+    #[test]
+    fn extract_tool_file_name_parses_sanitized_summary() {
+        assert_eq!(
+            extract_tool_file_name(r#"{"path": "G:/project/src/lib.rs"}"#).as_deref(),
+            Some("G:/project/src/lib.rs")
+        );
+        assert_eq!(
+            extract_tool_file_name(r#"{"file": "main.ts", "op": "edit"}"#).as_deref(),
+            Some("main.ts")
+        );
+        assert_eq!(
+            extract_tool_file_name(r#"{"command": "ls"}"#),
+            None,
+            "无文件名键不提取"
+        );
+        assert_eq!(
+            extract_tool_file_name(r#"{"path": ""}"#),
+            None,
+            "空路径不提取"
+        );
+        assert_eq!(extract_tool_file_name("not json at all"), None);
+        // 只取顶层 path 值，不把 rawInput（可能含 secret）带出
+        let raw = r#"{"path": "src/x.rs", "token": "SECRET"}"#;
+        assert_eq!(extract_tool_file_name(raw).as_deref(), Some("src/x.rs"));
+    }
+
+    #[test]
+    fn extract_tool_file_name_ignores_embedded_path_fragments() {
+        // 审查修复回归：值内嵌的 "path": 片段不得被当作文件名（防 secret 以文件名形态落盘）
+        let embedded = r#"{"input": "config says \"path\":\"sk-abc123\""}"#;
+        assert_eq!(
+            extract_tool_file_name(embedded),
+            None,
+            "非顶层键的内嵌 path 片段必须忽略"
+        );
+        // 非 JSON 形态一律不提取
+        assert_eq!(extract_tool_file_name(r#"{path: x}"#), None);
+        assert_eq!(extract_tool_file_name(r#""path":"src/x.rs""#), None);
+    }
 }

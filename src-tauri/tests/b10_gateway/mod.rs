@@ -39,7 +39,7 @@ gateway:
     .await;
 
     // QQ API 桩（P91 批 D1：自拷桩收敛至 harness::http_stub 门面）。
-    let (_qq_api_address, qq_request_rx, qq_server) = harness.http_stub(&[
+    let (_qq_api_address, qq_request_rx, qq_server) = TestHarness::http_stub(&[
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"id\":\"sent-1\"}",
     ]);
     // QQ 适配器注册（test token + 桩地址，避免真实 QQ API）。

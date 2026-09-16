@@ -293,8 +293,7 @@ impl PrismClient {
         self.post("/persist", body).await
     }
 
-    /// 测试构造：任意 URL（桩服务），无 configuration_error（lib.rs 集成测试用）。
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-agent"))]
     pub(crate) fn for_testing(url: String, token: Option<String>) -> Self {
         Self {
             client: Client::builder().build().expect("test HTTP client"),

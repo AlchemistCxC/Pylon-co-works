@@ -8,4 +8,7 @@
 //! 前置：`cargo build --bin pylon-fake-agent --features test-agent`
 //! （bin 经 current_exe 祖先目录定位，见 test_utils::fake_agent_bin）。
 
+mod auto_reconnect;
 mod b10_gateway;
+mod b11_inject;
+mod model_switch;
