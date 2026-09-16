@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use super::engine::{prepared_sdk_rpc, ResponderHandle, SdkBackend, SdkOutbound};
+use super::engine::{
+    prepared_sdk_rpc, InboundTelemetry, ResponderHandle, SdkBackend, SdkOutbound, CONTROL_INBOX_CAP,
+};
 
 pub struct AcpClient {
     child: ManagedChild,
@@ -83,22 +85,36 @@ fn declared_establishment_order(provider: Option<&str>) -> Vec<String> {
     }
 }
 
-/// Cloneable handle to the connection's single-consumer Kernel notification stream.
+/// Cloneable handle to the connection's single-consumer Kernel notification streams.
 /// Receiver ownership and locking stay inside ACP; callers only learn ordered recv.
+///
+/// #99：updates 与 control 双通道——控制帧（agent 请求/崩溃广播）走独立有界
+/// 通道，dispatcher 以 `biased` select 优先消费，不被通知洪泛饿死。
 #[derive(Clone)]
 pub(crate) struct NotificationInbox {
-    rx: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
+    updates: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
+    control: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
 }
 
 impl NotificationInbox {
-    pub(crate) fn new(rx: mpsc::Receiver<ClassifiedMessage>) -> Self {
+    pub(crate) fn new(
+        updates: mpsc::Receiver<ClassifiedMessage>,
+        control: mpsc::Receiver<ClassifiedMessage>,
+    ) -> Self {
         Self {
-            rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            updates: Arc::new(tokio::sync::Mutex::new(updates)),
+            control: Arc::new(tokio::sync::Mutex::new(control)),
         }
     }
 
+    /// 普通通知 lane（session/update 等）。
     pub(crate) async fn recv(&self) -> Option<ClassifiedMessage> {
-        self.rx.lock().await.recv().await
+        self.updates.lock().await.recv().await
+    }
+
+    /// 控制帧 lane（agent JSON-RPC 请求 / 崩溃广播；优先消费）。
+    pub(crate) async fn recv_control(&self) -> Option<ClassifiedMessage> {
+        self.control.lock().await.recv().await
     }
 }
 /// B1：消息类型化分类（reader 一次分类，dispatcher 枚举匹配——method 拼写错误
@@ -157,6 +173,9 @@ pub(crate) struct ClassifiedMessage {
     pub(crate) raw: RawMessage,
     pub(crate) classification: ReplayClassification,
     pub(crate) wire_ordinal: Option<u64>,
+    /// #99：本连接入站帧的单调 ingress ordinal（1 起；publish_inbound 分配）。
+    /// live/replay/boundary 共用同一序列模型；优先级 lane 不改写本序号。
+    pub(crate) ingress_seq: u64,
 }
 
 impl ClassifiedMessage {
@@ -165,6 +184,7 @@ impl ClassifiedMessage {
             raw,
             classification: ReplayClassification::Live,
             wire_ordinal: None,
+            ingress_seq: 0,
         }
     }
 }
@@ -173,8 +193,10 @@ impl AcpClient {
     pub fn disconnected() -> Self {
         let (outbound, outbound_rx) = mpsc::channel(1);
         drop(outbound_rx);
-        let (inbound_tx, inbound_rx) = mpsc::channel(NOTIFICATION_CHAN_CAP);
-        drop(inbound_tx);
+        let (updates_tx, updates_rx) = mpsc::channel(NOTIFICATION_CHAN_CAP);
+        drop(updates_tx);
+        let (control_tx, control_rx) = mpsc::channel(CONTROL_INBOX_CAP);
+        drop(control_tx);
         let (replay_events, _) = broadcast::channel(BROADCAST_CAP);
         let (shutdown, _) = watch::channel(false);
         let (crashed_watch, crashed_watch_rx) = watch::channel(false);
@@ -187,7 +209,8 @@ impl AcpClient {
             backend: SdkBackend {
                 outbound,
                 next_id: Arc::new(AtomicU64::new(1)),
-                inbound: NotificationInbox::new(inbound_rx),
+                inbound: NotificationInbox::new(updates_rx, control_rx),
+                telemetry: Arc::new(InboundTelemetry::new()),
                 replay_events,
                 active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
                 pending_requests: Arc::new(Mutex::new(HashMap::new())),

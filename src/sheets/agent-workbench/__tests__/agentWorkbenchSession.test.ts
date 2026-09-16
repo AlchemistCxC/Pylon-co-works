@@ -545,6 +545,72 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  // #97：catalog 不被压成单项——空成功响应/空 configOptions 回声只能结束传输，
+  // 不能把已投影的两项 selector catalog 替换成单项合成列表。
+  it('#97 空回声响应保留已投影的 selector catalog', async () => {
+    const active = session('echo-keeps-catalog', 'local:echo-keeps-catalog')
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    await service.bind(active)
+    service.applySessionResponse({
+      sessionId: 'remote-created',
+      models: {
+        currentModelId: 'm1',
+        availableModels: [{ modelId: 'm1', name: 'One' }, { modelId: 'm2', name: 'Two' }],
+      },
+    }, active.id)
+    const modelOptions = () => service.runtime.getSnapshot().document?.session.options.find(item => item.id === 'model')
+    // schema 是 JsonValue 联合：先收窄到对象再取 options（tsc 严格索引）。
+    const schemaOptions = (): unknown => {
+      const schema = modelOptions()?.schema
+      if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return undefined
+      return (schema as { readonly options?: unknown }).options
+    }
+    const twoChoices = expect.objectContaining({
+      options: expect.arrayContaining([expect.objectContaining({ id: 'm1' }), expect.objectContaining({ id: 'm2' })]),
+    })
+    expect(modelOptions()?.schema).toEqual(twoChoices)
+    // 评审补强：恰两项——arrayContaining 会掩盖「附加合成第三项」的劣化。
+    expect(schemaOptions()).toHaveLength(2)
+
+    // 空对象回声：document options 完整保留。
+    service.applySessionResponse({}, active.id)
+    expect(modelOptions()?.schema).toEqual(twoChoices)
+    expect(schemaOptions()).toHaveLength(2)
+    // 恒空 configOptions 回声（hermes set_config_option 形态）：同样不得清空 catalog。
+    service.applySessionResponse({ configOptions: [] }, active.id)
+    expect(modelOptions()?.schema).toEqual(twoChoices)
+    expect(schemaOptions()).toHaveLength(2)
+    service.destroy()
+  })
+
+  it('#97 权威完整列表刷新 catalog，旧 choices 不残留', async () => {
+    const active = session('authoritative-refresh', 'local:authoritative-refresh')
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    await service.bind(active)
+    service.applySessionResponse({
+      sessionId: 'remote-created',
+      models: {
+        currentModelId: 'm1',
+        availableModels: [{ modelId: 'm1' }, { modelId: 'm2' }],
+      },
+    }, active.id)
+    // Agent 推送新的完整模型面（旧 m1/m2 都不在）→ catalog 按权威列表整体刷新。
+    service.applySessionResponse({
+      models: {
+        currentModelId: 'm3',
+        availableModels: [{ modelId: 'm3', name: 'Three' }, { modelId: 'm4', name: 'Four' }],
+      },
+    }, active.id)
+    const option = service.runtime.getSnapshot().document?.session.options.find(item => item.id === 'model')
+    expect(option?.value).toBe('m3')
+    expect(option?.schema).toEqual(expect.objectContaining({
+      options: expect.arrayContaining([expect.objectContaining({ id: 'm3' }), expect.objectContaining({ id: 'm4' })]),
+    }))
+    expect(JSON.stringify(option?.schema)).not.toContain('"m1"')
+    expect(JSON.stringify(option?.schema)).not.toContain('"m2"')
+    service.destroy()
+  })
+
   it('真实 schemaVersion=1 canonical SQLite 行经 normalizer 投影而非误当 Workbench envelope', async () => {
     const service = createAgentWorkbenchSessionRuntime({
       loadAll: async () => [
