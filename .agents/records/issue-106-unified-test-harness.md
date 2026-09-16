@@ -4,6 +4,7 @@
 
 - P5：继续沿用本分支现有实现，auto_reconnect、b11_inject、model_switch 与 b10 均进入 `tests/integration.rs` 单一 integration target；`cargo test --manifest-path src-tauri/Cargo.toml --tests --features test-agent` 实测 21 个集成测试、1072 个 lib 测试及 fake-agent/bin 测试全部通过。
 - P4：尝试 projects 聚合（scripts=node、src=jsdom、isolate=false），实测触发大量跨文件 localStorage/初始化污染失败，已回退到原配置；P4 仍未验收，不能用不稳定结果冒充完成。
+- 后续按环境拆成 `scripts`、`frontend`、`solid` 三个 Vitest project；普通前端测试共享进程，Solid 测试保持 isolate（其 fake-clock/module 状态要求逐文件初始化）。代表性 React 测试通过；Solid scheduler 测试仍有既有时钟断言失败，需后续单独修复，不能归因于 projects 配置。
 
 > 入库保留。规格文档（spec）不保留，其目标、范围、方案与验收结论在此承接。
 

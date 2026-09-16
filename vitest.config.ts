@@ -15,9 +15,52 @@ export default defineConfig({
     react({ exclude: SOLID_WORKBENCH_FILES }),
   ],
   test: {
-    include: ['scripts/*.test.mts', 'src/**/*.test.{ts,tsx}'],
-    environment: 'node',
-    setupFiles: ['vitest.setup.ts'],
+    projects: [
+      {
+        plugins: [
+          solid({ include: SOLID_WORKBENCH_FILES, hot: false }),
+          react({ exclude: SOLID_WORKBENCH_FILES }),
+        ],
+        test: {
+          name: 'scripts',
+          include: ['scripts/*.test.mts'],
+          environment: 'node',
+          setupFiles: ['vitest.setup.ts'],
+          isolate: false,
+          pool: 'forks',
+          testTimeout: 30_000,
+        },
+      },
+      {
+        plugins: [
+          solid({ include: SOLID_WORKBENCH_FILES, hot: false }),
+          react({ exclude: SOLID_WORKBENCH_FILES }),
+        ],
+        test: {
+          name: 'frontend',
+          include: ['src/**/*.test.{ts,tsx}'],
+          exclude: ['src/renderers/solid-workbench/**/*.test.{ts,tsx}'],
+          environment: 'jsdom',
+          setupFiles: ['vitest.setup.ts'],
+          isolate: false,
+          pool: 'forks',
+          testTimeout: 30_000,
+        },
+      },
+      {
+        plugins: [solid({ include: SOLID_WORKBENCH_FILES, hot: false }), react({ exclude: SOLID_WORKBENCH_FILES })],
+        test: {
+          name: 'solid',
+          include: ['src/renderers/solid-workbench/**/*.test.{ts,tsx}'],
+          environment: 'jsdom',
+          setupFiles: ['vitest.setup.ts'],
+          // Solid tests rely on per-file fake-clock/module state.
+          isolate: true,
+          pool: 'forks',
+          testTimeout: 30_000,
+        },
+      },
+    ],
     // P91 C2 §7：全局 60s 收紧为 30s（node 纯逻辑/jsdom 组件共用一档；esbuild/dist
     // 重型 integration 文件内用 vi.setConfig 个别放宽到 60s）。retry 已退役——
     // 出口判据：无 retry 连续 5 轮全量全绿。
