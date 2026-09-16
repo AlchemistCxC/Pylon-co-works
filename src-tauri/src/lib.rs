@@ -1212,6 +1212,41 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             }
         });
     }
+    // #110 F3：事件库维护 watcher——墓碑事件清扫（兜底历史垃圾）+ WAL checkpoint
+    // （TRUNCATE）。启动即跑一次，此后每 10 分钟一次：流式回合每 chunk 一次事务，
+    // 从不 checkpoint 时 WAL 只增不减（体检实证 WAL 66MB 反超主库 62MB）。
+    {
+        let app_for_maintenance = app.handle().clone();
+        tokio::spawn(async move {
+            loop {
+                let state = app_for_maintenance.state::<AppState>();
+                match crate::session::message_service_of(state.inner()) {
+                    Ok(service) => {
+                        match service
+                            .run_journal_maintenance(crate::session::TOMBSTONE_EVENT_GRACE_DAYS)
+                            .await
+                        {
+                            Ok(outcome) if outcome.events_deleted > 0 => {
+                                tracing::info!(
+                                    tombstones = outcome.tombstones,
+                                    events_deleted = outcome.events_deleted,
+                                    "journal maintenance purged tombstoned events"
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::warn!("journal maintenance skipped: {error}");
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!("journal maintenance skipped: {error}");
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(600)).await;
+            }
+        });
+    }
     // 权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
     // permission.resolved terminal 事件——后端唯一计时/应答来源，前端
     // 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。

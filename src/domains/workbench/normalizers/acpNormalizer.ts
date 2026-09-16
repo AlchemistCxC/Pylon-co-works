@@ -19,6 +19,7 @@ import {
   extractConfigOptionChoices,
   extractConfigOptionId,
   extractConfigOptionValue,
+  extractMachineIdString,
 } from '../../../infrastructure/acp/chatContracts.ts'
 import { presentPromptFailure, type PromptFailurePresentationMetadata } from '../promptFailurePresentation.ts'
 
@@ -43,9 +44,12 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   // discriminator at the top level.  Flatten that transport envelope at the seam;
   // raw input is still retained unchanged by makeEnvelope for diagnostics.
   const effectiveUpdate = flattenAcpUpdate(update)
-  // A session info packet may carry both configuration mode and an explicit
+  // A session info packet may carry configuration mode and an explicit
   // lifecycle status. They are independent semantic facts and must not be
   // collapsed into one event (mode="running" is not lifecycle evidence).
+  // #110 F5：当前模型是同一包里的第三个独立事实——`models.currentModelId`
+  // （camel/snake 变体）或扁平 `model` 存在时必须产出 `session.model-updated`，
+  // 否则 journal 永远收不到模型事实，状态条只能退回兜底串。
   if (canonicalSessionUpdate(effectiveUpdate) === 'session_info_update') {
     const mode = typeof effectiveUpdate.mode === 'string'
       ? effectiveUpdate.mode
@@ -54,12 +58,14 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
       && LIFECYCLE_STATUSES.has(effectiveUpdate.status.toLowerCase())
       ? effectiveUpdate.status
       : undefined
-    if (mode !== undefined && status !== undefined) {
+    const model = sessionModelOf(effectiveUpdate)
+    const facts: WorkbenchSemanticEvent[] = []
+    if (mode !== undefined) facts.push({ type: 'session.mode-updated', mode })
+    if (status !== undefined) facts.push({ type: 'session.status-updated', status })
+    if (model !== undefined) facts.push({ type: 'session.model-updated', model })
+    if (facts.length > 0) {
       return {
-        events: [
-          makeEnvelope({ type: 'session.mode-updated', mode }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
-          makeEnvelope({ type: 'session.status-updated', status }, input, context, update, {}, identityFromUpdate(effectiveUpdate)),
-        ],
+        events: facts.map(fact => makeEnvelope(fact, input, context, update, {}, identityFromUpdate(effectiveUpdate))),
         diagnostics: [],
       }
     }
@@ -69,8 +75,23 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   return { events: [event], diagnostics: normalized.diagnostics }
 }
 
-function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {
-  const sessionUpdate = canonicalSessionUpdate(update)
+/**
+ * session_info_update 携带的当前模型 id（#110 F5）。
+ *
+ * 与 Rust 侧 `dispatcher::session_info_update`（P56/D2.3）和 sessionState provider
+ * 消费同一组变体：嵌套 `models.currentModelId`（camel/snake/current 别名）优先，
+ * 扁平的 `model` 次之。只收 machine id（display name 不得当 id 下发）。
+ */
+function sessionModelOf(update: Record<string, unknown>): string | undefined {
+  const models = isRecord(update.models) ? update.models : undefined
+  const nested = models === undefined ? undefined : extractMachineIdString(
+    models.currentModelId ?? models.current_model_id
+      ?? models.currentModel ?? models.current_model ?? models.current,
+  )
+  return nested ?? extractMachineIdString(update.model)
+}
+
+function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {  const sessionUpdate = canonicalSessionUpdate(update)
   const diagnostics: ReturnType<typeof createDiagnostic>[] = []
   const content = update.content ?? update.parts ?? update.blocks ?? update.output
   const blocks = content !== undefined ? content : typeof update.text === 'string' ? { type: 'text', text: update.text } : undefined

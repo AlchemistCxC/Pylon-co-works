@@ -14,7 +14,10 @@
 //! `loadSession` 布尔——Peri 形状实证），canonical 嵌套路径恒优先；两者同时
 //! 存在视为冲突，canonical 决定结论并产出诊断。object capability 只有 object
 //! 值才算广告（`true`/`1`/字符串/null 均不算）；boolean capability 只有
-//! 显式 `true`。未知路径/未知字段 fail-closed 且不影响其他条目。
+//! 显式 `true`；双形状 capability（[`CapabilityKind::BooleanOrObject`]）两种
+//! 合法形状皆算广告（#110 F2：ACP 标准把 `list`/`close` 定义为 object 形状，
+//! 而线上存在显式 `true` 的旧广告，两者都必须接受）。未知路径/未知字段
+//! fail-closed 且不影响其他条目。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{OnceLock, RwLock};
@@ -43,11 +46,15 @@ impl CapabilityFact {
     }
 }
 
-/// 广告值类型要求：boolean capability 只认 `true`；object capability 只认 object。
+/// 广告值类型要求：boolean capability 只认 `true`；object capability 只认 object；
+/// 双形状（`BooleanOrObject`）两者皆收。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityKind {
     Boolean,
     Object,
+    /// #110 F2：ACP 标准形状是 object，线上又存在显式 `true` 的旧广告——两种形状
+    /// 都算广告，其它值（`false`/`1`/字符串/null）仍 fail-closed。
+    BooleanOrObject,
 }
 
 impl CapabilityKind {
@@ -55,6 +62,7 @@ impl CapabilityKind {
         match self {
             Self::Boolean => value.as_bool() == Some(true),
             Self::Object => value.is_object(),
+            Self::BooleanOrObject => value.as_bool() == Some(true) || value.is_object(),
         }
     }
 
@@ -62,6 +70,7 @@ impl CapabilityKind {
         match self {
             Self::Boolean => "boolean true",
             Self::Object => "object",
+            Self::BooleanOrObject => "object 或 boolean true",
         }
     }
 }
@@ -154,14 +163,20 @@ pub const CAPABILITY_MATRIX: &[CapabilityMatrixEntry] = &[
     },
     CapabilityMatrixEntry {
         id: "close",
-        advertisement: Some((&["sessionCapabilities", "close"], CapabilityKind::Boolean)),
+        advertisement: Some((
+            &["sessionCapabilities", "close"],
+            CapabilityKind::BooleanOrObject,
+        )),
         alias: None,
         requires_declaration: false,
         consumer: Some(CapabilityConsumer::SessionClose),
     },
     CapabilityMatrixEntry {
         id: "list",
-        advertisement: Some((&["sessionCapabilities", "list"], CapabilityKind::Boolean)),
+        advertisement: Some((
+            &["sessionCapabilities", "list"],
+            CapabilityKind::BooleanOrObject,
+        )),
         alias: None,
         requires_declaration: false,
         consumer: Some(CapabilityConsumer::SessionList),
@@ -765,6 +780,67 @@ mod tests {
     fn snapshot_binds_connection_generation() {
         let snapshot = build_snapshot(json!({}), &["new"], &[]);
         assert_eq!(snapshot.generation, 7);
+    }
+
+    /// #110 F2：`list`/`close` 双形状——ACP 标准 object 广告与线上显式 `true`
+    /// 旧广告都算广告且不产类型错误诊断；其它值仍 fail-closed。
+    #[test]
+    fn list_and_close_accept_object_and_boolean_shapes() {
+        const REGISTERED: &[CapabilityConsumer] = &[
+            CapabilityConsumer::SessionList,
+            CapabilityConsumer::SessionClose,
+        ];
+
+        // Hermes 实测形状：sessionCapabilities = {fork:{}, list:{}, resume:{}}。
+        let object_shapes = build_snapshot(
+            json!({"sessionCapabilities": {"fork": {}, "list": {}, "close": {}}}),
+            &["new"],
+            REGISTERED,
+        );
+        for id in ["list", "close"] {
+            let decision = object_shapes.decision(id).unwrap();
+            assert!(decision.negotiated, "object 形状必须协商通过：{id}");
+            assert_eq!(decision.fact, CapabilityFact::Usable, "{id}");
+            assert_eq!(decision.source, CapabilitySource::Canonical);
+            assert!(
+                decision
+                    .diagnostics
+                    .iter()
+                    .all(|line| !line.contains("类型错误")),
+                "{id} 不得产类型错误诊断：{:?}",
+                decision.diagnostics
+            );
+        }
+
+        // 旧显式 `true` 广告不回归。
+        let boolean_shapes = build_snapshot(
+            json!({"sessionCapabilities": {"list": true, "close": true}}),
+            &["new"],
+            REGISTERED,
+        );
+        assert!(boolean_shapes.usable("list"));
+        assert!(boolean_shapes.usable("close"));
+
+        // 其它值仍 fail-closed，诊断写实际接受集（object 或 boolean true）。
+        for wrong in [json!(false), json!("yes"), json!(null), json!(1)] {
+            let snapshot = build_snapshot(
+                json!({"sessionCapabilities": {"list": wrong, "close": wrong}}),
+                &["new"],
+                REGISTERED,
+            );
+            for id in ["list", "close"] {
+                let decision = snapshot.decision(id).unwrap();
+                assert!(!decision.negotiated, "{wrong} 不得判定为 {id} 已广告");
+                assert_eq!(decision.fact, CapabilityFact::Unknown, "{id} @ {wrong}");
+                assert!(
+                    decision.diagnostics.iter().any(|line| {
+                        line.contains("类型错误") && line.contains("object 或 boolean true")
+                    }),
+                    "{id} @ {wrong} 必须报实际接受集：{:?}",
+                    decision.diagnostics
+                );
+            }
+        }
     }
 
     /// 未知声明名 fail-closed（继承旧 `session_establishment_channels` 的 Err 语义）。

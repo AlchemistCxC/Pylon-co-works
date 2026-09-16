@@ -15,6 +15,7 @@ use std::sync::Arc;
 use super::event_repo::{parse_canonical_event, EventError, EventRepo};
 use super::msg_repo::{validate_owner_key, MsgRepo};
 use super::{delete_session_core, validate_delete_owner, UserDataError};
+use crate::session::TOMBSTONE_EVENT_GRACE_DAYS;
 
 /// 读 deleted_sessions 单行 owner_key/state。
 fn tombstone_owner_state(conn: &Connection, session_id: &str) -> (String, String) {
@@ -100,14 +101,23 @@ fn validate_delete_owner_none_passthrough_some_validated() {
 
 // ── 步骤 2-4：begin（deleting）+ 本地事务删除 ──
 
+/// #110 F3：删除会话必须联动清扫该 owner 的 canonical 事件（同事务原子）。
+/// 旧契约是「事件不随删除清除（append-only）」——体检实证该契约让已删会话的事件
+/// 永久累积（92,698/94,680 = 97.9% 是垃圾），故按 F3 裁决改为联动删除。
 #[test]
-fn begin_delete_writes_deleting_tombstone_and_keeps_canonical_events() {
+fn begin_delete_removes_canonical_events_for_the_same_owner() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
     repo.touch_session("s1").expect("touch s1");
     let evt = parse_canonical_event(&event_json(["p1", "a1", "s1"], 1)).expect("parse event");
+    let other =
+        parse_canonical_event(&event_json(["p2", "b2", "s1"], 1)).expect("parse other owner");
     let evt_repo = EventRepo::open(&path).expect("open event repo");
-    evt_repo.append_events(&[evt], None).expect("append event");
+    // append 批次不得跨 owner（repository 契约）——分两次写。
+    evt_repo.append_events(&[evt], None).expect("append events");
+    evt_repo
+        .append_events(&[other], None)
+        .expect("append other owner event");
     repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("begin delete");
     drop(repo);
@@ -123,14 +133,135 @@ fn begin_delete_writes_deleting_tombstone_and_keeps_canonical_events() {
         .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
         .expect("count sessions");
     assert_eq!(sessions, 0, "begin 事务内已删除 sessions 行（原子）");
+    let deleted_owner_events: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM canonical_events WHERE owner_key = ?1",
+            [r#"["p1","a1","s1"]"#],
+            |row| row.get(0),
+        )
+        .expect("count deleted owner events");
+    assert_eq!(
+        deleted_owner_events, 0,
+        "该 owner 的 canonical 事件随删除清扫（#110 F3）"
+    );
+    let other_owner_events: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM canonical_events WHERE owner_key = ?1",
+            [r#"["p2","b2","s1"]"#],
+            |row| row.get(0),
+        )
+        .expect("count other owner events");
+    assert_eq!(
+        other_owner_events, 1,
+        "同 source 的另一个 owner 必须隔离（不得连带删除）"
+    );
+    drop(conn);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// legacy 墓碑（无 owner_key）不得按裸 session_id 清扫事件——同 source 多 owner
+/// 会互相误伤（DEL-02 隔离契约）。
+#[test]
+fn legacy_delete_without_owner_key_keeps_events() {
+    let path = unique_temp_db_path();
+    let repo = MsgRepo::open(&path).expect("open file repo");
+    repo.touch_session("s1").expect("touch s1");
+    let evt = parse_canonical_event(&event_json(["p1", "a1", "s1"], 1)).expect("parse event");
+    let evt_repo = EventRepo::open(&path).expect("open event repo");
+    evt_repo.append_events(&[evt], None).expect("append event");
+    repo.begin_delete_session("s1", None)
+        .expect("begin legacy delete");
+    drop(repo);
+    drop(evt_repo);
+    let conn = Connection::open(&path).expect("read file repo");
     let events: i64 = conn
         .query_row("SELECT COUNT(*) FROM canonical_events", [], |row| {
             row.get(0)
         })
         .expect("count canonical events");
-    assert_eq!(events, 1, "canonical_events 行不随删除清除（append-only）");
+    assert_eq!(
+        events, 1,
+        "legacy 墓碑只认裸 session_id，无法安全定位 owner → 不清理事件"
+    );
     drop(conn);
     let _ = std::fs::remove_file(&path);
+}
+
+/// #110 F3：墓碑事件清扫只覆盖「已终态 + 超过宽限期」的精确 owner 墓碑；墓碑行保留
+/// （迟到写 gate 依赖其存在性）。
+#[test]
+fn purge_tombstoned_events_respects_grace_period_and_keeps_tombstones() {
+    let path = unique_temp_db_path();
+    let repo = MsgRepo::open(&path).expect("open file repo");
+    for session in ["old", "fresh", "deleting"] {
+        repo.touch_session(session).expect("touch");
+    }
+    let evt_repo = EventRepo::open(&path).expect("open event repo");
+    // append 批次不得跨 owner（repository 契约）——逐 owner 写入。
+    for session in ["old", "fresh", "deleting"] {
+        evt_repo
+            .append_events(
+                &[parse_canonical_event(&event_json(["p", "a", session], 1)).unwrap()],
+                None,
+            )
+            .expect("append event");
+    }
+
+    repo.begin_delete_session("old", Some(r#"["p","a","old"]"#))
+        .expect("begin old");
+    repo.finalize_session_delete("old", Some(r#"["p","a","old"]"#))
+        .expect("finalize old");
+    repo.begin_delete_session("fresh", Some(r#"["p","a","fresh"]"#))
+        .expect("begin fresh");
+    repo.finalize_session_delete("fresh", Some(r#"["p","a","fresh"]"#))
+        .expect("finalize fresh");
+    // deleting 中间态：远端 close 尚未收尾，本不该被清扫。
+    repo.begin_delete_session("deleting", Some(r#"["p","a","deleting"]"#))
+        .expect("begin deleting");
+
+    // 只有 old 的墓碑时间回拨到宽限期之外（其它两条保持刚删除）。
+    {
+        let conn = Connection::open(&path).expect("write conn");
+        conn.execute(
+            "UPDATE deleted_sessions SET deleted_at = ?1 WHERE owner_key = ?2",
+            rusqlite::params![0_i64, r#"["p","a","old"]"#],
+        )
+        .expect("age old tombstone");
+    }
+
+    let outcome = repo
+        .purge_tombstoned_events(TOMBSTONE_EVENT_GRACE_DAYS)
+        .expect("purge");
+    assert_eq!(outcome.tombstones, 1, "只有超过宽限期的 deleted 墓碑入选");
+    assert_eq!(outcome.events_deleted, 0, "old 的事件已在删除时清空");
+
+    drop(repo);
+    drop(evt_repo);
+    let conn = Connection::open(&path).expect("read conn");
+    let tombstones: i64 = conn
+        .query_row("SELECT COUNT(*) FROM deleted_sessions", [], |row| {
+            row.get(0)
+        })
+        .expect("count tombstones");
+    assert_eq!(tombstones, 3, "墓碑行必须保留（迟到写 gate 依赖）");
+    let deleting_events: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM canonical_events WHERE owner_key = ?1",
+            [r#"["p","a","deleting"]"#],
+            |row| row.get(0),
+        )
+        .expect("count deleting owner events");
+    assert_eq!(deleting_events, 0, "deleting 中间态已由删除联动清空");
+    drop(conn);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// #110 F3：WAL checkpoint 可重复调用且不报错（in-memory / 非 WAL 库同样安全）。
+#[test]
+fn checkpoint_wal_is_idempotent() {
+    let repo = MsgRepo::open_in_memory().expect("open");
+    repo.checkpoint_wal().expect("first checkpoint");
+    repo.checkpoint_wal().expect("second checkpoint");
 }
 
 // ── 步骤 6 之后：finalize（deleting → deleted）──

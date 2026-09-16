@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { AssistSnapshot, BudgetSnapshot, SessionCommand, SessionConfigOption, UsageSnapshot } from '../../../../domains/workbench/session/sessionSurface.ts'
+import { resolveContextUsage } from '../../../../domains/workbench/session/sessionSurface.ts'
 import type { JsonValue } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
 import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 
@@ -19,6 +20,9 @@ export function SolidSessionSurfaceCard(props: {
 
 function UsageCard(props: { usage: UsageSnapshot; appearance: RenderAppearanceSnapshot }) {
   const usage = () => props.usage ?? {}
+  // #110 F4：上下文用量走单一派生源（同一快照的 contextUsed/contextLimit/percent），
+  // 不在此处另选 token 字段——否则与状态条百分比读出两组互不相干的数。
+  const contextUsage = () => resolveContextUsage(usage())
   const visible = (metric: string) => !Array.isArray(props.appearance.visibleMetrics)
     || props.appearance.visibleMetrics.includes(metric)
   const formatMetric = (value: number | undefined) => props.appearance.units === 'compact'
@@ -35,8 +39,8 @@ function UsageCard(props: { usage: UsageSnapshot; appearance: RenderAppearanceSn
       <Show when={visible('reasoning')}><Metric label="推理" value={usage().reasoningTokens} format={formatMetric} /></Show>
       <Show when={visible('cacheRead')}><Metric label="缓存读取" value={usage().cacheReadTokens} format={formatMetric} /></Show>
       <Show when={visible('cacheWrite')}><Metric label="缓存写入" value={usage().cacheWriteTokens} format={formatMetric} /></Show>
-      <Show when={visible('context') && showContext() && (usage().contextUsed !== undefined || usage().contextLimit !== undefined)}>
-        <span>上下文 {formatMetric(usage().contextUsed)} / {formatMetric(usage().contextLimit)}</span>
+      <Show when={visible('context') && showContext() && (contextUsage().used !== undefined || contextUsage().limit !== undefined)}>
+        <span>上下文 {formatMetric(contextUsage().used)} / {formatMetric(contextUsage().limit)}</span>
       </Show>
       <Show when={visible('cost') && showCost() && usage().costUsd !== undefined}>
         <span>{formatNumber(usage().costUsd)} {usage().currency ?? ''}</span>

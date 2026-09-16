@@ -21,8 +21,10 @@ Pylon 是 Tauri 2 应用，Windows 上的渲染层是 WebView2（Edge Chromium�
 - **不需要** Pylon 是 dev 构建
 - 调试服务器崩了或没起来，都不影响被调试的 app
 
-代价是需要在 `tauri.conf.json` 里加一行启动参数（见下）——WebView2 只在启动时读取它，
-运行中无法开启。
+代价是需要让 WebView2 带上 `--remote-debugging-port=<port>` 启动。两条路：改
+`tauri.conf.json`（固化，见「开箱即用（一次性配置）」）或用
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量（一次性，见「环境变量：可用，但只对
+『附加』生效」）。WebView2 只在启动时读取该参数，运行中无法开启。
 
 ## 接线
 
@@ -123,18 +125,50 @@ bun run tauri dev --config src-tauri/tauri.dev.conf.json
 3. **一个调试端口同时只能被一个 WebView2 进程占用。** 同时跑两个 Pylon 实例时，第二个会
    报端口冲突。需要并行调试就给不同实例配不同端口，并用 `--port` 指给本服务器。
 
-### 一个流传很广、但在 Tauri 下无效的做法
+### 环境变量：可用，但只对「附加」生效（2026-09-17 更正）
 
 网上常见的建议是用 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量来开调试端口，
-好处是不用改配置。**在 Tauri 下这条路不通。**
+好处是不用改配置。
 
-wry 在 `webview2/mod.rs:294` 用 `unwrap_or_else` **总会算出一串非空**的
-`additional_browser_args`（无配置时就是那串默认值），并在 `:327` 通过
-`options.set_additional_browser_arguments(...)` 显式写进环境选项。
-而 WebView2 只在**该选项字段为空**时才去读那个环境变量。所以环境变量会被静默丢弃，
-表现为「设了变量但端口没开」，且没有任何报错提示。
+**本 README 曾断言「在 Tauri 下该变量被静默丢弃」——该断言已被实机复核推翻。**
+在 WebView2 运行时 **153.0.4234.32** 上，纯环境变量启动即可开端口，且与 wry 的默认参数
+**同时存在**（是追加，不是二选一）：
 
-只能改配置。改完记得重启。
+```bash
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222 --remote-allow-origins=*" ./pylon.exe
+# → http://127.0.0.1:9222/json/version 返回 Edg/153.0.4234.32
+```
+
+证据取自运行中实例的浏览器进程命令行（不改配置、不重启即可复核）：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
+  Select-Object -ExpandProperty CommandLine | Where-Object { $_ -match 'remote-debugging' }
+# C:\...\msedgewebview2.exe --embedded-browser-webview=1 ... \
+#   --autoplay-policy=no-user-gesture-required \
+#   --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+#   --remote-allow-origins=* --remote-debugging-port=9222 --lang=zh-CN ...
+```
+
+命令行里同时出现两组参数即可判定：`--autoplay-policy` 与那串 `--disable-features` 只会
+由 wry 的默认分支算出（`wry-0.55.1/src/webview2/mod.rs:294-306`），而
+`--remote-debugging-port` / `--remote-allow-origins` 在本仓库既不在 `tauri.conf.json`、
+也不在任何 app 代码里——唯一来源就是那个环境变量。也就是说，运行时把环境变量的值
+**追加**到了 `options.set_additional_browser_arguments(...)` 的结果之后，而不是像早期
+文档描述的那样「字段非空就忽略环境变量」。
+
+> 版本边界：上述结论实测于 153.0.4234.32。运行时的这个合并行为属未文档化细节，
+> 换运行时前建议按上面的命令复核一次——它是只读的，不需要动配置。
+
+两个结论并存，不要混淆：
+
+- **改配置时**，`additionalBrowserArgs` 仍是**整串替换**（wry 的 `unwrap_or_else` 只在字段
+  为 `None` 时用默认值，见 `wry-0.55.1/src/webview2/mod.rs:294`）。所以走配置就必须把默认值
+  写回，见上一节「三个不能漏的点」第 1 条。
+- **用环境变量时**，它是**追加**，因此不需要（也不应该）抄那串默认值。
+
+两条路都行，按场景选：一次性本地调试用环境变量最省事；要固化进发布流程就用配置。
+任一方式改完都要**重启 app**——WebView2 只在启动时读取该参数。
 
 ## 构建与运行
 
@@ -273,8 +307,9 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| `debug_endpoint_unreachable` | 端点连不上。确认 app 在跑、`additionalBrowserArgs` 已加、**改完重启过**。`webview_targets` 会返回完整的开启步骤 |
-| 设了 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 但端口没开 | 该环境变量在 Tauri 下无效（wry 总会显式写死环境选项，WebView2 就不读它了）。只能改配置，见「一个流传很广、但在 Tauri 下无效的做法」 |
+| `debug_endpoint_unreachable` | 端点连不上。确认 app 在跑、调试端口已开（`additionalBrowserArgs` 或 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 任一）、**改完重启过**。`webview_targets` 会返回完整的开启步骤 |
+| 设了 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 但端口没开 | 先按「环境变量：可用，但只对『附加』生效」一节用 `Get-CimInstance` 看浏览器命令行：参数在命令行里 → 端口其实开了（检查变量拼写/端口号是否一致）；参数不在 → 确认变量确实传给了 `pylon.exe`（不是只设在当前 shell），并确认 app 是重启过的 |
+| 环境变量与配置都设了，参数重复两次 | 两者是叠加关系（见上）。同时设会得到两串相同参数——不致命，但应当只留一种 |
 | 用 `--config` 覆盖后窗口样式变了 | 配置合并对数组的处理未经验证。确认 `tauri.dev.conf.json` 里写全了 `decorations` / `transparent` 等字段 |
 | `no_targets` | 端口通了但没有可附加页面。窗口可能还没创建，稍后重试 |
 | `ambiguous_target` | 有多个页面目标。用返回列表里的 id 作为 `target` 参数 |

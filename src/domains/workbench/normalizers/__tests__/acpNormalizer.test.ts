@@ -292,6 +292,43 @@ describe('ACP normalizer', () => {
     const unknown = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', status: 'mystery' } }, context)
     expect(unknown.events[0].event.type).toBe('session.mode-updated')
   })
+
+  // #110 F5：模型事实是 session_info_update 里的独立第三件事，必须成事件落地。
+  it('emits session.model-updated for nested models.currentModelId (camel and snake)', () => {
+    const camel = normalizeAcpEvent({ update: {
+      sessionUpdate: 'session_info_update', models: { currentModelId: 'nous:hermes-4' },
+    } }, context)
+    expect(camel.events.map(item => item.event)).toEqual([
+      { type: 'session.model-updated', model: 'nous:hermes-4' },
+    ])
+    const snake = normalizeAcpEvent({ update: {
+      sessionUpdate: 'session_info_update', models: { current_model_id: 'snake:id' },
+    } }, context)
+    expect(snake.events[0].event).toEqual({ type: 'session.model-updated', model: 'snake:id' })
+  })
+
+  it('emits session.model-updated alongside mode and status without collapsing the three facts', () => {
+    const result = normalizeAcpEvent({ update: {
+      sessionUpdate: 'session_info_update', mode: 'running', status: 'completed', model: 'flat:id',
+    } }, context)
+    expect(result.events.map(item => item.event)).toEqual([
+      { type: 'session.mode-updated', mode: 'running' },
+      { type: 'session.status-updated', status: 'completed' },
+      { type: 'session.model-updated', model: 'flat:id' },
+    ])
+    expect(new Set(result.events.map(item => item.eventId)).size).toBe(3)
+  })
+
+  it('does not manufacture a model event from non-model session_info_update payloads', () => {
+    // Hermes 实测形状：只有 title/_meta/updatedAt，无模型维度。
+    const result = normalizeAcpEvent({ update: {
+      sessionUpdate: 'session_info_update', title: '会话标题', updatedAt: '2026-09-01T00:00:00.000Z',
+    } }, context)
+    expect(result.events.map(item => item.event.type)).not.toContain('session.model-updated')
+    // 空白 model 值不算模型事实。
+    const blank = normalizeAcpEvent({ update: { sessionUpdate: 'session_info_update', model: '   ' } }, context)
+    expect(blank.events.map(item => item.event.type)).not.toContain('session.model-updated')
+  })
 })
 
 // 并入自 acpPlanNormalizer.test.ts（P91 A6：同 SUT 合并；游离 afterEach 收敛到文件级）

@@ -403,6 +403,74 @@ fn merge_config_setting_response(
     set_config_option_current(response, option_key, value);
 }
 
+/// #110 F5：会话建立时的「生效模型」解析（纯函数，便于定点测试）。
+///
+/// 优先级（用户裁决 2026-09-16）：`agents.yaml` 的 agent 显式 `model` > 建立请求携带的
+/// `model`（profile 缺省）> 响应回显的权威 current model。全空/全空白 → `None`
+/// （调用方不得伪造模型事实）。
+pub(crate) fn resolve_established_model<'a>(
+    agent_model: Option<&'a str>,
+    requested_model: Option<&'a str>,
+    response_model: Option<&'a str>,
+) -> Option<&'a str> {
+    [agent_model, requested_model, response_model]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
+/// #110 F5：把建立期的生效模型写进 canonical journal（`session.model-updated`）。
+///
+/// 走 dispatcher 同一 ingest 通道（`EventService::ingest_event` + 同一 normalizer），
+/// 因此 raw 形状就是标准 `session/update` 包——冷挂载重放与 live 消费读同一份事实。
+/// 失败只记 warn：模型事实缺失不得让一个已经建立成功的会话失败。
+async fn ingest_established_model_event(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    model: &str,
+) -> Option<CanonicalEventRow> {
+    let owner = {
+        let agent_id = state.agent_id_for_runtime(runtime)?;
+        let sessions = runtime.sessions.lock().ok()?;
+        let session = sessions.get(source)?;
+        session.durable_owner(&agent_id, source).ok()?
+    }?;
+    let raw_payload = serde_json::json!({
+        "sessionId": peri_id,
+        "update": {
+            "sessionUpdate": "session_info_update",
+            "model": model,
+        },
+    });
+    match event_service_of(state) {
+        Ok(service) => match service
+            .ingest_event(owner, Some(peri_id.to_string()), generation, raw_payload)
+            .await
+        {
+            Ok(result) => result.events.into_iter().next(),
+            Err(error) => {
+                tracing::warn!(
+                    source = source,
+                    model = model,
+                    "建立期模型事实写入 journal 失败：{error}"
+                );
+                None
+            }
+        },
+        Err(error) => {
+            tracing::warn!(
+                source = source,
+                "建立期模型事实写入 journal 跳过（事件库不可用）：{error}"
+            );
+            None
+        }
+    }
+}
+
 /// P56/D1：初值 model 下发计划（纯函数便于测试；执行侧见 apply_initial_session_options）。
 #[derive(Debug)]
 pub(crate) enum InitialModelAction {
@@ -764,6 +832,19 @@ async fn create_session_slot(
     session.workspace_id = workspace_id;
     session.apply_session_response(&response);
     restore_session_state(&session, &mut response);
+    // #110 F5：模型解析链闭合——agent 显式 model > profile.model > 响应回显。
+    // 解析结果在会话槽位落位后写入 journal（`session.model-updated`），使「当前
+    // 模型」成为 journal 拥有的权威事实（与 sessionState provider 的分工一致）。
+    let response_model = session.model.clone();
+    let established_model = resolve_established_model(
+        state
+            .agent_for_runtime(runtime)
+            .and_then(|agent| agent.model)
+            .as_deref(),
+        initial_model,
+        Some(response_model.as_str()),
+    )
+    .map(str::to_string);
     let replaced = replace_session_slot(
         runtime,
         source,
@@ -779,6 +860,10 @@ async fn create_session_slot(
         return Err(PylonError::Protocol(format!(
             "stale session mapping for source: {source}"
         )));
+    }
+    if let Some(model) = established_model.as_deref() {
+        let _ = ingest_established_model_event(state, runtime, source, &peri_id, generation, model)
+            .await;
     }
     if close_replaced {
         if let Some(old) = replaced {
@@ -1241,6 +1326,38 @@ pub(crate) async fn new_session(
 mod initial_option_tests {
     use super::*;
     use serde_json::json;
+
+    /// #110 F5：生效模型优先级 = agent 显式 > profile 请求 > 响应回显（用户裁决
+    /// 2026-09-16）；全空/全空白 → None（不得伪造模型事实）。
+    #[test]
+    fn established_model_priority_is_agent_then_profile_then_response() {
+        assert_eq!(
+            resolve_established_model(Some("agent:id"), Some("profile:id"), Some("echo:id")),
+            Some("agent:id"),
+            "agent 显式 model 优先于 profile"
+        );
+        assert_eq!(
+            resolve_established_model(None, Some("profile:id"), Some("echo:id")),
+            Some("profile:id"),
+            "无 agent 显式时 profile.model 作缺省"
+        );
+        assert_eq!(
+            resolve_established_model(None, None, Some("echo:id")),
+            Some("echo:id"),
+            "无配置时退回响应回显的权威 current model"
+        );
+        assert_eq!(
+            resolve_established_model(Some("  "), Some("\t"), Some("")),
+            None,
+            "全空白不得当成模型值"
+        );
+        assert_eq!(resolve_established_model(None, None, None), None);
+        assert_eq!(
+            resolve_established_model(Some(" agent:id "), None, None),
+            Some("agent:id"),
+            "取值两端空白裁剪"
+        );
+    }
 
     #[test]
     fn reasoning_option_requires_advertised_semantic_id_and_choice() {
