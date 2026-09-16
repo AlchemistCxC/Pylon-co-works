@@ -26,7 +26,7 @@ export default defineConfig({
           include: ['scripts/*.test.mts'],
           environment: 'node',
           setupFiles: ['vitest.setup.ts'],
-          isolate: false,
+          isolate: true,
           pool: 'forks',
           testTimeout: 30_000,
         },
@@ -51,11 +51,23 @@ export default defineConfig({
         plugins: [solid({ include: SOLID_WORKBENCH_FILES, hot: false }), react({ exclude: SOLID_WORKBENCH_FILES })],
         test: {
           name: 'solid',
-          include: ['src/renderers/solid-workbench/**/*.test.{ts,tsx}'],
+          include: ['src/renderers/solid-workbench/**/*.test.tsx'],
           environment: 'jsdom',
           setupFiles: ['vitest.setup.ts'],
           // Solid tests rely on per-file fake-clock/module state.
           isolate: true,
+          pool: 'forks',
+          testTimeout: 30_000,
+        },
+      },
+      {
+        plugins: [],
+        test: {
+          name: 'solid-logic',
+          include: ['src/renderers/solid-workbench/**/streamingDisplayScheduler*.test.ts'],
+          environment: 'node',
+          setupFiles: ['vitest.setup.ts'],
+          isolate: false,
           pool: 'forks',
           testTimeout: 30_000,
         },
