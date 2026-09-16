@@ -72,7 +72,7 @@ image = { version = "0.25", default-features = false, features = ["png", "webp"]
 # 免去每次 execute 重新编译 SQL。
 rusqlite = { version = "0.40", default-features = false, features = ["bundled", "cache"] }
 # I12-W3：Gateway 凭据 AES-256-GCM envelope 与主密钥归零（用户 2026-08-11 授权新增）
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 zeroize = { version = "1", features = ["derive"] }
 # P53 D6：zip/URL 安装源（仅 deflate，避免无用编解码器）
 zip = { version = "2", default-features = false, features = ["deflate"] }
