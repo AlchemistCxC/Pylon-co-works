@@ -1,6 +1,6 @@
 ﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 1.6.0
+> 适用版本：Pylon 0.2.0
 >
 > 生产契约：Plugin API 1.0 / 1.1 / 1.2（最新 1.2），`pylon-plugin.json` schema 1
 
