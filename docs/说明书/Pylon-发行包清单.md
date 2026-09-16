@@ -11,6 +11,7 @@
 
 - Pylon 主程序及启动所需的 Tauri/WebView2 loader；
 - Agent 检测器；
+- 自带的调试 MCP 服务器（`tools/webview2-mcp/`，2026-09-17 起随包分发）；
 - 前端资源（字体等）；
 - `agents.example.yaml` 和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
@@ -31,6 +32,8 @@
 | `pylon-detect.exe` | 必须 | 本机 ACP Agent 探测器 |
 | `WebView2Loader.dll` | 必须 | Windows WebView2 启动依赖；缺失可能导致 `0xC0000135` |
 | `pylon-cli.exe` | 建议；存在时自动收集 | CLI 管理工具；当前脚本缺失时只警告 |
+| `tools/webview2-mcp/pylon-webview2-mcp.exe` | 必须 | 自带的调试 MCP 服务器（独立进程，走 WebView2 的 `--remote-debugging-port`）|
+| `tools/webview2-mcp/README.md` | 必须 | 接线方式，以及「加调试端口等于把窗口对同机任何进程开放」的代价说明 |
 | `resources/fonts/*` | 按构建资源实际生成 | 内置字体与呈现资源 |
 | `resources/runtime/git/**` | 可选（`--with-runtime`，Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe`。默认打包会剔除整个 `resources/runtime/` |
 | `resources/runtime/portable-git.json` | 可选（`--with-runtime`） | PortableGit 版本、来源和 SHA-256 元数据 |
@@ -87,7 +90,8 @@ bun run release:portable
 2. 生成正常版与离线版 SDK（正常版留在构建目录，离线版由 Tauri 复制到 release resources）；
 3. 构建 Tauri release（不生成安装器；`beforeBuildCommand` 会再执行一次 `bun run build`）；
 4. 构建 `pylon-detect.exe`；
-5. 收集文件、审计、压缩并核对 manifest。默认剔除 `resources/runtime/`（PortableGit）；打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
+5. 构建 `tools/webview2-mcp` 的 release 二进制（`cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release`）；
+6. 收集文件、审计、压缩并核对 manifest。打包器会在缺少该 exe 或它的 README 时直接失败——这条能力缺了要到用户真正需要调试时才暴露，所以按构建期错误处理。默认剔除 `resources/runtime/`（PortableGit）；打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
 
 如果分发渠道不携带 WebView2 bootstrapper，可在完成前端、SDK、Tauri 和 detector 构建后
 显式降级打包：
@@ -127,6 +131,7 @@ python scripts/pack_release.py --with-runtime
 - [ ] `python scripts/pack_release.py --verify-only <zip>` 通过。
 - [ ] 使用 `Get-FileHash <zip> -Algorithm SHA256`（或等价工具）核对 `.sha256`。
 - [ ] ZIP 只有一个 `pylon-<version>-win64/` 顶层目录，并包含空 `data/`。
+- [ ] 包内 `tools/webview2-mcp/` 同时有 `pylon-webview2-mcp.exe` 与 `README.md`；该 exe 能独立运行（`--version` / `--help` 先于一切校验）。
 - [ ] 解压到全新目录后可启动 `pylon.exe`；没有 WebView2 时，安装引导可工作。
 - [ ] 使用 `provider=hermes` 的 Agent 发起一次真实 ACP 会话：默认包确认 Hermes 能解析
       本机标准路径的健康 Git Bash 并完成最小工具调用；`--with-runtime` 包确认 Hermes 使用包内 Bash。

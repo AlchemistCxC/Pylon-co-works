@@ -16,7 +16,7 @@
     "build:plugin-sdk": "bun scripts/build-plugin-sdk.mjs",
     "build:example-plugin": "bun scripts/build-example-plugin.mjs",
     "pack:portable": "python scripts/pack_release.py",
-    "release:portable": "bun run build && bun run build:plugin-sdk && bun run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && bun run pack:portable",
+    "release:portable": "bun run build && bun run build:plugin-sdk && bun run tauri -- build --no-bundle && cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect && cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release && bun run pack:portable",
     "test": "vitest run",
     "test:unit": "vitest run src/domains src/infrastructure --passWithNoTests",
     "test:frontend": "vitest run",

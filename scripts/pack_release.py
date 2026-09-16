@@ -17,6 +17,8 @@
       resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
       resources/sdk/pylon-plugin-sdk.js     # 离线插件 SDK（纯浏览器 ESM）
       resources/sdk/pylon-plugin-manifest.schema.json
+      tools/webview2-mcp/pylon-webview2-mcp.exe  # 自带的调试 MCP 服务器
+      tools/webview2-mcp/README.md               # 接线与安全代价说明
     release/pylon-<version>-win64.zip
     release/pylon-<version>-win64.zip.sha256
     release/pylon-<version>-win64.manifest.json
@@ -57,6 +59,13 @@ OUT_ROOT = REPO_DIR / "release"
 
 EXE_NAME = "pylon.exe"
 DETECT_EXE_NAME = "pylon-detect.exe"
+# webview2-mcp：Pylon 自带的调试 MCP 服务器。它是**独立 crate**（不属 src-tauri
+# workspace），release 产物落在自己的 target/ 下；包内与 README 同级放在 tools/ 里，
+# 与其它随包脚本（install-webview2.bat 等）并列。
+MCP_DIR = REPO_DIR / "tools" / "webview2-mcp"
+MCP_RELEASE_DIR = MCP_DIR / "target" / "release"
+MCP_EXE_NAME = "pylon-webview2-mcp.exe"
+MCP_PACKAGE_DIR = "tools/webview2-mcp"
 TOP_DIR_PATTERN = re.compile(r"^pylon-[^/\\]+-win64/?$")
 
 FORBIDDEN_NAMES = {
@@ -230,6 +239,34 @@ def collect_dev_sdk() -> list[tuple[Path, str]]:
     return [(path, f"resources/sdk/{rel}") for rel, path in sorted(files.items())]
 
 
+def collect_mcp_tool() -> list[tuple[Path, str]]:
+    """webview2-mcp（Pylon 自带的调试 MCP 服务器）：exe + README。
+
+    2026-09-17 仓库主决定：该工具随发行包分发。理由：它是把 AI 客户端接到
+    **已安装的 Pylon** 上的唯一调试通道，源码仓里能 `cargo build`，拿到 zip 的人
+    却拿不到。它与 app 的耦合方式是「外部进程 + WebView2 的 --remote-debugging-port」，
+    不含任何调试构建要求，所以单独发一个二进制并不会把发行包变成开发版。
+
+    必须存在：缺了它就等于发行包少了这条能力，且失败点会拖到用户真正需要调试时
+    才暴露——按 pylon-detect 的规矩，构建期就报错并给出构建命令。
+    README 与 exe 同级，讲清接线方式，以及「加上那一行等于把窗口对同机任何进程开放」
+    这个必须先说清的代价。
+    """
+    exe = MCP_RELEASE_DIR / MCP_EXE_NAME
+    if not exe.is_file():
+        raise PackError(
+            f"缺少 webview2-mcp 可执行文件: {exe}\n"
+            "请先构建：cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release"
+        )
+    readme = MCP_DIR / "README.md"
+    if not readme.is_file():
+        raise PackError(f"缺少 webview2-mcp 说明文档: {readme}")
+    return [
+        (exe, f"{MCP_PACKAGE_DIR}/{MCP_EXE_NAME}"),
+        (readme, f"{MCP_PACKAGE_DIR}/README.md"),
+    ]
+
+
 def resolve_webview2_loader() -> Path:
     """定位 WebView2Loader.dll（exe 启动必需，缺失 → 0xC0000135）。
 
@@ -284,6 +321,8 @@ def collect_source_files(version: str, without_webview2: bool, with_runtime: boo
         files.append((cli_path, "pylon-cli.exe"))
     else:
         print("warn: 未找到 pylon-cli.exe，跳过该组件（不影响 GUI 启动）")
+
+    files.extend(collect_mcp_tool())
 
     resources_dir = RELEASE_DIR / "resources"
     if not resources_dir.is_dir():
