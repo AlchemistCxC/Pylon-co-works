@@ -165,7 +165,7 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | 工具 | 用途 |
 | --- | --- |
 | `webview_targets` | 列出可附加目标 + 浏览器版本。**排障第一步**，也是「端口通不通」的探针 |
-| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await` |
+| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await`。序列化后超过 64KB 会换成 `__truncated` 信封（带大小与前缀预览），需要完整原始结果时用 `webview_raw_cdp` |
 | `webview_raw_cdp` | 直调任意 CDP 方法，返回原始 result。覆盖本服务器未包装的域 |
 | `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志，**默认只读增量**；返回体带 `reconnected`，连接断开重连后缓冲从零开始会明确告知 |
 | `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录，同样带 `reconnected` |
@@ -173,9 +173,9 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | `webview_dom` | DOM 结构轮廓（标签/id/class/属性，可选盒模型与文本） |
 | `webview_query` | 单元素详查：盒模型、计算样式、可见性、祖先链、滚动尺寸 |
 | `webview_screenshot` | 截图，返回图片内容。支持整页与裁剪 |
-| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；坐标模式同样先报告该点落在了谁身上 |
+| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；坐标模式同样先报告该点落在了谁身上。`click_count: 2` 会派发两对 press/release，真的触发 `dblclick`；上限 3 |
 | `webview_type` | 输入文本；`insert`（默认）或 `keys` 逐字符真实按键 |
-| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等） |
+| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等）或单个 ASCII 字符；`modifiers` 组合出 Ctrl+A、Shift+Tab 这类快捷键。无法派发的按键名直接报错，不会发出空键码 |
 | `webview_hover` | 悬停元素或坐标（触发 hover 菜单 / tooltip），附带与 click 相同的命中测试 |
 | `webview_scroll` | 滚动窗口或容器（滚进视口 / top / bottom / 绝对 / 相对），返回滚动后位置 |
 | `webview_select` | 选中 `<select>` 选项（value / label / 下标），派发 input + change 让受控组件同步 |
@@ -192,7 +192,14 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 | `tauri_window_state` | 窗口状态：宿主侧（装饰/可见性/最大化/缩放/显示器）+ DOM 侧 |
 | `tauri_backend_logs` | 读后端日志（调 Pylon 的 `list_runtime_logs`） |
 
-### 两条设计上的关键选择
+### 几条设计上的关键选择
+
+**目标发现走 1 秒 TTL 缓存。** 一次工具调用内部会反复解析目标：点击 = 命中测试 +
+三连 `Input.dispatchMouseEvent`，`webview_type` 的 keys 模式 = 每字符两次按键，
+`webview_wait` = 每个轮询一次——每次解析都是一趟 `GET /json`。TTL 之内直接复用，
+省掉这些重复发现。它在两个方向上都不会骗人：`webview_targets` 永远绕过缓存直读
+（它是「端口通不通」的探针），而解析失败时 `resolve` 会强制刷新复核一次，
+不会把「缓存过时」说成「目标不存在」。
 
 **读增量，不是全量。** `webview_console` / `webview_network` / `tauri_events` 有共同的游标语义：
 
@@ -227,7 +234,8 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 2. **`tauri_event_catalog` 是静态扫描。** 只扫描传入的 `roots`（默认 `src` 与
    `src-tauri/src`），跳过 `node_modules` / `target` / `dist` 等目录。插件目录或生成代码
-   需另外传 `roots`。
+   需另外传 `roots`。扫描有预算：最多 2 万个文件、总计 128MB，任一用尽即停——
+   返回里的 `truncated: true` 会明说清单不完整，不会假装扫全了。
 
 3. **DOM 走自序列化而不是 `DOM.*` 域。** `DOM.getDocument` 的 nodeId 会被任何 DOM 变更作废，
    拿着旧 id 调用只会收到 "Could not find node"。自序列化一次性拿到全部且无句柄失效问题。

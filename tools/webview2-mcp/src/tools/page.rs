@@ -22,7 +22,9 @@ pub async fn targets(cx: &Context, args: &Value) -> Result<ToolResult> {
     let endpoint = cx.cdp.endpoint();
     // 这是诊断工具：端点不可达时**不**报错，而是把不可达本身作为结果返回，
     // 这样 agent 拿到的是一份可读的状态表，而不是一个需要另外解释的失败。
-    let targets = match cx.cdp.targets().await {
+    // 走 fresh 读取：它是「端口通不通」的探针，吃缓存会把「现在连不上」
+    // 报成「刚才连得上」。
+    let targets = match cx.cdp.targets_fresh().await {
         Ok(targets) => targets,
         Err(error) => {
             return Ok(ToolResult::json(&json!({
@@ -85,6 +87,13 @@ fn how_to_enable(port: u16) -> Value {
 
 // ───────────────────────────── 求值 ─────────────────────────────
 
+/// 求值结果的序列化上限。这是唯一没有天然边界的返回值（其它工具要么按条数、
+/// 要么按字符数封顶），而它的消费者是 LLM 的上下文——一次 `JSON.stringify(bigState)`
+/// 就能灌进几十万 token。超过时返回截断信封而不是原值。
+const MAX_EVALUATE_BYTES: usize = 64 * 1024;
+/// 截断信封里保留的预览字符数（按字符截，不切坏 UTF-8）。
+const EVALUATE_PREVIEW_CHARS: usize = 2_048;
+
 pub async fn evaluate(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("webview_evaluate", args);
     let expression = a.required_str("expression")?;
@@ -99,7 +108,30 @@ pub async fn evaluate(cx: &Context, args: &Value) -> Result<ToolResult> {
     let value = cx.cdp.evaluate(a.str("target")?, &script, options).await?;
     // 不套信封：求值的结果本身就是结果，多一层 {result: ...} 只会让
     // agent 在 chain 调用时多剥一层。
-    Ok(ToolResult::json(&value))
+    Ok(ToolResult::json(&cap_evaluate_output(value)))
+}
+
+/// 超限时换成截断信封：保留结构信息（原样大小 + 前缀预览），
+/// 而不是悄悄把上下文塞满。确实需要完整原始结果时走 `webview_raw_cdp`。
+fn cap_evaluate_output(value: Value) -> Value {
+    let serialized = match serde_json::to_string(&value) {
+        Ok(text) => text,
+        // 理论上不可达（Value 一定能序列化）；真撞上就把原值交回去，
+        // 总比因为一个哨兵分支丢掉结果强。
+        Err(_) => return value,
+    };
+    if serialized.len() <= MAX_EVALUATE_BYTES {
+        return value;
+    }
+    let preview: String = serialized.chars().take(EVALUATE_PREVIEW_CHARS).collect();
+    json!({
+        "__truncated": true,
+        "bytes": serialized.len(),
+        "limitBytes": MAX_EVALUATE_BYTES,
+        "preview": preview,
+        "note": "求值结果序列化后超过上限，已截断为前缀预览。请缩小返回结构（只取需要的字段、加 .length、分页）后重试；\
+                 确实需要完整原始结果时改用 webview_raw_cdp 调 Runtime.evaluate。",
+    })
 }
 
 pub async fn raw_cdp(cx: &Context, args: &Value) -> Result<ToolResult> {
@@ -170,11 +202,8 @@ pub async fn console(cx: &Context, args: &Value) -> Result<ToolResult> {
 }
 
 fn console_matches(record: &Value, types: &[String], pattern: Option<&str>) -> bool {
-    if !types.is_empty() {
-        let actual = record.get("type").and_then(Value::as_str).unwrap_or("");
-        if !types.iter().any(|want| type_equals(want, actual)) {
-            return false;
-        }
+    if !types.is_empty() && !types.iter().any(|want| console_type_matches(want, record)) {
+        return false;
     }
     if let Some(pattern) = pattern {
         let text = record
@@ -187,6 +216,21 @@ fn console_matches(record: &Value, types: &[String], pattern: Option<&str>) -> b
         }
     }
     true
+}
+
+/// 类型过滤要同时比对两个字段：
+///
+/// - `type`：控制台调用的类型（log / error / …）或浏览器日志的级别；
+/// - `kind`：异常记录（`Runtime.exceptionThrown`）的 `type` 固定是 `"error"`
+///   ——那是 CDP 的语义，只有比对 `kind` 才能命中，否则文档承诺的
+///   `type=exception` 永远返回空。
+fn console_type_matches(want: &str, record: &Value) -> bool {
+    let actual = record.get("type").and_then(Value::as_str).unwrap_or("");
+    if type_equals(want, actual) {
+        return true;
+    }
+    want.eq_ignore_ascii_case("exception")
+        && record.get("kind").and_then(Value::as_str) == Some("exception")
 }
 
 /// CDP 用 `warning`，习惯写法是 `warn`；两者不该因为拼法不同就漏掉。
@@ -595,7 +639,8 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
     let y = a.f64("y")?;
     let mode = a.str("mode")?.unwrap_or("input").to_string();
     let button = a.str("button")?.unwrap_or("left").to_string();
-    let click_count = a.u64_or("click_count", 1)?;
+    // 上限 3：单击/双击/三击有浏览器语义，更高的次数没有对应行为。
+    let click_count = a.u64_or("click_count", 1)?.clamp(1, 3);
     let settle_ms = a.u64_or("settle_ms", 80)?;
 
     if selector.is_none() && (x.is_none() || y.is_none()) {
@@ -676,11 +721,7 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
         "middle" => 4,
         _ => 1,
     };
-    for params in [
-        json!({ "type": "mouseMoved", "x": point_x, "y": point_y, "button": "none", "buttons": 0 }),
-        json!({ "type": "mousePressed", "x": point_x, "y": point_y, "button": button, "buttons": buttons, "clickCount": click_count }),
-        json!({ "type": "mouseReleased", "x": point_x, "y": point_y, "button": button, "buttons": 0, "clickCount": click_count }),
-    ] {
+    for params in click_events(point_x, point_y, &button, buttons, click_count) {
         cx.cdp
             .call(target_arg, "Input.dispatchMouseEvent", params)
             .await?;
@@ -708,6 +749,26 @@ pub async fn click(cx: &Context, args: &Value) -> Result<ToolResult> {
             _ => None,
         },
     })))
+}
+
+/// 点击的事件序列：先把指针移到目标点，再按次数派发 **press/release 对**。
+///
+/// Chromium 判定 `dblclick` 靠的是第二对事件的 `clickCount=2`；
+/// 只发一对（哪怕把 clickCount 写成 2）不会产生 dblclick。
+fn click_events(x: f64, y: f64, button: &str, buttons: i64, click_count: u64) -> Vec<Value> {
+    let mut events =
+        vec![json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none", "buttons": 0 })];
+    for index in 1..=click_count {
+        events.push(json!({
+            "type": "mousePressed", "x": x, "y": y,
+            "button": button, "buttons": buttons, "clickCount": index,
+        }));
+        events.push(json!({
+            "type": "mouseReleased", "x": x, "y": y,
+            "button": button, "buttons": 0, "clickCount": index,
+        }));
+    }
+    events
 }
 
 pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
@@ -739,8 +800,16 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
 
     if mode == "keys" {
         for ch in text.chars() {
-            let specification = key_spec(&ch.to_string());
-            dispatch_key(cx, target_arg, &specification).await?;
+            let specification = key_spec(&ch.to_string()).map_err(|_| {
+                Error::bad_args(
+                    "webview_type",
+                    format!(
+                        "mode=keys 无法派发字符 {ch:?}（它没有对应的键盘事件）。含中文等非 ASCII \
+                         文本请用 mode=insert（默认）。"
+                    ),
+                )
+            })?;
+            dispatch_key(cx, target_arg, &specification, 0).await?;
             if delay_ms > 0 {
                 sleep_ms(delay_ms).await;
             }
@@ -752,7 +821,7 @@ pub async fn type_text(cx: &Context, args: &Value) -> Result<ToolResult> {
     }
 
     if submit {
-        dispatch_key(cx, target_arg, &key_spec("Enter")).await?;
+        dispatch_key(cx, target_arg, &key_spec("Enter")?, 0).await?;
     }
 
     // 回读输入后状态：受控组件可能拒绝了这次输入（例如校验失败后清空），
@@ -793,6 +862,7 @@ pub async fn key(cx: &Context, args: &Value) -> Result<ToolResult> {
     let selector = a.str("selector")?;
     let repeat = a.u64_or("repeat", 1)?.clamp(1, 64);
     let settle_ms = a.u64_or("settle_ms", 60)?;
+    let modifiers = parse_modifiers("webview_key", &a.str_list("modifiers")?)?;
 
     if let Some(selector) = selector {
         let script = jsscript::focus_for_typing(Some(selector), false);
@@ -809,9 +879,12 @@ pub async fn key(cx: &Context, args: &Value) -> Result<ToolResult> {
         }
     }
 
-    let specification = key_spec(name);
+    let mut specification = key_spec(name)?;
+    if modifiers & MODIFIER_SHIFT != 0 {
+        apply_shift(&mut specification);
+    }
     for _ in 0..repeat {
-        dispatch_key(cx, target_arg, &specification).await?;
+        dispatch_key(cx, target_arg, &specification, modifiers).await?;
     }
     sleep_ms(settle_ms).await;
 
@@ -820,11 +893,57 @@ pub async fn key(cx: &Context, args: &Value) -> Result<ToolResult> {
         "key": specification.key,
         "code": specification.code,
         "virtualKeyCode": specification.virtual_key_code,
+        "modifiers": modifiers,
         "repeat": repeat,
         "note": specification.note,
     })))
 }
 
+/// CDP `Input.dispatchKeyEvent` 的 `modifiers` 位掩码。
+const MODIFIER_ALT: i64 = 1;
+const MODIFIER_CTRL: i64 = 2;
+const MODIFIER_META: i64 = 4;
+const MODIFIER_SHIFT: i64 = 8;
+/// 按住这几个键时 `text` 必须省略：组合键只触发快捷键，不插入字符。
+const MODIFIER_TEXT_SUPPRESSING: i64 = MODIFIER_ALT | MODIFIER_CTRL | MODIFIER_META;
+
+/// 修饰键名 → CDP `modifiers` 位掩码。
+fn parse_modifiers(tool: &str, names: &[String]) -> Result<i64> {
+    let mut mask = 0i64;
+    for name in names {
+        mask |= match name.to_ascii_lowercase().as_str() {
+            "alt" => MODIFIER_ALT,
+            "ctrl" | "control" => MODIFIER_CTRL,
+            "meta" | "cmd" | "command" | "win" | "super" => MODIFIER_META,
+            "shift" => MODIFIER_SHIFT,
+            other => {
+                return Err(Error::bad_args(
+                    tool,
+                    format!(
+                        "未知修饰键 {other:?}；可用：ctrl / alt / shift / meta（meta 即 Win 键）"
+                    ),
+                ))
+            }
+        };
+    }
+    Ok(mask)
+}
+
+/// Shift 按住时，单字母键的 `key`/`text` 要变成大写（`Shift+a` 的 key 是 `A`，
+/// 页面据此判断字符）。其它可打印字符的 Shift 映射（`Shift+1` → `!`）不在这里
+/// 展开——需要输入具体文字时用 `webview_type` 更可靠。
+fn apply_shift(specification: &mut KeySpec) {
+    let mut chars = specification.key.chars();
+    if let (Some(ch), None) = (chars.next(), chars.next()) {
+        if ch.is_ascii_lowercase() {
+            let upper = ch.to_ascii_uppercase().to_string();
+            specification.key = upper.clone();
+            specification.text = Some(upper);
+        }
+    }
+}
+
+#[derive(Debug)]
 struct KeySpec {
     key: String,
     code: String,
@@ -837,54 +956,53 @@ struct KeySpec {
 /// 按键名 → CDP 派发所需的信息。
 ///
 /// 分三层：先查命名键表（导航/编辑/提交这类「不产生字符但仍要有真实按键」的键），
-/// 再查标点表（VK 码在 OEM 区段，不等于 ASCII），最后退化成「当作单个字符处理」
-/// 并带上说明，避免调用方以为任意名字都能用。
-fn key_spec(name: &str) -> KeySpec {
+/// 再查标点表（VK 码在 OEM 区段，不等于 ASCII），最后退化成「当作单个 ASCII
+/// 字符处理」并带上说明。都不是就报错——带着 VK=0 派发一颗无效按键，只会让
+/// agent 把「页面没反应」当成被测应用的缺陷。
+fn key_spec(name: &str) -> Result<KeySpec> {
     let lowered = name.to_ascii_lowercase();
     if let Some(spec) = named_key(&lowered) {
-        return spec;
+        return Ok(spec);
     }
     if let Some(index) = function_key_index(&lowered) {
         let code = format!("F{index}");
-        return KeySpec {
+        return Ok(KeySpec {
             key: code.clone(),
             code,
             virtual_key_code: 111 + index as i64,
             text: None,
             note: None,
-        };
+        });
     }
     if let Some((code, virtual_key_code)) = punctuation_key(&lowered) {
-        return KeySpec {
+        return Ok(KeySpec {
             key: lowered.clone(),
             code: code.to_string(),
             virtual_key_code,
             text: Some(lowered.clone()),
             note: None,
-        };
+        });
     }
 
-    // 单字符：按可打印字符派发。非 ASCII（中文等）没有 keydown 语义，
-    // 应当走 webview_type，所以这里明确标出来。
     let mut chars = name.chars();
     match (chars.next(), chars.next()) {
-        (Some(ch), None) if ch.is_ascii() => KeySpec {
+        (Some(ch), None) if ch.is_ascii() => Ok(KeySpec {
             key: ch.to_string(),
             code: format!("Key{}", ch.to_ascii_uppercase()),
             virtual_key_code: ch.to_ascii_uppercase() as i64,
             text: Some(ch.to_string()),
-            note: Some(format!("`{name}` 不在命名键表内，按可打印字符 `{ch}` 派发。")),
-        },
-        _ => KeySpec {
-            key: name.to_string(),
-            code: name.to_string(),
-            virtual_key_code: 0,
-            text: None,
             note: Some(format!(
-                "`{name}` 不是已知命名键，也不是单个 ASCII 字符；已按字面量派发，行为可能不符合预期。\
-                 要输入文字请用 webview_type。"
+                "`{name}` 不在命名键表内，按可打印字符 `{ch}` 派发。"
             )),
-        },
+        }),
+        _ => Err(Error::bad_args(
+            "webview_key",
+            format!(
+                "`{name}` 不是已知命名键（Enter / Tab / Escape / Arrow* / Home / End / PageUp / \
+                 PageDown / F1-F12 / 常用标点），也不是单个 ASCII 字符。要输入文字请用 \
+                 webview_type；组合键请用 modifiers 参数（例如 key=\"a\" + modifiers=[\"ctrl\"]）。"
+            ),
+        )),
     }
 }
 
@@ -945,29 +1063,58 @@ fn function_key_index(name: &str) -> Option<u8> {
     (1..=12).contains(&index).then_some(index)
 }
 
-async fn dispatch_key(cx: &Context, target: Option<&str>, specification: &KeySpec) -> Result<()> {
+async fn dispatch_key(
+    cx: &Context,
+    target: Option<&str>,
+    specification: &KeySpec,
+    modifiers: i64,
+) -> Result<()> {
+    cx.cdp
+        .call(
+            target,
+            "Input.dispatchKeyEvent",
+            key_down_params(specification, modifiers),
+        )
+        .await?;
+    cx.cdp
+        .call(
+            target,
+            "Input.dispatchKeyEvent",
+            key_up_params(specification, modifiers),
+        )
+        .await?;
+    Ok(())
+}
+
+fn key_down_params(specification: &KeySpec, modifiers: i64) -> Value {
     let mut down = json!({
         "type": "keyDown",
         "key": specification.key,
         "code": specification.code,
         "windowsVirtualKeyCode": specification.virtual_key_code,
         "nativeVirtualKeyCode": specification.virtual_key_code,
+        "modifiers": modifiers,
     });
-    if let Some(text) = &specification.text {
-        down["text"] = json!(text);
-        down["unmodifiedText"] = json!(text);
+    // Ctrl/Alt/Meta 按住时不带 text：否则 Chromium 会把字符插进去，
+    // Ctrl+A 变成「先插入 a 再全选」。
+    if modifiers & MODIFIER_TEXT_SUPPRESSING == 0 {
+        if let Some(text) = &specification.text {
+            down["text"] = json!(text);
+            down["unmodifiedText"] = json!(text);
+        }
     }
-    cx.cdp.call(target, "Input.dispatchKeyEvent", down).await?;
+    down
+}
 
-    let up = json!({
+fn key_up_params(specification: &KeySpec, modifiers: i64) -> Value {
+    json!({
         "type": "keyUp",
         "key": specification.key,
         "code": specification.code,
         "windowsVirtualKeyCode": specification.virtual_key_code,
         "nativeVirtualKeyCode": specification.virtual_key_code,
-    });
-    cx.cdp.call(target, "Input.dispatchKeyEvent", up).await?;
-    Ok(())
+        "modifiers": modifiers,
+    })
 }
 
 // ───────────────────────────── 导航 ─────────────────────────────
@@ -1458,20 +1605,20 @@ mod tests {
 
     #[test]
     fn named_keys_carry_virtual_key_codes_and_text() {
-        let enter = key_spec("Enter");
+        let enter = key_spec("Enter").unwrap();
         assert_eq!(enter.key, "Enter");
         assert_eq!(enter.virtual_key_code, 13);
         assert_eq!(enter.text.as_deref(), Some("\r"));
 
-        let tab = key_spec("tab");
+        let tab = key_spec("tab").unwrap();
         assert_eq!(tab.key, "Tab");
         assert_eq!(tab.virtual_key_code, 9);
 
-        let escape = key_spec("Esc");
+        let escape = key_spec("Esc").unwrap();
         assert_eq!(escape.key, "Escape");
         assert!(escape.text.is_none());
 
-        let down = key_spec("ArrowDown");
+        let down = key_spec("ArrowDown").unwrap();
         assert_eq!(down.code, "ArrowDown");
         assert_eq!(down.virtual_key_code, 40);
     }
@@ -1479,32 +1626,30 @@ mod tests {
     #[test]
     fn punctuation_keys_use_oem_virtual_key_codes_not_ascii() {
         // `.` 的 ASCII 是 46，而 46 作为 VK 是 Delete——标点绝不能按 ASCII 取 VK。
-        let period = key_spec(".");
+        let period = key_spec(".").unwrap();
         assert_eq!(period.code, "Period");
         assert_eq!(period.virtual_key_code, 190);
         assert_eq!(period.text.as_deref(), Some("."));
         assert!(period.note.is_none(), "表内标点是已知键，不该再提示不可靠");
 
-        assert_eq!(key_spec(";").virtual_key_code, 186);
-        assert_eq!(key_spec("=").virtual_key_code, 187);
-        assert_eq!(key_spec("[").code, "BracketLeft");
-        assert_eq!(key_spec("]").code, "BracketRight");
-        assert_eq!(key_spec("'").virtual_key_code, 222);
-        assert_eq!(key_spec("\\").code, "Backslash");
+        assert_eq!(key_spec(";").unwrap().virtual_key_code, 186);
+        assert_eq!(key_spec("=").unwrap().virtual_key_code, 187);
+        assert_eq!(key_spec("[").unwrap().code, "BracketLeft");
+        assert_eq!(key_spec("]").unwrap().code, "BracketRight");
+        assert_eq!(key_spec("'").unwrap().virtual_key_code, 222);
+        assert_eq!(key_spec("\\").unwrap().code, "Backslash");
     }
 
     #[test]
     fn function_keys_map_to_112_through_123() {
-        assert_eq!(key_spec("F1").virtual_key_code, 112);
-        assert_eq!(key_spec("f12").virtual_key_code, 123);
-        assert_eq!(key_spec("F1").code, "F1");
-        // F13 不存在，退化为字面量分支。
-        assert!(key_spec("F13").note.is_some());
+        assert_eq!(key_spec("F1").unwrap().virtual_key_code, 112);
+        assert_eq!(key_spec("f12").unwrap().virtual_key_code, 123);
+        assert_eq!(key_spec("F1").unwrap().code, "F1");
     }
 
     #[test]
     fn single_ascii_character_becomes_a_printable_key_with_a_note() {
-        let spec = key_spec("a");
+        let spec = key_spec("a").unwrap();
         assert_eq!(spec.key, "a");
         assert_eq!(spec.code, "KeyA");
         assert_eq!(spec.virtual_key_code, 65);
@@ -1513,15 +1658,150 @@ mod tests {
     }
 
     #[test]
-    fn unknown_multi_char_key_is_reported_as_unreliable() {
-        let spec = key_spec("MetaLeft");
-        assert!(spec.note.unwrap_or_default().contains("webview_type"));
+    fn undispatchable_key_names_are_rejected_instead_of_sent_with_vk_zero() {
+        // 带 VK=0 派发一颗无效按键，只会让 agent 把「页面没反应」当成应用缺陷。
+        for name in ["MetaLeft", "F13", "中", "ControlLeft"] {
+            let error = key_spec(name).unwrap_err();
+            assert_eq!(error.kind(), "bad_args", "{name}");
+            let text = error.to_string();
+            assert!(text.contains("webview_type"), "{name}: {text}");
+            assert!(text.contains("modifiers"), "{name}: {text}");
+        }
     }
 
     #[test]
-    fn non_ascii_single_char_is_flagged_rather_than_silently_dispatched() {
-        let spec = key_spec("中");
-        assert!(spec.note.unwrap_or_default().contains("webview_type"));
+    fn modifiers_parse_to_the_cdp_bitmask() {
+        let ctrl = parse_modifiers("webview_key", &["ctrl".to_string()]).unwrap();
+        assert_eq!(ctrl, MODIFIER_CTRL);
+        let combo =
+            parse_modifiers("webview_key", &["ctrl".to_string(), "shift".to_string()]).unwrap();
+        assert_eq!(combo, MODIFIER_CTRL | MODIFIER_SHIFT);
+        // 别名与大小写都接受。
+        assert_eq!(
+            parse_modifiers("webview_key", &["Meta".to_string()]).unwrap(),
+            MODIFIER_META
+        );
+        assert_eq!(
+            parse_modifiers("webview_key", &["CMD".to_string()]).unwrap(),
+            MODIFIER_META
+        );
+        assert_eq!(
+            parse_modifiers("webview_key", &[]).unwrap(),
+            0,
+            "不给修饰键就是普通按键"
+        );
+
+        let error = parse_modifiers("webview_key", &["hyper".to_string()]).unwrap_err();
+        assert_eq!(error.kind(), "bad_args");
+        assert!(error.to_string().contains("ctrl"), "{error}");
+    }
+
+    #[test]
+    fn combining_ctrl_drops_the_text_so_it_does_not_insert_a_character() {
+        let letter = key_spec("a").unwrap();
+        let plain = key_down_params(&letter, 0);
+        assert_eq!(plain["text"], "a");
+        assert_eq!(plain["unmodifiedText"], "a");
+
+        // Ctrl+A 是「全选」，不能先插入一个 a。
+        let ctrl = key_down_params(&letter, MODIFIER_CTRL);
+        assert!(ctrl.get("text").is_none(), "{ctrl}");
+        assert_eq!(ctrl["modifiers"], MODIFIER_CTRL);
+        // keyUp 本来就不带 text，但必须带同一个 modifiers 位。
+        assert_eq!(
+            key_up_params(&letter, MODIFIER_CTRL)["modifiers"],
+            MODIFIER_CTRL
+        );
+    }
+
+    #[test]
+    fn shift_turns_a_letter_key_uppercase_and_leaves_everything_else_alone() {
+        // 没有 Shift 时原样：小写字母就是小写。
+        let letter = key_spec("b").unwrap();
+        assert_eq!(letter.key, "b");
+        assert_eq!(letter.virtual_key_code, 66, "VK 是位置码，与大小写无关");
+
+        // Shift+字母：key/text 变成大写，页面据此判断字符。
+        let mut shifted = key_spec("b").unwrap();
+        apply_shift(&mut shifted);
+        assert_eq!(shifted.key, "B");
+        assert_eq!(shifted.text.as_deref(), Some("B"));
+        assert_eq!(shifted.virtual_key_code, 66);
+
+        // 命名键与标点不受 Shift 改写（不能把 Enter 变成别的键）。
+        let mut enter = key_spec("Enter").unwrap();
+        apply_shift(&mut enter);
+        assert_eq!(enter.key, "Enter");
+        assert_eq!(enter.text.as_deref(), Some("\r"));
+
+        let mut period = key_spec(".").unwrap();
+        apply_shift(&mut period);
+        assert_eq!(period.key, ".");
+    }
+
+    #[test]
+    fn click_events_emit_a_press_release_pair_per_click() {
+        let single = click_events(10.0, 20.0, "left", 1, 1);
+        assert_eq!(single.len(), 3, "移动 + 一对 press/release");
+        assert_eq!(single[0]["type"], "mouseMoved");
+        assert_eq!(single[1]["clickCount"], 1);
+        assert_eq!(single[2]["clickCount"], 1);
+        assert_eq!(single[1]["buttons"], 1);
+        assert_eq!(single[2]["buttons"], 0);
+
+        // 双击必须发两对：Chromium 靠第二对的 clickCount=2 判定 dblclick。
+        let double = click_events(10.0, 20.0, "left", 1, 2);
+        assert_eq!(double.len(), 5);
+        assert_eq!(double[3]["type"], "mousePressed");
+        assert_eq!(double[3]["clickCount"], 2);
+        assert_eq!(double[4]["type"], "mouseReleased");
+        assert_eq!(double[4]["clickCount"], 2);
+
+        let triple = click_events(1.0, 2.0, "right", 2, 3);
+        assert_eq!(triple.len(), 7);
+        assert_eq!(triple[5]["clickCount"], 3);
+        assert_eq!(triple[5]["button"], "right");
+    }
+
+    #[test]
+    fn exception_filter_matches_the_kind_field_not_only_the_type() {
+        // 异常记录的 type 固定是 "error"（CDP 语义），文档承诺的 exception 靠 kind 命中。
+        let exception = json!({ "kind": "exception", "type": "error", "text": "boom" });
+        assert!(console_type_matches("exception", &exception));
+        assert!(console_type_matches("ERROR", &exception));
+        assert!(!console_type_matches("log", &exception));
+
+        let console_error = json!({ "kind": "console", "type": "error", "text": "boom" });
+        assert!(!console_type_matches("exception", &console_error));
+        assert!(console_type_matches("error", &console_error));
+    }
+
+    #[test]
+    fn oversized_evaluate_result_is_replaced_by_a_truncated_envelope() {
+        let huge = json!({ "rows": vec!["x".repeat(200); 1000] });
+        let capped = cap_evaluate_output(huge);
+        assert_eq!(capped["__truncated"], true);
+        assert_eq!(capped["limitBytes"], MAX_EVALUATE_BYTES);
+        assert!(
+            capped["bytes"].as_u64().unwrap_or(0) > MAX_EVALUATE_BYTES as u64,
+            "{capped}"
+        );
+        let preview = capped["preview"].as_str().unwrap_or_default();
+        assert!(
+            preview.chars().count() <= EVALUATE_PREVIEW_CHARS,
+            "预览不该超长"
+        );
+        assert!(preview.starts_with('{'), "预览应是序列化结果的前缀");
+        assert!(capped.get("rows").is_none(), "截断后不再带原结构");
+    }
+
+    #[test]
+    fn ordinary_evaluate_results_pass_through_unchanged() {
+        let value = json!({ "ok": true, "n": 3 });
+        assert_eq!(cap_evaluate_output(value.clone()), value);
+        // 边界：正好不超限时不该触发截断。
+        let exact = json!("x".repeat(MAX_EVALUATE_BYTES - 2));
+        assert_eq!(cap_evaluate_output(exact.clone()), exact);
     }
 
     #[test]

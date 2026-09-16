@@ -418,31 +418,38 @@ impl EventLog {
             Kind::Console => self.evicted_console,
             Kind::Network => self.evicted_network,
         };
-        // 网络缓冲按「最后变更时间」排序，其 seq 可能小于同缓冲里的更早条目；
-        // 一律按 seq 升序检视，保证增量不漏。
-        let mut candidates: Vec<Value> = match kind {
-            Kind::Console => self.console.iter().cloned().collect(),
-            Kind::Network => self.network.iter().cloned().collect(),
-        };
-        candidates.sort_by_key(|record| record.get("seq").and_then(Value::as_u64).unwrap_or(0));
 
-        let mut entries = Vec::new();
-        let mut scanned = 0usize;
-        let mut last_scanned = from;
-        for record in candidates {
-            let seq = record.get("seq").and_then(Value::as_u64).unwrap_or(0);
-            if seq <= from {
-                continue;
+        let (entries, scanned, last_scanned) = {
+            let buffer = match kind {
+                Kind::Console => &self.console,
+                Kind::Network => &self.network,
+            };
+            // 一律按 seq 升序检视，保证增量不漏。排序在**索引**上做：
+            // 整缓冲深拷贝（最多 3000 条带 headers 的 Value）是纯开销——
+            // 读增量通常只关心末尾几条，只 clone 命中的那些就够了。
+            let mut order: Vec<usize> = (0..buffer.len()).collect();
+            order.sort_unstable_by_key(|index| seq_of(&buffer[*index]));
+
+            let mut entries = Vec::new();
+            let mut scanned = 0usize;
+            let mut last_scanned = from;
+            for index in order {
+                let record = &buffer[index];
+                let seq = seq_of(record);
+                if seq <= from {
+                    continue;
+                }
+                if scanned >= scan {
+                    break;
+                }
+                scanned += 1;
+                last_scanned = seq;
+                if entries.len() < limit && matches(record) {
+                    entries.push(record.clone());
+                }
             }
-            if scanned >= scan {
-                break;
-            }
-            scanned += 1;
-            last_scanned = seq;
-            if entries.len() < limit && matches(&record) {
-                entries.push(record);
-            }
-        }
+            (entries, scanned, last_scanned)
+        };
 
         if since_seq.is_none() {
             self.cursors.insert(kind.key(), last_scanned.max(from));
@@ -482,6 +489,10 @@ impl EventLog {
             "latestSeq": self.seq,
         })
     }
+}
+
+fn seq_of(record: &Value) -> u64 {
+    record.get("seq").and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn push_capped(buffer: &mut VecDeque<Value>, record: Value, capacity: usize, evicted: &mut u64) {

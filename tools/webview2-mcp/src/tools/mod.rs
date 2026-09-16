@@ -129,7 +129,7 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_navigate" => page::navigate(cx, args).await,
         "tauri_invoke" => host::invoke(cx, args).await,
         "tauri_events" => host::events(cx, args).await,
-        "tauri_event_catalog" => host::event_catalog(cx, args),
+        "tauri_event_catalog" => host::event_catalog(cx, args).await,
         "tauri_window_state" => host::window_state(cx, args).await,
         "tauri_backend_logs" => host::backend_logs(cx, args).await,
         other => Err(Error::bad_args(other, "未知工具。可用工具见 tools/list。")),
@@ -178,6 +178,25 @@ fn type_schema(spec: &str) -> Value {
     }
 }
 
+/// 只读工具：不改变**被调试应用**的状态。
+///
+/// 这条例线按「对 app 的影响」划，不按「对 MCP 自己缓冲的影响」：
+/// `tauri_events` 会往页面里注册订阅、输入类工具会改 UI 状态，
+/// 因此都不在这里——标注成只读会让客户端在权限 UI 上给出错误的承诺。
+const READ_ONLY_TOOLS: [&str; 11] = [
+    "webview_targets",
+    "webview_console",
+    "webview_network",
+    "webview_network_body",
+    "webview_dom",
+    "webview_query",
+    "webview_screenshot",
+    "webview_wait",
+    "tauri_event_catalog",
+    "tauri_window_state",
+    "tauri_backend_logs",
+];
+
 /// `tools/list` 的返回体。
 pub fn catalog() -> Vec<Value> {
     TOOLS.iter().map(ToolSpec::build).collect()
@@ -201,7 +220,7 @@ impl ToolSpec {
             }
             properties.insert((*key).into(), schema);
         }
-        json!({
+        let mut tool = json!({
             "name": self.name,
             "description": self.description,
             "inputSchema": {
@@ -209,7 +228,12 @@ impl ToolSpec {
                 "properties": properties,
                 "required": self.required,
             },
-        })
+        });
+        if READ_ONLY_TOOLS.contains(&self.name) {
+            // 客户端据此做权限提示/自动放行；不确定就不标。
+            tool["annotations"] = json!({ "readOnlyHint": true });
+        }
+        tool
     }
 }
 
@@ -234,7 +258,7 @@ static TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "webview_evaluate",
-        description: "在页面主世界求值 JS 表达式并返回可序列化结果。默认包成 async IIFE，因此表达式里可以直接用 await。结果是 DOM 节点/函数等不可序列化对象时返回 __unserializable 标记而不是 null，避免把「拿不到值」误判成「值就是 null」。",
+        description: "在页面主世界求值 JS 表达式并返回可序列化结果。默认包成 async IIFE，因此表达式里可以直接用 await。结果是 DOM 节点/函数等不可序列化对象时返回 __unserializable 标记而不是 null，避免把「拿不到值」误判成「值就是 null」。结果序列化后超过 64KB 会换成 __truncated 信封（带大小与前缀预览），需要完整原始结果时用 webview_raw_cdp。",
         properties: &[
             (
                 "expression",
@@ -416,7 +440,11 @@ static TOOLS: &[ToolSpec] = &[
             ("x", "视口坐标 X（CSS 像素）。", "number"),
             ("y", "视口坐标 Y（CSS 像素）。", "number"),
             ("button", "鼠标键。", "enum:left|right|middle"),
-            ("click_count", "点击次数，默认 1；2 表示双击。", "integer"),
+            (
+                "click_count",
+                "点击次数，默认 1；2 = 双击（会派发两对 press/release，产生 dblclick），3 = 三击。上限 3，超出会被夹到 3。",
+                "integer",
+            ),
             (
                 "mode",
                 "input（默认，派发真实鼠标事件）或 dom（直接调 element.click()）。",
@@ -461,17 +489,22 @@ static TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "webview_key",
-        description: "派发命名按键（Enter / Tab / Escape / Backspace / Delete / Arrow* / Home / End / PageUp / PageDown / F1-F12）。需要输入字符请用 webview_type，本工具用于导航与提交类按键。传入未知名字会在返回里说明它的实际行为，不会静默当成单字符。",
+        description: "派发命名按键（Enter / Tab / Escape / Backspace / Delete / Arrow* / Home / End / PageUp / PageDown / F1-F12 / 常用标点）或单个 ASCII 字符，可组合 modifiers 发出快捷键（如 key=\"a\" + modifiers=[\"ctrl\"] 即 Ctrl+A）。需要输入文字请用 webview_type，本工具用于导航、提交与组合键。无法派发的按键名（如 MetaLeft、中）直接报 bad_args，不会带着空键码发出无效按键。",
         properties: &[
             (
                 "key",
-                "按键名，例如 Enter、Escape、ArrowDown。名称同 CDP key 值。",
+                "按键名，例如 Enter、Escape、ArrowDown，或单个 ASCII 字符（如 a、.）。名称同 CDP key 值。",
                 "string",
             ),
             (
                 "selector",
                 "先聚焦该元素再按键；省略则按在当前聚焦元素上。",
                 "string",
+            ),
+            (
+                "modifiers",
+                "同时按下的修饰键，单个字符串或数组，例如 [\"ctrl\"]、[\"ctrl\",\"shift\"]。可用：ctrl（别名 control）/ alt / shift / meta（别名 cmd / command / win / super）。按住 ctrl / alt / meta 时不会插入字符，即组合键语义。",
+                "string_or_string_array",
             ),
             ("repeat", "连按次数，默认 1（上限 64）。", "integer"),
             ("settle_ms", "按键后等待多少毫秒再返回，默认 60。", "integer"),
@@ -852,6 +885,50 @@ mod tests {
         let error = dispatch(&cx, "webview_nope", &json!({})).await.unwrap_err();
         assert_eq!(error.kind(), "bad_args");
         assert!(error.to_string().contains("tools/list"));
+    }
+
+    #[test]
+    fn read_only_tools_are_annotated_and_mutating_ones_are_left_unannotated() {
+        for name in READ_ONLY_TOOLS {
+            let tool = TOOLS
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("只读名单里的 {name} 不在工具表里"));
+            assert_eq!(
+                tool.build()["annotations"]["readOnlyHint"],
+                true,
+                "{name} 应带 readOnlyHint"
+            );
+        }
+        // 输入、导航、任意求值/调用都会改变 app 状态，不能承诺只读。
+        for name in [
+            "webview_evaluate",
+            "webview_click",
+            "webview_type",
+            "webview_navigate",
+            "tauri_invoke",
+            "tauri_events",
+        ] {
+            let tool = TOOLS.iter().find(|t| t.name == name).unwrap();
+            assert!(
+                tool.build().get("annotations").is_none(),
+                "{name} 不该被标成只读"
+            );
+        }
+    }
+
+    #[test]
+    fn webview_key_declares_the_modifiers_argument() {
+        let key = TOOLS.iter().find(|t| t.name == "webview_key").unwrap();
+        let (_, description, type_spec) = key
+            .properties
+            .iter()
+            .find(|(name, _, _)| *name == "modifiers")
+            .expect("webview_key 缺 modifiers 参数");
+        assert_eq!(*type_spec, "string_or_string_array");
+        assert!(description.contains("ctrl"), "{description}");
+        // 修饰键有默认（无），不能进 required，否则省略即被客户端拒。
+        assert!(!key.required.contains(&"modifiers"));
     }
 
     #[test]

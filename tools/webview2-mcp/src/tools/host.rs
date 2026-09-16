@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
@@ -156,6 +157,9 @@ const SKIP_DIRECTORIES: [&str; 10] = [
 
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
+/// 单次扫描的总字节预算。只有文件数上限时，2MB × 20000 的最坏情况仍会
+/// 读掉 40GB——给错 roots 时这个上限才真正兜得住。
+const MAX_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_LINE_CHARS: usize = 4000;
 
 /// (needle, 这是发出方还是接收方, 事件名是第几个参数)
@@ -176,9 +180,9 @@ const NEEDLES: [Needle; 6] = [
     ("once(", "once", 0),
 ];
 
-pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
+pub async fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
     let a = Args::new("tauri_event_catalog", args);
-    let roots = {
+    let roots: Vec<String> = {
         let requested = a.str_list("roots")?;
         if requested.is_empty() {
             DEFAULT_ROOTS.iter().map(|s| s.to_string()).collect()
@@ -188,23 +192,38 @@ pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
     };
     let pattern = a.string("pattern")?.map(|text| text.to_lowercase());
 
+    // 扫描是同步递归 IO：直接在 async 分发里跑会占着 reactor 线程，
+    // 最大 2 万文件时可感知地拖慢同一进程里的其它请求。
+    let cwd = Arc::clone(&cx.cwd);
+    let payload = tokio::task::spawn_blocking(move || scan_roots(&cwd, &roots, pattern.as_deref()))
+        .await
+        .map_err(|error| Error::Io(format!("源码扫描任务失败：{error}")))?;
+    Ok(ToolResult::json(&payload))
+}
+
+fn scan_roots(cwd: &Path, roots: &[String], pattern: Option<&str>) -> Value {
     let mut hits: Vec<Hit> = Vec::new();
     let mut scanned_files = 0usize;
     let mut skipped_roots: Vec<String> = Vec::new();
     let mut dynamic_sites = 0usize;
-    let budget = ScanBudget::new(MAX_FILES);
+    let budget = ScanBudget::new(MAX_FILES, MAX_TOTAL_BYTES);
 
-    for root in &roots {
-        let path = cx.cwd.join(root);
+    for root in roots {
+        let path = cwd.join(root);
         if !path.is_dir() {
             skipped_roots.push(format!("{root}（不是目录）"));
             continue;
         }
-        walk(&path, &cx.cwd, 0, &budget, &mut |file, relative| {
-            scanned_files += 1;
-            if let Ok(text) = std::fs::read_to_string(file) {
-                scan_source(&text, relative, &mut hits, &mut dynamic_sites);
+        walk(&path, cwd, 0, &budget, &mut |file, relative| {
+            let Ok(text) = std::fs::read_to_string(file) else {
+                return;
+            };
+            if !budget.spend_bytes(text.len() as u64) {
+                // 预算耗尽：这一份不扫，结果里会以 truncated 标明。
+                return;
             }
+            scanned_files += 1;
+            scan_source(&text, relative, &mut hits, &mut dynamic_sites);
         });
         if budget.stopped.get() {
             break;
@@ -215,7 +234,7 @@ pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
     // 摊平成行会让 agent 自己再聚合一遍。
     let mut grouped: BTreeMap<String, Vec<&Hit>> = BTreeMap::new();
     for hit in &hits {
-        if let Some(pattern) = &pattern {
+        if let Some(pattern) = pattern {
             if !hit.event.to_lowercase().contains(pattern) {
                 continue;
             }
@@ -234,20 +253,28 @@ pub fn event_catalog(cx: &Context, args: &Value) -> Result<ToolResult> {
         })
         .collect();
 
-    Ok(ToolResult::json(&json!({
+    let truncated = budget.stopped.get();
+    let mut limitations: Vec<&str> = vec![
+        "静态扫描：用变量、拼接或模板字符串构造的事件名扫不到（见 dynamicSites 计数）。",
+        "只扫描给定的 roots，默认 src 与 src-tauri/src；插件目录或生成代码需另外传入。",
+        "同名事件可能来自不同生命周期；这里的 file:line 只用于定位，不表达语义。",
+    ];
+    if truncated {
+        limitations
+            .push("扫描预算（文件数或总字节数）已用尽，本次清单不完整；请缩小 roots 后重试。");
+    }
+
+    json!({
         "roots": roots,
         "scannedFiles": scanned_files,
+        "truncated": truncated,
         "skippedRoots": skipped_roots,
         "eventCount": events.len(),
         "events": events,
         "dynamicSites": dynamic_sites,
-        "limitations": [
-            "静态扫描：用变量、拼接或模板字符串构造的事件名扫不到（见 dynamicSites 计数）。",
-            "只扫描给定的 roots，默认 src 与 src-tauri/src；插件目录或生成代码需另外传入。",
-            "同名事件可能来自不同生命周期；这里的 file:line 只用于定位，不表达语义。",
-        ],
+        "limitations": limitations,
         "nextStep": "把要用的事件名列进 tauri_events 的 events 参数即可开始采集。tauri:// 前缀的内置窗口事件（如 tauri://resize）同样可直接订阅。",
-    })))
+    })
 }
 
 fn is_emitter(kind: &str) -> bool {
@@ -266,16 +293,18 @@ struct Hit {
     context: String,
 }
 
-/// 目录遍历的共享预算：剩余可扫描文件数（归零即提前终止）。
+/// 目录遍历的共享预算：剩余可扫描文件数与总字节数（任一归零即提前终止）。
 struct ScanBudget {
     remaining: std::cell::Cell<usize>,
+    bytes: std::cell::Cell<u64>,
     stopped: std::cell::Cell<bool>,
 }
 
 impl ScanBudget {
-    fn new(max_files: usize) -> Self {
+    fn new(max_files: usize, max_bytes: u64) -> Self {
         Self {
             remaining: std::cell::Cell::new(max_files),
+            bytes: std::cell::Cell::new(max_bytes),
             stopped: std::cell::Cell::new(false),
         }
     }
@@ -286,6 +315,17 @@ impl ScanBudget {
         if remaining == 0 {
             self.stopped.set(true);
         }
+    }
+
+    /// 记一份源码的字节数。返回 false 表示这次会超预算——该文件不再扫描。
+    fn spend_bytes(&self, amount: u64) -> bool {
+        let remaining = self.bytes.get();
+        if amount > remaining {
+            self.stopped.set(true);
+            return false;
+        }
+        self.bytes.set(remaining - amount);
+        true
     }
 }
 
@@ -747,6 +787,18 @@ mod tests {
             hits.is_empty(),
             "这些不是 Tauri 事件调用，却出现在清单里：{hits:?}"
         );
+    }
+
+    #[test]
+    fn scan_budget_refuses_to_exceed_the_byte_allowance() {
+        let budget = ScanBudget::new(10, 100);
+        assert!(budget.spend_bytes(60));
+        assert!(!budget.spend_bytes(60), "超出剩余字节数时必须拒绝");
+        assert!(budget.stopped.get(), "超预算要置 stopped，让遍历提前结束");
+
+        let files = ScanBudget::new(1, 1_000);
+        files.consume();
+        assert!(files.stopped.get(), "文件数用尽同样要停");
     }
 
     #[test]
