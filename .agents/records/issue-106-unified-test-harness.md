@@ -104,6 +104,9 @@
 
 ## 稳定性观测
 
+**P4 追加诊断（同日）**：环境守卫式 setup 拆分（node 跳过 DOM 层，单项目架构不变）实测会以 ~50% 概率触发 `issue55.rowSetPurity.solid.test.tsx` 切片确定性断言非确定（原版 setup 3/3 绿；守卫版 4 跑 2 挂；单跑恒过）——setup 内动态 import 的初始化时序影响 solid token 切片的可复现性。结论：P4 的 setup/环境拆分必须以 project 隔离语义承载（每个 jsdom 文件独立进程+确定初始化序），单项目内的任何部分拆分都会引入此类非确定；与 projects 版并发超时问题同根，均指向「transform 管线与初始化时序」是 P4 的真正成本中心。
+
+
 最终门禁复验曾出现 1 次 pylon-core 单测失败（92/1），随后 **5 次连续全量 workspace 复跑全绿**、pylon-core 单独 2 次复跑全绿——判定为并发重载下的偶发 flake（pylon-core 含 powershell/ping 真实进程夹具 managed_probe_cleanup_kills_descendant_processes，对负载时序敏感；该夹具系既有代码，非本期引入）。
 
 ## 并行交集
