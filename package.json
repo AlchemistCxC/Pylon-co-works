@@ -60,7 +60,7 @@
     "codemirror": "^6.0.2",
     "hast-util-to-html": "^9.0.5",
     "lucide-react": "^1.26.0",
-    "motion": "^12.42.2",
+    "motion": "^13.2.0",
     "react": "^19",
     "react-dom": "^19",
     "react-markdown": "^10.1.0",
