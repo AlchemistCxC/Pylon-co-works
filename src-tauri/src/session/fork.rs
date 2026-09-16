@@ -367,6 +367,14 @@ for line in sys.stdin:
     /// AC8 回滚：RPC 失败 ⇒ 稳定错误、无 child 槽位、无 fork 关系、parent 原样。
     #[tokio::test]
     async fn fork_failure_rolls_back_without_child_slot_or_link() {
+        // P1-2 修复（CI 顺序依赖）：消费者注册是进程级全局
+        // （`negotiated::CAPABILITY_CONSUMERS`），注册只在成功用例里做过——
+        // 本用例不能依赖「它先跑」这种调度偶然：runner 上并行调度一变，就会
+        // 提前被 gate 拦成 `fork advertised but consumer not registered`，
+        // 走不到 RPC 失败路径（实测单跑必红）。独立注册，与成功用例对齐。
+        crate::acp::negotiated::register_capability_consumer(
+            crate::acp::CapabilityConsumer::SessionFork,
+        );
         let (runtime, agent) = fork_runtime("fork-fail", true).await;
         seed_parent(&runtime, "local:parent");
         let state = crate::test_utils::TestStateBuilder::bare()
