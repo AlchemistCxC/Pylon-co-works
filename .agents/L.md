@@ -262,3 +262,9 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 [2026-09-16 04] [图灵] [#99]
 
 闭环：run 35007730845（27e92432）**CI 全绿**——Rust（测试 + clippy + 构建）✅、前端 ✅。clippy 基线 6 条欠账已清零（修复而非扩基线）。#104 可评审合并。
+
+---
+
+[2026-09-16 01] [Noether] [#98]
+
+完工：ACP 能力协商与生命周期消费者闭环（PR 分支 `Ru5t/issue-98-capability-lifecycle`，基于 main）。提交内容：`acp/negotiated.rs` 能力矩阵快照（canonical 嵌套真源 + 根级 loadSession 兼容 alias + 四态/消费者注册表）、`acp/interaction_queue.rs` 统一 request-id 交互队列（FIFO/单一 Active/drain 终态/冷挂载投影）、`session/fork.rs` session/fork raw 消费者（usable gate + 受限 envelope + parent/child）、探针与建立链/agent_status 消费同一快照、protocol_adapter 方法驱动（去 provider gate）、elicitation 通用桥、agent_status 增 capabilitySnapshot/pendingInteractions、TS usable-only fail-closed 投影 + 冷挂载种子。ADR-0004 + 开发记录入库。门禁：fmt/cargo test 1073 绿（独立 worktree 验证提交树）/check:acp-shadow ok/vitest 全绿/tsc/check:solid/check:frontend 绿。

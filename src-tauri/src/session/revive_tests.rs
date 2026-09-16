@@ -445,3 +445,62 @@ for line in sys.stdin:
         "recreation notice is also emitted for the no-peri-id creation path"
     );
 }
+
+// ── #98（P1-2 评审修复）：revive 成功但远端 identity 变化 ⇒ 显式 rebind——
+// 复用 recreated_peri_id 出参通道广播（pylon:session-recreated），映射绑定新 id，
+// 不静默复用旧映射。fixture 仅标准嵌套 `sessionCapabilities.loadSession: {}`，
+// 同时覆盖「建立与复活消费同一协商快照」的 load 通道判定。──
+#[tokio::test]
+async fn revive_with_changed_remote_identity_rebinds_explicitly() {
+    const SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line); method=request.get('method')
+    result={}
+    if method == 'initialize':
+        result={'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
+    elif method == 'session/load':
+        result={'sessionId':'remote-rebound'}
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':result}
+    print(json.dumps(response),flush=True)
+"#;
+    let agent = crate::test_utils::fake_acp_agent("rebind-identity", SCRIPT);
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .unwrap();
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("rebind-identity")
+        .with_agent(agent)
+        .with_runtime("rebind-identity", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let mapping = ensure_session_mapping(
+        &state,
+        &runtime,
+        "local:rebind",
+        Some("profile"),
+        "",
+        ".",
+        &[],
+        Some("remote-original"),
+        &mut recreated,
+    )
+    .await
+    .expect("load 通道在交集内，revive 必成功");
+    assert_eq!(mapping.peri_id, "remote-rebound", "映射绑定远端返回的新 id");
+    assert_eq!(
+        recreated.as_deref(),
+        Some("remote-rebound"),
+        "identity 变化必须显式广播（recreated 事件通道）"
+    );
+    assert_eq!(
+        runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get("local:rebind")
+            .expect("槽位已重挂")
+            .peri_id,
+        "remote-rebound"
+    );
+}

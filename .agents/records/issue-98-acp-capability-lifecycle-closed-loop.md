@@ -16,7 +16,7 @@
 
 | 文件 | 大致范围 | 性质 |
 | --- | --- | --- |
-| `src-tauri/src/acp/negotiated.rs` | 能力矩阵（`CAPABILITY_MATRIX`：canonical 路径/类型/alias/消费者）、`NegotiatedCapabilitySnapshot`（Unknown/Advertised/Negotiated/Usable 四态、诊断、establishment 通道、wire 投影）、全局消费者注册表 + 29 项矩阵测试 | 新增 |
+| `src-tauri/src/acp/negotiated.rs` | 能力矩阵（`CAPABILITY_MATRIX`：canonical 路径/类型/alias/消费者）、`NegotiatedCapabilitySnapshot`（Unknown/Advertised/Negotiated/Usable 四态、诊断、establishment 通道、wire 投影）、全局消费者注册表 + 10 项矩阵测试 | 新增 |
 | `src-tauri/src/acp/interaction_queue.rs` | 统一交互队列（admit/settle/drain_where/drain/snapshot/depth、FIFO 单一 Active、终态枚举、`pending_interactions_wire` 冷挂载投影）+ 7 项测试 | 新增 |
 | `src-tauri/src/session/fork.rs` | `session/fork` raw RPC 消费者（usable gate、受限 envelope 校验、parent/child `ForkRecord` 登记、失败回滚=从未发生）、`session_fork` 命令 + 3 项测试 | 新增 |
 | `src-tauri/src/acp/capabilities.rs` | typed 视图标注（生产路径移交矩阵快照，视图保留给测试/诊断） | 修改 |
@@ -25,7 +25,7 @@
 | `src-tauri/src/lifecycle/mod.rs` | continuity probe 改消费协商快照（修根级 `loadSession` 与嵌套 object 不一致；读取失败 fail-closed） | 修改 |
 | `src-tauri/src/session/create.rs` | revive 链消费快照（establishment 通道 + `advertised("resume")` 平价断言）；revive 后远端 identity 变化显式 rebind（复用 `pylon:session-recreated` 通道 + runtime log） | 修改 |
 | `src-tauri/src/runtime.rs` | `AgentRuntime.interactions` 队列字段 | 修改 |
-| `src-tauri/src/dispatcher/mod.rs` | permission 请求入队（事件载荷同构复用）+ queue depth trace；adapter 分发改方法驱动（provider 不再是 gate）；私有桥新增 `elicitation/create` 分支 + 入队；未知 method 一律稳定 `method_unsupported` | 修改 |
+| `src-tauri/src/dispatcher/mod.rs` | permission 请求入队（事件载荷同构复用）+ queue depth trace；adapter 分发改方法驱动（provider 不再是 gate）；私有桥新增 `elicitation/create` 分支 + 入队；interaction 形请求（`looks_like_interaction_method` 命中面）稳定 `method_unsupported`，完全未知方法名走 A1 未知通知日志（base 既有行为） | 修改 |
 | `src-tauri/src/permission.rs` | resolve 成功 settle（Answered/Cancelled）；超时先 settle TimedOut；崩溃 runtime 队列 drain；respond_interaction 重构（私有桥优先、方法驱动兜底、elicitation 应答 arm） | 修改 |
 | `src-tauri/src/protocol_adapter.rs` | 方法键控注册表 `PROTOCOL_METHOD_ADAPTERS` + `get_protocol_adapter_for_method`；provider 键控表保留给诊断 catalog | 修改 |
 | `src-tauri/src/acp/adapter/private_ext/mod.rs` | `PrivateBridge::Elicitation`（方法路由、provider 无关）、`parse_elicitation` fail-closed 校验、`build_elicitation_response`（accept/decline/cancel）+ 测试 | 修改 |
@@ -36,7 +36,7 @@
 | `src/infrastructure/acp/permissionController.ts` | `seedFromSnapshot` 冷挂载种子（复用 normalize→receive 链，reducer 双键去重） | 修改 |
 | `src/infrastructure/acp/sessionClient.ts` | `forkSession` 方法 | 修改 |
 | `src/App.tsx` | agent_status 到达（fetch + listen）时调 seedFromSnapshot | 修改 |
-| `src/infrastructure/acp/__tests__/agentContracts.test.ts` | 契约更新至 fail-closed 语义 + 新增结构化快照 describe（35 测试） | 修改 |
+| `src/infrastructure/acp/__tests__/agentContracts.test.ts` | 契约更新至 fail-closed 语义 + 新增结构化快照 describe（35 项，含 it.each 展开） | 修改 |
 | `src/infrastructure/acp/__tests__/permissionController.test.ts` | 新增冷挂载种子 describe（15 测试全绿） | 修改 |
 | `.agents/decisions/0004-acp-capability-matrix-fail-closed.md` | canonical 真源、根级 alias 兼容窗口、fail-closed 迁移 | 新增 |
 | `docs/说明书/Pylon-项目架构参考.md`、`docs/说明书/Pylon-模块维护地图.md` | revive/rebind 与新模块漂移修订 | 修改 |
@@ -58,10 +58,10 @@
 | 冲突时 canonical 优先；boolean/string/null 不算 object capability | 通过：矩阵测试 `canonical_wins_conflicts_and_wrong_types_fail_closed` |
 | 建立/排序/探针不再各自拼路径，读同一协商快照 | 通过：`session_establishment_channels` 删除，快照唯一产出通道 |
 | initialize 前拒绝、未广告不发 RPC、fallback/detached 语义保持 | 通过：session_ready 守卫未动；revive/skip 语义测试全绿 |
-| Rust 与 TS 对 unknown/advertised/usable 投影一致；缺失不 fail-open | 通过：`capabilitySnapshot` 同构投影 + agentContracts 35 测试 |
+| Rust 与 TS 对 unknown/advertised/usable 投影一致；缺失不 fail-open | 通过：`capabilitySnapshot` 同构投影 + agentContracts 35 项（含 it.each 展开）|
 | fork 无消费者不暴露 usable，诊断说明 | 通过：usable=false + 「消费者未注册」诊断 |
-| fork fixture 实发 raw RPC、identity rebind、失败保留 parent | 通过：fork.rs envelope/gate/回滚测试（wire 级 fixture 由受限 envelope 校验承载） |
-| rebind 显式事件 | 通过：revive identity 变化复用 `pylon:session-recreated` 广播 + rebind 日志 |
+| fork fixture 实发 raw RPC、identity rebind、失败保留 parent | 通过（评审修复后）：fork.rs 执行链 wire 级测试（fake agent）——usable gate / raw RPC 形状 / child 槽位 / 失败回滚 + envelope 校验 |
+| rebind 显式事件 | 通过（评审修复后）：revive_tests 新增 rebind 用例断言 recreated 出参与槽位绑定，广播复用 `pylon:session-recreated` 通道 |
 | 并发 permission/elicitation 不互相覆盖；FIFO、depth、cancel/timeout/disconnect drain | 通过：interaction_queue 7 项测试 + dispatcher/permission/lib 接线 |
 | elicitation 等不再要求 provider 匹配；未知 method 稳定 unsupported + raw 诊断 | 通过：方法键控注册表 + dispatcher 常量 reason + private_ext 测试 |
 | 未知扩展字段不破坏 initialize/session/fork，raw 可回放 | 通过：`unknown_extension_fields_preserved_and_ignored` + fork envelope 测试 |
@@ -91,3 +91,23 @@
 - 根级 `loadSession` alias 的实际移除版本待 ACP 标准嵌套路径普及后另立 issue（ADR-0004 已登记弃用方向）。
 - elicitation 前端渲染卡（`elicitation.request` 事件已有队列/应答链）未接 UI——按 spec「不重做 UI」边界保留给后续切片。
 - `session_fork` 命令暂无 UI 入口（消费链 + TS client 方法已就绪），前端分叉会话登记（identityStore）留待有 UI 需求时接线。
+
+## 评审修复轮（2026-09-16，代码级深审后）
+
+单 agent 行代码级审核（PR #105 提交树静态审读）结论：无 P0；3 项 P1 与 8 项 P2，当轮全部修复：
+
+| 项 | 修复 |
+| --- | --- |
+| P1-1 resume 通道绕开 catalog 声明交集 | create.rs resume gate 改 `negotiated("resume")`（广告 ∧ 声明，与 load 对称）；debug_assert 改为对齐纯广告视图，语义恢复 base 行为 |
+| P1-2 fork 执行链/rebind 零测试 | fork.rs 补 3 个 wire 级测试（fake agent：gate 稳定拒绝 / raw RPC 形状+child 槽位+ForkRecord / 失败回滚）；revive_tests.rs 补 rebind 用例（load 返回不同 sessionId ⇒ recreated 出参 + 槽位绑定新 id） |
+| P1-3 close/expiry 不 drain 非 approval 条目 | respond_pending_permissions_cancelled 增按 session_id 的队列 drain_where(Cancelled) |
+| P2-1 超时 settle 先行后 restore 失配 | restore_pending 回灌交互队列（重建同构事件载荷） |
+| P2-2 fork 不可达诊断分支 | 收敛为两分支准确文案 |
+| P2-3 elicitation 未知 optionId 静默 accept | optionId 白名单 fail-closed，未知值显式 Err |
+| P2-4 TS 兜底角落（canonical 类型错误+根级 alias） | agentContracts 注释登记已知角落 |
+| P2-5 文档测试计数失真 | ADR/记录计数校正为本文件可复核数字 |
+| P2-6 client.rs 陈旧注释 | 指向协商快照新真源 |
+| P2-7 elicitation admit 吞错 | 与 permission 路径一致 warn |
+| P2-8「一律 unsupported」表述过强 | 记录限定 interaction 形请求范围 |
+
+审核确认无误的关键面（记录备查）：队列状态机反例未找到（单一 Active 不变量在各种 settle/drain 顺序下保持）、锁序单向无反序、request_id 双形态键全路径一致、dispatcher 重放自洽、bypass/auto 确认绕过队列、TS 结构化投影逐键一致。已知残留（登记不修）：`interaction.resolved` 事件暂无前端消费方（elicitation UI 属后续切片）；AC14 的 monotonic sequence 以 generation + reducer 双键去重补偿。
