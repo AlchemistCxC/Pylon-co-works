@@ -89,7 +89,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^30.0.1",
     "react-dom18": "npm:react-dom@^18.3.1",
-    "react-refresh": "^0.18.0",
+    "react-refresh": "^0.19.0",
     "react18": "npm:react@^18.3.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
