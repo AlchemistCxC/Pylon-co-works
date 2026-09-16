@@ -29,7 +29,7 @@ import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
-import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
+import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
@@ -225,12 +225,15 @@ export default function App() {
         const activeAgent = useIdentityStore.getState().activeAgent
         const status = normalizeAgentStatus(payload as AgentStatusPayload, activeAgent)
         useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
+        // #98：冷挂载——agent_status 快照恢复 pending permission 卡（幂等去重）。
+        getPermissionController()?.seedFromSnapshot(payload)
       },
       registerListeners: async () => {
         const unlisten = await listen<AgentStatusPayload>('pylon:agent-status', event => {
           const activeAgent = useIdentityStore.getState().activeAgent
           const status = normalizeAgentStatus(event.payload, activeAgent)
           useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
+          getPermissionController()?.seedFromSnapshot(event.payload)
         })
         // P51：后端 session/load 复活失败而新建会话时广播（Pylon 重启后首次发送）。
         // 回写新 periId，使下一次发送/重启能继续复活这条新会话而不是再新建。

@@ -7,6 +7,10 @@ pub enum PrivateBridge {
     GrokExtQuestions,
     PiSelectAsk,
     GrokExitPlan,
+    /// #98：`elicitation/create` 通用协议桥——按方法名路由，不绑定任何
+    /// provider。请求保持 raw（message/requestedSchema 原样观测），应答按
+    /// ESM 风格 action 三值（accept/decline/cancel），不伪造 option 或成功。
+    Elicitation,
 }
 
 /// Validate Codeg-compatible private interaction request shapes before the
@@ -19,7 +23,42 @@ pub fn validate_request(method: &str, params: &Value) -> Result<(), String> {
         }
         "pi/select_ask" => parse_questions(PrivateBridge::PiSelectAsk, params).map(|_| ()),
         "_x.ai/exit_plan_mode" => parse_exit_plan(PrivateBridge::GrokExitPlan, params).map(|_| ()),
+        "elicitation/create" => parse_elicitation(params).map(|_| ()),
         _ => Ok(()),
+    }
+}
+
+/// `elicitation/create` 参数校验：message 必须是 string（可缺省）、
+/// requestedSchema 缺省或 object。其它形状 fail-closed（返回 Err → 调用方
+/// 按协议错误应答，不伪造 option）。
+pub fn parse_elicitation(params: &Value) -> Result<(), String> {
+    if !params.is_object() {
+        return Err("elicitation/create params must be an object".into());
+    }
+    if let Some(message) = params.get("message") {
+        if !message.is_string() {
+            return Err("elicitation/create message must be a string".into());
+        }
+    }
+    if let Some(schema) = params.get("requestedSchema") {
+        if !schema.is_object() {
+            return Err("elicitation/create requestedSchema must be an object".into());
+        }
+    }
+    Ok(())
+}
+
+/// elicitation 应答形状：action ∈ accept/decline/cancel；accept 携带 content
+/// （用户 freeform/表单值，原样透传，宿主不解释 schema 语义）。
+pub fn build_elicitation_response(action: &str, content: Option<&Value>) -> Result<Value, String> {
+    match action {
+        "accept" => Ok(serde_json::json!({
+            "action": "accept",
+            "content": content.cloned().unwrap_or(serde_json::json!({})),
+        })),
+        "decline" => Ok(serde_json::json!({"action": "decline"})),
+        "cancel" => Ok(serde_json::json!({"action": "cancel"})),
+        other => Err(format!("elicitation action unsupported: {other}")),
     }
 }
 
@@ -33,7 +72,9 @@ pub fn parse_questions(
             question_policy::validate_specs(&specs)?;
             Ok(specs)
         }
-        PrivateBridge::GrokExitPlan => Err("plan bridge does not accept questions".into()),
+        PrivateBridge::GrokExitPlan | PrivateBridge::Elicitation => {
+            Err("plan/elicitation bridge does not accept questions".into())
+        }
     }
 }
 /// Serialize the provider-specific response shape documented by Codeg. Grok
@@ -73,7 +114,9 @@ pub fn build_question_response(
                 None => serde_json::json!({"cancelled":true}),
             })
         }
-        PrivateBridge::GrokExitPlan => Err("plan bridge does not accept question answers".into()),
+        PrivateBridge::GrokExitPlan | PrivateBridge::Elicitation => {
+            Err("plan/elicitation bridge does not accept question answers".into())
+        }
     }
 }
 pub fn parse_exit_plan(bridge: PrivateBridge, params: &Value) -> Result<(String, String), String> {
@@ -130,6 +173,40 @@ mod tests {
             &serde_json::json!({"questions":[]})
         )
         .is_err());
+    }
+
+    /// #98：elicitation/create 走通用桥——不绑定 provider；合法/非法形状与
+    /// action 三值应答。
+    #[test]
+    fn elicitation_bridge_is_provider_free_and_fail_closed() {
+        assert!(validate_request(
+            "elicitation/create",
+            &serde_json::json!({"message": "Provide details", "requestedSchema": {"type": "object"}})
+        )
+        .is_ok());
+        assert!(
+            validate_request("elicitation/create", &serde_json::json!({"message": "m"})).is_ok()
+        );
+        assert!(
+            validate_request("elicitation/create", &serde_json::json!({"message": 42})).is_err()
+        );
+        assert!(validate_request(
+            "elicitation/create",
+            &serde_json::json!({"requestedSchema": "not-an-object"})
+        )
+        .is_err());
+        assert!(validate_request("elicitation/create", &serde_json::json!([])).is_err());
+
+        assert_eq!(
+            build_elicitation_response("accept", Some(&serde_json::json!({"answer": "detail"})))
+                .unwrap(),
+            serde_json::json!({"action": "accept", "content": {"answer": "detail"}})
+        );
+        assert_eq!(
+            build_elicitation_response("cancel", None).unwrap(),
+            serde_json::json!({"action": "cancel"})
+        );
+        assert!(build_elicitation_response("invent", None).is_err());
     }
 
     #[test]

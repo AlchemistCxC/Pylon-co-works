@@ -7,6 +7,7 @@ import {
 } from '../permissionController.ts'
 import {
   permissionReducer,
+  sliceForAgent,
   EMPTY_PERMISSION_STATE,
   type PermissionAction,
   type PermissionState,
@@ -226,5 +227,65 @@ describe('permissionController interaction transport（迁移自 scripts/test-pe
     })
     expect(strAt?.requestedAt).toBe('2026-08-13T00:00:00Z')
     expect(resolveTimeoutDenyOption([{ optionId: 'allow_once' }, { optionId: 'reject_once' }])?.optionId).toBe('reject_once')
+  })
+})
+
+// ── #98（AC14）：冷挂载/刷新只凭 agent_status.pendingInteractions 快照恢复
+// pending permission 卡——不依赖一次性 live event。──
+describe('#98 冷挂载：seedFromSnapshot 恢复 pending interaction', () => {
+  const snapshotEvent = (requestId: string, title: string) => ({
+    provider: 'peri',
+    agentId: 'peri',
+    sessionId: 's1',
+    eventType: 'permission.request',
+    requestId,
+    clientGeneration: 3,
+    payload: {
+      title,
+      options: [{ optionId: 'allow_once' }, { optionId: 'reject_once' }],
+      requestedAt: 900,
+      deadlineMs: 300_000,
+    },
+  })
+
+  it('快照恢复 active+queued（FIFO 顺序），非 approval/畸形条目不进 permission reducer', () => {
+    const h = setup(['allow_once', 'reject_once'])
+    h.controller.seedFromSnapshot({
+      pendingInteractions: [
+        { requestId: '1', method: 'session/request_permission', kind: 'approval', state: 'active', payload: snapshotEvent('1', 'A') },
+        { requestId: '2', method: 'session/request_permission', kind: 'approval', state: 'waiting', payload: snapshotEvent('2', 'B') },
+        { requestId: '3', kind: 'elicitation', state: 'active', payload: { eventType: 'elicitation.request', requestId: '3' } },
+        { requestId: '4', kind: 'approval', payload: null },
+        'corrupt',
+      ],
+    })
+    const slice = sliceForAgent(h.state(), 'peri')
+    expect(slice.active?.request.requestId).toBe('1')
+    expect(slice.active?.request.title).toBe('A')
+    expect(slice.queued.map(request => request.request.requestId)).toEqual(['2'])
+    // 已恢复的 active 卡可正常 choose（复用既有应答链）。
+  })
+
+  it('与 live 事件幂等：快照恢复后同 (requestId, clientGeneration) 不重复入队', () => {
+    const h = setup(['allow_once', 'reject_once'])
+    h.controller.seedFromSnapshot({
+      pendingInteractions: [
+        { requestId: '1', kind: 'approval', state: 'active', payload: snapshotEvent('1', 'A') },
+      ],
+    })
+    // 同 id 同 generation 的 live 事件重放 → reducer 双键去重，仍只有一条。
+    h.receive('1' as unknown as number)
+    const slice = sliceForAgent(h.state(), 'peri')
+    expect(slice.active?.request.requestId).toBe('1')
+    expect(slice.queued).toHaveLength(0)
+  })
+
+  it('无 pendingInteractions 键（旧载荷）→ no-op', () => {
+    const h = setup(['allow_once'])
+    h.controller.seedFromSnapshot({ generation: 5 })
+    expect(h.actions).toHaveLength(0)
+    h.controller.seedFromSnapshot(null)
+    h.controller.seedFromSnapshot(undefined)
+    expect(h.actions).toHaveLength(0)
   })
 })

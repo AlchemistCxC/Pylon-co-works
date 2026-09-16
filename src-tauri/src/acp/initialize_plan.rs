@@ -7,10 +7,10 @@
 //! 一份不完整的 capability 文档继续握手。
 //!
 //! session 建立侧：[`SessionNewPlan`] 收拢 session/new 参数（MCP 模式语义
-//! 保持在 `session_new_params`），[`EstablishmentChannel`] +
-//! [`session_establishment_channels`] 把「catalog 声明顺序 ∩ 服务端能力」的
-//! 交集规则做成纯函数——声明了 resume 但服务端没广告，或反之，都不产生
-//! resume 通道；`new` 是 ACP 必备通道，恒在最后。
+//! 保持在 `session_new_params`），[`EstablishmentChannel`] 通道类型由
+//! `negotiated::NegotiatedCapabilitySnapshot::establishment_channels` 按
+//! 「catalog 声明顺序 ∩ 服务端能力」的交集规则产出——声明了 resume 但服务端
+//! 没广告，或反之，都不产生 resume 通道；`new` 是 ACP 必备通道，恒在最后。
 
 use crate::acp::error::{AcpError, AgentConnectFailure};
 use crate::agent_config::{AcpProtocolConfig, McpServersMode};
@@ -101,43 +101,10 @@ pub(crate) enum EstablishmentChannel {
     New,
 }
 
-/// 会话建立通道 = catalog 声明顺序 ∩ 服务端能力交集，按声明顺序排列。
-///
-/// - `resume` 通道：声明 ∧ 服务端 `sessionCapabilities.resume` 为 object；
-/// - `load` 通道：声明 ∧ 服务端 `sessionCapabilities.loadSession` 为 object；
-/// - `new` 通道：ACP 必备，声明即可（catalog 校验已保证 order 以 new 收尾）。
-///
-/// 广告侧经 [`crate::acp::CapabilityRegistry::supports_object`]（initialize
-/// 协商的 typed fail-closed 视图）——不在此重新解析 raw JSON。未知声明名 →
-/// Err（fail-closed：拼错的 policy 必须在计划层显形，而不是被静默丢弃后以
-/// 一条看似合法的短链继续）。
-pub(crate) fn session_establishment_channels(
-    declared_order: &[&str],
-    registry: &crate::acp::CapabilityRegistry,
-) -> Result<Vec<EstablishmentChannel>, String> {
-    let mut channels = Vec::new();
-    for declared in declared_order {
-        match *declared {
-            "resume" => {
-                if registry.supports_object(&["sessionCapabilities", "resume"]) {
-                    channels.push(EstablishmentChannel::Resume);
-                }
-            }
-            "load" => {
-                if registry.supports_object(&["sessionCapabilities", "loadSession"]) {
-                    channels.push(EstablishmentChannel::Load);
-                }
-            }
-            "new" => channels.push(EstablishmentChannel::New),
-            other => {
-                return Err(format!(
-                    "sessionEstablishment 声明了未知通道：{other}（合法值：resume/load/new）"
-                ))
-            }
-        }
-    }
-    Ok(channels)
-}
+// 「catalog 声明顺序 ∩ 服务端能力」的交集规则自 #98 起真源收敛到
+// [`crate::acp::negotiated::NegotiatedCapabilitySnapshot::establishment_channels`]：
+// session 建立、重连 continuity probe、agent_status 快照消费同一份协商结论，
+// 任何调用方不再各自拼接 capability path。本模块只保留通道类型与计划层。
 
 #[cfg(test)]
 mod tests {
@@ -189,47 +156,38 @@ mod tests {
         assert!(omit.params().unwrap().get("mcpServers").is_none());
     }
 
-    /// 交集矩阵：声明 ∧ 广告才产生通道；new 恒在；未知声明 fail-closed。
+    /// 计划层引用的 [`crate::acp::negotiated`] 快照与旧内联交集同结论（金丝雀）：
+    /// 嵌套 object 广告产生通道、标量不算能力。矩阵全量语义见 negotiated.rs 测试。
     #[test]
-    fn establishment_channels_are_the_declared_advertised_intersection() {
+    fn snapshot_establishment_channels_match_the_inline_intersection() {
+        use crate::acp::negotiated::NegotiatedCapabilitySnapshot;
         let full = registry(json!({"sessionCapabilities": {"resume": {}, "loadSession": {}}}));
+        let declared = vec!["resume".to_string(), "load".to_string(), "new".to_string()];
+        let snapshot = NegotiatedCapabilitySnapshot::from_parts(
+            &full,
+            &declared,
+            0,
+            &std::collections::BTreeSet::new(),
+        );
         assert_eq!(
-            session_establishment_channels(&["resume", "load", "new"], &full).unwrap(),
+            snapshot.establishment_channels().unwrap(),
             vec![
                 EstablishmentChannel::Resume,
                 EstablishmentChannel::Load,
                 EstablishmentChannel::New
             ]
         );
-
-        // 服务端只广告 load：resume 不产生（声明了也不行——这就是交集）。
-        let load_only = registry(json!({"sessionCapabilities": {"loadSession": {}}}));
-        assert_eq!(
-            session_establishment_channels(&["resume", "load", "new"], &load_only).unwrap(),
-            vec![EstablishmentChannel::Load, EstablishmentChannel::New]
-        );
-
-        // 服务端什么都没广告：只剩 new（ACP 必备通道）。
-        let bare = registry(json!({}));
-        assert_eq!(
-            session_establishment_channels(&["resume", "load", "new"], &bare).unwrap(),
-            vec![EstablishmentChannel::New]
-        );
-
-        // 声明不含 resume：即使服务端广告了 resume 也不产生（双向交集）。
-        assert_eq!(
-            session_establishment_channels(&["load", "new"], &full).unwrap(),
-            vec![EstablishmentChannel::Load, EstablishmentChannel::New]
-        );
-
-        // 广告值必须是 object：标量不算能力。
+        // 标量不算 object capability（fail-closed 同旧实现）。
         let scalar = registry(json!({"sessionCapabilities": {"resume": true, "loadSession": {}}}));
+        let snapshot = NegotiatedCapabilitySnapshot::from_parts(
+            &scalar,
+            &declared,
+            0,
+            &std::collections::BTreeSet::new(),
+        );
         assert_eq!(
-            session_establishment_channels(&["resume", "load", "new"], &scalar).unwrap(),
+            snapshot.establishment_channels().unwrap(),
             vec![EstablishmentChannel::Load, EstablishmentChannel::New]
         );
-
-        // 未知声明名 fail-closed。
-        assert!(session_establishment_channels(&["resume", "fork", "new"], &full).is_err());
     }
 }
