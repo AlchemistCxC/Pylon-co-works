@@ -44,7 +44,7 @@ issue #98 之前，能力判断散落三处且互不一致：
 
 ## 证据
 
-- Rust 矩阵与四态：`src-tauri/src/acp/negotiated.rs`（29 项矩阵测试）
+- Rust 矩阵与四态：`src-tauri/src/acp/negotiated.rs`（10 项矩阵测试）
 - 探针消费快照：`src-tauri/src/lifecycle/mod.rs`（probe_unknown_session_continuity）
 - 建立链消费快照：`src-tauri/src/session/create.rs`（revive_session_slot）
 - IPC 投影：`src-tauri/src/lib.rs`（agent_status_payload.capabilitySnapshot/pendingInteractions）

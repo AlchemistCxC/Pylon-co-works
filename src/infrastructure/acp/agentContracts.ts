@@ -98,7 +98,10 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
   return {
     connected,
     capabilitiesKnown,
-    // canonical 缺失时根级布尔 alias 兼容生效（唯一登记的 alias）。
+    // canonical 缺失时根级布尔 alias 兼容生效（唯一登记的 alias）。已知角落：
+    // canonical 为错误类型（如 boolean）且根级 alias 为 true 时，本兜底投影
+    // true 而 Rust 矩阵判类型错误 fail-closed——仅影响无结构化快照的旧载荷，
+    // 以结构化快照为准。
     loadSession: rawObjectCapability(session, 'loadSession') || caps?.loadSession === true,
     promptImage: prompt?.image === true,
     // raw 无消费者登记信息：fork 恒 fail-closed（ghost capability 防线）。

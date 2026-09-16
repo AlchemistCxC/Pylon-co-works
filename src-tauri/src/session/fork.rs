@@ -121,10 +121,10 @@ pub(crate) async fn fork_session_slot(
         let reason = snapshot
             .decision("fork")
             .map(|decision| {
-                if decision.negotiated {
-                    "fork capability negotiated but consumer not registered"
-                } else if decision.advertised == Some(true) {
-                    "fork advertised but not negotiated/usable (no registered consumer)"
+                // fork 无声明维度：advertised ⇒ negotiated 恒成立，可用性缺口
+                // 只可能是「未广告」或「消费者未注册」两种。
+                if decision.advertised == Some(true) {
+                    "fork advertised but consumer not registered"
                 } else {
                     "fork capability not advertised"
                 }
@@ -261,6 +261,175 @@ mod tests {
         assert!(forked_session_id_from(&serde_json::json!("session-1")).is_err());
         let oversized = serde_json::Value::String("x".repeat(MAX_FORK_RESPONSE_BYTES + 1));
         assert!(forked_session_id_from(&oversized).is_err());
+    }
+
+    // ── P1-2（评审修复）：fork 执行链 wire 级测试——gate/RPC 形状/child 槽位/
+    // parent 只读/失败回滚全部落证据（python fake agent，与 revive_tests 同款
+    // harness；不依赖真实 provider 名称，fixture 只描述 ACP wire 形状）。──
+
+    const FORK_SCRIPT: &str = r#"import json,sys,os
+for line in sys.stdin:
+    request=json.loads(line); method=request.get('method')
+    result={}
+    error=None
+    if method == 'initialize':
+        result={'agentCapabilities':{'sessionCapabilities':{'fork': {}, 'loadSession': {}}}}
+    elif method == 'session/fork':
+        if os.environ.get('PYLON_FORK_FAIL') == '1':
+            error={'code':-32000,'message':'fork unavailable'}
+        else:
+            result={'sessionId':'remote-child','_vendorExtension':{'future':True}}
+    else:
+        result={'sessionId':'remote-parent'}
+    response={'jsonrpc':'2.0','id':request.get('id')}
+    response['error' if error else 'result']=error if error else result
+    print(json.dumps(response),flush=True)
+"#;
+
+    async fn fork_runtime(
+        name: &str,
+        fail: bool,
+    ) -> (std::sync::Arc<AgentRuntime>, crate::agent_config::AgentDef) {
+        let mut env = std::collections::HashMap::new();
+        if fail {
+            env.insert("PYLON_FORK_FAIL".to_string(), "1".to_string());
+        }
+        let agent = crate::test_utils::fake_acp_agent_with(name, FORK_SCRIPT, Vec::new(), env);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .unwrap();
+        (runtime, agent)
+    }
+
+    fn seed_parent(runtime: &AgentRuntime, source: &str) {
+        let parent = crate::session::SessionInfo::new(
+            "remote-parent".to_string(),
+            String::new(),
+            ".".to_string(),
+            false,
+            0,
+        );
+        runtime
+            .sessions
+            .lock()
+            .expect("test sessions 锁")
+            .insert(source.to_string(), parent);
+    }
+
+    /// AC8：fork usable ⇒ 实发 raw `session/fork`（params 仅 sessionId），返回的
+    /// 新 remote identity 绑定 child 槽位 + ForkRecord；parent 槽位只读不污染；
+    /// 未知扩展字段不破坏 sessionId 提取（raw 原文随事件回传）。
+    #[tokio::test]
+    async fn fork_session_slot_sends_raw_rpc_and_creates_child_with_link() {
+        crate::acp::negotiated::register_capability_consumer(
+            crate::acp::CapabilityConsumer::SessionFork,
+        );
+        let (runtime, agent) = fork_runtime("fork-ok", false).await;
+        seed_parent(&runtime, "local:parent");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("fork-ok")
+            .with_agent(agent)
+            .with_runtime("fork-ok", runtime.clone())
+            .build();
+        let payload = fork_session_slot(&state, &runtime, "local:parent", "local:child")
+            .await
+            .unwrap();
+        assert_eq!(
+            payload.get("periId"),
+            Some(&serde_json::json!("remote-child"))
+        );
+        assert_eq!(
+            payload.pointer("/rawResponse/_vendorExtension"),
+            Some(&serde_json::json!({"future": true})),
+            "未知扩展字段原样保留（raw envelope 保真）"
+        );
+        let sessions = runtime.sessions.lock().expect("test sessions 锁");
+        assert_eq!(
+            sessions.get("local:child").expect("child 槽位已建").peri_id,
+            "remote-child"
+        );
+        assert_eq!(
+            sessions
+                .get("local:parent")
+                .expect("parent 槽位不变")
+                .peri_id,
+            "remote-parent",
+            "失败回滚前提：parent 映射只读"
+        );
+        drop(sessions);
+        let record = fork_link("local:child").expect("fork 关系已登记");
+        assert_eq!(record.parent_source, "local:parent");
+        assert_eq!(record.parent_peri_id, "remote-parent");
+        assert_eq!(record.child_peri_id, "remote-child");
+    }
+
+    /// AC8 回滚：RPC 失败 ⇒ 稳定错误、无 child 槽位、无 fork 关系、parent 原样。
+    #[tokio::test]
+    async fn fork_failure_rolls_back_without_child_slot_or_link() {
+        // P1-2 修复（CI 顺序依赖）：消费者注册是进程级全局
+        // （`negotiated::CAPABILITY_CONSUMERS`），注册只在成功用例里做过——
+        // 本用例不能依赖「它先跑」这种调度偶然：runner 上并行调度一变，就会
+        // 提前被 gate 拦成 `fork advertised but consumer not registered`，
+        // 走不到 RPC 失败路径（实测单跑必红）。独立注册，与成功用例对齐。
+        crate::acp::negotiated::register_capability_consumer(
+            crate::acp::CapabilityConsumer::SessionFork,
+        );
+        let (runtime, agent) = fork_runtime("fork-fail", true).await;
+        seed_parent(&runtime, "local:parent");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("fork-fail")
+            .with_agent(agent)
+            .with_runtime("fork-fail", runtime.clone())
+            .build();
+        // 独立 child source：FORK_LINKS 是进程级全局注册表，避免与成功用例串名。
+        let error = fork_session_slot(&state, &runtime, "local:parent", "local:child-fail")
+            .await
+            .expect_err("RPC 失败必须传播");
+        assert!(
+            error.to_string().contains("session/fork rpc failed"),
+            "实际: {error}"
+        );
+        let sessions = runtime.sessions.lock().expect("test sessions 锁");
+        assert!(
+            sessions.get("local:child-fail").is_none(),
+            "失败不得创建 child 槽位"
+        );
+        assert_eq!(
+            sessions.get("local:parent").unwrap().peri_id,
+            "remote-parent"
+        );
+        drop(sessions);
+        assert!(
+            fork_link("local:child-fail").is_none(),
+            "失败不得登记 fork 关系"
+        );
+    }
+
+    /// AC7：能力不可用（未广告/消费者未注册）⇒ 稳定 session_fork_unavailable，
+    /// 不发 RPC、不建 child。
+    #[tokio::test]
+    async fn fork_gate_stable_unsupported_without_negotiated_capability() {
+        // 不注册 SessionFork 消费者、连接为 disconnected（无广告）。
+        let runtime = AgentRuntime::new_disconnected();
+        seed_parent(&runtime, "local:parent");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("fork-gate")
+            .with_runtime("fork-gate", runtime.clone())
+            .build();
+        let error = fork_session_slot(&state, &runtime, "local:parent", "local:child")
+            .await
+            .expect_err("不可用必须稳定拒绝");
+        assert!(
+            error.to_string().contains("session_fork_unavailable"),
+            "实际: {error}"
+        );
+        assert!(runtime
+            .sessions
+            .lock()
+            .expect("锁")
+            .get("local:child")
+            .is_none());
     }
 
     /// fork 关系登记/查询：child → parent 链路可断言（wire trace/snapshot 素材）。

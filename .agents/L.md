@@ -265,12 +265,18 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 ---
 
-[2026-09-16 05] [图灵] [#99]
+[2026-09-16 01] [Noether] [#98]
 
-二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
+完工：ACP 能力协商与生命周期消费者闭环（PR 分支 `Ru5t/issue-98-capability-lifecycle`，基于 main）。提交内容：`acp/negotiated.rs` 能力矩阵快照（canonical 嵌套真源 + 根级 loadSession 兼容 alias + 四态/消费者注册表）、`acp/interaction_queue.rs` 统一 request-id 交互队列（FIFO/单一 Active/drain 终态/冷挂载投影）、`session/fork.rs` session/fork raw 消费者（usable gate + 受限 envelope + parent/child）、探针与建立链/agent_status 消费同一快照、protocol_adapter 方法驱动（去 provider gate）、elicitation 通用桥、agent_status 增 capabilitySnapshot/pendingInteractions、TS usable-only fail-closed 投影 + 冷挂载种子。ADR-0004 + 开发记录入库。门禁：fmt/cargo test 1073 绿（独立 worktree 验证提交树）/check:acp-shadow ok/vitest 全绿/tsc/check:solid/check:frontend 绿。
+
+---
 
 [2026-09-16 03] [Erdős] [#107]
 
 清出 `scripts/` 四个零引用孤儿脚本与根目录垃圾（`nul`、误落盘模板行、调试日志、pycache）。只 git rm 下列四个 tracked 文件：acceptance-pet-runtime.mts、hermes-wire-test.py、smoke-release-sdk.mjs、convert-presets-to-delta.mts，另本地清理未跟踪垃圾。**不碰** scripts/ 其他在岗脚本、pack-plugin-devkit 链、backup-portable-data.sh、src-tauri 他人 WIP。
 
 ---
+
+[2026-09-16 05] [图灵] [#99]
+
+二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
