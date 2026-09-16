@@ -12,9 +12,9 @@
 //! 排查 app 重启时，「连接断了」和「方法卡住」是完全不同的结论。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -37,6 +37,51 @@ const DOMAINS: [&str; 4] = [
 ];
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 连接心跳间隔。定期发一个 WebSocket ping。
+///
+/// 它解决的是半开连接：app 被 `kill` 掉（或窗口被销毁）时，对面已经不在了，
+/// 但本地 socket 常常不报错——下一次调用会白等到超时才失败，而排查的人看到的
+/// 是「方法卡住」，不是「连接断了」。心跳把这种情况提前变成「连接已死 → 重连」。
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// 发出 ping 后等 pong 的时限。超过即判定连接已死。
+const PONG_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 心跳探针的载荷（内容无意义，只用于配对）。
+const PROBE_PAYLOAD: &[u8] = b"pylon-mcp";
+
+/// 一轮心跳的判定结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keepalive {
+    /// 已经收到 pong：机制可用，继续下一轮。
+    Pong,
+    /// 还没到时限，继续等。
+    Wait,
+    /// 机制可用却没等到 pong —— 对面不在了。
+    Dead,
+    /// 这个端点从来没回过 pong：不能把「它不回 ping」当成「连接已死」。
+    Unsupported,
+}
+
+/// 心跳状态机的判定（纯函数，便于测）。
+///
+/// `pong_supported` 表示本会话已经**至少收到过一次** pong。只有在这个前提下，
+/// 缺 pong 才能推出「连接已死」——否则旧版 WebView2（或中间有代理时）不回 ping
+/// 会被误判成断线，那比不做心跳还糟。
+fn keepalive_verdict(probe_age: Duration, pong_after_probe: bool, pong_supported: bool) -> Keepalive {
+    if pong_after_probe {
+        return Keepalive::Pong;
+    }
+    if probe_age < PONG_TIMEOUT {
+        return Keepalive::Wait;
+    }
+    if pong_supported {
+        Keepalive::Dead
+    } else {
+        Keepalive::Unsupported
+    }
+}
 
 /// `Runtime.evaluate` 的可选项。
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +130,12 @@ pub struct Session {
     next_id: AtomicI64,
     alive: Arc<AtomicBool>,
     default_timeout: Duration,
+    /// 「新文档自动重订阅」脚本的记账：`(scriptId, 它覆盖的事件名)`。
+    ///
+    /// 页内状态会随 reload 消失，CDP 侧的注册却还在——不在这里记账就会重复注册，
+    /// 让同一事件被投递到多个回调。名字集合变化时也要先撤旧的再注册新的，
+    /// 否则旧脚本会把已经不需要的事件一起恢复。
+    reload_subscription: StdMutex<Option<(String, Vec<String>)>>,
 }
 
 impl Session {
@@ -123,6 +174,9 @@ impl Session {
         let pending: Pending = Arc::new(StdMutex::new(HashMap::new()));
         let events = Arc::new(StdMutex::new(EventLog::new()));
         let alive = Arc::new(AtomicBool::new(true));
+        let started = Instant::now();
+        // 最近一次收到 pong 的时刻（相对会话开始的毫秒数）。
+        let last_pong_ms = Arc::new(AtomicU64::new(0));
 
         tokio::spawn(async move {
             while let Some(message) = outbound.recv().await {
@@ -137,6 +191,7 @@ impl Session {
             let pending = Arc::clone(&pending);
             let events = Arc::clone(&events);
             let alive = Arc::clone(&alive);
+            let last_pong_ms = Arc::clone(&last_pong_ms);
             tokio::spawn(async move {
                 while let Some(incoming) = stream.next().await {
                     match incoming {
@@ -145,6 +200,9 @@ impl Session {
                             if let Ok(text) = std::str::from_utf8(&bytes) {
                                 dispatch(text, &pending, &events);
                             }
+                        }
+                        Ok(Message::Pong(_)) => {
+                            last_pong_ms.store(started.elapsed().as_millis() as u64, Ordering::SeqCst);
                         }
                         Ok(Message::Close(_)) => break,
                         Ok(_) => {}
@@ -156,6 +214,66 @@ impl Session {
             });
         }
 
+        {
+            // 心跳 task：定期发 ping，按 pong 判定半开连接。
+            let pending = Arc::clone(&pending);
+            let alive = Arc::clone(&alive);
+            let last_pong_ms = Arc::clone(&last_pong_ms);
+            let probe_writer = writer.clone();
+            tokio::spawn(async move {
+                let mut probe: Option<(u64, Instant)> = None;
+                let mut pong_supported = false;
+                loop {
+                    tokio::time::sleep(KEEPALIVE_INTERVAL).await;
+                    if !alive.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let last_pong = last_pong_ms.load(Ordering::SeqCst);
+                    if let Some((probe_ms, sent_at)) = probe {
+                        let verdict = keepalive_verdict(
+                            sent_at.elapsed(),
+                            last_pong > probe_ms,
+                            pong_supported,
+                        );
+                        match verdict {
+                            // 收到 pong 后不中断，直接发下一轮探针（下面统一发）。
+                            Keepalive::Pong => pong_supported = true,
+                            Keepalive::Wait => continue,
+                            Keepalive::Dead => {
+                                eprintln!(
+                                    "[pylon-webview2-mcp] 连接心跳无回应（{PONG_TIMEOUT:?} 内没有 pong）；\
+                                     判定连接已死——app 可能已被杀掉或窗口已销毁。下次调用会自动重连。"
+                                );
+                                alive.store(false, Ordering::SeqCst);
+                                fail_pending(
+                                    &pending,
+                                    "WebSocket 心跳无回应（对面已不在，socket 未报错）",
+                                );
+                                // 提示本地 socket 收尾，让 reader 也能退出。
+                                let _ = probe_writer.send(Message::Close(None));
+                                return;
+                            }
+                            Keepalive::Unsupported => {
+                                eprintln!(
+                                    "[pylon-webview2-mcp] 该调试端点不回应 WebSocket ping，\
+                                     已停用连接心跳（不影响正常调用；半开连接只能等调用超时暴露）。"
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    let probe_ms = started.elapsed().as_millis() as u64;
+                    if probe_writer
+                        .send(Message::Ping(PROBE_PAYLOAD.to_vec()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                    probe = Some((probe_ms, Instant::now()));
+                }
+            });
+        }
+
         let session = Arc::new(Self {
             writer,
             pending,
@@ -163,6 +281,7 @@ impl Session {
             next_id: AtomicI64::new(1),
             alive,
             default_timeout,
+            reload_subscription: StdMutex::new(None),
         });
 
         session.open_domains().await;
@@ -176,6 +295,15 @@ impl Session {
 
     pub fn events(&self) -> Arc<StdMutex<EventLog>> {
         Arc::clone(&self.events)
+    }
+
+    /// 已注册的「新文档自动重订阅」脚本：`(scriptId, 覆盖的事件名)`。
+    pub fn reload_subscription(&self) -> Option<(String, Vec<String>)> {
+        lock(&self.reload_subscription).clone()
+    }
+
+    pub fn set_reload_subscription(&self, script_id: String, names: Vec<String>) {
+        *lock(&self.reload_subscription) = Some((script_id, names));
     }
 
     /// 打开事件域。失败不致命（例如旧 WebView2 缺某个域），逐条记到 stderr，
@@ -383,6 +511,31 @@ fn lock<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keepalive_only_calls_a_dead_link_after_pongs_were_proven_to_work() {
+        // 收到 pong：机制可用。
+        assert_eq!(
+            keepalive_verdict(Duration::from_millis(1), true, false),
+            Keepalive::Pong
+        );
+        // 还没到时限：继续等，不下结论。
+        assert_eq!(
+            keepalive_verdict(PONG_TIMEOUT - Duration::from_millis(1), false, true),
+            Keepalive::Wait
+        );
+        // 已证明会回 pong，却超时没回 —— 对面不在了。
+        assert_eq!(
+            keepalive_verdict(PONG_TIMEOUT, false, true),
+            Keepalive::Dead
+        );
+        // 从没见过 pong：这是「这个端点不支持」，不是「连接死了」。
+        // 误判成 Dead 会把好会话杀掉，比不做心跳更糟，所以必须退让。
+        assert_eq!(
+            keepalive_verdict(PONG_TIMEOUT, false, false),
+            Keepalive::Unsupported
+        );
+    }
 
     #[test]
     fn evaluates_value_passthrough() {

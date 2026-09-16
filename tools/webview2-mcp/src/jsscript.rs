@@ -458,8 +458,55 @@ pub fn events_subscribe(
     max_buffer: usize,
     reset: bool,
 ) -> String {
+    as_async_body(&events_subscribe_body(names, target, max_buffer, reset))
+}
+
+/// 供 `Page.addScriptToEvaluateOnNewDocument` 注入的版本：每次新文档都重跑一遍，
+/// 于是 reload 之后订阅自动恢复，不必等 agent 再喊一次。
+///
+/// 与直接注入的那份有两点不同：
+///
+/// 1. **先等 `__TAURI_INTERNALS__` 出现**。新文档注入脚本与 Tauri 自己的
+///    init 脚本谁先执行没有明文的保证；抢跑的话 `invoke` 还不存在，订阅会
+///    静默失败（这正是「reload 后事件再也不来」最难查的形态）。
+/// 2. **不 reset**：新文档本来就是干净的缓冲。
+pub fn events_subscribe_on_new_document(
+    names: &[String],
+    target: &Value,
+    max_buffer: usize,
+) -> String {
+    as_sync_body(&render(
+        r#"
+  const start = async () => {
+{BODY}
+  };
+  let attempts = 0;
+  const wait = () => {
+    const internals = window.__TAURI_INTERNALS__;
+    if (internals && typeof internals.invoke === 'function') { start().catch(() => {}); return; }
+    // 约 5 秒内每 50ms 看一眼；再等不到就放弃（页面多半不是 Tauri webview）。
+    if (++attempts > 100) return;
+    setTimeout(wait, 50);
+  };
+  wait();
+"#,
+        &[(
+            "{BODY}",
+            events_subscribe_body(names, target, max_buffer, false),
+        )],
+    ))
+}
+
+/// 订阅脚本的**函数体**（可直接作为 async IIFE 内容）。两个注入点共用这一份，
+/// 避免「直接注入」与「新文档注入」两套逻辑漂移。
+fn events_subscribe_body(
+    names: &[String],
+    target: &Value,
+    max_buffer: usize,
+    reset: bool,
+) -> String {
     let names: Vec<String> = names.iter().map(|n| js_str(n)).collect();
-    as_async_body(&render(
+    render(
         r#"
   const NAMES = [{NAMES}];
   const TARGET = {TARGET};
@@ -535,7 +582,7 @@ pub fn events_subscribe(
             ("{MAX_BUFFER}", max_buffer.to_string()),
             ("{RESET}", reset.to_string()),
         ],
-    ))
+    )
 }
 
 /// 读事件增量，游标语义与 `webview_console` 一致（scan 与 limit 分离）。
@@ -1054,6 +1101,24 @@ mod tests {
     }
 
     #[test]
+    fn the_new_document_variant_waits_for_tauri_then_reuses_the_same_body() {
+        let script = events_subscribe_on_new_document(
+            &["session://update".to_string()],
+            &json!({ "kind": "Any" }),
+            500,
+        );
+        // 必须等 __TAURI_INTERNALS__：新文档注入与 Tauri init 的先后没有保证。
+        assert!(script.contains("typeof internals.invoke === 'function'"), "{script}");
+        assert!(script.contains("setTimeout(wait, 50)"), "{script}");
+        // 订阅逻辑与直接注入那份是同一份体（避免两套逻辑漂移）。
+        assert!(script.contains("plugin:event|listen"), "{script}");
+        assert!(script.contains(r#"const NAMES = ["session://update"];"#), "{script}");
+        // 新文档本来就是干净的缓冲，不该 reset。
+        assert!(script.contains("const RESET = false;"), "{script}");
+        assert!(!script.contains("const RESET = true;"), "{script}");
+    }
+
+    #[test]
     fn events_subscribe_with_empty_name_list_still_returns_state() {
         let script = events_subscribe(&[], &json!({ "kind": "Any" }), 100, true);
         assert!(script.contains("const NAMES = [];"));
@@ -1083,6 +1148,7 @@ mod tests {
             window_state("main"),
             tauri_invoke("cmd", &json!({})),
             events_subscribe(&["e".to_string()], &json!({ "kind": "Any" }), 10, false),
+            events_subscribe_on_new_document(&["e".to_string()], &json!({ "kind": "Any" }), 10),
             events_drain(None, 10, 10),
             events_drain(Some(1), 10, 10),
             wait_selector("#a", false),

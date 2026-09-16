@@ -698,7 +698,7 @@ static TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "tauri_events",
-        description: "订阅并读取 Tauri 事件的增量。必须显式给出事件名——tauri 的 __TAURI_INTERNALS__.invoke 用不可配置的 defineProperty 定义，无法包装，因此做不到全量旁路捕获。事件名先用 tauri_event_catalog 从源码扫出。订阅是幂等的，页面 reload 后下次调用会自动重新订阅。",
+        description: "订阅并读取 Tauri 事件的增量。必须显式给出事件名——tauri 的 __TAURI_INTERNALS__.invoke 用不可配置的 defineProperty 定义，无法包装，因此做不到全量旁路捕获；事件名先用 tauri_event_catalog 从源码扫出。订阅是幂等的，并且会被注册成「新文档注入」：页面 reload/导航后订阅自动重建，不必再喊一次（结果里的 reloadSubscription 说明注册状态；该 WebView2 版本若不支持这个方法会如实报 installed=false，行为退回原样）。事件名集合变化时会自动重注册。",
         properties: &[
             (
                 "events",

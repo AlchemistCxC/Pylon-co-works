@@ -101,6 +101,33 @@ pub async fn events(cx: &Context, args: &Value) -> Result<ToolResult> {
         )
     };
 
+    let not_tauri = subscription
+        .as_ref()
+        .and_then(|value| value.get("ok"))
+        .and_then(Value::as_bool)
+        == Some(false);
+
+    // 让页面 reload 后的订阅自动重建：把订阅脚本注册成「新文档注入」。
+    // 失败不致命（退化回旧行为：下次调用再订阅一次），所以只报事实、不报错。
+    let reload = match names.is_empty() || not_tauri {
+        true => Value::Null,
+        false => {
+            let subscribed: Vec<String> = subscription
+                .as_ref()
+                .and_then(|value| value.get("subscribed"))
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            ensure_reload_subscription(cx, target_arg, &event_target, buffer_size, subscribed).await
+        }
+    };
+
     let drained = cx
         .cdp
         .evaluate(
@@ -113,14 +140,9 @@ pub async fn events(cx: &Context, args: &Value) -> Result<ToolResult> {
         )
         .await?;
 
-    let not_tauri = subscription
-        .as_ref()
-        .and_then(|value| value.get("ok"))
-        .and_then(Value::as_bool)
-        == Some(false);
-
     let mut result = ToolResult::json(&json!({
         "subscription": subscription,
+        "reloadSubscription": reload,
         "entries": drained.get("entries").cloned().unwrap_or(json!([])),
         "returned": drained.get("entries").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
         "scanned": drained.get("scanned").cloned().unwrap_or(json!(0)),
@@ -131,11 +153,89 @@ pub async fn events(cx: &Context, args: &Value) -> Result<ToolResult> {
         "subscriptionErrors": drained.get("errors").cloned().unwrap_or(json!({})),
         "installed": drained.get("installed").cloned().unwrap_or(json!(false)),
         "explicitSinceSeq": since,
-        "reloadNote": "页面 reload 会清空页内订阅与缓冲；下次调用本工具会自动重新订阅（订阅是幂等的），但 reload 期间的事件无法补回。",
+        "reloadNote": "页面 reload 会清空页内缓冲，但订阅已被注册成「新文档注入」（见 reloadSubscription）：新文档一建立就自动重订阅，不必再喊一次。reload 瞬间的事件仍然补不回来。",
         "discoveryNote": "事件名必须显式给出。tauri 的 __TAURI_INTERNALS__.invoke 用不可配置的 defineProperty 定义，无法包装，因此做不到全量事件旁路捕获。用 tauri_event_catalog 从源码扫出事件名。",
     }));
     result.is_error = not_tauri;
     Ok(result)
+}
+
+/// 注册（或在事件名集合变化时重注册）「新文档自动重订阅」脚本。
+///
+/// 三种结果都会如实返回，让 agent 知道 reload 后会发生什么：
+/// 已是最新（`changed: false`）、本次注册/更新成功、或该 WebView2 版本不支持
+/// 这个 CDP 方法（`installed: false` + 原因）——不支持时行为退回原样。
+async fn ensure_reload_subscription(
+    cx: &Context,
+    target: Option<&str>,
+    event_target: &Value,
+    buffer_size: usize,
+    subscribed: Vec<String>,
+) -> Value {
+    if subscribed.is_empty() {
+        return json!({ "installed": false, "reason": "本次没有成功订阅任何事件，未注册新文档注入" });
+    }
+    let mut names = subscribed;
+    names.sort();
+
+    let session = match cx.cdp.session(target).await {
+        Ok((_, session, _)) => session,
+        Err(error) => {
+            return json!({ "installed": false, "reason": format!("取会话失败：{error}") });
+        }
+    };
+
+    if let Some((identifier, tracked)) = session.reload_subscription() {
+        if tracked == names {
+            return json!({
+                "installed": true,
+                "changed": false,
+                "events": names,
+                "note": "新文档注入已是最新，无需重注册。",
+            });
+        }
+        // 名字集合变了：先撤旧的。否则旧脚本会把已经不需要的事件一起恢复，
+        // 同一事件也会被投递到两个回调。
+        if let Err(error) = session
+            .call(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                json!({ "identifier": identifier }),
+            )
+            .await
+        {
+            eprintln!("[pylon-webview2-mcp] 撤销旧的新文档注入失败（继续注册新的）：{error}");
+        }
+    }
+
+    let source = jsscript::events_subscribe_on_new_document(&names, event_target, buffer_size);
+    let outcome = session
+        .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+        )
+        .await;
+
+    match outcome {
+        Ok(value) => match value.get("identifier").and_then(Value::as_str) {
+            Some(identifier) => {
+                session.set_reload_subscription(identifier.to_string(), names.clone());
+                json!({
+                    "installed": true,
+                    "changed": true,
+                    "events": names,
+                    "note": "已注册新文档注入：页面 reload/导航后订阅会自动重建，无需再调用本工具。",
+                })
+            }
+            None => json!({
+                "installed": false,
+                "reason": "Page.addScriptToEvaluateOnNewDocument 没有返回 identifier；该 WebView2 版本可能不支持。reload 后仍需手动重新订阅。",
+            }),
+        },
+        Err(error) => json!({
+            "installed": false,
+            "reason": format!("注册新文档注入失败：{error}；reload 后仍需手动重新订阅。"),
+        }),
+    }
 }
 
 // ─────────────────────── 事件名静态扫描 ───────────────────────
