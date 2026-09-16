@@ -40,7 +40,7 @@ futures-util = "0.3"
 infer = "0.19"
 url = "2"
 # issue #82：Agent 浏览器 CDP 通道（WebView2 CallDevToolsProtocolMethod；版本对齐 wry 0.55 依赖树）
-webview2-com = "0.38"
+webview2-com = "0.39"
 windows = "0.61"
 log = "0.4"
 # R2 错误类型化：PylonError Display/Error 由 derive 生成（DTO 序列化仍手写）
