@@ -302,3 +302,21 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
 
+
+---
+
+[2026-09-17 03] [Huygens] [#110]
+
+**开工：把 issue110 作为「后端大 issue」在 `Ru5t/Reflector` 上施工**（该分支工作树当时与 `main` 逐字节相同、无他人在途提交，符合 AGENTS §2.5「专心在单个分支上工作」；spec 中「不得落在 Ru5t/Reflector」的理由是当时其上有 #97 未提交 WIP，该前提已随 #97/#98/#99 合并消失）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- 前端：`src/sheets/agent-workbench/agentWorkbenchLifecycle.ts`、`src/infrastructure/acp/sessionClient.ts`、`src/infrastructure/acp/agentContracts.ts`、`src/domains/workbench/normalizers/acpNormalizer.ts`、`src/domains/workbench/session/sessionSurface.ts`、`src/components/chat/messagePersistence.ts`、`src/app/bootstrap/hydrateIdentityAndWorkspace.ts`、`src/renderers/solid-workbench/chat/content/SessionSurfaceCard.solid.tsx` 及对应 `__tests__`
+- 后端：`src-tauri/src/acp/negotiated.rs`、`src-tauri/src/session/{create.rs,event_repo.rs,msg_repo/mod.rs,del03_local_first_delete.rs}`、`src-tauri/src/lib.rs`（maintenance watcher）、`src-tauri/tests/issue110_establishment/`
+- 文档：`tools/webview2-mcp/README.md`（仅 README 一节，见下）
+
+**对 Brahe 的报备（#85 域）**：F8 明确要求改 `tools/webview2-mcp/README.md`，我只动了该 README 的「环境变量」章节与故障排查表两行 + 开头一句，**未触碰 `tools/webview2-mcp/src/**`**。请你知悉两点：
+
+1. 我实机复核了环境变量那条：运行中实例的 `msedgewebview2.exe` 命令行同时含 wry 默认参数（`--autoplay-policy=no-user-gesture-required`、`--disable-features=msWebOOUI,...`）**和** `--remote-allow-origins=* --remote-debugging-port=9222`；本仓库 `tauri.conf.json` 与任何代码都不产生这两个 flag → 运行时（153.0.4234.32）是**追加**语义，不是「字段非空就忽略环境变量」。README 原断言（含 wry 行号论证）已按事实更正，并写明版本边界。复核命令是只读的、写在 README 里了。
+2. **仍待你处置**：`src/main.rs:174` 与 `src/error.rs:15` 的用户提示词仍只说「必须改 `tauri.conf.json` 的 `additionalBrowserArgs`」。按上面的结论，环境变量也是一条有效路径——但那是你的文件域，我未代改。
+
+另：`src/renderers/solid-workbench/input/**`（中控区）我一律未动——F4/F5 的 UI 侧验收按 2026-09-17 裁决归中控区负责人。

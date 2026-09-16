@@ -53,6 +53,36 @@ export interface ReplayMetadata {
   boundary: ReplayBoundary
 }
 
+/** 冷挂载 turn 状态（后端 `TurnLedger` 最近一条会话快照）。 */
+export interface ColdMountTurnState {
+  readonly phase?: string
+  readonly terminal?: { readonly cause?: string; readonly detail?: string }
+  readonly key?: {
+    readonly localSessionId?: string
+    readonly remoteSessionId?: string
+    readonly generation?: number
+    readonly turnId?: number
+  }
+}
+
+/**
+ * #99 冷挂载 turn 快照——`load_persisted_session` 随权威恢复一并返回，前端不再
+ * 依赖一次性的 Tauri event。字段形状由后端契约测试
+ * `cold_mount_turn_snapshot_exposes_settled_turn_and_cursor` 钉定（#110 F4：
+ * 本归一化器原先未透传该字段，冷挂载链路拿不到 turn 事实）。
+ */
+export interface ColdMountTurnSnapshot {
+  readonly source?: string
+  readonly periId?: string
+  readonly generation?: number
+  /** 会话无已知 turn 时为 `null`（后端不伪造空快照）。 */
+  readonly turn?: ColdMountTurnState | null
+  /** 入站 ingress 序列 cursor（lastIngressSeq/spill/drop/overloaded）。 */
+  readonly sequence?: Readonly<Record<string, unknown>>
+  readonly replayLoading?: boolean
+  readonly lastError?: string | null
+}
+
 export interface PersistedSessionLoadResult {
   response: unknown
   replay: unknown[]
@@ -64,6 +94,8 @@ export interface PersistedSessionLoadResult {
   collection: { complete: boolean; truncated: boolean; droppedCount: number }
   import?: { importId: string; status: 'imported' | 'already-imported'; trust: 'unverified' }
   diagnostics: readonly unknown[]
+  /** #110 F4：冷挂载 turn 快照（畸形/缺失 → undefined，绝不抛）。 */
+  turn?: ColdMountTurnSnapshot
 }
 
 function finiteNonNegativeInteger(value: unknown): number | null {
@@ -73,6 +105,60 @@ function finiteNonNegativeInteger(value: unknown): number | null {
 function finitePositiveInteger(value: unknown): number | null {
   const parsed = finiteNonNegativeInteger(value)
   return parsed !== null && parsed > 0 ? parsed : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 字符串字段：非空字符串才接受（空串与其它类型一律丢弃，不伪造值）。 */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/**
+ * #110 F4：冷挂载 turn 快照归一化——只透传已知字段，且每个字段都过类型守卫；
+ * 非对象/null 返回 undefined（缺失不伪造）。未知扩展字段不进入返回值
+ * （该快照是权威事实投影，不是 raw 回放通道）。
+ */
+export function normalizeColdMountTurnSnapshot(raw: unknown): ColdMountTurnSnapshot | undefined {
+  if (!isRecord(raw)) return undefined
+  const turnCandidate = raw.turn
+  let turn: ColdMountTurnState | null | undefined
+  if (turnCandidate === null) {
+    turn = null
+  } else if (isRecord(turnCandidate)) {
+    const terminal = isRecord(turnCandidate.terminal)
+      ? {
+          ...(nonEmptyString(turnCandidate.terminal.cause) !== undefined ? { cause: nonEmptyString(turnCandidate.terminal.cause)! } : {}),
+          ...(nonEmptyString(turnCandidate.terminal.detail) !== undefined ? { detail: nonEmptyString(turnCandidate.terminal.detail)! } : {}),
+        }
+      : undefined
+    const key = isRecord(turnCandidate.key)
+      ? {
+          ...(nonEmptyString(turnCandidate.key.localSessionId) !== undefined ? { localSessionId: nonEmptyString(turnCandidate.key.localSessionId)! } : {}),
+          ...(nonEmptyString(turnCandidate.key.remoteSessionId) !== undefined ? { remoteSessionId: nonEmptyString(turnCandidate.key.remoteSessionId)! } : {}),
+          ...(finiteNonNegativeInteger(turnCandidate.key.generation) !== null ? { generation: finiteNonNegativeInteger(turnCandidate.key.generation)! } : {}),
+          ...(finiteNonNegativeInteger(turnCandidate.key.turnId) !== null ? { turnId: finiteNonNegativeInteger(turnCandidate.key.turnId)! } : {}),
+        }
+      : undefined
+    turn = {
+      ...(nonEmptyString(turnCandidate.phase) !== undefined ? { phase: nonEmptyString(turnCandidate.phase)! } : {}),
+      ...(terminal !== undefined ? { terminal } : {}),
+      ...(key !== undefined ? { key } : {}),
+    }
+  }
+  const generation = finiteNonNegativeInteger(raw.generation)
+  return {
+    ...(nonEmptyString(raw.source) !== undefined ? { source: nonEmptyString(raw.source)! } : {}),
+    ...(nonEmptyString(raw.periId) !== undefined ? { periId: nonEmptyString(raw.periId)! } : {}),
+    ...(generation !== null ? { generation } : {}),
+    ...(turn !== undefined ? { turn } : {}),
+    ...(isRecord(raw.sequence) ? { sequence: Object.freeze({ ...raw.sequence }) } : {}),
+    ...(typeof raw.replayLoading === 'boolean' ? { replayLoading: raw.replayLoading } : {}),
+    // 后端 `AgentRuntimeState::last_error: Option<String>`。
+    ...(typeof raw.lastError === 'string' || raw.lastError === null ? { lastError: raw.lastError } : {}),
+  }
 }
 
 /** D6：旧/畸形 backend 响应不得被误标成 complete。 */
@@ -108,14 +194,14 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
     && observedCount === replay.length + droppedCount
     && boundaryCandidate?.kind === 'session-load-response'
     && validRange
-  const replayJournalStatus: PersistedSessionLoadResult['replayJournalStatus'] = record.replayJournalStatus === 'imported'
-    || record.replayJournalStatus === 'reconciled'
+  const replayJournalStatus: PersistedSessionLoadResult['replayJournalStatus'] = record.replayJournalStatus === 'imported'    || record.replayJournalStatus === 'reconciled'
     || record.replayJournalStatus === 'already-present'
     || record.replayJournalStatus === 'already-imported'
     || record.replayJournalStatus === 'local-authoritative'
     || record.replayJournalStatus === 'incomplete-not-imported'
     ? record.replayJournalStatus
     : 'metadata-unavailable'
+  const turn = normalizeColdMountTurnSnapshot(record.turn)
 
   return {
     response: 'response' in record ? record.response : raw,
@@ -194,6 +280,9 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
       }
     })(),
     diagnostics: Array.isArray(record.diagnostics) ? record.diagnostics : [],
+    // #110 F4：冷挂载 turn 快照级联透传（此前被归一化器丢弃，冷挂载链路拿不到
+    // turn 事实，状态条只能退回不完整的本地推断）。缺失时不留空键。
+    ...(turn !== undefined ? { turn } : {}),
   }
 }
 

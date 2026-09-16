@@ -85,6 +85,79 @@ export function clearMessageStorage(sessionId: string, storage: Pick<MessageStor
   } catch { /* 存储不可用：跳过清除 */ }
 }
 
+/** 消息快照 key 前缀（与 domains/search/snapshotSearch 的 MESSAGE_SNAPSHOT_KEY_PREFIX 同值）。 */
+export const MESSAGE_STORAGE_KEY_PREFIX = 'pylon-msgs-'
+
+/** 具备键枚举能力的 storage（localStorage 形状；枚举能力缺失时 GC 静默跳过）。 */
+export interface EnumerableMessageStorage extends MessageStorage {
+  readonly length?: number
+  key?: (index: number) => string | null
+}
+
+/**
+ * #110 F6：孤儿消息快照 GC。
+ *
+ * 删除会话链路（removeSessionTransaction → clearMessages）只清理「正在被删除的
+ * 那一条」；早于该联动落地的删除、以及中途失败/异常退出的删除会留下孤儿键而永不
+ * 回收（体检实证：`pylon-msgs-smstyclin`、`pylon-msgs-smsplz710` 两条孤儿，且其
+ * 会话已不在 `pylon-sessions` 列表中）。水合完成后按活会话集合回收，返回被删除的
+ * 键（便于记账/断言）。
+ *
+ * 只删 `pylon-msgs-` 前缀的键——运行态之外的任何 localStorage 内容都不在本职责内。
+ */
+export function pruneOrphanMessageSnapshots(
+  liveSessionIds: Iterable<string>,
+  storage: EnumerableMessageStorage,
+): string[] {
+  const live = new Set(liveSessionIds)
+  const keys: string[] = []
+  try {
+    const length = typeof storage.length === 'number' ? storage.length : 0
+    for (let index = 0; index < length; index += 1) {
+      const key = storage.key?.(index)
+      if (typeof key === 'string') keys.push(key)
+    }
+  } catch {
+    // 枚举不可用（隐私模式等）：放弃本次 GC，不影响启动。
+    return []
+  }
+  const removed: string[] = []
+  for (const key of keys) {
+    if (!key.startsWith(MESSAGE_STORAGE_KEY_PREFIX)) continue
+    if (live.has(key.slice(MESSAGE_STORAGE_KEY_PREFIX.length))) continue
+    try {
+      storage.removeItem(key)
+      removed.push(key)
+    } catch { /* 存储不可用：跳过该键 */ }
+  }
+  return removed
+}
+
+/** 恢复时参与中断归一的字段子集（不把 Message 类型拖进本模块）。 */
+export interface RestorableRunningMessage {
+  running?: boolean
+  role?: string
+  toolStatus?: string
+}
+
+/**
+ * #110 F6：快照恢复时的中断终态归一。
+ *
+ * 进程重启后仍标 `running` 的消息，其终态事件不会跨进程补发——它只可能属于一个
+ * 被中断的回合（体检实证：`pylon-msgs-smstyclin` 里一条 `running:true` 的僵尸工具
+ * 消息）。恢复时统一收敛为终态：工具消息补 `cancelled`（视觉状态表里的「已取消」，
+ * 而不是把未知结局谎报成 `completed`），其余清 `running`。
+ */
+export function settleInterruptedSnapshot<T extends RestorableRunningMessage>(messages: readonly T[]): T[] {
+  return messages.map(message => {
+    if (!message.running) return message
+    if (message.role === 'tool') {
+      return { ...message, running: false, toolStatus: message.toolStatus || 'cancelled' }
+    }
+    return { ...message, running: false }
+  })
+}
+
 // ============================================================================
 // I14-W2：MessageRepository 抽象（分层见 ISSUE-14「参考解决方案」）。
 // React/Zustand → scheduler → MessageRepository → browser(adapter localStorage)
@@ -190,7 +263,9 @@ export interface MessageRepository {
 export function browserMessageRepository(storage: MessageStorage = localStorage): MessageRepository {
   return {
     async load(sessionId) {
-      return parseMessageSnapshot<Message>(storage.getItem(messageStorageKey(sessionId)))
+      // #110 F6：快照恢复即中断归一——跨进程残留的 running 只可能是被中断的回合。
+      const snapshot = parseMessageSnapshot<Message>(storage.getItem(messageStorageKey(sessionId)))
+      return snapshot === null ? null : settleInterruptedSnapshot(snapshot)
     },
     async save(sessionId, messages) {
       persistMessageSnapshot(sessionId, messages as never[], storage)

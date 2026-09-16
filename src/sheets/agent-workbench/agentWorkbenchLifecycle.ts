@@ -55,6 +55,56 @@ export interface AgentWorkbenchLifecycleOutcome {
   readonly kind: 'placeholder-read' | 'create-scheduled'
 }
 
+/** #110 F1：恢复等待 owner runtime 就绪的上限——超过则照常尝试（失败仍走既有
+ * ErrorCenter 路径）。等不到不等于成功，也不无限挂起。 */
+export const AGENT_READY_TIMEOUT_MS = 15_000
+
+/** #110 F1：首败后的单次退避重试间隔。 */
+export const RECOVERY_RETRY_DELAY_MS = 2_000
+
+/**
+ * owner runtime 是否就绪（#110 F1）。
+ *
+ * 只有**显式已知的非 connected** 状态才算未就绪：状态缺失/非字符串时返回 true
+ * （不把「还不知道」当成「未就绪」，否则在没有状态源的环境里会把恢复永久挂起）。
+ */
+function agentRuntimeReady(agentId: string): boolean {
+  const status = useRuntimeStore.getState().agentStatuses[agentId]
+  if (!status || typeof status.status !== 'string') return true
+  return status.status === 'connected'
+}
+
+/**
+ * 等 owner runtime 就绪（#110 F1）。
+ *
+ * 冷启动实测：恢复请求比 hermes ACP `connected` 早 ~2.4s，恢复必然失败并留下
+ * 「恢复会话失败」错误条（叠加 F4 即 #56 的完整现场）。因此恢复入口先排队等
+ * `agentStatuses[agentId].status === 'connected'`——已就绪立即返回，未就绪则订阅
+ * store 变更（agent_status 事件经 App 写入 runtimeStore）后重放判定。
+ *
+ * 会话已切换（`isCurrent()` 为假）时立即放弃等待，返回 false 由调用方静默返回。
+ */
+async function waitForAgentReady(agentId: string, isCurrent: () => boolean): Promise<boolean> {
+  if (agentRuntimeReady(agentId)) return true
+  const subscribe = useRuntimeStore.subscribe
+  if (typeof subscribe !== 'function') return true
+  return new Promise<boolean>(resolve => {
+    let settled = false
+    const finish = (ready: boolean) => {
+      if (settled) return
+      settled = true
+      unsubscribe()
+      clearTimeout(timer)
+      resolve(ready)
+    }
+    const unsubscribe = subscribe(() => {
+      if (!isCurrent()) return finish(false)
+      if (agentRuntimeReady(agentId)) finish(true)
+    })
+    const timer = setTimeout(() => finish(agentRuntimeReady(agentId)), AGENT_READY_TIMEOUT_MS)
+  })
+}
+
 /** P52 D4：controller 死后 replay commit 不再有 UI 投影意义——adapter 只保留
  * cursor 播种（canonicalEventFeed.seed）；lock/commit 语义退化 no-op。
  * 载荷（generation/authority/trace）仍在 coordinator 与返回的 outcome 中完整保留。 */
@@ -69,6 +119,8 @@ const replayAdapter = {
 
 export class AgentWorkbenchLifecycle {
   private readonly loadGenerations = new Map<string, number>()
+  /** #110 F1：每 source 已用掉的退避重试次数（成功即清零，上限 1 次）。 */
+  private readonly recoveryAttempts = new Map<string, number>()
   private readonly coordinator = new ReplayLoadCoordinator(replayAdapter)
 
   /** 当前绑定会话变更（宿主 bind 效应调用）：跑 new/load 链。
@@ -120,6 +172,10 @@ export class AgentWorkbenchLifecycle {
     if (!isCurrent()) return undefined
     // D7：旧 localStorage 快照整体废弃——访问过该会话即清理旧 key，不再读写。
     clearMessageStorage(session.id, localStorage)
+    // #110 F1：恢复不得早于 owner runtime 就绪（冷启动实测恢复比 ACP connected
+    // 早 ~2.4s → 必然失败）。首屏占位已渲染，此处等待不给首帧加延迟。
+    await waitForAgentReady(session.agentId, isCurrent)
+    if (!isCurrent()) return undefined
     await this.startPersistedLoad(session, ownerKey, placeholder?.messages ?? [], isCurrent, placeholder?.rows)
     return { kind: 'placeholder-read' }
   }
@@ -128,6 +184,9 @@ export class AgentWorkbenchLifecycle {
   prune(sources: readonly string[]): void {
     for (const key of [...this.loadGenerations.keys()]) {
       if (!sources.includes(key)) this.loadGenerations.delete(key)
+    }
+    for (const key of [...this.recoveryAttempts.keys()]) {
+      if (!sources.includes(key)) this.recoveryAttempts.delete(key)
     }
   }
 
@@ -251,6 +310,7 @@ export class AgentWorkbenchLifecycle {
       resolveRuntimeErrors({ action: '恢复会话', scope: { kind: 'session', id: session.id }, source: 'chat.session-recovery' })
       resolveRuntimeErrors({ key: `session-recovery:${session.id}`, source: 'chat.session-recovery' })
       resolveRuntimeErrors({ key: `session-placeholder:${session.id}`, source: 'chat.session-placeholder' })
+      this.recoveryAttempts.delete(session.source)
       applySessionStateResponse(sessionContext(session), res)
       // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
       // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
@@ -284,7 +344,36 @@ export class AgentWorkbenchLifecycle {
       } else {
         reportRuntimeDiagnostic('恢复会话', error, session.agentId, options)
       }
+      // #110 F1：首败保留上面这条 ErrorCenter 记录，并排一次退避自动重试——冷启动
+      // 竞态的时间余量（本次取证里恢复正是碰巧由后续链路自动恢复的）。重试成功时
+      // 上面的 resolveRuntimeErrors 会清掉该条；仍失败才停为手动重试。
+      this.scheduleRecoveryRetry(session, ownerKey, cached, isCurrent, placeholderRows, loadGeneration)
     }
+  }
+
+  /**
+   * #110 F1：单次退避重试排程。
+   *
+   * 守卫齐备才排：该 source 未用过重试额度、仍是当前 load generation、会话仍是
+   * 当前绑定。任一不成立即放弃——重试不得覆盖用户此后的显式操作，也不得与更
+   * 新的 load 竞争（coordinator 的 generation 是唯一权威）。
+   */
+  private scheduleRecoveryRetry(
+    session: Session,
+    ownerKey: string,
+    cached: Message[],
+    isCurrent: () => boolean,
+    placeholderRows: readonly CanonicalEventRow[] | undefined,
+    failedGeneration: number,
+  ): void {
+    const attempts = this.recoveryAttempts.get(session.source) ?? 0
+    if (attempts >= 1) return
+    this.recoveryAttempts.set(session.source, attempts + 1)
+    setTimeout(() => {
+      if (!isCurrent()) return
+      if (this.coordinator.currentGeneration(session.source) !== failedGeneration) return
+      void this.startPersistedLoad(session, ownerKey, cached, isCurrent, placeholderRows)
+    }, RECOVERY_RETRY_DELAY_MS)
   }
 
   /** load 完成信号（宿主接 sessionRuntime.refresh）。 */

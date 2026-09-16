@@ -532,7 +532,22 @@ fn normalize_kernel_event(
         Some("session_info_update") => "session.model-updated",
         Some("config_option_update") => "session.config-updated",
         Some("available_commands_update") => "session.commands-updated",
-        _ => "unknown",
+        // #110 F7：`unknown` 归因。原先只落一个 "unknown" 死账——体检时 830 行
+        // unknown 无法从库内归因，只能逐条反查 raw。现在把未识别的判别符与 update
+        // 键集合打点，新形状一出现即可定位；raw 仍按 §5.10 原则 5 完整保留
+        // （unknown 不静默丢弃，也不改写历史行）。
+        _ => {
+            tracing::warn!(
+                target: "canonical_event",
+                owner = %owner_key,
+                discriminator = session_update.unwrap_or("<missing-update>"),
+                update_keys = %update
+                    .map(|map| map.keys().cloned().collect::<Vec<_>>().join(","))
+                    .unwrap_or_default(),
+                "unrecognized session/update discriminator: event recorded as 'unknown' with raw preserved"
+            );
+            "unknown"
+        }
     };
 
     let mut typed_payload = serde_json::Map::new();
@@ -604,6 +619,30 @@ fn normalize_kernel_event(
                 if let Some(value) = update.get(field) {
                     typed_payload.insert(field.to_string(), value.clone());
                 }
+            }
+        }
+        // #110 F5：`session_info_update` 的当前模型事实——`typed_payload.model` 是前端
+        // `session.model-updated` 语义投影的唯一取值来源（与 P56/D2.3 同一组变体：
+        // 嵌套 models.currentModelId camel/snake 优先，扁平 model 次之）。缺失则
+        // journal 收不到模型事实，状态条只能退回兜底串。
+        if session_update == Some("session_info_update") {
+            let model = update
+                .get("models")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|models| {
+                    [
+                        "currentModelId",
+                        "current_model_id",
+                        "currentModel",
+                        "current_model",
+                        "current",
+                    ]
+                    .iter()
+                    .find_map(|key| non_empty_string(models.get(*key)))
+                })
+                .or_else(|| non_empty_string(update.get("model")));
+            if let Some(model) = model {
+                typed_payload.insert("model".to_string(), serde_json::Value::String(model));
             }
         }
     }
@@ -2078,6 +2117,106 @@ mod tests {
                 .remove(0);
             assert_eq!(event.event_type, expected, "variant {variant}");
         }
+    }
+
+    /// #110 F5：`session_info_update` 的模型事实必须进 typed_payload.model——
+    /// 前端 `session.model-updated` 语义投影只从这里取值；缺失则模型事实丢失。
+    #[test]
+    fn kernel_ingest_session_info_update_carries_model_fact() {
+        for (payload, expected) in [
+            (
+                serde_json::json!({"sessionUpdate": "session_info_update", "models": {"currentModelId": "nous:hermes-4"}}),
+                Some("nous:hermes-4"),
+            ),
+            (
+                serde_json::json!({"sessionUpdate": "session_info_update", "models": {"current_model_id": "snake:id"}}),
+                Some("snake:id"),
+            ),
+            (
+                serde_json::json!({"sessionUpdate": "session_info_update", "model": "flat:id"}),
+                Some("flat:id"),
+            ),
+            // display name 不是 machine id：嵌套 current 为对象且无可提取机器值 → 不落 model。
+            (
+                serde_json::json!({"sessionUpdate": "session_info_update", "model": "   "}),
+                None,
+            ),
+            (
+                serde_json::json!({"sessionUpdate": "session_info_update", "title": "会话标题"}),
+                None,
+            ),
+        ] {
+            let event = repo()
+                .ingest_kernel_event(kernel_input(serde_json::json!({
+                    "source": "local:s1",
+                    "update": payload
+                })))
+                .expect("ingest")
+                .events
+                .remove(0);
+            assert_eq!(
+                event.event_type, "session.model-updated",
+                "payload {payload}"
+            );
+            let model = event
+                .typed_payload
+                .as_ref()
+                .and_then(|typed| typed.get("model"))
+                .and_then(serde_json::Value::as_str);
+            assert_eq!(model, expected, "payload {payload}");
+        }
+    }
+
+    /// #110 F7：体检时库内 31 行 `unknown` 的真实 raw 形状（camelCase `{sessionId,
+    /// update:{sessionUpdate}}` 通知包）必须被当前分类器正确识别——证明残留是旧构建的
+    /// 历史错标，而不是现行分类缺口。用例形状逐字节取自只读取证样本。
+    #[test]
+    fn kernel_ingest_recognizes_legacy_unknown_wire_shapes() {
+        let cases = [
+            (
+                serde_json::json!({"sessionId": "99d58bd6", "update": {"size": 1000000, "used": 21793, "sessionUpdate": "usage_update"}}),
+                "usage.updated",
+            ),
+            (
+                serde_json::json!({"sessionId": "99d58bd6", "update": {"availableCommands": [{"name": "help", "description": "List available commands"}], "sessionUpdate": "available_commands_update"}}),
+                "session.commands-updated",
+            ),
+            (
+                serde_json::json!({"sessionId": "99d58bd6", "update": {"configOptions": [{"id": "model-selection", "category": "model"}], "sessionUpdate": "config_option_update"}}),
+                "session.config-updated",
+            ),
+            (
+                serde_json::json!({"sessionId": "99d58bd6", "update": {"_meta": {"periKind": "skill"}, "title": "会话标题", "updatedAt": "2026-09-01T00:00:00.000Z", "sessionUpdate": "session_info_update"}}),
+                "session.model-updated",
+            ),
+        ];
+        for (raw, expected) in cases {
+            let event = repo()
+                .ingest_kernel_event(kernel_input(raw.clone()))
+                .expect("ingest")
+                .events
+                .remove(0);
+            assert_eq!(event.event_type, expected, "raw {raw}");
+            assert_eq!(event.raw_payload, raw, "raw 原文保真（不受分类影响）");
+        }
+    }
+
+    /// #110 F7：真正未识别的判别符仍 fail-soft 成 `unknown` 且 raw 完整保留
+    /// （归因打点走 tracing，不改事件行契约）。
+    #[test]
+    fn kernel_ingest_truly_unknown_discriminator_keeps_raw() {
+        let raw = serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {"sessionUpdate": "vendor_future_update", "payload": {"x": 1}},
+        });
+        let event = repo()
+            .ingest_kernel_event(kernel_input(raw.clone()))
+            .expect("ingest")
+            .events
+            .remove(0);
+        assert_eq!(event.event_type, "unknown");
+        assert_eq!(event.typed_payload, None);
+        assert_eq!(event.raw_payload, raw);
     }
 
     #[test]

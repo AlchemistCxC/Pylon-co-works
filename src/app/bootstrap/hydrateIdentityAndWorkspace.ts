@@ -3,6 +3,7 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { markLegacyMigrationComplete } from '../../infrastructure/persistence/legacyKeyMigration.ts'
+import { pruneOrphanMessageSnapshots } from '../../components/chat/messagePersistence.ts'
 
 export type HydrationStage = 'profiles' | 'workspace-sheets' | 'workspace-entities' | 'sessions'
 export interface HydrationResult {
@@ -57,6 +58,14 @@ export function hydrateIdentityAndWorkspace(legacy?: ProfilePersistenceState): P
     if (!completedStages.includes('sessions')) {
       await useIdentityStore.getState().hydrateSessions()
       completedStages = [...completedStages, 'sessions']
+      // #110 F6：会话列表就绪后回收孤儿消息快照——删除联动只清「正在删的那条」，
+      // 早于联动落地的删除会留下永不回收的 `pylon-msgs-*` 键。
+      if (typeof localStorage !== 'undefined') {
+        pruneOrphanMessageSnapshots(
+          useIdentityStore.getState().sessions.map(session => session.id),
+          localStorage,
+        )
+      }
     }
     markLegacyMigrationComplete()
     return Object.freeze({ completedStages: Object.freeze([...completedStages]) })

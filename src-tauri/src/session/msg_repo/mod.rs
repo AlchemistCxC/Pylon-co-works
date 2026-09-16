@@ -167,6 +167,19 @@ pub(crate) struct MsgRepo {
     conn: Mutex<Connection>,
 }
 
+/// #110 F3：墓碑事件清扫的宽限期（天）——已终态墓碑超过该期限，其遗留事件即可回收。
+/// 7 天给「误删取证/恢复」留窗口，同时不让垃圾无限累积。
+pub(crate) const TOMBSTONE_EVENT_GRACE_DAYS: i64 = 7;
+
+/// #110 F3：墓碑事件清扫结果（记账/断言用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct TombstonePurgeOutcome {
+    /// 本次纳入清扫的墓碑数（state='deleted' 且超过宽限期）。
+    pub(crate) tombstones: i64,
+    /// 实际删除的 canonical_events 行数。
+    pub(crate) events_deleted: i64,
+}
+
 /// I14-W9：保留策略行（单行；version + revision + payload JSON；wire camelCase）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -685,8 +698,71 @@ impl MsgRepo {
             ],
         )
         .map_err(repo_err)?;
+        // #110 F3：删除会话联动清扫该 owner 的 canonical 事件（同事务，原子）。
+        // 不清理则事件永久累积——体检实证 92,698/94,680（97.9%）是已删会话的孤儿行，
+        // 主库 61MB 里绝大部分是垃圾。只有精确 owner（owner_scope='exact'）可安全清扫：
+        // legacy 墓碑只有裸 session_id，同 source 多 owner 会互相误伤（DEL-02 隔离契约）。
+        if owner_key.is_some() {
+            tx.execute(
+                "DELETE FROM canonical_events WHERE owner_key = ?1",
+                params![tombstone_owner],
+            )
+            .map_err(repo_err)?;
+        }
         tx.commit().map_err(repo_err)?;
         Ok(())
+    }
+
+    /// #110 F3：墓碑事件清扫——兜底回收「早于删除联动落地」的历史垃圾，以及删除时
+    /// 因故未清干净的行。
+    ///
+    /// 只扫 `state='deleted'` 且 `owner_scope='exact'` 的墓碑：`deleting` 是两阶段
+    /// 中间态（远端 close 尚未收尾，可能仍需取证），legacy 墓碑无 owner 维。
+    /// **墓碑行本身不删**——迟到写 gate（`ensure_session_not_deleted`）依赖其存在性，
+    /// 删墓碑等于允许已删会话复活。
+    pub(crate) fn purge_tombstoned_events(
+        &self,
+        grace_days: i64,
+    ) -> Result<TombstonePurgeOutcome, PylonError> {
+        let mut conn = self.conn.lock().map_err(lock_err)?;
+        let tx = conn.transaction().map_err(repo_err)?;
+        let cutoff = now_millis().saturating_sub(grace_days.max(0).saturating_mul(86_400_000));
+        let tombstones: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM deleted_sessions
+                 WHERE state = 'deleted' AND owner_scope = 'exact' AND deleted_at < ?1",
+                params![cutoff],
+                |row| row.get(0),
+            )
+            .map_err(repo_err)?;
+        let events_deleted = tx
+            .execute(
+                "DELETE FROM canonical_events WHERE owner_key IN (
+                     SELECT owner_key FROM deleted_sessions
+                     WHERE state = 'deleted' AND owner_scope = 'exact' AND deleted_at < ?1
+                 )",
+                params![cutoff],
+            )
+            .map_err(repo_err)? as i64;
+        tx.commit().map_err(repo_err)?;
+        Ok(TombstonePurgeOutcome {
+            tombstones,
+            events_deleted,
+        })
+    }
+
+    /// #110 F3：WAL 定期 checkpoint（TRUNCATE）。
+    ///
+    /// 流式回合每 chunk 一次事务，从不主动 checkpoint 时 WAL 只增不减——体检实证
+    /// WAL 66.4MB 反超主库 61.9MB。TRUNCATE 在无读者时把 WAL 文件本身收缩回零。
+    /// 拿不到写锁时 SQLite 返回 busy 行而不是错误，按「本次跳过」处理（下一轮再来）。
+    pub(crate) fn checkpoint_wal(&self) -> Result<(), PylonError> {
+        let conn = self.conn.lock().map_err(lock_err)?;
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|_| ())
+        .map_err(repo_err)
     }
 
     // ── I14-W9：保留策略执行（policy 读写 + preview/prune 同一筛选） ──
@@ -1004,5 +1080,26 @@ impl MessageService {
         .map_err(|error| {
             MessageError::Unavailable(format!("message repo finalize delete task failed: {error}"))
         })?
+    }
+
+    /// #110 F3：事件库维护（墓碑事件清扫 + WAL checkpoint）——spawn_blocking 边界。
+    ///
+    /// 由启动/定时维护任务调用（`lib.rs` maintenance watcher）。整体失败只返回
+    /// 结构化错误，调用方记 warn 不降级（维护是尽力而为，不得影响会话链路）。
+    pub(crate) async fn run_journal_maintenance(
+        &self,
+        grace_days: i64,
+    ) -> Result<TombstonePurgeOutcome, MessageError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || {
+            let outcome = repo.purge_tombstoned_events(grace_days)?;
+            repo.checkpoint_wal()?;
+            Ok::<_, PylonError>(outcome)
+        })
+        .await
+        .map_err(|error| {
+            MessageError::Unavailable(format!("journal maintenance task failed: {error}"))
+        })?
+        .map_err(|error| MessageError::Unavailable(error.to_string()))
     }
 }

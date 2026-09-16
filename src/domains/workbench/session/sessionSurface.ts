@@ -116,8 +116,36 @@ export function normalizeUsageSnapshot(value: unknown, previous?: UsageSnapshot)
   return { value: Object.freeze(next) as UsageSnapshot, invalidFields: Object.freeze(invalidFields) }
 }
 
-export function normalizeBudgetSnapshot(input: {
-  readonly used?: number; readonly limit?: number; readonly remaining?: number
+/**
+ * 上下文用量的单一派生源（#110 F4）。
+ *
+ * 同一份 usage 快照里 `contextUsed`/`contextLimit`/`contextPercent` 是三个并列字段，
+ * 各显示位自选字段就会自相矛盾——线上实证：同一条 `usage.updated`（used=21793,
+ * size=1000000）下状态条并排显示 `0.0 k`（token chip 读 totalTokens/输入+输出）与
+ * `2.3%`（百分比读 contextPercent）。本函数是数据层的唯一取数入口：三者由同一
+ * 快照派生，`percent` 优先采用显式值、缺失时由 used/limit 计算，保证两个显示位
+ * 拿到的是同一组数。token 数量显示位应消费 `used`，不得另行挑选 token 字段。
+ */
+export function resolveContextUsage(usage: UsageSnapshot | undefined): {
+  readonly used?: number
+  readonly limit?: number
+  readonly percent?: number
+} {
+  const used = finiteNonNegative(usage?.contextUsed)
+  const limit = finiteNonNegative(usage?.contextLimit)
+  const explicitPercent = finiteNonNegative(usage?.contextPercent)
+  const derivedPercent = used !== undefined && limit !== undefined && limit > 0
+    ? used / limit * 100
+    : undefined
+  const percent = explicitPercent ?? derivedPercent
+  return Object.freeze({
+    ...(used !== undefined ? { used } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(percent !== undefined ? { percent } : {}),
+  })
+}
+
+export function normalizeBudgetSnapshot(input: {  readonly used?: number; readonly limit?: number; readonly remaining?: number
   readonly budgetType?: string; readonly resetAt?: string; readonly threshold?: string
   readonly percent?: number; readonly exhausted?: boolean
 }, previous?: BudgetSnapshot): BudgetSnapshot {

@@ -285,6 +285,34 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
   it('authMethods 非数组（漂移）不当 hasAuthMethods', () => {
     expect(resolveCapabilitySnapshot(status({ capabilities: { authMethods: 'api_key' } })).hasAuthMethods).toBe(false)
   })
+
+  it('#110 F2：list/close 双形状——ACP 标准 object 广告也算可用（Hermes 实测 {fork:{},list:{},resume:{}}）', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: { sessionCapabilities: { fork: {}, list: {}, resume: {} } },
+    }))).toEqual({
+      connected: true,
+      capabilitiesKnown: true,
+      loadSession: false,
+      promptImage: false,
+      sessionFork: false,
+      sessionResume: true,
+      sessionClose: false,
+      sessionList: true,
+      mcpHttp: false,
+      mcpSse: false,
+      hasAuthMethods: false,
+    })
+  })
+
+  it('#110 F2：list/close 非 object 非 true 的值仍 fail-closed（false/1/字符串/null）', () => {
+    for (const wrong of [false, 1, 'yes', null]) {
+      const snapshot = resolveCapabilitySnapshot(status({
+        capabilities: { sessionCapabilities: { list: wrong, close: wrong } },
+      }))
+      expect(snapshot.sessionList, `list=${String(wrong)}`).toBe(false)
+      expect(snapshot.sessionClose, `close=${String(wrong)}`).toBe(false)
+    }
+  })
 })
 
 describe('resolveAttachFilters/gate — 图片 filters 完整性与缺失快照（迁移自 scripts/test-agent-contracts.mts，P91 A1）', () => {

@@ -13,6 +13,8 @@ import {
   messageStorageKey,
   parseMessageSnapshot,
   persistMessageSnapshot,
+  pruneOrphanMessageSnapshots,
+  settleInterruptedSnapshot,
   toWireRecord,
   type MessageStorage,
 } from '../messagePersistence.ts'
@@ -162,5 +164,99 @@ describe('messageStorage key 格式与 clearMessageStorage（迁移自 scripts/t
     const removed: string[] = []
     clearMessageStorage('session-a', { removeItem: key => removed.push(key) })
     expect(removed).toEqual(['pylon-msgs-session-a'])
+  })
+})
+
+// ── #110 F6：孤儿快照 GC 与中断终态归一 ──────────────────────────────────────
+
+/** 带键枚举能力的 storage（localStorage 语义；Map 无明显顺序保证但同插入序）。 */
+function enumerableStorage(seed: Record<string, string> = {}) {
+  const map = new Map<string, string>(Object.entries(seed))
+  return {
+    get length() { return map.size },
+    key: (index: number) => [...map.keys()][index] ?? null,
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => { map.set(key, value) },
+    removeItem: (key: string) => { map.delete(key) },
+    keys: () => [...map.keys()],
+  }
+}
+
+describe('#110 F6 孤儿消息快照 GC（pruneOrphanMessageSnapshots）', () => {
+  it('回收 owner 已不在会话列表的 pylon-msgs-* 键（实证两条孤儿形状）', () => {
+    const storage = enumerableStorage({
+      'pylon-msgs-smstyclin': '{"version":1,"messages":[]}',
+      'pylon-msgs-smsplz710': '[]',
+      'pylon-msgs-live-1': '{"version":1,"messages":[]}',
+    })
+    const removed = pruneOrphanMessageSnapshots(['live-1'], storage)
+    expect(removed.sort()).toEqual(['pylon-msgs-smsplz710', 'pylon-msgs-smstyclin'])
+    expect(storage.keys()).toEqual(['pylon-msgs-live-1'])
+  })
+
+  it('不碰非 pylon-msgs-* 的运行态键（主题/宠物/会话列表等）', () => {
+    const storage = enumerableStorage({
+      'pylon-sessions': '{"version":3,"sessions":[]}',
+      'pylon-pet-v3': '{}',
+      'pylon-theme': 'dark',
+    })
+    expect(pruneOrphanMessageSnapshots([], storage)).toEqual([])
+    expect(storage.keys().sort()).toEqual(['pylon-pet-v3', 'pylon-sessions', 'pylon-theme'])
+  })
+
+  it('枚举能力缺失（隐私模式等）时静默跳过，不抛也不误删', () => {
+    const storage: MessageStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => { throw new Error('must not be called') },
+    }
+    expect(pruneOrphanMessageSnapshots(['a'], storage)).toEqual([])
+  })
+
+  it('单个键删除失败不阻断其余回收', () => {
+    const base = enumerableStorage({ 'pylon-msgs-a': '[]', 'pylon-msgs-b': '[]' })
+    const failing = {
+      ...base,
+      removeItem: (key: string) => {
+        if (key === 'pylon-msgs-a') throw new Error('storage unavailable')
+        base.removeItem(key)
+      },
+    }
+    expect(pruneOrphanMessageSnapshots([], failing)).toEqual(['pylon-msgs-b'])
+    expect(base.keys()).toEqual(['pylon-msgs-a'])
+  })
+})
+
+describe('#110 F6 恢复时中断终态归一（settleInterruptedSnapshot）', () => {
+  it('running 工具消息收敛为 cancelled 终态（不谎报 completed）', () => {
+    const settled = settleInterruptedSnapshot([
+      { id: 'tool-1', role: 'tool', running: true },
+      { id: 'tool-2', role: 'tool', running: true, toolStatus: 'running' },
+      { id: 'tool-3', role: 'tool', running: false, toolStatus: 'failed' },
+    ] as never[])
+    expect(settled[0]).toMatchObject({ running: false, toolStatus: 'cancelled' })
+    expect(settled[1]).toMatchObject({ running: false, toolStatus: 'running' })
+    // 已终态的消息原样保留（不覆盖既有 status）。
+    expect(settled[2]).toMatchObject({ running: false, toolStatus: 'failed' })
+  })
+
+  it('非工具消息只清 running', () => {
+    const settled = settleInterruptedSnapshot([
+      { id: 'm1', role: 'assistant', running: true },
+      { id: 'm2', role: 'user', running: false },
+    ] as never[])
+    expect(settled[0]).toMatchObject({ running: false })
+    expect(settled[0]).not.toHaveProperty('toolStatus')
+  })
+
+  it('browser repository.load 恢复快照时即归一（僵尸 running 不再跨进程存活）', async () => {
+    const storage = enumerableStorage({
+      'pylon-msgs-s1': JSON.stringify({
+        version: 1,
+        messages: [{ id: 'tool-1', role: 'tool', running: true }],
+      }),
+    })
+    const loaded = await browserMessageRepository(storage).load('s1')
+    expect(loaded).toEqual([{ id: 'tool-1', role: 'tool', running: false, toolStatus: 'cancelled' }])
   })
 })

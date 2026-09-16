@@ -344,8 +344,10 @@ fn tombstone_gate_and_delete_semantics_baseline() {
         })
         .expect("count canonical events");
     assert_eq!(
-        events, 1,
-        "canonical_events 不随 delete_session 删除（append-only 事件流独立于 sessions 行，§5.12）"
+        events, 0,
+        "#110 F3：canonical_events 随 delete_session 联动清扫（旧「append-only 留存」契约让\
+         已删会话的事件永久累积：体检实证 92,698/94,680 = 97.9% 是垃圾）。迟到写仍被 \
+         tombstone 拒绝（见上），故清扫后计数为 0"
     );
     let legacy_tables: i64 = conn
         .query_row(

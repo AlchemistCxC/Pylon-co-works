@@ -6,6 +6,7 @@ import {
   selectAssist,
   selectSessionSurface,
 } from '../workbenchProjector.ts'
+import { resolveContextUsage } from '../session/sessionSurface.ts'
 
 const envelope = (sequence: number, event: WorkbenchSemanticEvent) => createWorkbenchEnvelope({
   sessionId: 'session-c14-review',
@@ -15,6 +16,36 @@ const envelope = (sequence: number, event: WorkbenchSemanticEvent) => createWork
   identity: {},
   provenance: { origin: 'local-observed', trust: 'authoritative' },
   event,
+})
+
+describe('#110 F4 上下文用量单一派生源（resolveContextUsage）', () => {
+  it('Hermes 冷挂载实证快照：used/limit 与 percent 同源（21.8k/1.0m → 2.18%）', () => {
+    const document = reduceWorkbenchEvent(createWorkbenchDocument('session-c14-review'), envelope(1, {
+      type: 'usage.updated',
+      usage: { contextUsed: 21793, contextLimit: 1000000 },
+    }))
+    const resolved = resolveContextUsage(selectSessionSurface(document).usage)
+    expect(resolved).toEqual({ used: 21793, limit: 1000000, percent: 21793 / 1000000 * 100 })
+    // 同一快照里 contextUsed 与 contextPercent 必须同时存在——两个显示位不得各自选字段。
+    expect(selectSessionSurface(document).usage).toMatchObject({ contextUsed: 21793, contextLimit: 1000000 })
+  })
+
+  it('字段缺失组合不伪造值：只有 used 或只有 limit 时不派生 percent', () => {
+    expect(resolveContextUsage({ contextUsed: 10 })).toEqual({ used: 10 })
+    expect(resolveContextUsage({ contextLimit: 100 })).toEqual({ limit: 100 })
+    expect(resolveContextUsage(undefined)).toEqual({})
+    // limit=0 不做除零派生（与 normalizeUsageSnapshot 同一守卫）。
+    expect(resolveContextUsage({ contextUsed: 10, contextLimit: 0 })).toEqual({ used: 10, limit: 0 })
+  })
+
+  it('显式 percent 优先于派生值（provider 权威值不被本地重算覆盖）', () => {
+    expect(resolveContextUsage({ contextUsed: 10, contextLimit: 100, contextPercent: 42 }))
+      .toEqual({ used: 10, limit: 100, percent: 42 })
+  })
+
+  it('非法数值（负数/NaN/字符串）一律丢弃', () => {
+    expect(resolveContextUsage({ contextUsed: -1, contextLimit: Number.NaN, contextPercent: '9' as never })).toEqual({})
+  })
 })
 
 describe('C14 normalized session and assist projection', () => {
@@ -83,8 +114,7 @@ describe('C14 normalized session and assist projection', () => {
     })
   })
 
-  it('projects assist events into an ephemeral document slice without transcript pollution', () => {
-    const events = [
+  it('projects assist events into an ephemeral document slice without transcript pollution', () => {    const events = [
       envelope(1, { type: 'assist.prediction', placeholder: '继续修复', actions: [{ id: 'accept', label: '接受' }] }),
       envelope(2, { type: 'assist.file-suggestions', files: ['src/a.ts', 'src/b.ts'] }),
       envelope(3, { type: 'assist.queued-command', command: '/compact' }),

@@ -63,6 +63,14 @@ const usableFromSnapshot = (
 const rawObjectCapability = (session: Record<string, unknown> | null, id: string): boolean =>
   isPlainObject(session?.[id])
 
+/**
+ * raw 兜底：双形状 capability（#110 F2——`list`/`close` 的 ACP 标准形状是 object，
+ * 线上又存在显式 `true` 的旧广告，两者皆算广告）。与 Rust
+ * `CapabilityKind::BooleanOrObject` 同语义。
+ */
+const rawBooleanOrObjectCapability = (session: Record<string, unknown> | null, id: string): boolean =>
+  session?.[id] === true || rawObjectCapability(session, id)
+
 /** 能力快照派生：lifecycle 决定连接，结构化协商快照优先，raw 兜底 fail-closed。 */
 export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined): AgentCapabilitySnapshot {
   const capabilities = status == null ? undefined : status.capabilities
@@ -107,8 +115,8 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
     // raw 无消费者登记信息：fork 恒 fail-closed（ghost capability 防线）。
     sessionFork: false,
     sessionResume: rawObjectCapability(session, 'resume'),
-    sessionClose: session?.close === true,
-    sessionList: session?.list === true,
+    sessionClose: rawBooleanOrObjectCapability(session, 'close'),
+    sessionList: rawBooleanOrObjectCapability(session, 'list'),
     mcpHttp: mcp?.http === true,
     mcpSse: mcp?.sse === true,
     hasAuthMethods: Array.isArray(authMethods) && authMethods.length > 0,
