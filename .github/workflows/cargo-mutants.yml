@@ -1,0 +1,58 @@
+# #106 P7.2：变异测试抽样（周期任务，非门禁）。
+# cargo-mutants 对高频域（dispatcher / session / acp）做变异抽样，报告以
+# artifact 产出；不阻塞合并、不设阈值——判别力治理是持续过程，不是一次闸门。
+# 手动触发：Actions → cargo-mutants → Run workflow。
+
+name: cargo-mutants
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mutants:
+    name: 变异抽样（dispatcher/session/acp）
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: 使用 MSVC 工具链（CI runner 自带链接器）
+        run: rustup override set stable-x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+
+      - name: 安装 cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      # 抽样三高频域；--in-diff 不用（全量抽样非门禁，跑不完即 timeout 截断，
+      # 报告以已产出部分为准）。
+      - name: 运行变异抽样
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo mutants --in-place --no-shuffle -p pylon \
+            --file src/dispatcher \
+            --file src/session \
+            --file src/acp \
+            --timeout 300 \
+            --output-json ../mutants-report.json || true
+          cd ..
+
+      - name: 上传变异报告
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-report
+          path: |
+            mutants-report.json
+            src-tauri/mutants.out/**
+          retention-days: 14
+          if-no-files-found: warn

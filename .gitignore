@@ -5,6 +5,11 @@ src-tauri/tests-harness/target/
 src-tauri/pet-core/target/
 src-tauri/pylon-core/target/
 src-tauri/pylon-foundations/target/
+# 仓库根 target/：并行施工时各 agent 放验证输出的草稿区（vitest JSON 报告、
+# clippy 报告等）。本仓没有根 workspace，它不是 cargo 目标目录。此前只有
+# src-tauri/*/target 被忽略，草稿目录就一直以未跟踪身份出现在 git status 里；
+# 2026-09-17 起一并忽略。
+/target/
 *.log
 # P91 B3：本地 QA 草稿不入库（_rustfail/tsc/pylon-acceptance/cargo-test* 等 log 残留已被上方 *.log 覆盖）
 design-qa.md

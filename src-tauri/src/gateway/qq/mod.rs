@@ -304,7 +304,8 @@ impl QqAdapter {
     }
 
     /// 测试构造：注入 QQ API 桩地址（集成测试避免打真实 QQ API）。
-    #[cfg(test)]
+    /// #106 P5：test-agent feature 下对外部 tests/ 目标可见。
+    #[cfg(any(test, feature = "test-agent"))]
     pub(crate) fn for_testing(
         core: Arc<GatewayCore>,
         http: Client,
@@ -315,7 +316,7 @@ impl QqAdapter {
     }
 
     /// 测试构造：注入手动时钟（P91 批 C1 §5——节流测试推进时钟代替真 sleep）。
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-agent"))]
     pub(crate) fn for_testing_with_clock(
         core: Arc<GatewayCore>,
         http: Client,

@@ -74,7 +74,7 @@ pub(crate) fn unbind_workspace_sessions(state: &AppState, workspace_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{fake_acp_agent, TestStateBuilder};
+    use crate::test_utils::{fake_acp_agent_stub, TestStateBuilder};
 
     fn workspace(id: &str, root: &str) -> crate::workspaces::Workspace {
         crate::workspaces::Workspace {
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn resolve_freezes_workspace_root_or_explicit_cwd_or_agent_default() {
         let state = TestStateBuilder::bare()
-            .with_agent(fake_acp_agent("peri", ""))
+            .with_agent(fake_acp_agent_stub("peri"))
             .with_workspace(workspace("ws-1", "C:\\ws-root"))
             .build();
 

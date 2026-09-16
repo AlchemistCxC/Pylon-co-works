@@ -3,35 +3,9 @@
 //! 失败才允许新建，且新建必须显式告知（recreated_peri_id out-param）。
 //! 历史会话在 provider 端不再随每次重启膨胀。
 use super::*;
-use crate::test_utils::fake_acp_agent;
 
 #[tokio::test]
 async fn generation_change_during_recovery_rejects_success_and_failure_without_fallback() {
-    const SCRIPT: &str = r#"import json,sys,time,pathlib
-ready,release,method_to_wait,outcome=sys.argv[1:]
-seen=[]
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    result={}
-    error=None
-    if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}} if method_to_wait == 'session/resume' else {'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
-    elif method.startswith('session/'):
-        seen.append(method)
-        if method == method_to_wait:
-            pathlib.Path(ready).touch()
-            deadline=time.monotonic()+10
-            while not pathlib.Path(release).exists():
-                if time.monotonic()>deadline: raise SystemExit('test barrier timed out')
-                time.sleep(0.01)
-            if outcome == 'error': error={'code':-32000,'message':'session unavailable'}
-        result={'sessionId':'remote-original'}
-    elif method == '_test/seen':
-        result={'methods':seen}
-    response={'jsonrpc':'2.0','id':request.get('id')}
-    response['error' if error else 'result']=error if error else result
-    print(json.dumps(response),flush=True)
-"#;
     for method in ["session/resume", "session/load"] {
         for outcome in ["success", "error"] {
             let unique = std::time::SystemTime::now()
@@ -43,16 +17,20 @@ for line in sys.stdin:
                 std::process::id()
             ));
             let release = ready.with_extension("release");
-            let agent = crate::test_utils::fake_acp_agent_with(
+            let agent = crate::test_utils::fake_acp_agent(
                 "recovery-generation",
-                SCRIPT,
-                vec![
-                    ready.to_string_lossy().into_owned(),
-                    release.to_string_lossy().into_owned(),
-                    method.into(),
-                    outcome.into(),
+                &[
+                    "--scenario",
+                    "recovery-generation",
+                    "--barrier-ready",
+                    &ready.to_string_lossy(),
+                    "--barrier-release",
+                    &release.to_string_lossy(),
+                    "--wait-method",
+                    method,
+                    "--outcome",
+                    outcome,
                 ],
-                Default::default(),
             );
             let runtime = AgentRuntime::new_disconnected();
             *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
@@ -121,20 +99,7 @@ for line in sys.stdin:
 /// session/load 命中（返回已存在 sessionId）→ 复用，不新建。
 #[tokio::test]
 async fn ensure_session_mapping_revives_via_session_load_before_creating() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    method = request.get('method')
-    if method == 'initialize':
-        response['result'] = {'agentCapabilities': {'sessionCapabilities': {'loadSession': {}}}}
-    elif method == 'session/new':
-        response['result'] = {'sessionId':'newly-created'}
-    elif method == 'session/load':
-        response['result'] = {'sessionId': request['params']['sessionId']}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = fake_acp_agent("revive-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent("revive-agent", &["--scenario", "revive-echo"]);
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -184,22 +149,7 @@ for line in sys.stdin:
 /// Advertised object capability → resume is attempted and load is not used.
 #[tokio::test]
 async fn ensure_session_mapping_resumes_without_replay_or_recreation() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result'] = {'agentCapabilities': {'sessionCapabilities': {'resume': {}}}}
-    elif method == 'session/resume':
-        response['result'] = {'sessionId': request['params']['sessionId']}
-    elif method == 'session/load':
-        raise SystemExit('load must not be called after successful resume')
-    elif method == 'session/new':
-        response['result'] = {'sessionId':'unexpected-new'}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = fake_acp_agent("resume-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent("resume-agent", &["--scenario", "resume-only"]);
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -229,22 +179,10 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn ensure_session_mapping_resume_failure_falls_back_to_load() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-seen=[]
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method'); seen.append(method)
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}}
-    elif method == 'session/resume':
-        response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session archived'}}
-    elif method == 'session/load':
-        response['result']={'sessionId':request['params']['sessionId']}
-    elif method == 'session/new':
-        raise SystemExit('new must not be called after load success')
-    print(json.dumps(response),flush=True)
-"#;
-    let agent = fake_acp_agent("resume-load-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent(
+        "resume-load-agent",
+        &["--scenario", "resume-archived-load-echo"],
+    );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -274,19 +212,15 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn ensure_session_mapping_resume_and_load_failure_creates_new_session() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':{},'loadSession':{}}}}
-    elif method in ('session/resume','session/load'):
-        response={'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session unavailable'}}
-    elif method == 'session/new':
-        response['result']={'sessionId':'recreated-session'}
-    print(json.dumps(response),flush=True)
-"#;
-    let agent = fake_acp_agent("resume-new-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent(
+        "resume-new-agent",
+        &[
+            "--scenario",
+            "resume-load-error-new",
+            "--session-id",
+            "recreated-session",
+        ],
+    );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -316,19 +250,10 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn ensure_session_mapping_malformed_resume_capability_uses_load() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result']={'agentCapabilities':{'sessionCapabilities':{'resume':True,'loadSession':{}}}}
-    elif method == 'session/resume':
-        raise SystemExit('malformed boolean capability must not resume')
-    elif method == 'session/load':
-        response['result']={'sessionId':request['params']['sessionId']}
-    print(json.dumps(response),flush=True)
-"#;
-    let agent = fake_acp_agent("malformed-resume-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent(
+        "malformed-resume-agent",
+        &["--scenario", "resume-bool-load-echo"],
+    );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -359,18 +284,15 @@ for line in sys.stdin:
 /// session/load 失败（provider 端会话已死）→ 降级新建 + recreated 通知。
 #[tokio::test]
 async fn ensure_session_mapping_falls_back_to_new_with_notice_when_load_fails() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    if method == 'session/load':
-        # remote session is gone: JSON-RPC error
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32000,'message':'session not found'}}), flush=True)
-        continue
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'fresh-session'}}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = fake_acp_agent("fallback-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fallback-agent",
+        &[
+            "--scenario",
+            "load-error-else-new",
+            "--session-id",
+            "fresh-session",
+        ],
+    );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -407,13 +329,10 @@ for line in sys.stdin:
 /// 无持久化 peri_id（None）→ 直接新建，行为与旧版一致。
 #[tokio::test]
 async fn ensure_session_mapping_without_peri_id_creates_directly() {
-    const FAKE_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'direct-new'}}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = fake_acp_agent("direct-agent", FAKE_SCRIPT);
+    let agent = crate::test_utils::fake_acp_agent(
+        "direct-agent",
+        &["--scenario", "new-always", "--session-id", "direct-new"],
+    );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await
@@ -452,18 +371,9 @@ for line in sys.stdin:
 // 同时覆盖「建立与复活消费同一协商快照」的 load 通道判定。──
 #[tokio::test]
 async fn revive_with_changed_remote_identity_rebinds_explicitly() {
-    const SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    result={}
-    if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'loadSession':{}}}}
-    elif method == 'session/load':
-        result={'sessionId':'remote-rebound'}
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':result}
-    print(json.dumps(response),flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("rebind-identity", SCRIPT);
+    // 场景 `rebind` 复刻原 fixture 的 wire：只宣告 loadSession，session/load 回
+    // 一个新 id（remote-rebound）——正是「远端 identity 变化」这一事件的触发源。
+    let agent = crate::test_utils::fake_acp_agent("rebind-identity", &["--scenario", "rebind"]);
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
         .await

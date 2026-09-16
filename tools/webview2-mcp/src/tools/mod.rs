@@ -116,8 +116,10 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_console" => page::console(cx, args).await,
         "webview_network" => page::network(cx, args).await,
         "webview_network_body" => page::network_body(cx, args).await,
+        "webview_websocket" => page::websocket(cx, args).await,
         "webview_dom" => page::dom(cx, args).await,
         "webview_query" => page::query(cx, args).await,
+        "webview_snapshot" => page::snapshot(cx, args).await,
         "webview_screenshot" => page::screenshot(cx, args).await,
         "webview_click" => page::click(cx, args).await,
         "webview_type" => page::type_text(cx, args).await,
@@ -129,7 +131,7 @@ pub async fn dispatch(cx: &Context, name: &str, args: &Value) -> Result<ToolResu
         "webview_navigate" => page::navigate(cx, args).await,
         "tauri_invoke" => host::invoke(cx, args).await,
         "tauri_events" => host::events(cx, args).await,
-        "tauri_event_catalog" => host::event_catalog(cx, args),
+        "tauri_event_catalog" => host::event_catalog(cx, args).await,
         "tauri_window_state" => host::window_state(cx, args).await,
         "tauri_backend_logs" => host::backend_logs(cx, args).await,
         other => Err(Error::bad_args(other, "未知工具。可用工具见 tools/list。")),
@@ -178,6 +180,27 @@ fn type_schema(spec: &str) -> Value {
     }
 }
 
+/// 只读工具：不改变**被调试应用**的状态。
+///
+/// 这条例线按「对 app 的影响」划，不按「对 MCP 自己缓冲的影响」：
+/// `tauri_events` 会往页面里注册订阅、输入类工具会改 UI 状态，
+/// 因此都不在这里——标注成只读会让客户端在权限 UI 上给出错误的承诺。
+const READ_ONLY_TOOLS: [&str; 13] = [
+    "webview_targets",
+    "webview_console",
+    "webview_network",
+    "webview_network_body",
+    "webview_websocket",
+    "webview_dom",
+    "webview_query",
+    "webview_snapshot",
+    "webview_screenshot",
+    "webview_wait",
+    "tauri_event_catalog",
+    "tauri_window_state",
+    "tauri_backend_logs",
+];
+
 /// `tools/list` 的返回体。
 pub fn catalog() -> Vec<Value> {
     TOOLS.iter().map(ToolSpec::build).collect()
@@ -201,7 +224,7 @@ impl ToolSpec {
             }
             properties.insert((*key).into(), schema);
         }
-        json!({
+        let mut tool = json!({
             "name": self.name,
             "description": self.description,
             "inputSchema": {
@@ -209,7 +232,12 @@ impl ToolSpec {
                 "properties": properties,
                 "required": self.required,
             },
-        })
+        });
+        if READ_ONLY_TOOLS.contains(&self.name) {
+            // 客户端据此做权限提示/自动放行；不确定就不标。
+            tool["annotations"] = json!({ "readOnlyHint": true });
+        }
+        tool
     }
 }
 
@@ -225,16 +253,23 @@ static TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "webview_targets",
         description: "列出 WebView2 调试端点下所有可附加目标，并返回浏览器/协议版本。任何工具报 debug_endpoint_unreachable 时，第一步都回到这里确认端点是否活着——端点不可达时本工具不报错，而是返回 reachable=false 与开启步骤。",
-        properties: &[(
-            "include_workers",
-            "是否连同 worker / service_worker 等非页面目标一起列出（它们通常不可附加）。默认 false。",
-            "boolean",
-        )],
+        properties: &[
+            (
+                "include_workers",
+                "是否连同 worker / service_worker 等非页面目标一起列出（它们通常不可附加）。默认 false。",
+                "boolean",
+            ),
+            (
+                "scan_ports",
+                "是否顺便扫一段相邻端口（当前端口 +1..+9），列出本机其它 WebView2 调试端点。默认 false——调试端口是「谁连上谁能控制这个 app」的能力，主动去连别的端口不该是默认行为。仅在同时跑多个实例、又忘了谁用哪个端口时开它。",
+                "boolean",
+            ),
+        ],
         required: &[],
     },
     ToolSpec {
         name: "webview_evaluate",
-        description: "在页面主世界求值 JS 表达式并返回可序列化结果。默认包成 async IIFE，因此表达式里可以直接用 await。结果是 DOM 节点/函数等不可序列化对象时返回 __unserializable 标记而不是 null，避免把「拿不到值」误判成「值就是 null」。",
+        description: "在页面主世界求值 JS 表达式并返回可序列化结果。默认包成 async IIFE，因此表达式里可以直接用 await。结果是 DOM 节点/函数等不可序列化对象时返回 __unserializable 标记而不是 null，避免把「拿不到值」误判成「值就是 null」。结果序列化后超过 64KB 会换成 __truncated 信封（带大小与前缀预览），需要完整原始结果时用 webview_raw_cdp。",
         properties: &[
             (
                 "expression",
@@ -333,6 +368,43 @@ static TOOLS: &[ToolSpec] = &[
         required: &["request_id"],
     },
     ToolSpec {
+        name: "webview_websocket",
+        description: "读 WebSocket 流：连接级事件（created / handshake-request / handshake-response / closed / frame-error）与每一帧各占一条记录，保持往返次序——这一点与 webview_network 相反（那里按 requestId 把一次请求压成一条，看握手足够）。默认读增量，游标语义与 webview_console 一致。",
+        properties: &[
+            (
+                "pattern",
+                "按连接 url 子串过滤（大小写不敏感）。",
+                "string",
+            ),
+            (
+                "payload_pattern",
+                "按帧载荷文本子串过滤（大小写不敏感）。",
+                "string",
+            ),
+            (
+                "direction",
+                "只看某个方向：sent（页面发出）或 received（页面收到）。省略则两个方向都要。",
+                "enum:sent|received",
+            ),
+            (
+                "phase",
+                "只看某个阶段：created / handshake-request / handshake-response / frame / frame-error / closed。",
+                "enum:created|handshake-request|handshake-response|frame|frame-error|closed",
+            ),
+            (
+                "request_id",
+                "只看某条连接（webview_network 返回的 requestId）。",
+                "string",
+            ),
+            ("since_seq", SINCE_DOC, "integer"),
+            ("limit", LIMIT_DOC, "integer"),
+            ("scan", SCAN_DOC, "integer"),
+            ("reset", RESET_DOC, "boolean"),
+            ("target", TARGET_DOC, "string"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
         name: "webview_dom",
         description: "取 DOM 结构轮廓：每个元素的标签/id/class/属性，可选盒模型与叶子文本。走自序列化而不是 DOM.* 域，因此不受 nodeId 失效影响（DOM 变更会让 DOM.* 的 nodeId 作废）。节点数上限触发时会在 truncated 与 elidedChildren 里显式标注。",
         properties: &[
@@ -376,6 +448,30 @@ static TOOLS: &[ToolSpec] = &[
         required: &["selector"],
     },
     ToolSpec {
+        name: "webview_snapshot",
+        description: "无障碍快照：把页面折成「角色 + 可访问名 + ref」的文本树，例如 `- button \"发送\" [ref=e3]`。驱动 UI 时用它替代猜选择器——角色与名字是用户看到的东西，不随 DOM 结构变化；文本里的 ref 可直接传给 webview_click / webview_type / webview_key / webview_select 的 ref 参数（比 CSS 选择器稳）。ref 存在页内，页面重载后失效，那时定位会明确提示重新快照。角色表是简化版（常见标签 + 显式 role=），不做完整 ARIA 隐含角色推导。",
+        properties: &[
+            (
+                "selector",
+                "只快照这个子树；省略则整页。页面很大时用它可以避免触及 max_nodes 上限。",
+                "string",
+            ),
+            (
+                "max_nodes",
+                "节点上限，默认 300。到达上限即停止并在返回里标 truncated。",
+                "integer",
+            ),
+            (
+                "include_values",
+                "是否带上输入框当前值（value=...）。默认 true；值很长或含敏感内容时可关掉。",
+                "boolean",
+            ),
+            ("target", TARGET_DOC, "string"),
+            ("timeout_ms", TIMEOUT_DOC, "integer"),
+        ],
+        required: &[],
+    },
+    ToolSpec {
         name: "webview_screenshot",
         description: "截图并作为图片内容返回。full_page 用 Page.getLayoutMetrics 的 cssContentSize 做整页捕获；该参数在部分 WebView2 版本不支持，失败时会自动退回视口截图并在说明里写清，而不是整次失败。",
         properties: &[
@@ -410,13 +506,22 @@ static TOOLS: &[ToolSpec] = &[
         properties: &[
             (
                 "selector",
-                "目标元素选择器。与 x/y 二选一；selector 会先 scrollIntoView 再取中心点。",
+                "目标元素选择器。与 ref、x/y 三选一；会先 scrollIntoView 再取中心点。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot——比选择器稳，页面结构变了也不失效（除非元素被重新渲染）。与 selector、x/y 三选一。",
                 "string",
             ),
             ("x", "视口坐标 X（CSS 像素）。", "number"),
             ("y", "视口坐标 Y（CSS 像素）。", "number"),
             ("button", "鼠标键。", "enum:left|right|middle"),
-            ("click_count", "点击次数，默认 1；2 表示双击。", "integer"),
+            (
+                "click_count",
+                "点击次数，默认 1；2 = 双击（会派发两对 press/release，产生 dblclick），3 = 三击。上限 3，超出会被夹到 3。",
+                "integer",
+            ),
             (
                 "mode",
                 "input（默认，派发真实鼠标事件）或 dom（直接调 element.click()）。",
@@ -439,7 +544,12 @@ static TOOLS: &[ToolSpec] = &[
             ("text", "要输入的文本。", "string"),
             (
                 "selector",
-                "输入目标选择器；省略则用当前聚焦元素。",
+                "输入目标选择器；与 ref 二选一，两个都省略则用当前聚焦元素。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 二选一。",
                 "string",
             ),
             ("clear", "输入前清空。默认 false。", "boolean"),
@@ -461,17 +571,27 @@ static TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "webview_key",
-        description: "派发命名按键（Enter / Tab / Escape / Backspace / Delete / Arrow* / Home / End / PageUp / PageDown / F1-F12）。需要输入字符请用 webview_type，本工具用于导航与提交类按键。传入未知名字会在返回里说明它的实际行为，不会静默当成单字符。",
+        description: "派发命名按键（Enter / Tab / Escape / Backspace / Delete / Arrow* / Home / End / PageUp / PageDown / F1-F12 / 常用标点）或单个 ASCII 字符，可组合 modifiers 发出快捷键（如 key=\"a\" + modifiers=[\"ctrl\"] 即 Ctrl+A）。需要输入文字请用 webview_type，本工具用于导航、提交与组合键。无法派发的按键名（如 MetaLeft、中）直接报 bad_args，不会带着空键码发出无效按键。",
         properties: &[
             (
                 "key",
-                "按键名，例如 Enter、Escape、ArrowDown。名称同 CDP key 值。",
+                "按键名，例如 Enter、Escape、ArrowDown，或单个 ASCII 字符（如 a、.）。名称同 CDP key 值。",
                 "string",
             ),
             (
                 "selector",
-                "先聚焦该元素再按键；省略则按在当前聚焦元素上。",
+                "先聚焦该元素再按键；与 ref 二选一，两个都省略则按在当前聚焦元素上。",
                 "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 二选一。",
+                "string",
+            ),
+            (
+                "modifiers",
+                "同时按下的修饰键，单个字符串或数组，例如 [\"ctrl\"]、[\"ctrl\",\"shift\"]。可用：ctrl（别名 control）/ alt / shift / meta（别名 cmd / command / win / super）。按住 ctrl / alt / meta 时不会插入字符，即组合键语义。",
+                "string_or_string_array",
             ),
             ("repeat", "连按次数，默认 1（上限 64）。", "integer"),
             ("settle_ms", "按键后等待多少毫秒再返回，默认 60。", "integer"),
@@ -486,7 +606,12 @@ static TOOLS: &[ToolSpec] = &[
         properties: &[
             (
                 "selector",
-                "目标元素选择器。与 x/y 二选一；selector 会先 scrollIntoView 再取中心点。",
+                "目标元素选择器。与 ref、x/y 三选一；会先 scrollIntoView 再取中心点。",
+                "string",
+            ),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot——比选择器稳，页面结构变了也不失效（除非元素被重新渲染）。与 selector、x/y 三选一。",
                 "string",
             ),
             ("x", "视口坐标 X（CSS 像素）。", "number"),
@@ -532,7 +657,12 @@ static TOOLS: &[ToolSpec] = &[
         name: "webview_select",
         description: "选中 <select> 的选项：value / label / 下标三种匹配方式恰好给一种（multiple 可给数组选多项），选中后派发 input 与 change 事件让受控组件同步状态。返回匹配到的 option 与选中后的 selectedValues，可直接确认这次选择是否真的生效。目标不是 select 元素时返回 reason=not-a-select；没有匹配项时返回 reason=no-matching-option 并带回现有选项列表。",
         properties: &[
-            ("selector", "select 元素选择器。", "string"),
+            ("selector", "select 元素选择器；与 ref 恰好给出一个。", "string"),
+            (
+                "ref",
+                "快照 ref（如 e12），来自 webview_snapshot；与 selector 恰好给出一个。",
+                "string",
+            ),
             (
                 "value",
                 "按 option 的 value 全等匹配，可给数组（multiple 时选中多项）。",
@@ -547,7 +677,7 @@ static TOOLS: &[ToolSpec] = &[
             ("target", TARGET_DOC, "string"),
             ("timeout_ms", TIMEOUT_DOC, "integer"),
         ],
-        required: &["selector"],
+        required: &[],
     },
     ToolSpec {
         name: "webview_wait",
@@ -626,7 +756,7 @@ static TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "tauri_events",
-        description: "订阅并读取 Tauri 事件的增量。必须显式给出事件名——tauri 的 __TAURI_INTERNALS__.invoke 用不可配置的 defineProperty 定义，无法包装，因此做不到全量旁路捕获。事件名先用 tauri_event_catalog 从源码扫出。订阅是幂等的，页面 reload 后下次调用会自动重新订阅。",
+        description: "订阅并读取 Tauri 事件的增量。必须显式给出事件名——tauri 的 __TAURI_INTERNALS__.invoke 用不可配置的 defineProperty 定义，无法包装，因此做不到全量旁路捕获；事件名先用 tauri_event_catalog 从源码扫出。订阅是幂等的，并且会被注册成「新文档注入」：页面 reload/导航后订阅自动重建，不必再喊一次（结果里的 reloadSubscription 说明注册状态；该 WebView2 版本若不支持这个方法会如实报 installed=false，行为退回原样）。事件名集合变化时会自动重注册。",
         properties: &[
             (
                 "events",
@@ -855,6 +985,50 @@ mod tests {
     }
 
     #[test]
+    fn read_only_tools_are_annotated_and_mutating_ones_are_left_unannotated() {
+        for name in READ_ONLY_TOOLS {
+            let tool = TOOLS
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("只读名单里的 {name} 不在工具表里"));
+            assert_eq!(
+                tool.build()["annotations"]["readOnlyHint"],
+                true,
+                "{name} 应带 readOnlyHint"
+            );
+        }
+        // 输入、导航、任意求值/调用都会改变 app 状态，不能承诺只读。
+        for name in [
+            "webview_evaluate",
+            "webview_click",
+            "webview_type",
+            "webview_navigate",
+            "tauri_invoke",
+            "tauri_events",
+        ] {
+            let tool = TOOLS.iter().find(|t| t.name == name).unwrap();
+            assert!(
+                tool.build().get("annotations").is_none(),
+                "{name} 不该被标成只读"
+            );
+        }
+    }
+
+    #[test]
+    fn webview_key_declares_the_modifiers_argument() {
+        let key = TOOLS.iter().find(|t| t.name == "webview_key").unwrap();
+        let (_, description, type_spec) = key
+            .properties
+            .iter()
+            .find(|(name, _, _)| *name == "modifiers")
+            .expect("webview_key 缺 modifiers 参数");
+        assert_eq!(*type_spec, "string_or_string_array");
+        assert!(description.contains("ctrl"), "{description}");
+        // 修饰键有默认（无），不能进 required，否则省略即被客户端拒。
+        assert!(!key.required.contains(&"modifiers"));
+    }
+
+    #[test]
     fn every_dispatched_name_exists_in_the_catalog() {
         // dispatch 的 match 分支与 TOOLS 表是两份人工维护的清单，
         // 这里保证 catalog 里的每个名字都真的能被 dispatch 到一个已实现的分支。
@@ -867,7 +1041,7 @@ mod tests {
         }
         assert_eq!(
             TOOLS.len(),
-            22,
+            24,
             "工具数量变化时请同步更新 README、smoke 脚本与 instructions"
         );
     }

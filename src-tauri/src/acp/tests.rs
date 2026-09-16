@@ -532,18 +532,7 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
 }
 #[tokio::test]
 async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={'sessionId':'fake-session-1'}
-    elif method == 'session/prompt':
-        response['result']={'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp", script);
+    let agent = crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", "alive"]);
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP must initialize");
@@ -596,32 +585,7 @@ for line in sys.stdin:
 async fn wire_trace_preserves_id_kinds_and_full_sequence() {
     // OBS-01 验收：fake ACP 发送 number/string/null/无 id 四类报文，trace 保留
     // 四类差异；一次 permission 闭环按 seq 排出完整顺序；方向/身份逐条保留。
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        print(json.dumps(response), flush=True)
-        # unsolicited：absent-id 通知、number/string/null-id 消息（§5.3：显式 number 形态，
-        # 不依赖引擎生成的 outbound id 形态）
-        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'s-1'}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':7,'result':{'ok':True}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':'str-id-1','result':{'ok':True}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':None,'result':None}), flush=True)
-    elif method == 'session/new':
-        response['result']={'sessionId':'fake-session-1'}
-        print(json.dumps(response), flush=True)
-    elif method == 'session/prompt':
-        # P1 场景：string-id 的 request_permission 先到，再 update 通知，最后响应
-        print(json.dumps({'jsonrpc':'2.0','id':'perm-1','method':'session/request_permission','params':{'sessionId':'fake-session-1','toolCallId':'tc-1','options':[{'optionId':'allow_once'},{'optionId':'deny'}]}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'fake-session-1','toolCallId':'tc-1','type':'tool_call_update'}}), flush=True)
-        response['result']={'stopReason':'end_turn'}
-        print(json.dumps(response), flush=True)
-    else:
-        print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-trace", script);
+    let agent = crate::test_utils::fake_acp_agent("fake-acp-trace", &["--scenario", "id-kinds"]);
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP must initialize");
@@ -752,16 +716,7 @@ for line in sys.stdin:
 async fn fake_acp_initialize_stores_agent_capabilities() {
     // P1（能力协商暴露）：initialize 响应里的 agentCapabilities 必须存进
     // AcpClient——前端能力驱动 UI（agent_status.capabilities）依赖此存储。
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result']={'protocolVersion':1,'agentCapabilities':{'loadSession':True,'promptCapabilities':{'image':True}}}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-caps", script);
+    let agent = crate::test_utils::fake_acp_agent("fake-acp-caps", &["--scenario", "caps"]);
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP must initialize");
@@ -776,7 +731,7 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn connect_failures_have_typed_preflight_and_spawn_stages() {
-    let mut missing = crate::test_utils::fake_acp_agent("missing", "print('x')");
+    let mut missing = crate::test_utils::fake_acp_agent_stub("missing");
     missing.exe = std::env::temp_dir()
         .join("definitely-missing-pylon-agent")
         .to_string_lossy()
@@ -792,7 +747,7 @@ async fn connect_failures_have_typed_preflight_and_spawn_stages() {
     assert_eq!(failure.code, "agent_executable_missing");
     assert!(!failure.retryable);
 
-    let mut spawn = crate::test_utils::fake_acp_agent("spawn", "print('x')");
+    let mut spawn = crate::test_utils::fake_acp_agent_stub("spawn");
     spawn.exe = format!("pylon-command-that-does-not-exist-{}", std::process::id());
     let error = AcpClient::connect_with_logs(&spawn, None)
         .await
@@ -808,12 +763,19 @@ async fn connect_failures_have_typed_preflight_and_spawn_stages() {
 
 #[tokio::test]
 async fn initialize_rpc_failure_keeps_safe_remote_summary() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32041,'message':'profile invalid','data':{'token':'must-not-leak','attempt':1}}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("typed-init-error", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "typed-init-error",
+        &[
+            "--scenario",
+            "error-echo",
+            "--error-code",
+            "-32041",
+            "--error-message",
+            "profile invalid",
+            "--error-data",
+            r#"{"token":"must-not-leak","attempt":1}"#,
+        ],
+    );
     let error = AcpClient::connect_with_logs(&agent, None)
         .await
         .err()
@@ -833,12 +795,8 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn malformed_capabilities_have_capability_stage() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'agentCapabilities':[]}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("typed-capability-error", script);
+    let agent =
+        crate::test_utils::fake_acp_agent("typed-capability-error", &["--scenario", "bad-caps"]);
     let error = AcpClient::connect_with_logs(&agent, None)
         .await
         .err()
@@ -879,10 +837,8 @@ fn rpc_failure_kind_distinguishes_missing_session_from_method_and_transient_erro
 
 #[tokio::test]
 async fn fake_acp_eof_drains_pending_requests() {
-    let script = r#"import sys
-sys.exit(0)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-eof", script);
+    let agent =
+        crate::test_utils::fake_acp_agent("fake-acp-eof", &["--scenario", "exit-immediately"]);
     let client = AcpClient::connect_with_logs(&agent, None).await;
     assert!(
         client.is_err(),
@@ -895,17 +851,7 @@ async fn crashed_watch_signals_eof_after_broadcast_overflow() {
     // A7：洪泛 300 条（> BROADCAST_CAP=256）后 EOF——NOTIF_AGENT_CRASHED 广播
     // 必然被 Lagged 丢弃；崩溃信号必须经独立 watch 通道仍可靠送达（watch 保留
     // 最新值：订阅晚于崩溃时 has_changed 直接可读，订阅早于崩溃时 changed 触发）。
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        for i in range(300):
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'flood','update':{'sessionUpdate':'agent_message_chunk','content':{'text':'x'}}}}), flush=True)
-        break
-sys.exit(0)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-flood-crash", script);
+    let agent = crate::test_utils::fake_acp_agent("fake-acp-flood-crash", &["--scenario", "flood"]);
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("flood fake ACP must initialize");
@@ -928,23 +874,15 @@ sys.exit(0)
 
 #[tokio::test]
 async fn fake_acp_session_load_collects_replay_before_response() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result']={}
-    elif method == 'session/load':
-        session_id=request['params']['sessionId']
-        for text in ['history-1','history-2']:
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':text}}}}), flush=True)
-        response['result']={'loaded':True}
-    else:
-        response['result']={}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-replay", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-replay",
+        &[
+            "--scenario",
+            "replay-history",
+            "--load-chunks",
+            r#"["history-1","history-2"]"#,
+        ],
+    );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP replay agent must initialize");
@@ -975,20 +913,8 @@ for line in sys.stdin:
 /// 必须按配置超时返回 RpcTimeout（而非默认 30s 等待）。
 #[tokio::test]
 async fn rpc_timeout_from_config_is_used() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    else:
-        pass
-"#;
-    let mut agent = crate::test_utils::fake_acp_agent_with(
-        "fake-acp-rpc-timeout",
-        script,
-        Vec::new(),
-        HashMap::new(),
-    );
+    let mut agent =
+        crate::test_utils::fake_acp_agent("fake-acp-rpc-timeout", &["--scenario", "silent"]);
     agent.acp = Some(crate::agent_config::AcpProtocolConfig {
         rpc_timeout_secs: Some(1),
         ..Default::default()
@@ -1019,22 +945,14 @@ for line in sys.stdin:
 /// G1-02：replay_max 参数化——回放超过配置上限时截断且继续等响应（响应不得丢）。
 #[tokio::test]
 async fn replay_max_truncation_respects_config() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    elif request.get('method') == 'session/load':
-        session_id=request['params']['sessionId']
-        for i in range(3):
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'h%d' % i}}}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'loaded':True}}), flush=True)
-"#;
-    let mut agent = crate::test_utils::fake_acp_agent_with(
+    let mut agent = crate::test_utils::fake_acp_agent(
         "fake-acp-replay-cap",
-        script,
-        Vec::new(),
-        HashMap::new(),
+        &[
+            "--scenario",
+            "replay-history",
+            "--load-chunks",
+            r#"["h0","h1","h2"]"#,
+        ],
     );
     agent.acp = Some(crate::agent_config::AcpProtocolConfig {
         replay_max_events: Some(2),
@@ -1088,24 +1006,16 @@ for line in sys.stdin:
 #[tokio::test]
 async fn fake_acp_cancel_and_close_send_expected_notifications() {
     let trace_path = crate::test_utils::unique_temp("acp-control").with_extension("jsonl");
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/close':
-        response['result']={'closed':True}
-    if request.get('id') is not None:
-        print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent_with(
+    let agent = crate::test_utils::fake_acp_agent(
         "fake-acp-control",
-        script,
-        vec![trace_path.to_string_lossy().into_owned()],
-        HashMap::new(),
+        &[
+            "--scenario",
+            "control-echo",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "all",
+        ],
     );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -1137,13 +1047,10 @@ for line in sys.stdin:
 }
 #[tokio::test]
 async fn fake_acp_eof_wakes_pending_request_after_initialize() {
-    let script = r#"import json,sys
-line=sys.stdin.readline()
-request=json.loads(line)
-print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-sys.exit(0)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-eof-after-init", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-eof-after-init",
+        &["--scenario", "crash-after-init"],
+    );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("initialize response must arrive before EOF");
@@ -1166,16 +1073,8 @@ sys.exit(0)
 
 #[tokio::test]
 async fn fake_acp_malformed_json_does_not_break_following_response() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    print('{malformed-json', flush=True)
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if request.get('method') == 'session/new':
-        response['result']={'sessionId':'after-malformed'}
-    print(json.dumps(response), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-malformed", script);
+    let agent =
+        crate::test_utils::fake_acp_agent("fake-acp-malformed", &["--scenario", "malformed-echo"]);
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("malformed line must not break initialize");
@@ -1187,13 +1086,15 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn fake_acp_stderr_is_drained_into_safe_runtime_log() {
-    let script = r#"import json,sys
-print('fake stderr diagnostic', file=sys.stderr, flush=True)
-for line in sys.stdin:
-    request=json.loads(line)
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-stderr", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-stderr",
+        &[
+            "--scenario",
+            "alive",
+            "--stderr-marker",
+            "fake stderr diagnostic",
+        ],
+    );
     let logs = crate::runtime_log::RuntimeLogHub::new(16);
     let client = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
         .await
@@ -1245,16 +1146,17 @@ for line in sys.stdin:
 
 #[tokio::test]
 async fn fake_acp_delayed_response_stays_pending_until_response() {
-    let script = r#"import json,sys,time
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'session/new':
-        time.sleep(0.15)
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'delayed-session'}}), flush=True)
-    else:
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-delayed", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-delayed",
+        &[
+            "--scenario",
+            "alive",
+            "--session-id",
+            "delayed-session",
+            "--new-delay-ms",
+            "150",
+        ],
+    );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("delayed fake ACP must initialize");
@@ -1268,25 +1170,16 @@ for line in sys.stdin:
 #[tokio::test]
 async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response() {
     let trace_path = crate::test_utils::unique_temp("acp-prompt").with_extension("jsonl");
-    let script = r#"import json,sys,time
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    method=request.get('method')
-    if method == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    elif method == 'session/prompt':
-        time.sleep(0.2)
-    elif method == 'session/cancel':
-        print(json.dumps({'jsonrpc':'2.0','id':None,'method':'session/update','params':{'sessionId':request['params']['sessionId'],'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'cancelled'}}}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent_with(
+    let agent = crate::test_utils::fake_acp_agent(
         "fake-acp-prompt-timeout",
-        script,
-        vec![trace_path.to_string_lossy().into_owned()],
-        HashMap::new(),
+        &[
+            "--scenario",
+            "prompt-hang",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "all",
+        ],
     );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -1341,34 +1234,17 @@ async fn writer_failure_signals_watch_and_pending_settles() {
         std::process::id()
     ));
     // 读一行后立即退出：initialize 写入成功，后续写触发 EPIPE。
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-line=sys.stdin.readline()
-request=json.loads(line)
-trace.write(json.dumps(request)+'\n')
-trace.flush()
-print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-    let agent = crate::agent_config::AgentDef {
-        name: "fake-acp-writer-fail".to_string(),
-        provider: None,
-        transport: "subprocess".to_string(),
-        exe: crate::test_utils::test_python_exe().to_string(),
-        args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
-            trace_path.to_string_lossy().into_owned(),
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-writer-fail",
+        &[
+            "--scenario",
+            "crash-after-init",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "all",
         ],
-        cwd: None,
-        env: HashMap::new(),
-        default: false,
-        set_model_api: false,
-        model: None,
-        hermes_profile: None,
-        acp_args: Vec::new(),
-        acp: None,
-    };
+    );
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("initialize 应成功（首行写入正常）");
@@ -1400,23 +1276,10 @@ print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=Tr
 }
 #[tokio::test]
 async fn fake_acp_session_load_ignores_updates_from_other_sessions() {
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    elif request.get('method') == 'session/load':
-        session_id=request['params']['sessionId']
-        updates=[
-            (session_id, 'target-1'),
-            ('other-session', 'must-not-leak'),
-            (session_id, 'target-2'),
-        ]
-        for update_session, text in updates:
-            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':update_session,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':text}}}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'loaded':True}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-update-isolation", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-update-isolation",
+        &["--scenario", "update-isolation"],
+    );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("update isolation fake ACP must initialize");
@@ -1445,18 +1308,8 @@ async fn fake_acp_session_load_replay_eof_returns_connection_closed() {
     // 优化 3：回放期间 EOF（崩溃）——每轮复检 crashed 立即 ConnectionClosed，
     // 而非依赖 NOTIF_AGENT_CRASHED 广播被跳过（非目标 session/update）后
     // 挂满 30s 假超时。
-    let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    elif request.get('method') == 'session/load':
-        session_id=request['params']['sessionId']
-        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'history-1'}}}}), flush=True)
-        break
-sys.exit(0)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-replay-eof", script);
+    let agent =
+        crate::test_utils::fake_acp_agent("fake-acp-replay-eof", &["--scenario", "replay-eof"]);
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("fake ACP replay EOF agent must initialize");
@@ -1480,19 +1333,10 @@ sys.exit(0)
 
 #[tokio::test]
 async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
-    let script = r#"import json,sys
-prompt_id=None
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    if method == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-    elif method == 'session/prompt':
-        prompt_id=request.get('id')
-    elif method == 'session/cancel':
-        print(json.dumps({'jsonrpc':'2.0','id':prompt_id,'result':{'stopReason':'cancelled'}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent("fake-acp-cancel-response", script);
+    let agent = crate::test_utils::fake_acp_agent(
+        "fake-acp-cancel-response",
+        &["--scenario", "prompt-cancel-respond"],
+    );
     let client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("cancel-response fake ACP must initialize");
@@ -1545,21 +1389,20 @@ for line in sys.stdin:
 async fn send_response_writes_result_with_matching_id() {
     let trace_path =
         std::env::temp_dir().join(format!("pylon-acp-response-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    trace.write(line)
-    trace.flush()
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        print(json.dumps({'jsonrpc':'2.0','id':42,'method':'session/request_permission','params':{'sessionId':'s-1','toolCallId':'tc-1','options':[]}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent_with(
+    let agent = crate::test_utils::fake_acp_agent(
         "fake-acp-response",
-        script,
-        vec![trace_path.to_string_lossy().into_owned()],
-        HashMap::new(),
+        &[
+            "--scenario",
+            "permission-proactive",
+            "--permission-id",
+            "42",
+            "--permission-params",
+            r#"{"sessionId":"s-1","toolCallId":"tc-1","options":[]}"#,
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "all",
+        ],
     );
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -1606,24 +1449,20 @@ for line in sys.stdin:
 async fn fake_acp_initialize_uses_configured_client_capabilities() {
     let trace_path =
         std::env::temp_dir().join(format!("pylon-acp-caps-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
     let agent = crate::agent_config::AgentDef {
         name: "fake-acp-caps".to_string(),
         provider: None,
         transport: "subprocess".to_string(),
-        exe: "python".to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
         args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
+            "--scenario".to_string(),
+            "trace-all".to_string(),
+            "--trace-file".to_string(),
             trace_path.to_string_lossy().into_owned(),
+            "--trace-mode".to_string(),
+            "all".to_string(),
         ],
         cwd: None,
         env: HashMap::new(),
@@ -1683,19 +1522,16 @@ async fn fake_acp_initialize_defaults_to_unified_capabilities() {
         "pylon-acp-caps-default-{}.jsonl",
         std::process::id()
     ));
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
-    let agent = crate::test_utils::fake_acp_agent_with(
+    let agent = crate::test_utils::fake_acp_agent(
         "fake-acp-caps-default",
-        script,
-        vec![trace_path.to_string_lossy().into_owned()],
-        HashMap::new(),
+        &[
+            "--scenario",
+            "trace-all",
+            "--trace-file",
+            &trace_path.to_string_lossy(),
+            "--trace-mode",
+            "all",
+        ],
     );
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -1732,24 +1568,20 @@ for line in sys.stdin:
 async fn custom_protocol_version_and_client_info_reach_wire() {
     let trace_path =
         std::env::temp_dir().join(format!("pylon-acp-handshake-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    trace.write(json.dumps(request)+'\n')
-    trace.flush()
-    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-"#;
     let agent = crate::agent_config::AgentDef {
         name: "fake-acp-handshake".to_string(),
         provider: None,
         transport: "subprocess".to_string(),
-        exe: crate::test_utils::test_python_exe().to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
         args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
+            "--scenario".to_string(),
+            "trace-all".to_string(),
+            "--trace-file".to_string(),
             trace_path.to_string_lossy().into_owned(),
+            "--trace-mode".to_string(),
+            "all".to_string(),
         ],
         cwd: None,
         env: HashMap::new(),
@@ -1803,24 +1635,19 @@ async fn hermes_profile_injects_hermes_home_env() {
     std::fs::create_dir_all(&profile_dir).unwrap();
     let trace_path =
         std::env::temp_dir().join(format!("pylon-hermes-env-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys,os
-with open(sys.argv[1],'w',encoding='utf-8') as f:
-    f.write(os.environ.get('HERMES_HOME','')+'\n')
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        break
-"#;
     let mut agent = crate::agent_config::AgentDef {
         name: "fake-hermes".to_string(),
         provider: None,
         transport: "subprocess".to_string(),
-        exe: crate::test_utils::test_python_exe().to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
         args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
+            "--scenario".to_string(),
+            "env-probe".to_string(),
+            "--env-var".to_string(),
+            "HERMES_HOME".to_string(),
+            "--trace-file".to_string(),
             trace_path.to_string_lossy().into_owned(),
         ],
         cwd: None,
@@ -1854,24 +1681,19 @@ for line in sys.stdin:
 async fn unset_hermes_profile_does_not_inject_env() {
     let trace_path =
         std::env::temp_dir().join(format!("pylon-hermes-noenv-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys,os
-with open(sys.argv[1],'w',encoding='utf-8') as f:
-    f.write(os.environ.get('HERMES_HOME','<absent>')+'\n')
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        break
-"#;
     let agent = crate::agent_config::AgentDef {
         name: "fake-hermes-plain".to_string(),
         provider: None,
         transport: "subprocess".to_string(),
-        exe: crate::test_utils::test_python_exe().to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
         args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
+            "--scenario".to_string(),
+            "env-probe".to_string(),
+            "--env-var".to_string(),
+            "HERMES_HOME".to_string(),
+            "--trace-file".to_string(),
             trace_path.to_string_lossy().into_owned(),
         ],
         cwd: None,
@@ -1923,15 +1745,6 @@ fn process_exists(pid: u32) -> bool {
 async fn codex_wrapper_connects_through_the_adapter_not_the_vendor_cli() {
     let trace_path =
         std::env::temp_dir().join(format!("pylon-codex-wrapper-{}.jsonl", std::process::id()));
-    let script = r#"import json,sys,os
-with open(sys.argv[1],'w',encoding='utf-8') as f:
-    f.write(json.dumps({'argv':sys.argv,'marker':os.environ.get('PYLON_WRAPPER_MARKER','<absent>')}))
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        break
-"#;
     let mut env = HashMap::new();
     env.insert(
         "PYLON_WRAPPER_MARKER".to_string(),
@@ -1942,11 +1755,15 @@ for line in sys.stdin:
         // provider 决定 catalog profile：codex 是 wrapper（adapterRelation.nativeCmd = codex）。
         provider: Some("codex".to_string()),
         transport: "subprocess".to_string(),
-        exe: crate::test_utils::test_python_exe().to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
         args: vec![
-            "-u".to_string(),
-            "-c".to_string(),
-            script.to_string(),
+            "--scenario".to_string(),
+            "argv-probe".to_string(),
+            "--env-var".to_string(),
+            "PYLON_WRAPPER_MARKER".to_string(),
+            "--trace-file".to_string(),
             trace_path.to_string_lossy().into_owned(),
         ],
         cwd: None,
@@ -1972,11 +1789,13 @@ for line in sys.stdin:
         .iter()
         .map(|item| item.as_str().unwrap_or_default().to_string())
         .collect();
-    // 适配器只收到自己的脚本参数；catalog recipe 的 args 为空，未追加任何参数。
+    // 适配器只收到自己的场景参数（假 bin 本体 + argv-probe 旗标）；catalog recipe
+    // 的 args 为空，未追加任何参数。P1 后适配器本体 = pylon-fake-agent bin，
+    // 原断言的「解释器参数」形态随之更新为「场景旗标在 argv」。
     assert!(
-        argv.iter()
-            .any(|arg| arg.ends_with(".py") || arg.contains("-c")),
-        "argv 应包含解释器参数: {argv:?}"
+        argv.windows(2)
+            .any(|window| window == ["--scenario", "argv-probe"]),
+        "argv 应包含适配器自身的场景参数: {argv:?}"
     );
     assert!(
         !argv
@@ -2005,24 +1824,17 @@ async fn claude_wrapper_puts_declared_client_capabilities_on_the_wire() {
     async fn capture_initialize_params(provider: &str, tag: &str) -> serde_json::Value {
         let trace_path =
             std::env::temp_dir().join(format!("pylon-{tag}-init-{}.jsonl", std::process::id()));
-        let script = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if request.get('method') == 'initialize':
-        with open(sys.argv[1],'w',encoding='utf-8') as f:
-            f.write(json.dumps(request.get('params',{})))
-        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
-        break
-"#;
         let agent = crate::agent_config::AgentDef {
             name: tag.to_string(),
             provider: Some(provider.to_string()),
             transport: "subprocess".to_string(),
-            exe: crate::test_utils::test_python_exe().to_string(),
+            exe: crate::test_utils::fake_agent_bin()
+                .to_string_lossy()
+                .into_owned(),
             args: vec![
-                "-u".to_string(),
-                "-c".to_string(),
-                script.to_string(),
+                "--scenario".to_string(),
+                "init-params-probe".to_string(),
+                "--trace-file".to_string(),
                 trace_path.to_string_lossy().into_owned(),
             ],
             cwd: None,

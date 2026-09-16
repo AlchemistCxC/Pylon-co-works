@@ -1520,7 +1520,7 @@ mod tests {
 
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent(agent_id)
-            .with_agent(crate::test_utils::fake_acp_agent(agent_id, ""))
+            .with_agent(crate::test_utils::fake_acp_agent_stub(agent_id))
             .with_runtime(agent_id, runtime.clone())
             .build();
         let event_service = Arc::new(EventService::in_memory().expect("event service"));
@@ -1579,18 +1579,15 @@ mod tests {
     /// authoritative `user.message`；终态行可以另外存在，但不得再出现第二条用户事实。
     #[tokio::test]
     async fn send_prompt_core_success_has_one_authoritative_user_row() {
-        const SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={'sessionId':'prompt-success-session'}
-    elif method == 'session/prompt':
-        response['result']={'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
-        let mut agent = crate::test_utils::fake_acp_agent("prompt-success-agent", SCRIPT);
+        let mut agent = crate::test_utils::fake_acp_agent(
+            "prompt-success-agent",
+            &[
+                "--scenario",
+                "alive",
+                "--session-id",
+                "prompt-success-session",
+            ],
+        );
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             prompt_timeout_secs: Some(5),
             ..Default::default()
@@ -1678,20 +1675,6 @@ for line in sys.stdin:
     #[tokio::test]
     async fn before_send_hook_transform_rewrites_wire_but_journal_keeps_original() {
         use tauri::{Listener, Manager};
-        const SCRIPT: &str = r#"import json,sys
-trace=open(sys.argv[1],'w',encoding='utf-8')
-for line in sys.stdin:
-    request=json.loads(line)
-    method=request.get('method')
-    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'session/new':
-        response['result']={'sessionId':'hook-dual-session'}
-    elif method == 'session/prompt':
-        trace.write(json.dumps(request)+'\n')
-        trace.flush()
-        response['result']={'stopReason':'end_turn'}
-    print(json.dumps(response), flush=True)
-"#;
         let trace_path = std::env::temp_dir().join(format!(
             "pylon-hook-dual-track-{}-{}.jsonl",
             std::process::id(),
@@ -1700,11 +1683,18 @@ for line in sys.stdin:
                 .map(|value| value.as_millis())
                 .unwrap_or(0),
         ));
-        let agent = crate::test_utils::fake_acp_agent_with(
+        let agent = crate::test_utils::fake_acp_agent(
             "hook-dual-agent",
-            SCRIPT,
-            vec![trace_path.to_string_lossy().into_owned()],
-            std::collections::HashMap::new(),
+            &[
+                "--scenario",
+                "stream",
+                "--session-id",
+                "hook-dual-session",
+                "--trace-file",
+                &trace_path.to_string_lossy(),
+                "--trace-mode",
+                "prompt-only",
+            ],
         );
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)

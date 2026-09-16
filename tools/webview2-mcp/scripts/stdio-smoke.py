@@ -69,11 +69,11 @@ EXPECTED_RESPONSES = len([request for request in REQUESTS if "id" in request]) +
 
 EXPECTED_TOOLS = {
     "webview_targets", "webview_evaluate", "webview_raw_cdp", "webview_console",
-    "webview_network", "webview_network_body", "webview_dom", "webview_query",
-    "webview_screenshot", "webview_click", "webview_type", "webview_key",
-    "webview_hover", "webview_scroll", "webview_select", "webview_wait",
-    "webview_navigate", "tauri_invoke", "tauri_events", "tauri_event_catalog",
-    "tauri_window_state", "tauri_backend_logs",
+    "webview_network", "webview_network_body", "webview_websocket", "webview_dom",
+    "webview_query", "webview_snapshot", "webview_screenshot", "webview_click",
+    "webview_type", "webview_key", "webview_hover", "webview_scroll",
+    "webview_select", "webview_wait", "webview_navigate", "tauri_invoke",
+    "tauri_events", "tauri_event_catalog", "tauri_window_state", "tauri_backend_logs",
 }
 
 FAILURES = []
@@ -151,7 +151,7 @@ def check_notifications_are_not_answered(responses):
 def check_tool_catalog(by_id):
     tools = by_id.get(2, {}).get("result", {}).get("tools", [])
     names = {tool.get("name") for tool in tools}
-    check(len(tools) == 22, "tools/list 返回 22 个工具", f"实际 {len(tools)}")
+    check(len(tools) == 24, "tools/list 返回 24 个工具", f"实际 {len(tools)}")
     check(names == EXPECTED_TOOLS, "工具名集合与预期一致", f"差集 {names ^ EXPECTED_TOOLS}")
     check(all(tool["inputSchema"]["type"] == "object" for tool in tools), "所有工具都是 object schema")
     check(all(len(tool.get("description", "")) > 40 for tool in tools), "所有工具描述都有实质内容")

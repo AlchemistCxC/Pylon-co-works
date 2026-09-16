@@ -271,6 +271,27 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 ---
 
+
+[2026-09-16 23] [Brahe] [#85]
+
+按仓库主直接要求对 `tools/webview2-mcp` 施工（不新开 issue，沿 #85 后续跟进）。**我改动的文件域（请勿改写、勿连带提交）**：`tools/webview2-mcp/**` 全部，外加新增的 `.agents/records/85-webview2-mcp-perf-and-fixes.md`。
+
+内容：目标发现 1s TTL 缓存 + 共享 reqwest client（一次点击原本要 4 趟 `GET /json`，`webview_type` 的 keys 模式每字符 2 趟）；事件读增量不再整缓冲深拷贝（只 clone 命中条目）；`webview_evaluate` 结果 64KB 上限（`__truncated` 信封）；`click_count=2` 改为派发两对 press/release（原实现产生不了 `dblclick`）；`webview_console` 的 `type=exception` 过滤修复（原按 `type` 比恒为空，改按 `kind`）；`webview_key` 新增 `modifiers`（Ctrl+A 这类组合键），无法派发的按键名直接报 `bad_args`；`tauri_event_catalog` 挪出 reactor 线程并加总字节预算；`tools/list` 补 `annotations.readOnlyHint`。
+
+**冲突观察（重要）**：#106 的 main 合并把我的 webview2 未提交改动 stash 了（`stash@{0}: preserve unrelated webview2 changes before main merge`）。我已用 `git stash show -p stash@{0} | git apply` 恢复并提交——**请不要再 pop**（会重复应用/冲突），确认无误后可直接 `drop stash@{0}`。
+
+**环境观察**：本机 9222 当前有两个 page 目标（`about:blank` 与 Pylon），不带 `target` 的工具调用会按设计报 `ambiguous_target`；用 `webview_targets` 返回的 id 前缀即可（id 每次启动都会变，别抄旧的）。
+
+---
+
+[2026-09-17 01] [Brahe] [#85]
+
+第二轮：把上一轮列为「后续」的六项全做了（`tools/webview2-mcp/**` 仍是本人域，请勿改写、勿连带提交；新增记录 `.agents/records/85-webview2-mcp-deepening.md`）。
+
+内容：`webview_websocket`（连接级事件 + 每帧一条，保持往返次序）；network 记录并入 `*ExtraInfo`（CORS 被拦时唯一有真实状态码的地方，另存 `raw*` 不覆盖）；Session 加 WS 心跳（15s ping / 10s pong）判定半开连接，且**只有本会话收到过 pong 才允许判死**（端点不回 ping 就停用，绝不误杀好会话）；`tauri_events` 订阅注册成新文档注入，reload/导航后自动重建（会话内记账 scriptId + 事件名，名字变了先撤旧再注册）；新工具 `webview_snapshot`（角色 + 可访问名 + ref 文本树）并让 click/type/key/hover/select 接受 `ref` 定位（失效时明确提示重新快照，不回退猜元素）；`webview_targets` 加 `scan_ports`（默认关）。
+
+工具表 22 → 24；README / instructions / 冒烟脚本已同步。门禁：cargo test 156 绿、clippy -D warnings 零告警、fmt 干净、stdio 冒烟全绿；实机（本机 9222 的 Pylon）验证了快照、ref 悬停、stale ref 提示、参数互斥、以及 30s 空闲后心跳不误判。**未在真机上点击/输入**（怕干扰正在用该实例的人），写路径只到单测与事件序列断言为止。
+=======
 [2026-09-16 03] [Erdős] [#107]
 
 清出 `scripts/` 四个零引用孤儿脚本与根目录垃圾（`nul`、误落盘模板行、调试日志、pycache）。只 git rm 下列四个 tracked 文件：acceptance-pet-runtime.mts、hermes-wire-test.py、smoke-release-sdk.mjs、convert-presets-to-delta.mts，另本地清理未跟踪垃圾。**不碰** scripts/ 其他在岗脚本、pack-plugin-devkit 链、backup-portable-data.sh、src-tauri 他人 WIP。
@@ -280,3 +301,4 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 [2026-09-16 05] [图灵] [#99]
 
 二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
+

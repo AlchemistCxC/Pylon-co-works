@@ -89,6 +89,79 @@ class AuditTests(unittest.TestCase):
             pack.reject_forbidden(ok)
 
 
+class McpToolPackagingTests(unittest.TestCase):
+    """自带的调试 MCP 服务器必须随发行包分发（2026-09-17 仓库主决定）。
+
+    它与 app 是「外部进程 + WebView2 --remote-debugging-port」的松耦合关系，
+    源码仓能 `cargo build`、拿到 zip 的人却拿不到——所以把 exe 与 README 一起打进
+    `tools/webview2-mcp/`。本测试钉住三件事：收集路径、缺 exe 必须构建期报错
+    （而不是拖到用户需要调试时才发现）、README 必须能过发行包的内容审计。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="pylon-mcp-pack-test-"))
+        self.old_release = pack.MCP_RELEASE_DIR
+        self.old_dir = pack.MCP_DIR
+
+    def tearDown(self) -> None:
+        pack.MCP_RELEASE_DIR = self.old_release
+        pack.MCP_DIR = self.old_dir
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_exe_and_readme_land_under_tools_with_the_exe_name(self) -> None:
+        release = self.tmp / "target" / "release"
+        release.mkdir(parents=True)
+        (release / pack.MCP_EXE_NAME).write_bytes(b"MZ-fake")
+        docs = self.tmp / "docs"
+        docs.mkdir()
+        (docs / "README.md").write_text("# mcp", encoding="utf-8")
+        pack.MCP_RELEASE_DIR = release
+        pack.MCP_DIR = docs
+
+        collected = dict(
+            (rel, source) for source, rel in pack.collect_mcp_tool()
+        )
+        self.assertEqual(
+            sorted(collected),
+            [
+                f"{pack.MCP_PACKAGE_DIR}/README.md",
+                f"{pack.MCP_PACKAGE_DIR}/{pack.MCP_EXE_NAME}",
+            ],
+        )
+        # 路径必须落在 tools/ 下：与随包脚本并列，且不进 src/ 这类被拒路径。
+        for rel in collected:
+            pack.reject_forbidden(rel)
+
+    def test_missing_exe_fails_the_build_instead_of_shipping_silently(self) -> None:
+        pack.MCP_RELEASE_DIR = self.tmp / "target" / "release"
+        pack.MCP_DIR = pack.REPO_DIR / "tools" / "webview2-mcp"
+        with self.assertRaises(pack.PackError) as raised:
+            pack.collect_mcp_tool()
+        # 报错要带出构建命令，否则拿到失败的人得回读脚本才知道怎么办。
+        self.assertIn("--release", str(raised.exception))
+        self.assertIn("tools/webview2-mcp", str(raised.exception))
+
+    def test_missing_readme_fails_the_build(self) -> None:
+        release = self.tmp / "target" / "release"
+        release.mkdir(parents=True)
+        (release / pack.MCP_EXE_NAME).write_bytes(b"MZ-fake")
+        pack.MCP_RELEASE_DIR = release
+        pack.MCP_DIR = self.tmp / "empty"
+        with self.assertRaises(pack.PackError):
+            pack.collect_mcp_tool()
+
+    def test_the_shipped_readme_passes_the_release_audit(self) -> None:
+        # README 是文本文件，会走 scan_text_file：里面不能有本机绝对路径或
+        # 形如 `token: ...` 的敏感键，否则打包在审计阶段就会失败。
+        readme = pack.REPO_DIR / "tools" / "webview2-mcp" / "README.md"
+        self.assertTrue(readme.is_file())
+        rel = f"{pack.MCP_PACKAGE_DIR}/README.md"
+        pack.reject_forbidden(rel)
+        pack.scan_text_file(rel, readme.read_text(encoding="utf-8"))
+
+
 class StagingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="pylon-pack-test-"))

@@ -268,27 +268,15 @@ mod tests {
 
     // ── B3 集成：真实 fake ACP 子进程的并发与隔离 ──
 
-    /// 一个 echo 型 fake ACP（initialize + session/new 都按请求回 sessionId）。
-    const ECHO_AGENT_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get('method')
-    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
-    if method == 'initialize':
-        response['result'] = {'agentCapabilities': {'sessionCapabilities': {'loadSession': {}}}}
-    elif method == 'session/new':
-        response['result'] = {'sessionId': 'shared-name'}
-    print(json.dumps(response), flush=True)
-"#;
+    /// echo 型 fake ACP（P1 后为 bin 场景 session-capable：loadSession 能力 + 固定名会话）。
+    fn echo_agent(name: &str) -> crate::agent_config::AgentDef {
+        crate::test_utils::fake_acp_agent(name, &["--scenario", "session-capable"])
+    }
 
     /// initialize 后立即退出的 fake ACP（崩溃实例）。
-    const CRASH_AGENT_SCRIPT: &str = r#"import json,sys
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get('method') == 'initialize':
-        print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{}}), flush=True)
-        break
-"#;
+    fn crash_agent(name: &str) -> crate::agent_config::AgentDef {
+        crate::test_utils::fake_acp_agent(name, &["--scenario", "crash-after-init"])
+    }
 
     async fn registered_client(
         registry: &Arc<InstanceRegistry>,
@@ -309,9 +297,9 @@ for line in sys.stdin:
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn three_fake_instances_run_concurrently_with_isolated_wires() {
         let registry = InstanceRegistry::new(MAX_INSTANCES);
-        let alpha = crate::test_utils::fake_acp_agent("alpha", ECHO_AGENT_SCRIPT);
-        let beta = crate::test_utils::fake_acp_agent("beta", ECHO_AGENT_SCRIPT);
-        let gamma = crate::test_utils::fake_acp_agent("gamma", ECHO_AGENT_SCRIPT);
+        let alpha = echo_agent("alpha");
+        let beta = echo_agent("beta");
+        let gamma = echo_agent("gamma");
 
         let (mut alpha, alpha_guard) = registered_client(&registry, &alpha, 1).await;
         let (mut beta, beta_guard) = registered_client(&registry, &beta, 1).await;
@@ -351,8 +339,8 @@ for line in sys.stdin:
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn one_instance_crashing_does_not_affect_the_others() {
         let registry = InstanceRegistry::new(MAX_INSTANCES);
-        let doomed = crate::test_utils::fake_acp_agent("doomed", CRASH_AGENT_SCRIPT);
-        let survivor = crate::test_utils::fake_acp_agent("survivor", ECHO_AGENT_SCRIPT);
+        let doomed = crash_agent("doomed");
+        let survivor = echo_agent("survivor");
 
         let (mut doomed, doomed_guard) = registered_client(&registry, &doomed, 1).await;
         let (mut survivor, survivor_guard) = registered_client(&registry, &survivor, 1).await;

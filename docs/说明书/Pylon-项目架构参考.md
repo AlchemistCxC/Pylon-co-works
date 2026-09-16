@@ -415,9 +415,11 @@ bun run test:unit
 bun run test:frontend
 bun run build
 bun run check:solid
-cargo test --manifest-path src-tauri/Cargo.toml --lib
-cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
-cargo test --manifest-path src-tauri/pylon-foundations/Cargo.toml
+# #106 workspace 化后：单锁单 target，全 crate 单元测试一条命令（含子 crate）
+cargo test --manifest-path src-tauri/Cargo.toml --workspace --lib
+# 集成/夹具形态测试（先构建测试专用假 agent bin）
+cargo build --manifest-path src-tauri/Cargo.toml --bin pylon-fake-agent --features test-agent
+cargo test --manifest-path src-tauri/Cargo.toml --workspace --tests --features test-agent
 ```
 
 ### 按改动区域选择测试

@@ -1,1 +1,1 @@
-@python -u "%~dp0..\..\service.py" %*
+@node "%~dp0..\..\service.mjs" %*

@@ -275,22 +275,39 @@ pub fn report(runtime_found: bool, shell_path: &[String]) -> DiagnosticsReport {
         // No explicit snapshot: use what this machine would hand a newly started
         // process. Before this the parameter was always empty in practice, so
         // the mismatch verdict could never fire on Windows.
-        persisted_path_entries().unwrap_or_default()
+        persisted_path_entries()
     } else {
-        shell_path.to_vec()
+        Some(shell_path.to_vec())
     };
-    // An empty snapshot means no new-process PATH could be read; it is not
-    // evidence that the GUI PATH differs. `path_gap(..).observed` carries that
-    // distinction, while the verdict keeps its three-value shape.
-    let gap = persisted_path_gap_from(&gui_path, Some(new_process_path.clone()));
-    let verdict = if shell_path.is_empty() && runtime_found && !gap.has_gap() {
+    report_from_parts(runtime_found, &gui_path, new_process_path)
+}
+
+/// Verdict core shared by [`report`] and tests: `new_process_path = None` means
+/// no new-process PATH snapshot could be read at all, which is **unknown**, not
+/// empty — it must never become a PathMismatch on its own. An empty snapshot is
+/// treated the same way ("no evidence"), matching the historical `report`
+/// behavior of feeding `unwrap_or_default()` into the gap comparison.
+fn report_from_parts(
+    runtime_found: bool,
+    gui_path: &[String],
+    new_process_path: Option<Vec<String>>,
+) -> DiagnosticsReport {
+    let no_snapshot = new_process_path
+        .as_ref()
+        .is_none_or(|entries| entries.is_empty());
+    let gap = persisted_path_gap_from(gui_path, new_process_path.clone());
+    let verdict = if no_snapshot && runtime_found && !gap.has_gap() {
         DiagnosticsVerdict::Ready
     } else {
-        compute_verdict(runtime_found, &gui_path, &new_process_path)
+        compute_verdict(
+            runtime_found,
+            gui_path,
+            &new_process_path.unwrap_or_default(),
+        )
     };
     DiagnosticsReport {
         environment: collect_environment(),
-        path_entries: gui_path,
+        path_entries: gui_path.to_vec(),
         verdict,
     }
 }
@@ -300,7 +317,28 @@ mod tests {
     use super::*;
     #[test]
     fn unavailable_shell_path_is_not_reported_as_a_mismatch() {
-        assert_ne!(report(true, &[]).verdict, DiagnosticsVerdict::PathMismatch);
+        // 封闭判定（workspace 化后本 crate 测试进 CI，禁止再对比真实机器的
+        // 注册表 PATH 与测试进程 PATH）：None / 空快照 =「无证据」，不得判
+        // PathMismatch——这正是原断言钉住的行为，现在注入输入确定性复现。
+        let gui = vec!["C:\\app".to_string()];
+        assert_ne!(
+            report_from_parts(true, &gui, None).verdict,
+            DiagnosticsVerdict::PathMismatch
+        );
+        assert_ne!(
+            report_from_parts(true, &gui, Some(Vec::new())).verdict,
+            DiagnosticsVerdict::PathMismatch
+        );
+    }
+
+    /// 读到快照且与 app PATH 有差时，PathMismatch 照报（无证据豁免不得吞掉真实差）。
+    #[test]
+    fn observed_snapshot_gap_still_reports_mismatch() {
+        let gui = vec!["C:\\app".to_string()];
+        assert_eq!(
+            report_from_parts(true, &gui, Some(vec!["C:\\shell".to_string()])).verdict,
+            DiagnosticsVerdict::PathMismatch
+        );
     }
     #[test]
     fn path_mismatch_explains_gui_install_failure() {

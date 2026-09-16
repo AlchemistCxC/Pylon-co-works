@@ -264,37 +264,22 @@ mod tests {
     }
 
     // ── P1-2（评审修复）：fork 执行链 wire 级测试——gate/RPC 形状/child 槽位/
-    // parent 只读/失败回滚全部落证据（python fake agent，与 revive_tests 同款
-    // harness；不依赖真实 provider 名称，fixture 只描述 ACP wire 形状）。──
-
-    const FORK_SCRIPT: &str = r#"import json,sys,os
-for line in sys.stdin:
-    request=json.loads(line); method=request.get('method')
-    result={}
-    error=None
-    if method == 'initialize':
-        result={'agentCapabilities':{'sessionCapabilities':{'fork': {}, 'loadSession': {}}}}
-    elif method == 'session/fork':
-        if os.environ.get('PYLON_FORK_FAIL') == '1':
-            error={'code':-32000,'message':'fork unavailable'}
-        else:
-            result={'sessionId':'remote-child','_vendorExtension':{'future':True}}
-    else:
-        result={'sessionId':'remote-parent'}
-    response={'jsonrpc':'2.0','id':request.get('id')}
-    response['error' if error else 'result']=error if error else result
-    print(json.dumps(response),flush=True)
-"#;
+    // parent 只读/失败回滚全部落证据（`pylon-fake-agent --scenario fork`，与
+    // revive_tests 同款 harness；不依赖真实 provider 名称，fixture 只描述
+    // ACP wire 形状）。──
 
     async fn fork_runtime(
         name: &str,
         fail: bool,
     ) -> (std::sync::Arc<AgentRuntime>, crate::agent_config::AgentDef) {
-        let mut env = std::collections::HashMap::new();
+        // 场景 `fork` 复刻原 FORK_SCRIPT 的 wire：initialize 宣告 fork+loadSession、
+        // session/fork 回 child id 与未知扩展字段、其余方法回 parent id；
+        // 失败注入用 `--outcome error`（等价于原 PYLON_FORK_FAIL=1）。
+        let mut args = vec!["--scenario", "fork"];
         if fail {
-            env.insert("PYLON_FORK_FAIL".to_string(), "1".to_string());
+            args.extend(["--outcome", "error"]);
         }
-        let agent = crate::test_utils::fake_acp_agent_with(name, FORK_SCRIPT, Vec::new(), env);
+        let agent = crate::test_utils::fake_acp_agent(name, &args);
         let runtime = AgentRuntime::new_disconnected();
         *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
             .await

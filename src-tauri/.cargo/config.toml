@@ -1,0 +1,13 @@
+# #106 P6：Rust 构建/测试提速（实测驱动）。
+#
+# 1. rust-lld 链接器（target 级配置，不分 profile）：Windows 上链接常见 2-5×
+#    提速，治「touch lib.rs 重编译+链接 21.5s」的内环税。release 构建在本 PR
+#    内验证 bundle 产物正常；异常则在 release 工作流以环境变量回退 MSVC link.exe。
+# 2. debug = "line-tables-only"：砍 MSVC PDB 生成（链接大头），保回溯 file:line。
+#    仅减调试信息密度，零行为影响。
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+[profile.dev]
+debug = "line-tables-only"

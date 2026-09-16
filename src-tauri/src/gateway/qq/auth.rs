@@ -120,7 +120,8 @@ impl QqAuth {
     }
 
     /// 测试构造：预设固定 token（不触发刷新；集成测试避免打真实 QQ API）。
-    #[cfg(test)]
+    /// #106 P5：test-agent feature 下对外部 tests/ 目标可见。
+    #[cfg(any(test, feature = "test-agent"))]
     pub(crate) fn for_testing(token: String) -> Self {
         let auth = Self::new(
             Client::new(),

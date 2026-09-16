@@ -3,12 +3,6 @@ pub use pylon_core::agent_catalog;
 mod agent_config;
 pub mod agent_detection;
 mod agent_runtime;
-#[cfg(test)]
-mod auto_reconnect_integration_tests;
-#[cfg(test)]
-mod b10_gateway_integration_tests;
-#[cfg(test)]
-mod b11_inject_integration_tests;
 mod browser;
 mod browser_agent;
 mod browser_agent_cmds;
@@ -56,8 +50,15 @@ mod session_expiry_platform_tests;
 mod session_info_tests;
 mod session_store;
 mod startup;
-#[cfg(test)]
-mod test_utils;
+// P5（#106）：harness 即门面——tests/ 集成目标经此消费产品表面；
+// AppState 等内部类型不加 pub，门面只出窄值（spec P5 五类面）。
+// cfg(test) 使既有 lib 内嵌测试不受 feature 影响；feature 使外部 test target 可见。
+#[cfg(any(test, feature = "test-agent"))]
+#[doc(hidden)]
+pub mod test_harness;
+#[cfg(any(test, feature = "test-agent"))]
+#[doc(hidden)]
+pub mod test_utils;
 mod workspace_cmds;
 mod workspaces;
 
@@ -99,7 +100,7 @@ use crate::session::{check_session_expiry, send_prompt_core};
 #[cfg(test)]
 use crate::export::{is_export_sensitive_key, sanitize_export_messages, write_export_atomically};
 #[cfg(test)]
-use crate::lifecycle::{do_connect_and_replace, set_mcp_servers};
+use crate::lifecycle::set_mcp_servers;
 #[cfg(test)]
 use crate::permission::{
     parse_permission_request, permission_response, permission_response_cancelled,
@@ -107,9 +108,8 @@ use crate::permission::{
 };
 #[cfg(test)]
 use crate::session::{
-    build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
-    extract_tool_file_name, inject_applies_to, send_message, session_expired, InspectorSessionRow,
-    SessionListRow,
+    build_full_inspector_payload, config_option_current_value, session_expired,
+    InspectorSessionRow, SessionListRow,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
@@ -689,12 +689,10 @@ pub fn init_tracing() {
 /// - 其他（默认 idle）：`now - updated_at > idle_minutes` → 过期
 ///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // issue #82：浏览器 MCP 桥以 `pylon.exe browser-bridge` 子命令形态运行
-    // （零发行包变更）。必须在 GUI 启动前分发：桥复用主二进制但不进 Tauri。
-    if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
-        std::process::exit(browser_bridge::run_stdio_bridge());
-    }
+// P3a（#106）：进程级一次性注册提取（rustls provider + peri/hermes 协议适配器 +
+// #98 能力消费者）。全部幂等——生产 run() 与测试装配走同一入口，消灭
+// test_state_with_acp 对 run() 的手工镜像。
+pub(crate) fn install_process_registrations() {
     // rustls 0.23 进程级 CryptoProvider：依赖树经 feature 统一同时启用
     // aws-lc-rs 与 ring（reqwest/hyper-rustls 与 tokio-tungstenite 各拉其一），
     // 自动探测必然失败——gateway QQ WSS 首次 TLS 握手即 panic（P78 真实平台
@@ -725,6 +723,538 @@ pub fn run() {
     ] {
         crate::acp::negotiated::register_capability_consumer(consumer);
     }
+}
+
+/// P3a（#106）：config→AppState 组装的输入部件（run() 与 TestStateBuilder 同源）。
+pub(crate) struct AppStateParts {
+    pub(crate) runtimes: Arc<AgentRuntimeManager>,
+    pub(crate) agents: HashMap<String, AgentDef>,
+    pub(crate) active_agent: String,
+    pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
+    pub(crate) prism: PrismClient,
+    pub(crate) gateway: Arc<GatewayCore>,
+    pub(crate) startup: crate::startup::StartupDiagnostics,
+}
+
+/// P3a（#106）：AppState 单一构造点——run() 生产装配与 TestStateBuilder 测试
+/// 默认值同源；AppState 增字段时编译失败点仅此一处（E18 人肉同步纪律退役）。
+pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
+    let AppStateParts {
+        runtimes,
+        agents,
+        active_agent,
+        runtime_logs,
+        prism,
+        gateway,
+        startup,
+    } = parts;
+    AppState {
+        runtimes,
+        agents: Arc::new(Mutex::new(agents)),
+        active_agent: Arc::new(Mutex::new(active_agent)),
+        pet: Arc::new(Mutex::new(pet::PetState::default())),
+        runtime_logs,
+        runtime_mcp: Mutex::new(None),
+        prism,
+        gateway,
+        startup: Arc::new(RwLock::new(startup)),
+        approval_mode: Arc::new(Mutex::new("default".to_string())),
+        browser_agent: Arc::new(browser_agent::hub::BrowserAgentHub::new()),
+        pet_write_lock: tokio::sync::Mutex::new(()),
+        switch_lock: tokio::sync::Mutex::new(()),
+        mcp_write_lock: tokio::sync::Mutex::new(()),
+        config_write_lock: tokio::sync::Mutex::new(()),
+        browser: Arc::new(browser::BrowserManager::new()),
+        // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
+        // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
+        mcp_wire: Mutex::new(None),
+        frontend_log_throttle: Mutex::new(runtime_log::FrontendLogThrottle::default()),
+        // I14-W1：消息仓库槽位初始 None，setup() 启动时序填充（见 struct 注释）。
+        message_service: Arc::new(Mutex::new(None)),
+        // I14-W5：用户数据仓库槽位初始 None，setup() 启动时序填充（与消息同库）。
+        user_data_service: Arc::new(Mutex::new(None)),
+        // M3 EVT-02：canonical 事件仓库槽位初始 None，setup() 启动时序填充（同库）。
+        event_service: Arc::new(Mutex::new(None)),
+        // I12-W4：gateway 实例服务与持久化路径，setup() 启动时序填充。
+        gateway_instances: crate::gateway::instance::GatewayInstanceService::new(),
+        gateway_instance_store_path: Arc::new(Mutex::new(None)),
+        // I12-W5：凭据存储槽位初始 None，setup() 打开填充。
+        gateway_credentials: Arc::new(Mutex::new(None)),
+        // CWD-03：Workspace 注册表初始空（测试经 TestStateBuilder 注入）。
+        workspaces: Arc::new(Mutex::new(HashMap::new())),
+        // 施工文档 §2.3：数据目录槽位初始空，setup() 最前面解析填入。
+        data_dirs: Arc::new(OnceLock::new()),
+        plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
+        pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
+        hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
+    }
+}
+
+// P3a（#106）：setup 管道提取——DataDirs 解析→portable 迁移→workspace 恢复→storage 诊断
+// →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
+// run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
+pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    if let Err(error) = window.set_title("Pylon") {
+        tracing::warn!("set window title failed: {error}");
+    }
+    // 施工文档 §2.3：任何插件/Pet/MCP/SQLite/Gateway 路径消费者运行前，
+    // 用 app.handle() 解析一次 DataDirs 并写入 AppState 一次性槽位。
+    // 失败 = 启动中止（blocked），禁止消费者各自回退不同目录。
+    let data_dirs = crate::paths::resolve_data_dirs(app.handle())
+        .map_err(|error| format!("resolve data dirs failed: {error}"))?;
+    app.state::<AppState>()
+        .data_dirs
+        .set(data_dirs)
+        .map_err(|_| "data dirs already initialized".to_string())?;
+    // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
+    // 时按需 clone（PathBuf 拷贝成本可忽略）。
+    let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    // portable 首次启动自动迁移（2026-08-19 修复）：
+    // AppData 旧数据 → data/。必须在此处（hydrate_workspaces 之前、
+    // message_service 初始化之前）——服务打开后迁移命令会被拒绝，
+    // hydrate 在迁移前会读到空 workspaces 表。失败不中止启动：
+    // AppData 数据未动，可后续手动处理（UI 横幅兜底）。
+    {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        let app_config_dir = app
+            .path()
+            .app_config_dir()
+            .map_err(|error| error.to_string())?;
+        if crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir) {
+            match crate::paths::migrate_appdata_to_portable_staged(
+                &app_data_dir,
+                &app_config_dir,
+                &dirs.data_root,
+            ) {
+                Ok(()) => tracing::info!(
+                    "AppData 旧数据已自动迁移至 portable: {}",
+                    dirs.data_root.display()
+                ),
+                Err(error) => tracing::error!(
+                    "portable 自动迁移失败（AppData 数据未动，可后续手动处理）：{error}"
+                ),
+            }
+        }
+    }
+    // Workspace 注册表必须先于前端 hydrate 恢复；文件缺失即首次启动，返回空表。
+    crate::workspaces::hydrate_workspaces(app.state::<AppState>().inner())
+        .map_err(|error| format!("load workspaces failed: {error}"))?;
+    // 施工文档 §7.4：storage 诊断与路径同时确定（只暴露模式/脱敏原因）。
+    {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        let app_config_dir = app
+            .path()
+            .app_config_dir()
+            .map_err(|error| error.to_string())?;
+        let migration_available =
+            crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir);
+        let storage = crate::startup::StorageDiagnostics::from_dirs(&dirs)
+            .with_migration_available(migration_available);
+        let app_state = app.state::<AppState>();
+        let mut startup = app_state
+            .startup
+            .write()
+            .map_err(|_| "startup diagnostics lock poisoned".to_string())?;
+        startup.storage = Some(storage);
+    }
+    // Phase 4：浏览器管理器注入主窗口（子 WebView add_child 需要）。
+    app.state::<AppState>()
+        .browser
+        .register_host(window.as_ref().window(), app.handle().clone());
+    // issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
+    {
+        let state = app.state::<AppState>();
+        state
+            .browser_agent
+            .init_settings_path(crate::paths::browser_agent_settings_path(&dirs));
+        let hub = state.browser_agent.clone();
+        state
+            .browser
+            .register_page_load_hook(std::sync::Arc::new(move |tab_id| {
+                if let Ok(mut registry) = hub.refs().lock() {
+                    registry.invalidate_tab(tab_id);
+                }
+            }));
+    }
+    // 插件基建 v2：启动即创建用户插件目录树（installed/staging），
+    // 让用户无需先安装也能在文件管理器里看到插件目录。
+    if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {
+        tracing::warn!("create plugin dirs failed: {error}");
+    }
+    // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
+    {
+        let path = crate::paths::pet_persist_path(&dirs);
+        if let Some(saved) = pet::load_from_file(&path) {
+            let pet_arc = app.state::<AppState>().pet.clone();
+            if let Ok(mut pet) = pet_arc.lock() {
+                pet::restore(&mut pet, saved);
+            };
+        }
+    }
+    // B4.2：MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
+    {
+        let path = crate::paths::mcp_persist_path(&dirs);
+        if let Some(servers) = load_mcp_persisted(&path) {
+            if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
+                *slot = Some(servers);
+                tracing::info!("MCP 配置已从 {} 恢复", path.display());
+            }
+        }
+    }
+    // Kernel persistence readiness barrier：三个 service 共用同一 SQLite 文件，
+    // 但作为一个启动单元串行 open/migrate 并一次性安装。setup 返回后所有
+    // command/dispatcher 都可依赖 service 已就绪；任一失败则 setup 失败，
+    // 不运行半可用 Kernel，也不回退 localStorage/第二历史权威。
+    {
+        let db_path = crate::paths::message_db_path(&dirs);
+        let services = crate::session::PersistenceServices::open(&db_path)?;
+        let state = app.state::<AppState>();
+        *state
+            .message_service
+            .lock()
+            .map_err(|_| "message service slot lock poisoned".to_string())? =
+            Some(services.message);
+        *state
+            .user_data_service
+            .lock()
+            .map_err(|_| "user-data service slot lock poisoned".to_string())? =
+            Some(services.user_data);
+        *state
+            .event_service
+            .lock()
+            .map_err(|_| "event service slot lock poisoned".to_string())? = Some(services.event);
+        tracing::info!("Kernel persistence services ready: {}", db_path.display());
+    }
+    // I12-W4：gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
+    // → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按
+    // `enabled && autoStart` 策略显式启动（失败可见，不静默）。损坏/IO 失败
+    // 保留原文件，仅可见报错（不阻断启动、不丢配置）。
+    // I12-W5：同块打开凭据存储（W3）→ 接线 start 凭据解析器 → 加载后刷新
+    // 实例 credential_ref/status（重启不丢凭据引用）。
+    {
+        let state = app.state::<AppState>();
+        let store_path_slot = state.gateway_instance_store_path.clone();
+        let credentials_slot = state.gateway_credentials.clone();
+        let path = crate::paths::gateway_instances_path(&dirs);
+        if let Ok(mut slot) = store_path_slot.lock() {
+            *slot = Some(path.clone());
+        }
+        // I12-W5：打开加密凭据存储（密文/主密钥分目录；失败可见不阻断）。
+        // 施工文档 §7.3：路径解析失败 → credentials 槽位保持 None，禁止
+        // 回退 `PathBuf::new()`（避免相对当前目录误写 pylon-master.key）。
+        let credentials = {
+            let credentials_dir = crate::paths::credentials_dir(&dirs);
+            match crate::gateway::credentials::CredentialStore::open(&credentials_dir) {
+                Ok(store) => Some(Arc::new(store)),
+                Err(error) => {
+                    tracing::error!("凭据存储打开失败（set_credentials 不可用）：{error}");
+                    None
+                }
+            }
+        };
+        if let Ok(mut slot) = credentials_slot.lock() {
+            *slot = credentials.clone();
+        }
+        let service = state.gateway_instances.clone();
+        let path_for_task = path.clone();
+        let credentials_for_refresh = credentials.clone();
+        tokio::spawn(async move {
+            let loaded = tokio::task::spawn_blocking(move || {
+                crate::gateway::instance_store::load_instances(&path_for_task)
+            })
+            .await;
+            match loaded {
+                Ok(Ok(instances)) => {
+                    service.load_instances(instances).await;
+                    tracing::info!("gateway 实例配置已加载：{}", path.display());
+                    // I12-W5：重启恢复凭据引用（secret 不载入内存，仅标记）
+                    if let Some(store) = credentials_for_refresh.as_ref() {
+                        let store = store.clone();
+                        service
+                            .refresh_credential_states(move |platform, id| {
+                                store.has_credentials(platform, id).unwrap_or(false)
+                            })
+                            .await;
+                    }
+                    // AC2：仅 enabled && autoStart 显式启动，失败可见（策略测试见
+                    // instance.rs auto_start_instances）
+                    service.auto_start_instances().await;
+                }
+                Ok(Err(error)) => {
+                    tracing::error!("gateway 实例配置加载失败（保留原文件不覆盖）：{error}")
+                }
+                Err(error) => {
+                    tracing::error!("gateway 实例配置加载 task 失败：{error}");
+                }
+            }
+        });
+        // I12-W5：start 凭据解析器（factory.create 前从 CredentialStore 解析
+        // secret 填入 state；未配置 → None → factory 报 CredentialMissing）
+        {
+            let credentials_slot = state.gateway_credentials.clone();
+            state.gateway_instances.set_credential_resolver(Arc::new(
+                move |platform: &str, instance_id: &str| {
+                    credentials_slot
+                        .lock()
+                        .ok()
+                        .and_then(|slot| slot.clone())
+                        .and_then(|store| {
+                            store.get_credentials(platform, instance_id).ok().flatten()
+                        })
+                        .map(|secret| secret.to_string())
+                },
+            ));
+        }
+        // gateway 共用 HTTP client（平台 factory 连接循环共用；超时参数
+        // 与 legacy env 路径一致）。
+        let qq_http = match reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!("Pylon gateway HTTP client unavailable: {error}");
+                reqwest::Client::new()
+            }
+        };
+        // 平台注册表（P78）：一次注册全部带真实适配器的平台（当前仅 qq）；
+        // auto-start/手动 start 的凭据校验与连接循环入口。新增平台 =
+        // platform_registry.rs 加 entry，本文件零改动。
+        crate::gateway::platform_registry::register_platform_factories(
+            &state.gateway_instances,
+            state.gateway.clone(),
+            qq_http,
+        );
+        // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
+        // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
+        // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
+        // （覆盖侧 warn 留痕）。
+        {
+            let gateway_for_hook = state.gateway.clone();
+            state.gateway_instances.set_adapter_registry(Arc::new(
+                move |key: &str, adapter: &Arc<dyn gateway::PlatformAdapter>, register: bool| {
+                    if register {
+                        if gateway_for_hook.replace(adapter.clone()).is_some() {
+                            tracing::warn!(
+                                "gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）"
+                            );
+                        }
+                    } else if gateway_for_hook.unregister_if(key, adapter) {
+                        tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
+                    }
+                },
+            ));
+        }
+        // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
+        // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
+        {
+            let gateway = state.gateway.clone();
+            state
+                .gateway_instances
+                .set_route_guard(Arc::new(move |instance_id: &str| {
+                    gateway
+                        .routes()
+                        .iter()
+                        .any(|binding| binding.instance_id.as_deref() == Some(instance_id))
+                }));
+        }
+    }
+    let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+    if let Some(runtime) = handles.active_runtime() {
+        start_notification_dispatcher(&handles, &runtime, window.clone());
+    }
+    app.state::<AppState>()
+        .inner()
+        .start_runtime_log_dispatcher(window);
+    // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
+    // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
+    // （announce=false，不广播 GUI 状态）。
+    {
+        let app_handle = app.handle().clone();
+        let main_webview = app.get_webview_window("main");
+        let main_window = main_webview.as_ref().map(|w| w.as_ref().window());
+        let state = app.state::<AppState>();
+        state.gateway.set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
+        let app = app_handle.clone();
+        let webview = main_webview.clone();
+        let window = main_window.clone();
+        let resolved = resolved.clone();
+        tokio::spawn(async move {
+            let state = app.state::<AppState>();
+            // I12-W4：route 绑定强制（决策纯函数 resolve_ingest_agent，
+            // 正反用例见 route.rs 测试）——instance-bound route 必须指向
+            // 已连接实例：InstanceMissing/InstanceNotConnected → 显式错误
+            // + 丢弃，**禁止 fallback 到 active agent**（来源实例不可用却
+            // 按默认 agent 路由会造成错位回复）。Unbound（legacy 无
+            // instance_id）与无 binding 保持旧 fallback 行为（D-04）。
+            let binding_ref = resolved.binding.as_ref();
+            let bound_instance_id = binding_ref.and_then(|b| b.instance_id.as_deref());
+            let instance_status = match bound_instance_id {
+                Some(instance_id) => state
+                    .inner()
+                    .gateway_instances
+                    .status_of(instance_id)
+                    .await,
+                None => None,
+            };
+            let active_agent = state
+                .inner()
+                .active_agent
+                .lock()
+                .map(|v| v.clone())
+                .unwrap_or_default();
+            // I12 W9：unbound_policy 传入决策（reject 时无 binding 消息显式拒绝，
+            // 记录最小元数据，不进入 agent）
+            let unbound_policy = state.inner().gateway.unbound_policy();
+            let agent_id = match crate::gateway::route::resolve_ingest_agent(
+                binding_ref,
+                instance_status,
+                &active_agent,
+                unbound_policy,
+            ) {
+                Ok(id) => id,
+                Err(reason) => {
+                    tracing::error!(
+                        "gateway ingest 拒绝：route {} 绑定实例 {} 状态不可用（{:?}），禁止 fallback",
+                        resolved.source,
+                        bound_instance_id.unwrap_or(""),
+                        reason
+                    );
+                    return;
+                }
+            };
+            if agent_id.is_empty() {
+                tracing::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
+                return;
+            }
+            let runtime = state.inner().runtimes.get_or_create(&agent_id);
+            if let Some(webview) = webview.as_ref() {
+                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
+                    tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
+                    return;
+                }
+            }
+            // P1-1：平台路由绑定 agent ≠ GUI active agent 时会话 cwd 必须用
+            // 绑定 agent 的 cwd（而非 active agent）；无绑定 agent 定义时回退 None。
+            let agent_cwd = state.inner().agents.lock().ok()
+                .and_then(|agents| agents.get(&agent_id).cloned())
+                .and_then(|agent| agent.cwd);
+            // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
+            // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
+            // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
+            // 既有失败路径的 rollback_seen 语义）；transform → 改写
+            // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
+            let content = match crate::hook_bridge::message_received_hook_outcome(
+                state.inner(),
+                window.as_ref(),
+                &resolved,
+            )
+            .await
+            {
+                crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
+                crate::hook_bridge::MessageReceivedDecision::Drop => return,
+            };
+            if let Err(error) = send_prompt_core(
+                state.inner(),
+                &runtime,
+                window.as_ref(),
+                &state.gateway,
+                &crate::session::PromptContext {
+                    source: resolved.source.clone(),
+                    profile_id: None,
+                    content,
+                    persona: String::new(),
+                    session_prompt: None,
+                    attachments: None,
+                    mcp_servers: None,
+                    cwd: agent_cwd,
+                    known_peri_id: None,
+                },
+            ).await {
+                tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
+                // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
+                // resume 重放可重新 ingest（防故障期消息永久丢失）。
+                // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
+                // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
+                // G4 §3-9（C5）：统一入口 adapter_for_source（空 key 返回
+                // None，与旧 platform_key 判空等价；接入 wechat 等新平台
+                // 自动生效，未注册适配器无操作）。
+                if let Some(msg_id) = resolved.msg_id.as_deref() {
+                    if let Some(adapter) =
+                        state.gateway.adapter_for_source(&resolved.source)
+                    {
+                        adapter.rollback_seen(msg_id);
+                    }
+                }
+            }
+        });
+    }));
+    }
+    // 会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
+    // 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
+    {
+        let app_for_watcher = app.handle().clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let state = app_for_watcher.state::<AppState>();
+                check_session_expiry(state.inner()).await;
+            }
+        });
+    }
+    // 权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
+    // permission.resolved terminal 事件——后端唯一计时/应答来源，前端
+    // 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
+    {
+        let app_for_watcher = app.handle().clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let state = app_for_watcher.state::<AppState>();
+                let outcomes = check_pending_permission_timeouts(state.inner()).await;
+                if outcomes.is_empty() {
+                    continue;
+                }
+                let Some(window) = app_for_watcher.get_webview_window("main") else {
+                    continue;
+                };
+                for outcome in outcomes {
+                    emit_event(
+                        &window,
+                        crate::event_names::INTERACTION,
+                        serde_json::json!({
+                            "eventType": "permission.resolved",
+                            "agentId": outcome.agent_id,
+                            "sessionId": outcome.session_id,
+                            "requestId": outcome.request_id.to_string(),
+                            "clientGeneration": outcome.client_generation,
+                            "optionId": outcome.option_id,
+                            "reason": "timed_out",
+                        }),
+                    );
+                }
+            }
+        });
+    }
+    Ok(())
+}
+pub fn run() {
+    // issue #82：浏览器 MCP 桥以 `pylon.exe browser-bridge` 子命令形态运行
+    // （零发行包变更）。必须在 GUI 启动前分发：桥复用主二进制但不进 Tauri。
+    if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
+        std::process::exit(browser_bridge::run_stdio_bridge());
+    }
+    install_process_registrations();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
     let loaded = agent_config::load_app_config();
@@ -806,8 +1336,7 @@ pub fn run() {
                             state.status = AgentLifecycleStatus::Connected;
                             state.last_error = None;
                             state.last_connected_at = Some(crate::time::Timestamp::now());
-                            state.activated_config_fingerprint =
-                                Some(agent.runtime_fingerprint());
+                            state.activated_config_fingerprint = Some(agent.runtime_fingerprint());
                         }
                     }
                     Err(error) => {
@@ -834,60 +1363,73 @@ pub fn run() {
             .register_uri_scheme_protocol("pylon-plugin", |context, request| {
                 crate::plugin_cmds::plugin_resource_response(context.app_handle(), request)
             })
-            .manage(AppState {
+            .manage(build_app_state(AppStateParts {
                 runtimes,
-                agents: Arc::new(Mutex::new(agents_for_state)),
-                active_agent: Arc::new(Mutex::new(default_agent_id)),
-                pet: Arc::new(Mutex::new(pet::PetState::default())),
+                agents: agents_for_state,
+                active_agent: default_agent_id,
                 runtime_logs,
-                runtime_mcp: Mutex::new(None),
                 prism,
                 gateway,
-                startup: Arc::new(RwLock::new((*startup).clone())),
-                approval_mode: Arc::new(Mutex::new("default".to_string())),
-                browser_agent: Arc::new(browser_agent::hub::BrowserAgentHub::new()),
-                pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-            config_write_lock: tokio::sync::Mutex::new(()),
-            browser: Arc::new(browser::BrowserManager::new()),
-            // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
-            // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
-            mcp_wire: Mutex::new(None),
-            frontend_log_throttle: Mutex::new(runtime_log::FrontendLogThrottle::default()),
-            // I14-W1：消息仓库槽位初始 None，setup() 启动时序填充（见 struct 注释）。
-            message_service: Arc::new(Mutex::new(None)),
-            // I14-W5：用户数据仓库槽位初始 None，setup() 启动时序填充（与消息同库）。
-            user_data_service: Arc::new(Mutex::new(None)),
-            // M3 EVT-02：canonical 事件仓库槽位初始 None，setup() 启动时序填充（同库）。
-            event_service: Arc::new(Mutex::new(None)),
-            // I12-W4：gateway 实例服务与持久化路径，setup() 启动时序填充。
-            gateway_instances: crate::gateway::instance::GatewayInstanceService::new(),
-            gateway_instance_store_path: Arc::new(Mutex::new(None)),
-            // I12-W5：凭据存储槽位初始 None，setup() 打开填充。
-            gateway_credentials: Arc::new(Mutex::new(None)),
-            // CWD-03：Workspace 注册表初始空（测试经 TestStateBuilder 注入）。
-            workspaces: Arc::new(Mutex::new(HashMap::new())),
-            // 施工文档 §2.3：数据目录槽位初始空，setup() 最前面解析填入。
-            data_dirs: Arc::new(OnceLock::new()),
-            plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
-            pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
-            hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
-            })
+                startup: (*startup).clone(),
+            }))
             .invoke_handler(tauri::generate_handler![
-                crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,
-                crate::prism_cmds::prism_logs, crate::prism_cmds::prism_chronicle, crate::prism_cmds::prism_history, crate::prism_cmds::prism_scenario, crate::prism_cmds::prism_blocks,
-                crate::prism_cmds::prism_inject, crate::prism_cmds::prism_command, crate::prism_cmds::prism_create_scenario, crate::prism_cmds::prism_delete_scenario,
-                crate::prism_cmds::prism_create_source, crate::prism_cmds::prism_delete_source, crate::prism_cmds::prism_source_detail, crate::prism_cmds::prism_source_files,
-                crate::prism_cmds::prism_read_source_file, crate::prism_cmds::prism_write_source_file, crate::prism_cmds::prism_delete_source_file,
-                crate::prism_cmds::prism_source_entries, crate::prism_cmds::prism_source_entry, crate::prism_cmds::prism_add_source_entry, crate::prism_cmds::prism_edit_source_entry,
+                crate::prism_cmds::prism_health,
+                crate::prism_cmds::prism_status,
+                crate::prism_cmds::prism_state,
+                crate::prism_cmds::prism_scenarios,
+                crate::prism_cmds::prism_sources,
+                crate::prism_cmds::prism_aliases,
+                crate::prism_cmds::prism_config,
+                crate::prism_cmds::prism_logs,
+                crate::prism_cmds::prism_chronicle,
+                crate::prism_cmds::prism_history,
+                crate::prism_cmds::prism_scenario,
+                crate::prism_cmds::prism_blocks,
+                crate::prism_cmds::prism_inject,
+                crate::prism_cmds::prism_command,
+                crate::prism_cmds::prism_create_scenario,
+                crate::prism_cmds::prism_delete_scenario,
+                crate::prism_cmds::prism_create_source,
+                crate::prism_cmds::prism_delete_source,
+                crate::prism_cmds::prism_source_detail,
+                crate::prism_cmds::prism_source_files,
+                crate::prism_cmds::prism_read_source_file,
+                crate::prism_cmds::prism_write_source_file,
+                crate::prism_cmds::prism_delete_source_file,
+                crate::prism_cmds::prism_source_entries,
+                crate::prism_cmds::prism_source_entry,
+                crate::prism_cmds::prism_add_source_entry,
+                crate::prism_cmds::prism_edit_source_entry,
                 crate::prism_cmds::prism_delete_source_entry,
-                crate::prism_cmds::prism_update_config, crate::prism_cmds::prism_update_scenario, crate::prism_cmds::prism_create_block, crate::prism_cmds::prism_update_block,
-                crate::prism_cmds::prism_delete_block, crate::prism_cmds::prism_add_scenario_block, crate::prism_cmds::prism_edit_scenario_block,
-                crate::prism_cmds::prism_delete_scenario_block, crate::prism_cmds::prism_reorder_scenario_blocks, crate::prism_cmds::prism_reload, crate::prism_cmds::prism_llm_test,
-                crate::session::new_session, crate::session::send_message, crate::session::set_mode, crate::session::set_config_option, crate::session::close_session, crate::session::cancel_prompt, crate::session::load_sessions,
+                crate::prism_cmds::prism_update_config,
+                crate::prism_cmds::prism_update_scenario,
+                crate::prism_cmds::prism_create_block,
+                crate::prism_cmds::prism_update_block,
+                crate::prism_cmds::prism_delete_block,
+                crate::prism_cmds::prism_add_scenario_block,
+                crate::prism_cmds::prism_edit_scenario_block,
+                crate::prism_cmds::prism_delete_scenario_block,
+                crate::prism_cmds::prism_reorder_scenario_blocks,
+                crate::prism_cmds::prism_reload,
+                crate::prism_cmds::prism_llm_test,
+                crate::session::new_session,
+                crate::session::send_message,
+                crate::session::set_mode,
+                crate::session::set_config_option,
+                crate::session::close_session,
+                crate::session::cancel_prompt,
+                crate::session::load_sessions,
                 crate::session::session_fork,
-                crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::restart_agent_runtime, crate::lifecycle::agent_status, crate::lifecycle::acp_wire_trace_snapshot, crate::lifecycle::reload_agents, crate::lifecycle::get_mcp_servers, crate::lifecycle::set_mcp_servers,
+                crate::session::session_inspector,
+                crate::lifecycle::list_agents,
+                crate::lifecycle::switch_agent,
+                crate::lifecycle::reconnect_agent,
+                crate::lifecycle::restart_agent_runtime,
+                crate::lifecycle::agent_status,
+                crate::lifecycle::acp_wire_trace_snapshot,
+                crate::lifecycle::reload_agents,
+                crate::lifecycle::get_mcp_servers,
+                crate::lifecycle::set_mcp_servers,
                 crate::lifecycle::list_tool_dictionary,
                 crate::lifecycle::set_session_state,
                 crate::lifecycle::validate_agents,
@@ -900,32 +1442,58 @@ pub fn run() {
                 crate::agent_detection::detect_agent_runtimes,
                 crate::agent_detection::cancel_detection_refresh,
                 crate::acp::instance_registry::acp_instance_overview,
-                crate::permission::approve_tool_call, crate::permission::respond_interaction, crate::permission::set_approval_mode,
-                crate::permission::get_approval_mode, crate::permission::interaction_list,
-                crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
-                crate::session::send_message_streaming, crate::session::load_persisted_session, crate::session::list_persisted_sessions,
-                crate::session::evt_append, crate::session::evt_revision, crate::session::evt_list, crate::session::evt_export_raw, crate::session::evt_search,
-                crate::session::evt_load_compact, crate::session::evt_rollup_trim,
-                crate::session::user_data_load, crate::session::user_data_save,
-                crate::session::user_profile_delete, crate::session::user_session_delete,
+                crate::permission::approve_tool_call,
+                crate::permission::respond_interaction,
+                crate::permission::set_approval_mode,
+                crate::permission::get_approval_mode,
+                crate::permission::interaction_list,
+                crate::pet_cmds::get_pet,
+                crate::pet_cmds::pet_action,
+                crate::session::send_message_streaming,
+                crate::session::load_persisted_session,
+                crate::session::list_persisted_sessions,
+                crate::session::evt_append,
+                crate::session::evt_revision,
+                crate::session::evt_list,
+                crate::session::evt_export_raw,
+                crate::session::evt_search,
+                crate::session::evt_load_compact,
+                crate::session::evt_rollup_trim,
+                crate::session::user_data_load,
+                crate::session::user_data_save,
+                crate::session::user_profile_delete,
+                crate::session::user_session_delete,
                 crate::session::user_session_delete_finalize,
-                crate::session::retention_policy_get, crate::session::retention_policy_set,
-                crate::session::retention_preview, crate::session::retention_prune,
+                crate::session::retention_policy_get,
+                crate::session::retention_policy_set,
+                crate::session::retention_preview,
+                crate::session::retention_prune,
                 crate::export::export_session,
-                crate::logs_cmds::list_runtime_logs, crate::logs_cmds::clear_runtime_logs, crate::logs_cmds::push_frontend_log,
+                crate::logs_cmds::list_runtime_logs,
+                crate::logs_cmds::clear_runtime_logs,
+                crate::logs_cmds::push_frontend_log,
                 crate::logs_cmds::set_runtime_log_live,
-                crate::workspace_cmds::get_workspace_root, crate::workspace_cmds::list_workspace_entries, crate::workspace_cmds::read_workspace_text,
+                crate::workspace_cmds::get_workspace_root,
+                crate::workspace_cmds::list_workspace_entries,
+                crate::workspace_cmds::read_workspace_text,
                 crate::workspace_cmds::write_workspace_text,
-                crate::workspace_cmds::git_status, crate::workspace_cmds::git_status_with_branch,
-                crate::workspace_cmds::git_diff, crate::workspace_cmds::git_history,
-                crate::workspace_cmds::git_stage, crate::workspace_cmds::git_unstage,
-                crate::workspace_cmds::git_commit, crate::workspace_cmds::git_create_branch,
-                crate::workspace_cmds::git_switch_branch, crate::workspace_cmds::git_pull,
+                crate::workspace_cmds::git_status,
+                crate::workspace_cmds::git_status_with_branch,
+                crate::workspace_cmds::git_diff,
+                crate::workspace_cmds::git_history,
+                crate::workspace_cmds::git_stage,
+                crate::workspace_cmds::git_unstage,
+                crate::workspace_cmds::git_commit,
+                crate::workspace_cmds::git_create_branch,
+                crate::workspace_cmds::git_switch_branch,
+                crate::workspace_cmds::git_pull,
                 crate::workspace_cmds::git_push,
                 crate::workspace_cmds::workspace_search,
-                crate::workspaces::workspace_create, crate::workspaces::workspace_list,
+                crate::workspaces::workspace_create,
+                crate::workspaces::workspace_list,
                 crate::workspaces::workspace_restore,
-                crate::workspaces::workspace_update, crate::workspaces::workspace_delete,
+                crate::workspaces::workspace_update,
+                crate::workspaces::workspace_delete,
                 crate::plugin_cmds::plugin_package_inspect,
                 crate::plugin_cmds::plugin_package_inspect_zip,
                 crate::plugin_cmds::plugin_package_inspect_url,
@@ -959,488 +1527,65 @@ pub fn run() {
                 crate::hook_bridge::pylon_hook_ready,
                 crate::hook_bridge::pylon_hook_respond,
                 crate::hook_bridge::hook_registry_sync,
-                crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
+                crate::gateway_cmds::gateway_status,
+                crate::gateway_cmds::reload_gateway,
                 crate::gateway_cmds::gateway_sessions,
                 crate::gateway_cmds::gateway_catalog,
-                crate::gateway_cmds::gateway_instances, crate::gateway_cmds::gateway_instance_create,
-                crate::gateway_cmds::gateway_instance_update, crate::gateway_cmds::gateway_instance_remove,
-                crate::gateway_cmds::gateway_instance_start, crate::gateway_cmds::gateway_instance_stop,
+                crate::gateway_cmds::gateway_instances,
+                crate::gateway_cmds::gateway_instance_create,
+                crate::gateway_cmds::gateway_instance_update,
+                crate::gateway_cmds::gateway_instance_remove,
+                crate::gateway_cmds::gateway_instance_start,
+                crate::gateway_cmds::gateway_instance_stop,
                 crate::gateway_cmds::gateway_instance_restart,
                 crate::gateway_cmds::gateway_instance_set_credentials,
-                crate::browser_cmds::browser_start, crate::browser_cmds::browser_new_tab, crate::browser_cmds::browser_open_tab, crate::browser_cmds::browser_select_tab, crate::browser_cmds::browser_close_tab, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
-                crate::browser_cmds::browser_back, crate::browser_cmds::browser_forward, crate::browser_cmds::browser_reload,
-                crate::browser_cmds::browser_snapshot, crate::browser_cmds::browser_download, crate::browser_cmds::browser_click, crate::browser_cmds::browser_type,
-                crate::browser_cmds::browser_press, crate::browser_cmds::browser_scroll,
-                 crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_set_visible, crate::browser_cmds::browser_set_zoom, crate::browser_cmds::browser_close,
-                crate::browser_agent_cmds::browser_agent_get_settings, crate::browser_agent_cmds::browser_agent_set_settings,
-                crate::browser_agent_cmds::browser_agent_resolve_access, crate::browser_agent_cmds::browser_agent_exe_path,
-                crate::browser_agent_cmds::browser_agent_claim_status, crate::browser_agent_cmds::browser_agent_user_activity,
+                crate::browser_cmds::browser_start,
+                crate::browser_cmds::browser_new_tab,
+                crate::browser_cmds::browser_open_tab,
+                crate::browser_cmds::browser_select_tab,
+                crate::browser_cmds::browser_close_tab,
+                crate::browser_cmds::browser_status,
+                crate::browser_cmds::browser_navigate,
+                crate::browser_cmds::browser_back,
+                crate::browser_cmds::browser_forward,
+                crate::browser_cmds::browser_reload,
+                crate::browser_cmds::browser_snapshot,
+                crate::browser_cmds::browser_download,
+                crate::browser_cmds::browser_click,
+                crate::browser_cmds::browser_type,
+                crate::browser_cmds::browser_press,
+                crate::browser_cmds::browser_scroll,
+                crate::browser_cmds::browser_set_bounds,
+                crate::browser_cmds::browser_set_visible,
+                crate::browser_cmds::browser_set_zoom,
+                crate::browser_cmds::browser_close,
+                crate::browser_agent_cmds::browser_agent_get_settings,
+                crate::browser_agent_cmds::browser_agent_set_settings,
+                crate::browser_agent_cmds::browser_agent_resolve_access,
+                crate::browser_agent_cmds::browser_agent_exe_path,
+                crate::browser_agent_cmds::browser_agent_claim_status,
+                crate::browser_agent_cmds::browser_agent_user_activity,
                 crate::browser_agent_cmds::browser_agent_recent_ops,
-                crate::browser_agent_cmds::browser_agent_navigate, crate::browser_agent_cmds::browser_agent_snapshot,
-                crate::browser_agent_cmds::browser_agent_tab_list, crate::browser_agent_cmds::browser_agent_tab_new,
-                crate::browser_agent_cmds::browser_agent_tab_select, crate::browser_agent_cmds::browser_agent_tab_close,
-                crate::browser_agent_cmds::browser_agent_screenshot, crate::browser_agent_cmds::browser_agent_save_page,
-                crate::browser_agent_cmds::browser_agent_read_network, crate::browser_agent_cmds::browser_agent_wait,
-                crate::browser_agent_cmds::browser_agent_scroll, crate::browser_agent_cmds::browser_agent_emulate,
-                crate::browser_agent_cmds::browser_agent_click, crate::browser_agent_cmds::browser_agent_type,
-                crate::browser_agent_cmds::browser_agent_press, crate::browser_agent_cmds::browser_agent_download,
+                crate::browser_agent_cmds::browser_agent_navigate,
+                crate::browser_agent_cmds::browser_agent_snapshot,
+                crate::browser_agent_cmds::browser_agent_tab_list,
+                crate::browser_agent_cmds::browser_agent_tab_new,
+                crate::browser_agent_cmds::browser_agent_tab_select,
+                crate::browser_agent_cmds::browser_agent_tab_close,
+                crate::browser_agent_cmds::browser_agent_screenshot,
+                crate::browser_agent_cmds::browser_agent_save_page,
+                crate::browser_agent_cmds::browser_agent_read_network,
+                crate::browser_agent_cmds::browser_agent_wait,
+                crate::browser_agent_cmds::browser_agent_scroll,
+                crate::browser_agent_cmds::browser_agent_emulate,
+                crate::browser_agent_cmds::browser_agent_click,
+                crate::browser_agent_cmds::browser_agent_type,
+                crate::browser_agent_cmds::browser_agent_press,
+                crate::browser_agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])
-            .setup(|app| {
-                let window = app.get_webview_window("main").ok_or("main window not found")?;
-                if let Err(error) = window.set_title("Pylon") { tracing::warn!("set window title failed: {error}"); }
-                // 施工文档 §2.3：任何插件/Pet/MCP/SQLite/Gateway 路径消费者运行前，
-                // 用 app.handle() 解析一次 DataDirs 并写入 AppState 一次性槽位。
-                // 失败 = 启动中止（blocked），禁止消费者各自回退不同目录。
-                let data_dirs = crate::paths::resolve_data_dirs(app.handle())
-                    .map_err(|error| format!("resolve data dirs failed: {error}"))?;
-                app.state::<AppState>()
-                    .data_dirs
-                    .set(data_dirs)
-                    .map_err(|_| "data dirs already initialized".to_string())?;
-                // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
-                // 时按需 clone（PathBuf 拷贝成本可忽略）。
-                let dirs = app.state::<AppState>().data_dirs_cloned()?;
-                // portable 首次启动自动迁移（2026-08-19 修复）：
-                // AppData 旧数据 → data/。必须在此处（hydrate_workspaces 之前、
-                // message_service 初始化之前）——服务打开后迁移命令会被拒绝，
-                // hydrate 在迁移前会读到空 workspaces 表。失败不中止启动：
-                // AppData 数据未动，可后续手动处理（UI 横幅兜底）。
-                {
-                    let app_data_dir = app
-                        .path()
-                        .app_data_dir()
-                        .map_err(|error| error.to_string())?;
-                    let app_config_dir = app
-                        .path()
-                        .app_config_dir()
-                        .map_err(|error| error.to_string())?;
-                    if crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir) {
-                        match crate::paths::migrate_appdata_to_portable_staged(
-                            &app_data_dir,
-                            &app_config_dir,
-                            &dirs.data_root,
-                        ) {
-                            Ok(()) => tracing::info!(
-                                "AppData 旧数据已自动迁移至 portable: {}",
-                                dirs.data_root.display()
-                            ),
-                            Err(error) => tracing::error!(
-                                "portable 自动迁移失败（AppData 数据未动，可后续手动处理）：{error}"
-                            ),
-                        }
-                    }
-                }
-                // Workspace 注册表必须先于前端 hydrate 恢复；文件缺失即首次启动，返回空表。
-                crate::workspaces::hydrate_workspaces(app.state::<AppState>().inner())
-                    .map_err(|error| format!("load workspaces failed: {error}"))?;
-                // 施工文档 §7.4：storage 诊断与路径同时确定（只暴露模式/脱敏原因）。
-                {
-                    let app_data_dir = app
-                        .path()
-                        .app_data_dir()
-                        .map_err(|error| error.to_string())?;
-                    let app_config_dir = app
-                        .path()
-                        .app_config_dir()
-                        .map_err(|error| error.to_string())?;
-                    let migration_available =
-                        crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir);
-                    let storage = crate::startup::StorageDiagnostics::from_dirs(&dirs)
-                        .with_migration_available(migration_available);
-                    let app_state = app.state::<AppState>();
-                    let mut startup = app_state
-                        .startup
-                        .write()
-                        .map_err(|_| "startup diagnostics lock poisoned".to_string())?;
-                    startup.storage = Some(storage);
-                }
-                // Phase 4：浏览器管理器注入主窗口（子 WebView add_child 需要）。
-                app.state::<AppState>().browser.register_host(
-                    window.as_ref().window(),
-                    app.handle().clone(),
-                );
-                // issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
-                {
-                    let state = app.state::<AppState>();
-                    state.browser_agent.init_settings_path(
-                        crate::paths::browser_agent_settings_path(&dirs),
-                    );
-                    let hub = state.browser_agent.clone();
-                    state.browser.register_page_load_hook(std::sync::Arc::new(move |tab_id| {
-                        if let Ok(mut registry) = hub.refs().lock() {
-                            registry.invalidate_tab(tab_id);
-                        }
-                    }));
-                }
-                // 插件基建 v2：启动即创建用户插件目录树（installed/staging），
-                // 让用户无需先安装也能在文件管理器里看到插件目录。
-                if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {
-                    tracing::warn!("create plugin dirs failed: {error}");
-                }
-                // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
-                {
-                    let path = crate::paths::pet_persist_path(&dirs);
-                    if let Some(saved) = pet::load_from_file(&path) {
-                        let pet_arc = app.state::<AppState>().pet.clone();
-                        if let Ok(mut pet) = pet_arc.lock() {
-                            pet::restore(&mut pet, saved);
-                        };
-                    }
-                }
-                // B4.2：MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
-                {
-                    let path = crate::paths::mcp_persist_path(&dirs);
-                    if let Some(servers) = load_mcp_persisted(&path) {
-                        if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
-                            *slot = Some(servers);
-                            tracing::info!("MCP 配置已从 {} 恢复", path.display());
-                        }
-                    }
-                }
-                // Kernel persistence readiness barrier：三个 service 共用同一 SQLite 文件，
-                // 但作为一个启动单元串行 open/migrate 并一次性安装。setup 返回后所有
-                // command/dispatcher 都可依赖 service 已就绪；任一失败则 setup 失败，
-                // 不运行半可用 Kernel，也不回退 localStorage/第二历史权威。
-                {
-                    let db_path = crate::paths::message_db_path(&dirs);
-                    let services = crate::session::PersistenceServices::open(&db_path)?;
-                    let state = app.state::<AppState>();
-                    *state
-                        .message_service
-                        .lock()
-                        .map_err(|_| "message service slot lock poisoned".to_string())? =
-                        Some(services.message);
-                    *state
-                        .user_data_service
-                        .lock()
-                        .map_err(|_| "user-data service slot lock poisoned".to_string())? =
-                        Some(services.user_data);
-                    *state
-                        .event_service
-                        .lock()
-                        .map_err(|_| "event service slot lock poisoned".to_string())? =
-                        Some(services.event);
-                    tracing::info!("Kernel persistence services ready: {}", db_path.display());
-                }
-                // I12-W4：gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
-                // → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按
-                // `enabled && autoStart` 策略显式启动（失败可见，不静默）。损坏/IO 失败
-                // 保留原文件，仅可见报错（不阻断启动、不丢配置）。
-                // I12-W5：同块打开凭据存储（W3）→ 接线 start 凭据解析器 → 加载后刷新
-                // 实例 credential_ref/status（重启不丢凭据引用）。
-                {
-                    let state = app.state::<AppState>();
-                    let store_path_slot = state.gateway_instance_store_path.clone();
-                    let credentials_slot = state.gateway_credentials.clone();
-                    let path = crate::paths::gateway_instances_path(&dirs);
-                    if let Ok(mut slot) = store_path_slot.lock() {
-                        *slot = Some(path.clone());
-                    }
-                    // I12-W5：打开加密凭据存储（密文/主密钥分目录；失败可见不阻断）。
-                    // 施工文档 §7.3：路径解析失败 → credentials 槽位保持 None，禁止
-                    // 回退 `PathBuf::new()`（避免相对当前目录误写 pylon-master.key）。
-                    let credentials = {
-                        let credentials_dir = crate::paths::credentials_dir(&dirs);
-                        match crate::gateway::credentials::CredentialStore::open(&credentials_dir)
-                        {
-                            Ok(store) => Some(Arc::new(store)),
-                            Err(error) => {
-                                tracing::error!("凭据存储打开失败（set_credentials 不可用）：{error}");
-                                None
-                            }
-                        }
-                    };
-                    if let Ok(mut slot) = credentials_slot.lock() {
-                        *slot = credentials.clone();
-                    }
-                    let service = state.gateway_instances.clone();
-                    let path_for_task = path.clone();
-                    let credentials_for_refresh = credentials.clone();
-                    tokio::spawn(async move {
-                        let loaded = tokio::task::spawn_blocking(move || {
-                            crate::gateway::instance_store::load_instances(&path_for_task)
-                        })
-                        .await;
-                        match loaded {
-                            Ok(Ok(instances)) => {
-                                service.load_instances(instances).await;
-                                tracing::info!("gateway 实例配置已加载：{}", path.display());
-                                // I12-W5：重启恢复凭据引用（secret 不载入内存，仅标记）
-                                if let Some(store) = credentials_for_refresh.as_ref() {
-                                    let store = store.clone();
-                                    service
-                                        .refresh_credential_states(move |platform, id| {
-                                            store.has_credentials(platform, id).unwrap_or(false)
-                                        })
-                                        .await;
-                                }
-                                // AC2：仅 enabled && autoStart 显式启动，失败可见（策略测试见
-                                // instance.rs auto_start_instances）
-                                service.auto_start_instances().await;
-                            }
-                            Ok(Err(error)) => tracing::error!(
-                                "gateway 实例配置加载失败（保留原文件不覆盖）：{error}"
-                            ),
-                            Err(error) => {
-                                tracing::error!("gateway 实例配置加载 task 失败：{error}");
-                            }
-                        }
-                    });
-                    // I12-W5：start 凭据解析器（factory.create 前从 CredentialStore 解析
-                    // secret 填入 state；未配置 → None → factory 报 CredentialMissing）
-                    {
-                        let credentials_slot = state.gateway_credentials.clone();
-                        state.gateway_instances.set_credential_resolver(Arc::new(
-                            move |platform: &str, instance_id: &str| {
-                                credentials_slot
-                                    .lock()
-                                    .ok()
-                                    .and_then(|slot| slot.clone())
-                                    .and_then(|store| {
-                                        store.get_credentials(platform, instance_id).ok().flatten()
-                                    })
-                                    .map(|secret| secret.to_string())
-                            },
-                        ));
-                    }
-                    // gateway 共用 HTTP client（平台 factory 连接循环共用；超时参数
-                    // 与 legacy env 路径一致）。
-                    let qq_http = match reqwest::Client::builder()
-                        .connect_timeout(Duration::from_secs(10))
-                        .timeout(Duration::from_secs(30))
-                        .build()
-                    {
-                        Ok(client) => client,
-                        Err(error) => {
-                            tracing::warn!("Pylon gateway HTTP client unavailable: {error}");
-                            reqwest::Client::new()
-                        }
-                    };
-                    // 平台注册表（P78）：一次注册全部带真实适配器的平台（当前仅 qq）；
-                    // auto-start/手动 start 的凭据校验与连接循环入口。新增平台 =
-                    // platform_registry.rs 加 entry，本文件零改动。
-                    crate::gateway::platform_registry::register_platform_factories(
-                        &state.gateway_instances,
-                        state.gateway.clone(),
-                        qq_http,
-                    );
-                    // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
-                    // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
-                    // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
-                    // （覆盖侧 warn 留痕）。
-                    {
-                        let gateway_for_hook = state.gateway.clone();
-                        state.gateway_instances.set_adapter_registry(Arc::new(
-                            move |key: &str,
-                                  adapter: &Arc<dyn gateway::PlatformAdapter>,
-                                  register: bool| {
-                                if register {
-                                    if gateway_for_hook
-                                        .replace(adapter.clone())
-                                        .is_some()
-                                    {
-                                        tracing::warn!(
-                                            "gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）"
-                                        );
-                                    }
-                                } else if gateway_for_hook.unregister_if(key, adapter) {
-                                    tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
-                                }
-                            },
-                        ));
-                    }
-                    // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
-                    // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
-                    {
-                        let gateway = state.gateway.clone();
-                        state.gateway_instances.set_route_guard(Arc::new(move |instance_id: &str| {
-                            gateway
-                                .routes()
-                                .iter()
-                                .any(|binding| binding.instance_id.as_deref() == Some(instance_id))
-                        }));
-                    }
-                }
-                let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
-                if let Some(runtime) = handles.active_runtime() {
-                    start_notification_dispatcher(&handles, &runtime, window.clone());
-                }
-                app.state::<AppState>().inner().start_runtime_log_dispatcher(window);
-                // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
-                // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
-                // （announce=false，不广播 GUI 状态）。
-                {
-                    let app_handle = app.handle().clone();
-                    let main_webview = app.get_webview_window("main");
-                    let main_window = main_webview.as_ref().map(|w| w.as_ref().window());
-                    let state = app.state::<AppState>();
-                    state.gateway.set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
-                        let app = app_handle.clone();
-                        let webview = main_webview.clone();
-                        let window = main_window.clone();
-                        let resolved = resolved.clone();
-                        tokio::spawn(async move {
-                            let state = app.state::<AppState>();
-                            // I12-W4：route 绑定强制（决策纯函数 resolve_ingest_agent，
-                            // 正反用例见 route.rs 测试）——instance-bound route 必须指向
-                            // 已连接实例：InstanceMissing/InstanceNotConnected → 显式错误
-                            // + 丢弃，**禁止 fallback 到 active agent**（来源实例不可用却
-                            // 按默认 agent 路由会造成错位回复）。Unbound（legacy 无
-                            // instance_id）与无 binding 保持旧 fallback 行为（D-04）。
-                            let binding_ref = resolved.binding.as_ref();
-                            let bound_instance_id = binding_ref.and_then(|b| b.instance_id.as_deref());
-                            let instance_status = match bound_instance_id {
-                                Some(instance_id) => state
-                                    .inner()
-                                    .gateway_instances
-                                    .status_of(instance_id)
-                                    .await,
-                                None => None,
-                            };
-                            let active_agent = state
-                                .inner()
-                                .active_agent
-                                .lock()
-                                .map(|v| v.clone())
-                                .unwrap_or_default();
-                            // I12 W9：unbound_policy 传入决策（reject 时无 binding 消息显式拒绝，
-                            // 记录最小元数据，不进入 agent）
-                            let unbound_policy = state.inner().gateway.unbound_policy();
-                            let agent_id = match crate::gateway::route::resolve_ingest_agent(
-                                binding_ref,
-                                instance_status,
-                                &active_agent,
-                                unbound_policy,
-                            ) {
-                                Ok(id) => id,
-                                Err(reason) => {
-                                    tracing::error!(
-                                        "gateway ingest 拒绝：route {} 绑定实例 {} 状态不可用（{:?}），禁止 fallback",
-                                        resolved.source,
-                                        bound_instance_id.unwrap_or(""),
-                                        reason
-                                    );
-                                    return;
-                                }
-                            };
-                            if agent_id.is_empty() {
-                                tracing::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
-                                return;
-                            }
-                            let runtime = state.inner().runtimes.get_or_create(&agent_id);
-                            if let Some(webview) = webview.as_ref() {
-                                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
-                                    tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
-                                    return;
-                                }
-                            }
-                            // P1-1：平台路由绑定 agent ≠ GUI active agent 时会话 cwd 必须用
-                            // 绑定 agent 的 cwd（而非 active agent）；无绑定 agent 定义时回退 None。
-                            let agent_cwd = state.inner().agents.lock().ok()
-                                .and_then(|agents| agents.get(&agent_id).cloned())
-                                .and_then(|agent| agent.cwd);
-                            // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
-                            // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
-                            // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
-                            // 既有失败路径的 rollback_seen 语义）；transform → 改写
-                            // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
-                            let content = match crate::hook_bridge::message_received_hook_outcome(
-                                state.inner(),
-                                window.as_ref(),
-                                &resolved,
-                            )
-                            .await
-                            {
-                                crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
-                                crate::hook_bridge::MessageReceivedDecision::Drop => return,
-                            };
-                            if let Err(error) = send_prompt_core(
-                                state.inner(),
-                                &runtime,
-                                window.as_ref(),
-                                &state.gateway,
-                                &crate::session::PromptContext {
-                                    source: resolved.source.clone(),
-                                    profile_id: None,
-                                    content,
-                                    persona: String::new(),
-                                    session_prompt: None,
-                                    attachments: None,
-                                    mcp_servers: None,
-                                    cwd: agent_cwd,
-                                    known_peri_id: None,
-                                },
-                            ).await {
-                                tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
-                                // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
-                                // resume 重放可重新 ingest（防故障期消息永久丢失）。
-                                // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
-                                // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
-                                // G4 §3-9（C5）：统一入口 adapter_for_source（空 key 返回
-                                // None，与旧 platform_key 判空等价；接入 wechat 等新平台
-                                // 自动生效，未注册适配器无操作）。
-                                if let Some(msg_id) = resolved.msg_id.as_deref() {
-                                    if let Some(adapter) =
-                                        state.gateway.adapter_for_source(&resolved.source)
-                                    {
-                                        adapter.rollback_seen(msg_id);
-                                    }
-                                }
-                            }
-                        });
-                    }));
-                }
-                // 会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
-                // 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
-                {
-                    let app_for_watcher = app.handle().clone();
-                    tokio::spawn(async move {
-                        loop {
-                            tokio::time::sleep(Duration::from_secs(60)).await;
-                            let state = app_for_watcher.state::<AppState>();
-                            check_session_expiry(state.inner()).await;
-                        }
-                    });
-                }
-                // 权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
-                // permission.resolved terminal 事件——后端唯一计时/应答来源，前端
-                // 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
-                {
-                    let app_for_watcher = app.handle().clone();
-                    tokio::spawn(async move {
-                        loop {
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                            let state = app_for_watcher.state::<AppState>();
-                            let outcomes =
-                                check_pending_permission_timeouts(state.inner()).await;
-                            if outcomes.is_empty() {
-                                continue;
-                            }
-                            let Some(window) = app_for_watcher.get_webview_window("main") else {
-                                continue;
-                            };
-                            for outcome in outcomes {
-                                emit_event(
-                                    &window,
-                                    crate::event_names::INTERACTION,
-                                    serde_json::json!({
-                                        "eventType": "permission.resolved",
-                                        "agentId": outcome.agent_id,
-                                        "sessionId": outcome.session_id,
-                                        "requestId": outcome.request_id.to_string(),
-                                        "clientGeneration": outcome.client_generation,
-                                        "optionId": outcome.option_id,
-                                        "reason": "timed_out",
-                                    }),
-                                );
-                            }
-                        }
-                    });
-                }
-                Ok(())
-            })
+            .setup(|app| run_setup_pipeline(app))
             // 关窗时不在此处 block_on kill——run() 由 rt.block_on 驱动，窗口回调在
             // 同一 runtime 栈内执行，嵌套 block_on 必 panic ("Cannot start a runtime
             // from within a runtime")。子进程清理依赖 AppState drop 链：

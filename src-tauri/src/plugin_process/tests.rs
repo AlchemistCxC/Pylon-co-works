@@ -14,60 +14,6 @@ fn temp(label: &str) -> PathBuf {
     ))
 }
 
-fn service_script() -> &'static str {
-    r#"import json, os, subprocess, sys, threading, time
-lock = threading.Lock()
-cancelled = set()
-stubborn = False
-
-def send(value):
-    with lock:
-        sys.stdout.write(json.dumps(value, separators=(',', ':')) + '\n')
-        sys.stdout.flush()
-
-def delayed(request_id, delay):
-    time.sleep(delay)
-    if str(request_id) not in cancelled:
-        send({'jsonrpc':'2.0','id':request_id,'result':'late'})
-
-for raw in sys.stdin:
-    message = json.loads(raw)
-    method = message.get('method')
-    if method == '$/cancelRequest':
-        cancelled.add(str(message.get('params', {}).get('id')))
-        continue
-    if method == 'shutdown':
-        if stubborn:
-            time.sleep(60)
-        break
-    request_id = message.get('id')
-    params = message.get('params')
-    if method == 'echo':
-        send({'jsonrpc':'2.0','id':request_id,'result':params})
-    elif method == 'slow':
-        threading.Thread(target=delayed, args=(request_id, 10), daemon=True).start()
-    elif method == 'armStubborn':
-        stubborn = True
-        send({'jsonrpc':'2.0','id':request_id,'result':'armed'})
-    elif method == 'crash':
-        os._exit(7)
-    elif method == 'flood':
-        for index in range(2048):
-            sys.stderr.write(('err-%04d-' % index) + ('x' * 512) + '\n')
-            send({'jsonrpc':'2.0','method':'progress','params':{'index':index}})
-        sys.stderr.flush()
-        send({'jsonrpc':'2.0','id':request_id,'result':'drained'})
-    elif method == 'spawnChild':
-        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-        path = params['pidFile']
-        with open(path, 'w', encoding='utf-8') as handle:
-            handle.write(str(child.pid))
-        send({'jsonrpc':'2.0','id':request_id,'result':child.pid})
-    else:
-        send({'jsonrpc':'2.0','id':request_id,'error':{'code':-32601,'message':'missing'}})
-"#
-}
-
 fn fixture(base: &Path) -> crate::paths::DataDirs {
     let config = base.join("config");
     let data = base.join("data");
@@ -78,13 +24,16 @@ fn fixture(base: &Path) -> crate::paths::DataDirs {
     fs::create_dir_all(package.join("bin")).unwrap();
     fs::create_dir_all(&data).unwrap();
     fs::write(package.join("dist/entry.js"), b"export default {};").unwrap();
-    fs::write(package.join("bin/service.py"), service_script()).unwrap();
+    // P1（#106）：service 本体 = pylon-fake-agent bin 的 plugin-fixture 场景
+    //（echo/slow/armStubborn/crash/flood/spawnChild 全语义对照原 service.py；
+    // spawnChild 经自我再执行 hang 场景产生孙进程）——测试不再依赖宿主解释器。
+    let service_bin = crate::test_utils::fake_agent_bin();
 
     #[cfg(windows)]
     let (platform, executable) = {
         let command = format!(
-            "@{} -u \"%~dp0service.py\" %*\r\n",
-            crate::test_utils::test_python_exe()
+            "@\"{}\" --scenario plugin-fixture %*\r\n",
+            service_bin.display()
         );
         fs::write(package.join("bin/service.cmd"), command).unwrap();
         ("windows-x86_64", "./bin/service.cmd")
@@ -96,8 +45,8 @@ fn fixture(base: &Path) -> crate::paths::DataDirs {
         fs::write(
             &path,
             format!(
-                "#!/bin/sh\nexec {} -u \"$(dirname \"$0\")/service.py\" \"$@\"\n",
-                crate::test_utils::test_python_exe()
+                "#!/bin/sh\nexec \"{}\" --scenario plugin-fixture \"$@\"\n",
+                service_bin.display()
             ),
         )
         .unwrap();
@@ -111,8 +60,8 @@ fn fixture(base: &Path) -> crate::paths::DataDirs {
         fs::write(
             &path,
             format!(
-                "#!/bin/sh\nexec {} -u \"$(dirname \"$0\")/service.py\" \"$@\"\n",
-                crate::test_utils::test_python_exe()
+                "#!/bin/sh\nexec \"{}\" --scenario plugin-fixture \"$@\"\n",
+                service_bin.display()
             ),
         )
         .unwrap();

@@ -3,6 +3,7 @@
 //! WebView2 的 `--remote-debugging-port` 起的是 Chromium 内建 DevTools HTTP 端点，
 //! `GET /json` 返回该调试端口下所有可附加目标。这里只做纯发现，不持有连接。
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -80,9 +81,10 @@ impl TargetInfo {
 pub async fn fetch_targets(host: &str, port: u16, timeout: Duration) -> Result<Vec<TargetInfo>> {
     let endpoint = format!("http://{host}:{port}");
     let url = format!("{endpoint}/json/list");
-    let client = build_client(timeout)?;
+    let client = shared_client()?;
     let response = client
         .get(&url)
+        .timeout(timeout)
         .send()
         .await
         .map_err(|error| Error::Unreachable {
@@ -97,6 +99,7 @@ pub async fn fetch_targets(host: &str, port: u16, timeout: Duration) -> Result<V
         let fallback = format!("{endpoint}/json");
         let response = client
             .get(&fallback)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|error| Error::Unreachable {
@@ -132,9 +135,10 @@ async fn decode_list(
 /// `GET /json/version` —— 浏览器/协议版本。诊断「连上了但是旧 WebView2」时用。
 pub async fn fetch_version(host: &str, port: u16, timeout: Duration) -> Result<Value> {
     let endpoint = format!("http://{host}:{port}");
-    let client = build_client(timeout)?;
+    let client = shared_client()?;
     let response = client
         .get(format!("{endpoint}/json/version"))
+        .timeout(timeout)
         .send()
         .await
         .map_err(|error| Error::Unreachable {
@@ -152,13 +156,21 @@ pub async fn fetch_version(host: &str, port: u16, timeout: Duration) -> Result<V
         })
 }
 
-fn build_client(timeout: Duration) -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        // 调试端点是本机回调，代理只会把它转发坏掉。
-        .no_proxy()
-        .build()
-        .map_err(|error| Error::Io(format!("构造 HTTP client 失败：{error}")))
+/// 全进程共享一个 client：目标发现是热路径（每次工具调用都要走），
+/// 每次现建 client 等于每次丢弃连接池、重做一遍 TCP 握手。
+/// 超时改为按请求设置（见两个 `fetch_*`），因为不同调用方的预算不同。
+fn shared_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: OnceLock<std::result::Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                // 调试端点是本机回调，代理只会把它转发坏掉。
+                .no_proxy()
+                .build()
+                .map_err(|error| format!("构造 HTTP client 失败：{error}"))
+        })
+        .as_ref()
+        .map_err(|message| Error::Io(message.clone()))
 }
 
 /// reqwest 的错误链要摊平：`error.to_string()` 只给最外层的 "error sending request"，
