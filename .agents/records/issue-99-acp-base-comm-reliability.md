@@ -152,6 +152,20 @@ golden 2 个（wire parity/replay 序列）。
 - 未知请求 -32601 的 dispatcher 循环级测试缺失（分支内联于主循环，测试需完整 window/state 装置）。
 - malformed/batch wire capture 证据（依赖 SDK 内部行为）。
 
+## 二审处置（2026-09-16，第二个独立子 agent 对修复增量 825069ee..27e92432 的行级评审）
+
+结论：**可合并**（无 P0/P1）。新泵并发证明成立（生产者单线程串行经 SDK event-loop 语义核实；所有通道发送与滞留决策在同一 spill 锁临界区原子完成；持锁仅调非阻塞 try_send；terminate 前放锁规避 std Mutex 不可重入）。5 项 P2 处置：
+
+| 项 | 处置 |
+| --- | --- |
+| P2-1 E1 回归锁对旧实现无判别力 | ✅ 按评审给出的判别性构造重写：relay 阶段无泵、updates 容量 2、腾格后 relay D——新实现 Spilled + 交付 [A,B,C,D]，旧实现 Published + [A,B,D,C]，outcome 与交付序双重断言对旧实现必红 |
+| P2-2 时钟回拨可静默裁掉 just-settled | ✅ prune 候选排除 just-settled、超出容量时从最旧候选裁起为其腾位；新增 `prune_survives_clock_backwards_just_settled` |
+| P2-3 泵滞留期不查 shutdown；Closed-break 滞留帧不计数 | ✅ Full 重试等待加 shutdown 现值检查；Closed-break 对滞留帧计数 `closed_dropped` 并告警；泵文档如实化 |
+| P2-4 task abort 绕过 drop_generation（既有盲区） | 📝 记录明示（非本增量引入；清理依赖代际过滤对快照不可见，纯内存缓慢累积，后续可在 client 替换点做 sweep） |
+| P2-5 SessionUpdate-kind 带 id 请求 Responder 滞留（既有） | 📝 记录为已知限制（畸形 agent 才触发；分支结构既有） |
+
+二审正面确认记录：cb23befa 补遗属实、E10/E12 修复属实、golden while-let 等价、文档纠偏逐字相符、-32601 到达帧穷举无误杀、测试模块结构完整（去重 use 后单 cfg(test) 模块、原测试一个不少）。
+
 ## 未解问题
 
 - `InboundRelay` 泵任务的续投延迟（5ms 轮询 + Notify 唤醒）在极端洪泛下的

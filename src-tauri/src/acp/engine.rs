@@ -304,8 +304,9 @@ impl InboundRelay {
 /// 保序机制（评审 E1）：锁内 **peek 队首并 clone 试发**——帧在成功发送前保持
 /// 队首占位，生产者（relay）因此始终看到非空滞留、把新帧排到队尾；
 /// 「取出-失败-放回」的重试窗口不复存在。
-/// 退出条件（评审 E5）：下游通道关闭、shutdown 触发（订阅 watch，连接
-/// kill/替换时随之退出，不残留定时任务）、或过载终态后 spill 排空。
+/// 退出条件（评审 E5/P2-3）：下游通道关闭（滞留帧计入 `closed_dropped`）、
+/// shutdown 触发（订阅 watch：空 spill 时现值检查 + changed；重试等待中亦
+/// 响应现值——连接收敛后不再向其投递滞留帧）、或过载终态后 spill 排空。
 pub(crate) fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut shutdown_rx = relay.shutdown.subscribe();
@@ -372,9 +373,36 @@ pub(crate) fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle
                 }
                 Some((_, Err(tokio::sync::mpsc::error::TrySendError::Full(_)))) => {
                     // inbox 仍满：帧保持在队首占位，稍候重试（无取放窗口）。
+                    // 重试等待同样响应 shutdown——过载终态置位 shutdown 后不再
+                    // 把滞留帧继续投进正在收敛的连接（评审 P2-3）。
+                    if *shutdown_rx.borrow_and_update() {
+                        break;
+                    }
                     tokio::time::sleep(retry).await;
                 }
-                Some((_, Err(tokio::sync::mpsc::error::TrySendError::Closed(_)))) => break,
+                Some((_, Err(tokio::sync::mpsc::error::TrySendError::Closed(_)))) => {
+                    // 下游关闭：spill 滞留帧无法投递——显式计数后退出（模块
+                    // 不变量：任何 drop 必须可观测，评审 P2-3）。
+                    let mut spill = relay
+                        .spill
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let leftover = (spill.control.len() + spill.updates.len()) as u64;
+                    spill.control.clear();
+                    spill.updates.clear();
+                    drop(spill);
+                    if leftover > 0 {
+                        relay
+                            .telemetry
+                            .closed_dropped
+                            .fetch_add(leftover, Ordering::AcqRel);
+                        tracing::warn!(
+                            leftover,
+                            "acp inbound pump: downstream closed with frames still in spill"
+                        );
+                    }
+                    break;
+                }
             }
         }
     })
@@ -1716,14 +1744,19 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
 
-    /// #99（评审 E1 回归锁）：lane 存在滞留帧时，新帧必须排到 spill 队尾
-    ///（返回 Spilled）而不是直发越过滞留帧（旧实现返回 Published 且乱序送达）。
-    /// 消费端最终按 ingress 序列收齐，证明严格 FIFO。
+    /// #99（评审 E1 回归锁，判别性构造由二审 P2-1 给出）：lane 存在滞留帧时，
+    /// 新帧必须排到 spill 队尾（返回 `Spilled`）而不是直发越过滞留帧。
+    ///
+    /// 判别力设计：**relay 阶段不 spawn 泵**（旧实现的乱序窗口恰在泵重试等待
+    /// 期间；无泵则无调度干扰，结果确定）。updates 容量 2：A、B 直发占满，
+    /// C 进 spill（滞留期开始）；消费 A 腾出一格后 relay D——
+    /// - 新实现：检测到滞留（C 占位）→ D 返回 `Spilled`，最终交付 [A,B,C,D]；
+    /// - 旧实现：无滞留检查 → D 直发返回 `Published`，交付 [A,B,D,C]。
+    /// 断言同时钉住 outcome 与交付序，对旧实现必红。
     #[tokio::test]
     async fn relay_with_lane_backlog_keeps_new_frames_behind_spilled() {
         let (relay, mut updates_rx, _control_rx, _shutdown_rx) =
-            InboundRelay::for_test_with_receivers(1, 8, 64);
-        let _pump = spawn_inbound_pump(relay.clone());
+            InboundRelay::for_test_with_receivers(2, 8, 64);
         let update = |index: u64| {
             ClassifiedMessage::live(RawMessage {
                 id: None,
@@ -1736,15 +1769,22 @@ mod tests {
                 error: None,
             })
         };
-        // U0 → inbox；U1 → spill（泵可能尚未投递）；U2 必须排在 U1 之后。
+        // relay 阶段（无泵、无 await：结果确定，不受调度影响）。
         assert_eq!(relay.relay(update(0)), PublishOutcome::Published);
-        assert_eq!(relay.relay(update(1)), PublishOutcome::Spilled);
+        assert_eq!(relay.relay(update(1)), PublishOutcome::Published);
+        assert_eq!(relay.relay(update(2)), PublishOutcome::Spilled);
+        // 消费 A 腾出一格——滞留 C 仍在 spill 占位。
+        let first = updates_rx.recv().await.expect("first frame");
+        assert_eq!(first.ingress_seq, 1);
+        // 判别点：滞留存在时 D 禁止直发。
         assert_eq!(
-            relay.relay(update(2)),
+            relay.relay(update(3)),
             PublishOutcome::Spilled,
-            "滞留存在时新帧禁止直发（E1：直发会越过滞留帧破坏 FIFO）"
+            "滞留存在时新帧必须排尾（直发 = E1 旧实现回归）"
         );
-        let mut seqs = Vec::new();
+        // 现在起泵续投：交付序必须 [A,B,C,D]（旧实现为 [A,B,D,C]）。
+        let pump = spawn_inbound_pump(relay.clone());
+        let mut seqs = vec![first.ingress_seq];
         for _ in 0..3 {
             let frame = tokio::time::timeout(Duration::from_secs(5), updates_rx.recv())
                 .await
@@ -1752,7 +1792,8 @@ mod tests {
                 .expect("updates channel must stay open");
             seqs.push(frame.ingress_seq);
         }
-        assert_eq!(seqs, vec![1, 2, 3], "交付序必须等于 ingress 序");
+        assert_eq!(seqs, vec![1, 2, 3, 4], "交付序必须等于 ingress 序");
+        pump.abort();
     }
 
     /// #99（评审 E5 回归锁）：shutdown 触发后泵任务必须退出，不残留

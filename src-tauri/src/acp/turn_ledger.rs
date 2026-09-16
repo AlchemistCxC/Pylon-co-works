@@ -339,6 +339,12 @@ impl TurnLedger {
     const TERMINAL_RETENTION_PER_SESSION: usize = 8;
 
     /// 裁剪同会话三元组下超量的旧终态记录（settle 锁内调用）。
+    ///
+    /// just-settled 永不参与裁剪候选（评审 P2-2）：墙钟回拨时它的
+    /// `settled_at_ms` 可能小于存量终态，若参排会被误判为最旧而即时丢失
+    /// （且 settle 已返回 Published、静默不可观测）。语义：保留最近
+    /// `TERMINAL_RETENTION_PER_SESSION` 条**含 just-settled**——候选为存量
+    /// 终态，超出容纳空间时从最旧开始裁剪，为其腾位。
     fn prune_terminal_retention(
         records: &mut HashMap<TurnKey, TurnRecord>,
         just_settled: &TurnKey,
@@ -346,7 +352,8 @@ impl TurnLedger {
         let mut terminals: Vec<(u64, u64)> = records
             .iter()
             .filter(|(key, record)| {
-                record.terminal.is_some()
+                key.turn_id != just_settled.turn_id
+                    && record.terminal.is_some()
                     && key.local_session_id == just_settled.local_session_id
                     && key.remote_session_id == just_settled.remote_session_id
                     && key.generation == just_settled.generation
@@ -362,16 +369,15 @@ impl TurnLedger {
                 )
             })
             .collect();
-        if terminals.len() <= Self::TERMINAL_RETENTION_PER_SESSION {
+        // candidates + just_settled 的总数须 ≤ 上界；超出即从最旧候选裁起。
+        let excess = (terminals.len() + 1).saturating_sub(Self::TERMINAL_RETENTION_PER_SESSION);
+        if excess == 0 {
             return;
         }
         // 最旧优先（时间戳同毫秒时以 turn_id 定序，保证确定性）。
         terminals.sort_unstable_by_key(|(at, id)| (*at, *id));
-        let stale_ids: std::collections::HashSet<u64> = terminals
-            [..terminals.len() - Self::TERMINAL_RETENTION_PER_SESSION]
-            .iter()
-            .map(|(_, id)| *id)
-            .collect();
+        let stale_ids: std::collections::HashSet<u64> =
+            terminals[..excess].iter().map(|(_, id)| *id).collect();
         records.retain(|key, _| {
             !(key.local_session_id == just_settled.local_session_id
                 && key.remote_session_id == just_settled.remote_session_id
@@ -752,6 +758,36 @@ mod tests {
         let active = key(13);
         ledger.begin(active.clone(), 13);
         assert!(ledger.snapshot(&active).is_some());
+    }
+
+    #[test]
+    fn prune_survives_clock_backwards_just_settled() {
+        let ledger = ledger();
+        for turn_id in 1..=8u64 {
+            let k = key(turn_id);
+            ledger.begin(k.clone(), turn_id);
+            assert_eq!(
+                ledger.settle(&k, TurnTerminalCause::Completed, 100 + turn_id, None),
+                SettleOutcome::Published
+            );
+        }
+        // 墙钟回拨（NTP 步进）：第 9 个 turn 的 settled_at_ms 小于全部存量。
+        let k9 = key(9);
+        ledger.begin(k9.clone(), 9);
+        assert_eq!(
+            ledger.settle(&k9, TurnTerminalCause::Completed, 50, None),
+            SettleOutcome::Published
+        );
+        // P2-2：just-settled 已返回 Published，不得被裁剪静默丢失。
+        assert!(
+            ledger.snapshot(&k9).is_some(),
+            "刚 settle 的记录不得被时钟回拨误裁"
+        );
+        let mut ids = ledger.snapshot_records_for_test("local:s1", "peri-s1", 1);
+        ids.sort_unstable();
+        assert_eq!(ids.len(), TurnLedger::TERMINAL_RETENTION_PER_SESSION);
+        assert!(ids.contains(&9), "最新终态必须存活");
+        assert_eq!(ids[0], 2, "被裁的应是时间戳最旧的 turn 1");
     }
 
     #[test]
