@@ -550,9 +550,9 @@ async fn handle_permission_request<R: tauri::Runtime>(
     request_id: crate::acp::RequestId,
     params: Option<&serde_json::Value>,
 ) {
-    // #98：方法驱动 dispatch——adapter 按 ACP method 注册表查找，provider 名称
-    // 不再是 gate（任何 agent 的 session/request_permission 都由通用适配器处理，
-    // 未注册方法得到稳定 method_unsupported，raw 参数随拒绝事件保留可诊断）。
+    // #98: method-driven dispatch - adapter lookup by ACP method, provider name
+    // no longer a gate; unknown methods get a stable method_unsupported with the
+    // raw params kept observable via the rejection event.
     let Some(adapter) =
         crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
     else {
@@ -855,6 +855,10 @@ async fn handle_permission_request<R: tauri::Runtime>(
             // 前端只做倒计时展示，不自行持有 300s 常量。
             "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
         });
+        // #98: unified interaction queue admission (FIFO / single Active /
+        // queued depth). The queue feeds cancel/timeout/disconnect drain
+        // terminal states and the cold-mount snapshot; kind = "approval" and
+        // the stored event payload is identical to pylon:interaction.
         let interaction_event = serde_json::json!({
             "provider": provider,
             "agentId": agent_id,
@@ -1937,8 +1941,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "_x.ai/exit_plan_mode" => {
                             Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
                         }
-                        // #98：elicitation/create 通用协议桥——按方法名路由，
-                        // 不要求 provider 名称匹配（AC11）。
+                        // #98: elicitation/create generic protocol bridge - routed
+                        // by method name, no provider match required (AC11).
                         "elicitation/create" => {
                             Some(crate::acp::adapter::private_ext::PrivateBridge::Elicitation)
                         }
@@ -1983,9 +1987,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 }, "requestId": request_id.to_string(),
                                 "clientGeneration": generation, "payload": params,
                             });
-                            // #98：统一交互队列登记（drain 终态 + 冷挂载快照数据源）。
+                            // #98: unified interaction queue admission (drain
+                            // terminal states + cold-mount snapshot source).
                             if let Some(runtime) = runtimes.get(&agent_id) {
-                                let _ = runtime.interactions.admit(
+                                if let Err(error) = runtime.interactions.admit(
                                     crate::acp::interaction_queue::InteractionQueueEntry {
                                         request_id: request_id.to_string(),
                                         method: method.to_string(),
@@ -2005,7 +2010,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                         event: interaction_event.clone(),
                                         state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                                     },
-                                );
+                                ) {
+                                    tracing::warn!("interaction queue admit failed: {error}");
+                                }
                             }
                             emit_event(&window, crate::event_names::INTERACTION, interaction_event);
                             continue;
@@ -2030,9 +2037,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
-                    // #98：provider 名称不再是 dispatch gate——未注册的 client
-                    // request 一律按方法维度报稳定 unsupported（raw 诊断随事件
-                    // 保留，不伪造 option 或成功）。
+                    // #98: provider name is no longer a dispatch gate - unknown
+                    // client requests report a stable method-level unsupported
+                    // (raw diagnostics kept on the rejection event).
                     let reason = "method_unsupported";
                     (
                         reason,

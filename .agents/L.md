@@ -265,33 +265,6 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 ---
 
-[2026-09-16 05] [图灵] [#99]
+[2026-09-16 01] [Noether] [#98]
 
-二审闭环：第二个独立子 agent 对修复增量（825069ee..27e92432）行级评审，结论**可合并**（无 P0/P1，新泵并发证明成立——SDK event-loop 单线程语义已核实）。5 项 P2 已处置：P2-1 E1 回归锁改判别性构造（旧实现必红）、P2-2 prune 排除 just-settled 防时钟回拨误裁 + 测试、P2-3 泵重试等待响应 shutdown + Closed-break 滞留帧计数；P2-4（task abort 绕过 drop_generation）/P2-5（SessionUpdate-kind 带 id 滞留）为既有边界，已在开发记录明示。共享分支 4b9bf7fa，PR 分支 008c6d07，本地复验 1089/0（共享）/ 1043/0（PR 分支）。
-
-[2026-09-16 03] [Erdős] [#107]
-
-清出 `scripts/` 四个零引用孤儿脚本与根目录垃圾（`nul`、误落盘模板行、调试日志、pycache）。只 git rm 下列四个 tracked 文件：acceptance-pet-runtime.mts、hermes-wire-test.py、smoke-release-sdk.mjs、convert-presets-to-delta.mts，另本地清理未跟踪垃圾。**不碰** scripts/ 其他在岗脚本、pack-plugin-devkit 链、backup-portable-data.sh、src-tauri 他人 WIP。
-
----
-
-[2026-09-16 06] [Lovelace] [#106] 正式开工
-
-大一统测试基建施工开始，**本地分支 `Ru5t/issue-106-test-harness`**（基线 = 3aa2e5e4 + main 合并节点 73b1bf00；因不可抗力仅本地提交，不推远端，PR 后补）。执行序 P0→P7 一个大 PR 形态（本地多提交）。spec 见 `.agents/spec/issue-106-unified-test-harness.md`（定稿），ADR-0005 已入库。
-
-**我改动的文件域（请勿改写、勿连带提交）**：
-
-- Rust：`src-tauri/Cargo.toml`（+workspace/+features/+bin）、`src-tauri/.cargo/config.toml`（新增）、删 3 个子 `Cargo.lock`、`src-tauri/src/bin/pylon-fake-agent.rs`（新增）、`src-tauri/src/test_utils.rs`、`src-tauri/src/test_harness/`（新增）、`src-tauri/src/lib.rs`（run() 三段提取 + mod 声明）、`src-tauri/tests/`（新增 integration target + golden-traces 基线不动）、四个集成测试文件 + `session/model_switch_wire_tests.rs` + `acp/golden_trace_tests.rs`（迁移/换装配）
-- 门禁与 CI：`.github/workflows/ci.yml`（去 skip、workspace 单命令、rust-cache、证据包）、`.github/dependabot.yml`（新增）、`.github/workflows/cargo-mutants.yml`（新增）、`package.json`（check:ipc、check:rust 改写）、`scripts/check-ipc-contract.mts`（新增）、`vitest.config.ts`、`vitest.setup.ts`
-- 文档：`.agents/L.md`（本文件）、`.agents/records/`、`.agents/decisions/0005`（状态转已采用）、`docs/说明书/`（涉测试/CI 章节表述）
-
-**我不碰**：`src-tauri/src` 生产模块本体语义（acp/dispatcher/session/browser_agent 等仅按 P3a 提取所需最小接触）、`scripts/` 其他在岗脚本语义（check-acp-shadow-parity 保持）、`tools/webview2-mcp/`。提交一律显式 pathspec。工作区如出现他人未提交改动一概不提交。
-
----
-
-[2026-09-16 07] [Lovelace] [#106]
-
-阶段性完工（本地分支 `Ru5t/issue-106-test-harness`，未推远端）：P0 workspace 化、P1 假 agent Rust bin（22 份 Python 脚本清零、golden 基线逐字节一致）、P2 harness 核心+冒烟、P3a run() 三段提取（E18 退役）、P3b check:ipc、P6 提速（热增量 9s）、P7（证据包/mutants/dependabot）。**遗留**：P4 前端聚合与 P5 集成测试抽离未落地（P4 实测 projects 分层后 transform 翻倍引发 solid 桥接测试延迟，按预算整体回退；P5 门面地基已就绪），已在开发记录 `.agents/records/issue-106-unified-test-harness.md` 完整记录。共享文件改动清单见记录尾部「并行交集」。clippy 基线零新增、fmt 绿、全量 1243 Rust 测 + 3789 前端测绿。
-[2026-09-16 14] [Codex] [#106]
-
-接手原有 `Ru5t/issue-106-test-harness` 分支继续施工。确认 P5 单 target 已落地并通过 Rust 全量测试（21 integration / 1072 lib / fake-agent 与 bin）。开始补 P4 Vitest projects 聚合（scripts=node、src=jsdom、isolate=false）；当前环境缺可执行 Bun/Node 入口，前端验证待补，暂不宣称完成。
+完工：ACP 能力协商与生命周期消费者闭环（PR 分支 `Ru5t/issue-98-capability-lifecycle`，基于 main）。提交内容：`acp/negotiated.rs` 能力矩阵快照（canonical 嵌套真源 + 根级 loadSession 兼容 alias + 四态/消费者注册表）、`acp/interaction_queue.rs` 统一 request-id 交互队列（FIFO/单一 Active/drain 终态/冷挂载投影）、`session/fork.rs` session/fork raw 消费者（usable gate + 受限 envelope + parent/child）、探针与建立链/agent_status 消费同一快照、protocol_adapter 方法驱动（去 provider gate）、elicitation 通用桥、agent_status 增 capabilitySnapshot/pendingInteractions、TS usable-only fail-closed 投影 + 冷挂载种子。ADR-0004 + 开发记录入库。门禁：fmt/cargo test 1073 绿（独立 worktree 验证提交树）/check:acp-shadow ok/vitest 全绿/tsc/check:solid/check:frontend 绿。
