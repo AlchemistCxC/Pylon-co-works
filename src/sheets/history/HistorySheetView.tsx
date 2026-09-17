@@ -25,7 +25,8 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * `history-sheet/history-sidebar(-total)/history-row` 类名保留为 workspace
  * adaptive.css（modern-gui 模式覆写）的锚点。
  */
-const SHEET = 'history-sheet flex min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
+// #116 子项 2：同 Search——缺 flex-1 时按内容宽度收缩（实测 394×988）。
+const SHEET = 'history-sheet flex flex-1 min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
 const SIDEBAR = 'history-sidebar flex w-[var(--sheet-sidebar-width,250px)] basis-[var(--sheet-sidebar-width,250px)] flex-col py-[var(--ui-space-5)] px-3 overflow-y-auto border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)] max-[720px]:w-[190px] max-[720px]:basis-[190px]'
 const SIDEBAR_HEAD = 'grid gap-2 mx-2 mb-4 pb-4 border-b border-border'
 const SIDEBAR_HEAD_SPAN = 'text-accent font-bold text-[10px] leading-[1] font-[family-name:var(--mono)] tracking-[.14em]'

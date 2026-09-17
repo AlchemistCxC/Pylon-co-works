@@ -191,7 +191,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
             {p.avatar ? <img src={p.avatar} alt={p.name} /> : p.name[0]}
           </button>
         ))}
-        <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>✎</button>
+        {/* #116 子项 4：同排宠物按钮的 title 已是中文，此处原为 "Edit Profile"。 */}
+        <button className="profile-edit" title="编辑当前 Profile" onClick={onProfileEdit}>✎</button>
         <button className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}>🐾</button>
       </div>
     </aside>

@@ -166,7 +166,10 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
               >
                 <span className="runtime-log-id text-text-dim w-[3em] basis-[3em] shrink grow-0">{entry.id}</span>
                 <span className="runtime-log-level w-[4em] basis-[4em] shrink grow-0 font-bold uppercase">{entry.level}</span>
-                <span className="runtime-log-source w-[6em] basis-[6em] shrink grow-0 overflow-hidden text-ellipsis">{entry.source || '—'}</span>
+                {/* #116 子项 3：缺 whitespace-nowrap 时 agent-stderr 会在连字符处断成
+                    两行（单元格 19→37px、整行 30→37px），与含下划线不可断行的
+                    prism_desktop_lib 同一列两种表现。同文件 runtime-log-chip 已有该 utiliy。 */}
+                <span className="runtime-log-source w-[6em] basis-[6em] shrink grow-0 overflow-hidden text-ellipsis whitespace-nowrap">{entry.source || '—'}</span>
                 <span className="runtime-log-time text-text-dim w-[8em] basis-[8em] shrink grow-0">{formatTime(entry.timestamp)}</span>
                 {entry.category && <span className="runtime-log-chip flex-none max-w-[9em] overflow-hidden text-ellipsis whitespace-nowrap px-[6px] font-[family-name:var(--mono)] text-[10px] leading-[18px] text-text-dim border border-border rounded-none bg-[color-mix(in_srgb,var(--bg-input)_70%,transparent)]">{entry.category}</span>}
                 <span className="runtime-log-message flex-1 min-w-0 [word-break:break-word] max-[760px]:basis-full max-[760px]:[overflow-wrap:anywhere]">{entry.message}</span>

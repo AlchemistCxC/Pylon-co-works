@@ -55,6 +55,18 @@ interface BrowserTabSnapshot {
   title?: string | null
 }
 
+/**
+ * #116 子项 4：phase 是前端状态机枚举（本文件顶层 interface），直接插值会把
+ * `ready` 这类内部值送到地址栏与左侧栏——同一条工具栏的按钮文案已是中文。
+ * 仅做展示映射，`data-phase` 属性保留原枚举值供选择器与测试使用。
+ */
+const BROWSER_PHASE_LABELS: Record<BrowserSnapshot['phase'], string> = {
+  idle: '空闲',
+  starting: '启动中',
+  ready: '就绪',
+  error: '异常',
+}
+
 interface BrowserPageLink {
   index?: number
   text?: string
@@ -578,7 +590,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
             )
           })}
         </nav>
-        {!sidebarCollapsed && <div className={`browser-sidebar-note mt-auto py-2.5 px-3 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5] max-[720px]:hidden ${sidebarCollapsed ? 'hidden' : ''}`}>WebView session<br /><span className="text-text-dim">{snapshot.phase}</span></div>}
+        {!sidebarCollapsed && <div className={`browser-sidebar-note mt-auto py-2.5 px-3 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5] max-[720px]:hidden ${sidebarCollapsed ? 'hidden' : ''}`}>WebView 会话<br /><span className="text-text-dim">{BROWSER_PHASE_LABELS[snapshot.phase]}</span></div>}
       </aside>
       <main className="browser-main flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden">
         {/* 保留语义节点供旧主题/可访问性选择器兼容；视觉上 Browser Sheet 不再重复显示
@@ -633,7 +645,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
             {snapshot.zoomPercent}%
           </button>
           <span className={`browser-status browser-status-inline inline-flex min-w-[58px] h-[26px] items-center justify-center px-[7px] border rounded-[4px] text-text-dim bg-bg-panel font-[family-name:var(--mono)] text-[10px] tracking-[.04em] uppercase max-[720px]:min-w-[50px] ${snapshot.phase === 'ready' ? 'text-[var(--tool-ok)] border-[color-mix(in_srgb,var(--tool-ok)_38%,var(--border))]' : snapshot.phase === 'starting' ? 'text-[var(--tool-run)] border-[color-mix(in_srgb,var(--tool-run)_38%,var(--border))]' : snapshot.phase === 'error' ? 'text-[var(--tool-err,var(--danger))] border-[color-mix(in_srgb,var(--tool-err,var(--danger))_38%,var(--border))]' : ''} ${snapshot.runtime === 'iframe-preview' ? 'text-accent border-[color-mix(in_srgb,var(--accent)_38%,var(--border))]' : ''}`} data-phase={snapshot.phase} data-runtime={snapshot.runtime} title={browserPreview ? '开发预览：页面由 iframe 加载' : '桌面 WebView2 会话'}>
-            {browserPreview ? 'preview' : snapshot.phase}
+            {browserPreview ? '预览' : BROWSER_PHASE_LABELS[snapshot.phase]}
           </span>
         </div>
         {zoomSettingsOpen && (

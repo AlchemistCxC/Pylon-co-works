@@ -162,7 +162,9 @@ export default function SettingsPreview({ zone }: Props) {
           </div>
         </div>
       </div>
-      <div className="set-preview-caption">{zone} · 实时预览（{w}×{h}）</div>
+      {/* #116 子项 8：这一栏是缩放后的示意（实测 0.22 倍，正文折算约 2.8px），
+          原标签只写「实时预览」，容易被当成可读内容——明确标注为示意。 */}
+      <div className="set-preview-caption">{zone} · 示意图（{w}×{h} 按 {Math.round(scale * 100)}% 缩放，非真实尺寸）</div>
     </div>
   )
 }

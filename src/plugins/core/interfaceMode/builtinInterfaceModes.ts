@@ -16,7 +16,8 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
   }),
   Object.freeze({
     id: 'terminal-like',
-    label: 'Terminal-like',
+    // #116 子项 4c：三选一里另两项已是「现代 GUI」「蓝调战术」，原先只有它显示英文。
+    label: '经典终端',
     description: '经典记录流与四套终端呈现风格',
     icon: 'terminal',
     order: 20,

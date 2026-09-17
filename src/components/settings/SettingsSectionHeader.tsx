@@ -1,5 +1,6 @@
 import {
   isPageOwnedSection,
+  SECTION_OWNER_LABELS,
   SECTION_OWNERS,
   SETTINGS_SECTION_LABELS,
   type SettingsSectionId,
@@ -15,7 +16,8 @@ const DENSITY_LABELS: Readonly<Record<SettingsDensity, string>> = {
 
 /**
  * Owner 头（施工书 09 §K-1，设计书 07 §4.2）：
- * 内容区顶部显示「正在调哪个部件」。owner id 纯文字起步（拍板 D1-A，图标位留空）。
+ * 内容区顶部显示「正在调哪个部件」。已登记 owner 显示其可读名（#116 子项 4d，
+ * 原始 owner id 仍在 data-owner 上），未登记的按「设置页」徽标处理。
  * 页面自有/未登记 section 显示「设置页」徽标（PAGE_OWNED_SECTIONS + isPageOwnedSection 派生）。
  * 密度档三选（拍板 D3-A 全局一档）：basic 只显 tier:'basic'；standard 非 advanced；all 全量。
  */
@@ -39,7 +41,7 @@ export default function SettingsSectionHeader(props: {
         <strong>{SETTINGS_SECTION_LABELS[section]}</strong>
         {pageOwned
           ? <em className="settings-owner-id settings-owner-page">设置页</em>
-          : <em className="settings-owner-id">· {owner}</em>}
+          : <em className="settings-owner-id">· {SECTION_OWNER_LABELS[owner] ?? owner}</em>}
       </span>
       {/* F3 边界修复：密度档只对含字段的组件 section 有意义，pageOwned 动作面板不显示 */}
       {!pageOwned && (

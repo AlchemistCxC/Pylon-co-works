@@ -20,7 +20,9 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * `search-sheet-input/search-sidebar-scope/-action/search-result-row` 类名保留为
  * workspace adaptive.css（modern-gui 覆写）锚点。
  */
-const SHEET = 'search-sheet flex min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
+// #116 子项 2：本壳是 .layout（flex 容器）的直接子项，缺 flex-1 时按内容宽度
+// 收缩（实测 528×988，而同排 File/Overview/Runtime/Gateway 都是 1920×988）。
+const SHEET = 'search-sheet flex flex-1 min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
 const SIDEBAR = 'search-sidebar flex w-[var(--sheet-sidebar-width,250px)] basis-[var(--sheet-sidebar-width,250px)] flex-col py-[var(--ui-space-5)] px-3 border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)] max-[720px]:w-[190px] max-[720px]:basis-[190px]'
 const SIDEBAR_HEAD = 'grid gap-2 mx-2 mb-4 pb-4 border-b border-border'
 const HEAD_SPAN = 'text-accent font-bold text-[10px] leading-[1] font-[family-name:var(--mono)] tracking-[.14em]'
