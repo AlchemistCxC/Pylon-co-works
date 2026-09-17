@@ -56,7 +56,13 @@
 3. **边界立即 flush**：终帧 / 回合边界 / 切会话 / 应用关闭不等待窗口（对齐约束 1）。
 4. **规则单一实现 + parity 契约**：聚合规则以 TS 侧 `canonicalEventBatch.ts` 为规范，Rust 实现须由 parity 契约测试钉定（对齐既有 `check:acp-shadow-parity` 的纪律），避免两套规则漂移。
 5. **schema 破坏性重建**（本 ADR 授权、但独立成步）：以 `(owner_key, sequence)` 作主键（`event_id` 改为派生列或去列）、常量列外移或合并、`auto_vacuum=INCREMENTAL`、设 `application_id`、回收 74% 闲置页。存量无需兼容（无外部用户）。
-6. **`fold_segments` 的输入扩展**：`turn_rollup.rs::fold_segments` 目前从 `typed_payload.text` 取 delta 文本；batch 行的文本在 `rawPayload` 的 chunk 数组里。二选一并写测试：(a) 聚合行同时写拼接后的 `typedPayload.text`；或 (b) `fold_segments` 识别 batch 行、展开 chunk 后再折叠。**(b) 更省字节且单一改动同时覆盖构建与 L3 校验两路，对既有单 chunk 行零行为变化**——倾向 (b)，待施工时以 sha256 等价测试定案。
+6. **`fold_segments` 的类型表扩展（而非文本来源改造）**：聚合行**自带** `typedPayload.text`（拼接结果，见 `canonicalEventBatch.ts::buildBatchRow` 与 `canonicalEventSink.batch.test.ts` 的断言 `typedPayload = { text, foldedCount, seqSpan }`），因此折叠**不需要**去展开 chunk 取文本。真正要改的只有类型表：`turn_rollup.rs::is_foldable_delta` / `static_delta_type` 目前只认 `assistant.text.delta` / `assistant.thinking.delta`，会把 `*.delta.batch` 行判成不可折叠、退化为 `Segment::Event` 整行嵌入（单元膨胀且不再折叠）。加入 batch 类型映射到其基类型后，折叠结果与折叠原始单 chunk **逐字节相同**（证明见「后果 · 正面」）。
+7. **`canonicalEventCursor` 必须获得跨度感知（本次唯一"改重放模型"的地方）**：游标的连续性契约是 `event.sequence === cursor + 1` 且消费后 `cursor === notification.sequence`（`canonicalEventCursor.ts`）。内核一旦写出 `sequence = 跨度末条` 的聚合行，行与行之间出现编号跳跃 ⇒ 游标判 `canonical_gap_unrecoverable` 抛错。必须让游标以「行 → 占用跨度」访问器判连续性：**仅 `*.delta.batch` 行的 `seqSpan` 是占用声明**（跨度中间编号无任何行占用，读侧按 `owner#(seqStart+i)` 重建）；**`turn.unit` 的 `rollup_seq_start/end` 是覆盖声明**（所指的行在裁剪前仍然存在）。两者不可同一处理——把 unit 的覆盖跨度当占用会让游标跳过仍然存在的 delta 行，静默丢数据。
+8. **先钉死再改（纪律，不是步骤）**：本次会动「重放模型」的边界。施工顺序固定为：**先**为现状写特征化测试并验证其全绿（钉死"今天正确的行为"），**再**改动，且改动只允许是"为跨度新增支持"，不得改变既有逐 chunk 行下的任何可观测行为。
+9. **合批口径 = 方案 B（回合/消息边界落盘，用户 2026-09-18 选定）**：聚合 run 在**遇到任何非同类 delta 事件时立即 flush**（该边界即"消息结束"：工具卡、user.message、turn.completed、usage/session 状态行都切断 run），另在**预算越线、终帧、切会话、应用关闭**时 flush。不设固定行数/时间窗。已接受的两项后果：① mid-message 期间该消息正文不在 journal（崩溃丢失窗 = 单条消息长度）；② 在途期间 bind/refresh 读不到该消息正文。
+   - 兜底可逆性：把"最大驻留时长"实现为**单个具名常量**，B 的取值为"不设上限"；若要改为"B + 1s 兜底"（把崩溃丢失窗从整条消息压回 1s），只需改这一个常量，无需改设计。
+   - 长消息仍会被 48 KiB / 2000 chunk 预算切成多行（实测约 338 chunk/行），故"一条消息一行"在物理上只对短消息成立。
+10. **重放模型的处置范围（用户 2026-09-18 授权重写）**：只重写**"行语义"这一层**——把「一行占用哪些 sequence / 覆盖哪些 sequence / 归一化后是哪些 per-sequence 事件」收敛为**单一事实源**，并让游标与既有展开器都走它。**不重写投影与等价那一半**：`agentWorkbenchSession.batch.test.ts`（batch 展开逐字节一致、unit 展开等价、段级隔离）与 `replayCrossLineContract.test.ts`（complete/truncated 可分、稳定机器码）已把"正确重放"钉在投影层且全绿，整体替换它们等于拿掉本次唯一的正确性基线。
 
 ## 后果
 
