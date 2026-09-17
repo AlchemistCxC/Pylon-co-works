@@ -64,6 +64,62 @@
    - 长消息仍会被 48 KiB / 2000 chunk 预算切成多行（实测约 338 chunk/行），故"一条消息一行"在物理上只对短消息成立。
 10. **重放模型的处置范围（用户 2026-09-18 授权重写）**：只重写**"行语义"这一层**——把「一行占用哪些 sequence / 覆盖哪些 sequence / 归一化后是哪些 per-sequence 事件」收敛为**单一事实源**，并让游标与既有展开器都走它。**不重写投影与等价那一半**：`agentWorkbenchSession.batch.test.ts`（batch 展开逐字节一致、unit 展开等价、段级隔离）与 `replayCrossLineContract.test.ts`（complete/truncated 可分、稳定机器码）已把"正确重放"钉在投影层且全绿，整体替换它们等于拿掉本次唯一的正确性基线。
 
+## 追加（2026-09-18）：mid-stream 重放要求对方案 B 的修正 —— 两级存储（提议，待确认）
+
+### 要求
+
+用户提出：**在流式输出过程中切换页面后，重放必须正确**，并授权「设计新的存储方案，而不是行级别的存储」。
+
+### 方案 B 单独用不成立
+
+`turn.unit` 只在终态构建（`turn_rollup.rs`：未终结 turn 不折叠），因此**在途回合的内容今天由逐 chunk 行承载**（存量证据：1064 条 delta 行无对应 unit）。由此：
+
+- **中途切 sheet（keep-alive）**：组件不卸载（`AgentRendererSuiteWorkbench` 的 `{isActiveSheet && <ActiveAgentSessionLifecycle/>}` 只 gate 生命周期链），runtime/TurnClock/document/stream channel 全部存活，帧继续 `applyLive` 写入内存文档；回到该 sheet 时 `activate → startPersistedLoad → refresh` 以 `initialDocument: current` 把 journal 折在 live 文档上，靠 coverage 互斥去重。此路径今天正确，但**正确性建立在内存状态之上**。
+- **中途切 sheet / 应用重启后重新 bind**：无内存可依，只能读 journal；逐 chunk 行使部分正文可重放。此路径今天正确。
+
+**方案 B 使第二条失效**：消息边界才落盘 ⇒ 在途消息在 journal 中无任何行 ⇒ 冷重放得到"空回合"。第一条仅由内存侥幸遮蔽。故「落盘节奏可以粗」与「在途回放必须精确」必须解耦；行级存储把二者绑死，B 则牺牲了后者。
+
+### 备选（追加）
+
+| 方案 | 否决理由 |
+| --- | --- |
+| G. **两级存储**：append-only 已提交历史（消息/回合粒度）+ 显式非历史的在途尾巴（`canonical_event_draft`，原地 UPDATE，粗节奏） | —（提议采纳） |
+| H. B + 仅内存承载在途文本 | 冷重启即在途内容永久丢失（journal 无行、`canonical_events` 为唯一权威、local wins 不允许 replay 补齐）；且正确性依赖"组件不卸载"这一实现细节 |
+| I. B + 1s 兜底窗口 | 只把丢失窗压到 1s，仍是丢；且历史里仍会留下按窗口切的中间行，行语义与 unit/trim 依旧纠缠 |
+
+### 方案 G 结构
+
+```
+① 已提交历史（append-only，唯一权威）：canonical_events，每条消息/每回合 1 行，无逐 chunk 行
+② 在途尾巴（显式非历史）：canonical_event_draft
+   - 键 (owner_key, turn_id, message_id) 单行；原地 UPDATE；节奏 = 单个具名常量（如 200ms）
+   - 永不参与 evt_* 历史读；只经专用 live-tail seam 暴露给 bind/refresh
+   - provenance 显式 draft/unverified ⇒ 不构成第二种历史源
+   - 消息提交：同事务 INSERT 正式行 + DELETE draft（原子换手；不存在"两者都在"或"两者都无"的窗口）
+   - 读取判据（硬规则）：账本 `cold_mount_turn_snapshot.turn.phase` 为 prompting/streaming/settling
+     ⇒ history ∪ tail；为 terminal ⇒ 仅 history，且存在的 tail 视为陈旧并清除
+```
+
+### 量化对比（600 chunk 的单条消息，沿用实测基数）
+
+| | 今天 | 仅 B | 方案 G |
+| --- | --- | --- | --- |
+| 落盘量 | ~11.8 MB | ~0.2 MB | **~1.8 MB**（150×单行 UPDATE×~12 KB） |
+| 历史行长 | 600 | 1–2 | **1** |
+| 在途冷重放 | 精确 | **丢失** | **精确** |
+| 崩溃丢失窗 | 0 | 整条消息 | **≤ 一个 draft 节奏** |
+| 裁剪机制 | 需 unit + sha256 等价 | 仍需要 | **新回合不再需要**（历史无 chunk 行可裁） |
+
+### 后果
+
+- **正面**：在途回放精确性不再依赖内存存活；崩溃丢失窗从"整条消息"收回"一个 draft 节奏"；历史行数再降一个数量级；**L2/L3（rollup + trim）对新数据退役**——它们存在的唯一目的是压缩逐 chunk 行，而新数据没有可压缩对象，于是「trim 需先有 unit 且 sha256 相等」整类脆弱性对新数据消失（保留机器只为读存量）。
+- **负面**：多一张表与一个 seam；需显式维护"draft 不是历史"的边界（历史读必须排除它，否则变成第二历史源）；`evt_rollup_trim` 的语义要按"存量 vs 新数据"分流。
+- **风险**：draft 的原地 UPDATE 会反复脏同一页（~3 页/次），节奏定得过密会重新推高写入量——故节奏常量化并纳入验收（见 spec 的 S6 验收项）。
+
+### 衔接
+
+读取判据所需的权威信号已存在且**已有前端消费方**：`ColdMountTurnSnapshot.turn.phase`（`src-tauri/src/acp/turn_ledger.rs` 的 `TurnPhase`）经 `load_persisted_session` 回到前端 `refresh`（#68 修复的账本兜底，`.agents/records/issue-68-generator-indicator-terminal-delivery.md`）。
+
 ## 后果
 
 - **正面**：WAL 写入相对基线 ≤ 1/8；checkpoint 频率同比例下降（流式期间的 fsync 抖动随之下降）；行数与表占用大幅下降（一条 600 chunk 的回合从 600 行降到窗口数量级）；表占用相对基线 ≤ 60%（含冗余主键移除）；「老回合没有 unit 导致永不可裁剪」的存量问题随重建一次性清掉。
