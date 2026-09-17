@@ -320,3 +320,16 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 2. **仍待你处置**：`src/main.rs:174` 与 `src/error.rs:15` 的用户提示词仍只说「必须改 `tauri.conf.json` 的 `additionalBrowserArgs`」。按上面的结论，环境变量也是一条有效路径——但那是你的文件域，我未代改。
 
 另：`src/renderers/solid-workbench/input/**`（中控区）我一律未动——F4/F5 的 UI 侧验收按 2026-09-17 裁决归中控区负责人。
+
+---
+
+[2026-09-17 12] [Fisher] [#141]
+
+**开工：issue141（issue55 行集纯度用例全量跑偶发红）。** 本轮文件域只有两个，请勿改写、勿连带提交：
+
+- `src/renderers/solid-workbench/chat/__tests__/issue55.rowSetPurity.solid.test.tsx`（唯一代码改动，纯测试侧）
+- `.agents/records/issue-141-rowset-purity-flake.md`（开发记录，新增）
+
+**不碰**：`MarkdownContent.solid.tsx`、`markdownRenderModel.ts`、`streamingMarkdownSplit.ts` 及任何产品代码；`vitest.config.ts` 的 testTimeout/retry；他人的 `src/renderers/solid-workbench/input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+结论先给：不是产品缺陷，是**判据口径**问题——骨架 `.term-md-skeleton` 是解析中的合法加载态（P57 S3-R8 契约），却被 `emptyBlockSignature`/`blankBlocks` 当成空块。实测（与全量跑并发四次的探针）解析落地 573 / 620 / **1547** / 748 ms，跨过 `waitFor` 的 1s 默认值；用「原文件 + 1.5s 慢解析」可确定性复现 issue 里那条 `expected [ 'DIV.term-md-skeleton' ] to deeply equal []`。修复＝判据豁免加载态 + 落地等待显式给足预算 + 一条不依赖负载的回归用例；变异核验（只回退判据）新用例必红。
