@@ -75,6 +75,8 @@
 | 修复后 + 慢解析 | ✅ 6 passed（第 4 用例 1687ms，在预算内落地） |
 | 修复后但 `rowElements` 回退为不豁免骨架 + 慢解析 | ❌ 新增用例红（`expected [ 'DIV.term-md-skeleton' ] to deeply equal []`）⇒ 回归锁有判别性 |
 
+**并发压测（issue 的原始条件）**：在一轮全量跑进行中，目标用例连续跑 8 次 → **8/8 退出码 0**（每次 `6 passed`）；同批全量跑 `572 passed / 3817 passed` 绿。修复前同样的并发会把落地耗时推过 1s 默认阈值（上表 1547ms 那次）。
+
 **门禁**：
 
 - `bun run build:example-plugin` → 成功
