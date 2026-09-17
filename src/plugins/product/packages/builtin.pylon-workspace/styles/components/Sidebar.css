@@ -3,10 +3,14 @@
   isolation:isolate;
   display:flex; flex-direction:column;
   background:transparent;
-  border-right:1px solid var(--border);
-  width:var(--workspace-sidebar-track-width, var(--sheet-sidebar-width, var(--sidebar-width, 250px)));
-  min-width:var(--workspace-sidebar-track-width, var(--sheet-sidebar-width, var(--sidebar-width, 250px)));
-  max-width:var(--workspace-sidebar-track-width, var(--sheet-sidebar-width, var(--sidebar-width, 250px)));
+  /* #154：左列宽度只有 --sheet-sidebar-track-width 一个真值（展开=用户宽，折叠=0），
+     标题栏左轨道消费同一变量，因此两条分割线共线。
+     竖直分割线不在这里画——全应用只有布局层那一条（见 App.css 的 .layout[data-sidebar]），
+     否则「标题栏一条 + 左列一条」依旧会各自漂移（浏览器 Sheet 曾硬编码 156px 错开 84px）。 */
+  width:var(--sheet-sidebar-track-width, 0px);
+  min-width:var(--sheet-sidebar-track-width, 0px);
+  max-width:var(--sheet-sidebar-track-width, 0px);
+  overflow-x:hidden; overflow-y:auto;
   font-family:var(--font);
   transition:width var(--motion-standard) var(--ease-emphasized), min-width var(--motion-standard) var(--ease-emphasized), max-width var(--motion-standard) var(--ease-emphasized), background-color var(--motion-standard) var(--ease-standard);
   will-change:width;
@@ -19,6 +23,9 @@
   filter:blur(var(--sidebar-blur,0px));
   transform:scale(1.015);
 }
+/* #154：外壳（宽度/边框/折叠）由布局层的 SheetSidebarSlot 渲染，Sheet 只提供内容。
+   内容区自己填满外壳并各自滚动，因此各 Sheet 不再自带宽度、边框与 overflow。 */
+.sheet-sidebar-body { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .sidebar-header { padding:var(--ui-space-3); display:flex; flex-direction:column; gap:var(--ui-space-2); align-items:stretch; border-bottom:1px solid var(--border); }
 .sidebar > * {
   opacity:1;
@@ -143,24 +150,15 @@
   color:color-mix(in srgb,var(--accent) 66%,var(--text-dim));
 }
 
-/* collapsed */
-.sidebar.collapsed {
+/* collapsed —— #154：折叠是**布局层状态**（`.layout[data-sidebar="collapsed"]`），
+   不再由各 Sheet 自己加类。宽度已由 --sheet-sidebar-track-width 归零；这里把整列
+   移出可见性与 tab 序——宽度裁剪挡得住像素，挡不住键盘焦点。visibility 会继承到
+   所有后代，因此不需要逐个 Sheet 列举内部节点。 */
+.layout[data-sidebar="collapsed"] .sidebar {
   overflow:hidden;
-  background-image:none !important;
-  width:var(--workspace-sidebar-collapsed-width,42px);
-  min-width:var(--workspace-sidebar-collapsed-width,42px);
-  max-width:var(--workspace-sidebar-collapsed-width,42px);
-}
-.sidebar.collapsed > * {
-  opacity:0;
-  transform:translateX(-8px);
+  background-image:none;
   visibility:hidden;
-  transition:opacity var(--motion-fast) var(--ease-standard), transform var(--motion-standard) var(--ease-standard), visibility 0s linear var(--motion-standard);
 }
-.sidebar.collapsed .search-input,
-.sidebar.collapsed .sidebar-sections,
-.sidebar.collapsed .profile-avatar:not(.active),
-.sidebar.collapsed .profile-edit { display:none; }
 
 /* W2-11（S8）：agent 三色状态灯（异常可见装置）——绿呼吸/黄常亮/红常亮/平时全灰 */
 .sidebar-status-bar {
@@ -295,7 +293,7 @@
 .app[data-interface-mode="modern-gui"] .cwd-new,
 .app[data-interface-mode="modern-gui"] .cwd-settings-section,
 .app[data-interface-mode="modern-gui"] .workspace-empty { border-radius:12px; }
-.app[data-interface-mode="modern-gui"] .sidebar.collapsed { border-radius:14px; }
+.app[data-interface-mode="modern-gui"] .layout[data-sidebar="collapsed"] .sidebar { border-radius:14px; }
 
 /* Q4/DF-05a：中心 workbench 先保留内容预算，再让宿主侧栏弹性收缩。 */
 .layout .agent-sheet-keep-alive > .main {
@@ -308,19 +306,12 @@
 }
 @media (max-width:1100px) {
   .layout .agent-sheet-keep-alive > .main { min-width:360px; }
-  .sidebar {
-    flex:0 1 var(--workspace-sidebar-track-width, var(--sheet-sidebar-width, var(--sidebar-width, 250px)));
-    min-width:200px;
-  }
 }
+/* #154：窄屏不再由 CSS 伪造折叠轨道。左列宽度只有 --sheet-sidebar-track-width
+   一个真值（见 .sidebar）；在这里再写宽度就会与标题栏分割线脱钩——那正是
+   浏览器 / Gateway 错位的成因。窄屏只保留内容预算与子元素收缩护栏。 */
 @media (max-width:760px) {
   .layout .agent-sheet-keep-alive > .main { min-width:360px; }
-  .sidebar {
-    flex:0 1 var(--workspace-sidebar-collapsed-width,42px);
-    width:var(--workspace-sidebar-collapsed-width,42px);
-    min-width:var(--workspace-sidebar-collapsed-width,42px);
-    max-width:var(--workspace-sidebar-collapsed-width,42px);
-  }
   .sidebar > * { min-width:0; }
   .session-item,
   .sidebar-section-head,

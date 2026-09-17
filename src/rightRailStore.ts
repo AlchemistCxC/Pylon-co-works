@@ -41,6 +41,12 @@ export function clampRightRailWidth(width: number): number {
   return Math.min(RIGHT_RAIL_MAX_WIDTH, Math.max(RIGHT_RAIL_MIN_WIDTH, Math.round(width)))
 }
 
+/** #154：左栏宽度的唯一 clamp——store setter 与拖拽手柄共用，避免两处各算一套边界。 */
+export function clampLeftRailWidth(width: number): number {
+  if (!Number.isFinite(width)) return LEFT_RAIL_DEFAULT_WIDTH
+  return Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(width)))
+}
+
 /** Application-level right rail state. It intentionally lives outside Sheet state. */
 export const useRightRailStore = create<RightRailState>()(persist(
   (set) => ({
@@ -53,7 +59,7 @@ export const useRightRailStore = create<RightRailState>()(persist(
     activePanelId: null,
     background: null,
     setCollapsed: collapsed => set({ collapsed }),
-    setLeftRailWidth: width => set({ leftRailWidth: Math.min(LEFT_RAIL_MAX_WIDTH, Math.max(LEFT_RAIL_MIN_WIDTH, Math.round(width))) }),
+    setLeftRailWidth: width => set({ leftRailWidth: clampLeftRailWidth(width) }),
     setLeftRailCollapsed: leftRailCollapsed => set({ leftRailCollapsed }),
     setWidth: width => set({ width: clampRightRailWidth(width) }),
     setActivePanel: activePanelId => set({ activePanelId }),

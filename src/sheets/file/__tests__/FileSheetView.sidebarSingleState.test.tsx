@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
 /**
- * I09-A-FE-02（L2：File 单一折叠状态，6.10 问题 #4）：
- * File 消除双层状态（本地 collapsed + ctx.sidebarCollapsed 当 hidden）——
- * 折叠唯一来源 ctx.sidebarCollapsed（titlebar 统一控制），不再出现 hidden 类，
- * 不再有独立收起按钮（file-sidebar-close）。
- * 观察点：.file-sidebar 的 collapsed 类直连 ctx.sidebarCollapsed。
+ * I09-A-FE-02（L2：File 单一折叠状态）+ #154 改写。
+ *
+ * 旧契约：「折叠唯一来源 ctx.sidebarCollapsed」，观察点是 `.file-sidebar` 上的
+ * collapsed 类。那仍然是「Sheet 自持左栏几何」——折叠宽度、边框、可见性都写在
+ * Sheet 自己的类里，于是标题栏的分割线与左列的分割线各画一条、各自漂移。
+ *
+ * 新契约：几何（宽度 / 竖直分割线 / 折叠可见性）全部归布局层，File 的左栏只挂
+ * 共享几何类 `.sidebar`，**不再参与折叠状态**。本文件因此断言：
+ *  - 左栏挂 `.sidebar`（宽度唯一来自 --sheet-sidebar-track-width）；
+ *  - 左栏没有属于自己的 collapsed / hidden 类，也没有独立收起按钮；
+ *  - ctx.sidebarCollapsed 变化**不再**改变左栏类集合（它与折叠已解耦）。
+ * 折叠态的可见性由 `.layout[data-sidebar="collapsed"]` 保证，逐格验证在
+ * `src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.test.tsx`
+ * 与 `sidebarUnifiedModel.css.test.ts`。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
@@ -50,7 +59,7 @@ function renderHarness(sidebarCollapsed: boolean) {
   return render(<FileSheetView sheet={sheet} ctx={makeCtx(sidebarCollapsed)} />)
 }
 
-describe('I09-A-FE-02 File 单一折叠状态（消除双层状态）', () => {
+describe('I09-A-FE-02 / #154 File 左栏单一几何来源', () => {
   beforeEach(() => {
     resetStores()
     localStorage.clear()
@@ -62,30 +71,32 @@ describe('I09-A-FE-02 File 单一折叠状态（消除双层状态）', () => {
     })
   })
 
-  it('展开态：.file-sidebar 无 collapsed / 无 hidden 类，无独立收起按钮', () => {
+  it('左栏挂共享几何类 .sidebar，无 collapsed / hidden 类，无独立收起按钮', () => {
     const { container } = renderHarness(false)
     const sidebar = container.querySelector('.file-sidebar') as HTMLElement
     expect(sidebar).toBeTruthy()
+    expect(sidebar).toHaveClass('sidebar')
     expect(sidebar.classList.contains('collapsed')).toBe(false)
     expect(sidebar.classList.contains('hidden')).toBe(false)
     expect(container.querySelector('.file-sidebar-close')).toBeNull()
   })
 
-  it('折叠态：ctx.sidebarCollapsed=true → collapsed 类（保留 42px 功能图标栏），无 hidden', () => {
+  it('折叠态：左栏仍在 DOM 且类集合不变——可见性归布局层，不归本 Sheet', () => {
     const { container } = renderHarness(true)
     const sidebar = container.querySelector('.file-sidebar') as HTMLElement
-    expect(sidebar.classList.contains('collapsed')).toBe(true)
+    expect(sidebar).toBeTruthy()
+    expect(sidebar.classList.contains('collapsed')).toBe(false)
     expect(sidebar.classList.contains('hidden')).toBe(false)
   })
 
-  it('响应式：ctx.sidebarCollapsed 变化后 collapsed 类即时翻转（单一状态源）', () => {
+  it('ctx.sidebarCollapsed 变化不再改变左栏类集合（与折叠解耦，单一几何来源）', () => {
     useWorkspaceStore.setState({ workspaceSheets: createSheetState([sheet], 'file-1') })
     const { container, rerender } = render(<FileSheetView sheet={sheet} ctx={makeCtx(false)} />)
     const sidebar = container.querySelector('.file-sidebar') as HTMLElement
-    expect(sidebar.classList.contains('collapsed')).toBe(false)
+    const expandedClasses = sidebar.className
     rerender(<FileSheetView sheet={sheet} ctx={makeCtx(true)} />)
-    expect(sidebar.classList.contains('collapsed')).toBe(true)
+    expect(sidebar.className).toBe(expandedClasses)
     rerender(<FileSheetView sheet={sheet} ctx={makeCtx(false)} />)
-    expect(sidebar.classList.contains('collapsed')).toBe(false)
+    expect(sidebar.className).toBe(expandedClasses)
   })
 })

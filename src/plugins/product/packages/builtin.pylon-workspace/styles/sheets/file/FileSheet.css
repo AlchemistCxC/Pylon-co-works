@@ -14,21 +14,15 @@
   font-family: var(--font);
 }
 
+/* #154：宽度 / flex 基准 / 竖直分割线归布局层的 .sidebar——File 原先自带
+   --sheet-sidebar-width 与 border-right，折叠时还保留 42px 的 activity 图标条
+   （用户明确不要「折叠后的紧凑左列」）。这里只保留「本 Sheet 左栏内部怎么排」：
+   activity 图标条与面板并排。 */
 .file-sidebar {
-  display: flex;
-  flex: 0 0 var(--sheet-sidebar-width, 250px);
+  flex-direction: row;
   min-width: 0;
-  max-width: var(--sheet-sidebar-width, 250px);
   overflow: hidden;
-  border-right: 1px solid var(--border);
   background: var(--surface-panel);
-}
-
-.file-sidebar.collapsed {
-  /* 所有 Sheet 共用 42px 折叠轨道，只保留 activity 图标栏。 */
-  flex-basis: var(--workspace-sidebar-collapsed-width, 42px);
-  width: var(--workspace-sidebar-collapsed-width, 42px);
-  max-width: var(--workspace-sidebar-collapsed-width, 42px);
 }
 
 .file-sidebar-panel {
@@ -55,9 +49,11 @@
 
 .file-activity-bar {
   display: flex;
-  flex: 0 0 var(--workspace-sidebar-collapsed-width, 42px);
+  /* 这是本 Sheet 左栏**内部**的图标条宽度（展开态就存在），不是折叠轨道——
+     #154 之后折叠轨道已不存在（折叠 = 0 宽）。 */
+  flex: 0 0 42px;
   flex-direction: column;
-  width: var(--workspace-sidebar-collapsed-width, 42px);
+  width: 42px;
   padding-top: 4px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
@@ -334,12 +330,11 @@
 
 .file-sidebar {
   background: color-mix(in srgb, var(--bg-panel) 88%, var(--global-bg-color) 12%);
-  border-right-color: color-mix(in srgb, var(--border) 82%, transparent);
 }
 
 .file-activity-bar {
-  width: var(--workspace-sidebar-collapsed-width, 42px);
-  flex-basis: var(--workspace-sidebar-collapsed-width, 42px);
+  width: 42px;
+  flex-basis: 42px;
   padding-top: 4px;
   background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
 }
@@ -837,7 +832,8 @@
 }
 
 @media (max-width: 900px) {
-  .file-sidebar { flex-basis: var(--sheet-sidebar-width, 250px); }
+  /* #154：不再在窄屏改左列宽度——宽度只有 --sheet-sidebar-track-width 一个真值
+     （见 Sidebar.css 的 .sidebar），在这里再写一次就会与标题栏分割线脱钩。 */
   .file-tab { min-width: 128px; }
   .file-tab-md { padding-inline: 24px; }
   .dispatch-target { display: none; }

@@ -567,7 +567,11 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
 
   return (
     <div className={`browser-sheet ${sidebarCollapsed ? 'browser-sidebar-collapsed' : ''} flex flex-1 min-w-0 min-h-0 overflow-hidden text-text font-[family-name:var(--font)] bg-[var(--global-bg-color,var(--bg))]`} data-browser-mode={browserPreview ? 'preview' : 'runtime'}>
-      <aside className={`browser-sidebar flex w-[156px] basis-[156px] min-h-0 flex-col border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_82%,transparent)] max-[720px]:w-[42px] max-[720px]:basis-[42px] ${sidebarCollapsed ? 'w-[42px] basis-[42px]' : ''}`}>
+      {/* #154：左列几何归布局层的 .sidebar。原先这里是硬编码 156px / 折叠 42px，
+          标题栏轨道却是 240px——实测两条分割线错开 84px，正是用户报的「浏览器
+          Sheet 分割线对不齐」。内部仍在折叠态适配的类（justify-center 等）保留，
+          它们只影响内容排布，不再影响宽度。 */}
+      <aside className="sidebar browser-sidebar flex min-h-0 flex-col bg-[color-mix(in_srgb,var(--bg-panel)_82%,transparent)]">
         <div className={`browser-sidebar-head min-h-[36px] flex items-center px-3 border-b border-border max-[720px]:justify-center max-[720px]:px-0 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}>
           {!sidebarCollapsed && <span className="browser-sidebar-title text-text-dim font-bold text-[10px] font-[family-name:var(--mono)] tracking-[.12em] max-[720px]:hidden">TOOLS</span>}
         </div>

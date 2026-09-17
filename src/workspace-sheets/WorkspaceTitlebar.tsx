@@ -25,10 +25,8 @@ interface WorkspaceTitlebarProps {
   activeSheetKind?: string
   activeSessionId?: string | null
   sidebarCollapsed: boolean
-  /** active Sheet 是否有 workspace 或 sheet 左栏；无左栏时按钮禁用。 */
+  /** active Sheet 是否真的会渲染左栏；无左栏时左格不占轨道、折叠按钮不出现。 */
   sidebarEnabled: boolean
-  /** TitleBar 左侧是否与 active Sheet 的展开左栏共用同一轨道宽度。 */
-  sidebarExpandedTrack?: boolean
   rightPanelEnabled?: boolean
   canReopenSheet: boolean
   onToggleSidebar: () => void
@@ -62,7 +60,6 @@ export default function WorkspaceTitlebar({
   activeSessionId = null,
   sidebarCollapsed,
   sidebarEnabled,
-  sidebarExpandedTrack = sidebarEnabled,
   canReopenSheet,
   onToggleSidebar,
   onFocusSheet,
@@ -174,24 +171,14 @@ export default function WorkspaceTitlebar({
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
   }, [openMenu])
-  const sidebarVisiblyOpen = sidebarExpandedTrack && !sidebarCollapsed
-  const sidebarToggleLabel = !sidebarEnabled
-    ? '当前 Sheet 无侧栏'
-    : sidebarCollapsed ? '展开左栏' : '收起左栏'
+  // #154：左格只在左列真的可见时占轨道——折叠后轨道宽度由
+  // --sheet-sidebar-track-width 归零，整格不参与布局，于是既没有空列也没有悬空分割线。
+  const sidebarExpanded = sidebarEnabled && !sidebarCollapsed
+  const sidebarToggleLabel = sidebarCollapsed ? '展开左栏' : '收起左栏'
   return (
-    <header className={`workspace-titlebar ${sidebarExpandedTrack ? 'sidebar-expanded-track' : 'sidebar-compact-track'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
+    <header className={`workspace-titlebar ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
-        <button
-          type="button"
-          className="workspace-titlebar-icon workspace-sidebar-toggle"
-          onClick={onToggleSidebar}
-          disabled={!sidebarEnabled}
-          title={sidebarToggleLabel}
-          aria-label={sidebarToggleLabel}
-        >
-          {chromeStyle === 'icons' ? <Menu size={17} aria-hidden="true" /> : <span aria-hidden="true">☰</span>}
-        </button>
-        {sidebarVisiblyOpen && (
+        {sidebarExpanded && (
           <span className="workspace-titlebar-brand" aria-label="Agent 状态">
             <AgentStatusLights status={activeStatus.status} size={12} />
           </span>
@@ -219,6 +206,22 @@ export default function WorkspaceTitlebar({
 
       <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
+          {/* #154：折叠按钮并入右侧应用控制簇。左轨道折叠后为 0 宽，按钮若留在左格会
+              随轨道一起消失，用户将无法再展开；无左栏的 Sheet 直接不出现该按钮。 */}
+          {sidebarEnabled && <>
+            <button
+              type="button"
+              className="workspace-titlebar-icon workspace-sidebar-toggle"
+              onClick={onToggleSidebar}
+              title={sidebarToggleLabel}
+              aria-label={sidebarToggleLabel}
+              aria-expanded={sidebarExpanded}
+              data-sidebar-toggle="true"
+            >
+              {chromeStyle === 'icons' ? <Menu size={17} aria-hidden="true" /> : <span aria-hidden="true">☰</span>}
+            </button>
+            <span className="workspace-launcher-separator" aria-hidden="true" />
+          </>}
           <div className="workspace-titlebar-menu-anchor">
             <button type="button" onClick={event => toggleMenu('right-panel', event.currentTarget)} disabled={!rightPanelAvailable} title={rightPanelAvailable ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏" aria-haspopup="menu" aria-expanded={openMenu === 'right-panel'} aria-controls={menuId('right-panel')} data-menu-trigger="right-panel"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
             {openMenu === 'right-panel' && <div id={menuId('right-panel')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="right-panel" onKeyDown={handleMenuKeyDown}>

@@ -437,3 +437,17 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **约束（复审据此把关）**：① `sidebarMode` 的三个字符串值是契约，**保持字符串不变**，只改语义解释与渲染路径（零持久化迁移）；② `settingsDomains.ts` 的域/分区/深链别名、`pylon:open-settings` 事件、`normalizeSettingsIntent` 不变；③ 左栏 clamp（160/520）、`applyWorkspaceLayoutChange` 事务、`pylon-workspace-layout-v3` 持久化键不变；④ 既有测试可改写但须逐条登记，**不得降级断言**。
 
 **给后续 agent 的两条提示**：① 确认 `src-tauri/tauri.conf.json` 里那处未提交的 `additionalBrowserArgs: --remote-debugging-port=9222` 是 webview2 MCP 能连上的前提，**继续不要提交它**；② 分割线对齐的验收口径是**数值比对**——逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」，不靠目视截图。
+
+---
+
+[2026-09-18 00] [Miyaki Kumo] [#154] **进展：统一侧栏模型（左列几何归布局层）已落地。**
+
+**做了什么**：四套宽度 token 收敛为唯一真值 `--sheet-sidebar-track-width`（展开=用户宽 / 折叠或本 Sheet 无左栏=**0**）；竖直分割线改由布局层 `.layout[data-sidebar="expanded"]::before` 单点绘制；各 Sheet 左栏一律挂共享几何类 `.sidebar`，不得自带宽度/边框；折叠 = 0 宽（**不再保留 42px 紧凑轨道**，用户明确要求）；折叠按钮并入右侧应用控制簇（折叠后左轨为 0 宽，按钮留在左格会随之消失）；`sheetHasLeftColumn` 成为 App 与 SheetLayout 的唯一判据；新增左栏**拖拽实时调宽**手柄。决策见 `.agents/decisions/0009-unified-left-column-model.md`，记录见 `.agents/records/154-unified-sidebar-model.md`。
+
+**未做（用户四项诉求中的其余三项，仍待办）**：标题栏排布优化（身份填入左轨道 / sheet 格宽度 token 化 / sheet 总宽贴合 / 设置菜单收敛）、左栏视觉排布重构、设置迁入 sheet 体系。中控区全程未碰。
+
+**我这片碰过、请避让的共享文件**：`builtin.pylon-shell/styles/App.css`、`builtin.pylon-workspace/styles/components/{Sidebar,PrismSheet}.css` + `styles/sheets/{OverviewSheetView,file/FileSheet}.css`、`src/App.tsx`、`src/workspace-sheets/{SheetLayout,SheetSidebarSlot,WorkspaceTitlebar,sheetSidebarState,LeftRailResizeHandle}`、`src/domains/theme/themeCssSnapshot.ts`、`src/rightRailStore.ts`、`src/components/{Sidebar,PrismSheet}.tsx`、`src/sheets/**` 的左栏段。
+
+**⚠️ 给 #155（内核落盘 / ADR-0008）的提示**：你们新增的未跟踪文件 `src/__tests__/replay/invariants.ts` 与 `fixtures.ts` 里，`'../../../domains/events/eventSchema.ts'` 这类相对路径**多了一层 `../`**——从 `src/__tests__/replay/` 出发，`../../../` 已解析到仓库根，正确应为 `'../../domains/events/…'`。当前 `tsc -b` 报「Cannot find module」（模块其实都在），并因此阻塞 `bun run check:frontend` 的 build 阶段。我未触碰你们的文件，仅在此报点。
+
+**实机验收待补**：我改完时 Pylon 实例已关闭（9222 不可达），逐 sheet 的「分割线 x 相等」与拖拽手感未实测。补测口径见开发记录「验收标准与结果」末段。
