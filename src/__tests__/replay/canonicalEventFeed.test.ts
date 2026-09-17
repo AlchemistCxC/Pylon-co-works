@@ -20,10 +20,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   Channel: class { id = 0; onmessage = () => {} },
 }))
 
-import { createCanonicalEventFeed } from '../canonicalEventFeed.ts'
-import { subscribePluginEvents, clearPluginEventListenersForTests } from '../pluginEventBus.ts'
-import type { CanonicalEventRow } from '../canonicalEventRepository.ts'
-import type { CanonicalEventSink } from '../canonicalEventSink.ts'
+import { createCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
+import { subscribePluginEvents, clearPluginEventListenersForTests } from '../../infrastructure/events/pluginEventBus.ts'
+import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventSink } from '../../infrastructure/events/canonicalEventSink.ts'
 
 const SOURCE = 'local:feed-unit'
 

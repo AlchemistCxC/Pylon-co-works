@@ -31,7 +31,7 @@ function statusLabel(status: AdapterInstance['status']): string {
 const INSTANCE_REFRESH_MS = 3000
 const DELETE_CONFIRM_MS = 3000
 
-export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: SheetContext }) {
   const sheetScope = useMemo(() => ({ kind: 'sheet' as const, id: sheet.id }), [sheet.id])
   const operationKey = useCallback((action: string, suffix = '') => `gateway:${sheet.id}:${action}${suffix ? `:${suffix}` : ''}`, [sheet.id])
   const [gatewayClient] = useState(() => createGatewayClient({
@@ -292,7 +292,8 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
   // runtime-filter-input / template-apply 保留为底座消费与 adaptive 锚点；
   // file-main-*/search-result-* 共享词汇从 DOM 退役，基线值并入 utility。
   const SHEET = 'gateway-sheet flex-1 flex min-w-0 text-text font-[family-name:var(--font)]'
-  const SIDEBAR = 'gateway-sidebar flex w-[var(--sheet-sidebar-width,250px)] basis-[var(--sheet-sidebar-width,250px)] flex-col py-6 px-3 overflow-y-auto border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)]'
+  // #154：左列几何归布局层的 .sidebar（见 SearchSheetView 同处说明）；本类只管内容样式。
+  const SIDEBAR = 'sidebar gateway-sidebar flex flex-col py-6 px-3 bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)]'
   const SECTION_TITLE = 'flex items-center gap-2 m-0 text-text text-[13px] font-[650] tracking-[.02em] before:content-[""] before:inline-block before:w-[3px] before:h-[14px] before:shrink-0 before:rounded-none before:bg-accent before:opacity-80 not-first:mt-6'
   const SIDEBAR_LIST = 'grid gap-1 m-0 p-0 list-none'
   const SIDEBAR_ITEM = 'flex items-center min-h-[var(--ui-control-compact)] px-3 border border-transparent rounded-none text-text-dim text-[12px] transition-[background-color,border-color,color] duration-[120ms] before:content-[""] before:inline-block before:w-1.5 before:h-1.5 before:mr-2 before:rounded-none before:bg-[var(--tool-ok)] before:shadow-[0_0_0_3px_var(--success-soft)] hover:border-border hover:bg-bg-hover hover:text-text'
@@ -343,7 +344,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
 
   return (
     <div className={SHEET}>
-      {!ctx.sidebarCollapsed && <aside className={SIDEBAR}>
+      <aside className={SIDEBAR}>
         <div className={SECTION_TITLE}>适配器</div>
         {status?.adapters.length ? (
           <ul className={SIDEBAR_LIST}>
@@ -365,7 +366,7 @@ export default function GatewaySheetView({ sheet, ctx }: { sheet: SheetRecord; c
             ))}
           </ul>
         )}
-      </aside>}
+      </aside>
       <main className={MAIN}>
         {error && <p className={HINT} role="status">网关状态读取失败，详情见右下角错误中心</p>}
         <header className={HEADER}>

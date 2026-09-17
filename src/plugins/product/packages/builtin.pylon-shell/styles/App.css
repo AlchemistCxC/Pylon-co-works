@@ -17,9 +17,12 @@
 .workspace-titlebar {
   --titlebar-text-resolved:var(--titlebar-text,var(--text));
   --titlebar-text-muted:color-mix(in srgb,var(--titlebar-text-resolved) 68%,transparent);
+  /* 左格在折叠态的最小宽度 = 折叠按钮宽度。第 1 列用 max(轨道宽, 它)，于是
+     折叠按钮永远停在最左且折叠前后位置不变；同时这不是「空列」——格子里是按钮本身。 */
+  --titlebar-rail-toggle-width:42px;
   position:relative; z-index:100;
   height:var(--titlebar-h,44px); min-height:var(--titlebar-h,44px); display:grid;
-  grid-template-columns:minmax(0,var(--titlebar-sidebar-width,var(--sidebar-width,250px))) minmax(0,1fr) auto;
+  grid-template-columns:max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)) minmax(0,1fr) auto;
   align-items:stretch; background:var(--titlebar-bg,var(--surface-panel));
   border-bottom:1px solid var(--border); color:var(--titlebar-text-resolved);
   box-shadow:none;
@@ -31,10 +34,12 @@
 .workspace-titlebar button { font-family:inherit; }
 .workspace-titlebar-sidebar {
   min-width:0; display:flex; align-items:center; gap:var(--ui-space-2); padding:0;
-  border-right:1px solid var(--border); overflow:hidden;
+  overflow:hidden;
 }
-.workspace-titlebar.sidebar-compact-track .workspace-titlebar-sidebar,
-.workspace-titlebar.sidebar-disabled .workspace-titlebar-sidebar { justify-content:flex-start; }
+/* #154：左列竖直分割线由左列外壳拥有；标题栏左格只在左列可见时补上 titlebar
+   高度那一段，且与左列共用 --sheet-sidebar-track-width，两段因此共线。折叠
+   （轨道 0 宽）或本 Sheet 无左栏时不画，避免悬空分割线。 */
+.workspace-titlebar.sidebar-expanded .workspace-titlebar-sidebar { border-right:1px solid var(--border); }
 .workspace-titlebar-brand {
   display:flex; align-items:center; gap:var(--ui-space-2); color:var(--titlebar-text-muted);
   font-size:var(--font-size-2xs); font-weight:700; letter-spacing:0.14em; white-space:nowrap; user-select:none;
@@ -71,10 +76,18 @@
 .workspace-open-trigger, .workspace-reopen-trigger { display:grid; place-items:center; padding:0; color:var(--accent); }
 .workspace-titlebar-icon.workspace-reopen-trigger:disabled { opacity:.26; color:var(--titlebar-text-muted); }
 .workspace-launcher-separator { width:1px; height:18px; margin:auto 0; background:var(--border); }
+/* 折叠按钮固定在左格首位、三灯在其右；宽度取左格最小宽度，使按钮位置在折叠前后不变。 */
 .workspace-sidebar-toggle {
-  width:var(--workspace-sidebar-collapsed-width,42px); height:100%; flex:0 0 var(--workspace-sidebar-collapsed-width,42px);
-  padding:0; display:grid; place-items:center;
+  width:var(--titlebar-rail-toggle-width,42px); height:100%; flex:0 0 var(--titlebar-rail-toggle-width,42px);
+  margin:0; padding:0; display:grid; place-items:center;
 }
+.workspace-sidebar-toggle:disabled { cursor:default; }
+/* 折叠（或本 Sheet 无左栏）：左格只收窄到折叠按钮的宽度，按钮留在原位（最左），
+   仅去掉分割线与状态灯。**不能 display:none**——移除这个 grid item 会让后两个兄弟
+   自动前移一列，右侧栏/界面/设置 与窗口控制会整簇跳到窗口最左侧（实测菜单
+   957/997/1037 → 4/44/84）。左格宽度由第 1 列的 max(轨道宽, 按钮宽) 决定。 */
+.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar { overflow:hidden; }
+.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-brand { display:none; }
 .workspace-titlebar-brand { margin-left:var(--ui-space-2); }
 .workspace-titlebar-icon:hover,
 .workspace-titlebar-icon.workspace-reopen-trigger:hover,
@@ -153,20 +166,15 @@
 
 @media (max-width:1100px) {
   .sheet-tab { width:120px; min-width:120px; max-width:120px; }
-  .workspace-titlebar-brand { display:none; }
-  .workspace-titlebar-sidebar { justify-content:flex-start; }
   .workspace-window-controls button { width:34px; }
   .workspace-titlebar-entry-label { display:inline; }
 }
 
-/* Q4/DF-05a：窄屏先释放标题栏左轨道，保留活动 tab、恢复入口和窗口控制。 */
+/* Q4/DF-05a：窄屏不再由 CSS 伪造折叠轨道。#154 之后左列宽度只有
+   --sheet-sidebar-track-width 一个真值，CSS 改不动它——一旦在这里改，
+   标题栏分割线就会与左列脱钩（这正是浏览器/Gateway 错位的成因）。
+   窄屏只收紧标题栏自身的预算，左列宽度交给用户折叠/拖拽。 */
 @media (max-width:760px) {
-  .workspace-titlebar,
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
-  }
-  .workspace-titlebar-sidebar { width:var(--workspace-sidebar-collapsed-width,42px); }
-  .workspace-titlebar-brand { display:none; }
   .workspace-titlebar-workspace { min-width:0; }
   .workspace-titlebar-drag { min-width:var(--ui-space-1); }
   .sheet-tab-focus { padding-inline:var(--ui-space-2); }
@@ -174,25 +182,7 @@
 
 /* Q2/DF-02d：无 hover 或粗指针仍可发现 Sheet 关闭操作。 */
 @media (hover:none), (pointer:coarse) {
-  .workspace-titlebar,
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-    --pylon-terminal-touch-target:44px;
-    grid-template-columns:0 minmax(var(--ui-space-6),1fr) auto;
-  }
-  .workspace-titlebar-sidebar,
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
-    position:absolute;
-    inset:0 auto 0 0;
-    z-index:2;
-    width:var(--pylon-terminal-touch-target);
-    min-width:var(--pylon-terminal-touch-target);
-    padding:0;
-    background:var(--titlebar-bg,var(--surface-panel));
-  }
-  .workspace-titlebar-workspace,
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace {
-    padding-left:var(--pylon-terminal-touch-target);
-  }
+  .workspace-titlebar { --pylon-terminal-touch-target:44px; }
   .sheet-tab-close { visibility:visible; opacity:1; }
   .workspace-titlebar-icon,
   .workspace-window-controls button,
@@ -448,6 +438,34 @@
 }
 
 .layout { display:flex; flex:1; overflow:hidden; position:relative; }
+/* #154：全应用唯一一条左列竖直分割线，由布局层绘制——不在标题栏、也不在任何 Sheet 里。
+   位置与左列宽度共用 --sheet-sidebar-track-width，因此它与标题栏左格那段、与各 Sheet
+   左列的右缘必然共线；折叠（轨道 0）时整条线不画，不会再出现悬空分割线。
+   迁移前是「标题栏一条 + Sheet 自画一条」，两者各自漂移：浏览器 Sheet 硬编码 156px
+   时实测错开 84px。*/
+.layout[data-sidebar="expanded"]::before {
+  content:''; position:absolute; z-index:3; top:0; bottom:0;
+  left:calc(var(--sheet-sidebar-track-width, 0px) - var(--line-width-1, 1px));
+  width:var(--line-width-1, 1px);
+  background:var(--border); pointer-events:none;
+}
+.app[data-shell-sidebar-side="right"] .layout[data-sidebar="expanded"]::before {
+  left:auto; right:calc(var(--sheet-sidebar-track-width, 0px) - var(--line-width-1, 1px));
+}
+/* #154：左栏拖拽实时调宽手柄。与右栏手柄同一形态，拖拽期间 .layout 上的
+   is-resizing 关掉宽度过渡，否则每次 pointermove 的过渡会互相打断产生拖尾。 */
+.left-rail-resize-handle {
+  position:absolute; z-index:4; top:0; bottom:0; width:6px; cursor:col-resize;
+  background:transparent; touch-action:none;
+  left:calc(var(--sheet-sidebar-track-width, 0px) - 3px);
+}
+.app[data-shell-sidebar-side="right"] .left-rail-resize-handle {
+  left:auto; right:calc(var(--sheet-sidebar-track-width, 0px) - 3px);
+}
+.layout[data-sidebar="collapsed"] .left-rail-resize-handle { display:none; }
+.left-rail-resize-handle:hover, .left-rail-resize-handle:focus-visible { background:color-mix(in srgb,var(--accent) 62%,transparent); outline:none; }
+.layout.is-resizing,
+.layout.is-resizing .sidebar { transition:none; }
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .right-rail-host { position:relative; display:flex; flex:0 0 var(--right-rail-width,320px); width:var(--right-rail-width,320px); min-width:220px; max-width:560px; min-height:0; overflow:hidden; opacity:1; transition:flex-basis var(--motion-standard) var(--ease-emphasized), width var(--motion-standard) var(--ease-emphasized), min-width var(--motion-standard) var(--ease-emphasized), max-width var(--motion-standard) var(--ease-emphasized), opacity var(--motion-fast) var(--ease-standard); will-change:flex-basis,width; }
 .right-rail-host.is-collapsed { flex-basis:0; width:0; min-width:0; max-width:0; opacity:0; pointer-events:none; }
@@ -592,7 +610,7 @@
     color-mix(in srgb,var(--surface-canvas) 94%,var(--surface-panel));
 }
 .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-  height:58px; min-height:58px; grid-template-columns:minmax(0,var(--titlebar-sidebar-width,var(--sidebar-width,264px))) minmax(0,1fr) auto;
+  height:58px; min-height:58px; grid-template-columns:max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)) minmax(0,1fr) auto;
   padding:7px 8px; gap:8px; border-bottom:0; background:color-mix(in srgb,var(--surface-canvas) 74%,transparent);
   box-shadow:none; backdrop-filter:blur(28px) saturate(1.18);
 }
@@ -616,7 +634,6 @@
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button:hover { transform:none; }
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-icon:hover,
 .app[data-interface-mode="modern-gui"] .workspace-window-controls button:hover { transform:translateY(-1px); }
-.app[data-interface-mode="modern-gui"] .workspace-sidebar-toggle { flex-basis:34px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls { height:44px; padding:0 4px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls-divider { height:22px; margin-inline:3px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls .close:hover { border-radius:10px; }
@@ -681,36 +698,15 @@
   z-index: 100; /* 宿主层级最高：确保窗口按钮始终可点。 */
 }
 
-/* Mode-scoped GUI chrome is declared above the shared breakpoint rules; keep
-   the emergency titlebar budget authoritative for modern-gui as well. */
+/* Mode-scoped GUI chrome is declared above the shared breakpoint rules. */
 @media (max-width:760px) {
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
-  }
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
-    width:var(--workspace-sidebar-collapsed-width,42px);
-    min-width:var(--workspace-sidebar-collapsed-width,42px);
-    padding:0;
-  }
   .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { min-width:0; }
 }
 
 /* Keep touch hit targets without allowing the left rail to consume the tab
    track at emergency widths. */
 @media (hover:none), (pointer:coarse) {
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-    grid-template-columns:0 minmax(var(--ui-space-6),1fr) auto;
-  }
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
-    position:absolute;
-    inset:0 auto 0 0;
-    z-index:2;
-    width:var(--pylon-terminal-touch-target,44px);
-    min-width:var(--pylon-terminal-touch-target,44px);
-    padding:0;
-    background:var(--titlebar-bg,var(--surface-panel));
-  }
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { padding-left:var(--pylon-terminal-touch-target,44px); }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar { --pylon-terminal-touch-target:44px; }
 }
 
 /* Classic AgentSheet title rail: keep a continuous track, but add a small
@@ -883,5 +879,5 @@ body[data-interface-mode="tactical-blue"] :is(button,input,textarea,select) { ac
 .app[data-shell-sidebar-side="right"] .right-rail-host .right-rail-resize-handle { left:auto; right:0; }
 
 /* 标题栏镜像：轨道列换到第 3 列，窗口控制列换到第 1 列；拖拽区属性不变 */
-.app[data-shell-sidebar-side="right"] .workspace-titlebar { grid-template-columns:auto minmax(0,1fr) minmax(0,var(--titlebar-sidebar-width,var(--sidebar-width,250px))); }
+.app[data-shell-sidebar-side="right"] .workspace-titlebar { grid-template-columns:auto minmax(0,1fr) max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)); }
 .app[data-shell-sidebar-side="right"] .workspace-titlebar > .workspace-titlebar-sidebar { order:4; }

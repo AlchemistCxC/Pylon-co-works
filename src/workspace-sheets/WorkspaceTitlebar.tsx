@@ -6,7 +6,7 @@ import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 import { selectAgentStatus } from '../components/settings/agentTypes'
-import { Menu, Minus, Plus, RotateCcw, Square, X } from 'lucide-react'
+import { Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Square, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -25,10 +25,8 @@ interface WorkspaceTitlebarProps {
   activeSheetKind?: string
   activeSessionId?: string | null
   sidebarCollapsed: boolean
-  /** active Sheet 是否有 workspace 或 sheet 左栏；无左栏时按钮禁用。 */
+  /** active Sheet 是否真的会渲染左栏；无左栏时左格不占轨道、折叠按钮不出现。 */
   sidebarEnabled: boolean
-  /** TitleBar 左侧是否与 active Sheet 的展开左栏共用同一轨道宽度。 */
-  sidebarExpandedTrack?: boolean
   rightPanelEnabled?: boolean
   canReopenSheet: boolean
   onToggleSidebar: () => void
@@ -62,7 +60,6 @@ export default function WorkspaceTitlebar({
   activeSessionId = null,
   sidebarCollapsed,
   sidebarEnabled,
-  sidebarExpandedTrack = sidebarEnabled,
   canReopenSheet,
   onToggleSidebar,
   onFocusSheet,
@@ -174,24 +171,33 @@ export default function WorkspaceTitlebar({
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
   }, [openMenu])
-  const sidebarVisiblyOpen = sidebarExpandedTrack && !sidebarCollapsed
-  const sidebarToggleLabel = !sidebarEnabled
-    ? '当前 Sheet 无侧栏'
-    : sidebarCollapsed ? '展开左栏' : '收起左栏'
+  // #154：左格只在左列真的可见时占轨道——折叠后轨道宽度由
+  // --sheet-sidebar-track-width 归零，整格不参与布局，于是既没有空列也没有悬空分割线。
+  const sidebarExpanded = sidebarEnabled && !sidebarCollapsed
+  const sidebarToggleLabel = sidebarCollapsed ? '展开左栏' : '收起左栏'
   return (
-    <header className={`workspace-titlebar ${sidebarExpandedTrack ? 'sidebar-expanded-track' : 'sidebar-compact-track'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
+    <header className={`workspace-titlebar ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
+        {/* 折叠按钮在最左、三灯在其右，顺序固定。它留在左格里的前提是左格折叠时**不收成 0**
+            而是收窄到按钮宽度（标题栏 grid 第 1 列用 `max(轨道宽, 按钮宽)`），否则按钮会随
+            轨道一起消失、位置也不再稳定。始终渲染（本 Sheet 无左栏时禁用），
+            避免随 Sheet 能力忽隐忽现。 */}
         <button
           type="button"
           className="workspace-titlebar-icon workspace-sidebar-toggle"
           onClick={onToggleSidebar}
           disabled={!sidebarEnabled}
-          title={sidebarToggleLabel}
-          aria-label={sidebarToggleLabel}
+          title={sidebarEnabled ? sidebarToggleLabel : '当前 Sheet 无侧栏'}
+          aria-label={sidebarEnabled ? sidebarToggleLabel : '当前 Sheet 无侧栏'}
+          aria-expanded={sidebarEnabled ? sidebarExpanded : undefined}
+          data-sidebar-toggle="true"
         >
-          {chromeStyle === 'icons' ? <Menu size={17} aria-hidden="true" /> : <span aria-hidden="true">☰</span>}
+          {/* 图标表达「左栏在/不在」而不是汉堡菜单：☰ 会读成「打开菜单」。 */}
+          {chromeStyle === 'icons'
+            ? (sidebarExpanded ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />)
+            : <span aria-hidden="true">{sidebarExpanded ? '▤' : '▢'}</span>}
         </button>
-        {sidebarVisiblyOpen && (
+        {sidebarExpanded && (
           <span className="workspace-titlebar-brand" aria-label="Agent 状态">
             <AgentStatusLights status={activeStatus.status} size={12} />
           </span>

@@ -18,7 +18,7 @@ import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.t
 import { useIdentityStore, type Session } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import { createSessionClient, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
+import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
 import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../components/chat/chatReplayTrace.ts'
@@ -316,7 +316,9 @@ export class AgentWorkbenchLifecycle {
       // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
       useRuntimeStore.getState().setBindingGeneration(sessionContext(session), useRuntimeStore.getState().agentStatuses[session.agentId]?.generation)
       // load 后 canonical journal 可能发现 bind 读漏掉的终态事件——通知宿主 refresh。
-      this.onCanonicalRefresh?.(session, outcome.canonicalRevision)
+      // #99 账本快照随 outcome 一起交宿主：journal 读可能早于终态行落盘，账本是
+      // 不依赖一次性 Tauri event 的终态证据（见 refresh 的 ledgerTurn 说明）。
+      this.onCanonicalRefresh?.(session, outcome.canonicalRevision, outcome.turn)
     }
     catch (error) {
       if (this.coordinator.currentGeneration(session.source) !== loadGeneration) return
@@ -377,5 +379,5 @@ export class AgentWorkbenchLifecycle {
   }
 
   /** load 完成信号（宿主接 sessionRuntime.refresh）。 */
-  onCanonicalRefresh?: (session: Session, canonicalRevision: number) => void
+  onCanonicalRefresh?: (session: Session, canonicalRevision: number, turn?: ColdMountTurnSnapshot) => void
 }

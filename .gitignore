@@ -80,3 +80,6 @@ dist-plugin-sdk/
 
 # pi agent 本地运行时状态（goals/tasks 快照，不入库）
 /.pi/
+
+# ZCode agent 本地运行时状态（会话计划等快照，不入库；与 /.pi/ 同类）
+/.zcode/

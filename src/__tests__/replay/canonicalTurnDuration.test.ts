@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal } from '../canonicalTurnDuration.ts'
+import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal } from '../../domains/events/canonicalTurnDuration.ts'
 
 const row = (sequence: number, eventType: 'user.message' | 'turn.completed' | 'turn.failed', at: string) => ({
   sequence,

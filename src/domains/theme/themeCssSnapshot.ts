@@ -9,16 +9,16 @@ import { toCssBackgroundImage } from '../../backgroundImage.ts'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
 import { VISUAL_SEMANTIC_ROLE_TOKENS, type VisualSemanticRole } from './visualSemantics.ts'
 
-/** I09-A-FE-01（D-08 冻结）：统一折叠宽度 token——titlebar cell / workspace sidebar / Browser/File 内栏共用，组件不得各自硬编码 */
-export const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 42
-
 export interface ThemeCssLayout {
   sidebarCollapsed: boolean
   sidebarWidth: number
-  /** active Sheet 是否有任一种可折叠左栏。 */
+  /**
+   * active Sheet 是否有可渲染的左栏。
+   *
+   * #154：语义从「Sheet 声明了 sidebarMode」收紧为「布局层真的会渲染左栏」，
+   * 由调用方查注册表得出（声明 'sheet' 但未提供 sidebar 组件的 kind 为 false）。
+   */
   sidebarEnabled: boolean
-  /** 是否存在 workspace 公共左栏稳定轨道；折叠时仍保持该轨道宽度。 */
-  sidebarExpandedTrack?: boolean
 }
 
 /**
@@ -132,7 +132,7 @@ export function selectThemeCssSnapshot(
   s: Readonly<Record<string, unknown>>,
   layout: ThemeCssLayout,
 ): Record<string, string> {
-  const { sidebarWidth, sidebarEnabled, sidebarExpandedTrack = sidebarEnabled } = layout
+  const { sidebarWidth, sidebarEnabled } = layout
   const globalFontToken = resolveFontToken(s.globalFont)
   const roleValues = resolveRoleValues(s)
   const scheme = s.uiScheme === 'dark' || s.uiScheme === 'light' ? s.uiScheme : undefined
@@ -152,11 +152,9 @@ export function selectThemeCssSnapshot(
     '--chat-font': resolveFontToken(s.chatFont),
     '--msg-font': resolveFontToken(s.msgFont),
     '--msg-text': (s.msgTextColor as string) || 'var(--chat-text-color,var(--text))',
-    // 所有 Sheet 左栏统一：展开使用用户宽度，折叠使用 42px 控制轨道。
-    '--workspace-sidebar-collapsed-width': `${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
-    '--workspace-sidebar-track-width': `${sidebarEnabled && !layout.sidebarCollapsed ? sidebarWidth : WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
-    '--titlebar-sidebar-width': `${sidebarExpandedTrack && !layout.sidebarCollapsed ? sidebarWidth : WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
-    '--sheet-sidebar-width': `${sidebarWidth}px`,
+    // #154：左列宽度只有这一个真值——展开取用户宽度，折叠或本 Sheet 无左栏取 0。
+    // 标题栏左轨道与各 Sheet 左栏外壳共用它，分割线因此天然共线；不再保留紧凑轨道。
+    '--sheet-sidebar-track-width': `${sidebarEnabled && !layout.sidebarCollapsed ? sidebarWidth : 0}px`,
   }
   for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
     if (cssVar in vars) continue

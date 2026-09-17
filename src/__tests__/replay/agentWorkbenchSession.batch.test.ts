@@ -6,11 +6,11 @@
  * - 形状损坏的 batch 行退回单行归一（event.unknown，raw 不丢，不崩溃）。
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeRawEvent } from '../../../domains/events/canonicalNormalizer'
-import { mergeAdjacentDeltaChunks } from '../../../infrastructure/events/canonicalEventBatch'
-import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../../domains/events/eventSchema'
-import type { Session } from '../../../identityStore.ts'
-import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
+import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer'
+import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch'
+import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
+import type { Session } from '../../identityStore.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
 const ownerKey = toCanonicalOwnerKey(owner)

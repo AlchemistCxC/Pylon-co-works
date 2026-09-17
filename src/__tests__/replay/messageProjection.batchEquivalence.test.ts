@@ -6,10 +6,10 @@
  * receivedAt（真实库中每 chunk 时间戳不同）——等价性不得依赖时间戳巧合。
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeRawEvent } from '../canonicalNormalizer'
-import { mergeAdjacentDeltaChunks } from '../../../infrastructure/events/canonicalEventBatch'
-import type { CanonicalConversationEvent, CanonicalEventOwner } from '../eventSchema'
-import { projectMessagesFromCanonical } from '../messageProjection.ts'
+import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer'
+import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch'
+import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
+import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'p1', agentId: 'peri', localSessionId: 'local:s1' }
 
@@ -142,8 +142,8 @@ describe('messageProjection batch 等价性（#81 L1 golden）', () => {
 
 describe('turn.unit 消息侧展开（#81 L2）', () => {
   it('单元行展开为 segment 事件；被覆盖行丢弃；投影与逐行等价', async () => {
-    const { expandTurnUnitRows } = await import('../canonicalUnit')
-    const { createCanonicalEvent } = await import('../eventSchema')
+    const { expandTurnUnitRows } = await import('../../domains/events/canonicalUnit')
+    const { createCanonicalEvent } = await import('../../domains/events/eventSchema')
     const unitRow = createCanonicalEvent({
       owner,
       clientGeneration: 1,

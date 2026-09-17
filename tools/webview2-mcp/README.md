@@ -1,281 +1,333 @@
 # pylon-webview2-mcp
 
-面向 Pylon（Tauri 2 + Windows WebView2）前端的 MCP 调试服务器。
+面向 Pylon（Tauri 2 + Windows WebView2）的 **MCP 调试服务器**。
 
-它让 AI 客户端能直接看进正在运行的 Pylon 窗口：控制台报错、网络请求、DOM 与样式、
-截图、真实点击与输入，以及 Tauri 宿主侧的命令、事件与后端日志。
+一句话：**让 AI 客户端「看进」正在运行的 Pylon 窗口**——控制台报错、网络请求、DOM 与计算样式、
+截图、真实点击与输入，以及 Tauri 宿主侧的命令、事件、窗口状态与后端日志。
+做法是用一个独立进程，通过 WebView2 自带的 `--remote-debugging-port` 反连标准 CDP 端点。
 
-## 为什么这样做
+**你需要的东西**：本 README 同目录下的 `pylon-webview2-mcp.exe`，加上一个正在运行的 Pylon。
+**不需要源代码**——这个 exe 是独立进程，不往 Pylon 里塞任何东西。
 
-Pylon 是 Tauri 2 应用，Windows 上的渲染层是 WebView2（Edge Chromium）。WebView2 提供两种
-调试入口：
-
-| 通路 | 做法 | 取舍 |
-| --- | --- | --- |
-| 进程内 COM | `webview.with_webview()` 取 `ICoreWebView2Controller`，调 `CallDevToolsProtocolMethod` | 无需端口，但必须在 app 里加代码，且只对 dev 构建有意义 |
-| **远程调试端口** | 给 WebView2 加 `--remote-debugging-port=<port>`，它自己暴露标准 CDP 端点 | **零侵入**；独立进程即可驱动；release 的 exe 同样能连 |
-
-本服务器走第二条。因此：
-
-- **不需要**在 `src-tauri/` 里加任何调试代码
-- **不需要** Pylon 是 dev 构建
-- 调试服务器崩了或没起来，都不影响被调试的 app
-
-代价是需要让 WebView2 带上 `--remote-debugging-port=<port>` 启动。两条路：改
-`tauri.conf.json`（固化，见「开箱即用（一次性配置）」）或用
-`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量（一次性，见「环境变量：可用，但只对
-『附加』生效」）。WebView2 只在启动时读取该参数，运行中无法开启。
-
-## 接线
-
-### 开箱即用（一次性配置）
-
-把下面这段合并进 `src-tauri/tauri.conf.json`，**重新构建并重启 app** 即可：
-
-```json
-{
-  "app": {
-    "windows": [
-      {
-        "title": "Prism Desktop",
-        "decorations": false,
-        "transparent": true,
-        "center": true,
-        "additionalBrowserArgs": "--remote-debugging-port=9222 --remote-allow-origins=* --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
-      }
-    ]
-  }
-}
+```text
+MCP 客户端 ──stdio(JSON-RPC 2.0)──► pylon-webview2-mcp ──CDP/WebSocket──► Pylon.exe (WebView2)
 ```
 
-（只贴 `additionalBrowserArgs` 那一行到已有的窗口对象里即可；上面列全其余字段是为了提醒它们不能被覆盖。）
+---
 
-**必须重启**——这个参数在 WebView2 环境创建时读取，改完不重启不会生效。
-验证：调 `webview_targets`，应返回 `reachable: true` 与至少一个 page 目标。
+## 目录
 
-### ⚠️ 这一行等于把窗口完全对外开放
+- [一、它能干什么](#一它能干什么)
+- [二、接入](#二接入)
+- [三、接入 MCP 客户端](#三接入-mcp-客户端)
+- [四、拉起调试窗口](#四拉起调试窗口)
+- [五、工具参考（24 个）](#五工具参考24-个)
+- [六、已知限制](#六已知限制)
+- [七、故障排查](#七故障排查)
+- [附录 A：接线语义为什么是这样](#附录-a接线语义为什么是这样)
 
-这是「开箱即用」的真实代价，必须明说：
+---
 
-| | |
+## 一、它能干什么
+
+| 我想知道 / 我想做 | 用哪个工具 |
 | --- | --- |
-| **谁能连** | 同一台机器上的**任何**进程，不需要管理员权限。端口默认只绑 `127.0.0.1`，所以**不会**暴露到局域网 |
-| **能做什么** | 执行任意 JS；读页面内的全部数据（会话内容、localStorage、前端持有的任何令牌）；读全部网络流量；伪造鼠标与键盘输入 |
-| **更重要的是** | 配上本服务器的 `tauri_invoke`，可以调用**任意已注册的 Tauri 命令**——攻击面不止页面，还包括后端能力。且受 `capabilities/default.json` 约束的范围内本就很宽：它含 `shell:default`、`dialog:default`、`fs:default` |
+| 界面为什么白了 / 报错了 | `webview_console`（控制台 + 未捕获异常）、`tauri_backend_logs`（后端日志） |
+| 某个接口到底返回了什么 | `webview_network` → `webview_network_body` |
+| WebSocket 帧级往返还对不对 | `webview_websocket`（连接级事件 + 每帧一条，保持次序） |
+| 这个按钮为什么点不动 | `webview_query`（盒模型/计算样式/可见性）、`webview_click` 的 `hitIsSelfOrDescendant` |
+| 「当前界面长什么样」 | `webview_screenshot`（可整页、可裁剪） |
+| 想按「用户看到的东西」定位元素 | `webview_snapshot` → 拿 `ref` 喂给 click / type / key / select / hover |
+| 复现一次真实操作流 | `webview_click` / `webview_type` / `webview_key` / `webview_hover` / `webview_scroll` / `webview_select`，中间用 `webview_wait` 同步 |
+| 后端某个命令返回什么 | `tauri_invoke`（等价于页面里 invoke 任意已注册命令） |
+| 某个事件到底有没有发出来 | `tauri_event_catalog` 扫出事件名（**需要源码**）→ `tauri_events` 订阅读增量 |
+| 窗口装饰/缩放/最大化这些 DOM 拿不到的属性 | `tauri_window_state` |
+| 本体没包装的 CDP 域（`DOM.*` / `CSS.*` / `Emulation.*` / `Performance.*`） | `webview_raw_cdp` |
+| 同时跑了好几个 Pylon，谁用哪个端口 | `webview_targets` 配 `scan_ports: true` |
 
-因此：
+**边界**：走标准 CDP 的部分（`webview_*`）全部可用；`tauri_*` 依赖页面里客观存在的
+`__TAURI_INTERNALS__`，因此仍要求 app 是 Tauri 应用。
 
-- **带这一行的构建不要对外分发。** 拿到该构建的人，其机器上的任意进程都能无授权地完全控制这个 app。
-- 它只适合本地开发与排障。
-- 如果 Pylon 会被其他人运行（哪怕只是内测），请用下面的 dev-only 方案，别把这行留在正式配置里。
+---
 
-### 只给 dev 开、release 不开
+## 二、接入
 
-`tauri dev` 支持用 `-c/--config` 叠加一份覆盖配置（CLI 帮助里明说用于 "different build flavors"）。
+### 1. 带调试端口启动 Pylon
 
-`src-tauri/tauri.dev.conf.json`：
-
-```json
-{
-  "app": {
-    "windows": [
-      {
-        "title": "Prism Desktop",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "decorations": false,
-        "transparent": true,
-        "center": true,
-        "additionalBrowserArgs": "--remote-debugging-port=9222 --remote-allow-origins=* --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
-      }
-    ]
-  }
-}
-```
-
-启动：
-
-```bash
-bun run tauri dev --config src-tauri/tauri.dev.conf.json
-```
-
-正式的 `tauri build` 不带 `--config`，就完全不带调试端口。
-
-> **为什么覆盖文件里要写全窗口字段：** `app.windows` 是数组，而配置合并对数组的处理
-> 究竟是「整体替换」还是「按下标深合并」，在 `tauri-cli`（预编译二进制）里，从本仓库
-> 可得的源码中查不到。**写全之后两种行为下结果都正确**，所以这是一个不依赖该细节的写法。
-> 代价是窗口字段有了两份，改一处要记得改两处——若你确认了实际的合并行为，可以把它瘦身。
->
-> 本仓库工作树当前有其它贡献者未提交的改动，故本次**未实跑验证**这条配方。
-> 首次使用时请确认窗口的 `decorations` / `transparent` 没有被覆盖掉。
-
-### 三个不能漏的点
-
-1. **`additionalBrowserArgs` 是整串替换，不是追加。** wry 的默认值是
-   `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`
-   （见 `wry-0.55.1/src/webview2/mod.rs:297`，`unwrap_or_else` 只在字段为 `None` 时用默认值）。
-   漏写这一项就会静默丢掉「去掉 mini menu / SmartScreen」的行为。上面的配方已把默认值写回。
-
-2. **`--remote-allow-origins=*` 建议保留。** Chromium 111+ 起，带 `Origin` 头的 WebSocket
-   连 DevTools 端点会被拒。本服务器的 Rust 客户端不发 `Origin`，理论上不需要它；但一旦
-   换成网页版 DevTools 或别的工具去连，没有这一项就会连不上。
-
-3. **一个调试端口同时只能被一个 WebView2 进程占用。** 同时跑两个 Pylon 实例时，第二个会
-   报端口冲突。需要并行调试就给不同实例配不同端口，并用 `--port` 指给本服务器。
-
-### 环境变量：可用，但只对「附加」生效（2026-09-17 更正）
-
-网上常见的建议是用 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量来开调试端口，
-好处是不用改配置。
-
-**本 README 曾断言「在 Tauri 下该变量被静默丢弃」——该断言已被实机复核推翻。**
-在 WebView2 运行时 **153.0.4234.32** 上，纯环境变量启动即可开端口，且与 wry 的默认参数
-**同时存在**（是追加，不是二选一）：
-
-```bash
-WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222 --remote-allow-origins=*" ./pylon.exe
-# → http://127.0.0.1:9222/json/version 返回 Edg/153.0.4234.32
-```
-
-证据取自运行中实例的浏览器进程命令行（不改配置、不重启即可复核）：
+启动 Pylon 时，把调试参数用环境变量带上（**这次启动**生效）：
 
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
-  Select-Object -ExpandProperty CommandLine | Where-Object { $_ -match 'remote-debugging' }
-# C:\...\msedgewebview2.exe --embedded-browser-webview=1 ... \
-#   --autoplay-policy=no-user-gesture-required \
-#   --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
-#   --remote-allow-origins=* --remote-debugging-port=9222 --lang=zh-CN ...
+# PowerShell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222 --remote-allow-origins=*"
+.\pylon.exe
 ```
 
-命令行里同时出现两组参数即可判定：`--autoplay-policy` 与那串 `--disable-features` 只会
-由 wry 的默认分支算出（`wry-0.55.1/src/webview2/mod.rs:294-306`），而
-`--remote-debugging-port` / `--remote-allow-origins` 在本仓库既不在 `tauri.conf.json`、
-也不在任何 app 代码里——唯一来源就是那个环境变量。也就是说，运行时把环境变量的值
-**追加**到了 `options.set_additional_browser_arguments(...)` 的结果之后，而不是像早期
-文档描述的那样「字段非空就忽略环境变量」。
-
-> 版本边界：上述结论实测于 153.0.4234.32。运行时的这个合并行为属未文档化细节，
-> 换运行时前建议按上面的命令复核一次——它是只读的，不需要动配置。
-
-两个结论并存，不要混淆：
-
-- **改配置时**，`additionalBrowserArgs` 仍是**整串替换**（wry 的 `unwrap_or_else` 只在字段
-  为 `None` 时用默认值，见 `wry-0.55.1/src/webview2/mod.rs:294`）。所以走配置就必须把默认值
-  写回，见上一节「三个不能漏的点」第 1 条。
-- **用环境变量时**，它是**追加**，因此不需要（也不应该）抄那串默认值。
-
-两条路都行，按场景选：一次性本地调试用环境变量最省事；要固化进发布流程就用配置。
-任一方式改完都要**重启 app**——WebView2 只在启动时读取该参数。
-
-## 构建与运行
-
-```bash
-cd tools/webview2-mcp
-cargo build --release          # 产物：target/release/pylon-webview2-mcp
+```bat
+:: 命令提示符（cmd）
+set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 --remote-allow-origins=*
+pylon.exe
 ```
 
-MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的参数：
+WebView2 只在启动时读这个参数，运行中开不了——所以换端口、或忘了带，都得关掉重开。
+细节与验证见[四、拉起调试窗口](#四拉起调试窗口)。
+
+### 2. 把服务器配进 MCP 客户端
+
+见[三、接入 MCP 客户端](#三接入-mcp-客户端)。MCP 客户端会在需要时自己拉起本进程，
+**不需要手动启动**。
+
+### 3. 自检
+
+在客户端里依次调用：
+
+1. `webview_targets` → `reachable: true`，且至少有一个 page 目标
+2. `webview_evaluate`，表达式 `1 + 1` → 返回 `2`
+3. `webview_evaluate`，表达式 `typeof window.__TAURI_INTERNALS__.invoke` → 返回 `"function"`
+4. `tauri_window_state` → `tauriHostAvailable` 为 true、`tauriHostErrors` 为空
+5. `tauri_invoke`，`{"command":"list_runtime_logs","args":{"query":{"limit":5}}}` → 返回日志数组
+6. `webview_screenshot` → 返回一张能看懂的图
+7. `webview_snapshot` → 返回「角色 + 名字 + ref」的文本树；挑一个 `ref=eN` 传给 `webview_click` 应能点中
+
+第 3 步同时说明两件事：CDP 通道通了，且 Pylon 内部的 Tauri 接口没被改过语义。
+
+---
+
+## 三、接入 MCP 客户端
+
+传输方式 **stdio**：客户端拉起进程，在 stdin/stdout 上讲 MCP（JSON-RPC 2.0，一行一条报文）。
+支持协议版本 `2024-11-05` / `2025-03-26` / `2025-06-18`。
+
+### 配置
+
+`command` 填 `pylon-webview2-mcp.exe` 的**完整路径**。它就在你解压出来的 Pylon 目录里
+（`pylon.exe` 所在的那个目录）：
+
+```text
+pylon-<版本>-win64/                  ← 解压出来就是这个目录
+├── pylon.exe
+├── WebView2Loader.dll
+└── tools/
+    └── webview2-mcp/
+        ├── pylon-webview2-mcp.exe   ← command 要指到它
+        └── README.md                ← 你正在读的这份
+```
+
+把下例里的 `<Pylon 目录>` 换成上面那个目录的完整路径（即 `pylon.exe` 所在目录），其余照抄：
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "pylon-webview2": {
+        "type": "stdio",
+        "command": "<Pylon 目录>/tools/webview2-mcp/pylon-webview2-mcp.exe",
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+例如解压在 `<解压目录>/pylon-<版本>-win64`（占位示例，替换为你自己的实际路径），这一行就写成（JSON 里用正斜杠，或把反斜杠写成 `\\`）：
+
+```json
+"command": "<解压目录>/pylon-<版本>-win64/tools/webview2-mcp/pylon-webview2-mcp.exe"
+```
+
+> 注意：文档里刻意写成占位形式而不是某个具体盘符路径——`scripts/pack_release.py`
+> 的发行审计会拒绝包内文本文件出现「盘符 + 冒号 + 斜杠」形态的本机绝对路径，
+> 以免把维护机路径带进发行包。
+
+存盘后重启客户端。
+
+### Claude Desktop / 其它客户端
+
+通用 stdio 形态（顶层 `mcpServers`）：
+
+```json
+{
+  "mcpServers": {
+    "pylon-webview2": {
+      "command": "<Pylon 目录>/tools/webview2-mcp/pylon-webview2-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+**`command` 要填到 exe 本身**，不是它所在的目录——客户端会直接执行这个文件。且 `command`
+是字符串、`args` 是字符串数组（不要写成 `"command": ["exe", "--port", "9222"]`，
+那是另一种客户端的方言）。
+
+**`cwd` 只在你有 Pylon 源码时才需要**：`tauri_event_catalog` 靠它定位源码目录
+（默认扫描 `src` 与 `src-tauri/src`）。没有源码就整个省掉这一项，其余工具不受影响。
+
+### 命令行参数
+
+MCP 客户端通常不带参数直接拉起。参数只用于本地手动调试，以及一台机器上跑多个实例时错开端口。
 
 ```text
 --host <地址>         调试端点地址（默认 127.0.0.1）
---port <端口>        调试端点端口（默认 9222）
+--port <端口>         调试端点端口（默认 9222）
 --timeout-ms <毫秒>   单次 CDP 调用默认超时（默认 20000）
---cwd <目录>          tauri_event_catalog 扫描源码的根目录（默认当前目录）
+--cwd <目录>          tauri_event_catalog 扫描源码的根目录（默认当前工作目录）
 -h, --help / -V, --version
 ```
 
-`--help` / `--version` 先于一切校验：即使别的参数写错，它们也会正常回答。
+`--port 9222` 与 `--port=9222` 两种写法都接受。`--help` / `--version` 先于一切校验：
+即使别的参数写错，它们也会正常回答。
 
-## 工具
+手动确认这个 exe 自身能跑：
 
-共 24 个。全部接受可选的 `target`（目标 id / id 前缀 / url 或 title 子串）；
-只有一个页面目标时可省略。全部接受 `timeout_ms`。
+```powershell
+.\pylon-webview2-mcp.exe --help      # 打印用法与前置条件
+.\pylon-webview2-mcp.exe --version
+```
 
-### 页面级（CDP）
+**服务器所有诊断输出都走 stderr，stdout 只承载协议报文。** 往 stdout 混一个字符，
+客户端就会在解析层炸掉，而错误现场看起来跟本服务器毫无关系——手动调试时别往它的 stdout 打印东西。
 
-| 工具 | 用途 |
-| --- | --- |
-| `webview_targets` | 列出可附加目标 + 浏览器版本。**排障第一步**，也是「端口通不通」的探针。`scan_ports: true` 会顺带列出相邻端口上的其它 WebView2 实例（默认关） |
-| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，所以可以直接写 `await`。序列化后超过 64KB 会换成 `__truncated` 信封（带大小与前缀预览），需要完整原始结果时用 `webview_raw_cdp` |
-| `webview_raw_cdp` | 直调任意 CDP 方法，返回原始 result。覆盖本服务器未包装的域 |
-| `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志，**默认只读增量**；返回体带 `reconnected`，连接断开重连后缓冲从零开始会明确告知 |
-| `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录，同样带 `reconnected` |
-| `webview_network_body` | 按 requestId 取响应体；base64 会解码后再判断是否为文本 |
+---
 
-| `webview_websocket` | WebSocket 流：连接级事件与**每一帧**各占一条记录（保持往返次序），可按 url / 载荷 / 方向 / 阶段过滤 |
-| `webview_dom` | DOM 结构轮廓（标签/id/class/属性，可选盒模型与文本） |
-| `webview_query` | 单元素详查：盒模型、计算样式、可见性、祖先链、滚动尺寸 |
+## 四、拉起调试窗口
 
-| `webview_snapshot` | 无障碍快照：角色 + 可访问名 + `ref` 的文本树。拿到的 ref 可直接喂给 click / type / key / select / hover（比 CSS 选择器稳） |
-| `webview_screenshot` | 截图，返回图片内容。支持整页与裁剪 |
-| `webview_click` | 真实鼠标事件点击，**附带命中测试结果**（见下）；目标用 `selector` 或 `ref` 指定，坐标模式同样先报告该点落在了谁身上。`click_count: 2` 会派发两对 press/release，真的触发 `dblclick`；上限 3 |
-| `webview_type` | 输入文本；`insert`（默认）或 `keys` 逐字符真实按键。目标用 `selector` 或 `ref`（省略则用当前聚焦元素） |
-| `webview_key` | 派发命名按键（Enter / Tab / Escape / Arrow\* / F1-F12 / 常用标点等）或单个 ASCII 字符；`modifiers` 组合出 Ctrl+A、Shift+Tab 这类快捷键，目标可用 `selector` 或 `ref`。无法派发的按键名直接报错，不会发出空键码 |
-| `webview_hover` | 悬停元素（`selector` / `ref`）或坐标（触发 hover 菜单 / tooltip），附带与 click 相同的命中测试 |
-| `webview_scroll` | 滚动窗口或容器（滚进视口 / top / bottom / 绝对 / 相对），返回滚动后位置 |
-| `webview_select` | 选中 `<select>` 选项（value / label / 下标），派发 input + change 让受控组件同步；目标用 `selector` 或 `ref` 恰好给一个 |
-| `webview_wait` | 动作之间的同步原语：等元素出现/消失、等 JS 条件、等 URL、等文档就绪 |
-| `webview_navigate` | goto / reload / back / forward；就绪判定要求「先见到导航证据，再等 readyState=complete」，旧文档的 complete 不会被误当成新页就绪 |
+**不需要改任何文件**，只在这一次启动生效——启动前把参数放进环境变量：
 
-### Tauri 宿主侧
+```powershell
+# PowerShell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222 --remote-allow-origins=*"
+.\pylon.exe
+```
 
-| 工具 | 用途 |
-| --- | --- |
-| `tauri_invoke` | 调用任意已注册的 Tauri 命令（等价于页面里的 `__TAURI_INTERNALS__.invoke`） |
-| `tauri_events` | 订阅并读取事件增量。订阅会注册成「新文档注入」，页面 reload/导航后自动重建 |
-| `tauri_event_catalog` | 静态扫描源码，列出 emit / listen 调用点上的事件名 |
-| `tauri_window_state` | 窗口状态：宿主侧（装饰/可见性/最大化/缩放/显示器）+ DOM 侧 |
-| `tauri_backend_logs` | 读后端日志（调 Pylon 的 `list_runtime_logs`） |
+```bat
+:: 命令提示符（cmd）
+set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 --remote-allow-origins=*
+pylon.exe
+```
 
-### 几条设计上的关键选择
+WebView2 **只在启动时**读这个参数，运行中开不了——所以每次要调都得这样带一遍。
+这也正是「一次性」的好处：不写进任何配置，事后无需清理，不会影响别人正常启动的 Pylon。
 
-**目标发现走 1 秒 TTL 缓存。** 一次工具调用内部会反复解析目标：点击 = 命中测试 +
-三连 `Input.dispatchMouseEvent`，`webview_type` 的 keys 模式 = 每字符两次按键，
-`webview_wait` = 每个轮询一次——每次解析都是一趟 `GET /json`。TTL 之内直接复用，
-省掉这些重复发现。它在两个方向上都不会骗人：`webview_targets` 永远绕过缓存直读
-（它是「端口通不通」的探针），而解析失败时 `resolve` 会强制刷新复核一次，
-不会把「缓存过时」说成「目标不存在」。
+验证端口真的开了：
 
-**用 ref 定位，少猜选择器。** `webview_snapshot` 把页面折成「角色 + 可访问名 + ref」的文本树，例如 `- button "发送" [ref=e3]`；把 `e3` 传给 click / type / key / select / hover 即可定位。角色与名字是用户看到的东西，不随 DOM 结构变化，比 `div:nth-child(3) > button` 稳得多。ref 存在页内映射里，页面重载或元素被重新渲染后会失效——那时工具会明确说「请重新快照」，不会悄悄点到别处。
+```powershell
+Invoke-RestMethod http://127.0.0.1:9222/json/version      # 返回 Edg/<版本> 即可
+```
 
-**读增量，不是全量。** `webview_console` / `webview_network` / `tauri_events` 有共同的游标语义：
+MCP 侧则调 `webview_targets`：端点不可达时它**不报错**，而是返回 `reachable: false` 并附开启步骤。
 
-- 省略 `since_seq` → 从「上次读到的位置」继续，并把游标推进到本次扫描末尾
-- 显式传 `since_seq` → 从该处重读，**不推进游标**（无副作用重读）
+两个注意：
 
-于是排障主循环是「先做动作，再读增量」，而不是反复全量拉。
-`limit` 和 `scan` 是两个独立上限：`limit` 限制**返回**多少条，`scan` 限制**检视**多少条。
-分开的理由是「最近 50 条 error」不该因为中间夹了上千条 info 就搜不到；
-返回里的 `scanned` 与 `buffer.evicted` 用来判断窗口是否够大、有没有缺口。
+- **一个端口只能被一个 WebView2 进程占用。** 同时开两个 Pylon 会撞端口，第二个连不上。
+  要多实例并行，就给每个实例换一个端口号，并把对应端口用 `--port` 告诉本服务器。
+- **别把 `--disable-features=...` 抄进环境变量。** 环境变量是**追加**在 Pylon 自带参数之后的，
+  抄进来会得到两串重复参数。原因见[附录 A](#附录-a接线语义为什么是这样)。
 
-**断线恢复对读类工具同样生效。** 连接断开后，`webview_console` / `webview_network`
-的下一次调用会自动重连——而不是拿着死会话的空缓冲永远读出空增量。
-代价是事件缓冲属于旧会话、无法带回：返回体里的 `reconnected: true` 与
-`reconnectNote` 会明确说明这一点，不会让缺口伪装成「页面很安静」。
+### 安全代价
 
-**点击会做命中测试。** `webview_click` 返回 `hitIsSelfOrDescendant`：
-为 `false` 说明该坐标上实际落的是别的元素，即目标被遮挡——这正是「点了没反应」最常见的成因，
-而 `element.click()` 永远查不出来。需要绕过时用 `mode: "dom"`。
+**打开端口 = 把该窗口的完整代码执行能力交给同机任何进程**：连上就能执行任意 JS，
+进而调用任意已注册的 Tauri 命令（读写文件、跑 agent 那类都在内）。所以只在调试时开，
+**用完关掉 Pylon 就收工**。
 
-## 已知限制
+---
 
-这些是设计边界，不是待修的 bug。写在这里是为了避免误判现象。
+## 五、工具参考（24 个）
 
-1. **事件订阅必须显式列出事件名，无法全量旁路捕获。**
-   Tauri 用 `Object.defineProperty(window.__TAURI_INTERNALS__, 'invoke', { value: ... })`
-   定义 invoke（`tauri-2.11.5/scripts/core.js:81`），描述符没有 `writable` 也没有
-   `configurable`，因此**无法包装它**来旁路记录 `plugin:event|emit`。
-   所以 `tauri_events` 走「`transformCallback` + `plugin:event|listen` + 页内环形缓冲」，
-   事件名由 `tauri_event_catalog` 从源码静态扫出。用变量或模板字符串构造的事件名扫不到，
-   该工具返回里的 `dynamicSites` 会给出这类位置的数量。
+### 通用约定
 
-2. **`tauri_event_catalog` 是静态扫描。** 只扫描传入的 `roots`（默认 `src` 与
-   `src-tauri/src`），跳过 `node_modules` / `target` / `dist` 等目录。插件目录或生成代码
-   需另外传 `roots`。扫描有预算：最多 2 万个文件、总计 128MB，任一用尽即停——
-   返回里的 `truncated: true` 会明说清单不完整，不会假装扫全了。
+- **`target`**（可选，几乎所有工具都有）：目标 id / id 前缀 / url 或 title 子串。
+  只有一个页面目标时可省略；多目标时省略会报 `ambiguous_target` 并列出全部候选。
+- **`timeout_ms`**（可选）：覆盖服务启动时的默认超时。
+- **读增量工具**（`webview_console` / `webview_network` / `webview_websocket` / `tauri_events`）
+  共享一套窗口参数：
+  - 默认只返回「上次读过之后」的增量。**典型用法是先做动作再读，不要反复全量拉。**
+  - `since_seq` 显式指定起点（不推进游标，便于无副作用重读同一段）；
+  - `limit` 最多返回多少条命中记录（默认 50）；`scan` 最多检视多少条（默认 `limit×20`，上限 3000）。
+    两者分开是为了让「最近 50 条 error」不必因为中间夹着上千条 info 而搜不到；
+  - `reset: true` 先清空缓冲并把游标推到末尾，即「从现在开始看」；
+  - 连接断开重连后缓冲从零开始，返回体的 `reconnected` 会明确告知。
+- **`ref`**（快照 ref，如 `e12`）：由 `webview_snapshot` 产出，可直接喂给
+  `webview_click` / `webview_type` / `webview_key` / `webview_select` / `webview_hover`。
+  比 CSS 选择器稳——角色与名字是用户看到的东西，不随 DOM 结构变化。
+  ref 只在最近一次快照之后有效：页面重载、或元素被重新渲染（列表虚拟化、条件挂载）都会失效，
+  那时会明确提示「请重新快照」。要抗结构变化就用选择器。
+- **只读标记**：13 个工具带 `readOnlyHint`，客户端可据此做权限提示或自动放行。
+  划分口径是**对被调试 app 的影响**：`webview_evaluate` / `webview_click` / `webview_type` /
+  `webview_navigate` / `tauri_invoke` / `tauri_events` 都会改 app 状态，**不**标只读。
+- **失败形态**：工具自身的失败（端点没起来、选择器没命中）走 `isError: true` 的内容块，
+  结构是 `{isError, error, detail, hint, tool?}`——`error` 是稳定机读码，`detail` 是散文，
+  `hint` 是下一步建议。**不是** JSON-RPC 错误，所以 agent 能读到原因并自行调整。
+
+### 页面级（19 个，走 CDP）
+
+| 工具 | 用途 | 主要参数 |
+| --- | --- | --- |
+| `webview_targets` | 列出可附加目标 + 浏览器/协议版本。**排障第一步**，也是「端口通不通」的探针（端点不可达时返回 `reachable:false` + 开启步骤，不报错） | `include_workers`、`scan_ports` |
+| `webview_evaluate` | 求值 JS 并返回值。默认包成 async IIFE，可直接写 `await` | **`expression`**、`wrap`、`await_promise`、`return_by_value` |
+| `webview_raw_cdp` | 直调任意 CDP 方法，返回原始 result。覆盖未包装的域，也是「某方法在当前版本是否可用」的探针 | **`method`**、`params` |
+| `webview_console` | 控制台消息 + 未捕获异常 + 浏览器日志 | `type`、`pattern`、增量窗口 |
+| `webview_network` | 网络请求日志；同一 requestId 的四个事件合并成一条记录 | `resource_type`、`pattern`、`status_min`、`failed_only`、增量窗口 |
+| `webview_network_body` | 按 requestId 取响应体；base64 解码后再判断是否为文本 | **`request_id`**、`max_chars` |
+| `webview_websocket` | WebSocket 流：连接级事件与**每一帧**各占一条，保持往返次序 | `pattern`、`payload_pattern`、`direction`、`phase`、`request_id`、增量窗口 |
+| `webview_dom` | DOM 结构轮廓（标签/id/class/属性，可选盒模型与文本）。走自序列化，不受 nodeId 失效影响 | `selector`、`max_depth`、`max_nodes`、`include_text`、`include_rect` |
+| `webview_query` | 单元素详查：盒模型、计算样式、可见性、祖先链、滚动尺寸 | **`selector`**、`props` |
+| `webview_snapshot` | 无障碍快照：角色 + 可访问名 + `ref` 的文本树 | `selector`、`max_nodes`、`include_values` |
+| `webview_screenshot` | 截图，返回图片内容 | `full_page`、`format`、`quality`、`clip` |
+| `webview_click` | 真实鼠标事件点击，**附带命中测试**（`hitIsSelfOrDescendant` 为 false 即被遮挡） | `selector` \| `ref` \| `x`+`y`、`button`、`click_count`、`mode`、`settle_ms` |
+| `webview_type` | 输入文本；受控组件可能拒绝，返回体带输入后的实际值 | **`text`**、`selector` \| `ref`、`clear`、`mode`、`delay_ms`、`submit` |
+| `webview_key` | 派发命名按键或单个 ASCII 字符，可组合 `modifiers` 发快捷键 | **`key`**、`selector` \| `ref`、`modifiers`、`repeat`、`settle_ms` |
+| `webview_hover` | 悬停（只派发 `mouseMoved`），触发 hover 菜单 / tooltip；附带与 click 相同的命中测试 | `selector` \| `ref` \| `x`+`y`、`settle_ms` |
+| `webview_scroll` | 滚动窗口或容器（滚进视口 / top / bottom / 绝对 / 相对），返回三个层面的滚动后位置 | `selector`、`to`、`x`、`y`、`dx`、`dy` |
+| `webview_select` | 选中 `<select>` 选项，派发 input + change 让受控组件同步 | `selector` \| `ref`、`value`、`label`、`index` |
+| `webview_wait` | 动作之间的**同步原语**，替代「点击后盲等固定毫秒」 | `selector`(+`hidden`) \| `condition` \| `href_contains` \| `ready`、`poll_ms`、`timeout_ms` |
+| `webview_navigate` | goto / reload / back / forward | **`action`**、`url`、`ignore_cache`、`settle_ms` |
+
+加粗的参数是必填。更细的参数语义（枚举值、默认值、互斥关系）在 `tools/list` 的
+`inputSchema` 里，每个字段都带说明——agent 可直接读。
+
+### Tauri 宿主侧（5 个）
+
+| 工具 | 用途 | 主要参数 |
+| --- | --- | --- |
+| `tauri_invoke` | 调用任意已注册的 Tauri 命令（等价于页面里 invoke）。失败时同时给可读 `error` 与 `errorRaw` | **`command`**、`args` |
+| `tauri_events` | 订阅并读取事件增量。**必须显式给出事件名**（原因见[已知限制](#六已知限制)第 1 条） | `events`、`buffer_size`、`target_kind`、`target_label`、增量窗口 |
+| `tauri_event_catalog` | 扫描 **Pylon 源码**，列出 emit / listen 调用点上的事件名（**没源码就用不了**，见[已知限制](#六已知限制)第 2 条） | `roots`、`pattern` |
+| `tauri_window_state` | 窗口状态：宿主侧（装饰/可见性/最大化/缩放/显示器）+ DOM 侧（视口/DPR） | `label` |
+| `tauri_backend_logs` | 读后端日志（调 Pylon 的 `list_runtime_logs`，与前端 RuntimeSheet 同源） | `level`、`source`、`session`、`search`、`limit` |
+
+### 错误码
+
+工具失败时返回的 `error` 字段是稳定机读码（文案会改，码是契约）：
+
+| 码 | 含义 | 下一步 |
+| --- | --- | --- |
+| `debug_endpoint_unreachable` | 端点连不上：进程没起来，或没带 `--remote-debugging-port` | 调 `webview_targets` 拿开启步骤 |
+| `no_targets` | 端口通了但没有可附加页面 | 窗口可能还没创建，稍后重试 |
+| `ambiguous_target` | 有多个页面目标且未指定 `target` | 用返回列表里的 id 前缀 |
+| `unknown_target` | `target` 匹配不上任何目标 | 调 `webview_targets` 取当前 id |
+| `target_gone` | 调用途中断连（reload 或 app 重启） | 直接重试，下次会自动重连 |
+| `cdp_error` | CDP 返回了 error 对象 | 用 `webview_raw_cdp` 复核该方法在当前版本是否可用 |
+| `js_exception` | 页面 JS 抛异常 | 先看 `webview_console` 的上下文 |
+| `timeout` | 超时；CDP 侧可能仍在跑 | 调大 `timeout_ms`，或改成先取句柄再轮询 |
+| `bad_args` | 入参不合法（含未知工具名） | 按 `tools/list` 的 `inputSchema` 修正 |
+| `io_error` | 本地 IO 失败 | — |
+
+---
+
+## 六、已知限制
+
+写在这里是为了避免误判现象。
+
+1. **事件订阅必须显式给出事件名，无法「全量捕获」。**
+   Tauri 内部把 `invoke` 定义成既不可改写、也不可重新配置的属性，因此没法把它包装起来
+   旁路记录所有事件。本服务器走的是「按名字监听 + 页内环形缓冲」，
+   所以**你得先知道事件名**——通常靠 `tauri_event_catalog` 从源码扫出来，没有源码就只能靠试。
+   返回里的 `dynamicSites` 会告诉你「事件名是动态拼出来的、扫不到」的位置有多少个。
+
+2. **`tauri_event_catalog` 扫的是 Pylon 源码。** 它读传入的 `roots`（默认 `src` 与
+   `src-tauri/src`），跳过 `node_modules` / `target` / `dist`。所以**手上没有源码时这个工具用不了**，
+   连带 `tauri_events` 也只能靠猜事件名。扫描有预算上限（最多 2 万个文件 / 总计 128MB），
+   用尽即停——返回里的 `truncated: true` 会明说清单不完整，不会假装扫全了。
 
 3. **DOM 走自序列化而不是 `DOM.*` 域。** `DOM.getDocument` 的 nodeId 会被任何 DOM 变更作废，
    拿着旧 id 调用只会收到 "Could not find node"。自序列化一次性拿到全部且无句柄失效问题。
@@ -286,70 +338,68 @@ MCP 客户端通常不带参数直接拉起它。本地手动调试时可用的�
 
 5. **`reload` / `goto` 会清空页内注入状态。** 事件订阅与页内缓冲、以及快照的 ref 都会消失。
    `tauri_events` 的订阅已注册成「新文档注入」，新文档一建立就自动重建（注册状态见返回体的
-   `reloadSubscription`）；ref 则需要重新 `webview_snapshot`。但 reload
-   期间的事件无法补回。
+   `reloadSubscription`）；ref 则需要重新 `webview_snapshot`。但 reload 期间的事件无法补回。
 
 6. **`webview_evaluate` 撞上永不 settle 的 Promise 会超时。** CDP 侧可能仍在执行。
    这类场景请先取句柄再轮询结果，而不是直接 await。
 
-7. **`tauri_window_state` 的宿主侧命令可能被拒。** Pylon 的 `capabilities/default.json`
-   含 `core:window:default`，它已覆盖全部只读窗口命令（`is_decorated` / `is_visible` /
-   `is_maximized` / `scale_factor` / `available_monitors` 等，见 tauri-2.11.5 的
-   `permissions/window/autogenerated/reference.md`）。若仍有个别命令失败，会在
-   `tauriHostErrors` 里逐条列出，而不是让整张状态表失败。
+7. **`webview_evaluate` 结果超过 64KB 会被换成 `__truncated` 信封**（带大小与前缀预览），
+   而不是静默截断。需要完整原始结果时用 `webview_raw_cdp`。
+   结果是 DOM 节点/函数等不可序列化对象时返回 `__unserializable` 标记而不是 `null`，
+   避免把「拿不到值」误判成「值就是 null」。
 
-8. **不提供宿主侧日志文件读取。** `tauri_backend_logs` 走 Pylon 自己的 `list_runtime_logs`
-   命令，读的是 `RuntimeLogHub` 的环形缓冲——好处是它与前端 RuntimeSheet 同源，能把
-   「后端报了什么」和「界面显示了什么」对齐；代价是容量有限，历史条目会被覆盖
-   （返回里有说明）。
+8. **`tauri_window_state` 的宿主侧读数可能缺项。** 个别只读窗口命令若因权限或平台原因不可用，
+   只会在返回的 `tauriHostErrors` 里逐条列出，不会让整张状态表失败——所以看到该字段非空时，
+   是某一项没拿到，不是整个工具坏了。
 
-## 故障排查
+9. **不提供宿主侧日志文件读取。** `tauri_backend_logs` 读的是 Pylon 后端自己的环形日志缓冲
+   ——好处是它与界面上「运行日志」面板同源，能把「后端报了什么」和「界面显示了什么」对齐到
+   一条时间轴；代价是容量有限，历史条目会被覆盖（返回里有说明）。
+
+10. **`webview_snapshot` 的角色表是简化版**（常见标签 + 显式 `role=`），不做完整 ARIA 隐含角色推导。
+
+11. **CDP 方法的可用性取决于本机的 WebView2 版本。** 所以别假设某个方法一定可用——
+    工具报 `cdp_error` 时，先用 `webview_raw_cdp` 单独试一下那个方法。
+    首次接入建议按[第二节的自检清单](#3-自检)走一遍：最后一步能过，就说明整条链路是通的。
+
+---
+
+## 七、故障排查
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| `debug_endpoint_unreachable` | 端点连不上。确认 app 在跑、调试端口已开（`additionalBrowserArgs` 或 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 任一）、**改完重启过**。`webview_targets` 会返回完整的开启步骤 |
-| 设了 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 但端口没开 | 先按「环境变量：可用，但只对『附加』生效」一节用 `Get-CimInstance` 看浏览器命令行：参数在命令行里 → 端口其实开了（检查变量拼写/端口号是否一致）；参数不在 → 确认变量确实传给了 `pylon.exe`（不是只设在当前 shell），并确认 app 是重启过的 |
-| 环境变量与配置都设了，参数重复两次 | 两者是叠加关系（见上）。同时设会得到两串相同参数——不致命，但应当只留一种 |
-| 用 `--config` 覆盖后窗口样式变了 | 配置合并对数组的处理未经验证。确认 `tauri.dev.conf.json` 里写全了 `decorations` / `transparent` 等字段 |
+| `debug_endpoint_unreachable` | 端点连不上。确认 Pylon 在跑、且启动时带了调试参数（见[第四节](#四拉起调试窗口)）。`webview_targets` 会返回完整的开启步骤 |
+| 设了环境变量但端口没开 | 用[附录 A](#附录-a接线语义为什么是这样)的 `Get-CimInstance` 看浏览器命令行：参数在 → 端口其实开了（检查变量拼写、端口号是否一致）；参数不在 → 确认变量确实传给了 `pylon.exe`（不是只设在当前 shell），并确认 Pylon 是关掉重开的 |
+| 命令行里出现两串重复的调试参数 | 说明 Pylon 自带的启动参数里已经有它了，再叠环境变量就会重复——不致命，但只应留一种 |
+| 想订事件却不知道有哪些事件名 | `tauri_event_catalog` 读的是**源码**目录，没有源码就用不了——见[已知限制](#六已知限制)第 2 条 |
+| 端口冲突 / 连上的是别的 app | 一个调试端口只能被一个 WebView2 进程占用。给不同实例配不同端口并用 `--port` 指定；用 `webview_targets` 的 `scan_ports` 查清谁在哪个端口 |
 | `no_targets` | 端口通了但没有可附加页面。窗口可能还没创建，稍后重试 |
-| `ambiguous_target` | 有多个页面目标。用返回列表里的 id 作为 `target` 参数 |
-| 端口冲突 / 连上的是别的 app | 一个调试端口只能被一个 WebView2 进程占用。给不同实例配不同端口并用 `--port` 指定 |
+| `ambiguous_target` | 有多个页面目标。用返回列表里的 id 作为 `target` 参数。注意 **id 每次启动都会变，别抄旧的** |
 | `webview_console` 一直为空 | 事件域没打开。查看服务器 stderr——`Runtime.enable` 等失败会逐条打印原因 |
-| 工具报 `target_gone` | 页面 reload 或 app 重启导致连接断开。`webview_console` / `webview_network` 的下次调用会自动重连（返回体 `reconnected: true` 会标明缓冲从零开始）；其它工具直接重试即可 |
+| 工具报 `target_gone` | 页面 reload 或 app 重启导致连接断开。`webview_console` / `webview_network` 的下次调用会自动重连（返回体 `reconnected: true` 标明缓冲从零开始）；其它工具直接重试即可 |
 | 点了没反应 | 看 `webview_click` 返回的 `hitIsSelfOrDescendant`；为 false 即被遮挡 |
 | ref 定位报「请重新 webview_snapshot」 | ref 只在最近一次快照之后有效：页面重载、或该元素被重新渲染（列表虚拟化、条件挂载）都会让它失效。重新快照即可；要抗结构变化就用选择器 |
 | 调用等到超时，而不是立刻报 `target_gone` | 老版本上可能出现。本服务器每 15s 发一次 WS 心跳，10s 内没有 pong 就判定连接已死（半开连接：app 被强杀时 socket 常常不报错）。若端点从不回 pong（极旧版本），心跳会自行停用并在 stderr 说明 |
+| MCP 客户端里只看到服务器名、没有 `mcp__...` 工具 | 服务器启动就失败了。用 `--help` 手动跑一遍看 stderr；检查配置里 `command` 是字符串还是被写成了数组 |
 
-服务器所有诊断输出都走 **stderr**。stdout 只承载 JSON-RPC 报文——往 stdout 混一个字符，
-客户端就会在解析层炸掉，而错误现场看起来跟本服务器毫无关系。
+---
 
-## 验证
+## 附录 A：接线语义为什么是这样
 
-```bash
-cd tools/webview2-mcp
-cargo test                              # 单元测试
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-python scripts/stdio-smoke.py           # 端到端 stdio 冒烟（不需要 app 在跑）
+**环境变量是「追加」，不是「覆盖」。** 实测（WebView2 运行时 153.0.4234.32）：带环境变量启动后，
+`msedgewebview2.exe` 的命令行里**同时**出现 Pylon 自己那组参数
+（`--autoplay-policy=...`、`--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`）
+与 `--remote-allow-origins=* --remote-debugging-port=9222`。也就是说，运行时把环境变量的值
+**追加**在了 Pylon 原有参数之后。
+
+这解释了第四节那条注意：既然是追加，就不需要（也不应该）把 `--disable-features=...` 抄进来
+——那只会得到两串重复参数。
+
+不想改任何东西就能复核这一点（只读，随时可跑）：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
+  Select-Object -ExpandProperty CommandLine | Where-Object { $_ -match 'remote-debugging' }
 ```
 
-`scripts/stdio-smoke.py` 拉起真实进程、喂真实 MCP 报文，验证分行帧、id 关联、通知不回包、
-错误码、工具目录形状，以及「app 没起来时的可操作错误」这条路径。
-
-### 验证边界（未覆盖的部分）
-
-以上自动化验证**不包含**与真实 WebView2 的 CDP 交互。要覆盖那条链路，需要一台装了
-WebView2 的 Windows 机器、带调试端口启动的 Pylon，以及一次实际调用。截至目前，
-`webview_*` / `tauri_*` 与真实页面的行为**尚未经过端到端实测**：协议层、参数处理、
-事件归一化与游标语义有单元测试，但「CDP 方法在当前 WebView2 版本上是否都可用」只能在
-真机上确认。首次接入时建议按下面的顺序自检：
-
-1. `webview_targets` → 应看到 `reachable: true` 与至少一个 page 目标
-2. `webview_evaluate`，表达式 `1 + 1` → 应返回 `2`
-3. `webview_evaluate`，表达式 `typeof window.__TAURI_INTERNALS__.invoke` → 应是 `"function"`
-4. `tauri_window_state` → `tauriHostAvailable` 应为 true，`tauriHostErrors` 应为空
-5. `tauri_invoke`，命令 `list_runtime_logs`，参数 `{"query":{"limit":5}}` → 应返回日志数组
-6. `webview_screenshot` → 应返回一张能看懂的图
-7. `webview_snapshot` → 应返回角色 + 名字 + ref 的文本树；挑一个 `ref=eN` 传给 `webview_click` 应能点中
-
-第 3 步是分水岭：它同时证明「CDP 通道可用」与「Tauri 内部桥未改语义」。
+> 版本边界：该合并行为属运行时的未文档化细节，实测于 153.0.4234.32。换 WebView2 版本前建议复核一次。

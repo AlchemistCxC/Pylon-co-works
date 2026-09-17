@@ -3,7 +3,7 @@
  * 显式派生（背景/字体/布局）+ defs 循环注入 + 空 color 省略 + 布局宽度。
  */
 import { describe, expect, it } from 'vitest'
-import { resolveFontToken, selectThemeCssSnapshot, WORKSPACE_SIDEBAR_COLLAPSED_WIDTH } from '../themeCssSnapshot'
+import { resolveFontToken, selectThemeCssSnapshot } from '../themeCssSnapshot'
 import { THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
 
 const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
@@ -43,13 +43,10 @@ describe('selectThemeCssSnapshot', () => {
   })
 
   it('有左栏 Sheet 的 TitleBar 与左栏在展开/折叠时保持同宽', () => {
-    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 250, sidebarEnabled: true, sidebarExpandedTrack: true })
-    expect(vars['--titlebar-sidebar-width']).toBe('42px')
-    expect(vars['--workspace-sidebar-track-width']).toBe('42px')
-    const expanded = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: true, sidebarExpandedTrack: true })
-    expect(expanded['--titlebar-sidebar-width']).toBe('320px')
-    expect(expanded['--workspace-sidebar-track-width']).toBe('320px')
-    expect(expanded['--sheet-sidebar-width']).toBe('320px')
+    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 250, sidebarEnabled: true })
+    expect(vars['--sheet-sidebar-track-width']).toBe('0px')
+    const expanded = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: true })
+    expect(expanded['--sheet-sidebar-track-width']).toBe('320px')
   })
 
   it('背景图经 toCssBackgroundImage 转换（非空输入产生 var 引用）', () => {
@@ -71,24 +68,34 @@ describe('selectThemeCssSnapshot', () => {
   })
 })
 
-describe('I09-A-FE-01 统一折叠宽度 token 契约（D-08：42px）', () => {
-  it('token 冻结为 42px 且快照发出 --workspace-sidebar-collapsed-width', () => {
-    expect(WORKSPACE_SIDEBAR_COLLAPSED_WIDTH).toBe(42)
-    const vars = selectThemeCssSnapshot(makeState(), LAYOUT)
-    expect(vars['--workspace-sidebar-collapsed-width']).toBe('42px')
+// #154：左列宽度从「三套独立 token + 42px 折叠轨道」收敛为一个真值。
+// 折叠 = 0（不再保留紧凑轨道，用户明确要求折叠后不留列）。
+describe('#154 左列唯一宽度真值契约（折叠 = 0）', () => {
+  it('折叠时轨道为 0，且四套旧 token 不得复活', () => {
+    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 320, sidebarEnabled: true })
+    expect(vars['--sheet-sidebar-track-width']).toBe('0px')
+    // 这四套各自独立演化正是浏览器/Gateway 分割线错位的成因（标题栏读
+    // --titlebar-sidebar-width、左列读 --workspace-sidebar-track-width、8 个
+    // Sheet 自画的 aside 读 --sheet-sidebar-width 且不感知折叠）。复活任何一套
+    // 都意味着又出现第二条宽度来源。
+    for (const retired of [
+      '--titlebar-sidebar-width',
+      '--workspace-sidebar-track-width',
+      '--workspace-sidebar-collapsed-width',
+      '--sheet-sidebar-width',
+    ]) {
+      expect(vars[retired]).toBeUndefined()
+    }
   })
 
-  it('公共左栏折叠时收窄到统一 42px 控制轨道', () => {
-    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 320, sidebarEnabled: true, sidebarExpandedTrack: true })
-    expect(vars['--titlebar-sidebar-width']).toBe('42px')
-    expect(vars['--workspace-sidebar-track-width']).toBe('42px')
-    expect(vars['--workspace-sidebar-collapsed-width']).toBe(`${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`)
+  it('展开时取用户宽度', () => {
+    const expanded = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: true })
+    expect(expanded['--sheet-sidebar-track-width']).toBe('320px')
   })
 
-  it('无 sidebar 时 titlebar 第一列固定为 42px 控制区（不占展开宽度，方案 B）', () => {
+  it('无左栏的 Sheet 轨道为 0（不空占标题栏第一列）', () => {
     const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: false })
-    expect(vars['--titlebar-sidebar-width']).toBe('42px')
-    expect(vars['--workspace-sidebar-track-width']).toBe('42px')
+    expect(vars['--sheet-sidebar-track-width']).toBe('0px')
   })
 })
 

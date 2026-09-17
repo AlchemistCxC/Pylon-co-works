@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { PersistedSessionLoadResult } from '../../../infrastructure/acp/sessionClient.ts'
+import type { PersistedSessionLoadResult } from '../../infrastructure/acp/sessionClient.ts'
 import {
   CHAT_REPLAY_TRACE_CONTRACT,
   CHAT_REPLAY_TRACE_FLAG,
@@ -7,12 +7,12 @@ import {
   readChatReplayTrace,
   recordChatReplayTrace,
   replayErrorCode,
-} from '../chatReplayTrace.ts'
+} from '../../components/chat/chatReplayTrace.ts'
 import {
   ReplayLoadCoordinator,
   ReplayLoadInProgressError,
   type ReplayLoadControllerAdapter,
-} from '../chatReplayCoordinator.ts'
+} from '../../components/chat/chatReplayCoordinator.ts'
 
 function metadata(complete: boolean, droppedCount = 0): PersistedSessionLoadResult['replayMetadata'] {
   const observedCount = droppedCount + (complete ? 2 : 1)

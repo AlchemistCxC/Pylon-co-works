@@ -1,6 +1,6 @@
 import PrismSheet from '../components/PrismSheet'
-import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 
-export default function PrismManagerSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  return <div className="sheet-tool-view"><PrismSheet sidebarCollapsed={ctx.sidebarCollapsed} /></div>
+export default function PrismManagerSheetView() {
+  // #154：左列折叠不再由本 Sheet 透传——可见性归布局层（.layout[data-sidebar]）。
+  return <div className="sheet-tool-view"><PrismSheet /></div>
 }
