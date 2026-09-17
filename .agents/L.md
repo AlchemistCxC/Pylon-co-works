@@ -442,7 +442,7 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 [2026-09-18 00] [Miyaki Kumo] [#154] **进展：统一侧栏模型（左列几何归布局层）已落地。**
 
-**做了什么**：四套宽度 token 收敛为唯一真值 `--sheet-sidebar-track-width`（展开=用户宽 / 折叠或本 Sheet 无左栏=**0**）；竖直分割线改由布局层 `.layout[data-sidebar="expanded"]::before` 单点绘制；各 Sheet 左栏一律挂共享几何类 `.sidebar`，不得自带宽度/边框；折叠 = 0 宽（**不再保留 42px 紧凑轨道**，用户明确要求）；折叠按钮并入右侧应用控制簇（折叠后左轨为 0 宽，按钮留在左格会随之消失）；`sheetHasLeftColumn` 成为 App 与 SheetLayout 的唯一判据；新增左栏**拖拽实时调宽**手柄。决策见 `.agents/decisions/0009-unified-left-column-model.md`，记录见 `.agents/records/154-unified-sidebar-model.md`。
+**做了什么**：四套宽度 token 收敛为唯一真值 `--sheet-sidebar-track-width`（展开=用户宽 / 折叠或本 Sheet 无左栏=**0**）；竖直分割线改由布局层 `.layout[data-sidebar="expanded"]::before` 单点绘制；各 Sheet 左栏一律挂共享几何类 `.sidebar`，不得自带宽度/边框；折叠 = 0 宽（**不再保留 42px 紧凑轨道**，用户明确要求）；折叠按钮放在**工作区带首位**（左栏紧邻处，不进右侧应用控制簇——那会挤动 右侧栏/界面/设置 与窗口控制）；`sheetHasLeftColumn` 成为 App 与 SheetLayout 的唯一判据；新增左栏**拖拽实时调宽**手柄。决策见 `.agents/decisions/0009-unified-left-column-model.md`，记录见 `.agents/records/154-unified-sidebar-model.md`。
 
 **未做（用户四项诉求中的其余三项，仍待办）**：标题栏排布优化（身份填入左轨道 / sheet 格宽度 token 化 / sheet 总宽贴合 / 设置菜单收敛）、左栏视觉排布重构、设置迁入 sheet 体系。中控区全程未碰。
 
@@ -455,3 +455,7 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **实机复测改出两个静态契约与单测都抓不到的真缺陷**（已修，提交 `406846f8`）：① 各 Sheet 左栏自带 `px-3`/padding，`box-sizing:border-box` 下 `width:0` 也缩不到 0 ⇒ Gateway 折叠残留 **24px**（折叠态补 `padding:0`）；② `Sidebar.css` 旧规则 `.sidebar > * { visibility:visible }` 会覆盖继承 ⇒ 外壳 `visibility:hidden` 之下 File 的 activity 按钮仍 `focusable=true`（宽度 0 只裁像素，挡不住键盘焦点；已删该规则并补 `*` 兜底）。
 
 **给做真机验收的人**：只重建 `dist/` 不够——Tauri 把前端内嵌进二进制，改完 CSS 必须重跑 `cargo build` 并重启 App，否则会读到旧样式（我因此误判过一次「修复无效」）。
+
+**⚠️ 标题栏 grid 的坑（本轮踩到，后来者注意）**：`.workspace-titlebar` 是三列 grid。**隐藏任一列的子元素都不能用 `display:none`**——移除一个 grid item 会让后面的兄弟自动前移一列。我曾用 `display:none` 隐藏折叠态的标题栏左格，结果「右侧栏/界面/设置」与窗口控制整簇跳到窗口最左侧（实测 957/997/1037 → 4/44/84）。要「不占空间但保留格位」请用 `width:0 + padding:0 + border:0 + visibility:hidden`。这条已由 `src/workspace-sheets/__tests__/sidebarUnifiedModel.css.test.ts` 静态钉住。
+
+**折叠按钮位置**：位于**工作区带首位**（`.workspace-titlebar-workspace` 的第一个子元素，左栏紧邻处），不在 `左侧栏/右侧栏/窗口控制` 任何一簇里。之所以能放在工作区带而不影响右侧——工作区带是第 2 列 `minmax(0,1fr)`，第 3 列宽度由自身内容决定，故本列增删不移动第 3 列。请勿把它移回左格（折叠后左轨 0 宽会一起消失）或右侧应用控制簇（会挤动三菜单与窗口控制）。
