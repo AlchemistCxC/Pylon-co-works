@@ -9,16 +9,20 @@ const fileCss = read('src/plugins/product/packages/builtin.pylon-workspace/style
 const prismCss = read('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css')
 
 /**
- * 取某选择器直接跟 `{` 的规则体（也命中逗号列表成员与后代选择器的末段）。
- * 不用「按 `}` 切分再比选择器列表」的做法：选择器文本前面常带注释，
- * 整体比较会漏匹配。
+ * 取选择器列表中**恰好包含**该选择器的规则体。
+ *
+ * 先剥掉注释再切规则：选择器文本前面常紧跟注释，用 `[^{}]+` 直接吃选择器会把
+ * 注释一起带进来而漏匹配；逗号列表（`A, B { … }`）也要按成员比对。
  */
 function ruleBodies(css: string, selector: string): string[] {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g')
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '')
   const out: string[] = []
+  const re = /([^{}]+)\{([^}]*)\}/g
   let match: RegExpExecArray | null
-  while ((match = re.exec(css)) !== null) out.push(match[1])
+  while ((match = re.exec(withoutComments)) !== null) {
+    const selectors = match[1].split(',').map(s => s.trim())
+    if (selectors.includes(selector)) out.push(match[2])
+  }
   return out
 }
 
@@ -83,9 +87,21 @@ describe('#154 左列统一模型 CSS 契约', () => {
   })
 
   it('折叠可见性是布局层状态，且会继承到所有后代（挡得住键盘焦点）', () => {
-    const collapsed = ruleBodies(sidebarCss, '.layout[data-sidebar="collapsed"] .sidebar')[0]
-    expect(collapsed, '缺少折叠态规则').toBeTruthy()
-    expect(collapsed).toContain('visibility:hidden')
+    const collapsedRules = ruleBodies(sidebarCss, '.layout[data-sidebar="collapsed"] .sidebar')
+    const allCollapsed = collapsedRules.join('\n')
+    expect(collapsedRules.length, '缺少折叠态规则').toBeGreaterThan(0)
+    expect(allCollapsed).toContain('visibility:hidden')
+    // 各 Sheet 左栏自带内边距（gateway/search/history 的 px-3、ps-nav 的 padding）；
+    // box-sizing:border-box 下即使 width:0，盒子也不会小于 padding 之和——实测
+    // Gateway 折叠后残留 24px。折叠态必须把内边距一并归零，「折叠 = 0 宽」才成立。
+    expect(allCollapsed, '折叠态未归零内边距 → 会残留 padding 宽度').toMatch(/padding:\s*0/)
+    // visibility 会被后代的 `visibility:visible` 覆盖（本案元凶是已删除的 `.sidebar > *`），
+    // 只写外壳会留下「看不见但可聚焦」的控件——实测 File 的 activity 按钮仍可 focus。
+    const descendantGuard = ruleBodies(sidebarCss, '.layout[data-sidebar="collapsed"] .sidebar *')[0]
+    expect(descendantGuard, '缺少后代可见性兜底规则').toBeTruthy()
+    expect(descendantGuard).toContain('visibility:hidden')
+    // 元凶本身不得复活。
+    expect(sidebarCss, '.sidebar > * 的 visibility:visible 会覆盖继承，使折叠态控件仍可聚焦').not.toMatch(/\.sidebar > \* \{[^}]*visibility:visible/)
   })
 
   it('拖拽手柄按同一 token 定位，折叠时隐藏', () => {

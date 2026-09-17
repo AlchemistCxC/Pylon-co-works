@@ -64,21 +64,37 @@
 
 | 验收项 | 结果 |
 | --- | --- |
-| 逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」 | **未完成**——验收时 Pylon 实例已关闭（webview2 调试端点不可达），需重启后按下方口径补测 |
-| 左列区域仅一个元素带 `border-right` | 静态契约已钉（`sidebarUnifiedModel.css.test.ts`）；实机数值待补 |
-| 折叠态左列宽 0、无残余列与悬空分割线 | 静态契约已钉（折叠态规则 + 手柄隐藏）；实机数值待补 |
-| 折叠态 `.file-activity-bar` 不可见 | 由 `.layout[data-sidebar="collapsed"] .sidebar { visibility:hidden }` 覆盖（继承到后代） |
-| 拖拽实时改宽 + clamp 160/520 + 持久化 | 实现完成；单测覆盖 clamp 与 setter（`rightRailStore`），实机交互待补测 |
-| `sidebarMode` 三字符串值与持久化面零迁移 | 是：枚举未改，未动 `pylon-workspace-layout-v3` 与 `applyWorkspaceLayoutChange` |
+| 逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」 | **通过**。Gateway / Browser / File 三态实测：`titlebarCellRight = railRight = layoutDividerLeft+1 = 240`，`aligned: true`；轨道右缘**有右边框的元素恰好 1 个**（`.workspace-titlebar-sidebar`），左列自身 `borderRight = 0px` |
+| 折叠态左列宽 0、无残余列与悬空分割线 | **通过**。`track=0`、`railWidth=0`、`railPadding=0px`、`railVisibility=hidden`、标题栏左格 `display:none`、轨道处有边框元素计数 **0**、`.sheet-tab-region.left=0`、sheet 内容 `left=0` |
+| 折叠态 File 的 activity 图标条不再出现 | **通过**。`activityBarVisibility=hidden`，其按钮 `focusable=false`（修掉「看不见但可聚焦」） |
+| 拖拽实时改宽 + clamp + 持久化 | **通过**。CDP 真实指针序列：拖拽中 `.app` 内联变量即刻为 `340px`，`railWidth=340` 且**标题栏轨道同帧跟随到 340**（`.layout.is-resizing=true` 关过渡）；抬起后 `pylon-workspace-layout-v3.state.leftRailWidth = 340`，手柄 `aria-valuenow=340`；随后拖回 240 并落库 |
+| `sidebarMode` 三字符串值与持久化面零迁移 | 通过：枚举未改，未动 `pylon-workspace-layout-v3` 与 `applyWorkspaceLayoutChange` |
 | `tsc -b` | 我的文件 0 错误（仅并行 #155 的未跟踪文件报错，见「并行交集」） |
 | `lint` | 0 error / 1 既有 warning（`RightRailHost.tsx` useMemo 依赖，非本次） |
 | `check:first-party-styles` / `check:tailwind-tokens` | 通过 |
-| 定向 vitest（workspace-sheets + sheets + file + browser + theme + shell-recipe） | **81 文件 / 442 项全绿** |
+| 定向 vitest（workspace-sheets + sheets + file + browser + theme + shell-recipe） | **81 文件 / 442 项全绿**（含新增 6 项静态契约） |
 | `check:frontend` | 阻塞：`tsc -b` 阶段失败于并行 #155 的未跟踪文件（相对路径多一层 `../`），与本次无关 |
 
-**实测基线（改动前，webview2 MCP，视口 1200×800，左栏 240）**：Agent 展开 标题栏 240 / 左列 240（两条独立 border）；Browser 展开 **240 / 156（错开 84px）**；Gateway 展开 240 / 240（宽度巧合相等，仍是两条独立线）；Gateway 折叠 标题栏轨道 42px 带 border、左列不存在 ⇒ 悬空分割线；`--sheet-sidebar-width` 折叠时仍为 240（不感知折叠）。
+**实机复现路径（本轮）**：Pylon 实例在验收前被关闭，我用 `bunx vite build` + `cargo build` 重建后自行拉起（`src-tauri/target/debug/pylon.exe`，调试端口来自那处未提交的 `tauri.conf.json`）。注意 `frontendDist` 是**编译期内嵌**进 Rust 二进制的，只重建 `dist/` 不重启/重编译不会生效——第一次复测因此读到旧 CSS，误判为「修复无效」。
 
-**改动后补测口径（重启 Pylon 后执行）**：逐 sheet 量 `.workspace-titlebar-sidebar` 的 `right`（展开态）与本 sheet 左栏 `.sidebar` 的 `right`，要求数值相等且 `document.querySelectorAll` 中带 `border-right` 的左列元素计数为 1；折叠态量 `.workspace-titlebar-sidebar` 宽为 0 且 `.layout[data-sidebar]` 为 `collapsed`。
+**实机数值（改动后，视口 1200×800，用户左栏宽 240）**
+
+| 场景 | 标题栏左格右缘 | 左列右缘 | 分割线左缘+1 | 轨道处有边框的元素 | 左列自身 borderRight |
+|---|---|---|---|---|---|
+| Gateway 展开 | 240 | 240 | 240 | 1（`.workspace-titlebar-sidebar`） | 0px |
+| Browser 展开 | 240 | 240 | 240 | 1 | 0px |
+| File 展开 | 240 | 240 | 240 | 1 | 0px |
+| File 折叠 | 左格 `display:none` | 0 | 不画 | 0 | 0px |
+| 拖拽中（350→340） | 340 | 340 | 340 | — | — |
+
+对照**改动前基线**：Browser 展开 240 / **156**（错开 84px）；Gateway 折叠 标题栏轨道 42px 带边框而左列不存在（悬空分割线）；折叠态左列残留 42px 空列、File 残留 42px 图标条。
+
+**改动后补测口径（复现用）**：逐 sheet 量 `.workspace-titlebar-sidebar` 的 `right` 与本 sheet 左栏 `.sidebar` 的 `right`，要求相等，且「右缘落在 `--sheet-sidebar-track-width` 处、`borderRightWidth != 0` 的元素」计数为 1；折叠态再量 `track == 0`、`.layout[data-sidebar] == 'collapsed'`、轨道处边框元素计数 0、左格 `display:none`。
+
+**实机复测改出的两个真缺陷**（静态契约与单测都没抓到，只有数值实测能抓到）：
+
+1. **折叠残留 24px**：各 Sheet 左栏自带内边距（gateway/search/history 的 `px-3`、`ps-nav` 的 `padding`），`box-sizing:border-box` 下即使 `width:0` 盒子也不可能小于 padding 之和 ⇒ Gateway 折叠后残留 24px。修：折叠态 `padding:0`（并加静态断言）。
+2. **折叠态控件仍可聚焦**：`Sidebar.css` 旧规则 `.sidebar > * { visibility:visible }` 会**覆盖继承**，于是 `visibility:hidden` 的外壳下 File 的 activity 按钮依然 `focusable=true`、`checkVisibility()=true`（宽度 0 只是裁掉了像素）。修：删除该旧规则，并补 `.layout[data-sidebar="collapsed"] .sidebar *` 兜底（`*` 保证压过任何 Sheet 级 `visibility:visible`）。
 
 ## 测试处置
 
@@ -105,8 +121,9 @@
 1. **spec 写「8 个 Sheet 把 `<aside>` 抽成注册表 `sidebar:` 组件」，实际未做。** 原因：实测 6 个 Sheet 的左栏都读 Sheet 局部状态（`filtered`/`filter`、`results`/`query`、`paged`、`status`/`sessions`），File 的左栏还渲染 Sheet 的 `children` 面板树；迁走需先整体上提状态，属独立大重构。本片改为「左栏挂共享几何类 `.sidebar`」——宽度/分割线/折叠三个所有权都归布局层，Sheet 不再持有几何。这一点已写入 ADR-0009 的备选方案与风险。
 2. **spec 未写「折叠按钮移入右簇」是必需项**，实施中发现它是必需：折叠后左轨道 0 宽，按钮留在左格会随之消失，用户将无法再展开。
 3. **spec 未预见 `.ps-nav::before` 与 `.sidebar::before` 争伪元素**，实施中把 PRISM 标题改为真实元素。
-4. **spec 提到「`.file-activity-bar` 折叠时随外壳一起消失」**——实现方式不是条件渲染，而是布局层 `visibility:hidden` 继承（同时解决键盘焦点）。
-5. `check:frontend` 未能全绿，原因在并行 agent 的未跟踪文件（见下），非本次改动。
+4. **spec 提到「`.file-activity-bar` 折叠时随外壳一起消失」**——实现方式不是条件渲染，而是布局层 `visibility` 覆盖（同时解决键盘焦点）。
+5. **spec 未预见「折叠残留 padding 宽度」与「旧 `.sidebar > *` 覆盖 visibility 继承」两个缺陷**，均由实机数值复测发现并修（详见上文「实机复测改出的两个真缺陷」）。
+6. `check:frontend` 未能全绿，原因在并行 agent 的未跟踪文件（见下），非本次改动。
 
 ## 未解问题
 
