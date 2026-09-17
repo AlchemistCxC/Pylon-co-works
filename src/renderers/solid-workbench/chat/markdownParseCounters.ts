@@ -17,6 +17,11 @@ export interface MarkdownParseCountersSnapshot {
   readonly cacheHits: number
   /** 真正跑过解析器的请求数 */
   readonly parsed: number
+  /**
+   * #150 命中增量 graft 的请求数（纯文本追加直接拼接上一模型，未进解析器）。
+   * 与 `parsed` 合看即「结构字符重解析」与「纯文本拼接」的比例；graft 不进 `parseMs`。
+   */
+  readonly grafted: number
   /** 因请求已被取代（结果必被丢弃）而跳过解析的请求数 */
   readonly skipped: number
   /** 解析器内累计耗时（毫秒，取整；只算 `parse` + `run`，不含模块加载） */
@@ -29,6 +34,7 @@ export interface MarkdownParseCountersSnapshot {
 
 let cacheHits = 0
 let parsed = 0
+let grafted = 0
 let skipped = 0
 let parseMs = 0
 let maxParseMs = 0
@@ -37,6 +43,11 @@ let maxTextLength = 0
 /** 记一次缓存命中（调用本身不改变任何渲染决策）。 */
 export function noteMarkdownParseCacheHit(): void {
   cacheHits += 1
+}
+
+/** 记一次增量 graft 命中（纯文本追加拼接，未进解析器）。 */
+export function noteMarkdownParseGrafted(): void {
+  grafted += 1
 }
 
 /** 记一次被取代而跳过的解析请求。 */
@@ -55,13 +66,14 @@ export function noteMarkdownParseDone(input: { readonly durationMs: number; read
 }
 
 export function markdownParseCounters(): MarkdownParseCountersSnapshot {
-  return { cacheHits, parsed, skipped, parseMs: Math.round(parseMs), maxParseMs, maxTextLength }
+  return { cacheHits, parsed, grafted, skipped, parseMs: Math.round(parseMs), maxParseMs, maxTextLength }
 }
 
 /** 测试用：清空累计计数。 */
 export function resetMarkdownParseCounters(): void {
   cacheHits = 0
   parsed = 0
+  grafted = 0
   skipped = 0
   parseMs = 0
   maxParseMs = 0
