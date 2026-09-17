@@ -104,6 +104,14 @@ export function unitRow(sequence: number, seqStart: number, seqEnd: number): Can
   return baseRow(sequence, 'turn.unit', { seqStart, seqEnd }, { kind: 'turn-unit' })
 }
 
+/**
+ * 完整形状的 turn.unit 行（payload 由调用方给出）。`unitRow` 只给最小形状，
+ * 供游标类断言使用；需要让 `parseTurnUnitPayload` 真正解析（投影/展开类断言）时必须用本函数。
+ */
+export function unitRowOf(sequence: number, typedPayload: unknown): CanonicalEventRow {
+  return baseRow(sequence, 'turn.unit', typedPayload, { kind: 'turn-unit' })
+}
+
 // --- 原始 wire 构造（经 normalizeRawEvent 与真实落盘管线同源）---
 
 export function rawText(text: string, messageId = 'msg-1'): unknown {
@@ -114,6 +122,9 @@ export function rawThinking(text: string, messageId = 'msg-1'): unknown {
 }
 export function rawUser(text: string): unknown {
   return { source: 'local:s1', update: { sessionUpdate: 'user_message_chunk', content: { text } } }
+}
+export function rawToolStart(toolCallId: string, title = 'Read'): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'tool_call', toolCallId, title, kind: 'read' } }
 }
 export function rawDone(): unknown {
   return { source: 'local:s1', update: { sessionUpdate: 'done' } }
