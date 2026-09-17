@@ -1,5 +1,15 @@
 /* A3-04d Prism：管理面统一为专家型工作台，沿用全局 token 与主题语义色。 */
 
+/* #116 子项 2：本壳是 .layout（flex 容器）的直接子项，原先为 display:block 且无
+   flex 声明，故只占内容尺寸（688×988），其内 .prism-sheet 的 flex:1 在 block 父级
+   里不生效（实测 688×410）。改为拉伸的 flex 容器后宽高由父级传递。 */
+.sheet-tool-view {
+  display: flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .prism-sheet {
   display: flex;
   flex: 1;

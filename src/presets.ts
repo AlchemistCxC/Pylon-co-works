@@ -864,6 +864,31 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
 /** Public registry: terminal presets are projected to complete snapshots. */
 export const GLOBAL_PRESETS: GlobalPreset[] = RAW_GLOBAL_PRESETS.map(completeTerminalPreset)
 
+/**
+ * #116 子项 7：「全局预设」行的兜底 chip 判据（从 Settings.tsx 抽出以便单测）。
+ *
+ * `deriveGlobalStatus` 可能返回三种值：内置预设的 name、`'custom'` 哨兵（任一 zone
+ * 被手动改过）、自定义预设的 id。原先的兜底判据只排除内置 name，于是后两种都会把
+ * **原文**渲染成一个 chip —— 用户看到 `custom-1788421103162` 这类内部标识，且与
+ * `.set-custom-presets` 里的具名 chip 同时点亮。
+ *
+ * 现在的口径：
+ * - 内置预设 name → 无兜底（上面那排 chip 自己就是选中态）
+ * - 自定义预设 id → 无兜底（交给具名列表渲染，避免重复点亮）
+ * - `'custom'` 哨兵 → 显示为「自定义」
+ * - 其余无法识别的值 → 显示为「未知预设」，原值只在 title 里留作排查线索
+ */
+export function fallbackPresetChip(
+  globalStatus: string,
+  customPresetIds: readonly string[],
+): { label: string; title: string } | null {
+  if (!globalStatus) return null
+  if (GLOBAL_PRESETS.some(preset => preset.name === globalStatus)) return null
+  if (customPresetIds.includes(globalStatus)) return null
+  if (globalStatus === 'custom') return { label: '自定义', title: '当前外观已偏离预设基准' }
+  return { label: '未知预设', title: `未识别的预设标识：${globalStatus}` }
+}
+
 /** 从预设里提取指定 zone 的字段子集 */
 export function pickZoneFields(
   theme: Partial<ThemeSettings>,

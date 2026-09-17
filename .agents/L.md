@@ -367,3 +367,22 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`MarkdownContent.solid.tsx`（尾块路径本来就是 `cache: false` 调用，模型层按该标志启用增量，**调用点零改动**）、`streamingMarkdownSplit.ts`、`streamingRowCounters.ts`、`streamingDisplayScheduler.ts`、`streamingDiagnostics.ts`（`parseCost` 是既有读数，本轮不扩展读数结构）、`vitest.config.ts`、`docs/说明书/`、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
 
 **约束（复审据此把关）**：graft 只在「可证明为纯文本追加」时发生，判定不通过一律回退整段重解析；渲染结果必须与整段重解析逐块一致（差分测试对每个前缀断言）；既有行为测试零修改。
+
+---
+
+[2026-09-17 21] [Fisher] [#116]
+
+**开工：issue116（外观 + 设置页排查整合 10 项）。** spec 见 `.agents/spec/116-frontend-audit.md`（该文件 gitignore，不入库）。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 样式基座：`src/index.css`（**全局 reset 移入 `@layer base`**，层序显式声明）、`src/styles/tailwind.css`（仅头部注释）
+- 首方样式：`builtin.pylon-shell/styles/components/Settings.css`、`builtin.pylon-workspace/styles/components/PrismSheet.css`
+- 前端组件 / 视图：`src/components/Settings.tsx`、`SettingsPreview.tsx`、`Sidebar.tsx`、`src/components/settings/{SettingsSectionHeader,InputPredictionSettingsPanel,AgentRuntimePanel,settingsChromeState}.ts(x)`、**新增** `src/components/settings/agentDetectionDiagnostics.ts`、`src/sheets/{RuntimeSheetView,search/SearchSheetView,history/HistorySheetView,browser/BrowserSheetView}.tsx`
+- 域 / 插件：`src/utils.ts`、`src/presets.ts`、`src/settingsDomains.ts`、`src/plugins/core/interfaceMode/builtinInterfaceModes.ts`、`src/plugins/product/packages/builtin.pylon-plugin-manager/panel/pluginManagerPanel.ts`
+- 测试：上述各处的 `__tests__` + **新增** `src/__tests__/{utils.formatTime,cascadeLayerContract}.test.ts`、`src/components/settings/__tests__/agentDetectionDiagnostics.test.ts`
+- 文档：`.agents/records/`、`.agents/decisions/`、`.agents/dev-standards.md`（样式节一行）、`docs/说明书/Pylon-开发与协作规范.md`（样式节）
+
+**我不碰**：`src/renderers/solid-workbench/**`（#150 已收口，本 issue 不动渲染管线）、`src-tauri/**`（子项 10 只改呈现，不动探测算法）、`tools/webview2-mcp/**`、`.agents/spec/**`（gitignore）。
+
+**给后续 agent 的两条提示**：① `src/index.css` 的 reset 现在在 `@layer base`——新增首方样式若依赖「未分层 CSS 恒压 utilities」，请记住该约定**只对存量类成立**，全局元素 reset 不在此列；② 子项 4d 把设置页 Owner 头的 owner id 换成了可读中文名（原始 id 落在 `data-owner`），断言过 `settings-owner-badge` 文本的测试已同步更新。

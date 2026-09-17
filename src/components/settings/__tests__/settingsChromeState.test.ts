@@ -3,6 +3,7 @@ import {
   readDensity, writeDensity,
   readCollapsed, writeCollapsed,
   readPinned, writePinned, PINNED_LIMIT,
+  readPreviewCollapsed, writePreviewCollapsed,
   visibleByDensity,
 } from '../settingsChromeState.ts'
 
@@ -65,3 +66,25 @@ describe('密度过滤谓词 visibleByDensity', () => {
 const DENSITY_KEY_FOR_TEST = 'pylon-settings-density'
 function k2(k: string) { return `pylon-settings-${k}` }
 function get2(store: Map<string,string>) { return (key: string) => store.get(key) ?? null }
+
+describe('预览栏折叠态（#116 子项 8）', () => {
+  it('缺省为展开，写入后可读出，且不与密度档共用 key', () => {
+    const store = new Map<string, string>()
+    const get = (key: string) => store.get(key) ?? null
+    const set = (key: string, value: string) => { store.set(key, value) }
+
+    expect(readPreviewCollapsed(get)).toBe(false)
+    writePreviewCollapsed(true, set)
+    expect(readPreviewCollapsed(get)).toBe(true)
+    expect([...store.keys()]).toEqual(['pylon-settings-preview-collapsed'])
+
+    writePreviewCollapsed(false, set)
+    expect(readPreviewCollapsed(get)).toBe(false)
+  })
+
+  it('脏数据（非 true 的 JSON）一律按展开处理', () => {
+    expect(readPreviewCollapsed(() => '"true"')).toBe(false)
+    expect(readPreviewCollapsed(() => '{')).toBe(false)
+    expect(readPreviewCollapsed(() => 'null')).toBe(false)
+  })
+})

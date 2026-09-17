@@ -12,7 +12,7 @@
  * guide instead of throwing. After the user grants via the host authorization
  * card and the plugin retries activation, the panel becomes functional.
  */
-import { PYLON_PLUGIN_API_LATEST, type PluginManagementApi } from '../../../../../sdk/index.ts'
+import { PYLON_PLUGIN_API_LATEST, type PluginBootstrapOverview, type PluginManagementApi } from '../../../../../sdk/index.ts'
 
 export interface PluginManagerPanelOptions {
   readonly management?: PluginManagementApi
@@ -25,6 +25,15 @@ export interface PluginManagerPanelOptions {
 }
 
 const LOG_LIMIT = 12
+
+/** #116 子项 4b：启动状态枚举 → 展示文案（枚举本身由宿主 API 定义，不在此改）。 */
+const BOOTSTRAP_STATE_LABELS: Readonly<Record<PluginBootstrapOverview['state'], string>> = {
+  idle: '未启动',
+  starting: '启动中',
+  ready: '就绪',
+  degraded: '降级运行',
+  'safe-mode': '安全模式',
+}
 
 // ── Tailwind utility 常量（J 施工书 20260914）──────────────────────────
 // 值全部经 kernel utilities 层的 @theme inline 引用宿主视觉语义 token。
@@ -342,7 +351,8 @@ export function mountPluginManagerPanel(
 
         bootstrapList.replaceChildren()
         if (bootstrapState.failures.length === 0) {
-          bootstrapList.append(el('p', HINT, `启动状态：${bootstrapState.state}。`))
+          // #116 子项 4b：句子已是中文，句尾不能塞内部状态枚举（原为裸插值 state）。
+          bootstrapList.append(el('p', HINT, `启动状态：${BOOTSTRAP_STATE_LABELS[bootstrapState.state]}。`))
         }
         for (const failure of bootstrapState.failures) {
           const row = el('div', ROW)

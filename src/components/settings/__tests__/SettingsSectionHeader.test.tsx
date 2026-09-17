@@ -3,12 +3,17 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import SettingsSectionHeader from '../SettingsSectionHeader.tsx'
 
-/** K-1：Owner 头（owner id 纯文字 D1-A + pageOwned 徽标 + 密度档三选）。 */
+/** K-1：Owner 头（owner 展示名 + pageOwned 徽标 + 密度档三选）。 */
 
 describe('SettingsSectionHeader', () => {
-  it('组件 owner section 显示 owner id', () => {
+  it('组件 owner section 显示可读名，原始 id 留在 data-owner', () => {
+    // #116 子项 4d：原先徽标文本直接是内部 id（`· message-stream`），与同位置的
+    // 「设置页」徽标两种语法并存；现改显示可读名，id 由 data-owner 承载。
     render(<SettingsSectionHeader section="chat" density="standard" onDensity={() => {}} />)
-    expect(screen.getByTestId('settings-owner-badge').textContent).toContain('message-stream')
+    const badge = screen.getByTestId('settings-owner-badge')
+    expect(badge.textContent).toContain('消息流组件')
+    expect(badge.textContent).not.toContain('message-stream')
+    expect(badge.getAttribute('data-owner')).toBe('message-stream')
   })
 
   it('页面自有 section 显示「设置页」徽标而非 owner id', () => {

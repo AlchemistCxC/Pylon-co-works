@@ -276,7 +276,10 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
     const candidateCard = (await screen.findByLabelText('Detected executable')).closest('.agent-runtime-card') as HTMLElement
     expect(within(candidateCard).getByText(/ACP：未验证/)).toBeInTheDocument()
-    expect(screen.getByText(/version_probe_timeout.*version timeout/)).toBeInTheDocument()
+    // #116 子项 10：诊断在 UI 上只呈现「哪条探测 · 哪个候选 · 本地化原因」；
+    // 内部码与后端原文改由运行日志 / Runtime sheet 承载（见 agentDetectionDiagnostics 单测）。
+    expect(screen.queryByText(/version_probe_timeout/)).not.toBeInTheDocument()
+    expect(screen.getByText('版本探测 · test · 执行超时，未在预算内返回（可重试）')).toBeInTheDocument()
     fireEvent.click(within(candidateCard).getByRole('button', { name: '添加参数' }))
     fireEvent.click(within(candidateCard).getByRole('button', { name: '添加参数' }))
     fireEvent.change(within(candidateCard).getByLabelText('Detected 参数 4'), { target: { value: 'a"b' } })

@@ -201,6 +201,22 @@ export const SECTION_OWNERS = {
   renderers: 'renderer-catalog',
 } as const satisfies Partial<Record<SettingsSectionId, string>>
 
+/**
+ * #116 子项 4d：owner id → 展示名。
+ *
+ * 原先直接把 `· sidebar` / `· control-center` 这类内部 id 送进 UI，而同位置的
+ * page-owned 分区显示的是「设置页」徽标——两种语法并存，且 id 对用户没有信息量。
+ * 现统一显示中文名；原始 id 仍由 `data-owner` 属性承载，机器可读性不变。
+ */
+export const SECTION_OWNER_LABELS: Readonly<Record<string, string>> = {
+  'app-shell': '应用外壳',
+  sidebar: '侧栏组件',
+  'message-stream': '消息流组件',
+  'control-center': '中控区',
+  'context-panel': '右栏上下文',
+  'renderer-catalog': '渲染器目录',
+}
+
 /** 页面自有 sections：预设编排与动作面板，归属设置页而非任何组件（设计书 v2 §v2.1）。 */
 export const PAGE_OWNED_SECTIONS = ['templates', 'window', 'history', 'backup'] as const satisfies readonly SettingsSectionId[]
 

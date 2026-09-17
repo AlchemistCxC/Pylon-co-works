@@ -9,7 +9,7 @@ import { useRuntimeStore } from '../runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
-import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
+import { GLOBAL_PRESETS, fallbackPresetChip, pickZoneFields } from '../presets'
 import { useWorkspaceStore } from '../workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
@@ -40,7 +40,7 @@ import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
-import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
+import { readDensity, writeDensity, readPinned, writePinned, readPreviewCollapsed, writePreviewCollapsed, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
@@ -158,6 +158,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     ccEditMode: s.ccEditMode,
   } as ThemeSettings & { ccEditMode: boolean })))
   const reset = () => { resetThemeForActiveInterfaceMode() }
+  // #116 子项 9：破坏性操作（重置主题 / 删除自定义预设）原先一击即生效、无撤销点，
+  // 故补两段式确认：第一次点击只进入待确认态，确认才真正执行。
+  const [confirmResetTheme, setConfirmResetTheme] = useState(false)
+  const [pendingDeletePresetId, setPendingDeletePresetId] = useState<string | null>(null)
   const resetZone = useStore(s => s.resetZone)
   const setZoneField = useStore(s => s.setZoneField)
   const setCcEditMode = useStore(s => s.setCcEditMode)
@@ -172,6 +176,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const setAgentStatus = useRuntimeStore(s => s.setAgentStatus)
   const setActiveAgent = useIdentityStore(s => s.setActiveAgent)
   const customPresets = useStore(s => s.customPresets)
+  /** #116 子项 7：预设行兜底 chip 的口径见 presets.ts 的 fallbackPresetChip。 */
+  const fallbackPresetChipView = fallbackPresetChip(globalStatus, customPresets.map(preset => preset.id))
   const sessions = useIdentityStore(s => s.sessions)
   // I01-W2：动态配置按 AgentContext（agentId+source）读写
   const activeSessionContext = (() => {
@@ -460,6 +466,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     writeDensity(d, (key, v) => storage.set(key, v))
   }
 
+  // #116 子项 8：预览栏折叠（chrome 态，持久化；折叠后正文宽度回升）
+  const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() =>
+    readPreviewCollapsed((k) => storage.get(k)))
+  const togglePreviewCollapsed = () => {
+    setPreviewCollapsed(prev => {
+      writePreviewCollapsed(!prev, (key, v) => storage.set(key, v))
+      return !prev
+    })
+  }
+
   // K-2：左栏二级折叠导航展开态（session 内 UI 态；打开设置默认收起）
   const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(new Set())
   const toggleNavSection = (section: string) => {
@@ -593,8 +609,14 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                   <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}
-                {globalStatus && !GLOBAL_PRESETS.some(p => p.name === globalStatus) && (
-                  <button type="button" className="set-preset-chip active">{globalStatus}</button>
+                {/* #116 子项 7：兜底 chip 原先直接输出 globalStatus 原文——它是 'custom'
+                    哨兵或自定义预设 id 时会把内部标识当预设名显示，且与下方
+                    .set-custom-presets 里的具名 chip 重复点亮。现在：自定义预设 id 由
+                    具名列表负责（此处不出兜底），'custom' 哨兵显示为「自定义」，其余
+                    无法识别的值显示为「未知预设」并把原值留在 title/data 上供排查。 */}
+                {fallbackPresetChipView && (
+                  <button type="button" className="set-preset-chip active"
+                    title={fallbackPresetChipView.title} data-preset-status={globalStatus}>{fallbackPresetChipView.label}</button>
                 )}
               </div>
               <div className="set-hint">
@@ -625,7 +647,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                 {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
                   <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} disabled={applyingPresetId !== null} aria-busy={applyingPresetId === preset.id || undefined} onClick={() => { void applyCustomPresetFromSettings(preset.id) }}>{preset.name}</button>
                   <button type="button" className="ps-btn sm" onClick={() => { void saveCustomPresetFromSettings(preset.name, preset.id) }}>覆盖</button>
-                  <button type="button" className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
+                  {pendingDeletePresetId === preset.id ? (
+                    <div className="set-confirm set-confirm-inline" role="alertdialog" aria-label={`确认删除预设 ${preset.name}`}>
+                      <span className="set-confirm-text">删除后不可恢复；引用它的区域会保留现值但失去预设基准。</span>
+                      <button type="button" className="ps-btn sm danger"
+                        onClick={() => { setPendingDeletePresetId(null); removeCustomPreset(preset.id) }}>确认删除</button>
+                      <button type="button" className="ps-btn sm" onClick={() => setPendingDeletePresetId(null)}>取消</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="ps-btn sm danger" onClick={() => setPendingDeletePresetId(preset.id)}>删除</button>
+                  )}
                 </div>)}
               </div>}
             </Group>}
@@ -859,7 +890,19 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
             ))}
           </div>
           <div className="settings-nav-footer">
-            <button type="button" className="set-nav-btn reset" onClick={reset}>重置主题</button>
+            {confirmResetTheme ? (
+              <div className="set-confirm" role="alertdialog" aria-label="确认重置主题">
+                <p className="set-confirm-text">重置主题会把当前外观（含手动改动）恢复为本界面模式的默认值，且不可撤销。</p>
+                <div className="set-confirm-actions">
+                  <button type="button" className="ps-btn sm danger"
+                    onClick={() => { setConfirmResetTheme(false); reset() }}>确认重置</button>
+                  <button type="button" className="ps-btn sm"
+                    onClick={() => setConfirmResetTheme(false)}>取消</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="set-nav-btn reset" onClick={() => setConfirmResetTheme(true)}>重置主题</button>
+            )}
           </div>
         </div>
 
@@ -889,11 +932,27 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           onOpenChange={setQuickSearchOpen}
         />
         {!activePluginPageId && (previewZone || activeSection === 'renderers') && (
-          <div className="settings-preview-pane">
-            <div className="settings-preview-label">{activeSection === 'renderers' ? 'Renderer fixture' : '实时预览'}</div>
-            {activeSection === 'renderers'
-              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} settingsCatalog={settingsContributionCatalog} activeSuiteId={activeRendererSuiteId} />
-              : <SettingsPreview zone={previewZone!} />}
+          <div className={`settings-preview-pane${previewCollapsed ? ' collapsed' : ''}`}>
+            <div className="settings-preview-pane-head">
+              {!previewCollapsed && (
+                <div className="settings-preview-label">{activeSection === 'renderers' ? 'Renderer fixture' : '实时预览'}</div>
+              )}
+              <button type="button" className="settings-preview-toggle"
+                onClick={togglePreviewCollapsed}
+                aria-expanded={!previewCollapsed}
+                aria-controls="settings-preview-body"
+                title={previewCollapsed ? '展开预览栏' : '折叠预览栏'}
+                aria-label={previewCollapsed ? '展开预览栏' : '折叠预览栏'}>
+                {previewCollapsed ? '‹' : '›'}
+              </button>
+            </div>
+            {!previewCollapsed && (
+              <div id="settings-preview-body" className="settings-preview-body">
+                {activeSection === 'renderers'
+                  ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} settingsCatalog={settingsContributionCatalog} activeSuiteId={activeRendererSuiteId} />
+                  : <SettingsPreview zone={previewZone!} />}
+              </div>
+            )}
           </div>
         )}
       </div>
