@@ -405,3 +405,35 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`src/renderers/solid-workbench/**`、`src/components/Settings*.tsx`、`src/index.css`、`src/styles/tailwind.css`、`src-tauri/**`、`tools/webview2-mcp/**`、`docs/说明书/Pylon-开发与协作规范.md`（以上属 #116 / #150 域）。
 
 **给后续 agent 的两条提示**：① **不要提交 `src-tauri/tauri.conf.json`**——工作区里有一处未提交改动，是 `additionalBrowserArgs: --remote-debugging-port=9222 ...`（webview2 MCP 能连上的前提），不是本 issue 产物，归属待定；② 若要用 webview2 MCP 复核指示器：`window.__TAURI_INTERNALS__` 的 `invoke`/`callbacks` 均不可包装、Channel 帧不走 `callbacks` 表（帧级旁路做不到），且 sheet 是 keep-alive——`document.querySelector(`.term-summary`)` 会命中 `display:none` 的隐藏 sheet，必须按活动 sheet（`display:contents`）取根。
+
+---
+
+[2026-09-17 24] [Miyaki Kumo] [#154]
+
+**开工：issue154（统一侧栏模型——左列单一主人 + 标题栏排布 + 设置迁入 sheet 体系）。** spec 见 `.agents/spec/154-unified-sidebar-model.md`；路线决策落 `.agents/decisions/`。分支沿用 `Ru5t/Reflector`。根因（带 file:line）见 issue #154 正文。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+阶段 1（统一侧栏模型，地基——宽度/边框/折叠/拖拽全在这里）：
+- `src/domains/theme/themeCssSnapshot.ts`（`WORKSPACE_SIDEBAR_COLLAPSED_WIDTH` 42→0；三套 track token 收敛为一套）
+- `src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（左列边框唯一 owner、左轨道、resize handle；删 42px 相关断点）
+- `src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css`、`styles/components/PrismSheet.css`、`styles/sheets/OverviewSheetView.css`、`styles/sheets/file/FileSheet.css`
+- `src/workspace-sheets/SheetSidebarSlot.tsx`、`src/workspace-sheets/SheetLayout.tsx`
+- `src/plugins/core/sheet/builtinWorkspacePlugins.ts`、`src/plugins/product/builtinPylonGateway.ts`（补 `sidebar:` 声明）
+- 内联 `<aside>` 抽成 `sidebar:` 组件：`src/sheets/{OverviewSheetView,RuntimeSheetView,PrismManagerSheetView}.tsx`、`src/sheets/search/SearchSheetView.tsx`、`src/sheets/history/HistorySheetView.tsx`、`src/sheets/gateway/GatewaySheetView.tsx`、`src/sheets/browser/BrowserSheetView.tsx`、`src/sheets/file/{FileSheetView,FileSheetSidebar}.tsx`
+- **新增** 左栏拖拽 resize handle 组件
+- `src/App.tsx`（`sidebarEnabled`/`sidebarExpandedTrack` 收敛）
+
+阶段 2 / 3：`src/workspace-sheets/WorkspaceTitlebar.tsx`、`src/workspace-sheets/SheetTabStrip.tsx`、`src/components/Sidebar.tsx`、`src/components/sidebar/WorkspacesPanel.tsx`
+
+阶段 4：`src/components/Settings.tsx`（覆盖层 → sheet 形态）、**新增** 设置 sheet 视图与导航左栏、`src/plugins/product/firstPartyStyleOwnership.ts`（登记新样式 owner/importer/lifecycle）
+
+测试：`src/sheets/__tests__/SheetInternalSidebars.test.tsx`（契约按新模型改写）、`src/sheets/file/__tests__/FileSheetView.sidebarSingleState.test.tsx`、`src/sheets/browser/__tests__/BrowserSheet.css.test.ts`、`src/components/__tests__/Sidebar.css.test.ts`、`src/workspace-sheets/__tests__/{workspaceTitlebar.css,workspaceTitlebarSidebarToggle,sheetLayoutSidebarCollapsedReactive,sheetRegistrySidebarMode}`、`src/domains/theme/__tests__/themeCssSnapshot.test.ts`、设置相关 `src/components/__tests__/Settings*.test.tsx`
+
+文档：`.agents/records/`、`.agents/decisions/`、`docs/说明书/Pylon-模块维护地图.md`、`docs/说明书/Pylon-项目架构参考.md`、本文件
+
+**我不碰**：`src/renderers/solid-workbench/**` 与 `ControlCenter.css`（中控区——用户明确不碰）、`src/components/chat/**`、`src/sheets/agent-workbench/**`（#68 域）、`src-tauri/**`、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`（#116 域）。
+
+**约束（复审据此把关）**：① `sidebarMode` 的三个字符串值是契约，**保持字符串不变**，只改语义解释与渲染路径（零持久化迁移）；② `settingsDomains.ts` 的域/分区/深链别名、`pylon:open-settings` 事件、`normalizeSettingsIntent` 不变；③ 左栏 clamp（160/520）、`applyWorkspaceLayoutChange` 事务、`pylon-workspace-layout-v3` 持久化键不变；④ 既有测试可改写但须逐条登记，**不得降级断言**。
+
+**给后续 agent 的两条提示**：① 确认 `src-tauri/tauri.conf.json` 里那处未提交的 `additionalBrowserArgs: --remote-debugging-port=9222` 是 webview2 MCP 能连上的前提，**继续不要提交它**；② 分割线对齐的验收口径是**数值比对**——逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」，不靠目视截图。
