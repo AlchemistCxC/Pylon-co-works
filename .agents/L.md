@@ -339,3 +339,47 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 1. 本刀**不 commit、不 push、不开 PR**（施工单铁律 6），改动留在工作树等验收；本次只提交本 L.md 一个文件（AGENTS §2.3.5）。
 2. **对后续刀的接口影响**：刀0 之后，`completeTerminalPreset`（`src/presets.ts`）与 `filterPresetTheme` / `clampPresetCcHeight` / `syncPresetCcHeight`（`presetReducer.ts`）、`selectCcProperties`（`appearance.ts`）、`normalizeZoneRecord`（`migration.ts`）都已是**导出符号**。若有人正在动这几个文件（尤其刀2 要拆 `src/presets.ts`），请把新增的 `export` 计入符号表——刀2 的「导出符号集合一致」验收项已包含 `completeTerminalPreset`。
+[2026-09-17 12] [Fisher] [#141]
+
+**开工：issue141（issue55 行集纯度用例全量跑偶发红）。** 本轮文件域只有两个，请勿改写、勿连带提交：
+
+- `src/renderers/solid-workbench/chat/__tests__/issue55.rowSetPurity.solid.test.tsx`（唯一代码改动，纯测试侧）
+- `.agents/records/issue-141-rowset-purity-flake.md`（开发记录，新增）
+
+**不碰**：`MarkdownContent.solid.tsx`、`markdownRenderModel.ts`、`streamingMarkdownSplit.ts` 及任何产品代码；`vitest.config.ts` 的 testTimeout/retry；他人的 `src/renderers/solid-workbench/input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+结论先给：不是产品缺陷，是**判据口径**问题——骨架 `.term-md-skeleton` 是解析中的合法加载态（P57 S3-R8 契约），却被 `emptyBlockSignature`/`blankBlocks` 当成空块。实测（与全量跑并发四次的探针）解析落地 573 / 620 / **1547** / 748 ms，跨过 `waitFor` 的 1s 默认值；用「原文件 + 1.5s 慢解析」可确定性复现 issue 里那条 `expected [ 'DIV.term-md-skeleton' ] to deeply equal []`。修复＝判据豁免加载态 + 落地等待显式给足预算 + 一条不依赖负载的回归用例；变异核验（只回退判据）新用例必红。
+
+---
+
+[2026-09-17 14] [Fisher] [#148]
+
+**开工：issue148（尾块解析「最新即胜」+ 只读解析成本读数）。** 这是 #141 遗留观察的落地施工，spec 见 `.agents/spec/issue-148-tail-parse-latest-wins.md`。**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/renderers/solid-workbench/chat/markdownRenderModel.ts`（新增可选 `isCurrent` 判据 + 跳过与缓存安全）
+- `src/renderers/solid-workbench/chat/markdownParseCounters.ts`（**新增**，叶子模块，仿 `streamingRowCounters.ts`）
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（只在增长尾块路径传判据）
+- `src/renderers/solid-workbench/streamingDiagnostics.ts`（读数新增 `parseCost` 一项，既有字段不动）
+- `src/renderers/solid-workbench/chat/__tests__/issue148.parseLatestWins.solid.test.tsx`（**新增**；既有测试一律不改）
+- 文档：`.agents/records/issue-148-*.md`、本文件
+
+**我不碰**：`streamingDisplayScheduler.ts`、`streamingRowCounters.ts`、`streamingMarkdownSplit.ts`、`chat/__tests__/issue55.rowSetPurity.solid.test.tsx`（#141 已收口）、`vitest.config.ts`、`docs/说明书/`（该区域未描述尾块解析策略，无漂移面）、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+**约束（复审时请据此把关）**：跳过只允许发生在「Solid 必然丢弃结果」的请求上（判据 ≡ `pr === p`），且跳过结果**不得进 LRU**；既有行为测试零修改。
+
+---
+
+[2026-09-17 17] [Fisher] [#150]
+
+**开工：issue150（尾块解析增量 graft，路线 A）。** spec 见 `.agents/spec/issue-150-tail-incremental-parse.md`，路线决策见 `.agents/decisions/0006-streaming-tail-incremental-parse.md`（**不上 worker**，理由：worker 不减总 CPU——实测症状是浪费不是主线程卡顿；且 jsdom 没有 Worker，生产路径无法在现有测试环境覆盖）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/renderers/solid-workbench/chat/markdownRenderModel.ts`（增量 graft 判据 + 基座 MRU + `incremental` 选项）
+- `src/renderers/solid-workbench/chat/markdownParseCounters.ts`（新增只读计数 `grafted`）
+- `src/renderers/solid-workbench/chat/__tests__/issue150.incrementalGraft.test.ts`（**新增**，node 环境差分测试；既有测试一律不改）
+- 文档：`.agents/decisions/0006-*.md`（新增）、`.agents/records/issue-150-*.md`、本文件
+
+**我不碰**：`MarkdownContent.solid.tsx`（尾块路径本来就是 `cache: false` 调用，模型层按该标志启用增量，**调用点零改动**）、`streamingMarkdownSplit.ts`、`streamingRowCounters.ts`、`streamingDisplayScheduler.ts`、`streamingDiagnostics.ts`（`parseCost` 是既有读数，本轮不扩展读数结构）、`vitest.config.ts`、`docs/说明书/`、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+**约束（复审据此把关）**：graft 只在「可证明为纯文本追加」时发生，判定不通过一律回退整段重解析；渲染结果必须与整段重解析逐块一致（差分测试对每个前缀断言）；既有行为测试零修改。

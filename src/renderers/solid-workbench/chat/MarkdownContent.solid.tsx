@@ -40,8 +40,11 @@ export function MarkdownContent(props: MarkdownContentProps) {
 
 interface StreamingBlockRow {
   readonly id: number
-  /** P57 S3-A11：该行是否仍是增长尾块（尾块解析绕 LRU 缓存，稳定后恢复缓存）。 */
-  tail: boolean
+  /** P57 S3-A11：该行是否仍是增长尾块（尾块解析绕 LRU 缓存，稳定后恢复缓存）。
+   *  #150 稳定性：必须是**信号**——行被提升为稳定行时要触发解析源变化（见 `MarkdownSegment`），
+   *  否则已提交内容会沿用增量模型、失去「提升即全量」的自愈。 */
+  tail(): boolean
+  setTail(value: boolean): void
   readonly text: string
   update(text: string): void
 }
@@ -125,7 +128,7 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
       // 位置对账：文本未变就不碰 signal（不多余重解析），变了就地更新——保持 DOM 身份是
       // 尾块逐拍增长不闪烁、稳定块（含代码块）不重挂载的前提。
       if (candidate.text !== spec.text) candidate.update(spec.text)
-      candidate.tail = spec.tail
+      candidate.setTail(spec.tail)
       nextRows.push(candidate)
     }
     rendered = nextRows
@@ -165,7 +168,8 @@ function trimRowStructuralWhitespace(text: string): string {
 
 function createStreamingBlockRow(id: number, initialText: string, tail: boolean): StreamingBlockRow {
   const [text, setText] = createSignal(initialText)
-  return { id, tail, get text() { return text() }, update: setText }
+  const [isTail, setIsTail] = createSignal(tail)
+  return { id, tail: isTail, setTail: setIsTail, get text() { return text() }, update: setText }
 }
 
 function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; inline?: boolean }) {
@@ -173,7 +177,7 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
   const openCodeTail = createMemo(() => props.streaming() ? splitOpenCodeFenceTail(text()) : null)
   // P57 S3-A11：增长尾块的中间态解析绕 LRU 缓存（同前缀同长度的文本永不再命中，
   // 只会挤掉 stable 块的缓存条目）；行晋升为 stable 后恢复缓存。
-  const cacheModel = () => !props.row.tail
+  const cacheModel = () => !props.row.tail()
   return <Show
     when={openCodeTail() !== null}
     fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} />}
@@ -218,8 +222,18 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
   const shouldParse = () => !isPlainTextContent(text())
   const useCache = () => props.cache?.() ?? true
   const [model] = createResource(
-    () => shouldParse() ? text() : undefined,
-    source => getMarkdownRenderModel(source, { cache: useCache() }),
+    // #150 稳定性：解析源带上 `cache` 标志 ⇒ 尾块被提升为稳定行（cache false→true）时**换源重解析**，
+    // 于是「已提交内容一定来自整段重解析」——增量拼接只可能影响正在长的那一行，即便某个没预料的
+    // 形状上拼错了，也会在块完成那一刻被真实解析覆盖（自愈）。代价是每块多一次整段重解析（一次）。
+    () => shouldParse() ? { text: text(), cache: useCache() } : undefined,
+    source => getMarkdownRenderModel(source.text, {
+      cache: source.cache,
+      // #148：只有增长尾块（不走缓存的路径）才传「最新即胜」判据——跳过返回空模型，落进 LRU
+      // 会毒化同文本的其他行。判据与 Solid 丢弃结果的 `pr === p` 条件同义：解析源是
+      // `shouldParse() ? text() : undefined`，源一变它就发起新 fetch 并改写 pr，旧请求的结果
+      // 必被丢弃（token 级切片、终态重发、resume 这类一 tick 内多次发布的中间态即在此被挡下）。
+      isCurrent: source.cache ? undefined : () => shouldParse() && text() === source.text,
+    }),
   )
 
   return (

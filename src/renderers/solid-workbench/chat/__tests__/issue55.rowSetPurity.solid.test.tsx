@@ -8,14 +8,51 @@ import { splitStreamingMarkdownBlocks } from '../streamingMarkdownSplit.ts'
 afterEach(cleanup)
 
 /**
- * 行元素文本：容器直接子元素 = 行渲染出的顶层块。
- * 注意一个「行」在解析路径下可能产出多个顶层元素（例如标题紧跟段落），所以这里读的是元素文本。
+ * 解析中的骨架：`.term-md-skeleton[aria-busy]`（`MarkdownContent.solid.tsx` 的 MarkdownSegment
+ * 首次解析未 resolve 前渲染）。它是**合法的加载态**——没有文本，也不代表任何行边界或行内容。
  */
-function blockTexts(container: HTMLElement): string[] {
-  return [...container.children].map(element => element.textContent ?? '')
+function parseSkeletons(container: HTMLElement): Element[] {
+  return [...container.querySelectorAll('.term-md-skeleton')]
 }
 
-/** 块签名：标签 + class + 文本。用于「流式结果 == 对同一文本的直接推导（全新挂载）」的逐块比对。 */
+/**
+ * 解析落地预算：行内容由异步 markdown 解析产出（动态 import + unified），全量跑时 500+ 个
+ * 测试文件争 CPU，实测同一用例的落地耗时 573 / 620 / 1547 / 748 ms（#141，与全量跑并发四次），
+ * 跨过了 `waitFor` 的 1s 默认值。故显式给足预算（与 `MarkdownContent.solid.test.tsx` 的异步
+ * 解析等待同档）：预算内仍未落地 = 解析真的卡住了，仍然要红。
+ */
+const MARKDOWN_PARSE_TIMEOUT_MS = 10_000
+
+/** 等所有行的异步解析落地（骨架消失）。它只回答「现在可以比快照了吗」，本身不是不变式断言。 */
+async function waitForMarkdownParsed(container: HTMLElement): Promise<void> {
+  await waitFor(
+    () => expect(parseSkeletons(container)).toHaveLength(0),
+    { timeout: MARKDOWN_PARSE_TIMEOUT_MS },
+  )
+}
+
+/**
+ * 行元素：容器直接子元素 = 行渲染出的顶层块。注意一个「行」在解析路径下可能产出多个顶层元素
+ * （例如标题紧跟段落），所以这里读的是元素。
+ *
+ * 骨架不算行内容：它是解析中的加载态，既不是空块、也不是空白块——「行文本要么有内容，要么
+ * 不渲染」这条不变式说的是**行文本**（#141）。判据先豁免它，解析落地与否另由
+ * `waitForMarkdownParsed` 把关，两件事不混。
+ */
+function rowElements(container: HTMLElement): Element[] {
+  return [...container.children].filter(element => !element.classList.contains('term-md-skeleton'))
+}
+
+/** 行元素文本。 */
+function blockTexts(container: HTMLElement): string[] {
+  return rowElements(container).map(element => element.textContent ?? '')
+}
+
+/**
+ * 块签名：标签 + class + 文本。用于「流式结果 == 对同一文本的直接推导（全新挂载）」的逐块比对。
+ * 这里刻意**不豁免**骨架：它比的是两次快照的 DOM 形状，基线在解析落地后取，任一侧还在解析都
+ * 应当判为不同——于是「签名相等」这一条同时蕴含「已落地」。
+ */
 function blockSignature(container: HTMLElement): string[] {
   return [...container.children].map(element => `${element.tagName}.${element.className}|${element.textContent ?? ''}`)
 }
@@ -24,9 +61,9 @@ function hasStructuralEdgeWhitespace(text: string): boolean {
   return /^\s/.test(text) || /\s$/.test(text)
 }
 
-/** 无文本的顶层块的标签 + class（定位用：空文本块要么是结构元素，要么是缺陷）。 */
+/** 无文本的行元素标签 + class（定位用：空文本块要么是结构元素，要么是缺陷；骨架已豁免）。 */
 function emptyBlockSignature(container: HTMLElement): string[] {
-  return [...container.children]
+  return rowElements(container)
     .filter(element => (element.textContent ?? '').length === 0)
     .map(element => `${element.tagName}.${getBlockClass(element)}`)
 }
@@ -44,12 +81,13 @@ function edgeWhitespaceBlocks(container: HTMLElement): string[] {
 }
 
 /**
- * 纯空白块（任何形式）：行文本要么有内容，要么不渲染——空白块永远是缺陷。
+ * 纯空白块（任何形式）：行文本要么有内容，要么不渲染——空白块永远是缺陷；解析中的骨架不算
+ * （它没有行文本，见 `rowElements`）。
  * 注意不能用 `/^\s/` 判定「结构空白」：源文本里的代码缩进是内容，解析后的表格/列表元素
  * 之间也夹着渲染标记自身的换行，两者都不属于行文本。
  */
 function blankBlocks(container: HTMLElement): string[] {
-  return [...container.children]
+  return rowElements(container)
     .filter(element => (element.textContent ?? '').trim().length === 0)
     .map(element => `${element.tagName}.${getBlockClass(element)}`)
 }
@@ -152,7 +190,7 @@ describe('issue 55: 行集合是当前文本的纯函数', () => {
     await waitFor(() => expect(container.textContent).toContain('第二段正在增长'))
     // 基线：单调增长到该文本时的行集合（同一渲染路径，可比）。等异步解析落地（.term-md-skeleton
     // 消失）再取，否则比的是两个都还在解析的中间态。
-    await waitFor(() => expect(emptyBlockSignature(container)).toEqual([]))
+    await waitForMarkdownParsed(container)
     const baseline = blockSignature(container)
 
     // 发布链可能出现非后继输入（插值后的裁剪前缀、双列表分叉、终态重发、resume）：
@@ -164,8 +202,9 @@ describe('issue 55: 行集合是当前文本的纯函数', () => {
     setText(finalText)
     setText(`${finalText}\n\n `)
     setText(finalText)
-    await waitFor(() => expect(blockSignature(container)).toEqual(baseline))
-    await waitFor(() => expect(emptyBlockSignature(container)).toEqual([]))
+    // 签名相等蕴含解析已落地（blockSignature 不豁免骨架）——不必再单独等一次。
+    await waitFor(() => expect(blockSignature(container)).toEqual(baseline), { timeout: MARKDOWN_PARSE_TIMEOUT_MS })
+    expect(emptyBlockSignature(container)).toEqual([])
 
     const blocks = blockTexts(container)
     expect(blocks.every(block => block.length > 0)).toBe(true)
@@ -188,7 +227,7 @@ describe('issue 55: 行集合是当前文本的纯函数', () => {
     setState({ text: finalText, streaming: false })
     setState({ text: `${finalText}\n\n `, streaming: false })
     setState({ text: finalText, streaming: false })
-    await waitFor(() => expect(blockSignature(container)).toEqual(settled))
+    await waitFor(() => expect(blockSignature(container)).toEqual(settled), { timeout: MARKDOWN_PARSE_TIMEOUT_MS })
   })
 })
 
@@ -202,16 +241,20 @@ describe('issue 55: 现场形状回归（真机规模与切分节奏）', () => 
     const { container } = render(() => <MarkdownContent text={text()} streaming />)
 
     for (const prefix of prefixes) setText(prefix)
-    await waitFor(() => expect(container.textContent).toContain('尾段 20'))
-    // 等所有行的异步解析落地（.term-md-skeleton 是解析中的合法加载态，不是空块缺陷）。
-    await waitFor(() => expect(emptyBlockSignature(container)).toEqual([]))
+    // 取基线前要同时满足：最后一段已可见 + 所有行的异步解析已落地。骨架是解析中的合法加载态
+    // （判据里已豁免，见 emptyBlockSignature），但**快照比对**必须等落地——两件事用同一个预算等，
+    // 省得把默认 1s 当成「解析必落地」的隐含假设（#141）。
+    await waitFor(() => {
+      expect(container.textContent).toContain('尾段 20')
+      expect(parseSkeletons(container)).toHaveLength(0)
+    }, { timeout: MARKDOWN_PARSE_TIMEOUT_MS })
     const settled = blockSignature(container)
 
     // 非后继输入（回退到中段）再回到全文：同文本必须得到同一行集合。
     setText(full.slice(0, Math.floor(full.length / 2)))
     setText(full)
-    await waitFor(() => expect(emptyBlockSignature(container)).toEqual([]))
-    await waitFor(() => expect(blockSignature(container)).toEqual(settled))
+    // 签名相等蕴含解析已落地（blockSignature 不豁免骨架），故不必再单独等一次落地。
+    await waitFor(() => expect(blockSignature(container)).toEqual(settled), { timeout: MARKDOWN_PARSE_TIMEOUT_MS })
 
     const blocks = blockTexts(container)
     expect(blocks.length).toBeGreaterThan(0)
@@ -219,5 +262,22 @@ describe('issue 55: 现场形状回归（真机规模与切分节奏）', () => 
     expect(emptyBlockSignature(container)).toEqual([])
     expect(blankBlocks(container)).toEqual([])
     expect(plainRowsWithLeadingBlankLine(container)).toEqual([])
+  })
+})
+
+describe('issue 141: 解析中的骨架不是空块缺陷', () => {
+  it('解析 pending 时「无空块 / 无空白块」判据为空，落地后仍为空', async () => {
+    // 确定性构造 pending 窗口：createResource 的 fetch 最早在微任务后 resolve，render() 返回后的
+    // 同一次 tick 里骨架必然在 DOM 中——不依赖机器负载，也不依赖时钟。
+    const { container } = render(() => <MarkdownContent text="**粗体** 与一行需要解析的正文。" streaming />)
+    expect(parseSkeletons(container)).toHaveLength(1)
+    // 判据豁免加载态：骨架没有行文本，但「无空块 / 无空白块」说的是行文本（#141）。
+    expect(emptyBlockSignature(container)).toEqual([])
+    expect(blankBlocks(container)).toEqual([])
+
+    await waitForMarkdownParsed(container)
+    expect(container.textContent).toContain('粗体')
+    expect(emptyBlockSignature(container)).toEqual([])
+    expect(blankBlocks(container)).toEqual([])
   })
 })
