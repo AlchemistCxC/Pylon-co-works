@@ -128,7 +128,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   },
 }
 
-function completeTerminalPreset(preset: GlobalPreset): GlobalPreset {
+export function completeTerminalPreset(preset: GlobalPreset): GlobalPreset {
   if (!(preset.name in TERMINAL_VISUAL_COMPLETION)) return preset
   const name = preset.name as TerminalPresetName
   return {
