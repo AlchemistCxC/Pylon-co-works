@@ -128,11 +128,15 @@ pylon-<版本>-win64/                  ← 解压出来就是这个目录
 }
 ```
 
-例如解压在 `D:\pylon-0.2.1-win64`，这一行就写成（JSON 里用正斜杠，或把反斜杠写成 `\\`）：
+例如解压在 `<解压目录>/pylon-<版本>-win64`（占位示例，替换为你自己的实际路径），这一行就写成（JSON 里用正斜杠，或把反斜杠写成 `\\`）：
 
 ```json
-"command": "D:/pylon-0.2.1-win64/tools/webview2-mcp/pylon-webview2-mcp.exe"
+"command": "<解压目录>/pylon-<版本>-win64/tools/webview2-mcp/pylon-webview2-mcp.exe"
 ```
+
+> 注意：文档里刻意写成占位形式而不是某个具体盘符路径——`scripts/pack_release.py`
+> 的发行审计会拒绝包内文本文件出现「盘符 + 冒号 + 斜杠」形态的本机绝对路径，
+> 以免把维护机路径带进发行包。
 
 存盘后重启客户端。
 
