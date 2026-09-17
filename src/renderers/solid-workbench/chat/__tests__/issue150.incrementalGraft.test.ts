@@ -55,6 +55,17 @@ const CORPUS: readonly { readonly name: string; readonly text: string }[] = [
   { name: 'emoji 与非 BMP 字符', text: '结论：🎯 命中目标，📌 记一笔，然后继续往下写正文内容。' },
   { name: '行尾反斜杠', text: '这一行以反斜杠结尾 \\' },
   { name: '分隔线', text: '上面的段落。\n\n---\n\n下面的段落。' },
+  { name: '换序号分隔符（必须回退）', text: '1. 甲\n2) 乙\n3. 丙' },
+  { name: '换子弹符（必须回退）', text: '- 甲\n* 乙\n+ 丙' },
+  { name: '松散列表（项内空行）', text: '- 甲\n\n- 乙' },
+  { name: '缩进续行（必须回退）', text: '第一行\n    缩进的代码\n尾行' },
+  { name: '列表项 lazy 续行', text: '1. 甲\n继续写但不编号\n2. 乙' },
+  { name: '列表后空行接段落', text: '1. 甲\n\n接一段普通文字' },
+  { name: '引用块内续行与空行', text: '> 甲\n> 乙\n>\n> 丙\n\n普通段落' },
+  { name: '标题后接段落', text: '## 标题\n正文一段\n\n又一段' },
+  { name: '表格后接文字（必须回退）', text: '| a | b |\n| --- | --- |\n| 1 | 2 |\n普通文字' },
+  { name: '有序列表多行项', text: '1. 第一项\n  第二行\n2. 第二项\n  第二行\n3. 第三项' },
+  { name: '项内含行内元素的列表', text: '- **粗体**甲\n- 乙\n- 丙' },
 ]
 
 /** 真机形状的长夹具：40 项有序列表（项间无空行），#150 现场实测的那一类单块。 */
@@ -142,21 +153,42 @@ describe('issue 150: graft 判据的方向性（该拼的拼、该退的退）',
     }
   })
 
-  it('ASCII 标点 / 换行 / 行首构造一律回退整段重解析', async () => {
+  it('ASCII 标点 / 行首构造一律回退整段重解析', async () => {
     const cases = ['hello world', '第一行\n', '1. 列表项', '# 标题', '| a | b |', '   缩进', '> 引用', '---', '```ts']
     for (const base of cases) {
       clearMarkdownRenderModelCache()
       const warm = await tailStep(base)
       expect(warm.model.children.length, base).toBeGreaterThanOrEqual(0)
-      // 追加一个「结构字符」或换行：必须回退
-      for (const suffix of [',', '\n', '|', '#', ' ']) {
-        const text = base + suffix
-        if (text === base) continue
-        const step = await tailStep(text)
-        if (suffix === ' ' && !/[\r\n]$/.test(base)) continue
+      // 追加一个「结构字符」：必须回退（行首构造还会改写整块，不能按续行处理）
+      for (const suffix of [',', '|', '#', '-']) {
+        const step = await tailStep(base + suffix)
         expect(step.grafted, `${JSON.stringify(base)}+${JSON.stringify(suffix)}`).toBe(false)
       }
     }
+  })
+
+  it('尾随换行不改变模型：纯换行差量是「不变式拼接」，换行后的行内容按行规则拼接', async () => {
+    // 真机实测：一行边界会先来一个纯 `\n` 差量，再来行内容——两者都不该触发整段重解析
+    for (const base of ['第一行', '1. 甲', '# 标题', '> 引用', '| a |\n| --- |\n| x']) {
+      clearMarkdownRenderModelCache()
+      await tailStep(base)
+      const terminated = await tailStep(`${base}\n`)
+      expect(terminated.grafted, `${JSON.stringify(base)}+\\n`).toBe(true)
+      expect(terminated.model, `${JSON.stringify(base)}+\\n`).toEqual(await fullParse(`${base}\n`))
+    }
+    // 段落 / 列表项 / 标题 / 引用之后的续行或新段落：走行拼接
+    for (const base of ['第一行', '1. 甲', '# 标题', '> 引用']) {
+      clearMarkdownRenderModelCache()
+      await tailStep(base)
+      const started = await tailStep(`${base}\n第二行`)
+      expect(started.grafted, `${JSON.stringify(base)}+\\n第二行`).toBe(true)
+      expect(started.model, `${JSON.stringify(base)}+\\n第二行`).toEqual(await fullParse(`${base}\n第二行`))
+    }
+    // 表格之后接文字：形状不同（表格结束、另起段落），回退但结果必须一致
+    clearMarkdownRenderModelCache()
+    await tailStep('| a |\n| --- |\n| x')
+    const afterTable = await tailStep('| a |\n| --- |\n| x\n第二行')
+    expect(afterTable.model).toEqual(await fullParse('| a |\n| --- |\n| x\n第二行'))
   })
 
   it('落点行内元素或 URL/实体/转义上下文时回退', async () => {
@@ -175,6 +207,36 @@ describe('issue 150: graft 判据的方向性（该拼的拼、该退的退）',
       const step = await tailStep(`${base}接着写字`)
       expect(step.grafted, base).toBe(false)
     }
+  })
+})
+
+describe('issue 150: 按行拼接（续行 / 新列表项 / 新段落）的方向性', () => {
+  /** 从 base 一步跨到 text（模拟「一整行一次到达」的发布形态）。 */
+  async function stepFrom(base: string, text: string): Promise<{ grafted: boolean; model: MarkdownRoot }> {
+    clearMarkdownRenderModelCache()
+    await tailStep(base)
+    const step = await tailStep(text)
+    expect(step.model, `${JSON.stringify(text)}`).toEqual(await fullParse(text))
+    return step
+  }
+
+  it('续行 / 新列表项 / 新段落都走拼接', async () => {
+    expect((await stepFrom('第一行', '第一行\n第二行')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n2. 乙')).grafted).toBe(true)
+    expect((await stepFrom('- 甲', '- 甲\n- 乙')).grafted).toBe(true)
+    expect((await stepFrom('第一段', '第一段\n\n第二段')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n\n段落')).grafted).toBe(true)
+    expect((await stepFrom('## 标题', '## 标题\n正文')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n继续写')).grafted).toBe(true)
+  })
+
+  it('换款标记 / 松散列表 / 缩进续行 / 表格后接文字一律回退', async () => {
+    expect((await stepFrom('1. 甲', '1. 甲\n2) 乙')).grafted).toBe(false)
+    expect((await stepFrom('- 甲', '- 甲\n* 乙')).grafted).toBe(false)
+    expect((await stepFrom('- 甲', '- 甲\n\n- 乙')).grafted).toBe(false)
+    expect((await stepFrom('第一行', '第一行\n    缩进')).grafted).toBe(false)
+    expect((await stepFrom('| a |\n| --- |\n| 1 |', '| a |\n| --- |\n| 1 |\n文字')).grafted).toBe(false)
+    expect((await stepFrom('1. 甲', '1. 甲\n\n2. 乙')).grafted).toBe(false)
   })
 })
 
