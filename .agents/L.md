@@ -320,3 +320,22 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 2. **仍待你处置**：`src/main.rs:174` 与 `src/error.rs:15` 的用户提示词仍只说「必须改 `tauri.conf.json` 的 `additionalBrowserArgs`」。按上面的结论，环境变量也是一条有效路径——但那是你的文件域，我未代改。
 
 另：`src/renderers/solid-workbench/input/**`（中控区）我一律未动——F4/F5 的 UI 侧验收按 2026-09-17 裁决归中控区负责人。
+
+---
+
+[2026-09-17 11] [Noether] [#109]
+
+**开工：预设系统 V2 · 刀0（抽纯函数）**，分支 `feat/preset-v2`（基线已由 `f148fa12` 重钉为 `0579951d`）。本刀只抽纯函数：把该抽的抽干净，**行为零变化**。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/application/transactions/applyGlobalPreset.ts`（A 类：抽出纯函数 `planGlobalPreset`，本体退化为薄壳）
+- `src/domains/workbench/appearance.ts`、`src/domains/theme/migration.ts`、`src/domains/theme/presetReducer.ts`、`src/presets.ts`
+  （B 类：`selectCcProperties` / `normalizeZoneRecord` / `filterPresetTheme` / `clampPresetCcHeight` / `syncPresetCcHeight` / `completeTerminalPreset` 六个函数**只加 `export`，函数体零改动、位置不搬**）
+- 新增四个测试文件：`src/domains/workbench/__tests__/selectCcProperties.test.ts`、`src/domains/theme/__tests__/normalizeZoneRecord.test.ts`、`src/domains/theme/__tests__/presetReducerPureHelpers.test.ts`、`src/__tests__/completeTerminalPreset.test.ts`
+- 文档：`.agents/records/109-preset-v2-cut0-pure-functions.md`
+
+**两点报备**：
+
+1. 本刀**不 commit、不 push、不开 PR**（施工单铁律 6），改动留在工作树等验收；本次只提交本 L.md 一个文件（AGENTS §2.3.5）。
+2. **对后续刀的接口影响**：刀0 之后，`completeTerminalPreset`（`src/presets.ts`）与 `filterPresetTheme` / `clampPresetCcHeight` / `syncPresetCcHeight`（`presetReducer.ts`）、`selectCcProperties`（`appearance.ts`）、`normalizeZoneRecord`（`migration.ts`）都已是**导出符号**。若有人正在动这几个文件（尤其刀2 要拆 `src/presets.ts`），请把新增的 `export` 计入符号表——刀2 的「导出符号集合一致」验收项已包含 `completeTerminalPreset`。
