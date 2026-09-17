@@ -30,10 +30,14 @@ import type { ReplayVariant } from './invariants.ts'
 import {
   OWNER_KEY,
   chunkRows,
+  rawCommands,
   rawDone,
+  rawFailed,
+  rawMarkdown,
   rawText,
   rawThinking,
   rawToolStart,
+  rawUsage,
   rawUser,
   unitRowOf,
 } from './harness.ts'
@@ -125,7 +129,15 @@ function pick<T>(random: () => number, items: readonly T[]): T {
   return items[Math.floor(random() * items.length)]!
 }
 
-/** 生成一段会话：1–3 个回合，每回合由随机的 text/thinking/tool run 组成。 */
+/**
+ * 生成一段会话：1–3 个回合，每回合由随机的 text/thinking/tool run 组成。
+ *
+ * 刻意纳入四类真实形态（它们各自都是一个"会踩"的边界）：
+ * - **identity 抖动**：messageId 中途变化 ⇒ 合并必须以 identity 为界；
+ * - **回合中途的状态行**（usage/commands）⇒ 必须切断 delta run；
+ * - **markdown 内容**⇒ run 的 markdown 标记与投影 part kind；
+ * - **失败终态**（turn.failed）⇒ 与 done 不同的终态路径。
+ */
 export function generateScenario(seed: number): Scenario {
   const random = makeRandom(seed)
   const wires: unknown[] = []
@@ -136,15 +148,20 @@ export function generateScenario(seed: number): Scenario {
     for (let run = 0; run < runs; run += 1) {
       const kind = random()
       const chunks = 1 + Math.floor(random() * 3)
-      if (kind < 0.45) {
-        for (let index = 0; index < chunks; index += 1) wires.push(rawText(pick(random, RUN_TEXTS)))
+      const messageId = `msg-${seed}-${turn}-${Math.floor(random() * 2)}`
+      if (kind < 0.4) {
+        for (let index = 0; index < chunks; index += 1) wires.push(rawText(pick(random, RUN_TEXTS), messageId))
+      } else if (kind < 0.7) {
+        for (let index = 0; index < chunks; index += 1) wires.push(rawThinking(pick(random, RUN_TEXTS), messageId))
       } else if (kind < 0.8) {
-        for (let index = 0; index < chunks; index += 1) wires.push(rawThinking(pick(random, RUN_TEXTS)))
-      } else {
+        wires.push(rawMarkdown('**加粗** 与 `code`', messageId))
+      } else if (kind < 0.9) {
         wires.push(rawToolStart(`tool-${seed}-${turn}-${run}`))
+      } else {
+        wires.push(random() < 0.5 ? rawUsage(1_000_000, 1234) : rawCommands())
       }
     }
-    wires.push(rawDone())
+    wires.push(random() < 0.2 ? rawFailed() : rawDone())
   }
   return scenarioOf(`生成(seed=${seed})`, wires)
 }

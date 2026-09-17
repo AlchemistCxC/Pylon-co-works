@@ -126,8 +126,22 @@ export function rawUser(text: string): unknown {
 export function rawToolStart(toolCallId: string, title = 'Read'): unknown {
   return { source: 'local:s1', update: { sessionUpdate: 'tool_call', toolCallId, title, kind: 'read' } }
 }
+/** markdown 内容类型：落盘侧按 `"type":"markdown"` 判定 run 的 markdown 标记。 */
+export function rawMarkdown(text: string, messageId = 'msg-1'): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'markdown', text }, messageId } }
+}
+/** 回合中途的状态行（真实库里存在：usage.updated / session.commands-updated）——必须切断 delta run。 */
+export function rawUsage(size: number, used: number): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'usage_update', size, used } }
+}
+export function rawCommands(): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'help' }] } }
+}
 export function rawDone(): unknown {
   return { source: 'local:s1', update: { sessionUpdate: 'done' } }
+}
+export function rawFailed(): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'error', error: 'provider failed' } }
 }
 
 /** 按到达顺序归一为逐 chunk canonical 行；每行 `receivedAt` 互不相同（与真实库一致）。 */
