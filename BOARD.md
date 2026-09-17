@@ -1,6 +1,10 @@
 <!-- markdownlint-disable -->
 # BOARD.md · 共享交流板
 
+[2026-09-15] [Chica·规划线] [已建上游 issue #93 并认领·交接 GLM 施工·#69 遗留量项收尾] issue #69 的漂移本体已由 **PR #80 合并**落地（merge `b4367e6`，2026-09-15 00:15 CST；PR 上 `review_comments=0 / comments=0`，纯按 CI 绿合并），两态实测归零；**合并时披露、未纳入该轮**的量项未收口，故承接新开 **issue #93**（`bug(file-sheet)`）：① 正文容器右内边距 只读 24px / 编辑 16px（**承载选择器待复核**——静态 `.cm-content{padding-right:0}` 与上一轮实测 16px 矛盾，须先重测定位再动值）；② 宽行行盒右缘差 0.032px（`max-content` 亚像素）；③ **待作者裁断**的 56→72px 行号轨盒宽（裁断前不得改动）。施工书《Pylon-Issue93-FileSheet两态几何收尾施工书-20260915.md》（文档库母本 + 桌面副本，md5 一致；**不含修复方案**，Q1–Q4 交施工员判定）；分支 `fix/issue-93-file-sheet-tails`（基线 `main @ 6c60bce`，已推 fork `hellochica`，tracking=fork）；工作副本 `F:\tool\Pylon-issue93`（干净 worktree，未预装依赖，门禁前须 `bun install`）。**施工者 GLM（外部模型）· 监督/验收 Chica**。
+
+**本 PR 只含本条目（BOARD.md 单文件 docs 提交，无代码/契约/样式变更）**。文件域交集提醒：本任务只动 `src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css` + file 域测试（必要时 `src/sheets/file/FileCodeEditor.tsx`）+ `.agents/records/` + 本文件；**#83（FileSheet.css 跨 sheet 共享词汇解耦）文件域相邻**，并行会话若要同时动该文件请先回板协调。未触 `dist-plugin-sdk/**`、`src-tauri/**`、`.github/workflows/**`、Markdown 渲染路径；未触 `F:\tool\Pylon-main`（#53 线）、`F:\tool\Pylon-co-works-main`（Chica/p55）、`F:\tool\Pylon-issue69`（#69 线，已合并）三个工作树。
+
 [2026-09-14] [Chica·工程师] [认领·#69 FileSheet 两态几何统一模型（接手砂纸批次，按作者 10:57 指向重建）] 分支 `fix/issue-69-file-sheet-geometry`（fork 已推，PR 待提）；起点已同步至上游 `main @ b562e8a`（原 `d221e80f`，含砂纸 `354eb472` 部分修复），工作副本 `F:\tool\Pylon-issue69`（独立 worktree，两个既有工作树全程未动）。施工书见文档库 `Pylon-Issue69-FileSheet两态几何统一模型施工书-20260913.md`；开发记录见 `.agents/records/69-file-sheet-two-state-geometry.md`。
 
 **根因（真实浏览器实测，headless Edge 跑真实 app + 浏览器演示模式，5 类样本 × 两态 × 往返 ≥2 轮）**：① 契约块未声明 `.file-tab-line` 的 `border-left: 2px`（变更行载体重穿透契约）⇒ 首字符 x 只读 350 / 编辑 348（**−2px**）；② 编辑态 CM 的**折叠列**与行号列同挤 56px 盒且都按内容定宽 ⇒ 行号右缘 319 / 302.922（**−16.078px**；1200 行文件 −6.406px，折叠列被行号挤窄）；③ tab 列宽只读 14.297px（tab-size 2）/ 编辑 28.594px（CM 内联 4）⇒ **2 倍差**；④ 变更行标记 `::before` 占布局 ⇒ 变更行正文比未变更行右移 **13.156px**；⑤ 经典滚动条环境下只读 thin 10px / 编辑 4px（可用宽度差 6px）。
