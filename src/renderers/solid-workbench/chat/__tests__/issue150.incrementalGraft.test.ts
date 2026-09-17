@@ -55,6 +55,26 @@ const CORPUS: readonly { readonly name: string; readonly text: string }[] = [
   { name: 'emoji 与非 BMP 字符', text: '结论：🎯 命中目标，📌 记一笔，然后继续往下写正文内容。' },
   { name: '行尾反斜杠', text: '这一行以反斜杠结尾 \\' },
   { name: '分隔线', text: '上面的段落。\n\n---\n\n下面的段落。' },
+  { name: '换序号分隔符（必须回退）', text: '1. 甲\n2) 乙\n3. 丙' },
+  { name: '换子弹符（必须回退）', text: '- 甲\n* 乙\n+ 丙' },
+  { name: '松散列表（项内空行）', text: '- 甲\n\n- 乙' },
+  { name: '缩进续行（必须回退）', text: '第一行\n    缩进的代码\n尾行' },
+  { name: '列表项 lazy 续行', text: '1. 甲\n继续写但不编号\n2. 乙' },
+  { name: '列表后空行接段落', text: '1. 甲\n\n接一段普通文字' },
+  { name: '引用块内续行与空行', text: '> 甲\n> 乙\n>\n> 丙\n\n普通段落' },
+  { name: '标题后接段落', text: '## 标题\n正文一段\n\n又一段' },
+  { name: '表格后接文字（必须回退）', text: '| a | b |\n| --- | --- |\n| 1 | 2 |\n普通文字' },
+  { name: '有序列表多行项', text: '1. 第一项\n  第二行\n2. 第二项\n  第二行\n3. 第三项' },
+  { name: '项内含行内元素的列表', text: '- **粗体**甲\n- 乙\n- 丙' },
+  // 对抗性夹具：表格与换行（这两类是「拼错就会渲染漂移」的高风险形状）
+  { name: '表格带对齐分隔行', text: '| 左 | 中 | 右 |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |' },
+  { name: '段落紧接表格（形状突变）', text: '一句话\n| a | b |\n| --- | --- |\n| 1 | 2 |' },
+  { name: '以竖线收尾的段落', text: 'foo |\nbar | baz' },
+  { name: '表格后空行接列表', text: '| a |\n| --- |\n| 1 |\n\n- 项一\n- 项二' },
+  { name: '列表项内硬换行（行尾两空格）', text: '1. 甲  \n   乙\n2. 丙' },
+  { name: '连续空行分段', text: '甲\n\n\n\n乙\n\n丙' },
+  { name: 'CRLF 行尾（必须回退）', text: '第一行\r\n第二行\r\n第三行' },
+  { name: '硬换行紧接续行', text: '第一行  \n第二行\n第三行' },
 ]
 
 /** 真机形状的长夹具：40 项有序列表（项间无空行），#150 现场实测的那一类单块。 */
@@ -66,19 +86,54 @@ function longListBlock(items: number): string {
   return lines.join('\n')
 }
 
+/** 纯文本段落流：30 个短段落 + 20 行连续正文（无 ASCII 标点）——行边界最密的形状。 */
+function paragraphShapedText(): string {
+  const parts: string[] = []
+  for (let index = 0; index < 30; index += 1) parts.push(`第 ${index + 1} 段：先确认现象与复现路径，再核对渲染层的宽度来源与揭示节奏。`)
+  const long: string[] = []
+  for (let index = 0; index < 20; index += 1) long.push(`连续正文第 ${index + 1} 行，这里是一行没有任何标点符号的中文说明文字用来占据版面并制造行边界。`)
+  parts.push(long.join('\n'))
+  return parts.join('\n\n')
+}
+
+/** 真机同构的长夹具：30 个短段落 + 40 项列表 + 表格 + 20 行连续正文（#150 真机 prompt 的形状）。 */
+function benchShapedText(): string {
+  const parts: string[] = []
+  for (let index = 0; index < 30; index += 1) parts.push(`第 ${index + 1} 段：先确认现象与复现路径，再核对渲染层的宽度来源与揭示节奏。`)
+  parts.push(longListBlock(40))
+  parts.push([
+    '| 位置 | 谱 | 本例 | 合 |',
+    '| --- | --- | --- | --- |',
+    '| 一 | 仄仄平平仄仄平 | 示例句甲 | ✓ |',
+    '| 二 | 平平仄仄仄平平 | 示例句乙 | ✓ |',
+  ].join('\n'))
+  const long: string[] = []
+  for (let index = 0; index < 20; index += 1) {
+    long.push(`连续正文第 ${index + 1} 行，这里是一行没有任何标点符号的中文说明文字用来占据版面并制造行边界。`)
+  }
+  parts.push(long.join('\n'))
+  return parts.join('\n\n')
+}
+
 beforeEach(() => {
   clearMarkdownRenderModelCache()
   resetMarkdownParseCounters()
 })
 
 describe('issue 150: 增量 graft 与整段重解析逐前缀一致', () => {
+  // 步长要参数化：真机揭示每帧约 2–5 字到达，不同步长会走出**不同形状的差量**
+  // （`" 乙"`、`"2. "`、`"甲\n"`…），只跑 1 字步长会漏掉整类形状。
+  const STEPS = [1, 2, 3, 5] as const
   for (const fixture of CORPUS) {
-    it(`每个前缀都一致：${fixture.name}`, async () => {
-      for (let end = 1; end <= fixture.text.length; end += 1) {
-        const prefix = fixture.text.slice(0, end)
-        const incremental = await tailStep(prefix)
-        const reference = await fullParse(prefix)
-        expect(incremental.model, `${fixture.name} @${end}`).toEqual(reference)
+    it(`每个前缀都一致（步长 1/2/3/5）：${fixture.name}`, async () => {
+      for (const step of STEPS) {
+        clearMarkdownRenderModelCache()
+        for (let end = 1; end <= fixture.text.length; end += step) {
+          const prefix = fixture.text.slice(0, end)
+          const incremental = await tailStep(prefix)
+          const reference = await fullParse(prefix)
+          expect(incremental.model, `${fixture.name} step=${step} @${end}`).toEqual(reference)
+        }
       }
     })
   }
@@ -142,21 +197,42 @@ describe('issue 150: graft 判据的方向性（该拼的拼、该退的退）',
     }
   })
 
-  it('ASCII 标点 / 换行 / 行首构造一律回退整段重解析', async () => {
+  it('ASCII 标点 / 行首构造一律回退整段重解析', async () => {
     const cases = ['hello world', '第一行\n', '1. 列表项', '# 标题', '| a | b |', '   缩进', '> 引用', '---', '```ts']
     for (const base of cases) {
       clearMarkdownRenderModelCache()
       const warm = await tailStep(base)
       expect(warm.model.children.length, base).toBeGreaterThanOrEqual(0)
-      // 追加一个「结构字符」或换行：必须回退
-      for (const suffix of [',', '\n', '|', '#', ' ']) {
-        const text = base + suffix
-        if (text === base) continue
-        const step = await tailStep(text)
-        if (suffix === ' ' && !/[\r\n]$/.test(base)) continue
+      // 追加一个「结构字符」：必须回退（行首构造还会改写整块，不能按续行处理）
+      for (const suffix of [',', '|', '#', '-']) {
+        const step = await tailStep(base + suffix)
         expect(step.grafted, `${JSON.stringify(base)}+${JSON.stringify(suffix)}`).toBe(false)
       }
     }
+  })
+
+  it('尾随换行不改变模型：纯换行差量是「不变式拼接」，换行后的行内容按行规则拼接', async () => {
+    // 真机实测：一行边界会先来一个纯 `\n` 差量，再来行内容——两者都不该触发整段重解析
+    for (const base of ['第一行', '1. 甲', '# 标题', '> 引用', '| a |\n| --- |\n| x']) {
+      clearMarkdownRenderModelCache()
+      await tailStep(base)
+      const terminated = await tailStep(`${base}\n`)
+      expect(terminated.grafted, `${JSON.stringify(base)}+\\n`).toBe(true)
+      expect(terminated.model, `${JSON.stringify(base)}+\\n`).toEqual(await fullParse(`${base}\n`))
+    }
+    // 段落 / 列表项 / 标题 / 引用之后的续行或新段落：走行拼接
+    for (const base of ['第一行', '1. 甲', '# 标题', '> 引用']) {
+      clearMarkdownRenderModelCache()
+      await tailStep(base)
+      const started = await tailStep(`${base}\n第二行`)
+      expect(started.grafted, `${JSON.stringify(base)}+\\n第二行`).toBe(true)
+      expect(started.model, `${JSON.stringify(base)}+\\n第二行`).toEqual(await fullParse(`${base}\n第二行`))
+    }
+    // 表格之后接文字：形状不同（表格结束、另起段落），回退但结果必须一致
+    clearMarkdownRenderModelCache()
+    await tailStep('| a |\n| --- |\n| x')
+    const afterTable = await tailStep('| a |\n| --- |\n| x\n第二行')
+    expect(afterTable.model).toEqual(await fullParse('| a |\n| --- |\n| x\n第二行'))
   })
 
   it('落点行内元素或 URL/实体/转义上下文时回退', async () => {
@@ -178,6 +254,36 @@ describe('issue 150: graft 判据的方向性（该拼的拼、该退的退）',
   })
 })
 
+describe('issue 150: 按行拼接（续行 / 新列表项 / 新段落）的方向性', () => {
+  /** 从 base 一步跨到 text（模拟「一整行一次到达」的发布形态）。 */
+  async function stepFrom(base: string, text: string): Promise<{ grafted: boolean; model: MarkdownRoot }> {
+    clearMarkdownRenderModelCache()
+    await tailStep(base)
+    const step = await tailStep(text)
+    expect(step.model, `${JSON.stringify(text)}`).toEqual(await fullParse(text))
+    return step
+  }
+
+  it('续行 / 新列表项 / 新段落都走拼接', async () => {
+    expect((await stepFrom('第一行', '第一行\n第二行')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n2. 乙')).grafted).toBe(true)
+    expect((await stepFrom('- 甲', '- 甲\n- 乙')).grafted).toBe(true)
+    expect((await stepFrom('第一段', '第一段\n\n第二段')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n\n段落')).grafted).toBe(true)
+    expect((await stepFrom('## 标题', '## 标题\n正文')).grafted).toBe(true)
+    expect((await stepFrom('1. 甲', '1. 甲\n继续写')).grafted).toBe(true)
+  })
+
+  it('换款标记 / 松散列表 / 缩进续行 / 表格后接文字一律回退', async () => {
+    expect((await stepFrom('1. 甲', '1. 甲\n2) 乙')).grafted).toBe(false)
+    expect((await stepFrom('- 甲', '- 甲\n* 乙')).grafted).toBe(false)
+    expect((await stepFrom('- 甲', '- 甲\n\n- 乙')).grafted).toBe(false)
+    expect((await stepFrom('第一行', '第一行\n    缩进')).grafted).toBe(false)
+    expect((await stepFrom('| a |\n| --- |\n| 1 |', '| a |\n| --- |\n| 1 |\n文字')).grafted).toBe(false)
+    expect((await stepFrom('1. 甲', '1. 甲\n\n2. 乙')).grafted).toBe(false)
+  })
+})
+
 describe('issue 150: 真机形状的成本下降', () => {
   it('长列表按 2 字步长流式揭示：整段重解析次数相对每步一次下降一个数量级', async () => {
     const text = longListBlock(40)
@@ -187,10 +293,38 @@ describe('issue 150: 真机形状的成本下降', () => {
       steps += 1
     }
     const counters = markdownParseCounters()
-    // 「每步一次」= steps。实测（见开发记录）：2931 字 / 1466 步 → parsed 132、grafted 1334（11.1×），
-    // 解析 CPU 2368ms → 197ms（12.0×）；这里留余量锁住「一个数量级」。
+    // 「每步一次」= steps。实测（见开发记录）：2931 字 / 1466 步 → parsed 54、grafted 1412（27×），
+    // 解析 CPU 2357ms → 67ms（35×）；这里留余量锁住「一个数量级」。
     expect(counters.parsed).toBeLessThan(steps / 10)
     expect(counters.grafted).toBeGreaterThan(steps / 2)
     expect(counters.maxTextLength).toBeLessThanOrEqual(text.length)
+  })
+
+  it('真机同构内容按 2 字步长：整段重解析次数被成本锁拦住（含尾随换行归一化）', async () => {
+    // 这些入口是**纯性能**路径：退化掉也不会算错（回退永远正确），所以必须由成本锁看守。
+    // 实测 5025 字 / 2513 步 → parsed 160、grafted 2353；关掉尾随换行归一化会退化到 ~230+。
+    const text = benchShapedText()
+    let steps = 0
+    for (let end = 1; end <= text.length; end += 2) {
+      await tailStep(text.slice(0, end))
+      steps += 1
+    }
+    const counters = markdownParseCounters()
+    expect(counters.parsed).toBeLessThan(steps / 12)
+    expect(counters.grafted).toBeGreaterThan(steps * 0.8)
+  })
+
+  it('纯文本段落流按 2 字步长：整段重解析压到「每千步不到一次」', async () => {
+    // 这一条专门看守「行内容入口」（基座已以换行结尾时，行内容直接按行规则拼接）：
+    // 实测 996 步 → parsed 1；关掉该入口会退化到 ~15（步长 1 时多候选基座探测能救回来，故用步长 2）。
+    const text = paragraphShapedText()
+    let steps = 0
+    for (let end = 1; end <= text.length; end += 2) {
+      await tailStep(text.slice(0, end))
+      steps += 1
+    }
+    const counters = markdownParseCounters()
+    expect(counters.parsed).toBeLessThan(steps / 100)
+    expect(counters.grafted).toBeGreaterThan(steps * 0.9)
   })
 })

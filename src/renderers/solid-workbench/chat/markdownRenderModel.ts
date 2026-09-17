@@ -133,6 +133,18 @@ const PLAIN_DELTA = /^[A-Za-z0-9\u0080-\u{10FFFF} ]+$/u
  */
 const EXTENDABLE_PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/
 
+/**
+ * 按行拼接的差量形状：1–2 个换行 + 一行纯文本（非空、不以空白开头）。
+ * 行内容仍走 `PLAIN_LINE` 白名单——同理，纯文本行不可能自成块级构造。
+ */
+const LINE_DELTA = /^(\n{1,2})([^\n]+)$/
+/** 纯文本行：与 `PLAIN_DELTA` 同源的字符集。 */
+const PLAIN_LINE = /^[A-Za-z0-9\u0080-\u{10FFFF}][A-Za-z0-9\u0080-\u{10FFFF} ]*$/u
+/** 行首列表标记：子弹符或有序序号 + 空格。 */
+const LIST_MARKER = /^(?:([-*+])|(\d+)([.)])) /
+/** 模型里的换行分隔文本节点（remark-rehype 的排版产物）。 */
+const TEXT_NEWLINE: MarkdownText = { type: 'text', value: '\n' }
+
 /** 允许作为 graft 落点的祖先元素：追加纯文本不会改变这些容器的语义（表格单元格同理）。 */
 const GRAFT_SAFE_ANCESTORS = new Set([
   'p', 'li', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -190,8 +202,14 @@ function graftMarkdownModel(baseText: string, baseModel: MarkdownRoot, text: str
   if (!text.startsWith(baseText)) return null
   const delta = text.slice(baseText.length)
   if (delta.length === 0) return null
-  if (!PLAIN_DELTA.test(delta)) return null
-  if (/[\r\n]$/.test(baseText)) return null
+  // 行尾换行与空行是**块之间的分隔**，CommonMark 在块尾会把它们剥掉：文档末尾追加 1 个或多个
+  // `\n` 不改变模型（真机实测一行边界会先来一个纯 `\n` 差量，再来的行内容才是内容）。
+  const trailingNewlines = (/(\n+)$/.exec(baseText)?.[1].length ?? 0)
+  const effectiveBase = trailingNewlines > 0 ? baseText.slice(0, baseText.length - trailingNewlines) : baseText
+  // 差量**尾部**的换行同理（每帧 2–5 字到达时，「内容 + 换行」常挤在同一个差量里）：先摘掉再分类。
+  const tailNewlines = (/(\n+)$/.exec(delta)?.[1].length ?? 0)
+  const core = tailNewlines > 0 ? delta.slice(0, delta.length - tailNewlines) : delta
+  if (core.length === 0) return baseModel
   const spine = rightmostSpine(baseModel)
   if (spine === null) return null
   const { leaf, chain } = spine
@@ -200,19 +218,123 @@ function graftMarkdownModel(baseText: string, baseModel: MarkdownRoot, text: str
     const container = step.container
     if (container.type === 'element' && !GRAFT_SAFE_ANCESTORS.has(container.tagName)) return null
   }
+  const line = LINE_DELTA.exec(core)
+  // 行拼接的两个入口：①差量自带换行（`LINE_DELTA`）；②基座已经以换行结尾、差量是**这一行的内容**
+  // （真机形态：一行边界先来纯 `\n`，再来行内容）。两者都把「基座尾随换行数 + 差量首部换行数」
+  // 合并成 `newlines` 再走同一套行规则。
+  const contentOnlyLine = line === null && trailingNewlines > 0 && PLAIN_DELTA.test(core) ? core : null
+  const lineContent = line !== null ? line[2]! : contentOnlyLine
+  if (lineContent !== null) {
+    const spliced = spliceLine(effectiveBase, leaf, chain, trailingNewlines + (line?.[1]?.length ?? 0), lineContent)
+    if (spliced !== null) return spliced
+    // 身处在行边界：判据不成立一律整段重解析——绝不能退化成「延长旧叶子」，那会吞掉这个换行
+    return null
+  }
+  if (!PLAIN_DELTA.test(core)) return null
   // CommonMark 会剥掉块内容的末尾空白（`The ` 解析出来是 `The`），拼接时同样剥掉，
   // 否则与整段重解析差一个空格——差分测试逮到过这一条。纯空白差量因此不产生任何内容。
-  const appended = delta.replace(/\s+$/u, '')
+  const appended = core.replace(/\s+$/u, '')
   if (appended.length === 0) return baseModel
-  if (!baseText.endsWith(leaf.value)) return null
+  if (trailingNewlines > 0) return null // 已经换行：追加的文字属于新的一行，不是延长旧叶子
+  if (!effectiveBase.endsWith(leaf.value)) return null
   if (EXTENDABLE_PUNCTUATION.test(leaf.value.slice(-LEAF_GUARD_WINDOW))) return null
   return rebuildSpine(chain, leaf, appended)
+}
+
+/**
+ * 按行拼接（差量 = 1–2 个换行 + 一行纯文本）。三条规则的**形状都取自真机参考树实测**
+ * （见 `.agents/records/issue-150-line-splice.md`），任一判据不成立即返回 null 回退整段重解析：
+ *
+ * - **续行**（`\n` + 非标记行，落点父节点是 `p` 或 `li`）：软换行在模型里就是**同一个 text 节点内的
+ *   `\n`**，所以直接延长该节点即可（列表项的 lazy continuation 与引用块内的续行同形）。
+ * - **同款标记新列表项**（`\n` + 与基座最后一行**同款**的标记 + 纯文本）：在列表容器尾部把
+ *   `"\n"` 分隔节点换成 `["\n", li(内容), "\n"]`。标记换款（`-`→`*`、`.`→`)`）会让解析器**拆成
+ *   两个列表**，所以必须同款；松散列表（项内有 `p` 包裹）形状不同，一并回退。
+ * - **新段落**（空行 + 非缩进行，或标题后的单换行 + 行）：在根级追加 `["\n", p(内容)]`
+ *   ——实测「段落/列表/标题/围栏之后」都是这个形状。
+ */
+function spliceLine(
+  baseText: string,
+  leaf: MarkdownText,
+  chain: readonly GraftChainStep[],
+  newlines: number,
+  lineContent: string,
+): MarkdownRoot | null {
+  const parent = chain[chain.length - 1]!.container
+  const parentTag = parent.type === 'element' ? parent.tagName : ''
+  const rootStep = chain[0]
+  const root = rootStep?.container
+  if (root === undefined || root.type !== 'root') return null
+  const marker = LIST_MARKER.exec(lineContent)
+
+  if (newlines === 1 && marker !== null) {
+    // 同款标记的新列表项（标记换了款解析器会拆列表，所以要求同款）
+    if (parentTag !== 'li' || chain.length !== 3) return null
+    const list = chain[1]!.container
+    if (list.type !== 'element' || (list.tagName !== 'ul' && list.tagName !== 'ol')) return null
+    if (parent.children.length !== 1) return null // 松散列表（项内有 p 包裹）形状不同
+    const previous = LIST_MARKER.exec(lastLine(baseText))
+    if (previous === null) return null
+    const sameMarker = marker[1] !== undefined
+      ? marker[1] === previous[1]
+      : previous[2] !== undefined && marker[3] === previous[3]
+    if (!sameMarker) return null
+    const content = lineContent.slice(marker[0].length).replace(/\s+$/u, '')
+    if (content.length === 0 || !PLAIN_LINE.test(content)) return null
+    const item: MarkdownRenderNode = {
+      type: 'element',
+      tagName: 'li',
+      properties: {},
+      children: [{ type: 'text', value: content }],
+    }
+    return rebuildChain(chain, 1, children => [...children.slice(0, -1), TEXT_NEWLINE, item, TEXT_NEWLINE])
+  }
+
+  // 标记行但判据不成立（换款、嵌套、松散…）→ 回退，绝不当作续行
+  if (marker !== null) return null
+  if (!PLAIN_LINE.test(lineContent)) return null
+
+  // 续行：软换行 = 同一 text 节点内的 `\n`（列表项的 lazy continuation 与引用块内续行同形）
+  if (newlines === 1 && (parentTag === 'p' || parentTag === 'li')) {
+    if (!baseText.endsWith(leaf.value)) return null
+    if (EXTENDABLE_PUNCTUATION.test(leaf.value.slice(-LEAF_GUARD_WINDOW))) return null
+    return rebuildSpine(chain, leaf, `\n${lineContent.replace(/\s+$/u, '')}`)
+  }
+
+  // 新段落：空行之后，或标题之后的单换行（实测「段落/列表/标题/围栏之后」都是根级追加这个形状）
+  const afterBlankLine = newlines === 2
+  const afterHeading = newlines === 1 && /^h[1-6]$/.test(parentTag) && chain.length === 2
+  if (afterBlankLine || afterHeading) {
+    const lastChild = root.children[root.children.length - 1]
+    if (lastChild === undefined || lastChild.type !== 'element') return null
+    const paragraph: MarkdownRenderNode = {
+      type: 'element',
+      tagName: 'p',
+      properties: {},
+      children: [{ type: 'text', value: lineContent.replace(/\s+$/u, '') }],
+    }
+    return rebuildChain(chain, 0, children => [...children, TEXT_NEWLINE, paragraph])
+  }
+
+  return null
+}
+
+/** 文本最后一行（用于比对列表标记是否同款）。 */
+function lastLine(text: string): string {
+  const index = text.lastIndexOf('\n')
+  return index < 0 ? text : text.slice(index + 1)
+}
+
+interface GraftChainStep {
+  readonly container: MarkdownRoot | MarkdownElement
+  /** 该层脊线子节点在 `container.children` 里的下标。 */
+  readonly index: number
 }
 
 interface GraftSpine {
   readonly leaf: MarkdownText
   /** 从根到叶子父节点的链：每层的容器与该层所选子节点的下标。 */
-  readonly chain: readonly { readonly container: MarkdownRoot | MarkdownElement; readonly index: number }[]
+  readonly chain: readonly GraftChainStep[]
 }
 
 /**
@@ -223,7 +345,7 @@ interface GraftSpine {
  * 最右内容叶子不是文本节点（如以 `<hr>`/`<img>` 收尾）时返回 null。
  */
 function rightmostSpine(model: MarkdownRoot): GraftSpine | null {
-  const chain: { container: MarkdownRoot | MarkdownElement; index: number }[] = []
+  const chain: GraftChainStep[] = []
   let container: MarkdownRoot | MarkdownElement = model
   for (;;) {
     let index: number = container.children.length - 1
@@ -240,32 +362,46 @@ function rightmostSpine(model: MarkdownRoot): GraftSpine | null {
   }
 }
 
-/** 拷贝脊线并延长最右文本节点；其余子树结构共享（O(深度 × 每层子节点数) 的浅拷贝）。 */
-function rebuildSpine(
-  chain: readonly { readonly container: MarkdownRoot | MarkdownElement; readonly index: number }[],
-  leaf: MarkdownText,
-  delta: string,
+/** 延长最右文本节点（纯文本追加与续行同此：软换行在模型里就是同一个 text 节点内的 `\n`）。 */
+function rebuildSpine(chain: readonly GraftChainStep[], leaf: MarkdownText, delta: string): MarkdownRoot {
+  const deepest = chain[chain.length - 1]!
+  return rebuildChain(chain, chain.length - 1, children =>
+    replaceAt(children, deepest.index, { type: 'text', value: leaf.value + delta }))
+}
+
+/**
+ * 沿脊线重建：`depth` 层的子节点由 `edit` 生成，其余层只替换脊线下标处的子节点——非脊线子树结构共享，
+ * 因此单次拼接是 O(深度 × 每层子节点数) 的浅拷贝。
+ */
+function rebuildChain(
+  chain: readonly GraftChainStep[],
+  depth: number,
+  edit: (children: readonly MarkdownRenderNode[]) => readonly MarkdownRenderNode[],
 ): MarkdownRoot {
-  let node: MarkdownRenderNode = { type: 'text', value: leaf.value + delta }
-  for (let position = chain.length - 1; position >= 1; position -= 1) {
-    const step = chain[position]!
+  const deepest = chain[chain.length - 1]!
+  // 最深层不在编辑层时，脊线下标处的内容保持原样（S2/S3 只改上层容器）。
+  let node: MarkdownRenderNode = deepest.container.children[deepest.index] ?? { type: 'root', children: [] }
+  for (let level = chain.length - 1; level >= 0; level -= 1) {
+    const step = chain[level]!
     const container = step.container
-    if (container.type !== 'element') break
-    const children = [...container.children]
-    children[step.index] = node
-    node = {
-      type: 'element',
-      tagName: container.tagName,
-      properties: container.properties,
-      children,
-    }
+    const children = level === depth
+      ? edit(container.children)
+      : replaceAt(container.children, step.index, node)
+    node = container.type === 'root'
+      ? { type: 'root', children }
+      : { type: 'element', tagName: container.tagName, properties: container.properties, children }
   }
-  const rootStep = chain[0]!
-  const root = rootStep.container
-  if (root.type !== 'root') return { type: 'root', children: [node] }
-  const children = [...root.children]
-  children[rootStep.index] = node
-  return { type: 'root', children }
+  return node as MarkdownRoot
+}
+
+function replaceAt(
+  children: readonly MarkdownRenderNode[],
+  index: number,
+  value: MarkdownRenderNode,
+): readonly MarkdownRenderNode[] {
+  const next = [...children]
+  next[index] = value
+  return next
 }
 
 async function buildMarkdownRenderModel(

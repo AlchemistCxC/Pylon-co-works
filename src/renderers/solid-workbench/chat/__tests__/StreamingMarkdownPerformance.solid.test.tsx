@@ -88,8 +88,12 @@ describe('canonical streaming Markdown performance contract', () => {
 
     setStreaming(false)
 
+    // #150 稳定性「提升即全量」：终态把该行提升为稳定行时会**换源整段重解析一次**（已提交内容必须
+    // 来自真实解析，而不是增量拼接的结果），因此终态这一步比原来多一次解析；高亮不受影响（代码块
+    // 的 DOM/高亮结果被复用，不重复高亮）。这是有意的行为变化，不是「每 chunk 重解析」的回归——
+    // 那一条由上一个用例逐 chunk 锁定。
     await waitFor(() => expect(result.container.querySelector('[data-streaming-code="true"]')).toBeNull())
     await waitFor(() => expect(counters.highlight).toHaveBeenCalledTimes(1))
-    expect(counters.parse).toHaveBeenCalledTimes(parseCount + 1)
+    expect(counters.parse).toHaveBeenCalledTimes(parseCount + 2)
   })
 })
