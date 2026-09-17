@@ -1,4 +1,4 @@
-import { GLOBAL_PRESETS, type GlobalPreset, type PresetName } from '../../presets.ts'
+import { GLOBAL_PRESETS, type GlobalPreset, type PresetName } from '../../presets/index.ts'
 import { useStore, type ThemeSettings } from '../../store.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileRegistry } from '../../plugin-runtime/presentation/presentationProfileRegistry.ts'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cloneCcLayout, DEFAULT_CC_LAYOUT } from '../ccLayoutState.ts'
-import { completeTerminalPreset, type GlobalPreset } from '../presets.ts'
+import { completeTerminalPreset, type GlobalPreset } from '../presets/index.ts'
 import { THEME_DEFAULTS } from '../themeFieldDefs.ts'
 
 /** TerminalPresetName 之外的预设：claude/nord/tokyo/solarized/amber/matrix 六个才登记视觉补全。 */

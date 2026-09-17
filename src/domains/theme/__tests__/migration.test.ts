@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
 import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
-import { GLOBAL_PRESETS } from '../../../presets.ts'
+import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { PROFILE_SCHEMA_VERSION } from '../../../profilePersistence.ts'
 import { readFileSync } from 'node:fs'
 import { CC_LAYOUT_SCHEMA_VERSION } from '../../../ccLayoutState.ts'

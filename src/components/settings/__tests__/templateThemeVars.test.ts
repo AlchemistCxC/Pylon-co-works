@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { themeToCssVars } from '../templateThemeVars.ts'
 import { THEME_CSS_VAR_MAP, THEME_DEFAULTS } from '../../../themeFieldDefs.ts'
-import { GLOBAL_PRESETS } from '../../../presets.ts'
+import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 
 // W2-14：模板库——预览局部 cssVars 不触全局 store；点击才应用；恢复重应用 delta
 

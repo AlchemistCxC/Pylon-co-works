@@ -2,7 +2,7 @@
 // （原 scripts/test-zone-fields.mts；settingsCompleteness.test.ts 只锁 defs 侧，本检查锁接线侧）。
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { ZONE_FIELDS } from '../src/presets.ts'
+import { ZONE_FIELDS } from '../src/themeFieldDefs.ts'
 import { THEME_FIELD_OWNERS } from '../src/themeFieldDefs.ts'
 
 const storeSource = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
