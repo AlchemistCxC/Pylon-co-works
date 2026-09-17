@@ -333,3 +333,20 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **不碰**：`MarkdownContent.solid.tsx`、`markdownRenderModel.ts`、`streamingMarkdownSplit.ts` 及任何产品代码；`vitest.config.ts` 的 testTimeout/retry；他人的 `src/renderers/solid-workbench/input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
 
 结论先给：不是产品缺陷，是**判据口径**问题——骨架 `.term-md-skeleton` 是解析中的合法加载态（P57 S3-R8 契约），却被 `emptyBlockSignature`/`blankBlocks` 当成空块。实测（与全量跑并发四次的探针）解析落地 573 / 620 / **1547** / 748 ms，跨过 `waitFor` 的 1s 默认值；用「原文件 + 1.5s 慢解析」可确定性复现 issue 里那条 `expected [ 'DIV.term-md-skeleton' ] to deeply equal []`。修复＝判据豁免加载态 + 落地等待显式给足预算 + 一条不依赖负载的回归用例；变异核验（只回退判据）新用例必红。
+
+---
+
+[2026-09-17 14] [Fisher] [#148]
+
+**开工：issue148（尾块解析「最新即胜」+ 只读解析成本读数）。** 这是 #141 遗留观察的落地施工，spec 见 `.agents/spec/issue-148-tail-parse-latest-wins.md`。**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/renderers/solid-workbench/chat/markdownRenderModel.ts`（新增可选 `isCurrent` 判据 + 跳过与缓存安全）
+- `src/renderers/solid-workbench/chat/markdownParseCounters.ts`（**新增**，叶子模块，仿 `streamingRowCounters.ts`）
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（只在增长尾块路径传判据）
+- `src/renderers/solid-workbench/streamingDiagnostics.ts`（读数新增 `parseCost` 一项，既有字段不动）
+- `src/renderers/solid-workbench/chat/__tests__/issue148.parseLatestWins.solid.test.tsx`（**新增**；既有测试一律不改）
+- 文档：`.agents/records/issue-148-*.md`、本文件
+
+**我不碰**：`streamingDisplayScheduler.ts`、`streamingRowCounters.ts`、`streamingMarkdownSplit.ts`、`chat/__tests__/issue55.rowSetPurity.solid.test.tsx`（#141 已收口）、`vitest.config.ts`、`docs/说明书/`（该区域未描述尾块解析策略，无漂移面）、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+**约束（复审时请据此把关）**：跳过只允许发生在「Solid 必然丢弃结果」的请求上（判据 ≡ `pr === p`），且跳过结果**不得进 LRU**；既有行为测试零修改。
