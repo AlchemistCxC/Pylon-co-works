@@ -219,7 +219,14 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
   const useCache = () => props.cache?.() ?? true
   const [model] = createResource(
     () => shouldParse() ? text() : undefined,
-    source => getMarkdownRenderModel(source, { cache: useCache() }),
+    source => getMarkdownRenderModel(source, {
+      cache: useCache(),
+      // #148：只有增长尾块（不走缓存的路径）才传「最新即胜」判据——跳过返回空模型，落进 LRU
+      // 会毒化同文本的其他行。判据与 Solid 丢弃结果的 `pr === p` 条件同义：解析源是
+      // `shouldParse() ? text() : undefined`，源一变它就发起新 fetch 并改写 pr，旧请求的结果
+      // 必被丢弃（token 级切片、终态重发、resume 这类一 tick 内多次发布的中间态即在此被挡下）。
+      isCurrent: useCache() ? undefined : () => shouldParse() && text() === source,
+    }),
   )
 
   return (
