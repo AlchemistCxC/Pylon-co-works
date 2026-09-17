@@ -73,11 +73,18 @@
 .workspace-open-trigger, .workspace-reopen-trigger { display:grid; place-items:center; padding:0; color:var(--accent); }
 .workspace-titlebar-icon.workspace-reopen-trigger:disabled { opacity:.26; color:var(--titlebar-text-muted); }
 .workspace-launcher-separator { width:1px; height:18px; margin:auto 0; background:var(--border); }
-/* #154：折叠按钮并入右侧应用控制簇——左轨道折叠后为 0 宽，按钮若留在左格会
-   随轨道一起消失，用户将无法再展开。 */
-.workspace-sidebar-toggle { width:var(--ui-control-standard); height:var(--ui-control-standard); flex:0 0 auto; padding:0; display:grid; place-items:center; }
-/* 轨道为 0 宽（折叠 / 本 Sheet 无左栏）时整个左格不参与布局，避免留下 1px 悬空边框。 */
-.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar { display:none; }
+/* 折叠按钮位于工作区带首位（左栏紧邻处），不进右侧应用控制簇——放那里会挤动
+   右侧栏/界面/设置 与窗口控制的落点。工作区带是 grid 第 2 列（1fr），本列的
+   增删不影响第 3 列，故三菜单与窗口按钮位置恒定。 */
+.workspace-sidebar-toggle { width:var(--ui-control-standard); height:var(--ui-control-standard); flex:0 0 auto; margin:auto 0; padding:0; display:grid; place-items:center; border-left:1px solid transparent; }
+.workspace-sidebar-toggle:disabled { cursor:default; }
+/* 轨道为 0 宽（折叠 / 本 Sheet 无左栏）时左格不占空间、不可见，但**必须留在 grid 流里**。
+   用 display:none 移除会让后两个兄弟自动前移一列——「右侧栏/界面/设置」与窗口控制
+   会整体跳到窗口最左侧（实测折叠后菜单从 957/997/1037 变成 4/44/84，窗口按钮从
+   1086/1124/1162 变成 133/171/209）。折叠只应改变左列，不该动右侧这两簇。 */
+.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar {
+  width:0; min-width:0; max-width:0; padding:0; border:0; overflow:hidden; visibility:hidden;
+}
 .workspace-titlebar-brand { margin-left:var(--ui-space-2); }
 .workspace-titlebar-icon:hover,
 .workspace-titlebar-icon.workspace-reopen-trigger:hover,

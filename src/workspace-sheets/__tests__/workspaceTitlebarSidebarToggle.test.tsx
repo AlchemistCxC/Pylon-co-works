@@ -69,23 +69,39 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
     expect(onToggle).toHaveBeenCalledTimes(1)
   })
 
-  it('active Sheet 无侧栏 → 完全不生成折叠按钮（不是禁用）', () => {
+  it('active Sheet 无侧栏 → 折叠按钮禁用（保留位置，不忽隐忽现）', () => {
     const onToggle = renderTitlebar(false, false)
-    expect(toggleButton()).toBeNull()
-    expect(screen.queryByRole('button', { name: '当前 Sheet 无侧栏' })).toBeNull()
+    const button = toggleButton()
+    expect(button).not.toBeNull()
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', '当前 Sheet 无侧栏')
     expect(document.querySelector('.workspace-titlebar')).toHaveClass('sidebar-disabled')
     expect(screen.queryByLabelText('Agent 状态')).toBeNull()
+    fireEvent.click(button!)
     expect(onToggle).not.toHaveBeenCalled()
   })
 
-  it('#154：按钮位于右侧应用控制簇，不随左轨道折叠而消失', () => {
+  it('折叠按钮位于工作区带首位，且**不在**右侧应用控制簇内（三菜单与窗口控制位置不受影响）', () => {
     renderTitlebar(true, true)
     const button = toggleButton()
     // 折叠态没有左轨道，按钮必须仍然可点——否则用户无法再展开。
     expect(button).not.toBeNull()
-    expect(button!.closest('.workspace-window-app-controls')).not.toBeNull()
+    expect(button!.closest('.workspace-titlebar-workspace')).not.toBeNull()
     expect(button!.closest('.workspace-titlebar-sidebar')).toBeNull()
+    expect(button!.closest('.workspace-window-app-controls')).toBeNull()
+    expect(button!.closest('.workspace-window-controls')).toBeNull()
     expect(button).not.toBeDisabled()
+
+    // 应用控制簇里仍然只有三个菜单触发（外加插件贡献），不得混入折叠按钮。
+    const appControls = document.querySelector('.workspace-window-app-controls')!
+    expect(appControls.querySelectorAll('[data-sidebar-toggle="true"]').length).toBe(0)
+    expect([...appControls.querySelectorAll('[data-menu-trigger]')].map(b => b.getAttribute('data-menu-trigger')))
+      .toEqual(['right-panel', 'interface', 'settings'])
+
+    // 窗口控制三按钮照旧存在且顺序不变。
+    const nativeControls = document.querySelector('.workspace-window-native-controls')!
+    expect([...nativeControls.querySelectorAll('button')].map(b => b.getAttribute('aria-label')))
+      .toEqual(['最小化', '最大化或还原', '关闭窗口'])
   })
 
   it('已折叠且有侧栏 → 按钮标注展开，且状态灯一并隐藏', () => {

@@ -6,7 +6,7 @@ import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 import { selectAgentStatus } from '../components/settings/agentTypes'
-import { Menu, Minus, Plus, RotateCcw, Square, X } from 'lucide-react'
+import { Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Square, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -186,6 +186,29 @@ export default function WorkspaceTitlebar({
       </div>
 
       <div className="workspace-titlebar-workspace">
+        {/* 折叠按钮放在左栏紧邻处（工作区带首位），**不进右侧应用控制簇**：放那里会挤动
+            右侧栏/界面/设置 与窗口控制的落点，而这三者加窗口按钮的位置必须稳定。
+            之所以能放在这里而不影响它们——工作区带是标题栏 grid 的第 2 列
+            `minmax(0,1fr)`，第 3 列（应用控制 + 窗口控制）宽度由自身内容决定，
+            因此本列的增删不会移动第 3 列。
+            之所以不放在左格里——左轨道折叠后宽 0，按钮会随轨道一起消失，用户无法再展开。
+            始终渲染（无左栏时禁用），避免按钮随 Sheet 能力忽隐忽现。 */}
+        <button
+          type="button"
+          className="workspace-titlebar-icon workspace-sidebar-toggle"
+          onClick={onToggleSidebar}
+          disabled={!sidebarEnabled}
+          title={sidebarEnabled ? sidebarToggleLabel : '当前 Sheet 无侧栏'}
+          aria-label={sidebarEnabled ? sidebarToggleLabel : '当前 Sheet 无侧栏'}
+          aria-expanded={sidebarEnabled ? sidebarExpanded : undefined}
+          data-sidebar-toggle="true"
+        >
+          {/* 图标表达「左栏在/不在」而不是汉堡菜单：☰ 会读成「打开菜单」，这也是原先费解的一半。 */}
+          {chromeStyle === 'icons'
+            ? (sidebarExpanded ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />)
+            : <span aria-hidden="true">{sidebarExpanded ? '▤' : '▢'}</span>}
+        </button>
+        <span className="workspace-launcher-separator" aria-hidden="true" />
         {showTabBar && <SheetTabStrip
           sheets={sheets}
           activeSheetId={activeSheetId}
@@ -206,22 +229,6 @@ export default function WorkspaceTitlebar({
 
       <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
-          {/* #154：折叠按钮并入右侧应用控制簇。左轨道折叠后为 0 宽，按钮若留在左格会
-              随轨道一起消失，用户将无法再展开；无左栏的 Sheet 直接不出现该按钮。 */}
-          {sidebarEnabled && <>
-            <button
-              type="button"
-              className="workspace-titlebar-icon workspace-sidebar-toggle"
-              onClick={onToggleSidebar}
-              title={sidebarToggleLabel}
-              aria-label={sidebarToggleLabel}
-              aria-expanded={sidebarExpanded}
-              data-sidebar-toggle="true"
-            >
-              {chromeStyle === 'icons' ? <Menu size={17} aria-hidden="true" /> : <span aria-hidden="true">☰</span>}
-            </button>
-            <span className="workspace-launcher-separator" aria-hidden="true" />
-          </>}
           <div className="workspace-titlebar-menu-anchor">
             <button type="button" onClick={event => toggleMenu('right-panel', event.currentTarget)} disabled={!rightPanelAvailable} title={rightPanelAvailable ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏" aria-haspopup="menu" aria-expanded={openMenu === 'right-panel'} aria-controls={menuId('right-panel')} data-menu-trigger="right-panel"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
             {openMenu === 'right-panel' && <div id={menuId('right-panel')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="right-panel" onKeyDown={handleMenuKeyDown}>

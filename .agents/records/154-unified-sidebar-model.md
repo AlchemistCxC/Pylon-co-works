@@ -91,10 +91,23 @@
 
 **改动后补测口径（复现用）**：逐 sheet 量 `.workspace-titlebar-sidebar` 的 `right` 与本 sheet 左栏 `.sidebar` 的 `right`，要求相等，且「右缘落在 `--sheet-sidebar-track-width` 处、`borderRightWidth != 0` 的元素」计数为 1；折叠态再量 `track == 0`、`.layout[data-sidebar] == 'collapsed'`、轨道处边框元素计数 0、左格 `display:none`。
 
-**实机复测改出的两个真缺陷**（静态契约与单测都没抓到，只有数值实测能抓到）：
+**实机复测改出的三个真缺陷**（静态契约与单测都没抓到，只有数值实测能抓到）：
 
 1. **折叠残留 24px**：各 Sheet 左栏自带内边距（gateway/search/history 的 `px-3`、`ps-nav` 的 `padding`），`box-sizing:border-box` 下即使 `width:0` 盒子也不可能小于 padding 之和 ⇒ Gateway 折叠后残留 24px。修：折叠态 `padding:0`（并加静态断言）。
 2. **折叠态控件仍可聚焦**：`Sidebar.css` 旧规则 `.sidebar > * { visibility:visible }` 会**覆盖继承**，于是 `visibility:hidden` 的外壳下 File 的 activity 按钮依然 `focusable=true`、`checkVisibility()=true`（宽度 0 只是裁掉了像素）。修：删除该旧规则，并补 `.layout[data-sidebar="collapsed"] .sidebar *` 兜底（`*` 保证压过任何 Sheet 级 `visibility:visible`）。
+3. **折叠时右侧两簇整体左移（用户报的「折叠按钮逻辑太怪」的根因）**：折叠态我用 `display:none` 隐藏标题栏左格，而标题栏是三列 grid——移除一个 grid item 会让后两个兄弟自动**前移一列**。实测折叠后「右侧栏/界面/设置」从 `957/997/1037` 变成 `4/44/84`、窗口控制三按钮从 `1086/1124/1162` 变成 `133/171/209`（整簇跑到窗口最左侧）。修：折叠态左格改为「0 宽 + `padding:0` + `border:0` + `visibility:hidden`」**留在 grid 流里**，并加静态断言禁止 `display:none`。
+   - 同时按用户要求重排折叠按钮位置：从右侧应用控制簇移回**工作区带首位**（左栏紧邻处），并把图标从读作「菜单」的 ☰ 换成 `PanelLeftClose`/`PanelLeftOpen`（glyph 皮肤 `▤`/`▢`）。
+
+**折叠按钮位置与「三菜单 + 窗口控制不动」的实机证明**（1200×800）
+
+| 元素 | 改动前基线 | 现在·展开 | 现在·折叠 |
+|---|---|---|---|
+| `.workspace-window-controls` | x=953 w=247 | x=953 w=247 | x=953 w=247 |
+| 右侧栏 / 界面 / 设置 | 957 / 997 / 1037 | 957 / 997 / 1037 | **957 / 997 / 1037** |
+| 最小化 / 最大化 / 关闭 | 1086 / 1124 / 1162 | 1086 / 1124 / 1162 | **1086 / 1124 / 1162** |
+| 折叠按钮 | 42px 左格内 | x=240（贴左栏右缘） | x=0（贴折叠后的左缘，可点） |
+
+即：右侧两簇在展开/折叠两态下**与改动前的数值逐项相同**，折叠只改变左列。
 
 ## 测试处置
 

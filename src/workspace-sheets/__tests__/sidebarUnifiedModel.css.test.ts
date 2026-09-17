@@ -112,4 +112,14 @@ describe('#154 左列统一模型 CSS 契约', () => {
     // 拖拽期间关过渡，否则每个 pointermove 的过渡互相打断会拖出尾迹。
     expect(appCss).toMatch(/\.layout\.is-resizing[^{]*\{[^}]*transition:none/)
   })
+
+  it('折叠时标题栏左格留在 grid 流里（否则右侧两簇会整体左移）', () => {
+    const collapsedCell = ruleBodies(appCss, '.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar')[0]
+    expect(collapsedCell, '缺少折叠态左格规则').toBeTruthy()
+    // 关键：不能用 display:none。标题栏是三列 grid，移除左格会让「右侧栏/界面/设置」
+    // 与窗口控制这两个兄弟自动前移一列（实测菜单从 957/997/1037 → 4/44/84、
+    // 窗口按钮 1086/1124/1162 → 133/171/209），即用户报的「折叠后菜单乱跳」。
+    expect(collapsedCell, '折叠态左格不得 display:none（会挤动右侧菜单与窗口控制）').not.toMatch(/display:\s*none/)
+    expect(collapsedCell).toMatch(/width:\s*0/)
+  })
 })
