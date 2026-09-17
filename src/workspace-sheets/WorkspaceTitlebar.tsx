@@ -178,21 +178,10 @@ export default function WorkspaceTitlebar({
   return (
     <header className={`workspace-titlebar ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
-        {sidebarExpanded && (
-          <span className="workspace-titlebar-brand" aria-label="Agent 状态">
-            <AgentStatusLights status={activeStatus.status} size={12} />
-          </span>
-        )}
-      </div>
-
-      <div className="workspace-titlebar-workspace">
-        {/* 折叠按钮放在左栏紧邻处（工作区带首位），**不进右侧应用控制簇**：放那里会挤动
-            右侧栏/界面/设置 与窗口控制的落点，而这三者加窗口按钮的位置必须稳定。
-            之所以能放在这里而不影响它们——工作区带是标题栏 grid 的第 2 列
-            `minmax(0,1fr)`，第 3 列（应用控制 + 窗口控制）宽度由自身内容决定，
-            因此本列的增删不会移动第 3 列。
-            之所以不放在左格里——左轨道折叠后宽 0，按钮会随轨道一起消失，用户无法再展开。
-            始终渲染（无左栏时禁用），避免按钮随 Sheet 能力忽隐忽现。 */}
+        {/* 折叠按钮在最左、三灯在其右，顺序固定。它留在左格里的前提是左格折叠时**不收成 0**
+            而是收窄到按钮宽度（标题栏 grid 第 1 列用 `max(轨道宽, 按钮宽)`），否则按钮会随
+            轨道一起消失、位置也不再稳定。始终渲染（本 Sheet 无左栏时禁用），
+            避免随 Sheet 能力忽隐忽现。 */}
         <button
           type="button"
           className="workspace-titlebar-icon workspace-sidebar-toggle"
@@ -203,12 +192,19 @@ export default function WorkspaceTitlebar({
           aria-expanded={sidebarEnabled ? sidebarExpanded : undefined}
           data-sidebar-toggle="true"
         >
-          {/* 图标表达「左栏在/不在」而不是汉堡菜单：☰ 会读成「打开菜单」，这也是原先费解的一半。 */}
+          {/* 图标表达「左栏在/不在」而不是汉堡菜单：☰ 会读成「打开菜单」。 */}
           {chromeStyle === 'icons'
             ? (sidebarExpanded ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />)
             : <span aria-hidden="true">{sidebarExpanded ? '▤' : '▢'}</span>}
         </button>
-        <span className="workspace-launcher-separator" aria-hidden="true" />
+        {sidebarExpanded && (
+          <span className="workspace-titlebar-brand" aria-label="Agent 状态">
+            <AgentStatusLights status={activeStatus.status} size={12} />
+          </span>
+        )}
+      </div>
+
+      <div className="workspace-titlebar-workspace">
         {showTabBar && <SheetTabStrip
           sheets={sheets}
           activeSheetId={activeSheetId}

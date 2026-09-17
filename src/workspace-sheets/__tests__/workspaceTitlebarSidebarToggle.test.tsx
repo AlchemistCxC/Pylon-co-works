@@ -81,16 +81,18 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
     expect(onToggle).not.toHaveBeenCalled()
   })
 
-  it('折叠按钮位于工作区带首位，且**不在**右侧应用控制簇内（三菜单与窗口控制位置不受影响）', () => {
-    renderTitlebar(true, true)
+  it('折叠按钮在最左、三灯在其右，且**不在**右侧应用控制簇内（三菜单与窗口控制位置不受影响）', () => {
+    renderTitlebar(true, false)
     const button = toggleButton()
-    // 折叠态没有左轨道，按钮必须仍然可点——否则用户无法再展开。
     expect(button).not.toBeNull()
-    expect(button!.closest('.workspace-titlebar-workspace')).not.toBeNull()
-    expect(button!.closest('.workspace-titlebar-sidebar')).toBeNull()
+    const cell = button!.closest('.workspace-titlebar-sidebar')
+    expect(cell).not.toBeNull()
+    // 顺序：按钮是左格首个元素，三灯紧随其右。
+    expect(cell!.firstElementChild).toBe(button)
+    expect(button!.nextElementSibling).toHaveClass('workspace-titlebar-brand')
     expect(button!.closest('.workspace-window-app-controls')).toBeNull()
     expect(button!.closest('.workspace-window-controls')).toBeNull()
-    expect(button).not.toBeDisabled()
+    expect(button!.closest('.workspace-titlebar-workspace')).toBeNull()
 
     // 应用控制簇里仍然只有三个菜单触发（外加插件贡献），不得混入折叠按钮。
     const appControls = document.querySelector('.workspace-window-app-controls')!
@@ -102,6 +104,19 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
     const nativeControls = document.querySelector('.workspace-window-native-controls')!
     expect([...nativeControls.querySelectorAll('button')].map(b => b.getAttribute('aria-label')))
       .toEqual(['最小化', '最大化或还原', '关闭窗口'])
+  })
+
+  it('折叠态按钮仍在左格首位（位置折叠前后不变），三灯隐藏', () => {
+    renderTitlebar(true, true)
+    const button = toggleButton()
+    // 左格折叠时收窄到按钮宽度而不是归零，所以按钮仍在原位、可点。
+    expect(button).not.toBeNull()
+    expect(button!.closest('.workspace-titlebar-sidebar')).not.toBeNull()
+    expect(button!.closest('.workspace-titlebar-sidebar')!.firstElementChild).toBe(button)
+    expect(button).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '展开左栏' })).toBe(button)
+    // 折叠后三灯不显示。
+    expect(document.querySelector('.workspace-titlebar-brand')).toBeNull()
   })
 
   it('已折叠且有侧栏 → 按钮标注展开，且状态灯一并隐藏', () => {

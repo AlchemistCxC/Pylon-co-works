@@ -113,13 +113,23 @@ describe('#154 左列统一模型 CSS 契约', () => {
     expect(appCss).toMatch(/\.layout\.is-resizing[^{]*\{[^}]*transition:none/)
   })
 
-  it('折叠时标题栏左格留在 grid 流里（否则右侧两簇会整体左移）', () => {
-    const collapsedCell = ruleBodies(appCss, '.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar')[0]
-    expect(collapsedCell, '缺少折叠态左格规则').toBeTruthy()
-    // 关键：不能用 display:none。标题栏是三列 grid，移除左格会让「右侧栏/界面/设置」
+  it('折叠时标题栏左格留住按钮宽度（按钮位置前后不变，且不挤动右侧两簇）', () => {
+    // 第 1 列 = max(轨道宽, 折叠按钮宽)：折叠态左格收窄到按钮宽度而不是 0，
+    // 因此按钮停在最左、折叠前后 x 不变。
+    expect(appCss).toMatch(/grid-template-columns:max\(var\(--sheet-sidebar-track-width,0px\),var\(--titlebar-rail-toggle-width\)\) minmax\(0,1fr\) auto/)
+    expect(appCss).toMatch(/--titlebar-rail-toggle-width:\s*42px/)
+    // 关键：左格不能用 display:none。标题栏是三列 grid，移除左格会让「右侧栏/界面/设置」
     // 与窗口控制这两个兄弟自动前移一列（实测菜单从 957/997/1037 → 4/44/84、
     // 窗口按钮 1086/1124/1162 → 133/171/209），即用户报的「折叠后菜单乱跳」。
+    const collapsedCell = ruleBodies(appCss, '.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar')[0]
+    expect(collapsedCell, '缺少折叠态左格规则').toBeTruthy()
     expect(collapsedCell, '折叠态左格不得 display:none（会挤动右侧菜单与窗口控制）').not.toMatch(/display:\s*none/)
-    expect(collapsedCell).toMatch(/width:\s*0/)
+    expect(collapsedCell, '折叠态左格不得把宽度归零（按钮会失去位置）').not.toMatch(/(^|;)\s*(width|max-width)\s*:\s*0/)
+  })
+
+  it('折叠态只隐藏三灯，不隐藏按钮', () => {
+    const collapsedBrand = ruleBodies(appCss, '.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-brand')[0]
+    expect(collapsedBrand, '缺少折叠态三灯规则').toBeTruthy()
+    expect(collapsedBrand).toMatch(/display:\s*none/)
   })
 })

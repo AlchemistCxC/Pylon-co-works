@@ -17,9 +17,12 @@
 .workspace-titlebar {
   --titlebar-text-resolved:var(--titlebar-text,var(--text));
   --titlebar-text-muted:color-mix(in srgb,var(--titlebar-text-resolved) 68%,transparent);
+  /* 左格在折叠态的最小宽度 = 折叠按钮宽度。第 1 列用 max(轨道宽, 它)，于是
+     折叠按钮永远停在最左且折叠前后位置不变；同时这不是「空列」——格子里是按钮本身。 */
+  --titlebar-rail-toggle-width:42px;
   position:relative; z-index:100;
   height:var(--titlebar-h,44px); min-height:var(--titlebar-h,44px); display:grid;
-  grid-template-columns:minmax(0,var(--sheet-sidebar-track-width,0px)) minmax(0,1fr) auto;
+  grid-template-columns:max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)) minmax(0,1fr) auto;
   align-items:stretch; background:var(--titlebar-bg,var(--surface-panel));
   border-bottom:1px solid var(--border); color:var(--titlebar-text-resolved);
   box-shadow:none;
@@ -73,18 +76,18 @@
 .workspace-open-trigger, .workspace-reopen-trigger { display:grid; place-items:center; padding:0; color:var(--accent); }
 .workspace-titlebar-icon.workspace-reopen-trigger:disabled { opacity:.26; color:var(--titlebar-text-muted); }
 .workspace-launcher-separator { width:1px; height:18px; margin:auto 0; background:var(--border); }
-/* 折叠按钮位于工作区带首位（左栏紧邻处），不进右侧应用控制簇——放那里会挤动
-   右侧栏/界面/设置 与窗口控制的落点。工作区带是 grid 第 2 列（1fr），本列的
-   增删不影响第 3 列，故三菜单与窗口按钮位置恒定。 */
-.workspace-sidebar-toggle { width:var(--ui-control-standard); height:var(--ui-control-standard); flex:0 0 auto; margin:auto 0; padding:0; display:grid; place-items:center; border-left:1px solid transparent; }
-.workspace-sidebar-toggle:disabled { cursor:default; }
-/* 轨道为 0 宽（折叠 / 本 Sheet 无左栏）时左格不占空间、不可见，但**必须留在 grid 流里**。
-   用 display:none 移除会让后两个兄弟自动前移一列——「右侧栏/界面/设置」与窗口控制
-   会整体跳到窗口最左侧（实测折叠后菜单从 957/997/1037 变成 4/44/84，窗口按钮从
-   1086/1124/1162 变成 133/171/209）。折叠只应改变左列，不该动右侧这两簇。 */
-.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar {
-  width:0; min-width:0; max-width:0; padding:0; border:0; overflow:hidden; visibility:hidden;
+/* 折叠按钮固定在左格首位、三灯在其右；宽度取左格最小宽度，使按钮位置在折叠前后不变。 */
+.workspace-sidebar-toggle {
+  width:var(--titlebar-rail-toggle-width,42px); height:100%; flex:0 0 var(--titlebar-rail-toggle-width,42px);
+  margin:0; padding:0; display:grid; place-items:center;
 }
+.workspace-sidebar-toggle:disabled { cursor:default; }
+/* 折叠（或本 Sheet 无左栏）：左格只收窄到折叠按钮的宽度，按钮留在原位（最左），
+   仅去掉分割线与状态灯。**不能 display:none**——移除这个 grid item 会让后两个兄弟
+   自动前移一列，右侧栏/界面/设置 与窗口控制会整簇跳到窗口最左侧（实测菜单
+   957/997/1037 → 4/44/84）。左格宽度由第 1 列的 max(轨道宽, 按钮宽) 决定。 */
+.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-sidebar { overflow:hidden; }
+.workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-brand { display:none; }
 .workspace-titlebar-brand { margin-left:var(--ui-space-2); }
 .workspace-titlebar-icon:hover,
 .workspace-titlebar-icon.workspace-reopen-trigger:hover,
@@ -607,7 +610,7 @@
     color-mix(in srgb,var(--surface-canvas) 94%,var(--surface-panel));
 }
 .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-  height:58px; min-height:58px; grid-template-columns:minmax(0,var(--sheet-sidebar-track-width,0px)) minmax(0,1fr) auto;
+  height:58px; min-height:58px; grid-template-columns:max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)) minmax(0,1fr) auto;
   padding:7px 8px; gap:8px; border-bottom:0; background:color-mix(in srgb,var(--surface-canvas) 74%,transparent);
   box-shadow:none; backdrop-filter:blur(28px) saturate(1.18);
 }
@@ -876,5 +879,5 @@ body[data-interface-mode="tactical-blue"] :is(button,input,textarea,select) { ac
 .app[data-shell-sidebar-side="right"] .right-rail-host .right-rail-resize-handle { left:auto; right:0; }
 
 /* 标题栏镜像：轨道列换到第 3 列，窗口控制列换到第 1 列；拖拽区属性不变 */
-.app[data-shell-sidebar-side="right"] .workspace-titlebar { grid-template-columns:auto minmax(0,1fr) minmax(0,var(--sheet-sidebar-track-width,0px)); }
+.app[data-shell-sidebar-side="right"] .workspace-titlebar { grid-template-columns:auto minmax(0,1fr) max(var(--sheet-sidebar-track-width,0px),var(--titlebar-rail-toggle-width)); }
 .app[data-shell-sidebar-side="right"] .workspace-titlebar > .workspace-titlebar-sidebar { order:4; }

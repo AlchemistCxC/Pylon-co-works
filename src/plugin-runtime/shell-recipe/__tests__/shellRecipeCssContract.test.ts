@@ -32,9 +32,9 @@ describe('Shell Recipe 样式契约（ADR-0003）', () => {
 
   it('标题栏镜像：轨道列移到第 3 列且拖拽区属性不在重排规则内被移除', () => {
     expect(appCss).toMatch(
-      // #154：轨道列与左列外壳共用唯一宽度真值 --sheet-sidebar-track-width
-      // （原 --titlebar-sidebar-width 随三套 token 收敛退休；断言强度不变）。
-      /\.app\[data-shell-sidebar-side="right"\] \.workspace-titlebar \{ grid-template-columns:auto minmax\(0,1fr\) minmax\(0,var\(--sheet-sidebar-track-width,0px\)\); \}/,
+      // #154：轨道列与左列外壳共用唯一宽度真值 --sheet-sidebar-track-width，并以
+      // max(轨道宽, 折叠按钮宽) 作下限——折叠态左格保留按钮宽度，按钮位置前后不变。
+      /\.app\[data-shell-sidebar-side="right"\] \.workspace-titlebar \{ grid-template-columns:auto minmax\(0,1fr\) max\(var\(--sheet-sidebar-track-width,0px\),var\(--titlebar-rail-toggle-width\)\); \}/,
     )
     expect(appCss).toMatch(/\.app\[data-shell-sidebar-side="right"\] \.workspace-titlebar > \.workspace-titlebar-sidebar \{ order:4; \}/)
     // 红线：默认标题栏的 data-tauri-drag-region 由 WorkspaceTitlebar 输出，重排规则不得涉及
