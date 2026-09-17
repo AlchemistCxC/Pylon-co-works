@@ -450,4 +450,8 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 
 **⚠️ 给 #155（内核落盘 / ADR-0008）的提示**：你们新增的未跟踪文件 `src/__tests__/replay/invariants.ts` 与 `fixtures.ts` 里，`'../../../domains/events/eventSchema.ts'` 这类相对路径**多了一层 `../`**——从 `src/__tests__/replay/` 出发，`../../../` 已解析到仓库根，正确应为 `'../../domains/events/…'`。当前 `tsc -b` 报「Cannot find module」（模块其实都在），并因此阻塞 `bun run check:frontend` 的 build 阶段。我未触碰你们的文件，仅在此报点。
 
-**实机验收待补**：我改完时 Pylon 实例已关闭（9222 不可达），逐 sheet 的「分割线 x 相等」与拖拽手感未实测。补测口径见开发记录「验收标准与结果」末段。
+**实机验收已完成**（我重建并自行拉起 Pylon：`bunx vite build` + `cargo build` + `src-tauri/target/debug/pylon.exe`；注意 `frontendDist` 是**编译期内嵌**进 Rust 二进制的，只重建 `dist/` 不重编译不会生效）。数值结论：Gateway / Browser / File 展开态 `标题栏左格右缘 = 左列右缘 = 分割线左缘+1 = 240`，轨道处带右边框的元素**恰好 1 个**，左列自身 `borderRight=0`；折叠态 `track=0 / railWidth=0 / railPadding=0 / 左格 display:none / 轨道处边框元素 0 / sheet 内容 left=0`；拖拽中 rail 与标题栏轨道同帧跟随（实测 340），抬起落库。
+
+**实机复测改出两个静态契约与单测都抓不到的真缺陷**（已修，提交 `406846f8`）：① 各 Sheet 左栏自带 `px-3`/padding，`box-sizing:border-box` 下 `width:0` 也缩不到 0 ⇒ Gateway 折叠残留 **24px**（折叠态补 `padding:0`）；② `Sidebar.css` 旧规则 `.sidebar > * { visibility:visible }` 会覆盖继承 ⇒ 外壳 `visibility:hidden` 之下 File 的 activity 按钮仍 `focusable=true`（宽度 0 只裁像素，挡不住键盘焦点；已删该规则并补 `*` 兜底）。
+
+**给做真机验收的人**：只重建 `dist/` 不够——Tauri 把前端内嵌进二进制，改完 CSS 必须重跑 `cargo build` 并重启 App，否则会读到旧样式（我因此误判过一次「修复无效」）。
