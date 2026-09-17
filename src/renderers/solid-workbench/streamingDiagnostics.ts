@@ -9,6 +9,7 @@
  */
 import type { StreamingDisplayDiagnosticsSnapshot } from './streamingDisplayScheduler.ts'
 import { streamingRowCounters } from './chat/streamingRowCounters.ts'
+import { markdownParseCounters } from './chat/markdownParseCounters.ts'
 import { registerRendererDiagnostics } from '../../plugin-runtime/renderers/rendererDiagnosticsRegistry.ts'
 
 /** 验收桥上的读数 key（`__PYLON_KERNEL_DEV__.diagnostics.read('streamingDisplay')`）。 */
@@ -134,6 +135,9 @@ export function registerStreamingDisplayDiagnostics(input: {
     publishCost: input.publishCost.snapshot(),
     // 行集合的规模读数（纯观测）：rows / textParagraphs > 1 即出现文本之外的边界。
     rowSet: streamingRowCounters(),
+    // 解析成本读数（#148，纯观测）：parsed/skipped 看「最新即胜」是否生效，
+    // parseMs/maxParseMs/maxTextLength 看长单块的每帧重解析值不值得进一步优化。
+    parseCost: markdownParseCounters(),
     // 实际用的行读取作用域（多 workbench 挂载时注册 host 可能不含当前会话的行）。
     rowScope: resolveRowScope(input.host).scopeName,
     rows: diagnoseStreamingRows(input.host),
