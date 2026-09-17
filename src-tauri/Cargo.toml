@@ -30,14 +30,14 @@ pylon-pet-core = { path = "pet-core" }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.10"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 tokio-rustls = "0.26"
 rustls = "0.23"
 rustls-native-certs = "0.8"
 futures-util = "0.3"
-infer = "0.19"
+infer = "0.22"
 url = "2"
 # issue #82：Agent 浏览器 CDP 通道（WebView2 CallDevToolsProtocolMethod；版本对齐 wry 0.55 依赖树）
 webview2-com = "0.38"
