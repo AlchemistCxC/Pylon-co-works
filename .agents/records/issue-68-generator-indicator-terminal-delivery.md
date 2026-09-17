@@ -7,7 +7,7 @@
 
 - issue：#68（OPEN，本次在其下补评论登记残留面）
 - 分支：`Ru5t/Reflector`
-- 提交范围：`<base>..<head>`（见「证据 · commit」，提交后回填）
+- 提交范围：`aea15428..945aa7e0`（`c39dba12` = L.md 并行文件域声明，`945aa7e0` = 修复本体）
 - 日期：2026-09-17
 
 ## 目标与范围
@@ -79,7 +79,7 @@
 
 ## 证据
 
-- commit：（提交后回填）
+- commit：`945aa7e0`（修复本体；`c39dba12` 为 L.md 文件域声明）
 - 测试（名称 + 退出码）：
   - `vitest run`（全量）→ 0，`Test Files 581 passed` / `Tests 3922 passed`
   - `tsc -p tsconfig.solid.json --noEmit` → 0
