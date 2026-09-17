@@ -34,7 +34,7 @@
 
 第一方 CSS 的所有权真值是 `src/plugins/product/firstPartyStyleOwnership.ts`（`check:first-party-styles` 门禁）：产品 CSS 由各第一方包 `styleAssets` 以 `?inline` 挂载、随插件生命周期回收；新增样式文件必须登记 owner、importer 与 lifecycle。Tailwind utilities 基线唯一入口是 `src/styles/tailwind.css`（kernel-static），`@theme inline` 只读消费 `index.css` 的 token。
 
-- utility 类只用于新代码与结构性微调；既有 CSS 文件不迁移，也不用 utility 覆盖存量类——未分层 CSS 在层叠序上恒高于 `@layer utilities`，覆盖既有样式请改对应的 CSS 文件。
+- utility 类只用于新代码与结构性微调；既有 CSS 文件不迁移，也不用 utility 覆盖存量类——未分层 CSS 在层叠序上恒高于 `@layer utilities`，覆盖既有样式请改对应的 CSS 文件。**该约定只对存量「类」成立**：`src/index.css` 的全局元素 reset（`*, *::before, *::after`）落在 `@layer base`，层序 `base < theme < utilities` 亦在同文件声明。原因是元素级 reset 对**没有任何存量类**的纯 utility 元素同样生效，留在未分层区会让 `p-*` / `m-*` 全系恒败（issue #116 子项 1；首方包 plugin-manager 曾带着这个假绿合入）。新增全局元素规则照此办理：进 `@layer base`，或写成不压制 utility 的形态。
 - `tailwind.css` 内禁止字面量色值，新增映射只允许 `var(--…)` 引用（`check:tailwind-tokens` 门禁）；`--ease-*`、`--motion-*`、`--shadow-*` 命名空间与既有 token 撞名，不映射，需要时用任意值语法（如 `shadow-[var(--shadow-soft)]`）。
 - 禁用 `dark:` variant：主题是 CSS 变量换值，不存在 class 翻转。插件 `?inline` CSS 不得使用 `@apply`（不经过 Tailwind 入口编译），但可照常使用 utility 类名。
 - utility 类名不对第三方 Suite 承诺稳定；第三方 Suite 视觉自足，不依赖宿主 Tailwind 版本与类集合。
