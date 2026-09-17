@@ -114,6 +114,25 @@ describe('ReplayLoadCoordinator', () => {
     expect(outcome?.canonicalDuration).toMatchObject({ elapsedMs: 3250, source: 'canonical-events' })
   })
 
+  it('carries the #99 cold-mount turn ledger snapshot onto the outcome', async () => {
+    // 终帧只经一次性 IPC Channel 交付，账本是终帧之外唯一的终态证据；它必须随
+    // outcome 上抛到宿主 refresh，否则兜底整条静默失效。
+    const controller = adapter()
+    const coordinator = new ReplayLoadCoordinator(controller)
+    const turn = { source: 'source', turn: { phase: 'terminal', terminal: { cause: 'completed', settledAtMs: 5 } } }
+    const outcome = await coordinator.load(request(result({ authority: 'local-journal', turn }), { rows: [] }))
+
+    expect(outcome?.turn).toEqual(turn)
+  })
+
+  it('omits the turn snapshot when the backend reports no turn fact', async () => {
+    const controller = adapter()
+    const coordinator = new ReplayLoadCoordinator(controller)
+    const outcome = await coordinator.load(request(result({ authority: 'local-journal' }), { rows: [] }))
+
+    expect(outcome && 'turn' in outcome).toBe(false)
+  })
+
   it('uses replay only when metadata is complete and no local journal rows exist', async () => {
     const controller = adapter()
     const coordinator = new ReplayLoadCoordinator(controller)
