@@ -350,3 +350,20 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`streamingDisplayScheduler.ts`、`streamingRowCounters.ts`、`streamingMarkdownSplit.ts`、`chat/__tests__/issue55.rowSetPurity.solid.test.tsx`（#141 已收口）、`vitest.config.ts`、`docs/说明书/`（该区域未描述尾块解析策略，无漂移面）、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
 
 **约束（复审时请据此把关）**：跳过只允许发生在「Solid 必然丢弃结果」的请求上（判据 ≡ `pr === p`），且跳过结果**不得进 LRU**；既有行为测试零修改。
+
+---
+
+[2026-09-17 17] [Fisher] [#150]
+
+**开工：issue150（尾块解析增量 graft，路线 A）。** spec 见 `.agents/spec/issue-150-tail-incremental-parse.md`，路线决策见 `.agents/decisions/0006-streaming-tail-incremental-parse.md`（**不上 worker**，理由：worker 不减总 CPU——实测症状是浪费不是主线程卡顿；且 jsdom 没有 Worker，生产路径无法在现有测试环境覆盖）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/renderers/solid-workbench/chat/markdownRenderModel.ts`（增量 graft 判据 + 基座 MRU + `incremental` 选项）
+- `src/renderers/solid-workbench/chat/markdownParseCounters.ts`（新增只读计数 `grafted`）
+- `src/renderers/solid-workbench/chat/__tests__/issue150.incrementalGraft.test.ts`（**新增**，node 环境差分测试；既有测试一律不改）
+- 文档：`.agents/decisions/0006-*.md`（新增）、`.agents/records/issue-150-*.md`、本文件
+
+**我不碰**：`MarkdownContent.solid.tsx`（尾块路径本来就是 `cache: false` 调用，模型层按该标志启用增量，**调用点零改动**）、`streamingMarkdownSplit.ts`、`streamingRowCounters.ts`、`streamingDisplayScheduler.ts`、`streamingDiagnostics.ts`（`parseCost` 是既有读数，本轮不扩展读数结构）、`vitest.config.ts`、`docs/说明书/`、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
+
+**约束（复审据此把关）**：graft 只在「可证明为纯文本追加」时发生，判定不通过一律回退整段重解析；渲染结果必须与整段重解析逐块一致（差分测试对每个前缀断言）；既有行为测试零修改。
