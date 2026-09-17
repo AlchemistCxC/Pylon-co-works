@@ -14,14 +14,16 @@
 import { describe, expect, it } from 'vitest'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch.ts'
 import { SCENARIOS, generateScenarios, shapesOf, toUnitRows } from './fixtures.ts'
+import { REAL_FIXTURE_SCENARIOS } from './realFixtures.ts'
 import { expectReplayInvariants, inspectSequenceSpace } from './invariants.ts'
 import { chunkRows } from './harness.ts'
 
+const ALL_SCENARIOS = [...SCENARIOS, ...REAL_FIXTURE_SCENARIOS]
 const GENERATED = generateScenarios(24)
 
 describe('场景矩阵 · 多形态等价与跨层不变量', () => {
-  for (const scenario of SCENARIOS) {
-    it(`手写场景：${scenario.name}`, () => {
+  for (const scenario of ALL_SCENARIOS) {
+    it(`场景：${scenario.name}`, () => {
       expectReplayInvariants(shapesOf(scenario))
     })
   }
@@ -34,7 +36,7 @@ describe('场景矩阵 · 多形态等价与跨层不变量', () => {
 })
 
 describe('场景矩阵 · 派生形态自身的形状约束', () => {
-  for (const scenario of [...SCENARIOS, ...GENERATED].slice(0, 8)) {
+  for (const scenario of [...ALL_SCENARIOS, ...GENERATED].slice(0, 10)) {
     it(`单元形态确实产出了单元行：${scenario.name}`, () => {
       const rows = toUnitRows(chunkRows(scenario.wires), { keepCovered: false })
       // 若某场景根本没折出单元，等价性断言就是空转——先钉住"聚合确实发生"。

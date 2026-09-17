@@ -17,15 +17,14 @@ import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalE
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { SCENARIOS, generateScenarios } from './fixtures.ts'
+import { REAL_FIXTURE_SCENARIOS } from './realFixtures.ts'
 import { chunkRows } from './harness.ts'
+import { assistantContent, isSubsequence } from './oracles.ts'
 
-const ALL_SCENARIOS = [...SCENARIOS, ...generateScenarios(16)]
+const ALL_SCENARIOS = [...SCENARIOS, ...REAL_FIXTURE_SCENARIOS, ...generateScenarios(16)]
 
-function assistantContent(rows: readonly CanonicalConversationEvent[]): string {
-  return projectMessagesFromCanonical(rows)
-    .filter(message => message.role === 'assistant')
-    .map(message => message.content)
-    .join('')
+function assistantContentOf(rows: readonly CanonicalConversationEvent[]): string {
+  return assistantContent(projectMessagesFromCanonical(rows))
 }
 
 /** 确定性洗牌（不用随机，避免 flaky）。 */
@@ -34,32 +33,22 @@ function rotate<T>(items: readonly T[], by: number): T[] {
   return [...items.slice(offset), ...items.slice(0, offset)]
 }
 
-/** needle 的字符是否按原序全部出现在 haystack 中（允许中间插入其它字符）。 */
-function isSubsequence(needle: string, haystack: string): boolean {
-  let index = 0
-  for (const char of haystack) {
-    if (char === needle[index]) index += 1
-    if (index === needle.length) return true
-  }
-  return needle.length === 0
-}
-
 describe('增量读 · assistant 正文单调增长（前缀性）', () => {
   for (const scenario of ALL_SCENARIOS) {
     it(`每个读取前缀都是最终正文的前缀：${scenario.name}`, () => {
       const rows = chunkRows(scenario.wires)
-      const full = assistantContent(rows)
+      const full = assistantContentOf(rows)
       for (let length = 0; length <= rows.length; length += 1) {
-        const prefix = assistantContent(rows.slice(0, length))
+        const prefix = assistantContentOf(rows.slice(0, length))
         expect(full.startsWith(prefix), `${scenario.name} 前缀 ${length} 不是最终正文的前缀`).toBe(true)
       }
     })
 
     it(`聚合形态同样满足前缀性：${scenario.name}`, () => {
       const rows = mergeAdjacentDeltaChunks(chunkRows(scenario.wires))
-      const full = assistantContent(rows)
+      const full = assistantContentOf(rows)
       for (let length = 0; length <= rows.length; length += 1) {
-        expect(full.startsWith(assistantContent(rows.slice(0, length))), `${scenario.name} 聚合前缀 ${length}`).toBe(true)
+        expect(full.startsWith(assistantContentOf(rows.slice(0, length))), `${scenario.name} 聚合前缀 ${length}`).toBe(true)
       }
     })
   }
@@ -85,7 +74,7 @@ describe('增量读 · 顺序无关', () => {
 
 describe('增量读 · 越界/畸形行不得污染正常行（行级隔离）', () => {
   const rows = chunkRows(SCENARIOS[6]!.wires)
-  const expected = assistantContent(rows)
+  const expected = assistantContentOf(rows)
 
   /**
    * 毒行**追加**而非替换既存行，且断言用**子序列**而非"包含子串"：
@@ -110,13 +99,13 @@ describe('增量读 · 越界/畸形行不得污染正常行（行级隔离）',
     it(`${name}：不得抛错，既有正文按原序一个不少`, () => {
       const spliced = [...rows, poison]
       expect(() => projectMessagesFromCanonical(spliced)).not.toThrow()
-      expect(isSubsequence(expected, assistantContent(spliced)), `${name}：既有正文被丢弃或乱序`).toBe(true)
+      expect(isSubsequence(expected, assistantContentOf(spliced)), `${name}：既有正文被丢弃或乱序`).toBe(true)
     })
   }
 
   it('一次塞入全部毒行仍不抛错，且既有正文按原序不缺', () => {
     const spliced = [...rows, ...poisons.map(([, poison]) => poison)]
     expect(() => projectMessagesFromCanonical(spliced)).not.toThrow()
-    expect(isSubsequence(expected, assistantContent(spliced))).toBe(true)
+    expect(isSubsequence(expected, assistantContentOf(spliced))).toBe(true)
   })
 })

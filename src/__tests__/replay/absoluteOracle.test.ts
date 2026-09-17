@@ -22,38 +22,14 @@ import { CANONICAL_BATCH_LIMITS, mergeAdjacentDeltaChunks } from '../../infrastr
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { SCENARIOS, generateScenarios } from './fixtures.ts'
+import { REAL_FIXTURE_SCENARIOS } from './realFixtures.ts'
 import { chunkRows } from './harness.ts'
 
-const ALL_SCENARIOS = [...SCENARIOS, ...generateScenarios(24)]
+const ALL_SCENARIOS = [...SCENARIOS, ...REAL_FIXTURE_SCENARIOS, ...generateScenarios(24)]
 
 // --- 从 wire 直接推导期望（不经过存储/投影） ---
 
-function updateOf(wire: unknown): Record<string, unknown> | undefined {
-  if (!wire || typeof wire !== 'object') return undefined
-  const update = (wire as { update?: unknown }).update
-  return update && typeof update === 'object' ? update as Record<string, unknown> : undefined
-}
-
-/** 全部 text delta 的文本按到达序拼接——这是 assistant 正文的**完整期望值**。 */
-export function expectedAssistantText(wires: readonly unknown[]): string {
-  return wires
-    .map(updateOf)
-    .filter((update): update is Record<string, unknown> => update?.sessionUpdate === 'agent_message_chunk')
-    .map(update => String((update.content as { text?: unknown } | undefined)?.text ?? ''))
-    .join('')
-}
-
-/** 全部 user 消息的文本（按到达序）。 */
-export function expectedUserTexts(wires: readonly unknown[]): string[] {
-  return wires
-    .map(updateOf)
-    .filter((update): update is Record<string, unknown> => update?.sessionUpdate === 'user_message_chunk')
-    .map(update => String((update.content as { text?: unknown } | undefined)?.text ?? ''))
-}
-
-function assistantContent(messages: readonly { role: string; content: string }[]): string {
-  return messages.filter(message => message.role === 'assistant').map(message => message.content).join('')
-}
+import { assistantContent, expectedAssistantText, expectedUserTexts, updateOf } from './oracles.ts'
 
 /** 行集里可还原出的原始 wire（逐 chunk 行的 rawPayload / 聚合行的 rawPayload 数组）。 */
 function recoverableWires(rows: readonly CanonicalConversationEvent[]): unknown[] {
