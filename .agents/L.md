@@ -459,3 +459,13 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **⚠️ 标题栏 grid 的坑（本轮踩到，后来者注意）**：`.workspace-titlebar` 是三列 grid。**隐藏任一列的子元素都不能用 `display:none`**——移除一个 grid item 会让后面的兄弟自动前移一列。我曾用 `display:none` 隐藏折叠态的标题栏左格，结果「右侧栏/界面/设置」与窗口控制整簇跳到窗口最左侧（实测 957/997/1037 → 4/44/84）。要「不占空间但保留格位」请用 `width:0 + padding:0 + border:0 + visibility:hidden`。这条已由 `src/workspace-sheets/__tests__/sidebarUnifiedModel.css.test.ts` 静态钉住。
 
 **折叠按钮位置（两轮反馈后定稿，请勿再动）**：**标题栏最左端，三灯在其右**（左格首位），**折叠前后位置不变**。做法是标题栏 grid 第 1 列取 `max(--sheet-sidebar-track-width, --titlebar-rail-toggle-width=42px)`——展开时该列 = 轨道宽 240，折叠时收窄到 42 而不是 0，按钮因此恒在 x=0；折叠只隐藏三灯与分割线。这不算「留空列」：格里装的是按钮本身（正文区左列仍为 0）。**不要**把它放进右侧应用控制簇（会挤动三菜单与窗口控制），**不要**把左格 `display:none`（移除 grid item 会让右侧两簇前移一列，实测菜单 957/997/1037 → 4/44/84）。
+
+---
+
+[2026-09-18 02] [Borges] [—] **文献沉降：协作规范增强 + 留言板收敛**（用户当场逐条裁定，非施工书任务）。
+
+**我改动的文件域（请勿改写、勿连带提交）**：`AGENTS.md`、`.gitignore`、根 `BOARD.md`（降为指针桩）、本文件（追加声明 + 轮转 09-16 及以前条目）、新增 `.agents/skills/`、`.agents/records/`、`.agents/decisions/`。另在**仓外** `Docs/Archive/` 落两份全文快照（遵循既有仓外惯例，不入版本控制）。
+
+**我不碰的**：`src/**`、`src-tauri/**`、`.github/**`、`docs/说明书/**`、`package.json`、`tools/**`。
+
+**三件事**：① 根 `BOARD.md`（341KB / 999 行）长期被误读为在岗板——它其实 09-14 就已搬走、只是被善意恢复成了幽灵；降为指向 `.agents/BOARD.md` 的桩，治掉「grep 到就吞十万 token」。② `L.md` 只留在途：09-16 及以前（其 issue 均已有开发记录）轮转出。③ AGENTS.md 补齐：远端名 `github/main`、共享工作树处置、纯追加文件冲突取并集、咨询分支、DoD、pathspec 提交、§2.3 编号断号。
