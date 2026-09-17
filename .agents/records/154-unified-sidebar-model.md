@@ -96,6 +96,8 @@
 1. **折叠残留 24px**：各 Sheet 左栏自带内边距（gateway/search/history 的 `px-3`、`ps-nav` 的 `padding`），`box-sizing:border-box` 下即使 `width:0` 盒子也不可能小于 padding 之和 ⇒ Gateway 折叠后残留 24px。修：折叠态 `padding:0`（并加静态断言）。
 2. **折叠态控件仍可聚焦**：`Sidebar.css` 旧规则 `.sidebar > * { visibility:visible }` 会**覆盖继承**，于是 `visibility:hidden` 的外壳下 File 的 activity 按钮依然 `focusable=true`、`checkVisibility()=true`（宽度 0 只是裁掉了像素）。修：删除该旧规则，并补 `.layout[data-sidebar="collapsed"] .sidebar *` 兜底（`*` 保证压过任何 Sheet 级 `visibility:visible`）。
 3. **折叠时右侧两簇整体左移（用户报的「折叠按钮逻辑太怪」的根因）**：折叠态我用 `display:none` 隐藏标题栏左格，而标题栏是三列 grid——移除一个 grid item 会让后两个兄弟自动**前移一列**。实测折叠后「右侧栏/界面/设置」从 `957/997/1037` 变成 `4/44/84`、窗口控制三按钮从 `1086/1124/1162` 变成 `133/171/209`（整簇跑到窗口最左侧）。修：折叠态左格不再 `display:none`，并加静态断言禁止。
+4. **分割线旁那条「阴影」（用户报「侧栏分界线那根线为啥有一点点阴影」）**：左列同时是滚动容器（`overflow-y:auto`）且内容溢出 6px（`scrollHeight 762 > clientHeight 756`），于是经典滚动条在右缘占掉 **4px gutter**（实测 `offsetWidth 240 / clientWidth 236`）。而背景层 `.sidebar::before`（`inset:0`）只覆盖内容盒，够不到这 4px——**紧贴 1px 分割线的就是这条 4px 软灰带**，看起来像线带了阴影。分割线本身是干净的（1px `#7A847E`、无 box-shadow、无 filter、位置整数）。修：左列隐藏自身滚动条（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`，与 `.sheet-tab-strip` 同一做法），`clientWidth` 回到 240、背景铺满整列；列内列表仍保留自己的滚动条。静态断言已加。
+   - 附带发现：左列内容仍溢出 6px（滚动条虽已隐藏，内容仍可滚），疑与 `.search-input` 的 `flex:1`（Phase 3 待修）有关，留给左栏视觉重构一片处理。
 
 **折叠按钮的最终落位（用户两轮反馈后定稿）**：**标题栏最左端，三灯在其右**（左格首位），且**折叠前后位置不变**。做法是第 1 列取 `max(轨道宽, 折叠按钮宽 42px)`——展开时该列 = 轨道宽 240，折叠时收窄到 42 而不是 0，按钮因此恒在 x=0；折叠只隐藏三灯与分割线。这不算「留空列」：格里装的是按钮本身（用户反对的是**正文区**的 Agent 空列 / File 图标条，正文左列仍为 0）。中途曾先后试过「放进右侧应用控制簇」（挤动三菜单，用户否）与「放工作区带首位」（位置随折叠在 240↔0 间跳动，用户否）。
 

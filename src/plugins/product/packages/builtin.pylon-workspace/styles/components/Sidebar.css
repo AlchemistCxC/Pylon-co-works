@@ -11,6 +11,12 @@
   min-width:var(--sheet-sidebar-track-width, 0px);
   max-width:var(--sheet-sidebar-track-width, 0px);
   overflow-x:hidden; overflow-y:auto;
+  /* 左列不显示自己的滚动条：经典滚动条会在右缘吃掉 4px 的 gutter，而那 4px 正好紧贴
+     分割线——背景（.sidebar::before 只覆盖内容盒）够不到 gutter，于是线旁出现一条 4px
+     的软灰带，看起来就像分割线带了阴影（实测 offsetWidth 240 / clientWidth 236）。
+     隐藏后 clientWidth == offsetWidth，背景铺满整列，线旁不再有第二条边。
+     与 .sheet-tab-strip 同一做法；列内列表（.work-list / .session-list 等）仍保留自己的滚动条。 */
+  scrollbar-width:none;
   font-family:var(--font);
   transition:width var(--motion-standard) var(--ease-emphasized), min-width var(--motion-standard) var(--ease-emphasized), max-width var(--motion-standard) var(--ease-emphasized), background-color var(--motion-standard) var(--ease-standard);
   will-change:width;
@@ -25,6 +31,7 @@
 }
 /* #154：外壳（宽度/边框/折叠）由布局层的 SheetSidebarSlot 渲染，Sheet 只提供内容。
    内容区自己填满外壳并各自滚动，因此各 Sheet 不再自带宽度、边框与 overflow。 */
+.sidebar::-webkit-scrollbar { display:none; }
 .sidebar-header { padding:var(--ui-space-3); display:flex; flex-direction:column; gap:var(--ui-space-2); align-items:stretch; border-bottom:1px solid var(--border); }
 /* #154 已删除原 `.sidebar > *`（opacity/transform/visibility:visible + 过渡）：那是旧
    「Sheet 自己加 collapsed 类」时代的展开动画复位。它的 `visibility:visible` 会**覆盖

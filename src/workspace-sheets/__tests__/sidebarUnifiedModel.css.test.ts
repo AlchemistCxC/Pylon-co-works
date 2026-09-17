@@ -104,6 +104,13 @@ describe('#154 左列统一模型 CSS 契约', () => {
     expect(sidebarCss, '.sidebar > * 的 visibility:visible 会覆盖继承，使折叠态控件仍可聚焦').not.toMatch(/\.sidebar > \* \{[^}]*visibility:visible/)
   })
 
+  it('左列不显示自身滚动条（否则 4px gutter 紧贴分割线，看起来像线带了阴影）', () => {
+    const body = ruleBodies(sidebarCss, '.sidebar')[0]
+    expect(body).toContain('scrollbar-width:none')
+    // webkit 侧的对应规则（与 .sheet-tab-strip 同一做法）。
+    expect(sidebarCss).toMatch(/\.sidebar::-webkit-scrollbar\s*\{\s*display:\s*none/)
+  })
+
   it('拖拽手柄按同一 token 定位，折叠时隐藏', () => {
     const body = ruleBodies(appCss, '.left-rail-resize-handle')[0]
     expect(body, '缺少 .left-rail-resize-handle 规则').toBeTruthy()
