@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
-import { messageSnapshotToWorkbenchEnvelopes } from '../messageSnapshotProjection.ts'
-import type { Message } from '../../../components/chat/messageTypes.ts'
-import { persistMessageSnapshot } from '../../../components/chat/messagePersistence.ts'
-import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
-import type { Session } from '../../../identityStore.ts'
+import { projectWorkbench } from '../../domains/workbench/workbenchProjector.ts'
+import { messageSnapshotToWorkbenchEnvelopes } from '../../sheets/agent-workbench/messageSnapshotProjection.ts'
+import type { Message } from '../../components/chat/messageTypes.ts'
+import { persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import type { Session } from '../../identityStore.ts'
 
 describe('browser message snapshot bridge', () => {
   it('projects legacy visual messages into the terminal Workbench document', () => {

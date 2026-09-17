@@ -5,11 +5,11 @@
  * adapter 接线，不能改变这里的输入/输出契约。
  */
 import { describe, expect, it } from 'vitest'
-import { createCanonicalEvent, type CanonicalConversationEvent, type CanonicalEventOwner } from '../eventSchema'
+import { createCanonicalEvent, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
 import {
   effectiveCanonicalProjectionEvents,
   projectMessagesFromCanonicalBuiltin,
-} from '../messageProjection'
+} from '../../domains/events/messageProjection'
 
 const owner: CanonicalEventOwner = {
   profileId: 'p-b03',

@@ -8,17 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createCanonicalEventSink,
   type CanonicalEventOfferContext,
-} from '../canonicalEventSink'
+} from '../../infrastructure/events/canonicalEventSink'
 import {
   canonicalBatchChunksOf,
   canonicalBatchSpanOf,
   mergeAdjacentDeltaChunks,
-} from '../canonicalEventBatch'
+} from '../../infrastructure/events/canonicalEventBatch'
 import {
   CanonicalEventRepositoryError,
   type CanonicalEventRepository,
-} from '../canonicalEventRepository'
-import type { CanonicalConversationEvent } from '../../../domains/events/eventSchema'
+} from '../../infrastructure/events/canonicalEventRepository'
+import type { CanonicalConversationEvent } from '../../domains/events/eventSchema'
 
 const OWNER_KEY = '["p1","peri","local:s1"]'
 const context: CanonicalEventOfferContext = {

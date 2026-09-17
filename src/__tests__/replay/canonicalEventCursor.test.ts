@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { CanonicalEventRow } from '../canonicalEventRepository.ts'
-import { CanonicalEventCursor, CanonicalEventCursorError } from '../canonicalEventCursor.ts'
+import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import { CanonicalEventCursor, CanonicalEventCursorError } from '../../infrastructure/events/canonicalEventCursor.ts'
 
 const OWNER_KEY = '["p1","peri","local:s1"]'
 

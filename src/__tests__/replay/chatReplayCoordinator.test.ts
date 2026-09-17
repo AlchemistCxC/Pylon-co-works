@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { PersistedSessionLoadResult } from '../../../infrastructure/acp/sessionClient.ts'
-import type { CanonicalEventRow } from '../../../infrastructure/events/canonicalEventRepository.ts'
-import type { Message } from '../messageTypes.ts'
+import type { PersistedSessionLoadResult } from '../../infrastructure/acp/sessionClient.ts'
+import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { Message } from '../../components/chat/messageTypes.ts'
 import {
   ReplayLoadCoordinator,
   ReplayLoadInProgressError,
   type ReplayLoadControllerAdapter,
-} from '../chatReplayCoordinator.ts'
+} from '../../components/chat/chatReplayCoordinator.ts'
 
 const metadata = (complete: boolean, droppedCount = 0): PersistedSessionLoadResult['replayMetadata'] => ({
   complete,

@@ -3,9 +3,9 @@
  * 锁定与 live/replay reducer 对齐的聚合、工具卡生命周期、终态 settle 与 unknown 跳过。
  */
 import { describe, expect, it } from 'vitest'
-import { createCanonicalEvent, type CanonicalEventOwner } from '../eventSchema'
-import { projectMessagesFromCanonical } from '../messageProjection'
-import type { CanonicalConversationEvent } from '../eventSchema'
+import { createCanonicalEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
+import { projectMessagesFromCanonical } from '../../domains/events/messageProjection'
+import type { CanonicalConversationEvent } from '../../domains/events/eventSchema'
 
 const owner: CanonicalEventOwner = { profileId: 'p1', agentId: 'peri', localSessionId: 'local:s1' }
 
