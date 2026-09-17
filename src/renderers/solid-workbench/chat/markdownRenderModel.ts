@@ -206,7 +206,10 @@ function graftMarkdownModel(baseText: string, baseModel: MarkdownRoot, text: str
   // `\n` 不改变模型（真机实测一行边界会先来一个纯 `\n` 差量，再来的行内容才是内容）。
   const trailingNewlines = (/(\n+)$/.exec(baseText)?.[1].length ?? 0)
   const effectiveBase = trailingNewlines > 0 ? baseText.slice(0, baseText.length - trailingNewlines) : baseText
-  if (/^\n+$/.test(delta)) return baseModel
+  // 差量**尾部**的换行同理（每帧 2–5 字到达时，「内容 + 换行」常挤在同一个差量里）：先摘掉再分类。
+  const tailNewlines = (/(\n+)$/.exec(delta)?.[1].length ?? 0)
+  const core = tailNewlines > 0 ? delta.slice(0, delta.length - tailNewlines) : delta
+  if (core.length === 0) return baseModel
   const spine = rightmostSpine(baseModel)
   if (spine === null) return null
   const { leaf, chain } = spine
@@ -215,17 +218,22 @@ function graftMarkdownModel(baseText: string, baseModel: MarkdownRoot, text: str
     const container = step.container
     if (container.type === 'element' && !GRAFT_SAFE_ANCESTORS.has(container.tagName)) return null
   }
-  const line = LINE_DELTA.exec(delta)
-  if (line !== null) {
-    // 基座自带的尾随换行与差量开头的换行合起来算「这一行之前有几个换行」
-    const spliced = spliceLine(effectiveBase, leaf, chain, trailingNewlines + line[1]!.length, line[2]!)
+  const line = LINE_DELTA.exec(core)
+  // 行拼接的两个入口：①差量自带换行（`LINE_DELTA`）；②基座已经以换行结尾、差量是**这一行的内容**
+  // （真机形态：一行边界先来纯 `\n`，再来行内容）。两者都把「基座尾随换行数 + 差量首部换行数」
+  // 合并成 `newlines` 再走同一套行规则。
+  const contentOnlyLine = line === null && trailingNewlines > 0 && PLAIN_DELTA.test(core) ? core : null
+  const lineContent = line !== null ? line[2]! : contentOnlyLine
+  if (lineContent !== null) {
+    const spliced = spliceLine(effectiveBase, leaf, chain, trailingNewlines + (line?.[1]?.length ?? 0), lineContent)
     if (spliced !== null) return spliced
-    if (trailingNewlines > 0) return null // 行边界处判据不成立：交给整段重解析，别退化成续行
+    // 身处在行边界：判据不成立一律整段重解析——绝不能退化成「延长旧叶子」，那会吞掉这个换行
+    return null
   }
-  if (!PLAIN_DELTA.test(delta)) return null
+  if (!PLAIN_DELTA.test(core)) return null
   // CommonMark 会剥掉块内容的末尾空白（`The ` 解析出来是 `The`），拼接时同样剥掉，
   // 否则与整段重解析差一个空格——差分测试逮到过这一条。纯空白差量因此不产生任何内容。
-  const appended = delta.replace(/\s+$/u, '')
+  const appended = core.replace(/\s+$/u, '')
   if (appended.length === 0) return baseModel
   if (trailingNewlines > 0) return null // 已经换行：追加的文字属于新的一行，不是延长旧叶子
   if (!effectiveBase.endsWith(leaf.value)) return null

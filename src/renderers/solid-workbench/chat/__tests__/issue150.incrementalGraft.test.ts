@@ -86,19 +86,54 @@ function longListBlock(items: number): string {
   return lines.join('\n')
 }
 
+/** 纯文本段落流：30 个短段落 + 20 行连续正文（无 ASCII 标点）——行边界最密的形状。 */
+function paragraphShapedText(): string {
+  const parts: string[] = []
+  for (let index = 0; index < 30; index += 1) parts.push(`第 ${index + 1} 段：先确认现象与复现路径，再核对渲染层的宽度来源与揭示节奏。`)
+  const long: string[] = []
+  for (let index = 0; index < 20; index += 1) long.push(`连续正文第 ${index + 1} 行，这里是一行没有任何标点符号的中文说明文字用来占据版面并制造行边界。`)
+  parts.push(long.join('\n'))
+  return parts.join('\n\n')
+}
+
+/** 真机同构的长夹具：30 个短段落 + 40 项列表 + 表格 + 20 行连续正文（#150 真机 prompt 的形状）。 */
+function benchShapedText(): string {
+  const parts: string[] = []
+  for (let index = 0; index < 30; index += 1) parts.push(`第 ${index + 1} 段：先确认现象与复现路径，再核对渲染层的宽度来源与揭示节奏。`)
+  parts.push(longListBlock(40))
+  parts.push([
+    '| 位置 | 谱 | 本例 | 合 |',
+    '| --- | --- | --- | --- |',
+    '| 一 | 仄仄平平仄仄平 | 示例句甲 | ✓ |',
+    '| 二 | 平平仄仄仄平平 | 示例句乙 | ✓ |',
+  ].join('\n'))
+  const long: string[] = []
+  for (let index = 0; index < 20; index += 1) {
+    long.push(`连续正文第 ${index + 1} 行，这里是一行没有任何标点符号的中文说明文字用来占据版面并制造行边界。`)
+  }
+  parts.push(long.join('\n'))
+  return parts.join('\n\n')
+}
+
 beforeEach(() => {
   clearMarkdownRenderModelCache()
   resetMarkdownParseCounters()
 })
 
 describe('issue 150: 增量 graft 与整段重解析逐前缀一致', () => {
+  // 步长要参数化：真机揭示每帧约 2–5 字到达，不同步长会走出**不同形状的差量**
+  // （`" 乙"`、`"2. "`、`"甲\n"`…），只跑 1 字步长会漏掉整类形状。
+  const STEPS = [1, 2, 3, 5] as const
   for (const fixture of CORPUS) {
-    it(`每个前缀都一致：${fixture.name}`, async () => {
-      for (let end = 1; end <= fixture.text.length; end += 1) {
-        const prefix = fixture.text.slice(0, end)
-        const incremental = await tailStep(prefix)
-        const reference = await fullParse(prefix)
-        expect(incremental.model, `${fixture.name} @${end}`).toEqual(reference)
+    it(`每个前缀都一致（步长 1/2/3/5）：${fixture.name}`, async () => {
+      for (const step of STEPS) {
+        clearMarkdownRenderModelCache()
+        for (let end = 1; end <= fixture.text.length; end += step) {
+          const prefix = fixture.text.slice(0, end)
+          const incremental = await tailStep(prefix)
+          const reference = await fullParse(prefix)
+          expect(incremental.model, `${fixture.name} step=${step} @${end}`).toEqual(reference)
+        }
       }
     })
   }
@@ -258,10 +293,38 @@ describe('issue 150: 真机形状的成本下降', () => {
       steps += 1
     }
     const counters = markdownParseCounters()
-    // 「每步一次」= steps。实测（见开发记录）：2931 字 / 1466 步 → parsed 132、grafted 1334（11.1×），
-    // 解析 CPU 2368ms → 197ms（12.0×）；这里留余量锁住「一个数量级」。
+    // 「每步一次」= steps。实测（见开发记录）：2931 字 / 1466 步 → parsed 54、grafted 1412（27×），
+    // 解析 CPU 2357ms → 67ms（35×）；这里留余量锁住「一个数量级」。
     expect(counters.parsed).toBeLessThan(steps / 10)
     expect(counters.grafted).toBeGreaterThan(steps / 2)
     expect(counters.maxTextLength).toBeLessThanOrEqual(text.length)
+  })
+
+  it('真机同构内容按 2 字步长：整段重解析次数被成本锁拦住（含尾随换行归一化）', async () => {
+    // 这些入口是**纯性能**路径：退化掉也不会算错（回退永远正确），所以必须由成本锁看守。
+    // 实测 5025 字 / 2513 步 → parsed 160、grafted 2353；关掉尾随换行归一化会退化到 ~230+。
+    const text = benchShapedText()
+    let steps = 0
+    for (let end = 1; end <= text.length; end += 2) {
+      await tailStep(text.slice(0, end))
+      steps += 1
+    }
+    const counters = markdownParseCounters()
+    expect(counters.parsed).toBeLessThan(steps / 12)
+    expect(counters.grafted).toBeGreaterThan(steps * 0.8)
+  })
+
+  it('纯文本段落流按 2 字步长：整段重解析压到「每千步不到一次」', async () => {
+    // 这一条专门看守「行内容入口」（基座已以换行结尾时，行内容直接按行规则拼接）：
+    // 实测 996 步 → parsed 1；关掉该入口会退化到 ~15（步长 1 时多候选基座探测能救回来，故用步长 2）。
+    const text = paragraphShapedText()
+    let steps = 0
+    for (let end = 1; end <= text.length; end += 2) {
+      await tailStep(text.slice(0, end))
+      steps += 1
+    }
+    const counters = markdownParseCounters()
+    expect(counters.parsed).toBeLessThan(steps / 100)
+    expect(counters.grafted).toBeGreaterThan(steps * 0.9)
   })
 })
