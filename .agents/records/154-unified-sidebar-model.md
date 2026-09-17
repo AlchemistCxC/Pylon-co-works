@@ -69,11 +69,11 @@
 | 折叠态 File 的 activity 图标条不再出现 | **通过**。`activityBarVisibility=hidden`，其按钮 `focusable=false`（修掉「看不见但可聚焦」） |
 | 拖拽实时改宽 + clamp + 持久化 | **通过**。CDP 真实指针序列：拖拽中 `.app` 内联变量即刻为 `340px`，`railWidth=340` 且**标题栏轨道同帧跟随到 340**（`.layout.is-resizing=true` 关过渡）；抬起后 `pylon-workspace-layout-v3.state.leftRailWidth = 340`，手柄 `aria-valuenow=340`；随后拖回 240 并落库 |
 | `sidebarMode` 三字符串值与持久化面零迁移 | 通过：枚举未改，未动 `pylon-workspace-layout-v3` 与 `applyWorkspaceLayoutChange` |
-| `tsc -b` | 我的文件 0 错误（仅并行 #155 的未跟踪文件报错，见「并行交集」） |
+| `tsc -b` | **exit 0，全仓 0 错误**（#155 提交其修复后不再有未跟踪文件干扰） |
 | `lint` | 0 error / 1 既有 warning（`RightRailHost.tsx` useMemo 依赖，非本次） |
 | `check:first-party-styles` / `check:tailwind-tokens` | 通过 |
 | 定向 vitest（workspace-sheets + sheets + file + browser + theme + shell-recipe） | **81 文件 / 442 项全绿**（含新增 6 项静态契约） |
-| `check:frontend` | 阻塞：`tsc -b` 阶段失败于并行 #155 的未跟踪文件（相对路径多一层 `../`），与本次无关 |
+| `check:frontend` | **590 / 591 文件、4263 / 4266 用例通过**。唯一失败是 `src/renderers/solid-workbench/chat/__tests__/issue150.incrementalGraft.test.ts`（#150 的中控区渲染测试，非本片文件域，用户明确要求中控区不碰）；**单跑 55/55 全绿**，判定为全量并行负载下的游走 flake（仓库已知模式，P91 记录过同类）。未改动、未跳过、未重试掩盖。 |
 
 **实机复现路径（本轮）**：Pylon 实例在验收前被关闭，我用 `bunx vite build` + `cargo build` 重建后自行拉起（`src-tauri/target/debug/pylon.exe`，调试端口来自那处未提交的 `tauri.conf.json`）。注意 `frontendDist` 是**编译期内嵌**进 Rust 二进制的，只重建 `dist/` 不重启/重编译不会生效——第一次复测因此读到旧 CSS，误判为「修复无效」。
 
