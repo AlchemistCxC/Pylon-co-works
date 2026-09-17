@@ -386,3 +386,22 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`src/renderers/solid-workbench/**`（#150 已收口，本 issue 不动渲染管线）、`src-tauri/**`（子项 10 只改呈现，不动探测算法）、`tools/webview2-mcp/**`、`.agents/spec/**`（gitignore）。
 
 **给后续 agent 的两条提示**：① `src/index.css` 的 reset 现在在 `@layer base`——新增首方样式若依赖「未分层 CSS 恒压 utilities」，请记住该约定**只对存量类成立**，全局元素 reset 不在此列；② 子项 4d 把设置页 Owner 头的 owner id 换成了可读中文名（原始 id 落在 `data-owner`），断言过 `settings-owner-badge` 文本的测试已同步更新。
+
+---
+
+[2026-09-17 23] [Fresnel] [#68]
+
+**开工：issue68 残留面（生成指示器偶发不出现——终帧交付与账本证据）。** 现象复核见 issue 评论（已发）；真机探针结论：#68 原案在 `145fa8c3` 后已不成立，但另两条缺口可复现同一症状，本轮修之。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/infrastructure/events/canonicalEventFeed.ts`（导出终帧信号构造 + 新增 `subscribeWindowTerminalFrames` 兜底轨；`emitTerminal` 改走共用构造）
+- `src/sheets/agent-workbench/agentWorkbenchSession.ts`（终态收敛单入口 + `listenTerminalFallback` 依赖缝 + `refresh(session, ledgerTurn)` 账本证据）
+- `src/sheets/agent-workbench/agentWorkbenchLifecycle.ts`、`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`（`onCanonicalRefresh` 透传 `turn`）
+- `src/components/chat/chatReplayCoordinator.ts`（`ReplayLoadOutcome.turn`）
+- **新增** `src/domains/workbench/generationLedgerSummary.ts` + 三处对应 `__tests__`
+- 文档：`.agents/records/issue-68-generator-indicator-terminal-delivery.md`、`docs/说明书/Pylon-项目架构参考.md`（§8 两处）、本文件
+
+**我不碰**：`src/renderers/solid-workbench/**`、`src/components/Settings*.tsx`、`src/index.css`、`src/styles/tailwind.css`、`src-tauri/**`、`tools/webview2-mcp/**`、`docs/说明书/Pylon-开发与协作规范.md`（以上属 #116 / #150 域）。
+
+**给后续 agent 的两条提示**：① **不要提交 `src-tauri/tauri.conf.json`**——工作区里有一处未提交改动，是 `additionalBrowserArgs: --remote-debugging-port=9222 ...`（webview2 MCP 能连上的前提），不是本 issue 产物，归属待定；② 若要用 webview2 MCP 复核指示器：`window.__TAURI_INTERNALS__` 的 `invoke`/`callbacks` 均不可包装、Channel 帧不走 `callbacks` 表（帧级旁路做不到），且 sheet 是 keep-alive——`document.querySelector(`.term-summary`)` 会命中 `display:none` 的隐藏 sheet，必须按活动 sheet（`display:contents`）取根。
