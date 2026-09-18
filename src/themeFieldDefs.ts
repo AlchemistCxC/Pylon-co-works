@@ -120,7 +120,7 @@ export const THEME_FIELD_DEFS = {
   // ── sidebar ──
   sidebarBg: { ...C('sidebar', '侧栏背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
   sidebarBgImage: { ...T('sidebar', '侧栏背景图'), default: '', control: 'bgImage', group: "背景", },
-  sidebarWidth: { ...N('sidebar', '左栏宽度', 160, 400), default: 250, group: "布局", unit: 'px' },
+  sidebarWidth: { ...N('sidebar', '左栏宽度', 160, 400), default: 250, group: "布局", unit: 'px', noCssVar: true, hint: '已迁移到左栏拖拽布局；旧主题值仅由工作区布局迁移读取' },
   sidebarTransparency: { ...N('sidebar', '侧栏背景不透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
   sidebarBlur: { ...N('sidebar', '侧栏模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
   sidebarTextColor: { ...C('sidebar', '文字颜色'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "文字", semanticRole: 'content.text' },
