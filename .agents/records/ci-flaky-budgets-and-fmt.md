@@ -72,6 +72,8 @@ CI 的 Rust job 在 PR #160 上为 failure，用户怀疑是「没跑 fmt」。�
 - 争抢量级：同一套 `--lib` 根套件本机 1090 项耗时 **5.47s**，CI 上 1089 项耗时 **17.39s**（≈3.2×）；CI 的 `--lib` 全程为多文件并行、runner 为共享机型
 - fmt：`cargo fmt --all --check` 修前 rc=1、修后 rc=0；归属回溯见上节
 - 门禁：`cargo fmt --all --check` rc=0；`cargo test --workspace --lib --features test-agent` 全绿
+- **CI 实测（真验证）**：head `85b8f0e0` → Rust job `success`（步骤 10/11/12/13 全 success，14 success，15/16 skipped）、前端 job `success`。对照基线：修前 `ae271554` 的 Rust job 为 failure（测试步骤 exit 1）
+- 复现入口：`bun scripts/check-doc-links.mjs`（文档面）；`cargo fmt --all --manifest-path src-tauri/Cargo.toml --check`（fmt 面）；`cargo test --workspace --lib --features test-agent`（测试面）
 
 ## 与 spec 的偏差
 
@@ -82,7 +84,7 @@ CI 的 Rust job 在 PR #160 上为 failure，用户怀疑是「没跑 fmt」。�
 
 ## 未解问题
 
-- **本机无法制造 CI 的争抢条件**：我的验证都在空闲机器上跑（根套件 5.47s vs CI 17.39s）。因此「30s 足够」是据 3–9 倍余量与 3.2× 慢化推算的**判断**，不是本地复现的证明。下一次 CI 跑是真正的验证。
+- **本机无法制造 CI 的争抢条件** → **已由 CI 实测收口**：修后 `85b8f0e0` 的 Rust job 全绿（04:46:03→05:10:21，24m18s），逐步核对 10「Rust 测试与构建」/ 11「fmt」/ 12「ACP shadow parity」/ 13「clippy」**全部 success**，14「上传 debug 产物」success，15/16「失败证据包」正确 skipped。即：30s 预算在真实争抢下成立；且第 11–13 步此前从未被执行过（被测试步骤的 exit 1 短路），本次一并证明它们本就正常——**潜伏故障确实只有两个，没有第三个**。
 - **CI 编排是否应改串行**：归档旧板的建议是「串行或放大」，本次只做了「放大」。串行会拉长所有人的 CI 用时，属编排决策，留给用户。
 - **`2_000` 量级的四处等待**（`plugin_process/tests.rs` 154/220/314/386 行）与本次同属「预算封顶」的形态，本次未动（无失败证据）。若后续再出现同型红，它们是第一顺位嫌疑。
 - **`be9db4bf` 的提交纪律问题**：该提交新增 261 行却未过 fmt，说明当时的本地门禁没有覆盖到它（或未跑）。与「提交前跑 `cargo fmt --all --check`」应当写进日常动作有关——本次未改 `AGENTS.md`（它已在 §2.4 指向 `check:rust`，而 `check:rust` 含 `cargo fmt --check`；`check:rust` 属「改动范围大才跑全测」的另一条链），登记备查。
