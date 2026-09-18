@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import { resetStores } from '../../test/resetStores'
-import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getCommandRegistry, getContextPanelRegistry, getTitlebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { useRightRailStore } from '../../rightRailStore.ts'
 
@@ -13,13 +13,11 @@ const baseProps = {
   activeAgent: 'peri',
   sidebarCollapsed: true,
   sidebarEnabled: false,
-  canReopenSheet: false,
   onToggleSidebar: vi.fn(),
   onFocusSheet: vi.fn(),
   onCloseSheet: vi.fn(),
   menuActions: { onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() },
   onOpenSheet: vi.fn(),
-  onReopenSheet: vi.fn(),
   onToggleRightPanel: vi.fn(),
   onToggleSettings: vi.fn(),
   onOpenSettingsDomain: vi.fn(),
@@ -27,6 +25,9 @@ const baseProps = {
   onToggleFullscreen: vi.fn(),
   onCloseWindow: vi.fn(),
 }
+
+const gear = () => screen.getByRole('button', { name: '界面与设置' })
+const railToggle = () => document.querySelector<HTMLButtonElement>('[data-right-rail-toggle="true"]')!
 
 describe('WorkspaceTitlebar Sheet 导航入口', () => {
   beforeEach(() => {
@@ -36,27 +37,28 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     Element.prototype.scrollIntoView = vi.fn()
   })
 
-  it('#52 记住的面板仅在右栏展开时显示选中，重新打开和收起同步菜单', () => {
+  it('#52 右栏按钮只负责折叠：点它切换 collapsed，面板类型不在这里选', () => {
     const registration = getContextPanelRegistry().register(createPluginIdentity('test.issue52', 'run'), {
       id: 'test.context', label: '上下文', scope: 'global', renderKind: 'first-party-react', component: () => null,
     })
     try {
       useRightRailStore.setState({ activePanelId: 'test.context', collapsed: true })
       render(<WorkspaceTitlebar {...baseProps} />)
-      const openMenu = () => fireEvent.click(screen.getByRole('button', { name: '右侧栏' }))
-      openMenu()
-      expect(screen.getByRole('menuitemradio', { name: '上下文' })).toHaveAttribute('aria-checked', 'false')
-      fireEvent.click(screen.getByRole('menuitemradio', { name: '上下文' }))
-      expect(useRightRailStore.getState().collapsed).toBe(false)
-      openMenu()
-      expect(screen.getByRole('menuitemradio', { name: /上下文/ })).toHaveAttribute('aria-checked', 'true')
-      fireEvent.click(screen.getByRole('menuitem', { name: '收起右侧栏' }))
-      openMenu()
-      expect(screen.getByRole('menuitemradio', { name: '上下文' })).toHaveAttribute('aria-checked', 'false')
-      expect(useRightRailStore.getState().activePanelId).toBe('test.context')
+      expect(railToggle()).toHaveAttribute('aria-label', '展开右侧栏')
+      expect(railToggle()).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(railToggle())
+      expect(baseProps.onToggleRightPanel).toHaveBeenCalledOnce()
+      // 类型切换的入口只有一个：右栏内部（`.context-panel-tabs`）。标题栏不再有面板列表。
+      fireEvent.click(gear())
+      expect(screen.queryByRole('menuitemradio', { name: '上下文' })).toBeNull()
     } finally {
       registration.dispose()
     }
+  })
+
+  it('无可用右栏贡献时右栏按钮禁用', () => {
+    render(<WorkspaceTitlebar {...baseProps} />)
+    expect(railToggle()).toBeDisabled()
   })
 
   it('打开入口只打开 Registry Launcher，不再暴露硬编码 Runtime 动作', () => {
@@ -66,66 +68,106 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     expect(screen.queryByRole('button', { name: /调试|Runtime/ })).toBeNull()
   })
 
-  it('最近关闭项存在时恢复按钮调用 reopen，否则禁用', () => {
-    const { rerender } = render(<WorkspaceTitlebar {...baseProps} />)
-    expect(screen.getByRole('button', { name: '没有最近关闭的 Sheet' })).toBeDisabled()
+  it('「重新打开最近关闭的 Sheet」按钮与启动器分隔线都已删除，能力留在页签右键菜单与命令里', () => {
+    render(<WorkspaceTitlebar {...baseProps} />)
+    expect(screen.queryByRole('button', { name: /最近关闭的 Sheet/ })).toBeNull()
+    const launchers = document.querySelector('.workspace-titlebar-launchers')!
+    expect([...launchers.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['打开 Sheet'])
+    expect(launchers.querySelector('.workspace-launcher-separator')).toBeNull()
+  })
 
-    rerender(<WorkspaceTitlebar {...baseProps} canReopenSheet />)
-    const reopen = screen.getByRole('button', { name: '重新打开最近关闭的 Sheet' })
-    expect(reopen).not.toBeDisabled()
-    fireEvent.click(reopen)
-    expect(baseProps.onReopenSheet).toHaveBeenCalledOnce()
+  it('右簇只剩一个齿轮菜单触发与一个右栏折叠按钮', () => {
+    render(<WorkspaceTitlebar {...baseProps} />)
+    expect([...document.querySelectorAll('[data-menu-trigger]')].map(node => node.getAttribute('data-menu-trigger'))).toEqual(['app-menu'])
+    expect(document.querySelectorAll('[data-right-rail-toggle="true"]').length).toBe(1)
+    expect(gear()).toHaveAttribute('aria-haspopup', 'menu')
+  })
+
+  it('齿轮菜单一次含三段：界面模式（radio）、设置域（跳转）、插件项（命令）', () => {
+    const command = vi.fn()
+    const owner = createPluginIdentity('test.menu', 'run')
+    const commandHandle = getCommandRegistry().register(owner, {
+      id: 'test.menu.ping', name: 'test.menu.ping', description: 'ping', priority: 0, execute: command,
+    })
+    const itemHandle = getTitlebarRegistry().register(owner, {
+      id: 'test.menu.item', slot: 'app-menu', renderKind: 'command', label: '插件动作', commandId: 'test.menu.ping',
+    }, { contributionId: 'test.menu.item', priority: 0 })
+    try {
+      render(<WorkspaceTitlebar {...baseProps} />)
+      fireEvent.click(gear())
+      const menu = screen.getByRole('menu')
+      expect(menu).toHaveAttribute('data-menu-kind', 'app-menu')
+      // 三段的分段标题都在（界面模式的 radio 项由界面模式注册表提供，单测里可能为空）。
+      expect(within(menu).getByText('界面模式')).toBeTruthy()
+      expect([...menu.querySelectorAll('.workspace-menu-subheading')].map(node => node.textContent)).toEqual(['设置', '插件'])
+      expect(within(menu).getByRole('menuitem', { name: '外观' })).toBeTruthy()
+      const pluginItem = within(menu).getByRole('menuitem', { name: '插件动作' })
+      expect(pluginItem).toHaveAttribute('data-menu-command', 'test.menu.ping')
+      fireEvent.click(pluginItem)
+      expect(command).toHaveBeenCalledOnce()
+      expect(screen.queryByRole('menu')).toBeNull()
+      expect(document.activeElement).toBe(gear())
+    } finally {
+      itemHandle.dispose()
+      commandHandle.dispose()
+    }
+  })
+
+  it('插件菜单项受 when 门控，为假时整项不出现', () => {
+    const handle = getTitlebarRegistry().register(createPluginIdentity('test.menu.hidden', 'run'), {
+      id: 'test.menu.hidden.item', slot: 'app-menu', renderKind: 'command', label: '隐藏项', commandId: 'test.menu.ping',
+      when: () => false,
+    }, { contributionId: 'test.menu.hidden.item', priority: 0 })
+    try {
+      render(<WorkspaceTitlebar {...baseProps} />)
+      fireEvent.click(gear())
+      expect(screen.queryByRole('menuitem', { name: '隐藏项' })).toBeNull()
+    } finally {
+      handle.dispose()
+    }
   })
 
   it('右上角菜单入口提供互斥的 VS Code 式 menu 语义与稳定锚点', () => {
     render(<WorkspaceTitlebar {...baseProps} />)
-    const settings = screen.getByRole('button', { name: '设置' })
-    const interfaceMode = screen.getByRole('button', { name: '界面模式' })
+    const trigger = gear()
 
-    expect(settings).toHaveAttribute('aria-haspopup', 'menu')
-    expect(settings).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(settings)
-    const settingsMenu = screen.getByRole('menu')
-    expect(settingsMenu).toHaveAttribute('data-menu-kind', 'settings')
-    expect(settings).toHaveAttribute('aria-expanded', 'true')
-    expect(settings).toHaveAttribute('aria-controls', settingsMenu.id)
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('menu')
+    expect(menu).toHaveAttribute('data-menu-kind', 'app-menu')
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(trigger).toHaveAttribute('aria-controls', menu.id)
 
-    fireEvent.click(interfaceMode)
-    const interfaceMenu = screen.getByRole('menu')
-    expect(interfaceMenu).toHaveAttribute('data-menu-kind', 'interface')
-    expect(settings).toHaveAttribute('aria-expanded', 'false')
-    expect(interfaceMode).toHaveAttribute('aria-expanded', 'true')
-
-    fireEvent.keyDown(interfaceMenu, { key: 'Escape' })
+    fireEvent.keyDown(menu, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(interfaceMode).toHaveAttribute('aria-expanded', 'false')
-    expect(document.activeElement).toBe(interfaceMode)
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('菜单项点击或外部关闭后焦点回到对应触发按钮', () => {
     render(<WorkspaceTitlebar {...baseProps} />)
-    const settings = screen.getByRole('button', { name: '设置' })
+    const trigger = gear()
 
-    fireEvent.click(settings)
-    const menuItem = screen.getByRole('menuitem', { name: '外观' })
-    fireEvent.click(menuItem)
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: '外观' }))
     expect(baseProps.onOpenSettingsDomain).toHaveBeenCalledWith('appearance')
-    expect(document.activeElement).toBe(settings)
+    expect(document.activeElement).toBe(trigger)
 
-    fireEvent.click(settings)
+    fireEvent.click(trigger)
     expect(screen.getByRole('menu')).toBeTruthy()
     fireEvent.pointerDown(document.body)
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(document.activeElement).toBe(settings)
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('设置菜单在设置页打开时仍可切换顶层域', () => {
     const onOpenSettingsDomain = vi.fn()
     render(<WorkspaceTitlebar {...baseProps} settingsOpen onOpenSettingsDomain={onOpenSettingsDomain} />)
-    const settings = screen.getByRole('button', { name: '设置' })
-    fireEvent.click(settings)
+    const trigger = gear()
+    fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('menuitem', { name: '插件' }))
     expect(onOpenSettingsDomain).toHaveBeenCalledWith('plugins')
-    expect(document.activeElement).toBe(settings)
+    expect(document.activeElement).toBe(trigger)
   })
 })

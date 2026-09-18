@@ -28,7 +28,6 @@ function renderTitlebar(sidebarEnabled: boolean, sidebarCollapsed = false, onTog
       sidebarCollapsed={sidebarCollapsed}
       sidebarEnabled={sidebarEnabled}
       rightPanelEnabled={rightPanelEnabled}
-      canReopenSheet={false}
       onToggleSidebar={onToggleSidebar}
       onFocusSheet={vi.fn()}
       onCloseSheet={vi.fn()}
@@ -40,7 +39,6 @@ function renderTitlebar(sidebarEnabled: boolean, sidebarCollapsed = false, onTog
         onReopen: vi.fn(),
       }}
       onOpenSheet={vi.fn()}
-      onReopenSheet={vi.fn()}
       onToggleRightPanel={vi.fn()}
       onToggleSettings={vi.fn()}
       onMinimize={vi.fn()}
@@ -94,11 +92,12 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
     expect(button!.closest('.workspace-window-controls')).toBeNull()
     expect(button!.closest('.workspace-titlebar-workspace')).toBeNull()
 
-    // 应用控制簇里仍然只有三个菜单触发（外加插件贡献），不得混入折叠按钮。
+    // 应用控制簇里只有一个齿轮菜单触发（外加右栏折叠钮与插件贡献），不得混入左栏折叠按钮。
     const appControls = document.querySelector('.workspace-window-app-controls')!
     expect(appControls.querySelectorAll('[data-sidebar-toggle="true"]').length).toBe(0)
     expect([...appControls.querySelectorAll('[data-menu-trigger]')].map(b => b.getAttribute('data-menu-trigger')))
-      .toEqual(['right-panel', 'interface', 'settings'])
+      .toEqual(['app-menu'])
+    expect([...appControls.querySelectorAll('[data-right-rail-toggle="true"]')].length).toBe(1)
 
     // 窗口控制三按钮照旧存在且顺序不变。
     const nativeControls = document.querySelector('.workspace-window-native-controls')!
@@ -143,13 +142,11 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
       activeSheetId: null,
       activeAgent: 'peri',
       sidebarEnabled: true,
-      canReopenSheet: false,
       onToggleSidebar: vi.fn(),
       onFocusSheet: vi.fn(),
       onCloseSheet: vi.fn(),
       menuActions: { onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() },
       onOpenSheet: vi.fn(),
-      onReopenSheet: vi.fn(),
       onToggleRightPanel: vi.fn(),
       onToggleSettings: vi.fn(),
       onMinimize: vi.fn(),
@@ -172,13 +169,11 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
         sidebarCollapsed={false}
         sidebarEnabled={false}
         rightPanelEnabled={false}
-        canReopenSheet={false}
         onToggleSidebar={vi.fn()}
         onFocusSheet={vi.fn()}
         onCloseSheet={vi.fn()}
         menuActions={{ onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() }}
         onOpenSheet={vi.fn()}
-        onReopenSheet={vi.fn()}
         onToggleRightPanel={onToggleRightPanel}
         onToggleSettings={vi.fn()}
         onMinimize={vi.fn()}
@@ -186,8 +181,9 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
         onCloseWindow={vi.fn()}
       />,
     )
-    const button = screen.getByRole('button', { name: '右侧栏' })
+    const button = document.querySelector<HTMLButtonElement>('[data-right-rail-toggle="true"]')!
     expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-label', '当前没有可用右侧栏')
     expect(button).toHaveAttribute('title', '当前没有可用右侧栏')
     fireEvent.click(button)
     expect(onToggleRightPanel).not.toHaveBeenCalled()

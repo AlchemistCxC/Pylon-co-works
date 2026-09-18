@@ -52,7 +52,7 @@ import { projectFontContributions } from './infrastructure/fonts/fontProjection.
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
-import { selectAvailableContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
+import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
@@ -168,7 +168,7 @@ export default function App() {
   // 主题级 showSidebar 一并计入，否则标题栏会为被主题隐藏的左栏保留轨道。
   const sidebarEnabled = sheetHasLeftColumn(activeSheet) && showSidebar
   const rightPanelEnabled = activeSheet
-    ? selectAvailableContextPanels(contextPanelSnapshot.entries, {
+    ? selectContextPanels(contextPanelSnapshot.entries, {
       workspaceKind: activeSheet.kind,
       sheetId: activeSheet.id,
       activeSessionId: activeSession,
@@ -478,7 +478,6 @@ export default function App() {
         sidebarCollapsed={sidebarCollapsed}
         sidebarEnabled={sidebarEnabled}
         rightPanelEnabled={rightPanelEnabled}
-        canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
         onCloseSheet={id => { void closeWorkspace(id) }}
@@ -490,7 +489,6 @@ export default function App() {
           onReopen: () => useWorkspaceStore.getState().reopenSheet(),
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
-        onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
         onToggleSettings={() => setShowSettings(value => !value)}
         onOpenSettingsDomain={domain => {

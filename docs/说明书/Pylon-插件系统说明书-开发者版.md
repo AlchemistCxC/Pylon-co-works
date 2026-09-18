@@ -1,6 +1,6 @@
 ﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 0.2.1
+> 适用版本：Pylon 0.2.2
 >
 > 生产契约：Plugin API 1.0 / 1.1 / 1.2（最新 1.2），`pylon-plugin.json` schema 1
 
@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -813,7 +813,7 @@ context.sidebar.registerAgentSidebarContribution({
 
 **顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。
 
-Sheet 右栏按 Workspace kind 注册：
+右栏面板（上下文面板）注册：
 
 ```ts
 context.contextPanel.register({
@@ -826,9 +826,58 @@ context.contextPanel.register({
 })
 ```
 
+**面板选择模型（API 2.2 起，见 ADR-0012）**：`workspaceKind` 是**亲和**而不是闸门——
+
+| 字段 | 语义 |
+| --- | --- |
+| `workspaceKind` | **只是默认选中**：进入某个种类的 Sheet 且用户没显式选过时，右栏优先显示声明了该种类的面板。面板**不会**因为种类不匹配而消失，用户在右栏切换器里可以选任意面板（面板拿到的是当前 Sheet 的上下文，可能因此显示空态）。 |
+| `scope: 'contextual'`（默认） | 与 `workspaceKind` 配套的「这个种类的家用面板」。 |
+| `scope: 'global'` | 任何 Sheet 都能用；当没有任何面板声明当前 Sheet 种类时，它是默认选中的兜底。 |
+| `when` | **硬闸门**：为假时面板不出现在切换器里。它表达「此刻这个面板没有意义」（例如无会话时不显示），与「适不适合这个 Sheet」是两条轴。异常按「不显示」处理并记录一条运行错误。 |
+
+没显式选过时的默认顺序：**亲和当前 Sheet 种类的面板 → 第一个 `global` 面板 → 列表第一个**。用户一旦在切换器里选过，那次选择跨 Sheet 保持（`rightRailStore.activePanelId`），切 Sheet 不会把它抢回默认值。右栏头部的切换器列出全部通过 `when` 的面板；**切换器的标签是宿主渲染的，插件不画自己的标签行**。
+
 `order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态（含 `presentation` / `collapsed` / `pageOpen` / `blockAction`），并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 
 Workspace 自身的 `sidebar` 仍负责声明整块左栏壳；Agent 左栏内部内容、FileSheet workbench activity，以及通用右栏内容分别由对应 contribution registry 管理，不建立第二套 `kind → sidebar` 映射。
+
+#### 6.8.1 标题栏贡献与设置齿轮菜单（API 2.1）
+
+标题栏的**右簇只有两个控件**：一个设置齿轮菜单（`data-menu-trigger="app-menu"`）与一个右栏折叠钮。界面模式、设置域跳转、插件菜单项都在齿轮菜单里——所以「界面」与「设置」不再各占一个文字触发。右栏的**类型切换在右栏内部**（`.context-panel-tabs`），标题栏那个按钮**只负责折叠**，不提供第二处面板选择入口；右栏内部也不再有第二个折叠钮（折叠只有标题栏一处）。切换器**列出全部已注册面板**，其中不适用于当前 Sheet 的面板照列但禁用并在 `title` 里写明原因（只列可用面板时，单面板 Sheet 会只剩一个撑满的标签，看上去是标题而不是切换器）。
+
+插件往齿轮菜单里加一项：
+
+```ts
+context.titlebar.register({
+  id: 'example.menu.doctor',
+  slot: 'app-menu',
+  renderKind: 'command',
+  label: '运行自检',
+  icon: 'activity',
+  order: 400,
+  commandId: 'example.doctor.run',
+  when: context => context.workspaceKind === 'agent',
+}, { contributionId: 'example.menu.doctor' })
+```
+
+**槽位（`slot`，封闭词表）**：`left-rail` / `workspace` / `center` / `app-actions` 四个**渲染槽**沿用原语义（渲染成标题栏上的按钮或表面，`first-party-react` 或 `isolated-surface`）；`app-menu` 是唯一的**数据槽**——它不渲染成按钮，而是成为齿轮菜单「插件」段里的一项，点击时宿主执行 `commandId`（走命令注册表，见 §6.1）。
+
+**菜单项字段**
+
+| 字段 | 必填 | 默认 | 语义 |
+| --- | --- | --- | --- |
+| `id` | 是 | — | 贡献 id（也是去重键） |
+| `slot` | 是 | — | 菜单项固定为 `'app-menu'` |
+| `renderKind` | 是 | — | 菜单项固定为 `'command'` |
+| `label` | 是 | — | 菜单项文字（宿主渲染，插件不画 DOM） |
+| `commandId` | 是 | — | 点击执行的命令 id；命令不存在或不可执行时宿主吞掉错误并记录，不炸标题栏 |
+| `icon` | 否 | 无图标 | 稳定图标键，与左栏模块图标同一映射；未知键降级为默认图标 |
+| `order` | 否 | 注册顺序 | 段内排序 |
+| `when` | 否 | 恒可见 | 可见性谓词，入参 `TitlebarContext`（`interfaceMode` / `workspaceKind` / `sheetId` / `settingsOpen`）；抛异常按「不显示」处理 |
+
+**注册期校验（fail-closed）**：`id` 非空且无首尾空格、`label` 非空、`slot` 属于封闭词表；`slot: 'app-menu'` ⇔ `renderKind: 'command'`（两者互相绑定，错配即拒绝）、`commandId` 非空；其余两种 renderKind 各自的 `component` / `surfaceId` 校验照旧。**菜单外壳（分组标题、图标、键盘导航、错误边界）全部归宿主**——插件只声明「叫什么、什么图标、点了跑哪条命令」，与左栏模块同一条纪律。
+
+齿轮菜单的键盘语义与其它菜单一致：`↓` / `↑` / `Home` / `End` 在**整段**菜单项之间移动（跨段连续），`Esc` 关闭并把焦点还给齿轮。
 
 ### 6.9 Application
 
@@ -972,11 +1021,13 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0`（`PYLON_PLUGIN_API_SUPPORTED`）；
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2`（`PYLON_PLUGIN_API_SUPPORTED`）；
   旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
 - minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
 - `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。1.3 仅扩充 Hook 锚点词表（§6.2），manifest 字段形状相对 1.2 不变。
 - **2.0 是破坏性主轴**：Agent 左栏贡献由「按 `mode ('work' | 'chat')` 注册的互斥视图」改为「按 `region ('modules' | 'sessions')` 注册的堆叠区块」（§6.8）。manifest 字段形状相对 1.3 不变，因此 1.x 清单仍可解析与激活；**引用旧 `mode` 的左栏贡献必须按 2.0 重写**。`capabilities` / `dangerousHooks` 的 `>= 1.2` 谓词对 2.0 继续成立。
+- **2.1 只做加法**：标题栏贡献新增 `slot: 'app-menu'`——把一项数据化菜单项注册进标题栏的设置齿轮菜单（§6.8.1）。既有槽位、字段与校验不变，2.0 插件无需改动。
+- **2.2 只放宽**：右栏面板的 `workspaceKind` 从「可用性闸门」改为「默认选中的亲和」（§6.8，ADR-0012）。字段形状不变、清单无需改动，只是面板在更多 Sheet 上变得可选；`when` 仍是硬闸门。
 
 #### 6.11.4 SDK 发行形态
 

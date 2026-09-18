@@ -58,7 +58,6 @@ const titlebarActions = {
     onReopen: vi.fn(),
   },
   onOpenSheet: vi.fn(),
-  onReopenSheet: vi.fn(),
   onToggleRightPanel: vi.fn(),
   onToggleSettings: vi.fn(),
   onMinimize: vi.fn(),
@@ -118,7 +117,6 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
           activeAgent="peri"
           sidebarCollapsed={false}
           sidebarEnabled={true}
-          canReopenSheet={false}
         />,
       )
 
@@ -137,7 +135,6 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
           activeAgent="peri"
           sidebarCollapsed={false}
           sidebarEnabled={true}
-          canReopenSheet={false}
         />,
       )
 

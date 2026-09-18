@@ -208,6 +208,8 @@
 
 **⚠️ 追加修复（2026-09-18 20:10）：左栏所有按钮曾长期失效，根因是长按拖拽在 `pointerdown` 就捕获指针。** 捕获把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在按下/抬起目标的最近公共祖先上 ⇒ 头内部的标题、折叠钮、「打开」、头部动作全部收不到 click（自 `1b4854f0` 起一直如此，实机表现为「点了没反应」）。现改为长按到点才捕获，并补 `pointerleave` 取消长按。**仍占用文件域**：`src/components/Sidebar.tsx`、`src/components/__tests__/Sidebar.blocks.test.tsx`。全量 **601 文件 / 4361 用例通过**。
 
+**🔧 在途文件域（2026-09-18 21:30，标题栏 + 右栏，未提交）**：`src/workspace-sheets/{WorkspaceTitlebar,SheetTabStrip}.tsx` 及 `__tests__/workspaceTitlebar*.tsx`、`sheetTabOverflow.test.tsx`、`src/App.tsx`、`src/components/right-panel/{RightRailHost,ContextPanelHost}.tsx` 及 `__tests__`、`src/plugin-runtime/context-panel/**`、`src/plugin-runtime/titlebar/**`、`src/plugin-runtime/packageManifest.ts` + 两份 `pylon-plugin-manifest.schema.json`、首方样式 `builtin.pylon-shell/styles/App.css` 与 `builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css`、说明书、`.agents/decisions/0012-*.md`。改动要点：标题栏「界面+设置」合并为齿轮菜单（新增 `slot:'app-menu'` 数据化菜单项，API 2.1）、右栏按钮只折叠且图标重画、页签自动压缩 + 「···」收敛（不滚动不截断）、右栏面板 `workspaceKind` 由闸门改为亲和（API 2.2，ADR-0012）。全量 **601 文件 / 4380 用例通过**。
+
 ---
 
 [2026-09-18 17] [Polya] [#156 / #109]

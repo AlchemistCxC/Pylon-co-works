@@ -2,20 +2,22 @@ import { Suspense, useEffect, useId, useRef, useState, useSyncExternalStore, typ
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
+import { useWorkspaceStore } from '../workspaceStore'
 import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 import { selectAgentStatus } from '../components/settings/agentTypes'
-import { Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Square, X } from 'lucide-react'
+import { Minus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, Square, X } from 'lucide-react'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
-import { getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { getCommandRegistry, getContextPanelRegistry, getInterfaceModeRegistry, getTitlebarRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { selectContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore } from '../rightRailStore.ts'
 import { activateInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { TitlebarContext } from '../plugin-runtime/titlebar/titlebarTypes.ts'
+import { resolveLaunchIcon } from './launchIcons.tsx'
 import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../settingsDomains.ts'
 
 interface WorkspaceTitlebarProps {
@@ -28,13 +30,11 @@ interface WorkspaceTitlebarProps {
   /** active Sheet 是否真的会渲染左栏；无左栏时左格不占轨道、折叠按钮不出现。 */
   sidebarEnabled: boolean
   rightPanelEnabled?: boolean
-  canReopenSheet: boolean
   onToggleSidebar: () => void
   onFocusSheet: (id: string) => void
   onCloseSheet: (id: string) => void
   menuActions: WorkspaceMenuActions
   onOpenSheet: () => void
-  onReopenSheet: () => void
   onToggleRightPanel: () => void
   onToggleSettings: () => void
   /** Open Settings directly at one of the four top-level domains. */
@@ -50,7 +50,8 @@ interface WorkspaceTitlebarProps {
   settingsOpen?: boolean
 }
 
-type WorkspaceMenuKind = 'right-panel' | 'interface' | 'settings'
+/** 右簇只有一个菜单：齿轮（界面 + 设置 + 插件项）。右栏的类型切换在右栏内部，标题栏不再有一份。 */
+type WorkspaceMenuKind = 'app-menu'
 
 export default function WorkspaceTitlebar({
   sheets,
@@ -60,13 +61,12 @@ export default function WorkspaceTitlebar({
   activeSessionId = null,
   sidebarCollapsed,
   sidebarEnabled,
-  canReopenSheet,
   onToggleSidebar,
   onFocusSheet,
   onCloseSheet,
   menuActions,
   onOpenSheet,
-  onReopenSheet,
+  onToggleRightPanel,
   rightPanelEnabled = true,
   onToggleSettings,
   onOpenSettingsDomain,
@@ -80,6 +80,9 @@ export default function WorkspaceTitlebar({
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
+  // 「有最近关闭的 Sheet」只服务于**页签右键菜单**里的重开项：标题栏上那个重开按钮已删除
+  // （能力没删——命令 `workspace.sheet.reopen` 与页签右键都还在）。
+  const canReopenSheet = useWorkspaceStore(state => state.workspaceSheets.recentlyClosed.length > 0)
   const [openMenu, setOpenMenu] = useState<WorkspaceMenuKind | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -113,14 +116,26 @@ export default function WorkspaceTitlebar({
     if (entry.value.slot !== 'app-actions') return false
     try { return entry.value.when?.(titlebarContext) ?? true } catch { return false }
   })
-  const availablePanels = selectAvailableContextPanels(panelSnapshot.entries, {
+  const availablePanels = selectContextPanels(panelSnapshot.entries, {
     workspaceKind: activeSheetKind,
     sheetId: activeSheetId,
     activeSessionId,
     activeAgent,
   })
-  const activePanelId = useRightRailStore(state => state.collapsed ? null : state.activePanelId)
+  const rightRailCollapsed = useRightRailStore(state => state.collapsed)
   const rightPanelAvailable = rightPanelEnabled !== false && availablePanels.length > 0
+  // 插件注册的齿轮菜单项（API 2.1）：数据化贡献，点了跑命令。
+  const pluginMenuItems = titlebarSnapshot.entries.flatMap(entry => {
+    const contribution = entry.value
+    if (contribution.slot !== 'app-menu' || contribution.renderKind !== 'command') return []
+    try { return (contribution.when?.(titlebarContext) ?? true) ? [contribution] : [] } catch { return [] }
+  })
+  const runMenuCommand = (commandId: string) => {
+    // 菜单项的命令可能属于已停用插件或因故不可执行——失败记账但不炸标题栏。
+    void getCommandRegistry().execute(commandId).catch(error => {
+      console.error('标题栏菜单命令执行失败', commandId, error)
+    })
+  }
   const menuId = (kind: WorkspaceMenuKind) => `${titlebarId}-menu-${kind}`
   const toggleMenu = (kind: WorkspaceMenuKind, trigger: HTMLButtonElement) => {
     menuTriggerRef.current = trigger
@@ -216,37 +231,53 @@ export default function WorkspaceTitlebar({
           canReopen={canReopenSheet}
         />}
         <div className="workspace-titlebar-launchers">
+          {/* 新建 Sheet 是**浏览器式**的：紧贴最后一个页签右侧（页签区收缩到内容宽度，
+              空档全部让给右侧拖拽区），不是被推到窗口右端。 */}
           <button type="button" className="workspace-titlebar-icon workspace-open-trigger" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet"><Plus size={16} aria-hidden="true" /></button>
-          <span className="workspace-launcher-separator" aria-hidden="true" />
-          <button type="button" className="workspace-titlebar-icon workspace-reopen-trigger" onClick={onReopenSheet} disabled={!canReopenSheet} title={canReopenSheet ? '重新打开最近关闭的 Sheet' : '没有最近关闭的 Sheet'} aria-label={canReopenSheet ? '重新打开最近关闭的 Sheet' : '没有最近关闭的 Sheet'}><RotateCcw size={14} aria-hidden="true" /></button>
         </div>
         <div className="workspace-titlebar-drag" data-tauri-drag-region />
       </div>
 
       <div className="workspace-window-controls" ref={menuRef}>
         <div className="workspace-window-app-controls">
+          {/* 右栏按钮**只负责折叠**：类型切换在右栏内部（`.context-panel-tabs`），标题栏不再持有第二处
+              切换入口。图标与左栏折叠钮同构，只是朝向镜像。 */}
+          <button
+            type="button"
+            className="workspace-titlebar-icon workspace-right-rail-toggle"
+            onClick={onToggleRightPanel}
+            disabled={!rightPanelAvailable}
+            title={rightPanelAvailable ? (rightRailCollapsed ? '展开右侧栏' : '收起右侧栏') : '当前没有可用右侧栏'}
+            aria-label={rightPanelAvailable ? (rightRailCollapsed ? '展开右侧栏' : '收起右侧栏') : '当前没有可用右侧栏'}
+            aria-expanded={rightPanelAvailable ? !rightRailCollapsed : undefined}
+            data-right-rail-toggle="true"
+          >
+            {/* 图标是**画出来的**面板符号（右侧一道实心条 = 右栏在），不是 `»` 箭头：
+                箭头和窗口控制、以及右栏内部那个折叠钮撞脸，用户点名要「个别的图标」。 */}
+            {chromeStyle === 'icons'
+              ? (rightRailCollapsed ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />)
+              : <span className="workspace-rail-glyph" aria-hidden="true" />}
+          </button>
           <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={event => toggleMenu('right-panel', event.currentTarget)} disabled={!rightPanelAvailable} title={rightPanelAvailable ? '右侧栏' : '当前没有可用右侧栏'} aria-label="右侧栏" aria-haspopup="menu" aria-expanded={openMenu === 'right-panel'} aria-controls={menuId('right-panel')} data-menu-trigger="right-panel"><span className="workspace-titlebar-entry-label">右侧栏</span></button>
-            {openMenu === 'right-panel' && <div id={menuId('right-panel')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="right-panel" onKeyDown={handleMenuKeyDown}>
-              <div className="workspace-menu-heading">右侧栏</div>
-              {!rightPanelAvailable && <div className="workspace-menu-empty">当前没有可用面板</div>}
-              {availablePanels.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={activePanelId === entry.contributionId} data-selected={activePanelId === entry.contributionId ? 'true' : undefined} onClick={() => { useRightRailStore.getState().setActivePanel(entry.contributionId); useRightRailStore.getState().setCollapsed(false); closeMenu() }}><span className="workspace-menu-check" aria-hidden="true">{activePanelId === entry.contributionId ? '✓' : ''}</span><span>{entry.value.label}</span></button>)}
-              <span className="workspace-menu-separator" />
-              <button type="button" role="menuitem" onClick={() => { useRightRailStore.getState().setCollapsed(true); closeMenu() }}>收起右侧栏</button>
-            </div>}
-          </div>
-          <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={event => toggleMenu('interface', event.currentTarget)} title="界面模式" aria-label="界面模式" aria-haspopup="menu" aria-expanded={openMenu === 'interface'} aria-controls={menuId('interface')} data-menu-trigger="interface"><span className="workspace-titlebar-entry-label">界面</span></button>
-            {openMenu === 'interface' && <div id={menuId('interface')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="interface" onKeyDown={handleMenuKeyDown}>
+            <button
+              type="button"
+              className="workspace-titlebar-icon workspace-titlebar-menu-icon"
+              onClick={event => toggleMenu('app-menu', event.currentTarget)}
+              title="界面与设置"
+              aria-label="界面与设置"
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'app-menu'}
+              aria-controls={menuId('app-menu')}
+              data-menu-trigger="app-menu"
+            >
+              {chromeStyle === 'icons' ? <Settings size={16} aria-hidden="true" /> : <span aria-hidden="true">⚙</span>}
+            </button>
+            {openMenu === 'app-menu' && <div id={menuId('app-menu')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="app-menu" onKeyDown={handleMenuKeyDown}>
+              {/* 二级内容分三段：界面模式（radio）/ 设置域（跳转）/ 插件项（命令）。 */}
               <div className="workspace-menu-heading">界面模式</div>
               {modeSnapshot.entries.map(entry => <button key={entry.contributionId} type="button" role="menuitemradio" aria-checked={entry.value.id === interfaceMode} data-selected={entry.value.id === interfaceMode ? 'true' : undefined} onClick={() => { try { const ok = activateInterfaceMode(entry.value.id); if (ok) closeMenu() } catch { /* activation failure is reported by the transaction */ } }}><span className="workspace-menu-check" aria-hidden="true">{entry.value.id === interfaceMode ? '✓' : ''}</span><span>{entry.value.label}</span></button>)}
-            </div>}
-          </div>
-          <div className="workspace-titlebar-menu-anchor">
-            <button type="button" onClick={event => toggleMenu('settings', event.currentTarget)} title="设置" aria-label="设置" aria-haspopup="menu" aria-expanded={openMenu === 'settings'} aria-controls={menuId('settings')} data-menu-trigger="settings"><span className="workspace-titlebar-entry-label">设置</span></button>
-            {openMenu === 'settings' && <div id={menuId('settings')} className="workspace-menu workspace-menu-chrome" role="menu" data-menu-kind="settings" onKeyDown={handleMenuKeyDown}>
-              <div className="workspace-menu-heading">设置</div>
-              <div className="workspace-menu-subheading">跳转到设置域</div>
+              <span className="workspace-menu-separator" />
+              <div className="workspace-menu-subheading">设置</div>
               {SETTINGS_DOMAINS.map(domain => {
                 const meta = SETTINGS_DOMAIN_MENU_META[domain.id]
                 const label = SETTINGS_DOMAIN_SHORT_LABELS[domain.id]
@@ -269,10 +300,32 @@ export default function WorkspaceTitlebar({
                   <span className="workspace-menu-chevron" aria-hidden="true">›</span>
                 </button>
               })}
+              {pluginMenuItems.length > 0 && <>
+                <span className="workspace-menu-separator" />
+                <div className="workspace-menu-subheading">插件</div>
+                {pluginMenuItems.map(contribution => {
+                  const ContributionIcon = resolveLaunchIcon(contribution.icon)
+                  return <button
+                    key={contribution.id}
+                    type="button"
+                    role="menuitem"
+                    className="workspace-menu-command-item"
+                    title={contribution.label}
+                    aria-label={contribution.label}
+                    data-menu-command={contribution.commandId}
+                    onClick={() => { closeMenu(); runMenuCommand(contribution.commandId) }}
+                  >
+                    <span className="workspace-menu-check workspace-menu-command-glyph" aria-hidden="true">{contribution.icon ? <ContributionIcon size={13} /> : ''}</span>
+                    <span>{contribution.label}</span>
+                  </button>
+                })}
+              </>}
             </div>}
           </div>
           {contributedActions.map(entry => {
             const contribution = entry.value
+            // 菜单项不进标题栏按钮簇：它是数据化贡献，渲染在齿轮菜单里（见上）。
+            if (contribution.renderKind === 'command') return null
             if (contribution.renderKind === 'isolated-surface') {
               return <IsolatedPluginSurface key={entry.contributionId} surfaceId={contribution.surfaceId} className="workspace-titlebar-plugin-action" input={{ titlebarContext }} />
             }
