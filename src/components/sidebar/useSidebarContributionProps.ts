@@ -29,7 +29,7 @@ export type AgentSidebarSharedProps = Omit<
  * 两处必须拿到**同一批**会话/工作区数据与回调，否则「整页里删掉的会话，区块里还显示」
  * 这类分裂迟早会出现。因此把接线抽到这里，`Sidebar` 与页面宿主都消费它。
  */
-export function useSidebarContributionProps(ctx: SheetContext, query: string): AgentSidebarSharedProps {
+export function useSidebarContributionProps(ctx: SheetContext, query: string, onQueryChange: (query: string) => void): AgentSidebarSharedProps {
   const {
     activeSession,
     selectSession: onSelectSession,
@@ -116,6 +116,7 @@ export function useSidebarContributionProps(ctx: SheetContext, query: string): A
   return {
     activeAgentId: activeAgent,
     query,
+    onQueryChange,
     activeSessionId: activeSession,
     // 会话区里两个族群（挂在工作区上的 / 无 cwd 的）由同一个贡献渲染并按 cwd 分组，
     // 因此给它全集，分组语义留在面板里，宿主不再做 work/chat 预切分。

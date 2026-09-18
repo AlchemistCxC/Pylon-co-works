@@ -3,24 +3,28 @@ import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts
 import type { Workspace } from '../../workspaceEntities.ts'
 
 /**
- * 左栏分区。左栏是**两个分区的纵向堆叠**，不是互斥视图：
- * - `modules`：常驻能力区块（定时、自动化等），贴顶、自身滚动、可折叠。
- * - `sessions`：会话列表，占满剩余高度，是左栏唯一的会话滚动态。
+ * 左栏是**一个有序的模块栈**。
  *
- * 取代旧的 `AgentSidebarMode ('work' | 'chat')`。旧模型把「工作 / 聊天」做成一对
- * 互斥页签，于是注册表的 `order` 无法生效（每个 mode 只挂一个贡献），`when` 也
- * 从未被调用——而这两者恰好是区块栈需要的原语。分区维度下它们都真正生效。
+ * 曾经是「两个分区（modules / sessions）纵向堆叠」，而 `sessions` 分区里又只有一个贡献。
+ * 用户要求「把会话抽取成一个常开模块」，于是分区这一层被删掉：会话就是栈里的一个模块，
+ * 与其它模块同构（同一条注册表、同一套图标/点击语义/拖拽/显隐），区别只在于它声明了
+ * `alwaysOpen` 与较大的 `order`，因而默认常开且排在最后。
+ *
+ * 这么做的收益是「模块」这件事只有一种形状：插件注册的模块与内置的会话模块走同一条路，
+ * 拖拽重排、显隐设置、图标、点击语义都不需要为会话开特例。
  */
-export type AgentSidebarRegion = 'modules' | 'sessions'
-
-/** 贡献内容的两种体量：左栏区块内的小样，或主区整页。 */
 export type AgentSidebarPresentation = 'block' | 'page'
 
-/** 分区字面量清单。注册期校验与宿主分发共用，避免两处各写一份枚举。 */
-export const AGENT_SIDEBAR_REGIONS = ['modules', 'sessions'] as const satisfies readonly AgentSidebarRegion[]
+/**
+ * 点击模块标题的语义。用户在需求里把它归纳为三种可选方案：
+ * - `expand`：点击展开/折叠（默认）。若模块同时声明了 `page`，宿主会在头部自动补一个
+ *   「打开」按钮——这即用户说的「都要」。
+ * - `page`：点击进入新页面（替换聊天视图的整页）。此时若模块可折叠，宿主会渲染一个
+ *   独立的折叠钮，因为标题已被「进入页面」占用。
+ */
+export type AgentSidebarTitleAction = 'expand' | 'page'
 
 export interface AgentSidebarContributionContext {
-  readonly region: AgentSidebarRegion
   readonly activeAgentId: string
   readonly activeSessionId: string | null
   readonly query: string
@@ -43,21 +47,25 @@ export interface AgentSidebarHeaderAction {
 export interface AgentSidebarContributionProps {
   readonly activeAgentId: string
   readonly query: string
+  /**
+   * 搜索框由**会话模块自己渲染**（它只过滤会话），但取值留在宿主：`when` 谓词与其它
+   * 模块看到的 `query` 必须与输入框同步，两处各存一份会漂移。
+   */
+  readonly onQueryChange: (query: string) => void
   readonly activeSessionId: string | null
   readonly sessions: readonly WorkspaceSession[]
   readonly workspaces: readonly Workspace[]
   readonly liveGeneratingSources: readonly string[]
   /**
-   * 同一份内容以两种体量出现：`block` 是左栏区块里的小样，`page` 是它展开到主区后的整页。
-   * 贡献据此决定渲染密度（区块里紧凑、整页里铺开），而不是维护两份组件。
+   * 同一份内容以两种体量出现：`block` 是左栏模块里的小样，`page` 是它展开到主区后的整页。
+   * 贡献据此决定渲染密度（模块里紧凑、整页里铺开），而不是维护两份组件。
    */
   readonly presentation: AgentSidebarPresentation
   /** 宿主拥有折叠状态；贡献据此决定是否跳过昂贵渲染。`page` 体量下恒为 `false`。 */
   readonly collapsed: boolean
   /**
-   * 注册「区块头动作」的处理器。宿主渲染头部（标题 + 折叠钮 + `headerActions`），
+   * 注册「模块头动作」的处理器。宿主渲染头部（标题 + 折叠钮 + `headerActions`），
    * 但动作语义属于贡献，因此由贡献在挂载期把处理器注册回来、卸载时传 `null` 注销。
-   * 贡献不必监听 `onBlockAction`，二者只留其一即可（前者是宿主导入，后者是占位默认值）。
    */
   readonly registerBlockActionHandler: (handler: ((actionId: string) => void) | null) => void
   /** 宿主头部的 `headerActions` 被点击时回调，参数是该 action 的 id。 */
@@ -73,28 +81,36 @@ export interface AgentSidebarContributionProps {
   readonly onCreateWorkspaceSession: (workspaceId: string) => void
 }
 
+export interface AgentSidebarPage {
+  /** 页面头部标题；宿主渲染头部与返回控件，贡献只画内容。 */
+  readonly title: string
+}
+
 interface AgentSidebarContributionBase {
   readonly id: string
-  readonly region: AgentSidebarRegion
-  /** 区块标题。由**宿主**渲染成区块头——贡献不得再画一份自己的标题。 */
+  /** 模块标题。由**宿主**渲染成模块头——贡献不得再画一份自己的标题。 */
   readonly label: string
+  /** 稳定图标键（与 Workspace launch 同一映射）。省略时模块头不画图标。 */
+  readonly icon?: string
   readonly order?: number
-  /** 是否可折叠。省略时 `modules` 区默认可折叠，`sessions` 区默认不可折叠。 */
+  /** 标题点击语义；省略为 `expand`。 */
+  readonly onTitleClick?: AgentSidebarTitleAction
+  /** 是否可折叠。省略时除 `alwaysOpen` 外默认可折叠。 */
   readonly collapsible?: boolean
   readonly defaultCollapsed?: boolean
   /**
-   * 声明本区块**可以展开成主区整页**：点击区块标题即打开，页面替换该 Sheet 的聊天视图
-   * （不开新 Sheet）。页面渲染的是**同一个贡献组件**，只是 `presentation: 'page'`。
-   * 省略即该区块只能折叠，点了无处可去。
+   * 常开：不可折叠、不可隐藏、且**不参与显隐设置**。会话模块用它——左栏没有会话列表
+   * 就失去了主体。仍可参与拖拽重排（order 只是默认位次）。
+   */
+  readonly alwaysOpen?: boolean
+  /**
+   * 声明本模块**可以展开成主区整页**：点击进入（`onTitleClick: 'page'`）或由宿主在头部
+   * 提供的「打开」按钮进入。页面替换该 Sheet 的聊天视图（不开新 Sheet），渲染的是
+   * **同一个贡献组件**，只是 `presentation: 'page'`。
    */
   readonly page?: AgentSidebarPage
   readonly headerActions?: readonly AgentSidebarHeaderAction[]
   readonly when?: (context: AgentSidebarContributionContext) => boolean
-}
-
-export interface AgentSidebarPage {
-  /** 页面头部标题；宿主渲染头部与返回控件，贡献只画内容。 */
-  readonly title: string
 }
 
 export interface FirstPartyAgentSidebarContribution extends AgentSidebarContributionBase {

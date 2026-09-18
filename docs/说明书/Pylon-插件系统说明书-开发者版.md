@@ -721,31 +721,42 @@ UI Surface Registry 已实现。`surfaceId` 需要由可见贡献点引用；Age
 
 ### 6.8 左右栏贡献
 
-Agent 左栏是**两个分区的纵向堆叠**，不是一对互斥视图：`modules`（常驻能力区块，贴顶、自身滚动、默认可折叠）在上，`sessions`（会话列表，占满剩余高度）在下。贡献按 `region` 注册：
+Agent 左栏是**一个有序的模块栈**：会话本身就是栈里的一个模块（声明 `alwaysOpen`，因此不可折叠、不可隐藏、默认排在最后），与插件注册的模块同构——同一条注册表、同一套图标 / 点击语义 / 拖拽重排 / 显隐设置。模块按 `order` 排列：
 
 ```ts
 context.sidebar.registerAgentSidebarContribution({
   id: 'example.automation',
-  region: 'modules',
   label: '自动化',
+  icon: 'waypoints',            // 稳定图标键，与 Workspace launch 同一映射；未知键安全降级
   order: 300,
-  collapsible: true,          // 省略时 modules 默认可折叠、sessions 默认不可折叠
+  onTitleClick: 'expand',       // 'expand'（默认）标题展开/折叠 | 'page' 标题进入整页
+  collapsible: true,            // 省略时默认 true；`alwaysOpen` 的模块恒为 false
   defaultCollapsed: false,
-  page: { title: '自动化' },   // 可选：声明后点区块标题即把内容展开成主区整页
-  headerActions: [            // 可选：宿主渲染在区块头部的动作按钮
+  page: { title: '自动化' },     // 声明后此模块可展开成主区整页
+  headerActions: [              // 宿主渲染在模块头部的动作按钮
     { id: 'new-rule', label: '新建', title: '新建自动化规则', icon: 'plus' },
   ],
-  when: context => context.region === 'modules',   // 可选：可见性谓词
+  when: context => true,        // 可见性谓词
   renderKind: 'isolated-surface',
   surfaceId: 'example.panel',
 })
 ```
 
-**区块外壳（标题、折叠钮、`headerActions`）由宿主渲染，贡献只画区块内容**。标题的唯一来源是贡献声明的 `label`——贡献不得再画一份自己的标题。宿主点击 `headerActions` 时：`first-party-react` 贡献经 `props.registerBlockActionHandler` 在挂载期注册的处理器回派；`isolated-surface` 贡献走 `host:input` 的 `blockAction` 字段（带 `nonce`，重复点击可区分）。
+**模块外壳（图标、标题、折叠钮、`headerActions`、拖拽手柄）由宿主渲染，贡献只画模块内容**。标题的唯一来源是贡献声明的 `label`——贡献不得再画一份自己的标题。宿主点击 `headerActions` 时：`first-party-react` 贡献经 `props.registerBlockActionHandler` 在挂载期注册的处理器回派；`isolated-surface` 贡献走 `host:input` 的 `blockAction` 字段（带 `nonce`，重复点击可区分）。
 
-**点击语义分工**：区块**标题**在声明了 `page` 时把内容展开成主区整页（替换该 Sheet 的聊天视图，**不开新 Sheet**，Esc 或页面头部「返回」回到聊天）；**折叠钮**是独立控件，只管折叠。未声明 `page` 的区块，标题退化为折叠开关。
+**点击方案由插件选**（用户归纳的三种，全部由此表达）：
 
-**页面渲染的是同一个贡献组件**，只是 `presentation: 'page'`（左栏区块里是 `'block'`）——同一份内容两种体量，不需要维护两份组件，也共享同一批会话/工作区数据与回调。隔离表面在 `host:input` 里拿到同样的 `presentation` / `collapsed` / `pageOpen`。
+| 想要的 | 声明 |
+| --- | --- |
+| 点击展开/折叠 | `onTitleClick: 'expand'`（默认） |
+| 点击进入新页面 | `onTitleClick: 'page'` + `page`（此时宿主另给一个折叠钮，因为标题已被占用） |
+| 都要 | `onTitleClick: 'expand'` + `page` —— 标题负责展开，模块头自动出现「打开」按钮 |
+
+`onTitleClick: 'page'` 却没声明 `page` 会在注册期被拒绝（点了没处去是死路，不做静默降级）；`alwaysOpen` 与 `collapsible: true` 同时声明同样被拒绝。
+
+**整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`（左栏模块里是 `'block'`）——同一份内容两种体量，不需要维护两份组件，也共享同一批会话/工作区数据与回调。隔离表面在 `host:input` 里拿到同样的 `presentation` / `collapsed` / `pageOpen`。
+
+**顺序与显隐**是跨 Sheet 的界面偏好（`pylon-sidebar-modules-v1`），用户在左栏拖拽模块头的手柄改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏。
 
 Sheet 右栏按 Workspace kind 注册：
 

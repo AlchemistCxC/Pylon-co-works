@@ -230,22 +230,20 @@ function PreviewApp({ zone }: { zone: string }) {
       <div className="layout" style={{ flex: 1, minHeight: 0 }}>
         <aside className="sidebar" style={z('sidebar')}>
           {/* 预览跟着左栏模型走：模块区（常驻区块）+ 会话区，不再有互斥模式页签。 */}
-          <div className="sidebar-region" data-region="modules">
+          <div className="sidebar-modules">
             {['定时', '自动化'].map(label => (
-              <section className="sidebar-block" data-region="modules" data-collapsed="false" key={label}>
+              <section className="sidebar-block" data-collapsed="true" key={label}>
                 <div className="sidebar-block-head">
-                  <span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-arrow">▾</span><span className="sidebar-block-title">{label}</span></span>
+                  <span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-title">{label}</span></span>
                 </div>
               </section>
             ))}
-          </div>
-          <div className="sidebar-region" data-region="sessions">
-            <div className="sidebar-region-search">
-              <input className="search-input" placeholder="搜索会话..." readOnly />
-            </div>
-            <section className="sidebar-block" data-region="sessions" data-collapsed="false">
+            <section className="sidebar-block" data-collapsed="false" data-always-open="true">
               <div className="sidebar-block-head"><span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-title">会话</span></span></div>
               <div className="sidebar-block-body">
+                <div className="session-module-search">
+                  <input className="search-input" placeholder="搜索会话..." readOnly />
+                </div>
                 <div className="session-list">
                   <div className="group-header" style={{ display: 'block' }}>本地</div>
                   {['会话 A', '会话 B', '会话 C'].map((n, i) => (

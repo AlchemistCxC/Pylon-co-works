@@ -44,6 +44,7 @@ function createProps(overrides: Partial<AgentSidebarContributionProps> = {}): Ag
   return {
     activeAgentId: 'peri',
     query: '',
+    onQueryChange: vi.fn(),
     activeSessionId: null,
     sessions: [],
     workspaces: [workspace],

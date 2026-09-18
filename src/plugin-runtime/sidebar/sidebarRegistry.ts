@@ -1,7 +1,9 @@
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
-import { AGENT_SIDEBAR_REGIONS, type AgentSidebarContribution, type AgentSidebarHeaderAction, type AgentSidebarRegion } from './sidebarTypes.ts'
+import type { AgentSidebarContribution, AgentSidebarHeaderAction } from './sidebarTypes.ts'
+
+const TITLE_ACTIONS = ['expand', 'page'] as const
 
 function validateHeaderActions(contribution: AgentSidebarContribution): void {
   const actions = contribution.headerActions
@@ -26,8 +28,8 @@ function validateContribution(contribution: AgentSidebarContribution): AgentSide
     throw new Error('Agent sidebar contribution id 必须是非空且无首尾空格的字符串')
   }
   if (!contribution.label.trim()) throw new Error(`Agent sidebar contribution label 不能为空：${contribution.id}`)
-  if (!AGENT_SIDEBAR_REGIONS.includes(contribution.region)) {
-    throw new Error(`Agent sidebar contribution region 非法：${contribution.id}`)
+  if (contribution.onTitleClick !== undefined && !TITLE_ACTIONS.includes(contribution.onTitleClick)) {
+    throw new Error(`Agent sidebar contribution onTitleClick 非法（只能是 expand / page）：${contribution.id}`)
   }
   if (contribution.page !== undefined) {
     if (!contribution.page || typeof contribution.page !== 'object') {
@@ -36,6 +38,14 @@ function validateContribution(contribution: AgentSidebarContribution): AgentSide
     if (typeof contribution.page.title !== 'string' || !contribution.page.title.trim()) {
       throw new Error(`Agent sidebar contribution page.title 不能为空：${contribution.id}`)
     }
+  }
+  // 标题点了要「进入页面」却没有页面可进 —— 注册期就拒绝，否则是一次点击后无反馈的死路。
+  if (contribution.onTitleClick === 'page' && contribution.page === undefined) {
+    throw new Error(`Agent sidebar contribution onTitleClick=page 但未声明 page：${contribution.id}`)
+  }
+  // 常开与可折叠是互相否定的声明，不做静默取一。
+  if (contribution.alwaysOpen === true && contribution.collapsible === true) {
+    throw new Error(`Agent sidebar contribution 不得同时声明 alwaysOpen 与 collapsible：${contribution.id}`)
   }
   validateHeaderActions(contribution)
   if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
@@ -73,9 +83,8 @@ export class AgentSidebarRegistry {
     return this.registry.getSnapshot()
   }
 
-  list(region?: AgentSidebarRegion): readonly AgentSidebarContribution[] {
-    return this.registry.getSnapshot().entries
-      .filter(entry => region === undefined || entry.value.region === region)
-      .map(entry => entry.value)
+  /** 按注册顺序（`order` 升序，同序由 Registry 的 owner/id 稳定决定）返回模块清单。 */
+  list(): readonly AgentSidebarContribution[] {
+    return this.registry.getSnapshot().entries.map(entry => entry.value)
   }
 }

@@ -37,70 +37,76 @@
    继承**，使折叠态下左栏内部控件仍可聚焦——实测 File 的 activity 图标条在轨道宽 0、
    visibility:hidden 时按钮依旧 focusable。新模型里折叠可见性只由下面那条布局层规则负责。 */
 
-/* ── 左栏分区 ──
-   左栏是**两个分区的纵向堆叠**，不是一对互斥视图（那对「工作 / 聊天」页签已删除）。
-   `modules` 常驻能力区块贴顶、内容高度、自身滚动且有上限；`sessions` 占满剩余高度，
-   是左栏唯一的会话滚动态。上限用百分比而不是固定 px：左栏宽度可拖拽、高度随窗口变化，
-   固定值在窄窗会把会话区挤没。 */
-.sidebar-region { display:flex; flex-direction:column; min-height:0; }
-.sidebar-region[data-region="modules"] {
-  flex:0 0 auto;
-  max-height:var(--sidebar-modules-max-height, 42%);
+/* ── 左栏模块栈 ──
+   左栏是**一个有序的模块栈**（曾经是 modules/sessions 两个分区的堆叠）。会话就是栈里的
+   一个模块，声明 `alwaysOpen`：不可折叠、不可隐藏，默认排在最后。
+   整栈是**唯一滚动容器**，每个模块都是内容高度——这样「模块」只有一种形状，
+   不再有「其中一个是会自己滚动的分区」这种特例，也不会出现嵌套滚动。 */
+.sidebar-modules {
+  flex:1 1 auto; min-height:0;
+  display:flex; flex-direction:column; gap:6px;
+  padding:var(--ui-space-2) 0 var(--ui-space-2);
   overflow-y:auto;
-  border-bottom:1px solid var(--border);
 }
-.sidebar-region[data-region="sessions"] { flex:1 1 auto; }
-/* 模块区的区块**不得被压缩**：分区有 max-height，若区块保留默认的 `flex-shrink:1`，
-   四个区块会各自被压到小于内容高度——实测自然高 418px 被压成 111/85/69/51，内容溢出到
-   下一个区块头上，看着像区块互相重叠。改成长度即内容高度，溢出交给分区的 overflow 滚动。 */
-.sidebar-region[data-region="modules"] > .sidebar-block { flex:0 0 auto; }
-.sidebar-region-search { padding:var(--ui-space-2) var(--ui-space-3); }
+/* 栈内滚动由 .sidebar-modules 负责，会话列表本身不再滚（否则嵌套）。 */
+.sidebar-modules .session-list { flex:0 0 auto; overflow:visible; padding:0; }
+/* 搜索框在会话模块**内部**：它是这个模块的控件，不是整栏的表头。 */
+.session-module-search { padding:0 var(--ui-space-2) var(--ui-space-2); }
 
-/* ── 区块外壳 ──
-   外壳（标题 + 折叠钮 + 头部动作）归**宿主**渲染，贡献只画 `.sidebar-block-body`。
-   旧模型里每个面板各画一份 `.sidebar-section-head`、标题写死在组件内，于是注册表的
-   `label` 无人读取，模式页签与分区头还重复出现同一个词。 */
-.sidebar-block { display:flex; flex-direction:column; min-height:0; }
-.sidebar-block[data-region="sessions"] { flex:1 1 auto; }
+.sidebar-block { display:flex; flex-direction:column; min-height:0; flex:0 0 auto; }
+
+/* 模块头：拖拽手柄 + 图标 + 标题 + [折叠钮] + 动作。
+   手柄按需显形（悬停/聚焦/拖拽中），平时不占视觉注意力。 */
 .sidebar-block-head {
-  display:flex; align-items:center; gap:var(--ui-space-2);
+  display:flex; align-items:center; gap:4px;
   min-height:26px;
-  padding:1px var(--ui-space-3);
-  background:color-mix(in srgb,var(--bg-panel) 72%,transparent);
+  padding:1px var(--ui-space-2);
 }
-/* 标题即「打开整页」的入口（区块声明了 page 时）；没有页面时它退化为折叠开关。 */
+.sidebar-block-grip {
+  flex:0 0 auto; display:grid; place-items:center;
+  width:14px; height:18px; padding:0; margin-left:-2px;
+  border:0; background:transparent; color:var(--text-dim);
+  cursor:grab; opacity:0; transition:opacity var(--motion-fast) var(--ease-standard);
+}
+.sidebar-block-head:hover .sidebar-block-grip,
+.sidebar-block-grip:focus-visible { opacity:.55; }
+.sidebar-block[data-dragging="true"] .sidebar-block-grip { opacity:.9; cursor:grabbing; }
+.sidebar-block[data-dragging="true"] { opacity:.72; }
+.sidebar-block[data-dragging="true"] > .sidebar-block-head { background:color-mix(in srgb,var(--accent) 12%,transparent); }
+/* 标题的点击语义由贡献声明（`onTitleClick`）：展开/折叠，或进入主区整页。
+   字号与会话名同源（用户要求「同步字体 token，和会话一样」）。 */
 .sidebar-block-toggle {
   flex:1 1 auto; min-width:0;
-  display:flex; align-items:center; gap:6px;
+  display:flex; align-items:center; gap:5px;
   padding:0; border:0; background:transparent; cursor:pointer;
-  color:var(--text); font-size:12px; font-weight:700; letter-spacing:.04em; text-align:left;
+  color:var(--text); font-size:var(--sidebar-name-size, 14px); font-weight:700; text-align:left;
 }
-.sidebar-block-toggle:disabled { cursor:default; }
 .sidebar-block-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-/* 已展开成整页的区块：标题用强调色，左栏与主区因此互相对得上。 */
-.sidebar-block[data-page-open="true"] > .sidebar-block-head { background:color-mix(in srgb,var(--accent) 10%,transparent); }
-.sidebar-block[data-page-open="true"] .sidebar-block-title { color:var(--accent); }
-/* 折叠钮是**独立**的按钮（标题已被「打开整页」占用）；箭头默认压淡、悬停/聚焦才亮，
-   与组头同一处理——用户点名「折叠按钮也太显眼」。 */
-.sidebar-block-collapse { flex:0 0 auto; display:grid; place-items:center; width:18px; height:18px; padding:0; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:var(--text-dim); cursor:pointer; }
-.sidebar-block-collapse:hover { background:var(--bg-hover); color:var(--text); }
-.sidebar-block-collapse:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-.sidebar-block-arrow { flex:0 0 auto; color:var(--text-dim); font-size:10px; opacity:.32; transition:opacity var(--motion-fast) var(--ease-standard); }
-.sidebar-block-head:hover .sidebar-block-arrow,
-.sidebar-block-collapse:focus-visible .sidebar-block-arrow { opacity:.85; }
+.sidebar-block-icon { flex:0 0 auto; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 70%,var(--text-dim)); }
+/* 已展开成整页的模块：标题与图标用强调色，左栏与主区因此互相对得上。 */
+.sidebar-block[data-page-open="true"] .sidebar-block-title,
+.sidebar-block[data-page-open="true"] .sidebar-block-icon { color:var(--accent); }
+/* 折叠钮只在「标题被进入页面占用」时才出现（`onTitleClick: 'page'`）；默认淡出。 */
+.sidebar-block-collapse {
+  flex:0 0 auto; display:grid; place-items:center;
+  width:18px; height:18px; padding:0; border:0; border-radius:var(--ui-radius-xs);
+  background:transparent; color:var(--text-dim); cursor:pointer; opacity:.45;
+  transition:opacity var(--motion-fast) var(--ease-standard);
+}
+.sidebar-block-collapse:hover { background:var(--bg-hover); color:var(--text); opacity:1; }
+.sidebar-block-collapse:focus-visible { outline:2px solid var(--accent); outline-offset:1px; opacity:1; }
 .sidebar-block-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sidebar-block-actions { flex:0 0 auto; display:flex; align-items:center; gap:2px; }
 .sidebar-block-action {
   display:flex; align-items:center; gap:4px;
   min-height:22px; padding:0 var(--ui-space-2);
   border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent;
-  color:var(--text-dim); cursor:pointer; font-size:11px;
+  color:var(--text-dim); cursor:pointer; font-size:var(--sidebar-meta-size, 11px);
 }
 .sidebar-block-action:hover:not(:disabled) { color:var(--text); background:var(--bg-hover); border-color:var(--border); }
 .sidebar-block-action:disabled { opacity:.5; cursor:default; }
 .sidebar-block-action:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .sidebar-block-body { display:flex; flex-direction:column; min-height:0; }
-.sidebar-block[data-region="sessions"] > .sidebar-block-body { flex:1 1 auto; }
 .sidebar-block-body-surface { display:flex; flex-direction:column; min-height:0; }
 
 /* 模块区块的占位体型：列表 / 列表+开关 / 计数量表 / 摘要+动作。
@@ -111,8 +117,8 @@
 .sidebar-block-row[data-state="running"] .sidebar-block-status { background:var(--tool-run,var(--accent)); }
 .sidebar-block-row[data-state="paused"] .sidebar-block-status { opacity:.45; }
 .sidebar-block-row-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; gap:1px; }
-.sidebar-block-row-name { font-size:12.5px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sidebar-block-row-meta { font:10px/1.4 var(--mono); color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-block-row-name { font-size:var(--sidebar-name-size, 14px); color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-block-row-meta { font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sidebar-block-switch { position:relative; width:24px; height:13px; flex:0 0 24px; border:1px solid var(--border); border-radius:var(--ui-radius-pill); background:var(--bg-input); }
 .sidebar-block-switch::after { content:''; position:absolute; top:1px; left:1px; width:9px; height:9px; border-radius:50%; background:var(--text-dim); }
 .sidebar-block-row[data-enabled="true"] .sidebar-block-switch { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 22%,transparent); }
@@ -120,7 +126,7 @@
 .sidebar-block-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
 .sidebar-block-metric { display:flex; flex-direction:column; gap:2px; }
 .sidebar-block-metric strong { font:600 15px/1.2 var(--mono); color:var(--text); }
-.sidebar-block-metric span { font-size:10.5px; color:var(--text-dim); }
+.sidebar-block-metric span { font-size:var(--sidebar-meta-size, 11px); color:var(--text-dim); }
 .sidebar-block-progress { grid-column:1/-1; height:4px; background:var(--bg-input); border:1px solid var(--border); overflow:hidden; }
 .sidebar-block-progress > span { display:block; height:100%; background:var(--accent); }
 .sidebar-block-summary { display:flex; align-items:center; justify-content:space-between; gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
@@ -165,7 +171,7 @@
 /* 时间与操作钮共用一个流内格子（与组头同一手法）：默认只显示时间，悬停/聚焦时操作钮
    淡入顶替。若让四个操作钮常驻占宽（84px），单行会话名会被挤成「sessio…」。 */
 .session-tail { position:relative; flex:0 0 auto; display:grid; place-items:center end; min-width:40px; }
-.session-meta { grid-area:1/1; font:10.5px/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
+.session-meta { grid-area:1/1; font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
 .session-actions { grid-area:1/1; display:flex; align-items:center; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
 .session-item:hover .session-tail > .session-meta,
 .session-item:focus-within .session-tail > .session-meta { opacity:0; }
@@ -271,23 +277,21 @@
 .cwd-new-actions { display:flex; gap:var(--ui-space-2); }
 /* 组头压成单行 26px（原 46px 两行：名称 + 9.5px 目录路径）。目录路径降级为 tooltip，
    不占行——那一行既不可读（9.5px 且常年被椭掉 40%），又让每组多出 20px 高度。 */
-.cwd-group { position:relative; margin-bottom:4px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
+.cwd-group { position:relative; margin-bottom:1px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
 .cwd-group-head { position:relative; display:flex; align-items:center; gap:2px; min-height:26px; padding:0; user-select:none; }
-.cwd-group-toggle { display:grid; flex:1 1 auto; min-width:0; grid-template-columns:11px 15px minmax(0,1fr); align-items:center; gap:5px; padding:1px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.cwd-group-toggle { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:5px; padding:1px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .cwd-group-toggle:hover { background:var(--state-hover-bg); }
 .cwd-group-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 /* 折叠箭头默认压到很淡、悬停/聚焦才亮：用户点名「折叠按钮也太显眼」。 */
-.cwd-group-arrow { width:11px; display:grid; place-items:center; color:var(--text-dim); opacity:.32; transition:opacity var(--motion-fast) var(--ease-standard); }
-.cwd-group:hover .cwd-group-arrow, .cwd-group:focus-within .cwd-group-arrow { opacity:.85; }
 .cwd-group-folder { width:15px; flex:0 0 15px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 72%,var(--text)); }
-.cwd-group-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; font-weight:600; color:var(--text); }
+.cwd-group-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--sidebar-name-size, 14px); font-weight:600; color:var(--text); }
 /* 计数与动作**共用一个流内格子**：两者交叉淡出（悬停时计数让位给动作），因此格子尺寸由
    较宽的动作决定，切换时不发生位移。旧写法把两者绝对定位、再给 `.cwd-group-toggle` 预留
    `padding-right:62px`——那个 62px 是手抄的动作宽度之和，加第三个动作就会静默压字。 */
 .cwd-group-meta { position:relative; flex:0 0 auto; display:grid; place-items:center; padding-right:2px; }
 /* 计数退成药丸改为**纯暗字**：药丸的描边+底色在 240px 栏里是显眼的噪声，而它承载的
    只是「几个会话」。 */
-.cwd-group-count { grid-area:1/1; color:var(--text-placeholder); font:10px/1.5 var(--mono); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
+.cwd-group-count { grid-area:1/1; color:var(--text-placeholder); font:var(--sidebar-meta-size, 11px)/1.5 var(--mono); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
 .cwd-group-actions { grid-area:1/1; display:flex; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
 .cwd-group:hover .cwd-group-count, .cwd-group:focus-within .cwd-group-count { opacity:0; }
 .cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; }
@@ -332,7 +336,7 @@
 .cwd-settings-footer { position:sticky; bottom:0; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 0 2px; background:linear-gradient(transparent,var(--sidebar-bg) 22%); }
 .cwd-settings-dirty { color:var(--text-dim); font-size:10px; }
 .cwd-settings-dirty.active { color:var(--accent); }
-.workspace-empty { display:flex; flex-direction:column; align-items:center; gap:7px; margin:32px 10px 0; padding:22px 16px; border:1px dashed var(--border); border-radius:var(--ui-radius-sm); color:var(--text-dim); text-align:center; }
+.workspace-empty { display:flex; flex-direction:column; align-items:center; gap:7px; margin:8px 10px 0; padding:22px 16px; border:1px dashed var(--border); border-radius:var(--ui-radius-sm); color:var(--text-dim); text-align:center; }
 .workspace-empty svg { color:var(--accent); opacity:.8; }
 .workspace-empty strong { color:var(--text); font-size:13px; }
 .workspace-empty span { font-size:11px; line-height:1.5; }
@@ -366,11 +370,8 @@
   background:color-mix(in srgb,var(--surface-panel) 70%,transparent); box-shadow:0 14px 38px color-mix(in srgb,var(--text) 5%,transparent);
 }
 .app[data-interface-mode="modern-gui"] .sidebar::before { border-radius:inherit; }
-.app[data-interface-mode="modern-gui"] .sidebar-region-search { padding:10px 12px 4px; }
 .app[data-interface-mode="modern-gui"] .search-input { height:38px; border-radius:11px; padding-inline:12px; }
-.app[data-interface-mode="modern-gui"] .sidebar-region[data-region="modules"] { border-bottom:0; }
 .app[data-interface-mode="modern-gui"] .sidebar-block { margin:0 8px 6px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:12px; overflow:hidden; }
-.app[data-interface-mode="modern-gui"] .sidebar-block[data-region="sessions"] { margin-bottom:0; border:0; overflow:visible; }
 .app[data-interface-mode="modern-gui"] .sidebar-block-head { padding:8px 10px; border-radius:12px; background:transparent; }
 .app[data-interface-mode="modern-gui"] .sidebar-block-action { border-radius:8px; }
 .app[data-interface-mode="modern-gui"] .session-list { padding:6px 8px 10px; }

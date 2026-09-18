@@ -163,3 +163,30 @@
 - **⚠️ 与 #116（Fisher）重叠**：`src/components/Sidebar.tsx` 同时出现在 #116 的文件域声明中。本轮**重写了该文件**（删模式页签、加区块外壳与两区）。已在 `.agents/L.md` 声明并提请注意。
 - 本轮碰过的共享文件，供其他贡献者避让：`builtin.pylon-workspace/styles/components/Sidebar.css`、`src/workspace-sheets/{agentWorkspaceState,SheetLauncher}.tsx`(+ 新增 `launchIcons.tsx`)、`src/sheets/AgentSheetView.tsx`、`src/renderers/solid-workbench/{workbenchContracts.ts,SolidWorkbenchApp.solid.tsx,input/ControlCenter.solid.tsx,settingsPreviewControlCenter.solid.tsx}`、`src/plugin-runtime/renderers/rendererTypes.ts`、`src/plugin-runtime/packageManifest.ts`、`shared/pylon-plugin-manifest.schema.json`、`src-tauri/resources/sdk/pylon-plugin-manifest.schema.json`、`src/components/SettingsPreview.tsx`、`src/domains/workbench/agentEmptyState.ts`、`src/components/chat/AgentEmptyState.tsx`。
 - **未触碰**：`ControlCenter.css`、`src-tauri/**`（除资源 schema 副本）、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`。
+
+
+---
+
+## 追加轮（同日）：模块栈一维化 + 插件化留位 + 排布与显隐
+
+用户 8 条要求，逐条落点：
+
+| # | 要求 | 做法 |
+| --- | --- | --- |
+| 1 | 会话抽取成常开模块 | 删 `AgentSidebarRegion`；会话改注册为 `alwaysOpen: true` + `order: 900` 的普通模块，与插件模块同构 |
+| 2 | 字体 token 同步 + 略放大 | 模块标题/组名/行名统一 `--sidebar-name-size`、次要文字统一 `--sidebar-meta-size`；预设值 13→14 / 11→12 |
+| 3 | 给插件化留位置 | 模块与页面都在同一条公开注册表上（`registerAgentSidebarContribution` + `page`），新增第三方 isolated-surface 模块+页面的契约测试 |
+| 4 | 工作区间空白太多 | `.cwd-group` 下边距 4→1px、`.workspace-empty` 上边距 32→8px、组内空提示此前已删 |
+| 5 | 插件选点击方案/图标/页面 | `onTitleClick: 'expand' \| 'page'`、`icon`（稳定键）、`page`；「都要」= expand + page（宿主自动补「打开」） |
+| 6 | 搜索放进会话模块 | 移入 `.session-module-search`；`onQueryChange` 由宿主持有 |
+| 7 | 拖拽调整模块排布 | 模块头手柄 + pointer 捕获；拖拽中预览、抬起落库到 `pylon-sidebar-modules-v1` |
+| 8 | 设置页声明模块显隐 | 「设置 → 侧栏 → 模块」`SidebarModulesPanel`；`alwaysOpen` 项列出但禁用 |
+| 附 | 去掉工作区折叠按钮、保留折叠 | 删除 `.cwd-group-arrow`，整组头即开关 |
+
+**门禁**：`tsc -b` 无输出；`eslint src/` 0 error（1 条既存 warning）；全量 **600 文件 / 4350 用例通过**。
+
+**实机复核（webview2 MCP，重建后重启）**：模块栈次序 `scheduled→automation→tasks→extensions→sessions`（order 100/200/300/400/900）；每个模块有手柄与图标；`automation` 有独立折叠钮（`onTitleClick: 'page'`）；`scheduled` 头部自动出现「打开」（expand + page = 都要）；`sessions` `data-always-open="true"`、无折叠钮、带「工作区」动作；搜索框在会话模块内部且高 **36px**；组头 **26px**、组间 **3px**、组头箭头**已不在 DOM**；`--sidebar-name-size` = 14px，模块标题/组名/会话名 computed 均为 **14px**（同源）；设置 → 侧栏 → 模块面板列出 5 个模块（「定时/自动化 可展开为页面」「会话 常开」）。
+
+**本轮未做**：模块显隐的**实测**只到「面板正确渲染 5 行」；勾选/取消勾选的实机效果未逐项复核（单元测试已覆盖 `applyModulePrefs` 的隐藏与 `alwaysOpen` 例外）。拖拽的实机手势（真实指针拖动）未做——jsdom 无指针几何，单元测试用合成的 pointermove 覆盖了落库路径；**实机拖拽请用户验一下手感**。
+
+**⚠️ 实测期间观察到的现象（需用户确认归属）**：复核过程中主题由 Solarized 浅色变为 **Nord**（`appliedPreset` 五个分区全为 `nord`）。本轮我只改过主题的一个字段（`sidebarNameSize` 13→14），未点击任何预设行。若这不是用户自己所点，则「编辑某个字号字段会连带套用预设」是严重缺陷，需要单独立项排查。

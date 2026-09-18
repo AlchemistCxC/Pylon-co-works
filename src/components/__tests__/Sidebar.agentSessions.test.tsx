@@ -35,6 +35,7 @@ function panelProps(overrides: Partial<AgentSidebarContributionProps> = {}): Age
   return {
     activeAgentId: 'peri',
     query: '',
+    onQueryChange: vi.fn(),
     activeSessionId: null,
     sessions: [session()],
     workspaces: [],

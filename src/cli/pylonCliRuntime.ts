@@ -75,7 +75,7 @@ export function getPylonCliService(): PylonCliService {
           },
           services: getPluginServiceRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), kind: entry.value.kind, serviceId: entry.value.id })),
           uiSurfaces: getPluginUiRegistry().getSnapshot().entries.map(entry => contribution(entry)),
-          sidebars: getAgentSidebarRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), region: entry.value.region, label: entry.value.label })),
+          sidebars: getAgentSidebarRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), icon: entry.value.icon ?? null, label: entry.value.label })),
           fileWorkbench: getFileWorkbenchRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), kind: entry.value.kind })),
           contextPanels: getContextPanelRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), workspaceKind: entry.value.workspaceKind, label: entry.value.label })),
           presentationProfiles: getPresentationProfileRegistry().getSnapshot().entries.map(entry => ({ ...contribution(entry), label: entry.value.label, family: entry.value.family })),

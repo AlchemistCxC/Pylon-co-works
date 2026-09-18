@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Archive, ChevronDown, ChevronRight, Download, Folder, FolderOpen, Inbox, Plus, Settings, Trash2 } from 'lucide-react'
+import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Settings, Trash2 } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -167,8 +167,9 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
     const GroupIcon = icon === 'inbox' ? Inbox : (folded ? Folder : FolderOpen)
     return (
       <div className="cwd-group-head">
-        <button className="cwd-group-toggle" type="button" onClick={() => toggleCwd(groupId)} title={rootPath} aria-label={`${folded ? '展开' : '折叠'} ${label}`}>
-          <span className="cwd-group-arrow" aria-hidden="true">{folded ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</span>
+        {/* 折叠**没有**独立按钮：整个组头就是开关（用户要求去掉最左侧那个 `>`）。
+            目录路径保留为 tooltip。 */}
+        <button className="cwd-group-toggle" type="button" onClick={() => toggleCwd(groupId)} title={rootPath} aria-label={`${folded ? '展开' : '折叠'} ${label}`} aria-expanded={!folded}>
           <span className="cwd-group-folder" aria-hidden="true"><GroupIcon size={15} /></span>
           <span className="cwd-group-name">{label}</span>
         </button>
@@ -199,6 +200,11 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
 
   return (
     <>
+      {/* 搜索框归会话模块**内部**：它只过滤会话，挂在模块外面会让「它到底管什么」
+          含糊，也让模块栈的次序在视觉上被切断。取值仍由宿主持有（`props.query`）。 */}
+      <div className="session-module-search">
+        <input className="search-input" placeholder="搜索会话..." value={props.query} onChange={event => props.onQueryChange(event.target.value)} aria-label="搜索会话" />
+      </div>
       <div className="session-list" role="tree" aria-label="工作区与会话">
         {showNewCwd && (
           <div className="cwd-new">

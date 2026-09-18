@@ -34,7 +34,6 @@ function register(contribution: Partial<AgentSidebarContribution> & { id: string
   const registry = getAgentSidebarRegistry()
   identitySeq += 1
   disposals.push(registry.register(createPluginIdentity('test.page-host', `run-${identitySeq}`), {
-    region: 'modules',
     label: contribution.id,
     renderKind: 'first-party-react',
     component: () => null,
@@ -65,7 +64,7 @@ afterEach(() => {
 describe('AgentSheet 主区整页宿主', () => {
   it('渲染页面标题与内容，并以 presentation=page 交给同一个贡献组件', () => {
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list('modules')[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
 
     expect(screen.getByRole('heading', { name: '定时任务' })).toBeInTheDocument()
     expect(screen.getByTestId('probe')).toHaveTextContent('page')
@@ -75,7 +74,7 @@ describe('AgentSheet 主区整页宿主', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list('modules')[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'scheduled' }} />)
 
     fireEvent.click(screen.getByRole('button', { name: '返回聊天' }))
     expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, {
@@ -88,7 +87,7 @@ describe('AgentSheet 主区整页宿主', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list('modules')[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { blockCollapsed: {}, activePageId: null })
