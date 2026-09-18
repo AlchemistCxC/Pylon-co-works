@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -779,10 +779,10 @@ context.sidebar.registerAgentSidebarContribution({
 | `presentation` | `'block'`（左栏模块内）或 `'page'`（主区整页）——**同一组件两种体量** |
 | `collapsed` | 是否处于折叠；`page` 体量恒为 `false` |
 | `activeAgentId` / `activeSessionId` | 当前 Agent 与会话 |
-| `sessions` / `workspaces` / `liveGeneratingSources` | 与工作台同源的会话、工作区与运行中来源 |
+| `sessions` / `workspaces` / `liveGeneratingSources` | 与工作台同源的会话、工作区与运行中来源；会话对象自带 `pinned?`（置顶，自 API 2.3 起）与 `archivedAt?` |
 | `registerBlockActionHandler` | 见上 |
 | `onBlockAction` | 占位（宿主回派走注册的处理器；保留字段以稳定接口形状） |
-| `onSelectSession` / `onDeleteSession` / `onExportSession?` / `onArchiveSession?` / `onOpenSessionSettings` / `onRenameSession` | 会话操作回调 |
+| `onSelectSession` / `onDeleteSession` / `onExportSession?` / `onArchiveSession?` / `onOpenSessionSettings` / `onRenameSession` / `onToggleSessionPin?` | 会话操作回调（`onToggleSessionPin` 自 API 2.3 起：切换置顶，置顶的会话排在其所属工作区最前） |
 | `onCreateLooseSession` / `onCreateWorkspace` / `onCreateWorkspaceSession` | 创建入口 |
 
 **wire 契约（`isolated-surface`）**：宿主经 `host:input` 下发
@@ -1021,13 +1021,14 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2`（`PYLON_PLUGIN_API_SUPPORTED`）；
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3`（`PYLON_PLUGIN_API_SUPPORTED`）；
   旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
 - minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
 - `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。1.3 仅扩充 Hook 锚点词表（§6.2），manifest 字段形状相对 1.2 不变。
 - **2.0 是破坏性主轴**：Agent 左栏贡献由「按 `mode ('work' | 'chat')` 注册的互斥视图」改为「按 `region ('modules' | 'sessions')` 注册的堆叠区块」（§6.8）。manifest 字段形状相对 1.3 不变，因此 1.x 清单仍可解析与激活；**引用旧 `mode` 的左栏贡献必须按 2.0 重写**。`capabilities` / `dangerousHooks` 的 `>= 1.2` 谓词对 2.0 继续成立。
 - **2.1 只做加法**：标题栏贡献新增 `slot: 'app-menu'`——把一项数据化菜单项注册进标题栏的设置齿轮菜单（§6.8.1）。既有槽位、字段与校验不变，2.0 插件无需改动。
 - **2.2 只放宽**：右栏面板的 `workspaceKind` 从「可用性闸门」改为「默认选中的亲和」（§6.8，ADR-0012）。字段形状不变、清单无需改动，只是面板在更多 Sheet 上变得可选；`when` 仍是硬闸门。
+- **2.3 只做加法**：会话视图新增可选字段 `pinned`，左栏贡献 props 新增可选回调 `onToggleSessionPin`（§6.8）。既有插件无需改动。
 
 #### 6.11.4 SDK 发行形态
 

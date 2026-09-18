@@ -55,6 +55,8 @@ export interface Session {
   lastReplyAt?: number
   /** 归档时间；归档会话不显示在 Agentsheet 活动列表。 */
   archivedAt?: number
+  /** 置顶：在**所属工作区内**排到最前（用户要求「置顶到当前工作区最靠前的位置」）。 */
+  pinned?: boolean
   platform: string
   workdir: string
   /** CWD-03：Workspace 实体绑定（方案 C）。有值 = 绑定 Workspace（root 单一来源，

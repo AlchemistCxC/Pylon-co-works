@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Settings, Trash2 } from 'lucide-react'
+import { Folder, FolderOpen, Inbox, Pin, PinOff, Plus, Settings } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -120,38 +120,59 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
   // 会让人分不清哪边是「结果」）。这里只负责分组与选择。
   const looseSessions = props.sessions.filter(session => !session.workspaceId)
 
-  const renderSession = (session: (typeof props.sessions)[number]) => (
-    <div key={session.id} role="treeitem" tabIndex={0} className={`session-item ${props.activeSessionId === session.id ? 'active' : ''}`}
-      onClick={() => props.onSelectSession(session.id)}
-      onKeyDown={event => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); props.onSelectSession(session.id) }
-        if (event.key === 'F2') { event.preventDefault(); setRenaming(session.id); setRenameValue(session.name) }
-      }}
-      onDoubleClick={event => { event.stopPropagation(); setRenaming(session.id); setRenameValue(session.name) }}>
-      <span className="session-dot" data-running={props.liveGeneratingSources.includes(session.source) ? 'true' : undefined} />
-      {renaming === session.id ? (
-        <input className="session-rename-input" value={renameValue} autoFocus
-          onChange={event => setRenameValue(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && renameValue.trim()) { props.onRenameSession(session.id, renameValue.trim()); setRenaming(null) }
-            if (event.key === 'Escape') setRenaming(null)
-          }}
-          onBlur={() => setRenaming(null)} onClick={event => event.stopPropagation()} />
-      ) : <span className="session-name">{session.name}</span>}
-      {/* 时间与操作钮**共用一个流内格子**：默认只显示时间，悬停/聚焦时操作钮淡入顶替。
-          旧写法让四个操作钮常驻占宽（84px），把单行会话名挤成「sessio…」；单行化之后
-          这个代价更明显。交叉淡出既保住名字宽度，也不发生位移。 */}
-      <span className="session-tail">
-        <span className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</span>
-        <span className="session-actions">
-          <button className="session-action" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置" aria-label={session.name + " 会话设置"}><Settings size={13} aria-hidden="true" /></button>
-          <button className="session-action" onClick={event => { event.stopPropagation(); void props.onExportSession?.(session.id) }} title="导出会话" aria-label={session.name + " 导出"}><Download size={13} aria-hidden="true" /></button>
-          <button className="session-action" onClick={event => { event.stopPropagation(); void props.onArchiveSession?.(session.id) }} title="归档会话" aria-label={session.name + " 归档"}><Archive size={13} aria-hidden="true" /></button>
-          <button className="session-action danger" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }} title="删除会话" aria-label={"删除 " + session.name}><Trash2 size={13} aria-hidden="true" /></button>
+  /**
+   * 会话行：`[置顶] 名称 … ● 时间 / 设置`。
+   *
+   * 两个按钮**平时不可见**，悬停/聚焦才显形（与组头动作同一手法：opacity + visibility
+   * 同步门控，未显形时不参与命中测试）。用户点名过「四个按钮常驻会把名字挤成 sessio…」，
+   * 也点名过现在这两个按钮「完全不见了」——所以除了显形门控，还给了足够的对比度
+   * （旧写法叠了 `opacity:.62` 与 `--text-dim`，等于两层压暗）。
+   *
+   * 置顶图标占的是**工作区图标那一列**（15px 槽），会话名因此与工作区名同列——见 CSS。
+   */
+  const renderSession = (session: (typeof props.sessions)[number]) => {
+    const pinned = session.pinned === true
+    return (
+      <div key={session.id} role="treeitem" tabIndex={0} className={`session-item ${props.activeSessionId === session.id ? 'active' : ''}`}
+        data-pinned={pinned ? 'true' : undefined}
+        onClick={() => props.onSelectSession(session.id)}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); props.onSelectSession(session.id) }
+          if (event.key === 'F2') { event.preventDefault(); setRenaming(session.id); setRenameValue(session.name) }
+        }}
+        onDoubleClick={event => { event.stopPropagation(); setRenaming(session.id); setRenameValue(session.name) }}>
+        <button
+          type="button"
+          className="session-pin"
+          aria-pressed={pinned}
+          title={pinned ? '取消置顶' : '置顶会话（移到本工作区最前）'}
+          aria-label={pinned ? `取消置顶 ${session.name}` : `置顶 ${session.name}`}
+          onClick={event => { event.stopPropagation(); props.onToggleSessionPin?.(session.id) }}
+        >
+          {pinned ? <PinOff size={12} aria-hidden="true" /> : <Pin size={12} aria-hidden="true" />}
+        </button>
+        {renaming === session.id ? (
+          <input className="session-rename-input" value={renameValue} autoFocus
+            onChange={event => setRenameValue(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && renameValue.trim()) { props.onRenameSession(session.id, renameValue.trim()); setRenaming(null) }
+              if (event.key === 'Escape') setRenaming(null)
+            }}
+            onBlur={() => setRenaming(null)} onClick={event => event.stopPropagation()} />
+        ) : <span className="session-name">{session.name}</span>}
+        {/* 运行指示点跟着时间走（不再占名字左边的列）：那一列让位给置顶图标，
+            名字才能与工作区名对齐。 */}
+        <span className="session-dot" data-running={props.liveGeneratingSources.includes(session.source) ? 'true' : undefined} />
+        {/* 时间与设置钮共用一个流内格子：默认只显示时间，悬停/聚焦时按钮淡入顶替。 */}
+        <span className="session-tail">
+          <span className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</span>
+          <span className="session-actions">
+            <button className="session-action" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置（重命名 / 归档 / 导出）" aria-label={session.name + " 会话设置"}><Settings size={13} aria-hidden="true" /></button>
+          </span>
         </span>
-      </span>
-    </div>
-  )
+      </div>
+    )
+  }
 
   const renderGroupHead = (
     groupId: string,

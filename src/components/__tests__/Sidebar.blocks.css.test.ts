@@ -43,7 +43,10 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
   it('左轨统一：模块头 / 组头 / 会话缩进都取自 --sidebar-rail-pad', () => {
     expect(body('.sidebar-block-head')).toMatch(/padding:1px var\(--sidebar-rail-pad/)
     expect(body('.cwd-group-toggle')).toMatch(/var\(--sidebar-rail-pad/)
-    expect(body('.cwd-group-sessions')).toMatch(/calc\(var\(--sidebar-rail-pad/)
+    // 会话行的缩进不再由容器统一给，而是行内自带「图标槽 + 间距」，好让会话名与
+    // 工作区名同列（`.cwd-group-sessions` 因此归零）。
+    expect(body('.cwd-group-sessions')).toMatch(/padding:1px 2px 2px 0/)
+    expect(body('.session-item')).toMatch(/padding:1px 6px 1px calc\(var\(--sidebar-rail-pad, 6px\) - 2px\)/)
   })
 
   it('拖拽有落点指示线（拖拽期间不实时重排，避免反馈环抖动）', () => {
@@ -84,6 +87,41 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     // 任何字面时长都意味着这条动画逃过了 reduced-motion 覆盖。
     expect(group).not.toMatch(/\d+ms/)
     expect(sidebarCss, '左栏折叠动画不得再出现字面毫秒时长').not.toMatch(/transition:[^;]*\d+ms/)
+  })
+
+  it('会话行：置顶图标占工作区图标那一列，会话名与工作区名同列（两列都要对上）', () => {
+    // 行内容盒起于 x=6（1px 透明边框 + rail-2 左内边距）→ 与工作区图标同列；
+    // 15px 图标槽 + 5px 间距 → 会话名落在 x=26，与工作区名同列。三处必须同源，
+    // 否则「图标对齐了、名字还差几像素」或反之。
+    const folder = sidebarCss.match(/\.cwd-group-folder \{([^}]*)\}/)?.[1] ?? ''
+    const pin = sidebarCss.match(/\.session-pin \{([^}]*)\}/)?.[1] ?? ''
+    expect(folder).toMatch(/(width|flex):[^;]*15px/)
+    expect(pin).toMatch(/flex:0 0 15px/)
+    expect(body('.session-item')).toMatch(/gap:5px/)
+    const toggle = sidebarCss.match(/\.cwd-group-toggle \{([^}]*)\}/)?.[1] ?? ''
+    expect(toggle, '工作区组头的图标↔名字间距').toMatch(/gap:5px/)
+  })
+
+  it('选中态用阴影而不是框：边框透明、阴影里带左侧强调条', () => {
+    const active = sidebarCss.match(/\.session-item\.active \{([^}]*)\}/)?.[1] ?? ''
+    expect(active, '选中态缺少阴影').toMatch(/box-shadow:inset 3px 0 0 var\(--accent\)/)
+    expect(active, '选中态不得再画边框').toMatch(/border-color:transparent/)
+    expect(active).not.toMatch(/border-color:var\(--state-selected-stroke\)/)
+    const terminal = sidebarCss.match(/\.app\[data-interface-mode="terminal-like"\] \.session-item\.active \{([^}]*)\}/)?.[1] ?? ''
+    expect(terminal).toMatch(/box-shadow:inset 3px 0 0 var\(--accent\)/)
+    expect(terminal).toMatch(/border-color:transparent/)
+  })
+
+  it('会话行只有置顶与设置两个动作，且平时不可见、门控同步（不参与命中测试）', () => {
+    const pin = sidebarCss.match(/\.session-pin \{([^}]*)\}/)?.[1] ?? ''
+    expect(pin).toMatch(/opacity:0/)
+    expect(pin).toMatch(/visibility:hidden/)
+    expect(pin).toMatch(/pointer-events:none/)
+    // 已置顶的常驻显示（否则看不出这条为什么排最前）。
+    expect(sidebarCss).toMatch(/\.session-item\[data-pinned="true"\] > \.session-pin \{[^}]*opacity:/)
+    // 旧的四钮时代类名不得复活。
+    expect(sidebarCss).not.toMatch(/\.session-del\s*\{/)
+    expect(sidebarCss).not.toMatch(/\.session-gear\s*\{/)
   })
 
   it('会话区与可排布模块的分界是「留白 + 层底 + 吸顶」，**不画线**（用户裁定的形态 B）', () => {

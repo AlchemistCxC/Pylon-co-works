@@ -135,7 +135,7 @@ describe('api=1.2 package manifest (capabilities)', () => {
 
   it('accepts api=2.0（左栏贡献改按 region 注册的破坏性主轴）且仍拒绝未知更高版本', () => {
     expect(parsePylonPluginManifest({ ...valid, api: '2.0' }).api).toBe('2.0')
-    expect(() => parsePylonPluginManifest({ ...valid, api: '2.3' })).toThrow(/仅支持/)
+    expect(() => parsePylonPluginManifest({ ...valid, api: '2.4' })).toThrow(/仅支持/)
     // 1.x 清单继续合法：旧版本插件在新宿主继续激活（allowlist 只增不减）。
     expect(parsePylonPluginManifest({ ...valid, api: '1.0' }).api).toBe('1.0')
     // 破坏性主轴不改变 1.2 起合法的字段形状：2.0 清单同样可声明 capabilities。
@@ -152,7 +152,11 @@ describe('api=1.2 package manifest (capabilities)', () => {
 
   it('accepts api=2.2（右栏面板种类改为亲和，纯放宽）', () => {
     expect(parsePylonPluginManifest({ ...valid, api: '2.2' }).api).toBe('2.2')
-    expect(() => parsePylonPluginManifest({ ...valid, api: '2.3' })).toThrow(/仅支持/)
+  })
+
+  it('accepts api=2.3（会话置顶，纯加法）', () => {
+    expect(parsePylonPluginManifest({ ...valid, api: '2.3' }).api).toBe('2.3')
+    expect(() => parsePylonPluginManifest({ ...valid, api: '2.4' })).toThrow(/仅支持/)
   })
 
   it('accepts and validates dangerous hook declarations', () => {
