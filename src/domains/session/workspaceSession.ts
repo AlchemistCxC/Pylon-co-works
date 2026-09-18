@@ -9,6 +9,8 @@ export interface WorkspaceSession {
   createdAt: number
   lastActiveAt: number
   lastReplyAt?: number
+  /** 置顶（在工作区内排最前）。左栏渲染与插件读同一份会话视图，因此这里必须有。 */
+  pinned?: boolean
   platform: string
   workdir: string
   workspaceId?: string

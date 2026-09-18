@@ -47,7 +47,9 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
   const ownSessions = useMemo(() => {
     return sessions
       .filter(s => s.profileId === activeProfileId && s.agentId === activeAgent && !s.archivedAt)
-      .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
+      // 置顶的排在各自工作区最前，其余按最近活跃（`sort` 稳定，同档内保持原序）。
+      .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+        || ((b.lastActiveAt || 0) - (a.lastActiveAt || 0)))
   }, [sessions, activeProfileId, activeAgent])
 
   const handleDelete = async (id: string) => {
@@ -126,6 +128,11 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
     onExportSession: handleExport,
     onArchiveSession: handleArchive,
     onOpenSessionSettings: onSessionSettings,
+    onToggleSessionPin: (id: string) => {
+      const target = sessions.find(session => session.id === id)
+      if (!target) return
+      updateSession(id, { pinned: !target.pinned })
+    },
     onRenameSession: (id: string, name: string) => updateSession(id, { name, lastActiveAt: Date.now() }),
     onCreateLooseSession: () => { window.dispatchEvent(new CustomEvent('pylon:new-session')); onSelectSession(null) },
     onCreateWorkspace: async (name: string, rootPath: string) => { await createWorkspace(name, rootPath) },

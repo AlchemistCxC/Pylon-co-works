@@ -68,6 +68,8 @@ export interface AgentSidebarContributionProps {
   readonly onExportSession?: (id: string) => Promise<void>
   readonly onArchiveSession?: (id: string) => Promise<void> | void
   readonly onOpenSessionSettings: (id: string) => void
+  /** 切换会话置顶（在所属工作区内排最前）。 */
+  readonly onToggleSessionPin?: (id: string) => void
   readonly onRenameSession: (id: string, name: string) => void
   readonly onCreateLooseSession: () => void
   readonly onCreateWorkspace: (name: string, rootPath: string) => Promise<void>

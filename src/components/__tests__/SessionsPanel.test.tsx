@@ -184,6 +184,39 @@ describe('SessionsPanel', () => {
     expect(onCreateLooseSession).toHaveBeenCalledOnce()
   })
 
+  it('会话行只有两个动作：置顶与设置（删除/导出/归档从行上撤出，收进设置）', () => {
+    const onOpenSessionSettings = vi.fn()
+    const onToggleSessionPin = vi.fn()
+    render(<SessionsPanel {...createProps({ sessions: [boundSession], onOpenSessionSettings, onToggleSessionPin })} />)
+
+    const row = document.querySelector('.session-item')!
+    const labels = [...row.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))
+    expect(labels).toEqual(['置顶 实现界面', '实现界面 会话设置'])
+    // 三个旧动作不得复活（用户点名「设置和删除完全不见了」，但要求行上只留两个）。
+    expect(screen.queryByLabelText('删除 实现界面')).toBeNull()
+    expect(screen.queryByLabelText('实现界面 导出')).toBeNull()
+    expect(screen.queryByLabelText('实现界面 归档')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '实现界面 会话设置' }))
+    expect(onOpenSessionSettings).toHaveBeenCalledWith('session-1')
+    expect(screen.getByRole('button', { name: '实现界面 会话设置' })).toHaveAttribute('title', '会话设置（重命名 / 归档 / 导出）')
+  })
+
+  it('置顶按钮切换置顶且不选中会话；已置顶的行常驻显示取消置顶', () => {
+    const onToggleSessionPin = vi.fn()
+    const onSelectSession = vi.fn()
+    const { rerender } = render(<SessionsPanel {...createProps({ sessions: [boundSession], onToggleSessionPin, onSelectSession })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '置顶 实现界面' }))
+    expect(onToggleSessionPin).toHaveBeenCalledWith('session-1')
+    // 行内的按钮必须 stopPropagation：点按钮不该连带选中会话。
+    expect(onSelectSession).not.toHaveBeenCalled()
+
+    rerender(<SessionsPanel {...createProps({ sessions: [{ ...boundSession, pinned: true }], onToggleSessionPin, onSelectSession })} />)
+    expect(screen.getByRole('button', { name: '取消置顶 实现界面' })).toHaveAttribute('aria-pressed', 'true')
+    expect(document.querySelector('.session-item')).toHaveAttribute('data-pinned', 'true')
+  })
+
   it('没有任何工作区也没有无 cwd 会话时给出起步空态', () => {
     render(<SessionsPanel {...createProps({ workspaces: [] })} />)
     expect(screen.getByText('从一个文件夹开始')).toBeInTheDocument()
