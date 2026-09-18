@@ -2,7 +2,9 @@
 // 只迁 presets.ts 相关纯函数断言（zone 归属 + pickZoneFields）；
 // 原脚本 store/defs/App/CSS/skin/settingsDomains 的源码文本段由 css-var 审计覆盖，不迁。
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS, ZONE_FIELDS, fallbackPresetChip, pickZoneFields } from '../presets.ts'
+import { GLOBAL_PRESETS, fallbackPresetChip } from '../presets/index.ts'
+import { pickZoneFields } from '../zones/index.ts'
+import { ZONE_FIELDS } from '../themeFieldDefs.ts'
 
 const field = 'ccStatusFontSize'
 

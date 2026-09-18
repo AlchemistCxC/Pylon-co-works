@@ -94,6 +94,25 @@ describe('Solid Workbench widgets', () => {
     expect(screen.queryByRole('button', { name: 'high' })).toBeNull()
   })
 
+  // 写入用的键必须来自 catalog 的 kind 解析，不能写死：provider 给这一项起的 id 不
+  // 一定是 reasoning_effort（peri 用的是 thinking_effort），写死会让 setConfigOption
+  // 的守卫在发请求之前就拒掉，且报一个与真实原因无关的 config_option_not_found。
+  it('reasoning writes the id the catalogue resolved, not a hardcoded one', async () => {
+    const services = renderWidget(() => <SolidReasoningWidget />, { reasoningSwitchMode: 'menu' })
+    const document = createWorkbenchDocument('preview-session')
+    services.runtime.replaceDocument({ ...document, session: { ...document.session,
+      options: normalizeSessionConfigOptions([{ id: 'thinking_effort', name: 'Thinking Effort', type: 'select',
+        currentValue: 'medium', options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }] }]),
+    } })
+    services.commands.setHandler('setConfigOption', async () => ({ ok: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'medium' }))
+    fireEvent.click(screen.getByRole('option', { name: 'high' }))
+    await waitFor(() => expect(services.commands.calls[0]?.args).toEqual([
+      'preview-session', 'thinking_effort', 'high', { expectedValue: 'medium' },
+    ]))
+    services.destroy()
+  })
+
   it('Model dropdown 枚举 runtime models，并经 facade 切换', async () => {
     const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'menu' })
     fireEvent.click(screen.getByRole('button', { name: /deepseek-v4-flash/ }))
@@ -154,6 +173,27 @@ describe('Solid Workbench widgets', () => {
     fireEvent.click(await screen.findByRole('button', { name: /my-default-model/ }))
     const menu = screen.getByRole('listbox', { name: '模型列表' })
     expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent)).toEqual([])
+    services.destroy()
+  })
+
+  // 空候选时留一个 8px 空盒 = 用户看到"点了弹出个空的"。占位必须可读且不可交互：
+  // 不是 option（否则会变成可选项）、也不可点。
+  it('模型没有可选项时渲染不可点的占位，而不是空盒子', async () => {
+    const services = renderWidget(
+      () => <SolidModelWidget
+        forceDropdown
+        draftValue={() => 'my-default-model'}
+        onDraftChange={() => {}}
+      />,
+      { modelSwitchMode: 'menu' },
+      { sessionId: null, agentAdvertisedModels: [] },
+    )
+    services.runtime.update({ availableModels: [], activeModel: '' })
+    fireEvent.click(await screen.findByRole('button', { name: /my-default-model/ }))
+    const menu = screen.getByRole('listbox', { name: '模型列表' })
+    expect(menu.textContent).toContain('当前 Agent 未上报可选模型')
+    expect(menu.querySelectorAll('[role="option"]')).toHaveLength(0)
+    expect(menu.querySelector('button')).toBeNull()
     services.destroy()
   })
 

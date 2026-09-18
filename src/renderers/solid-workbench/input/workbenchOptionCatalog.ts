@@ -16,13 +16,12 @@ export interface WorkbenchOptionEntry {
 
 export type WorkbenchOptionKind = 'model' | 'mode' | 'reasoning'
 
-/** Broad fallback catalogue. A provider's advertised modes always win. */
+/** Fallback mode candidates for a provider that advertises none. Every id must stay acceptable to the mode write channel. */
 export const DEFAULT_MODE_OPTIONS: readonly WorkbenchOptionEntry[] = Object.freeze([
   { id: 'default', label: '默认' },
   { id: 'auto', label: '全自动' },
   { id: 'accept_edits', label: '接受编辑' },
   { id: 'dont_ask', label: '不再询问' },
-  { id: 'edit', label: '编辑模式' },
   { id: 'bypass', label: '绕过确认' },
 ])
 
@@ -246,6 +245,23 @@ function preferAdvertised(
 }
 
 /**
+ * A set that holds nothing but the current value is not an advertised choice
+ * list. `optionIds` unshifts the current value into the snapshot list so the UI
+ * can always render it, so a provider that advertises no choices looks like one
+ * that advertised exactly the current one. Calling that authoritative dropped
+ * the fallback catalogue while the menu still hides the current value — which is
+ * how the permission menu ended up empty right after a switch.
+ */
+function advertisedChoices(
+  advertised: readonly WorkbenchOptionEntry[],
+  current?: string,
+): readonly WorkbenchOptionEntry[] {
+  const key = current?.trim().toLowerCase()
+  if (!key) return advertised
+  return advertised.some(entry => entry.id.trim().toLowerCase() !== key) ? advertised : []
+}
+
+/**
  * Model candidates come only from advertised surfaces: the live session
  * snapshot (negotiation response) plus, for the empty-state draft binding, the
  * owning agent's advertised set (its sessionConfig buckets). When nothing is
@@ -271,7 +287,7 @@ export function resolveModeOptionEntries(snapshot: WorkbenchRuntimeSnapshot, dra
     documentOptions(snapshot, 'mode'),
   ])
   return mergeEntries([
-    preferAdvertised(advertised, DEFAULT_MODE_OPTIONS),
+    preferAdvertised(advertisedChoices(advertised, snapshot.activeMode), DEFAULT_MODE_OPTIONS),
   ], draft || snapshot.activeMode)
 }
 

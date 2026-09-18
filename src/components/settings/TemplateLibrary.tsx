@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
-import { GLOBAL_PRESETS } from '../../presets'
+import { GLOBAL_PRESETS } from '../../presets/index.ts'
 import { THEME_DEFAULTS } from '../../themeFieldDefs'
 import SettingsPreview from '../SettingsPreview'
 import type { ThemeSettings } from '../../store'

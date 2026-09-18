@@ -7,10 +7,16 @@ export interface RendererSuiteCommandGate {
   bind(delegate: WorkbenchCommandPort): WorkbenchCommandPort
 }
 
-const COMMANDS: readonly (keyof WorkbenchCommandPort)[] = [
+const COMMANDS = [
   'prompt', 'send', 'cancel', 'attach', 'setModel', 'setMode', 'createSession', 'compact', 'exportSession', 'clearSession',
-  'toolAction', 'respondInteraction', 'openResource', 'revealResource', 'copy', 'retry', 'recover',
-]
+  'setConfigOption', 'toolAction', 'respondInteraction', 'openResource', 'revealResource', 'copy', 'retry', 'recover',
+] as const satisfies readonly (keyof WorkbenchCommandPort)[]
+
+// 穷尽性守卫（编译期）：端口新增方法而白名单没跟 → MissingCommands 不再是 never，下一行 `true` 赋给 `never` 编译失败。
+// `as const` 不可省——带注解的数组会把元素类型放宽成 keyof WorkbenchCommandPort，守卫会静默失效。
+type MissingCommands = Exclude<keyof WorkbenchCommandPort, (typeof COMMANDS)[number]>
+const _commandsAreExhaustive: MissingCommands extends never ? true : never = true
+void _commandsAreExhaustive
 
 export function createRendererSuiteCommandGate(): RendererSuiteCommandGate {
   let active = false

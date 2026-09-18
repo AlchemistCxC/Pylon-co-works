@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cloneCcLayout } from '../../../ccLayoutState.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
-import { GLOBAL_PRESETS } from '../../../presets.ts'
+import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import type { ThemeSettings } from '../../../store.ts'
 import { selectWorkbenchAppearance } from '../appearance.ts'
 import {
