@@ -353,7 +353,11 @@ mod tests {
         assert_eq!(run["eventType"], json!("assistant.text.delta"));
         assert_eq!(run["seqStart"], json!(2));
         assert_eq!(run["seqEnd"], json!(3));
-        assert_eq!(run["text"], json!("甲乙"), "相邻同类同 identity 必须精确拼接");
+        assert_eq!(
+            run["text"],
+            json!("甲乙"),
+            "相邻同类同 identity 必须精确拼接"
+        );
     }
 
     #[test]
@@ -392,8 +396,14 @@ mod tests {
             vec!["event", "delta-run", "event"],
             "非 delta 行必须整行保留且保序"
         );
-        assert_eq!(fold.segments[0]["event"]["eventType"], json!("user.message"));
-        assert_eq!(fold.segments[2]["event"]["eventType"], json!("turn.completed"));
+        assert_eq!(
+            fold.segments[0]["event"]["eventType"],
+            json!("user.message")
+        );
+        assert_eq!(
+            fold.segments[2]["event"]["eventType"],
+            json!("turn.completed")
+        );
     }
 
     #[test]
