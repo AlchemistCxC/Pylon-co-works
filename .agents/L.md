@@ -240,17 +240,17 @@
 
 ---
 
-[2026-09-18 22] [Kepler] [#163 + #157]
+[2026-09-19 00] [Kepler] [#129]（旧 #163/#157 条目已随 PR #173 合入移除）
 
-**开工：#163（切换 Agent 后被主动停的 Agent 报 crashed:true）+ #157（acp::tests::writer_failure 全量并行 flaky）。** 分支沿用 `Ru5t/Reflector`。均为 `src-tauri` 侧。
+**开工：issue129（字体系统收敛 5+2 项：表单控件 Arial 回落、字体栈双真值、预览回退、内容字体并存、死分支）。** 前端为主，分支沿用 `Ru5t/Reflector`。
 
 **我方本轮文件域（请勿改写、勿连带提交）**：
 
-- `src-tauri/src/acp/client.rs`（AcpClient 新增 `stopped` 标记 + `is_dead()`；`is_crashed()` 语义改为「意外退出才真」；kill() 置位；三处发送守卫换 is_dead）
-- `src-tauri/src/lib.rs`（仅 `acp_is_crashed` 文档注释，无逻辑改动）
-- `src-tauri/src/permission.rs`（超时清理判据 is_crashed → is_dead，一处）
-- `src-tauri/src/bin/pylon-fake-agent.rs`（新增 `close-stdin-after-init` 场景，供 #157 确定性构造）
-- `src-tauri/src/acp/tests.rs`（重写 writer_failure 测试为确定性构造 + 新增主动停不判 crash 用例）
-- 文档：`.agents/spec/`（新 spec）、`.agents/records/`（开发记录）、`docs/说明书/`（若描述了 crashed 判据则同步）、本文件
+- `src/index.css`（@layer base 增表单控件 `font:inherit`；`--type-content-font` 基线改 msg-font 链；删 `--type-content-font` 按模式死分支两行）
+- `src/plugins/product/builtinPylonRenderers.ts`（三个内置字体贡献 family 改为 `var(--font-*-default)` 引用，index.css 成为唯一真值源）
+- `src/components/settings/FontContributionPicker.tsx`（interface 角色预览回退改走生产 `resolveFontToken`）及 `__tests__/FontContributionPicker.test.tsx`（两条断言随修复更新）
+- `src/themeFieldDefs.ts`（仅 chatFont/msgFont 两条 `hint` 措辞，零默认值/零结构改动）
+- **新增** `src/__tests__/fontStackContract.test.ts`（字体栈真值源契约）
+- 文档：`.agents/spec/`、`.agents/records/`、本文件
 
-**我不碰**：前端 `src/**`、`tools/**`、`.github/**`、`src-tauri/src/` 其余文件。
+**我不碰**：`src/components/Sidebar*`、`src/sheets/**`、`src/workspace-sheets/**`（#154 在途域）、`src-tauri/**`、`tools/**`、`docs/说明书/**`（字体系统无说明书描述面，已核查）。
