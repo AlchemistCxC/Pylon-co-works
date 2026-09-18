@@ -189,11 +189,17 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.session-actions')).toMatch(/pointer-events:\s*none/)
   })
 
-  it('会话行操作钮在未显形时退出命中测试（只给 opacity:0 会吃掉落在行中段的点击）', () => {
-    const hidden = body('.app[data-interface-mode="terminal-like"] .session-item > .session-action')
-    expect(hidden).toMatch(/opacity:\s*0/)
-    expect(hidden).toMatch(/visibility:\s*hidden/)
-    expect(hidden).toMatch(/pointer-events:\s*none/)
+  it('会话行动作的显形门控在**容器**上，按钮自身不得再叠第二层', () => {
+    // opacity 作用于整个子树：容器 opacity:0 时，只给按钮提 opacity 救不了——
+    // 旧断言检查的「按钮自带三层门控」正是「会话设置不可见」的根因之一。
+    const container = body('.session-actions')
+    expect(container).toMatch(/opacity:\s*0/)
+    expect(container).toMatch(/visibility:\s*hidden/)
+    expect(container).toMatch(/pointer-events:\s*none/)
+    const terminalAction = body('.app[data-interface-mode="terminal-like"] .session-actions > .session-action')
+    expect(terminalAction, '按钮不得再带自己的 opacity/visibility 门控').not.toMatch(/opacity:/)
+    expect(terminalAction).not.toMatch(/visibility:/)
+    expect(terminalAction).toMatch(/cursor:\s*pointer/)
   })
 
   it('字号与会话同源：模块标题/组名/行名用同一 token，次要文字用 meta token', () => {

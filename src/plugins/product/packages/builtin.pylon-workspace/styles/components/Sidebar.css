@@ -248,7 +248,12 @@
    淡入顶替。若让四个操作钮常驻占宽（84px），单行会话名会被挤成「sessio…」。 */
 .session-tail { position:relative; flex:0 0 auto; display:grid; place-items:center end; min-width:22px; }
 .session-meta { grid-area:1/1; font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
-.session-actions { grid-area:1/1; display:flex; align-items:center; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
+.session-actions { grid-area:1/1; display:flex; align-items:center; gap:2px; opacity:0; visibility:hidden; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard), visibility 0s linear var(--motion-fast); }
+/* 门控必须落在**容器**上：opacity 作用于整个子树，只把按钮自己的 opacity 提上去，
+   依然被容器的 opacity:0 整体罩住——这就是「会话设置不可见」的根因（按钮自己的
+   opacity/visibility 看起来都对，合成结果却是全隐）。 */
+.session-item:hover .session-actions,
+.session-item:focus-within .session-actions { opacity:1; visibility:visible; pointer-events:auto; transition-delay:0s; }
 .session-item:hover .session-tail > .session-meta,
 .session-item:focus-within .session-tail > .session-meta { opacity:0; }
 
@@ -432,7 +437,7 @@
 .cwd-settings-dialog-identity strong { min-width:0; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog-identity span { min-width:0; overflow:hidden; color:var(--text-dim); font:11px var(--mono); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog > .cwd-settings { margin:0 20px 16px; }
-@media (hover:none) { .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; } .session-tail > .session-meta { opacity:0; } .session-actions { opacity:.82; visibility:visible; pointer-events:auto; } }
+@media (hover:none) { .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; } .session-tail > .session-meta { opacity:0; } .session-actions { opacity:1; visibility:visible; pointer-events:auto; } }
 
 /* Modern GUI workspace rail. Local values intentionally stay in this package. */
 .app[data-interface-mode="modern-gui"] .layout { gap:8px; padding:0 8px 8px; }
@@ -523,34 +528,21 @@
   border-radius:0;
   background:transparent;
   color:var(--text-dim);
-  opacity:0;
-  /* 未显形时**同时**退出命中测试。只给 `opacity:0` 的话，按钮在淡入窗口内（以及任何
-     程序化点击里）仍会吃掉落在会话行中段的点击——实测行中心 `elementFromPoint` 命中的
-     就是其中的「会话设置」。`visibility` 的离散过渡带延迟，正好把淡入窗口一起罩住。 */
-  visibility:hidden;
-  pointer-events:none;
+  /* 显形/隐形的门控在**容器** `.session-actions` 上（见基础段）；按钮这里只保留
+     悬停/聚焦的着色，不再叠第二层 opacity/visibility——两层门控曾把按钮压到看不见。 */
   cursor:pointer;
-  transition:opacity var(--motion-fast) var(--ease-standard), visibility 0s linear var(--motion-fast), color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+  transition:color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 .app[data-interface-mode="terminal-like"] .session-meta {
   white-space:nowrap;
 }
-.app[data-interface-mode="terminal-like"] .session-item:hover > .session-action,
-.app[data-interface-mode="terminal-like"] .session-item:focus-within > .session-action,
-.app[data-interface-mode="terminal-like"] .session-item:hover .session-actions > .session-action,
-.app[data-interface-mode="terminal-like"] .session-item:focus-within .session-actions > .session-action {
-  /* 旧写法显形时只有 `opacity:.62`，再叠上 `--text-dim` 就是两层压暗——用户实机反馈
-     「按钮完全不见了」。显形即近全亮，靠 hover 态再提一档。 */
-  opacity:.88;
-  visibility:visible;
-  pointer-events:auto;
-  transition-delay:0s;
+.app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover {
+  color:var(--text);
+  border-color:color-mix(in srgb,var(--border) 76%,var(--accent));
+  background:color-mix(in srgb,var(--bg-hover) 72%,transparent);
 }
-.app[data-interface-mode="terminal-like"] .session-item > .session-action:hover,
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover,
-.app[data-interface-mode="terminal-like"] .session-item > .session-action:focus-visible,
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:focus-visible {
-  opacity:1;
   color:var(--text);
   border-color:color-mix(in srgb,var(--border) 76%,var(--accent));
   background:color-mix(in srgb,var(--bg-hover) 72%,transparent);
@@ -570,16 +562,16 @@
   background:color-mix(in srgb,var(--state-danger,var(--danger)) 8%,transparent);
 }
 @media (hover:none), (pointer:coarse) {
-  .app[data-interface-mode="terminal-like"] .session-item > .session-action,
+  .session-actions {
+    /* 无 hover 环境没有「显形」这一步，容器必须常驻可见且可点。 */
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+  }
   .app[data-interface-mode="terminal-like"] .session-actions > .session-action {
     width:30px;
     height:30px;
     min-width:30px;
-    opacity:.82;
-    /* 无 hover 环境没有「显形」这一步，按钮必须常驻可见且可点。 */
-    visibility:visible;
-    pointer-events:auto;
-    transition-delay:0s;
   }
 }
 .app[data-interface-mode="tactical-blue"] .sidebar { background:#071831ed; border-right:1px solid #75c5f344; }

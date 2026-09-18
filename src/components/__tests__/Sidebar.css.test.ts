@@ -19,10 +19,10 @@ function lastRuleBody(selector: string): string {
 // 原为全文 toInclude token 断言，改为选择器限域断言（防 token 撞车误绿）。
 describe('Sidebar 键盘焦点 CSS 契约', () => {
   it('键盘聚焦会话行露出行内动作（focus-within 不依赖指针）', () => {
-    // 行内动作现为「置顶 + 设置」：置顶钮自己的显形规则，设置钮在 terminal-like 段的
-    // 逗号列表里（因此不能按单选择器取规则体，只能对全文断言）。
+    // 行内动作为「置顶 + 设置」：门控都在**容器** `.session-actions` 上（opacity 作用于
+    // 整个子树，按钮不得再自带第二层——那正是「设置不可见」的根因）。
     expect(lastRuleBody('.session-item:focus-within > .session-pin')).toContain('opacity')
-    expect(css).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.session-item:focus-within \.session-actions > \.session-action \{[^}]*opacity:/)
+    expect(lastRuleBody('.session-item:focus-within .session-actions')).toContain('opacity')
   })
 
   it('行内动作的 :focus-visible 规则给焦点环（选择器可为逗号列表成员）', () => {
