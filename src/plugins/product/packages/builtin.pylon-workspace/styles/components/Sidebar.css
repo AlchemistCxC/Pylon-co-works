@@ -145,6 +145,27 @@
    下把这些 token 压到 1ms，因此这里不需要再写一遍媒体查询。
    `1fr` 在自动高度的网格里等价于「内容高度」，展开态因此与旧的 flex 列视觉一致。
    子元素必须 `min-height:0`，否则栅格项默认的 `min-height:auto` 让 0fr 收不下去。 */
+/* ── 会话区（常驻模块）与可排布模块的**分界**（用户裁定形态 B，2026-09-18）──
+   不画线。区域感由三件事叠加，都是「这是一块不同的地方」而不是「这里有一条分隔」：
+   ① 留白：栈的统一 gap 是 6px，这里再补 4px，会话区上方因此有 10px 呼吸；
+   ② 层底：会话区整块（含标题行）一层极淡底色，在 250px 宽、26px 行高的栏里比线条安静得多；
+   ③ 标题吸顶：整栈滚动时标题贴住栏顶，顺带回答「滚到中间这堆紧凑行是什么」。
+   吸顶头必须自带近乎不透明的底 + 背景模糊：否则会话列表会从标题底下透出字影；用模糊而非实色，
+   是为了不遮掉用户自定的左栏背景图（`.sidebar::before` 可以是图片）。 */
+/* 层底直接用 `--bg-panel`（不掺透明）：这个主题里它本身就是 rgba(0,0,0,.03) 这类
+   「一层面板」的填充（搜索输入框同款），再乘个系数就等于没有——实测 52% 版本算出来是
+   1.6% 黑，肉眼不可辨。 */
+.sidebar-block[data-always-open="true"] { background:var(--bg-panel); }
+.sidebar-block[data-always-open="true"]:not(:first-child) { margin-top:4px; }
+/* 吸顶头：近不透明的 `--surface-panel`（本主题是实色 #FAF9F5）+ 背景模糊——与会话列表
+   同层的半透明底会让行文字从标题底下透出字影；用表面色而不是 `--bg-panel` 是因为后者
+   在这个主题里只有 3% 不透明度，挡不住任何东西。 */
+.sidebar-block[data-always-open="true"] > .sidebar-block-head {
+  position:sticky; top:0; z-index:2;
+  background:color-mix(in srgb,var(--surface-panel) 92%,transparent);
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+}
+
 .sidebar-block-body {
   display:grid; grid-template-rows:1fr; min-height:0; overflow:hidden; opacity:1;
   transition:grid-template-rows var(--motion-standard) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);

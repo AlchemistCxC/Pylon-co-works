@@ -86,6 +86,21 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(sidebarCss, '左栏折叠动画不得再出现字面毫秒时长').not.toMatch(/transition:[^;]*\d+ms/)
   })
 
+  it('会话区与可排布模块的分界是「留白 + 层底 + 吸顶」，**不画线**（用户裁定的形态 B）', () => {
+    const zone = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\] \{([^}]*)\}/)?.[1] ?? ''
+    expect(zone, '缺少常驻区层底规则').toMatch(/background:var\(--bg-panel\)/)
+    // 用户明确说「不必搞成横线」：任何 border-top / 伪元素分隔线都不该出现。
+    expect(zone).not.toMatch(/border/)
+    const gap = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\]:not\(:first-child\) \{([^}]*)\}/)?.[1] ?? ''
+    expect(gap, '缺少会话区上方的额外留白').toMatch(/margin-top:\s*\d+px/)
+    const head = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\] > \.sidebar-block-head \{([^}]*)\}/)?.[1] ?? ''
+    expect(head, '缺少吸顶标题规则').toMatch(/position:\s*sticky/)
+    expect(head).toMatch(/top:\s*0/)
+    // 吸顶头必须自带近乎不透明的底 + 模糊，否则会话列表会从标题底下透出字影。
+    expect(head).toMatch(/background:color-mix\(in srgb,var\(--surface-panel\) 9\d%/)
+    expect(head).toMatch(/backdrop-filter:blur/)
+  })
+
   it('工作区组头**没有**折叠按钮（保留折叠功能：组头本身即开关）', () => {
     expect(body('.cwd-group-arrow'), '组头箭头已按用户要求删除').toBe('')
     expect(sidebarCss, '组头箭头不得复活').not.toMatch(/\.cwd-group-arrow\s*\{/)
