@@ -12,4 +12,5 @@ mod auto_reconnect;
 mod b10_gateway;
 mod b11_inject;
 mod issue110_establishment;
+mod issue53_selector_probe;
 mod model_switch;

@@ -222,6 +222,19 @@ pub(crate) async fn load_persisted_session(
                     "stale session mapping for source: {source}"
                 )));
             }
+            // #51：恢复期选择器面入 journal（与 create_session_slot 建立期写入对称）
+            // ——重启后打开历史会话时，document.session.options（中控区 model/
+            // reasoning/mode 候选）由 journal 重放恢复；load 响应本身只进 store 层。
+            let load_options = crate::session::create::response_config_options(&response);
+            let _ = crate::session::create::ingest_established_config_options_event(
+                state.inner(),
+                &runtime,
+                &source,
+                &peri_id,
+                generation,
+                &load_options,
+            )
+            .await;
             let authority = match replay_journal_status {
                 "local-authoritative" => "local-journal",
                 "imported" | "already-imported" | "already-present" | "reconciled" => {

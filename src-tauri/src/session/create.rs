@@ -471,6 +471,83 @@ async fn ingest_established_model_event(
     }
 }
 
+/// #51：把建立/恢复期的完整 configOptions 选择器面写进 canonical journal
+/// （`session.config-updated`）。
+///
+/// 与 [`ingest_established_model_event`] 同一模式：raw 形状是标准 `session/update`
+/// 包，live 与冷挂载重放读同一份事实——重启后打开历史会话时，中控区选择器
+/// （model choices / reasoning / mode）由此恢复。`options` 为空不写（空数组对
+/// projector 是"广告了零项"，会与"尚未宣告"混淆）；超过 D97-4 envelope 上限不写，
+/// 只告警。失败仅记 warn：选择器事实缺失不得让已成功的建立/恢复失败。
+pub(crate) async fn ingest_established_config_options_event(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    options: &[serde_json::Value],
+) -> Option<CanonicalEventRow> {
+    if options.is_empty() {
+        return None;
+    }
+    // D97-4 同款有界原则：选择器 envelope 超 UPPER 时不入 journal，防止极端
+    // agent 的大响应把 journal 行撑爆（raw 语义保真让位于 journal 健康）。
+    let serialized = serde_json::to_string(options).ok()?;
+    if serialized.len() > super::model::SELECTOR_ENVELOPE_MAX_BYTES {
+        tracing::warn!(
+            source = source,
+            bytes = serialized.len(),
+            "established configOptions envelope exceeds selector journal bound; skipped"
+        );
+        return None;
+    }
+    let owner = {
+        let agent_id = state.agent_id_for_runtime(runtime)?;
+        let sessions = runtime.sessions.lock().ok()?;
+        let session = sessions.get(source)?;
+        session.durable_owner(&agent_id, source).ok()?
+    }?;
+    let raw_payload = serde_json::json!({
+        "sessionId": peri_id,
+        "update": {
+            "sessionUpdate": "config_option_update",
+            "configOptions": options,
+        },
+    });
+    match event_service_of(state) {
+        Ok(service) => match service
+            .ingest_event(owner, Some(peri_id.to_string()), generation, raw_payload)
+            .await
+        {
+            Ok(result) => result.events.into_iter().next(),
+            Err(error) => {
+                tracing::warn!(
+                    source = source,
+                    "建立期选择器事实写入 journal 失败：{error}"
+                );
+                None
+            }
+        },
+        Err(error) => {
+            tracing::warn!(
+                source = source,
+                "建立期选择器事实写入 journal 跳过（事件库不可用）：{error}"
+            );
+            None
+        }
+    }
+}
+
+/// 从建立/恢复响应里提取权威 configOptions envelope（camel/snake 双形）。
+pub(crate) fn response_config_options(response: &serde_json::Value) -> Vec<serde_json::Value> {
+    response
+        .get("configOptions")
+        .or_else(|| response.get("config_options"))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// P56/D1：初值 model 下发计划（纯函数便于测试；执行侧见 apply_initial_session_options）。
 #[derive(Debug)]
 pub(crate) enum InitialModelAction {
@@ -865,6 +942,18 @@ async fn create_session_slot(
         let _ = ingest_established_model_event(state, runtime, source, &peri_id, generation, model)
             .await;
     }
+    // #51：建立期选择器面入 journal——重启后打开历史会话时中控区由此恢复
+    // model choices / reasoning / mode 候选（空 envelope 不写，见 helper 文档）。
+    let established_options = response_config_options(&response);
+    let _ = ingest_established_config_options_event(
+        state,
+        runtime,
+        source,
+        &peri_id,
+        generation,
+        &established_options,
+    )
+    .await;
     if close_replaced {
         if let Some(old) = replaced {
             // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
@@ -1217,6 +1306,19 @@ async fn revive_session_slot(
             serde_json::Value::String(revived_peri_id.clone()),
         )]),
     );
+    // #51：revive 槽位的 new_response 为 None（不向调用方回传响应），前端 document
+    // 因此拿不到选择器面——把 load/resume 响应里的 configOptions 写进 journal，
+    // 经 live/replay 同通道收敛到 document.session.options。
+    let revived_options = response_config_options(&response);
+    let _ = ingest_established_config_options_event(
+        state,
+        runtime,
+        source,
+        &revived_peri_id,
+        generation,
+        &revived_options,
+    )
+    .await;
     Ok(Some(SessionMapping {
         peri_id: revived_peri_id,
         is_first: false,
@@ -1320,6 +1422,90 @@ pub(crate) async fn new_session(
     Ok(mapping
         .new_response
         .expect("create_session_slot 必返回 session/new 原始响应"))
+}
+
+/// #53：空态选择器探测——起一次性会话读 Agent 广告的 configOptions/modes 后立即
+/// close。codge `probe_agent_options` 的 Pylon 等价物：空态（无历史会话桶）的中控区
+/// 模型候选由此获得数据源，不再依赖"该 agent 曾在本机跑过会话"。
+///
+/// 与用户会话完全隔离：合成 source 不落会话槽位、不写 journal、不做 initial 选项
+/// 下发、gateway 语义不参与；关闭走 LocalFirstBestEffort（探测会话的 close 失败
+/// 不产生用户可见错误）。runtime 未建立 → `agent_runtime_unavailable`（探测不
+/// boot 进程）。空 `configOptions` 是合法结果（"本 agent 无可配置项"）。
+#[tauri::command(rename_all = "camelCase")]
+pub(crate) async fn probe_agent_selectors(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+    cwd: Option<String>,
+    workspace_id: Option<String>,
+) -> Result<serde_json::Value, PylonError> {
+    let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
+    let generation = state.current_generation(&runtime);
+    let (session_cwd, _workspace_id) =
+        crate::workspaces::resolve_session_cwd(state.inner(), cwd, workspace_id)?;
+    // 与 create_session_slot 同款前置：未握手直接拒绝（稳定错误码）；建立期串行化
+    // 共用 session_creation 锁（探测与用户建会话不并发打同一个 agent 子进程）。
+    {
+        let acp = runtime.acp.lock().await;
+        if !acp.session_ready() {
+            return Err(PylonError::Protocol(
+                "session_new_before_initialize: ACP 握手未完成，禁止建立会话".to_string(),
+            ));
+        }
+    }
+    let params = crate::acp::initialize_plan::build_session_new_plan(
+        session_cwd.clone(),
+        Vec::new(),
+        state.protocol_for_runtime(&runtime).mcp_servers,
+    )
+    .params()?;
+    let response = state
+        .acp_rpc_generation_checked(&runtime, acp::METHOD_SESSION_NEW, params, generation)
+        .await?;
+    state.ensure_generation(&runtime, generation)?;
+    let peri_id = crate::acp::session_id_from(&response)?;
+    // 面解析复用 apply_session_response（与用户会话同一套形状判定，零特判）。
+    let mut probe_session = SessionInfo::new(
+        peri_id.clone(),
+        String::new(),
+        session_cwd,
+        false,
+        generation,
+    );
+    probe_session.apply_session_response(&response);
+    let model_surface = match &probe_session.model_surface {
+        ModelSurface::ConfigOption { config_id } => serde_json::json!({
+            "kind": "config_option",
+            "configId": config_id,
+        }),
+        ModelSurface::ModelsState => serde_json::json!({ "kind": "models_state" }),
+        ModelSurface::None => serde_json::json!({ "kind": "none" }),
+    };
+    let mut options = response_config_options(&response);
+    if serde_json::to_string(&options)
+        .map(|text| text.len())
+        .unwrap_or(0)
+        > super::model::SELECTOR_ENVELOPE_MAX_BYTES
+    {
+        tracing::warn!(
+            agent = agent_id,
+            "probe configOptions envelope exceeds bound; returning surface only"
+        );
+        options = Vec::new();
+    }
+    let result = serde_json::json!({
+        "configOptions": options,
+        "modes": response.get("modes").cloned().unwrap_or(serde_json::Value::Null),
+        "modelSurface": model_surface,
+        "modelChoices": probe_session.model_choices,
+        "currentModel": if probe_session.model.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(probe_session.model.clone())
+        },
+    });
+    let _ = close_session_rpc(state.inner(), &runtime, &peri_id, generation, false).await;
+    Ok(result)
 }
 
 #[cfg(test)]
