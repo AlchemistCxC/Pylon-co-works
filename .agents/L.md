@@ -176,3 +176,26 @@
 **追加（2026-09-18 12，同一会话）**：用户授权在 PR #160 内一并修 CI 红（Rust job 的 flaky）。**新增文件域（请勿改写、勿连带提交）**：`src-tauri/pylon-core/src/agent_detection.rs`（仅 `managed_probe_cleanup_kills_descendant_processes` 测试内的等待预算）、`src-tauri/src/plugin_process/tests.rs`（仅进程测试的等待预算）。**只改预算数值，不改任何断言**；不碰这两个文件的非测试逻辑，也不碰其他 crate。
 
 **再追加**：CI 红的第二个独立故障查明了——`cargo fmt --check` 本身 rc=1，唯一需要格式化的文件是 `src-tauri/src/session/turn_rollup.rs`（`be9db4bf` 引入，**分支版与 main 版逐字节相同，即 main 的该门禁同样是红的**，只是被测试失败挡在前面从未跑到）。故本次一并修，**纯格式化、零语义**。第三个文件域：`src-tauri/src/session/turn_rollup.rs`（仅 `cargo fmt`）。
+
+---
+
+[2026-09-18 14] [Miyaki Kumo] [#154 续 · 左栏区块栈模型]
+
+**开工：把 AgentSheet 左栏从「mode 过滤出的单面板」改为「分区内按 order 堆叠的常驻区块栈」**（用户当场裁定：本项目无用户/无插件市场/无现成插件，**准许破坏性更新，怎么彻底怎么来**）。这是在回答 #154 spec 的**未决问题 1「左栏新 UI/功能占位内容 —— 待用户补充」**，属 #154 阶段 3 的续做，沿用 `Ru5t/Reflector`。
+
+**契约变更（破坏性）**：`AgentSidebarMode ('work'|'chat')` → `AgentSidebarRegion ('modules'|'sessions')`；区块新增 `collapsible` / `defaultCollapsed` / `headerActions`；**区块外壳（标题+折叠）归宿主渲染，贡献只画内容**（今天 `WorkspacesPanel`/`ChatSessionsPanel` 各画一份 `.sidebar-section-head` 且标签写死，注册表的 `label` 无人读）。`AgentWorkspaceState` 由 `{ sidebarMode }` 改为 `{ collapsedBlocks }`；`layout.agent-sidebar.set` CLI 命令删除。**不碰** ADR-0009 锁定的几何面：`--sheet-sidebar-track-width`、左栏 clamp 160/520、`applyWorkspaceLayoutChange`、`pylon-workspace-layout-v3`、以及**另一个**同名 `sidebarMode ('workspace'|'sheet'|'none')`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 契约与注册表：`src/plugin-runtime/sidebar/{sidebarTypes,sidebarRegistry}.ts` 及 `__tests__`
+- 左栏：`src/components/Sidebar.tsx`、`src/components/sidebar/**`、`src/components/__tests__/Sidebar*.test.tsx`
+- 首方样式：`builtin.pylon-workspace/styles/components/Sidebar.css`、`src/plugins/product/firstPartyStyleOwnership.ts`（新类登记）
+- Sheet 状态与视图：`src/workspace-sheets/agentWorkspaceState.ts`、`src/sheets/AgentSheetView.tsx`、`src/plugins/core/sheet/builtinWorkspaceCommands.ts`、`src/plugins/product/builtinPylonWorkspace.ts`
+- work/chat 轴残留清理（`workspaceMode` 共 18 文件）：`src/plugin-runtime/renderers/rendererTypes.ts`、`src/renderers/solid-workbench/{workbenchContracts.ts,SolidWorkbenchApp.solid.tsx,input/ControlCenter.solid.tsx,settingsPreviewControlCenter.solid.tsx}`、`src/sheets/agent-workbench/agentWorkbenchSessionCreation.ts`、`src/domains/workbench/agentEmptyState.ts`、`src/components/chat/AgentEmptyState.tsx` 及各自 `__tests__`
+- 文档：`.agents/decisions/`（新增 ADR）、`.agents/records/`、`docs/说明书/Pylon-插件系统说明书-开发者版.md` §6.8/§6.11.3、本文件
+
+**⚠️ 与 #116（Fisher）的重叠提请注意**：`src/components/Sidebar.tsx` 同时出现在 #116 的文件域声明（2026-09-17 21 条目）与我这里。本轮我按新模型**重写**该文件（删模式页签、加区块外壳与两区），非局部修改。若 #116 仍有未落地的 Sidebar 改动，请先告知，我避让。
+
+**⚠️ 偏离声明**：spec 154 写「中控区不碰」，但彻底删掉 work/chat 轴必须动 `ControlCenter.solid.tsx` 的两处（一个「请先选择工作区」提交守卫 + 一个工作区下拉项文案）与 `src/renderers/solid-workbench/**` 的字段透传。用户已批准「怎么彻底怎么来」。**仅删失效语义分支，不重排中控区布局/样式**；`ControlCenter.css` 一字不动。
+
+**从 ADR-0009 继承的验收口径**：逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」数值相等；折叠 = 0 宽；轨道处带右边框的元素恰好 1 个。左栏新样式不得打破这三条。
