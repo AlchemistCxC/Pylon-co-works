@@ -383,3 +383,29 @@ CI 红因已修（clippy 基线门禁 6 条，清零而非更新基线），PR #
 **我不碰**：`MarkdownContent.solid.tsx`（尾块路径本来就是 `cache: false` 调用，模型层按该标志启用增量，**调用点零改动**）、`streamingMarkdownSplit.ts`、`streamingRowCounters.ts`、`streamingDisplayScheduler.ts`、`streamingDiagnostics.ts`（`parseCost` 是既有读数，本轮不扩展读数结构）、`vitest.config.ts`、`docs/说明书/`、他人的 `input/**`、`tools/webview2-mcp/**`、`src-tauri/**`。
 
 **约束（复审据此把关）**：graft 只在「可证明为纯文本追加」时发生，判定不通过一律回退整段重解析；渲染结果必须与整段重解析逐块一致（差分测试对每个前缀断言）；既有行为测试零修改。
+
+---
+
+[2026-09-18 17] [Polya] [#156 / #109]
+
+**交接：`feat/preset-v2` 已推上远端、PR #164 已开；合并冲突由 ACh 接手 —— 我停手，不再改本分支。**
+
+**本分支上属于我的两个提交（解决冲突时请保留，勿整文件取 main）**：
+
+- `5353805a` #156 中控三控件修复与「值来源」同步（16 文件）。含一条**早于本批存在**的重放缺陷修复：同一 journal 行的多条事件共用一个**行级** `coverage`，会被投影器按"跨度已覆盖"整条丢弃（`session_info_update` 一行三 fact 同样中招）。
+- `96fcdcd` 登记 `src/presets/`、`src/zones/` 的模块归属 —— 刀2 拆出的目录没在模块表里，`check:docs`（含 `check:maintenance`）在 CI 必红。
+
+**冲突清单（我 abort 之前实测的 5 处）**：
+
+- **import 行冲突（取并集即可）**：`src/sheets/agent-workbench/agentWorkbenchSession.ts`（HEAD 侧需保留 `SessionConfigOption` 类型导入，并并入 main 的 `subscribeWindowTerminalFrames` / `CanonicalTerminalSignal`）、`src/components/Settings.tsx`、`src/__tests__/presets.test.ts`。
+- **语义冲突（别整文件取 main）**：`src/presets/builtin.ts`（39 行）与上面两个文件的 presets 部分 —— main 新增了 `fallbackPresetChip` 等，而本分支把 `src/presets.ts` 拆成了 `presets/` + `zones/`（刀2）⇒ 需把 main 的新增**移植进拆分结构**。照字面执行仓库那条"冲突一律以 main 为准"会把刀2 的拆分连同本次修复一起丢掉。
+- **移动 vs 修改**：`src/__tests__/replay/agentWorkbenchSession.snapshotBridge.test.ts` —— main 把该测试搬到了 `src/__tests__/replay/`，本分支改的是老路径那份 ⇒ 我方新增用例要落到 main 的**新路径**。
+- **我方新增代码落点（勿丢）**：`agentWorkbenchSession.ts` 的 `LocalSessionFact` / `localSessionFactEvent` / `withSemanticValue` / `applyLocalSessionFact`；`acpNormalizer.ts` 的 `configOptionSessionFacts`；`workbenchProjector.ts` 的"空 options 不覆盖"守卫；`WorkbenchWidgets.solid.tsx` 的 `isReasoningOption`。
+
+**本机环境两条（影响本地门禁与 push，别误判为代码问题）**：
+
+- `~/.gitconfig` 里 `http.sslBackend = openssl`，这套 Git 构建不支持 ⇒ **任何** https 的 git 操作都报 `Unsupported SSL backend 'openssl'`。用 `git -c http.sslBackend=schannel <cmd>` 单条命令绕过（我没有改全局配置）。
+- 工作区有**未跟踪**的禁区目录 `src/layout-sketch/`、`src/ui-demo/`：`check:first-party-styles`（glob 文件系统）与 `check:maintenance`（`git ls-files --others`）会扫到它们而在**本机**红；CI 干净检出不包含这两个目录 ⇒ 不影响 CI。
+- github.com 直连时好时坏（同一 IP 钉住即通）⇒ 推送失败不一定是代理问题，重试即可。
+
+**不碰**：`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`（未跟踪、未提交）。
