@@ -7,6 +7,7 @@ import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.t
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { errorCode, errorMessage } from '../../utils.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
@@ -371,7 +372,14 @@ function createCommandPort(
       return { ok: true, value: result }
     } catch (error) {
       const stale = !sameCommandBinding(mountBinding, readBinding())
-      const normalized = { code: 'command_failed', message: error instanceof Error ? error.message : String(error), recoverability: 'retry' as const }
+      // #172：后端拒绝 DTO 是 { code, message } 结构化对象（非 Error）——透传真实
+      // code（NoActiveAgent / AgentRuntimeUnavailable / Acp …）与 message 供错误中心
+      // 分类与展示；裸 String(error) 会把两者一起吞成 [object Object] / command_failed。
+      const normalized = {
+        code: errorCode(error) ?? 'command_failed',
+        message: errorMessage(error, '命令被运行时拒绝'),
+        recoverability: 'retry' as const,
+      }
       reportCommandFailure(binding, command, normalized, stale)
       return { ok: false, error: normalized }
     }
