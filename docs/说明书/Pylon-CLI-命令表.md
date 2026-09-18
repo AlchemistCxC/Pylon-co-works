@@ -1,6 +1,6 @@
 # Pylon CLI 命令表
 
-> 适用版本：Pylon 0.2.1（2026-09-17）  
+> 适用版本：Pylon 0.2.2（2026-09-18）  
 > 单一真值：`shared/pylon-cli-manifest.json`（CLI 壳命令）+ 运行时 Command Registry（插件命令）
 
 Pylon CLI 连接已经运行的桌面应用。CLI 壳不复制插件业务逻辑：固定控制命令进入对应控制端口，插件功能统一通过 `command exec <commandId>` 调用。
@@ -110,7 +110,9 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 ### 3.3 布局与 Sheet
 
-`layout.inspect`、`layout.sidebar.set`、`layout.sidebar-width.set`、`layout.right-panel.set`、`layout.pet.set`、`layout.agent-sidebar.set`、`workspace.sheet.focus`、`workspace.sheet.pin.toggle`、`workspace.sheet.close-others`、`workspace.sheet.close-right`、`workspace.sheet.reopen`。
+`layout.inspect`、`layout.sidebar.set`、`layout.sidebar-width.set`、`layout.right-panel.set`、`layout.pet.set`、`layout.agent-sidebar.block.set`、`workspace.sheet.focus`、`workspace.sheet.pin.toggle`、`workspace.sheet.close-others`、`workspace.sheet.close-right`、`workspace.sheet.reopen`。
+
+`layout.agent-sidebar.block.set` 的入参是 `{ sheetId, blockId, collapsed }`，用于设置 Agent Sheet 左栏某个区块的折叠状态。它取代了 `layout.agent-sidebar.set`——后者设置的 `sidebarMode ('work' | 'chat')` 随「左栏是一对互斥视图」的旧模型一并废除，参数已无消费方。
 
 ### 3.4 呈现风格
 

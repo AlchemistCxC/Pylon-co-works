@@ -2,12 +2,12 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useReplayPostureStore } from '../components/chat/replayPostureStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { deserializeAgentWorkspaceState } from '../workspace-sheets/agentWorkspaceState.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
+import AgentSheetPageHost, { useOpenSidebarPage } from '../components/sidebar/AgentSheetPageHost.tsx'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
 
 const interfaceModeRegistry = getInterfaceModeRegistry()
@@ -29,9 +29,11 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
   // W2-11：showPet 消费点切 workspaceStore（W1-01 迁出主题，防换主题/toggle 双真值）
   const showPet = useWorkspaceStore(s => s.showPet)
   const postureSession = useReplayPostureStore(s => s.sessionId)
+  // 左栏模块可以把自己的内容展开成「主区整页」——它**替换**聊天视图，但不开新 Sheet。
+  // 这里只解析，不在 hook 之前早退（早退会让后面的 hook 顺序随页面开关变化）。
+  const openPage = useOpenSidebarPage(sheet.state)
   // 姿态只对进入时的会话生效（非 null 且匹配 activeSession）
   const isReplay = ctx.activeSession !== null && postureSession === ctx.activeSession
-  const workspaceMode = deserializeAgentWorkspaceState(sheet.state).sidebarMode
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const modeSnapshot = useSyncExternalStore(
     subscribeInterfaceModes,
@@ -46,6 +48,8 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
       useReplayPostureStore.getState().clear()
     }
   }, [postureSession, ctx.activeSession])
+  // 页面打开时聊天区整体不挂载（与切会话同一条路径：历史在返回时经 lifecycle 重读）。
+  if (openPage) return <AgentSheetPageHost page={openPage} ctx={ctx} sheet={sheet} state={sheet.state} />
   if (mode.workbench.renderKind === 'isolated-surface') {
     return <IsolatedPluginSurface
       surfaceId={mode.workbench.surfaceId}
@@ -55,7 +59,6 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
         sheet: { id: sheet.id, kind: sheet.kind, title: sheet.title, agentId: sheet.agentId },
         activeSessionId: ctx.activeSession,
         sessionSource: ctx.activeSession ? ctx.sessionSource(ctx.activeSession) : undefined,
-        workspaceMode,
         showPet,
         isReplay,
       }}
@@ -86,7 +89,6 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
       ctx={ctx}
       modeId={mode.id}
       defaultSuiteId={mode.workbench.defaultSuiteId}
-      workspaceMode={workspaceMode}
       isReplay={isReplay}
     />
   }
@@ -97,7 +99,6 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
     ctx={ctx}
     modeId={mode.id}
     defaultSuiteId="builtin.solid"
-    workspaceMode={workspaceMode}
     isReplay={isReplay}
   />
 }

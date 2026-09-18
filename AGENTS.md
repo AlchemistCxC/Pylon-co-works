@@ -43,9 +43,9 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 - **已记录** → 优先读取并核查内容，将当前用户反馈补充在 issue 评论区中，并**认领**（assignee 设为自己）。然后开展下一步。
 
 ### 2.3 正式开工
-
+0. 如果你是deepseek系列模型，**注意峰谷**，周一到周五的早上9点到午12点，下午2到6点**双倍计费**，提醒用户。
 1. 按 issue 内容 grep `docs/说明书/`，定位涉及区域获取相关说明，作为初步了解——**按需读取，不通读全仓**，后继续探索代码定位实际问题，请不要违背开发决策相关文件（你在开发前需要grep有没有已经落地的，会影响到本地任务的历史决策）
-2. 定位问题区域后，尽力对齐用户需求，进行对齐工作，澄清模糊语义与决策，`.agents/spec/` 落地规格化文档（模板 `.agents/templates/spec.md`）。
+2. 定位问题区域后，尽力对齐用户需求，进行对齐工作，澄清模糊语义与决策，而后在`.agents/spec/` 落地规格化文档（模板 `.agents/templates/spec.md`），这一步目的是方便追溯。
 3. 遵守 [`.agents/dev-standards.md`](.agents/dev-standards.md)（路线与技术决策记录在此）。若 issue 涉及路线与决策，按 [`.agents/templates/adr.md`](.agents/templates/adr.md) 的格式登记到 `.agents/decisions/`，注意，请不要在用户没有完成决策前就登记，
 4. 进行并行多agent施工时，请在 [`.agents/L.md`](.agents/L.md) 留下留言声明施工范围以应对冲突（文件互相改写、连带提交等等），写入后即立刻提交单个 `L.md` 文件使其他 agent 可见，留言简洁，避免冗长。**`L.md` 只留在途条目**：自己的 issue 合入后即可把自己的条目移除；文件过长时把旧条目归档到仓外 `Docs/Archive/` 并更新文件头指针。
 
@@ -97,6 +97,14 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 
 路径约定：**仓外**协作工作区一律写成 `../Docs/…`（如 `../Docs/Archive/`），**仓内**一律小写 `docs/`。两者在 Windows 上同形，写混会得到无法自动校验的悬空指针——`check:docs` 按设计只校验仓内指针。
 
-## §6 修订
+## §6 部分重要技术决策
+
+### §6.1 CSS
+
+本项目已经开始转换部分css为Tailwind v4
+- 涉及到对存量已有CSS进行修改时，建议使用Tailwind CSS进行替换（过于复杂的可以继续使用）
+- 新增CSS时请区分类型，涉及到：布局，响应式断点，状态变体，一致性token时优先使用Tailwind CSS，若涉及复杂样式，组件时使用原生CSS
+ 
+## §7 修订
 
 本文件的修订需经仓库主批准。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Activity, Bot, FileCode2, Globe2, History, LayoutDashboard, MoreHorizontal, Network, Puzzle, Search, X } from 'lucide-react'
 import { useIdentityStore } from '../identityStore'
@@ -62,7 +62,7 @@ export default function SheetTabStrip({
   const [switchingSheetId, setSwitchingSheetId] = useState<string | null>(null)
   const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
-  const [overflowState, setOverflowState] = useState({ left: false, right: false, overflowed: false })
+  const [visibleCount, setVisibleCount] = useState(sheets.length)
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
   const [overflowMenuPosition, setOverflowMenuPosition] = useState({ top: 0, right: 0 })
   // 稳定回调：避免菜单打开期间父组件重渲染导致 document 监听反复重绑
@@ -71,35 +71,66 @@ export default function SheetTabStrip({
     setMenuPosition(null)
   }, [])
 
-  useEffect(() => {
-    if (!activeSheetId) return
-    tabRefs.current.get(activeSheetId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    requestAnimationFrame(() => {
-      const strip = stripRef.current
-      if (!strip) return
-      const max = Math.max(0, strip.scrollWidth - strip.clientWidth)
-      setOverflowState({ left: strip.scrollLeft > 1, right: strip.scrollLeft < max - 1, overflowed: max > 1 })
-    })
-  }, [activeSheetId, sheets.length])
-
-  const updateOverflow = useCallback(() => {
+  /**
+   * 装得下几个页签。
+   *
+   * 页签先按 flex **自动压缩**（CSS：基准宽度 → 最小宽度）；压到最小仍装不下时**不滚动**，
+   * 而是把装不下的收进「···」选单——否则容器右缘会留一个被切掉一半的页签（用户两次实机
+   * 点名「有 sheet 被截断」）。
+   *
+   * 可用宽度取**标题栏中格**减去启动器与拖拽区的最小宽，而不是页签区自己的宽度：页签区是
+   * 按内容撑开的（`flex:0 1 auto`），拿它自己当尺子会形成「内容决定尺子、尺子决定内容」的
+   * 自指。中格宽度只由栅格与窗口决定，与渲染多少个页签无关，所以这里没有反馈环。
+   *
+   * 最小宽度等常量从 CSS 自定义属性读（`--sheet-tab-min-width` 等），避免 JS 里再抄一份
+   * 与样式表各说各话。量不到宽度时（首帧、jsdom）一律按「全放得下」处理，不做假定。
+   */
+  const measureFit = useCallback(() => {
+    const region = regionRef.current
     const strip = stripRef.current
-    if (!strip) return
-    const max = Math.max(0, strip.scrollWidth - strip.clientWidth)
-    setOverflowState({ left: strip.scrollLeft > 1, right: strip.scrollLeft < max - 1, overflowed: max > 1 })
-  }, [])
+    const cell = region?.parentElement
+    if (!region || !strip || !cell) return
+    const stripStyle = getComputedStyle(strip)
+    const number = (value: string, fallback: number) => {
+      const parsed = Number.parseFloat(value)
+      return Number.isFinite(parsed) ? parsed : fallback
+    }
+    const gap = number(stripStyle.columnGap || stripStyle.gap, 0)
+    const baseMin = number(stripStyle.getPropertyValue('--sheet-tab-min-width'), 96)
+    const agentMin = number(stripStyle.getPropertyValue('--sheet-tab-agent-min-width'), baseMin)
+    const triggerWidth = number(getComputedStyle(region).getPropertyValue('--sheet-tab-overflow-trigger-width'), 32)
+    const launchersWidth = cell.querySelector('.workspace-titlebar-launchers')?.getBoundingClientRect().width ?? 0
+    const drag = cell.querySelector('.workspace-titlebar-drag')
+    const dragMin = drag ? number(getComputedStyle(drag).minWidth, 18) : 18
+    const available = cell.clientWidth - launchersWidth - dragMin
+    if (!(available > 0)) { setVisibleCount(sheets.length); return }
+    const minOf = (sheet: SheetRecord) => sheet.kind === 'agent' ? agentMin : baseMin
+    const needed = sheets.reduce((sum, sheet, index) => sum + minOf(sheet) + (index > 0 ? gap : 0), 0)
+    if (needed <= available) { setVisibleCount(sheets.length); return }
+    const budget = available - triggerWidth
+    let used = 0
+    let count = 0
+    for (const sheet of sheets) {
+      const next = used + minOf(sheet) + (count > 0 ? gap : 0)
+      if (next > budget) break
+      used = next
+      count += 1
+    }
+    // 至少留一个：极窄窗口下宁可压缩一个页签，也不留一个空壳子。
+    setVisibleCount(Math.max(1, count))
+  }, [sheets])
 
-  useEffect(() => {
-    updateOverflow()
-    const strip = stripRef.current
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateOverflow)
-    if (strip) observer?.observe(strip)
-    window.addEventListener('resize', updateOverflow)
+  useLayoutEffect(() => {
+    measureFit()
+    const cell = regionRef.current?.parentElement
+    const observer = typeof ResizeObserver === 'undefined' || !cell ? null : new ResizeObserver(measureFit)
+    if (cell) observer?.observe(cell)
+    window.addEventListener('resize', measureFit)
     return () => {
       observer?.disconnect()
-      window.removeEventListener('resize', updateOverflow)
+      window.removeEventListener('resize', measureFit)
     }
-  }, [sheets.length, updateOverflow])
+  }, [measureFit])
 
   useEffect(() => {
     if (!overflowMenuOpen) return
@@ -145,10 +176,22 @@ export default function SheetTabStrip({
     })
   }
 
+  /**
+   * 渲染窗口：默认从头开始；**活动页签一旦落在窗口之外，窗口整体平移把它带进来**
+   * （否则切到被收起的页签时，标题栏上看不到当前是谁）。
+   */
+  const windowStart = (() => {
+    if (visibleCount >= sheets.length) return 0
+    const activeIndex = sheets.findIndex(sheet => sheet.id === activeSheetId)
+    return activeIndex >= visibleCount ? activeIndex - visibleCount + 1 : 0
+  })()
+  const shownSheets = sheets.slice(windowStart, windowStart + visibleCount)
+  const overflowed = shownSheets.length < sheets.length
+
   return (
-    <div ref={regionRef} className={`sheet-tab-region ${overflowState.overflowed ? 'overflowed' : ''} ${overflowState.left ? 'can-scroll-left' : ''} ${overflowState.right ? 'can-scroll-right' : ''}`}>
-    <div ref={stripRef} className="sheet-tab-strip" role="tablist" aria-label="Workspace Sheets" onScroll={updateOverflow}>
-      {sheets.map(sheet => {
+    <div ref={regionRef} className={`sheet-tab-region ${overflowed ? 'overflowed' : ''}`}>
+    <div ref={stripRef} className="sheet-tab-strip" role="tablist" aria-label="Workspace Sheets">
+      {shownSheets.map(sheet => {
         const active = sheet.id === activeSheetId
         const agentState = sheet.kind === 'agent' && sheet.agentId
           ? selectAgentStatus(sheet.agentId, activeAgent, agentStatuses ?? {}).status
@@ -232,7 +275,7 @@ export default function SheetTabStrip({
         position={menuPosition}
       />
     </div>
-    {overflowState.overflowed && <button type="button" className="sheet-tab-overflow-trigger" aria-label="显示所有 Sheet" aria-expanded={overflowMenuOpen} onClick={event => {
+    {overflowed && <button type="button" className="sheet-tab-overflow-trigger" aria-label="显示所有 Sheet" aria-expanded={overflowMenuOpen} onClick={event => {
       const rect = event.currentTarget.getBoundingClientRect()
       setOverflowMenuPosition({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) })
       setOverflowMenuOpen(open => !open)

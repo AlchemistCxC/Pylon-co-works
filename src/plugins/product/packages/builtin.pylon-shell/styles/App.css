@@ -73,9 +73,8 @@
   color:var(--titlebar-text-muted); cursor:pointer; outline:none;
 }
 .workspace-titlebar-icon { width:var(--ui-control-standard); height:var(--ui-control-standard); margin:auto 0; font-size:var(--font-size-lg); }
-.workspace-open-trigger, .workspace-reopen-trigger { display:grid; place-items:center; padding:0; color:var(--accent); }
-.workspace-titlebar-icon.workspace-reopen-trigger:disabled { opacity:.26; color:var(--titlebar-text-muted); }
-.workspace-launcher-separator { width:1px; height:18px; margin:auto 0; background:var(--border); }
+/* 新建 Sheet 是 Workspace 导航入口，图标使用主题强调色。 */
+.workspace-open-trigger { display:grid; place-items:center; padding:0; color:var(--accent); }
 /* 折叠按钮固定在左格首位、三灯在其右；宽度取左格最小宽度，使按钮位置在折叠前后不变。 */
 .workspace-sidebar-toggle {
   width:var(--titlebar-rail-toggle-width,42px); height:100%; flex:0 0 var(--titlebar-rail-toggle-width,42px);
@@ -90,7 +89,6 @@
 .workspace-titlebar:not(.sidebar-expanded) .workspace-titlebar-brand { display:none; }
 .workspace-titlebar-brand { margin-left:var(--ui-space-2); }
 .workspace-titlebar-icon:hover,
-.workspace-titlebar-icon.workspace-reopen-trigger:hover,
 .workspace-window-controls button:hover { background:var(--bg-hover); color:var(--titlebar-text-resolved); }
 .workspace-titlebar-icon:disabled { cursor:default; opacity:0.25; background:transparent; color:var(--titlebar-text-muted); }
 .workspace-titlebar-icon:focus-visible,
@@ -98,23 +96,36 @@
 .sheet-tab button:focus-visible { box-shadow:inset 0 0 0 var(--line-width-2) var(--accent); color:var(--titlebar-text-resolved); }
 /* Sheet Launcher 与恢复关闭项是 Workspace 导航入口，图标使用主题强调色。 */
 .workspace-window-controls { height:calc(var(--titlebar-h,44px) - var(--line-width-1)); }
-.workspace-window-controls button { width:38px; margin:var(--ui-space-1) 0; height:calc(var(--titlebar-h,44px) - var(--ui-space-2)); font-size:var(--font-size-md); }
+/* 标题栏里所有可点盒子的**高度与垂直位置**统一到一处：`--ui-control-standard`（36px）+ 居中。
+   曾经窗口控制是 `margin:4px 0` + `height:calc(44px - 8px)`，与图标按钮的 `margin:auto` 差 0.5px，
+   加上全高的「···」，同一行里三种高度，实机一眼就看出没对齐。 */
+.workspace-window-controls button { width:38px; margin:auto 0; height:var(--ui-control-standard); font-size:var(--font-size-md); }
 .workspace-window-native-controls button { display:grid; place-items:center; }
 .workspace-window-controls .close:hover { background:rgba(190,40,40,0.72); color:#fff; }
 
-.sheet-tab-region { position:relative; min-width:0; flex:1; display:flex; align-items:stretch; overflow:hidden; -webkit-app-region:no-drag; }
-.sheet-tab-region::before, .sheet-tab-region::after { content:''; position:absolute; z-index:3; top:0; bottom:0; width:var(--ui-space-5); pointer-events:none; opacity:0; transition:opacity var(--motion-fast) var(--ease-standard); }
-.sheet-tab-region::before { left:0; background:linear-gradient(90deg,var(--titlebar-bg,var(--surface-panel)),transparent); }
-.sheet-tab-region::after { right:var(--sheet-overflow-reserve,0px); background:linear-gradient(270deg,var(--titlebar-bg,var(--surface-panel)),transparent); }
-.sheet-tab-region.can-scroll-left::before, .sheet-tab-region.can-scroll-right::after { opacity:1; }
-.sheet-tab-region.overflowed { --sheet-overflow-reserve:32px; }
-.sheet-tab-strip {
-  min-width:0; flex:1; display:flex; align-items:stretch; overflow-x:auto; overflow-y:hidden;
-  scrollbar-width:none; -webkit-app-region:no-drag;
+/* 页签区**收缩到内容宽度**（不再与拖拽区平分剩余空间）：新建 Sheet 的「+」因此紧贴最后一个页签，
+   空档全部归右侧拖拽区——浏览器式的页签语法。
+   `--sheet-tab-overflow-trigger-width` 同时是「···」按钮的宽度与 `SheetTabStrip` 预算落点时的
+   预留量：单一真值，避免 JS 里再抄一个 32。 */
+.sheet-tab-region {
+  --sheet-tab-overflow-trigger-width:var(--ui-space-6);
+  position:relative; min-width:0; flex:0 1 auto; display:flex; align-items:stretch; overflow:hidden; -webkit-app-region:no-drag;
 }
-.sheet-tab-strip::-webkit-scrollbar { display:none; }
+/* 页签**不滚动**：装不下的页签由 `SheetTabStrip` 从渲染窗口里剔除、收进「···」选单，
+   于是容器右缘永远不会出现一个被切掉一半的页签（滚动条只会切得更狠）。
+   两个最小宽度 token 是 JS 侧算「装得下几个」的尺子，改这里就等于改预算。 */
+.sheet-tab-strip {
+  min-width:0; flex:0 1 auto; display:flex; align-items:stretch; overflow:hidden;
+  --sheet-tab-min-width:96px;
+  --sheet-tab-agent-min-width:96px;
+  -webkit-app-region:no-drag;
+}
 .sheet-tab {
-  position:relative; width:160px; min-width:160px; max-width:160px; height:100%;
+  /* 页签**随数量自动压缩**：基准 160px、最小 `--sheet-tab-min-width`，页签一多就等比例收窄
+     （浏览器式）；压到最小仍装不下的那些由 `SheetTabStrip` 从渲染窗口里剔除、进「···」选单，
+     所以既不会滚动、也不会在容器右缘留半个页签。必须是 flex 项而不是固定宽度——
+     固定 160px 时多开几个就只能靠滚动，压缩过程根本看不到。 */
+  position:relative; flex:1 1 160px; width:160px; min-width:var(--sheet-tab-min-width,96px); max-width:160px; height:100%;
   display:flex; align-items:center; padding:0;
   border:0; border-right:1px solid var(--border); font-family:var(--font); font-size:var(--font-size-sm);
   color:var(--titlebar-text-muted); background:transparent;
@@ -146,7 +157,9 @@
 .sheet-tab.active .sheet-tab-close,
 .sheet-tab:focus-within .sheet-tab-close { visibility:visible; opacity:1; }
 .sheet-tab-close:hover { background:var(--bg-active); color:var(--titlebar-text-resolved); }
-.sheet-tab-overflow-trigger { position:relative; z-index:4; width:var(--ui-space-6); flex:0 0 var(--ui-space-6); border:0; border-left:1px solid var(--border); border-radius:0; outline:none; color:var(--titlebar-text-muted); background:var(--titlebar-bg,var(--surface-panel)); cursor:pointer; -webkit-app-region:no-drag; }
+/* 溢出选单触发器**不画左边线**：它紧挨着最后一个页签，那条线会被读成「新建 Sheet 左边的竖线」
+   （用户实机点名）。页签之间的分隔由页签自己的小竖线负责，见 terminal-like 段。 */
+.sheet-tab-overflow-trigger { position:relative; z-index:4; align-self:center; height:var(--ui-control-standard); width:var(--sheet-tab-overflow-trigger-width,var(--ui-space-6)); flex:0 0 var(--sheet-tab-overflow-trigger-width,var(--ui-space-6)); border:0; border-radius:0; outline:none; color:var(--titlebar-text-muted); background:var(--titlebar-bg,var(--surface-panel)); cursor:pointer; -webkit-app-region:no-drag; }
 .sheet-tab-overflow-trigger:hover, .sheet-tab-overflow-trigger[aria-expanded="true"] { color:var(--titlebar-text-resolved); background:var(--bg-hover); }
 .sheet-tab-overflow-trigger:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
 .sheet-tab-overflow-menu { position:fixed; z-index:90; display:grid; width:min(280px,calc(100vw - 16px)); max-height:min(420px,calc(100vh - 56px)); padding:4px; overflow:auto; border:1px solid var(--stroke-strong); border-radius:var(--ui-radius-md); color:var(--text); background:var(--surface-overlay); box-shadow:var(--shadow-float); backdrop-filter:blur(20px) saturate(1.08); font:12px var(--font); }
@@ -165,7 +178,8 @@
 .workspace-menu-workspace { top:calc(100% + 3px); right:0; }
 
 @media (max-width:1100px) {
-  .sheet-tab { width:120px; min-width:120px; max-width:120px; }
+  .sheet-tab-strip { --sheet-tab-min-width:120px; --sheet-tab-agent-min-width:120px; }
+  .sheet-tab { width:120px; flex:1 1 120px; min-width:var(--sheet-tab-min-width,120px); max-width:120px; }
   .workspace-window-controls button { width:34px; }
   .workspace-titlebar-entry-label { display:inline; }
 }
@@ -187,6 +201,9 @@
   .workspace-titlebar-icon,
   .workspace-window-controls button,
   .sheet-tab-close,
+  /* 粗指针下「···」要放大到触控尺寸。**同时改 token**：JS 侧按这个宽度做预算，
+     只改 min-width 会让预算短 20px，右缘那个页签又被切掉一点。 */
+  .sheet-tab-region { --sheet-tab-overflow-trigger-width:var(--pylon-terminal-touch-target); }
   .sheet-tab-overflow-trigger { min-width:var(--pylon-terminal-touch-target); min-height:var(--pylon-terminal-touch-target); }
 }
 
@@ -313,6 +330,29 @@
 .workspace-titlebar-menu-anchor > button[aria-expanded="true"] {
   box-shadow:inset 0 -2px var(--accent);
 }
+/* 齿轮是**图标**触发（左栏折叠钮那一套尺寸语法），不是被文字撑开的标签：把上面那条
+   「auto 宽度 + 左右 padding」的标签语法单独覆盖掉。
+   右栏折叠钮**必须**跟它同规格——两个图标按钮并排却一个 38×36、一个 36×36，看上去就是没对齐
+   （右栏钮若留给 `.workspace-window-controls button` 那条规则，会拿到 38 宽与 4px 上下外边距）。 */
+.workspace-titlebar-menu-anchor > button.workspace-titlebar-menu-icon,
+.workspace-titlebar-icon.workspace-right-rail-toggle {
+  display:grid; place-items:center;
+  width:var(--ui-control-standard); height:var(--ui-control-standard);
+  padding:0; margin:auto 1px;
+  font-size:var(--font-size-lg); font-weight:400; letter-spacing:0;
+}
+.workspace-titlebar-menu-anchor > button.workspace-titlebar-menu-icon:hover,
+.workspace-titlebar-menu-anchor > button.workspace-titlebar-menu-icon[aria-expanded="true"] { text-decoration:none; }
+/* 右栏折叠钮的图标是**画出来的面板符号**：一个 15×12 的框 + 右侧一道实心条（=右栏在）。
+   展开时实心条不透明，折叠时压淡——比 `»` 更明确地表达「哪一侧的栏、在不在」，
+   也不会和窗口控制或右栏内部的按钮撞脸。 */
+.workspace-rail-glyph { position:relative; display:block; width:15px; height:12px; border:1px solid currentColor; border-radius:2px; }
+.workspace-rail-glyph::after {
+  content:''; position:absolute; top:-1px; bottom:-1px; right:-1px; width:5px;
+  background:currentColor; border-radius:0 2px 2px 0;
+  transition:opacity var(--motion-fast) var(--ease-standard);
+}
+.workspace-right-rail-toggle[aria-expanded="false"] .workspace-rail-glyph::after { opacity:.22; }
 .workspace-titlebar .workspace-menu-chrome {
   animation:workspace-menu-enter var(--motion-fast) var(--ease-emphasized) both;
   transform-origin:top right;
@@ -631,17 +671,21 @@
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button {
   width:auto; min-width:0; border-radius:0; background:transparent; transform:none;
 }
+/* 齿轮是**图标**触发（与左栏折叠钮同一套尺寸语法），不是文字标签：把它从上面那条
+   「auto 宽度」里单独拎出来，否则会退回被文字撑开的形状。 */
+.app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button.workspace-titlebar-menu-icon {
+  width:34px; height:34px; padding:0; margin:auto 1px; border-radius:10px;
+}
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-menu-anchor > button:hover { transform:none; }
 .app[data-interface-mode="modern-gui"] .workspace-titlebar-icon:hover,
 .app[data-interface-mode="modern-gui"] .workspace-window-controls button:hover { transform:translateY(-1px); }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls { height:44px; padding:0 4px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls-divider { height:22px; margin-inline:3px; }
 .app[data-interface-mode="modern-gui"] .workspace-window-controls .close:hover { border-radius:10px; }
-.app[data-interface-mode="modern-gui"] .workspace-launcher-separator { height:16px; opacity:.55; }
 .app[data-interface-mode="modern-gui"] .sheet-tab-region { height:36px; align-items:center; }
-.app[data-interface-mode="modern-gui"] .sheet-tab-strip { align-items:center; gap:4px; padding:0 3px; }
+.app[data-interface-mode="modern-gui"] .sheet-tab-strip { align-items:center; gap:4px; padding:0 3px; --sheet-tab-min-width:132px; --sheet-tab-agent-min-width:132px; }
 .app[data-interface-mode="modern-gui"] .sheet-tab {
-  width:172px; min-width:132px; max-width:190px; height:34px; border:1px solid transparent; border-radius:10px;
+  width:172px; flex:1 1 172px; min-width:var(--sheet-tab-min-width,132px); max-width:190px; height:34px; border:1px solid transparent; border-radius:10px;
 }
 .app[data-interface-mode="modern-gui"] .sheet-tab:hover { border-color:color-mix(in srgb,var(--border) 72%,transparent); }
 .app[data-interface-mode="modern-gui"] .sheet-tab.active {
@@ -655,7 +699,7 @@
 }
 .app[data-interface-mode="modern-gui"] .sheet-tab.active .sheet-tab-kind-icon { color:var(--accent); background:color-mix(in srgb,var(--accent) 13%,transparent); }
 .app[data-interface-mode="modern-gui"] .sheet-tab-close { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; }
-.app[data-interface-mode="modern-gui"] .sheet-tab-overflow-trigger { height:32px; border:0; border-radius:9px; background:transparent; }
+.app[data-interface-mode="modern-gui"] .sheet-tab-overflow-trigger { height:34px; border:0; border-radius:9px; background:transparent; }
 .app[data-interface-mode="modern-gui"] .sheet-launcher-overlay { background:color-mix(in srgb,var(--surface-canvas) 52%,transparent); backdrop-filter:blur(14px); }
 .app[data-interface-mode="modern-gui"] .sheet-launcher-dialog { top:11%; border-radius:22px; border-color:color-mix(in srgb,var(--accent) 25%,var(--border)); box-shadow:0 32px 90px rgba(0,0,0,.28); }
 .app[data-interface-mode="modern-gui"] .sheet-launcher-list [cmdk-item] { min-height:78px; border-radius:15px; transition:transform 140ms ease,border-color 140ms ease,background 140ms ease; }
@@ -716,13 +760,31 @@
 }
 .app[data-interface-mode="terminal-like"] .sheet-tab {
   width:auto;
-  min-width:116px;
+  flex:1 1 160px;
+  min-width:var(--sheet-tab-min-width,96px);
   max-width:220px;
   border-right:0;
 }
+.app[data-interface-mode="terminal-like"] .sheet-tab-strip {
+  --sheet-tab-min-width:96px;
+  --sheet-tab-agent-min-width:136px;
+}
 .app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {
   width:max-content;
-  min-width:136px;
+  min-width:var(--sheet-tab-agent-min-width,136px);
+}
+/* 页签之间的分隔线：**小竖线**（浏览器式），只画在相邻页签的间隙里，最后一个页签右侧没有——
+   于是「新建 Sheet」左边不再有一条来历不明的竖线。 */
+.app[data-interface-mode="terminal-like"] .sheet-tab + .sheet-tab::before {
+  content:'';
+  position:absolute;
+  top:50%;
+  left:calc(var(--ui-space-1) / -2 - 0.5px);
+  width:1px;
+  height:14px;
+  transform:translateY(-50%);
+  background:color-mix(in srgb,var(--border) 82%,transparent);
+  pointer-events:none;
 }
 .app[data-interface-mode="terminal-like"] .sheet-tab-kind-mark {
   border-radius:50%;
@@ -772,10 +834,11 @@
   visibility:hidden;
   opacity:0;
 }
+/* 「+」现在紧贴最后一个页签（页签自带右边框），不再需要启动器自己画一条竖线。 */
 .app[data-interface-mode="terminal-like"] .workspace-titlebar-launchers {
   margin-left:var(--ui-space-1);
   padding-left:var(--ui-space-1);
-  border-left:1px solid color-mix(in srgb,var(--border) 72%,transparent);
+  border-left:0;
 }
 .app[data-interface-mode="terminal-like"] .workspace-window-controls {
   padding-left:var(--ui-space-1);
@@ -803,8 +866,12 @@
 }
 
 @media (max-width:760px) {
+  .app[data-interface-mode="terminal-like"] .sheet-tab-strip {
+    --sheet-tab-min-width:112px;
+    --sheet-tab-agent-min-width:112px;
+  }
   .app[data-interface-mode="terminal-like"] .sheet-tab {
-    min-width:112px;
+    min-width:var(--sheet-tab-min-width,112px);
     max-width:200px;
   }
   .app[data-interface-mode="terminal-like"] .sheet-tab[data-kind="agent"] {

@@ -54,6 +54,7 @@ import { usePresentationPreferenceStore } from '../domains/presentation/presenta
 import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { resolveInterfaceModeSuite } from '../application/transactions/activateInterfaceMode.ts'
+import SidebarModulesPanel from './settings/SidebarModulesPanel.tsx'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
@@ -669,6 +670,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         return (
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.sidebar}</h3>}
+            {!isSearching && <Group title="模块"><SidebarModulesPanel /></Group>}
             {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
             <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>

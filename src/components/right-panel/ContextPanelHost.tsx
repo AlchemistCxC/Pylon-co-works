@@ -7,7 +7,7 @@ import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSur
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { ContextPanelContributionProps } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
-import { selectAvailableContextPanels } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore } from '../../rightRailStore.ts'
 import { RendererSettingsSchemaHost } from '../settings/RendererSettingField.tsx'
 
@@ -21,7 +21,8 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
     () => registry.getSnapshot(),
     () => registry.getSnapshot(),
   )
-  const entries = useMemo(() => selectAvailableContextPanels(snapshot.entries, {
+  // 可切换的面板 = 通过 `when` 闸门的全部面板（与 Sheet 种类无关）；种类只影响「没选过时默认看谁」。
+  const entries = useMemo(() => selectContextPanels(snapshot.entries, {
     workspaceKind: sheet.kind,
     sheetId: sheet.id,
     activeSessionId: ctx.activeSession,
@@ -30,7 +31,8 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
   useEffect(() => {
     if (activePanelId !== undefined) setActiveId(activePanelId ?? '')
   }, [activePanelId])
-  const active = entries.find(entry => entry.contributionId === activeId) ?? entries[0]
+  const active = entries.find(entry => entry.contributionId === activeId)
+    ?? resolveContextPanelDefault(entries, sheet.kind)
 
   const adapter = useMemo(() => active?.value.schema
     ? active.value.valueAdapter ?? (active.ownerPluginId
@@ -112,14 +114,30 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
   return (
     <aside className="context-panel" aria-label={`${sheet.title} 右栏`} style={{ '--right-width': `${rightWidth}px` } as CSSProperties}>
       <div className="context-panel-head">
+        {/* 切换器列出**所有可显示的面板**（`when` 闸门之上的全部），不再按 Sheet 种类裁剪：
+            按种类裁剪时，单面板的 Sheet 只剩一个撑满的标签，看上去是标题而不是切换器
+            （用户实机报「侧栏内部没有切换侧栏种类的按钮」）。 */}
         <div className="context-panel-tabs" role="tablist" aria-label="右栏面板">
           {entries.map(entry => (
-            <button key={entry.contributionId} type="button" role="tab" aria-selected={entry.contributionId === active.contributionId} className={`context-panel-mode ${entry.contributionId === active.contributionId ? 'active' : ''}`} onClick={() => setActiveId(entry.contributionId)}>{entry.value.label}</button>
+            <button
+              key={entry.contributionId}
+              type="button"
+              role="tab"
+              aria-selected={entry.contributionId === active.contributionId}
+              className={`context-panel-mode ${entry.contributionId === active.contributionId ? 'active' : ''}`}
+              title={entry.value.label}
+              onClick={() => {
+                // 选择要落到 store（而不仅是本地 state）：它是「用户显式选过」的唯一凭据——
+                // 决定跨 Sheet 是否保持、重载后是否还记得。只写本地 state 的话，切一次 Sheet
+                // 就会被亲和默认值抢回去。
+                setActiveId(entry.contributionId)
+                useRightRailStore.getState().setActivePanel(entry.contributionId)
+              }}
+            >
+              {entry.value.label}
+            </button>
           ))}
         </div>
-        <button type="button" className="context-panel-collapse" onClick={() => {
-          useRightRailStore.getState().setCollapsed(true)
-        }} aria-label="收起右栏">»</button>
       </div>
       <div className="context-panel-body">
         <PluginContributionBoundary key={`${active.ownerRuntimeInstanceId}:${active.contributionId}`} contributionId={active.contributionId}>{renderActive()}</PluginContributionBoundary>

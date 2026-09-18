@@ -3,10 +3,22 @@ import type { HotSwapMode } from './shadowUpdate.ts'
 import { HOOK_NAMES, type HookName } from './hooks/hookTypes.ts'
 
 export const PYLON_PLUGIN_API_MIN = '1.0' as const
-export const PYLON_PLUGIN_API_LATEST = '1.3' as const
-/** 宿主接受的全部 API 小版本（allowlist）：minor 只做加法且向后兼容，
- *  1.0 插件在 1.1/1.2/1.3 宿主继续激活；未知更高版本拒绝并提示升级宿主。 */
-export const PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, '1.1' as const, '1.2' as const, PYLON_PLUGIN_API_LATEST] as const
+export const PYLON_PLUGIN_API_LATEST = '2.2' as const
+/** 宿主接受的全部 API 版本（allowlist）：minor 只做加法且向后兼容，
+ *  1.0 插件在 1.1/1.2/1.3 宿主继续激活；未知更高版本拒绝并提示升级宿主。
+ *
+ *  **2.0 是破坏性主轴**：Agent 左栏贡献从「按 `mode ('work' | 'chat')` 注册的互斥视图」
+ *  改为「按 `region ('modules' | 'sessions')` 注册的堆叠区块」——`AgentSidebarContribution.mode`
+ *  被 `region` 取代，并新增 `collapsible` / `defaultCollapsed` / `headerActions`。
+ *  1.x 清单仍可解析与激活，但引用旧 `mode` 的左栏贡献需按 2.0 重写。
+ *
+ *  **2.1 只做加法**：标题栏贡献新增 `slot: 'app-menu'`（设置齿轮菜单项，见
+ *  `CommandTitlebarContribution`），不改动任何既有字段形状。
+ *
+ *  **2.2 只放宽**：右栏上下文面板的 `workspaceKind` 从「可用性闸门」改为「自动选中的亲和」——
+ *  面板不再按 Sheet 种类被裁掉，用户可在右栏切换器里选任意面板；`when` 仍是硬闸门。
+ *  字段形状不变，既有插件无需改动，只是面板变得可选（详见 §6.8 与 ADR-0012）。 */
+export const PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, '1.1' as const, '1.2' as const, '1.3' as const, '2.0' as const, '2.1' as const, PYLON_PLUGIN_API_LATEST] as const
 export type PylonPluginApiVersion = (typeof PYLON_PLUGIN_API_SUPPORTED)[number]
 /** @deprecated 语义是宿主接受的最低版本，改用 PYLON_PLUGIN_API_MIN */
 export const PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN
@@ -68,7 +80,7 @@ const HOT_SWAP_MODES = new Set<HotSwapMode>([
 const API_SUPPORTED_SET = new Set<string>(PYLON_PLUGIN_API_SUPPORTED)
 const CAPABILITY_SET = new Set<string>(PYLON_PLUGIN_CAPABILITIES)
 /** minor 升版只做加法，顺序表用于「自某版本起合法」谓词（ADR-0001）。 */
-const API_MINOR_ORDER: Readonly<Record<string, number>> = { '1.0': 0, '1.1': 1, '1.2': 2, '1.3': 3 }
+const API_MINOR_ORDER: Readonly<Record<string, number>> = { '1.0': 0, '1.1': 1, '1.2': 2, '1.3': 3, '2.0': 4, '2.1': 5, '2.2': 6 }
 
 /** capabilities / dangerousHooks 自 API 1.2 起为合法字段；1.3 仅扩充锚点词表，字段形状不变。
  *  用 `>=` 谓词而非 `=== LATEST`，避免宿主升版后旧 manifest 被误按 removed-field 拒绝。 */

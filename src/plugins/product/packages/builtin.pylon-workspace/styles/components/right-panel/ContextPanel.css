@@ -39,8 +39,14 @@
 .context-panel-contribution { min-width:0; }
 .context-panel-plugin-surface { min-width:0; min-height:80px; }
 
+/* 标签按内容宽（不再 flex:1 撑满）：只有一个面板时撑满的「标签」看起来是标题而不是切换器。
+   多个面板时排成一行，装不下就收窄并省略号。 */
 .context-panel-mode {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-height: var(--ui-control-compact);
   padding: 0 var(--ui-space-2);
   font-size: 12px;
@@ -62,25 +68,7 @@
   background: var(--bg-active);
 }
 
-.context-panel-mode:focus-visible,
-.context-panel-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.context-panel-collapse {
-  width: var(--ui-control-compact);
-  height: var(--ui-control-compact);
-  padding: 0;
-  font-size: 12px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 0;
-  cursor: pointer;
-}
-
-.context-panel-collapse:hover {
-  color: var(--text);
-  background: var(--bg-hover);
-}
+.context-panel-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .context-panel-body {
   flex: 1;

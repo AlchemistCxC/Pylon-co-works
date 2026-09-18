@@ -42,7 +42,6 @@ export interface AgentRendererSuiteWorkbenchProps {
   ctx: SheetContext
   modeId: string
   defaultSuiteId: string
-  workspaceMode: 'work' | 'chat'
   isReplay: boolean
 }
 
@@ -77,7 +76,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         const current = currentPropsRef.current
         return createAgentWorkbenchSession(request, {
           agentId: current.sheet.agentId || useIdentityStore.getState().activeAgent,
-          workspaceMode: current.workspaceMode,
           applySessionResponse: (sessionId, response) => sessionRuntimeRef.current?.applySessionResponse(response, sessionId),
         })
       },
@@ -145,7 +143,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   )
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
-    workspaceMode: props.workspaceMode, replayReadonly: props.isReplay,
+    replayReadonly: props.isReplay,
     reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
     visibility: isActiveSheet ? 'active' : 'background', rightInset: props.ctx.rightInset, preview: false,
     presentationProfileId: activeProfileId,
@@ -154,7 +152,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     workspacePath: workspace?.rootPath ?? session?.workdir,
     availableWorkspaces: workspaces.map(item => ({ id: item.id, label: item.name, path: item.rootPath, lastActiveAt: item.lastActiveAt })),
     agentAdvertisedModels,
-  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet, agentAdvertisedModels])
+  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet, agentAdvertisedModels])
   const activation = useMemo(() => {
     try {
       return resolveRendererActivation(catalog, {

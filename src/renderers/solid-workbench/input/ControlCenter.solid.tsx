@@ -198,7 +198,8 @@ export function SolidControlCenter() {
     catch (error) { setSubmitError(error instanceof Error ? error.message : '创建工作区失败') }
   }
   const createEmptySession = async (text: string, attachments: readonly WorkbenchAttachment[]) => {
-    if (input().workspaceMode === 'work' && !workspaceId()) { setSubmitError('请先选择工作区'); return false }
+    // 旧模型在这里按「左栏是否处于工作页签」拦截未选工作区的提交（`请先选择工作区`）。
+    // 左栏已不再分互斥视图：不选工作区即创建一个无 cwd 会话，是合法意图，故守卫删除。
     if (submitting()) return false
     setSubmitting(true); setSubmitError('')
     try {
@@ -326,7 +327,7 @@ export function SolidControlCenter() {
                   setWorkspaceId(value)
                 }}
               >
-                <option value="" selected={workspaceId() === ''}>{input().workspaceMode === 'work' ? '选择工作区…' : '不使用工作区'}</option>
+                <option value="" selected={workspaceId() === ''}>不使用工作区</option>
                 <For each={emptyWorkspaces()}>{item => <option value={item.id} selected={item.id === workspaceId()}>{item.label} · {item.path}</option>}</For>
               </select>
             </label>

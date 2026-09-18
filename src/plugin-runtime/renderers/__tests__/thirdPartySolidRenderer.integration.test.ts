@@ -40,7 +40,7 @@ function overlaySurface(): RenderSurface {
 }
 
 const input: WorkbenchMountInput = {
-  sheetId: 'example-sheet', sessionOwnerKey: 'example-owner', sessionId: 'example-session', workspaceMode: 'work',
+  sheetId: 'example-sheet', sessionOwnerKey: 'example-owner', sessionId: 'example-session',
   replayReadonly: false, reducedMotion: false, visibility: 'active', rightInset: 0, preview: false,
 }
 

@@ -200,9 +200,15 @@
 
 **从 ADR-0009 继承的验收口径**：逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」数值相等；折叠 = 0 宽；轨道处带右边框的元素恰好 1 个。左栏新样式不得打破这三条。
 
-**⚠️ 停工留档（2026-09-18 午后）—— 工作树当前是「故意的半成品」，门禁红**：用户叫停（计费高峰），本轮**停在契约层**。已改：`src/plugin-runtime/sidebar/{sidebarTypes,sidebarRegistry}.ts`（删 `AgentSidebarMode`，加 `region` / `headerActions` / `collapsible`）。未改完：`AGENT_SIDEBAR_REGIONS` 常量尚未定义，且 `src/components/Sidebar.tsx` 等消费方仍 import 旧类型 ⇒ **`bunx tsc -b` 与 `check:frontend` 现在会红，且错误源自我方在途文件**。据此排查其他故障前先看这里。用户明确要求**保留现场、不做恢复**。
+**✅ 进展（2026-09-18 晚）：左栏区块栈模型 + 模块整页 + 密度收敛已落地，门禁全绿。** 契约 `AgentSidebarMode → AgentSidebarRegion`，新增 `page` / `collapsible` / `defaultCollapsed` / `headerActions` 与 `presentation`；区块外壳归宿主渲染，点标题把内容展开成主区整页（替换聊天视图、不开新 Sheet）。状态 `AgentWorkspaceState = { blockCollapsed, activePageId }`（零存储键迁移）。同时清掉 `workspaceMode` 整条轴（18 文件）并把插件 API 升 major 至 **2.0**。全量 **599 文件 / 4342 用例通过**；`tsc -b` / `lint` / `check:first-party-styles` / CSS 变量审计均绿。决策 `.agents/decisions/0011-agent-sidebar-region-model.md`，记录 `.agents/records/154-agent-sidebar-region-model.md`。
+
+**实机构建提示（本轮踩到，后来者省一次弯路）**：G: 盘已 100% 满（构建缓存 `src-tauri/target` 占 30G），直接 `cargo build` 会以「磁盘空间不足」失败。**别删用户的 target 缓存**——用 `CARGO_TARGET_DIR=D:/pylon-acceptance-target cargo build --bin pylon` 落到达盘（D: 有 63G）。
 
 **⚠️ `AGENTS.md` 根目录文件当前有未提交改动，属用户本人正在编辑，非我方产物**——不 stage、不提交、不改写。按 AGENTS §2.1 共享工作树纪律办理。
+
+**⚠️ 追加修复（2026-09-18 20:10）：左栏所有按钮曾长期失效，根因是长按拖拽在 `pointerdown` 就捕获指针。** 捕获把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在按下/抬起目标的最近公共祖先上 ⇒ 头内部的标题、折叠钮、「打开」、头部动作全部收不到 click（自 `1b4854f0` 起一直如此，实机表现为「点了没反应」）。现改为长按到点才捕获，并补 `pointerleave` 取消长按。**仍占用文件域**：`src/components/Sidebar.tsx`、`src/components/__tests__/Sidebar.blocks.test.tsx`。全量 **601 文件 / 4361 用例通过**。
+
+**🔧 在途文件域（2026-09-18 21:30，标题栏 + 右栏，未提交）**：`src/workspace-sheets/{WorkspaceTitlebar,SheetTabStrip}.tsx` 及 `__tests__/workspaceTitlebar*.tsx`、`sheetTabOverflow.test.tsx`、`src/App.tsx`、`src/components/right-panel/{RightRailHost,ContextPanelHost}.tsx` 及 `__tests__`、`src/plugin-runtime/context-panel/**`、`src/plugin-runtime/titlebar/**`、`src/plugin-runtime/packageManifest.ts` + 两份 `pylon-plugin-manifest.schema.json`、首方样式 `builtin.pylon-shell/styles/App.css` 与 `builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css`、说明书、`.agents/decisions/0012-*.md`。改动要点：标题栏「界面+设置」合并为齿轮菜单（新增 `slot:'app-menu'` 数据化菜单项，API 2.1）、右栏按钮只折叠且图标重画、页签自动压缩 + 「···」收敛（不滚动不截断）、右栏面板 `workspaceKind` 由闸门改为亲和（API 2.2，ADR-0012）。全量 **601 文件 / 4380 用例通过**。
 
 ---
 

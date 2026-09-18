@@ -575,7 +575,6 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-preview={props.context.input().preview ? 'true' : 'false'}
       data-paused={props.context.paused() ? 'true' : 'false'}
       data-session-id={props.context.input().sessionId ?? undefined}
-      data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
       data-creation-state={sessionCreation().phase}
       style={{
@@ -600,7 +599,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             onKeyDown={scrollIntent.onKeyDown}
           >
             <div class="solid-workbench-empty-space">
-              <WorkbenchEmptyBrand workspaceMode={props.context.input().workspaceMode ?? 'work'} />
+              <WorkbenchEmptyBrand />
             </div>
           </div>
           <CreationOverlayHost
@@ -1269,9 +1268,9 @@ function createStableActivityGroupRow(key: string): StableActivityGroupRow {
 /** Brand-only empty-state layer. The control center remains the sole input
  * surface; this block provides recognition without duplicating instructions,
  * context rows, or creation controls. */
-function WorkbenchEmptyBrand(props: { workspaceMode: 'work' | 'chat' }) {
-  const model = () => selectAgentEmptyState(props.workspaceMode)
-  return <div class="agent-empty-state solid-workbench-empty-brand" data-workspace-mode={props.workspaceMode} role="img" aria-label="Pylon Agent">
+function WorkbenchEmptyBrand() {
+  const model = () => selectAgentEmptyState()
+  return <div class="agent-empty-state solid-workbench-empty-brand" role="img" aria-label="Pylon Agent">
     <div class="agent-empty-lockup" aria-hidden="true">
       <div class="agent-empty-brand">
         <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">

@@ -1,20 +1,6 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Command } from 'cmdk'
-import {
-  Activity,
-  Bot,
-  Boxes,
-  FolderTree,
-  Globe,
-  History,
-  LayoutDashboard,
-  Search,
-  Settings,
-  SlidersHorizontal,
-  SquareStack,
-  Waypoints,
-  type LucideIcon,
-} from 'lucide-react'
+import { resolveLaunchIcon } from './launchIcons.tsx'
 import { useIdentityStore } from '../identityStore'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { activateAgentSheet } from './activateAgentSheet'
@@ -37,23 +23,11 @@ interface SheetLauncherProps {
   onOpenProfiles: () => void
 }
 
-const LAUNCH_ICONS: Readonly<Record<string, LucideIcon>> = {
-  activity: Activity,
-  agent: Bot,
-  boxes: Boxes,
-  'folder-tree': FolderTree,
-  globe: Globe,
-  history: History,
-  'layout-dashboard': LayoutDashboard,
-  search: Search,
-  settings: Settings,
-  sliders: SlidersHorizontal,
-  waypoints: Waypoints,
-}
+const LAUNCH_ICON_SIZE = 20
 
 function LaunchIcon({ icon }: { icon?: string }) {
-  const Icon = (icon && LAUNCH_ICONS[icon]) || SquareStack
-  return <span className="sheet-launcher-icon" data-launch-icon={icon || 'workspace'}><Icon size={20} strokeWidth={1.8} aria-hidden="true" /></span>
+  const Icon = resolveLaunchIcon(icon)
+  return <span className="sheet-launcher-icon" data-launch-icon={icon || 'workspace'}><Icon size={LAUNCH_ICON_SIZE} strokeWidth={1.8} aria-hidden="true" /></span>
 }
 
 interface LaunchGroup {

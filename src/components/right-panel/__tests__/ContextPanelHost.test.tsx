@@ -161,4 +161,68 @@ describe('ContextPanelHost', () => {
     fireEvent.click(screen.getByRole('tab', { name: '正常' }))
     expect(screen.getByText('健康面板内容')).toBeInTheDocument()
   })
+
+  it('切换器列出全部可显示面板，且跨 Sheet 种类也能切（种类只定默认）', () => {
+    const registry = getContextPanelRegistry()
+    const identity = createPluginIdentity('test.context.switcher', 'run')
+    registrations.push(registry.register(identity, {
+      id: 'agent-only',
+      workspaceKind: sheet.kind,
+      label: '本 Sheet 面板',
+      order: 100,
+      renderKind: 'first-party-react',
+      component: () => <div>本 Sheet 面板内容</div>,
+    }))
+    registrations.push(registry.register(identity, {
+      id: 'file-only',
+      workspaceKind: 'file',
+      label: 'File 面板',
+      order: 200,
+      renderKind: 'first-party-react',
+      component: () => <div>File 面板内容</div>,
+    }))
+
+    render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
+
+    // 用户实机报「侧栏内部没有切换侧栏种类的按钮」：只列可用面板时，单面板 Sheet 只剩一个
+    // 撑满的标签，看起来是标题。现在两个都列、都能切——种类只决定默认选中谁。
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.map(tab => tab.textContent)).toEqual(['本 Sheet 面板', 'File 面板'])
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(tabs[1])
+    expect(screen.getByText('File 面板内容')).toBeInTheDocument()
+    expect(screen.queryByText('本 Sheet 面板内容')).toBeNull()
+    // 选择落到 store：这是「用户显式选过」的凭据（跨 Sheet 保持 / 重载后记得）。
+    expect(useRightRailStore.getState().activePanelId).toBe('file-only')
+    // 右栏内部的折叠钮已删除（折叠由标题栏那一个负责），头部只剩切换器。
+    expect(document.querySelector('.context-panel-collapse')).toBeNull()
+    expect([...document.querySelector('.context-panel-head')!.children].map(node => node.className))
+      .toEqual(['context-panel-tabs'])
+  })
+
+  it('没显式选过时，默认选中与当前 Sheet 种类亲和的面板', () => {
+    const registry = getContextPanelRegistry()
+    const identity = createPluginIdentity('test.context.affinity', 'run')
+    registrations.push(registry.register(identity, {
+      id: 'global-panel',
+      label: '全局面板',
+      order: 50,
+      scope: 'global',
+      renderKind: 'first-party-react',
+      component: () => <div>全局面板内容</div>,
+    }))
+    registrations.push(registry.register(identity, {
+      id: 'affine-panel',
+      workspaceKind: sheet.kind,
+      label: '亲和面板',
+      order: 900,
+      renderKind: 'first-party-react',
+      component: () => <div>亲和面板内容</div>,
+    }))
+
+    render(<ContextPanelHost sheet={sheet} ctx={ctx} activePanelId={null} />)
+
+    // 亲和优先于 order 更靠前的 global 面板。
+    expect(screen.getByText('亲和面板内容')).toBeInTheDocument()
+  })
 })
