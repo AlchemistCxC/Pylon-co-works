@@ -3,6 +3,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+/// 进程 spawn + 就绪／IPC 往返的等待预算（毫秒）。
+///
+/// 按「争抢」而非「空闲」取值：空闲机器上一次 spawn + 首次往返约 0.3–1s，但
+/// `cargo test --workspace` 全并行时 CI runner 会被饥饿，3s 量级的窗口会被击穿
+/// （#157 同一型：Rust 全量并行下 flaky）——实测本机单跑 3/3 绿（0.34–1.05s），
+/// 而 CI 红在 read 就绪往返上，且随机落在不同的进程类测试。本文件其余等待本就在
+/// 10s／20s 量级（见 165／248 行），故把偏紧的几处对齐到同一口径。
+///
+/// 预算不是被测契约——断言一字未改，放宽的只是等待窗口。
+const SPAWN_WAIT_MS: u64 = 30_000;
+
+/// job object 收敛进程树后的观察窗口（毫秒）。原来是睡 250ms 就断言孙进程已死，
+/// 空闲机器够用，争抢下不够——同属「预算不是契约」一类，只放宽窗口。
+const TREE_REAP_WAIT_MS: u64 = 2_000;
+
 fn temp(label: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -359,13 +374,13 @@ async fn on_failure_restart_replaces_generation_and_recovers_rpc() {
             &descriptor.process_id,
             "crash".into(),
             None,
-            3_000,
+            SPAWN_WAIT_MS,
             Some("crash".into()),
         )
         .await
         .unwrap_err();
     assert!(error.contains("restarting"));
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_millis(SPAWN_WAIT_MS), async {
         loop {
             let current = supervisor.get(&descriptor.process_id).unwrap().descriptor();
             if current.status == ProcessStatus::Running && current.restart_attempts == 1 {
@@ -415,7 +430,7 @@ async fn job_object_kills_descendant_process_tree() {
             &descriptor.process_id,
             "spawnChild".into(),
             Some(json!({ "pidFile": pid_file.to_string_lossy() })),
-            3_000,
+            SPAWN_WAIT_MS,
             Some("spawn-child".into()),
         )
         .await
@@ -425,7 +440,7 @@ async fn job_object_kills_descendant_process_tree() {
     supervisor
         .kill(app.handle(), &descriptor.process_id)
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(TREE_REAP_WAIT_MS)).await;
     let output = Command::new("tasklist")
         .args(["/FI", &format!("PID eq {child_pid}"), "/FO", "CSV", "/NH"])
         .output()
@@ -487,7 +502,7 @@ async fn checked_in_json_rpc_example_is_runnable() {
                 &descriptor.process_id,
                 "echo".into(),
                 Some(json!({ "ready": true })),
-                3_000,
+                SPAWN_WAIT_MS,
                 Some("readiness".into()),
             )
             .await
