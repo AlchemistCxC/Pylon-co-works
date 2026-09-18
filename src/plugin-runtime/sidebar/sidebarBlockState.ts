@@ -20,12 +20,12 @@ export interface AgentSidebarBlockState {
 export const EMPTY_BLOCK_STATE: AgentSidebarBlockState = Object.freeze({ blockCollapsed: Object.freeze({}), activePageId: null })
 
 /**
- * 是否可折叠。
- * - `alwaysOpen`（会话模块）恒不可折叠——左栏没有会话列表就失去了主体；
- * - 其余模块默认按 `collapsible`，省略则视为可折叠。
+ * 是否可折叠。所有模块一视同仁，默认 `true`。
+ *
+ * `alwaysOpen` **不再**压制折叠：它的语义已收窄为「不可隐藏」（常驻模块栈、不出现在显隐
+ * 设置的可改项里）。用户明确要求会话模块也能折叠——「点击后工作区啥的都收进来」。
  */
 export function resolveBlockCollapsible(contribution: AgentSidebarContribution): boolean {
-  if (contribution.alwaysOpen === true) return false
   return contribution.collapsible ?? true
 }
 

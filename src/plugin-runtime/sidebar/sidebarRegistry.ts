@@ -43,10 +43,6 @@ function validateContribution(contribution: AgentSidebarContribution): AgentSide
   if (contribution.onTitleClick === 'page' && contribution.page === undefined) {
     throw new Error(`Agent sidebar contribution onTitleClick=page 但未声明 page：${contribution.id}`)
   }
-  // 常开与可折叠是互相否定的声明，不做静默取一。
-  if (contribution.alwaysOpen === true && contribution.collapsible === true) {
-    throw new Error(`Agent sidebar contribution 不得同时声明 alwaysOpen 与 collapsible：${contribution.id}`)
-  }
   validateHeaderActions(contribution)
   if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
     throw new Error(`Agent sidebar first-party component 非法：${contribution.id}`)

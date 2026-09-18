@@ -118,13 +118,18 @@ describe('左栏模块栈模型', () => {
     expect(screen.queryByTestId('body-mod')).toBeNull()
   })
 
-  it('alwaysOpen 的模块没有折叠控件，且持久化的折叠值对它无效', () => {
+  it('alwaysOpen 的模块**也可折叠**（常驻只表示不可隐藏），默认展开', () => {
+    const patchSheetState = vi.fn()
+    useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'sessions', label: '会话', alwaysOpen: true, component: () => <Body name="sessions" /> })
-    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { sessions: true }, activePageId: null }} />)
+    const view = render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { sessions: true }, activePageId: null }} />)
+    // 默认展开（alwaysOpen 只是默认不折叠，用户折叠过则尊重用户）
+    expect(blockOf('sessions')).toHaveAttribute('data-collapsed', 'true')
 
+    view.rerender(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {}, activePageId: null }} />)
     expect(blockOf('sessions')).toHaveAttribute('data-collapsed', 'false')
-    expect(screen.getByTestId('body-sessions')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /折叠 会话|展开 会话/ })).toBeNull()
+    fireEvent.click(within(blockOf('sessions')).getByRole('button', { name: '会话' }))
+    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { blockCollapsed: { sessions: true }, activePageId: null })
   })
 
   it('「都要」：声明 page 且标题语义为 expand 时，标题折叠 + 头部自动出现「打开」', () => {

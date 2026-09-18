@@ -29,23 +29,27 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.sidebar-modules .session-list')).toMatch(/overflow:\s*visible/)
   })
 
-  it('搜索是会话模块内的**内联行**（不是描边框），左轨与模块头同基准', () => {
-    const row = body('.session-module-search')
-    expect(row, '缺少搜索行').toBeTruthy()
-    expect(row).toMatch(/display:\s*flex/)
-    expect(row).toMatch(/--sidebar-rail-pad/)
-    // 描边盒模型不得复活：有 border 就又是「框」。
-    expect(row).not.toMatch(/border:\s*1px/)
-    const input = body('.session-search-input')
-    expect(input, '内联输入框不该有边框/背景').toMatch(/border:\s*0/)
-    expect(input).toMatch(/background:\s*transparent/)
-    expect(sidebarCss, '旧描边搜索框已无消费方，不得复活').not.toMatch(/\.search-input\s*\{/)
+  it('搜索是**独立模块**的专属面板：带框输入 + 清除 + 计数 + 分组结果', () => {
+    for (const selector of ['.search-field', '.search-field-input', '.search-field-clear', '.search-hint', '.search-count', '.search-results', '.search-group-head', '.search-hit']) {
+      expect(body(selector), `缺少 ${selector} 规则`).toBeTruthy()
+    }
+    // 专属面板的输入框**应当**带框——它与会话列表里那个「嵌一行的框」是两回事。
+    expect(body('.search-field')).toMatch(/border:1px solid/)
+    // 旧的「会话模块内联搜索」与描边 .search-input 都不得复活。
+    expect(body('.session-module-search'), '会话内联搜索已移出').toBe('')
+    expect(sidebarCss, '旧描边搜索框不得复活').not.toMatch(/\.search-input\s*\{/)
   })
 
   it('左轨统一：模块头 / 组头 / 会话缩进都取自 --sidebar-rail-pad', () => {
     expect(body('.sidebar-block-head')).toMatch(/padding:1px var\(--sidebar-rail-pad/)
     expect(body('.cwd-group-toggle')).toMatch(/var\(--sidebar-rail-pad/)
     expect(body('.cwd-group-sessions')).toMatch(/calc\(var\(--sidebar-rail-pad/)
+  })
+
+  it('拖拽有落点指示线（拖拽期间不实时重排，避免反馈环抖动）', () => {
+    const marker = body('.sidebar-modules-drop')
+    expect(marker, '缺少落点指示线').toBeTruthy()
+    expect(marker).toMatch(/background:var\(--accent\)/)
   })
 
   it('拖拽靠**长按头部**，没有独立手柄（手柄要么常驻成噪声，要么变成看不见却能拖的靶子）', () => {

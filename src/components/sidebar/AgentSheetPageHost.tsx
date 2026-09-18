@@ -9,9 +9,6 @@ import type { AgentSidebarContribution } from '../../plugin-runtime/sidebar/side
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import { FirstPartyContribution } from './FirstPartyContribution.tsx'
-
-/** 整页里没有搜索输入（搜索属于会话模块的左栏体量），故查询恒为空。 */
-const noopQueryChange = () => {}
 import { useSidebarContributionProps } from './useSidebarContributionProps.ts'
 
 /**
@@ -62,7 +59,7 @@ export default function AgentSheetPageHost({ page, ctx, sheet, state }: {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [close])
 
-  const sharedProps = useSidebarContributionProps(ctx, '', noopQueryChange)
+  const sharedProps = useSidebarContributionProps(ctx)
   const pageDecl = page.page
   if (!pageDecl) return null
 

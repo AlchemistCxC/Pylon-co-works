@@ -75,12 +75,17 @@ describe('AgentSidebarRegistry', () => {
     expect(() => registry.register(identity, contribution('bad-action', { onTitleClick: 'collapse' as never }))).toThrow(/onTitleClick 非法/)
   })
 
-  it('alwaysOpen 与 collapsible 是互相否定的声明，不做静默取一', () => {
+  it('alwaysOpen 不压制可折叠（常驻只表示不可隐藏，用户要求会话模块也能折叠）', () => {
     const registry = new AgentSidebarRegistry()
     const identity = createPluginIdentity('test.sidebar', 'always-open')
-    expect(() => registry.register(identity, contribution('bad', { alwaysOpen: true, collapsible: true }))).toThrow(/不得同时声明/)
-    registry.register(identity, contribution('ok', { alwaysOpen: true }))
-    expect(registry.list()[0].alwaysOpen).toBe(true)
+    registry.register(identity, contribution('sessions', { alwaysOpen: true }))
+    registry.register(identity, contribution('pinned-folded', { alwaysOpen: true, collapsible: true }))
+    // 同 order 的稳定次序由 Registry 的 owner/id 决定，这里只关心两个声明的保留（顺序无关）。
+    expect(registry.list().map(item => [item.id, item.alwaysOpen, item.collapsible]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))))
+      .toEqual([
+        ['pinned-folded', true, true],
+        ['sessions', true, undefined],
+      ])
   })
 
   it('page.title 不能为空', () => {

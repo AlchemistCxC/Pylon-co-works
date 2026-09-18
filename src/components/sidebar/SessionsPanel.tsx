@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Search, Settings, Trash2 } from 'lucide-react'
+import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Settings, Trash2 } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -116,10 +116,9 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
   })
 
   const editingWorkspace = props.workspaces.find(workspace => workspace.id === editingCwdId)
-  const normalizedQuery = props.query.trim().toLowerCase()
-  const matchesQuery = (name: string) => !normalizedQuery || name.toLowerCase().includes(normalizedQuery)
+  // 会话列表**不再被搜索过滤**：搜索已是独立模块、自己呈现结果（一个查询驱动两处呈现
+  // 会让人分不清哪边是「结果」）。这里只负责分组与选择。
   const looseSessions = props.sessions.filter(session => !session.workspaceId)
-  const visibleLoose = looseSessions.filter(session => matchesQuery(session.name))
 
   const renderSession = (session: (typeof props.sessions)[number]) => (
     <div key={session.id} role="treeitem" tabIndex={0} className={`session-item ${props.activeSessionId === session.id ? 'active' : ''}`}
@@ -162,7 +161,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
     onAdd: () => void,
     onSettings?: () => void,
   ) => {
-    const folded = normalizedQuery ? false : collapsedCwd.has(groupId)
+    const folded = collapsedCwd.has(groupId)
     const GroupIcon = icon === 'inbox' ? Inbox : (folded ? Folder : FolderOpen)
     return (
       <div className="cwd-group-head">
@@ -183,28 +182,25 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
   }
 
   const renderGroup = (groupId: string, sessions: readonly (typeof props.sessions)[number][], head: React.ReactNode) => {
-    const folded = normalizedQuery ? false : collapsedCwd.has(groupId)
+    const folded = collapsedCwd.has(groupId)
     return (
       <div className="cwd-group" key={groupId} role="treeitem" aria-expanded={!folded}>
         {head}
-        <div className={`cwd-group-sessions${folded ? ' is-collapsed' : ''}`} role="group" aria-hidden={folded}>
-          <div className="cwd-group-sessions-inner">{sessions.map(renderSession)}</div>
-        </div>
+        {/* 空组不渲染会话容器：它自带 1px/2px 内边距，展开态比折叠态高几像素，
+            于是「点空工作区的折叠/展开」会引起一次细微跳动（用户实机报的）。 */}
+        {sessions.length > 0 && (
+          <div className={`cwd-group-sessions${folded ? ' is-collapsed' : ''}`} role="group" aria-hidden={folded}>
+            <div className="cwd-group-sessions-inner">{sessions.map(renderSession)}</div>
+          </div>
+        )}
       </div>
     )
   }
 
-  const hasAnything = props.workspaces.length > 0 || visibleLoose.length > 0
+  const hasAnything = props.workspaces.length > 0 || looseSessions.length > 0
 
   return (
     <>
-      {/* 搜索是会话模块**内部的一行**，不是「框」：左栏现在是 26px 无框行构成的紧凑列表，
-          一个 36px 描边输入框夹在中间像外来控件。取值仍由宿主持有（`props.query`）。 */}
-      <label className="session-module-search">
-        <span className="session-search-icon" aria-hidden="true"><Search size={12} /></span>
-        <input className="session-search-input" placeholder="搜索会话" value={props.query}
-          onChange={event => props.onQueryChange(event.target.value)} aria-label="搜索会话" />
-      </label>
       <div className="session-list" role="tree" aria-label="工作区与会话">
         {showNewCwd && (
           <div className="cwd-new">
@@ -221,25 +217,19 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
           </div>
         )}
 
-        {props.workspaces.map(workspace => {
-          const workspaceMatches = normalizedQuery.length > 0 && `${workspace.name} ${workspace.rootPath}`.toLowerCase().includes(normalizedQuery)
-          const allBound = props.sessions.filter(session => session.workspaceId === workspace.id)
-          const bound = allBound.filter(session => !normalizedQuery || workspaceMatches || matchesQuery(session.name))
-          if (normalizedQuery && bound.length === 0 && !workspaceMatches) return null
-          return renderGroup(
-            workspace.id,
-            bound,
-            renderGroupHead(
-              workspace.id, workspace.name, workspace.rootPath, 'folder',
-              () => props.onCreateWorkspaceSession(workspace.id),
-              () => setEditingCwdId(workspace.id),
-            ),
-          )
-        })}
+        {props.workspaces.map(workspace => renderGroup(
+          workspace.id,
+          props.sessions.filter(session => session.workspaceId === workspace.id),
+          renderGroupHead(
+            workspace.id, workspace.name, workspace.rootPath, 'folder',
+            () => props.onCreateWorkspaceSession(workspace.id),
+            () => setEditingCwdId(workspace.id),
+          ),
+        ))}
 
         {hasAnything && renderGroup(
           LOOSE_GROUP_ID,
-          visibleLoose,
+          looseSessions,
           renderGroupHead(
             LOOSE_GROUP_ID, LOOSE_GROUP_LABEL, '未绑定目录的会话', 'inbox',
             () => props.onCreateLooseSession(),

@@ -48,29 +48,47 @@
   padding:var(--ui-space-2) 0 var(--ui-space-2);
   overflow-y:auto;
 }
+/* 拖拽落点指示线：拖拽期间不再实时重排模块（那会形成反馈环导致抖动），
+   改用一条线标出「松手后会插到这里」。 */
+.sidebar-modules-drop { height:2px; margin:2px var(--sidebar-rail-pad, 6px); background:var(--accent); opacity:.72; }
+
 /* 栈内滚动由 .sidebar-modules 负责，会话列表本身不再滚（否则嵌套）。 */
 .sidebar-modules .session-list { flex:0 0 auto; overflow:visible; padding:0; }
 /* 终端模式给 .session-list 自带 6px 内边距（`.app[data-interface-mode=...]` 的特异性高于上一行），
    在模块栈里会让工作区图标比模块图标右移 6px。栈内边距由各模块自己拥有，这里显式归零。 */
 .app[data-interface-mode="terminal-like"] .sidebar-modules .session-list { padding:0; }
 /* 搜索框在会话模块**内部**：它是这个模块的控件，不是整栏的表头。 */
-/* 搜索是会话模块里的**一行**，不是「框」：左栏已是 26px 无框行构成的紧凑列表，
-   一个 36px 描边输入框夹在中间像外来控件（用户点名「目前的框已经不适合 ui 界面了」）。 */
-.session-module-search {
+/* ── 搜索模块（VSCode 搜索侧栏那一类专属工具面板）──
+   输入框在这里**带框**是对的：专属面板的输入框就该长得像输入框——它从会话列表里搬出来，
+   正是因为「框」放错了位置（用户：「目前的框已经不适合 ui 界面了」）。 */
+.search-field {
   display:flex; align-items:center; gap:5px;
-  min-height:24px; margin-bottom:var(--ui-space-1);
-  padding:1px var(--sidebar-rail-pad, 6px);
-  color:var(--text-dim); cursor:text;
+  min-height:24px; margin:0 var(--sidebar-rail-pad, 6px) var(--ui-space-2); padding:0 6px;
+  border:1px solid var(--border); border-radius:var(--ui-radius-sm);
+  background:var(--bg-input); color:var(--text-dim);
 }
-.session-module-search:hover { color:var(--text); }
-.session-module-search:focus-within { color:var(--accent); }
-.session-search-icon { flex:0 0 auto; display:grid; place-items:center; }
-.session-search-input {
-  flex:1 1 auto; min-width:0;
-  padding:0; border:0; background:transparent; outline:none;
-  color:var(--text); font-family:inherit; font-size:var(--sidebar-meta-size, 11px);
+.search-field:focus-within { border-color:var(--accent); color:var(--accent); }
+.search-field-input { flex:1 1 auto; min-width:0; padding:0; border:0; background:transparent; outline:none; color:var(--text); font-family:inherit; font-size:var(--sidebar-meta-size, 11px); }
+.search-field-input::placeholder { color:var(--text-placeholder); }
+.search-field-clear { flex:0 0 auto; display:grid; place-items:center; width:16px; height:16px; padding:0; border:0; background:transparent; color:var(--text-dim); cursor:pointer; }
+.search-field-clear:hover { color:var(--text); }
+.search-hint { margin:0; padding:0 var(--sidebar-rail-pad, 6px); color:var(--text-placeholder); font-size:var(--sidebar-meta-size, 11px); }
+.search-count { margin:0 0 var(--ui-space-1); padding:0 var(--sidebar-rail-pad, 6px); color:var(--text-dim); font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); }
+.search-results { display:flex; flex-direction:column; gap:2px; }
+.search-group-head { display:flex; align-items:center; gap:5px; padding:1px var(--sidebar-rail-pad, 6px); color:var(--text-dim); font-size:var(--sidebar-meta-size, 11px); }
+.search-group-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.search-group-count { color:var(--text-placeholder); }
+/* 命中项缩进一个图标位，读作「工作区 → 命中」（对应 VSCode 的「文件 → 匹配」）。 */
+.search-hit {
+  display:flex; align-items:center; gap:6px; width:100%;
+  min-height:26px; padding:1px calc(var(--sidebar-rail-pad, 6px) + 14px);
+  border:1px solid transparent; background:transparent; color:var(--text); text-align:left; cursor:pointer;
+  font-size:var(--sidebar-name-size, 14px);
 }
-.session-search-input::placeholder { color:var(--text-placeholder); }
+.search-hit:hover { background:var(--bg-hover); }
+.search-hit.active { border-color:var(--state-selected-stroke); background:var(--state-selected-bg); }
+.search-hit-name { min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.search-hit-time { flex:0 0 auto; color:var(--text-dim); font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); }
 
 .sidebar-block { display:flex; flex-direction:column; min-height:0; flex:0 0 auto; }
 

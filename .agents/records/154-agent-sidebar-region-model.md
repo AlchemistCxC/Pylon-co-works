@@ -204,3 +204,19 @@
 **说明书同步**：`Pylon-插件系统说明书-开发者版.md` §6.8 补全为完整契约——注册字段表（必填/默认/语义）、注册期 fail-closed 校验清单、点击方案三选一表、`first-party-react` props 表、`isolated-surface` 的 `host:input` wire 契约与可发事件表（含 `host:create-chat-session` → `host:create-loose-session` 的更名）、长按拖拽与显隐偏好（独立键）；§1 的 `api` 取值与图标键清单（补 `messages` / `clock` / `plus`，并说明模块图标与 launch 共用同一映射）同步。
 
 **门禁**：`tsc -b` 无输出；`eslint src/` 0 error；全量 **600 文件 / 4353 用例通过**；`check-doc-links` 通过；`check:maintenance` exit 0。
+
+
+### 追加轮三（同日）：抖动修复 + 会话可折叠 + 搜索独立成模块 + 空组高度
+
+| 用户反馈 | 根因 | 做法 |
+| --- | --- | --- |
+| 拖拽时疯狂抖动 | 「实时重排预览」形成反馈环：重排把被拖模块挪出光标 → 落点按新布局重算 → 挪回去 | 长按那刻**冻结**各模块头中心线，落点只由冻结几何决定；预览改为一条落点指示线 |
+| 会话需要折叠 | `alwaysOpen` 此前压制了折叠 | 语义收窄为「不可隐藏」，与 `collapsible` 解耦（注册期互斥校验删除） |
+| 搜索还得改进 | 「框」不在错的设计上，而在错的位置 | 搜索**独立成模块**（VSCode 搜索侧栏）：带框输入 + 清除 + 命中计数 + 按工作区分组；会话列表不再被过滤 |
+| 空工作区折叠/展开有细微高度变化 | 空组仍渲染 `.cwd-group-sessions`（自带 1px/2px 内边距） | 空组不渲染该容器，折叠/展开对空组成为无操作 |
+
+**契约收窄**：`query` / `onQueryChange` 从 props 与 isolated wire 契约移除（模块自持查询），`when` 入参只剩 `{ activeAgentId, activeSessionId }`；`alwaysOpen` 不再压制折叠。说明书 §6.8 同步（含新增「内置模块参考」段）。
+
+**新增测试**：`SearchPanel.test.tsx`（未输入提示 / 按名命中并按工作区分组 / 工作区名命中列出全部 / 无命中空态 / 点击选中与清除 / 选中态）；CSS 契约扩到 14 条（新增落点指示线、搜索模块专属面板部件、旧内联搜索不得复活）。
+
+**门禁**：`tsc -b` 无输出；`eslint src/` 0 error；全量 **601 文件 / 4359 用例通过**。

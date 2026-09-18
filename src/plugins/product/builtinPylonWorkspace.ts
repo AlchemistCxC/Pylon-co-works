@@ -14,6 +14,7 @@ import { createBuiltinBrowserCommandDefinitions } from '../core/browser/builtinB
 import { registerBuiltinBrowserAgentSessionAccess } from '../core/browser/builtinBrowserAgentSessionAccess.ts'
 
 const SessionsPanel = lazy(() => import('../../components/sidebar/SessionsPanel.tsx'))
+const SearchPanel = lazy(() => import('../../components/sidebar/SearchPanel.tsx'))
 const ScheduledBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.ScheduledBlock })))
 const AutomationBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.AutomationBlock })))
 const TasksBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.TasksBlock })))
@@ -45,6 +46,16 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
     activate: context => {
       mountFirstPartyStyleAssets(BUILTIN_PYLON_WORKSPACE_ID, context.identity.key, context.scope, loadBuiltinPylonWorkspaceStyles())
       for (const definition of BUILTIN_WORKSPACE_TYPES) context.workspace.registerType(definition)
+      // 搜索是**独立模块**（VSCode 搜索侧栏那一类专属面板）：自己拥有查询、自己呈现结果。
+      // 它排在会话模块之前，可被用户隐藏或拖走（不是常驻）。
+      context.sidebar.registerAgentSidebarContribution({
+        id: 'builtin.sidebar.module.search',
+        label: '搜索',
+        icon: 'search',
+        order: 800,
+        renderKind: 'first-party-react',
+        component: SearchPanel,
+      })
       context.sidebar.registerAgentSidebarContribution({
         id: 'builtin.sidebar.module.sessions',
         label: '会话',

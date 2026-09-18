@@ -43,8 +43,6 @@ const looseSession = {
 function createProps(overrides: Partial<AgentSidebarContributionProps> = {}): AgentSidebarContributionProps {
   return {
     activeAgentId: 'peri',
-    query: '',
-    onQueryChange: vi.fn(),
     activeSessionId: null,
     sessions: [],
     workspaces: [workspace],
@@ -184,19 +182,6 @@ describe('SessionsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '在 无工作区 中新建会话' }))
     expect(onCreateLooseSession).toHaveBeenCalledOnce()
-  })
-
-  it('搜索同时过滤工作区组与无 cwd 组；按名称命中', () => {
-    render(<SessionsPanel {...createProps({
-      query: '介绍',
-      sessions: [boundSession, looseSession],
-      // 工作区名/路径都不含「介绍」，因此工作区组应被整体滤掉
-    })} />)
-
-    expect(screen.getByText('介绍一下你自己')).toBeInTheDocument()
-    expect(screen.queryByText('实现界面')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '折叠 Pylon' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '折叠 无工作区' })).toBeInTheDocument()
   })
 
   it('没有任何工作区也没有无 cwd 会话时给出起步空态', () => {

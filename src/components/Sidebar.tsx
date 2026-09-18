@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ChevronsUpDown } from 'lucide-react'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
@@ -20,7 +20,6 @@ import {
 } from '../plugin-runtime/sidebar/sidebarBlockState.ts'
 import {
   applyModulePrefs,
-  reorderModuleIds,
   sidebarModulePrefsStore,
   useSidebarModulePrefs,
 } from '../domains/workbench/sidebarModulePrefs.ts'
@@ -57,7 +56,6 @@ const DRAG_CLICK_SUPPRESS_MS = 320
  * 折叠改由独立折叠钮负责。
  */
 export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; state?: unknown; sheet?: { id: string } }) {
-  const [search, setSearch] = useState('')
   const blockState = useMemo(() => normalizeBlockState(state), [state])
   const modulePrefs = useSidebarModulePrefs()
   const patchSheetState = useWorkspaceStore(s => s.patchSheetState)
@@ -69,7 +67,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
 
-  const sharedProps = useSidebarContributionProps(ctx, search, setSearch)
+  const sharedProps = useSidebarContributionProps(ctx)
 
   const sidebarRegistry = getAgentSidebarRegistry()
   const sidebarSnapshot = useSyncExternalStore(
@@ -90,35 +88,33 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       sidebarSnapshot.entries.map(entry => entry.value),
       modulePrefs,
     )
-    return visible.filter(contribution => contribution.when?.({
-      activeAgentId: activeAgent,
-      activeSessionId: activeSession,
-      query: search,
-    }) ?? true)
-  }, [sidebarSnapshot, modulePrefs, activeAgent, activeSession, search])
+    return visible.filter(contribution => contribution.when?.({ activeAgentId: activeAgent, activeSessionId: activeSession }) ?? true)
+  }, [sidebarSnapshot, modulePrefs, activeAgent, activeSession])
 
   // ── 拖拽重排 ──
   // 拖拽期间只改**渲染次序**（预览），抬起才落库——与左栏调宽同一取舍：每帧写
   // localStorage 没有意义，而 live 预览是拖拽体感的关键。
   const [drag, setDrag] = useState<{ id: string; pointerId: number } | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
   const pressRef = useRef<{ timer: number; pointerId: number; startX: number; startY: number } | null>(null)
   const dragEndedAtRef = useRef(0)
+  /**
+   * 拖拽开始时**冻结**各模块头的几何。
+   *
+   * 曾经是「实时重排预览」：pointermove 里直接改渲染次序。那会形成反馈环——重排把被拖
+   * 模块挪到光标之外 → 目标位置按新布局重算 → 又挪回去 → 来回翻转，实机表现为疯狂抖动。
+   * 冻结几何后落点只由按下那一刻的布局决定，预览改用一条落点指示线，抖动在结构上不可能发生。
+   */
+  const dragGeometryRef = useRef<readonly { id: string; center: number }[] | null>(null)
   const moduleIds = useMemo(() => modules.map(contribution => contribution.id), [modules])
-  const renderedModules = useMemo(() => {
-    if (!drag || !dragOverId || drag.id === dragOverId) return modules
-    const nextOrder = reorderModuleIds(moduleIds, drag.id, dragOverId)
-    const byId = new Map(modules.map(contribution => [contribution.id, contribution]))
-    return nextOrder.map(id => byId.get(id)!)
-  }, [modules, moduleIds, drag, dragOverId])
 
-  const targetIndexAt = useCallback((clientY: number): string | null => {
-    const heads = [...document.querySelectorAll<HTMLElement>('.sidebar-block[data-module-id]')]
-    for (const head of heads) {
-      const rect = head.getBoundingClientRect()
-      if (clientY < rect.top + rect.height / 2) return head.dataset.moduleId ?? null
-    }
-    return heads.at(-1)?.dataset.moduleId ?? null
+  /** 落点序号：冻结几何里中心线在光标之上的模块个数。 */
+  const dropIndexAt = useCallback((clientY: number): number => {
+    const geometry = dragGeometryRef.current
+    if (!geometry) return 0
+    let index = 0
+    for (const entry of geometry) { if (clientY > entry.center) index += 1 }
+    return index
   }, [])
 
   const cancelPress = useCallback(() => {
@@ -142,11 +138,16 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
     event.currentTarget.setPointerCapture?.(event.pointerId)
     const timer = window.setTimeout(() => {
       pressRef.current = null
+      dragGeometryRef.current = [...document.querySelectorAll<HTMLElement>('.sidebar-block[data-module-id]')].map(node => {
+        const rect = node.getBoundingClientRect()
+        return { id: node.dataset.moduleId ?? '', center: rect.top + rect.height / 2 }
+      })
       setDrag({ id: contributionId, pointerId: event.pointerId })
-      setDragOverId(contributionId)
+      setDropIndex(moduleIds.indexOf(contributionId))
     }, LONG_PRESS_MS)
     pressRef.current = { timer, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY }
-  }, [])
+  // moduleIds 变化（显隐/次序变了）时要重建回调：长按进入拖拽时用它算初始落点，用旧次序会导致一按下就偏位。
+  }, [moduleIds])
 
   const onHeadPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const press = pressRef.current
@@ -156,23 +157,30 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       return
     }
     if (!drag || event.pointerId !== drag.pointerId) return
-    const over = targetIndexAt(event.clientY)
-    if (over && over !== dragOverId) setDragOverId(over)
-  }, [drag, dragOverId, cancelPress, targetIndexAt])
+    const next = dropIndexAt(event.clientY)
+    if (next !== dropIndex) setDropIndex(next)
+  }, [drag, dropIndex, cancelPress, dropIndexAt])
 
   const endDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     cancelPress()
     if (!drag) return
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId)
-    const over = dragOverId && dragOverId !== drag.id ? dragOverId : null
-    if (over) {
-      const nextOrder = reorderModuleIds(moduleIds, drag.id, over)
-      sidebarModulePrefsStore.setPrefs({ order: nextOrder, hidden: modulePrefs.hidden })
+    if (dropIndex !== null) {
+      const from = moduleIds.indexOf(drag.id)
+      // 落点序号是「插入到第几个之前」；移除自身后，靠后的落点要左移一位。
+      const to = from >= 0 && dropIndex > from ? dropIndex - 1 : dropIndex
+      const next = [...moduleIds]
+      if (from >= 0 && to !== from) {
+        next.splice(from, 1)
+        next.splice(to, 0, drag.id)
+        sidebarModulePrefsStore.setPrefs({ order: next, hidden: modulePrefs.hidden })
+      }
     }
+    dragGeometryRef.current = null
     dragEndedAtRef.current = Date.now()
     setDrag(null)
-    setDragOverId(null)
-  }, [drag, dragOverId, moduleIds, modulePrefs.hidden, cancelPress])
+    setDropIndex(null)
+  }, [drag, dropIndex, moduleIds, modulePrefs.hidden, cancelPress])
 
   const writeState = useCallback((next: ReturnType<typeof toggleBlockCollapsed>) => {
     if (!sheet) return
@@ -208,7 +216,6 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
     const openPageAction = shouldShowOpenPageAction(contribution)
 
     const surfaceInput = {
-      query: search,
       activeAgentId: activeAgent,
       activeSessionId: activeSession,
       presentation: 'block' as const,
@@ -245,7 +252,6 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
                 presentation: 'block',
                 collapsed,
                 onBlockAction: () => {},
-                onQueryChange: setSearch,
                 registerBlockActionHandler: handler => {
                   if (handler) actionHandlers.current.set(contributionId, handler)
                   else actionHandlers.current.delete(contributionId)
@@ -349,7 +355,13 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       {/* 单一滚动容器：各模块都是内容高度，整栈一起滚。这样「模块」只有一种形状，
           会话不再是「另一个会自己滚动的分区」。 */}
       <div className="sidebar-modules" role="list">
-        {renderedModules.map(renderBlock)}
+        {modules.map((contribution, index) => (
+          <Fragment key={contribution.id}>
+            {drag && dropIndex === index && <div className="sidebar-modules-drop" aria-hidden="true" />}
+            {renderBlock(contribution)}
+          </Fragment>
+        ))}
+        {drag && dropIndex === modules.length && <div className="sidebar-modules-drop" aria-hidden="true" />}
         {modules.length === 0 && <div className="session-empty">暂无模块</div>}
       </div>
 

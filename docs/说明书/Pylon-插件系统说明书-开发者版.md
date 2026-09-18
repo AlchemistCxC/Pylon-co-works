@@ -749,16 +749,16 @@ context.sidebar.registerAgentSidebarContribution({
 | `icon` | 否 | 无图标 | 稳定图标键（见下）；未知键安全降级 |
 | `order` | 否 | 注册顺序 | 模块的**默认**位次；用户拖拽后被次序偏好覆盖 |
 | `onTitleClick` | 否 | `'expand'` | 标题点击语义：`'expand'` 展开/折叠 · `'page'` 进入整页 |
-| `collapsible` | 否 | `true` | 是否可折叠；`alwaysOpen` 时恒为否 |
+| `collapsible` | 否 | `true` | 是否可折叠（`alwaysOpen` 的模块同样可折叠） |
 | `defaultCollapsed` | 否 | `false` | 首次出现时的折叠默认值（用户显式操作以用户为准） |
-| `alwaysOpen` | 否 | `false` | 常开：不可折叠、不可隐藏，且不出现在显隐设置的可改项里 |
+| `alwaysOpen` | 否 | `false` | 常驻：**不可隐藏**、不出现在显隐设置的可改项里、首次出现时默认展开（**不压制折叠**） |
 | `page` | 否 | 无 | `{ title }`；声明后该模块可展开成主区整页 |
 | `headerActions` | 否 | `[]` | 头部动作按钮（宿主渲染，见下） |
-| `when` | 否 | 恒可见 | 可见性谓词，入参 `{ activeAgentId, activeSessionId, query }` |
+| `when` | 否 | 恒可见 | 可见性谓词，入参 `{ activeAgentId, activeSessionId }` |
 | `renderKind` | 是 | — | `'first-party-react'`（仅主构建内置）或 `'isolated-surface'`（外置插件） |
 | `component` / `surfaceId` | 是 | — | 按 `renderKind` 二选一 |
 
-**注册期校验（fail-closed，任一不满足即拒绝注册）**：`id` / `label` 非空且无首尾空格；`onTitleClick` 只能是 `expand` / `page`；**`onTitleClick: 'page'` 必须同时声明 `page`**（点了没处去是死路，不做静默降级）；`alwaysOpen` 与 `collapsible: true` 不得同时声明（互相否定，不做静默取一）；`headerActions[].id` 非空、不重复且 `label` 非空；`page.title` 非空；`isolated-surface` 的 `surfaceId` 非空。
+**注册期校验（fail-closed，任一不满足即拒绝注册）**：`id` / `label` 非空且无首尾空格；`onTitleClick` 只能是 `expand` / `page`；**`onTitleClick: 'page'` 必须同时声明 `page`**（点了没处去是死路，不做静默降级）；`headerActions[].id` 非空、不重复且 `label` 非空；`page.title` 非空；`isolated-surface` 的 `surfaceId` 非空。
 
 **点击方案**（三种全部由此表达）：
 
@@ -778,7 +778,6 @@ context.sidebar.registerAgentSidebarContribution({
 | --- | --- |
 | `presentation` | `'block'`（左栏模块内）或 `'page'`（主区整页）——**同一组件两种体量** |
 | `collapsed` | 是否处于折叠；`page` 体量恒为 `false` |
-| `query` / `onQueryChange` | 会话搜索词与其写入口。搜索框由会话模块渲染，但**取值由宿主持有**，避免 `when` 与其它模块看到的 query 漂移 |
 | `activeAgentId` / `activeSessionId` | 当前 Agent 与会话 |
 | `sessions` / `workspaces` / `liveGeneratingSources` | 与工作台同源的会话、工作区与运行中来源 |
 | `registerBlockActionHandler` | 见上 |
@@ -790,7 +789,7 @@ context.sidebar.registerAgentSidebarContribution({
 
 ```ts
 {
-  query, activeAgentId, activeSessionId,
+  activeAgentId, activeSessionId,
   presentation: 'block' | 'page',
   collapsed, pageOpen,
   blockAction: { actionId, nonce } | null,
@@ -809,6 +808,8 @@ context.sidebar.registerAgentSidebarContribution({
 | `host:open-session-settings` | `sessionId` | 打开会话设置 |
 
 **整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`——不需要维护两份组件，两种体量共享同一批数据与回调。整页**替换该 Sheet 的聊天视图，但不是新 Sheet**：左栏仍是该 Sheet 的左栏，Esc 或页面头部「返回」回到聊天。
+
+**内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）、以及四个 mock 模块（定时 / 自动化 / 任务 / 扩展）。**模块自己拥有自己的查询**——宿主不再下发 `query`，插件想过滤自己的内容就在自己的组件里存。
 
 **顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。
 

@@ -34,8 +34,6 @@ function session(overrides: Partial<WorkspaceSession> = {}): WorkspaceSession {
 function panelProps(overrides: Partial<AgentSidebarContributionProps> = {}): AgentSidebarContributionProps {
   return {
     activeAgentId: 'peri',
-    query: '',
-    onQueryChange: vi.fn(),
     activeSessionId: null,
     sessions: [session()],
     workspaces: [],

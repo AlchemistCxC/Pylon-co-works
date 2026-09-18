@@ -27,7 +27,6 @@ export type AgentSidebarTitleAction = 'expand' | 'page'
 export interface AgentSidebarContributionContext {
   readonly activeAgentId: string
   readonly activeSessionId: string | null
-  readonly query: string
 }
 
 /**
@@ -46,12 +45,6 @@ export interface AgentSidebarHeaderAction {
 
 export interface AgentSidebarContributionProps {
   readonly activeAgentId: string
-  readonly query: string
-  /**
-   * 搜索框由**会话模块自己渲染**（它只过滤会话），但取值留在宿主：`when` 谓词与其它
-   * 模块看到的 `query` 必须与输入框同步，两处各存一份会漂移。
-   */
-  readonly onQueryChange: (query: string) => void
   readonly activeSessionId: string | null
   readonly sessions: readonly WorkspaceSession[]
   readonly workspaces: readonly Workspace[]
@@ -95,12 +88,12 @@ interface AgentSidebarContributionBase {
   readonly order?: number
   /** 标题点击语义；省略为 `expand`。 */
   readonly onTitleClick?: AgentSidebarTitleAction
-  /** 是否可折叠。省略时除 `alwaysOpen` 外默认可折叠。 */
+  /** 是否可折叠，默认 `true`（含 `alwaysOpen` 的模块）。 */
   readonly collapsible?: boolean
   readonly defaultCollapsed?: boolean
   /**
-   * 常开：不可折叠、不可隐藏、且**不参与显隐设置**。会话模块用它——左栏没有会话列表
-   * 就失去了主体。仍可参与拖拽重排（order 只是默认位次）。
+   * 常驻：**不可隐藏**、不出现在显隐设置的可改项里、首次出现时默认展开。会话模块用它——
+   * 左栏没有会话列表就失去了主体。**不压制折叠**（会话模块也可折叠成一行）与拖拽重排。
    */
   readonly alwaysOpen?: boolean
   /**
