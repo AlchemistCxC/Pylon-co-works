@@ -10,6 +10,10 @@
 
 @layer base {
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  /* #129 子项 1：表单控件不吃继承时 Chromium 落 UA 默认 `font: 400 13.3333px Arial`。
+     font:inherit 进 base 层（作者规则必胜 UA，零特异性必输任何组件规则）——
+     逐组件补 font:inherit 的旧约定变成"谁忘写谁掉 Arial"，此处一次收口。 */
+  :where(button, input, select, textarea) { font: inherit; }
 }
 
 /* 无障碍隐藏文本：项目此前缺失该工具类，导致多处 sr-only 文案可见。 */
@@ -146,7 +150,13 @@
   --type-interface-md: var(--font-size-base);
   --type-interface-lg: var(--font-size-md);
   --type-interface-line-height: 1.25;
-  --type-content-font: var(--chat-font, var(--font-mono-default));
+  /* #129 子项 4：content 角色与实际消息正文同源——正文链是
+     var(--msg-font, var(--chat-font, mono))（ChatView/InputBar 的 de-facto 链），
+     角色 token 必须取同一条链，插件消费方才不会在等宽记录流里渲染出衬线正文。
+     #129 子项 5：原按模式 fallback（terminal-like→mono / modern-gui→system）是
+     死分支——--chat-font/--msg-font 被 themeCssSnapshot 无条件内联，fallback
+     永不求值；已删除，模式间期望值统一为本链（契约测试钉住）。 */
+  --type-content-font: var(--msg-font, var(--chat-font, var(--font-mono-default)));
   --type-content-xs: var(--font-size-sm);
   --type-content-sm: var(--font-size-base);
   --type-content-md: var(--font-size-lg);
@@ -293,12 +303,11 @@ body[data-ui-scheme="light"] {
   --state-focus-ring: var(--pylon-palette-state-focus-ring);
   --connector-default: var(--pylon-palette-connector-default);
 }
-:where(html, body, .app)[data-interface-mode="terminal-like"] {
-  --type-content-font: var(--chat-font, var(--font-mono-default));
-}
-:where(html, body, .app)[data-interface-mode="modern-gui"] {
-  --type-content-font: var(--chat-font, var(--font-system));
-}
+
+/* #129 子项 5：此处原有的 --type-content-font 按模式覆盖（terminal-like→mono /
+   modern-gui→system）是死分支——--chat-font 恒被 themeCssSnapshot 内联，fallback
+   永不求值；且"移除内联让 fallback 活过来"会让 .term/正文/角色 token 三处各自的
+   fallback 分叉，故按 issue 的"或删除该死分支"路线删除。 */
 
 /* Keep legacy variable consumers on the same role chain. These aliases are
    replaced by explicit role values in themeCssSnapshot when a preset/zone
