@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Settings from '../../components/Settings'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resetStores } from '../../test/resetStores'
+import { mountSettingsSheet } from '../../test/settingsSheetHarness'
+import { openOrFocusSettingsSheet } from '../../sheets/settingsSheetNavigation'
 import SheetTabStrip from '../SheetTabStrip'
 import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import type { SheetRecord } from '../sheetTypes'
@@ -145,18 +146,16 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
   })
 
   describe('Settings（Agent 状态区）', () => {
-    // I13-W2：一级域切换由标题栏设置菜单发出 canonical intent；Settings
-    // 只负责当前域内的 section 导航，不再依赖已移除的 domain rail。
+    // #154 阶段 4 改写：open-settings intent 不再由 Settings 组件内监听消费，
+    // 挂载即带归一意图（openOrFocusSettingsSheet 同一入口的落点），语义不变。
     const openAgentTab = () => {
       act(() => {
-        window.dispatchEvent(new CustomEvent('pylon:open-settings', {
-          detail: { domain: 'agents-connections', section: 'agent' },
-        }))
+        openOrFocusSettingsSheet({ domain: 'agents-connections', section: 'agent' })
       })
     }
 
     it('无快照 → 状态显示“状态未知”，不出现假绿“已连接”', () => {
-      render(<Settings />)
+      mountSettingsSheet()
       openAgentTab()
 
       expect(screen.getByText('状态：状态未知')).toBeInTheDocument()
@@ -165,7 +164,7 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
 
     it('快照 connected → 状态显示“已连接”', () => {
       useRuntimeStore.setState({ agentStatuses: { peri: status('connected') } })
-      render(<Settings />)
+      mountSettingsSheet()
       openAgentTab()
 
       expect(screen.getByText('状态：已连接')).toBeInTheDocument()
@@ -177,7 +176,7 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
           peri: { agent: 'peri', agentId: 'peri', status: 'error', recentError: '心跳超时' },
         },
       })
-      render(<Settings />)
+      mountSettingsSheet()
       openAgentTab()
 
       expect(screen.getByText('状态：错误')).toBeInTheDocument()

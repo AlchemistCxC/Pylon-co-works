@@ -1,5 +1,6 @@
 // W1-01（F1-A 方案 A）：9 kind 原地替换——删 diff/changes/git-history（FileSheet 分区化，
-// 从未有内容），增 overview/search/history/browser/gateway；旧 kind 由 schema v2 normalize 清洗
+// 从未有内容），增 overview/search/history/browser/gateway；旧 kind 由 schema v2 normalize 清洗。
+// #154 阶段 4：增 settings（设置由固定覆盖层迁入 sheet 体系），10 kind。
 import type { Session } from '../identityStore'
 import { resolveWorkspace } from './workspaceRegistry.ts'
 
@@ -14,6 +15,7 @@ export const SHEET_KINDS = [
   'history',
   'browser',
   'gateway',
+  'settings',
 ] as const
 
 export type BuiltinSheetKind = typeof SHEET_KINDS[number]

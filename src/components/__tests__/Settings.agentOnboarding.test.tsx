@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
-import Settings from '../Settings.tsx'
+import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { resetStores } from '../../test/resetStores.ts'
 import { useIdentityStore } from '../../identityStore.ts'
 
@@ -40,13 +40,13 @@ describe('Settings Agent onboarding', () => {
   })
 
   it('进入 Agent 设置即挂载运行时发现入口，无需先展开高级组', () => {
-    render(<Settings initialDomain="agents-connections" initialSection="agent" />)
+    mountSettingsSheet({ domain: 'agents-connections', section: 'agent' })
 
     expect(screen.getByTestId('agent-runtime-panel')).toBeInTheDocument()
   })
 
   it('错误恢复入口把目标 Agent 传给运行时管理面板', () => {
-    render(<Settings initialDomain="agents-connections" initialSection="agent" initialAgentId="peri" />)
+    mountSettingsSheet({ domain: 'agents-connections', section: 'agent', agentId: 'peri' })
 
     expect(screen.getByTestId('agent-runtime-panel')).toHaveAttribute('data-agent-id', 'peri')
   })

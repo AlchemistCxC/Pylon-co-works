@@ -22,7 +22,10 @@ const CHUNK_BUDGET = 450_000
 // 2026-09-05 重定标：P30–P45（插件化设置系统、插件 runtime、错误中心、字体体系、
 // 流式终态一致性等）落地后 fresh build 为 1,577,822 B；旧预算 630,000 自 P0-P3
 // 后未随版重定（本门禁不在 check:frontend/CI 链内）。保留约 1.4% 余量。
-const TOTAL_GZIP_BUDGET = 1_600_000
+// 2026-09-19 重定标：#154 阶段 4（设置迁入 sheet 体系：新 settings sheet kind、
+// 左栏导航组件、导航状态模块；同轮删除设置覆盖层 shell CSS）后 fresh build 为
+// 1,600,220 B，旧预算仅超 220 B（0.014%）。按 1,615,000 定标，保留约 0.9% 余量。
+const TOTAL_GZIP_BUDGET = 1_615_000
 
 if (!exists(distDir)) {
   console.error('dist/assets 不存在——请先 npm run build')
