@@ -112,15 +112,24 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
    */
   const dragGeometryRef = useRef<readonly { id: string; center: number }[] | null>(null)
   const moduleIds = useMemo(() => modules.map(contribution => contribution.id), [modules])
+  /**
+   * 钉区起点：栈里第一个 `alwaysOpen` 模块的下标（`applyModulePrefs` 保证它们都在栈底）。
+   * 拖拽只能落在钉区**之前**——常驻模块是左栏主体（会话），用户要求它「始终位于模块最下方」，
+   * 不该被一次拖拽挤到中间去，也不该被谁顶下去。
+   */
+  const pinnedStart = useMemo(() => {
+    const index = modules.findIndex(contribution => contribution.alwaysOpen === true)
+    return index < 0 ? modules.length : index
+  }, [modules])
 
-  /** 落点序号：冻结几何里中心线在光标之上的模块个数。 */
+  /** 落点序号：冻结几何里中心线在光标之上的模块个数，钳在钉区之前。 */
   const dropIndexAt = useCallback((clientY: number): number => {
     const geometry = dragGeometryRef.current
     if (!geometry) return 0
     let index = 0
     for (const entry of geometry) { if (clientY > entry.center) index += 1 }
-    return index
-  }, [])
+    return Math.min(index, pinnedStart)
+  }, [pinnedStart])
 
   const cancelPress = useCallback(() => {
     const press = pressRef.current
@@ -138,6 +147,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
    */
   const onHeadPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, contributionId: string) => {
     if (event.button !== 0) return
+    // 钉住的常驻模块不拖：它能去哪儿？钉区之上的位置对它没有意义，又会让「会话永远在最后」失效。
+    if (modules.find(contribution => contribution.id === contributionId)?.alwaysOpen === true) return
     // **捕获只能发生在真的进入拖拽那一刻，绝不能在按下时。**
     // 捕获会把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在「按下目标」与
     // 「抬起目标」的**最近公共祖先**上——于是头内部的按钮（标题、折叠钮、「打开」、头部动作）
@@ -161,8 +172,9 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       setDropIndex(moduleIds.indexOf(contributionId))
     }, LONG_PRESS_MS)
     pressRef.current = { timer, pointerId, startX: event.clientX, startY: event.clientY }
-  // moduleIds 变化（显隐/次序变了）时要重建回调：长按进入拖拽时用它算初始落点，用旧次序会导致一按下就偏位。
-  }, [moduleIds])
+  // moduleIds / 模块集合变化（显隐、次序、钉住与否）时要重建回调：长按进入拖拽时用它算初始落点，
+  // 用旧次序会导致一按下就偏位。
+  }, [moduleIds, modules])
 
   /**
    * 按下后指针离开模块头就取消长按。
@@ -305,7 +317,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       >
         <div
           className="sidebar-block-head"
-          title="长按可拖动调整模块次序"
+          title={contribution.alwaysOpen === true ? '常驻模块固定在栈底' : '长按可拖动调整模块次序'}
           onPointerDown={event => onHeadPointerDown(event, contributionId)}
           onPointerMove={onHeadPointerMove}
           onPointerLeave={onHeadPointerLeave}

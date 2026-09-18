@@ -751,7 +751,7 @@ context.sidebar.registerAgentSidebarContribution({
 | `onTitleClick` | 否 | `'expand'` | 标题点击语义：`'expand'` 展开/折叠 · `'page'` 进入整页 |
 | `collapsible` | 否 | `true` | 是否可折叠（`alwaysOpen` 的模块同样可折叠） |
 | `defaultCollapsed` | 否 | `false` | 首次出现时的折叠默认值（用户显式操作以用户为准） |
-| `alwaysOpen` | 否 | `false` | 常驻：**不可隐藏**、不出现在显隐设置的可改项里、首次出现时默认展开（**不压制折叠**） |
+| `alwaysOpen` | 否 | `false` | 常驻：**不可隐藏**、不出现在显隐设置的可改项里、首次出现时默认展开（**不压制折叠**），且**钉在模块栈底**——它不响应长按拖拽，别的模块也拖不到它下面（左栏主体如会话区因此稳定在最后） |
 | `page` | 否 | 无 | `{ title }`；声明后该模块可展开成主区整页 |
 | `headerActions` | 否 | `[]` | 头部动作按钮（宿主渲染，见下） |
 | `when` | 否 | 恒可见 | 可见性谓词，入参 `{ activeAgentId, activeSessionId }` |
@@ -811,7 +811,7 @@ context.sidebar.registerAgentSidebarContribution({
 
 **内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）、以及四个 mock 模块（定时 / 自动化 / 任务 / 扩展）。**模块自己拥有自己的查询**——宿主不再下发 `query`，插件想过滤自己的内容就在自己的组件里存。
 
-**顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。
+**顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏、也不参与排序（钉在栈底，拖拽落点被钳在钉区之前）；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。次序偏好在收纳时统一收敛，因此手改过的旧偏好同样不会把常驻模块排到前面。
 
 右栏面板（上下文面板）注册：
 
