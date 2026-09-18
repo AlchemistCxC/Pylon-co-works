@@ -38,7 +38,12 @@ const OPEN_PAGE_ACTION = '__open_page__'
 const LONG_PRESS_MS = 260
 /** 长按期间移动超过这个距离（px）即判定为点击/滚动，取消拖拽。 */
 const LONG_PRESS_SLOP_PX = 6
-/** 拖拽结束后多久内忽略 click——否则抬起那一下会连带触发标题的展开/进页面。 */
+/**
+ * 拖拽结束后多久内忽略 click——否则抬起那一下会连带触发标题的展开/进页面。
+ *
+ * 拖拽时指针已被捕获，`click` 会被改派到模块头（见 `onHeadPointerDown`），标题本就不该收到它；
+ * 这条是**兜底**：捕获不可用的环境（如 jsdom、旧 WebView2）里改派不发生，click 会照常落在按钮上。
+ */
 const DRAG_CLICK_SUPPRESS_MS = 320
 
 /**
@@ -133,21 +138,43 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
    */
   const onHeadPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, contributionId: string) => {
     if (event.button !== 0) return
-    // 指针捕获是「拖出元素外仍收得到 pointermove」的关键，但并非所有环境都实现
-    // （jsdom 就没有）。缺了它拖拽退化但仍可用，不该整个拖不动。
-    event.currentTarget.setPointerCapture?.(event.pointerId)
+    // **捕获只能发生在真的进入拖拽那一刻，绝不能在按下时。**
+    // 捕获会把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在「按下目标」与
+    // 「抬起目标」的**最近公共祖先**上——于是头内部的按钮（标题、折叠钮、「打开」、头部动作）
+    // 全都收不到 click，实机表现为「左栏所有按钮点了没反应」。实测捕获在按时：
+    // pointerdown@.sidebar-block-toggle → pointerup@.sidebar-block-head → click@.sidebar-block-head。
+    // jsdom 不实现指针捕获，这个改派在单测里复现不出来，所以由 `Sidebar.blocks.test.tsx`
+    // 对**捕获时机**本身下断言。
+    const head = event.currentTarget
+    const pointerId = event.pointerId
     const timer = window.setTimeout(() => {
       pressRef.current = null
+      // 指针仍按着才可能走到这里——抬起与取消都会清掉这个计时器。
+      // 捕获是「拖出元素外仍收得到 pointermove」的关键，但并非所有环境都实现
+      // （jsdom 就没有）。缺了它拖拽退化但仍可用，不该整个拖不动。
+      head.setPointerCapture?.(pointerId)
       dragGeometryRef.current = [...document.querySelectorAll<HTMLElement>('.sidebar-block[data-module-id]')].map(node => {
         const rect = node.getBoundingClientRect()
         return { id: node.dataset.moduleId ?? '', center: rect.top + rect.height / 2 }
       })
-      setDrag({ id: contributionId, pointerId: event.pointerId })
+      setDrag({ id: contributionId, pointerId })
       setDropIndex(moduleIds.indexOf(contributionId))
     }, LONG_PRESS_MS)
-    pressRef.current = { timer, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY }
+    pressRef.current = { timer, pointerId, startX: event.clientX, startY: event.clientY }
   // moduleIds 变化（显隐/次序变了）时要重建回调：长按进入拖拽时用它算初始落点，用旧次序会导致一按下就偏位。
   }, [moduleIds])
+
+  /**
+   * 按下后指针离开模块头就取消长按。
+   *
+   * 取消捕获之后，头以外的 pointermove 收不到了，`LONG_PRESS_SLOP_PX` 也就测不到——用户按住
+   * 又快速移开（其实是想滚动或点别处）时计时器仍会照常触发拖拽。`pointerleave` 补上这个信号：
+   * 它只在真的离开头的边界时触发，在头内部的子元素之间移动不会触发。
+   */
+  const onHeadPointerLeave = useCallback(() => {
+    // 已经在拖拽（几何已冻结）时不取消：捕获之后指针本就该自由移动。
+    if (dragGeometryRef.current === null) cancelPress()
+  }, [cancelPress])
 
   const onHeadPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const press = pressRef.current
@@ -281,6 +308,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
           title="长按可拖动调整模块次序"
           onPointerDown={event => onHeadPointerDown(event, contributionId)}
           onPointerMove={onHeadPointerMove}
+          onPointerLeave={onHeadPointerLeave}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
         >

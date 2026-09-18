@@ -221,6 +221,70 @@ describe('左栏模块栈模型', () => {
     }
   })
 
+  /**
+   * 回归：捕获时机。
+   *
+   * Chromium 的 `click` 派发在「按下目标」与「抬起目标的**最近公共祖先**」上；在按下时就捕获
+   * 指针会把抬起目标改写成捕获元素（模块头），于是头内部的按钮全部收不到 click——「左栏所有
+   * 按钮点了没反应」就是这么来的（实机实测：click@.sidebar-block-head）。
+   *
+   * jsdom 不实现指针捕获，改派本身复现不出来，所以这里断言的是**捕获发生在何时**：按下不捕获、
+   * 长按到点才捕获。这条断言在旧实现（按下即捕获）下会红。
+   */
+  it('按下模块头不捕获指针，长按到点进入拖拽才捕获（否则头内部按钮的 click 会被改派走）', () => {
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'setPointerCapture')
+    const captured: Array<{ target: unknown; pointerId: number }> = []
+    Object.defineProperty(Element.prototype, 'setPointerCapture', {
+      configurable: true,
+      writable: true,
+      value(this: Element, pointerId: number) { captured.push({ target: this, pointerId }) },
+    })
+    vi.useFakeTimers()
+    try {
+      register({ id: 'a', label: '定时', component: () => <Body name="a" /> })
+      render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
+
+      const block = blockOf('a')
+      const head = block.querySelector('.sidebar-block-head') as HTMLElement
+      const toggle = block.querySelector('.sidebar-block-toggle') as HTMLElement
+
+      fireEvent.pointerDown(toggle, { pointerId: 7, button: 0, clientX: 12, clientY: 10 })
+      expect(captured).toEqual([])
+
+      act(() => { vi.advanceTimersByTime(300) })
+      expect(captured).toEqual([{ target: head, pointerId: 7 }])
+      expect(block).toHaveAttribute('data-dragging', 'true')
+      fireEvent.pointerUp(head, { pointerId: 7 })
+    } finally {
+      vi.useRealTimers()
+      if (original) Object.defineProperty(Element.prototype, 'setPointerCapture', original)
+      else delete (Element.prototype as unknown as Record<string, unknown>).setPointerCapture
+    }
+  })
+
+  it('按下后指针离开模块头即取消长按（无捕获时外部移动收不到，拖拽会误触发）', () => {
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'setPointerCapture')
+    Object.defineProperty(Element.prototype, 'setPointerCapture', { configurable: true, writable: true, value: () => {} })
+    vi.useFakeTimers()
+    try {
+      register({ id: 'a', label: '定时', component: () => <Body name="a" /> })
+      render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
+
+      const block = blockOf('a')
+      const head = block.querySelector('.sidebar-block-head') as HTMLElement
+      fireEvent.pointerDown(head, { pointerId: 1, button: 0, clientX: 12, clientY: 10 })
+      fireEvent.pointerLeave(head, { pointerId: 1, clientX: 12, clientY: 200 })
+      act(() => { vi.advanceTimersByTime(400) })
+
+      expect(block).toHaveAttribute('data-dragging', 'false')
+      fireEvent.pointerUp(head, { pointerId: 1 })
+    } finally {
+      vi.useRealTimers()
+      if (original) Object.defineProperty(Element.prototype, 'setPointerCapture', original)
+      else delete (Element.prototype as unknown as Record<string, unknown>).setPointerCapture
+    }
+  })
+
   it('损坏／旧模型的持久化状态回落为空：模块全部展开，不抛错', () => {
     register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
     render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ sidebarMode: 'chat', blockCollapsed: 'nope' }} />)

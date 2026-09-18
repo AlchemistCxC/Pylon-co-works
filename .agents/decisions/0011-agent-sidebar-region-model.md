@@ -48,7 +48,7 @@
 5. **`order` 与 `when` 真正生效**：同一分区内按 `order` 纵向堆叠；`when(context)` 为假时区块整体不渲染。
 6. **会话按 cwd 分组，无 cwd 组置底**：旧「聊天」面板并入会话区块，无 `workspaceId` 的会话落在**列表最底部的独立分组**（`无工作区`，复用既有 `.cwd-group` / `.cwd-group-sessions.is-collapsed` 折叠机制），不再占一个互斥页签。
 7. **状态换形状、零存储键迁移**：`AgentWorkspaceState` 由 `{ sidebarMode }` 改为 `{ blockCollapsed: Record<string, boolean> }`。用**显式映射**而不是「塌陷 id 清单」，因为贡献可声明 `defaultCollapsed`：只记塌陷项的话，用户把默认塌陷的区块展开后无处落笔。收敛集中在 `normalizeBlockState`，旧形状（含旧 `sidebarMode`）一律回落空映射，持久化键不变。
-8. **搜索归会话区**：搜索框只过滤会话，因此从整栏表头移入会话区顶部。
+8. **搜索归会话区**：搜索框只过滤会话，因此从整栏表头移入会话区顶部。（**已由第 28 条取代**：搜索最终独立成一个模块。）
 9. **清理 work/chat 轴的连带残留**：`workspaceMode` 这条轴被整条删除——它曾是「会话创建前置校验（`请先选择工作区`）+ 空态两套文案 + 渲染器套件门控」三件事，值来自 `sidebarMode`。删除后：创建无 cwd 会话成为合法意图（守卫删除）、空态收敛为一套文案、`MessageRenderContext` / `WorkbenchMountInput` 不再有该字段。**这是对 spec 154「中控区不碰」的已授权偏离**：只删失效语义分支，不重排中控区布局与样式（`ControlCenter.css` 一字未动）。
 10. **插件 API 升 major 至 2.0**：`PYLON_PLUGIN_API_LATEST = '2.0'`，allowlist 追加 `'2.0'`（1.0–1.3 继续激活），manifest schema 的 `api` enum 同步。manifest 字段形状相对 1.3 不变，故 1.x 清单仍可解析；**引用旧 `mode` 的左栏贡献必须按 2.0 重写**。
 11. **删除 CLI 命令 `layout.agent-sidebar.set`**，替代品 `layout.agent-sidebar.block.set { sheetId, blockId, collapsed }`（读改写 `blockCollapsed`，不整块覆盖）。
@@ -73,6 +73,7 @@
 27. **`alwaysOpen` 语义收窄为「不可隐藏」**（用户要求「为会话添加折叠功能，点击后工作区啥的都收进来」）：它不再压制折叠，也不再与 `collapsible` 互斥（注册期那条校验删除）。常驻只表示：不出现在显隐设置的可改项里 + 首次出现默认展开。
 28. **搜索独立成模块**（用户：「搜索独立出来作为一个模块，成为 VSCode 搜索侧栏那种」）：新 `builtin.sidebar.module.search`，自持查询、带框输入 + 清除 + 命中计数 + 按工作区分组的命中结果；**会话列表不再被过滤**（一个查询驱动两处呈现会让人分不清哪边是「结果」）。连带把 `query` / `onQueryChange` 从 props 契约与 isolated wire 契约里删除（宿主不再下发 query，模块自己存），`when` 的入参也只剩 `{ activeAgentId, activeSessionId }`。
 29. **空工作区的折叠/展开不再引起高度变化**（用户实机报「细微的高度变化」）：空组不再渲染 `.cwd-group-sessions` 容器——它自带 1px/2px 内边距，展开态因此比折叠态高几像素。
+30. **指针捕获只发生在「真的进入拖拽」那一刻**（用户实机报「让搜索可以折叠」）。长按拖拽最初在 `pointerdown` 就 `setPointerCapture`，于是 `pointerup` 的目标被改写成捕获元素（模块头），而 `click` 派发在「按下目标」与「抬起目标」的**最近公共祖先**上——头内部的按钮（标题、折叠钮、「打开」、头部动作）全场收不到 click，表现为「左栏所有按钮点了没反应」（自长按拖拽落地起一直如此）。改为长按计时器触发时才捕获：那时 click 反正要被吞，捕获无害。同时补 `pointerleave` 取消长按——不捕获之后头以外的 `pointermove` 收不到，`LONG_PRESS_SLOP_PX` 便形同虚设，用户按住又快速移开（其实想滚动或点别处）时会误触发拖拽。**jsdom 不实现指针捕获，这个改派在单测里复现不出来**，因此用例改为对捕获**时机**本身下断言（按下不捕获、长按到点才捕获），并做了变异校验。`DRAG_CLICK_SUPPRESS_MS` 降级为「捕获不可用环境」的兜底。
 
 ## 后果
 

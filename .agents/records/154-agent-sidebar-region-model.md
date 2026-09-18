@@ -220,3 +220,25 @@
 **新增测试**：`SearchPanel.test.tsx`（未输入提示 / 按名命中并按工作区分组 / 工作区名命中列出全部 / 无命中空态 / 点击选中与清除 / 选中态）；CSS 契约扩到 14 条（新增落点指示线、搜索模块专属面板部件、旧内联搜索不得复活）。
 
 **门禁**：`tsc -b` 无输出；`eslint src/` 0 error；全量 **601 文件 / 4359 用例通过**。
+
+
+### 追加轮四（同日）：左栏所有按钮失效——指针捕获时机 + 两条新用例
+
+| 用户反馈 | 根因 | 做法 |
+| --- | --- | --- |
+| 「让搜索可以折叠」（点标题没反应） | 长按拖拽在 **`pointerdown` 就 `setPointerCapture`**：捕获把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在「按下目标」与「抬起目标」的**最近公共祖先**上 ⇒ 头内部的标题按钮、折叠钮、「打开」、头部动作全部收不到 click。**影响面不止搜索**：左栏所有按钮自长按拖拽落地（`1b4854f0`）起一直是死的。jsdom 不实现指针捕获，单测复现不出 | 捕获**推迟到长按计时器触发那一刻**（真的进拖拽才捕获，那时 click 本就要被吞，捕获无害）；补 `onPointerLeave` 取消长按（不捕获后头以外的 pointermove 收不到，`LONG_PRESS_SLOP_PX` 形同虚设）；`DRAG_CLICK_SUPPRESS_MS` 降级为「捕获不可用环境」的兜底 |
+
+**实机数值证据**（`D:\pylon-acceptance-target\debug\pylon.exe`，CDP 9222；probe 挂在 document 捕获阶段）：
+
+| 测点 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 点击搜索模块标题的事件目标链 | `pointerdown@.sidebar-block-toggle` → `pointerup@.sidebar-block-head` → **`click@.sidebar-block-head`** | `pointerdown@.sidebar-block-toggle` → `pointerup@.sidebar-block-toggle` → **`click@.sidebar-block-toggle`** |
+| 点击后 `data-collapsed` | `false`（无反应，落盘无该键） | `true`；`.sidebar-block-body` 节点 1 → **0**；落盘 `blockCollapsed["builtin.sidebar.module.search"]=true` |
+| 自动化模块的独立折叠钮（`onTitleClick:'page'`） | `true`（无反应） | `false`，body 重新出现 |
+| 头部动作「打开」（定时模块） | 无反应 | `.agent-sheet-page` 出现、标题「定时」、`data-page-open="true"`；Esc 后回 `false` |
+| 长按拖拽（按住 450ms 后移动） | — | `data-dragging="true"`，落点指示线 **1** 条；拖到 y=345 → 指示线 y=395（末尾插入点）；抬起后落盘次序 `[automation, search, scheduled, extensions, sessions, tasks]` 与渲染次序一致；再拖回 y=140 次序复原 |
+| 唯一仍改派到头的场景 | — | 拖拽自身（那时 click 本就该被吞） |
+
+**新增用例（2 条，该文件共 15 条）**：① 捕获时机——按下不捕获、长按到点才以 `pointerId` 捕获；做过**变异校验**：把捕获挪回 `pointerdown`，该用例即红。② `pointerleave` 取消长按——按下后离开模块头，计时器到点也不进拖拽。
+
+**门禁**：`tsc -b` 无输出；`eslint src/` 0 error（仅既有 `RightRailHost` warning）；全量 **601 文件 / 4361 用例通过**（+2）。
