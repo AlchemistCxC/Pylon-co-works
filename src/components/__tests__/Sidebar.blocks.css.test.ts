@@ -100,6 +100,8 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.session-item')).toMatch(/gap:5px/)
     const toggle = sidebarCss.match(/\.cwd-group-toggle \{([^}]*)\}/)?.[1] ?? ''
     expect(toggle, '工作区组头的图标↔名字间距').toMatch(/gap:5px/)
+    // 模式级覆盖也必须同值：terminal-like 曾把带动作的行压到 4px，会话名因此差 1px。
+    expect(sidebarCss, '模式级行间距不得偏离 5px').toMatch(/\.session-item:has\(\.session-actions\) \{\s*gap:5px/)
   })
 
   it('选中态用阴影而不是框：边框透明、阴影里带左侧强调条', () => {

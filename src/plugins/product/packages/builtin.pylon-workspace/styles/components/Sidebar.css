@@ -501,9 +501,11 @@
   gap:2px;
   margin-left:auto;
 }
+/* 行内间距必须是 5px：4px 会让会话名落在 x=25，与工作区名（x=26）差 1px——
+   实测出来的。这一条是模式级覆盖，最容易与基线的对齐契约悄悄漂开。 */
 .app[data-interface-mode="terminal-like"] .session-item:has(> .session-action),
 .app[data-interface-mode="terminal-like"] .session-item:has(.session-actions) {
-  gap:4px;
+  gap:5px;
 }
 .app[data-interface-mode="terminal-like"] .session-item > .session-action,
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action {
