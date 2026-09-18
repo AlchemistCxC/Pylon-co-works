@@ -199,3 +199,7 @@
 **⚠️ 偏离声明**：spec 154 写「中控区不碰」，但彻底删掉 work/chat 轴必须动 `ControlCenter.solid.tsx` 的两处（一个「请先选择工作区」提交守卫 + 一个工作区下拉项文案）与 `src/renderers/solid-workbench/**` 的字段透传。用户已批准「怎么彻底怎么来」。**仅删失效语义分支，不重排中控区布局/样式**；`ControlCenter.css` 一字不动。
 
 **从 ADR-0009 继承的验收口径**：逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」数值相等；折叠 = 0 宽；轨道处带右边框的元素恰好 1 个。左栏新样式不得打破这三条。
+
+**⚠️ 停工留档（2026-09-18 午后）—— 工作树当前是「故意的半成品」，门禁红**：用户叫停（计费高峰），本轮**停在契约层**。已改：`src/plugin-runtime/sidebar/{sidebarTypes,sidebarRegistry}.ts`（删 `AgentSidebarMode`，加 `region` / `headerActions` / `collapsible`）。未改完：`AGENT_SIDEBAR_REGIONS` 常量尚未定义，且 `src/components/Sidebar.tsx` 等消费方仍 import 旧类型 ⇒ **`bunx tsc -b` 与 `check:frontend` 现在会红，且错误源自我方在途文件**。据此排查其他故障前先看这里。用户明确要求**保留现场、不做恢复**。
+
+**⚠️ `AGENTS.md` 根目录文件当前有未提交改动，属用户本人正在编辑，非我方产物**——不 stage、不提交、不改写。按 AGENTS §2.1 共享工作树纪律办理。
