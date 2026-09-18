@@ -371,7 +371,15 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
             })}
           </div>
         </div>
-        {!collapsed && <div className="sidebar-block-body">{body}</div>}
+        {/* body **常驻**，折叠靠 CSS 把行高收到 0（`grid-template-rows: 1fr → 0fr` + 淡出），
+            于是展开/折叠有过渡——此前是「折叠即卸载」，动作是瞬跳的，而同一栏里的工作区组
+            早就有收起动画（用户：「折叠动效…只有部分地方有」）。
+            折叠时必须 `inert`：高度 0 挡不住键盘焦点，本仓踩过「宽度 0 的按钮照样 focusable」。
+            副作用是贡献在折叠期间保持挂载——与右栏「折叠不卸载面板」同一取舍，模块内状态
+            （如搜索词）因此跨折叠保留。 */}
+        <div className="sidebar-block-body" inert={collapsed || undefined}>
+          <div className="sidebar-block-body-inner">{body}</div>
+        </div>
       </section>
     )
   }

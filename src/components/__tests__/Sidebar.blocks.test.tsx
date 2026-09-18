@@ -103,7 +103,7 @@ describe('左栏模块栈模型', () => {
     expect(screen.getByText('定时')).toBeInTheDocument()
   })
 
-  it('标题点击展开/折叠（默认语义），折叠后不渲染 body 且状态写回 sheet', () => {
+  it('标题点击展开/折叠（默认语义）：折叠后 body 仍挂载但被 inert 且零高，状态写回 sheet', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
@@ -115,7 +115,19 @@ describe('左栏模块栈模型', () => {
 
     view.rerender(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { mod: true }, activePageId: null }} />)
     expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'true')
-    expect(screen.queryByTestId('body-mod')).toBeNull()
+    // body **不再卸载**：折叠是 CSS 把行高收到 0（有过渡），因此这里断言「挂载但不可交互」。
+    const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
+    expect(body).not.toBeNull()
+    expect(body).toHaveAttribute('inert')
+    expect(screen.getByTestId('body-mod')).toBeInTheDocument()
+  })
+
+  it('展开态 body 不 inert（折叠是过渡而不是卸载，交互门控靠 inert）', () => {
+    register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {} }} />)
+    const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
+    expect(body).not.toBeNull()
+    expect(body).not.toHaveAttribute('inert')
   })
 
   it('alwaysOpen 的模块**也可折叠**（常驻只表示不可隐藏），默认展开', () => {
