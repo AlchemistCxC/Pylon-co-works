@@ -110,7 +110,9 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 ### 3.3 布局与 Sheet
 
-`layout.inspect`、`layout.sidebar.set`、`layout.sidebar-width.set`、`layout.right-panel.set`、`layout.pet.set`、`layout.agent-sidebar.set`、`workspace.sheet.focus`、`workspace.sheet.pin.toggle`、`workspace.sheet.close-others`、`workspace.sheet.close-right`、`workspace.sheet.reopen`。
+`layout.inspect`、`layout.sidebar.set`、`layout.sidebar-width.set`、`layout.right-panel.set`、`layout.pet.set`、`layout.agent-sidebar.block.set`、`workspace.sheet.focus`、`workspace.sheet.pin.toggle`、`workspace.sheet.close-others`、`workspace.sheet.close-right`、`workspace.sheet.reopen`。
+
+`layout.agent-sidebar.block.set` 的入参是 `{ sheetId, blockId, collapsed }`，用于设置 Agent Sheet 左栏某个区块的折叠状态。它取代了 `layout.agent-sidebar.set`——后者设置的 `sidebarMode ('work' | 'chat')` 随「左栏是一对互斥视图」的旧模型一并废除，参数已无消费方。
 
 ### 3.4 呈现风格
 

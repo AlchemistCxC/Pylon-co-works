@@ -142,21 +142,21 @@ describe('AgentSheetView renderer mode context', () => {
     useWorkspaceStore.setState({ workspaceSheets: { ...useWorkspaceStore.getState().workspaceSheets, activeSheetId: 'agent-sheet' } })
     useIdentityStore.setState({ sessions: [mock], sessionsHydrated: true })
     persistMessageSnapshot(mock.id, [{ id: 'mock-recovery-body', role: 'assistant', sender: 'peri', content: 'mock 从空态恢复的正文', time: '12:00' }], localStorage)
-    const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: null }} />)
+    const view = render(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: null }} />)
     await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     expect(screen.queryByText('mock 从空态恢复的正文')).toBeNull()
 
-    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
+    view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
     expect(await screen.findByText('mock 从空态恢复的正文')).toBeVisible()
     expect(localStorage.getItem(messageStorageKey(mock.id))).toContain('mock 从空态恢复的正文')
-    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: null }} />)
+    view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: null }} />)
     await waitFor(() => expect(screen.queryByText('mock 从空态恢复的正文')).toBeNull())
-    view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
+    view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: mock.id, sessionSource: () => mock.source }} />)
     expect(await screen.findByText('mock 从空态恢复的正文')).toBeVisible()
   })
 
   it('默认 Interface Mode 经 Renderer Suite Host 挂载内置 Solid Workbench', async () => {
-    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
     expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
     expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).toBeNull()
@@ -175,7 +175,7 @@ describe('AgentSheetView renderer mode context', () => {
 
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
     useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     publishPluginEvent(normalizeRawEvent(
       { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'base slot answer' } } },
@@ -195,7 +195,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         {
@@ -257,7 +257,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         {
@@ -302,7 +302,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -371,7 +371,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -398,7 +398,7 @@ describe('AgentSheetView renderer mode context', () => {
     settings.setOverride('kind.content.text.fontSize', 22)
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
     useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     publishPluginEvent(normalizeRawEvent(
       { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'configured content' } } },
@@ -432,7 +432,7 @@ describe('AgentSheetView renderer mode context', () => {
       usePresentationPreferenceStore.setState({ activeProfileId: 'test.c00-profile' })
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'profile content' } } },
@@ -491,10 +491,10 @@ describe('AgentSheetView renderer mode context', () => {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.session-suite')
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a'), session('session-2', 'local:b')] })
       const firstCtx = { ...ctx, activeSession: 'session-1' }
-      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={firstCtx} />)
+      const view = render(<AgentSheetView sheet={sheet({})} ctx={firstCtx} />)
       await screen.findByText('session-aware-suite')
 
-      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-2' }} />)
+      view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-2' }} />)
 
       await waitFor(() => expect(updates).toContain('session-2'))
       expect(mounts).toEqual(['session-1'])
@@ -509,7 +509,7 @@ describe('AgentSheetView renderer mode context', () => {
     const destroyed = vi.fn()
     await getPluginRuntime().activateBuiltin(suitePlugin(pluginId, 'removable-suite', false, destroyed))
     usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', `${pluginId}.suite`)
-    render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await screen.findByText('removable-suite')
 
     fakeInvoke.register('plugin_package_list', () => [{
@@ -534,7 +534,7 @@ describe('AgentSheetView renderer mode context', () => {
     await runtime.activateBuiltin(suitePlugin(pluginId, 'healthy-suite-v1'))
     usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', `${pluginId}.suite`)
     try {
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByText('healthy-suite-v1')
 
       await runtime.update(suitePlugin(pluginId, 'broken-suite-v2', true))
@@ -616,12 +616,15 @@ describe('AgentSheetView renderer mode context', () => {
     )
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-old')
-      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const view = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByText('namespace-old')
 
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-candidate')
       await waitFor(() => expect(view.container.querySelector('[data-renderer-suite-staging="test.namespace-candidate"]')).not.toBeNull())
-      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={ctx} />)
+      // 触发一次真实更新传播（切会话 → mount input 变化 → 旧实例收到 update）。
+      // 这里原本改的是 sheet state 的 `sidebarMode`；左栏模型换代后 AgentSheetView 不再读
+      // sheet state，那条路径断了，改用文件内既有的 activeSession 切换写法。
+      view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-2' }} />)
 
       await waitFor(() => expect(screen.getByText('old-owned-draft')).toBeTruthy())
     } finally {
@@ -656,7 +659,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       await fallbackRegistration.dispose()
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.failing-suite')
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
       expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid')
@@ -689,7 +692,7 @@ describe('AgentSheetView renderer mode context', () => {
     )
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
     useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     publishPluginEvent(normalizeRawEvent(
       { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'slot answer' } } },
@@ -729,7 +732,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         { update: { sessionUpdate: 'agent_thought_chunk', content: { text: 'normalized thought payload' } } },
@@ -776,7 +779,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-24T00:00:01.000Z', sequence: 1,
@@ -807,7 +810,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         { update: { sessionUpdate: 'agent_thought_chunk', content: { text: 'configured reasoning' } } },
@@ -859,7 +862,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -893,7 +896,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -936,7 +939,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1000,7 +1003,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1055,7 +1058,7 @@ describe('AgentSheetView renderer mode context', () => {
       const slotCtx = { ...ctx, activeSession: 'content-slot-session', sessionSource: () => 'local:content-slot' }
       useIdentityStore.setState({ sessions: [session('content-slot-session', 'local:content-slot')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={slotCtx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={slotCtx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       const normalizedContentEvent = normalizeRawEvent(
         { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'part payload' } } },
@@ -1098,7 +1101,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1148,7 +1151,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1218,7 +1221,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1253,7 +1256,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(createWorkbenchEnvelope({
         sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1302,7 +1305,7 @@ describe('AgentSheetView renderer mode context', () => {
   it('AgentSheet interaction command 穿过 Host gate 与统一 production transport', async () => {
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
     useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-    render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     publishPluginEvent(createWorkbenchEnvelope({
       sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
@@ -1364,7 +1367,7 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
-      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const view = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
       publishPluginEvent(normalizeRawEvent(
         { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'recoverable slot answer' } } },
@@ -1410,10 +1413,10 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.update-failing-suite')
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a'), session('session-2', 'local:b')] })
-      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-1' }} />)
+      const view = render(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-1' }} />)
       await screen.findByText('update-failing-suite')
 
-      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-2' }} />)
+      view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-2' }} />)
 
       await waitFor(() => expect(prepareCount).toBe(2), { timeout: 5_000 })
       expect(await screen.findByText('update-failing-suite')).toBeTruthy()
@@ -1463,7 +1466,7 @@ describe('AgentSheetView renderer mode context', () => {
     )
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.runtime-failing-suite')
-      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
       expect(prepareCount).toBe(3)
@@ -1511,7 +1514,7 @@ describe('AgentSheetView renderer mode context', () => {
     )
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.runtime-recovery-prepare-failing-suite')
-      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
       expect(prepareCount).toBe(3)
@@ -1551,7 +1554,7 @@ describe('AgentSheetView renderer mode context', () => {
     )
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.explicit-source')
-      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      const { container } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       await screen.findByText('explicit-fallback-suite', {}, { timeout: 5_000 })
       expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'test.explicit-fallback')
@@ -1561,22 +1564,18 @@ describe('AgentSheetView renderer mode context', () => {
     }
   })
 
-  it('把 Agent Workspace state 的 sidebarMode 经 Host input 传给 Solid，损坏值回退 work', async () => {
-    const { rerender } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={ctx} />)
-    const solid = await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
-    expect(solid).toHaveAttribute('data-session-id', 'session-1')
-    expect(solid).toHaveAttribute('data-workspace-mode', 'chat')
-
-    rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'broken' })} ctx={ctx} />)
-    await waitFor(() => expect(screen.getByLabelText('Solid Agent Workbench')).toHaveAttribute('data-workspace-mode', 'work'))
-  })
+  // 旧断言「Agent Workspace state 的 sidebarMode 经 Host input 传给 Solid」已随左栏模型换代删除：
+  // `sidebarMode ('work'|'chat')` 与它派生的 `data-workspace-mode` 都不再存在，Solid 也没了这个输入。
+  // 等价强度的替代断言在 `src/components/__tests__/Sidebar.blocks.test.tsx`（sheet state 的
+  // `blockCollapsed` 到达左栏、损坏值回落空映射）与 `workspace-sheets/__tests__/workspaceStore.integration.test.ts`
+  // 的 codec 往返用例里。
 
   it('Solid 空态提交首条请求后创建并选中会话，再向同一 owner 发送消息', async () => {
     const selectSession = vi.fn((id: string | null) => { invokeLog.push(`selectSession:${id}`) })
     fakeInvoke.register('new_session', () => Promise.resolve({ sessionId: 'remote-created' }))
 
     render(<AgentSheetView
-      sheet={sheet({ sidebarMode: 'chat' })}
+      sheet={sheet({})}
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
@@ -1614,7 +1613,7 @@ describe('AgentSheetView renderer mode context', () => {
     fakeInvoke.register('new_session', () => Promise.resolve({ sessionId: 'remote-work' }))
 
     render(<AgentSheetView
-      sheet={sheet({ sidebarMode: 'work' })}
+      sheet={sheet({})}
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
@@ -1635,12 +1634,12 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('Interface Mode 切换仍复用 Renderer Suite Host，不回到硬编码 React 工作台', async () => {
-    const { container, rerender } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    const { container, rerender } = render(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     const firstSolid = await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
     expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid')
 
     useInterfaceModeStore.setState({ interfaceMode: 'terminal-like' })
-    rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    rerender(<AgentSheetView sheet={sheet({})} ctx={ctx} />)
     await waitFor(() => expect(screen.getByLabelText('Solid Agent Workbench')).toBe(firstSolid))
     expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).toBeNull()
     expect(container.querySelector('[data-pylon-workbench="terminal-like"]')).toBeNull()

@@ -2,15 +2,14 @@ import PylonMark from '../PylonMark.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 
 interface AgentEmptyStateProps {
-  workspaceMode: 'work' | 'chat'
   sidebarCollapsed?: boolean
   onExpandSidebar?: () => void
 }
 
-export default function AgentEmptyState({ workspaceMode, sidebarCollapsed = false, onExpandSidebar }: AgentEmptyStateProps) {
-  const model = selectAgentEmptyState(workspaceMode)
+export default function AgentEmptyState({ sidebarCollapsed = false, onExpandSidebar }: AgentEmptyStateProps) {
+  const model = selectAgentEmptyState()
   return (
-    <div className="chat-empty agent-empty-state" data-workspace-mode={workspaceMode} role="region" aria-label="Agent 工作台空态">
+    <div className="chat-empty agent-empty-state" role="region" aria-label="Agent 工作台空态">
       <div className="agent-empty-brand" aria-hidden="true"><PylonMark size={52} title="" /></div>
       <div className="agent-empty-eyebrow">{model.eyebrow}</div>
       <h2 className="agent-empty-title">{model.title}</h2>

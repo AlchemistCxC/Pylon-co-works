@@ -200,23 +200,23 @@ describe('RendererRegistry', () => {
     expect(registry.resolveMessageRenderer()?.value.renderer.rendererId).toBe('capable')
   })
 
-  it('message renderer 可按 Agent Workspace mode 选择，其他 mode 回退', () => {
+  it('message renderer 可按 workspaceKind 选择，其他 kind 回退', () => {
     const registry = new RendererRegistry()
-    const owner = createPluginIdentity('test.mode-renderer', 'instance-mode')
+    const owner = createPluginIdentity('test.kind-renderer', 'instance-kind')
     registry.registerMessageRenderer(owner, {
-      id: 'work-mode', renderer: dummyRenderer('work-mode'), priority: 10, fallback: false,
-      canRender: input => input.context?.workspaceMode === 'work',
+      id: 'agent-kind', renderer: dummyRenderer('agent-kind'), priority: 10, fallback: false,
+      canRender: input => input.context?.workspaceKind === 'agent',
     })
     registry.registerMessageRenderer(owner, {
-      id: 'default-mode', renderer: dummyRenderer('default-mode'), priority: 20, fallback: true,
+      id: 'default-kind', renderer: dummyRenderer('default-kind'), priority: 20, fallback: true,
       canRender: () => true,
     })
 
     expect(registry.resolveMessageRenderer({ context: {
-      workspaceKind: 'agent', workspaceMode: 'work', agentId: 'peri', sessionId: 's1',
-    } })?.value.renderer.rendererId).toBe('work-mode')
+      workspaceKind: 'agent', agentId: 'peri', sessionId: 's1',
+    } })?.value.renderer.rendererId).toBe('agent-kind')
     expect(registry.resolveMessageRenderer({ context: {
-      workspaceKind: 'agent', workspaceMode: 'chat', agentId: 'peri', sessionId: 's1',
-    } })?.value.renderer.rendererId).toBe('default-mode')
+      workspaceKind: 'file', agentId: 'peri', sessionId: 's1',
+    } })?.value.renderer.rendererId).toBe('default-kind')
   })
 })

@@ -37,7 +37,6 @@ export interface WorkbenchMountInput {
   readonly sheetId: string
   readonly sessionOwnerKey: string | null
   readonly sessionId: string | null
-  readonly workspaceMode: 'work' | 'chat'
   readonly replayReadonly: boolean
   readonly reducedMotion: boolean
   readonly visibility: 'active' | 'background'
@@ -97,7 +96,6 @@ export interface SolidWorkbenchInput {
   preview?: boolean
   reducedMotion?: boolean
   sessionOwnerKey?: string | null
-  workspaceMode?: 'work' | 'chat'
   visibility?: 'active' | 'background'
   presentationProfileId?: string
   sessionLabel?: string
@@ -112,7 +110,6 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     sheetId: input.sheetId,
     sessionOwnerKey: input.sessionOwnerKey ?? null,
     sessionId: input.sessionId,
-    workspaceMode: input.workspaceMode ?? 'work',
     replayReadonly: input.replayReadonly === true,
     reducedMotion: input.reducedMotion === true,
     visibility: input.visibility ?? 'active',

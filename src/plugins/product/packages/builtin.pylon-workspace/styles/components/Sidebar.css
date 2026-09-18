@@ -32,19 +32,107 @@
 /* #154：外壳（宽度/边框/折叠）由布局层的 SheetSidebarSlot 渲染，Sheet 只提供内容。
    内容区自己填满外壳并各自滚动，因此各 Sheet 不再自带宽度、边框与 overflow。 */
 .sidebar::-webkit-scrollbar { display:none; }
-.sidebar-header { padding:var(--ui-space-3); display:flex; flex-direction:column; gap:var(--ui-space-2); align-items:stretch; border-bottom:1px solid var(--border); }
 /* #154 已删除原 `.sidebar > *`（opacity/transform/visibility:visible + 过渡）：那是旧
    「Sheet 自己加 collapsed 类」时代的展开动画复位。它的 `visibility:visible` 会**覆盖
    继承**，使折叠态下左栏内部控件仍可聚焦——实测 File 的 activity 图标条在轨道宽 0、
    visibility:hidden 时按钮依旧 focusable。新模型里折叠可见性只由下面那条布局层规则负责。 */
-.sidebar-mode-tabs { display:flex; width:100%; border:1px solid var(--border); }
-.sidebar-mode-tabs button { flex:1; min-width:0; height:var(--ui-control-standard); border:0; border-right:1px solid var(--border); background:transparent; color:var(--text-dim); cursor:pointer; }
-.sidebar-mode-tabs button:last-child { border-right:0; }
-.sidebar-mode-tabs button:hover { background:var(--bg-hover); color:var(--text); }
-.sidebar-mode-tabs button.active { background:var(--state-selected-bg); color:var(--text); box-shadow:inset 0 -2px 0 var(--accent); }
-.sidebar-mode-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+
+/* ── 左栏分区 ──
+   左栏是**两个分区的纵向堆叠**，不是一对互斥视图（那对「工作 / 聊天」页签已删除）。
+   `modules` 常驻能力区块贴顶、内容高度、自身滚动且有上限；`sessions` 占满剩余高度，
+   是左栏唯一的会话滚动态。上限用百分比而不是固定 px：左栏宽度可拖拽、高度随窗口变化，
+   固定值在窄窗会把会话区挤没。 */
+.sidebar-region { display:flex; flex-direction:column; min-height:0; }
+.sidebar-region[data-region="modules"] {
+  flex:0 0 auto;
+  max-height:var(--sidebar-modules-max-height, 42%);
+  overflow-y:auto;
+  border-bottom:1px solid var(--border);
+}
+.sidebar-region[data-region="sessions"] { flex:1 1 auto; }
+/* 模块区的区块**不得被压缩**：分区有 max-height，若区块保留默认的 `flex-shrink:1`，
+   四个区块会各自被压到小于内容高度——实测自然高 418px 被压成 111/85/69/51，内容溢出到
+   下一个区块头上，看着像区块互相重叠。改成长度即内容高度，溢出交给分区的 overflow 滚动。 */
+.sidebar-region[data-region="modules"] > .sidebar-block { flex:0 0 auto; }
+.sidebar-region-search { padding:var(--ui-space-2) var(--ui-space-3); }
+
+/* ── 区块外壳 ──
+   外壳（标题 + 折叠钮 + 头部动作）归**宿主**渲染，贡献只画 `.sidebar-block-body`。
+   旧模型里每个面板各画一份 `.sidebar-section-head`、标题写死在组件内，于是注册表的
+   `label` 无人读取，模式页签与分区头还重复出现同一个词。 */
+.sidebar-block { display:flex; flex-direction:column; min-height:0; }
+.sidebar-block[data-region="sessions"] { flex:1 1 auto; }
+.sidebar-block-head {
+  display:flex; align-items:center; gap:var(--ui-space-2);
+  min-height:26px;
+  padding:1px var(--ui-space-3);
+  background:color-mix(in srgb,var(--bg-panel) 72%,transparent);
+}
+/* 标题即「打开整页」的入口（区块声明了 page 时）；没有页面时它退化为折叠开关。 */
+.sidebar-block-toggle {
+  flex:1 1 auto; min-width:0;
+  display:flex; align-items:center; gap:6px;
+  padding:0; border:0; background:transparent; cursor:pointer;
+  color:var(--text); font-size:12px; font-weight:700; letter-spacing:.04em; text-align:left;
+}
+.sidebar-block-toggle:disabled { cursor:default; }
+.sidebar-block-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+/* 已展开成整页的区块：标题用强调色，左栏与主区因此互相对得上。 */
+.sidebar-block[data-page-open="true"] > .sidebar-block-head { background:color-mix(in srgb,var(--accent) 10%,transparent); }
+.sidebar-block[data-page-open="true"] .sidebar-block-title { color:var(--accent); }
+/* 折叠钮是**独立**的按钮（标题已被「打开整页」占用）；箭头默认压淡、悬停/聚焦才亮，
+   与组头同一处理——用户点名「折叠按钮也太显眼」。 */
+.sidebar-block-collapse { flex:0 0 auto; display:grid; place-items:center; width:18px; height:18px; padding:0; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:var(--text-dim); cursor:pointer; }
+.sidebar-block-collapse:hover { background:var(--bg-hover); color:var(--text); }
+.sidebar-block-collapse:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.sidebar-block-arrow { flex:0 0 auto; color:var(--text-dim); font-size:10px; opacity:.32; transition:opacity var(--motion-fast) var(--ease-standard); }
+.sidebar-block-head:hover .sidebar-block-arrow,
+.sidebar-block-collapse:focus-visible .sidebar-block-arrow { opacity:.85; }
+.sidebar-block-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-block-actions { flex:0 0 auto; display:flex; align-items:center; gap:2px; }
+.sidebar-block-action {
+  display:flex; align-items:center; gap:4px;
+  min-height:22px; padding:0 var(--ui-space-2);
+  border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent;
+  color:var(--text-dim); cursor:pointer; font-size:11px;
+}
+.sidebar-block-action:hover:not(:disabled) { color:var(--text); background:var(--bg-hover); border-color:var(--border); }
+.sidebar-block-action:disabled { opacity:.5; cursor:default; }
+.sidebar-block-action:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.sidebar-block-body { display:flex; flex-direction:column; min-height:0; }
+.sidebar-block[data-region="sessions"] > .sidebar-block-body { flex:1 1 auto; }
+.sidebar-block-body-surface { display:flex; flex-direction:column; min-height:0; }
+
+/* 模块区块的占位体型：列表 / 列表+开关 / 计数量表 / 摘要+动作。
+   这四条服务于 `sidebar/blocks/mockBlocks.tsx`；真实能力落地时按需替换。 */
+.sidebar-block-list { margin:0; padding:var(--ui-space-2) var(--ui-space-3); list-style:none; display:flex; flex-direction:column; gap:2px; }
+.sidebar-block-row { display:flex; align-items:center; gap:var(--ui-space-2); min-height:32px; padding:0 var(--ui-space-1); }
+.sidebar-block-status { width:6px; height:6px; flex:0 0 6px; border-radius:50%; background:var(--text-dim); }
+.sidebar-block-row[data-state="running"] .sidebar-block-status { background:var(--tool-run,var(--accent)); }
+.sidebar-block-row[data-state="paused"] .sidebar-block-status { opacity:.45; }
+.sidebar-block-row-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; gap:1px; }
+.sidebar-block-row-name { font-size:12.5px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-block-row-meta { font:10px/1.4 var(--mono); color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-block-switch { position:relative; width:24px; height:13px; flex:0 0 24px; border:1px solid var(--border); border-radius:var(--ui-radius-pill); background:var(--bg-input); }
+.sidebar-block-switch::after { content:''; position:absolute; top:1px; left:1px; width:9px; height:9px; border-radius:50%; background:var(--text-dim); }
+.sidebar-block-row[data-enabled="true"] .sidebar-block-switch { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 22%,transparent); }
+.sidebar-block-row[data-enabled="true"] .sidebar-block-switch::after { left:auto; right:1px; background:var(--accent); }
+.sidebar-block-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
+.sidebar-block-metric { display:flex; flex-direction:column; gap:2px; }
+.sidebar-block-metric strong { font:600 15px/1.2 var(--mono); color:var(--text); }
+.sidebar-block-metric span { font-size:10.5px; color:var(--text-dim); }
+.sidebar-block-progress { grid-column:1/-1; height:4px; background:var(--bg-input); border:1px solid var(--border); overflow:hidden; }
+.sidebar-block-progress > span { display:block; height:100%; background:var(--accent); }
+.sidebar-block-summary { display:flex; align-items:center; justify-content:space-between; gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
+.sidebar-block-cta { min-height:24px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); font-size:11px; }
+.sidebar-block-cta:disabled { opacity:.5; }
+
 .search-input {
-  flex:1; min-width:0; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border);
+  /* 撑满父容器，**不用 `flex:1`**。旧写法 `flex:1`（即 `flex-basis:0%`）在纵向 flex 容器
+     里会压过 `height`：容器高度 auto ⇒ 输入框落到 min-content，实测 **17px**（声明的是
+     36px），比它原先正上方的 36px 分段控件矮一半。该缺陷已记入 .agents/spec/154 阶段 3；
+     改为块级撑满后声明高度重新生效。 */
+  display:block; width:100%; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border);
   border-radius: 0; padding:0 var(--ui-space-3); color:var(--text); font-size:13px; outline:none;
   transition:border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
@@ -58,40 +146,29 @@
 .sidebar-action { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius: 0; font-size:15px; }
 .sidebar-action:hover { background:var(--bg-hover); color:var(--text); }
 
-.sidebar-sections { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-.sidebar-section { min-height:0; display:flex; flex-direction:column; }
-.sidebar-mode-panel { flex:1; min-height:0; display:flex; flex-direction:column; }
-.sidebar-section-head {
-  min-height:38px; padding:var(--ui-space-2) var(--ui-space-3);
-  display:flex; align-items:center; justify-content:space-between; gap:var(--ui-space-2);
-  background:color-mix(in srgb,var(--bg-panel) 72%,transparent);
-}
-.sidebar-section-title { display:flex; align-items:center; gap:var(--ui-space-2); color:var(--text); font-size:12px; font-weight:700; letter-spacing:.04em; }
-.sidebar-section-count { min-width:18px; padding:1px 5px; border:1px solid var(--border); border-radius:var(--ui-radius-pill,999px); color:var(--text-dim); font:10px/1.4 var(--mono); text-align:center; }
-.sidebar-section-action {
-  min-width:var(--ui-control-compact); height:var(--ui-control-compact); padding:0 var(--ui-space-2);
-  border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent;
-  color:var(--text-dim); cursor:pointer; font-size:15px;
-}
-.sidebar-section-action-wide { display:flex; align-items:center; gap:4px; font-size:11px; }
-.sidebar-section-action:hover { color:var(--text); background:var(--bg-hover); border-color:var(--border); }
-.sidebar-section-action:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .session-list { flex:1; min-height:0; overflow-y:auto; padding:var(--ui-space-2); }
 
-.session-item { position:relative; display:flex; align-items:center; gap:var(--ui-space-2); min-height:48px; padding:var(--ui-space-2); border:1px solid transparent; border-radius:var(--ui-radius-xs); cursor:pointer; transition:background var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard); }
+/* 会话行是**单行**：名称占满剩余、时间贴右。旧的两行堆叠（名称 + 时间各一行、
+  48px 高）在 240px 宽的栏里既高又空，用户点名「卡片占用高度太大、视觉空旷」。 */
+.session-item { position:relative; display:flex; align-items:center; gap:6px; min-height:26px; padding:1px 6px; border:1px solid transparent; border-radius:var(--ui-radius-xs); cursor:pointer; transition:background var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard); }
 .session-item:hover { background:var(--bg-hover); }
 .session-item.active { border-color:var(--state-selected-stroke); background:var(--state-selected-bg); }
-.session-item.active::before { content:''; position:absolute; left:-1px; top:10px; bottom:10px; width:2px; border-radius: 0; background:var(--accent); }
+.session-item.active::before { content:''; position:absolute; left:-1px; top:4px; bottom:4px; width:2px; border-radius: 0; background:var(--accent); }
 .session-item:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .session-item:focus-within { border-color:var(--border-focus); }
-/* W2-10（F2-C）：运行点读 liveGeneratingSources——运行中绿，periId 存在不再着色 */
+
 .session-dot { width:5px; height:5px; border-radius: 50%; background:var(--text-dim); flex-shrink:0; }
 .session-dot[data-running="true"] { background:var(--tool-ok,#1e9646); box-shadow:0 0 4px var(--tool-ok,#1e9646); }
 .session-item.active .session-dot { background:var(--accent); box-shadow:0 0 4px var(--accent); }
-.session-info { min-width:0; flex:1; }
-.session-name { font-size:var(--sidebar-name-size,14px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; color:var(--sidebar-text-color,var(--text)); }
+.session-name { min-width:0; flex:1 1 auto; font-size:var(--sidebar-name-size,13px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; color:var(--sidebar-text-color,var(--text)); }
 .session-item.active .session-name { font-weight:600; }
-.session-meta { font:11px/1.4 var(--mono); color:var(--text-dim); margin-top:2px; }
+/* 时间与操作钮共用一个流内格子（与组头同一手法）：默认只显示时间，悬停/聚焦时操作钮
+   淡入顶替。若让四个操作钮常驻占宽（84px），单行会话名会被挤成「sessio…」。 */
+.session-tail { position:relative; flex:0 0 auto; display:grid; place-items:center end; min-width:40px; }
+.session-meta { grid-area:1/1; font:10.5px/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
+.session-actions { grid-area:1/1; display:flex; align-items:center; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
+.session-item:hover .session-tail > .session-meta,
+.session-item:focus-within .session-tail > .session-meta { opacity:0; }
 .session-del { opacity:0; background:none; border:none; color:var(--state-danger); cursor:pointer; font-size:14px; padding:2px 4px; transition:opacity var(--motion-fast) var(--ease-standard); flex-shrink:0; margin-left:auto; }
 .session-gear { opacity:0; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:13px; padding:2px 4px; transition:opacity var(--motion-fast) var(--ease-standard); flex-shrink:0; }
 .session-item:hover .session-del,
@@ -118,18 +195,18 @@
 
 .session-empty { padding:20px 14px; text-align:center; color:var(--text-dim); font-size:13px; }
 
-/* Terminal-like session rail: keep rows compact, but give every session its
-   own hard boundary so adjacent transcripts read as separate records. The
-   active row is a command-line selection marker rather than a filled pill. */
+/* Terminal-like session rail. 行是**单行紧凑**的（与全局基线一致，不再另开 40px 档）；
+   保留终端风格的硬边界与命令行选中标记，但把行距与内边距收到与全局同一量级——
+   旧值 40px + 5px 内边距让「空旷」在终端模式下更明显。 */
 .app[data-interface-mode="terminal-like"] .session-list {
   display:flex;
   flex-direction:column;
-  gap:4px;
-  padding:6px 8px 10px;
+  gap:2px;
+  padding:4px 6px 8px;
 }
 .app[data-interface-mode="terminal-like"] .session-item {
-  min-height:40px;
-  padding:5px 8px 5px 9px;
+  min-height:26px;
+  padding:1px 6px;
   border-color:color-mix(in srgb,var(--border) 78%,transparent);
   border-radius:0;
   background:color-mix(in srgb,var(--bg-panel) 28%,transparent);
@@ -176,25 +253,9 @@
   border:0;
 }
 
-/* W2-11（S8）：agent 三色状态灯（异常可见装置）——绿呼吸/黄常亮/红常亮/平时全灰 */
-.sidebar-status-bar {
-  display: flex; align-items: center; gap: var(--ui-space-2);
-  min-height: var(--ui-control-compact); padding: 0 var(--ui-space-3);
-  border-bottom: 1px solid var(--border);
-}
-.sidebar-status-light {
-  width: 8px; height: 8px; border-radius: 0;
-  background: var(--text-dim);
-  opacity: 0.35;
-}
-.sidebar-status-ok.active { background: var(--tool-ok, #1e9646); opacity: 1; animation: sidebar-status-breathe 2s ease-in-out infinite; }
-.sidebar-status-warn.active { background: var(--ekgYellow, #fbbf24); opacity: 1; }
-.sidebar-status-error.active { background: var(--spinner-stalled-color, #FF6B80); opacity: 1; }
-@keyframes sidebar-status-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-.sidebar-status-label {
-  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
-  margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+/* W2-11 的 `.sidebar-status-bar` / `.sidebar-status-light` 三色状态灯 CSS 已删除：
+   全仓始终没有渲染点（.agents/spec/154 未决问题 3「复活还是删除」）。用户以「模块区放 4 个
+   mock」答复了未决问题 1，状态灯不在其中，故按死代码处置。复活时从 git 历史取回即可。 */
 
 /* W2-11：showPet toggle（写 workspaceStore，非主题） */
 .profile-pet {
@@ -203,34 +264,40 @@
 }
 .profile-pet[aria-pressed="true"] { color: var(--text); }
 
-.work-list { flex:1; min-height:0; overflow-y:auto; padding:var(--ui-space-2); }
 .cwd-new { display:flex; flex-direction:column; gap:var(--ui-space-2); margin-bottom:var(--ui-space-3); padding:var(--ui-space-3); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:color-mix(in srgb,var(--bg-panel) 82%,transparent); }
 .cwd-new-input { width:100%; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border); border-radius:var(--ui-radius-sm); color:var(--text); padding:0 var(--ui-space-3); font-size:13px; }
 .cwd-new-directory { display:flex; align-items:center; gap:var(--ui-space-2); min-width:0; }
 .cwd-new-directory-path { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dim); font:11px/1.4 var(--mono); }
 .cwd-new-actions { display:flex; gap:var(--ui-space-2); }
-.cwd-group { position:relative; margin-bottom:2px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
-.cwd-group:hover, .cwd-group:focus-within { border-color:var(--stroke-subtle); background:var(--surface-panel); }
-.cwd-group-head { position:relative; display:flex; align-items:stretch; min-height:46px; padding:2px; user-select:none; }
-.cwd-group-toggle { display:grid; width:100%; min-width:0; grid-template-columns:12px 16px minmax(0,1fr); align-items:center; gap:6px; padding:4px 62px 4px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
+/* 组头压成单行 26px（原 46px 两行：名称 + 9.5px 目录路径）。目录路径降级为 tooltip，
+   不占行——那一行既不可读（9.5px 且常年被椭掉 40%），又让每组多出 20px 高度。 */
+.cwd-group { position:relative; margin-bottom:4px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
+.cwd-group-head { position:relative; display:flex; align-items:center; gap:2px; min-height:26px; padding:0; user-select:none; }
+.cwd-group-toggle { display:grid; flex:1 1 auto; min-width:0; grid-template-columns:11px 15px minmax(0,1fr); align-items:center; gap:5px; padding:1px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .cwd-group-toggle:hover { background:var(--state-hover-bg); }
 .cwd-group-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
-.cwd-group-arrow { width:12px; color:var(--text-secondary, var(--text)); }
-.cwd-group-folder { width:16px; flex:0 0 16px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 72%,var(--text)); }
-.cwd-group-identity { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
-.cwd-group-name { font-size:12.5px; font-weight:600; color:var(--text); }
-.cwd-group-root { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9.5px; color:var(--text-placeholder); }
-.cwd-group-count { position:absolute; z-index:1; top:50%; right:10px; min-width:19px; padding:1px 5px; transform:translateY(-50%); border-radius:var(--ui-radius-pill); color:var(--text-dim); background:color-mix(in srgb,var(--bg-active) 68%,transparent); font:10px/1.5 var(--font); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
-.cwd-group-actions { position:absolute; z-index:2; top:50%; right:4px; display:flex; opacity:0; transform:translate(2px,-50%); transition:opacity var(--motion-fast) var(--ease-standard),transform var(--motion-fast) var(--ease-emphasized); }
+/* 折叠箭头默认压到很淡、悬停/聚焦才亮：用户点名「折叠按钮也太显眼」。 */
+.cwd-group-arrow { width:11px; display:grid; place-items:center; color:var(--text-dim); opacity:.32; transition:opacity var(--motion-fast) var(--ease-standard); }
+.cwd-group:hover .cwd-group-arrow, .cwd-group:focus-within .cwd-group-arrow { opacity:.85; }
+.cwd-group-folder { width:15px; flex:0 0 15px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 72%,var(--text)); }
+.cwd-group-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; font-weight:600; color:var(--text); }
+/* 计数与动作**共用一个流内格子**：两者交叉淡出（悬停时计数让位给动作），因此格子尺寸由
+   较宽的动作决定，切换时不发生位移。旧写法把两者绝对定位、再给 `.cwd-group-toggle` 预留
+   `padding-right:62px`——那个 62px 是手抄的动作宽度之和，加第三个动作就会静默压字。 */
+.cwd-group-meta { position:relative; flex:0 0 auto; display:grid; place-items:center; padding-right:2px; }
+/* 计数退成药丸改为**纯暗字**：药丸的描边+底色在 240px 栏里是显眼的噪声，而它承载的
+   只是「几个会话」。 */
+.cwd-group-count { grid-area:1/1; color:var(--text-placeholder); font:10px/1.5 var(--mono); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
+.cwd-group-actions { grid-area:1/1; display:flex; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
 .cwd-group:hover .cwd-group-count, .cwd-group:focus-within .cwd-group-count { opacity:0; }
-.cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; transform:translate(0,-50%); }
-.cwd-group-add { width:26px; height:26px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); cursor:pointer; font-size:13px; }
+.cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; }
+.cwd-group-add { width:22px; height:22px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); cursor:pointer; font-size:12px; }
 .cwd-group-add:hover { color:var(--accent); background:var(--bg-hover); border-color:var(--border); }
-.cwd-group-sessions { position:relative; display:grid; grid-template-rows:1fr; min-height:0; margin-left:20px; padding:0 6px 6px 10px; border-left:1px dashed color-mix(in srgb,var(--border) 76%,transparent); opacity:1; overflow:hidden; transition:grid-template-rows 180ms var(--ease-standard),opacity 140ms var(--ease-standard),padding-bottom 180ms var(--ease-standard); }
+/* 会话列表缩进减到 12px、去掉虚线导引轨：旧写法左侧共缩进 30px（20 margin + 10 padding）
+   而右侧只有 6px，左右不对称；虚线本身也在单行紧凑行里变成噪声。 */
+.cwd-group-sessions { position:relative; display:grid; grid-template-rows:1fr; min-height:0; margin-left:12px; padding:1px 2px 2px 4px; opacity:1; overflow:hidden; transition:grid-template-rows 180ms var(--ease-standard),opacity 140ms var(--ease-standard),padding-bottom 180ms var(--ease-standard); }
 .cwd-group-sessions-inner { min-height:0; overflow:hidden; }
 .cwd-group-sessions.is-collapsed { grid-template-rows:0fr; padding-bottom:0; opacity:0; pointer-events:none; }
-.cwd-session-item { min-height:38px; margin-top:2px; }
-.cwd-session-item::after { content:''; position:absolute; left:-11px; top:18px; width:8px; border-top:1px solid color-mix(in srgb,var(--border) 76%,transparent); }
 .cwd-root-input { font-family:var(--mono); font-size:11px; }
 .cwd-settings-error { color:var(--state-danger); }
 
@@ -270,13 +337,27 @@
 .workspace-empty strong { color:var(--text); font-size:13px; }
 .workspace-empty span { font-size:11px; line-height:1.5; }
 .workspace-empty .settings-action { margin-top:4px; }
-.cwd-session-empty { padding:12px 8px 8px; text-align:left; font-size:11px; }
+/* 组内「暂无会话」提示已删除：空组本身即说明，逐组提示只贡献高度（用户点名视觉空旷）。 */
+
+/* ── 主区整页（左栏模块展开）──
+   页面替换当前 Sheet 的聊天视图，但**不开新 Sheet**；头部（返回 + 标题）由宿主渲染，
+   贡献只画内容。与左栏区块外壳同一条约定。 */
+.agent-sheet-page { display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--chat-bg, transparent); }
+.agent-sheet-page-head { display:flex; align-items:center; gap:var(--ui-space-3); min-height:44px; padding:var(--ui-space-2) var(--ui-space-4); border-bottom:1px solid var(--border); }
+.agent-sheet-page-back { display:flex; align-items:center; gap:5px; min-height:26px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); cursor:pointer; font-size:12px; }
+.agent-sheet-page-back:hover { color:var(--text); background:var(--bg-hover); }
+.agent-sheet-page-back:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.agent-sheet-page-title { margin:0; color:var(--text); font-size:13px; font-weight:680; letter-spacing:.02em; }
+.agent-sheet-page-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:var(--ui-space-4); }
+.agent-sheet-page-surface { display:flex; flex-direction:column; min-height:0; }
+.mock-page-lead { margin:0 0 var(--ui-space-3); color:var(--text-dim); font-size:12px; line-height:1.6; }
+.mock-row-cols { display:flex; gap:var(--ui-space-4); flex:0 0 auto; }
 .cwd-settings-dialog { width:min(620px,calc(100vw - 32px)); max-height:min(760px,calc(100vh - 48px)); overflow:auto; }
 .cwd-settings-dialog-identity { display:grid; grid-template-columns:18px minmax(0,auto) minmax(0,1fr); align-items:center; gap:8px; margin:0 20px; padding:10px 0; border-bottom:1px solid var(--border); color:var(--accent); }
 .cwd-settings-dialog-identity strong { min-width:0; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog-identity span { min-width:0; overflow:hidden; color:var(--text-dim); font:11px var(--mono); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog > .cwd-settings { margin:0 20px 16px; }
-@media (hover:none) { .cwd-group-count { opacity:0; } .cwd-group-actions { opacity:1; transform:translate(0,-50%); } }
+@media (hover:none) { .cwd-group-count { opacity:0; } .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; } .session-tail > .session-meta { opacity:0; } .session-actions { opacity:.82; visibility:visible; pointer-events:auto; } }
 
 /* Modern GUI workspace rail. Local values intentionally stay in this package. */
 .app[data-interface-mode="modern-gui"] .layout { gap:8px; padding:0 8px 8px; }
@@ -285,14 +366,14 @@
   background:color-mix(in srgb,var(--surface-panel) 70%,transparent); box-shadow:0 14px 38px color-mix(in srgb,var(--text) 5%,transparent);
 }
 .app[data-interface-mode="modern-gui"] .sidebar::before { border-radius:inherit; }
-.app[data-interface-mode="modern-gui"] .sidebar-header { gap:10px; padding:12px; border-bottom:0; }
-.app[data-interface-mode="modern-gui"] .sidebar-mode-tabs { gap:4px; padding:3px; border:1px solid var(--border); border-radius:12px; background:color-mix(in srgb,var(--surface-canvas) 58%,transparent); }
-.app[data-interface-mode="modern-gui"] .sidebar-mode-tabs button { height:32px; border:0; border-radius:9px; }
-.app[data-interface-mode="modern-gui"] .sidebar-mode-tabs button.active { background:var(--surface-raised); box-shadow:0 4px 12px color-mix(in srgb,var(--text) 7%,transparent); }
+.app[data-interface-mode="modern-gui"] .sidebar-region-search { padding:10px 12px 4px; }
 .app[data-interface-mode="modern-gui"] .search-input { height:38px; border-radius:11px; padding-inline:12px; }
-.app[data-interface-mode="modern-gui"] .sidebar-section-head { margin:0 8px; padding:8px; border-radius:10px; background:transparent; }
-.app[data-interface-mode="modern-gui"] .session-list,
-.app[data-interface-mode="modern-gui"] .work-list { padding:6px 8px 10px; }
+.app[data-interface-mode="modern-gui"] .sidebar-region[data-region="modules"] { border-bottom:0; }
+.app[data-interface-mode="modern-gui"] .sidebar-block { margin:0 8px 6px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:12px; overflow:hidden; }
+.app[data-interface-mode="modern-gui"] .sidebar-block[data-region="sessions"] { margin-bottom:0; border:0; overflow:visible; }
+.app[data-interface-mode="modern-gui"] .sidebar-block-head { padding:8px 10px; border-radius:12px; background:transparent; }
+.app[data-interface-mode="modern-gui"] .sidebar-block-action { border-radius:8px; }
+.app[data-interface-mode="modern-gui"] .session-list { padding:6px 8px 10px; }
 .app[data-interface-mode="modern-gui"] .session-item { min-height:52px; margin:3px 0; padding:8px 10px; border-radius:12px; }
 .app[data-interface-mode="modern-gui"] .session-item:hover { transform:translateX(2px); }
 .app[data-interface-mode="modern-gui"] .session-item.active { box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 8%,transparent); }
@@ -330,7 +411,7 @@
   .layout .agent-sheet-keep-alive > .main { min-width:360px; }
   .sidebar > * { min-width:0; }
   .session-item,
-  .sidebar-section-head,
+  .sidebar-block-head,
   .profile-bar { min-width:0; }
 }
 @media (max-width:520px) {
@@ -373,8 +454,13 @@
   background:transparent;
   color:var(--text-dim);
   opacity:0;
+  /* 未显形时**同时**退出命中测试。只给 `opacity:0` 的话，按钮在淡入窗口内（以及任何
+     程序化点击里）仍会吃掉落在会话行中段的点击——实测行中心 `elementFromPoint` 命中的
+     就是其中的「会话设置」。`visibility` 的离散过渡带延迟，正好把淡入窗口一起罩住。 */
+  visibility:hidden;
+  pointer-events:none;
   cursor:pointer;
-  transition:opacity var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+  transition:opacity var(--motion-fast) var(--ease-standard), visibility 0s linear var(--motion-fast), color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 .app[data-interface-mode="terminal-like"] .session-meta {
   white-space:nowrap;
@@ -384,6 +470,9 @@
 .app[data-interface-mode="terminal-like"] .session-item:hover .session-actions > .session-action,
 .app[data-interface-mode="terminal-like"] .session-item:focus-within .session-actions > .session-action {
   opacity:.62;
+  visibility:visible;
+  pointer-events:auto;
+  transition-delay:0s;
 }
 .app[data-interface-mode="terminal-like"] .session-item > .session-action:hover,
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover,
@@ -407,6 +496,10 @@
     height:30px;
     min-width:30px;
     opacity:.82;
+    /* 无 hover 环境没有「显形」这一步，按钮必须常驻可见且可点。 */
+    visibility:visible;
+    pointer-events:auto;
+    transition-delay:0s;
   }
 }
 .app[data-interface-mode="tactical-blue"] .sidebar { background:#071831ed; border-right:1px solid #75c5f344; }

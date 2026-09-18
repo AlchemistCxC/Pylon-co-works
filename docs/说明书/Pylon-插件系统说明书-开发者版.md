@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -721,18 +721,31 @@ UI Surface Registry 已实现。`surfaceId` 需要由可见贡献点引用；Age
 
 ### 6.8 左右栏贡献
 
-Agent 左栏内容按模式注册：
+Agent 左栏是**两个分区的纵向堆叠**，不是一对互斥视图：`modules`（常驻能力区块，贴顶、自身滚动、默认可折叠）在上，`sessions`（会话列表，占满剩余高度）在下。贡献按 `region` 注册：
 
 ```ts
 context.sidebar.registerAgentSidebarContribution({
-  id: 'example.sidebar',
-  mode: 'work',
-  label: 'Example',
+  id: 'example.automation',
+  region: 'modules',
+  label: '自动化',
   order: 300,
+  collapsible: true,          // 省略时 modules 默认可折叠、sessions 默认不可折叠
+  defaultCollapsed: false,
+  page: { title: '自动化' },   // 可选：声明后点区块标题即把内容展开成主区整页
+  headerActions: [            // 可选：宿主渲染在区块头部的动作按钮
+    { id: 'new-rule', label: '新建', title: '新建自动化规则', icon: 'plus' },
+  ],
+  when: context => context.region === 'modules',   // 可选：可见性谓词
   renderKind: 'isolated-surface',
   surfaceId: 'example.panel',
 })
 ```
+
+**区块外壳（标题、折叠钮、`headerActions`）由宿主渲染，贡献只画区块内容**。标题的唯一来源是贡献声明的 `label`——贡献不得再画一份自己的标题。宿主点击 `headerActions` 时：`first-party-react` 贡献经 `props.registerBlockActionHandler` 在挂载期注册的处理器回派；`isolated-surface` 贡献走 `host:input` 的 `blockAction` 字段（带 `nonce`，重复点击可区分）。
+
+**点击语义分工**：区块**标题**在声明了 `page` 时把内容展开成主区整页（替换该 Sheet 的聊天视图，**不开新 Sheet**，Esc 或页面头部「返回」回到聊天）；**折叠钮**是独立控件，只管折叠。未声明 `page` 的区块，标题退化为折叠开关。
+
+**页面渲染的是同一个贡献组件**，只是 `presentation: 'page'`（左栏区块里是 `'block'`）——同一份内容两种体量，不需要维护两份组件，也共享同一批会话/工作区数据与回调。隔离表面在 `host:input` 里拿到同样的 `presentation` / `collapsed` / `pageOpen`。
 
 Sheet 右栏按 Workspace kind 注册：
 
@@ -747,7 +760,7 @@ context.contextPanel.register({
 })
 ```
 
-`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态，并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
+`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**同一分区内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态（含 `region` / `collapsed` / `blockAction`），并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 
 Workspace 自身的 `sidebar` 仍负责声明整块左栏壳；Agent 左栏内部内容、FileSheet workbench activity，以及通用右栏内容分别由对应 contribution registry 管理，不建立第二套 `kind → sidebar` 映射。
 
@@ -893,10 +906,11 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3`（`PYLON_PLUGIN_API_SUPPORTED`）；
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0`（`PYLON_PLUGIN_API_SUPPORTED`）；
   旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
 - minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
 - `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。1.3 仅扩充 Hook 锚点词表（§6.2），manifest 字段形状相对 1.2 不变。
+- **2.0 是破坏性主轴**：Agent 左栏贡献由「按 `mode ('work' | 'chat')` 注册的互斥视图」改为「按 `region ('modules' | 'sessions')` 注册的堆叠区块」（§6.8）。manifest 字段形状相对 1.3 不变，因此 1.x 清单仍可解析与激活；**引用旧 `mode` 的左栏贡献必须按 2.0 重写**。`capabilities` / `dangerousHooks` 的 `>= 1.2` 谓词对 2.0 继续成立。
 
 #### 6.11.4 SDK 发行形态
 

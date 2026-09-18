@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import WorkspacesPanel from '../sidebar/WorkspacesPanel'
+import SessionsPanel from '../sidebar/SessionsPanel'
 import { resetStores } from '../../test/resetStores'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
@@ -27,6 +27,19 @@ const workspace = {
   hookPluginIds: [],
 }
 
+const boundSession = {
+  id: 'session-1', agentId: 'peri', name: '实现界面', source: 'local:1', profileId: 'profile-a',
+  createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: workspace.rootPath, workspaceId: workspace.id,
+  sessionPrompt: '', skills: [], hooks: [], autoName: '', metadata: {}, context: {},
+}
+
+/** 无 cwd 会话：只有 `workdir` 空串、没有 `workspaceId`——分组判据就是 `!workspaceId`。 */
+const looseSession = {
+  id: 'session-2', agentId: 'peri', name: '介绍一下你自己', source: 'local:2', profileId: 'profile-a',
+  createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: '',
+  sessionPrompt: '', skills: [], hooks: [], autoName: '', metadata: {}, context: {},
+}
+
 function createProps(overrides: Partial<AgentSidebarContributionProps> = {}): AgentSidebarContributionProps {
   return {
     activeAgentId: 'peri',
@@ -35,18 +48,29 @@ function createProps(overrides: Partial<AgentSidebarContributionProps> = {}): Ag
     sessions: [],
     workspaces: [workspace],
     liveGeneratingSources: [],
+    presentation: 'block' as const,
+    collapsed: false,
+    registerBlockActionHandler: vi.fn(),
+    onBlockAction: vi.fn(),
     onSelectSession: vi.fn(),
     onDeleteSession: vi.fn(async () => {}),
     onOpenSessionSettings: vi.fn(),
     onRenameSession: vi.fn(),
-    onCreateChatSession: vi.fn(),
+    onCreateLooseSession: vi.fn(),
     onCreateWorkspace: vi.fn(async () => {}),
     onCreateWorkspaceSession: vi.fn(),
     ...overrides,
   }
 }
 
-describe('WorkspacesPanel', () => {
+/** 宿主要求贡献在挂载期注册区块头动作处理器；测试里接住它并按 actionId 调回去。 */
+function captureBlockAction(overrides: Partial<AgentSidebarContributionProps> = {}) {
+  let handler: ((actionId: string) => void) | null = null
+  const props = createProps({ registerBlockActionHandler: next => { handler = next }, ...overrides })
+  return { props, fire: (actionId: string) => { if (!handler) throw new Error('贡献未注册区块头处理器'); act(() => handler!(actionId)) } }
+}
+
+describe('SessionsPanel', () => {
   beforeEach(() => {
     resetStores()
     localStorage.clear()
@@ -56,12 +80,14 @@ describe('WorkspacesPanel', () => {
     open.mockResolvedValue(null)
   })
 
-  it('通过系统目录选择器选择根目录并自动生成工作区名称', async () => {
+  it('区块头的「工作区」动作交给目录选择器，并自动生成工作区名称', async () => {
     const onCreateWorkspace = vi.fn(async () => {})
     open.mockResolvedValue('C:\\Users\\Tester\\pylon-demo')
-    render(<WorkspacesPanel {...createProps({ onCreateWorkspace })} />)
+    const { props, fire } = captureBlockAction({ onCreateWorkspace })
+    render(<SessionsPanel {...props} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '新建工作区' }))
+    // 头部按钮由宿主渲染，贡献只注册语义——这里正是那条链路的断言。
+    fire('new-workspace')
 
     await waitFor(() => expect(open).toHaveBeenCalledWith({
       directory: true,
@@ -77,9 +103,9 @@ describe('WorkspacesPanel', () => {
   })
 
   it('将工作区设置作为弹出式对话框呈现', async () => {
-    render(<WorkspacesPanel {...createProps()} />)
+    render(<SessionsPanel {...createProps()} />)
 
-    const list = screen.getByRole('region', { name: '工作会话' })
+    const list = screen.getByRole('tree', { name: '工作区与会话' })
     fireEvent.click(within(list).getByRole('button', { name: 'Pylon 工作区设置' }))
 
     const settings = screen.getByRole('dialog')
@@ -88,7 +114,7 @@ describe('WorkspacesPanel', () => {
     expect(within(settings).queryByRole('button', { name: '在 Pylon 中新建会话' })).not.toBeInTheDocument()
 
     fireEvent.click(within(settings).getByRole('button', { name: '关闭工作区设置' }))
-    expect(screen.getByRole('region', { name: '工作会话' })).toBeInTheDocument()
+    expect(screen.getByRole('tree', { name: '工作区与会话' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '在 Pylon 中新建会话' })).toBeInTheDocument()
   })
 
@@ -96,7 +122,7 @@ describe('WorkspacesPanel', () => {
     useWorkspaceEntityStore.setState({ workspaces: [workspace], hydrated: true })
     const runtime = getPluginRuntime()
     runtime.activateBuiltinSync({ id: 'test.hooks.audit', activate: () => undefined })
-    render(<WorkspacesPanel {...createProps()} />)
+    render(<SessionsPanel {...createProps()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Pylon 工作区设置' }))
 
     fireEvent.change(screen.getByRole('textbox', { name: '工作区名称' }), { target: { value: 'Pylon Desktop' } })
@@ -116,12 +142,7 @@ describe('WorkspacesPanel', () => {
 
   it('持久化每个工作区的展开状态，并支持键盘选择会话', async () => {
     const onSelectSession = vi.fn()
-    const session = {
-      id: 'session-1', agentId: 'peri', name: '实现界面', source: 'local:1', profileId: 'profile-a',
-      createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: workspace.rootPath, workspaceId: workspace.id,
-      sessionPrompt: '', skills: [], hooks: [], autoName: '', metadata: {}, context: {},
-    }
-    const view = render(<WorkspacesPanel {...createProps({ sessions: [session], onSelectSession })} />)
+    const view = render(<SessionsPanel {...createProps({ sessions: [boundSession], onSelectSession })} />)
 
     fireEvent.keyDown(screen.getByText('实现界面').closest('[role="treeitem"]')!, { key: 'Enter' })
     expect(onSelectSession).toHaveBeenCalledWith('session-1')
@@ -129,22 +150,59 @@ describe('WorkspacesPanel', () => {
     await waitFor(() => expect(localStorage.getItem('pylon-workspace-tree:v1')).toContain('workspace-1'))
 
     view.unmount()
-    render(<WorkspacesPanel {...createProps({ sessions: [session] })} />)
+    render(<SessionsPanel {...createProps({ sessions: [boundSession] })} />)
     expect(screen.getByRole('button', { name: '展开 Pylon' })).toBeInTheDocument()
     const collapsedSessions = document.querySelector('.cwd-group-sessions.is-collapsed')
     expect(collapsedSessions).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('将工作区身份与计数/操作分成稳定几何层', () => {
-    render(<WorkspacesPanel {...createProps()} />)
+    render(<SessionsPanel {...createProps()} />)
     const toggle = screen.getByRole('button', { name: '折叠 Pylon' })
-    const count = screen.getByLabelText('0 个会话')
+    // 无 cwd 组也存在且同样显示「0 个会话」，因此计数查询必须限定在工作区组内。
+    const group = toggle.closest('.cwd-group')! as HTMLElement
+    const count = within(group).getByLabelText('0 个会话')
     const head = toggle.closest('.cwd-group-head')!
 
-    expect(toggle).toContainElement(screen.getByText('G:/Project/Pylon'))
+    // 身份是单行的「文件夹 + 名称」；目录路径降级为 tooltip（不再占一行 9.5px 小字）。
+    expect(toggle).toContainElement(screen.getByText('Pylon'))
+    expect(toggle).toHaveAttribute('title', 'G:/Project/Pylon')
     expect(toggle).not.toContainElement(count)
     expect(head).toContainElement(count)
     expect(head).toContainElement(screen.getByRole('button', { name: '在 Pylon 中新建会话' }))
     expect(head).toContainElement(screen.getByRole('button', { name: 'Pylon 工作区设置' }))
+  })
+
+  it('无 cwd 会话落在会话列表最底部的独立分组，且带自己的新建入口', () => {
+    const onCreateLooseSession = vi.fn()
+    render(<SessionsPanel {...createProps({ sessions: [boundSession, looseSession], onCreateLooseSession })} />)
+
+    const groups = [...document.querySelectorAll('.cwd-group')]
+    expect(groups).toHaveLength(2)
+    expect(groups.at(-1)!.querySelector('.cwd-group-name')!.textContent).toBe('无工作区')
+    // 有工作区的会话归工作区组，无 cwd 的归底部组，两者不混。
+    expect(groups[0].querySelector('.session-name')!.textContent).toBe('实现界面')
+    expect(groups.at(-1)!.querySelector('.session-name')!.textContent).toBe('介绍一下你自己')
+
+    fireEvent.click(screen.getByRole('button', { name: '在 无工作区 中新建会话' }))
+    expect(onCreateLooseSession).toHaveBeenCalledOnce()
+  })
+
+  it('搜索同时过滤工作区组与无 cwd 组；按名称命中', () => {
+    render(<SessionsPanel {...createProps({
+      query: '介绍',
+      sessions: [boundSession, looseSession],
+      // 工作区名/路径都不含「介绍」，因此工作区组应被整体滤掉
+    })} />)
+
+    expect(screen.getByText('介绍一下你自己')).toBeInTheDocument()
+    expect(screen.queryByText('实现界面')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '折叠 Pylon' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '折叠 无工作区' })).toBeInTheDocument()
+  })
+
+  it('没有任何工作区也没有无 cwd 会话时给出起步空态', () => {
+    render(<SessionsPanel {...createProps({ workspaces: [] })} />)
+    expect(screen.getByText('从一个文件夹开始')).toBeInTheDocument()
   })
 })

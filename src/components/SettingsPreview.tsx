@@ -229,18 +229,35 @@ function PreviewApp({ zone }: { zone: string }) {
 
       <div className="layout" style={{ flex: 1, minHeight: 0 }}>
         <aside className="sidebar" style={z('sidebar')}>
-          <div className="sidebar-header">
-            <input className="search-input" placeholder="搜索会话..." readOnly />
-            <span className="sidebar-action">+</span>
-          </div>
-          <div className="session-list">
-            <div className="group-header" style={{ display: 'block' }}>本地</div>
-            {['会话 A', '会话 B', '会话 C'].map((n, i) => (
-              <div key={n} className={`session-item ${i === 0 ? 'active' : ''}`}>
-                <span className="session-dot" />
-                <div className="session-info"><div className="session-name">{n}</div><div className="session-meta">刚刚</div></div>
-              </div>
+          {/* 预览跟着左栏模型走：模块区（常驻区块）+ 会话区，不再有互斥模式页签。 */}
+          <div className="sidebar-region" data-region="modules">
+            {['定时', '自动化'].map(label => (
+              <section className="sidebar-block" data-region="modules" data-collapsed="false" key={label}>
+                <div className="sidebar-block-head">
+                  <span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-arrow">▾</span><span className="sidebar-block-title">{label}</span></span>
+                </div>
+              </section>
             ))}
+          </div>
+          <div className="sidebar-region" data-region="sessions">
+            <div className="sidebar-region-search">
+              <input className="search-input" placeholder="搜索会话..." readOnly />
+            </div>
+            <section className="sidebar-block" data-region="sessions" data-collapsed="false">
+              <div className="sidebar-block-head"><span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-title">会话</span></span></div>
+              <div className="sidebar-block-body">
+                <div className="session-list">
+                  <div className="group-header" style={{ display: 'block' }}>本地</div>
+                  {['会话 A', '会话 B', '会话 C'].map((n, i) => (
+                    <div key={n} className={`session-item ${i === 0 ? 'active' : ''}`}>
+                      <span className="session-dot" />
+                      <span className="session-name">{n}</span>
+                      <span className="session-tail"><span className="session-meta">刚刚</span></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
           </div>
           <div className="profile-bar"><span className="profile-avatar active">R</span><span className="profile-avatar">S</span></div>
         </aside>

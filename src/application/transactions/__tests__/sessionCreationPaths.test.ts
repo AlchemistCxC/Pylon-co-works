@@ -56,7 +56,7 @@ const runtime = { agentStatuses: { owner: { generation: 7 } }, setBindingGenerat
 const paths = ['workbench', 'cli', 'recovery'] as const
 type Path = typeof paths[number]
 function create(path: Path, signal = new AbortController().signal, isCurrent = () => true) {
-  if (path === 'workbench') return createAgentWorkbenchSession(undefined, { agentId: session.agentId, workspaceMode: 'chat' })
+  if (path === 'workbench') return createAgentWorkbenchSession(undefined, { agentId: session.agentId })
   if (path === 'cli') return createCliSessionControlPort().create({ agentId: session.agentId }, { signal })
   return new AgentWorkbenchLifecycle().activate(session, { isCurrent })
 }
@@ -135,7 +135,7 @@ describe.each(paths)('%s session creation contract', path => {
 it('workbench preserves explicit model/reasoning/mode and projection-before-binding order', async () => {
   const project = vi.fn()
   await createAgentWorkbenchSession({ model: 'selected', reasoningLevel: 'high', mode: 'plan' }, {
-    agentId: 'owner', workspaceMode: 'chat', applySessionResponse: project,
+    agentId: 'owner', applySessionResponse: project,
   })
   expect(fakeInvoke.calls).toContainEqual({
     cmd: 'new_session',
