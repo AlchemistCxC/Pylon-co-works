@@ -11,11 +11,15 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
 })
 
-function mountEmptyControlCenter(createSession: () => Promise<unknown>) {
+function mountEmptyControlCenter(rejectWith: unknown) {
   const host = document.createElement('div')
   document.body.append(host)
   const services = createPreviewWorkbenchServices()
-  services.commands = createFakeWorkbenchCommandFacade({ createSession })
+  services.commands = createFakeWorkbenchCommandFacade({
+    createSession: async () => {
+      throw rejectWith
+    },
+  })
   const destroy = mountSolidControlCenterPreview({ host, services })
   cleanups.push(() => {
     destroy()
@@ -29,9 +33,7 @@ function mountEmptyControlCenter(createSession: () => Promise<unknown>) {
 
 describe('#172 空态提交失败错误条（solid-agent-empty-error）', () => {
   it('结构化 DTO 拒绝时显示后端 message 而非 [object Object]', async () => {
-    const textarea = mountEmptyControlCenter(async () => {
-      throw { code: 'AgentRuntimeUnavailable', message: '运行时未就绪' }
-    })
+    const textarea = mountEmptyControlCenter({ code: 'AgentRuntimeUnavailable', message: '运行时未就绪' })
 
     fireEvent.input(textarea, { target: { value: '无工作区消息' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
@@ -45,9 +47,7 @@ describe('#172 空态提交失败错误条（solid-agent-empty-error）', () => 
   })
 
   it('无 message 的意外拒绝值回退为可读文案，不出现 [object Object]', async () => {
-    const textarea = mountEmptyControlCenter(async () => {
-      throw { something: 'else' }
-    })
+    const textarea = mountEmptyControlCenter({ something: 'else' })
 
     fireEvent.input(textarea, { target: { value: '无工作区消息' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
