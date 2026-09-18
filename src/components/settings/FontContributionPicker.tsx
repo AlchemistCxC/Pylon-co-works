@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
 import type { FontRole } from '../../plugin-runtime/fonts/fontContributionTypes.ts'
 import { getFontContributionRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { resolveFontToken } from '../../domains/theme/themeCssSnapshot.ts'
 import Select from '../ui/Select.tsx'
 import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
@@ -40,12 +41,14 @@ export default function FontContributionPicker({ value, role, ariaLabel, onChang
     ? resolved
     : [{ value, label: `${FALLBACK_LABELS[value] ?? value}（已不可用）`, disabled: true }, ...resolved]
   const sample = selected?.sample ?? (role === 'code' ? 'const pylon = await connect()' : 'Pylon 让 Agent 工作变得清晰')
-  // An unloaded code contribution must preview the same role-safe fallback
-  // that production CSS uses; showing `inherit` here made Settings disagree
-  // with the actual code/terminal rendering after a plugin was disabled.
+  // An unloaded contribution must preview the same role-safe fallback that
+  // production CSS uses. #129 子项 3：回退真值直接取 resolveFontToken——上次只修了
+  // code 角色且写成 `var(--mono)`（生产真值是 `var(--font-mono-default, var(--mono))`），
+  // interface 角色仍是 `inherit`（生产真值是 `var(--font-system, var(--font))`），
+  // 与 resolveFontToken 对不可用贡献的回退各说各话。同一函数 ⇒ 结构上不可能再漂移。
   const previewFamily = selected
     ? `var(${fontContributionCssVariable(selected.id)}, ${selected.family})`
-    : role === 'code' ? 'var(--mono)' : 'inherit'
+    : resolveFontToken(undefined, role === 'code' ? 'code' : 'system')
 
   return (
     <div className="font-contribution-picker">
