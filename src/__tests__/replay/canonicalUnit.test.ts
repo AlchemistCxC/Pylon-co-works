@@ -8,10 +8,10 @@
  * 搜索同路径），工作台侧则把整轮塌成一条 event.unknown。
  */
 import { describe, expect, it } from 'vitest'
-import { createCanonicalEvent, toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../eventSchema'
-import { expandTurnUnitRows, parseTurnUnitPayload } from '../canonicalUnit.ts'
-import { normalizeRawEvent } from '../canonicalNormalizer.ts'
-import { projectMessagesFromCanonical } from '../messageProjection.ts'
+import { createCanonicalEvent, toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
+import { expandTurnUnitRows, parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
+import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
+import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'p1', agentId: 'peri', localSessionId: 'local:s1' }
 const ownerKey = toCanonicalOwnerKey(owner)

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createWorkbenchDocument, projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
-import { normalizeSessionConfigOptions } from '../../../domains/workbench/session/sessionSurface.ts'
-import { createCanonicalEvent } from '../../../domains/events/eventSchema.ts'
-import { messageSnapshotToWorkbenchEnvelopes } from '../messageSnapshotProjection.ts'
-import type { Message } from '../../../components/chat/messageTypes.ts'
-import { persistMessageSnapshot } from '../../../components/chat/messagePersistence.ts'
-import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
-import type { Session } from '../../../identityStore.ts'
+import { createWorkbenchDocument, projectWorkbench } from '../../domains/workbench/workbenchProjector.ts'
+import { normalizeSessionConfigOptions } from '../../domains/workbench/session/sessionSurface.ts'
+import { createCanonicalEvent } from '../../domains/events/eventSchema.ts'
+import { messageSnapshotToWorkbenchEnvelopes } from '../../sheets/agent-workbench/messageSnapshotProjection.ts'
+import type { Message } from '../../components/chat/messageTypes.ts'
+import { persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import type { Session } from '../../identityStore.ts'
 
 /** The shape an ACP provider advertises: every option carries its own choices. */
 const PROVIDER_OPTIONS = [

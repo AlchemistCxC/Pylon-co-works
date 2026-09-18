@@ -2,8 +2,9 @@
    Tailwind v4 utilities 基线（P85 / TW 施工书 20260914）。
 
    本文件的不变量（违反即门禁红，见 scripts/check-tailwind-token-purity.mts）：
-   - 不引 preflight：全局 reset 由 src/index.css 承担；preflight 会全局
-     重置元素默认值，破坏全部既有 CSS 的视觉前提。
+   - 不引 preflight：全局 reset 由 src/index.css 承担（该 reset 置于 @layer base，
+     层序声明也在 index.css）；preflight 会全局重置元素默认值，破坏全部既有
+     CSS 的视觉前提。base 层低于本文件的 utilities 层，spacing utility 才能生效。
    - source(none) 关闭自动全仓扫描，由下方 @source 显式限定 src（
      src-tauri 与 scripts 不进扫描）；扫描按文本匹配 class 字符串，与
      React、Solid 框架无关，.solid.tsx 同样命中。

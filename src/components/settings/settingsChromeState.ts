@@ -65,6 +65,19 @@ export function visibleByDensity(
   return field.advanced !== true
 }
 
+// ── 预览栏折叠（#116 子项 8）──
+// 预览栏占住的 294px 正是外观域正文只剩 662px 的原因（渲染器字段行溢出的前置条件），
+// 故折叠态与密度档同属 chrome 态：进 localStorage，不进 defs/schema/store。
+const PREVIEW_KEY = 'pylon-settings-preview-collapsed'
+
+export function readPreviewCollapsed(get: Getter): boolean {
+  return readJson<unknown>(get, PREVIEW_KEY, false) === true
+}
+
+export function writePreviewCollapsed(value: boolean, set: Setter): void {
+  writeJson(set, PREVIEW_KEY, value)
+}
+
 // ── 折叠记忆 ──
 
 export function readCollapsed(get: Getter): CollapseMap {

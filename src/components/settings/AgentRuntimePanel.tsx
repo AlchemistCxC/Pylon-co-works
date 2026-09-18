@@ -6,7 +6,8 @@ import {
   type AgentCreateConfig,
   type AgentsConfigDocument,
 } from '../../infrastructure/acp/agentClient'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
 import { useIdentityStore, type AgentEntry } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
@@ -290,6 +291,18 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         ? current
         : report.candidates.find(candidate => !candidate.alreadyImportedAgentId)?.candidateId ?? report.candidates[0]?.candidateId ?? null)
       setDetectionDiagnostics(report.diagnostics)
+      // #116 子项 10：诊断原文（内部码 + 系统级错误串）不再进 UI，改报进运行日志
+      // / Runtime sheet，保持可检索。先结清上一轮的诊断条目（本轮可能已消失），
+      // 再按 code+detector 的稳定 key 覆盖式上报，避免刷新一次堆一批。
+      resolveRuntimeErrors(entry => entry.key.startsWith('agent-detection:'))
+      for (const diagnostic of report.diagnostics) {
+        reportRuntimeDiagnostic('探测本机 Agent', new Error(presentDetectionDiagnostic(diagnostic).raw), undefined, {
+          key: `agent-detection:${diagnostic.code}:${diagnostic.detectorId ?? 'all'}`,
+          scope: { kind: 'app', id: 'agent-detection' },
+          source: 'settings.agent-runtime',
+          recovery: { kind: 'open-runtime-log' },
+        })
+      }
       setDetectionPreflight(report.preflight)
       setDetectionElapsedMs(report.elapsedMs)
       setDetectionTruncated(report.truncated)
@@ -830,11 +843,16 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         {(detectionElapsedMs > 0 || detectionTruncated) && (
           <div className="set-hint">探测耗时：{detectionElapsedMs}ms{detectionTruncated ? ' · 结果已截断' : ''}</div>
         )}
-        {detectionDiagnostics.map((diagnostic, index) => (
-          <div className="set-hint" role="status" key={`${diagnostic.code}:${diagnostic.detectorId ?? 'all'}:${index}`}>
-            {diagnostic.code}（{diagnostic.stage}）：{diagnostic.message}
-          </div>
-        ))}
+        {detectionDiagnostics.map((diagnostic, index) => {
+          // #116 子项 10：UI 只呈现「哪条探测 · 哪个候选 · 本地化原因」；
+          // 内部码与系统级原文由 presentDetectionDiagnostic 的 raw 进运行日志。
+          const presented = presentDetectionDiagnostic(diagnostic)
+          return (
+            <div className="set-hint" role="status" key={`${diagnostic.code}:${diagnostic.detectorId ?? 'all'}:${index}`}>
+              {presented.text}
+            </div>
+          )
+        })}
         {detectionCompleted && candidates.length === 0 && (
           <div className="agent-runtime-empty" role="status">
             <span>未发现可自动配置的 ACP Agent。若 Agent 已安装但不在 PATH 中，可以手动选择其可执行文件。</span>

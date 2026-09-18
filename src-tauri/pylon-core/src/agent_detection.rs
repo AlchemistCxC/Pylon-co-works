@@ -3062,6 +3062,18 @@ mod tests {
         assert!(uvx_python_args(None).is_empty());
     }
 
+    /// 受控探测要拉起 `powershell.exe` → `ping.exe -t`，再等它把孙进程 pid 落成文件。
+    ///
+    /// 等待窗口按「争抢」而非「空闲」取值：空闲机器上这段只需 0.3–1s，但
+    /// `cargo test --workspace` 全并行时 CI runner 会被饥饿，3s 的窗口会被击穿，
+    /// 表现为 pid 文件没出现（`descendant pid file`），且随机落在不同的进程类测试上
+    /// （#157 同一型：Rust 全量并行下 flaky）。
+    ///
+    /// 预算不是被测契约——被测的是「cleanup 杀掉了孙进程」，故只放宽窗口，
+    /// 下面两处断言一字未改。
+    const PROBE_READY_WAIT: Duration = Duration::from_secs(30);
+    const PROBE_EXIT_WAIT: Duration = Duration::from_secs(10);
+
     #[cfg(windows)]
     #[tokio::test]
     async fn managed_probe_cleanup_kills_descendant_processes() {
@@ -3085,7 +3097,7 @@ mod tests {
             .stderr(Stdio::null())
             .kill_on_drop(true);
         let mut child = ManagedProbeChild::new(command.spawn().unwrap());
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + PROBE_READY_WAIT;
         while !pid_file.is_file() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -3096,7 +3108,7 @@ mod tests {
             .unwrap();
 
         child.kill_and_wait().await;
-        let deadline = Instant::now() + Duration::from_secs(1);
+        let deadline = Instant::now() + PROBE_EXIT_WAIT;
         loop {
             let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
             if handle.is_null() {

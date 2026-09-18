@@ -9,10 +9,12 @@ import { resolveSheetRender } from './sheetRegistry.tsx'
 import { activateAgentSheet } from './activateAgentSheet'
 import SheetHost from './SheetHost'
 import SheetSidebarSlot from './SheetSidebarSlot'
+import LeftRailResizeHandle from './LeftRailResizeHandle.tsx'
 import RightRailHost from '../components/right-panel/RightRailHost.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
+import { sheetHasLeftColumn } from './sheetSidebarState.ts'
 import { useRightRailStore } from '../rightRailStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
 
@@ -135,6 +137,13 @@ export default function SheetLayout(props: SheetLayoutProps) {
     }
   }
   const ccEditMode = useStore(s => s.ccEditMode)
+  const showSidebar = useStore(s => s.showSidebar !== false)
+  // #154：左列的可见性是布局层的状态——宽度、竖直分割线与 a11y 可见性都据它决定，
+  // 各 Sheet 不再自行判断折叠。判定与 App 的 sidebarEnabled 同源（sheetHasLeftColumn），
+  // 避免标题栏与左列对「本 Sheet 有没有左栏」得出两个结论。
+  const leftColumnVisible = !activeSheet
+    ? false
+    : sheetHasLeftColumn(activeSheet) && showSidebar && !sidebarCollapsed
   // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
   const workspacePersistError = useWorkspaceStore(s => s.lastPersistError)
   const identityPersistError = useIdentityStore(s => s.lastPersistError)
@@ -157,7 +166,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
     // W1-05：无 active sheet → 虚拟 overview 接管空态（不写入持久 sheet 数组）
     const overviewEntry = resolveSheetRender('overview')
     return (
-      <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
+      <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-sidebar="collapsed" data-pylon-surface="workspace" data-agent-id={activeAgent}>
         {overviewEntry ? <overviewEntry.component sheet={VIRTUAL_OVERVIEW_SHEET} ctx={ctx} state={overviewEntry.deserialize(undefined)} /> : <EmptySheetHost />}
         <RightRailHost sheet={null} ctx={ctx} activeAgent={activeAgent} />
       </div>
@@ -165,8 +174,9 @@ export default function SheetLayout(props: SheetLayoutProps) {
   }
 
   return (
-    <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
+    <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-sidebar={leftColumnVisible ? 'expanded' : 'collapsed'} data-pylon-surface="workspace" data-agent-id={activeAgent}>
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
+      {leftColumnVisible && <LeftRailResizeHandle />}
       {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && activeSheet.kind !== 'browser' && <SheetHost sheet={activeSheet} ctx={ctx} />}
       {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {
         const active = sheet.id === activeSheetId

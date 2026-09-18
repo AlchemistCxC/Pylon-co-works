@@ -20,8 +20,13 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * `search-sheet-input/search-sidebar-scope/-action/search-result-row` 类名保留为
  * workspace adaptive.css（modern-gui 覆写）锚点。
  */
-const SHEET = 'search-sheet flex min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
-const SIDEBAR = 'search-sidebar flex w-[var(--sheet-sidebar-width,250px)] basis-[var(--sheet-sidebar-width,250px)] flex-col py-[var(--ui-space-5)] px-3 border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)] max-[720px]:w-[190px] max-[720px]:basis-[190px]'
+// #116 子项 2：本壳是 .layout（flex 容器）的直接子项，缺 flex-1 时按内容宽度
+// 收缩（实测 528×988，而同排 File/Overview/Runtime/Gateway 都是 1920×988）。
+const SHEET = 'search-sheet flex flex-1 min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
+// #154：左列几何（宽度 / 竖直分割线 / 折叠可见性）归布局层的 .sidebar——本类只管内容样式。
+// 原先自带 w/basis/border-r 与 max-[720px] 局部断点，是「标题栏分割线与左列分割线错位」的
+// 成因之一（每个 Sheet 各自决定宽度）。
+const SIDEBAR = 'sidebar search-sidebar flex flex-col py-[var(--ui-space-5)] px-3 bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)]'
 const SIDEBAR_HEAD = 'grid gap-2 mx-2 mb-4 pb-4 border-b border-border'
 const HEAD_SPAN = 'text-accent font-bold text-[10px] leading-[1] font-[family-name:var(--mono)] tracking-[.14em]'
 const HEAD_STRONG = 'text-[15px]'
@@ -119,15 +124,13 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
 
   return (
     <div className={SHEET}>
-      {!ctx.sidebarCollapsed && (
-        <aside className={SIDEBAR} aria-label="搜索工具">
+      <aside className={SIDEBAR} aria-label="搜索工具">
           <div className={SIDEBAR_HEAD}><span className={HEAD_SPAN}>SEARCH</span><strong className={HEAD_STRONG}>搜索范围</strong></div>
           <div className={SCOPE}><Database size={15} aria-hidden="true" className={SCOPE_SVG} /><span>本地会话快照</span><small className={SCOPE_SMALL}>{sessions.length}</small></div>
           <button type="button" className={SIDEBAR_ACTION} onClick={() => inputRef.current?.focus()}><Search size={15} aria-hidden="true" /><span>输入关键词</span></button>
           <button type="button" className={SIDEBAR_ACTION} disabled={!query} onClick={() => { setQuery(''); inputRef.current?.focus() }}><X size={15} aria-hidden="true" /><span>清除查询</span></button>
           <div className={SIDEBAR_SUMMARY}><strong className={SUMMARY_STRONG}>{loading ? '…' : results.length}</strong><span className={SUMMARY_SPAN}>当前结果</span>{truncated && <small className={SUMMARY_SPAN}>已达显示上限</small>}</div>
         </aside>
-      )}
       <main className={MAIN}>
         <div className={KICKER}>SEARCH</div>
         <h2 className={MAIN_TITLE}>跨会话搜索</h2>

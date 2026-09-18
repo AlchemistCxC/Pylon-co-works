@@ -7,10 +7,14 @@ const NAV: {key:Tab;label:string}[] = [
   {key:'debug',label:'调试'},{key:'system',label:'系统'},
 ]
 
-export default function PrismSheet({ sidebarCollapsed = false }: { sidebarCollapsed?: boolean }) {
+/** #154：左列几何（宽度/竖直分割线/折叠可见性）归布局层的 .sidebar；本组件只出内容。 */
+export default function PrismSheet() {
   const [tab,setTab] = useState<Tab>('bots')
   return <div className="prism-sheet">
-    {!sidebarCollapsed && <nav className="ps-nav" aria-label="Prism 分区">{NAV.map(n=><button key={n.key} className={`ps-nav-btn ${tab===n.key?'active':''}`} onClick={()=>setTab(n.key)}>{n.label}</button>)}</nav>}
+    {/* #154：.ps-nav 现在兼任布局层左列（.sidebar），而 .sidebar 已占用 ::before 作
+        侧栏背景（absolute inset:0）。同一个元素只能有一个 ::before，故把原先
+        `.ps-nav::before` 的 PRISM 标题改成真实元素。 */}
+    <nav className="sidebar ps-nav" aria-label="Prism 分区"><span className="ps-nav-kicker" aria-hidden="true">PRISM</span>{NAV.map(n=><button key={n.key} className={`ps-nav-btn ${tab===n.key?'active':''}`} onClick={()=>setTab(n.key)}>{n.label}</button>)}</nav>
     <div className="ps-body">
       <div className="ps-demo-notice" role="status">演示预览：尚未接入 Prism API，所有管理操作已禁用。</div>
       {tab==='bots'&&<BotsTab/>}{tab==='scenarios'&&<ScenariosTab/>}

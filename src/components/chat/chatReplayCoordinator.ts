@@ -1,5 +1,5 @@
 import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
-import type { PersistedSessionLoadResult, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
+import type { ColdMountTurnSnapshot, PersistedSessionLoadResult, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnDuration } from '../../domains/events/canonicalTurnDuration.ts'
 import type { Message } from './messageTypes.ts'
 
@@ -25,6 +25,11 @@ export interface ReplayLoadOutcome {
   readonly canonicalDuration?: CanonicalTurnDuration
   /** A terminal row may exist even when its timestamps are malformed. */
   readonly hasCanonicalTurnTerminal?: boolean
+  /**
+   * #99 冷挂载 turn 账本快照（随 `load_persisted_session` 返回）。终帧只经一次性
+   * IPC Channel 交付，账本是**不依赖一次性 event** 的终态证据，故随 outcome 上抛。
+   */
+  readonly turn?: ColdMountTurnSnapshot
 }
 
 export interface ReplayLoadControllerAdapter {
@@ -156,6 +161,7 @@ export class ReplayLoadCoordinator {
         generation,
         ...(canonicalDuration ? { canonicalDuration } : {}),
         hasCanonicalTurnTerminal: hasCanonicalTurnTerminal(projectionRows.length > 0 ? projectionRows : canonicalRows),
+        ...(result.turn ? { turn: result.turn } : {}),
       }
     } catch (error) {
       if (lockGeneration !== undefined) this.controller.abortSessionLoad(request.source, lockGeneration)

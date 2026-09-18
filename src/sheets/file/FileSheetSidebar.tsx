@@ -1,7 +1,7 @@
 import { Clock3, Files, GitBranch, MessageSquare, Search } from 'lucide-react'
 import type { FileActivityContribution } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 
-/** FileSheetSidebar — 固定宽度轨道；折叠只隐藏 Explorer 内容，Activity Bar 保持可用。 */
+/** FileSheetSidebar — 左列内容（#154：宽度/竖直分割线/折叠可见性归布局层的 .sidebar）。 */
 export default function FileSheetSidebar({
   activeSection,
   activities,
@@ -30,7 +30,7 @@ export default function FileSheetSidebar({
   }
 
   return (
-    <aside className={`file-sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className="sidebar file-sidebar">
       <nav className="file-activity-bar" aria-label="FileSheet 分区">
         {activities.map(activity => (
           <button

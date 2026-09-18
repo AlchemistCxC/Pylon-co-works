@@ -95,6 +95,60 @@ function extractSource(payload: unknown): string | undefined {
   return typeof source === 'string' ? source : undefined
 }
 
+/** 帧事件名 → 终帧类目（非终帧返回 undefined）。 */
+export function canonicalTerminalKindFromEvent(event: string): CanonicalTerminalKind | undefined {
+  return event === 'pylon:done' ? 'done' : event === 'pylon:error' ? 'error' : undefined
+}
+
+/** 终帧载荷 → 归属源（非字符串或缺省一律 undefined，调用方据此丢弃）。 */
+export function canonicalTerminalSourceFromPayload(payload: unknown): string | undefined {
+  return extractSource(payload)
+}
+
+/**
+ * 终帧帧信封 → 终态信号。Channel 主轨（`acceptFrame`）与 window 广播兜底轨共用
+ * 这一构造，两条路的终帧判定不得各自演化。
+ */
+export function canonicalTerminalSignalFromFrame(frame: CanonicalFeedFrame): CanonicalTerminalSignal | undefined {
+  const kind = canonicalTerminalKindFromEvent(frame.event)
+  if (!kind) return undefined
+  return { source: extractSource(frame.payload), kind, payload: frame.payload }
+}
+
+/**
+ * 终帧 window 广播订阅（兜底轨）。
+ *
+ * 后端两条收尾路径（`finalize_response` → DONE、`publish_prompt_failure` → ERROR）都
+ * 无条件走 `emit_event_all` 广播，所以这条路与 Channel 注册是否存在无关。主轨是
+ * per-source IPC Channel：`send_message_streaming` 注册、终帧 `take` 注销，且
+ * `stop_agent_runtime` 会 `clear_update_channels`——注册一丢，Channel 帧就没有第二次
+ * 投递。本订阅让终态收敛不再单点依赖那条注册。
+ *
+ * 与主轨共用 `canonicalTerminalSignalFromFrame`，两条路的终帧判定不各自演化；
+ * 重复投递由消费方（TurnClock 幂等）吸收。非 Tauri 环境为 no-op。
+ */
+export function subscribeWindowTerminalFrames(listener: CanonicalFeedTerminalListener): () => void {
+  if (!IS_TAURI) return () => {}
+  const stops: Array<() => void> = []
+  let disposed = false
+  for (const event of ['pylon:done', 'pylon:error'] as const) {
+    void listen(event, payload => {
+      const signal = canonicalTerminalSignalFromFrame({ event, payload: payload.payload })
+      if (signal) listener(signal)
+    }).then(stop => {
+      if (disposed) stop()
+      else stops.push(stop)
+    }).catch(() => {
+      // 兜底订阅失败只损失冗余，Channel 主轨不受影响。
+    })
+  }
+  return () => {
+    disposed = true
+    for (const stop of stops) stop()
+    stops.length = 0
+  }
+}
+
 export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): CanonicalEventFeed {
   const sink = (deps.sinkFactory ?? (() => (IS_TAURI ? createCanonicalEventSink() : noopCanonicalEventSink)))()
   const cursor = new CanonicalEventCursor(tauriCanonicalEventRepository())
@@ -111,11 +165,8 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
   }
 
   const emitTerminal = (frame: CanonicalFeedFrame): void => {
-    const kind: CanonicalTerminalKind | undefined = frame.event === 'pylon:done'
-      ? 'done'
-      : frame.event === 'pylon:error' ? 'error' : undefined
-    if (!kind) return
-    const signal: CanonicalTerminalSignal = { source: extractSource(frame.payload), kind, payload: frame.payload }
+    const signal = canonicalTerminalSignalFromFrame(frame)
+    if (!signal) return
     for (const listener of terminalListeners) listener(signal)
   }
 

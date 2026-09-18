@@ -5,8 +5,8 @@ import {
   resolveEventIdentity,
   resolveToolCallId,
   type CanonicalNormalizeContext,
-} from '../canonicalNormalizer'
-import { toCanonicalEventId, toCanonicalOwnerKey, validateCanonicalEvent } from '../eventSchema'
+} from '../../domains/events/canonicalNormalizer'
+import { toCanonicalEventId, toCanonicalOwnerKey, validateCanonicalEvent } from '../../domains/events/eventSchema'
 
 const owner = { profileId: 'p1', agentId: 'agent-a', localSessionId: 'local:demo' }
 

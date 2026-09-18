@@ -61,9 +61,6 @@ codex-code-mode-host.exe
 
 dist-plugin-devkit/
 
-# 本地 agent 施工约束（用户环境，不入库）
-AGENTS.md
-
 # 本地个人文件（用户环境，不入库）
 nodejs/
 public/
@@ -80,3 +77,6 @@ dist-plugin-sdk/
 
 # pi agent 本地运行时状态（goals/tasks 快照，不入库）
 /.pi/
+
+# ZCode agent 本地运行时状态（会话计划等快照，不入库；与 /.pi/ 同类）
+/.zcode/

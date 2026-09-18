@@ -1,7 +1,10 @@
 /* Overview 工作台：由 builtin.pylon-workspace 拥有，只消费宿主视觉 token。 */
 .overview-sheet{display:flex;flex:1;min-width:0;overflow:hidden;color:var(--text);font-family:var(--font)}
 .overview-main{flex:1;min-width:0;overflow-y:auto;padding:clamp(24px,4vw,54px) clamp(22px,5vw,72px) 56px;background:radial-gradient(circle at 15% -8%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 32%),linear-gradient(color-mix(in srgb,var(--text) 2.5%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--text) 2.5%,transparent) 1px,transparent 1px);background-size:auto,40px 40px,40px 40px}
-.overview-sidebar{display:flex;width:var(--sheet-sidebar-width,250px);flex:0 0 var(--sheet-sidebar-width,250px);flex-direction:column;border-right:1px solid var(--border);background:color-mix(in srgb,var(--surface-panel) 76%,transparent)}
+/* #154：只保留内容样式。宽度 / flex 基准 / 竖直分割线归布局层的 .sidebar——
+   Overview 原先自带 --sheet-sidebar-width 与 border-right，是「标题栏分割线与左列
+   分割线错位」的成因之一。 */
+.overview-sidebar{flex-direction:column;background:color-mix(in srgb,var(--surface-panel) 76%,transparent)}
 .overview-sidebar-head{display:grid;gap:8px;padding:22px 18px 17px;border-bottom:1px solid var(--border)}.overview-sidebar-head span{color:var(--accent);font:700 10px/1 var(--mono);letter-spacing:.14em}.overview-sidebar-head strong{font-size:15px}
 .overview-sidebar nav{display:grid;gap:4px;padding:14px 12px}.overview-sidebar nav button{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:9px;min-height:38px;padding:0 10px;color:var(--text-dim);text-align:left;border:1px solid transparent;border-left:3px solid transparent;background:transparent;font:12px var(--font);cursor:pointer}.overview-sidebar nav button:hover{color:var(--text);border-color:var(--border);border-left-color:var(--accent);background:var(--bg-hover)}.overview-sidebar nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.overview-sidebar nav svg{color:var(--accent)}.overview-sidebar nav small{font:10px var(--mono);color:var(--text-dim)}
 .overview-sidebar-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding:15px 18px;border-top:1px solid var(--border);color:var(--text-dim);font-size:11px}.overview-sidebar-foot svg{color:var(--success,#55b685)}

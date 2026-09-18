@@ -14,7 +14,7 @@ import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError'
-import { resolveSheetRender } from './workspace-sheets/sheetRegistry.tsx'
+import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
 import {
   closeOtherWorkspaces,
   closeRightWorkspaces,
@@ -161,10 +161,12 @@ export default function App() {
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
   const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
   const sidebarCollapsed = useRightRailStore(s => s.leftRailCollapsed)
-  const activeSidebarMode = activeSheet ? resolveSheetRender(activeSheet.kind)?.sidebarMode : undefined
-  // workspace / sheet 两类左栏都消费 workspaceStore.sidebarCollapsed，因此所有带左栏的
-  // Sheet 共用 TitleBar 最左端入口；none 才禁用。
-  const sidebarEnabled = activeSidebarMode === 'workspace' || activeSidebarMode === 'sheet'
+  const showSidebar = useStore(s => s.showSidebar !== false)
+  // #154：左列是否存在以「注册表真的提供 sidebar 组件」为准，而不是只看 sidebarMode。
+  // 后者会让「声明 'sheet' 但把左栏画在自己内容区里」的 Sheet 也空占一条标题栏轨道，
+  // 那条轨道自画的边框由此与左列自己的边框错开（浏览器 Sheet 实测错开 84px）。
+  // 主题级 showSidebar 一并计入，否则标题栏会为被主题隐藏的左栏保留轨道。
+  const sidebarEnabled = sheetHasLeftColumn(activeSheet) && showSidebar
   const rightPanelEnabled = activeSheet
     ? selectAvailableContextPanels(contextPanelSnapshot.entries, {
       workspaceKind: activeSheet.kind,
@@ -172,8 +174,6 @@ export default function App() {
       activeSessionId: activeSession,
     }).length > 0
     : false
-  // 所有带左栏的 Sheet 使用同一几何契约：展开宽度与左栏一致，折叠后统一为 42px。
-  const sidebarExpandedTrack = sidebarEnabled
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const prevActiveAgentRef = useRef<string>(activeAgent)
@@ -413,7 +413,7 @@ export default function App() {
     'app',
     { scope: 'global' },
     {},
-    { layout: { sidebarCollapsed, sidebarWidth, sidebarEnabled, sidebarExpandedTrack } },
+    { layout: { sidebarCollapsed, sidebarWidth, sidebarEnabled } },
   )
 
   // Portal 与 body::before 都在 `.app` 外：完整投影全局 Skin，避免二级菜单、
@@ -477,7 +477,6 @@ export default function App() {
         activeSessionId={activeSession}
         sidebarCollapsed={sidebarCollapsed}
         sidebarEnabled={sidebarEnabled}
-        sidebarExpandedTrack={sidebarExpandedTrack}
         rightPanelEnabled={rightPanelEnabled}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed)}

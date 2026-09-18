@@ -25,8 +25,10 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * `history-sheet/history-sidebar(-total)/history-row` 类名保留为 workspace
  * adaptive.css（modern-gui 模式覆写）的锚点。
  */
-const SHEET = 'history-sheet flex min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
-const SIDEBAR = 'history-sidebar flex w-[var(--sheet-sidebar-width,250px)] basis-[var(--sheet-sidebar-width,250px)] flex-col py-[var(--ui-space-5)] px-3 overflow-y-auto border-r border-border bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)] max-[720px]:w-[190px] max-[720px]:basis-[190px]'
+// #116 子项 2：同 Search——缺 flex-1 时按内容宽度收缩（实测 394×988）。
+const SHEET = 'history-sheet flex flex-1 min-w-0 overflow-hidden text-text font-[family-name:var(--font)]'
+// #154：左列几何归布局层的 .sidebar（见 SearchSheetView 同处说明）；本类只管内容样式。
+const SIDEBAR = 'sidebar history-sidebar flex flex-col py-[var(--ui-space-5)] px-3 bg-[color-mix(in_srgb,var(--bg-panel)_72%,transparent)]'
 const SIDEBAR_HEAD = 'grid gap-2 mx-2 mb-4 pb-4 border-b border-border'
 const SIDEBAR_HEAD_SPAN = 'text-accent font-bold text-[10px] leading-[1] font-[family-name:var(--mono)] tracking-[.14em]'
 const SIDEBAR_HEAD_STRONG = 'text-[15px]'
@@ -154,8 +156,7 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
 
   return (
     <div className={SHEET}>
-      {!ctx.sidebarCollapsed && (
-        <aside className={SIDEBAR} aria-label="存档导航">
+      <aside className={SIDEBAR} aria-label="存档导航">
           <div className={SIDEBAR_HEAD}><span className={SIDEBAR_HEAD_SPAN}>HISTORY</span><strong className={SIDEBAR_HEAD_STRONG}>存档导航</strong></div>
           <div className={SIDEBAR_TOTAL}><Archive size={16} aria-hidden="true" className={SIDEBAR_TOTAL_SVG} /><span><strong className={SIDEBAR_TOTAL_STRONG}>{paged.total}</strong> 个存档</span></div>
           {paged.pages > 1 && (
@@ -167,7 +168,6 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
           )}
           <div className={SIDEBAR_FOOT}>第 {paged.page} / {paged.pages} 页</div>
         </aside>
-      )}
       <main className={MAIN}>
         <div className={KICKER}>HISTORY</div>
         <h2 className={MAIN_TITLE}>存档会话（{paged.total}）</h2>

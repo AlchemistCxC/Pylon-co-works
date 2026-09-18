@@ -24,7 +24,7 @@ const NO_GENERATING_SOURCES: readonly string[] = []
 
 export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; state?: unknown; sheet?: { id: string } }) {
   const agentState = state && typeof state === 'object' ? state as { sidebarMode?: AgentSidebarMode } : undefined
-  const { activeSession, selectSession: onSelectSession, openProfileEdit: onProfileEdit, openSessionSettings: onSessionSettings, sidebarCollapsed: collapsed } = ctx
+  const { activeSession, selectSession: onSelectSession, openProfileEdit: onProfileEdit, openSessionSettings: onSessionSettings } = ctx
   const [search, setSearch] = useState('')
   const mode = agentState?.sidebarMode ?? 'work'
   const patchSheetState = useWorkspaceStore(s => s.patchSheetState)
@@ -143,46 +143,47 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
     onCreateWorkspaceSession: createSessionUnderCwd,
   }
 
+  // #154：本组件提供左栏内容；外壳挂共享几何类 .sidebar（宽度/竖直分割线/折叠可见性
+  // 全归布局层，各 Sheet 不得自带宽度或边框）。折叠可见性由布局层的
+  // .layout[data-sidebar="collapsed"] 统一处理，这里不再自行判断。
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className="sidebar">
       <div className="sidebar-header">
-        {!collapsed && <div className="sidebar-mode-tabs" role="tablist" aria-label="Agent 左栏模式">
+        <div className="sidebar-mode-tabs" role="tablist" aria-label="Agent 左栏模式">
           {(['work', 'chat'] as const).map(candidate => <button key={candidate} type="button" role="tab" aria-selected={mode === candidate} className={mode === candidate ? 'active' : ''} onClick={() => { if (sheet) patchSheetState(sheet.id, { sidebarMode: candidate }) }}>{candidate === 'work' ? '工作' : '聊天'}</button>)}
-        </div>}
-        {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
+        </div>
+        <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
-      {!collapsed && (
-        <div className="sidebar-sections">
-          {contributions.map(entry => {
-            if (entry.value.renderKind === 'isolated-surface') {
-              return <PluginContributionBoundary key={entry.contributionId} contributionId={entry.contributionId}>
-                <IsolatedPluginSurface
-                  surfaceId={entry.value.surfaceId}
-                  className="sidebar-mode-panel"
-                  input={{
-                    mode,
-                    query: search,
-                    activeAgentId: activeAgent,
-                    activeSessionId: activeSession,
-                    sessions: contributionProps.sessions.map(session => ({ id: session.id, name: session.name, workspaceId: session.workspaceId })),
-                    workspaces: workspaces.map(workspace => ({ id: workspace.id, name: workspace.name, rootPath: workspace.rootPath })),
-                  }}
-                  onEvent={(event, detail) => {
-                    if (event === 'host:select-session' && typeof detail === 'string') handleSelect(detail)
-                    if (event === 'host:create-chat-session') contributionProps.onCreateChatSession()
-                    if (event === 'host:create-workspace-session' && typeof detail === 'string') createSessionUnderCwd(detail)
-                    if (event === 'host:open-session-settings' && typeof detail === 'string') onSessionSettings(detail)
-                  }}
-                />
-              </PluginContributionBoundary>
-            }
-            const Contribution = entry.value.component as ComponentType<AgentSidebarContributionProps>
-            return <PluginContributionBoundary key={entry.contributionId} contributionId={entry.contributionId}><Suspense fallback={null}><Contribution {...contributionProps} /></Suspense></PluginContributionBoundary>
-          })}
-          {contributions.length === 0 && <div className="session-empty">当前模式没有可用内容</div>}
-        </div>
-      )}
+      <div className="sidebar-sections">
+        {contributions.map(entry => {
+          if (entry.value.renderKind === 'isolated-surface') {
+            return <PluginContributionBoundary key={entry.contributionId} contributionId={entry.contributionId}>
+              <IsolatedPluginSurface
+                surfaceId={entry.value.surfaceId}
+                className="sidebar-mode-panel"
+                input={{
+                  mode,
+                  query: search,
+                  activeAgentId: activeAgent,
+                  activeSessionId: activeSession,
+                  sessions: contributionProps.sessions.map(session => ({ id: session.id, name: session.name, workspaceId: session.workspaceId })),
+                  workspaces: workspaces.map(workspace => ({ id: workspace.id, name: workspace.name, rootPath: workspace.rootPath })),
+                }}
+                onEvent={(event, detail) => {
+                  if (event === 'host:select-session' && typeof detail === 'string') handleSelect(detail)
+                  if (event === 'host:create-chat-session') contributionProps.onCreateChatSession()
+                  if (event === 'host:create-workspace-session' && typeof detail === 'string') createSessionUnderCwd(detail)
+                  if (event === 'host:open-session-settings' && typeof detail === 'string') onSessionSettings(detail)
+                }}
+              />
+            </PluginContributionBoundary>
+          }
+          const Contribution = entry.value.component as ComponentType<AgentSidebarContributionProps>
+          return <PluginContributionBoundary key={entry.contributionId} contributionId={entry.contributionId}><Suspense fallback={null}><Contribution {...contributionProps} /></Suspense></PluginContributionBoundary>
+        })}
+        {contributions.length === 0 && <div className="session-empty">当前模式没有可用内容</div>}
+      </div>
 
       <div className="profile-bar">
         {profiles.map(p => (
@@ -191,7 +192,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
             {p.avatar ? <img src={p.avatar} alt={p.name} /> : p.name[0]}
           </button>
         ))}
-        <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>✎</button>
+        {/* #116 子项 4：同排宠物按钮的 title 已是中文，此处原为 "Edit Profile"。 */}
+        <button className="profile-edit" title="编辑当前 Profile" onClick={onProfileEdit}>✎</button>
         <button className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}>🐾</button>
       </div>
     </aside>

@@ -537,7 +537,11 @@ function ActiveAgentSessionLifecycle(props: {
     lifecycleRef.current = new AgentWorkbenchLifecycle()
     // Canonical replay can discover a terminal tool event after the initial
     // bind; refresh the same owner document when the load chain completes.
-    lifecycleRef.current.onCanonicalRefresh = (session) => { void props.sessionRuntime.refresh(session) }
+    // #99：账本快照一并交下去——终帧只经一次性 IPC Channel 交付，账本是不依赖
+    // 一次性 event 的终态证据，refresh 用它补出 journal 读漏掉的收敛事实。
+    lifecycleRef.current.onCanonicalRefresh = (session, _canonicalRevision, turn) => {
+      void props.sessionRuntime.refresh(session, turn)
+    }
   }
   const lifecycle = lifecycleRef.current
   const sessionRef = useRef(props.session)

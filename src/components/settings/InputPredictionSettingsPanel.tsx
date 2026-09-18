@@ -27,23 +27,23 @@ export default function InputPredictionSettingsPanel() {
   const configured = useMemo(() => Boolean(settings.enabled && settings.baseUrl && settings.apiKey && settings.model), [settings])
   return <div className="input-prediction-settings settings-surface">
     <div className="agent-settings-heading"><div><h3>输入预测服务</h3><p>独立于 ACP Agent 的 OpenAI 兼容 Chat Completions 服务。配置后，输入栏会按低频策略请求下一句预测。</p></div></div>
-    <div className="set-hint">API Key 仅用于请求该服务，保存在本机设置中；不开启或配置不完整时不会发起网络请求。</div>
+    <div className="set-hint">密钥仅用于请求该服务，保存在本机设置中；不开启或配置不完整时不会发起网络请求。</div>
     <section className="set-group"><div className="set-group-title">连接</div>
       <Field label="预测来源"><select className="set-select" value={settings.mode} onChange={event => update('mode', event.target.value as InputPredictionSettings['mode'])}><option value="auto">自动（优先 ACP Fork）</option><option value="fork">仅 ACP Fork</option><option value="standalone">仅独立模型</option><option value="off">关闭预测</option></select></Field>
       <Field label="启用独立服务"><input type="checkbox" checked={settings.enabled} onChange={event => update('enabled', event.target.checked)} /></Field>
-      <Field label="Base URL" hint="例如 https://api.openai.com/v1 或本地 sidecar 地址"><input className="set-input set-input-wide" value={settings.baseUrl} onChange={event => update('baseUrl', event.target.value)} placeholder="https://api.openai.com/v1" /></Field>
-      <Field label="API Key"><input className="set-input set-input-wide" type="password" value={settings.apiKey} onChange={event => update('apiKey', event.target.value)} placeholder="sk-…" autoComplete="off" /></Field>
+      <Field label="基础地址（Base URL）" hint="例如 https://api.openai.com/v1 或本地 sidecar 地址"><input className="set-input set-input-wide" value={settings.baseUrl} onChange={event => update('baseUrl', event.target.value)} placeholder="https://api.openai.com/v1" /></Field>
+      <Field label="密钥（API Key）"><input className="set-input set-input-wide" type="password" value={settings.apiKey} onChange={event => update('apiKey', event.target.value)} placeholder="sk-…" autoComplete="off" /></Field>
       <Field label="模型"><input className="set-input set-input-wide" value={settings.model} onChange={event => update('model', event.target.value)} placeholder="gpt-4o-mini" /></Field>
-      <Field label="Endpoint 路径" hint="兼容大多数 OpenAI API 网关"><input className="set-input set-input-wide" value={settings.endpointPath} onChange={event => update('endpointPath', event.target.value)} /></Field>
+      <Field label="端点路径（Endpoint）" hint="兼容大多数 OpenAI API 网关"><input className="set-input set-input-wide" value={settings.endpointPath} onChange={event => update('endpointPath', event.target.value)} /></Field>
     </section>
     <section className="set-group"><div className="set-group-title">生成参数</div>
       <Field label="推理等级"><select className="set-select" value={settings.reasoningEffort} onChange={event => update('reasoningEffort', event.target.value as InputPredictionSettings['reasoningEffort'])}><option value="none">关闭</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option></select></Field>
-      <Field label="Temperature"><input className="set-num" type="number" min="0" max="2" step="0.05" value={settings.temperature} onChange={event => update('temperature', event.target.valueAsNumber)} /></Field>
-      <Field label="Top P"><input className="set-num" type="number" min="0" max="1" step="0.05" value={settings.topP} onChange={event => update('topP', event.target.valueAsNumber)} /></Field>
+      <Field label="采样温度（Temperature）"><input className="set-num" type="number" min="0" max="2" step="0.05" value={settings.temperature} onChange={event => update('temperature', event.target.valueAsNumber)} /></Field>
+      <Field label="核采样（Top P）"><input className="set-num" type="number" min="0" max="1" step="0.05" value={settings.topP} onChange={event => update('topP', event.target.valueAsNumber)} /></Field>
       <Field label="最大输出 Token"><input className="set-num" type="number" min="1" max="4096" step="1" value={settings.maxTokens} onChange={event => update('maxTokens', event.target.valueAsNumber)} /></Field>
       <Field label="频率惩罚"><input className="set-num" type="number" min="-2" max="2" step="0.1" value={settings.frequencyPenalty} onChange={event => update('frequencyPenalty', event.target.valueAsNumber)} /></Field>
       <Field label="存在惩罚"><input className="set-num" type="number" min="-2" max="2" step="0.1" value={settings.presencePenalty} onChange={event => update('presencePenalty', event.target.valueAsNumber)} /></Field>
-      <Field label="Seed" hint="留空表示由服务端随机"><input className="set-num" type="number" value={settings.seed ?? ''} onChange={event => update('seed', event.target.value === '' ? null : event.target.valueAsNumber)} /></Field>
+      <Field label="随机种子（Seed）" hint="留空表示由服务端随机"><input className="set-num" type="number" value={settings.seed ?? ''} onChange={event => update('seed', event.target.value === '' ? null : event.target.valueAsNumber)} /></Field>
       <Field label="停止序列" hint="多个值用逗号分隔"><input className="set-input set-input-wide" value={settings.stop} onChange={event => update('stop', event.target.value)} placeholder="\n, END" /></Field>
     </section>
     <section className="set-group"><div className="set-group-title">上下文与请求</div>

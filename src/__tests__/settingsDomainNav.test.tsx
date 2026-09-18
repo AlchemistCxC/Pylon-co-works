@@ -160,8 +160,11 @@ describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
     expect(pinnedBtn.closest('.settings-nav-section-block')).toBeNull()
     fireEvent.click(pinnedBtn)
     // 断言：domain 回到外观（分区列表含「全局」）且内容区是消息流的 Owner 头
+    // （#116 子项 4d：Owner 头改显示可读名，原始 owner id 落在 data-owner 上）
     await waitFor(() => expect(w.getByRole('button', { name: '全局' })).toBeInTheDocument())
-    expect(screen.getByTestId('settings-owner-badge').textContent).toContain('message-stream')
+    const ownerBadge = screen.getByTestId('settings-owner-badge')
+    expect(ownerBadge.textContent).toContain('消息流组件')
+    expect(ownerBadge.getAttribute('data-owner')).toBe('message-stream')
   })
 })
 

@@ -212,8 +212,8 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
 
   return (
     <div className="overview-sheet" data-tactical-panel={tactical ? tacticalPanel : undefined}>
-      {!ctx.sidebarCollapsed && (
-        <aside className="overview-sidebar" aria-label="Overview 分区">
+      {/* #154：左列几何（宽度/竖直分割线/折叠可见性）归布局层的 .sidebar；本类只管内容样式。 */}
+      <aside className="sidebar overview-sidebar" aria-label="Overview 分区">
           <div className="overview-sidebar-head">
             <span>OVERVIEW</span>
             <strong>工作台导航</strong>
@@ -227,7 +227,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
           </nav>
           <div className="overview-sidebar-foot"><Activity size={14} aria-hidden="true" />{connectedCount} 个 Agent 在线</div>
         </aside>
-      )}
       <main className="overview-main">
       <div className="overview-shell">
         {tactical && <>

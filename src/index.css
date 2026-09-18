@@ -2,7 +2,15 @@
    Pylon — 宿主视觉语义与玻璃材质基线
    ═══════════════════════════════════════════════════════════ */
 
-*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+/* 层序显式声明，不依赖引入顺序：base(reset) 最低，theme 次之，utilities 最高。
+   全局 reset 若留在未分层区，按 Cascade Layers 规范会恒压 @layer utilities——
+   p-4 / mt-auto 这类 spacing utility 在没有任何存量类的元素上也会恒败（#116 子项 1）。
+   reset 仍承担 box-sizing:border-box 的全局默认，不得删除（首方样式与 .pe-input 依赖它）。 */
+@layer base, theme, utilities;
+
+@layer base {
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+}
 
 /* 无障碍隐藏文本：项目此前缺失该工具类，导致多处 sr-only 文案可见。 */
 .sr-only {

@@ -8,6 +8,7 @@ import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
+import { resolveGenerationLedgerTerminalReason, type GenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {
   canonicalBatchChunksOf,
   canonicalBatchSpanOf,
@@ -35,11 +36,19 @@ import {
   type SessionResponseObject,
 } from '../../infrastructure/acp/chatContracts.ts'
 import type { SessionConfigOption } from '../../domains/workbench/session/sessionSurface.ts'
-import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
+import { getCanonicalEventFeed, subscribeWindowTerminalFrames, type CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
+  /**
+   * 终帧 window 广播兜底订阅。主轨是 per-source IPC Channel（`send_message_streaming`
+   * 注册、终帧 take 注销），而 `pylon:done`/`pylon:error` 的 window 广播**没有任何
+   * 其他消费者**——Channel 一旦丢失（注册被清、或前端 `activeStreams` 条目被移除）
+   * 终帧就没有第二次投递。这里订阅同一条广播，让终帧至少有一条不依赖 Channel 注册
+   * 的路。返回退订函数。
+   */
+  listenTerminalFallback(listener: (signal: CanonicalTerminalSignal) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
 }
 
@@ -224,6 +233,15 @@ function withJournalDiagnostic(document: WorkbenchDocument, count: number): Work
   }
 }
 
+/**
+ * 终帧 window 广播兜底：订阅 `pylon:done`/`pylon:error` 的窗口事件。后端
+ * `finalize_response`/`publish_prompt_failure` 两条收尾路径都无条件走
+ * `emit_event_all` 广播，所以这条路与 Channel 是否存在无关。
+ */
+function defaultTerminalFallbackListener(listener: (signal: CanonicalTerminalSignal) => void): () => void {
+  return subscribeWindowTerminalFrames(listener)
+}
+
 function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   return {
     loadAll: ownerKey => {
@@ -234,6 +252,7 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
       return Promise.resolve([])
     },
     subscribe: listener => subscribePluginEvents(listener),
+    listenTerminalFallback: defaultTerminalFallbackListener,
   }
 }
 
@@ -288,6 +307,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
   const subscribe = dependencies.subscribe ?? defaults.subscribe
+  const listenTerminalFallback = dependencies.listenTerminalFallback ?? defaults.listenTerminalFallback
   const runtime = createWorkbenchRuntime({
     sessionId: null, status: 'idle', messages: [],
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
@@ -398,9 +418,21 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     terminal: boolean
   }
   const turnClocks = new Map<string, TurnClockEntry>()
+  /**
+   * 最近一次 canonical 重载读到的 #99 账本终态，按 source 隔离。
+   *
+   * 单独存而不是只用作 refresh 的入参：`refresh` 对同 source 会去重（`refreshInFlight`），
+   * 一次早于终态收敛发起的重载可能与携带账本的那次同窗，入参会被去重丢掉。按 source
+   * 保留最近观测到的终态即可让在途的那次重载用上它。
+   *
+   * **新回合起点必须清空**（见 `turnClockStart`）：否则上一回合的终态会被当成本回合的
+   * 证据，把在途的新回合判成已收敛。
+   */
+  const ledgerTerminalBySource = new Map<string, GenerationLedgerTerminalReason>()
 
   const turnClockStart = (targetSource: string, at: number): void => {
     turnClocks.set(targetSource, { generationStart: at, lastTokenAt: at, terminal: false })
+    ledgerTerminalBySource.delete(targetSource)
   }
 
   /** 每条 live envelope 刷新活性；返回 undefined = 无活动回合（不写 patch）。 */
@@ -698,7 +730,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
   // P52 D3：feed 终帧信号 → TurnClock 终态（done/error；cancelled 映射 cancelled）。
   // 时钟幂等：首个终态 wins；不在当前 source 的终帧只封存该 source 的时钟。
-  const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(signal => {
+  // 终态收敛的唯一入口：TurnClock 幂等（首个终态 wins），故 Channel 主轨与 window
+  // 广播兜底轨重复投递同一终帧是安全的——两条路都到就只是个 no-op。
+  const handleTerminalSignal = (signal: CanonicalTerminalSignal): void => {
     if (!signal.source) return
     const payload = signal.payload as { cancelled?: unknown; failure?: unknown } | null
     const reason: 'done' | 'cancelled' | 'error' = signal.kind === 'error'
@@ -708,7 +742,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       ? payload.failure as PromptFailureMetadata
       : undefined
     turnClockTerminal(signal.source, reason, Date.now(), failure)
-  })
+  }
+  const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(handleTerminalSignal)
+  const unsubscribeTerminalFallback = listenTerminalFallback(handleTerminalSignal)
   const unsubscribeEvents = subscribe(event => {
     if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return
     const candidate = event as { owner?: Parameters<typeof toCanonicalOwnerKey>[0]; sessionId?: unknown }
@@ -728,7 +764,16 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     }
   })
 
-  const refresh = async (session: Session | undefined): Promise<void> => {
+  /**
+   * Canonical 重载：把 journal 读回来的投影折回文档，并据此收敛时钟。
+   *
+   * `ledgerTurn` = 后端 #99 turn 账本随 `load_persisted_session` 回来的快照
+   * （`ColdMountTurnSnapshot.turn`）。它是**终帧之外唯一的终态证据**：终帧只经
+   * per-source IPC Channel 一条路交付，丢了就没有第二次；而账本由后端权威状态
+   * 合成、不依赖一次性 event。因此「本回合是否已收敛」= journal 读到终态行
+   * **或** 账本说已收敛——只认前者会让一次早于终态行落盘的读把摘要判成不存在。
+   */
+  const refresh = async (session: Session | undefined, ledgerTurn?: unknown): Promise<void> => {
     if (destroyed || !session || !ownerKey || !boundSessionId || !source) return
     const bindingKey = workbenchSessionBindingKey(session)
     const refreshOwnerKey = ownerKey
@@ -738,6 +783,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (bindingKey !== boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
     if (refreshInFlight) return refreshInFlight
     const refreshEpoch = ++canonicalReadEpoch
+    // 账本终态按 source 归档；本次调用的账本可能被去重丢掉，但归档会留下。
+    const ledgerTerminalReason = resolveGenerationLedgerTerminalReason(ledgerTurn)
+    if (ledgerTerminalReason !== undefined) ledgerTerminalBySource.set(refreshSource, ledgerTerminalReason)
 
     const run = (async () => {
       try {
@@ -788,16 +836,21 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           resolveRuntimeErrors({ key: `session-recovery:${refreshSessionId}`, source: 'chat.session-recovery' })
         }
         // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
-        settleTurnClockFromDocument(refreshSource, canonicalHasTerminal)
+        // #99：账本是第二条终态证据——journal 读可能早于终态行落盘（后端
+        // "done 先于 persist"），只认 journal 会让这类读把在途投影判成当前事实，
+        // 既封不住时钟、也补不出摘要。
+        const ledgerTerminalReason = ledgerTerminalBySource.get(refreshSource)
+        const hasTerminalEvidence = canonicalHasTerminal || ledgerTerminalReason !== undefined
+        settleTurnClockFromDocument(refreshSource, hasTerminalEvidence)
         reconcileTurnClock(refreshSource)
         const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
+        if (!settled.generating && !settled.summary && hasTerminalEvidence) {
           updateRuntimeState({
             summary: {
               elapsedMs: canonicalDuration?.elapsedMs ?? 0,
               tokenCount: settled.tokenCount,
               completedFrame: '',
-              reason: 'done',
+              reason: ledgerTerminalReason ?? 'done',
               durationSource: canonicalDuration?.source ?? 'unknown',
               durationAvailable: canonicalDuration !== undefined,
               // Display-only restore: must not synthesize a terminal fence
@@ -960,8 +1013,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     },
     destroy() {
       if (destroyed) return
-      destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
-      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear()
+      destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear(); ledgerTerminalBySource.clear()
     },
   }
 }

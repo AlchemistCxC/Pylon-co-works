@@ -13,6 +13,19 @@
 .set-custom-preset .set-preset-chip { min-width:120px; text-align:left; }
 .ps-btn.danger { color:var(--tool-err,var(--danger)); border-color:color-mix(in srgb,var(--tool-err,var(--danger)) 45%,transparent); }
 
+/* #116 子项 9：破坏性操作的两段式确认（重置主题 / 删除自定义预设）。
+   说明文案必须写明会丢失什么；取消只退回未确认态，不产生任何写入。 */
+.set-confirm {
+  display:flex; flex-direction:column; gap:6px; padding:8px; margin-top:6px;
+  border:1px solid color-mix(in srgb,var(--tool-err,var(--danger)) 42%,var(--border));
+  border-radius:var(--ui-radius-sm);
+  background:color-mix(in srgb,var(--tool-err,var(--danger)) 8%,transparent);
+}
+.set-confirm-text { margin:0; color:var(--text-dim); font-size:var(--font-size-xs); line-height:1.5; }
+.set-confirm-actions { display:flex; gap:6px; }
+.set-confirm-inline { flex-direction:row; flex-wrap:wrap; align-items:center; gap:6px; margin-top:0; padding:5px 7px; }
+.set-confirm-inline .set-confirm-text { flex:1 1 100%; }
+
 .settings {
   position:fixed; top:var(--titlebar-h, 44px); left:0; right:0; bottom:0; z-index:50;
   background:var(--surface-overlay); backdrop-filter:blur(max(var(--glass-blur-md),var(--blur,16px))) saturate(1.06);
@@ -300,6 +313,21 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   font-size:var(--font-size-sm); font-weight:680; text-transform:uppercase;
   letter-spacing:.08em; color:var(--text-dim); margin-bottom:12px;
 }
+/* #116 子项 8：预览栏表头 + 折叠开关。折叠态用 (0,2,0) 选择器，压过下方
+   @media 里的 flex-basis/min-width（那些是 (0,1,0)），故与规则顺序无关。 */
+.settings-preview-pane-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.settings-preview-pane-head .settings-preview-label { margin-bottom:12px; }
+.settings-preview-toggle {
+  flex:none; display:grid; place-items:center; width:24px; height:24px; padding:0;
+  border:1px solid var(--border); border-radius:var(--ui-radius-xs);
+  background:transparent; color:var(--text-dim); cursor:pointer;
+  font-size:var(--font-size-md); line-height:1;
+}
+.settings-preview-toggle:hover { color:var(--text); background:var(--bg-hover); }
+.settings-preview-body { min-width:0; }
+.settings-preview-pane.collapsed { flex:0 0 44px; min-width:44px; max-width:44px; padding:12px 6px; overflow:hidden; }
+.settings-preview-pane.collapsed .settings-preview-pane-head { justify-content:center; }
+.settings-preview-pane.collapsed .settings-preview-toggle { width:28px; height:28px; }
 .settings-empty-state {
   max-width:560px; margin:12vh auto 0; padding:32px; text-align:center;
   border:1px solid var(--border); border-radius:var(--ui-radius-lg); background:color-mix(in srgb,var(--bg-panel) 64%,transparent);
@@ -357,15 +385,17 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   display: flex; flex-direction: column; gap: 8px;
 }
 .template-card:hover { border-color: var(--border-focus); }
+/* #116 子项 6：原先 `.template-preview` 自己用 transform: scale(0.35) + width:285%
+   缩略——transform 不参与布局，布局盒仍是未缩放尺寸（实测 offsetHeight 378 vs
+   视觉高 132，每卡白占 246px 垂直空间）。现改为不做外层缩放：内层 SettingsPreview
+   本来就会按容器宽度 scale-to-fit，视觉仍是同一张 ~16% 示意图，但布局盒等于视觉盒。
+   卡片里的说明由卡片自身的模板名 / 覆盖度承担，故隐藏预览自带的 caption。 */
 .template-preview {
   border: 1px solid var(--border);
   border-radius: var(--ui-radius-sm);
   overflow: hidden;
-  min-height: 90px;
-  transform-origin: top left;
-  transform: scale(0.35);
-  width: 285%;
 }
+.template-preview .set-preview-caption { display: none; }
 .template-actions { display: flex; gap: 6px; }
 .template-apply, .template-restore {
   padding: 3px 10px; font-size: var(--font-size-sm); font-family: var(--font);
@@ -657,7 +687,10 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 /* schema layout 只影响字段内部控件编排；Ledger 保持一行一项，避免可读性退化。 */
 .renderer-settings-group.layout-grid .renderer-settings-fields,
 .renderer-settings-group.layout-inline .renderer-settings-fields { display:block; }
-.renderer-number-duo { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 滑块+数值行：display 契约由下面 `.renderer-setting-field.renderer-number-duo`
+   （0,2,0）承担，本类不再自带 display——原先它与后面的 `.renderer-setting-field`
+   的 grid 打架，胜负只由文件顺序决定（#116 子项 5）。 */
+.renderer-number-duo { min-width: 0; }
 .renderer-segmented { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .renderer-segmented-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--ui-radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--font-size-xs); }
 .renderer-segmented-chip.active { background: var(--accent); border-color: var(--accent); color: var(--text-inverse, var(--surface-canvas)); }
@@ -1410,6 +1443,11 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 .renderer-settings-field-row { border-bottom:1px solid color-mix(in srgb,var(--stroke-subtle) 74%,transparent); }
 .renderer-settings-field-row:last-child { border-bottom:0; }
 .renderer-setting-provenance { display:flex; min-height:22px; align-items:center; justify-content:space-between; gap:12px; padding:0 2px 5px; color:var(--text-placeholder); font:var(--font-size-4xs)/1.2 var(--mono); }
+/* #116 子项 5 续：窄容器下这一行会把自己撑得比容器宽（实测 256 → 267），
+   沿链把横向滚动条顶到 .settings-body。只做行级裁剪，**不动子项的收缩方式**：
+   给 span 加 min-width:0 会让四个元数据标签也一起被省略号截掉（1200px 下实测
+   由 1 处截断变成 5 处），那是新增裁切；缺省只有末位 code 可收缩，正是原意。 */
+.renderer-setting-provenance { overflow:hidden; }
 .renderer-setting-provenance > span { color:color-mix(in srgb,var(--accent) 68%,var(--text-dim)); letter-spacing:.05em; }
 .renderer-setting-provenance > code { min-width:0; overflow:hidden; color:inherit; font:inherit; text-overflow:ellipsis; white-space:nowrap; }
 .renderer-setting-field {
@@ -1420,6 +1458,22 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   gap:7px 14px;
   padding:9px 2px;
   color:var(--text);
+}
+/* #116 子项 5：滑块+数值行同时挂 `.renderer-setting-field` 与 `.renderer-number-duo`。
+   原先后者的 flex 被本文件靠后的 grid 覆盖，整行被当 3 列网格排：列宽固定
+   132+180+72、加 gap 28 与 padding 4 = 416px，而该行可用宽只有 374px —— 单位与
+   ↺ 重置被挤进隐式第二行、provenance 元数据被右边缘裁掉。此处按行的本意声明
+   flex 契约（组合选择器优先于本类，不再吃文件顺序）。
+
+   不换行：换行判据看的是各子项的**假设主尺寸**（滑块 220px）而非收缩后的尺寸，
+   实测 374px 容器下 ↺ 仍会被挤到第二行——验收要求四者同行。改为 nowrap 后各子项
+   按 flex-shrink 收缩（滑块已由 `.renderer-setting-field > :is(…)` 放开 min-width），
+   行的最小宽度约 166px，远低于字段行实际可用宽度，窄容器也不会溢出。 */
+.renderer-setting-field.renderer-number-duo {
+  display:flex;
+  flex-wrap:nowrap;
+  align-items:center;
+  gap:8px;
 }
 .renderer-setting-field > :is(label,legend,.renderer-setting-label) { color:var(--text); font-size:var(--font-size-xs); font-weight:600; }
 .renderer-setting-field > small { grid-column:1/-1; color:var(--text-dim); font-size:var(--font-size-2xs); line-height:1.4; }
@@ -1467,7 +1521,9 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 @media(max-width:1000px) {
   .renderer-settings-ledger { grid-template-columns:160px minmax(0,1fr); }
   .renderer-settings-inspector { padding-left:16px; }
-  .renderer-setting-field { grid-template-columns:minmax(110px,.62fr) minmax(150px,1fr) auto; }
+  /* #116 子项 5 续：本档容器实测只剩 256px，原列宽下限 110+150+auto(22)+gap 28 = 310
+     仍溢出 54px（非 duo 的普通字段行），故下限收到能真正放进窄容器的一档。 */
+  .renderer-setting-field { grid-template-columns:minmax(72px,.55fr) minmax(88px,1fr) auto; }
 }
 
 /* ── Domain split presentation ──

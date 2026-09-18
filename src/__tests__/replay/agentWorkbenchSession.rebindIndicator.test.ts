@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
-import type { Session } from '../../../identityStore.ts'
-import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
-import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import type { Session } from '../../identityStore.ts'
+import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
+import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 /**
  * 用户报告（2026-09-05，P45 接手后）：生成结束 → 切换到其他会话 → 切回，
