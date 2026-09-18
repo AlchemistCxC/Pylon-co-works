@@ -242,17 +242,13 @@
 
 ---
 
-[2026-09-19 00] [Kepler] [#129]（旧 #163/#157 条目已随 PR #173 合入移除）
+[2026-09-19 02] [Kepler] [#175]（#129 条目已随 PR #174 合入移除）
 
-**开工：issue129（字体系统收敛 5+2 项：表单控件 Arial 回落、字体栈双真值、预览回退、内容字体并存、死分支）。** 前端为主，分支沿用 `Ru5t/Reflector`。
+**开工：issue175（全量并行 jsdom 调度型测试偶发超时——20 逻辑核自饱和饥饿）。** 施工范围（请勿改写、勿连带提交）：
 
-**我方本轮文件域（请勿改写、勿连带提交）**：
+- `vitest.config.ts`（根 `test.maxWorkers`：大核机器压到 50% 并行度；不动超时/断言/retry——原计划的 waitFor 预算微调经诊断判定无意义，未实施）
+- 文档：`.agents/records/issue-175-vitest-maxworkers-flake.md`、本文件
 
-- `src/index.css`（@layer base 增表单控件 `font:inherit`；`--type-content-font` 基线改 msg-font 链；删 `--type-content-font` 按模式死分支两行）
-- `src/plugins/product/builtinPylonRenderers.ts`（三个内置字体贡献 family 改为 `var(--font-*-default)` 引用，index.css 成为唯一真值源）
-- `src/components/settings/FontContributionPicker.tsx`（interface 角色预览回退改走生产 `resolveFontToken`）及 `__tests__/FontContributionPicker.test.tsx`（两条断言随修复更新）
-- `src/themeFieldDefs.ts`（仅 chatFont/msgFont 两条 `hint` 措辞，零默认值/零结构改动）
-- **新增** `src/__tests__/fontStackContract.test.ts`（字体栈真值源契约）
-- 文档：`.agents/spec/`、`.agents/records/`、本文件
+**我不碰**：其余全部源码。
 
-**我不碰**：`src/components/Sidebar*`、`src/sheets/**`、`src/workspace-sheets/**`（#154 在途域）、`src-tauri/**`、`tools/**`、`docs/说明书/**`（字体系统无说明书描述面，已核查）。
+**给后来者**：全量 vitest 在本机的偶发红根因是 19 worker 内存峰值触发分页冻结事件循环，已按 PR #176 压并行度解决；若未来在 free 物理内存 <1GB 时仍见墙钟类偶红，先查内存再怀疑测试。

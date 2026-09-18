@@ -1,9 +1,19 @@
 import { globSync, readFileSync } from 'node:fs'
+import os from 'node:os'
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import solid from 'vite-plugin-solid'
 
 const SOLID_WORKBENCH_FILES = /src\/renderers\/solid-workbench\/.*\.solid(?:\.test)?\.tsx$/
+
+// #175：非 watch 模式 vitest 默认吃满 availableParallelism（20 核开发机 = 19 worker）。
+// 实测满载下全量必红：worker 内存峰值把 16GB 级开发机推进分页，事件循环整段冻结，
+// waitFor 的定时器连同其自身 1s 预算都无法触发（30s 测试看门狗收尸），失败集合
+// 在轮间漂移（solidRendererSurface / KernelRoot / issue150）。压到一半并行度后
+// 实测全量绿且比满载更快（分页消失，吞吐反升：177-213s → 131-135s）。
+// 小核机器（CI 4 vCPU）维持上游默认行为，不引入新变量。
+const availableParallelism = os.availableParallelism()
+const maxWorkers = availableParallelism >= 12 ? '50%' : undefined
 
 // Preserve the environment declared by each test; directory names do not imply DOM use.
 const testFiles = [...globSync(['scripts/*.test.mts', 'src/**/*.test.{ts,tsx}'])]
@@ -56,6 +66,7 @@ export default defineConfig({
     // 出口判据：无 retry 连续 5 轮全量全绿。
     testTimeout: 30_000,
     pool: 'forks',
+    maxWorkers,
     coverage: {
       provider: 'v8',
       include: ['src/**'],
