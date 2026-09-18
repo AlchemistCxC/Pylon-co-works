@@ -174,3 +174,5 @@
 **顺带更正一条在岗提示**：上面 #154 条目里「`src-tauri/tauri.conf.json` 那处未提交的 `additionalBrowserArgs` 继续不要提交」**已过时**——0.2.1（`4ddff6a0`）已把它正式入库，`src-tauri/tauri.conf.json:21` 现在默认带 `--remote-debugging-port=9222`。后果是本仓本地构建**默认开调试端口**，而开端口等于把该窗口的任意 JS 执行能力交给同机任何进程。这是有意的发行决策（该提交信息即写「发行包内置 webview2 MCP 调试通路」），我不改它，只留档；实机验收流程已按现状写进 `.agents/skills/webview2-acceptance/`。
 
 **追加（2026-09-18 12，同一会话）**：用户授权在 PR #160 内一并修 CI 红（Rust job 的 flaky）。**新增文件域（请勿改写、勿连带提交）**：`src-tauri/pylon-core/src/agent_detection.rs`（仅 `managed_probe_cleanup_kills_descendant_processes` 测试内的等待预算）、`src-tauri/src/plugin_process/tests.rs`（仅进程测试的等待预算）。**只改预算数值，不改任何断言**；不碰这两个文件的非测试逻辑，也不碰其他 crate。
+
+**再追加**：CI 红的第二个独立故障查明了——`cargo fmt --check` 本身 rc=1，唯一需要格式化的文件是 `src-tauri/src/session/turn_rollup.rs`（`be9db4bf` 引入，**分支版与 main 版逐字节相同，即 main 的该门禁同样是红的**，只是被测试失败挡在前面从未跑到）。故本次一并修，**纯格式化、零语义**。第三个文件域：`src-tauri/src/session/turn_rollup.rs`（仅 `cargo fmt`）。
