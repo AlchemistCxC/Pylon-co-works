@@ -167,10 +167,14 @@
 }
 
 .sidebar-block-body {
-  display:grid; grid-template-rows:1fr; min-height:0; overflow:hidden; opacity:1;
+  /* `grid-template-columns:minmax(0,1fr)` 不是装饰：隐式单列默认按**内容**定宽，容器窄于
+     内容时列就撑到内容宽，再被 `overflow:hidden` 裁掉——实测左栏 250px 时 `.session-list`
+     被撑到 278px，行尾的「会话设置」正好落在被裁的那 32px 里，于是「按钮完全不见了」
+     （用户实机反馈）。显式声明可收缩的单列后，列宽跟随容器，会话名先省略、行尾按钮留住。 */
+  display:grid; grid-template-rows:1fr; grid-template-columns:minmax(0,1fr); min-height:0; overflow:hidden; opacity:1;
   transition:grid-template-rows var(--motion-standard) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
 }
-.sidebar-block-body-inner { display:flex; flex-direction:column; min-height:0; }
+.sidebar-block-body-inner { display:flex; flex-direction:column; min-width:0; min-height:0; }
 .sidebar-block[data-collapsed="true"] > .sidebar-block-body { grid-template-rows:0fr; opacity:0; pointer-events:none; }
 .sidebar-block-body-surface { display:flex; flex-direction:column; min-height:0; }
 
