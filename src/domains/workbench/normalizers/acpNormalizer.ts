@@ -20,6 +20,9 @@ import {
   extractConfigOptionId,
   extractConfigOptionValue,
   extractMachineIdString,
+  extractModeConfig,
+  extractModelConfig,
+  type SessionResponseObject,
 } from '../../../infrastructure/acp/chatContracts.ts'
 import { presentPromptFailure, type PromptFailurePresentationMetadata } from '../promptFailurePresentation.ts'
 
@@ -72,7 +75,33 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   }
   const normalized = semanticEventForUpdate(effectiveUpdate, context)
   const event = makeEnvelope(normalized.event, input, context, update, {}, identityFromUpdate(effectiveUpdate))
-  return { events: [event], diagnostics: normalized.diagnostics }
+  const extraFacts = configOptionSessionFacts(effectiveUpdate)
+  return {
+    events: [
+      event,
+      ...extraFacts.map(fact => makeEnvelope(fact, input, context, update, {}, identityFromUpdate(effectiveUpdate))),
+    ],
+    diagnostics: normalized.diagnostics,
+  }
+}
+
+/**
+ * A config packet states the current value of every option it advertises, so a
+ * mode/model carried in it is the same fact `session_info_update` states — and the
+ * control center reads those two from `session.mode` / `session.model`, not from the
+ * option list. Emitting only the options left the two surfaces disagreeing: after a
+ * reload the config panel showed the provider's truth while the control center fell
+ * back to its local table. The config event stays first so existing consumers keep
+ * reading `events[0]`.
+ */
+function configOptionSessionFacts(update: Record<string, unknown>): readonly WorkbenchSemanticEvent[] {
+  if (canonicalSessionUpdate(update) !== 'config_option_update') return []
+  const facts: WorkbenchSemanticEvent[] = []
+  const mode = extractModeConfig(update as SessionResponseObject).mode
+  if (mode !== undefined) facts.push({ type: 'session.mode-updated', mode })
+  const model = extractModelConfig(undefined, update as SessionResponseObject).model
+  if (model !== undefined) facts.push({ type: 'session.model-updated', model })
+  return facts
 }
 
 /**

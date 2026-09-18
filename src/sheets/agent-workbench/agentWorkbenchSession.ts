@@ -14,7 +14,7 @@ import {
   isCanonicalBatchDeltaType,
 } from '../../infrastructure/events/canonicalEventBatch.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
-import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type SessionEvent, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
@@ -29,10 +29,12 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
+  findConfigOption,
   sessionResponseObject,
   type PromptFailureMetadata,
   type SessionResponseObject,
 } from '../../infrastructure/acp/chatContracts.ts'
+import type { SessionConfigOption } from '../../domains/workbench/session/sessionSurface.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
@@ -78,11 +80,15 @@ function normalizeCanonicalRowToEnvelopes(
       ? { origin: 'optimistic-local', trust: 'unverified', provider }
       : event.provenance ?? { origin: 'migration', trust: 'unverified', provider },
   })
-  return normalized.events.map(envelope => Object.freeze({
+  return normalized.events.map((envelope, index) => Object.freeze({
     ...envelope,
     eventId: normalized.events.length === 1 ? eventId : envelope.eventId,
     identity: Object.freeze({ ...event.identity, ...envelope.identity }),
-    ...(coverage ? { coverage: Object.freeze([coverage[0], coverage[1]]) as readonly [number, number] } : {}),
+    // coverage 是**行级**幂等键（投影器按"跨度是否已覆盖"整条丢弃），所以一行只能盖一条：
+    // 一个 config 包会产出多条语义事件（options + 当前 mode/model），若全都盖 [seq,seq]，
+    // 投影器会把同行的其余事件当成重复丢掉 —— 重放后就只剩一条，中控与配置面板各说各话。
+    // 其余事件按 eventId 幂等（同一次重放不会重复入账）。
+    ...(coverage && index === 0 ? { coverage: Object.freeze([coverage[0], coverage[1]]) as readonly [number, number] } : {}),
   }))
 }
 
@@ -229,6 +235,53 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
     },
     subscribe: listener => subscribePluginEvents(listener),
   }
+}
+
+/** A write Pylon performed itself and the provider confirmed. */
+export type LocalSessionFact =
+  | { readonly kind: 'model'; readonly model: string }
+  | { readonly kind: 'mode'; readonly mode: string }
+  | { readonly kind: 'option'; readonly id: string; readonly value: string | boolean }
+
+/** SessionConfigOption is JSON by construction; its readonly index signature is just
+ * what stops TS from unifying it with JsonValue on its own. */
+function withOptionValue(
+  options: readonly SessionConfigOption[],
+  index: number,
+  value: string | boolean,
+): readonly JsonValue[] {
+  return options.map((option, at) => (at === index ? { ...option, value } : option)) as unknown as readonly JsonValue[]
+}
+
+/** The option a semantic resolves to (shared ACP classifier), carrying a new value. */
+function withSemanticValue(
+  options: readonly SessionConfigOption[],
+  semantic: 'model' | 'mode',
+  value: string,
+): readonly JsonValue[] | undefined {
+  const index = options.findIndex(option => findConfigOption([option], semantic) !== undefined)
+  return index < 0 ? undefined : withOptionValue(options, index, value)
+}
+
+function localSessionFactEvent(fact: LocalSessionFact, document: WorkbenchDocument): SessionEvent | undefined {
+  const options = document.session.options
+  // The control center reads `session.mode` / `session.model` while the config panel
+  // reads the option's `value`, and nothing synchronises the two fields — so a local
+  // write has to fill both, or the two surfaces disagree (after a reload only the
+  // provider's advertisement survives and the control center falls back).
+  if (fact.kind === 'model') {
+    const merged = withSemanticValue(options, 'model', fact.model)
+    return { type: 'session.model-updated', model: fact.model, ...(merged ? { options: merged } : {}) }
+  }
+  if (fact.kind === 'mode') {
+    const merged = withSemanticValue(options, 'mode', fact.mode)
+    return { type: 'session.mode-updated', mode: fact.mode, ...(merged ? { options: merged } : {}) }
+  }
+  // `session.config-updated` replaces the whole option list, so a single-option
+  // write carries the merged list — the other options are not ours to drop.
+  const index = options.findIndex(option => option.id === fact.id)
+  if (index < 0) return undefined
+  return { type: 'session.config-updated', options: withOptionValue(options, index, fact.value) }
 }
 
 export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
@@ -550,6 +603,53 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     pendingSessionResponses.set(target, pending)
   }
 
+  /**
+   * Project a locally-confirmed write into the document as a canonical fact.
+   *
+   * Two different reasons make this necessary, and both follow from the same
+   * rule — the document is the single source of truth the selectors read:
+   *  - a provider may accept a write without announcing it (Hermes never emits
+   *    `current_mode_update`), so nothing else would publish the new value;
+   *  - replaying a synthetic session response instead is not an option: its
+   *    option list is response-shaped, and the projector replaces the whole
+   *    `session.options` surface with it. Doing that for a model switch silently
+   *    dropped the mode and reasoning catalogues, so the control center fell back
+   *    to its local tables (and the reasoning write was rejected for good).
+   * A fact states only the value that changed, so the rest of the surface stays.
+   */
+  const applyLocalSessionFact = (fact: LocalSessionFact, targetSessionId?: string): void => {
+    if (destroyed || !boundSessionId || !source) return
+    const target = targetSessionId?.trim()
+    if (target && target !== boundSessionId && target !== source) return
+    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(source)
+    const event = localSessionFactEvent(fact, current)
+    if (!event) return
+    const bufferedMax = buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
+    const previousTransient = transientSequenceBySource.get(source) ?? 0
+    const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
+    transientSequenceBySource.set(source, sequence)
+    const envelope = createWorkbenchEnvelope({
+      eventId: `local-fact:${source}:${sequence}`,
+      sessionId: source,
+      sequence,
+      recordedAt: new Date().toISOString(),
+      source: { provider: 'local-write', sourceId: `local-fact:${sequence}` },
+      provenance: {
+        origin: 'local-observed',
+        trust: 'authoritative',
+        provider: boundProvider,
+        orderConfidence: 'observed',
+        synthetic: { reason: 'local-write-confirmed' },
+      },
+      event,
+    })
+    if (loading) {
+      buffered.push(envelope)
+      return
+    }
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+  }
+
   const confirmPendingFromEnvelope = (envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope => {
     if (envelope.provenance.origin === 'optimistic-local') return envelope
     if ((envelope.event.type !== 'message.delta' && envelope.event.type !== 'message.completed')
@@ -745,6 +845,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
      * effect runs; the response is buffered and consumed by bind().
      */
     applySessionResponse,
+    applyLocalSessionFact,
     refresh,
     async bind(session: Session | undefined): Promise<void> {
       const nextBindingKey = workbenchSessionBindingKey(session)

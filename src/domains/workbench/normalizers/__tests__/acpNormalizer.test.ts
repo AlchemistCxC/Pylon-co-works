@@ -229,6 +229,26 @@ describe('ACP normalizer', () => {
     ] })
   })
 
+  // config 包同时声明"候选"和"当前值"：中控读后者（session.mode/model），配置面板读前者
+  // （options[].value）。只产 config 事件会让同一界面上两块地方各说各话。
+  it('states the current mode and model next to the options a config packet advertises', () => {
+    const result = normalizeAcpEvent({ update: {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        { id: 'mode', name: 'Session Mode', category: 'mode', type: 'select', currentValue: 'accept_edit',
+          options: [{ value: 'default' }, { value: 'accept_edit' }] },
+        { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'fable',
+          options: [{ value: 'fable' }, { value: 'haiku' }] },
+      ],
+    } }, context)
+
+    expect(result.events[0].event.type).toBe('session.config-updated')
+    expect(result.events.map(envelope => envelope.event)).toEqual(expect.arrayContaining([
+      { type: 'session.mode-updated', mode: 'accept_edit' },
+      { type: 'session.model-updated', model: 'fable' },
+    ]))
+  })
+
   it('defaults unknown config kinds to read-only while keeping ACP select/boolean editable', () => {
     const result = normalizeAcpEvent({ update: { sessionUpdate: 'config_option_update', configOptions: [
       { id: 'model', name: 'Model', currentValue: 'gpt-5', type: 'select', options: [{ value: 'gpt-5' }] },

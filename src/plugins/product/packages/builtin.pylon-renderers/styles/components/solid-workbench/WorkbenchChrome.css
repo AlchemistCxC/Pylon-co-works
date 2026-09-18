@@ -669,6 +669,15 @@
   cursor: pointer;
 }
 
+/* 空候选占位：不可点、不参与交互，只为把"点了弹出个空盒"变成一句可读的说明。 */
+.solid-workbench-control-center-slot .cc-model-empty {
+  padding: 5px 10px;
+  color: var(--text-dim);
+  font: 500 var(--font-size-xs)/1.25 var(--font);
+  white-space: nowrap;
+  cursor: default;
+}
+
 .solid-workbench-control-center-slot .cc-model-item[aria-selected='true'] {
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 13%, transparent);

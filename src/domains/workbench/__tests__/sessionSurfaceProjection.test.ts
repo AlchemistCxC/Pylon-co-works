@@ -7,6 +7,7 @@ import {
   selectSessionSurface,
 } from '../workbenchProjector.ts'
 import { resolveContextUsage } from '../session/sessionSurface.ts'
+import { normalizeAgentEvent, type NormalizeContext } from '../normalizers/agentEventNormalizer.ts'
 
 const envelope = (sequence: number, event: WorkbenchSemanticEvent) => createWorkbenchEnvelope({
   sessionId: 'session-c14-review',
@@ -114,6 +115,19 @@ describe('C14 normalized session and assist projection', () => {
     })
   })
 
+  // 空列表什么都没宣告。投影器这一行是整体替换而非合并，所以放它过去就会把 provider
+  // 已宣告的候选面清空 —— 这正是本地合成响应曾经连带塌掉三类选项的入口。
+  it('keeps the advertised options when a later event carries an empty list', () => {
+    const advertised = envelope(1, {
+      type: 'session.config-updated',
+      options: [{ id: 'thinking_effort', label: 'Thinking Effort', value: 'max', schema: { options: [{ id: 'low', label: 'low' }] } }],
+    })
+    const emptied = envelope(2, { type: 'session.config-updated', options: [] })
+    const document = [advertised, emptied].reduce(reduceWorkbenchEvent, createWorkbenchDocument('session-c14-review'))
+
+    expect(selectSessionSurface(document).options.map(option => option.id)).toEqual(['thinking_effort'])
+  })
+
   it('projects assist events into an ephemeral document slice without transcript pollution', () => {    const events = [
       envelope(1, { type: 'assist.prediction', placeholder: '继续修复', actions: [{ id: 'accept', label: '接受' }] }),
       envelope(2, { type: 'assist.file-suggestions', files: ['src/a.ts', 'src/b.ts'] }),
@@ -128,5 +142,46 @@ describe('C14 normalized session and assist projection', () => {
     })
     expect(live.messages).toEqual([])
     expect(live.timeline.map(item => item.kind)).toEqual(['assist', 'assist', 'assist'])
+  })
+})
+
+// 同一个"值"在文档里存了两处：中控读 `session.mode`/`session.model`，配置面板读
+// `options[].value`。provider 的 config 包同时声明了两者，规范化时两侧都要产 fact ——
+// 只产 options 的话，重载后两块地方会对同一件事给出两个答案。
+describe('中控字段与配置项的值必须一致（两个值来源）', () => {
+  const context: NormalizeContext = {
+    provider: 'peri', sessionId: 'session-c14-review', sourceId: 'wire-config', sequence: 1,
+    recordedAt: '2026-09-18T00:00:00.000Z',
+    provenance: { origin: 'local-observed', trust: 'authoritative' },
+  }
+  const configPacket = { sessionId: 'remote-1', update: {
+    sessionUpdate: 'config_option_update',
+    configOptions: [
+      { id: 'mode', name: 'Session Mode', category: 'mode', type: 'select', currentValue: 'accept_edit',
+        options: [{ value: 'default' }, { value: 'accept_edit' }] },
+      { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'fable',
+        options: [{ value: 'fable' }, { value: 'haiku' }] },
+    ],
+  } }
+
+  it('advertises the current mode and model as session facts next to the options', () => {
+    const { events } = normalizeAgentEvent(configPacket, context)
+    expect(events[0].event.type).toBe('session.config-updated')
+    expect(events.map(envelope => envelope.event)).toEqual(expect.arrayContaining([
+      { type: 'session.mode-updated', mode: 'accept_edit' },
+      { type: 'session.model-updated', model: 'fable' },
+    ]))
+  })
+
+  it('folds a provider config packet into agreeing control-center fields', () => {
+    const { events } = normalizeAgentEvent(configPacket, context)
+    const document = events.reduce(reduceWorkbenchEvent, createWorkbenchDocument('session-c14-review'))
+    const modeOption = document.session.options.find(option => option.id === 'mode')
+    const modelOption = document.session.options.find(option => option.id === 'model')
+
+    expect(document.session.mode).toBe(modeOption?.value)
+    expect(document.session.model).toBe(modelOption?.value)
+    expect(document.session.mode).toBe('accept_edit')
+    expect(document.session.model).toBe('fable')
   })
 })
