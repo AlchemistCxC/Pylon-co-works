@@ -67,6 +67,15 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     }
   })
 
+  it('模块体的栅格列必须可收缩（minmax(0,1fr)），否则内容溢出被裁、行尾按钮看不见', () => {
+    // 折叠动画把 body 从 flex 列改成栅格后，隐式单列默认按内容定宽：左栏 250px 时实测
+    // `.session-list` 被撑到 278px，`.sidebar-block-body` 的 overflow:hidden 把行尾的
+    // 「会话设置」整段裁掉（用户报「按钮完全不见了」的**真正成因**）。列必须跟随容器。
+    const blockBody = body('.sidebar-block-body')
+    expect(blockBody).toMatch(/grid-template-columns:minmax\(0,1fr\)/)
+    expect(body('.sidebar-block-body-inner')).toMatch(/min-width:0/)
+  })
+
   it('模块体的展开/折叠有过渡，且时长走 token（reduced-motion 靠 token 归零）', () => {
     // 用户实机报「折叠动效…只有部分地方有」：工作区组早就有 0fr 收起动画，模块体却是
     // 「折叠即卸载」的瞬跳。两侧现在同一条时间轴。
