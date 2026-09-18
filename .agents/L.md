@@ -266,3 +266,20 @@
 - 文档：`.agents/records/`、`.agents/decisions/`（如需）、`docs/说明书/` 涉及表述、本文件
 
 **我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`、中控区布局样式（`ControlCenter.css`；`ControlCenter.solid.tsx` 仅按 #172 改两处 catch 的错误消息提取，不重排布局）。
+
+---
+
+[2026-09-19 05] [Miyaki Kumo] [#53 + #51]
+
+**开工：模型/思考等级选择器全套打通——空态探测（#53）+ 恢复期选择器恢复与错误 UX（#51）。** 分支沿用 `Ru5t/Reflector`；spec 见 `.agents/spec/issue-selector-probe-and-restore.md`。调查结论已回写两 issue 评论区（#53：候选列表现依赖历史会话桶并集，无主动探测；#51：load 响应只进 store 层不进 workbench document，document 只重放 canonical journal）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 后端：`src-tauri/src/session/create.rs`（探测命令 + 建立期 configOptions 写 journal）、`src-tauri/src/session/persist.rs`（恢复期 configOptions 写 journal）、`src-tauri/src/session/mod.rs`、`src-tauri/src/lib.rs`（命令注册）、`src-tauri/src/session/model.rs`（如需序列化助手）及对应 Rust 测试
+- 前端：`src/infrastructure/acp/sessionClient.ts`（probe 方法）、`src/sheets/agent-workbench/agentAdvertisedModels.ts`（并集接入探测缓存）、`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`（探测装配）、`src/plugins/core/sessionState/runtimeStoreSessionState.ts`（applyResponse 补 raw）、`src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（无面禁用态 + 错误短文案）及 `ControlCenter.css` 的 `.cc-widget-error` 一条样式
+- 测试：上述 `__tests__` + 新增
+- 文档：`.agents/spec/`（gitignore）、`.agents/records/`、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`vitest.config.ts`（Kepler #175 刚收口）、`src/components/chat/**`、`tools/webview2-mcp/**`、他人 `src/workspace-sheets/**`。
+
+**给后来者**：`#110 F5` 的 `ingest_established_model_event` 模式（合成标准 `session/update` raw 写 canonical journal）是本轮恢复期选择器恢复的核心复用点；canonical 类型 `session.config-updated` 已存在（event_repo.rs:533），不新增 schema。
