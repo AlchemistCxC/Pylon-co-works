@@ -287,7 +287,9 @@ pub(crate) struct AppStateHandles {
     pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
-/// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
+/// acp 意外崩溃判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
+/// #163：主动 stop（kill）不算崩溃——`is_crashed` 已区分「主动停」与「意外退出」，
+/// 本函数只用于把意外崩溃写入状态；连接可用性判定请用 `AcpClient::is_dead`。
 /// 收敛 detect_and_record_crashes 与 agent_status_payload 的双写点（G3 §2.2.4）。
 fn acp_is_crashed(runtime: Option<&AgentRuntime>) -> bool {
     runtime

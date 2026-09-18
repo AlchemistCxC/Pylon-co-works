@@ -93,7 +93,8 @@ impl AcpClient {
     /// can observe the receiver without its request/session binding (or vice
     /// versa). Same-owner loads are rejected deterministically.
     pub(crate) fn begin_replay_capture(&self, session_id: &str) -> Result<ReplayCapture, AcpError> {
-        if self.crashed.load(Ordering::Acquire) {
+        // #163：与其他发送守卫一致用 is_dead——主动停掉的连接同样立即拒绝。
+        if self.is_dead() {
             return Err(AcpError::ConnectionClosed);
         }
         // Keep receiver creation under the same mutex as registration.
