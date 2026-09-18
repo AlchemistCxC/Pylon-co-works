@@ -252,3 +252,17 @@
 **我不碰**：其余全部源码。
 
 **给后来者**：全量 vitest 在本机的偶发红根因是 19 worker 内存峰值触发分页冻结事件循环，已按 PR #176 压并行度解决；若未来在 free 物理内存 <1GB 时仍见墙钟类偶红，先查内存再怀疑测试。
+
+---
+
+[2026-09-19 04] [Miyaki Kumo] [#172 + #154 残余收口]
+
+**开工：#172（[object Object] 吞错链）+ #154 残余（阶段 4 设置迁入 sheet 体系为本轮主体；左轨身份项经用户裁定正式放弃）。** 分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- #172：`src/utils.ts` 或就近新增共享 `errorMessage` 助手模块、`src/renderers/solid-workbench/workbenchHostPort.ts`、`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 及对应 `__tests__`
+- #154 阶段 4：`src/App.tsx`（移除 showSettings/settingsIntent 覆盖层挂载）、`src/components/Settings.tsx`（去 fixed 覆盖层 → sheet 内容形态）及其 `__tests__`、`src/plugins/core/sheet/builtinWorkspacePlugins.ts`（新 `settings` kind）、`src/settingsDomains.ts`（只读消费，契约不动）、`src/workspace-sheets/**`（如需 sheet 状态/导航缝）、`src/plugins/product/firstPartyStyleOwnership.ts` + 首方样式（新设置 sheet 样式 owner 登记）
+- 文档：`.agents/records/`、`.agents/decisions/`（如需）、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`、中控区布局样式（`ControlCenter.css`；`ControlCenter.solid.tsx` 仅按 #172 改两处 catch 的错误消息提取，不重排布局）。
