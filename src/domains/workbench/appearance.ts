@@ -285,7 +285,7 @@ function freezeAppearanceSnapshot(snapshot: WorkbenchAppearanceSnapshot): Workbe
   return Object.freeze(snapshot)
 }
 
-function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings, CcEditablePropertyKey> {
+export function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSettings, CcEditablePropertyKey> {
   return {
     inputBg: theme.inputBg,
     inputTextColor: theme.inputTextColor,

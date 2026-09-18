@@ -319,6 +319,7 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     titlebar: recordingApi('titlebar', recorded),
     storage: storageHarness.api,
     ccWidget: recordingApi('ccWidget', recorded),
+    presets: recordingApi('presets', recorded),
   } satisfies BuiltinPluginActivationContext
 
   const mock = context as MockPluginActivationContext

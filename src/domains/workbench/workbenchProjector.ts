@@ -1151,7 +1151,12 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       ...(event.model ? { model: event.model } : {}),
       ...(event.mode ? { mode: event.mode } : {}),
       ...(event.commands ? { commands: normalizeSessionCommands(event.commands) } : {}),
-      ...(event.options ? { options: normalizeSessionConfigOptions(event.options) } : {}),
+      // An empty list advertises nothing, so it must not wipe the surface the
+      // selectors read: this line replaces the whole list rather than merging into
+      // it, and every other producer already guards on length before emitting
+      // (see createSessionResponseEnvelope). A local synthetic write used to slip
+      // through here and drop the provider's catalogue.
+      ...(event.options && event.options.length > 0 ? { options: normalizeSessionConfigOptions(event.options) } : {}),
       ...(event.usage !== undefined ? { usage: normalizeUsageSnapshot(event.usage, document.session.usage).value } : {}),
     },
   }

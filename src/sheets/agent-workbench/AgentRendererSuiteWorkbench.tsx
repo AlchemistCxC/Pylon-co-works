@@ -34,6 +34,8 @@ import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileShee
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
 import { setSessionModel } from '../../components/chat/sessionModel.ts'
+import { setSessionMode } from '../../components/chat/sessionMode.ts'
+import { normalizeSessionMode } from '../../components/chat/sessionModeState.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -82,16 +84,26 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
       setModel: async (context, modelId) => {
         await setSessionModel(context, modelId)
-        // The ACP set_model response may be empty (Hermes). Mirror the
-        // successful command into the Workbench document so Solid renders the
-        // new value immediately instead of waiting for a later load/rebind.
-        sessionRuntimeRef.current?.applySessionResponse({
-          models: { currentModelId: modelId, availableModels: [{ modelId }] },
-        }, context.source)
+        // The ACP set_model response may be empty (Hermes), so the document needs
+        // the confirmed value published locally. It goes in as a fact, not as a
+        // synthetic session response: that shape replaces the whole
+        // `session.options` surface and silently dropped the mode and reasoning
+        // catalogues (the control center then fell back to its local tables).
+        sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'model', model: modelId }, context.source)
+      },
+      setMode: async (context, modeId) => {
+        await setSessionMode(context, modeId)
+        // Same reason as setModel: an accepted switch may be announced by nobody,
+        // so publish it as a document fact. The value that actually went on the
+        // wire is the normalized one.
+        const confirmed = normalizeSessionMode(modeId)
+        if (confirmed) sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'mode', mode: confirmed }, context.source)
       },
       setConfigOption: async (context, key, value) => {
         await createTauriChatClient().setConfigOption({ agentId: context.agentId, source: context.source, key, value })
-        sessionRuntimeRef.current?.applySessionResponse({ configOptions: [{ id: key, value }] }, context.source)
+        if (typeof value === 'string' || typeof value === 'boolean') {
+          sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'option', id: key, value }, context.source)
+        }
       },
       discardSession: discardAgentWorkbenchSession,
       async openResource(session, resource) {

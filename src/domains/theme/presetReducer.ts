@@ -37,7 +37,7 @@ import type { PresetBundleV2 } from './presetBundle.ts'
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
 const PRESET_KEY_SET = new Set<string>(THEME_PRESET_KEYS)
 
-function filterPresetTheme(value: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
+export function filterPresetTheme(value: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
   return Object.fromEntries(Object.entries(value).filter(([key]) => PRESET_KEY_SET.has(key))) as Partial<ThemeSettings>
 }
 
@@ -75,7 +75,7 @@ export interface ThemePresetState {
 export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'appliedPreset' | 'custom' | 'customPresets' | 'ccLayout' | 'ccHeight'>>
 
 /** cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState */
-function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
+export function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
   const inputMode = (theme.inputMode ?? String(DEFAULTS.inputMode)) as CcInputMode
   const footerLayout = (theme.footerLayout ?? String(DEFAULTS.footerLayout)) as CcFooterLayout
   const hintMode = (theme.cliHintMode ?? String(DEFAULTS.cliHintMode)) as CcHintMode
@@ -96,7 +96,7 @@ function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
   })
 }
 
-function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number } {
+export function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number } {
   return { ccHeight: clampPresetCcHeight(theme) }
 }
 

@@ -58,7 +58,7 @@ type ThemeMigrationState = Record<string, unknown> & {
   customPresets?: unknown
 }
 
-function normalizeZoneRecord<T>(value: unknown, defaults: Record<string, T>, valid: (item: unknown) => item is T): Record<string, T> {
+export function normalizeZoneRecord<T>(value: unknown, defaults: Record<string, T>, valid: (item: unknown) => item is T): Record<string, T> {
   const candidate = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   return Object.fromEntries(PRESET_ZONES.map(zone => [zone, valid(candidate[zone]) ? candidate[zone] : defaults[zone]])) as Record<string, T>
 }

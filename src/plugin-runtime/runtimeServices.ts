@@ -19,6 +19,7 @@ import { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts
 import { ShellRecipeRegistry } from './shell-recipe/shellRecipeRegistry.ts'
 import { TitlebarRegistry } from './titlebar/titlebarRegistry.ts'
 import { CcWidgetRegistry } from './cc-widget/ccWidgetRegistry.ts'
+import { PresetRegistry } from './preset/presetRegistry.ts'
 import {
   setWorkspaceRegistryStore,
   WorkspaceRegistryStore,
@@ -63,6 +64,7 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
     titlebarRegistry: new TitlebarRegistry(),
     workspaceRegistry,
     ccWidgetRegistry: new CcWidgetRegistry(),
+    presetRegistry: new PresetRegistry(),
   })
   if (!options.workspaceRegistry) setWorkspaceRegistryStore(workspaceRegistry)
   return services
@@ -139,3 +141,4 @@ export function getInterfaceModeRegistry(): InterfaceModeRegistry { return runti
 export function getShellRecipeRegistry(): ShellRecipeRegistry { return runtimeServices.shellRecipeRegistry }
 export function getTitlebarRegistry(): TitlebarRegistry { return runtimeServices.titlebarRegistry }
 export function getCcWidgetRegistry(): CcWidgetRegistry { return runtimeServices.ccWidgetRegistry }
+export function getPresetRegistry(): PresetRegistry { return runtimeServices.presetRegistry }

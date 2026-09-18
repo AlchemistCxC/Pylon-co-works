@@ -20,7 +20,7 @@ export const moduleDefinitions = [
   { id: 'layout-policy', roots: ['src/css01/', 'src/css04/', 'src/cwd02/'], responsibility: '历史布局、样式和工作目录策略；保留调用语义后再迁移' },
   { id: 'shared-utilities', roots: ['src/utils/'], responsibility: '已有窄工具函数；新代码优先归属具体能力模块' },
   { id: 'demo', roots: ['src/demo/'], responsibility: '浏览器演示数据；不得把演示验证当作原生链路证据' },
-  { id: 'frontend-root', roots: ['src/*'], responsibility: '旧根级 store、schema、入口和公共策略；按真实调用者逐步下沉' },
+  { id: 'frontend-root', roots: ['src/*', 'src/presets/', 'src/zones/'], responsibility: '旧根级 store、schema、入口和公共策略；按真实调用者逐步下沉' },
   { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 协商、传输、实例生命周期和通知分发' },
   { id: 'rust-session', roots: ['src-tauri/src/session/'], responsibility: '会话事务、replay 与持久化；保持 owner/generation 和提交顺序' },
   { id: 'rust-host', roots: ['src-tauri/src/'], responsibility: 'Tauri 注册、native adapters、文件/终端/Gateway/插件服务' },
