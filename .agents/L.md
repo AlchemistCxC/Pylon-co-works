@@ -172,3 +172,5 @@
 **三件事**：① 根 `BOARD.md`（341KB / 999 行）长期被误读为在岗板——它其实 09-14 就已搬走、只是被善意恢复成了幽灵；降为指向 `.agents/BOARD.md` 的桩，治掉「grep 到就吞十万 token」。② `L.md` 只留在途：09-16 及以前（其 issue 均已有开发记录）轮转出。③ AGENTS.md 补齐：远端名 `github/main`、共享工作树处置、纯追加文件冲突取并集、咨询分支、DoD、pathspec 提交、§2.3 编号断号。
 
 **顺带更正一条在岗提示**：上面 #154 条目里「`src-tauri/tauri.conf.json` 那处未提交的 `additionalBrowserArgs` 继续不要提交」**已过时**——0.2.1（`4ddff6a0`）已把它正式入库，`src-tauri/tauri.conf.json:21` 现在默认带 `--remote-debugging-port=9222`。后果是本仓本地构建**默认开调试端口**，而开端口等于把该窗口的任意 JS 执行能力交给同机任何进程。这是有意的发行决策（该提交信息即写「发行包内置 webview2 MCP 调试通路」），我不改它，只留档；实机验收流程已按现状写进 `.agents/skills/webview2-acceptance/`。
+
+**追加（2026-09-18 12，同一会话）**：用户授权在 PR #160 内一并修 CI 红（Rust job 的 flaky）。**新增文件域（请勿改写、勿连带提交）**：`src-tauri/pylon-core/src/agent_detection.rs`（仅 `managed_probe_cleanup_kills_descendant_processes` 测试内的等待预算）、`src-tauri/src/plugin_process/tests.rs`（仅进程测试的等待预算）。**只改预算数值，不改任何断言**；不碰这两个文件的非测试逻辑，也不碰其他 crate。
