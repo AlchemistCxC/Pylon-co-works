@@ -157,21 +157,18 @@ describe('SessionsPanel', () => {
     expect(collapsedSessions).toHaveAttribute('aria-hidden', 'true')
   })
 
-  it('将工作区身份与计数/操作分成稳定几何层', () => {
+  it('将工作区身份与操作分成稳定几何层；会话计数不再显示', () => {
     render(<SessionsPanel {...createProps()} />)
     const toggle = screen.getByRole('button', { name: '折叠 Pylon' })
-    // 无 cwd 组也存在且同样显示「0 个会话」，因此计数查询必须限定在工作区组内。
-    const group = toggle.closest('.cwd-group')! as HTMLElement
-    const count = within(group).getByLabelText('0 个会话')
     const head = toggle.closest('.cwd-group-head')!
 
     // 身份是单行的「文件夹 + 名称」；目录路径降级为 tooltip（不再占一行 9.5px 小字）。
     expect(toggle).toContainElement(screen.getByText('Pylon'))
     expect(toggle).toHaveAttribute('title', 'G:/Project/Pylon')
-    expect(toggle).not.toContainElement(count)
-    expect(head).toContainElement(count)
     expect(head).toContainElement(screen.getByRole('button', { name: '在 Pylon 中新建会话' }))
     expect(head).toContainElement(screen.getByRole('button', { name: 'Pylon 工作区设置' }))
+    expect(document.querySelector('.cwd-group-count')).toBeNull()
+    expect(screen.queryByLabelText('0 个会话')).toBeNull()
   })
 
   it('无 cwd 会话落在会话列表最底部的独立分组，且带自己的新建入口', () => {

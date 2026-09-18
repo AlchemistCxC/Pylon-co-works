@@ -29,22 +29,35 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.sidebar-modules .session-list')).toMatch(/overflow:\s*visible/)
   })
 
-  it('搜索框在会话模块内部，且不得用 flex:1（纵向 flex 里 flex-basis:0 会压掉 height，实测 17px vs 声明 36px）', () => {
-    expect(body('.session-module-search'), '缺少搜索框的模块内容器').toBeTruthy()
-    const search = body('.search-input')
-    expect(search).toMatch(/height:var\(--ui-control-standard/)
-    expect(search).not.toMatch(/flex:\s*1\b/)
-    expect(search).not.toMatch(/flex-basis:\s*0/)
+  it('搜索是会话模块内的**内联行**（不是描边框），左轨与模块头同基准', () => {
+    const row = body('.session-module-search')
+    expect(row, '缺少搜索行').toBeTruthy()
+    expect(row).toMatch(/display:\s*flex/)
+    expect(row).toMatch(/--sidebar-rail-pad/)
+    // 描边盒模型不得复活：有 border 就又是「框」。
+    expect(row).not.toMatch(/border:\s*1px/)
+    const input = body('.session-search-input')
+    expect(input, '内联输入框不该有边框/背景').toMatch(/border:\s*0/)
+    expect(input).toMatch(/background:\s*transparent/)
+    expect(sidebarCss, '旧描边搜索框已无消费方，不得复活').not.toMatch(/\.search-input\s*\{/)
   })
 
-  it('模块外壳部件齐备：拖拽手柄 / 标题 / 图标 / 折叠钮 / 动作 / 内容', () => {
-    for (const selector of ['.sidebar-block', '.sidebar-block-head', '.sidebar-block-grip', '.sidebar-block-toggle', '.sidebar-block-icon', '.sidebar-block-collapse', '.sidebar-block-actions', '.sidebar-block-action', '.sidebar-block-body']) {
+  it('左轨统一：模块头 / 组头 / 会话缩进都取自 --sidebar-rail-pad', () => {
+    expect(body('.sidebar-block-head')).toMatch(/padding:1px var\(--sidebar-rail-pad/)
+    expect(body('.cwd-group-toggle')).toMatch(/var\(--sidebar-rail-pad/)
+    expect(body('.cwd-group-sessions')).toMatch(/calc\(var\(--sidebar-rail-pad/)
+  })
+
+  it('拖拽靠**长按头部**，没有独立手柄（手柄要么常驻成噪声，要么变成看不见却能拖的靶子）', () => {
+    expect(body('.sidebar-block-grip'), '拖拽手柄已删除').toBe('')
+    expect(sidebarCss, '手柄不得复活').not.toMatch(/\.sidebar-block-grip\s*\{/)
+    expect(body('.sidebar-block-head')).toMatch(/user-select:\s*none/)
+  })
+
+  it('模块外壳部件齐备：标题 / 图标 / 折叠钮 / 动作 / 内容', () => {
+    for (const selector of ['.sidebar-block', '.sidebar-block-head', '.sidebar-block-toggle', '.sidebar-block-icon', '.sidebar-block-collapse', '.sidebar-block-actions', '.sidebar-block-action', '.sidebar-block-body']) {
       expect(body(selector), `缺少 ${selector} 规则`).toBeTruthy()
     }
-    // 拖拽手柄按需显形：常驻一个抓取图标是噪声。
-    expect(body('.sidebar-block-grip')).toMatch(/cursor:\s*grab/)
-    expect(body('.sidebar-block-grip')).toMatch(/opacity:\s*0/)
-    expect(sidebarCss).toMatch(/\.sidebar-block-head:hover \.sidebar-block-grip/)
   })
 
   it('工作区组头**没有**折叠按钮（保留折叠功能：组头本身即开关）', () => {
@@ -53,12 +66,16 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.cwd-group-toggle')).toBeTruthy()
   })
 
-  it('组头的计数与动作共用流内格子，不再靠 toggle 的 62px 手抄预留', () => {
+  it('组头右侧只剩动作（会话计数已按用户要求移除），且未显形时不参与命中测试', () => {
     const toggle = body('.cwd-group-toggle')
     expect(toggle).not.toMatch(/padding[^;]*62px/)
     expect(body('.cwd-group-meta')).toMatch(/display:\s*grid/)
-    expect(body('.cwd-group-count')).toMatch(/grid-area:\s*1\/1/)
-    expect(body('.cwd-group-actions')).toMatch(/grid-area:\s*1\/1/)
+    expect(body('.cwd-group-count'), '会话计数显示已移除').toBe('')
+    expect(sidebarCss, '计数不得复活').not.toMatch(/\.cwd-group-count\s*\{/)
+    const actions = body('.cwd-group-actions')
+    expect(actions).toMatch(/grid-area:\s*1\/1/)
+    expect(actions).toMatch(/visibility:\s*hidden/)
+    expect(actions).toMatch(/pointer-events:\s*none/)
   })
 
   it('密度：组头与会话行都是单行紧凑档，且路径行/两行栈不得复活', () => {
@@ -93,7 +110,7 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     for (const selector of ['.sidebar-block-toggle', '.cwd-group-name', '.sidebar-block-row-name']) {
       expect(body(selector), `${selector} 应与会话名同源`).toMatch(/font-size:var\(--sidebar-name-size/)
     }
-    for (const selector of ['.session-meta', '.sidebar-block-row-meta', '.cwd-group-count']) {
+    for (const selector of ['.session-meta', '.sidebar-block-row-meta']) {
       expect(body(selector), `${selector} 应使用统一 meta 字号`).toMatch(/--sidebar-meta-size/)
     }
   })

@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronsUpDown, GripVertical } from 'lucide-react'
+import { ChevronsUpDown } from 'lucide-react'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 
@@ -34,6 +34,13 @@ type BlockActionHandler = (actionId: string) => void
 
 /** 自动补的「打开整页」动作 id——贡献自己的动作 id 不得与它冲突（注册期不校验，宿主这里避开即可）。 */
 const OPEN_PAGE_ACTION = '__open_page__'
+
+/** 长按多久进入拖拽。太短会被点击误触，太长会让人觉得拖不动。 */
+const LONG_PRESS_MS = 260
+/** 长按期间移动超过这个距离（px）即判定为点击/滚动，取消拖拽。 */
+const LONG_PRESS_SLOP_PX = 6
+/** 拖拽结束后多久内忽略 click——否则抬起那一下会连带触发标题的展开/进页面。 */
+const DRAG_CLICK_SUPPRESS_MS = 320
 
 /**
  * Agent Sheet 左栏。
@@ -95,6 +102,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   // localStorage 没有意义，而 live 预览是拖拽体感的关键。
   const [drag, setDrag] = useState<{ id: string; pointerId: number } | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const pressRef = useRef<{ timer: number; pointerId: number; startX: number; startY: number } | null>(null)
+  const dragEndedAtRef = useRef(0)
   const moduleIds = useMemo(() => modules.map(contribution => contribution.id), [modules])
   const renderedModules = useMemo(() => {
     if (!drag || !dragOverId || drag.id === dragOverId) return modules
@@ -112,23 +121,47 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
     return heads.at(-1)?.dataset.moduleId ?? null
   }, [])
 
-  const onGripPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, contributionId: string) => {
-    event.preventDefault()
-    event.stopPropagation()
+  const cancelPress = useCallback(() => {
+    const press = pressRef.current
+    if (!press) return
+    window.clearTimeout(press.timer)
+    pressRef.current = null
+  }, [])
+
+  /**
+   * **长按**模块头进入拖拽——不再有独立的拖拽手柄。
+   *
+   * 手柄方案有两个代价：常驻一个抓取图标是噪声（用户点名过「折叠按钮太显眼」同一类问题），
+   * 而按需显形就必须给它 `visibility/pointer-events` 门控，否则是个看不见却能拖的靶子。
+   * 长按把手势和「点击标题」区分开，头部因此可以完全干净。
+   */
+  const onHeadPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, contributionId: string) => {
+    if (event.button !== 0) return
     // 指针捕获是「拖出元素外仍收得到 pointermove」的关键，但并非所有环境都实现
     // （jsdom 就没有）。缺了它拖拽退化但仍可用，不该整个拖不动。
     event.currentTarget.setPointerCapture?.(event.pointerId)
-    setDrag({ id: contributionId, pointerId: event.pointerId })
-    setDragOverId(contributionId)
+    const timer = window.setTimeout(() => {
+      pressRef.current = null
+      setDrag({ id: contributionId, pointerId: event.pointerId })
+      setDragOverId(contributionId)
+    }, LONG_PRESS_MS)
+    pressRef.current = { timer, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY }
   }, [])
 
-  const onGripPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+  const onHeadPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const press = pressRef.current
+    if (press) {
+      if (press.pointerId !== event.pointerId) return
+      if (Math.abs(event.clientX - press.startX) > LONG_PRESS_SLOP_PX || Math.abs(event.clientY - press.startY) > LONG_PRESS_SLOP_PX) cancelPress()
+      return
+    }
     if (!drag || event.pointerId !== drag.pointerId) return
     const over = targetIndexAt(event.clientY)
     if (over && over !== dragOverId) setDragOverId(over)
-  }, [drag, dragOverId, targetIndexAt])
+  }, [drag, dragOverId, cancelPress, targetIndexAt])
 
   const endDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    cancelPress()
     if (!drag) return
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId)
     const over = dragOverId && dragOverId !== drag.id ? dragOverId : null
@@ -136,9 +169,10 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       const nextOrder = reorderModuleIds(moduleIds, drag.id, over)
       sidebarModulePrefsStore.setPrefs({ order: nextOrder, hidden: modulePrefs.hidden })
     }
+    dragEndedAtRef.current = Date.now()
     setDrag(null)
     setDragOverId(null)
-  }, [drag, dragOverId, moduleIds, modulePrefs.hidden])
+  }, [drag, dragOverId, moduleIds, modulePrefs.hidden, cancelPress])
 
   const writeState = useCallback((next: ReturnType<typeof toggleBlockCollapsed>) => {
     if (!sheet) return
@@ -236,25 +270,25 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
         data-dragging={dragging ? 'true' : 'false'}
         aria-label={contribution.label}
       >
-        <div className="sidebar-block-head">
-          <button
-            className="sidebar-block-grip"
-            type="button"
-            title="拖拽调整模块次序"
-            aria-label={`拖拽调整 ${contribution.label} 的次序`}
-            onPointerDown={event => onGripPointerDown(event, contributionId)}
-            onPointerMove={onGripPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-          >
-            <GripVertical size={12} aria-hidden="true" />
-          </button>
+        <div
+          className="sidebar-block-head"
+          title="长按可拖动调整模块次序"
+          onPointerDown={event => onHeadPointerDown(event, contributionId)}
+          onPointerMove={onHeadPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
           <button
             className="sidebar-block-toggle"
             type="button"
             aria-pressed={titleAction === 'page' ? pageOpen : undefined}
             aria-expanded={titleAction === 'expand' && collapsible ? (collapsed ? 'false' : 'true') : undefined}
-            onClick={() => { if (titleAction === 'page') openPage(contribution); else if (collapsible) toggleBlock(contribution) }}
+            onClick={() => {
+              // 拖拽抬起那一下会补一个 click；不吞掉就会连带展开/进页面。
+              if (Date.now() - dragEndedAtRef.current < DRAG_CLICK_SUPPRESS_MS) return
+              if (titleAction === 'page') openPage(contribution)
+              else if (collapsible) toggleBlock(contribution)
+            }}
           >
             {Icon && <span className="sidebar-block-icon" aria-hidden="true"><Icon size={13} /></span>}
             <span className="sidebar-block-title">{contribution.label}</span>

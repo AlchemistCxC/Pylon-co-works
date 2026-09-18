@@ -241,9 +241,10 @@ function PreviewApp({ zone }: { zone: string }) {
             <section className="sidebar-block" data-collapsed="false" data-always-open="true">
               <div className="sidebar-block-head"><span className="sidebar-block-toggle" aria-hidden="true"><span className="sidebar-block-title">会话</span></span></div>
               <div className="sidebar-block-body">
-                <div className="session-module-search">
-                  <input className="search-input" placeholder="搜索会话..." readOnly />
-                </div>
+                <label className="session-module-search">
+                  <span className="session-search-icon" aria-hidden="true">⌕</span>
+                  <input className="session-search-input" placeholder="搜索会话" readOnly />
+                </label>
                 <div className="session-list">
                   <div className="group-header" style={{ display: 'block' }}>本地</div>
                   {['会话 A', '会话 B', '会话 C'].map((n, i) => (

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Sidebar from '../Sidebar'
 import { useBlockActionHandler } from '../sidebar/useBlockActionHandler.ts'
@@ -168,19 +168,52 @@ describe('左栏模块栈模型', () => {
     expect(moduleIds()).toEqual(['sessions'])
   })
 
-  it('拖拽重排：抬起后把新次序落库到模块偏好', () => {
-    register({ id: 'a', label: '定时', order: 100, component: () => <Body name="a" /> })
-    register({ id: 'b', label: '自动化', order: 200, component: () => <Body name="b" /> })
-    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
-    expect(moduleIds()).toEqual(['a', 'b'])
+  it('长按模块头进入拖拽，抬起后把新次序落库（没有独立手柄）', () => {
+    vi.useFakeTimers()
+    try {
+      register({ id: 'a', label: '定时', order: 100, component: () => <Body name="a" /> })
+      register({ id: 'b', label: '自动化', order: 200, component: () => <Body name="b" /> })
+      render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
+      expect(moduleIds()).toEqual(['a', 'b'])
 
-    const grip = within(blockOf('a')).getByRole('button', { name: '拖拽调整 定时 的次序' })
-    // jsdom 没有真实指针几何，这里直接构造一次「拖到 b 的中点之下」的序列。
-    fireEvent.pointerDown(grip, { pointerId: 1, clientY: 0 })
-    fireEvent.pointerMove(grip, { pointerId: 1, clientY: 10_000 })
-    fireEvent.pointerUp(grip, { pointerId: 1, clientY: 10_000 })
+      const head = blockOf('a').querySelector('.sidebar-block-head') as HTMLElement
+      fireEvent.pointerDown(head, { pointerId: 1, button: 0, clientX: 12, clientY: 10 })
+      // 还没到长按时长：不动。移动超过阈值则取消（点击/滚动，不是拖拽）。
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(blockOf('a')).toHaveAttribute('data-dragging', 'false')
 
-    expect(JSON.parse(localStorage.getItem(SIDEBAR_MODULES_STORAGE_KEY)!).order).toEqual(['b', 'a'])
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(blockOf('a')).toHaveAttribute('data-dragging', 'true')
+
+      fireEvent.pointerMove(head, { pointerId: 1, clientY: 10_000 })
+      fireEvent.pointerUp(head, { pointerId: 1, clientY: 10_000 })
+
+      expect(JSON.parse(localStorage.getItem(SIDEBAR_MODULES_STORAGE_KEY)!).order).toEqual(['b', 'a'])
+      expect(blockOf('a')).toHaveAttribute('data-dragging', 'false')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('长按期间一旦移动超过阈值即取消（不把点击/滚动误判成拖拽）', () => {
+    vi.useFakeTimers()
+    try {
+      register({ id: 'a', label: '定时', component: () => <Body name="a" /> })
+      register({ id: 'b', label: '自动化', component: () => <Body name="b" /> })
+      render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
+
+      const head = blockOf('a').querySelector('.sidebar-block-head') as HTMLElement
+      fireEvent.pointerDown(head, { pointerId: 1, button: 0, clientX: 12, clientY: 10 })
+      fireEvent.pointerMove(head, { pointerId: 1, clientX: 40, clientY: 10 })
+      act(() => { vi.advanceTimersByTime(400) })
+
+      expect(blockOf('a')).toHaveAttribute('data-dragging', 'false')
+      fireEvent.pointerUp(head, { pointerId: 1 })
+      // 没有落库任何次序（beforeEach 写入的是空偏好）。
+      expect(JSON.parse(localStorage.getItem(SIDEBAR_MODULES_STORAGE_KEY)!).order).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('损坏／旧模型的持久化状态回落为空：模块全部展开，不抛错', () => {

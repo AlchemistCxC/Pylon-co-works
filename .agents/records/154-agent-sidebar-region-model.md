@@ -190,3 +190,17 @@
 **本轮未做**：模块显隐的**实测**只到「面板正确渲染 5 行」；勾选/取消勾选的实机效果未逐项复核（单元测试已覆盖 `applyModulePrefs` 的隐藏与 `alwaysOpen` 例外）。拖拽的实机手势（真实指针拖动）未做——jsdom 无指针几何，单元测试用合成的 pointermove 覆盖了落库路径；**实机拖拽请用户验一下手感**。
 
 **⚠️ 实测期间观察到的现象（需用户确认归属）**：复核过程中主题由 Solarized 浅色变为 **Nord**（`appliedPreset` 五个分区全为 `nord`）。本轮我只改过主题的一个字段（`sidebarNameSize` 13→14），未点击任何预设行。若这不是用户自己所点，则「编辑某个字号字段会连带套用预设」是严重缺陷，需要单独立项排查。
+
+
+### 追加轮二（同日）：用户三条修正 + 计数移除
+
+| 要求 | 做法 | 实机证据 |
+| --- | --- | --- |
+| 不要拖拽按键，改长按拖拽，模块整体左移 | 删 `.sidebar-block-grip`；长按 260ms 进拖拽（移动 >6px 取消，抬起后 320ms 吞 click）；左轨统一 `--sidebar-rail-pad` | 手柄节点 **0 个**；模块图标 x 由 24 → **6** |
+| 工作区缩进与模块图标一致 | 模块头 / 组头 / 搜索 / 会话缩进全部派生自同一 rail；图标占位统一 15px | 模块图标、工作区图标、搜索图标同在 **x=6**；标题同在 **x=26** |
+| 重绘搜索会话 | 从 36px 描边框改为内联行（图标 + 无框输入，hover/focus 变色）；旧 `.search-input` 规则删除 | 输入框 `border 0` / `background transparent`，行高 24 |
+| 去掉工作区右侧会话数量 | 删 `.cwd-group-count` 与交叉淡出；右侧只剩 hover 显形的动作 | 计数节点 **0 个**；未显形动作 `visibility:hidden` + `pointer-events:none` |
+
+**说明书同步**：`Pylon-插件系统说明书-开发者版.md` §6.8 补全为完整契约——注册字段表（必填/默认/语义）、注册期 fail-closed 校验清单、点击方案三选一表、`first-party-react` props 表、`isolated-surface` 的 `host:input` wire 契约与可发事件表（含 `host:create-chat-session` → `host:create-loose-session` 的更名）、长按拖拽与显隐偏好（独立键）；§1 的 `api` 取值与图标键清单（补 `messages` / `clock` / `plus`，并说明模块图标与 launch 共用同一映射）同步。
+
+**门禁**：`tsc -b` 无输出；`eslint src/` 0 error；全量 **600 文件 / 4353 用例通过**；`check-doc-links` 通过；`check:maintenance` exit 0。

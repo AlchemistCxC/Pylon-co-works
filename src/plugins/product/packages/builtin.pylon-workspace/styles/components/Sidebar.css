@@ -50,27 +50,41 @@
 }
 /* 栈内滚动由 .sidebar-modules 负责，会话列表本身不再滚（否则嵌套）。 */
 .sidebar-modules .session-list { flex:0 0 auto; overflow:visible; padding:0; }
+/* 终端模式给 .session-list 自带 6px 内边距（`.app[data-interface-mode=...]` 的特异性高于上一行），
+   在模块栈里会让工作区图标比模块图标右移 6px。栈内边距由各模块自己拥有，这里显式归零。 */
+.app[data-interface-mode="terminal-like"] .sidebar-modules .session-list { padding:0; }
 /* 搜索框在会话模块**内部**：它是这个模块的控件，不是整栏的表头。 */
-.session-module-search { padding:0 var(--ui-space-2) var(--ui-space-2); }
+/* 搜索是会话模块里的**一行**，不是「框」：左栏已是 26px 无框行构成的紧凑列表，
+   一个 36px 描边输入框夹在中间像外来控件（用户点名「目前的框已经不适合 ui 界面了」）。 */
+.session-module-search {
+  display:flex; align-items:center; gap:5px;
+  min-height:24px; margin-bottom:var(--ui-space-1);
+  padding:1px var(--sidebar-rail-pad, 6px);
+  color:var(--text-dim); cursor:text;
+}
+.session-module-search:hover { color:var(--text); }
+.session-module-search:focus-within { color:var(--accent); }
+.session-search-icon { flex:0 0 auto; display:grid; place-items:center; }
+.session-search-input {
+  flex:1 1 auto; min-width:0;
+  padding:0; border:0; background:transparent; outline:none;
+  color:var(--text); font-family:inherit; font-size:var(--sidebar-meta-size, 11px);
+}
+.session-search-input::placeholder { color:var(--text-placeholder); }
 
 .sidebar-block { display:flex; flex-direction:column; min-height:0; flex:0 0 auto; }
 
-/* 模块头：拖拽手柄 + 图标 + 标题 + [折叠钮] + 动作。
-   手柄按需显形（悬停/聚焦/拖拽中），平时不占视觉注意力。 */
+/* 模块头：图标 + 标题 + [折叠钮] + 动作。**没有独立拖拽手柄**——长按头部即拖拽，
+   头部因此可以完全干净（手柄要么常驻成噪声，要么按需显形后变成看不见却能拖的靶子）。
+   左内边距取统一左轨 `--sidebar-rail-pad`，与工作区组图标、搜索行同一基准。 */
 .sidebar-block-head {
   display:flex; align-items:center; gap:4px;
   min-height:26px;
-  padding:1px var(--ui-space-2);
+  padding:1px var(--sidebar-rail-pad, 6px);
+  user-select:none;
+  touch-action:pan-y;
 }
-.sidebar-block-grip {
-  flex:0 0 auto; display:grid; place-items:center;
-  width:14px; height:18px; padding:0; margin-left:-2px;
-  border:0; background:transparent; color:var(--text-dim);
-  cursor:grab; opacity:0; transition:opacity var(--motion-fast) var(--ease-standard);
-}
-.sidebar-block-head:hover .sidebar-block-grip,
-.sidebar-block-grip:focus-visible { opacity:.55; }
-.sidebar-block[data-dragging="true"] .sidebar-block-grip { opacity:.9; cursor:grabbing; }
+.sidebar-block[data-dragging="true"] .sidebar-block-head { cursor:grabbing; }
 .sidebar-block[data-dragging="true"] { opacity:.72; }
 .sidebar-block[data-dragging="true"] > .sidebar-block-head { background:color-mix(in srgb,var(--accent) 12%,transparent); }
 /* 标题的点击语义由贡献声明（`onTitleClick`）：展开/折叠，或进入主区整页。
@@ -82,7 +96,9 @@
   color:var(--text); font-size:var(--sidebar-name-size, 14px); font-weight:700; text-align:left;
 }
 .sidebar-block-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-.sidebar-block-icon { flex:0 0 auto; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 70%,var(--text-dim)); }
+/* 图标占位固定 15px（与工作区组的 folder 同宽）：这样图标**与标题**都落在同一条左轨上，
+   否则图标对齐了、标题还差几像素。 */
+.sidebar-block-icon { flex:0 0 15px; width:15px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 70%,var(--text-dim)); }
 /* 已展开成整页的模块：标题与图标用强调色，左栏与主区因此互相对得上。 */
 .sidebar-block[data-page-open="true"] .sidebar-block-title,
 .sidebar-block[data-page-open="true"] .sidebar-block-icon { color:var(--accent); }
@@ -133,18 +149,6 @@
 .sidebar-block-cta { min-height:24px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); font-size:11px; }
 .sidebar-block-cta:disabled { opacity:.5; }
 
-.search-input {
-  /* 撑满父容器，**不用 `flex:1`**。旧写法 `flex:1`（即 `flex-basis:0%`）在纵向 flex 容器
-     里会压过 `height`：容器高度 auto ⇒ 输入框落到 min-content，实测 **17px**（声明的是
-     36px），比它原先正上方的 36px 分段控件矮一半。该缺陷已记入 .agents/spec/154 阶段 3；
-     改为块级撑满后声明高度重新生效。 */
-  display:block; width:100%; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border);
-  border-radius: 0; padding:0 var(--ui-space-3); color:var(--text); font-size:13px; outline:none;
-  transition:border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
-}
-.search-input:hover { border-color:var(--border-focus); }
-.search-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent); }
-.search-input::placeholder { color:var(--text-placeholder); }
 .sidebar-actions { display:flex; gap:2px; }
 .sidebar-actions button { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius: 0; font-size:15px; }
 .sidebar-actions button:hover { background:var(--bg-hover); color:var(--text); }
@@ -279,7 +283,8 @@
    不占行——那一行既不可读（9.5px 且常年被椭掉 40%），又让每组多出 20px 高度。 */
 .cwd-group { position:relative; margin-bottom:1px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
 .cwd-group-head { position:relative; display:flex; align-items:center; gap:2px; min-height:26px; padding:0; user-select:none; }
-.cwd-group-toggle { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:5px; padding:1px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
+/* 左内边距减 1px：`.cwd-group` 自带 1px 透明边框（悬停高亮用），不减就跟模块图标差 1px。 */
+.cwd-group-toggle { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:5px; padding:1px calc(var(--sidebar-rail-pad, 6px) - 1px); border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .cwd-group-toggle:hover { background:var(--state-hover-bg); }
 .cwd-group-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 /* 折叠箭头默认压到很淡、悬停/聚焦才亮：用户点名「折叠按钮也太显眼」。 */
@@ -289,17 +294,16 @@
    较宽的动作决定，切换时不发生位移。旧写法把两者绝对定位、再给 `.cwd-group-toggle` 预留
    `padding-right:62px`——那个 62px 是手抄的动作宽度之和，加第三个动作就会静默压字。 */
 .cwd-group-meta { position:relative; flex:0 0 auto; display:grid; place-items:center; padding-right:2px; }
-/* 计数退成药丸改为**纯暗字**：药丸的描边+底色在 240px 栏里是显眼的噪声，而它承载的
-   只是「几个会话」。 */
-.cwd-group-count { grid-area:1/1; color:var(--text-placeholder); font:var(--sidebar-meta-size, 11px)/1.5 var(--mono); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
-.cwd-group-actions { grid-area:1/1; display:flex; gap:2px; opacity:0; visibility:hidden; pointer-events:none; }
-.cwd-group:hover .cwd-group-count, .cwd-group:focus-within .cwd-group-count { opacity:0; }
-.cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; }
+/* 组右侧**只剩动作按钮**（用户去掉了会话数量的显示）。动作常驻占位、按需显形：
+   显形用 opacity + visibility/pointer-events 同步门控，未显形时不参与命中测试。 */
+.cwd-group-actions { grid-area:1/1; display:flex; gap:2px; opacity:0; visibility:hidden; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
+.cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; transition-delay:0s; }
 .cwd-group-add { width:22px; height:22px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); cursor:pointer; font-size:12px; }
 .cwd-group-add:hover { color:var(--accent); background:var(--bg-hover); border-color:var(--border); }
 /* 会话列表缩进减到 12px、去掉虚线导引轨：旧写法左侧共缩进 30px（20 margin + 10 padding）
    而右侧只有 6px，左右不对称；虚线本身也在单行紧凑行里变成噪声。 */
-.cwd-group-sessions { position:relative; display:grid; grid-template-rows:1fr; min-height:0; margin-left:12px; padding:1px 2px 2px 4px; opacity:1; overflow:hidden; transition:grid-template-rows 180ms var(--ease-standard),opacity 140ms var(--ease-standard),padding-bottom 180ms var(--ease-standard); }
+/* 会话列表缩进 = 左轨 + 一个图标位，使会话名与工作区名同列（用户要求缩进一致）。 */
+.cwd-group-sessions { position:relative; display:grid; grid-template-rows:1fr; min-height:0; margin-left:0; padding:1px 2px 2px calc(var(--sidebar-rail-pad, 6px) + 20px); opacity:1; overflow:hidden; transition:grid-template-rows 180ms var(--ease-standard),opacity 140ms var(--ease-standard),padding-bottom 180ms var(--ease-standard); }
 .cwd-group-sessions-inner { min-height:0; overflow:hidden; }
 .cwd-group-sessions.is-collapsed { grid-template-rows:0fr; padding-bottom:0; opacity:0; pointer-events:none; }
 .cwd-root-input { font-family:var(--mono); font-size:11px; }
@@ -361,7 +365,7 @@
 .cwd-settings-dialog-identity strong { min-width:0; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog-identity span { min-width:0; overflow:hidden; color:var(--text-dim); font:11px var(--mono); text-overflow:ellipsis; white-space:nowrap; }
 .cwd-settings-dialog > .cwd-settings { margin:0 20px 16px; }
-@media (hover:none) { .cwd-group-count { opacity:0; } .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; } .session-tail > .session-meta { opacity:0; } .session-actions { opacity:.82; visibility:visible; pointer-events:auto; } }
+@media (hover:none) { .cwd-group-actions { opacity:1; visibility:visible; pointer-events:auto; } .session-tail > .session-meta { opacity:0; } .session-actions { opacity:.82; visibility:visible; pointer-events:auto; } }
 
 /* Modern GUI workspace rail. Local values intentionally stay in this package. */
 .app[data-interface-mode="modern-gui"] .layout { gap:8px; padding:0 8px 8px; }
@@ -370,7 +374,6 @@
   background:color-mix(in srgb,var(--surface-panel) 70%,transparent); box-shadow:0 14px 38px color-mix(in srgb,var(--text) 5%,transparent);
 }
 .app[data-interface-mode="modern-gui"] .sidebar::before { border-radius:inherit; }
-.app[data-interface-mode="modern-gui"] .search-input { height:38px; border-radius:11px; padding-inline:12px; }
 .app[data-interface-mode="modern-gui"] .sidebar-block { margin:0 8px 6px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:12px; overflow:hidden; }
 .app[data-interface-mode="modern-gui"] .sidebar-block-head { padding:8px 10px; border-radius:12px; background:transparent; }
 .app[data-interface-mode="modern-gui"] .sidebar-block-action { border-radius:8px; }

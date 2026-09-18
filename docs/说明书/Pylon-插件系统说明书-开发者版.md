@@ -497,7 +497,7 @@ launch: {
 }
 ```
 
-`icon` 是由 Host 解释的稳定字符串，不是 React 组件。当前内置键包括 `activity`、`agent`、`boxes`、`folder-tree`、`globe`、`history`、`layout-dashboard`、`search`、`settings`、`sliders`、`waypoints`；未知键安全降级为通用 Workspace 图标。`categoryOrder` 与 `order` 只控制 Launcher 排序，不是跨插件视觉 token。
+`icon` 是由 Host 解释的稳定字符串，不是 React 组件。当前内置键包括 `activity`、`agent`、`boxes`、`clock`、`folder-tree`、`globe`、`history`、`layout-dashboard`、`messages`、`plus`、`search`、`settings`、`sliders`、`waypoints`；未知键安全降级为通用 Workspace 图标。**Agent 左栏模块的 `icon` 与 `headerActions[].icon` 消费同一张映射表**（见 §6.8）。`categoryOrder` 与 `order` 只控制 Launcher 排序，不是跨插件视觉 token。
 
 注意：当前外置 UI 插件不共享宿主 React 组件契约。通用第三方 UI 优先使用隔离 UI Surface；第一方 Workspace React 类型属于当前主构建内部契约。
 
@@ -721,42 +721,96 @@ UI Surface Registry 已实现。`surfaceId` 需要由可见贡献点引用；Age
 
 ### 6.8 左右栏贡献
 
-Agent 左栏是**一个有序的模块栈**：会话本身就是栈里的一个模块（声明 `alwaysOpen`，因此不可折叠、不可隐藏、默认排在最后），与插件注册的模块同构——同一条注册表、同一套图标 / 点击语义 / 拖拽重排 / 显隐设置。模块按 `order` 排列：
+Agent 左栏是**一个有序的模块栈**：会话本身就是栈里的一个模块（声明 `alwaysOpen`），与插件注册的模块同构——同一条注册表、同一套外壳 / 图标 / 点击语义 / 长按拖拽 / 显隐设置。模块按 `order` 排列：
 
 ```ts
 context.sidebar.registerAgentSidebarContribution({
   id: 'example.automation',
   label: '自动化',
-  icon: 'waypoints',            // 稳定图标键，与 Workspace launch 同一映射；未知键安全降级
+  icon: 'waypoints',
   order: 300,
-  onTitleClick: 'expand',       // 'expand'（默认）标题展开/折叠 | 'page' 标题进入整页
-  collapsible: true,            // 省略时默认 true；`alwaysOpen` 的模块恒为 false
+  onTitleClick: 'expand',
+  collapsible: true,
   defaultCollapsed: false,
-  page: { title: '自动化' },     // 声明后此模块可展开成主区整页
-  headerActions: [              // 宿主渲染在模块头部的动作按钮
-    { id: 'new-rule', label: '新建', title: '新建自动化规则', icon: 'plus' },
-  ],
-  when: context => true,        // 可见性谓词
+  page: { title: '自动化' },
+  headerActions: [{ id: 'new-rule', label: '新建', title: '新建自动化规则', icon: 'plus' }],
+  when: context => true,
   renderKind: 'isolated-surface',
   surfaceId: 'example.panel',
 })
 ```
 
-**模块外壳（图标、标题、折叠钮、`headerActions`、拖拽手柄）由宿主渲染，贡献只画模块内容**。标题的唯一来源是贡献声明的 `label`——贡献不得再画一份自己的标题。宿主点击 `headerActions` 时：`first-party-react` 贡献经 `props.registerBlockActionHandler` 在挂载期注册的处理器回派；`isolated-surface` 贡献走 `host:input` 的 `blockAction` 字段（带 `nonce`，重复点击可区分）。
+**注册字段**
 
-**点击方案由插件选**（用户归纳的三种，全部由此表达）：
+| 字段 | 必填 | 默认 | 语义 |
+| --- | --- | --- | --- |
+| `id` | 是 | — | 贡献 id，也是契约（改名需迁移） |
+| `label` | 是 | — | 模块标题的**唯一来源**；由宿主渲染，贡献不得再画一份 |
+| `icon` | 否 | 无图标 | 稳定图标键（见下）；未知键安全降级 |
+| `order` | 否 | 注册顺序 | 模块的**默认**位次；用户拖拽后被次序偏好覆盖 |
+| `onTitleClick` | 否 | `'expand'` | 标题点击语义：`'expand'` 展开/折叠 · `'page'` 进入整页 |
+| `collapsible` | 否 | `true` | 是否可折叠；`alwaysOpen` 时恒为否 |
+| `defaultCollapsed` | 否 | `false` | 首次出现时的折叠默认值（用户显式操作以用户为准） |
+| `alwaysOpen` | 否 | `false` | 常开：不可折叠、不可隐藏，且不出现在显隐设置的可改项里 |
+| `page` | 否 | 无 | `{ title }`；声明后该模块可展开成主区整页 |
+| `headerActions` | 否 | `[]` | 头部动作按钮（宿主渲染，见下） |
+| `when` | 否 | 恒可见 | 可见性谓词，入参 `{ activeAgentId, activeSessionId, query }` |
+| `renderKind` | 是 | — | `'first-party-react'`（仅主构建内置）或 `'isolated-surface'`（外置插件） |
+| `component` / `surfaceId` | 是 | — | 按 `renderKind` 二选一 |
+
+**注册期校验（fail-closed，任一不满足即拒绝注册）**：`id` / `label` 非空且无首尾空格；`onTitleClick` 只能是 `expand` / `page`；**`onTitleClick: 'page'` 必须同时声明 `page`**（点了没处去是死路，不做静默降级）；`alwaysOpen` 与 `collapsible: true` 不得同时声明（互相否定，不做静默取一）；`headerActions[].id` 非空、不重复且 `label` 非空；`page.title` 非空；`isolated-surface` 的 `surfaceId` 非空。
+
+**点击方案**（三种全部由此表达）：
 
 | 想要的 | 声明 |
 | --- | --- |
 | 点击展开/折叠 | `onTitleClick: 'expand'`（默认） |
-| 点击进入新页面 | `onTitleClick: 'page'` + `page`（此时宿主另给一个折叠钮，因为标题已被占用） |
-| 都要 | `onTitleClick: 'expand'` + `page` —— 标题负责展开，模块头自动出现「打开」按钮 |
+| 点击进入新页面 | `onTitleClick: 'page'` + `page`（宿主另给一个独立折叠钮，因为标题已被占用） |
+| 都要 | `onTitleClick: 'expand'` + `page` —— 标题负责展开，模块头**自动出现**「打开」按钮 |
 
-`onTitleClick: 'page'` 却没声明 `page` 会在注册期被拒绝（点了没处去是死路，不做静默降级）；`alwaysOpen` 与 `collapsible: true` 同时声明同样被拒绝。
+**模块外壳（图标、标题、折叠钮、`headerActions`）全部由宿主渲染**，贡献只画模块内容。用户**长按模块头**即可拖拽改次序（没有独立拖拽手柄）。
 
-**整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`（左栏模块里是 `'block'`）——同一份内容两种体量，不需要维护两份组件，也共享同一批会话/工作区数据与回调。隔离表面在 `host:input` 里拿到同样的 `presentation` / `collapsed` / `pageOpen`。
+**`headerActions` 的回派**：宿主渲染按钮，语义留在贡献。`first-party-react` 贡献在挂载期调用 `props.registerBlockActionHandler(fn)` 注册处理器（卸载时传 `null` 注销），宿主点击时以 `actionId` 回调；`isolated-surface` 贡献改为从 `host:input.blockAction` 读请求（含 `nonce`，重复点击可区分）。
 
-**顺序与显隐**是跨 Sheet 的界面偏好（`pylon-sidebar-modules-v1`），用户在左栏拖拽模块头的手柄改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏。
+**props 契约（`first-party-react`）**：贡献组件收到
+
+| 字段 | 语义 |
+| --- | --- |
+| `presentation` | `'block'`（左栏模块内）或 `'page'`（主区整页）——**同一组件两种体量** |
+| `collapsed` | 是否处于折叠；`page` 体量恒为 `false` |
+| `query` / `onQueryChange` | 会话搜索词与其写入口。搜索框由会话模块渲染，但**取值由宿主持有**，避免 `when` 与其它模块看到的 query 漂移 |
+| `activeAgentId` / `activeSessionId` | 当前 Agent 与会话 |
+| `sessions` / `workspaces` / `liveGeneratingSources` | 与工作台同源的会话、工作区与运行中来源 |
+| `registerBlockActionHandler` | 见上 |
+| `onBlockAction` | 占位（宿主回派走注册的处理器；保留字段以稳定接口形状） |
+| `onSelectSession` / `onDeleteSession` / `onExportSession?` / `onArchiveSession?` / `onOpenSessionSettings` / `onRenameSession` | 会话操作回调 |
+| `onCreateLooseSession` / `onCreateWorkspace` / `onCreateWorkspaceSession` | 创建入口 |
+
+**wire 契约（`isolated-surface`）**：宿主经 `host:input` 下发
+
+```ts
+{
+  query, activeAgentId, activeSessionId,
+  presentation: 'block' | 'page',
+  collapsed, pageOpen,
+  blockAction: { actionId, nonce } | null,
+  sessions: { id, name, workspaceId }[],
+  workspaces: { id, name, rootPath }[],
+}
+```
+
+可发的受控事件：
+
+| 事件 | detail | 语义 |
+| --- | --- | --- |
+| `host:select-session` | `sessionId` | 选中会话 |
+| `host:create-loose-session` | — | 新建无 cwd 会话（**旧名 `host:create-chat-session` 已废弃**） |
+| `host:create-workspace-session` | `workspaceId` | 在该工作区下新建会话 |
+| `host:open-session-settings` | `sessionId` | 打开会话设置 |
+
+**整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`——不需要维护两份组件，两种体量共享同一批数据与回调。整页**替换该 Sheet 的聊天视图，但不是新 Sheet**：左栏仍是该 Sheet 的左栏，Esc 或页面头部「返回」回到聊天。
+
+**顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。
 
 Sheet 右栏按 Workspace kind 注册：
 
@@ -771,7 +825,7 @@ context.contextPanel.register({
 })
 ```
 
-`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**同一分区内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态（含 `region` / `collapsed` / `blockAction`），并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
+`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态（含 `presentation` / `collapsed` / `pageOpen` / `blockAction`），并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 
 Workspace 自身的 `sidebar` 仍负责声明整块左栏壳；Agent 左栏内部内容、FileSheet workbench activity，以及通用右栏内容分别由对应 contribution registry 管理，不建立第二套 `kind → sidebar` 映射。
 

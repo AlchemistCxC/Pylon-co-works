@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Settings, Trash2 } from 'lucide-react'
+import { Archive, Download, Folder, FolderOpen, Inbox, Plus, Search, Settings, Trash2 } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -158,7 +158,6 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
     groupId: string,
     label: string,
     rootPath: string,
-    count: number,
     icon: 'folder' | 'inbox',
     onAdd: () => void,
     onSettings?: () => void,
@@ -174,7 +173,6 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
           <span className="cwd-group-name">{label}</span>
         </button>
         <div className="cwd-group-meta">
-          <span className="cwd-group-count" aria-label={`${count} 个会话`}>{count}</span>
           <span className="cwd-group-actions">
             <button className="cwd-group-add" onClick={event => { event.stopPropagation(); onAdd() }} title={`在 ${label} 中新建会话`} aria-label={`在 ${label} 中新建会话`}><Plus size={13} aria-hidden="true" /></button>
             {onSettings && <button className="cwd-group-add cwd-group-settings" onClick={event => { event.stopPropagation(); onSettings() }} title={`${label} 工作区设置`} aria-label={`${label} 工作区设置`}><Settings size={13} aria-hidden="true" /></button>}
@@ -200,11 +198,13 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
 
   return (
     <>
-      {/* 搜索框归会话模块**内部**：它只过滤会话，挂在模块外面会让「它到底管什么」
-          含糊，也让模块栈的次序在视觉上被切断。取值仍由宿主持有（`props.query`）。 */}
-      <div className="session-module-search">
-        <input className="search-input" placeholder="搜索会话..." value={props.query} onChange={event => props.onQueryChange(event.target.value)} aria-label="搜索会话" />
-      </div>
+      {/* 搜索是会话模块**内部的一行**，不是「框」：左栏现在是 26px 无框行构成的紧凑列表，
+          一个 36px 描边输入框夹在中间像外来控件。取值仍由宿主持有（`props.query`）。 */}
+      <label className="session-module-search">
+        <span className="session-search-icon" aria-hidden="true"><Search size={12} /></span>
+        <input className="session-search-input" placeholder="搜索会话" value={props.query}
+          onChange={event => props.onQueryChange(event.target.value)} aria-label="搜索会话" />
+      </label>
       <div className="session-list" role="tree" aria-label="工作区与会话">
         {showNewCwd && (
           <div className="cwd-new">
@@ -230,7 +230,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
             workspace.id,
             bound,
             renderGroupHead(
-              workspace.id, workspace.name, workspace.rootPath, allBound.length, 'folder',
+              workspace.id, workspace.name, workspace.rootPath, 'folder',
               () => props.onCreateWorkspaceSession(workspace.id),
               () => setEditingCwdId(workspace.id),
             ),
@@ -241,7 +241,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
           LOOSE_GROUP_ID,
           visibleLoose,
           renderGroupHead(
-            LOOSE_GROUP_ID, LOOSE_GROUP_LABEL, '未绑定目录的会话', looseSessions.length, 'inbox',
+            LOOSE_GROUP_ID, LOOSE_GROUP_LABEL, '未绑定目录的会话', 'inbox',
             () => props.onCreateLooseSession(),
           ),
         )}
