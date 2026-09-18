@@ -6,6 +6,7 @@ import {
   resolveModelOptionEntries,
   resolveReasoningOptionEntries,
   resolveDocumentOptionValue,
+  shortControlCenterError,
 } from './workbenchOptionCatalog.ts'
 
 function nextValue(values: readonly string[], current: string): string {
@@ -26,13 +27,17 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
   // 可选项（排除当前值）。为空时菜单只能是一片空白 —— 那是"点了没反应"的观感，
   // 所以下面渲染一条不可点的占位，而不是留个空盒子。
   const selectable=()=>entries().filter(x=>x.id!==model())
+  // #51：「不可切换」≠「切换失败」——无草稿绑定的真实会话里，候选为空意味着
+  // 该 agent 没有宣告任何模型面（restart 后未恢复/agent 不支持），控件置禁用并
+  // 说明原因，而不是让用户反复点出一串长报错。草稿态（空态选型）不受限。
+  const unsurfaced=()=>!props.onDraftChange&&entries().length===0
   const width=()=>appearance().modelWidth??120, height=()=>appearance().modelHeight??28, radius=()=>appearance().modelRadius??0, fontSize=()=>appearance().modelFontSize??12
   const bg=()=>appearance().modelBgColor==='black'?'#000':'#fff', fg=()=>appearance().modelTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
-  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(r.error||'未配置模型?')} finally {setPending(false);close(true)} }
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(shortControlCenterError(r.error,'模型切换失败'))} finally {setPending(false);close(true)} }
   createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
-  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg(),display:'flex','align-items':'center','justify-content':'center'})
-  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><div class="cc-model-root"><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><Show when={selectable().length>0} fallback={<div class="cc-model-empty" role="presentation">当前 Agent 未上报可选模型</div>}><For each={selectable()}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></Show></div></Show></div></div>
+  const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg()})
+  return <div ref={el=>root=el} class="solid-model-widget"><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{m()}</span>}</Show><div class="cc-model-root"><button ref={el=>trigger=el} type="button" class="cc-model-trigger" style={triggerStyle()} disabled={unsurfaced()} title={unsurfaced()?'该 agent 未宣告可切换模型':undefined} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='menu'?setOpen(v=>!v):void choose(nextValue(models(),model()))}>{pending()?'......':model()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" style={{width:`${width()}px`}} role="listbox" aria-label="模型列表" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}}><Show when={selectable().length>0} fallback={<div class="cc-model-empty" role="presentation">当前 Agent 未上报可选模型</div>}><For each={selectable()}>{item=><button type="button" role="option" aria-selected={false} class="cc-model-item" onClick={()=>void choose(item.id)}>{item.label||item.id}</button>}</For></Show></div></Show></div></div>
 }
 
 /** 权限模式控件：本体只显示后端机器值（不翻译），外观与交互跟模型／思考强度控件同一套语言。
@@ -52,7 +57,7 @@ export function SolidModeWidget(props: {
   const mode=()=>props.draftValue?.()||runtime().activeMode||entries()[0]?.id||'default'
   const switchMode=()=>props.forceDropdown?'menu':(appearance().permissionSwitchMode??'menu')
   const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
-  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===mode()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setMode(sid,target);if(!r.ok)setError(r.error||'权限模式切换失败')} finally {setPending(false);close(true)} }
+  const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===mode()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setMode(sid,target);if(!r.ok)setError(shortControlCenterError(r.error,'权限模式切换失败'))} finally {setPending(false);close(true)} }
   createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
   const cycle=()=>{void choose(nextValue(entries().map(e=>e.id), mode()))}
@@ -73,7 +78,7 @@ export function SolidReasoningWidget(props: { draftValue?: () => string; onDraft
   const menuId=`cc-reasoning-menu-${createUniqueId()}`
   const entries=()=>resolveReasoningOptionEntries(runtime(), resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning'))
   const current=()=>resolveDocumentOptionValue(runtime().document?.session.options, 'reasoning') || props.draftValue?.() || entries()[0]?.id || ''
-    const choose=async(value:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(value);close(true);return}; const sid=workbench.input().sessionId;if(!sid||value===current()){close(true);return}; const option=runtime().document?.session.options?.find(isReasoningOption); const previous=current(); setPending(true);setError(''); try {const result=await workbench.commands.setConfigOption(sid,option?.id||'reasoning_effort',value,{expectedValue:previous,...(option?.version==null?{}:{expectedVersion:option.version})});if(!result.ok)setError(result.error||'切换失败')} finally {setPending(false);close(true)} }
+    const choose=async(value:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(value);close(true);return}; const sid=workbench.input().sessionId;if(!sid||value===current()){close(true);return}; const option=runtime().document?.session.options?.find(isReasoningOption); const previous=current(); setPending(true);setError(''); try {const result=await workbench.commands.setConfigOption(sid,option?.id||'reasoning_effort',value,{expectedValue:previous,...(option?.version==null?{}:{expectedVersion:option.version})});if(!result.ok)setError(shortControlCenterError(result.error,'思考等级切换失败'))} finally {setPending(false);close(true)} }
   createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
   const mode=()=>appearance().reasoningSwitchMode??'menu'

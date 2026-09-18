@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../identityStore.ts'
@@ -13,7 +14,14 @@ import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
-import { agentAdvertisedModelEntries } from './agentAdvertisedModels.ts'
+import {
+  agentAdvertisedModelEntries,
+  agentProbeFresh,
+  agentProbeInFlight,
+  markProbeInFlight,
+  markProbeUnavailable,
+  noteAgentSelectorsSnapshot,
+} from './agentAdvertisedModels.ts'
 import { AgentWorkbenchLifecycle } from './agentWorkbenchLifecycle.ts'
 
 export interface WorkbenchFatalFailure {
@@ -33,6 +41,7 @@ import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './age
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
+import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { setSessionModel } from '../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../components/chat/sessionMode.ts'
 import { normalizeSessionMode } from '../../components/chat/sessionModeState.ts'
@@ -141,6 +150,28 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     () => agentAdvertisedModelEntries(sheetAgentId),
     () => agentAdvertisedModelEntries(sheetAgentId),
   )
+  // Issue #53：空态（无历史会话桶）的候选来自后端探测——起一次性会话读 Agent
+  // 广告的 configOptions 后即弃。探测落位/失败都推进本地 tick，让 mount input
+  // 重算（store 订阅本身不会因探测而 emit）。失败静默：候选退回桶并集，TTL 内
+  // 不重试。
+  const [probeTick, setProbeTick] = useState(0)
+  useEffect(() => {
+    if (!sheetAgentId) return
+    if (agentProbeFresh(sheetAgentId) || agentProbeInFlight(sheetAgentId)) return
+    markProbeInFlight(sheetAgentId, true)
+    createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      .probeAgentSelectors({ agentId: sheetAgentId })
+      .then(snapshot => {
+        noteAgentSelectorsSnapshot(sheetAgentId, snapshot)
+      })
+      .catch(() => {
+        markProbeUnavailable(sheetAgentId)
+      })
+      .finally(() => {
+        markProbeInFlight(sheetAgentId, false)
+        setProbeTick(tick => tick + 1)
+      })
+  }, [sheetAgentId, probeTick])
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
     replayReadonly: props.isReplay,

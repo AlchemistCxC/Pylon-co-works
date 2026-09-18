@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../../../runtimeStore.ts'
-import { agentAdvertisedModelEntries } from '../agentAdvertisedModels.ts'
+import {
+  agentAdvertisedModelEntries,
+  markProbeUnavailable,
+  noteAgentSelectorsSnapshot,
+  resetAgentProbeForTests,
+} from '../agentAdvertisedModels.ts'
 
 const agentA = { agentId: 'agent-a', source: 'ws://a/session-1' }
 const agentASecondSession = { agentId: 'agent-a', source: 'ws://a/session-2' }
@@ -9,6 +14,7 @@ const agentB = { agentId: 'agent-b', source: 'ws://b/session-1' }
 describe('agentAdvertisedModelEntries', () => {
   beforeEach(() => {
     useRuntimeStore.setState({ sessionConfig: {} })
+    resetAgentProbeForTests()
   })
 
   it('returns the advertised modelChoices (id/label) of the owning agent', () => {
@@ -85,5 +91,48 @@ describe('agentAdvertisedModelEntries', () => {
     expect(nextB.map(entry => entry.id)).toEqual(['new-b'])
     expect(agentAdvertisedModelEntries('agent-a')).toBe(nextA)
     expect(agentAdvertisedModelEntries('agent-b')).toBe(nextB)
+  })
+
+  // —— #53：空态探测结果并入（探测 label 为权威形状，压在历史桶之上）——
+
+  it('merges probed candidates over the bucket union with probe labels winning', () => {
+    useRuntimeStore.getState().setSessionConfig(agentA, { models: ['shared-model', 'a-only'] })
+    noteAgentSelectorsSnapshot('agent-a', {
+      configOptions: [
+        {
+          id: 'model-selection',
+          category: 'model',
+          options: [
+            { valueId: 'shared-model', name: 'Shared (probed)' },
+            { valueId: 'probed-only', name: 'Probed Only' },
+          ],
+          currentValue: 'shared-model',
+        },
+      ],
+    })
+    const entries = agentAdvertisedModelEntries('agent-a')
+    // 同 id 冲突：探测条目在桶的既有位置上覆盖（Map 语义），新 id 追加在后。
+    expect(entries.map(entry => entry.id)).toEqual(['shared-model', 'a-only', 'probed-only'])
+    expect(entries.find(entry => entry.id === 'shared-model')?.label).toBe('Shared (probed)')
+    expect(entries.find(entry => entry.id === 'probed-only')?.label).toBe('Probed Only')
+  })
+
+  it('falls back to snapshot modelChoices ids when no standard option is advertised', () => {
+    noteAgentSelectorsSnapshot('agent-a', { modelChoices: ['raw-id-1', 'raw-id-2'] })
+    expect(agentAdvertisedModelEntries('agent-a')).toEqual([
+      { id: 'raw-id-1', label: 'raw-id-1' },
+      { id: 'raw-id-2', label: 'raw-id-2' },
+    ])
+  })
+
+  it('reports no candidates when the agent advertises nothing (empty is valid)', () => {
+    noteAgentSelectorsSnapshot('agent-a', { configOptions: [] })
+    expect(agentAdvertisedModelEntries('agent-a')).toEqual([])
+  })
+
+  it('probe failure keeps the bucket-union fallback without poisoning the cache', () => {
+    useRuntimeStore.getState().setSessionConfig(agentA, { models: ['a-model'] })
+    markProbeUnavailable('agent-a')
+    expect(agentAdvertisedModelEntries('agent-a').map(entry => entry.id)).toEqual(['a-model'])
   })
 })
