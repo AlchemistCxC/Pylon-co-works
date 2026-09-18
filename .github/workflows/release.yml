@@ -1,8 +1,14 @@
 name: Release
 
+# **只在手动 dispatch 时运行——`push: tags: ['v*']` 已移除（2026-09-18 决定）。**
+#
+# 本仓的发行流程是**本地构建 + 手动上传资产**：`bun run release:portable` 出 zip/sha256/
+# manifest，再 `gh release create <tag> <assets>` 一并建 tag 与 release。既然资产在打 tag
+# 之前就已上传，tag 推送再触发一次 CI 构建纯属重复：0.2.0 / 0.2.1 / 0.2.2 三次都在构建
+# 中途被手动取消（取消时作业尚未走到上传步骤，所以已发布的资产不会被覆盖，但也意味着那次
+# 运行没有任何产出）。需要让 CI 验一遍发行链时，手动 dispatch 本工作流即可；在 tag ref 上
+# dispatch 仍会走到发布步骤（下方 `if`），在分支上 dispatch 则只构建、不发布。
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
