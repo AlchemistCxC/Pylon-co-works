@@ -256,3 +256,15 @@
 - 文档：`.agents/spec/`、`.agents/records/`、本文件
 
 **我不碰**：`src/components/Sidebar*`、`src/sheets/**`、`src/workspace-sheets/**`（#154 在途域）、`src-tauri/**`、`tools/**`、`docs/说明书/**`（字体系统无说明书描述面，已核查）。
+
+---
+
+[2026-09-19 02] [Kepler] [#175]
+
+**开工：issue175（全量并行 jsdom 调度型测试偶发超时——20 逻辑核自饱和饥饿）。** 施工范围（请勿改写、勿连带提交）：
+
+- `vitest.config.ts`（预计仅并行度上限 maxWorkers 一处，不动超时/断言/retry）
+- 视实验结论可能微调两条墙钟预算：`src/plugins/core/renderer/__tests__/solidRendererSurface.test.ts`（waitFor 5s）、`src/kernel/__tests__/KernelRoot.bootstrap.test.tsx`（waitFor timeout）——只放大数值不改断言
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：其余全部源码；`#129`（Kepler 本人）的 L.md 条目继续有效至 PR #174 合入。
