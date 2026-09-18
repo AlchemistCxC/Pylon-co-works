@@ -61,7 +61,12 @@ export function writeModulePrefs(storage: StorageLike, prefs: SidebarModulePrefs
 /**
  * 把偏好套到注册表快照上：先按显式次序，再把未列出的模块按注册顺序接在后面
  * （新装的模块因此总是落在末尾，可预期；`order` 只决定初次顺序）。
+ *
  * `alwaysOpen` 的模块**不可隐藏**——隐藏了左栏就少了主体。
+ *
+ * 并且**钉在栈底**（用户要求「始终位于模块最下方」）：用户拖拽写下的次序同样受这条约束，
+ * 否则「会话在最后」会随一次拖拽漂移，分界也跟着漂。钉序在这里统一收敛——渲染、拖拽落库、
+ * 设置页都从这里取次序，因此旧偏好里把常驻模块排在前面的值也会被纠正回来。
  */
 export function applyModulePrefs(
   contributions: readonly AgentSidebarContribution[],
@@ -72,9 +77,13 @@ export function applyModulePrefs(
   const rankedSet = new Set(ranked)
   const rest = contributions.filter(contribution => !rankedSet.has(contribution.id)).map(contribution => contribution.id)
   const hidden = new Set(prefs.hidden)
-  return [...ranked, ...rest]
+  const ordered = [...ranked, ...rest]
     .map(id => byId.get(id)!)
     .filter(contribution => contribution.alwaysOpen === true || !hidden.has(contribution.id))
+  const pinned = ordered.filter(contribution => contribution.alwaysOpen === true)
+  if (pinned.length === 0) return ordered
+  const movable = ordered.filter(contribution => contribution.alwaysOpen !== true)
+  return [...movable, ...pinned]
 }
 
 /** 把 `fromId` 移动到 `toId` 的位置，产出新的完整次序（拖拽落点用）。 */

@@ -68,6 +68,35 @@ fn disconnected_client_is_not_marked_as_crashed() {
     assert!(!AcpClient::disconnected().is_crashed());
 }
 
+#[tokio::test]
+async fn intentional_stop_is_not_reported_as_crashed() {
+    // #163：主动 kill 引发的进程退出与意外崩溃共享同一信号（exit watcher/EOF），
+    // 主动停必须有「这是主动停」的证词——kill 后 is_crashed 恒 false（即使
+    // exit watcher 随后把 crashed 原始标志置位），is_dead 恒 true，发送守卫拒绝。
+    let agent =
+        crate::test_utils::fake_acp_agent("fake-acp-intentional-stop", &["--scenario", "alive"]);
+    let mut client = AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("alive fake ACP must initialize");
+    assert!(!client.is_crashed(), "存活连接不得判 crashed");
+    assert!(!client.is_dead(), "存活连接不得判死");
+    client.kill().expect("kill must succeed");
+    assert!(
+        !client.is_crashed(),
+        "主动 stop 不得判 crashed（#163：被切走的 Agent 不是崩溃）"
+    );
+    assert!(client.is_dead(), "主动 stop 后连接已不可用");
+    assert!(
+        client
+            .prepare_rpc(
+                METHOD_SESSION_NEW,
+                serde_json::json!({"cwd": ".", "mcpServers": []}),
+            )
+            .is_err(),
+        "主动 stop 后发送守卫必须立即拒绝"
+    );
+}
+
 /// G1-06：close 降级判定类型化——-32601 信封（code 优先）与字符串兜底。
 #[test]
 fn method_not_found_detection() {
@@ -1226,36 +1255,29 @@ async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response()
 }
 #[tokio::test]
 async fn writer_failure_signals_watch_and_pending_settles() {
-    // 方案 2A 测试门：writer 写失败（EPIPE）必须经 fail_connection 统一结算——
-    // crashed=true、watch 发 true、pending waiter 立即 ConnectionClosed，
-    // 不再只置 crashed 等下次 EOF（agent 僵死时 EOF 永不来）。
-    let trace_path = std::env::temp_dir().join(format!(
-        "pylon-acp-writer-fail-{}.jsonl",
-        std::process::id()
-    ));
-    // 读一行后立即退出：initialize 写入成功，后续写触发 EPIPE。
+    // 方案 2A 测试门：writer 写失败（broken pipe）必须统一结算——crashed=true、
+    // watch 发 true、pending waiter 立即 Err，不再只置 crashed 等下次 EOF
+    // （agent 僵死时 EOF 永不来）。
+    // #157 确定性构造：close-stdin-after-init 场景应答 initialize 后**关闭自身
+    // stdin 读端并驻留**——进程不退出，exit watcher / stdout EOF 不参与竞争，
+    // prepare_rpc 的守卫必然放行；写失败的结算信号只能来自写失败本身。
+    // （旧 crash-after-init 子进程即刻退出，全量并行下崩溃信号与 prepare_rpc
+    // 竞争，守卫先行拒绝导致本测试偶发 panic。）
     let agent = crate::test_utils::fake_acp_agent(
         "fake-acp-writer-fail",
-        &[
-            "--scenario",
-            "crash-after-init",
-            "--trace-file",
-            &trace_path.to_string_lossy(),
-            "--trace-mode",
-            "all",
-        ],
+        &["--scenario", "close-stdin-after-init"],
     );
     let mut client = AcpClient::connect_with_logs(&agent, None)
         .await
         .expect("initialize 应成功（首行写入正常）");
     let mut crashed_rx = client.crashed_receiver();
-    // 子进程已退出，writer 下次写必 EPIPE → fail_connection → watch 发 true。
+    // 子进程存活但 stdin 读端已关，writer 下次写必 broken pipe → 统一结算。
     let rpc = client
         .prepare_rpc(
             METHOD_SESSION_NEW,
             serde_json::json!({"cwd": ".", "mcpServers": []}),
         )
-        .expect("prepare_rpc 不依赖进程状态");
+        .expect("prepare_rpc 不依赖进程状态（子进程存活）");
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), rpc.complete())
         .await
         .expect("写失败必须在 5s 内收敛（不得悬挂）");
@@ -1272,7 +1294,6 @@ async fn writer_failure_signals_watch_and_pending_settles() {
     .unwrap_or(false);
     assert!(watch_hit, "writer failure 必须经 watch 信号送达");
     client.kill().expect("cleanup");
-    std::fs::remove_file(&trace_path).ok();
 }
 #[tokio::test]
 async fn fake_acp_session_load_ignores_updates_from_other_sessions() {

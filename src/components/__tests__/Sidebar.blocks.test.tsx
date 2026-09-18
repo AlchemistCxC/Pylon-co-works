@@ -103,7 +103,7 @@ describe('左栏模块栈模型', () => {
     expect(screen.getByText('定时')).toBeInTheDocument()
   })
 
-  it('标题点击展开/折叠（默认语义），折叠后不渲染 body 且状态写回 sheet', () => {
+  it('标题点击展开/折叠（默认语义）：折叠后 body 仍挂载但被 inert 且零高，状态写回 sheet', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
@@ -115,7 +115,19 @@ describe('左栏模块栈模型', () => {
 
     view.rerender(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { mod: true }, activePageId: null }} />)
     expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'true')
-    expect(screen.queryByTestId('body-mod')).toBeNull()
+    // body **不再卸载**：折叠是 CSS 把行高收到 0（有过渡），因此这里断言「挂载但不可交互」。
+    const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
+    expect(body).not.toBeNull()
+    expect(body).toHaveAttribute('inert')
+    expect(screen.getByTestId('body-mod')).toBeInTheDocument()
+  })
+
+  it('展开态 body 不 inert（折叠是过渡而不是卸载，交互门控靠 inert）', () => {
+    register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {} }} />)
+    const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
+    expect(body).not.toBeNull()
+    expect(body).not.toHaveAttribute('inert')
   })
 
   it('alwaysOpen 的模块**也可折叠**（常驻只表示不可隐藏），默认展开', () => {
@@ -195,6 +207,38 @@ describe('左栏模块栈模型', () => {
 
       expect(JSON.parse(localStorage.getItem(SIDEBAR_MODULES_STORAGE_KEY)!).order).toEqual(['b', 'a'])
       expect(blockOf('a')).toHaveAttribute('data-dragging', 'false')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('常驻模块固定栈底：长按它不进拖拽，别的模块也落不到它下面', () => {
+    vi.useFakeTimers()
+    try {
+      register({ id: 'a', label: '定时', order: 100, component: () => <Body name="a" /> })
+      register({ id: 'b', label: '自动化', order: 200, component: () => <Body name="b" /> })
+      register({ id: 'sessions', label: '会话', alwaysOpen: true, order: 900, component: () => <Body name="s" /> })
+      render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
+      expect(moduleIds()).toEqual(['a', 'b', 'sessions'])
+
+      // ① 长按常驻模块头：不进拖拽（它能去哪儿？钉区之上的位置对会话没有意义）。
+      const pinnedHead = blockOf('sessions').querySelector('.sidebar-block-head') as HTMLElement
+      fireEvent.pointerDown(pinnedHead, { pointerId: 1, button: 0, clientX: 12, clientY: 10 })
+      act(() => { vi.advanceTimersByTime(400) })
+      expect(blockOf('sessions')).toHaveAttribute('data-dragging', 'false')
+      expect(blockOf('sessions').querySelector('.sidebar-block-head')).toHaveAttribute('title', '常驻模块固定在栈底')
+      fireEvent.pointerUp(pinnedHead, { pointerId: 1 })
+
+      // ② 拖动 a 到最底：落点被钳在钉区之前，次序仍是 [b, a, sessions]。
+      const head = blockOf('a').querySelector('.sidebar-block-head') as HTMLElement
+      fireEvent.pointerDown(head, { pointerId: 2, button: 0, clientX: 12, clientY: 10 })
+      act(() => { vi.advanceTimersByTime(400) })
+      fireEvent.pointerMove(head, { pointerId: 2, clientY: 10_000 })
+      fireEvent.pointerUp(head, { pointerId: 2, clientY: 10_000 })
+
+      expect(moduleIds()).toEqual(['b', 'a', 'sessions'])
+      // 落库的次序里常驻模块**仍在最后**——落点被钳住，用户写不出「谁在会话下面」这种次序。
+      expect(JSON.parse(localStorage.getItem(SIDEBAR_MODULES_STORAGE_KEY)!).order).toEqual(['b', 'a', 'sessions'])
     } finally {
       vi.useRealTimers()
     }

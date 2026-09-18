@@ -208,6 +208,8 @@
 
 **⚠️ 追加修复（2026-09-18 20:10）：左栏所有按钮曾长期失效，根因是长按拖拽在 `pointerdown` 就捕获指针。** 捕获把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在按下/抬起目标的最近公共祖先上 ⇒ 头内部的标题、折叠钮、「打开」、头部动作全部收不到 click（自 `1b4854f0` 起一直如此，实机表现为「点了没反应」）。现改为长按到点才捕获，并补 `pointerleave` 取消长按。**仍占用文件域**：`src/components/Sidebar.tsx`、`src/components/__tests__/Sidebar.blocks.test.tsx`。全量 **601 文件 / 4361 用例通过**。
 
+**⚠️ 看到他人在途（2026-09-18 23:50）**：`git status` 显示 `src-tauri/src/{acp/client.rs,acp/replay.rs,acp/tests.rs,permission.rs,lib.rs,bin/pylon-fake-agent.rs}` 有未提交改动，属 **Kepler** 的 #163/#157 文件域（其条目见下）。我一律未 stage、未提交、未改写；自己全程用 pathspec 提交。
+
 **🔧 在途文件域（2026-09-18 21:30，标题栏 + 右栏，未提交）**：`src/workspace-sheets/{WorkspaceTitlebar,SheetTabStrip}.tsx` 及 `__tests__/workspaceTitlebar*.tsx`、`sheetTabOverflow.test.tsx`、`src/App.tsx`、`src/components/right-panel/{RightRailHost,ContextPanelHost}.tsx` 及 `__tests__`、`src/plugin-runtime/context-panel/**`、`src/plugin-runtime/titlebar/**`、`src/plugin-runtime/packageManifest.ts` + 两份 `pylon-plugin-manifest.schema.json`、首方样式 `builtin.pylon-shell/styles/App.css` 与 `builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css`、说明书、`.agents/decisions/0012-*.md`。改动要点：标题栏「界面+设置」合并为齿轮菜单（新增 `slot:'app-menu'` 数据化菜单项，API 2.1）、右栏按钮只折叠且图标重画、页签自动压缩 + 「···」收敛（不滚动不截断）、右栏面板 `workspaceKind` 由闸门改为亲和（API 2.2，ADR-0012）。全量 **601 文件 / 4380 用例通过**。
 
 ---
@@ -235,3 +237,20 @@
 - github.com 直连时好时坏（同一 IP 钉住即通）⇒ 推送失败不一定是代理问题，重试即可。
 
 **不碰**：`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`（未跟踪、未提交）。
+
+---
+
+[2026-09-18 22] [Kepler] [#163 + #157]
+
+**开工：#163（切换 Agent 后被主动停的 Agent 报 crashed:true）+ #157（acp::tests::writer_failure 全量并行 flaky）。** 分支沿用 `Ru5t/Reflector`。均为 `src-tauri` 侧。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src-tauri/src/acp/client.rs`（AcpClient 新增 `stopped` 标记 + `is_dead()`；`is_crashed()` 语义改为「意外退出才真」；kill() 置位；三处发送守卫换 is_dead）
+- `src-tauri/src/lib.rs`（仅 `acp_is_crashed` 文档注释，无逻辑改动）
+- `src-tauri/src/permission.rs`（超时清理判据 is_crashed → is_dead，一处）
+- `src-tauri/src/bin/pylon-fake-agent.rs`（新增 `close-stdin-after-init` 场景，供 #157 确定性构造）
+- `src-tauri/src/acp/tests.rs`（重写 writer_failure 测试为确定性构造 + 新增主动停不判 crash 用例）
+- 文档：`.agents/spec/`（新 spec）、`.agents/records/`（开发记录）、`docs/说明书/`（若描述了 crashed 判据则同步）、本文件
+
+**我不碰**：前端 `src/**`、`tools/**`、`.github/**`、`src-tauri/src/` 其余文件。

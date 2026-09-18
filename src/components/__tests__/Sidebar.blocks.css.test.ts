@@ -64,6 +64,43 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     }
   })
 
+  it('模块体的展开/折叠有过渡，且时长走 token（reduced-motion 靠 token 归零）', () => {
+    // 用户实机报「折叠动效…只有部分地方有」：工作区组早就有 0fr 收起动画，模块体却是
+    // 「折叠即卸载」的瞬跳。两侧现在同一条时间轴。
+    const blockBody = body('.sidebar-block-body')
+    expect(blockBody).toMatch(/grid-template-rows:\s*1fr/)
+    expect(blockBody).toMatch(/transition:[^;]*grid-template-rows var\(--motion-standard\)/)
+    expect(blockBody).toMatch(/overflow:\s*hidden/)
+    // 0fr 收得下去的前提：栅格项必须能缩到 0。
+    expect(body('.sidebar-block-body-inner')).toMatch(/min-height:\s*0/)
+    expect(sidebarCss).toMatch(/\.sidebar-block\[data-collapsed="true"\] > \.sidebar-block-body \{[^}]*grid-template-rows:0fr/)
+    expect(sidebarCss).toMatch(/\.sidebar-block\[data-collapsed="true"\] > \.sidebar-block-body \{[^}]*pointer-events:none/)
+  })
+
+  it('工作区组的折叠时长也是 token，不是字面毫秒（字面值不随 reduced-motion 归零）', () => {
+    const group = body('.cwd-group-sessions')
+    expect(group).toMatch(/transition:[^;]*grid-template-rows var\(--motion-standard\)/)
+    expect(group).toMatch(/opacity var\(--motion-fast\)/)
+    // 任何字面时长都意味着这条动画逃过了 reduced-motion 覆盖。
+    expect(group).not.toMatch(/\d+ms/)
+    expect(sidebarCss, '左栏折叠动画不得再出现字面毫秒时长').not.toMatch(/transition:[^;]*\d+ms/)
+  })
+
+  it('会话区与可排布模块的分界是「留白 + 层底 + 吸顶」，**不画线**（用户裁定的形态 B）', () => {
+    const zone = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\] \{([^}]*)\}/)?.[1] ?? ''
+    expect(zone, '缺少常驻区层底规则').toMatch(/background:var\(--bg-panel\)/)
+    // 用户明确说「不必搞成横线」：任何 border-top / 伪元素分隔线都不该出现。
+    expect(zone).not.toMatch(/border/)
+    const gap = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\]:not\(:first-child\) \{([^}]*)\}/)?.[1] ?? ''
+    expect(gap, '缺少会话区上方的额外留白').toMatch(/margin-top:\s*\d+px/)
+    const head = sidebarCss.match(/\.sidebar-block\[data-always-open="true"\] > \.sidebar-block-head \{([^}]*)\}/)?.[1] ?? ''
+    expect(head, '缺少吸顶标题规则').toMatch(/position:\s*sticky/)
+    expect(head).toMatch(/top:\s*0/)
+    // 吸顶头必须自带近乎不透明的底 + 模糊，否则会话列表会从标题底下透出字影。
+    expect(head).toMatch(/background:color-mix\(in srgb,var\(--surface-panel\) 9\d%/)
+    expect(head).toMatch(/backdrop-filter:blur/)
+  })
+
   it('工作区组头**没有**折叠按钮（保留折叠功能：组头本身即开关）', () => {
     expect(body('.cwd-group-arrow'), '组头箭头已按用户要求删除').toBe('')
     expect(sidebarCss, '组头箭头不得复活').not.toMatch(/\.cwd-group-arrow\s*\{/)

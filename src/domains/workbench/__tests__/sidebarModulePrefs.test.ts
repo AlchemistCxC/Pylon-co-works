@@ -35,6 +35,16 @@ describe('侧栏模块偏好', () => {
     expect(applyModulePrefs(modules, { order: [], hidden: ['a', 'sessions'] }).map(m => m.id)).toEqual(['sessions'])
   })
 
+  it('alwaysOpen 的模块**钉在栈底**：用户拖拽写下的次序也不能把它挪到前面', () => {
+    const modules = [buildModule('a'), buildModule('b'), buildModule('sessions', { alwaysOpen: true })]
+    // 旧偏好 / 手改 localStorage 把常驻模块排在第一位 —— 收纳时纠正回栈底。
+    expect(applyModulePrefs(modules, { order: ['sessions', 'a', 'b'], hidden: [] }).map(m => m.id))
+      .toEqual(['a', 'b', 'sessions'])
+    // 两个常驻模块：各自保持相对次序，整体仍然贴底。
+    const two = [buildModule('p', { alwaysOpen: true }), buildModule('a'), buildModule('q', { alwaysOpen: true })]
+    expect(applyModulePrefs(two, { order: [], hidden: [] }).map(m => m.id)).toEqual(['a', 'p', 'q'])
+  })
+
   it('偏好里指向已卸载模块的 id 被忽略', () => {
     const modules = [buildModule('a')]
     expect(applyModulePrefs(modules, { order: ['gone', 'a'], hidden: ['gone'] }).map(m => m.id)).toEqual(['a'])
