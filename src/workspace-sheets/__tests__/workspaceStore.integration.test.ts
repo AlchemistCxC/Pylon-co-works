@@ -141,10 +141,10 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
     expect(persisted?.metadata).toEqual({ activeFile: '/a/b.ts' })
   })
 
-  it('patchSheetState 经 workspace codec 更新并持久化 Agent 左栏区块状态', () => {
+  it('patchSheetState 经 workspace codec 更新并持久化 Agent 左栏整页状态', () => {
     const id = openAgentSheet('peri')
-    useWorkspaceStore.getState().patchSheetState(id, { blockCollapsed: { 'builtin.sidebar.module.scheduled': true }, activePageId: null })
-    const expected = { blockCollapsed: { 'builtin.sidebar.module.scheduled': true }, activePageId: null }
+    useWorkspaceStore.getState().patchSheetState(id, { activePageId: 'builtin.sidebar.module.scheduled' })
+    const expected = { activePageId: 'builtin.sidebar.module.scheduled' }
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
     expect(readPersisted().state.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
 
@@ -152,10 +152,10 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
   })
 
-  it('主区整页的 activePageId 与折叠状态一起往返（两者共用一个持久化面）', () => {
+  it('上一代形状（折叠映射同住 Sheet 状态）经 codec 收敛：折叠不再出现在 Sheet 状态（零迁移，issue #202）', () => {
     const id = openAgentSheet('peri')
     useWorkspaceStore.getState().patchSheetState(id, { blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'builtin.sidebar.module.scheduled' })
-    const expected = { blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'builtin.sidebar.module.scheduled' }
+    const expected = { activePageId: 'builtin.sidebar.module.scheduled' }
     expect(readPersisted().state.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
 
     useWorkspaceStore.getState().hydrateWorkspaceSheets(['peri'])
@@ -165,7 +165,7 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
   it('旧模型的 sidebarMode 落盘值经 codec 收敛为空状态（零迁移）', () => {
     const id = openAgentSheet('peri')
     useWorkspaceStore.getState().patchSheetState(id, { sidebarMode: 'chat' })
-    expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === id)?.state).toEqual({ blockCollapsed: {}, activePageId: null })
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === id)?.state).toEqual({ activePageId: null })
   })
 
   it('setSidebarWidth 后持久化 layout 与内存一致（基线：当前已正确）', () => {

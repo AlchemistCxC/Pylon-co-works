@@ -1,4 +1,5 @@
 import { CommandRegistry } from './commands/commandRegistry.ts'
+import { PromptContributionRegistry } from './prompt/promptContributionRegistry.ts'
 import { PluginEventBus } from './events/pluginEventBus.ts'
 import { HookRuntime } from './hooks/hookRuntime.ts'
 import { RegistryHub } from './registry/registryHub.ts'
@@ -42,6 +43,7 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
   const services = Object.freeze({
     registryHub: new RegistryHub(),
     commandRegistry: new CommandRegistry(),
+    promptContributionRegistry: new PromptContributionRegistry(),
     eventBus: new PluginEventBus(),
     hookRuntime: options.hookRuntime ?? new HookRuntime(),
     rendererRegistry: new RendererRegistry(),
@@ -97,6 +99,11 @@ export function getRegistryHub(): RegistryHub {
 
 export function getCommandRegistry(): CommandRegistry {
   return runtimeServices.commandRegistry
+}
+
+/** #201：prompt 注入贡献注册表（插件化 sessionPrompt 扩展段；宿主消费面见 assembleSessionPrompt）。 */
+export function getPromptContributionRegistry(): PromptContributionRegistry {
+  return runtimeServices.promptContributionRegistry
 }
 
 export function getPluginEventBus(): PluginEventBus {

@@ -2,7 +2,7 @@ import type { CommandDefinition } from '../../../plugin-runtime/commands/command
 import { useWorkspaceStore } from '../../../workspaceStore.ts'
 import { useRightRailStore } from '../../../rightRailStore.ts'
 import { applyWorkspaceLayoutChange } from '../../../application/transactions/applyWorkspaceLayoutChange.ts'
-import { normalizeBlockState } from '../../../plugin-runtime/sidebar/sidebarBlockState.ts'
+import { sidebarBlockCollapseStore } from '../../../domains/workbench/sidebarBlockCollapse.ts'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function id(input: Record<string, unknown>): string { if (typeof input.sheetId !== 'string' || !input.sheetId.trim()) throw new Error('sheetId 必须是非空字符串'); return input.sheetId.trim() }
@@ -16,10 +16,10 @@ export function createBuiltinWorkspaceCommandDefinitions(): CommandDefinition[] 
     { id: 'layout.sidebar-width.set', name: 'layout.sidebar-width.set', description: '设置共享左栏宽度', priority: base + 2, execute: ({ args }) => { const width = record(args).width; if (typeof width !== 'number' || !Number.isFinite(width)) throw new Error('width 必须是数字'); const result = applyWorkspaceLayoutChange({ sidebarWidth: width }); if (!result.ok) throw new Error(result.message); return { width: useRightRailStore.getState().leftRailWidth } } },
     { id: 'layout.right-panel.set', name: 'layout.right-panel.set', description: '设置共享右栏折叠状态', priority: base + 3, execute: ({ args }) => { const value = boolean(record(args).collapsed, 'collapsed'); const result = applyWorkspaceLayoutChange({ rightPanelCollapsed: value }); if (!result.ok) throw new Error(result.message); return { collapsed: value } } },
     { id: 'layout.pet.set', name: 'layout.pet.set', description: '设置桌宠显示状态', priority: base + 4, execute: ({ args }) => { const show = boolean(record(args).show, 'show'); useWorkspaceStore.getState().setShowPet(show); return { show } } },
-    // 旧命令 `layout.agent-sidebar.set { mode: 'work' | 'chat' }` 随左栏互斥页签一并删除：
-    // 它设置的 `sidebarMode` 已不是任何消费方读的字段。替代品按新区块模型设置单个区块的折叠，
-    // 并**读改写**而不是整块覆盖 `blockCollapsed`（patchSheetState 是替换语义）。
-    { id: 'layout.agent-sidebar.block.set', name: 'layout.agent-sidebar.block.set', description: '设置 Agent Sheet 左栏某区块的折叠状态', priority: base + 5, execute: ({ args }) => { const input = record(args); const sheetId = id(input); const blockId = input.blockId; if (typeof blockId !== 'string' || !blockId.trim()) throw new Error('blockId 必须是非空字符串'); const collapsed = boolean(input.collapsed, 'collapsed'); const current = useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === sheetId)?.state; const state = normalizeBlockState(current); useWorkspaceStore.getState().patchSheetState(sheetId, { blockCollapsed: { ...state.blockCollapsed, [blockId.trim()]: collapsed } }); return { sheetId, blockId: blockId.trim(), collapsed } } },
+    // 旧命令 `layout.agent-sidebar.set { mode: 'work' | 'chat' }` 随左栏互斥页签一并删除。
+    // 现命令设置单个模块的折叠。#202 起折叠是**跨 Sheet 的应用级偏好**（全局单一真值，
+    // 独立持久化 key），入参因此不再需要 sheetId；**读改写**全局映射而不是整块覆盖。
+    { id: 'layout.agent-sidebar.block.set', name: 'layout.agent-sidebar.block.set', description: '设置左栏某模块的折叠状态（跨 Sheet 共享）', priority: base + 5, execute: ({ args }) => { const input = record(args); const blockId = input.blockId; if (typeof blockId !== 'string' || !blockId.trim()) throw new Error('blockId 必须是非空字符串'); const collapsed = boolean(input.collapsed, 'collapsed'); const store = sidebarBlockCollapseStore; store.setCollapseMap({ ...store.collapsed, [blockId.trim()]: collapsed }); return { blockId: blockId.trim(), collapsed } } },
     { id: 'workspace.sheet.focus', name: 'workspace.sheet.focus', description: '聚焦已打开 Sheet', priority: base + 6, execute: ({ args }) => { const sheetId = id(record(args)); useWorkspaceStore.getState().focusSheet(sheetId); return { sheetId } } },
     { id: 'workspace.sheet.pin.toggle', name: 'workspace.sheet.pin.toggle', description: '切换 Sheet 固定状态', priority: base + 7, execute: ({ args }) => { const sheetId = id(record(args)); useWorkspaceStore.getState().toggleSheetPin(sheetId); return { sheetId } } },
     { id: 'workspace.sheet.close-others', name: 'workspace.sheet.close-others', description: '关闭其他 Sheet', priority: base + 8, execute: ({ args }) => { const sheetId = id(record(args)); useWorkspaceStore.getState().closeOtherSheets(sheetId); return { sheetId } } },

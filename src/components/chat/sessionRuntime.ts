@@ -2,7 +2,7 @@ import type { Session, SessionConfig } from '../../store'
 import type { AvailableCommand } from '../../infrastructure/acp/chatContracts'
 import type { AgentContext, AgentContextKey } from '../../agentContext.ts'
 import { toAgentContextKey } from '../../agentContext.ts'
-import { injectAgentCommandPrompt } from '../../host/commandSetResolver.ts'
+import { assembleSessionPrompt } from '../../host/commandSetResolver.ts'
 import { collectFirstMessagePromptPrelude } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 
 export interface SessionLiveStats {
@@ -76,10 +76,15 @@ interface BuildSendMessagePayloadOptions {
 
 export function buildSendMessagePayload({ session, content, persona, attachments }: BuildSendMessagePayloadOptions) {
   const snapshotPrelude = collectFirstMessagePromptPrelude(session.creationSnapshot)
-  const commandPrelude = injectAgentCommandPrompt({ ...session, sessionPrompt: '' })
-  const sessionPrompt = [snapshotPrelude || persona.trim(), session.sessionPrompt.trim(), commandPrelude]
-    .filter(Boolean)
-    .join('\n\n')
+  // #201：组装唯一入口（identity/session/命令清单/插件扩展段，分层与预算见其注释）。
+  const sessionPrompt = assembleSessionPrompt({
+    snapshotPrelude,
+    persona,
+    sessionPrompt: session.sessionPrompt,
+    agentId: session.agentId,
+    profileId: session.profileId,
+    enabledPluginIds: session.commandSetPlugins,
+  })
   return {
     // OWNER-02：Session owner 显式 agentId（从 Session 读取，绝不取 activeAgent）。
     agentId: session.agentId,

@@ -813,6 +813,8 @@ context.sidebar.registerAgentSidebarContribution({
 
 **顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏、也不参与排序（钉在栈底，拖拽落点被钳在钉区之前）；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。次序偏好在收纳时统一收敛，因此手改过的旧偏好同样不会把常驻模块排到前面。
 
+**折叠/展开**同属跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-block-collapse-v1`（同样**不是** `pylon-workspace-layout-v3`）：在任意 Agent Sheet 收起/展开某模块，切换 Sheet、重启应用都不改变。`defaultCollapsed` 仍按贡献声明生效——它只决定「用户还没显式操作过」时的初始值；用户一旦操作，显式值全局生效。Sheet 级左栏状态只剩「整页打开状态」（`activePageId`）——开页回答的是「这张 Sheet 的主区此刻显示什么」。
+
 右栏面板（上下文面板）注册：
 
 ```ts

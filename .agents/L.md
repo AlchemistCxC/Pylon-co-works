@@ -326,3 +326,49 @@
 - 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节）、`.agents/records/`、本文件
 
 **我不碰**：`src/**`（前端零改动）、`src-tauri/src/dispatcher/**`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`（他人在途，未 stage 未改写，全程 pathspec 提交）。
+
+---
+
+[2026-09-19 23:25] [Miyaki Kumo] [#202]
+
+**开工：左栏模块折叠状态提升为跨 Sheet 应用级偏好并持久化**（折叠状态从 Sheet 级 `AgentWorkspaceState` 迁出到独立 localStorage key，语义变更见 issue）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- 代码：`src/domains/workbench/sidebarBlockCollapse.ts`（新增）、`src/plugin-runtime/sidebar/sidebarBlockState.ts`、`src/workspace-sheets/agentWorkspaceState.ts`、`src/components/Sidebar.tsx`、`src/components/sidebar/AgentSheetPageHost.tsx`、`src/plugins/core/sheet/builtinWorkspaceCommands.ts`
+- 测试：`src/domains/workbench/__tests__/sidebarBlockCollapse.test.ts`（新增）、`src/components/__tests__/Sidebar.blocks.test.tsx`、`src/components/__tests__/AgentSheetPageHost.test.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`、`src/workspace-sheets/__tests__/workspaceStore.integration.test.ts`、`src/plugins/core/commandSet/__tests__/builtinCliCommandCoverage.test.ts`
+- 文档：`docs/说明书/Pylon-CLI-命令表.md`、`.agents/decisions/0015-*`、`.agents/records/`（新增一篇）
+
+**对在途改动的报备**：工作树里有他人未提交改动（`src/__tests__/replay/*`、`src/domains/events/canonicalTurnDuration.ts`、`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`），我方不触碰、不暂存、不连带提交，全部提交走 pathspec。
+
+---
+
+[2026-09-20 02] [Miyaki Kumo] [#205]
+
+**开工：切会话冷读的「未覆盖 delta 全量下发 + Θ(N²) 投影 + 载荷物化」重构**（页面空白数分钟 / pylon.exe 峰值 600MB 的根因层）。spec 见 `.agents/spec/205-replay-projection-linearization.md`，分支沿用 `Ru5t/Reflector`。
+
+**规模事实**：生产库单 owner 135,826 行中 133,745 行是 `assistant.thinking.delta`；单回合实测未覆盖 79,682 行；投影实测每翻倍 ×4.0（40k 行 49.5s）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- 前端投影：`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`（仅 bind/refresh 的中间数组与拷贝，不动绑定判据语义）
+- 前端测试：新增 `src/__tests__/replay/projectionLinearization.test.ts`（**新增文件**；他人 scratch `__scratch.debug.test.ts` 与根目录 `bench-replay.tmp.ts` 我不动、不暂存）
+- 后端读：`src-tauri/src/session/event_repo.rs`（**与 #155 T2 声明域重叠，特此报备**——我只动 `load_events_compact` 与其新增的「尾部 delta 折叠」助手 + 该文件内的测试；不碰 migrations、`msg_repo/**`、写路径 `append_events`、裁剪 `rollup_trim`）
+- 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节 compact 读语义）、`.agents/records/`（新增一篇）、`.agents/spec/`、本文件
+
+**我方不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/persist.rs`、`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例（三者均为在途改动）、`src/components/__tests__/Sidebar.css.test.ts`。
+
+**给 #155（Miyaki Kumo）的报备**：读侧折叠正是 T3「聚合读/draft 尾巴」中「尾部未覆盖行」的那一半。我按用户本轮的明确授权（「准许引入高性能算法与库，彻底重构这个糟糕的内存大户」）先行落地读侧，**不改写路径、不改 schema**；若你 T3 另有设计，以你的为准，我这部分可让位。
+
+---
+
+[2026-09-20 03] [Miyaki Kumo] [#208 开工 + #155 T3 准备]
+
+**#208（本轮实现）**：长思考/长回答正文在界面上被截断——`SolidCodeBlock` 对超过 `maxLines*8`（默认 3200 字符）的代码块折到前缀且**无展开入口**（`CodeBlock.solid.tsx:27-34`，提示是静态 `role="note"`）。改为折叠提示带展开/收起入口、按有界步长增量展开（保留默认折叠的性能意图）。spec 见 `.agents/spec/208-*.md`。
+
+**#155 T3（本轮只做开工准备：认领 + 声明 + spec + 度量计划，不动代码）**：ADR-0008 定义 T3 = **行聚合（消息粒度历史 + draft 尾巴）**，风险「高：动重放模型（跨度语义、游标、折叠、trim）」，且 ADR 明确「T1/T2 之后若实测增长可接受，可以永远不做 T3」。准备物 = `.agents/spec/155-t3-*.md`（切片计划、与 #205 读侧折叠的关系、存储/WAL 基线测法）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- `src/renderers/solid-workbench/chat/CodeBlock.solid.tsx`、`src/renderers/solid-workbench/chat/__tests__/TextBlocks.solid.test.tsx`
+- 如需样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅 `.term-code-folded` 一节）
+- 文档：`.agents/records/`（新增一篇）、`.agents/spec/`、本文件
+
+**对在途改动的报备**：工作树里 `src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/session/persist.rs`、`builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例有他人未提交改动——我**不碰、不暂存、不连带提交**。特别地：T3 将来若需动 dispatcher 的窗口/flush 区段，我会先与 `dispatcher/mod.rs` 的在途作者确认后再动，本轮不动。

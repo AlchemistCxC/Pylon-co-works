@@ -716,7 +716,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
-    if (isUserStart && !echoesOptimistic) {
+    // #200：loading 期间到达的是 session/load 的**重放历史**帧——不是新回合。
+    // 空 journal（#155 T2 重建升级）时 refresh 无终态证据可压住时钟，重放的 user
+    // 帧会把历史回合复活成「仍在等待后端响应」的生成态并阻塞发送队列。缓冲帧在
+    // 载入完成后经 projectWorkbench 折叠（不走 applyLive），不会二次开启时钟。
+    if (isUserStart && !echoesOptimistic && !loading) {
       // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
       // （elapsed 从用户发出算起，与已绑定路径一致）。
       if (!clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
@@ -814,7 +818,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
         // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
         // live 已应用区间完全覆盖者跳过（审核修复：恢复基线的 initialDocument: current）。
-        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        // #205：无缓冲帧（常见的冷刷新）时直接把有序信封交给投影，省掉一次整集合拷贝。
+        const projected = projectWorkbench(bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0
           ? withJournalDiagnostic(reconciled, refreshMalformedCount)
@@ -916,7 +921,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       canonicalReadEpoch += 1
       refreshInFlight = null
       const nextGeneration = ++generation
-      turnEpoch = 0
+      // #204 ②：`turnEpoch` 是 runtime 局部的**单调**围栏（`workbenchRuntime.acceptDocument`
+      // 对 live 帧执行 `options.turnEpoch < snapshot.turnEpoch` 即拒收）。绑定重建不得把它
+      // 回落为 0——切回时 snapshot 的 epoch 仍停在切走前那一轮，回落会让切回后到达的思考帧
+      // 被静默丢弃（正文截断在切换点），并在终帧后的 journal 重折里另起一块（思考块分裂）。
+      // 这里承接当前值，新回合仍由 applyLive 的 user 帧推进（`turnEpoch += 1`）。
+      turnEpoch = runtime.getSnapshot().turnEpoch ?? 0
       boundSessionId = session?.id
       boundProvider = session?.agentId || 'acp'
       source = session?.source
@@ -963,13 +973,23 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
             return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
           })()
           : []
-        const envelopes = [...rows, ...browserSnapshot].flatMap(row => {
-          const migrated = toWorkbenchEnvelopes(row)
-          if (migrated.length > 0) return migrated
-          malformedCount += 1
-          return []
-        })
-        const projected = projectWorkbench([...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
+        // #205：不再先 concat 再 flatMap——直接按序收集（冷重放这份数组与行数同阶，
+        // 少一次整集合拷贝与中间数组）。浏览器快照轨照旧排在 journal 行之后。
+        const envelopes: WorkbenchEventEnvelope[] = []
+        const collect = (source: readonly unknown[]): void => {
+          for (const row of source) {
+            const migrated = toWorkbenchEnvelopes(row)
+            if (migrated.length === 0) {
+              malformedCount += 1
+              continue
+            }
+            for (const envelope of migrated) envelopes.push(envelope)
+          }
+        }
+        collect(rows)
+        collect(browserSnapshot)
+        // buffered 为空是冷切会话的常态：此时入参已是有序数组，投影不再复制一份。
+        const projected = projectWorkbench(buffered.length === 0 ? envelopes : [...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
         const reconciled = withPendingOptimistic(session.source, projected)
         const document = malformedCount > 0 ? withJournalDiagnostic(reconciled, malformedCount) : reconciled
         buffered = []; loading = false

@@ -1,23 +1,28 @@
 import type { AgentSidebarContribution, AgentSidebarTitleAction } from './sidebarTypes.ts'
 
 /**
- * 左栏模块状态。
+ * Agent Sheet 的左栏**整页**状态。
  *
- * - `blockCollapsed`：键是模块 id，值是「用户是否把它收起了」。
- *   用显式映射而不是「塌陷 id 清单」，是因为贡献可以声明 `defaultCollapsed`：
- *   若只记录塌陷项，用户把默认塌陷的模块**展开**后无处落笔（从清单移除 → 又回落到
- *   默认塌陷），方向即反转。显式映射两个方向都记得住。
- * - `activePageId`：当前展开到主区整页的模块 id；`null` 表示主区显示聊天视图。
+ * 只剩 `activePageId`：当前展开到主区整页的模块 id；`null` 表示主区显示聊天视图。
+ * 它回答的是「**这张 Sheet** 的主区此刻显示什么」，因此留在 Sheet 级状态里。
  *
- * 两个字段必须**一起写**：`patchSheetState` 是替换语义，只写一个会抹掉另一个。
- * 因此本模块只暴露产出完整状态的助手，调用方不得自行拼半个对象。
+ * 模块的折叠/展开不在这里——那是用户对左栏这个界面区域的整理意图，属于**跨 Sheet
+ * 的界面偏好**，真值在 `domains/workbench/sidebarBlockCollapse`（独立 localStorage
+ * key，issue #202）。
  */
-export interface AgentSidebarBlockState {
-  readonly blockCollapsed: Readonly<Record<string, boolean>>
+export interface AgentSidebarPageState {
   readonly activePageId: string | null
 }
 
-export const EMPTY_BLOCK_STATE: AgentSidebarBlockState = Object.freeze({ blockCollapsed: Object.freeze({}), activePageId: null })
+export const EMPTY_PAGE_STATE: AgentSidebarPageState = Object.freeze({ activePageId: null })
+
+/**
+ * 模块折叠映射：模块 id → 用户是否把它收起。
+ *
+ * 与 `sidebarBlockCollapse` store 里的类型同构（两边都保持这个结构形状，互不 import，
+ * 同 `sidebarModulePrefs` 不依赖贡献契约的分层取舍）。
+ */
+export type BlockCollapseMap = Readonly<Record<string, boolean>>
 
 /**
  * 是否可折叠。所有模块一视同仁，默认 `true`。
@@ -51,47 +56,42 @@ export function shouldShowOpenPageAction(contribution: AgentSidebarContribution)
 }
 
 /**
- * 从任意持久化值收敛出模块状态。未知形状一律回落空状态——包括旧模型的
- * `{ sidebarMode: 'work' | 'chat' }`，因此换模型**不需要存储键迁移**。
+ * 从任意持久化值收敛出整页状态。未知形状一律回落空状态——包括旧模型的
+ * `{ sidebarMode: 'work' | 'chat' }`，也包括「折叠映射同住 Sheet 状态」的上一代形状：
+ * 折叠已迁出为跨 Sheet 偏好（issue #202），遗留的 `blockCollapsed` 字段在此被自然
+ * 丢弃。换模型**不需要存储键迁移**。
  */
-export function normalizeBlockState(raw: unknown): AgentSidebarBlockState {
+export function normalizePageState(raw: unknown): AgentSidebarPageState {
   if (raw && typeof raw === 'object') {
-    const value = raw as { blockCollapsed?: unknown; activePageId?: unknown }
-    const collapsedEntries = value.blockCollapsed && typeof value.blockCollapsed === 'object' && !Array.isArray(value.blockCollapsed)
-      ? Object.entries(value.blockCollapsed as Record<string, unknown>)
-        .filter(([id, collapsed]) => id.trim() !== '' && typeof collapsed === 'boolean')
-      : []
+    const value = raw as { activePageId?: unknown }
     const activePageId = typeof value.activePageId === 'string' && value.activePageId.trim() !== '' ? value.activePageId.trim() : null
-    return Object.freeze({
-      blockCollapsed: Object.freeze(Object.fromEntries(collapsedEntries as [string, boolean][])),
-      activePageId,
-    })
+    return Object.freeze({ activePageId })
   }
-  return EMPTY_BLOCK_STATE
+  return EMPTY_PAGE_STATE
 }
 
 /** 某模块此刻是否折叠：用户显式操作过以用户为准，否则取贡献声明的默认值。 */
 export function isBlockCollapsed(
   contribution: AgentSidebarContribution,
-  state: AgentSidebarBlockState,
+  collapsed: BlockCollapseMap,
 ): boolean {
   if (!resolveBlockCollapsible(contribution)) return false
-  const explicit = state.blockCollapsed[contribution.id]
+  const explicit = collapsed[contribution.id]
   return explicit ?? resolveBlockDefaultCollapsed(contribution)
 }
 
-/** 翻转某模块的折叠并落成新状态（不可折叠的模块原样返回）。 */
+/** 翻转某模块的折叠并产出新映射（不可折叠的模块原样返回）。落库归 `sidebarBlockCollapseStore`。 */
 export function toggleBlockCollapsed(
   contribution: AgentSidebarContribution,
-  state: AgentSidebarBlockState,
-): AgentSidebarBlockState {
-  if (!resolveBlockCollapsible(contribution)) return state
-  const next = !isBlockCollapsed(contribution, state)
-  return { ...state, blockCollapsed: { ...state.blockCollapsed, [contribution.id]: next } }
+  collapsed: BlockCollapseMap,
+): BlockCollapseMap {
+  if (!resolveBlockCollapsible(contribution)) return collapsed
+  const next = !isBlockCollapsed(contribution, collapsed)
+  return { ...collapsed, [contribution.id]: next }
 }
 
 /** 某模块此刻是否已展开为主区整页。 */
-export function isBlockPageOpen(contribution: AgentSidebarContribution, state: AgentSidebarBlockState): boolean {
+export function isBlockPageOpen(contribution: AgentSidebarContribution, state: AgentSidebarPageState): boolean {
   return contribution.page !== undefined && state.activePageId === contribution.id
 }
 
@@ -101,14 +101,14 @@ export function isBlockPageOpen(contribution: AgentSidebarContribution, state: A
  */
 export function openBlockPage(
   contribution: AgentSidebarContribution,
-  state: AgentSidebarBlockState,
-): AgentSidebarBlockState {
+  state: AgentSidebarPageState,
+): AgentSidebarPageState {
   if (contribution.page === undefined || state.activePageId === contribution.id) return state
   return { ...state, activePageId: contribution.id }
 }
 
 /** 关掉整页，回到聊天视图。 */
-export function closeBlockPage(state: AgentSidebarBlockState): AgentSidebarBlockState {
+export function closeBlockPage(state: AgentSidebarPageState): AgentSidebarPageState {
   if (state.activePageId === null) return state
   return { ...state, activePageId: null }
 }
@@ -120,7 +120,7 @@ export function closeBlockPage(state: AgentSidebarBlockState): AgentSidebarBlock
  */
 export function resolveOpenPage(
   contributions: readonly AgentSidebarContribution[],
-  state: AgentSidebarBlockState,
+  state: AgentSidebarPageState,
 ): AgentSidebarContribution | null {
   if (state.activePageId === null) return null
   return contributions.find(item => item.id === state.activePageId && item.page !== undefined) ?? null

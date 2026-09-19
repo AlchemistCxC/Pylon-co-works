@@ -64,33 +64,30 @@ afterEach(() => {
 describe('AgentSheet 主区整页宿主', () => {
   it('渲染页面标题与内容，并以 presentation=page 交给同一个贡献组件', () => {
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     expect(screen.getByRole('heading', { name: '定时任务' })).toBeInTheDocument()
     expect(screen.getByTestId('probe')).toHaveTextContent('page')
   })
 
-  it('「返回」把 activePageId 清空并保留折叠状态（patchSheetState 是替换语义）', () => {
+  it('「返回」只清整页状态（折叠已迁出为全局偏好，与 Sheet 级整页互不牵挂，issue #202）', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     fireEvent.click(screen.getByRole('button', { name: '返回聊天' }))
-    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, {
-      blockCollapsed: { 'builtin.sidebar.module.tasks': true },
-      activePageId: null,
-    })
+    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { activePageId: null })
   })
 
   it('Esc 也能关闭整页（键盘用户的退路）', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} state={{ activePageId: 'scheduled' }} />)
+    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { blockCollapsed: {}, activePageId: null })
+    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { activePageId: null })
   })
 
   it('没有 page 声明的贡献即使被 activePageId 指到也解不出来（不渲染任何页面）', () => {

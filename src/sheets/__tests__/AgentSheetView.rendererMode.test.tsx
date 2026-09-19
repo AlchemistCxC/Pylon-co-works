@@ -1566,8 +1566,8 @@ describe('AgentSheetView renderer mode context', () => {
 
   // 旧断言「Agent Workspace state 的 sidebarMode 经 Host input 传给 Solid」已随左栏模型换代删除：
   // `sidebarMode ('work'|'chat')` 与它派生的 `data-workspace-mode` 都不再存在，Solid 也没了这个输入。
-  // 等价强度的替代断言在 `src/components/__tests__/Sidebar.blocks.test.tsx`（sheet state 的
-  // `blockCollapsed` 到达左栏、损坏值回落空映射）与 `workspace-sheets/__tests__/workspaceStore.integration.test.ts`
+  // 等价强度的替代断言在 `src/components/__tests__/Sidebar.blocks.test.tsx`（全局折叠偏好到达左栏、
+  // 损坏值回落空映射、跨 Sheet 同态）与 `workspace-sheets/__tests__/workspaceStore.integration.test.ts`
   // 的 codec 往返用例里。
 
   it('Solid 空态提交首条请求后创建并选中会话，再向同一 owner 发送消息', async () => {

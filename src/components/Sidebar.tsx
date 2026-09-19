@@ -11,7 +11,7 @@ import type {
 import {
   isBlockCollapsed,
   isBlockPageOpen,
-  normalizeBlockState,
+  normalizePageState,
   openBlockPage,
   resolveBlockCollapsible,
   resolveTitleAction,
@@ -23,6 +23,7 @@ import {
   sidebarModulePrefsStore,
   useSidebarModulePrefs,
 } from '../domains/workbench/sidebarModulePrefs.ts'
+import { sidebarBlockCollapseStore, useSidebarBlockCollapse } from '../domains/workbench/sidebarBlockCollapse.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import { resolveLaunchIcon } from '../workspace-sheets/launchIcons.tsx'
@@ -59,9 +60,14 @@ const DRAG_CLICK_SUPPRESS_MS = 320
  * 点击语义由贡献声明（`onTitleClick`）：`expand` 时标题展开/折叠，若同时声明了 `page`，
  * 宿主在头部自动补一个「打开」按钮（用户所说「都要」）；`page` 时标题进入主区整页，
  * 折叠改由独立折叠钮负责。
+ *
+ * **折叠/展开是跨 Sheet 的应用级偏好**（`sidebarBlockCollapseStore`，独立持久化 key）：
+ * 任意 Sheet 里收起/展开某模块，切到别的 Sheet、乃至重启应用都不改变（issue #202）。
+ * 整页（`activePageId`）则相反——它是「这张 Sheet 的主区此刻显示什么」，留在 Sheet 级。
  */
 export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; state?: unknown; sheet?: { id: string } }) {
-  const blockState = useMemo(() => normalizeBlockState(state), [state])
+  const pageState = useMemo(() => normalizePageState(state), [state])
+  const collapsedMap = useSidebarBlockCollapse()
   const modulePrefs = useSidebarModulePrefs()
   const patchSheetState = useWorkspaceStore(s => s.patchSheetState)
   const profiles = useIdentityStore(s => s.profiles)
@@ -221,18 +227,16 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
     setDropIndex(null)
   }, [drag, dropIndex, moduleIds, modulePrefs.hidden, cancelPress])
 
-  const writeState = useCallback((next: ReturnType<typeof toggleBlockCollapsed>) => {
-    if (!sheet) return
-    patchSheetState(sheet.id, { blockCollapsed: next.blockCollapsed, activePageId: next.activePageId })
-  }, [patchSheetState, sheet])
-
+  // 折叠写全局 store（跨 Sheet 共享 + 独立持久化）；整页写 Sheet 级状态。
   const toggleBlock = useCallback((contribution: AgentSidebarContribution) => {
-    writeState(toggleBlockCollapsed(contribution, blockState))
-  }, [blockState, writeState])
+    sidebarBlockCollapseStore.setCollapseMap(toggleBlockCollapsed(contribution, collapsedMap))
+  }, [collapsedMap])
 
   const openPage = useCallback((contribution: AgentSidebarContribution) => {
-    writeState(openBlockPage(contribution, blockState))
-  }, [blockState, writeState])
+    if (!sheet) return
+    const next = openBlockPage(contribution, pageState)
+    patchSheetState(sheet.id, { activePageId: next.activePageId })
+  }, [pageState, patchSheetState, sheet])
 
   const dispatchBlockAction = useCallback((contribution: AgentSidebarContribution, actionId: string) => {
     if (actionId === OPEN_PAGE_ACTION) { openPage(contribution); return }
@@ -247,8 +251,8 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   const renderBlock = (contribution: AgentSidebarContribution) => {
     const contributionId = contribution.id
     const collapsible = resolveBlockCollapsible(contribution)
-    const collapsed = isBlockCollapsed(contribution, blockState)
-    const pageOpen = isBlockPageOpen(contribution, blockState)
+    const collapsed = isBlockCollapsed(contribution, collapsedMap)
+    const pageOpen = isBlockPageOpen(contribution, pageState)
     const titleAction = resolveTitleAction(contribution)
     const isolated = contribution.renderKind === 'isolated-surface'
     const streamedAction = pendingSurfaceAction?.contributionId === contributionId ? pendingSurfaceAction : null

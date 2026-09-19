@@ -168,12 +168,18 @@ describe('WorkbenchProjector', () => {
 
   // 「turn failure / provider.error 终态 settle」两用例已归并至 workbenchProjectorLifecycle.test.ts
 
-  it('live, restart and recovery provenance produce the same document', () => {
+  it('live 与 restart provenance 投影同文档；recovery-import 内容相同但按已沉淀处理', () => {
     const live = envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'same' }] })
     const restart = envelope(1, live.event, live.identity, { origin: 'migration', trust: 'unverified' })
     const recovery = envelope(1, live.event, live.identity, { origin: 'recovery-import', trust: 'unverified', provider: 'peri', importId: 'import-1' })
     expect(projectWorkbench([live]).document).toEqual(projectWorkbench([restart]).document)
-    expect(projectWorkbench([live]).document).toEqual(projectWorkbench([recovery]).document)
+    // #200：provenance 不改变消息内容/身份/分段——但 recovery-import 是
+    // session/load 的历史导入（历史无「在途」语义），running 必须按已沉淀处理，
+    // 否则导入历史永久「仍在等待后端响应」并阻塞发送队列。
+    const liveMessages = projectWorkbench([live]).document.messages
+    const recoveryMessages = projectWorkbench([recovery]).document.messages
+    expect(recoveryMessages).toEqual(liveMessages.map(message => ({ ...message, running: false })))
+    expect(recoveryMessages[0]?.running).toBe(false)
   })
 
   it('sorts journal sequence deterministically while identity events may arrive out of order', () => {
