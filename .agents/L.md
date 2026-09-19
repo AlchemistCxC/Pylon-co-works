@@ -347,3 +347,19 @@
 - `package.json`（仅 check:frontend 与 scripts 字段）
 - `scripts/check-acp-shadow-parity.mjs`（仅 fixture 参数与耗时输出）
 - `docs/说明书/` 中 CI 相关表述的同步、`.agents/records/` 新增开发记录
+
+---
+
+[2026-09-19 17] [Miyaki Kumo] [#185]
+
+**施工：WebView2 bootstrapper 出库 + 便携包契约变更**（在 `Ru5t/Reflector` 上）。
+
+**本轮文件域（勿改写、勿连带提交）**：
+- `scripts/pack_release.py`（删 bootstrapper 收集 / `--without-webview2` / manifest 字段）
+- `scripts/tests/test_pack_release.py`（同步契约）
+- `resources/release/tools/`（删 exe、重写 install-webview2.bat）
+- `.gitignore`（撤销受控例外）
+- `docs/说明书/Pylon-发行包清单.md`
+- `.agents/decisions/0014-release-zip-without-webview2-bootstrapper.md`、`.agents/records/185-webview2-bootstrapper-removal.md`
+
+注：本分支含本会话早前的 main→branch 修复合并提交（37743b93），将随 #185 一并 push。
