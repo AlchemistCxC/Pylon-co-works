@@ -1454,6 +1454,33 @@ impl EventRepo {
         })
     }
 
+    /// #51 收口：owner journal 里 sequence 最大的指定类型事件行（无则 None）。
+    /// UNIQUE(owner_key, sequence) 自动索引倒序走查 + event_type 谓词命中即停，
+    /// 供写入侧做「payload 未变不重复追加」的幂等判定；不承担一般查询职责
+    /// （一般读路径走 list_events / load_events_compact）。
+    pub(crate) fn latest_event_of_type(
+        &self,
+        owner_key: &str,
+        event_type: &str,
+    ) -> Result<Option<CanonicalEventRow>, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let mut stmt = conn
+            .prepare_cached(&format!(
+                "SELECT {EVENT_COLUMNS} FROM canonical_events
+                 WHERE owner_key = ?1 AND event_type = ?2
+                 ORDER BY sequence DESC LIMIT 1"
+            ))
+            .map_err(EventError::from)?;
+        let stored = stmt
+            .query_row(params![owner_key, event_type], map_event_row)
+            .optional()
+            .map_err(EventError::from)?;
+        stored.map(|row| row.decode()).transpose()
+    }
+
     /// #81 L2：compact 读——返回「单元 + 未覆盖行」（升序）。被 turn.unit 覆盖的
     /// 行不再读取（L3 裁剪后这些行已删除），前端读/解析行数随单元粒度下降。
     pub(crate) fn load_events_compact(
@@ -1932,6 +1959,20 @@ impl EventService {
             .await
             .map_err(|error| {
                 EventError::Unavailable(format!("event repo list task failed: {error}"))
+            })?
+    }
+
+    /// #51 收口：写入侧幂等判定的读支撑——owner journal 里最新一条指定类型事件。
+    pub(crate) async fn latest_event_of_type(
+        &self,
+        owner_key: String,
+        event_type: &'static str,
+    ) -> Result<Option<CanonicalEventRow>, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.latest_event_of_type(&owner_key, event_type))
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo latest task failed: {error}"))
             })?
     }
 
@@ -3658,5 +3699,63 @@ mod tests {
             assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// #51 收口：latest_event_of_type 取同类型最新 sequence 行、跨类型过滤、
+    /// 空结果返回 None——写入侧幂等判定的查询语义钉住。
+    #[test]
+    fn latest_event_of_type_returns_newest_matching_row() {
+        let repo = repo();
+        let selector = |value: &str| {
+            serde_json::json!({
+                "source": "local:s1",
+                "update": {
+                    "sessionUpdate": "config_option_update",
+                    "configOptions": [{ "id": value }]
+                }
+            })
+        };
+        let owner_key = repo
+            .ingest_kernel_event(kernel_input(selector("v1")))
+            .expect("ingest v1")
+            .events[0]
+            .owner_key
+            .clone();
+        repo.ingest_kernel_event(kernel_input(serde_json::json!({
+            "source": "local:s1",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "root-tool",
+                "content": { "toolCallId": "root-tool" },
+                "title": "Write",
+                "kind": "edit",
+                "status": "completed",
+                "rawOutput": { "ok": true }
+            }
+        })))
+        .expect("ingest tool update");
+        repo.ingest_kernel_event(kernel_input(selector("v2")))
+            .expect("ingest v2");
+
+        let latest = repo
+            .latest_event_of_type(&owner_key, "session.config-updated")
+            .expect("selector query")
+            .expect("selector row exists");
+        assert_eq!(latest.sequence, 3);
+        assert_eq!(
+            latest.raw_payload.pointer("/update/configOptions/0/id"),
+            Some(&serde_json::json!("v2"))
+        );
+
+        let tool = repo
+            .latest_event_of_type(&owner_key, "tool.call.completed")
+            .expect("tool query")
+            .expect("tool row exists");
+        assert_eq!(tool.sequence, 2);
+
+        assert!(repo
+            .latest_event_of_type(&owner_key, "turn.completed")
+            .expect("absent query")
+            .is_none());
     }
 }

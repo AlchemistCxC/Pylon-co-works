@@ -170,3 +170,135 @@ async fn load_persisted_session_journals_selector_surface() {
     assert!(ids.contains(&"model-selection".to_string()));
     assert!(ids.contains(&"reasoning_effort".to_string()));
 }
+
+/// #51 收口：重复打开同一历史会话（顺序两次 session/load）不得重复追加选择器
+/// 行——此前每次 load 都各写一条，journal 随打开次数线性膨胀（审查发现）。
+/// 第二次写入因 payload 与 journal 尾部已存面相同被跳过。
+#[tokio::test]
+async fn reloading_persisted_session_does_not_duplicate_selector_row() {
+    let mut load_result = serde_json::json!({ "sessionId": "load-session" });
+    load_result["configOptions"] = serde_json::json!([
+        {"id": "model-selection", "category": "model",
+         "options": [{"valueId": "m-1", "name": "One"}, {"valueId": "m-2", "name": "Two"}],
+         "currentValue": "m-1"},
+        {"id": "reasoning_effort", "category": "thought_level",
+         "options": [{"valueId": "low"}, {"valueId": "high"}],
+         "currentValue": "low"}
+    ]);
+    let harness = TestHarness::boot(HarnessConfig::new().with_fake_agent(
+        "reload-selector-agent",
+        &[
+            "--scenario",
+            "revive-load",
+            "--advertise-models",
+            &load_result.to_string(),
+        ],
+    ))
+    .await;
+
+    for _ in 0..2 {
+        harness
+            .load_persisted_session(
+                "profile-reload",
+                "reload-selector-agent",
+                "local:reload53",
+                "remote-reload53",
+                Some("."),
+            )
+            .await
+            .expect("persisted session load must succeed");
+    }
+
+    let owner = TestHarness::owner_key("profile-reload", "reload-selector-agent", "local:reload53");
+    let rows = harness.journal_json(&owner, 50).await;
+    let selector_rows: Vec<&serde_json::Value> = rows
+        .iter()
+        .filter(|row| {
+            row.get("eventType").and_then(|value| value.as_str()) == Some("session.config-updated")
+        })
+        .collect();
+    assert_eq!(
+        selector_rows.len(),
+        1,
+        "重复 load 不得累积重复的 session.config-updated 行，实际 journal：{rows:#?}"
+    );
+}
+
+/// #51 收口：revive 路径（ensure_session_mapping 的 ACP 原生 session/load 复活，
+/// send 收敛入口）同样落选择器事实且恰一条——此前该写入点无集成覆盖；第二次
+/// 收敛走映射复用，不得再追加。
+#[tokio::test]
+async fn revived_session_journals_selector_surface() {
+    let mut load_result = serde_json::json!({ "sessionId": "remote-revive53" });
+    load_result["configOptions"] = serde_json::json!([
+        {"id": "model-selection", "category": "model",
+         "options": [{"valueId": "m-1", "name": "One"}, {"valueId": "m-2", "name": "Two"}],
+         "currentValue": "m-1"},
+        {"id": "reasoning_effort", "category": "thought_level",
+         "options": [{"valueId": "low"}, {"valueId": "high"}],
+         "currentValue": "low"}
+    ]);
+    let harness = TestHarness::boot(HarnessConfig::new().with_fake_agent(
+        "revive-selector-agent",
+        &[
+            "--scenario",
+            "revive-load",
+            "--advertise-models",
+            &load_result.to_string(),
+        ],
+    ))
+    .await;
+
+    let (peri_id, recreated) = harness
+        .ensure_mapping(
+            "local:revive53",
+            Some("profile-revive53"),
+            "",
+            ".",
+            Some("remote-revive53"),
+        )
+        .await
+        .expect("revive must succeed");
+    assert_eq!(peri_id, "remote-revive53");
+    assert_eq!(recreated, None, "复活成功不得重建会话");
+
+    // 第二次收敛命中复用路径，选择器行不得增加。
+    let (peri_id_again, _) = harness
+        .ensure_mapping(
+            "local:revive53",
+            Some("profile-revive53"),
+            "",
+            ".",
+            Some("remote-revive53"),
+        )
+        .await
+        .expect("second mapping must reuse the revived slot");
+    assert_eq!(peri_id_again, "remote-revive53");
+
+    let owner = TestHarness::owner_key(
+        "profile-revive53",
+        "revive-selector-agent",
+        "local:revive53",
+    );
+    let rows = harness.journal_json(&owner, 50).await;
+    let selector_rows: Vec<&serde_json::Value> = rows
+        .iter()
+        .filter(|row| {
+            row.get("eventType").and_then(|value| value.as_str()) == Some("session.config-updated")
+        })
+        .collect();
+    assert_eq!(
+        selector_rows.len(),
+        1,
+        "revive 必须恰好落一条 session.config-updated，实际 journal：{rows:#?}"
+    );
+    let ids: Vec<String> = selector_rows[0]
+        .pointer("/rawPayload/update/configOptions")
+        .and_then(|value| value.as_array())
+        .expect("raw configOptions")
+        .iter()
+        .filter_map(|o| o.get("id").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    assert!(ids.contains(&"model-selection".to_string()));
+    assert!(ids.contains(&"reasoning_effort".to_string()));
+}

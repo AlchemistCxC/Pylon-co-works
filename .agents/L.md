@@ -283,3 +283,10 @@
 **我不碰**：`vitest.config.ts`（Kepler #175 刚收口）、`src/components/chat/**`、`tools/webview2-mcp/**`、他人 `src/workspace-sheets/**`。
 
 **给后来者**：`#110 F5` 的 `ingest_established_model_event` 模式（合成标准 `session/update` raw 写 canonical journal）是本轮恢复期选择器恢复的核心复用点；canonical 类型 `session.config-updated` 已存在（event_repo.rs:533），不新增 schema。
+
+---
+
+[2026-09-19 06] [Miyaki Kumo] [#53/#51 审查收口·journal 去重 + revive 测试]
+
+**追加施工**（同分支同 issue 域，PR #177 审查遗留收口）：`ingest_established_config_options_event` 幂等去重（防重复 load/revive 线性膨胀 journal）+ revive 写入路径集成测试。**本轮新增触碰文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/event_repo.rs`（新增 `latest_event_of_type` 定向查询 + 单测——该文件在 #110 Huygens 条目亦有声明，本轮只追加方法与测试，不动既有行）。其余触碰沿用 2026-09-19 05 条目文件域：`src-tauri/src/session/create.rs`、`src-tauri/tests/issue53_selector_probe/mod.rs`、开发记录、本文件。
+

@@ -65,3 +65,11 @@
 - **说明书漂移同步**：`docs/说明书/Pylon-插件化前后端拓扑全图.md` 的 `APP --> SETTINGS` 边改为 `SHEETLAYOUT --> SETTINGS`（#154 阶段 4 后 `Settings.tsx` 经 sheet 注册表挂载，不再由 App 直挂），节点标注「settings sheet 主区视图」。
 - **合并**：`3a7ddb20` 合入 `github/main`（#175 squash `5953a3f7`），`.agents/L.md` 冲突按追加并集解决；PR diff 中 `vitest.config.ts`/issue-175 记录的幻影差异随合并消失。
 - **仍遗留（本轮未处理，待裁定）**：① `ingest_established_config_options_event` 每次建立/恢复/revive 都追加一条 journal 记录，重复打开同一历史会话会线性累积重复行（重放语义幂等，仅 journal 体积增长）；② revive 写入路径无集成测试（仅与建立期同构保证）；③ #51 建议「错误可关闭/自动消退」未做，当前仍靠下次操作清除。
+
+**追加（2026-09-19 同日第二收口轮：journal 去重 + revive 集成测试）**
+
+- **journal 重复追加修复（审查遗留①）**：`ingest_established_config_options_event` 增加「尾部同面跳过」。新增 `EventRepo::latest_event_of_type` / `EventService::latest_event_of_type`（`UNIQUE(owner_key, sequence)` 自动索引倒序走查 + `event_type` 谓词命中即停，仅服务写入侧幂等判定，不承担一般查询）；比较器 `established_options_unchanged` 只比 `update.configOptions` 结构相等（对象键序无关），解析不出 configOptions 视为不同——宁多写一条不冒丢面风险；去重查询失败 fail-open 继续追加。重复打开同一历史会话不再随打开次数线性膨胀 journal。**裁剪安全性**：`rollup_trim` 只删 `turn.unit` 覆盖跨度内的行，config-updated 在建立/恢复期写入、不在 turn 跨度内，去重不引入新的裁剪丢面风险。
+- **revive 写入路径集成测试（审查遗留②）**：`revived_session_journals_selector_surface`——`ensure_mapping` ACP session/load 复活恰落一条 `session.config-updated`，第二次收敛复用槽位不再追加。
+- **去重回归**：`reloading_persisted_session_does_not_duplicate_selector_row`——顺序两次 `load_persisted_session` 仍恰一条。
+- 单测：`latest_event_of_type_returns_newest_matching_row`（同类型最新行/跨类型过滤/空 None）、`established_options_unchanged_compares_config_options_only`（键序无关/面变化必写/缺面视为不同）。
+- 测试证据：`cargo fmt --check` ✅；`cargo test --lib session::` → **238 passed**（236 + 新增 2）；`cargo test --test integration --features test-agent` → 全量 **27 passed**（25 + 新增 2）；**变异核验**——比较器临时恒 `false`（去重失效）时 `reloading_persisted_session_does_not_duplicate_selector_row` 变红（累积 2 行），恢复后复绿。

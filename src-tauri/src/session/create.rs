@@ -478,7 +478,9 @@ async fn ingest_established_model_event(
 /// 包，live 与冷挂载重放读同一份事实——重启后打开历史会话时，中控区选择器
 /// （model choices / reasoning / mode）由此恢复。`options` 为空不写（空数组对
 /// projector 是"广告了零项"，会与"尚未宣告"混淆）；超过 D97-4 envelope 上限不写，
-/// 只告警。失败仅记 warn：选择器事实缺失不得让已成功的建立/恢复失败。
+/// 只告警。journal 已持有相同 configOptions 时跳过（#51 收口：重复 load/revive
+/// 不得逐次追加膨胀 journal）；去重查询失败 fail-open 继续追加。失败仅记 warn：
+/// 选择器事实缺失不得让已成功的建立/恢复失败。
 pub(crate) async fn ingest_established_config_options_event(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -507,6 +509,46 @@ pub(crate) async fn ingest_established_config_options_event(
         let session = sessions.get(source)?;
         session.durable_owner(&agent_id, source).ok()?
     }?;
+    let service = match event_service_of(state) {
+        Ok(service) => service,
+        Err(error) => {
+            tracing::warn!(
+                source = source,
+                "建立期选择器事实写入 journal 跳过（事件库不可用）：{error}"
+            );
+            return None;
+        }
+    };
+    // #51 收口：journal 已持有相同选择器面时不再重复追加。重复打开同一历史
+    // 会话的每次 load / revive / 重建都会走到这里，逐次追加会让 journal 随
+    // 打开次数线性膨胀；重放按「最后一次覆盖」消费选择器面，payload 相同即
+    // 投影相同，跳过是安全的。查询失败按未命中处理（fail-open，退回追加）。
+    match owner.key() {
+        Ok(owner_key) => {
+            match service
+                .latest_event_of_type(owner_key, "session.config-updated")
+                .await
+            {
+                Ok(Some(existing))
+                    if established_options_unchanged(&existing.raw_payload, options) =>
+                {
+                    tracing::debug!(
+                        source = source,
+                        "configOptions unchanged; skip duplicate selector journal append"
+                    );
+                    return None;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(source = source, "选择器面去重查询失败，继续追加：{error}")
+                }
+            }
+        }
+        Err(error) => tracing::warn!(
+            source = source,
+            "选择器面去重缺 owner key，继续追加：{error}"
+        ),
+    }
     let raw_payload = serde_json::json!({
         "sessionId": peri_id,
         "update": {
@@ -514,28 +556,33 @@ pub(crate) async fn ingest_established_config_options_event(
             "configOptions": options,
         },
     });
-    match event_service_of(state) {
-        Ok(service) => match service
-            .ingest_event(owner, Some(peri_id.to_string()), generation, raw_payload)
-            .await
-        {
-            Ok(result) => result.events.into_iter().next(),
-            Err(error) => {
-                tracing::warn!(
-                    source = source,
-                    "建立期选择器事实写入 journal 失败：{error}"
-                );
-                None
-            }
-        },
+    match service
+        .ingest_event(owner, Some(peri_id.to_string()), generation, raw_payload)
+        .await
+    {
+        Ok(result) => result.events.into_iter().next(),
         Err(error) => {
             tracing::warn!(
                 source = source,
-                "建立期选择器事实写入 journal 跳过（事件库不可用）：{error}"
+                "建立期选择器事实写入 journal 失败：{error}"
             );
             None
         }
     }
+}
+
+/// #51 收口：journal 已存行与本次 `options` 的选择器面是否相同（结构相等）。
+/// 只比 `update.configOptions` 数组本身；rawPayload 其余字段（sessionId、
+/// sessionUpdate 判别符）是写入包装，不参与投影。解析不出 configOptions
+/// 视为不同——宁可多写一条，不冒丢面风险。
+fn established_options_unchanged(
+    stored_raw: &serde_json::Value,
+    options: &[serde_json::Value],
+) -> bool {
+    stored_raw
+        .get("update")
+        .and_then(|update| update.get("configOptions"))
+        .is_some_and(|stored| stored == &serde_json::Value::Array(options.to_vec()))
 }
 
 /// 从建立/恢复响应里提取权威 configOptions envelope（camel/snake 双形）。
@@ -1767,6 +1814,37 @@ mod initial_option_tests {
         assert!(matches!(
             plan_initial_model(&response, "deepseek-v4-flash", None).unwrap(),
             InitialModelAction::SendSetModel
+        ));
+    }
+
+    /// #51 收口：payload 比对只认 `update.configOptions` 结构相等（对象键序
+    /// 无关）；缺 configOptions 的行一律视为不同——宁多写一条，不冒丢面风险。
+    #[test]
+    fn established_options_unchanged_compares_config_options_only() {
+        let options = json!([{ "id": "model-selection", "currentValue": "m-1" }]);
+        let raw = |config: serde_json::Value| {
+            json!({
+                "sessionId": "peri",
+                "update": { "sessionUpdate": "config_option_update", "configOptions": config }
+            })
+        };
+        assert!(established_options_unchanged(
+            &raw(options.clone()),
+            options.as_array().unwrap()
+        ));
+        let reordered = json!([{ "currentValue": "m-1", "id": "model-selection" }]);
+        assert!(established_options_unchanged(
+            &raw(reordered),
+            options.as_array().unwrap()
+        ));
+        let changed = json!([{ "id": "model-selection", "currentValue": "m-2" }]);
+        assert!(!established_options_unchanged(
+            &raw(changed),
+            options.as_array().unwrap()
+        ));
+        assert!(!established_options_unchanged(
+            &json!({ "update": {} }),
+            options.as_array().unwrap()
         ));
     }
 }
