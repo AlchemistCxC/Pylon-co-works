@@ -11,9 +11,8 @@
       README.txt
       portable.flag
       data/                    # 空目录，触发 portable 模式
-      tools/install-webview2.bat
+      tools/install-webview2.bat             # 缺 WebView2 Runtime 时的联网兜底安装
       tools/repair-hermes-acp.bat/.ps1  # optional Hermes ACP stdin repair
-      tools/MicrosoftEdgeWebview2Setup.exe   # 受控 release 资源，默认必须存在
       resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
       resources/sdk/pylon-plugin-sdk.js     # 离线插件 SDK（纯浏览器 ESM）
       resources/sdk/pylon-plugin-manifest.schema.json
@@ -294,7 +293,7 @@ def resolve_webview2_loader() -> Path:
     )
 
 
-def collect_source_files(version: str, without_webview2: bool, with_runtime: bool = False) -> list[tuple[Path, str]]:
+def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple[Path, str]]:
     """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
     exe_path = RELEASE_DIR / EXE_NAME
     if not exe_path.is_file():
@@ -410,17 +409,8 @@ def collect_source_files(version: str, without_webview2: bool, with_runtime: boo
             raise PackError(f"缺少 release 模板: {repair_src}")
         files.append((repair_src, f"tools/{repair_name}"))
 
-    bootstrapper = TEMPLATE_DIR / "tools" / "MicrosoftEdgeWebview2Setup.exe"
-    if without_webview2:
-        if bootstrapper.is_file():
-            print("warn: --without-webview2 已指定，忽略已存在的 WebView2 bootstrapper")
-    else:
-        if not bootstrapper.is_file():
-            raise PackError(
-                f"缺少 WebView2 bootstrapper: {bootstrapper}\n"
-                "请将微软 Evergreen Bootstrapper 放到该路径，或显式 --without-webview2 降级打包。"
-            )
-        files.append((bootstrapper, "tools/MicrosoftEdgeWebview2Setup.exe"))
+    # WebView2 bootstrapper 不再随包分发（2026-09-19 ADR-0014）：运行时按 Windows
+    # 自带处理，缺 Runtime 的机器由 tools/install-webview2.bat 联网兜底安装。
 
     return files
 
@@ -469,7 +459,6 @@ def build_manifest(
     top_dir: str,
     files: list[tuple[Path, str]],
     staging_root: Path,
-    webview2_bootstrapper: bool,
 ) -> list[dict]:
     entries: list[dict] = []
     # 固定目录项也进入 manifest（portable.flag 与 data/ 目录）
@@ -492,14 +481,13 @@ def write_zip(
     top_dir: str,
     version: str,
     files: list[tuple[Path, str]],
-    webview2_bootstrapper: bool,
 ) -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     zip_path = OUT_ROOT / f"{top_dir}.zip"
     if zip_path.exists():
         zip_path.unlink()
 
-    entries = build_manifest(top_dir, files, staging_root, webview2_bootstrapper)
+    entries = build_manifest(top_dir, files, staging_root)
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         # 顶层目录条目
@@ -522,7 +510,6 @@ def write_zip(
         "version": version,
         "platform": "win64",
         "portable": True,
-        "webview2Bootstrapper": webview2_bootstrapper,
         "files": entries,
     }
     manifest_path = OUT_ROOT / f"{top_dir}.manifest.json"
@@ -595,11 +582,6 @@ def verify_zip(zip_path: Path) -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--without-webview2",
-        action="store_true",
-        help="降级打包：不包含 WebView2 bootstrapper（manifest 记录 false）",
-    )
-    parser.add_argument(
         "--with-runtime",
         action="store_true",
         help="包含 Hermes PortableGit 运行时（默认排除——bash 已在标准路径 C:\\Program Files\\Git，2026-08-31 决定）",
@@ -621,13 +603,12 @@ def main(argv: list[str] | None = None) -> int:
 
     version = resolve_version()
     top_dir = f"pylon-{version}-win64"
-    files = collect_source_files(version, args.without_webview2, args.with_runtime)
-    webview2_bootstrapper = not args.without_webview2
+    files = collect_source_files(version, args.with_runtime)
 
     staging_root = build_staging(version, files)
     try:
         audit_staging(staging_root, top_dir)
-        write_zip(staging_root, top_dir, version, files, webview2_bootstrapper)
+        write_zip(staging_root, top_dir, version, files)
     finally:
         # 连续执行两次不混入旧 staging 内容
         if staging_root.exists():

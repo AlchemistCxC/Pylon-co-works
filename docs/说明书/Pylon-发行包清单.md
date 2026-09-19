@@ -16,7 +16,7 @@
 - `agents.example.yaml` 和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
 - 离线插件 SDK（单文件 ESM + manifest schema，不含 testing harness）；
-- WebView2 安装引导（或明确声明由分发渠道另行提供）；
+- WebView2 兜底安装引导脚本（运行时按 Windows 自带处理，不再内置安装器——2026-09-19 决定）；
 - 包外的 SHA-256 文件和 manifest。
 
 默认发行**不携带** Hermes 的 PortableGit 运行时（2026-08-31 决定）：Windows 上 Hermes 解析 Bash 的顺序是包内 `resources/runtime/git` → `PYLON_HERMES_RUNTIME_DIR` → 本机健康的系统 Git Bash（探测校验，不盲信 `PATH`，避免命中 WSL 的 `bash.exe` 或残缺安装）。需要把完整运行时打进发行包时，对 `pack_release.py` 使用 `--with-runtime`；此时树必须完整。该运行时只给 `provider=hermes` 的 Windows subprocess ACP 子进程使用，不会改写系统 `PATH`，也不会让其他 Agent 自动使用它。
@@ -44,8 +44,7 @@
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |
 | `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据 |
-| `tools/install-webview2.bat` | 必须 | 联网安装 WebView2 的引导脚本 |
-| `tools/MicrosoftEdgeWebview2Setup.exe` | 默认必须 | Evergreen Bootstrapper；使用 `--without-webview2` 时可省略 |
+| `tools/install-webview2.bat` | 必须 | 缺 WebView2 Runtime 时的兜底安装：优先用同目录手动放置的安装器，否则从微软官方 fwlink 联网下载 |
 
 `<version>` 必须同时来自 `package.json`、`src-tauri/tauri.conf.json` 和
 `src-tauri/Cargo.toml`，三处不一致时打包应停止。
@@ -53,8 +52,7 @@
 ZIP 同目录另生成：
 
 - `pylon-<version>-win64.zip.sha256`：ZIP 本身的 SHA-256；
-- `pylon-<version>-win64.manifest.json`：每个文件的大小和 SHA-256，以及是否携带
-  WebView2 bootstrapper。
+- `pylon-<version>-win64.manifest.json`：每个文件的大小和 SHA-256。
 
 这两个文件是交付校验材料，不需要再放进 ZIP 内。
 
@@ -66,9 +64,7 @@ ZIP 同目录另生成：
 2. Rust stable、Tauri 2 所需 Windows 构建工具；
 3. Python 3；
 4. 能启动目标 Windows WebView2 的环境；
-5. 仅当要打 `--with-runtime` 包：首次准备 PortableGit 时可访问 Git for Windows release 下载地址；
-6. 若需要把 WebView2 一起放进包，提前取得微软 Evergreen Bootstrapper，并放到
-   `resources/release/tools/MicrosoftEdgeWebview2Setup.exe`。
+5. 仅当要打 `--with-runtime` 包：首次准备 PortableGit 时可访问 Git for Windows release 下载地址。
 
 PortableGit 二进制树不入 Git 源码仓库。默认发行不需要准备它；`--with-runtime` 打包时，
 `prepare_hermes_runtime.py` 会把下载文件缓存在 `.cache/pylon/portable-git/`，把校验通过的完整树暂存到
@@ -93,17 +89,6 @@ bun run release:portable
 5. 构建 `tools/webview2-mcp` 的 release 二进制（`cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release`）；
 6. 收集文件、审计、压缩并核对 manifest。打包器会在缺少该 exe 或它的 README 时直接失败——这条能力缺了要到用户真正需要调试时才暴露，所以按构建期错误处理。默认剔除 `resources/runtime/`（PortableGit）；打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
 
-如果分发渠道不携带 WebView2 bootstrapper，可在完成前端、SDK、Tauri 和 detector 构建后
-显式降级打包：
-
-```bash
-bun run build
-bun run build:plugin-sdk
-bun run tauri -- build --no-bundle
-cargo build --manifest-path src-tauri/Cargo.toml --release --bin pylon-detect
-python scripts/pack_release.py --without-webview2
-```
-
 需要内嵌 PortableGit 的发行，先准备运行时，再对打包脚本加 `--with-runtime`：
 
 ```bash
@@ -111,8 +96,9 @@ bun run prepare:hermes-runtime
 python scripts/pack_release.py --with-runtime
 ```
 
-降级包仍必须带 `tools/install-webview2.bat`，并在发布说明中明确首次运行可能需要联网
-安装 WebView2。常规包不应使用该降级选项。
+发行包自 2026-09-19 起不再携带 WebView2 bootstrapper（`--without-webview2` 选项随之移除，
+见 ADR-0014）：Runtime 按 Windows 自带处理；包内 `tools/install-webview2.bat` 在系统缺
+WebView2 时联网下载安装器，发布说明无需再区分常规/降级包。
 
 ## 4.1 谁来发布（2026-09-18 决定）
 
@@ -147,7 +133,7 @@ gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md>
 - [ ] 使用 `Get-FileHash <zip> -Algorithm SHA256`（或等价工具）核对 `.sha256`。
 - [ ] ZIP 只有一个 `pylon-<version>-win64/` 顶层目录，并包含空 `data/`。
 - [ ] 包内 `tools/webview2-mcp/` 同时有 `pylon-webview2-mcp.exe` 与 `README.md`；该 exe 能独立运行（`--version` / `--help` 先于一切校验）。
-- [ ] 解压到全新目录后可启动 `pylon.exe`；没有 WebView2 时，安装引导可工作。
+- [ ] 解压到全新目录后可启动 `pylon.exe`；没有 WebView2 时，运行 `tools/install-webview2.bat` 能完成联网安装。
 - [ ] 使用 `provider=hermes` 的 Agent 发起一次真实 ACP 会话：默认包确认 Hermes 能解析
       本机标准路径的健康 Git Bash 并完成最小工具调用；`--with-runtime` 包确认 Hermes 使用包内 Bash。
 - [ ] 使用一个非 Hermes Agent 启动会话，确认它不继承 Hermes 的 Bash 路径和变量。

@@ -35,11 +35,11 @@ dist-solid-smoke/
 pylon-*win64.zip
 
 # 施工文档 Phase 1：release 产物目录不入库。
-# 受控 WebView2 bootstrapper 例外（2026-09-11 起入库）：pack_release.py 默认要求它在
-# 模板目录存在（`tools/MicrosoftEdgeWebview2Setup.exe`），而 release CI 是干净 checkout，
-# 不随仓库分发会让每个 release run 都在 pack:portable 阶段失败（实测 run 34592441017）。
-# 文件 1.7MB / PE32 / sha256 26fce08907a0059bbb44e86b4af3b69bf91ae58bb491b13e81debd8a22550341。
-# 若将来改为 CI 现取（微软 fwlink LinkId=2124703），删掉本行例外并撤下该文件。
+# 2026-09-11 曾把受控 WebView2 bootstrapper 作为例外入库（保证干净 checkout 可跑
+# pack:portable，实测 run 34592441017）；2026-09-19 起发行包不再携带 bootstrapper
+# （运行时按 Windows 自带处理，兜底由 tools/install-webview2.bat 联网下载，ADR-0014），
+# 例外撤销；本地手动放置的副本按未跟踪忽略。
+/resources/release/tools/MicrosoftEdgeWebview2Setup.exe
 /release/
 # Hermes Windows runtime is fetched and verified at release-build time; the
 # binary tree is distributed in the portable archive, not committed to source.
