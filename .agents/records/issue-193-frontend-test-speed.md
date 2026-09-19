@@ -58,8 +58,15 @@
 
 ## 未解问题
 
-- react-shared 共享化的 CI 表现（4 vCPU worker 数与本地 10 worker 不同，泄漏若只在 CI 显形则回退该组隔离）。
+- react-shared 共享化的 CI 表现（4 vCPU worker 数与本地 10 worker 不同，泄漏若只在 CI 显形则回退该组隔离）——已因对照实验提前回退，见上。
 - 本地全量墙钟（87s vs 基线 75s）受开发机并行负载干扰（同工作树有 #110 施工），收益以 CI 分片与 environment 累计值（296s → 280s）为准。
+
+## CI 首轮实战两处修复（分拆回归，非逻辑错误）
+
+1. **check:maintenance 红灯**：`src/test-utils/tauriCoreMock.ts` 是非测试源文件且不在 22 个模块 root → unmapped 即 exit 1。修复：注册表新增 `test-support` 模块。
+2. **分片 1/2 红灯**：`thirdPartySolidRenderer.integration.test.ts` 静态 import `examples/plugins/example.solid-renderer/dist/entry.js`（构建产物）——旧单 job 由 check:frontend 链内 `build:example-plugin` 前置保证；拆分后缺失，冷 checkout 解析失败（本地有历史产物未复现）。修复：分片 job 显式加回该前置。
+3. **check:solid 红灯**：生产边界检测按字符串匹配 `@tauri-apps/api/core`，mock 工厂文件的文档示例（`import { invoke } from '@tauri-apps/api/core'` 字样）命中检测式。修复：`src/test-utils/` 与 `__tests__`/`test` 同类待遇排除出生产扫描面。
+4. **流程教训**：`check-runtime-boundaries` 只扫 git 已跟踪文件——提交前本地跑 check:solid 会 skip 未跟踪的新文件，提交后 CI 才现形。后续门禁验证一律在 `git add` 之后执行。
 
 ## 并行交集
 
