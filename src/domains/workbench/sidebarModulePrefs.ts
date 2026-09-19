@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react'
-import type { AgentSidebarContribution } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 
 /**
  * 左栏模块的**顺序与显隐**偏好。
@@ -59,6 +58,15 @@ export function writeModulePrefs(storage: StorageLike, prefs: SidebarModulePrefs
 }
 
 /**
+ * 偏好排序只消费 `id` 与 `alwaysOpen`，因此领域层声明这个最小形状自持——
+ * 不反向依赖 plugin-runtime 的贡献契约（A17 R2：projector 禁 import plugin-runtime）。
+ */
+export interface SidebarModuleLike {
+  readonly id: string
+  readonly alwaysOpen?: boolean
+}
+
+/**
  * 把偏好套到注册表快照上：先按显式次序，再把未列出的模块按注册顺序接在后面
  * （新装的模块因此总是落在末尾，可预期；`order` 只决定初次顺序）。
  *
@@ -68,10 +76,10 @@ export function writeModulePrefs(storage: StorageLike, prefs: SidebarModulePrefs
  * 否则「会话在最后」会随一次拖拽漂移，分界也跟着漂。钉序在这里统一收敛——渲染、拖拽落库、
  * 设置页都从这里取次序，因此旧偏好里把常驻模块排在前面的值也会被纠正回来。
  */
-export function applyModulePrefs(
-  contributions: readonly AgentSidebarContribution[],
+export function applyModulePrefs<T extends SidebarModuleLike>(
+  contributions: readonly T[],
   prefs: SidebarModulePrefs,
-): readonly AgentSidebarContribution[] {
+): readonly T[] {
   const byId = new Map(contributions.map(contribution => [contribution.id, contribution]))
   const ranked = prefs.order.filter(id => byId.has(id))
   const rankedSet = new Set(ranked)

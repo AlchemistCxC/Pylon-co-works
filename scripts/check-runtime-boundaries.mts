@@ -42,7 +42,9 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/components/settings/ConfigOptionsPanel.tsx',
   'src/components/settings/CwdSettingsPanel.tsx',
   'src/components/settings/GatewayRiskPanel.tsx',
-  'src/components/Sidebar.tsx',
+  // #154 区块栈线把会话删除/导出接线自 Sidebar.tsx 迁入该 hook（removeSessionTransaction
+  // 端口 + createSessionClient 直发，形态不变）——条目随代码迁移，Sidebar.tsx 已无直发。
+  'src/components/sidebar/useSidebarContributionProps.ts',
   'src/infrastructure/events/canonicalEventRepository.ts',
   'src/infrastructure/acp/chatClient.ts',
   // issue #82 浏览器 Agent 会话注入：sessionCreation preflight handler 须自行
@@ -61,6 +63,9 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/plugins/core/file/builtinFileWorkbench.ts',
   'src/retentionPolicyRepository.ts',
   'src/sheets/agent-workbench/agentWorkbenchCommands.ts',
+  // #177 选择器空态探测：一次性 session client 读 Agent 广告的 configOptions 后即弃，
+  // 与 agentWorkbenchSessionCreation.ts 同形态（UI 侧装配 session client 直发）。
+  'src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx',
   'src/sheets/agent-workbench/agentWorkbenchSessionCreation.ts',
   'src/sheets/browser/BrowserSheetView.tsx',
   'src/sheets/file/DispatchBar.tsx',

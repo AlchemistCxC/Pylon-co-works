@@ -43,6 +43,11 @@ jobs:
       - name: 统一前端门禁（check:frontend）
         run: bun run check:frontend
 
+      # #179：check:solid 上 CI——此前该门禁只在本地跑，main 曾带 A17 R2 违规
+      # （sidebarModulePrefs.ts import plugin-runtime）合入而远端无感。
+      - name: Solid 边界门禁（check:solid）
+        run: bun run check:solid
+
   rust:
     name: Rust（测试 + clippy + 构建）
     runs-on: windows-latest
