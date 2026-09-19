@@ -182,7 +182,7 @@ export function SolidControlCenter() {
   onMount(() => {
     const onFolderPicked = (event: Event) => {
       const path = (event as CustomEvent<{ path?: string }>).detail?.path
-      if (path) setWorkspaceDraft({ name: path.split(/[\/]/).filter(Boolean).at(-1) || '新工作区', path })
+      if (path) setWorkspaceDraft({ name: path.split(/[\\/]/).filter(Boolean).at(-1) || '新工作区', path })
     }
     // Sidebar 的「新会话」意图携带工作区 id；空态工作区控件是宿主渲染元素
     // （刀4 后 `workspace` 控件已不在名单里，见 emptyWorkspaceControl）。
