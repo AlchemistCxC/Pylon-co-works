@@ -1,6 +1,7 @@
 """pack_release.py 的离线审计测试（不触发真实构建/压缩大文件）。"""
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -188,12 +189,15 @@ class StagingTests(unittest.TestCase):
         src.write_text("hello", encoding="utf-8")
         files = [(src, "fake.txt")]
         staging = pack.build_staging("1.1.0", files)
-        pack.write_zip(staging, "pylon-1.1.0-win64", "1.1.0", files, False)
+        pack.write_zip(staging, "pylon-1.1.0-win64", "1.1.0", files)
         zip_path = pack.OUT_ROOT / "pylon-1.1.0-win64.zip"
         self.assertTrue(zip_path.exists())
         self.assertTrue((pack.OUT_ROOT / "pylon-1.1.0-win64.zip.sha256").exists())
         manifest = pack.OUT_ROOT / "pylon-1.1.0-win64.manifest.json"
         self.assertTrue(manifest.exists())
+        manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+        # webview2Bootstrapper 字段已随 ADR-0014 移除，不得回潜。
+        self.assertNotIn("webview2Bootstrapper", manifest_data)
         with zipfile.ZipFile(zip_path) as zf:
             names = zf.namelist()
             self.assertIn("pylon-1.1.0-win64/", names)
@@ -257,6 +261,23 @@ class ManualPackagingTests(unittest.TestCase):
                 sorted(rel for _src, rel in files),
                 [f"{self.MANUAL_REL}/a.md", f"{self.MANUAL_REL}/sub/b.md"],
             )
+
+
+class WebView2BootstrapperTests(unittest.TestCase):
+    """发行包不再内置 WebView2 bootstrapper（2026-09-19 仓库主决定，ADR-0014）。
+
+    运行时按 Windows 自带处理；缺 Runtime 的机器由随包 tools/install-webview2.bat
+    兜底联网安装（微软 fwlink，与 Tauri 安装器的 downloadBootstrapper 同源）。
+    本测试钉住：随包 bat 必须能过发行内容审计——它现在携带 fwlink 下载链接，
+    而 DRIVE_PATH_RE / SENSITIVE_KEY_RE 对 URL 与 %TEMP% 变量必须保持静默。
+    """
+
+    def test_shipped_fallback_bat_passes_release_audit(self) -> None:
+        bat = pack.REPO_DIR / "resources" / "release" / "tools" / "install-webview2.bat"
+        self.assertTrue(bat.is_file(), "WebView2 兜底安装脚本是发行包必需模板")
+        rel = "tools/install-webview2.bat"
+        pack.reject_forbidden(rel)
+        pack.scan_text_file(rel, bat.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
