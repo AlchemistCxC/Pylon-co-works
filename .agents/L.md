@@ -297,3 +297,16 @@
 
 **追加施工**：`errorMessage`/`errorCode` 自 `src/utils.ts` 抽为 **新增文件** `src/infrastructure/tauri/errorPayload.ts`（+ `__tests__/errorPayload.test.ts`），消费方 `workbenchHostPort.ts`、`ControlCenter.solid.tsx` 改导入。沿用 2026-09-19 04 条目（#172 域）文件域并新增上述 infrastructure/tauri 两文件——该目录其他 contracts 文件未触碰。另登记 `.agents/decisions/0013-settings-navigation-state-persists-in-sheet-system.md`（#154 阶段 4 持久化契约，经用户裁定）。
 
+---
+
+[2026-09-19 08] [Miyaki Kumo] [PR #180 / #155 CI 收口]
+
+**开工：修 PR #180 的 clippy 基线门禁红（CI 新增 3 条诊断，只修不扩基线）。** 本轮文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/session/turn_rollup.rs`（`delta_sequence_span` 3 处 let-else → `?`，question_mark）
+- `src-tauri/src/dispatcher/mod.rs`（`flush_pending_canonical` 加 `#[allow(clippy::too_many_arguments)]` + 理由注释，沿用文件内既有惯例）
+- `src-tauri/src/session/event_repo.rs`（`ingest_kernel_event` 单数便捷入口仅测试使用，加 `#[cfg(test)]`；event_repo.rs 此前在 2026-09-19 06 条目已声明，本轮只动该方法的属性行）
+
+**我不碰**：工作树里 `.github/workflows/ci.yml`（check:solid 上 CI，#179 域）与 `src/domains/workbench/sidebarModulePrefs.ts`（A17 R2）的在途改动，一律 pathspec 提交。
+
+
