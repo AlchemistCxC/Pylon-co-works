@@ -36,22 +36,27 @@ use crate::error::PylonError;
 ///      v11 源表保留为 forensic archive，避免同 source 多 owner 互相覆盖。
 /// v13：canonical_events 增加 versioned envelope/provenance/raw 截断元数据；旧行
 ///      append-only 保留并默认标记 migration/unverified。
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+/// v14：#81 L2/L3 rollup 覆盖跨度列 + rollup_migration_state 进度表。
+/// v15：#155 T2 破坏性重建（ADR-0008「老数据全丢」）——canonical_events 瘦身为 15 列、
+///      (owner_key, sequence) WITHOUT ROWID 主键（event_id/owner 分维列/provenance 五组合/
+///      raw_* 计数改为读侧派生，wire 28 字段契约不变）；删死表 sessions 与
+///      legacy_message_backfill_audit；auto_vacuum=INCREMENTAL + application_id。旧库
+///      （user_version < 15）不搬迁任何行：保留 user_data.profiles 与 retention_policy，
+///      其余历史（canonical_events/墓碑/快照/user_data.sessions）丢弃重建。
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
-/// 当前 schema DDL（CREATE IF NOT EXISTS；升版迁移在 migrate() 内按版本补齐）。
-/// - sessions：会话行 + v8 会话级可恢复状态快照列（usage/commands 等）。
+/// Pylon 数据库头标识（PRAGMA application_id，'PYLN' 大端）。诊断用途：文件被误认成
+/// 其他应用数据时可据此识别。
+pub(crate) const PYLON_APPLICATION_ID: i64 = 0x5059_4C4E;
+
+/// 当前 schema DDL（CREATE IF NOT EXISTS；v15 起升版只有「重建」一条路，无补列迁移）。
+/// - session_state_snapshots：usage/commands 等可恢复快照（不是历史存储）。
 /// - user_data：versioned Profile/Session/activeProfileId（与会话同库）。
 /// - deleted_sessions：DEL-02 owner/deletion state tombstone（deleting/deleted）。
 /// - retention_policy：保留策略后端权威存储（单行）。
 /// - canonical_events：canonical 事件流（append-only；唯一会话历史权威）。
-/// - legacy_message_backfill_audit：v11 旧 message 数据的回填/归档结果；不是第二份历史权威。
+/// - rollup_migration_state：#81 L3 裁剪迁移进度。
 const SCHEMA_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS sessions (
-    session_id TEXT PRIMARY KEY NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    session_state TEXT
-);
 -- v10：usage/commands 等可恢复快照。它不是历史存储；canonical_events 仍是唯一 durable
 -- history。remote_session_id 仅记录最近映射，不参与 identity 或查询主键。
 CREATE TABLE IF NOT EXISTS session_state_snapshots (
@@ -93,6 +98,11 @@ CREATE TABLE IF NOT EXISTS deleted_sessions (
     deletion_revision INTEGER NOT NULL DEFAULT 0,
     reason TEXT
 );
+-- DEL-02（§5.12 索引建议）：deleting/deleted 列表过滤与 legacy session_id 诊断扫描。
+CREATE INDEX IF NOT EXISTS idx_deleted_sessions_state_deleted_at
+    ON deleted_sessions (state, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_deleted_sessions_session_id
+    ON deleted_sessions (session_id);
 -- I14-W9：保留策略后端权威存储（单行；version + revision 乐观并发；payload 为
 -- RetentionPolicy JSON——mode/days/count 档位契约见 retention.rs）。
 CREATE TABLE IF NOT EXISTS retention_policy (
@@ -102,23 +112,24 @@ CREATE TABLE IF NOT EXISTS retention_policy (
     payload TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
--- EVT-02（v6）+ B7（v9）：canonical 事件流表（方案书 §5.10 append-only 事件模型）。
--- active schema 不再使用旧 messages/MessageRecord；本表是唯一会话历史权威。
+-- EVT-02（v6）+ B7（v9）+ #155 T2（v15 瘦身）：canonical 事件流表（方案书 §5.10
+-- append-only 事件模型）。本表是唯一会话历史权威。
 -- 原则 5：unknown event 不得静默丢弃——raw_payload 恒存。owner_key = JSON 数组序列化
--- （禁冒号拼接，与 toCanonicalOwnerKey 同纪律）；UNIQUE(owner_key, sequence) 保证
--- owner/session 范围内 sequence 单调不重复（§5.10 rule 3）；event_id 为 owner_key#sequence
--- 确定性推导（rule 1，禁 content 哈希）。occurred_at/received_at 存原始 ISO 文本，
--- payloadVersion 版本化（rule 4）。本表不设 FK（事件流先于/独立于 messages 会话行；
--- DEL-02 owner 化 tombstone 在 M4 处理，禁止第二套删除语义）。
+-- （禁冒号拼接，与 toCanonicalOwnerKey 同纪律）；(owner_key, sequence) 为主键且
+-- WITHOUT ROWID（聚簇即按 owner+sequence 排列，取代 v14 的 event_id 主键 +
+-- UNIQUE(owner_key,sequence) 自动索引 + idx_session_seq 三棵重复 btree）。
+-- 派生列契约（读侧 `derive` 不落库，wire 28 字段形状不变）：
+--   event_id = owner_key#sequence（rule 1 确定性推导）；profile/agent/local_session_id =
+--   解析 owner_key；schema_version 恒 1；provenance 列是 (origin,trust) 五组合的整数编码
+--   （0=local-observed/authoritative，1=recovery-import/unverified，2=optimistic-local，
+--   3=migration，4=plugin；provider=agent_id[0/1]，import_id=local_session_id[1]）；
+--   raw_* 截断计数由 raw_payload 文本自描述重算（截断 stub 自带 _pylonTruncated/
+--   originalBytes）。本表不设 FK（事件流独立于会话行；删除语义由 DEL-02 tombstone 承担）。
 CREATE TABLE IF NOT EXISTS canonical_events (
-    event_id TEXT PRIMARY KEY NOT NULL,
     owner_key TEXT NOT NULL,
-    profile_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    local_session_id TEXT NOT NULL,
     remote_session_id TEXT,
-    client_generation INTEGER NOT NULL,
     sequence INTEGER NOT NULL,
+    client_generation INTEGER NOT NULL,
     occurred_at TEXT NOT NULL,
     received_at TEXT NOT NULL,
     event_type TEXT NOT NULL,
@@ -127,21 +138,12 @@ CREATE TABLE IF NOT EXISTS canonical_events (
     typed_payload TEXT,
     raw_payload TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    schema_version INTEGER NOT NULL DEFAULT 1,
-    provenance_origin TEXT NOT NULL DEFAULT 'migration',
-    provenance_trust TEXT NOT NULL DEFAULT 'unverified',
-    provenance_provider TEXT,
-    provenance_import_id TEXT,
-    raw_truncated INTEGER NOT NULL DEFAULT 0,
-    raw_original_bytes INTEGER NOT NULL DEFAULT 0,
-    raw_retained_bytes INTEGER NOT NULL DEFAULT 0,
-    raw_omitted_bytes INTEGER NOT NULL DEFAULT 0,
-    raw_truncation_reason TEXT,
-    -- #81 L2/L3：turn.unit 行的覆盖跨度（其余事件 NULL；迁移回填自 typedPayload）。
+    provenance INTEGER NOT NULL DEFAULT 3,
+    -- #81 L2/L3：turn.unit 行的覆盖跨度（其余事件 NULL）。
     rollup_seq_start INTEGER,
     rollup_seq_end INTEGER,
-    UNIQUE(owner_key, sequence)
-);
+    PRIMARY KEY (owner_key, sequence)
+) WITHOUT ROWID;
 -- #81 L3：裁剪迁移进度（逐 turn 单事务；trimmed/mismatch 永久跳过 => 可暂停/续跑）。
 CREATE TABLE IF NOT EXISTS rollup_migration_state (
     owner_key TEXT NOT NULL,
@@ -149,16 +151,6 @@ CREATE TABLE IF NOT EXISTS rollup_migration_state (
     state TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (owner_key, unit_event_id)
-);
-CREATE INDEX IF NOT EXISTS idx_canonical_events_session_seq
-    ON canonical_events(local_session_id, sequence);
-CREATE TABLE IF NOT EXISTS legacy_message_backfill_audit (
-    session_id TEXT PRIMARY KEY NOT NULL,
-    status TEXT NOT NULL,
-    reason TEXT,
-    message_count INTEGER NOT NULL,
-    owner_key TEXT,
-    created_at INTEGER NOT NULL
 );
 "#;
 
@@ -486,104 +478,20 @@ impl MsgRepo {
         get_session_state_for_owner_inner(&conn, &owner_key)
     }
 
-    /// 写入会话级可恢复状态快照（usage/commands 等，v8 session_state 列）。
-    /// merge 语义：与已存对象浅合并，新增 key 不覆盖已有 key，避免 usage 与 commands 分事件写入互相清空。
-    #[cfg(test)]
-    pub(crate) fn set_session_state(
-        &self,
-        session_id: &str,
-        state: &serde_json::Value,
-    ) -> Result<(), PylonError> {
-        let conn = self.conn.lock().map_err(lock_err)?;
-        ensure_session_not_deleted(&conn, session_id)
-            .map_err(|error| PylonError::from(error.to_string()))?;
-        let mut merged = state.clone();
-        if let Some(existing) = self.get_session_state_inner(&conn, session_id)? {
-            if let (Some(obj), Some(existing_obj)) = (merged.as_object_mut(), existing.as_object())
-            {
-                for (key, value) in existing_obj {
-                    if !obj.contains_key(key) {
-                        obj.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-        let json = serde_json::to_string(&merged)
-            .map_err(|error| PylonError::Protocol(error.to_string()))?;
-        conn.execute(
-            "INSERT INTO sessions (session_id, created_at, updated_at, session_state) VALUES (?1, ?2, ?2, ?3)
-             ON CONFLICT(session_id) DO UPDATE SET session_state = excluded.session_state, updated_at = excluded.updated_at",
-            params![session_id, now_millis(), json],
-        )
-        .map_err(repo_err)?;
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn get_session_state_inner(
-        &self,
-        conn: &Connection,
-        session_id: &str,
-    ) -> Result<Option<serde_json::Value>, PylonError> {
-        let value: Option<String> = conn
-            .query_row(
-                "SELECT session_state FROM sessions WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(repo_err)?;
-        value
-            .map(|json| {
-                serde_json::from_str(&json).map_err(|error| PylonError::Protocol(error.to_string()))
-            })
-            .transpose()
-    }
-
-    /// 读取会话级可恢复状态快照（无则 None；损坏时报错）。
-    #[cfg(test)]
-    pub(crate) fn get_session_state(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<serde_json::Value>, PylonError> {
-        let conn = self.conn.lock().map_err(lock_err)?;
-        let value: Option<String> = conn
-            .query_row(
-                "SELECT session_state FROM sessions WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(repo_err)?;
-        value
-            .map(|json| {
-                serde_json::from_str(&json).map_err(|error| PylonError::Protocol(error.to_string()))
-            })
-            .transpose()
-    }
-
-    /// 记录会话（首次插入 / 已存在仅刷新 updated_at）。
-    /// I14-W7：已删除会话（tombstone）拒绝复活。
-    #[allow(dead_code)] // 测试/历史兼容路径保留；生产会话行由 user_data sessions envelope 维护
+    /// 会话写入门闸（#155 T2 起 sessions 死表已删，touch 不再落行——生产会话行由
+    /// user_data sessions envelope 维护）。保留 tombstone gate 语义：已删除会话拒绝复活。
+    #[allow(dead_code)] // 测试/历史兼容路径保留
     pub(crate) fn touch_session(&self, session_id: &str) -> Result<(), PylonError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         ensure_session_not_deleted(&conn, session_id)
             .map_err(|error| PylonError::from(error.to_string()))?;
-        let now = now_millis();
-        conn.execute(
-            "INSERT INTO sessions (session_id, created_at, updated_at) VALUES (?1, ?2, ?2)
-             ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at",
-            params![session_id, now],
-        )
-        .map_err(repo_err)?;
         Ok(())
     }
 
-    /// D-02 + DEL-02 事务删除：删除 session 行并写 tombstone。
+    /// D-02 + DEL-02 事务删除：写 tombstone 并清扫该 owner 的快照/事件。
     /// tombstone 记录 owner/deletion state（§5.12）：owner_key 由调用方传入（None 时回退
     /// 会话作用域 legacy owner）；state 恒为 deleted；同一 owner 重复删除 INSERT OR IGNORE 幂等，
-    /// 不同 owner 的 tombstone 可并存。
-    /// canonical_events 行不随 delete_session 删除（append-only 事件流独立于 sessions 行）。
+    /// 不同 owner 的 tombstone 可并存。#110 F3：exact owner 的 canonical_events 同事务清扫。
     #[allow(dead_code)] // 测试/直通车变体：生产走 DEL-03 两阶段（begin_delete_session → finalize）
     pub(crate) fn delete_session(
         &self,
@@ -647,6 +555,8 @@ impl MsgRepo {
     }
 
     /// 事务删除实现（tombstone state 由调用方指定：'deleting' 两阶段 / 'deleted' 终态）。
+    /// #155 T2 起 sessions 死表已删：本事务清扫快照 + 写 tombstone +（exact owner 时）
+    /// 联动清扫 canonical_events。
     fn delete_session_with_state(
         &self,
         session_id: &str,
@@ -658,11 +568,6 @@ impl MsgRepo {
         if let Some(owner_key) = owner_key {
             validate_owner_key(owner_key)?;
         }
-        tx.execute(
-            "DELETE FROM sessions WHERE session_id = ?1",
-            params![session_id],
-        )
-        .map_err(repo_err)?;
         if let Some(owner_key) = owner_key {
             tx.execute(
                 "DELETE FROM session_state_snapshots WHERE owner_key = ?1",
@@ -753,9 +658,9 @@ impl MsgRepo {
 
     /// #110 F3：WAL 定期 checkpoint（TRUNCATE）。
     ///
-    /// 流式回合每 chunk 一次事务，从不主动 checkpoint 时 WAL 只增不减——体检实证
-    /// WAL 66.4MB 反超主库 61.9MB。TRUNCATE 在无读者时把 WAL 文件本身收缩回零。
-    /// 拿不到写锁时 SQLite 返回 busy 行而不是错误，按「本次跳过」处理（下一轮再来）。
+    /// 流式回合经 dispatcher 批窗口聚合事务落盘，从不主动 checkpoint 时 WAL 只增不减
+    /// ——体检实证 WAL 66.4MB 反超主库 61.9MB。TRUNCATE 在无读者时把 WAL 文件本身收缩
+    /// 回零。拿不到写锁时 SQLite 返回 busy 行而不是错误，按「本次跳过」处理（下一轮再来）。
     pub(crate) fn checkpoint_wal(&self) -> Result<(), PylonError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
@@ -763,6 +668,15 @@ impl MsgRepo {
         })
         .map(|_| ())
         .map_err(repo_err)
+    }
+
+    /// #155 T2：归还 `auto_vacuum=INCREMENTAL` 攒下的空闲页（无参 = 全量归还）。
+    /// v15 前的库没有 ptrmap，此调用是 no-op——只在重建后的库上有实际效果。
+    /// （PRAGMA incremental_vacuum 不返回行，须走 execute_batch。）
+    pub(crate) fn release_free_pages(&self) -> Result<(), PylonError> {
+        let conn = self.conn.lock().map_err(lock_err)?;
+        conn.execute_batch("PRAGMA incremental_vacuum")
+            .map_err(repo_err)
     }
 
     // ── I14-W9：保留策略执行（policy 读写 + preview/prune 同一筛选） ──
@@ -944,11 +858,11 @@ impl MsgRepo {
             super::retention::RetentionMode::ByCount => {
                 let limit = policy.count.unwrap_or(0) as i64;
                 // canonical_events 按 owner 键控：保留每 owner 最新 limit 条事件
-                // （sequence DESC）；event_id 全局唯一，按 event_id 删除不受跨 owner
-                // 同名 sequence 影响。
+                // （sequence DESC）。sequence 在 owner 范围内唯一（主键），相关子查询按
+                // owner_key 圈定后 NOT IN sequence 与按行元组删除等价。
                 tx.execute(
-                    "DELETE FROM canonical_events WHERE event_id NOT IN (
-                         SELECT event_id FROM canonical_events c2
+                    "DELETE FROM canonical_events WHERE sequence NOT IN (
+                         SELECT sequence FROM canonical_events c2
                          WHERE c2.owner_key = canonical_events.owner_key
                          ORDER BY sequence DESC LIMIT ?1
                      )",
@@ -1082,10 +996,14 @@ impl MessageService {
         })?
     }
 
-    /// #110 F3：事件库维护（墓碑事件清扫 + WAL checkpoint）——spawn_blocking 边界。
+    /// #110 F3：事件库维护（墓碑事件清扫 + WAL checkpoint + 闲置页归还）——
+    /// spawn_blocking 边界。
     ///
     /// 由启动/定时维护任务调用（`lib.rs` maintenance watcher）。整体失败只返回
     /// 结构化错误，调用方记 warn 不降级（维护是尽力而为，不得影响会话链路）。
+    /// #155 T2：v15 起 `auto_vacuum=INCREMENTAL`——删除让出的页进 ptrmap 空闲池，
+    /// `incremental_vacuum`（无参 = 全量归还）把已释放页交还操作系统，防止空闲页
+    /// 重新累积（v14 真实库 74% 页是历史遗留空闲页）。
     pub(crate) async fn run_journal_maintenance(
         &self,
         grace_days: i64,
@@ -1094,6 +1012,7 @@ impl MessageService {
         tokio::task::spawn_blocking(move || {
             let outcome = repo.purge_tombstoned_events(grace_days)?;
             repo.checkpoint_wal()?;
+            repo.release_free_pages()?;
             Ok::<_, PylonError>(outcome)
         })
         .await

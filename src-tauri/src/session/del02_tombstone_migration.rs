@@ -79,17 +79,14 @@ fn migrate_upgrades_v6_tombstone_to_latest_owner_state() {
     let mut conn = Connection::open_in_memory().expect("in-memory");
     v6_simulation(&mut conn);
 
-    connect(&mut conn).expect("migrate v6 → current");
+    connect(&mut conn).expect("rebuild v6 → current");
 
-    // 版本推进 + 列补齐 + 旧行兼容为 deleted。
+    // #155 T2（v15）：升版迁移已被「老数据全丢重建」取代（ADR-0008）——v6 墓碑
+    // 不再升级/归档，而是随重建丢弃；active schema 以全新 v15 形态重建。
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, SCHEMA_VERSION, "v6 库升版后必须等于当前版本");
-    assert_eq!(
-        version, SCHEMA_VERSION,
-        "v13 canonical envelope migration 必须保留 durable owner tombstone"
-    );
+    assert_eq!(version, SCHEMA_VERSION, "v6 库重建后必须等于当前版本");
 
     let cols: Vec<String> = {
         let mut stmt = conn
@@ -111,36 +108,26 @@ fn migrate_upgrades_v6_tombstone_to_latest_owner_state() {
             "deletion_revision",
             "reason"
         ],
-        "v6 旧表升版后必须得到 v13 versioned canonical active schema"
+        "重建后的 deleted_sessions 必须是 v15 durable-owner keyed active schema"
     );
 
-    // 无事件旧行：转换为唯一的会话作用域 legacy owner + state=deleted
-    // （兼容规则——§5.12“兼容旧行时视为 deleted”）。
-    let (owner_no, scope_no, state_no, rev_no, _) = tombstone_row(&conn, "legacy-no-events");
+    let tombstones: i64 = conn
+        .query_row("SELECT COUNT(*) FROM deleted_sessions", [], |row| {
+            row.get(0)
+        })
+        .expect("tombstone count");
     assert_eq!(
-        owner_no, "[\"*\",\"*\",\"legacy-no-events\"]",
-        "无事件旧行转为唯一 legacy owner key"
+        tombstones, 0,
+        "v15 重建丢弃旧墓碑（ADR-0008「墓碑随重建丢弃」）"
     );
-    assert_eq!(scope_no, "legacy");
-    assert_eq!(state_no, "deleted", "旧行兼容为 deleted");
-    assert_eq!(rev_no, 0, "旧行 deletion_revision 初始 0");
-
-    // 有事件旧行：owner_key 自 canonical_events 反查回填（真实 owner）。
-    let (owner_ev, scope_ev, state_ev, _, _) = tombstone_row(&conn, "legacy-with-events");
-    assert_eq!(
-        owner_ev, "[\"p1\",\"a1\",\"legacy-with-events\"]",
-        "反查回填真实 owner_key"
-    );
-    assert_eq!(scope_ev, "exact");
-    assert_eq!(state_ev, "deleted");
     let archived: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM deleted_sessions_v11_archive",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'deleted_sessions_v11_archive'",
             [],
             |row| row.get(0),
         )
-        .expect("archive count");
-    assert_eq!(archived, 2, "v11 source tombstones 必须完整保留供取证");
+        .expect("archive table count");
+    assert_eq!(archived, 0, "v15 重建不再产生 v11 forensic archive");
 }
 
 #[test]

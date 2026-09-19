@@ -84,8 +84,11 @@ mod del03_local_first_delete;
 // 的 {code,message} 稳定序列化 + 删除后迟到 evt_append wire code=event_session_deleted）。
 #[cfg(test)]
 mod del05_error_code_matrix;
+// #155 T2：存储写入基准（v15 vs v14 形态的 WAL/占用/空闲页数值证据）。
 #[cfg(test)]
 mod revive_tests;
+#[cfg(test)]
+mod storage_write_bench;
 // #97：模型选择器切换闭环 wire 级集成测试（真实广告 config id、发送前拒绝、
 // 钳制收敛、session/load 复活零 selector RPC）。
 #[cfg(test)]

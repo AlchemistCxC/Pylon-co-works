@@ -129,10 +129,8 @@ fn begin_delete_removes_canonical_events_for_the_same_owner() {
         state, "deleting",
         "本地优先两阶段：先写 deleting（终态由 finalize 转）"
     );
-    let sessions: i64 = conn
-        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
-        .expect("count sessions");
-    assert_eq!(sessions, 0, "begin 事务内已删除 sessions 行（原子）");
+    // #155 T2（v15）：sessions 死表已删——begin 事务清扫快照/事件并写墓碑，
+    // canonical 行计数见下。
     let deleted_owner_events: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM canonical_events WHERE owner_key = ?1",
