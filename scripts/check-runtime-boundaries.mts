@@ -17,9 +17,13 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const sourceExtensions = new Set(['.ts', '.tsx', '.mts'])
+// #193：src/test-utils/ 是测试共享支撑（mock 形状工厂等），仅被测试代码 import，
+// 不属生产边界扫描面——其文件天然含 '@tauri-apps/api/core' 字符串（mock 目标），
+// 不排除会误报 direct invoke。
 const productionFile = (path: string): boolean =>
   !path.includes('/__tests__/')
   && !path.includes('/test/')
+  && !path.includes('/test-utils/')
   && !path.endsWith('.test.ts')
   && !path.endsWith('.test.tsx')
   && !path.endsWith('.test.mts')
