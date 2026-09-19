@@ -249,16 +249,22 @@ function buildUnitForFixture(turnRows: readonly CanonicalConversationEvent[], se
       markdown: JSON.stringify(row.rawPayload).includes('"type":"markdown"'),
     })
   }
-  return unitRowOf(sequence, {
-    aggregateKind: 'turn-rollup',
-    seqStart: first.sequence,
-    seqEnd: terminal.sequence,
-    foldedCount: turnRows.length,
-    foldScheme: 'adjacent-delta-fold-v1',
-    contentSha256: 'fixture-only',
-    terminal: { eventType: terminal.eventType as 'turn.completed' | 'turn.failed', occurredAt: terminal.occurredAt },
-    segments,
-  })
+  // #199：行级时间戳对齐生产约定——Rust `build_turn_unit_row` 把 unit 的
+  // occurredAt/receivedAt 设为其 terminal 的时间戳（时长推导以行级时间戳封边）。
+  return {
+    ...unitRowOf(sequence, {
+      aggregateKind: 'turn-rollup',
+      seqStart: first.sequence,
+      seqEnd: terminal.sequence,
+      foldedCount: turnRows.length,
+      foldScheme: 'adjacent-delta-fold-v1',
+      contentSha256: 'fixture-only',
+      terminal: { eventType: terminal.eventType as 'turn.completed' | 'turn.failed', occurredAt: terminal.occurredAt },
+      segments,
+    }),
+    occurredAt: terminal.occurredAt,
+    receivedAt: terminal.receivedAt,
+  }
 }
 
 /** 一段场景 → 四种物理形态（等价性 oracle 的输入）。 */
