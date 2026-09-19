@@ -337,18 +337,16 @@
 
 ---
 
-[2026-09-19 16] [Miyaki Kumo] [#195]
+---
 
-**开工：issue195（设置 sheet 打开后无法关闭、标题栏无法交互——回收覆盖层时代的 `titlebar-settings-open` 交互锁）。** spec 见 `.agents/spec/195-settings-sheet-close-unlock.md`。分支沿用 `Ru5t/Reflector`。
+[2026-09-19 18] [Miyaki Kumo] [#155 T2 · schema 破坏性重建]
+
+**开工：issue155 T2 切片（ADR-0008 分期：canonical_events 28列→15列 + (owner_key,sequence) WITHOUT ROWID 主键 + 老库重建[老数据全丢] + auto_vacuum/application_id + 死表清理）。** spec 见 `.agents/spec/155-t2-schema-rebuild.md`。分支沿用 `Ru5t/Reflector`。T3（聚合行/draft 尾巴）按 ADR 待用户裁决，不在本轮。
 
 **我方本轮文件域（请勿改写、勿连带提交）**：
+- `src-tauri/src/session/msg_repo/{mod.rs,migrations.rs,tests.rs}`
+- `src-tauri/src/session/{event_repo.rs,del01_schema_audit.rs,del02_tombstone_migration.rs,del03_local_first_delete.rs,del05_error_code_matrix.rs,mod.rs}`
+- 新增 `src-tauri/src/session/storage_write_bench.rs`（基准测试）
+- 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节）、`.agents/records/`、本文件
 
-- `src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（仅删「Settings 打开态」交互锁块，约 :715-743）
-- `src/workspace-sheets/WorkspaceTitlebar.tsx`（去 `settingsOpen` / `onToggleSettings` props 与锁类；`TitlebarContext.settingsOpen` 保留、内部派生）
-- `src/App.tsx`（去对应两处传参）
-- 测试：`src/workspace-sheets/__tests__/{workspaceTitlebarLaunchers,workspaceTitlebarSidebarToggle,agentStatusConsumerMatrix}.test.tsx`、**新增**一条静态 CSS 契约测试
-- 文档：`.agents/records/`、本文件（`.agents/spec/` gitignore 不入库）
-
-**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、中控区（`src/renderers/solid-workbench/**`、`ControlCenter.css`）、`SheetTabStrip.tsx`（三关闭路本就完整）、`openOrFocusSettingsSheet` / `settingsDomains.ts`（ADR-0013 契约面）。
-
-**⚠️ 看到他人在途（2026-09-19）**：`src-tauri/resources/sdk/pylon-plugin-sdk.js` 有未提交改动，非我方产物，未 stage、未改写；本批全程 pathspec 提交。
+**我不碰**：`src/**`（前端零改动）、`src-tauri/src/dispatcher/**`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`（他人在途，未 stage 未改写，全程 pathspec 提交）。
