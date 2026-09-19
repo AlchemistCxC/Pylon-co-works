@@ -1,7 +1,6 @@
-import { useMemo, useState, useEffect, useSyncExternalStore, useId, useLayoutEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
-import { GROUP_ORDER } from '../themeFieldDefs'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -36,42 +35,23 @@ import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
-import { projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
-import { readDensity, writeDensity, readPinned, writePinned, readPreviewCollapsed, writePreviewCollapsed, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getContextPanelRegistry, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
+import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
-import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
 import { useRightRailStore } from '../rightRailStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_SECTION_LABELS, sectionZone, normalizeSettingsIntent, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
-import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
-import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
-import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
-import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { resolveInterfaceModeSuite } from '../application/transactions/activateInterfaceMode.ts'
+import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
+import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
+import { useSettingsContributionCatalog } from './settings/useSettingsContributionCatalog.ts'
 import SidebarModulesPanel from './settings/SidebarModulesPanel.tsx'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-
-const SETTINGS_FOCUSABLE_SELECTOR = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
-
-function settingsFocusable(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(SETTINGS_FOCUSABLE_SELECTOR)]
-    .filter(element => element.getAttribute('aria-hidden') !== 'true' && !element.hidden)
-}
 
 // ── helpers ──
 
@@ -106,52 +86,20 @@ function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
 
 // ── main ──
 
-export default function Settings({ onClose, activeSessionId, initialDomain, initialSection, initialAgentId }: {
-  onClose?: () => void
-  activeSessionId?: string | null
-  initialDomain?: string
-  initialSection?: string
-  initialAgentId?: string
-}) {
-  const initialIntent = normalizeSettingsIntent({ domain: initialDomain, section: initialSection, agentId: initialAgentId })
-  const settingsRef = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  const restoreFocusRef = useRef<HTMLElement | null>(null)
-  if (restoreFocusRef.current === null && typeof document !== 'undefined') {
-    const active = document.activeElement
-    restoreFocusRef.current = active instanceof HTMLElement ? active : null
-  }
-
-  useLayoutEffect(() => {
-    const root = settingsRef.current
-    if (!root) return
-    const focusables = settingsFocusable(root)
-    focusables[0]?.focus()
-    return () => {
-      const previous = restoreFocusRef.current
-      if (previous && previous.isConnected && !root.contains(previous)) previous.focus()
-    }
-  }, [])
-
-  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Tab') return
-    const root = settingsRef.current
-    if (!root) return
-    const focusables = settingsFocusable(root)
-    if (focusables.length === 0) {
-      event.preventDefault()
-      root.focus()
-      return
-    }
-    const currentIndex = focusables.indexOf(document.activeElement as HTMLElement)
-    const nextIndex = event.shiftKey
-      ? (currentIndex <= 0 ? focusables.length - 1 : currentIndex - 1)
-      : (currentIndex < 0 || currentIndex >= focusables.length - 1 ? 0 : currentIndex + 1)
-    if (currentIndex < 0 || (event.shiftKey && currentIndex === 0) || (!event.shiftKey && currentIndex === focusables.length - 1)) {
-      event.preventDefault()
-      focusables[nextIndex]?.focus()
-    }
-  }
+export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<SettingsSheetState>) {
+  // #154 阶段 4：设置由固定覆盖层迁入 sheet 体系。导航真值（domain/section/pluginPageId/
+  // agentId）改为 sheet 状态（持久化、随 workspace 布局落盘），本组件只保留视图局部态。
+  // 深链 `pylon:open-settings` 的打开/聚焦/patch 由 App 层 openOrFocusSettingsSheet 统一处理。
+  const activeDomain = state.domain
+  const activeSection = state.section
+  const activePluginPageId = state.pluginPageId ?? null
+  const navigate = (partial: {
+    domain?: SettingsDomainId
+    section?: SettingsSectionId
+    pluginPageId?: string | null
+    agentId?: string | null
+    rendererCategoryId?: string | null
+  }) => useWorkspaceStore.getState().patchSheetState(sheet.id, partial as Record<string, unknown>)
 
   // 只订阅主题字段 + ccEditMode：后台生成时的 live 状态（token/生成源）不再穿透整棵设置树。
   // pickCustomPresetTheme 白名单覆盖 Settings 全部 t.xxx 访问（已核对），ccEditMode 单独补。
@@ -159,10 +107,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     ...pickCustomPresetTheme(s),
     ccEditMode: s.ccEditMode,
   } as ThemeSettings & { ccEditMode: boolean })))
-  const reset = () => { resetThemeForActiveInterfaceMode() }
   // #116 子项 9：破坏性操作（重置主题 / 删除自定义预设）原先一击即生效、无撤销点，
   // 故补两段式确认：第一次点击只进入待确认态，确认才真正执行。
-  const [confirmResetTheme, setConfirmResetTheme] = useState(false)
+  // #154 阶段 4：重置主题确认块整体迁往左栏导航（SettingsSheetSidebar）。
   const [pendingDeletePresetId, setPendingDeletePresetId] = useState<string | null>(null)
   const resetZone = useStore(s => s.resetZone)
   const setZoneField = useStore(s => s.setZoneField)
@@ -182,6 +129,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const fallbackPresetChipView = fallbackPresetChip(globalStatus, customPresets.map(preset => preset.id))
   const sessions = useIdentityStore(s => s.sessions)
   // I01-W2：动态配置按 AgentContext（agentId+source）读写
+  const activeSessionId = ctx.activeSession
   const activeSessionContext = (() => {
     const session = sessions.find(session => session.id === activeSessionId)
     return session ? { agentId: session.agentId, source: session.source } : undefined
@@ -190,59 +138,13 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
-  const [activeDomain, setActiveDomain] = useState<SettingsDomainId>(
-    initialIntent.domain,
-  )
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>(
-    initialIntent.section,
-  )
-  const settingsPageRegistry = getPluginSettingsPageRegistry()
-  const pluginSettingsPages = useSyncExternalStore(
-    listener => settingsPageRegistry.subscribe(listener),
-    () => settingsPageRegistry.getSnapshot(),
-    () => settingsPageRegistry.getSnapshot(),
-  ).entries
-  const contextPanelRegistry = getContextPanelRegistry()
-  const contextPanelEntries = useSyncExternalStore(
-    listener => contextPanelRegistry.subscribe(listener),
-    () => contextPanelRegistry.getSnapshot(),
-    () => contextPanelRegistry.getSnapshot(),
-  ).entries
-  const pluginSettingsStore = getPluginSettingsStore()
-  const rendererRegistry = getRendererRegistry()
-  const rendererRegistrySnapshot = useSyncExternalStore(
-    listener => rendererRegistry.subscribe(listener),
-    () => rendererRegistry.snapshot(),
-    () => rendererRegistry.snapshot(),
-  )
-  const activeRendererSuiteId = (() => {
-    const modeId = useInterfaceModeStore.getState().interfaceMode
-    const mode = getInterfaceModeRegistry().resolve(modeId)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === modeId)
-    return mode?.workbench.renderKind === 'renderer-suite'
-      ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
-      : undefined
-  })()
-  const pluginPagesForCatalog = useMemo(() => pluginSettingsPages.map(entry => {
-    if (!entry.value.schema || entry.value.valueAdapter) return entry
-    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'plugin-page' }) } }
-  }), [pluginSettingsPages, pluginSettingsStore])
-  const contextPanelsForCatalog = useMemo(() => contextPanelEntries.map(entry => {
-    if (!entry.value.schema || entry.value.valueAdapter) return entry
-    return { ...entry, value: { ...entry.value, valueAdapter: createPluginSettingsValueAdapter({ store: pluginSettingsStore, ownerPluginId: entry.ownerPluginId, contributionId: entry.contributionId, namespace: 'context-panel' }) } }
-  }), [contextPanelEntries, pluginSettingsStore])
-  const settingsContributionCatalog = useMemo(() => projectSettingsContributionCatalog({
-    rendererSnapshot: rendererRegistrySnapshot,
-    activeSuiteId: activeRendererSuiteId,
-    pluginPages: pluginPagesForCatalog,
-    contextPanels: contextPanelsForCatalog,
-  }), [activeRendererSuiteId, rendererRegistrySnapshot, pluginPagesForCatalog, contextPanelsForCatalog])
-  const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
-    initialIntent.pluginPageId ?? null,
-  )
+  // #154 阶段 4：activeDomain/activeSection/activePluginPageId 已在函数顶部由 sheet 状态派生。
+  const { settingsContributionCatalog, pluginSettingsPages, rendererRegistrySnapshot, activeRendererSuiteId } = useSettingsContributionCatalog()
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
   const [searchQuery, setSearchQuery] = useState('')
-  const [rendererCategoryId, setRendererCategoryId] = useState('markdown-text')
+  // #154 阶段 4：renderers 分类导航位随 sheet 状态持久化（侧栏三级项与速搜命中同源）。
+  const rendererCategoryId = state.rendererCategoryId ?? 'markdown-text'
   const [rendererObjectKey, setRendererObjectKey] = useState<string | undefined>()
   const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
@@ -266,19 +168,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     key: `settings:${action}:${agentId ?? 'app'}`,
   })
 
-  // 施工文档 §5.3：Settings 宿主消费 open-settings 事件（ErrorCenter/Overview 恢复入口）。
-  useEffect(() => {
-    const onOpenSettings = (event: Event) => {
-      const detail = (event as CustomEvent<{ domain?: string; section?: string; agentId?: string }>).detail
-      if (!detail) return
-      const intent = normalizeSettingsIntent(detail)
-      setActiveDomain(intent.domain)
-      setActiveSection(intent.section)
-      setActivePluginPageId(intent.pluginPageId ?? null)
-    }
-    window.addEventListener('pylon:open-settings', onOpenSettings)
-    return () => window.removeEventListener('pylon:open-settings', onOpenSettings)
-  }, [])
+  // #154 阶段 4：旧覆盖层时代的「已挂载时消费 open-settings 事件」监听删除——
+  // App 层 openOrFocusSettingsSheet 对已打开的设置 sheet 直接 patch 导航态并聚焦。
+
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
     applyGlobalPresetTransaction(name)
@@ -368,9 +260,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
 
   useEffect(() => {
     if (activePluginPageId && !pluginSettingsPages.some(entry => entry.contributionId === activePluginPageId)) {
-      setActivePluginPageId(null)
-      setActiveSection('pluginManager')
+      navigate({ pluginPageId: null, section: 'pluginManager' })
     }
+    // navigate 是本渲染周期的 patchSheetState 绑定（随 sheet.id 定），非数据依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePluginPageId, pluginSettingsPages])
 
   const switchAgent = async (agentId: string) => {
@@ -458,7 +351,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
 
   // F2：禁储环境安全存储（内存兜底，会话内可用）
   const storage = safeStorage()
-  const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
 
   // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
   const [density, setDensity] = useState<SettingsDensity>(() =>
@@ -478,37 +370,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     })
   }
 
-  // K-2：左栏二级折叠导航展开态（session 内 UI 态；打开设置默认收起）
-  const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(new Set())
-  const toggleNavSection = (section: string) => {
-    setNavExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(section)) next.delete(section)
-      else next.add(section)
-      return next
-    })
-  }
-  // K-4：收藏置顶（拍板 D4-A hover 星标；上限 PINNED_LIMIT=3）
-  const [pinned, setPinned] = useState<readonly string[]>(() =>
-    readPinned((k) => storage.get(k)))
-  const togglePinned = (section: string) => {
-    const next = pinned.includes(section)
-      ? pinned.filter(id => id !== section)
-      : [...pinned, section].slice(-PINNED_LIMIT)
-    setPinned(next)
-    writePinned(next, (key, v) => storage.set(key, v))
-  }
-  // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
-  const navGroupsFor = (section: SettingsSectionId): readonly { readonly id: string; readonly label: string }[] => {
-    // Renderer 的三级项由 owner placement 投影成稳定语义类别；完整 object graph 留在高级目录。
-    if (section === 'renderers') {
-      return settingsContributionCatalog.categories.map(category => ({ id: category.id, label: category.label }))
-    }
-    const zone = sectionZone(section)
-    if (!zone) return []
-    const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
-    return groups.length >= 2 ? groups.map(title => ({ id: title, label: title })) : []
-  }
+  // K-2/K-4：二级折叠展开态与收藏置顶随导航迁入 SettingsSheetSidebar（#154 阶段 4）。
 
   // O-3：速搜定位态
   const [quickSearchOpen, setQuickSearchOpen] = useState(false)
@@ -523,23 +385,19 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
   const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
-      setActiveDomain('appearance')
-      setActiveSection('right')
-      setActivePluginPageId(null)
+      navigate({ domain: 'appearance', section: 'right', pluginPageId: null })
       useRightRailStore.getState().setActivePanel(item.contextPanelId)
       useRightRailStore.getState().setCollapsed(false)
       if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.pluginPageId) {
-      setActiveDomain('plugins')
-      setActiveSection('pluginManager')
-      setActivePluginPageId(item.pluginPageId)
+      navigate({ domain: 'plugins', section: 'pluginManager', pluginPageId: item.pluginPageId })
       if (item.anchor) requestAnimationFrame(() => document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor!)}"]`)?.scrollIntoView({ block: 'center' }))
       return
     }
     if (item.rendererRoute) {
-      setRendererCategoryId(item.rendererRoute.categoryId)
+      navigate({ rendererCategoryId: item.rendererRoute.categoryId })
       setRendererObjectKey(item.rendererRoute.objectKey)
       setSearchQuery(item.label)
     }
@@ -566,14 +424,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const domainOfSection = (section: string): SettingsDomainId | undefined =>
     SETTINGS_DOMAINS.find(d => (d.sections as readonly string[]).includes(section))?.id
   const jumpToSection = (section: SettingsSectionId) => {
-    setActivePluginPageId(null)
     const domain = domainOfSection(section)
-    if (domain && domain !== activeDomain) {
-      // 跨域跳转：先设 section 再切 domain——switchDomain 会重置 section，故直接组合设置
-      setActiveDomain(domain)
-      setNavExpanded(new Set())
-    }
-    setActiveSection(section)
+    // #154 阶段 4：跨域跳转由 codec 归一（normalizeSettingsSheetState → normalizeSettingsIntent），
+    // 这里直接写目标 section 与所属 domain；二级折叠展开态归左栏导航组件自持。
+    navigate({ section, domain: domain ?? activeDomain, pluginPageId: null })
   }
 
   // I13-W1：section → 内容（复用既有块/组件，视觉 token 与字段行为不变）
@@ -696,7 +550,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                 onClick={() => {
                   const cur = useStore.getState().ccEditMode
                   setCcEditMode(!cur)
-                  if (typeof onClose === 'function') onClose?.()
+                  if (!cur) ctx.closeSheet(sheet.id)
                 }}>
                 {t.ccEditMode ? '退出布局编辑器' : '进入布局编辑器'}
               </button>
@@ -757,7 +611,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
               <div className="set-hint">切换会立即重置当前会话的运行时状态。</div>
             </Group>
             <Group title="发现与管理 Agent">
-              <AgentRuntimePanel initialAgentId={initialAgentId} />
+              <AgentRuntimePanel initialAgentId={state.agentId} />
             </Group>
             <Group title="高级：YAML 配置" defaultOpen={false}>
               <AgentConfigEditor agentId={activeAgent} />
@@ -793,122 +647,10 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }
 
   return (
-    <div ref={settingsRef} className="settings" role="dialog" aria-modal="true" aria-labelledby={titleId} data-settings-domain={activeDomain} data-settings-section={activeSection} onKeyDown={handleDialogKeyDown}>
-      <header className="settings-header">
-        <div>
-          <h2 id={titleId}>设置</h2>
-          <p>调整 Pylon 的外观、工作区和 Agent 运行方式。</p>
-          <span className="settings-header-route" aria-live="polite">当前域 / {activeDomainConfig.label} · 使用标题栏“设置”菜单切换</span>
-        </div>
-        <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
-      </header>
+    <div className="settings flex flex-1 min-w-0" data-settings-domain={activeDomain} data-settings-section={activeSection}>
+      {/* #154 阶段 4：对话框外壳（role=dialog/焦点陷阱/settings-header/关闭钮）随覆盖层退役；
+          一二级导航迁入注册表 sidebar（SettingsSheetSidebar），主区只保留 正文 + 速搜 + 预览。 */}
       <div className="settings-tabs-root">
-        <div className="settings-nav">
-          <div className="settings-nav-context" data-settings-domain={activeDomain}>
-            <span>DOMAIN / {activeDomain}</span>
-            <div className="settings-nav-context-title">
-              <span className="settings-nav-context-glyph" aria-hidden="true">{SETTINGS_DOMAIN_MENU_META[activeDomain].glyph}</span>
-              <strong>{activeDomainConfig.label}</strong>
-            </div>
-            <small>{SETTINGS_DOMAIN_MENU_META[activeDomain].description}</small>
-          </div>
-          <div className="settings-nav-group settings-nav-sections">
-            {pinned.length > 0 && (
-              <>
-                <div className="settings-nav-label">常用</div>
-                {pinned.map(section => (
-                  <button type="button" key={`pin-${section}`} className="set-nav-btn pinned"
-                    onClick={() => jumpToSection(section as SettingsSectionId)}>
-                    <span className="settings-nav-pin-star" aria-hidden="true">★</span>
-                    {SETTINGS_SECTION_LABELS[section as SettingsSectionId]}
-                  </button>
-                ))}
-              </>
-            )}
-            <div className="settings-nav-label">{activeDomainConfig.label} 分区</div>
-            {activeDomainConfig.sections.map(section => {
-              const zone = sectionZone(section)
-              const subGroups = navGroupsFor(section)
-              const expanded = navExpanded.has(section)
-              const label = SETTINGS_SECTION_LABELS[section]
-              const hasSub = subGroups.length > 0
-              return (
-                <div key={section} className="settings-nav-section-block">
-                  <div className="settings-nav-section-row">
-                    <button type="button"
-                      className={`set-nav-btn ${!activePluginPageId && activeSection === section ? 'active' : ''}${zone && custom[zone] ? ' custom' : ''}`}
-                      aria-expanded={hasSub ? expanded : undefined}
-                      onClick={() => {
-                        setActivePluginPageId(null)
-                        setActiveSection(section)
-                        if (hasSub) toggleNavSection(section)
-                      }}
-                      title={zone && custom[zone] ? '该区有未保存的自定义改动' : undefined}>
-                      {hasSub && <span className="settings-nav-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
-                      {label}
-                    </button>
-                    <button type="button" className={`settings-nav-pin${pinned.includes(section) ? ' pinned' : ''}`}
-                      aria-label={pinned.includes(section) ? `取消置顶 ${label}` : `置顶 ${label}`}
-                      aria-pressed={pinned.includes(section)}
-                      onClick={e => { e.stopPropagation(); togglePinned(section) }}>★</button>
-                  </div>
-                  {hasSub && expanded && (
-                    <div className="settings-nav-subgroups">
-                      {subGroups.map(group => (
-                        <button type="button" key={group.id}
-                          className={`set-nav-btn subgroup${section === 'renderers' && rendererCategoryId === group.id ? ' active' : ''}`}
-                          onClick={e => {
-                            e.stopPropagation()
-                            setActivePluginPageId(null)
-                            setActiveSection(section)
-                            if (section === 'renderers') {
-                              setRendererCategoryId(group.id)
-                              return
-                            }
-                            // 锚点滚动：等 section 渲染后按组标题定位（下一帧）
-                            requestAnimationFrame(() => {
-                              const target = document.querySelector(`[data-group-anchor="${CSS.escape(group.label)}"]`)
-                              target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-                              // O-2：高亮脉冲 1.2s（prefers-reduced-motion 时 CSS 端自动禁用动画）
-                              target?.classList.add('settings-anchor-pulse')
-                              setTimeout(() => target?.classList.remove('settings-anchor-pulse'), 1200)
-                            })
-                          }}>
-                          {group.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {activeDomain === 'plugins' && pluginSettingsPages.map(entry => (
-              <button type="button" key={entry.contributionId}
-                className={`set-nav-btn plugin-page ${activePluginPageId === entry.contributionId ? 'active' : ''}`}
-                onClick={() => setActivePluginPageId(entry.contributionId)}
-                title={entry.value.description}>
-                <span>{entry.value.label}</span>
-                <small>{entry.ownerPluginId}</small>
-              </button>
-            ))}
-          </div>
-          <div className="settings-nav-footer">
-            {confirmResetTheme ? (
-              <div className="set-confirm" role="alertdialog" aria-label="确认重置主题">
-                <p className="set-confirm-text">重置主题会把当前外观（含手动改动）恢复为本界面模式的默认值，且不可撤销。</p>
-                <div className="set-confirm-actions">
-                  <button type="button" className="ps-btn sm danger"
-                    onClick={() => { setConfirmResetTheme(false); reset() }}>确认重置</button>
-                  <button type="button" className="ps-btn sm"
-                    onClick={() => setConfirmResetTheme(false)}>取消</button>
-                </div>
-              </div>
-            ) : (
-              <button type="button" className="set-nav-btn reset" onClick={() => setConfirmResetTheme(true)}>重置主题</button>
-            )}
-          </div>
-        </div>
-
         <div className="settings-body" data-settings-domain={activeDomain} data-settings-section={activeSection}>
           {!activePluginPageId && (
             <SettingsSectionHeader section={activeSection} density={density} onDensity={changeDensity} />

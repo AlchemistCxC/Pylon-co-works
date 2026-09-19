@@ -13,6 +13,7 @@ import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 
@@ -195,7 +196,7 @@ export function SolidControlCenter() {
       setWorkspaceDraft()
       setSubmitError('')
     }
-    catch (error) { setSubmitError(error instanceof Error ? error.message : '创建工作区失败') }
+    catch (error) { setSubmitError(errorMessage(error, '创建工作区失败')) }
   }
   const createEmptySession = async (text: string, attachments: readonly WorkbenchAttachment[]) => {
     // 旧模型在这里按「左栏是否处于工作页签」拦截未选工作区的提交（`请先选择工作区`）。
@@ -223,11 +224,11 @@ export function SolidControlCenter() {
         }
         void created.initialPromptOutcome.then(result => {
           if (result.status === 'rejected') restoreInitialPrompt(result.error || '首条请求发送失败')
-        }, error => restoreInitialPrompt(error instanceof Error ? error.message : String(error)))
+        }, error => restoreInitialPrompt(errorMessage(error, '首条请求发送失败')))
       }
       return true
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : String(error)); return false
+      setSubmitError(errorMessage(error, '会话创建失败')); return false
     } finally { setSubmitting(false) }
   }
   const emptyComposer = createMemo(() => !input().sessionId ? {

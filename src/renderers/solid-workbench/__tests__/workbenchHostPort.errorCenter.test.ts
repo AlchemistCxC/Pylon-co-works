@@ -77,4 +77,22 @@ describe('Workbench HostPort error presentation', () => {
     expect(getDiagnosticErrors()[0]?.scope).toEqual({ kind: 'session', id: 'session-a' })
     expect(getDiagnosticErrors()[0]?.key).toContain('session-a')
   })
+
+  it('#172：catch 分支捕获的结构化拒绝 DTO 在错误中心保留可分类 code 与后端 message', async () => {
+    vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true)
+    const commands = createFakeWorkbenchCommandFacade({
+      createSession: async () => { throw { code: 'AgentRuntimeUnavailable', message: '运行时未就绪' } },
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: null,
+      capabilities: { sessionCreate: true },
+    })
+
+    await host.commands.createSession({ initialPrompt: { text: '自检', attachments: [] } })
+    expect(getErrors()[0]).toMatchObject({
+      action: '创建会话', source: 'workbench.command', code: 'AgentRuntimeUnavailable', message: '运行时未就绪',
+    })
+  })
 })

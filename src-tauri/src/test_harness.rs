@@ -906,6 +906,18 @@ impl TestHarness {
         .map_err(|error| error.to_string())
     }
 
+    /// #53：驱动 `probe_agent_selectors` 命令（空态选择器探测，一次性会话即弃）。
+    pub async fn probe_agent_selectors(&self, agent_id: &str) -> Result<serde_json::Value, String> {
+        crate::session::probe_agent_selectors(
+            self.app.state::<crate::AppState>(),
+            agent_id.to_string(),
+            None,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
+
     /// 证据二路（JSON 形态）：journal 行序列化为 Value（eventType/sequence/
     /// typedPayload 均可按 serde camelCase 名取用）——外部测试可命名形态。
     pub async fn journal_json(&self, owner_key: &str, limit: u32) -> Vec<serde_json::Value> {

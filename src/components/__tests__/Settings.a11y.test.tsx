@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import Settings from '../Settings.tsx'
+import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
@@ -20,7 +20,7 @@ describe('Settings 宿主分区标题与导航的可访问性', () => {
   it('外观域的 set-group-title 全部是 button 且点击可切换折叠', async () => {
     const { kernelBootstrap } = await import('../../kernel/kernelBootstrapServices.ts')
     await kernelBootstrap.startNormal()
-    render(<Settings initialDomain="appearance" />)
+    mountSettingsSheet({ domain: 'appearance' })
     await vi.waitFor(() => {
       const titles = document.querySelectorAll<HTMLButtonElement>('.set-group-title')
       expect(titles.length).toBeGreaterThan(0)
@@ -39,7 +39,7 @@ describe('Settings 宿主分区标题与导航的可访问性', () => {
   it('设置分区导航是可聚焦的 button', async () => {
     const { kernelBootstrap } = await import('../../kernel/kernelBootstrapServices.ts')
     await kernelBootstrap.startNormal()
-    render(<Settings initialDomain="appearance" />)
+    mountSettingsSheet({ domain: 'appearance' })
     await vi.waitFor(() => {
       const navButtons = document.querySelectorAll<HTMLElement>('[class*="set-nav-btn"]')
       expect(navButtons.length).toBeGreaterThan(0)

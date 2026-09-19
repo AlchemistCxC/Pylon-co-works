@@ -1450,6 +1450,7 @@ pub fn run() {
                 crate::prism_cmds::prism_reload,
                 crate::prism_cmds::prism_llm_test,
                 crate::session::new_session,
+                crate::session::probe_agent_selectors,
                 crate::session::send_message,
                 crate::session::set_mode,
                 crate::session::set_config_option,

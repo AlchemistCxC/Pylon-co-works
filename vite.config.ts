@@ -125,6 +125,12 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // src-tauri/target 是 Rust 构建缓存（数万文件，构建期间被 cargo 进程锁定）。
+    // 监视它毫无收益，还会在 cargo 构建进行中因 chokidar 对被锁 exe 加 watch 而
+    // 抛 EBUSY，把整个 dev server 带崩（实发于 2026-09-18/19）。
+    watch: {
+      ignored: ['**/src-tauri/**'],
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

@@ -37,12 +37,20 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
     // an ACP config option, so retaining its selected value keeps the selector
     // aligned after restart without creating a second message authority.
     // P56/D3.3：modelChoices（id/label 分离真源）与 models（id 投影）同写。
-    if (cfg.models || reasoning.thinkingEffort || reasoning.reasoning) {
+    // #51：原始 envelope 一并入库（raw）——Settings 的泛化配置面板只读 raw，
+    // 缺席时建会话后恒显「暂无动态配置选项」，直到 agent 恰好主动 push。
+    const rawOptions = Array.isArray(res.configOptions)
+      ? res.configOptions
+      : Array.isArray((res as { config_options?: ConfigOption[] }).config_options)
+        ? (res as { config_options: ConfigOption[] }).config_options
+        : undefined
+    if (cfg.models || reasoning.thinkingEffort || reasoning.reasoning || rawOptions?.length) {
       useRuntimeStore.getState().setSessionConfig(ctx, {
         ...(cfg.models ? { models: cfg.models } : {}),
         ...(cfg.modelChoices ? { modelChoices: cfg.modelChoices } : {}),
         ...(reasoning.thinkingEffort ? { thinkingEffort: reasoning.thinkingEffort } : {}),
         ...(reasoning.reasoning ? { reasoning: reasoning.reasoning } : {}),
+        ...(rawOptions?.length ? { raw: rawOptions } : {}),
       })
     }
   },

@@ -305,10 +305,29 @@ export interface ForkSessionPayload {
   childSource: string
 }
 
+/** #53：空态选择器探测载荷——agent 维度，与具体会话无关。 */
+export interface ProbeAgentSelectorsPayload {
+  agentId: string
+  cwd?: string
+  workspaceId?: string
+}
+
+/** 探测结果：configOptions 原始 envelope + 后端解析好的模型面摘要。空 configOptions 合法。 */
+export interface AgentSelectorsSnapshot {
+  configOptions?: readonly unknown[]
+  modes?: unknown
+  modelSurface?: { kind: 'config_option' | 'models_state' | 'none'; configId?: string }
+  modelChoices?: readonly string[]
+  currentModel?: string | null
+}
+
 export function createSessionClient(transport: ClientTransport) {
   return {
     newSession: (payload: NewSessionPayload): Promise<unknown> => transport.invoke('new_session', payload),
     closeSession: (payload: CloseSessionPayload): Promise<unknown> => transport.invoke('close_session', payload),
+    // #53：起一次性会话读 Agent 广告的选择器面后即弃；空 configOptions 合法。
+    probeAgentSelectors: (payload: ProbeAgentSelectorsPayload): Promise<AgentSelectorsSnapshot> =>
+      transport.invoke('probe_agent_selectors', payload) as Promise<AgentSelectorsSnapshot>,
     // #98：fork 消费者——后端仅在协商快照判定 usable 时发送 session/fork raw
     // RPC；不可用时稳定报 session_fork_unavailable，不伪造 child identity。
     forkSession: (payload: ForkSessionPayload): Promise<unknown> =>

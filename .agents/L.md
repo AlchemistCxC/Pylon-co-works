@@ -252,3 +252,48 @@
 **我不碰**：其余全部源码。
 
 **给后来者**：全量 vitest 在本机的偶发红根因是 19 worker 内存峰值触发分页冻结事件循环，已按 PR #176 压并行度解决；若未来在 free 物理内存 <1GB 时仍见墙钟类偶红，先查内存再怀疑测试。
+
+---
+
+[2026-09-19 04] [Miyaki Kumo] [#172 + #154 残余收口]
+
+**开工：#172（[object Object] 吞错链）+ #154 残余（阶段 4 设置迁入 sheet 体系为本轮主体；左轨身份项经用户裁定正式放弃）。** 分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- #172：`src/utils.ts` 或就近新增共享 `errorMessage` 助手模块、`src/renderers/solid-workbench/workbenchHostPort.ts`、`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 及对应 `__tests__`
+- #154 阶段 4：`src/App.tsx`（移除 showSettings/settingsIntent 覆盖层挂载）、`src/components/Settings.tsx`（去 fixed 覆盖层 → sheet 内容形态）及其 `__tests__`、`src/plugins/core/sheet/builtinWorkspacePlugins.ts`（新 `settings` kind）、`src/settingsDomains.ts`（只读消费，契约不动）、`src/workspace-sheets/**`（如需 sheet 状态/导航缝）、`src/plugins/product/firstPartyStyleOwnership.ts` + 首方样式（新设置 sheet 样式 owner 登记）
+- 文档：`.agents/records/`、`.agents/decisions/`（如需）、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`、中控区布局样式（`ControlCenter.css`；`ControlCenter.solid.tsx` 仅按 #172 改两处 catch 的错误消息提取，不重排布局）。
+
+---
+
+[2026-09-19 05] [Miyaki Kumo] [#53 + #51]
+
+**开工：模型/思考等级选择器全套打通——空态探测（#53）+ 恢复期选择器恢复与错误 UX（#51）。** 分支沿用 `Ru5t/Reflector`；spec 见 `.agents/spec/issue-selector-probe-and-restore.md`。调查结论已回写两 issue 评论区（#53：候选列表现依赖历史会话桶并集，无主动探测；#51：load 响应只进 store 层不进 workbench document，document 只重放 canonical journal）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 后端：`src-tauri/src/session/create.rs`（探测命令 + 建立期 configOptions 写 journal）、`src-tauri/src/session/persist.rs`（恢复期 configOptions 写 journal）、`src-tauri/src/session/mod.rs`、`src-tauri/src/lib.rs`（命令注册）、`src-tauri/src/session/model.rs`（如需序列化助手）及对应 Rust 测试
+- 前端：`src/infrastructure/acp/sessionClient.ts`（probe 方法）、`src/sheets/agent-workbench/agentAdvertisedModels.ts`（并集接入探测缓存）、`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`（探测装配）、`src/plugins/core/sessionState/runtimeStoreSessionState.ts`（applyResponse 补 raw）、`src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（无面禁用态 + 错误短文案）及 `ControlCenter.css` 的 `.cc-widget-error` 一条样式
+- 测试：上述 `__tests__` + 新增
+- 文档：`.agents/spec/`（gitignore）、`.agents/records/`、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`vitest.config.ts`（Kepler #175 刚收口）、`src/components/chat/**`、`tools/webview2-mcp/**`、他人 `src/workspace-sheets/**`。
+
+**给后来者**：`#110 F5` 的 `ingest_established_model_event` 模式（合成标准 `session/update` raw 写 canonical journal）是本轮恢复期选择器恢复的核心复用点；canonical 类型 `session.config-updated` 已存在（event_repo.rs:533），不新增 schema。
+
+---
+
+[2026-09-19 06] [Miyaki Kumo] [#53/#51 审查收口·journal 去重 + revive 测试]
+
+**追加施工**（同分支同 issue 域，PR #177 审查遗留收口）：`ingest_established_config_options_event` 幂等去重（防重复 load/revive 线性膨胀 journal）+ revive 写入路径集成测试。**本轮新增触碰文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/event_repo.rs`（新增 `latest_event_of_type` 定向查询 + 单测——该文件在 #110 Huygens 条目亦有声明，本轮只追加方法与测试，不动既有行）。其余触碰沿用 2026-09-19 05 条目文件域：`src-tauri/src/session/create.rs`、`src-tauri/tests/issue53_selector_probe/mod.rs`、开发记录、本文件。
+
+
+---
+
+[2026-09-19 07] [Miyaki Kumo] [#172 收口·errorPayload 抽模块 + ADR-0013]
+
+**追加施工**：`errorMessage`/`errorCode` 自 `src/utils.ts` 抽为 **新增文件** `src/infrastructure/tauri/errorPayload.ts`（+ `__tests__/errorPayload.test.ts`），消费方 `workbenchHostPort.ts`、`ControlCenter.solid.tsx` 改导入。沿用 2026-09-19 04 条目（#172 域）文件域并新增上述 infrastructure/tauri 两文件——该目录其他 contracts 文件未触碰。另登记 `.agents/decisions/0013-settings-navigation-state-persists-in-sheet-system.md`（#154 阶段 4 持久化契约，经用户裁定）。
+
