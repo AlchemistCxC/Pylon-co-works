@@ -381,3 +381,18 @@
 **我方不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/persist.rs`、`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例（三者均为在途改动）、`src/components/__tests__/Sidebar.css.test.ts`。
 
 **给 #155（Miyaki Kumo）的报备**：读侧折叠正是 T3「聚合读/draft 尾巴」中「尾部未覆盖行」的那一半。我按用户本轮的明确授权（「准许引入高性能算法与库，彻底重构这个糟糕的内存大户」）先行落地读侧，**不改写路径、不改 schema**；若你 T3 另有设计，以你的为准，我这部分可让位。
+
+---
+
+[2026-09-20 03] [Miyaki Kumo] [#208 开工 + #155 T3 准备]
+
+**#208（本轮实现）**：长思考/长回答正文在界面上被截断——`SolidCodeBlock` 对超过 `maxLines*8`（默认 3200 字符）的代码块折到前缀且**无展开入口**（`CodeBlock.solid.tsx:27-34`，提示是静态 `role="note"`）。改为折叠提示带展开/收起入口、按有界步长增量展开（保留默认折叠的性能意图）。spec 见 `.agents/spec/208-*.md`。
+
+**#155 T3（本轮只做开工准备：认领 + 声明 + spec + 度量计划，不动代码）**：ADR-0008 定义 T3 = **行聚合（消息粒度历史 + draft 尾巴）**，风险「高：动重放模型（跨度语义、游标、折叠、trim）」，且 ADR 明确「T1/T2 之后若实测增长可接受，可以永远不做 T3」。准备物 = `.agents/spec/155-t3-*.md`（切片计划、与 #205 读侧折叠的关系、存储/WAL 基线测法）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- `src/renderers/solid-workbench/chat/CodeBlock.solid.tsx`、`src/renderers/solid-workbench/chat/__tests__/TextBlocks.solid.test.tsx`
+- 如需样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅 `.term-code-folded` 一节）
+- 文档：`.agents/records/`（新增一篇）、`.agents/spec/`、本文件
+
+**对在途改动的报备**：工作树里 `src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/session/persist.rs`、`builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例有他人未提交改动——我**不碰、不暂存、不连带提交**。特别地：T3 将来若需动 dispatcher 的窗口/flush 区段，我会先与 `dispatcher/mod.rs` 的在途作者确认后再动，本轮不动。
