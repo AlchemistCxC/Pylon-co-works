@@ -78,14 +78,12 @@ describe('theme schema v10：用量控件（S11）', () => {
   // status-primary/3 挪到 status-secondary/5。布局补位只挂在 migrate 钩子上 ——
   // 不 bump 主题版本，存量安装的用量控件会一直停在旧位置，老 pct 键也清不掉。
   it('存量 v7 布局（pct 时代）迁移后：pct 消失，用量控件落到权限控件右侧', () => {
-    const legacy = {
-      version: 7,
-      placements: {
-        ...DEFAULT_CC_LAYOUT.placements,
-        pct: { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 },
-        tokens: { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
-      },
-    }
+    // v7 只有 pct、没有 tokens（tokens 随 v8 才出现）；#197 起 v7 进入白名单、
+    // 用户布局不再整份重置，tokens 的新默认位由「缺失 id 补位」达成。
+    const legacyPlacements: Record<string, unknown> = { ...DEFAULT_CC_LAYOUT.placements }
+    delete legacyPlacements.tokens
+    legacyPlacements.pct = { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 }
+    const legacy = { version: 7, placements: legacyPlacements }
     const migrated = themeDomainMigrate({ ccLayout: legacy }, defaults, 9) as unknown as Migrated
 
     expect(migrated.ccLayout.placements.pct).toBeUndefined()

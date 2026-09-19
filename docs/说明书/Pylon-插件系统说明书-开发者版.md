@@ -1105,6 +1105,8 @@ Runtime 行为：
 
 不要写无作用域的 `button {}`、`body {}`、`* {}`。
 
+**skin variant 兼容说明**：`control-center` 组件 variant 已随中控 `ccStyle` 字段下线（刀4 / #171，2026-09-18）。第三方 skin 若声明该 variant，会在校验时被判「未知组件」拒绝（`skinValidation.ts:140`）。现役 variant：`input-bar` / `message` / `tool-call`（来源见 `skinSchema.ts:5-9`）。
+
 ---
 
 ## 8. 资源
