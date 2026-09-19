@@ -7,7 +7,7 @@ import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.t
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import { errorCode, errorMessage } from '../../utils.ts'
+import { errorCode, errorMessage } from '../../infrastructure/tauri/errorPayload.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 

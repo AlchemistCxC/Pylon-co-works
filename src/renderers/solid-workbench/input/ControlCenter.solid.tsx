@@ -13,7 +13,7 @@ import { useIdentityStore } from '../../../identityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
-import { errorMessage } from '../../../utils.ts'
+import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 

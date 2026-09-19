@@ -55,3 +55,10 @@
 ## 门禁
 
 `tsc -b` 无输出；eslint 0 error；定向 3 文件 26 用例通过；全量 605 文件 / 4423 用例通过。
+
+**追加（2026-09-19 审查收口轮）：助手抽为通用模块 + 直接单测**
+
+- `errorMessage`/`errorCode` 自 `src/utils.ts` 抽为 **`src/infrastructure/tauri/errorPayload.ts`**（归属 infrastructure：DTO 形状由 Tauri IPC 边界定义；`audit-maintenance` 的 shared-utilities 职责声明「新代码优先归属具体能力模块」亦指此向）。utils.ts 不保留 re-export；消费方 `workbenchHostPort.ts`、`ControlCenter.solid.tsx` 改指新模块（经全仓 grep 确认无其他 utils 导入点）。
+- **行为微修（对齐函数自身文档契约）**：「提取不到可读 message 时回退 fallback」——`null`/`undefined` 此前经 `String()` 产出 `'null'`/`'undefined'` 并可能展示给用户，现按契约回退 fallback；其余行为逐字节保留（Error/对象/字符串/数字、`[object Object]` 回退）。此前无直接单测，该边缘未被钉住。
+- **新增直接单测** `src/infrastructure/tauri/__tests__/errorPayload.test.ts`（9 例：结构化对象/Error/string/裸对象回退/空值回退/数字透传/code 四态 + 非 DTO 形状）。
+- 验证：定向 vitest **38 例全绿**（errorPayload 9 + workbenchHostPort 域 3 文件 + utils.formatTime 既有用例）；`tsc -b` 零错误；触碰文件 eslint 0 errors；`check:docs`（含 maintenance 审计）✅ 新文件映射 infrastructure 模块，unmapped 为空。

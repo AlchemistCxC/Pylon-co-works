@@ -290,3 +290,10 @@
 
 **追加施工**（同分支同 issue 域，PR #177 审查遗留收口）：`ingest_established_config_options_event` 幂等去重（防重复 load/revive 线性膨胀 journal）+ revive 写入路径集成测试。**本轮新增触碰文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/event_repo.rs`（新增 `latest_event_of_type` 定向查询 + 单测——该文件在 #110 Huygens 条目亦有声明，本轮只追加方法与测试，不动既有行）。其余触碰沿用 2026-09-19 05 条目文件域：`src-tauri/src/session/create.rs`、`src-tauri/tests/issue53_selector_probe/mod.rs`、开发记录、本文件。
 
+
+---
+
+[2026-09-19 07] [Miyaki Kumo] [#172 收口·errorPayload 抽模块 + ADR-0013]
+
+**追加施工**：`errorMessage`/`errorCode` 自 `src/utils.ts` 抽为 **新增文件** `src/infrastructure/tauri/errorPayload.ts`（+ `__tests__/errorPayload.test.ts`），消费方 `workbenchHostPort.ts`、`ControlCenter.solid.tsx` 改导入。沿用 2026-09-19 04 条目（#172 域）文件域并新增上述 infrastructure/tauri 两文件——该目录其他 contracts 文件未触碰。另登记 `.agents/decisions/0013-settings-navigation-state-persists-in-sheet-system.md`（#154 阶段 4 持久化契约，经用户裁定）。
+
