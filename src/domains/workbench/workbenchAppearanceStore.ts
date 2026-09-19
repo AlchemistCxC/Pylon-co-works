@@ -114,7 +114,6 @@ export function reduceAppearanceCommand(
         visibleStatusWidgets: resolveVisibleStatusWidgetCount({
           hiddenIds: theme.ccHidden,
           inputMode: theme.inputMode,
-          ccStyle: theme.ccStyle,
           submitButtonMode: theme.inputSubmitButtonMode,
         }),
         cliOverflowMode: theme.cliOverflowMode,
@@ -140,7 +139,6 @@ function settleCcHeight(theme: ThemeSettings): ThemeSettings {
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
       hiddenIds: theme.ccHidden,
       inputMode: theme.inputMode,
-      ccStyle: theme.ccStyle,
       submitButtonMode: theme.inputSubmitButtonMode,
     }),
     cliOverflowMode: theme.cliOverflowMode,

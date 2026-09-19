@@ -50,19 +50,17 @@ describe('clampPresetCcHeight / syncPresetCcHeight', () => {
     footerLayout: 'peri',
     cliHintMode: 'full',
     cliOverflowMode: 'fixed-scroll',
-    ccStyle: 'wave',
   } as const
   const manyVisible = { ...cliPeri, ccHidden: [] as string[] }
   const fewVisible = {
     ...cliPeri,
-    ccHidden: ['session', 'workspace', 'model', 'reasoning', 'mode', 'activity'],
+    ccHidden: ['model', 'reasoning'],
   }
 
   const visibleCount = (hidden: string[]) =>
     resolveVisibleStatusWidgetCount({
       hiddenIds: hidden,
       inputMode: 'cli',
-      ccStyle: 'wave',
       submitButtonMode: 'inline',
     })
   const minHeight = (visible: number) =>
@@ -74,14 +72,14 @@ describe('clampPresetCcHeight / syncPresetCcHeight', () => {
       cliOverflowMode: 'fixed-scroll',
     })
 
-  it('下界跟着「可见状态控件数」联动：控件数跨过 4 就多让出一行状态行', () => {
-    expect(visibleCount(manyVisible.ccHidden)).toBeGreaterThan(4)
-    expect(visibleCount(fewVisible.ccHidden)).toBeLessThanOrEqual(4)
+  it('下界跟着「可见状态控件数」联动（刀4 后名单上限 4，状态行不再换行）', () => {
+    expect(visibleCount(manyVisible.ccHidden)).toBe(4)
+    expect(visibleCount(fewVisible.ccHidden)).toBe(2)
 
     expect(clampPresetCcHeight({ ...manyVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(manyVisible.ccHidden)))
     expect(clampPresetCcHeight({ ...fewVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(fewVisible.ccHidden)))
-    // 差值恰是一条状态行高度（ccHeightState.STATUS_ROW_HEIGHT = 25）
-    expect(minHeight(visibleCount(manyVisible.ccHidden)) - minHeight(visibleCount(fewVisible.ccHidden))).toBe(25)
+    // 名单换代后可见状态控件 ≤ 4，永不触发 wrappedStatusRows（>4 才多让一行）
+    expect(minHeight(visibleCount(manyVisible.ccHidden))).toBe(minHeight(visibleCount(fewVisible.ccHidden)))
   })
 
   it('上界固定 400，区间内原样返回', () => {

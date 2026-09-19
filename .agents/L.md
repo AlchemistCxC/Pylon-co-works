@@ -309,4 +309,29 @@
 
 **我不碰**：工作树里 `.github/workflows/ci.yml`（check:solid 上 CI，#179 域）与 `src/domains/workbench/sidebarModulePrefs.ts`（A17 R2）的在途改动，一律 pathspec 提交。
 
+=======
+[2026-09-19 14] [AquaTur5235] [#171]
+
+**在途声明：中控元件名单换代（旧 11 → 新 7）+ 刀4 续 · 空态极简 —— 已落为提交 `b4e1f407`（本文件）与 `cd640777`（33 个施工文件 + 开发记录），并随对 `origin/main`（`e05bc80c`）的合并入库；PR 合入前请勿改写、勿连带提交。**
+
+- issue **#171**（总 issue #109）· 分支 `feat/preset-v2.1` · 起点 `d2beaf40`
+- 施工单：`04-施工单-刀4-中控元件名单换代.md`（§零 刷新表）· `04b-施工单-刀4续-空态极简.md`；**两单均已完工并经翻译独立核验**（`04` §十二 / `04b` §十），记录见 `.agents/records/issue-171-cc-roster-v2-and-empty-state-minimal.md`
+- ★ 合并订正（随 main `e05bc80c` / #177）：main 已删除「请先选择工作区」守卫，不选工作区即创建无 cwd 会话为合法意图 ⇒ 04b 的「丙-2」验收按 main 为准改写；空态工作区选择器由渲染器独立组件承载（`SHOW_EMPTY_WORKSPACE_CONTROL` 置 `true` 可回退显示）
+
+**文件域（33 个已跟踪改动，已入库）**：
+
+- 中控名单与布局：`src/domains/cc/{widgetDefinitions,widgetCatalog}.ts`、`src/ccLayoutState.ts`、`src/ccHeightState.ts`
+- 主题 schema / 字段表 / store：`src/domains/theme/{migration,presetReducer}.ts`、`src/themeFieldDefs.ts`、`src/store.ts`、`src/domains/workbench/{appearance,workbenchAppearanceStore}.ts`、`src/plugin-runtime/skin/skinSchema.ts`
+- 渲染器：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`
+- 预设数据：`src/presets/builtin.ts`
+- 首方 CSS：`builtin.pylon-renderers/styles/components/{chat/StatusBar.css,ControlCenter.css,solid-workbench/WorkbenchChrome.css}`
+- 契约快照（脚本重拍）：`src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`
+- 测试与夹具：上述区域的 `__tests__`、`src/renderers/solid-workbench/__fixtures__/mountSolidControlCenterPreview.solid.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`
+- 文档：本文件、`.agents/records/issue-171-*.md`（新增）
+
+**我不碰**：`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`（3 条禁区未跟踪项）；`src/presets/` 的拆分结构；`src-tauri/**`；`tools/webview2-mcp/**`。
+
+**给后续 agent 的三条提示**：① `CC_WIDGET_IDS` 现在只有 5 个（`input`/`model`/`reasoning`/`mode`/`tokens`），可落槽控件还要加注册轨的 `cc-send-button`（`CC_REGISTERED_SLOT_IDS`）；`ekg`/`session`/`workspace`/`activity`/`tasks` 已不存在，旧引用会静默失效。② 改布局/主题 schema **必须显式保留历史版本**在白名单里（当前 `[3,4,5,6,8,CC_LAYOUT_SCHEMA_VERSION]`），否则老用户布局静默回落默认值——本刀已踩过这个坑。③ 空态可见性只有 `hiddenWidgetIds()` 一个入口（04b 的空态收敛名单是 `EMPTY_STATE_HIDDEN_WIDGET_IDS`）；注册轨控件不走 `isWidgetVisible`，需自行补编辑态豁免（参考 `sendButtonMode()`）。
+
+**注**：本条原写于改动未提交时；现随合并提交入库，PR 合入后按 AGENTS §2.3 规矩移除本条目。
 

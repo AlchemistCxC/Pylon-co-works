@@ -1,15 +1,15 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
-import type { CcSlot, CcWidgetPlacement } from '../../../ccLayoutState.ts'
+import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcSlot, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
-import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useIdentityStore } from '../../../identityStore.ts'
+import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
@@ -26,11 +26,23 @@ const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', '
  * 共用同一名单，保持单一真值。
  */
 const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode', 'tokens']
-const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
-  input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
-  ekg: '用量条', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
-  send: '发送按钮', tasks: '任务',
+/**
+ * 编辑态可编辑控件 = 内置轨 ∪ 注册轨中**占槽位**的控件（刀4 的「内置轨 ∪ 注册轨」）。
+ * 「基础」`cc-surface` 不开槽位、无 order/offset/显隐，故不进工具栏（其值在设置页编辑）。
+ */
+const CC_EDIT_TOOLBAR_IDS: readonly CcLayoutWidgetId[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
+const WIDGET_LABELS: Readonly<Record<CcLayoutWidgetId, string>> = {
+  input: '输入栏', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
+  'cc-send-button': '发送按钮',
 }
+
+// 04b：空态极简 —— 空态工作区选择器隐藏保留（用户 2026-09-19 拍板「先隐藏」）。
+// 置 true 即恢复显示；选择器实现（EmptyWorkspaceControl）与它用到的命令全部保留。
+const SHOW_EMPTY_WORKSPACE_CONTROL = false
+
+// 04b：空态只留输入栏 —— 空态追加隐藏的控件（`hiddenWidgetIds()` 的唯一真值）。
+// `cc-send-button` 是注册轨 id（不是刀4 前的 legacy `send`）。
+const EMPTY_STATE_HIDDEN_WIDGET_IDS: readonly CcLayoutWidgetId[] = ['cc-send-button', 'model', 'reasoning', 'mode', 'tokens']
 
 export function SolidControlCenter() {
   const workbench = useSolidWorkbench()
@@ -56,7 +68,7 @@ export function SolidControlCenter() {
   }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
-  const [selected, setSelected] = createSignal<CcWidgetId>()
+  const [selected, setSelected] = createSignal<CcLayoutWidgetId>()
   const [workspaceId, setWorkspaceId] = createSignal('')
   /** Workspace carried by Sidebar's create-session intent. The event is
    * intentionally cached because Sidebar clears the active session in the
@@ -90,7 +102,9 @@ export function SolidControlCenter() {
   )
   let controlCenterElement: HTMLDivElement | undefined
   const sendButtonMode = () => {
-    if (appearance().ccHidden.includes('send')) return undefined
+    // 04b：空态隐藏发送按钮 —— 与其余控件共用 hiddenWidgetIds() 这一个入口。
+    // 注册轨的发送按钮不经 isWidgetVisible（没有 !edit 短路），故编辑态豁免在此显式保留（丁）。
+    if (hiddenWidgetIds().includes('cc-send-button') && !appearance().ccEditMode) return undefined
     return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
   }
   createEffect(() => {
@@ -168,8 +182,10 @@ export function SolidControlCenter() {
   onMount(() => {
     const onFolderPicked = (event: Event) => {
       const path = (event as CustomEvent<{ path?: string }>).detail?.path
-      if (path) setWorkspaceDraft({ name: path.split(/[\\\\/]/).filter(Boolean).at(-1) || '新工作区', path })
+      if (path) setWorkspaceDraft({ name: path.split(/[\\/]/).filter(Boolean).at(-1) || '新工作区', path })
     }
+    // Sidebar 的「新会话」意图携带工作区 id；空态工作区控件是宿主渲染元素
+    // （刀4 后 `workspace` 控件已不在名单里，见 emptyWorkspaceControl）。
     const onNewSession = (event: Event) => {
       const workspace = (event as CustomEvent<{ workspaceId?: unknown }>).detail?.workspaceId
       const id = typeof workspace === 'string' ? workspace.trim() : ''
@@ -258,20 +274,16 @@ export function SolidControlCenter() {
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
   const hiddenWidgetIds = () => !emptyVisual()
     ? appearance().ccHidden
-    : [...new Set([...appearance().ccHidden, 'session', 'activity', 'ekg', 'tokens', 'tasks'])]
+    : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])]
   const visibilityContext = () => ({
     hidden: hiddenWidgetIds(),
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
-    ccStyle: appearance().ccStyle,
     editMode: appearance().ccEditMode,
-    // The workspace selector is an intentional empty-state affordance even
-    // for terminal-classic, whose normal session chrome hides context chips.
-    presentationProfileId: input().sessionId ? input().presentationProfileId : undefined,
   })
-  // The registered cc-send-button owns the send block; keep the legacy id in
-  // layout/theme data for compatibility without mounting its old renderer.
-  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => id !== 'send' && isWidgetVisible(id, visibilityContext())))
+  // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
+  // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
+  const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
   const minHeight = () => resolveCcMinHeight({
     inputMode: appearance().inputMode,
     footerLayout: appearance().footerLayout,
@@ -279,9 +291,7 @@ export function SolidControlCenter() {
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
       hiddenIds: hiddenWidgetIds(),
       inputMode: appearance().inputMode,
-      ccStyle: appearance().ccStyle,
       submitButtonMode: appearance().inputSubmitButtonMode,
-      presentationProfileId: input().presentationProfileId,
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
@@ -295,57 +305,50 @@ export function SolidControlCenter() {
     .filter(id => passesStatusGate(id, slot))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
+  /**
+   * 空态工作区控件（刀4）：原 `workspace` 控件已从名单移除，但它承载的空态
+   * 「选择 / 新建工作区」是新会话链路的入口（含 cwd 绑定），故改为**宿主渲染元素**：
+   * 不占槽位、不进 ccLayout、不进编辑工具栏、不参与显隐与缩放。
+   */
+  const EmptyWorkspaceControl = () => <Show when={emptyVisual()}>
+    <div class="cc-empty-workspace-control">
+      <label class="cc-empty-workspace-select">
+        <span aria-hidden="true">▣</span>
+        <select
+          ref={node => { workspaceSelect = node }}
+          aria-label="新会话工作区"
+          disabled={submitting() || emptyWorkspaces().length === 0}
+          value={workspaceId()}
+          onInput={event => {
+            const value = event.currentTarget.value
+            setWorkspaceSelectionTouched(true)
+            setPreferredWorkspaceId(value)
+            setWorkspaceId(value)
+          }}
+          onChange={event => {
+            const value = event.currentTarget.value
+            setWorkspaceSelectionTouched(true)
+            setPreferredWorkspaceId(value)
+            setWorkspaceId(value)
+          }}
+        >
+                <option value="" selected={workspaceId() === ''}>不使用工作区</option>
+          <For each={emptyWorkspaces()}>{item => <option value={item.id} selected={item.id === workspaceId()}>{item.label} · {item.path}</option>}</For>
+        </select>
+      </label>
+      <button type="button" class="cc-empty-workspace-create" disabled={submitting()} onClick={pickFolder} aria-label="新建工作区">＋</button>
+      <Show when={workspaceDraft()}>{draft => <div class="cc-empty-workspace-popover">
+        <input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} />
+        <code title={draft().path}>{draft().path}</code>
+        <button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建</button>
+      </div>}</Show>
+    </div>
+  </Show>
+
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
         return <SolidInputBar disabled={readonly()} predictionProvider={workbench.predictionProvider} empty={emptyComposer} />
-      case 'session':
-        return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
-          <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
-        </span>
-      case 'workspace':
-        return <Show when={emptyVisual()} fallback={<span class="cc-info-chip cc-workspace-chip" title={input().workspacePath ?? input().workspaceLabel ?? '当前会话没有工作目录'}>
-          <span aria-hidden="true">▣</span><span>{input().workspaceLabel ?? '无工作目录'}</span>
-        </span>}>
-          <div class="cc-empty-workspace-control">
-            <label class="cc-empty-workspace-select">
-              <span aria-hidden="true">▣</span>
-              <select
-                ref={node => { workspaceSelect = node }}
-                aria-label="新会话工作区"
-                disabled={submitting() || emptyWorkspaces().length === 0}
-                value={workspaceId()}
-                onInput={event => {
-                  const value = event.currentTarget.value
-                  setWorkspaceSelectionTouched(true)
-                  setPreferredWorkspaceId(value)
-                  setWorkspaceId(value)
-                }}
-                onChange={event => {
-                  const value = event.currentTarget.value
-                  setWorkspaceSelectionTouched(true)
-                  setPreferredWorkspaceId(value)
-                  setWorkspaceId(value)
-                }}
-              >
-                <option value="" selected={workspaceId() === ''}>不使用工作区</option>
-                <For each={emptyWorkspaces()}>{item => <option value={item.id} selected={item.id === workspaceId()}>{item.label} · {item.path}</option>}</For>
-              </select>
-            </label>
-            <button type="button" class="cc-empty-workspace-create" disabled={submitting()} onClick={pickFolder} aria-label="新建工作区">＋</button>
-            <Show when={workspaceDraft()}>{draft => <div class="cc-empty-workspace-popover">
-              <input aria-label="新工作区名称" disabled={submitting()} value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} />
-              <code title={draft().path}>{draft().path}</code>
-              <button type="button" disabled={submitting()} onClick={() => void createWorkspace()}>创建</button>
-            </div>}</Show>
-          </div>
-        </Show>
-      case 'activity':
-        return <span class="cc-info-chip cc-activity-chip" data-running={runtime().generating ? 'true' : 'false'} role="status" aria-live="polite">
-          <span aria-hidden="true">{runtime().generating ? '◌' : '●'}</span><span>{runtime().generating ? '生成中' : '就绪'}</span>
-        </span>
-      case 'ekg':
-        return <SolidUsageGauge usage={runtime().document?.session.usage} fallbackTokens={runtime().tokenCount} style={appearance().ccStyle} scale={appearance().ccScale.ekg} />
       case 'tokens': {
         // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
         // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
@@ -378,13 +381,6 @@ export function SolidControlCenter() {
           onDraftChange={emptyVisual() ? setMode : undefined}
           forceDropdown={emptyVisual()}
         />
-      case 'send':
-        return null
-      case 'tasks': {
-        return <Show when={taskLabel(runtime().tasks)}>{label => (
-          <button type="button" class="cc-tasks-pill" title="任务列表（点击展开/收起）" onClick={() => window.dispatchEvent(new CustomEvent('pylon:tasks-toggle'))}>{label()}</button>
-        )}</Show>
-      }
     }
   }
 
@@ -401,7 +397,7 @@ export function SolidControlCenter() {
     >{body}</div>
   }
 
-  const beginDrag = (event: PointerEvent, id: CcWidgetId) => {
+  const beginDrag = (event: PointerEvent, id: CcLayoutWidgetId) => {
     if (!appearance().ccEditMode) return
     event.preventDefault()
     event.stopPropagation()
@@ -434,7 +430,7 @@ export function SolidControlCenter() {
     window.addEventListener('pointercancel', stop)
   }
 
-  const updatePlacement = (id: CcWidgetId, placement: Partial<CcWidgetPlacement>) => {
+  const updatePlacement = (id: CcLayoutWidgetId, placement: Partial<CcWidgetPlacement>) => {
     workbench.appearance.dispatch({ type: 'update-cc-placement', id, placement })
   }
   const beginHeightDrag = (event: PointerEvent) => {
@@ -460,12 +456,13 @@ export function SolidControlCenter() {
     window.addEventListener('pointercancel', stop)
   }
   const setProperty = (command: CcPropertyCommand) => workbench.appearance.dispatch(command)
-  const propertyFields = (id: CcWidgetId) => WIDGET_PROPERTY_FIELDS[id].filter(field => !field.showIf || field.showIf({
-    inputMode: appearance().inputMode,
-    ccStyle: appearance().ccStyle,
-    barFillFollow: appearance().ccProperties.barFillFollow,
-  }))
-  const renderPropertyField = (field: WidgetPropertyField, index: number): JSX.Element => {
+  // 注册轨控件（`cc-send-button`）没有 WIDGET_PROPERTY_FIELDS 条目 —— 属性面板只给
+  // 布局四项，它的外观字段在设置页编辑。
+  const propertyFields = (id: CcLayoutWidgetId) => {
+    if (!(id in WIDGET_PROPERTY_FIELDS)) return []
+    return WIDGET_PROPERTY_FIELDS[id as CcWidgetId].filter(field => !field.showIf || field.showIf({ inputMode: appearance().inputMode }))
+  }
+  const renderPropertyField = (field: WidgetPropertyField, index: number): JSX.Element | null => {
     if (field.kind === 'section') return <div class="cc-prop-sec" data-field-index={index}>{field.title}</div>
     const value = () => appearance().ccProperties[field.key]
     if (field.kind === 'color') return <div class="cc-prop-field"><label>{field.label}</label><input type="text" class="set-color-input" aria-label={field.label} value={String(value())} onChange={event => setProperty({ type: 'set-cc-property', key: field.key, value: event.currentTarget.value })} /></div>
@@ -479,10 +476,7 @@ export function SolidControlCenter() {
         if (option.sync) setProperty({ type: 'set-cc-property', key: option.sync.key, value: option.sync.value })
       }}>{option.label}</button>
     )}</For></div></div>
-    return <div class="cc-prop-field"><label>{field.label}</label><div class="set-preset-row">
-      <button type="button" class={`set-preset-chip${value() !== false ? ' active' : ''}`} onClick={() => setProperty({ type: 'set-cc-property', key: field.key, value: true })}>{field.trueLabel}</button>
-      <button type="button" class={`set-preset-chip${value() === false ? ' active' : ''}`} onClick={() => setProperty({ type: 'set-cc-property', key: field.key, value: false })}>{field.falseLabel}</button>
-    </div></div>
+    return null
   }
 
   /**
@@ -604,18 +598,21 @@ export function SolidControlCenter() {
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
     <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
-    <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('send')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
+    <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('cc-send-button')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
         <div class="cc-footer-status">
+          <Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}>
+            <EmptyWorkspaceControl />
+          </Show>
           <Show when={statusRowContent()}>{statusSlots()}</Show>
           {commandHint()}
         </div>
       </div> : <>
         <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
-        <div class="cc-status-row"><Show when={statusRowContent()}>{statusSlots()}</Show>{commandHint()}</div>
+        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusSlots()}</Show>{commandHint()}</div>
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (
@@ -653,7 +650,7 @@ export function SolidControlCenter() {
     <Show when={appearance().ccEditMode}>
       <div class="cc-edit-toolbar" role="toolbar" aria-label="中控控件工具栏">
         <span class="cc-edit-toolbar-label">控件</span>
-        <For each={CC_WIDGET_IDS}>{id => {
+        <For each={CC_EDIT_TOOLBAR_IDS}>{id => {
           const hidden = () => appearance().ccHidden.includes(id)
           return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
             <button type="button" class="cc-edit-toolbar-chip" aria-label={`${WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {WIDGET_LABELS[id]}</button>
@@ -692,27 +689,4 @@ function contextRatio(usage: UsageSnapshot | undefined, fallback: number): numbe
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
-}
-
-function SolidUsageGauge(props: { usage?: UsageSnapshot; fallbackTokens: number; style: string; scale?: number }) {
-  const ratio = () => contextRatio(props.usage, props.fallbackTokens)
-  const percent = () => Math.round(ratio() * 100)
-  return <Switch fallback={<svg viewBox="0 0 140 30" class="ekg-svg" preserveAspectRatio="none" aria-label={`上下文 ${percent()}%`} style={{ 'font-size': `${props.scale ?? 100}%` }}>
-    <rect x="0" y="12" width={140 * (1 - ratio())} height="6" rx="3" fill="currentColor" opacity="0.3" />
-    <rect x={140 * (1 - ratio())} y="12" width={140 * ratio()} height="6" rx="3" fill="var(--ekg-consumed,rgba(128,128,128,0.15))" />
-  </svg>}>
-    <Match when={props.style === 'numeric'}><span class="ekg-pct" style={{ 'font-size': `${props.scale ?? 100}%` }}>{percent()}%</span></Match>
-    <Match when={props.style === 'ring'}><span class="cc-context-ring" role="img" aria-label={`上下文 ${percent()}%`} title={`上下文 ${percent()}%`} style={{ '--context-ring-ratio': ratio(), 'font-size': `${props.scale ?? 100}%` }}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="cc-context-ring-track" cx="12" cy="12" r="9" pathLength="1" /><circle class="cc-context-ring-value" cx="12" cy="12" r="9" pathLength="1" /></svg>
-      <span class="cc-context-ring-label">{percent()}%</span>
-    </span></Match>
-    <Match when={props.style === 'bar'}><div class="ekg-bar" style={{ '--bar-fill': `${percent()}%`, 'font-size': `${props.scale ?? 100}%` }}><div class="ekg-bar-track" /><div class="ekg-bar-fill" /></div></Match>
-  </Switch>
-}
-
-function taskLabel(entries: readonly { readonly status: string }[]): string {
-  if (entries.length === 0) return ''
-  const completed = entries.filter(entry => entry.status === 'completed').length
-  const active = entries.filter(entry => entry.status === 'in_progress').length
-  return active > 0 ? `任务 ${completed}/${entries.length} · ${active} 进行中` : `任务 ${completed}/${entries.length}`
 }

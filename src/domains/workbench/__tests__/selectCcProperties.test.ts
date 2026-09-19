@@ -8,18 +8,9 @@ import { selectCcProperties } from '../appearance.ts'
  * 真值是 widgetDefinitions.ts 的 CcEditablePropertyKey 联合类型（类型层，无运行时列表）。
  */
 const CC_EDITABLE_KEYS = [
-  'barFillColor',
-  'barFillFollow',
-  'barHeight',
-  'barTrackColor',
-  'ccStyle',
   'cliLineColor',
   'cliLinePadding',
   'cliLineWidth',
-  'ekgGreen',
-  'ekgRed',
-  'ekgWidth',
-  'ekgYellow',
   'inputBg',
   'inputFontSize',
   'inputHeight',
@@ -66,10 +57,10 @@ describe('selectCcProperties', () => {
   })
 
   it('取值逐一取自入参的同名字段', () => {
-    const picked = selectCcProperties(theme({ inputBg: '#123456', ccStyle: 'bar', sendVariant: 'icon' }))
+    const picked = selectCcProperties(theme({ inputBg: '#123456', inputLineHeight: '1.5', sendVariant: 'icon' }))
 
     expect(picked.inputBg).toBe('#123456')
-    expect(picked.ccStyle).toBe('bar')
+    expect(picked.inputLineHeight).toBe('1.5')
     expect(picked.sendVariant).toBe('icon')
   })
 
@@ -84,12 +75,12 @@ describe('selectCcProperties', () => {
     const picked = selectCcProperties({ inputBg: '#123456' } as ThemeSettings)
 
     expect(picked.inputBg).toBe('#123456')
-    expect(picked.ekgGreen).toBeUndefined()
+    expect(picked.cliLineColor).toBeUndefined()
     expect(sortedKeys(picked)).toEqual(expectedKeys())
   })
 
   it('不修改入参：冻结的入参照常读，两次调用同结果', () => {
-    const input = Object.freeze(theme({ inputBg: '#123456', ccStyle: 'bar' }))
+    const input = Object.freeze(theme({ inputBg: '#123456', inputLineHeight: '1.5' }))
     const before = structuredClone(input)
 
     const first = selectCcProperties(input)

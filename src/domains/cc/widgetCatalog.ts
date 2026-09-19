@@ -4,18 +4,14 @@ import type { CcWidgetContribution } from '../../plugin-runtime/cc-widget/ccWidg
 
 const placement = (slot: CcWidgetPlacement['slot'], order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 const labels: Record<typeof CC_WIDGET_IDS[number], string> = {
-  input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态', ekg: '用量条',
-  tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式', send: '发送按钮', tasks: '任务',
+  input: '输入栏', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
 }
 const categories: Record<typeof CC_WIDGET_IDS[number], string> = {
-  input: 'input', session: 'runtime', workspace: 'runtime', activity: 'status', ekg: 'context',
-  tokens: 'context', model: 'runtime', reasoning: 'runtime', mode: 'runtime', send: 'action', tasks: 'status',
+  input: 'input', tokens: 'context', model: 'runtime', reasoning: 'runtime', mode: 'runtime',
 }
 const placements: Record<typeof CC_WIDGET_IDS[number], CcWidgetPlacement> = {
-  input: placement('input', 0), session: placement('status-secondary', 0), workspace: placement('status-secondary', 1),
-  model: placement('status-secondary', 2), reasoning: placement('status-secondary', 3), mode: placement('status-secondary', 4), activity: placement('status-primary', 0),
-  ekg: placement('status-primary', 1), tokens: placement('status-secondary', 5),
-  send: placement('actions', 0), tasks: placement('status-primary', 4),
+  input: placement('input', 0), model: placement('status-secondary', 2), reasoning: placement('status-secondary', 3),
+  mode: placement('status-secondary', 4), tokens: placement('status-secondary', 5),
 }
 
 /** Legacy widget definitions retained for the switch renderer. */
@@ -49,6 +45,8 @@ export const BUILTIN_CC_SEND_BUTTON_CONTRIBUTION: CcWidgetContribution = Object.
   id: 'cc-send-button',
   label: '发送按钮',
   category: 'action',
+  // legacy `send` 槽位事实迁到注册轨（F1=A）：默认仍在操作区首位。
+  defaultPlacement: placement('actions', 0),
   render: { kind: 'host-renderer' as const, rendererKey: 'cc-send-button' },
   propertyFields: Object.freeze([
     { kind: 'theme-field', key: 'inputSubmitButtonMode', label: '位置' },

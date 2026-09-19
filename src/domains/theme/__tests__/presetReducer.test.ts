@@ -32,7 +32,6 @@ function makeState(customPresets: ThemePresetState['customPresets']): ThemePrese
     footerLayout: 'free',
     cliHintMode: 'full',
     ccHidden: [],
-    ccStyle: 'wave',
     cliOverflowMode: 'fixed-scroll',
   }
 }
@@ -119,8 +118,7 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
       footerLayout: 'free',
       cliHintMode: 'full',
       ccHidden: [],
-      ccStyle: 'wave',
-      cliOverflowMode: 'fixed-scroll',
+        cliOverflowMode: 'fixed-scroll',
       ...overrides,
     }
   }

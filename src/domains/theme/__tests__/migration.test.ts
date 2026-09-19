@@ -104,7 +104,7 @@ describe('themeDomainMigrate inputVariant↔inputMode 联动不变量（MEDIUM 5
     base: {
       inputMode: 'cli', inputVariant: 'cli', inputSubmitButtonMode: 'inline',
       ccHeight: 150, footerLayout: 'free', cliHintMode: 'full',
-      ccHidden: [], ccStyle: 'wave', cliOverflowMode: 'fixed-scroll',
+      ccHidden: [], cliOverflowMode: 'fixed-scroll',
     },
     appliedPreset: defaults.appliedPreset,
     custom: defaults.custom,

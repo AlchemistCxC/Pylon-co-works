@@ -73,7 +73,7 @@ describe('customPresets CRUD 与业务键隔离（原 test-custom-presets.mts）
     bgBlur: 12,
     barFillFollow: true,
     spinnerSize: 18,
-    ccScale: { ekg: 95 },
+    ccScale: { tokens: 95 },
     appliedPreset: { global: 'glass' },
     custom: { global: true },
     ccEditMode: true,
@@ -134,10 +134,11 @@ describe('customPresets CRUD 与业务键隔离（原 test-custom-presets.mts）
       transparency: 0.72,
       globalFont: 'mono',
       bgBlur: 12,
-      barFillFollow: true,
       spinnerSize: 18,
-      ccScale: { ekg: 95 },
+      ccScale: { tokens: 95 },
     })
+    // 刀4：barFillFollow 已从主题字段表移除 → 与未知字段同样被白名单挡掉
+    expect('barFillFollow' in picked).toBe(false)
     expect('appliedPreset' in picked).toBe(false)
     expect('custom' in picked).toBe(false)
     expect('ccEditMode' in picked).toBe(false)
