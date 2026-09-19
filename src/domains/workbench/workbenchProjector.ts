@@ -610,6 +610,12 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   const content = textFromParts(parts)
   const previous = document.messages.at(-1)
   const terminal = event.type === 'message.completed'
+  // #200：recovery-import 是 session/load 的**历史导入**（journal 空时恢复整段
+  // 会话）——历史不存在「在途」语义，running 标记只属于本进程观察的 live 流。
+  // 无此豁免时，导入历史没有终态行（agent 重放不带 done 帧），全部消息停在
+  // running 态 → 文档派生 generating=true →「仍在等待后端响应」永久卡住并阻塞
+  // 发送队列（#155 T2 重建升级日的常态场景）。
+  const importedHistory = envelope.provenance.origin === 'recovery-import'
   if (terminal && content.length === 0) {
     return settleTextSegment(document, envelope, role)
   }
@@ -639,7 +645,7 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       messages: document.messages.map((message, index) => index === duplicateIndex ? {
         ...messageIdentityFor(envelope), role: 'user', content, parts,
         identity: envelope.identity, source: envelope.source,
-        sequence: envelope.sequence, running: !terminal,
+        sequence: envelope.sequence, running: !terminal && !importedHistory,
         time: envelope.occurredAt ?? envelope.recordedAt,
       } : message),
     }
@@ -676,8 +682,8 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     return addOutOfOrderDiagnostic(document, envelope)
   }
   const messages = append
-    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal }]
-    : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
+    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal && !importedHistory }]
+    : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal && !importedHistory, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
   return { ...document, messages }
 }
 
@@ -772,7 +778,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         parts: redacted ? parts : coalesceAdjacentReasoningParts([...previous.parts, ...reasoningParts]),
         identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous.identity,
         sequence: envelope.sequence,
-        running: event.type === 'reasoning.delta',
+        running: event.type === 'reasoning.delta' && envelope.provenance.origin !== 'recovery-import',
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
         ...(redacted ? { redacted: true } : {}),
         ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
@@ -785,7 +791,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         identity: envelope.identity,
         source: envelope.source,
         sequence: envelope.sequence,
-        running: event.type === 'reasoning.delta',
+        running: event.type === 'reasoning.delta' && envelope.provenance.origin !== 'recovery-import',
         time: envelope.occurredAt ?? envelope.recordedAt,
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : { thoughtStartedAtMs: Number.isFinite(startedAt) ? startedAt : undefined }),
         ...(redacted ? { redacted: true } : {}),

@@ -41,6 +41,15 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
   }
 }
 
+/** #200：session/load 恢复导入行的 provenance（journal 空时恢复 agent 侧历史）。 */
+function importedRow(sequence: number, sessionUpdate: string, fields: Record<string, unknown> = {}) {
+  const row = canonicalRow(sequence, sessionUpdate, fields)
+  return {
+    ...row,
+    provenance: { origin: 'recovery-import', trust: 'unverified', provider: 'peri' },
+  }
+}
+
 describe('rebind keeps the generation indicator responsive (user repro)', () => {
   it('a new turn after session re-enter restarts the indicator instead of staying terminal', async () => {
     const journal = [
@@ -100,6 +109,62 @@ describe('rebind keeps the generation indicator responsive (user repro)', () => 
     await feed.acceptFrame({ event: 'pylon:error', payload: { source: active.source, error: 'late' } })
     snapshot = service.runtime.getSnapshot()
     expect(snapshot.summary).toMatchObject({ reason: 'done' })
+    service.destroy()
+  })
+
+  it('#200：空 journal 重建升级——recovery-import 历史不进入生成态（核心回归）', async () => {
+    // #155 T2 重建升级日：journal 为空，bind 经 session/load 拿 agent 侧历史并
+    // recovery-import 落盘。导入历史没有终态行（agent 重放不带 done 帧）——修复前
+    // 投影器把全部消息停在 running 态 → 文档派生 generating=true，永久
+    // 「仍在等待后端响应」并阻塞发送队列。
+    const imported = [
+      importedRow(1, 'user_message_chunk', { content: { type: 'text', text: '历史问题' } }),
+      importedRow(2, 'agent_message_chunk', { content: { type: 'text', text: '历史回答' } }),
+    ]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => imported,
+      subscribe: () => () => {},
+    })
+    const active = session('session-recovery', 'local:rebind')
+    await service.bind(active)
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating, '导入历史不得进入生成态').toBe(false)
+    expect(snapshot.summary, '无终态证据不得造终态摘要').toBeNull()
+    expect(snapshot.document?.messages.at(-1)?.running, '导入消息按已沉淀处理').toBe(false)
+
+    // 之后的真实 live 回合照常开时钟（回归护栏：豁免只认 recovery-import）。
+    let pushEvent: ((row: unknown) => void) | undefined
+    service.destroy()
+    const live = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => imported,
+      subscribe: listener => { pushEvent = listener; return () => { pushEvent = undefined } },
+    })
+    await live.bind(active)
+    pushEvent?.(canonicalRow(3, 'user_message_chunk', { content: { type: 'text', text: '新回合' } }))
+    expect(live.runtime.getSnapshot().generating, 'live user 帧必须开启时钟').toBe(true)
+    live.destroy()
+  })
+
+  it('#200：loading 中途到达的导入 user 帧既不开时钟、也不进生成态', async () => {
+    // 同一场景的 live 侧防线：若导入行经发布通道在载入中途到达（loading=true），
+    // 修复前会走 applyLive 的「非乐观 user echo = 新回合」分支开启 TurnClock。
+    let pushEvent: ((row: unknown) => void) | undefined
+    let releaseLoad: (() => void) | undefined
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: () => new Promise<readonly unknown[]>(resolve => { releaseLoad = () => resolve([]) }),
+      subscribe: listener => { pushEvent = listener; return () => { pushEvent = undefined } },
+    })
+    const active = session('session-recovery-live', 'local:rebind')
+    const binding = service.bind(active)
+
+    pushEvent?.(importedRow(1, 'user_message_chunk', { content: { type: 'text', text: '历史回合' } }))
+    expect(service.runtime.getSnapshot().generating, '载入中的导入帧不得复活生成态').toBe(false)
+
+    releaseLoad?.()
+    await binding
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating, '导入帧缓冲折入后仍不得是生成态').toBe(false)
+    expect(snapshot.document?.messages.at(-1)?.running, '导入消息按已沉淀处理').toBe(false)
     service.destroy()
   })
 })

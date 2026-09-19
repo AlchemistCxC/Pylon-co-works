@@ -716,7 +716,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
-    if (isUserStart && !echoesOptimistic) {
+    // #200：loading 期间到达的是 session/load 的**重放历史**帧——不是新回合。
+    // 空 journal（#155 T2 重建升级）时 refresh 无终态证据可压住时钟，重放的 user
+    // 帧会把历史回合复活成「仍在等待后端响应」的生成态并阻塞发送队列。缓冲帧在
+    // 载入完成后经 projectWorkbench 折叠（不走 applyLive），不会二次开启时钟。
+    if (isUserStart && !echoesOptimistic && !loading) {
       // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
       // （elapsed 从用户发出算起，与已绑定路径一致）。
       if (!clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
