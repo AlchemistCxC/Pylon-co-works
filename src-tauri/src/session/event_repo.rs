@@ -1205,10 +1205,37 @@ impl EventRepo {
         &self,
         input: KernelEventInput,
     ) -> Result<EventAppendResult, EventError> {
-        let owner_key = input
+        self.ingest_kernel_events(vec![input])
+    }
+
+    /// Kernel batch ingest：同一 owner 的输入共享一条 SQLite transaction，但仍保持
+    /// 每个输入一条 append-only canonical 行。sequence 只在这里推进，因此批量路径与
+    /// 单事件路径共享同一 revision/terminal-unit 语义，后续 dispatcher 窗口可以直接复用。
+    fn ingest_kernel_events(
+        &self,
+        inputs: Vec<KernelEventInput>,
+    ) -> Result<EventAppendResult, EventError> {
+        let Some(first) = inputs.first() else {
+            return Ok(EventAppendResult {
+                events: Vec::new(),
+                revision: 0,
+            });
+        };
+        let owner_key = first
             .owner
             .key()
             .map_err(|error| EventError::Invalid(error.to_string()))?;
+        for input in &inputs {
+            let input_owner_key = input
+                .owner
+                .key()
+                .map_err(|error| EventError::Invalid(error.to_string()))?;
+            if input_owner_key != owner_key {
+                return Err(EventError::Invalid(format!(
+                    "kernel ingest batch crosses owners: {owner_key} vs {input_owner_key}"
+                )));
+            }
+        }
         let mut conn = self
             .conn
             .lock()
@@ -1217,7 +1244,7 @@ impl EventRepo {
         let tombstone_state: Option<String> = tx
             .prepare_cached(TOMBSTONE_STATE_SQL)
             .map_err(EventError::from)?
-            .query_row(params![owner_key, input.owner.local_session_id], |row| {
+            .query_row(params![owner_key, first.owner.local_session_id], |row| {
                 row.get(0)
             })
             .optional()
@@ -1236,105 +1263,117 @@ impl EventRepo {
             .map_err(EventError::from)?
             .flatten()
             .unwrap_or(0);
-        let event = normalize_kernel_event(input, revision + 1)?;
-        tx.prepare_cached(INSERT_EVENT_SQL)
-            .map_err(EventError::from)?
-            .execute(params![
-                event.event_id,
-                event.owner_key,
-                event.profile_id,
-                event.agent_id,
-                event.local_session_id,
-                event.remote_session_id,
-                event.client_generation,
-                event.sequence,
-                event.occurred_at,
-                event.received_at,
-                event.event_type,
-                event.payload_version,
-                event.identity.as_ref().map(serde_json::Value::to_string),
-                event
-                    .typed_payload
-                    .as_ref()
-                    .map(serde_json::Value::to_string),
-                event.raw_payload_json.as_str(),
-                event.created_at,
-                event.schema_version,
-                event.provenance_origin,
-                event.provenance_trust,
-                event.provenance_provider,
-                event.provenance_import_id,
-                event.raw_truncated,
-                event.raw_original_bytes,
-                event.raw_retained_bytes,
-                event.raw_omitted_bytes,
-                event.raw_truncation_reason,
-            ])
-            .map_err(EventError::from)?;
-        // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
-        // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
-        let mut result_events = vec![event.clone()];
-        let mut final_revision = revision + 1;
-        if super::turn_rollup::is_turn_terminal(&event.event_type) {
-            let prev_boundary: i64 = tx
-                .prepare_cached(LAST_TURN_BOUNDARY_SQL)
+        let mut final_revision = revision;
+        let mut result_events = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let event = normalize_kernel_event(input, final_revision + 1)?;
+            tx.prepare_cached(INSERT_EVENT_SQL)
                 .map_err(EventError::from)?
-                .query_row(params![owner_key, event.sequence], |row| row.get(0))
-                .optional()
-                .map_err(EventError::from)?
-                .flatten()
-                .unwrap_or(0);
-            let turn_rows = query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
-            match super::turn_rollup::build_turn_unit_row(&event, &turn_rows, event.sequence + 1) {
-                Ok(unit) => {
-                    let unit_sequence = unit.sequence;
-                    let inserted = tx
-                        .prepare_cached(INSERT_UNIT_EVENT_SQL)
-                        .map_err(EventError::from)?
-                        .execute(rusqlite::params![
-                            unit.event_id,
-                            unit.owner_key,
-                            unit.profile_id,
-                            unit.agent_id,
-                            unit.local_session_id,
-                            unit.remote_session_id,
-                            unit.client_generation,
-                            unit.sequence,
-                            unit.occurred_at,
-                            unit.received_at,
-                            unit.event_type,
-                            unit.payload_version,
-                            unit.identity.as_ref().map(serde_json::Value::to_string),
-                            unit.typed_payload
-                                .as_ref()
-                                .map(serde_json::Value::to_string),
-                            unit.raw_payload_json.as_str(),
-                            unit.created_at,
-                            unit.schema_version,
-                            unit.provenance_origin,
-                            unit.provenance_trust,
-                            unit.provenance_provider,
-                            unit.provenance_import_id,
-                            unit.raw_truncated,
-                            unit.raw_original_bytes,
-                            unit.raw_retained_bytes,
-                            unit.raw_omitted_bytes,
-                            unit.raw_truncation_reason,
-                            unit.rollup_seq_start,
-                            unit.rollup_seq_end,
-                        ])
-                        .map_err(EventError::from)?;
-                    // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
-                    // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
-                    if inserted > 0 {
-                        result_events.push(unit);
-                        final_revision = unit_sequence;
+                .execute(params![
+                    event.event_id,
+                    event.owner_key,
+                    event.profile_id,
+                    event.agent_id,
+                    event.local_session_id,
+                    event.remote_session_id,
+                    event.client_generation,
+                    event.sequence,
+                    event.occurred_at,
+                    event.received_at,
+                    event.event_type,
+                    event.payload_version,
+                    event.identity.as_ref().map(serde_json::Value::to_string),
+                    event
+                        .typed_payload
+                        .as_ref()
+                        .map(serde_json::Value::to_string),
+                    event.raw_payload_json.as_str(),
+                    event.created_at,
+                    event.schema_version,
+                    event.provenance_origin,
+                    event.provenance_trust,
+                    event.provenance_provider,
+                    event.provenance_import_id,
+                    event.raw_truncated,
+                    event.raw_original_bytes,
+                    event.raw_retained_bytes,
+                    event.raw_omitted_bytes,
+                    event.raw_truncation_reason,
+                ])
+                .map_err(EventError::from)?;
+            final_revision = event.sequence;
+            result_events.push(event.clone());
+
+            // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
+            // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
+            if super::turn_rollup::is_turn_terminal(&event.event_type) {
+                let prev_boundary: i64 = tx
+                    .prepare_cached(LAST_TURN_BOUNDARY_SQL)
+                    .map_err(EventError::from)?
+                    .query_row(params![owner_key, event.sequence], |row| row.get(0))
+                    .optional()
+                    .map_err(EventError::from)?
+                    .flatten()
+                    .unwrap_or(0);
+                let turn_rows =
+                    query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
+                match super::turn_rollup::build_turn_unit_row(
+                    &event,
+                    &turn_rows,
+                    event.sequence + 1,
+                ) {
+                    Ok(unit) => {
+                        let unit_sequence = unit.sequence;
+                        let inserted = tx
+                            .prepare_cached(INSERT_UNIT_EVENT_SQL)
+                            .map_err(EventError::from)?
+                            .execute(rusqlite::params![
+                                unit.event_id,
+                                unit.owner_key,
+                                unit.profile_id,
+                                unit.agent_id,
+                                unit.local_session_id,
+                                unit.remote_session_id,
+                                unit.client_generation,
+                                unit.sequence,
+                                unit.occurred_at,
+                                unit.received_at,
+                                unit.event_type,
+                                unit.payload_version,
+                                unit.identity.as_ref().map(serde_json::Value::to_string),
+                                unit.typed_payload
+                                    .as_ref()
+                                    .map(serde_json::Value::to_string),
+                                unit.raw_payload_json.as_str(),
+                                unit.created_at,
+                                unit.schema_version,
+                                unit.provenance_origin,
+                                unit.provenance_trust,
+                                unit.provenance_provider,
+                                unit.provenance_import_id,
+                                unit.raw_truncated,
+                                unit.raw_original_bytes,
+                                unit.raw_retained_bytes,
+                                unit.raw_omitted_bytes,
+                                unit.raw_truncation_reason,
+                                unit.rollup_seq_start,
+                                unit.rollup_seq_end,
+                            ])
+                            .map_err(EventError::from)?;
+                        // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
+                        // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
+                        if inserted > 0 {
+                            result_events.push(unit);
+                            final_revision = unit_sequence;
+                        }
                     }
-                }
-                Err(error) => {
-                    // best effort：单元缺席仅损失读放大优化，不影响事实与等价性。
-                    // 注意 INSERT/查询的 DB 错误不走此分支——与终态同事务原子回滚。
-                    tracing::warn!(owner = %owner_key, error = %error, "turn.unit 构建失败，本轮不折叠");
+                    Err(error) => {
+                        tracing::warn!(
+                            owner = %owner_key,
+                            error = %error,
+                            "turn.unit 构建失败，本轮不折叠"
+                        );
+                    }
                 }
             }
         }
@@ -1817,18 +1856,42 @@ impl EventService {
         client_generation: u64,
         raw_payload: serde_json::Value,
     ) -> Result<EventAppendResult, EventError> {
-        let client_generation = i64::try_from(client_generation)
-            .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
-        let input = KernelEventInput {
+        self.ingest_events(
             owner,
             remote_session_id,
             client_generation,
-            received_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            raw_payload,
-            recovery_import: false,
-        };
+            vec![raw_payload],
+        )
+        .await
+    }
+
+    /// Kernel batch ingest boundary：同一 owner 的多条 live raw payload 共享一次
+    /// repository transaction，仍逐条 normalize/append，并返回实际提交的行（含 terminal
+    /// 触发的 turn.unit）。调用方负责在窗口/消息边界 flush；单事件入口委托到这里以保证
+    /// 两条路径永远共享同一 sequence、tombstone 和 rollup 语义。
+    pub(crate) async fn ingest_events(
+        &self,
+        owner: DurableSessionOwner,
+        remote_session_id: Option<String>,
+        client_generation: u64,
+        raw_payloads: Vec<serde_json::Value>,
+    ) -> Result<EventAppendResult, EventError> {
+        let client_generation = i64::try_from(client_generation)
+            .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
+        let inputs = raw_payloads
+            .into_iter()
+            .map(|raw_payload| KernelEventInput {
+                owner: owner.clone(),
+                remote_session_id: remote_session_id.clone(),
+                client_generation,
+                received_at: chrono::Utc::now()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                raw_payload,
+                recovery_import: false,
+            })
+            .collect();
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.ingest_kernel_event(input))
+        tokio::task::spawn_blocking(move || repo.ingest_kernel_events(inputs))
             .await
             .map_err(|error| {
                 EventError::Unavailable(format!("kernel event ingest task failed: {error}"))
@@ -2119,6 +2182,69 @@ mod tests {
             true
         );
         assert_eq!(event.raw_payload, raw);
+    }
+
+    #[test]
+    fn kernel_batch_ingest_keeps_each_row_and_advances_past_terminal_unit() {
+        let repo = repo();
+        let delta = |text: &str| {
+            serde_json::json!({
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": text }
+                }
+            })
+        };
+        let result = repo
+            .ingest_kernel_events(vec![
+                kernel_input(delta("a")),
+                kernel_input(delta("b")),
+                kernel_input(serde_json::json!({
+                    "update": { "sessionUpdate": "done" }
+                })),
+                kernel_input(delta("after")),
+            ])
+            .expect("batch ingest");
+
+        assert_eq!(result.revision, 5);
+        assert_eq!(
+            result
+                .events
+                .iter()
+                .map(|event| (event.sequence, event.event_type.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "assistant.text.delta"),
+                (2, "assistant.text.delta"),
+                (3, "turn.completed"),
+                (4, "turn.unit"),
+                (5, "assistant.text.delta"),
+            ]
+        );
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        assert_eq!(repo.revision(&owner_key).unwrap(), 5);
+    }
+
+    #[test]
+    fn kernel_batch_ingest_rejects_mixed_owners_before_writing() {
+        let repo = repo();
+        let mut other = kernel_input(serde_json::json!({
+            "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "b" } }
+        }));
+        other.owner = DurableSessionOwner::new("p2", "peri", "local:s2");
+        let error = repo
+            .ingest_kernel_events(vec![
+                kernel_input(serde_json::json!({
+                    "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "a" } }
+                })),
+                other,
+            ])
+            .expect_err("mixed owners must be rejected");
+        assert!(
+            matches!(error, EventError::Invalid(message) if message.contains("crosses owners"))
+        );
+        let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+        assert_eq!(repo.revision(&owner_key).unwrap(), 0);
     }
 
     #[test]

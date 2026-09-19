@@ -43,15 +43,44 @@ enum Segment {
 }
 
 fn is_foldable_delta(event_type: &str) -> bool {
-    event_type == "assistant.text.delta" || event_type == "assistant.thinking.delta"
+    static_delta_type(event_type).is_some()
 }
 
 fn static_delta_type(event_type: &str) -> Option<&'static str> {
     match event_type {
-        "assistant.text.delta" => Some("assistant.text.delta"),
-        "assistant.thinking.delta" => Some("assistant.thinking.delta"),
+        "assistant.text.delta" | "assistant.text.delta.batch" => Some("assistant.text.delta"),
+        "assistant.thinking.delta" | "assistant.thinking.delta.batch" => {
+            Some("assistant.thinking.delta")
+        }
         _ => None,
     }
+}
+
+fn delta_sequence_span(row: &CanonicalEventRow) -> Option<(i64, i64)> {
+    if !row.event_type.ends_with(".batch") {
+        return Some((row.sequence, row.sequence));
+    }
+    let Some(span) = row
+        .typed_payload
+        .as_ref()
+        .and_then(|typed| typed.get("seqSpan"))
+        .and_then(Value::as_array)
+    else {
+        return None;
+    };
+    if span.len() != 2 {
+        return None;
+    }
+    let Some(start) = span.first().and_then(Value::as_i64) else {
+        return None;
+    };
+    let Some(end) = span.get(1).and_then(Value::as_i64) else {
+        return None;
+    };
+    if start < 1 || end < start || end != row.sequence {
+        return None;
+    }
+    Some((start, end))
 }
 
 /// 折叠 turn 范围行（升序、含 terminal 行）为保序 segments。
@@ -68,6 +97,10 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
             segments.push(Segment::Event(canonical_event_wire(row)));
             continue;
         }
+        let Some((seq_start, row_seq_end)) = delta_sequence_span(row) else {
+            segments.push(Segment::Event(canonical_event_wire(row)));
+            continue;
+        };
         let text = row
             .typed_payload
             .as_ref()
@@ -89,7 +122,7 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
                 == static_delta_type(&row.event_type).unwrap_or(row.event_type.as_str())
                 && *identity == row.identity;
             if same_run {
-                *seq_end = row.sequence;
+                *seq_end = row_seq_end;
                 run_text.push_str(&text);
                 *run_markdown |= markdown;
                 continue;
@@ -97,8 +130,8 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
         }
         segments.push(Segment::Run {
             event_type: static_delta_type(&row.event_type).expect("checked delta"),
-            seq_start: row.sequence,
-            seq_end: row.sequence,
+            seq_start,
+            seq_end: row_seq_end,
             identity: row.identity.clone(),
             text,
             occurred_at: row.occurred_at.clone(),
@@ -460,17 +493,13 @@ mod tests {
         assert!(!is_turn_terminal("assistant.text.delta.batch"));
     }
 
-    /// **目标声明（尚未实现，故 ignore）**：聚合行与它覆盖的原始 chunk 折叠结果必须逐字节相同。
+    /// **等价性约束**：聚合行与它覆盖的原始 chunk 折叠结果必须逐字节相同。
     ///
     /// 这是 T1/T3 的关键等价性，也是"L3 裁剪后重折叠 sha 不变"的前提。当前
-    /// `is_foldable_delta` 只认 `assistant.text.delta` / `assistant.thinking.delta`，
-    /// 聚合行会被当作不可折叠 → 退化为整行 `event` 段 → 正文与 sha 都变。
-    ///
-    /// 落地方式（ADR-0008 决定 6）：把 `is_foldable_delta` / `static_delta_type` 的类型表
-    /// 扩到 batch 类型并映射回基类型。聚合行的 `typedPayload.text` 已是拼接结果、
+    /// `*.delta.batch` 通过 `static_delta_type` 映射回基础 delta 类型。聚合行的
+    /// `typedPayload.text` 已是拼接结果、
     /// `identity`/`occurredAt` 沿用 run 首条，故折叠结果与折叠原始 chunk 必然相同。
     #[test]
-    #[ignore = "T1: is_foldable_delta 尚未接受 *.batch 类型；见 ADR-0008 决定 6"]
     fn fold_of_aggregated_row_equals_fold_of_original_chunks() {
         let chunks = vec![
             user(1, "问"),
@@ -490,5 +519,16 @@ mod tests {
             "聚合形态与原 chunk 形态的折叠必须字节相同"
         );
         assert_eq!(actual.segments, expected.segments);
+    }
+
+    #[test]
+    fn malformed_batch_span_is_preserved_as_an_event_segment() {
+        let malformed = batch(3, "assistant.text.delta", 2, 4, "甲乙", 2, "m1");
+        let fold = fold_turn_rows(&[malformed]);
+        assert_eq!(kinds(&fold.segments), vec!["event"]);
+        assert_eq!(
+            fold.segments[0]["event"]["eventType"],
+            json!("assistant.text.delta.batch")
+        );
     }
 }
