@@ -69,7 +69,7 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
     const schema = getSkinSchema()
 
     expect(schema.fields.inputVariant?.options).toEqual([...(THEME_FIELD_DEFS.inputVariant.options ?? [])])
-    expect(schema.fields.ccStyle?.options).toEqual([...(THEME_FIELD_DEFS.ccStyle.options ?? [])])
+    expect(schema.fields.ccVariant?.options).toEqual([...(THEME_FIELD_DEFS.ccVariant.options ?? [])])
 
     expect(schema.fields.ccLayout?.default).toEqual(DEFAULTS.ccLayout)
     expect(schema.fields.ccHidden?.default).toEqual(DEFAULTS.ccHidden)
@@ -80,7 +80,8 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
     const schema = getSkinSchema()
 
     expect(schema.componentVariants['input-bar']).toEqual([...(THEME_FIELD_DEFS.inputVariant.options ?? [])])
-    expect(schema.componentVariants['control-center']).toEqual([...(THEME_FIELD_DEFS.ccStyle.options ?? [])])
+    // 刀4：'control-center' 变体随 ccStyle 下线（用量条四形态移除）
+    expect(schema.componentVariants['control-center']).toBeUndefined()
     expect(schema.componentVariants.message).toEqual([...MESSAGE_ROLES])
     expect(schema.componentVariants['tool-call']).toEqual([...TOOL_VISUAL_STATES])
   })

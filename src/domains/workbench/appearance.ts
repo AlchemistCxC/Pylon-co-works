@@ -102,7 +102,6 @@ export interface WorkbenchAppearanceSnapshot {
   footerLayout: string
   cliOverflowMode: string
   ccVariant: string
-  ccStyle: string
   ccHeight: number
   ccBg: string
   ccBgImage: string
@@ -225,7 +224,6 @@ export function selectWorkbenchAppearance(
     footerLayout: theme.footerLayout,
     cliOverflowMode: theme.cliOverflowMode,
     ccVariant: theme.ccVariant,
-    ccStyle: theme.ccStyle,
     ccHeight: theme.ccHeight,
     ccBg: theme.ccBg,
     ccBgImage: theme.ccBgImage,
@@ -299,15 +297,6 @@ export function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSe
     cliLineWidth: theme.cliLineWidth,
     cliLineColor: theme.cliLineColor,
     cliLinePadding: theme.cliLinePadding,
-    ccStyle: theme.ccStyle,
-    ekgWidth: theme.ekgWidth,
-    ekgGreen: theme.ekgGreen,
-    ekgYellow: theme.ekgYellow,
-    ekgRed: theme.ekgRed,
-    barTrackColor: theme.barTrackColor,
-    barHeight: theme.barHeight,
-    barFillFollow: theme.barFillFollow,
-    barFillColor: theme.barFillColor,
     modelSwitchMode: theme.modelSwitchMode,
     modelBgColor: theme.modelBgColor,
     modelWidth: theme.modelWidth,

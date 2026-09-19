@@ -38,8 +38,19 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
  * 布局里 tokens 仍停在旧位置（status-primary/3），新默认位不生效。
  * 本版同时把 CC_LAYOUT_SCHEMA_VERSION 7→8：归一化遇到 v7 布局不在接受列表
  * [3,4,5,6,8] 内 → 整份布局回落默认值（用户已确认接受排版重置的代价）。
+ *
+ * v11（刀4 中控名单换代，2026-09-18）：中控元件名单旧 11 → 新 7。
+ * - 删 5 个 id（session / workspace / activity / ekg / tasks）连同它们的字段；
+ *   存量数据里的这些键在这里显式清掉（否则会随 state 流入 store）。
+ * - `ekg` 四形态仪表（wave / bar / ring / numeric）整体移除：`ccStyle` 与
+ *   `ekgWidth` / `ekgGreen` / `ekgYellow` / `ekgRed` / `barTrackColor` /
+ *   `barFillColor` / `barFillFollow` / `barHeight` 一并下线（实现留档见
+ *   `备份\ekg-留档\`，issue #170）。
+ * - legacy `send` 的槽位/显隐/缩放三处键迁到注册轨 id `cc-send-button`
+ *   （只改键名不改值；`ccLayout.placements` 的别名读取在 normalizeCcLayout 内）。
+ * 本版同时把 CC_LAYOUT_SCHEMA_VERSION 8→9，且白名单**显式保留 8** ⇒ 老布局不重置。
  */
-export const THEME_SCHEMA_VERSION = 10
+export const THEME_SCHEMA_VERSION = 11
 
 export type ThemeMigrationDefaults = {
   base: object
@@ -63,6 +74,29 @@ export function normalizeZoneRecord<T>(value: unknown, defaults: Record<string, 
   return Object.fromEntries(PRESET_ZONES.map(zone => [zone, valid(candidate[zone]) ? candidate[zone] : defaults[zone]])) as Record<string, T>
 }
 
+/** v11（刀4）：被删元件的 cc 主题字段 —— 旧数据显式清键，避免随 state 流入 store。 */
+const REMOVED_CC_THEME_KEYS = [
+  'ccStyle', 'ekgWidth', 'ekgGreen', 'ekgYellow', 'ekgRed',
+  'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
+] as const
+
+/** v11（刀4）：legacy `send` → 注册轨 id（槽位事实的继任者）。 */
+const LEGACY_CC_KEY_RENAMES: Readonly<Record<string, string>> = Object.freeze({ send: 'cc-send-button' })
+
+function renameLegacyCcHiddenKeys(value: unknown): unknown {
+  return Array.isArray(value)
+    ? value.map(id => LEGACY_CC_KEY_RENAMES[String(id)] ?? id)
+    : value
+}
+
+function renameLegacyCcScaleKeys(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([id, scale]) => [LEGACY_CC_KEY_RENAMES[id] ?? id, scale]),
+  )
+}
+
 export function normalizeThemeMigrationState(
   persisted: unknown,
   defaults: ThemeMigrationDefaults,
@@ -75,6 +109,10 @@ export function normalizeThemeMigrationState(
   delete state.ccPositions
   delete state.ccCliCustomized
   delete state.ccLayoutVersion
+  // v11（刀4）：名单换代的删键与改名（幂等；ccLayout.placements 的别名在 normalizeCcLayout 内）
+  for (const key of REMOVED_CC_THEME_KEYS) delete state[key]
+  state.ccHidden = renameLegacyCcHiddenKeys(state.ccHidden)
+  state.ccScale = renameLegacyCcScaleKeys(state.ccScale)
   const normalized: Record<string, unknown> = { ...defaults.base, ...state }
   // Older themes had one toolIndicator glyph. Preserve that choice when the
   // three state-specific fields are introduced instead of silently replacing
@@ -177,12 +215,11 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
     inputMode: migratedInputMode as CcInputMode,
     footerLayout: migratedFooterLayout as CcFooterLayout,
     hintMode: migratedHintMode as CcHintMode,
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-      inputMode: migratedInputMode as CcInputMode,
-      ccStyle: (state.ccStyle as string) || 'wave',
-      submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
-    }),
+      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+        hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
+        inputMode: migratedInputMode as CcInputMode,
+        submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
+      }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })
   state.customPresets = normalizeCustomPresets(state.customPresets)

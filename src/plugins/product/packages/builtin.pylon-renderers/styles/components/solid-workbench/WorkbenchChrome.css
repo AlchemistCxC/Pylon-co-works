@@ -413,11 +413,7 @@
 .solid-workbench-control-center-slot.is-empty .cc-edit-hdr,
 .solid-workbench-control-center-slot.is-empty .cc-edit-toolbar,
 .solid-workbench-control-center-slot.is-empty .cc-prop-panel { display: none; }
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='session'],
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='activity'],
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='ekg'],
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'],
-.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tasks'] { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'] { display: none; }
 .solid-workbench-control-center-slot.is-empty .cc-body {
   box-sizing: border-box;
   width: var(--cc-empty-content-width);

@@ -316,16 +316,17 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.destroy()
   })
 
-  it('恢复隐藏控件后同步抬高中控高度', () => {
+  it('显隐切换后 ccHeight 仍走最小高 clamp（刀4 后可见状态控件上限 4）', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({
       inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
-      ccHeight: 84,
-      ccHidden: ['session', 'workspace', 'activity', 'tokens', 'send', 'tasks'],
+      ccHeight: 20,
+      ccHidden: ['tokens'],
     }))
 
     store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false })
 
-    expect(store.getSnapshot()).toMatchObject({ ccHeight: 109 })
+    // 20 < 最小高 84（cli + peri + full hint；可见数 ≤ 4 不再触发状态行换行）
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 84 })
     store.destroy()
   })
 
@@ -337,7 +338,7 @@ describe('createStaticWorkbenchAppearanceStore', () => {
 
     store.dispatch({ type: 'set-cc-property', key: 'inputMode', value: 'cli' })
 
-    expect(store.getSnapshot()).toMatchObject({ inputMode: 'cli', ccHeight: 109 })
+    expect(store.getSnapshot()).toMatchObject({ inputMode: 'cli', ccHeight: 84 })
     store.destroy()
   })
 })

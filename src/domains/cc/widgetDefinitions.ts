@@ -9,7 +9,7 @@
 import type { ThemeSettings } from '../../store.ts'
 
 /** 全部中控 widget id（含输入栏、上下文、会话身份、运行态与动作按钮）。 */
-export const CC_WIDGET_IDS = ['input', 'session', 'workspace', 'model', 'reasoning', 'mode', 'activity', 'ekg', 'tokens', 'send', 'tasks'] as const
+export const CC_WIDGET_IDS = ['input', 'model', 'reasoning', 'mode', 'tokens'] as const
 export type CcWidgetId = (typeof CC_WIDGET_IDS)[number]
 
 /** 状态区 widget（除 input 外全部计入中控最小高度约束）——由 id 列表派生，不平行维护 */
@@ -17,15 +17,14 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
 
 // ── C4：属性表单 schema（PropertyPanel 由 registry 派生，消灭硬编码）──
 
-export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' | 'ekgGreen' | 'ekgYellow' | 'ekgRed' | 'barTrackColor' | 'barFillColor'
+export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor'
 export type CcNumberPropertyKey =
-  | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
+  | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
   | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
   | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'ccStyle' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
-export type CcBooleanPropertyKey = 'barFillFollow'
-export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
+export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey
 
 export type WidgetPropertyField =
   | { kind: 'section'; title: string }
@@ -37,17 +36,15 @@ export type WidgetPropertyField =
       label: string
       options: { value: string; label: string; sync?: { key: CcStringPropertyKey; value: string } }[]
     }
-  | { kind: 'chipsBool'; key: CcBooleanPropertyKey; label: string; trueLabel: string; falseLabel: string }
 
 export type CcPropertyCommand =
   | { readonly type: 'set-cc-property'; readonly key: CcColorPropertyKey | CcStringPropertyKey; readonly value: string }
   | { readonly type: 'set-cc-property'; readonly key: CcNumberPropertyKey; readonly value: number }
-  | { readonly type: 'set-cc-property'; readonly key: CcBooleanPropertyKey; readonly value: boolean }
 
-export type WidgetPropertyVisibilityContext = Pick<ThemeSettings, 'inputMode' | 'ccStyle' | 'barFillFollow'>
+export type WidgetPropertyVisibilityContext = Pick<ThemeSettings, 'inputMode'>
 
 export interface WidgetPropertyDef {
-  /** 条件显示（cli 字段只在 inputMode==='cli'、ekg 三色只在 wave 等） */
+  /** 条件显示（cli 字段只在 inputMode==='cli' 时出现） */
   showIf?: (theme: WidgetPropertyVisibilityContext) => boolean
 }
 
@@ -72,26 +69,6 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'number', key: 'cliLineWidth', label: '边框宽度', min: 1, max: 6, step: 0.1, showIf: t => t.inputMode === 'cli' },
     { kind: 'color', key: 'cliLineColor', label: '边框颜色', showIf: t => t.inputMode === 'cli' },
     { kind: 'number', key: 'cliLinePadding', label: '内边距', min: 0, max: 24, step: 0.1, showIf: t => t.inputMode === 'cli' },
-  ],
-  ekg: [
-    { kind: 'section', title: '用量条显示' },
-    {
-      kind: 'chips', key: 'ccStyle', label: '仪表类型',
-      options: [
-        { value: 'wave', label: '活动波形' },
-        { value: 'bar', label: '用量进度条' },
-        { value: 'ring', label: '环形进度' },
-        { value: 'numeric', label: '百分比数值' },
-      ],
-    },
-    { kind: 'number', key: 'ekgWidth', label: '宽度', min: 80, max: 400, step: 0.1 },
-    { kind: 'color', key: 'ekgGreen', label: '正常状态', showIf: t => t.ccStyle === 'wave' },
-    { kind: 'color', key: 'ekgYellow', label: '警示状态', showIf: t => t.ccStyle === 'wave' },
-    { kind: 'color', key: 'ekgRed', label: '危险状态', showIf: t => t.ccStyle === 'wave' },
-    { kind: 'color', key: 'barTrackColor', label: '轨道颜色', showIf: t => t.ccStyle === 'bar' },
-    { kind: 'number', key: 'barHeight', label: '高度', min: 4, max: 40, step: 0.1, showIf: t => t.ccStyle === 'bar' },
-    { kind: 'chipsBool', key: 'barFillFollow', label: '填充色跟随用量', trueLabel: '三段色', falseLabel: '固定色', showIf: t => t.ccStyle === 'bar' },
-    { kind: 'color', key: 'barFillColor', label: '填充颜色', showIf: t => t.ccStyle === 'bar' && t.barFillFollow === false },
   ],
   model: [
     { kind: 'section', title: '模型控件' },
@@ -129,33 +106,15 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, readonly (WidgetProperty
     { kind: 'number', key: 'permissionFontSize', label: '字号', min: 8, max: 32, step: 1 },
     { kind: 'chips', key: 'permissionTextColor', label: '文字颜色', options: [{ value: 'mode', label: '跟模式' }, { value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
   ],
-  send: [
-    { kind: 'section', title: '发送按钮外观' },
-    {
-      kind: 'chips', key: 'sendVariant', label: '外观风格',
-      options: [
-        { value: 'icon', label: '圆形' },
-        { value: 'square', label: '方形' },
-        { value: 'minimal', label: '极简' },
-      ],
-    },
-  ],
   tokens: [],
-  tasks: [],
-  session: [],
-  workspace: [],
-  activity: [],
 }
 
 export interface WidgetVisibilityCtx {
   hidden: readonly string[]
   inputMode: string
   submitButtonMode: string
-  ccStyle: string
   /** 编辑模式：全显（隐藏/模式互斥规则不生效） */
   editMode?: boolean
-  /** 经典终端冻结：新增图形控件在正常态不进入其布局。 */
-  presentationProfileId?: string
 }
 
 /**
@@ -165,24 +124,5 @@ export interface WidgetVisibilityCtx {
 export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   const edit = ctx.editMode === true
   if (!edit && ctx.hidden.includes(id)) return false
-  if (!edit
-    && ctx.presentationProfileId === 'builtin.presentation.terminal-classic'
-    && (id === 'session' || id === 'workspace' || id === 'activity')) return false
-  // numeric 模式：百分比由「用量」控件（tokens）表达，隐藏 ekg 数值避免重复。
-  // ring 模式的去重规则随 pct 控件一并移除（S11）——ring 环与用量百分比会重复显示，
-  // 已接受；待「把用量条整合进用量控件」那一单统一收口。
-  if (!edit && ctx.ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('tokens')) return false
-  // 独立 send widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮
-  if (id === 'send') {
-    if (!edit && !isExternalSubmitMode(ctx)) return false
-  }
   return true
-}
-
-/**
- * 外部按钮模式（send/attach 独立 widget 渲染的前提）：非 CLI + submitButtonMode=external。
- * 单一真值：isWidgetVisible 统一消费此判定，改判定一处即可。
- */
-export function isExternalSubmitMode(ctx: Pick<WidgetVisibilityCtx, 'inputMode' | 'submitButtonMode'>): boolean {
-  return ctx.inputMode !== 'cli' && ctx.submitButtonMode === 'external'
 }
