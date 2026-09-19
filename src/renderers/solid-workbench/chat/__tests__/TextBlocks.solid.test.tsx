@@ -39,6 +39,43 @@ describe('SolidCodeBlock (C00)', () => {
     expect(copyButton.getAttribute('data-copy-text')).toBe(long)
   })
 
+  it('#208：折叠提示可展开（有界步长）与收起——长正文不再只能靠复制才能读全', async () => {
+    const { fireEvent } = await import('@solidjs/testing-library')
+    const long = Array.from({ length: 400 }, (_, i) => `line-${i}`).join('\n')
+    const result = render(() => <SolidCodeBlock code={long} language="text" maxLines={50} />)
+    const block = result.container.querySelector('.term-code-block')!
+    const visibleLines = () => result.container.querySelectorAll('.term-code-line').length
+    const foldedLines = () => Number((result.container.querySelector('.term-code-folded span')?.textContent ?? '').replace(/\D/g, ''))
+
+    // 默认折叠态与改造前一致：可见行 ≤ maxLines + 1 个截断行，提示含「已折叠」
+    expect(visibleLines()).toBeLessThanOrEqual(52)
+    expect(block.getAttribute('data-folded')).toBe('true')
+    const firstFoldVisible = visibleLines()
+
+    // 展开一步：增量有界（≤ maxLines + 1），仍处于折叠态
+    await fireEvent.click(result.getByRole('button', { name: /显示更多/ }))
+    const afterOneStep = visibleLines()
+    expect(afterOneStep).toBeGreaterThan(firstFoldVisible)
+    expect(afterOneStep - firstFoldVisible).toBeLessThanOrEqual(52)
+    expect(block.getAttribute('data-folded')).toBe('true')
+    expect(foldedLines()).toBeGreaterThan(0)
+
+    // 收起：回到默认折叠态
+    await fireEvent.click(result.getByRole('button', { name: '收起' }))
+    expect(visibleLines()).toBe(firstFoldVisible)
+    expect(block.getAttribute('data-folded')).toBe('true')
+
+    // 连续展开到底：可见行 = 全文行数、折叠提示消失、data-folded=false
+    for (let step = 0; step < 12 && block.getAttribute('data-folded') === 'true'; step += 1) {
+      await fireEvent.click(result.getByRole('button', { name: /显示更多/ }))
+    }
+    expect(block.getAttribute('data-folded')).toBe('false')
+    expect(visibleLines()).toBe(400)
+    expect(result.container.textContent).not.toContain('已折叠')
+    // 复制始终携带全文（与是否展开无关）
+    expect(result.getByRole('button', { name: /复制/ }).getAttribute('data-copy-text')).toBe(long)
+  })
+
   it('copies via clipboard adapter and shows copied feedback', async () => {
     let copiedText: string | undefined
     const result = render(() => <SolidCodeBlock code="hello" language="txt" onCopy={text => { copiedText = text }} />)
