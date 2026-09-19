@@ -363,3 +363,21 @@
 - 文档：`docs/说明书/Pylon-CLI-命令表.md`、`.agents/decisions/0015-*`、`.agents/records/`（新增一篇）
 
 **对在途改动的报备**：工作树里有他人未提交改动（`src/__tests__/replay/*`、`src/domains/events/canonicalTurnDuration.ts`、`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`），我方不触碰、不暂存、不连带提交，全部提交走 pathspec。
+
+---
+
+[2026-09-20 02] [Miyaki Kumo] [#205]
+
+**开工：切会话冷读的「未覆盖 delta 全量下发 + Θ(N²) 投影 + 载荷物化」重构**（页面空白数分钟 / pylon.exe 峰值 600MB 的根因层）。spec 见 `.agents/spec/205-replay-projection-linearization.md`，分支沿用 `Ru5t/Reflector`。
+
+**规模事实**：生产库单 owner 135,826 行中 133,745 行是 `assistant.thinking.delta`；单回合实测未覆盖 79,682 行；投影实测每翻倍 ×4.0（40k 行 49.5s）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- 前端投影：`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`（仅 bind/refresh 的中间数组与拷贝，不动绑定判据语义）
+- 前端测试：新增 `src/__tests__/replay/projectionLinearization.test.ts`（**新增文件**；他人 scratch `__scratch.debug.test.ts` 与根目录 `bench-replay.tmp.ts` 我不动、不暂存）
+- 后端读：`src-tauri/src/session/event_repo.rs`（**与 #155 T2 声明域重叠，特此报备**——我只动 `load_events_compact` 与其新增的「尾部 delta 折叠」助手 + 该文件内的测试；不碰 migrations、`msg_repo/**`、写路径 `append_events`、裁剪 `rollup_trim`）
+- 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节 compact 读语义）、`.agents/records/`（新增一篇）、`.agents/spec/`、本文件
+
+**我方不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/persist.rs`、`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例（三者均为在途改动）、`src/components/__tests__/Sidebar.css.test.ts`。
+
+**给 #155（Miyaki Kumo）的报备**：读侧折叠正是 T3「聚合读/draft 尾巴」中「尾部未覆盖行」的那一半。我按用户本轮的明确授权（「准许引入高性能算法与库，彻底重构这个糟糕的内存大户」）先行落地读侧，**不改写路径、不改 schema**；若你 T3 另有设计，以你的为准，我这部分可让位。
