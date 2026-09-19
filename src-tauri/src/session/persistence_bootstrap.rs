@@ -78,7 +78,8 @@ mod tests {
         let services = PersistenceServices::open(&db.path).expect("bootstrap services");
 
         let connection = rusqlite::Connection::open(&db.path).expect("inspect database");
-        for table in ["sessions", "user_data", "canonical_events"] {
+        // #155 T2（v15）：sessions 死表已删除。
+        for table in ["user_data", "canonical_events", "deleted_sessions"] {
             let exists: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",

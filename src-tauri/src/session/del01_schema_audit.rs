@@ -103,7 +103,7 @@ fn user_index_names(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn schema_version_is_v13_versioned_canonical_envelope_baseline() {
+fn schema_version_is_v15_rebuilt_canonical_storage_baseline() {
     let conn = audit_db();
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -113,8 +113,8 @@ fn schema_version_is_v13_versioned_canonical_envelope_baseline() {
         "user_version 必须等于 SCHEMA_VERSION"
     );
     assert_eq!(
-        version, 14,
-        "审计基线 = v14（v13 + #81 rollup：canonical_events.rollup_seq_start/seq_end + rollup_migration_state 进度表）。后续迁移必须显式递增并更新本基线"
+        version, 15,
+        "审计基线 = v15（#155 T2：canonical_events 15 列 + (owner_key,sequence) WITHOUT ROWID 主键 +         auto_vacuum=INCREMENTAL + application_id；旧库检测→重建，无升版搬迁）。后续迁移必须显式递增并更新本基线"
     );
 }
 
@@ -126,29 +126,21 @@ fn table_inventory_baseline() {
     let expected = vec![
         "canonical_events",
         "deleted_sessions",
-        "legacy_message_backfill_audit",
         "retention_policy",
         "rollup_migration_state",
         "session_state_snapshots",
-        "sessions",
         "user_data",
     ];
     assert_eq!(
         tables, expected,
-        "DEL-01 审计：v14 active 表清单必须与 SCHEMA_SQL 一致。旧 messages active names 不得存在"
+        "DEL-01 审计：v15 active 表清单必须与 SCHEMA_SQL 一致。#155 T2 死表清理：sessions 与         legacy_message_backfill_audit 已删除；旧 messages active names 不得存在"
     );
 }
 
 #[test]
 fn column_inventory_owner_gap_baseline() {
     let conn = audit_db();
-    // sessions：owner 缺口——无 profile_id/agent_id/remote_session_id/source/generation/
-    // deletion_revision（§5.12 目标增量模型 session_records 的升级点）；v8 有 session_state。
-    assert_eq!(
-        column_names(&conn, "sessions"),
-        vec!["session_id", "created_at", "updated_at", "session_state"],
-        "DEL-01 审计：sessions 列集（v8 session_state + owner 缺口）。DEL-02 升级后更新本基线"
-    );
+    // #155 T2（v15）：sessions 死表已删除（生产会话行由 user_data envelope 维护）。
     // deleted_sessions：v12 owner_key 主键 + exact/legacy scope。
     assert_eq!(
         column_names(&conn, "deleted_sessions"),
@@ -177,22 +169,41 @@ fn column_inventory_owner_gap_baseline() {
         ],
         "v10 state snapshot 必须以完整 durable owner 键控；remote id 仅为映射",
     );
-    // canonical_events：owner 已覆盖（EVT-02 v6，owner 化样板）——含 owner_key 与
-    // 分维列（profile_id/agent_id/local_session_id/remote_session_id）。
+    // canonical_events：#155 T2（v15）存储收窄——15 列 + (owner_key, sequence)
+    // WITHOUT ROWID 聚簇主键；event_id/owner 分维列/provenance 四字段/raw_* 计数
+    // 均为读侧派生，不得落库（wire 28 字段契约不变）。
     let ce = column_names(&conn, "canonical_events");
-    for required in [
-        "event_id",
+    let expected_ce = [
         "owner_key",
+        "remote_session_id",
+        "sequence",
+        "client_generation",
+        "occurred_at",
+        "received_at",
+        "event_type",
+        "payload_version",
+        "identity",
+        "typed_payload",
+        "raw_payload",
+        "created_at",
+        "provenance",
+        "rollup_seq_start",
+        "rollup_seq_end",
+    ];
+    assert_eq!(
+        ce, expected_ce,
+        "v15 canonical_events 列集必须与 SCHEMA_SQL 一致（存储 15 列）"
+    );
+    for derived in [
+        "event_id",
         "profile_id",
         "agent_id",
         "local_session_id",
-        "remote_session_id",
-        "sequence",
-        "raw_payload",
+        "schema_version",
     ] {
         assert!(
-            ce.iter().any(|column| column == required),
-            "canonical_events 必须携带 owner 列 {required}（EVT-02 owner 化样板）；当前列 {ce:?}"
+            !ce.iter().any(|column| column == derived),
+            "v15 派生列不得落库: {derived}；当前列 {ce:?}"
         );
     }
 }
@@ -200,13 +211,15 @@ fn column_inventory_owner_gap_baseline() {
 #[test]
 fn index_inventory_baseline() {
     let conn = audit_db();
-    // 既有：canonical_events(local_session_id, sequence) 会话内序列索引。
+    // #155 T2（v15）：idx_canonical_events_session_seq 已删——(owner_key, sequence)
+    // WITHOUT ROWID 聚簇主键本身就是 owner 前缀有序的访问路径，(local_session_id,
+    // sequence) 无生产查询面。canonical_events 的唯一索引即主键本身。
     let ce_indexes = index_names(&conn, "canonical_events");
     assert!(
         ce_indexes
             .iter()
-            .any(|index| index == "idx_canonical_events_session_seq"),
-        "canonical_events 缺少 idx_canonical_events_session_seq；当前 {ce_indexes:?}"
+            .any(|index| index.starts_with("sqlite_autoindex")),
+        "canonical_events 主键聚簇以 sqlite_autoindex 形式登记；当前 {ce_indexes:?}"
     );
     // DEL-02：deleted_sessions 已新增 §5.12 建议的 (state, deleted_at) 复合索引
     // （deleting/deleted 列表过滤与 orphan cleanup 扫描）。
@@ -224,7 +237,6 @@ fn index_inventory_baseline() {
     // 缺口（保留）：无 (agent_id, profile_id, updated_at) 会话活动索引（§5.12 建议；owner 化后按 agent 过滤会话列表需要）。
     let user_indexes = user_index_names(&conn);
     let mut expected_indexes = vec![
-        "idx_canonical_events_session_seq".to_string(),
         "idx_deleted_sessions_state_deleted_at".to_string(),
         "idx_deleted_sessions_session_id".to_string(),
         "idx_session_state_snapshots_remote".to_string(),
@@ -232,7 +244,7 @@ fn index_inventory_baseline() {
     expected_indexes.sort();
     assert_eq!(
         user_indexes, expected_indexes,
-        "审计：全库用户索引应包含 canonical、tombstone 与 state remote mapping；新增索引必须更新本基线"
+        "审计：v15 全库用户索引只剩 tombstone 与 state remote mapping；新增/删除索引必须更新本基线"
     );
 }
 
@@ -325,10 +337,6 @@ fn tombstone_gate_and_delete_semantics_baseline() {
 
     // tombstone 写入 + canonical_events 留存，逐项核验。
     let conn = Connection::open(&path).expect("open final inspect conn");
-    let sessions: i64 = conn
-        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
-        .expect("count sessions");
-    assert_eq!(sessions, 0, "delete_session 必须删除 sessions 行");
     let tombstone: i64 = conn
         .query_row("SELECT COUNT(*) FROM deleted_sessions", [], |row| {
             row.get(0)

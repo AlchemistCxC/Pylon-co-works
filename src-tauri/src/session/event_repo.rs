@@ -139,17 +139,122 @@ struct KernelEventInput {
 
 const MAX_CANONICAL_RAW_BYTES: usize = 64 * 1024;
 
+// ── #155 T2（v15）存储收窄：15 列 + 读侧派生 ─────────────────────────────────
+// wire/EVT-01 的 28 字段契约不变；event_id/owner 分维列/schema_version/provenance
+// 四字段/raw_* 截断计数不落库，读侧由 `owner_triple`/`provenance_parts`/
+// `derive_raw_metadata` 派生（推导依据与勘察记录见 .agents/spec/155-t2-schema-rebuild.md）。
+
+/// v15：provenance (origin, trust) 合法的五组合整数编码。`parse_canonical_event`
+/// 已把组合钉死为 local-observed ⇔ authoritative、其余 ⇔ unverified。
+const PROVENANCE_LOCAL_OBSERVED: i64 = 0;
+const PROVENANCE_RECOVERY_IMPORT: i64 = 1;
+const PROVENANCE_OPTIMISTIC_LOCAL: i64 = 2;
+const PROVENANCE_MIGRATION: i64 = 3;
+const PROVENANCE_PLUGIN: i64 = 4;
+
+fn provenance_code(origin: &str, trust: &str) -> i64 {
+    match (origin, trust) {
+        ("local-observed", "authoritative") => PROVENANCE_LOCAL_OBSERVED,
+        ("recovery-import", "unverified") => PROVENANCE_RECOVERY_IMPORT,
+        ("optimistic-local", "unverified") => PROVENANCE_OPTIMISTIC_LOCAL,
+        ("migration", "unverified") => PROVENANCE_MIGRATION,
+        ("plugin", "unverified") => PROVENANCE_PLUGIN,
+        // 不可达（写入前已验证）；防御性归入 migration/unverified 保持读侧枚举合法。
+        _ => PROVENANCE_MIGRATION,
+    }
+}
+
+/// 读侧还原 wire provenance 四字段。provider/import_id 按组合派生：kernel 写入
+/// provider 恒为 agent_id、recovery-import 的 importId 恒为 local_session_id
+/// （全代码域唯一取值，2026-09-19 勘察）。
+fn provenance_parts(
+    code: i64,
+    agent_id: &str,
+    local_session_id: &str,
+) -> (String, String, Option<String>, Option<String>) {
+    match code {
+        PROVENANCE_LOCAL_OBSERVED => (
+            "local-observed".to_string(),
+            "authoritative".to_string(),
+            Some(agent_id.to_string()),
+            None,
+        ),
+        PROVENANCE_RECOVERY_IMPORT => (
+            "recovery-import".to_string(),
+            "unverified".to_string(),
+            Some(agent_id.to_string()),
+            Some(local_session_id.to_string()),
+        ),
+        PROVENANCE_OPTIMISTIC_LOCAL => (
+            "optimistic-local".to_string(),
+            "unverified".to_string(),
+            None,
+            None,
+        ),
+        PROVENANCE_PLUGIN => ("plugin".to_string(), "unverified".to_string(), None, None),
+        _ => (
+            "migration".to_string(),
+            "unverified".to_string(),
+            None,
+            None,
+        ),
+    }
+}
+
+/// owner 三元组自主键文本派生（owner_key = JSON 数组 [profile, agent, local]）。
+/// 形状异常回退空串（与 TS `normalizeCanonicalEventRow` 对缺失 owner 的容错同向）。
+fn owner_triple(owner_key: &str) -> (String, String, String) {
+    serde_json::from_str::<Vec<String>>(owner_key)
+        .ok()
+        .and_then(|parts| {
+            if parts.len() == 3 {
+                Some((parts[0].clone(), parts[1].clone(), parts[2].clone()))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// raw 截断元数据自 raw_payload 文本重算（wire 注释既有纪律：「截断信息由 rawPayload
+/// 重算」）——截断 stub 自带 `_pylonTruncated`/`originalBytes`，retained = 入库文本长度。
+/// 返回 (truncated, original_bytes, retained_bytes, omitted_bytes, reason)。
+fn derive_raw_metadata(raw_payload_json: &str) -> (bool, i64, i64, i64, Option<String>) {
+    let retained = raw_payload_json.len() as i64;
+    let stub_original = serde_json::from_str::<serde_json::Value>(raw_payload_json)
+        .ok()
+        .filter(|value| {
+            value
+                .get("_pylonTruncated")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        })
+        .and_then(|value| {
+            value
+                .get("originalBytes")
+                .and_then(serde_json::Value::as_i64)
+        });
+    match stub_original {
+        Some(original) => (
+            true,
+            original,
+            retained,
+            original.saturating_sub(retained),
+            Some("size".to_string()),
+        ),
+        None => (false, retained, retained, 0, None),
+    }
+}
+
 // 高频 SQL 常量：append/ingest 热路径共用同一 SQL 文本，
 // 配合 Connection::prepare_cached 让语句只编译一次（缓存随连接存活）。
+// 主键 (owner_key, sequence) 即去重键（v15 起无 event_id 列；eventId 由 rule 1 推导）。
 const INSERT_EVENT_SQL: &str = "INSERT INTO canonical_events
-     (event_id, owner_key, profile_id, agent_id, local_session_id,
-      remote_session_id, client_generation, sequence, occurred_at,
+     (owner_key, remote_session_id, sequence, client_generation, occurred_at,
       received_at, event_type, payload_version, identity, typed_payload,
-      raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
-      provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
-      raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason)
- VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
- ON CONFLICT(event_id) DO NOTHING";
+      raw_payload, created_at, provenance)
+ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+ ON CONFLICT(owner_key, sequence) DO NOTHING";
 const TOMBSTONE_STATE_SQL: &str = "SELECT state FROM deleted_sessions
      WHERE owner_key = ?1 OR (session_id = ?2 AND owner_scope = 'legacy')
      LIMIT 1";
@@ -157,19 +262,72 @@ const MAX_SEQUENCE_SQL: &str = "SELECT MAX(sequence) FROM canonical_events WHERE
 /// #81 L2：终结边界查询（上一 turn 的 terminal/unit 最大 sequence）。
 const LAST_TURN_BOUNDARY_SQL: &str = "SELECT COALESCE(MAX(sequence), 0) FROM canonical_events
      WHERE owner_key = ?1 AND event_type IN ('turn.completed', 'turn.failed', 'turn.unit') AND sequence < ?2";
-/// #81 L2：行集列清单（list/compact/trim 三路共用；尾部 rollup 列为 turn.unit 专用）。
-const EVENT_COLUMNS: &str = "event_id, owner_key, profile_id, agent_id, local_session_id,         remote_session_id, client_generation, sequence, occurred_at, received_at, event_type,         payload_version, identity, typed_payload, raw_payload, created_at, schema_version,         provenance_origin, provenance_trust, provenance_provider, provenance_import_id,         raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes,         raw_truncation_reason, rollup_seq_start, rollup_seq_end";
-/// #81 L2：turn.unit 行 INSERT（额外填充 rollup 覆盖跨度列）。
-const INSERT_UNIT_EVENT_SQL: &str = "INSERT INTO canonical_events
-     (event_id, owner_key, profile_id, agent_id, local_session_id,
-      remote_session_id, client_generation, sequence, occurred_at,
-      received_at, event_type, payload_version, identity, typed_payload,
-      raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
-      provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
-      raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason,
-      rollup_seq_start, rollup_seq_end)
- VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
- ON CONFLICT(event_id) DO NOTHING";
+/// v15 存储列序（list/compact/trim 三路共用；尾部 rollup 列为 turn.unit 专用）。
+const EVENT_COLUMNS: &str = "owner_key, remote_session_id, sequence, client_generation, occurred_at, received_at, event_type, payload_version, identity, typed_payload, raw_payload, created_at, provenance, rollup_seq_start, rollup_seq_end";
+
+/// v15 瘦身行写入（append/ingest/turn.unit 三路共用）：派生字段在 `map_event_row`
+/// 读侧还原，这里只绑存储 15 列；rollup 覆盖跨度仅 turn.unit 行携带。
+fn execute_insert_event(
+    tx: &rusqlite::Transaction<'_>,
+    event: &CanonicalEventRow,
+    rollup: Option<(i64, i64)>,
+) -> Result<usize, EventError> {
+    let provenance = provenance_code(&event.provenance_origin, &event.provenance_trust);
+    let identity = event.identity.as_ref().map(serde_json::Value::to_string);
+    let typed_payload = event
+        .typed_payload
+        .as_ref()
+        .map(serde_json::Value::to_string);
+    match rollup {
+        Some((rollup_seq_start, rollup_seq_end)) => tx
+            .prepare_cached(
+                "INSERT INTO canonical_events
+                 (owner_key, remote_session_id, sequence, client_generation, occurred_at,
+                  received_at, event_type, payload_version, identity, typed_payload,
+                  raw_payload, created_at, provenance, rollup_seq_start, rollup_seq_end)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 ON CONFLICT(owner_key, sequence) DO NOTHING",
+            )
+            .map_err(EventError::from)?
+            .execute(params![
+                event.owner_key,
+                event.remote_session_id,
+                event.sequence,
+                event.client_generation,
+                event.occurred_at,
+                event.received_at,
+                event.event_type,
+                event.payload_version,
+                identity,
+                typed_payload,
+                event.raw_payload_json,
+                event.created_at,
+                provenance,
+                rollup_seq_start,
+                rollup_seq_end,
+            ])
+            .map_err(EventError::from),
+        None => tx
+            .prepare_cached(INSERT_EVENT_SQL)
+            .map_err(EventError::from)?
+            .execute(params![
+                event.owner_key,
+                event.remote_session_id,
+                event.sequence,
+                event.client_generation,
+                event.occurred_at,
+                event.received_at,
+                event.event_type,
+                event.payload_version,
+                identity,
+                typed_payload,
+                event.raw_payload_json,
+                event.created_at,
+                provenance,
+            ])
+            .map_err(EventError::from),
+    }
+}
 
 fn is_journal_credential_key(key: &str, interaction_payload: bool) -> bool {
     let normalized = key
@@ -962,42 +1120,55 @@ pub(crate) fn canonical_event_wire(row: &CanonicalEventRow) -> serde_json::Value
     serde_json::Value::Object(event)
 }
 
-/// 事件行映射（EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。
+/// 事件行映射（v15 EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。
+/// 派生字段（event_id/owner 三元组/provenance 四字段/raw_* 计数）在此还原。
 fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredCanonicalEventRow> {
-    let identity: Option<String> = row.get(12)?;
-    let typed: Option<String> = row.get(13)?;
-    let raw: String = row.get(14)?;
+    let owner_key: String = row.get(0)?;
+    let sequence: i64 = row.get(2)?;
+    let identity: Option<String> = row.get(8)?;
+    let typed: Option<String> = row.get(9)?;
+    let raw: String = row.get(10)?;
+    let (profile_id, agent_id, local_session_id) = owner_triple(&owner_key);
+    let (provenance_origin, provenance_trust, provenance_provider, provenance_import_id) =
+        provenance_parts(row.get(12)?, &agent_id, &local_session_id);
+    let (
+        raw_truncated,
+        raw_original_bytes,
+        raw_retained_bytes,
+        raw_omitted_bytes,
+        raw_truncation_reason,
+    ) = derive_raw_metadata(&raw);
     Ok(StoredCanonicalEventRow {
         event: CanonicalEventRow {
-            event_id: row.get(0)?,
-            owner_key: row.get(1)?,
-            profile_id: row.get(2)?,
-            agent_id: row.get(3)?,
-            local_session_id: row.get(4)?,
-            remote_session_id: row.get(5)?,
-            client_generation: row.get(6)?,
-            sequence: row.get(7)?,
-            occurred_at: row.get(8)?,
-            received_at: row.get(9)?,
-            event_type: row.get(10)?,
-            payload_version: row.get(11)?,
+            event_id: format!("{owner_key}#{sequence}"),
+            owner_key,
+            profile_id,
+            agent_id,
+            local_session_id,
+            remote_session_id: row.get(1)?,
+            client_generation: row.get(3)?,
+            sequence,
+            occurred_at: row.get(4)?,
+            received_at: row.get(5)?,
+            event_type: row.get(6)?,
+            payload_version: row.get(7)?,
             identity: None,
             typed_payload: None,
             raw_payload: serde_json::Value::Null,
             raw_payload_json: String::new(),
-            created_at: row.get(15)?,
-            schema_version: row.get(16)?,
-            provenance_origin: row.get(17)?,
-            provenance_trust: row.get(18)?,
-            provenance_provider: row.get(19)?,
-            provenance_import_id: row.get(20)?,
-            raw_truncated: row.get::<_, i64>(21)? != 0,
-            raw_original_bytes: row.get(22)?,
-            raw_retained_bytes: row.get(23)?,
-            raw_omitted_bytes: row.get(24)?,
-            raw_truncation_reason: row.get(25)?,
-            rollup_seq_start: row.get(26)?,
-            rollup_seq_end: row.get(27)?,
+            created_at: row.get(11)?,
+            schema_version: 1,
+            provenance_origin,
+            provenance_trust,
+            provenance_provider,
+            provenance_import_id,
+            raw_truncated,
+            raw_original_bytes,
+            raw_retained_bytes,
+            raw_omitted_bytes,
+            raw_truncation_reason,
+            rollup_seq_start: row.get(13)?,
+            rollup_seq_end: row.get(14)?,
         },
         identity_json: identity,
         typed_payload_json: typed,
@@ -1152,41 +1323,7 @@ impl EventRepo {
         let mut inserted = Vec::new();
         let mut revision = current;
         for event in events {
-            let changed = tx
-                .prepare_cached(INSERT_EVENT_SQL)
-                .map_err(EventError::from)?
-                .execute(params![
-                    event.event_id,
-                    event.owner_key,
-                    event.profile_id,
-                    event.agent_id,
-                    event.local_session_id,
-                    event.remote_session_id,
-                    event.client_generation,
-                    event.sequence,
-                    event.occurred_at,
-                    event.received_at,
-                    event.event_type,
-                    event.payload_version,
-                    event.identity.as_ref().map(serde_json::Value::to_string),
-                    event
-                        .typed_payload
-                        .as_ref()
-                        .map(serde_json::Value::to_string),
-                    event.raw_payload_json.as_str(),
-                    event.created_at,
-                    event.schema_version,
-                    event.provenance_origin,
-                    event.provenance_trust,
-                    event.provenance_provider,
-                    event.provenance_import_id,
-                    event.raw_truncated,
-                    event.raw_original_bytes,
-                    event.raw_retained_bytes,
-                    event.raw_omitted_bytes,
-                    event.raw_truncation_reason,
-                ])
-                .map_err(EventError::from)?;
+            let changed = execute_insert_event(&tx, event, None)?;
             if changed > 0 {
                 revision = revision.max(event.sequence);
                 inserted.push(event.clone());
@@ -1269,40 +1406,7 @@ impl EventRepo {
         let mut result_events = Vec::with_capacity(inputs.len());
         for input in inputs {
             let event = normalize_kernel_event(input, final_revision + 1)?;
-            tx.prepare_cached(INSERT_EVENT_SQL)
-                .map_err(EventError::from)?
-                .execute(params![
-                    event.event_id,
-                    event.owner_key,
-                    event.profile_id,
-                    event.agent_id,
-                    event.local_session_id,
-                    event.remote_session_id,
-                    event.client_generation,
-                    event.sequence,
-                    event.occurred_at,
-                    event.received_at,
-                    event.event_type,
-                    event.payload_version,
-                    event.identity.as_ref().map(serde_json::Value::to_string),
-                    event
-                        .typed_payload
-                        .as_ref()
-                        .map(serde_json::Value::to_string),
-                    event.raw_payload_json.as_str(),
-                    event.created_at,
-                    event.schema_version,
-                    event.provenance_origin,
-                    event.provenance_trust,
-                    event.provenance_provider,
-                    event.provenance_import_id,
-                    event.raw_truncated,
-                    event.raw_original_bytes,
-                    event.raw_retained_bytes,
-                    event.raw_omitted_bytes,
-                    event.raw_truncation_reason,
-                ])
-                .map_err(EventError::from)?;
+            execute_insert_event(&tx, &event, None)?;
             final_revision = event.sequence;
             result_events.push(event.clone());
 
@@ -1326,42 +1430,11 @@ impl EventRepo {
                 ) {
                     Ok(unit) => {
                         let unit_sequence = unit.sequence;
-                        let inserted = tx
-                            .prepare_cached(INSERT_UNIT_EVENT_SQL)
-                            .map_err(EventError::from)?
-                            .execute(rusqlite::params![
-                                unit.event_id,
-                                unit.owner_key,
-                                unit.profile_id,
-                                unit.agent_id,
-                                unit.local_session_id,
-                                unit.remote_session_id,
-                                unit.client_generation,
-                                unit.sequence,
-                                unit.occurred_at,
-                                unit.received_at,
-                                unit.event_type,
-                                unit.payload_version,
-                                unit.identity.as_ref().map(serde_json::Value::to_string),
-                                unit.typed_payload
-                                    .as_ref()
-                                    .map(serde_json::Value::to_string),
-                                unit.raw_payload_json.as_str(),
-                                unit.created_at,
-                                unit.schema_version,
-                                unit.provenance_origin,
-                                unit.provenance_trust,
-                                unit.provenance_provider,
-                                unit.provenance_import_id,
-                                unit.raw_truncated,
-                                unit.raw_original_bytes,
-                                unit.raw_retained_bytes,
-                                unit.raw_omitted_bytes,
-                                unit.raw_truncation_reason,
-                                unit.rollup_seq_start,
-                                unit.rollup_seq_end,
-                            ])
-                            .map_err(EventError::from)?;
+                        let inserted = execute_insert_event(
+                            &tx,
+                            &unit,
+                            unit.rollup_seq_start.zip(unit.rollup_seq_end),
+                        )?;
                         // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
                         // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
                         if inserted > 0 {
@@ -1398,9 +1471,7 @@ impl EventRepo {
             .prepare_cached(
                 "SELECT EXISTS(
                 SELECT 1 FROM canonical_events
-                WHERE owner_key = ?1
-                  AND provenance_origin = 'local-observed'
-                  AND provenance_trust = 'authoritative'
+                WHERE owner_key = ?1 AND provenance = 0
             )",
             )
             .map_err(EventError::from)?
@@ -1422,64 +1493,17 @@ impl EventRepo {
             .lock()
             .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
         let mut stmt = conn
-            .prepare_cached(
-                "SELECT event_id, owner_key, profile_id, agent_id, local_session_id,
-                        remote_session_id, client_generation, sequence, occurred_at,
-                        received_at, event_type, payload_version, identity, typed_payload,
-                        raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
-                        provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
-                        raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason,
-                        rollup_seq_start, rollup_seq_end
-                 FROM canonical_events
+            .prepare_cached(&format!(
+                "SELECT {EVENT_COLUMNS} FROM canonical_events
                  WHERE owner_key = ?1 AND (?2 IS NULL OR sequence < ?2)
                  ORDER BY sequence DESC
-                 LIMIT ?3",
-            )
+                 LIMIT ?3"
+            ))
             .map_err(EventError::from)?;
         let rows = stmt
             .query_map(
                 params![owner_key, before_sequence, i64::from(limit)],
-                |row| {
-                    let identity: Option<String> = row.get(12)?;
-                    let typed: Option<String> = row.get(13)?;
-                    let raw: String = row.get(14)?;
-                    Ok(StoredCanonicalEventRow {
-                        event: CanonicalEventRow {
-                            event_id: row.get(0)?,
-                            owner_key: row.get(1)?,
-                            profile_id: row.get(2)?,
-                            agent_id: row.get(3)?,
-                            local_session_id: row.get(4)?,
-                            remote_session_id: row.get(5)?,
-                            client_generation: row.get(6)?,
-                            sequence: row.get(7)?,
-                            occurred_at: row.get(8)?,
-                            received_at: row.get(9)?,
-                            event_type: row.get(10)?,
-                            payload_version: row.get(11)?,
-                            identity: None,
-                            typed_payload: None,
-                            raw_payload: serde_json::Value::Null,
-                            raw_payload_json: String::new(),
-                            created_at: row.get(15)?,
-                            schema_version: row.get(16)?,
-                            provenance_origin: row.get(17)?,
-                            provenance_trust: row.get(18)?,
-                            provenance_provider: row.get(19)?,
-                            provenance_import_id: row.get(20)?,
-                            raw_truncated: row.get::<_, i64>(21)? != 0,
-                            raw_original_bytes: row.get(22)?,
-                            raw_retained_bytes: row.get(23)?,
-                            raw_omitted_bytes: row.get(24)?,
-                            raw_truncation_reason: row.get(25)?,
-                            rollup_seq_start: row.get(26)?,
-                            rollup_seq_end: row.get(27)?,
-                        },
-                        identity_json: identity,
-                        typed_payload_json: typed,
-                        raw_payload_json: raw,
-                    })
-                },
+                map_event_row,
             )
             .map_err(EventError::from)?;
         let mut events: Vec<CanonicalEventRow> = Vec::new();
@@ -1496,7 +1520,7 @@ impl EventRepo {
     }
 
     /// #51 收口：owner journal 里 sequence 最大的指定类型事件行（无则 None）。
-    /// UNIQUE(owner_key, sequence) 自动索引倒序走查 + event_type 谓词命中即停，
+    /// (owner_key, sequence) 聚簇主键倒序走查 + event_type 谓词命中即停，
     /// 供写入侧做「payload 未变不重复追加」的幂等判定；不承担一般查询职责
     /// （一般读路径走 list_events / load_events_compact）。
     pub(crate) fn latest_event_of_type(
@@ -1615,7 +1639,7 @@ impl EventRepo {
             "SELECT {EVENT_COLUMNS} FROM canonical_events e
              WHERE e.event_type = 'turn.unit'
                AND NOT EXISTS (SELECT 1 FROM rollup_migration_state s
-                               WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.event_id
+                               WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.owner_key || '#' || e.sequence
                                  AND s.state IN ('trimmed', 'mismatch'))
              ORDER BY e.sequence ASC LIMIT 1"
         );
@@ -1724,7 +1748,7 @@ impl EventRepo {
                 "SELECT COUNT(*) FROM canonical_events e
                  WHERE e.event_type = 'turn.unit'
                    AND NOT EXISTS (SELECT 1 FROM rollup_migration_state s
-                                   WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.event_id
+                                   WHERE s.owner_key = e.owner_key AND s.unit_event_id = e.owner_key || '#' || e.sequence
                                      AND s.state IN ('trimmed', 'mismatch'))",
             )
             .map_err(EventError::from)?
@@ -1741,21 +1765,29 @@ impl EventRepo {
             .conn
             .lock()
             .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        // v15 无 event_id 列：eventId = owner_key#sequence（rule 1），按最后一个 '#'
+        // 拆分（owner_key 是 JSON 数组文本，串内可含 '#'，sequence 后缀不含）。
+        let Some((owner_key, sequence_text)) = event_id.rsplit_once('#') else {
+            return Ok(None);
+        };
+        let Ok(sequence) = sequence_text.parse::<i64>() else {
+            return Ok(None);
+        };
         let export = conn
             .prepare_cached(
-                "SELECT event_id, owner_key, sequence, event_type, identity, typed_payload, raw_payload
-             FROM canonical_events WHERE event_id = ?1",
+                "SELECT event_type, identity, typed_payload, raw_payload
+             FROM canonical_events WHERE owner_key = ?1 AND sequence = ?2",
             )
             .map_err(EventError::from)?
-            .query_row(params![event_id], |row| {
+            .query_row(params![owner_key, sequence], |row| {
                 Ok(CanonicalEventRawExport {
-                    event_id: row.get(0)?,
-                    owner_key: row.get(1)?,
-                    sequence: row.get(2)?,
-                    event_type: row.get(3)?,
-                    identity_json: row.get(4)?,
-                    typed_payload_json: row.get(5)?,
-                    raw_payload_json: row.get(6)?,
+                    event_id: event_id.to_string(),
+                    owner_key: owner_key.to_string(),
+                    sequence,
+                    event_type: row.get(0)?,
+                    identity_json: row.get(1)?,
+                    typed_payload_json: row.get(2)?,
+                    raw_payload_json: row.get(3)?,
                 })
             })
             .optional()
@@ -1766,6 +1798,9 @@ impl EventRepo {
     /// B6：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
     /// 大小写不敏感 LIKE，返回去重后的候选 owner（前端再对候选 owner loadAll +
     /// 消息投影 + 消息文本精确匹配）。limit 为候选 owner 上限。
+    /// v15：owner 分维列不落库——DISTINCT 收窄到 (owner_key, remote_session_id)，
+    /// 三元组经 `owner_triple` 派生后按 (profile, agent, local) 排序截断（与 v14
+    /// 的 SQL ORDER BY 语义一致）。
     pub(crate) fn search_owners(
         &self,
         query: &str,
@@ -1778,30 +1813,38 @@ impl EventRepo {
         let pattern = format!("%{query}%");
         let mut stmt = conn
             .prepare_cached(
-                "SELECT DISTINCT profile_id, agent_id, local_session_id, remote_session_id
+                "SELECT DISTINCT owner_key, remote_session_id
                  FROM canonical_events
                  WHERE event_type LIKE ?1 COLLATE NOCASE
                     OR raw_payload LIKE ?1 COLLATE NOCASE
-                    OR COALESCE(typed_payload, '') LIKE ?1 COLLATE NOCASE
-                 ORDER BY profile_id, agent_id, local_session_id
-                 LIMIT ?2",
+                    OR COALESCE(typed_payload, '') LIKE ?1 COLLATE NOCASE",
             )
             .map_err(EventError::from)?;
         let rows = stmt
-            .query_map(params![pattern, i64::from(limit)], |row| {
-                Ok(EventSearchOwner {
-                    profile_id: row.get(0)?,
-                    agent_id: row.get(1)?,
-                    local_session_id: row.get(2)?,
-                    remote_session_id: row.get(3)?,
-                })
+            .query_map(params![pattern], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })
             .map_err(EventError::from)?;
-        let mut out = Vec::new();
+        let mut candidates = Vec::new();
         for row in rows {
-            out.push(row.map_err(EventError::from)?);
+            let (owner_key, remote_session_id) = row.map_err(EventError::from)?;
+            let (profile_id, agent_id, local_session_id) = owner_triple(&owner_key);
+            candidates.push(EventSearchOwner {
+                profile_id,
+                agent_id,
+                local_session_id,
+                remote_session_id,
+            });
         }
-        Ok(out)
+        candidates.sort_by(|a, b| {
+            (&a.profile_id, &a.agent_id, &a.local_session_id).cmp(&(
+                &b.profile_id,
+                &b.agent_id,
+                &b.local_session_id,
+            ))
+        });
+        candidates.truncate(limit as usize);
+        Ok(candidates)
     }
 }
 
@@ -3552,9 +3595,9 @@ mod tests {
                 .unwrap()
                 .execute(
                     &format!(
-                        "UPDATE canonical_events SET {column} = '{{broken' WHERE event_id = ?1"
+                        "UPDATE canonical_events SET {column} = '{{broken' WHERE owner_key = ?1 AND sequence = ?2"
                     ),
-                    params![row.event_id],
+                    params![row.owner_key, row.sequence],
                 )
                 .expect("inject malformed JSON");
 
@@ -3795,17 +3838,24 @@ mod tests {
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
             assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
+            // #155 T2（v15）：存储列收窄为 15 列；v13 的 envelope/provenance/raw_* 列
+            // 已由读侧派生取代（wire 28 字段契约不变）。
             for column in [
-                "schema_version",
-                "provenance_origin",
-                "provenance_trust",
-                "provenance_provider",
-                "provenance_import_id",
-                "raw_truncated",
-                "raw_original_bytes",
-                "raw_retained_bytes",
-                "raw_omitted_bytes",
-                "raw_truncation_reason",
+                "owner_key",
+                "remote_session_id",
+                "sequence",
+                "client_generation",
+                "occurred_at",
+                "received_at",
+                "event_type",
+                "payload_version",
+                "identity",
+                "typed_payload",
+                "raw_payload",
+                "created_at",
+                "provenance",
+                "rollup_seq_start",
+                "rollup_seq_end",
             ] {
                 let present: bool = conn
                     .prepare("SELECT 1 FROM pragma_table_info('canonical_events') WHERE name = ?1")
@@ -3814,7 +3864,26 @@ mod tests {
                     .optional()
                     .unwrap()
                     .unwrap_or(false);
-                assert!(present, "v13 canonical_events 缺少列 {column}");
+                assert!(present, "v15 canonical_events 缺少列 {column}");
+            }
+            for derived in [
+                "event_id",
+                "profile_id",
+                "agent_id",
+                "local_session_id",
+                "schema_version",
+                "provenance_origin",
+                "provenance_trust",
+                "raw_truncated",
+            ] {
+                let present: bool = conn
+                    .prepare("SELECT 1 FROM pragma_table_info('canonical_events') WHERE name = ?1")
+                    .unwrap()
+                    .query_row([derived], |_| Ok(true))
+                    .optional()
+                    .unwrap()
+                    .unwrap_or(false);
+                assert!(!present, "v15 派生列不得落库: {derived}");
             }
         }
         // 重开幂等

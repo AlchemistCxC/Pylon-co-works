@@ -35,22 +35,29 @@ fn migrate_fresh_db_to_current_version_without_message_tables() {
     assert_eq!(version, SCHEMA_VERSION, "新库迁移到当前版本");
     let tables = table_names(&conn);
     for required in [
-        "sessions",
         "user_data",
         "deleted_sessions",
         "retention_policy",
         "canonical_events",
-        "legacy_message_backfill_audit",
+        "rollup_migration_state",
+        "session_state_snapshots",
     ] {
         assert!(
             tables.iter().any(|t| t == required),
             "缺少核心表 {required}: {tables:?}"
         );
     }
-    for legacy in ["messages", "send_attempts", "message_migrations"] {
+    // #155 T2（v15）：死表清理——sessions 与 legacy_message_backfill_audit 不再创建。
+    for dropped in [
+        "sessions",
+        "legacy_message_backfill_audit",
+        "messages",
+        "send_attempts",
+        "message_migrations",
+    ] {
         assert!(
-            !tables.iter().any(|t| t == legacy),
-            "v12 fresh DB 不得包含 legacy active table {legacy}: {tables:?}"
+            !tables.iter().any(|t| t == dropped),
+            "v15 fresh DB 不得包含死表/legacy active table {dropped}: {tables:?}"
         );
     }
 }
@@ -128,196 +135,134 @@ fn wal_pragmas_tolerate_in_memory_database() {
     );
 }
 
+/// #155 T2（v15）：旧库（user_version < 15）按「老数据全丢」重建，不搬迁任何行。
+/// 保留面 = user_data.profiles + retention_policy；其余历史（canonical_events、墓碑、
+/// 快照、user_data.sessions 会话列表、legacy 表）全部丢弃；重建后 auto_vacuum 生效、
+/// 空闲页为 0（文件 ≈ 内容大小）。
 #[test]
-fn migrate_backfills_provable_legacy_messages_and_archives_all_v8_tables() {
-    // 模拟 v8：唯一 owner 的基础文本角色可无损组成 history.snapshot；原表只改名归档。
+fn legacy_db_is_rebuilt_without_data_migration() {
     let path = unique_temp_db_path();
     {
         let repo = MsgRepo::open(&path).expect("open fresh current schema");
         let conn = repo.conn.lock().unwrap();
         conn.execute_batch(
-            r#"CREATE TABLE messages (
-                     message_id TEXT PRIMARY KEY NOT NULL,
-                     session_id TEXT NOT NULL,
-                     seq INTEGER NOT NULL,
-                     role TEXT NOT NULL,
-                     content TEXT NOT NULL,
-                     client_msg_id TEXT,
-                     created_at INTEGER NOT NULL
-                 );
-                 CREATE TABLE send_attempts (
-                     session_id TEXT NOT NULL,
-                     message_id TEXT PRIMARY KEY NOT NULL,
-                     status TEXT NOT NULL,
-                     retry_of TEXT,
-                     created_at INTEGER NOT NULL,
-                     updated_at INTEGER NOT NULL
-                 );
-                 CREATE TABLE message_migrations (
-                     session_id TEXT PRIMARY KEY NOT NULL,
-                     source_kind TEXT NOT NULL,
-                     completed_at INTEGER,
-                     source_fingerprint TEXT,
-                     error TEXT
-                 );
-                 INSERT INTO canonical_events
-                   (event_id, owner_key, profile_id, agent_id, local_session_id,
-                    remote_session_id, client_generation, sequence, occurred_at,
-                    received_at, event_type, payload_version, raw_payload, created_at)
-                 VALUES ('base', '["p1","peri","legacy-s1"]', 'p1', 'peri', 'legacy-s1',
-                         'remote-1', 7, 1, 't', 't', 'turn.completed', 1, '{}', 1),
-                        ('tool-base', '["p1","peri","legacy-tool"]', 'p1', 'peri', 'legacy-tool',
-                         'remote-2', 7, 1, 't', 't', 'turn.completed', 1, '{}', 1);
-                 INSERT INTO messages
-                   (message_id, session_id, seq, role, content, client_msg_id, created_at)
-                 VALUES ('m1', 'legacy-s1', 1, 'user', 'question', NULL, 10),
-                        ('m2', 'legacy-s1', 2, 'assistant', 'answer', NULL, 11),
-                        ('m3', 'unmapped', 1, 'user', 'preserve', NULL, 12),
-                        ('m4', 'legacy-tool', 1, 'tool', 'opaque tool card', NULL, 13);
-                 PRAGMA user_version = 8;"#,
+            r#"INSERT INTO user_data (key, version, revision, payload, updated_at) VALUES
+                 ('profiles', 1, 1, '{"version":1,"profiles":[{"id":"p1"}]}', 1),
+                 ('sessions', 2, 3, '{"version":2,"sessions":[{"id":"s1"}]}', 1);
+               INSERT INTO retention_policy (singleton, version, revision, payload, updated_at)
+                 VALUES (1, 1, 1, '{"mode":"by_time","days":30}', 1);
+               INSERT INTO canonical_events
+                 (owner_key, remote_session_id, sequence, client_generation, occurred_at,
+                  received_at, event_type, payload_version, identity, typed_payload,
+                  raw_payload, created_at, provenance)
+               VALUES ('["p1","peri","legacy-s1"]', 'remote-1', 1, 7, 't', 't',
+                  'turn.completed', 1, NULL, NULL, '{}', 1, 0);
+               INSERT INTO deleted_sessions
+                 (owner_key, session_id, owner_scope, deleted_at, state, deletion_revision, reason)
+               VALUES ('["p","a","gone"]', 'gone', 'exact', 1, 'deleted', 0, NULL);
+               INSERT INTO session_state_snapshots
+                 (owner_key, profile_id, agent_id, local_session_id, remote_session_id,
+                  state, created_at, updated_at)
+               VALUES ('["p","a","gone"]', 'p', 'a', 'gone', NULL, '{}', 1, 1);
+               CREATE TABLE messages (message_id TEXT PRIMARY KEY NOT NULL);
+               PRAGMA user_version = 14;"#,
         )
-        .unwrap();
+        .expect("prepare v14 fixture");
     }
-    let upgraded = MsgRepo::open(&path).expect("reopen upgrades to current schema");
-    let conn = upgraded.conn.lock().unwrap();
+
+    let rebuilt = MsgRepo::open(&path).expect("reopen rebuilds to v15");
+    let conn = rebuilt.conn.lock().unwrap();
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, SCHEMA_VERSION, "v8 库重开必须升级到当前版本");
-    let tables = table_names(&conn);
-    for legacy in ["messages", "send_attempts", "message_migrations"] {
-        assert!(
-            !tables.iter().any(|t| t == legacy),
-            "升级后 active legacy name 必须退出: {legacy}: {tables:?}"
-        );
-    }
-    for archive in [
-        "legacy_messages_v8_archive",
-        "legacy_send_attempts_v8_archive",
-        "legacy_message_migrations_v8_archive",
+    assert_eq!(version, SCHEMA_VERSION, "v14 库重开必须重建到当前版本");
+    let profiles: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM user_data WHERE key = 'profiles'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(profiles, 1, "profiles 配置信封必须保留");
+    let sessions_envelope: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM user_data WHERE key = 'sessions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        sessions_envelope, 0,
+        "sessions 会话列表信封随历史丢弃（ADR-0008：重建后不会再有历史会话）"
+    );
+    let policy: String = conn
+        .query_row(
+            "SELECT payload FROM retention_policy WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(policy.contains("by_time"), "保留策略设置必须保留");
+    for (table, label) in [
+        ("canonical_events", "canonical 历史清空"),
+        ("deleted_sessions", "墓碑清空"),
+        ("session_state_snapshots", "状态快照清空"),
+        ("rollup_migration_state", "裁剪进度清空"),
     ] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "{label}");
+    }
+    let tables = table_names(&conn);
+    for dropped in ["sessions", "legacy_message_backfill_audit", "messages"] {
         assert!(
-            tables.iter().any(|table| table == archive),
-            "缺少 forensic archive {archive}"
+            !tables.iter().any(|t| t == dropped),
+            "死表/legacy 表必须移除: {dropped}: {tables:?}"
         );
     }
-    let archived_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM legacy_messages_v8_archive",
-            [],
-            |row| row.get(0),
-        )
+    let auto_vacuum: i64 = conn
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(archived_count, 4, "archive 必须保留全部源行");
-    let (status, message_count): (String, i64) = conn
-            .query_row(
-                "SELECT status, message_count FROM legacy_message_backfill_audit WHERE session_id = 'legacy-s1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-    assert_eq!(status, "backfilled");
-    assert_eq!(message_count, 2);
-    let unmapped_status: String = conn
-        .query_row(
-            "SELECT status FROM legacy_message_backfill_audit WHERE session_id = 'unmapped'",
-            [],
-            |row| row.get(0),
-        )
+    assert_eq!(auto_vacuum, 2, "重建后 auto_vacuum=INCREMENTAL(2)");
+    let application_id: i64 = conn
+        .query_row("PRAGMA application_id", [], |row| row.get(0))
         .unwrap();
-    let unsupported_status: String = conn
-        .query_row(
-            "SELECT status FROM legacy_message_backfill_audit WHERE session_id = 'legacy-tool'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(unmapped_status, "archived-unmapped");
-    assert_eq!(unsupported_status, "archived-unsupported");
-    let raw: String = conn
-        .query_row(
-            "SELECT raw_payload FROM canonical_events
-                 WHERE owner_key = ?1 AND event_type = 'history.snapshot'",
-            params![r#"["p1","peri","legacy-s1"]"#],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let snapshot: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    let replay = snapshot["replayEvents"].as_array().unwrap();
-    assert_eq!(replay.len(), 2);
-    assert_eq!(replay[0]["update"]["sessionUpdate"], "user_message_chunk");
-    assert_eq!(replay[0]["update"]["content"]["text"], "question");
-    assert_eq!(replay[1]["update"]["sessionUpdate"], "agent_message_chunk");
-    assert_eq!(replay[1]["update"]["content"]["text"], "answer");
-    let _ = std::fs::remove_file(&path);
-}
-
-#[test]
-fn legacy_archive_collision_rolls_back_without_touching_source_or_version() {
-    let path = unique_temp_db_path();
-    {
-        let repo = MsgRepo::open(&path).expect("open current");
-        let conn = repo.conn.lock().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE messages (
-                     message_id TEXT PRIMARY KEY NOT NULL,
-                     session_id TEXT NOT NULL,
-                     seq INTEGER NOT NULL,
-                     role TEXT NOT NULL,
-                     content TEXT NOT NULL,
-                     client_msg_id TEXT,
-                     created_at INTEGER NOT NULL
-                 );
-                 INSERT INTO messages VALUES ('m1', 's1', 1, 'user', 'keep', NULL, 1);
-                 CREATE TABLE legacy_messages_v8_archive (sentinel TEXT);
-                 PRAGMA user_version = 8;",
-        )
-        .unwrap();
-    }
-    let error = MsgRepo::open(&path)
-        .err()
-        .expect("archive collision must fail closed");
-    assert!(error
-        .to_string()
-        .contains("target legacy_messages_v8_archive already exists"));
-
-    let conn = Connection::open(&path).expect("inspect rollback");
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .unwrap();
-    let source_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
-        .unwrap();
-    let audit_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM legacy_message_backfill_audit",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(version, 8);
     assert_eq!(
-        source_count, 1,
-        "source table and rows must survive rollback"
+        application_id, PYLON_APPLICATION_ID,
+        "application_id 必须落库"
     );
-    assert_eq!(
-        audit_count, 0,
-        "audit/backfill writes must roll back with archive failure"
-    );
+    let freelist: i64 = conn
+        .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(freelist, 0, "重建后 VACUUM 必须回收全部闲置页");
+    drop(conn);
+    drop(rebuilt);
     let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn session_state_roundtrip_merge_keeps_existing_keys() {
+    // #155 T2：v8 sessions.session_state 死列已删——merge 语义改在生产 owner 键控路径钉死。
     let repo = MsgRepo::open_in_memory().expect("open");
-    repo.set_session_state("s1", &serde_json::json!({"usage": {"n": 1}}))
+    let owner = crate::session::DurableSessionOwner::new("p1", "peri", "local:s1");
+    repo.set_session_state_for_owner(&owner, None, &serde_json::json!({"usage": {"n": 1}}))
         .expect("set usage");
-    repo.set_session_state("s1", &serde_json::json!({"commands": ["ls"]}))
+    repo.set_session_state_for_owner(&owner, None, &serde_json::json!({"commands": ["ls"]}))
         .expect("set commands");
-    let state = repo.get_session_state("s1").expect("get").expect("present");
+    let state = repo
+        .get_session_state_for_owner(&owner)
+        .expect("get")
+        .expect("present");
     assert_eq!(state["usage"]["n"], 1, "merge 不覆盖已有 key");
     assert_eq!(state["commands"][0], "ls");
-    assert!(repo.get_session_state("ghost").expect("get").is_none());
+    let ghost = crate::session::DurableSessionOwner::new("p1", "peri", "ghost");
+    assert!(repo
+        .get_session_state_for_owner(&ghost)
+        .expect("get")
+        .is_none());
 }
 
 #[test]
@@ -391,120 +336,6 @@ fn owner_tombstone_deletes_and_blocks_only_the_matching_snapshot() {
 }
 
 #[test]
-fn v10_migrates_legacy_state_only_when_journal_proves_one_owner() {
-    let path = unique_temp_db_path();
-    {
-        let repo = MsgRepo::open(&path).expect("open current");
-        let conn = repo.conn.lock().unwrap();
-        conn.execute_batch(
-                "DROP TABLE session_state_snapshots;
-                 INSERT INTO sessions (session_id, created_at, updated_at, session_state)
-                 VALUES ('unique', 1, 1, '{\"usage\":{\"n\":1}}'),
-                        ('ambiguous', 1, 1, '{\"usage\":{\"n\":9}}');
-                 INSERT INTO canonical_events
-                   (event_id, owner_key, profile_id, agent_id, local_session_id,
-                    remote_session_id, client_generation, sequence, occurred_at,
-                    received_at, event_type, payload_version, raw_payload, created_at)
-                 VALUES
-                   ('u1', '[\"p1\",\"a1\",\"unique\"]', 'p1', 'a1', 'unique', 'remote-u', 1, 1, 't', 't', 'message', 1, '{}', 1),
-                   ('a1', '[\"p1\",\"a1\",\"ambiguous\"]', 'p1', 'a1', 'ambiguous', NULL, 1, 1, 't', 't', 'message', 1, '{}', 1),
-                   ('a2', '[\"p2\",\"a2\",\"ambiguous\"]', 'p2', 'a2', 'ambiguous', NULL, 1, 1, 't', 't', 'message', 1, '{}', 1);
-                 PRAGMA user_version = 9;",
-            )
-            .expect("prepare v9 fixture");
-    }
-
-    let upgraded = MsgRepo::open(&path).expect("upgrade to v10");
-    let unique = crate::session::DurableSessionOwner::new("p1", "a1", "unique");
-    let ambiguous = crate::session::DurableSessionOwner::new("p1", "a1", "ambiguous");
-    assert_eq!(
-        upgraded
-            .get_session_state_for_owner(&unique)
-            .expect("read migrated")
-            .expect("unique owner migrated")["usage"]["n"],
-        1,
-    );
-    assert!(
-        upgraded
-            .get_session_state_for_owner(&ambiguous)
-            .expect("read ambiguous")
-            .is_none(),
-        "多个 owner 的 legacy source 必须保留原数据但不得猜测回填",
-    );
-    let conn = upgraded.conn.lock().unwrap();
-    let retained: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE session_id = 'ambiguous' AND session_state IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-    assert_eq!(retained, 1, "歧义 legacy state 必须原样保留");
-    drop(conn);
-    drop(upgraded);
-    let _ = std::fs::remove_file(&path);
-}
-
-#[test]
-fn tombstone_owner_key_collision_rolls_back_v12_migration() {
-    let path = unique_temp_db_path();
-    {
-        let repo = MsgRepo::open(&path).expect("open current");
-        let conn = repo.conn.lock().unwrap();
-        conn.execute_batch(
-            r#"DROP TABLE deleted_sessions;
-                   CREATE TABLE deleted_sessions (
-                       session_id TEXT PRIMARY KEY NOT NULL,
-                       deleted_at INTEGER NOT NULL,
-                       owner_key TEXT NOT NULL,
-                       state TEXT NOT NULL,
-                       deletion_revision INTEGER NOT NULL,
-                       reason TEXT
-                   );
-                   INSERT INTO deleted_sessions VALUES
-                       ('metadata-a', 1, '["p","a","shared"]', 'deleted', 0, NULL),
-                       ('metadata-b', 2, '["p","a","shared"]', 'deleting', 0, NULL);
-                   PRAGMA user_version = 11;"#,
-        )
-        .expect("prepare v11 collision fixture");
-    }
-
-    assert!(
-        MsgRepo::open(&path).is_err(),
-        "duplicate owner evidence must fail closed"
-    );
-    let conn = Connection::open(&path).expect("inspect rollback");
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .unwrap();
-    let source_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM deleted_sessions", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    let archive_exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='deleted_sessions_v11_archive')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-    assert_eq!(
-        version, 11,
-        "failed migration must not advance user_version"
-    );
-    assert_eq!(
-        source_count, 2,
-        "source rows must survive transaction rollback"
-    );
-    assert!(
-        !archive_exists,
-        "rename must roll back with conflicting backfill"
-    );
-    let _ = std::fs::remove_file(&path);
-}
-
-#[test]
 fn touch_session_rejects_tombstoned_session() {
     let repo = MsgRepo::open_in_memory().expect("open");
     repo.touch_session("s1").expect("touch");
@@ -512,24 +343,6 @@ fn touch_session_rejects_tombstoned_session() {
     assert!(
         repo.touch_session("s1").is_err(),
         "已删除会话 touch 必须被 tombstone 拒绝（不复活）"
-    );
-}
-
-#[test]
-fn session_state_write_rejects_tombstoned_session_without_resurrection() {
-    let repo = MsgRepo::open_in_memory().expect("open");
-    repo.set_session_state("s1", &serde_json::json!({"usage": {"n": 1}}))
-        .expect("initial state");
-    repo.delete_session("s1", None).expect("delete");
-
-    assert!(
-        repo.set_session_state("s1", &serde_json::json!({"commands": ["late"]}))
-            .is_err(),
-        "tombstone 后迟到 state write 必须被拒绝"
-    );
-    assert!(
-        repo.get_session_state("s1").expect("read").is_none(),
-        "拒绝迟到写后 sessions 行不得复活"
     );
 }
 
@@ -545,14 +358,6 @@ fn delete_session_writes_tombstone_and_keeps_canonical_events() {
     );
     assert_eq!(repo.tombstone_state("ghost").expect("state"), None);
     let conn = repo.conn.lock().unwrap();
-    let sessions: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sessions WHERE session_id='s1'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(sessions, 0, "删除后 sessions 行清除");
     let events: i64 = conn
         .query_row("SELECT COUNT(*) FROM canonical_events", [], |r| r.get(0))
         .unwrap();
@@ -683,16 +488,15 @@ fn message_error_serializes_b1_2_code_message_shape() {
 fn insert_event_at(repo: &MsgRepo, owner_key: &str, seq: i64, created_at: i64) {
     let conn = repo.conn.lock().expect("lock");
     conn.execute(
-            "INSERT INTO canonical_events
-                 (event_id, owner_key, profile_id, agent_id, local_session_id, remote_session_id,
-                  client_generation, sequence, occurred_at, received_at, event_type, payload_version,
-                  identity, typed_payload, raw_payload, created_at)
-             VALUES (?1, ?2, 'p1', 'peri', 'local:s1', NULL,
-                  0, ?3, '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z',
-                  'user.message', 1, NULL, NULL, '{}', ?4)",
-            params![format!("{owner_key}#{seq}"), owner_key, seq, created_at],
-        )
-        .expect("insert canonical event");
+        "INSERT INTO canonical_events
+                 (owner_key, remote_session_id, sequence, client_generation, occurred_at,
+                  received_at, event_type, payload_version, identity, typed_payload,
+                  raw_payload, created_at, provenance)
+             VALUES (?1, NULL, ?2, 0, '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z',
+                  'user.message', 1, NULL, NULL, '{}', ?3, 3)",
+        params![owner_key, seq, created_at],
+    )
+    .expect("insert canonical event");
 }
 
 fn canonical_event_count(repo: &MsgRepo) -> i64 {
