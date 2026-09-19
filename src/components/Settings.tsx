@@ -8,7 +8,7 @@ import { useRuntimeStore } from '../runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
-import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, type PresetInterfaceMode } from '../presets/index.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
 import { pickZoneFields } from '../zones/index.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
@@ -120,13 +120,11 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const custom = useStore(s => s.custom)
   // A2：全局预设状态派生（任一 zone 触碰/基准不一致 → custom），原 appliedPreset.global 直读退役
   const globalStatus = useStore(s => deriveGlobalStatus(s))
-  // 刀5（#201）：预设菜单两级化——第一级「GUI / 终端」是预设菜单的过滤选项（不是界面
-  // 模式切换器），默认跟随当前界面模式的归属桶；当前模式不在归属表内（如 tactical-blue）
-  // ⇒ 整组不出现。用户点选后以本视图的选择为准。
+  // 刀5（#201，UI 二次修订 2026-09-19）：预设区直接显示当前界面模式对应的预设
+  // （presetsForInterfaceMode），随界面模式切换自动跟随；「GUI / 终端」的选择只在
+  // 「界面模式」Group 里发生。当前模式不在归属表内（如 tactical-blue）⇒ 整组不出现。
   const currentInterfaceMode = useInterfaceModeStore(s => s.interfaceMode)
   const modeBucket = INTERFACE_MODE_PRESET_BUCKET[currentInterfaceMode]
-  const [presetBucketOverride, setPresetBucketOverride] = useState<PresetInterfaceMode | null>(null)
-  const presetBucket = presetBucketOverride ?? modeBucket
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
@@ -466,19 +464,11 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
       case 'global':
         return (
           <>
-            {!isSearching && presetBucket && <Group title="全局预设">
-              {/* 刀5（#201）：第一级 = GUI/终端 过滤选项；第二级 = 所选桶的预设 chips。
-                  归属表（用户拍板）只有这两桶，不含完整界面模式列表。 */}
-              <div className="set-preset-row" role="radiogroup" aria-label="预设归属">
-                <button type="button" role="radio" aria-checked={presetBucket === 'gui'}
-                  className={`set-preset-chip ${presetBucket === 'gui' ? 'active' : ''}`}
-                  onClick={() => setPresetBucketOverride('gui')}>GUI</button>
-                <button type="button" role="radio" aria-checked={presetBucket === 'terminal'}
-                  className={`set-preset-chip ${presetBucket === 'terminal' ? 'active' : ''}`}
-                  onClick={() => setPresetBucketOverride('terminal')}>终端</button>
-              </div>
+            {!isSearching && <Group title="界面模式"><InterfaceModePicker /></Group>}
+            {!isSearching && modeBucket && <Group title="全局预设">
+              {/* 刀5（#201，UI 二次修订）：直接显示当前界面模式归属桶的预设 chips（随模式切换跟随）。 */}
               <div className="set-preset-row">
-                {GLOBAL_PRESETS.filter(p => p.interfaceMode === presetBucket).map(p => (
+                {presetsForInterfaceMode(currentInterfaceMode).map(p => (
                   <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}
@@ -533,7 +523,6 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
                 </div>)}
               </div>}
             </Group>}
-            {!isSearching && <Group title="界面模式"><InterfaceModePicker /></Group>}
             {/* 个人信息/强调色/布局骨架/玻璃效果/字体 已声明式化（defs 组），自动获得搜索/custom/恢复默认 */}
             <ZoneGroupFields zone="global" ctx={renderCtx} density={density} />
           </>
