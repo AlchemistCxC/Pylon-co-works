@@ -49,6 +49,11 @@ function generateInto(dir) {
     [
       "test",
       "--lib",
+      // #193：与 CI rust-test job / check-acp-shadow-parity 对齐 --features
+      // test-agent 指纹（基线已验证 feature 无关：带 feature 重生成的 trace 与
+      // 已提交基线逐字节一致），消除最后一处 feature 翻转重编。
+      "--features",
+      "test-agent",
       "acp::golden_trace_tests::golden_trace_baseline_generation",
       "--no-fail-fast",
       "--",
