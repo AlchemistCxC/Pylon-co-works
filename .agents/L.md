@@ -350,3 +350,16 @@
 - 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节）、`.agents/records/`、本文件
 
 **我不碰**：`src/**`（前端零改动）、`src-tauri/src/dispatcher/**`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`（他人在途，未 stage 未改写，全程 pathspec 提交）。
+
+---
+
+[2026-09-19 23:25] [Miyaki Kumo] [#202]
+
+**开工：左栏模块折叠状态提升为跨 Sheet 应用级偏好并持久化**（折叠状态从 Sheet 级 `AgentWorkspaceState` 迁出到独立 localStorage key，语义变更见 issue）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- 代码：`src/domains/workbench/sidebarBlockCollapse.ts`（新增）、`src/plugin-runtime/sidebar/sidebarBlockState.ts`、`src/workspace-sheets/agentWorkspaceState.ts`、`src/components/Sidebar.tsx`、`src/components/sidebar/AgentSheetPageHost.tsx`、`src/plugins/core/sheet/builtinWorkspaceCommands.ts`
+- 测试：`src/domains/workbench/__tests__/sidebarBlockCollapse.test.ts`（新增）、`src/components/__tests__/Sidebar.blocks.test.tsx`、`src/components/__tests__/AgentSheetPageHost.test.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`、`src/workspace-sheets/__tests__/workspaceStore.integration.test.ts`、`src/plugins/core/commandSet/__tests__/builtinCliCommandCoverage.test.ts`
+- 文档：`docs/说明书/Pylon-CLI-命令表.md`、`.agents/decisions/0015-*`、`.agents/records/`（新增一篇）
+
+**对在途改动的报备**：工作树里有他人未提交改动（`src/__tests__/replay/*`、`src/domains/events/canonicalTurnDuration.ts`、`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`），我方不触碰、不暂存、不连带提交，全部提交走 pathspec。
