@@ -21,7 +21,7 @@ env:
 
 jobs:
   frontend:
-    name: 前端（tsc + 测试 + build）
+    name: 前端静态门禁（lint + tsc + build）
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -43,16 +43,25 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
+      # #193：vite/vitest transform 缓存——CI 每次 run 从零转译（实测累计
+      # transform 80s+），按 bun.lock 建 key 跨 run 命中。
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/.vite
+          key: vite-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: vite-${{ runner.os }}-
+
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
 
-      # ISSUE-20 W1：统一入口——lint + IPC 契约（#106 P3b）+ vitest（P91 A5：legacy
-      # spawn 套件已全部退役，vitest 单轨）+ tsc/build。
-      # #184：覆盖率从本链拆出（见下一步）——PR 反馈环跑裸 vitest。
-      - name: 统一前端门禁（check:frontend）
-        run: bun run check:frontend
+      # ISSUE-20 W1 统一入口的静态半边：lint + IPC 契约（#106 P3b）+ tsc/build +
+      # bundle/solid-smoke/docs/deps。
+      # #193：vitest 拆到 frontend-test 分片矩阵（测试占前端 job 一半墙钟）；
+      # check:frontend 本地语义保留（含测试），check:frontend:static 是其测试前缀。
+      - name: 静态前端门禁（check:frontend:static）
+        run: bun run check:frontend:static
 
-      # #184：覆盖率门禁只在 main push 执行。阈值（vitest.config.ts）不再挡 PR，
+      # #184：覆盖率门禁只在 main push 执行。阈值（vitest.config.ts）不挡 PR，
       # 但低于阈值的 PR 合入后 main 必红，仍闭环；PR 反馈环省 ~3 min。
       - name: 覆盖率门禁（main push 专用）
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,6 +71,46 @@ jobs:
       # （sidebarModulePrefs.ts import plugin-runtime）合入而远端无感。
       - name: Solid 边界门禁（check:solid）
         run: bun run check:solid
+
+  # #193：vitest 分片矩阵——606 文件 / 4439 用例对半分片并行，前端测试段
+  # 墙钟减半。transform 缓存让两个分片共享转译结果。
+  frontend-test:
+    name: 前端测试（vitest 分片 ${{ matrix.shard }}/2）
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/.vite
+          key: vite-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: vite-${{ runner.os }}-
+
+      - name: 安装依赖（bun）
+        run: bun install --frozen-lockfile
+
+      # bun run 向脚本透传参数（vitest --shard 按 project 文件集合对半切）
+      - name: vitest 分片运行
+        run: bun run test --shard=${{ matrix.shard }}/2
 
   rust-test:
     name: Rust（fmt + 测试 + 构建）
