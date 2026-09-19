@@ -1120,6 +1120,151 @@ pub(crate) fn canonical_event_wire(row: &CanonicalEventRow) -> serde_json::Value
     serde_json::Value::Object(event)
 }
 
+/// #205：读侧尾部折叠预算——与写侧 `canonicalEventBatch.CANONICAL_BATCH_LIMITS` 同口径
+/// （48 KiB / 2000 chunk，落在 `retain_raw_payload` 的 64 KiB 截断线之内）。读侧不需要
+/// 截断约束，沿用该预算只为产出「同一种 batch 行形状」，任何既有解析路径都认。
+const MAX_FOLDED_CHUNKS: usize = 2000;
+const MAX_FOLD_BYTES: usize = 48 * 1024;
+/// #205：覆盖跨度进入 compact 读的 SQL 谓词（每跨度 2 个绑定参数）。超过此数退回整读
+/// 后内存过滤——SQLite 对表达式深度/参数个数有上限，宁可慢也不要查询失败。
+const MAX_COMPACT_SQL_RANGES: usize = 500;
+
+/// 该行能否参与折叠：静态 delta 类型，且 `typed_payload.text` 是 string。
+/// `.batch` 行不二次折叠。**text 门控与写侧同款**：无 string text 的 chunk 在逐行投影里
+/// 是 no-op（不新建消息），折进 batch 行会把 no-op 变成新建消息 ⇒ 破坏投影等价。
+fn foldable_delta_base(row: &CanonicalEventRow) -> Option<&'static str> {
+    if row.event_type.ends_with(".batch") {
+        return None;
+    }
+    let base = super::turn_rollup::static_delta_type(&row.event_type)?;
+    let has_text = row
+        .typed_payload
+        .as_ref()
+        .and_then(|typed| typed.get("text"))
+        .is_some_and(serde_json::Value::is_string);
+    has_text.then_some(base)
+}
+
+/// identity 四键全等（与前端 `sameIdentity` 同口径：两边都缺失算相等，null 与缺失不等）。
+fn identity_keys_equal(
+    left: &Option<serde_json::Value>,
+    right: &Option<serde_json::Value>,
+) -> bool {
+    const KEYS: [&str; 4] = ["messageId", "turnId", "toolCallId", "requestId"];
+    KEYS.iter().all(|key| {
+        match (
+            left.as_ref().and_then(|value| value.get(*key)),
+            right.as_ref().and_then(|value| value.get(*key)),
+        ) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left == right,
+            _ => false,
+        }
+    })
+}
+
+/// 折叠预算按**入库序列化文本**计：`raw_payload_json` 与 `raw_payload.to_string()` 逐字节
+/// 相等（v15 不变量），也正是前端 `encodedByteLength(JSON.stringify(raw))` 的口径——
+/// 免掉逐行再序列化一次。
+fn raw_payload_bytes(row: &CanonicalEventRow) -> usize {
+    row.raw_payload_json.len()
+}
+
+/// run 收口：长度 < 2 原样放回（与写侧「单条 run 不合并」一致），≥ 2 产出 batch 行。
+fn flush_delta_run(
+    out: &mut Vec<CanonicalEventRow>,
+    chunks: Vec<CanonicalEventRow>,
+    base: Option<&'static str>,
+) {
+    let Some(base) = base else { return };
+    if chunks.len() < 2 {
+        out.extend(chunks);
+        return;
+    }
+    let first_sequence = chunks[0].sequence;
+    let last = chunks.last().expect("run is non-empty");
+    let last_sequence = last.sequence;
+    let last_event_id = last.event_id.clone();
+    let folded_count = chunks.len();
+    let mut row = chunks[0].clone();
+    let mut text = String::new();
+    let mut raw_items: Vec<serde_json::Value> = Vec::with_capacity(folded_count);
+    for chunk in chunks {
+        if let Some(part) = chunk
+            .typed_payload
+            .as_ref()
+            .and_then(|typed| typed.get("text"))
+            .and_then(serde_json::Value::as_str)
+        {
+            text.push_str(part);
+        }
+        raw_items.push(chunk.raw_payload);
+    }
+    row.event_type = format!("{base}.batch");
+    // 跨度占用：行取段末的 sequence/eventId，段内编号不被任何行占用，读侧按
+    // `owner#(seqSpan[0]+i)` 重建原始 id（`canonicalEventBatch` 的既有契约）。
+    row.sequence = last_sequence;
+    row.event_id = last_event_id;
+    row.typed_payload = Some(serde_json::json!({
+        "text": text,
+        "foldedCount": folded_count,
+        "seqSpan": [first_sequence, last_sequence],
+    }));
+    row.raw_payload = serde_json::Value::Array(raw_items);
+    // 维持 v15 不变量：raw_payload_json == raw_payload.to_string()。
+    row.raw_payload_json = row.raw_payload.to_string();
+    row.rollup_seq_start = None;
+    row.rollup_seq_end = None;
+    out.push(row);
+}
+
+/// #205：compact 读的读侧折叠——把**相邻同类、identity 全等、sequence 连续**的 delta run
+/// 折成一条 `*.delta.batch` 行。形状与写侧 `mergeAdjacentDeltaChunks` 同一契约，前端
+/// `canonicalRowToWorkbench` 已有展开路径（逐 chunk 重建事件 id 与 coverage），故与逐行
+/// 存储**投影等价**。
+///
+/// 为什么在**读侧**折：`turn.unit` 只在回合终帧落盘，却覆盖整回合 ⇒ **回合进行中**该回合
+/// 已产出的 chunk 全部是「未覆盖行」，而切会话最常命中这个窗口（实测单回合 79,682 行）。
+/// 写侧聚合（#155 T3 目标结构第 1 条）是另一条路；读侧折叠对存量 journal 同样立即生效。
+/// 只用于 compact 读——`evt_list` 分页读保持逐行，不动游标语义。
+fn fold_uncovered_delta_runs(rows: Vec<CanonicalEventRow>) -> Vec<CanonicalEventRow> {
+    let mut out: Vec<CanonicalEventRow> = Vec::with_capacity(rows.len());
+    let mut run: Vec<CanonicalEventRow> = Vec::new();
+    let mut run_base: Option<&'static str> = None;
+    let mut run_bytes: usize = 0;
+    for row in rows {
+        let base = foldable_delta_base(&row);
+        let extend = match (base, run.last(), run_base) {
+            (Some(base), Some(last), Some(current)) => {
+                current == base
+                    && row.sequence == last.sequence + 1
+                    && identity_keys_equal(&last.identity, &row.identity)
+                    && run.len() < MAX_FOLDED_CHUNKS
+                    && run_bytes + raw_payload_bytes(&row) <= MAX_FOLD_BYTES
+            }
+            _ => false,
+        };
+        if extend {
+            run_bytes += raw_payload_bytes(&row);
+            run.push(row);
+            continue;
+        }
+        flush_delta_run(&mut out, std::mem::take(&mut run), run_base.take());
+        run_bytes = 0;
+        match base {
+            // 单条自身就超预算的 delta 不成批（与写侧一致：不截断，原样保留）。
+            Some(base) if raw_payload_bytes(&row) <= MAX_FOLD_BYTES => {
+                run_bytes = raw_payload_bytes(&row);
+                run_base = Some(base);
+                run.push(row);
+            }
+            _ => out.push(row),
+        }
+    }
+    flush_delta_run(&mut out, run, run_base);
+    out
+}
+
 /// 事件行映射（v15 EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。
 /// 派生字段（event_id/owner 三元组/provenance 四字段/raw_* 计数）在此还原。
 fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredCanonicalEventRow> {
@@ -1548,7 +1693,80 @@ impl EventRepo {
 
     /// #81 L2：compact 读——返回「单元 + 未覆盖行」（升序）。被 turn.unit 覆盖的
     /// 行不再读取（L3 裁剪后这些行已删除），前端读/解析行数随单元粒度下降。
+    ///
+    /// #205：过滤下推到 SQL（两段查询）——原实现先把**整表**读成 `Vec<CanonicalEventRow>`
+    /// （每行三个 payload 列都要解成 `serde_json::Value` 树）再在内存里过滤。实测生产库
+    /// （单 owner 13.6 万行）一次 compact 读 `1188ms`、峰值数百 MB，而结果只有 12 行。
+    /// 现在先只读单元行拿覆盖跨度，再按跨度在 WHERE 里剪掉被覆盖行 ⇒ 只读取真正要下发的行。
     pub(crate) fn load_events_compact(
+        &self,
+        owner_key: &str,
+    ) -> Result<Vec<CanonicalEventRow>, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        // 1) 单元行：既是返回内容，也是覆盖跨度的唯一来源。
+        let unit_sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 AND event_type = ?2 ORDER BY sequence ASC"
+        );
+        let mut unit_stmt = conn.prepare_cached(&unit_sql).map_err(EventError::from)?;
+        let mut units: Vec<CanonicalEventRow> = Vec::new();
+        for row in unit_stmt
+            .query_map(
+                params![owner_key, super::turn_rollup::TURN_UNIT_EVENT_TYPE],
+                map_event_row,
+            )
+            .map_err(EventError::from)?
+        {
+            units.push(row.map_err(EventError::from)?.decode()?);
+        }
+        let ranges: Vec<(i64, i64)> = units
+            .iter()
+            .filter_map(|row| row.rollup_seq_start.zip(row.rollup_seq_end))
+            .collect();
+        // 跨度数量进入 SQL 谓词，超阈值退回「整读后内存过滤」：SQLite 对表达式深度与
+        // 绑定参数个数都有上限，宁可慢也不要在极端 journal 上查询失败。
+        if ranges.len() > MAX_COMPACT_SQL_RANGES {
+            return self.load_events_compact_scan_then_filter(owner_key);
+        }
+        let mut uncovered_sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 AND event_type <> ?2"
+        );
+        for (index, _) in ranges.iter().enumerate() {
+            uncovered_sql.push_str(&format!(
+                " AND NOT (sequence BETWEEN ?{} AND ?{})",
+                2 * index + 3,
+                2 * index + 4
+            ));
+        }
+        uncovered_sql.push_str(" ORDER BY sequence ASC");
+        let mut bind: Vec<&dyn rusqlite::ToSql> =
+            vec![&owner_key, &super::turn_rollup::TURN_UNIT_EVENT_TYPE];
+        for (start, end) in &ranges {
+            bind.push(start);
+            bind.push(end);
+        }
+        let mut uncovered_stmt = conn
+            .prepare_cached(&uncovered_sql)
+            .map_err(EventError::from)?;
+        let mut rows: Vec<CanonicalEventRow> = units;
+        for row in uncovered_stmt
+            .query_map(rusqlite::params_from_iter(bind.iter()), map_event_row)
+            .map_err(EventError::from)?
+        {
+            rows.push(row.map_err(EventError::from)?.decode()?);
+        }
+        // 两段各自有序，合并后按 sequence 复原全序（单元行与其覆盖区间交错）。
+        rows.sort_by_key(|row| row.sequence);
+        // #205：未覆盖的尾部 delta run 在读侧折成 batch 行——回合进行中（其 turn.unit
+        // 尚未产生）这些行占未覆盖集合的全部，不折叠就要把整段 chunk 逐行下发并逐行
+        // 投影（实测单回合 79,682 行 ⇒ 前端空白数分钟、内核峰值数百 MB）。
+        Ok(fold_uncovered_delta_runs(rows))
+    }
+
+    /// compact 读的回退路径：整读该 owner 全部行后在内存里过滤（覆盖跨度过多时的兜底）。
+    fn load_events_compact_scan_then_filter(
         &self,
         owner_key: &str,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
@@ -1560,11 +1778,11 @@ impl EventRepo {
             "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 ORDER BY sequence ASC"
         );
         let mut stmt = conn.prepare_cached(&sql).map_err(EventError::from)?;
-        let rows = stmt
-            .query_map(params![owner_key], map_event_row)
-            .map_err(EventError::from)?;
         let mut all: Vec<CanonicalEventRow> = Vec::new();
-        for row in rows {
+        for row in stmt
+            .query_map(params![owner_key], map_event_row)
+            .map_err(EventError::from)?
+        {
             all.push(row.map_err(EventError::from)?.decode()?);
         }
         let mut ranges: Vec<(i64, i64)> = Vec::new();
@@ -1580,12 +1798,13 @@ impl EventRepo {
                 .iter()
                 .any(|(start, end)| sequence >= *start && sequence <= *end)
         };
-        Ok(all
+        let filtered: Vec<CanonicalEventRow> = all
             .into_iter()
             .filter(|row| {
                 row.event_type == super::turn_rollup::TURN_UNIT_EVENT_TYPE || !covered(row.sequence)
             })
-            .collect())
+            .collect();
+        Ok(fold_uncovered_delta_runs(filtered))
     }
 
     /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。
@@ -3954,5 +4173,188 @@ mod tests {
             .latest_event_of_type(&owner_key, "turn.completed")
             .expect("absent query")
             .is_none());
+    }
+
+    // ── #205：compact 读的尾部 delta 折叠 ───────────────────────────────────
+
+    /// 该 owner 的 owner key（测试内固定 profile=p1 / agent=peri / session=local:s1）。
+    fn owner_key() -> String {
+        DurableSessionOwner::new("p1", "peri", "local:s1")
+            .key()
+            .expect("owner key")
+    }
+
+    fn text_delta(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": text } }
+        })
+    }
+
+    fn thinking_delta(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "update": { "sessionUpdate": "agent_thought_chunk", "content": { "text": text } }
+        })
+    }
+
+    #[test]
+    fn compact_read_folds_adjacent_uncovered_delta_run_into_batch_row() {
+        let repo = repo();
+        repo.ingest_kernel_events(vec![
+            kernel_input(text_delta("甲")),
+            kernel_input(text_delta("乙")),
+            kernel_input(text_delta("丙")),
+        ])
+        .expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert_eq!(rows.len(), 1, "三条相邻同类 delta 折成一行");
+        let row = &rows[0];
+        assert_eq!(row.event_type, "assistant.text.delta.batch");
+        assert_eq!(row.sequence, 3, "跨度占用段末 sequence");
+        assert_eq!(row.event_id, format!("{}#3", owner_key()));
+        let typed = row.typed_payload.as_ref().expect("typed payload");
+        assert_eq!(typed["text"], "甲乙丙");
+        assert_eq!(typed["foldedCount"], 3);
+        assert_eq!(typed["seqSpan"], serde_json::json!([1, 3]));
+        assert_eq!(
+            row.raw_payload.as_array().expect("raw chunk array").len(),
+            3,
+            "rawPayload 是原始 chunk 数组（长度 == foldedCount == 跨度宽度）"
+        );
+        assert_eq!(
+            row.raw_payload_json,
+            row.raw_payload.to_string(),
+            "v15 不变量：raw_payload_json 与 raw_payload 序列化逐字节相等"
+        );
+        assert!(row.rollup_seq_start.is_none() && row.rollup_seq_end.is_none());
+    }
+
+    #[test]
+    fn compact_read_keeps_single_delta_unfolded() {
+        let repo = repo();
+        repo.ingest_kernel_events(vec![kernel_input(text_delta("独"))])
+            .expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].event_type, "assistant.text.delta",
+            "单条 run 不合并"
+        );
+        assert_eq!(rows[0].sequence, 1);
+    }
+
+    #[test]
+    fn compact_read_breaks_run_on_non_delta_row() {
+        let repo = repo();
+        repo.ingest_kernel_events(vec![
+            kernel_input(text_delta("甲")),
+            kernel_input(serde_json::json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "c1",
+                    "status": "completed"
+                }
+            })),
+            kernel_input(text_delta("乙")),
+        ])
+        .expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert_eq!(rows.len(), 3, "非 delta 行打断 run：两侧各剩单条");
+        assert_eq!(rows[0].event_type, "assistant.text.delta");
+        assert_eq!(rows[1].event_type, "tool.call.completed");
+        assert_eq!(rows[2].event_type, "assistant.text.delta");
+    }
+
+    #[test]
+    fn compact_read_breaks_run_on_identity_change() {
+        let repo = repo();
+        let identified = |text: &str, message_id: &str| {
+            serde_json::json!({
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": message_id,
+                    "content": { "text": text }
+                }
+            })
+        };
+        repo.ingest_kernel_events(vec![
+            kernel_input(identified("甲", "m1")),
+            kernel_input(identified("乙", "m1")),
+            kernel_input(identified("丙", "m2")),
+        ])
+        .expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert_eq!(rows.len(), 2, "identity 变化切断 run");
+        assert_eq!(rows[0].event_type, "assistant.text.delta.batch");
+        assert_eq!(rows[0].typed_payload.as_ref().unwrap()["text"], "甲乙");
+        assert_eq!(rows[1].event_type, "assistant.text.delta");
+    }
+
+    #[test]
+    fn compact_read_keeps_delta_kinds_in_separate_runs() {
+        let repo = repo();
+        repo.ingest_kernel_events(vec![
+            kernel_input(thinking_delta("思")),
+            kernel_input(thinking_delta("考")),
+            kernel_input(text_delta("答")),
+            kernel_input(text_delta("案")),
+        ])
+        .expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert_eq!(rows.len(), 2, "text 与 thinking 各自成 run");
+        assert_eq!(rows[0].event_type, "assistant.thinking.delta.batch");
+        assert_eq!(rows[1].event_type, "assistant.text.delta.batch");
+        assert_eq!(rows[0].typed_payload.as_ref().unwrap()["text"], "思考");
+        assert_eq!(rows[1].typed_payload.as_ref().unwrap()["text"], "答案");
+    }
+
+    #[test]
+    fn compact_read_cuts_run_at_fold_budget_without_losing_rows() {
+        let repo = repo();
+        // 48 KiB / 2000 chunk 两个预算里更紧的那个先触发（本用例是字节预算），
+        // 契约是「切断成多行、跨段连续、不丢行」，不是具体切成几行。
+        let total = MAX_FOLDED_CHUNKS + 1;
+        let inputs = (1..=total)
+            .map(|index| kernel_input(text_delta(&format!("{index},"))))
+            .collect::<Vec<_>>();
+        repo.ingest_kernel_events(inputs).expect("ingest");
+
+        let rows = repo.load_events_compact(&owner_key()).expect("compact");
+
+        assert!(rows.len() > 1, "预算用尽必须切断成多行（不截断）");
+        let mut folded = 0usize;
+        let mut expected_start = 1_i64;
+        for row in &rows {
+            if !row.event_type.ends_with(".batch") {
+                assert_eq!(row.sequence, expected_start, "尾部单条按原序保留");
+                folded += 1;
+                expected_start += 1;
+                continue;
+            }
+            let typed = row.typed_payload.as_ref().expect("typed payload");
+            let span = typed["seqSpan"].as_array().expect("seqSpan");
+            let count = typed["foldedCount"].as_i64().expect("foldedCount") as usize;
+            assert_eq!(span[0].as_i64(), Some(expected_start), "跨度连续且不重叠");
+            assert_eq!(
+                span[1].as_i64(),
+                Some(row.sequence),
+                "跨度占用段末 sequence"
+            );
+            assert_eq!(row.raw_payload.as_array().expect("raw array").len(), count);
+            assert!(count <= MAX_FOLDED_CHUNKS, "不得越 foldedCount 上限");
+            assert!(count >= 2, "单条不成 batch 行");
+            folded += count;
+            expected_start = row.sequence + 1;
+        }
+        assert_eq!(folded, total, "切断不丢行");
     }
 }

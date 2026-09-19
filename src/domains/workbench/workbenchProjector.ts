@@ -299,6 +299,81 @@ function mergeCoverage(ranges: readonly (readonly [number, number])[], start: nu
   return merged
 }
 
+/**
+ * #205：`mergeCoverage` 的就地版——批量回放路径持有区间数组的所有权，只改写被
+ * 触及的窗口（`splice` 替换），把「每事件重建整数组」的 Θ(N·R) 降到均摊 Θ(1)
+ * （升序跨度只需追加；吞并窗口的代价由被删区间偿付）。合并规则与 `mergeCoverage`
+ * 逐字一致：升序、不重叠、相邻即吸收（`to < low-1` 前缀保留、`from <= high+1` 吸收）。
+ */
+function mergeCoverageInPlace(ranges: [number, number][], start: number, end: number): void {
+  let first = 0
+  while (first < ranges.length && ranges[first]![1] < start - 1) first++
+  let low = start
+  let high = end
+  let last = first
+  while (last < ranges.length && ranges[last]![0] <= high + 1) {
+    low = Math.min(low, ranges[last]![0])
+    high = Math.max(high, ranges[last]![1])
+    last++
+  }
+  if (first === last && ranges[first]?.[0] === low && ranges[first]?.[1] === high) return
+  ranges.splice(first, last - first, [low, high])
+}
+
+/**
+ * #205：入参是否已按批量路径的排序判据升序（sequence 升序，同 sequence 按 eventId）。
+ * 成立时调用方可直接使用入参数组，省掉一份整集合拷贝 + 排序（冷重放每帧一份）。
+ */
+function isAscendingBySequence(events: readonly WorkbenchEventEnvelope[]): boolean {
+  for (let index = 1; index < events.length; index++) {
+    const previous = events[index - 1]!
+    const current = events[index]!
+    if (previous.sequence > current.sequence) return false
+    if (previous.sequence === current.sequence && previous.eventId.localeCompare(current.eventId) > 0) return false
+  }
+  return true
+}
+
+/**
+ * #205：升序 sequence 索引上的「存在 ∈ (after, before) 的元素」查询（二分）。
+ * 索引由批量路径按 timeline 顺序增量维护（timeline 自身按 sequence 排序）。
+ */
+function hasIndexedSequenceBetween(index: readonly number[], after: number, before: number): boolean {
+  let low = 0
+  let high = index.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (index[middle]! <= after) low = middle + 1
+    else high = middle
+  }
+  return low < index.length && index[low]! < before
+}
+
+/**
+ * #205：tool 边界查询——「是否存在 kind==='tool' 且 sequence ∈ (after, before) 的 timeline 条目」。
+ *
+ * 归约器原本对整条 timeline 做 `.some`，而该查询落在**最高频事件类型**（reasoning/
+ * text delta）上 ⇒ Θ(N·T)。`index` 是批量路径增量维护的 tool 条目 sequence 升序数组，
+ * 二分即可等价作答；无索引（单事件 live 路径）时回退原扫描，语义不变。
+ */
+function hasToolBetween(
+  document: WorkbenchDocument,
+  after: number,
+  before: number,
+  index?: readonly number[],
+): boolean {
+  if (index) return hasIndexedSequenceBetween(index, after, before)
+  return document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > after && entry.sequence < before)
+}
+
+/** 终态 session 条目的判据（`terminalSessionSequence` 的逐条口径，索引与扫描共用）。 */
+function isTerminalSessionEntry(entry: WorkbenchTimelineEntry): boolean {
+  if (entry.kind !== 'session' || !isRecord(entry.data)) return false
+  const data = entry.data as { type?: unknown; status?: unknown }
+  return data.type === 'session.completed'
+    || (typeof data.status === 'string' && TERMINAL_SESSION_STATUSES.has(data.status.toLowerCase()))
+}
+
 export function reduceWorkbenchEvent(
   document: WorkbenchDocument,
   envelope: WorkbenchEventEnvelope,
@@ -331,22 +406,51 @@ export function projectWorkbench(
   events: readonly WorkbenchEventEnvelope[],
   options: { readonly initialDocument?: WorkbenchDocument } = {},
 ): ProjectionResult {
-  const sorted = [...events].sort((left, right) => left.sequence - right.sequence || left.eventId.localeCompare(right.eventId))
+  // #205：冷重放的 journal 行本就有序（SQL ORDER BY sequence）——已升序时直接用入参，
+  // 省掉一份整集合拷贝 + 一次排序；乱序输入（live 缓冲折入）仍走同一排序语义。
+  const sorted = isAscendingBySequence(events)
+    ? events
+    : [...events].sort((left, right) => left.sequence - right.sequence || left.eventId.localeCompare(right.eventId))
   const initial = options.initialDocument ?? createWorkbenchDocument(sorted[0]?.sessionId ?? '')
   // P57 S2-R1e：批量回放入口用本地 Set 预去重，appliedEventIds 以共享可变数组按序追加、
   // 末端一次冻结——把单事件路径 `includes` + spread 的 O(n²) 降到 O(n)（R-A6）。
   // 公共形状 readonly string[] 不变；单事件 live 路径仍走 reduceWorkbenchEvent。
   const applied = new Set(initial.appliedEventIds)
   const appliedEventIds = [...initial.appliedEventIds]
-  let appliedRanges = initial.appliedRanges
+  // #205：批量路径取得工作数组所有权——timeline 只在入口复制一次，之后就地追加；
+  // 覆盖区间首用时复制一次，之后就地并入。两者都把「逐事件整数组复制」的
+  // Θ(N²)/Θ(N·R) 降到摊销 Θ(N)。对外暴露前统一冻结（与改造前形状一致）。
+  let timeline: WorkbenchTimelineEntry[] = [...initial.timeline]
+  let ranges: [number, number][] | undefined
+  // #205：timeline 派生索引——归约器要按 sequence 问「(a,b) 内有没有 tool 条目 /
+  // 文本流边界 / 终态 session 条目」。原本逐事件整条扫描（落在最高频的 delta 上 ⇒
+  // Θ(N·T)）。timeline 自身按 sequence 升序，故按位置增量延展即保持有序；
+  // 归约器换掉 timeline 数组时（tool/activity/诊断等低频事件）按位置补扫。
+  const context: { toolSequences: number[]; textBoundarySequences: number[]; terminalSessionSequences: number[] } = {
+    toolSequences: [],
+    textBoundarySequences: [],
+    terminalSessionSequences: [],
+  }
+  let indexedEntries = 0
+  const indexTimeline = (entries: readonly WorkbenchTimelineEntry[], from: number): void => {
+    for (let index = from; index < entries.length; index++) {
+      const entry = entries[index]!
+      if (entry.kind === 'tool') context.toolSequences.push(entry.sequence)
+      if (isTextStreamBoundary(entry)) context.textBoundarySequences.push(entry.sequence)
+      if (isTerminalSessionEntry(entry)) context.terminalSessionSequences.push(entry.sequence)
+    }
+  }
+  let orphanActivities: readonly WorkbenchActivityNode[] | undefined
+  let orphanIds: ReadonlySet<string> | undefined
   let document = initial
   for (const envelope of sorted) {
     // #81 L2：与 reduceWorkbenchEvent 同一幂等判据（journal 信封按区间覆盖，
     // 其余按 eventId）——单事件路径与批量路径语义一致。
     const span = coverageSpanOf(envelope)
     if (span) {
-      if (isSpanCovered(appliedRanges, span[0], span[1])) continue
-      appliedRanges = mergeCoverage(appliedRanges, span[0], span[1])
+      const current = ranges ?? (ranges = initial.appliedRanges.map(range => [range[0], range[1]] as [number, number]))
+      if (isSpanCovered(current, span[0], span[1])) continue
+      mergeCoverageInPlace(current, span[0], span[1])
     } else {
       if (applied.has(envelope.eventId)) continue
       applied.add(envelope.eventId)
@@ -356,21 +460,42 @@ export function projectWorkbench(
     const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
       ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
       : envelope
+    const entry = timelineEntry(effective)
+    const tail = timeline.at(-1)
+    // 升序输入下恒走 push（入口已排序 ⇒ 不中插）；乱序兜底仍是同一插入语义。
+    if (!tail || tail.sequence <= entry.sequence) timeline.push(entry)
+    else timeline = insertBySequence(timeline, entry)
     let next: WorkbenchDocument = {
       ...document,
       revision: Math.max(document.revision, envelope.sequence),
       appliedEventIds,
-      appliedRanges,
-      timeline: insertBySequence(document.timeline, timelineEntry(effective)),
+      appliedRanges: ranges ?? initial.appliedRanges,
+      timeline,
     }
-    next = reduceSemanticEvent(next, effective)
-    document = refreshOrphans(next)
+    next = reduceSemanticEvent(next, effective, context)
+    if (next.timeline !== timeline || indexedEntries > next.timeline.length) {
+      timeline = [...next.timeline]
+      indexedEntries = 0
+      context.toolSequences = []
+      context.textBoundarySequences = []
+      context.terminalSessionSequences = []
+    }
+    indexTimeline(timeline, indexedEntries)
+    indexedEntries = timeline.length
+    // orphan 是 (activities id 集合, parentId) 的纯函数：activities 数组同一引用 ⇒ id 未变
+    // ⇒ 上轮结果仍然成立，免掉每事件重建 Set（归约器不读 orphan，故与逐事件刷新等价）。
+    if (next.activities !== orphanActivities) {
+      orphanActivities = next.activities
+      orphanIds = new Set(next.activities.map(activity => activity.id))
+    }
+    document = refreshOrphans(next, orphanIds)
   }
+  const finalRanges = ranges ?? initial.appliedRanges.map(range => [range[0], range[1]] as [number, number])
   return {
     document: {
       ...document,
       appliedEventIds: Object.freeze([...appliedEventIds]),
-      appliedRanges: Object.freeze(appliedRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number])),
+      appliedRanges: Object.freeze(finalRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number])),
     },
     diagnostics: document.diagnostics,
   }
@@ -526,17 +651,31 @@ export function selectExtensions(document: WorkbenchDocument): readonly Workbenc
   return document.extensions
 }
 
-function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
+/**
+ * #205：归约器可选上下文——批量回放路径把「按 timeline 查询」的派生索引交给归约器，
+ * 免掉逐事件整条扫描。缺省（单事件 live 路径）一律回退原语义。三个索引都是
+ * sequence 升序数组，由 `projectWorkbench` 按 timeline 位置增量延展。
+ */
+interface ProjectionContext {
+  /** kind==='tool' 的条目 sequence（见 `hasToolBetween`）。 */
+  readonly toolSequences: readonly number[]
+  /** 文本流边界条目 sequence（见 `textStreamContinues`）。 */
+  readonly textBoundarySequences: readonly number[]
+  /** 终态 session 条目 sequence（见 `terminalSessionSequence`）。 */
+  readonly terminalSessionSequences: readonly number[]
+}
+
+function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, context?: ProjectionContext): WorkbenchDocument {
   const event = envelope.event
   switch (event.type) {
     case 'message.started':
     case 'message.delta':
     case 'message.completed':
-      return reduceMessage(document, envelope, event)
+      return reduceMessage(document, envelope, event, context)
     case 'reasoning.delta':
     case 'reasoning.completed':
     case 'reasoning.redacted':
-      return reduceReasoning(document, envelope, event)
+      return reduceReasoning(document, envelope, event, context)
     case 'tool.started':
     case 'tool.progress':
     case 'tool.completed':
@@ -594,13 +733,13 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
   }
 }
 
-function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
+function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent, context?: ProjectionContext): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
     // A journal-earlier event arriving after the terminal one is out-of-order
     // arrival, not a journal-late event; the sequence-ordered replay would
     // still fold it, so the live path must not fence it out.
-    const journalEarlierThanFence = envelope.sequence < terminalSessionSequence(document)
+    const journalEarlierThanFence = envelope.sequence < terminalSessionSequence(document, context?.terminalSessionSequences)
     const userTurnInProgress = role === 'user' && document.messages.at(-1)?.role === 'user' && document.messages.at(-1)?.running === true
     if (role === 'user' && (event.type === 'message.started' || event.type === 'message.delta' || (event.type === 'message.completed' && userTurnInProgress))) document = { ...document, session: { ...document.session, status: 'running', stopReason: undefined } }
     else if ((role !== 'user' || event.type === 'message.completed') && !journalEarlierThanFence) return addLateEventDiagnostic(document, envelope, 'late assistant event ignored after terminal fence')
@@ -624,7 +763,7 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   // for every delta. Assistant boundaries therefore come from the canonical
   // timeline's semantic text/tool/session events, not from side-channel events
   // or per-chunk identity.
-  const append = Boolean(previous && previous.role === role && textStreamContinues(document, previous, envelope) && (
+  const append = Boolean(previous && previous.role === role && textStreamContinues(document, previous, envelope, context?.textBoundarySequences) && (
     role === 'assistant'
       ? true
       : providerIdentityKey(envelope.identity) !== ''
@@ -655,8 +794,8 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   // Fold it in instead of dropping it so the live document matches the
   // sequence-ordered replay; the terminal state itself (running/duration) is
   // not resurrected.
-  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)
-    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document, context?.terminalSessionSequences))) {
     const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
       ...previous,
       content: previous.content + content,
@@ -667,7 +806,7 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   // A terminal segment is an absorption fence. A late delta may only start a
   // new visible segment when the provider supplies an explicit, different
   // turn identity; otherwise it belongs to the sealed turn and is ignored.
-  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope)) {
+  if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)) {
     const previousTurn = previous.identity.turnId
     const incomingTurn = envelope.identity.turnId
     const previousProvider = providerIdentityKey(previous.identity)
@@ -687,11 +826,11 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   return { ...document, messages }
 }
 
-function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
+function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }, context?: ProjectionContext): WorkbenchDocument {
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
     // Journal-earlier events are out-of-order arrivals, not journal-late ones;
     // the replay would still fold them (see reduceMessage).
-    if (!(envelope.sequence < terminalSessionSequence(document))) {
+    if (!(envelope.sequence < terminalSessionSequence(document, context?.terminalSessionSequences))) {
       return addLateEventDiagnostic(document, envelope, 'late reasoning event ignored after terminal fence')
     }
   }
@@ -716,8 +855,8 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const sameTerminalIdentity = incomingProviderIdentity !== '' && incomingProviderIdentity === previousProviderIdentity
   const append = previous !== undefined
     && previous.role === 'reasoning'
-    && textStreamContinues(document, previous, envelope)
-    && !document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
+    && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)
+    && !hasToolBetween(document, previous.sequence, envelope.sequence, context?.toolSequences)
     && (previous.running || (event.type !== 'reasoning.delta' && sameTerminalIdentity))
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
@@ -735,13 +874,13 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     }
     return document
   }
-  const hasToolBoundary = previous !== undefined && document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > previous.sequence && entry.sequence < envelope.sequence)
+  const hasToolBoundary = previous !== undefined && hasToolBetween(document, previous.sequence, envelope.sequence, context?.toolSequences)
   // Out-of-order arrival convergence: fold a journal-earlier delta into the
   // sealed reasoning segment instead of dropping it (see reduceMessage). The
   // terminal state—running flag, duration, sequence—stays as sealed.
   if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary
-    && textStreamContinues(document, previous, envelope)
-    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document))) {
+    && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)
+    && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document, context?.terminalSessionSequences))) {
     const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
       ...previous,
       content: previous.content + content,
@@ -1226,11 +1365,12 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   }
 }
 
-function refreshOrphans(document: WorkbenchDocument): WorkbenchDocument {
+function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<string>): WorkbenchDocument {
   // P57 S2-R1a：仅当某个带 parentId 的 activity 的 orphan 值实际变化时才克隆该节点；
   // 没有任何变化时恒等返回输入 document。此前每个带 parentId 的节点无条件克隆，
   // 恒产生新 activities 数组，放大了 freezeDeepSnapshot 每事件的全量深拷贝。
-  const ids = new Set(document.activities.map(activity => activity.id))
+  // #205：调用方已知 id 集合（如批量路径按 activities 数组同一性缓存）时可免重建。
+  const ids = providedIds ?? new Set(document.activities.map(activity => activity.id))
   let changed = false
   const activities = document.activities.map(activity => {
     if (!activity.parentId) return activity
@@ -1283,14 +1423,12 @@ function addLateEventDiagnostic(document: WorkbenchDocument, envelope: Workbench
  * out-of-order arrivals of journal-earlier facts, not journal-late events;
  * the sequence-ordered replay still folds them.
  */
-function terminalSessionSequence(document: WorkbenchDocument): number {
+function terminalSessionSequence(document: WorkbenchDocument, index?: readonly number[]): number {
+  // #205：批量路径把终态 session 条目 sequence 也建成升序索引，取末位即最大值。
+  if (index) return index.length > 0 ? index[index.length - 1]! : Number.NEGATIVE_INFINITY
   let latest = Number.NEGATIVE_INFINITY
   for (const entry of document.timeline) {
-    if (entry.kind !== 'session' || !isRecord(entry.data)) continue
-    const data = entry.data as { type?: unknown; status?: unknown }
-    const terminal = data.type === 'session.completed'
-      || (typeof data.status === 'string' && TERMINAL_SESSION_STATUSES.has(data.status.toLowerCase()))
-    if (terminal) latest = Math.max(latest, entry.sequence)
+    if (isTerminalSessionEntry(entry)) latest = Math.max(latest, entry.sequence)
   }
   return latest
 }
@@ -1342,7 +1480,12 @@ function textStreamContinues(
   document: WorkbenchDocument,
   previous: WorkbenchMessage,
   envelope: WorkbenchEventEnvelope,
+  boundaryIndex?: readonly number[],
 ): boolean {
+  // #205：journal 里每一条 message/reasoning 条目本身就是文本流边界（见
+  // `isTextStreamBoundary`），逐事件整条扫描把重放压成 Θ(N²)；批量路径改走
+  // 升序边界索引 + 二分，语义等价（无索引时回退原扫描，live 路径不变）。
+  if (boundaryIndex) return !hasIndexedSequenceBetween(boundaryIndex, previous.sequence, envelope.sequence)
   return !document.timeline.some(entry => entry.sequence > previous.sequence
     && entry.sequence < envelope.sequence
     && isTextStreamBoundary(entry))

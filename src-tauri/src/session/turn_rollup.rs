@@ -46,7 +46,9 @@ fn is_foldable_delta(event_type: &str) -> bool {
     static_delta_type(event_type).is_some()
 }
 
-fn static_delta_type(event_type: &str) -> Option<&'static str> {
+/// delta → 基础静态类型映射；`*.batch` 行映射回其基础 delta（#205：读侧尾部折叠
+/// 与单元折叠共用同一口径，`event_repo::fold_uncovered_delta_runs` 复用本函数）。
+pub(crate) fn static_delta_type(event_type: &str) -> Option<&'static str> {
     match event_type {
         "assistant.text.delta" | "assistant.text.delta.batch" => Some("assistant.text.delta"),
         "assistant.thinking.delta" | "assistant.thinking.delta.batch" => {
