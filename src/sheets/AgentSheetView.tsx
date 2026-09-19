@@ -49,7 +49,7 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
     }
   }, [postureSession, ctx.activeSession])
   // 页面打开时聊天区整体不挂载（与切会话同一条路径：历史在返回时经 lifecycle 重读）。
-  if (openPage) return <AgentSheetPageHost page={openPage} ctx={ctx} sheet={sheet} state={sheet.state} />
+  if (openPage) return <AgentSheetPageHost page={openPage} ctx={ctx} sheet={sheet} />
   if (mode.workbench.renderKind === 'isolated-surface') {
     return <IsolatedPluginSurface
       surfaceId={mode.workbench.surfaceId}

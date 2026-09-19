@@ -4,7 +4,7 @@ import { useIdentityStore } from '../../identityStore'
 import { useWorkspaceStore } from '../../workspaceStore'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { closeBlockPage, normalizeBlockState, resolveOpenPage } from '../../plugin-runtime/sidebar/sidebarBlockState.ts'
+import { normalizePageState, resolveOpenPage } from '../../plugin-runtime/sidebar/sidebarBlockState.ts'
 import type { AgentSidebarContribution } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
@@ -25,7 +25,7 @@ export function useOpenSidebarPage(state: unknown): AgentSidebarContribution | n
     () => sidebarRegistry.getSnapshot(),
     () => sidebarRegistry.getSnapshot(),
   )
-  const blockState = normalizeBlockState(state)
+  const blockState = normalizePageState(state)
   return resolveOpenPage(snapshot.entries.map(entry => entry.value), blockState)
 }
 
@@ -38,19 +38,18 @@ export function useOpenSidebarPage(state: unknown): AgentSidebarContribution | n
  *
  * 头部（返回 + 标题）由宿主渲染，贡献只画内容——与左栏区块外壳同一条约定。
  */
-export default function AgentSheetPageHost({ page, ctx, sheet, state }: {
+export default function AgentSheetPageHost({ page, ctx, sheet }: {
   page: AgentSidebarContribution
   ctx: SheetContext
   sheet: { id: string }
-  state?: unknown
 }) {
   const patchSheetState = useWorkspaceStore(s => s.patchSheetState)
   const activeAgent = useIdentityStore(s => s.activeAgent)
 
   const close = useCallback(() => {
-    const next = closeBlockPage(normalizeBlockState(state))
-    patchSheetState(sheet.id, { blockCollapsed: next.blockCollapsed, activePageId: next.activePageId })
-  }, [patchSheetState, sheet.id, state])
+    // 整页是 Sheet 级状态，只写 activePageId；模块折叠在全局 store（issue #202），与此无关。
+    patchSheetState(sheet.id, { activePageId: null })
+  }, [patchSheetState, sheet.id])
 
   // Esc 关闭：整页是「临时离开聊天」，键盘用户需要一个不依赖指针的退路。
   useEffect(() => {
