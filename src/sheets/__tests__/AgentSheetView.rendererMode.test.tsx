@@ -1617,8 +1617,9 @@ describe('AgentSheetView renderer mode context', () => {
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
-    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' }, { timeout: 5_000 })
-    expect(workspace).toHaveValue('workspace-a')
+    // 04b：空态工作区选择器已隐藏 —— 改由下方 new_session 实参断言预选结果；
+    // 先等空态挂载完成，避免在未挂载时输入。
+    await screen.findByRole('region', { name: 'Agent 工作台空态' }, { timeout: 5_000 })
     const prompt = screen.getByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '修复构建' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', charCode: 13 })

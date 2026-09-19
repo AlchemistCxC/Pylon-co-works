@@ -17,8 +17,8 @@ type Migrated = { ccLayout: { placements: Record<string, { slot: string; order: 
 describe('theme schema v8：老安装补入 reasoning 控件', () => {
   // 回归锚点：不 bump 版本号，存量 v7 安装的 migrate 钩子不触发，
   // normalizeCcLayout 的补位逻辑就永远跑不到 —— 控件在老浏览器里永远不出现。
-  it('持久化版本已推进到 10（v8 的补位逻辑仍然生效）', () => {
-    expect(THEME_SCHEMA_VERSION).toBe(10)
+  it('持久化版本已推进到 11（刀4 名单换代的迁移仍然生效）', () => {
+    expect(THEME_SCHEMA_VERSION).toBe(11)
   })
 
   it('存量 v7 布局缺 reasoning 时，migrate 后补入默认位置', () => {
@@ -90,5 +90,39 @@ describe('theme schema v10：用量控件（S11）', () => {
 
     expect(migrated.ccLayout.placements.pct).toBeUndefined()
     expect(migrated.ccLayout.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
+  })
+})
+
+describe('theme schema v11：中控名单换代（刀4）', () => {
+  // 回归锚点（2026-09-18）：被删元件的字段键与 legacy `send` 键都只挂在 migrate 钩子上
+  // 清理/改名 —— 不 bump 则老安装的 localStorage 里它们会一直留着。
+  it('被删元件的 cc 字段键在迁移中清掉（ekg 四形态 + 用量条参数 + ccStyle）', () => {
+    const legacy: Record<string, unknown> = {
+      ...DEFAULTS,
+      ccStyle: 'numeric', ekgWidth: 140, ekgGreen: '#4ade80', ekgYellow: '#fbbf24', ekgRed: '#f87171',
+      barTrackColor: '#353117', barFillColor: '#22c55e', barFillFollow: true, barHeight: 8,
+    }
+
+    const migrated = themeDomainMigrate(legacy, defaults, 10)
+
+    for (const key of ['ccStyle', 'ekgWidth', 'ekgGreen', 'ekgYellow', 'ekgRed', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight']) {
+      expect(migrated).not.toHaveProperty(key)
+    }
+    // 保留项不受牵连
+    expect(migrated.pillText).toBe(DEFAULTS.pillText)
+    expect(migrated.prismOnColor).toBe(DEFAULTS.prismOnColor)
+  })
+
+  it('legacy `send` 的 ccHidden / ccScale 键迁移到注册轨 id', () => {
+    const legacy: Record<string, unknown> = {
+      ...DEFAULTS,
+      ccHidden: ['send', 'tokens'],
+      ccScale: { send: 120, model: 90 },
+    }
+
+    const migrated = themeDomainMigrate(legacy, defaults, 10)
+
+    expect(migrated.ccHidden).toEqual(['cc-send-button', 'tokens'])
+    expect(migrated.ccScale).toEqual({ 'cc-send-button': 120, model: 90 })
   })
 })

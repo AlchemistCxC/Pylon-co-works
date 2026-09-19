@@ -16,14 +16,19 @@ import { normalizeWorkbenchMountInput, type SolidWorkbenchServices } from '../wo
 export function mountSolidControlCenterPreview({
   host,
   services,
+  sessionId = null,
 }: {
   host: HTMLElement
   services: SolidWorkbenchServices
+  /** 默认挂「空态」（main 契约，issue172 等用例依赖）；要「有会话」的用例显式传一个 id。 */
+  sessionId?: string | null
 }): () => void {
   let destroyed = false
   const [input] = createSignal(normalizeWorkbenchMountInput({
     sheetId: 'settings-preview',
-    sessionId: null,
+    // 默认 = 空态（与 main 一致）。04b 之后空态下发送按钮与状态控件已隐藏，
+    // 需要「有会话」的用例（preview 3 条）显式传 sessionId: 'preview-session'。
+    sessionId,
     preview: true,
     replayReadonly: false,
     reducedMotion: true,

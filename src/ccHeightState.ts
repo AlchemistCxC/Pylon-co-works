@@ -70,19 +70,15 @@ export interface CcMinHeightOptions {
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
   inputMode,
-  ccStyle,
   submitButtonMode,
-  presentationProfileId,
 }: {
   hiddenIds: readonly string[]
   inputMode: CcInputMode
-  ccStyle: string
   submitButtonMode: string
-  presentationProfileId?: string
 }): number {
-  // C2：与渲染共用一个可见性谓词（含 submitButtonMode 的 send/attach 判定），
-  // 修此前"计数把不渲染的 send/attach 算入最小高"的失真。
-  return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds, inputMode, submitButtonMode, ccStyle, presentationProfileId })).length
+  // C2：与渲染共用一个可见性谓词。名单换代（刀4）后，可见性只由 hidden 决定；
+  // inputMode / submitButtonMode 仍随上下文一起传递（渲染侧同源），但不再改变结果。
+  return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds, inputMode, submitButtonMode })).length
 }
 
 const BASE_MIN_HEIGHT = 64

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T06:07:55.599Z",
+  "generatedAt": "2026-09-19T05:30:54.537Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -14,8 +14,8 @@
       "focus-flow"
     ],
     "customPresetIds": [],
-    "themeSettingCount": 200,
-    "cssVariableCount": 100
+    "themeSettingCount": 191,
+    "cssVariableCount": 98
   },
   "fixtures": [
     {
@@ -134,7 +134,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "wave",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -181,14 +180,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 150,
-        "ekgGreen": "#4EBA65",
-        "ekgYellow": "#FFC107",
-        "ekgRed": "#FF6B80",
-        "barTrackColor": "rgba(0,0,0,0.18)",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -223,23 +214,11 @@
         "ccEditMode": false,
         "ccHidden": [],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -267,27 +246,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -393,8 +354,6 @@
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "150px",
-        "--ekg-green": "#4EBA65",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -524,7 +483,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -571,14 +529,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#4ade80",
-        "ekgYellow": "#fbbf24",
-        "ekgRed": "#f87171",
-        "barTrackColor": "#353117",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "rgba(205,214,244,0.6)",
         "prismOnColor": "#4ade80",
         "modelSwitchMode": "cycle",
@@ -612,26 +562,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -659,34 +597,15 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
         "ccScale": {
-          "ekg": 90,
           "tokens": 90,
           "model": 90,
           "mode": 90
@@ -796,8 +715,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#4ade80",
         "--pill-text": "rgba(205,214,244,0.6)",
         "--prism-on-color": "#4ade80",
         "--mode-auto-color": "#FFC107",
@@ -927,7 +844,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "bar",
         "ccVariant": "pill",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -974,14 +890,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 130,
-        "ekgGreen": "#22c55e",
-        "ekgYellow": "#f59e0b",
-        "ekgRed": "#ef4444",
-        "barTrackColor": "rgba(0,0,0,0.06)",
-        "barFillColor": "#22c55e",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "rgba(0,0,0,0.50)",
         "prismOnColor": "#22c55e",
         "modelSwitchMode": "cycle",
@@ -1015,26 +923,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -1062,34 +958,15 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
         "ccScale": {
-          "ekg": 105,
           "tokens": 100,
           "model": 100,
           "mode": 100
@@ -1198,8 +1075,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "130px",
-        "--ekg-green": "#22c55e",
         "--pill-text": "rgba(0,0,0,0.50)",
         "--prism-on-color": "#22c55e",
         "--mode-auto-color": "#f59e0b",
@@ -1329,7 +1204,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "bar",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -1376,14 +1250,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#a3be8c",
-        "ekgYellow": "#ebcb8b",
-        "ekgRed": "#bf616a",
-        "barTrackColor": "rgba(136,192,208,0.10)",
-        "barFillColor": "#88c0d0",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "rgba(136,192,208,0.75)",
         "prismOnColor": "#a3be8c",
         "modelSwitchMode": "cycle",
@@ -1417,26 +1283,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -1464,34 +1318,15 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
         "ccScale": {
-          "ekg": 100,
           "tokens": 95,
           "model": 95,
           "mode": 95
@@ -1604,8 +1439,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#a3be8c",
         "--pill-text": "rgba(136,192,208,0.75)",
         "--prism-on-color": "#a3be8c",
         "--mode-auto-color": "#ebcb8b",
@@ -1735,7 +1568,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -1782,14 +1614,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#9ece6a",
-        "ekgYellow": "#e0af68",
-        "ekgRed": "#f7768e",
-        "barTrackColor": "#24283b",
-        "barFillColor": "#7aa2f7",
-        "barFillFollow": true,
-        "barHeight": 8,
         "pillText": "#a9b1d6",
         "prismOnColor": "#9ece6a",
         "modelSwitchMode": "cycle",
@@ -1823,26 +1647,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -1870,27 +1682,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -2009,8 +1803,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#9ece6a",
         "--pill-text": "#a9b1d6",
         "--prism-on-color": "#9ece6a",
         "--mode-auto-color": "#e0af68",
@@ -2140,7 +1932,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -2187,14 +1978,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#859900",
-        "ekgYellow": "#b58900",
-        "ekgRed": "#dc322f",
-        "barTrackColor": "#eee8d5",
-        "barFillColor": "#268bd2",
-        "barFillFollow": true,
-        "barHeight": 8,
         "pillText": "#586e75",
         "prismOnColor": "#859900",
         "modelSwitchMode": "cycle",
@@ -2228,26 +2011,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -2275,27 +2046,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -2411,8 +2164,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#859900",
         "--pill-text": "#586e75",
         "--prism-on-color": "#859900",
         "--mode-auto-color": "#b58900",
@@ -2542,7 +2293,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -2589,14 +2339,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#ffc24b",
-        "ekgYellow": "#ffb000",
-        "ekgRed": "#ff6b35",
-        "barTrackColor": "#2b1900",
-        "barFillColor": "#ffb000",
-        "barFillFollow": true,
-        "barHeight": 8,
         "pillText": "#cc8c00",
         "prismOnColor": "#ffc24b",
         "modelSwitchMode": "cycle",
@@ -2630,26 +2372,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -2677,27 +2407,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -2816,8 +2528,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#ffc24b",
         "--pill-text": "#cc8c00",
         "--prism-on-color": "#ffc24b",
         "--mode-auto-color": "#ffb000",
@@ -2947,7 +2657,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -2994,14 +2703,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#39ff14",
-        "ekgYellow": "#ffd700",
-        "ekgRed": "#ff3c3c",
-        "barTrackColor": "#0a1a0a",
-        "barFillColor": "#39ff14",
-        "barFillFollow": true,
-        "barHeight": 8,
         "pillText": "#39ff14",
         "prismOnColor": "#39ff14",
         "modelSwitchMode": "cycle",
@@ -3035,26 +2736,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -3082,27 +2771,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -3221,8 +2892,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#39ff14",
         "--pill-text": "#39ff14",
         "--prism-on-color": "#39ff14",
         "--mode-auto-color": "#39ff14",
@@ -3352,7 +3021,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "bar",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -3399,14 +3067,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 150,
-        "ekgGreen": "#4EBA65",
-        "ekgYellow": "#FFC107",
-        "ekgRed": "#FF6B80",
-        "barTrackColor": "rgba(0,0,0,0.18)",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -3441,23 +3101,11 @@
         "ccEditMode": false,
         "ccHidden": [],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -3485,27 +3133,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -3613,8 +3243,6 @@
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "150px",
-        "--ekg-green": "#4EBA65",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -3744,7 +3372,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "bar",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -3791,14 +3418,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 150,
-        "ekgGreen": "#4EBA65",
-        "ekgYellow": "#FFC107",
-        "ekgRed": "#FF6B80",
-        "barTrackColor": "rgba(0,0,0,0.18)",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -3833,23 +3452,11 @@
         "ccEditMode": false,
         "ccHidden": [],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -3877,27 +3484,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -4005,8 +3594,6 @@
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "150px",
-        "--ekg-green": "#4EBA65",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -4136,7 +3723,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -4183,14 +3769,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 150,
-        "ekgGreen": "#4EBA65",
-        "ekgYellow": "#FFC107",
-        "ekgRed": "#FF6B80",
-        "barTrackColor": "rgba(0,0,0,0.18)",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -4225,23 +3803,11 @@
         "ccEditMode": false,
         "ccHidden": [],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -4269,27 +3835,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -4397,8 +3945,6 @@
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "150px",
-        "--ekg-green": "#4EBA65",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -4528,7 +4074,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "numeric",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -4575,14 +4120,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 140,
-        "ekgGreen": "#ffc24b",
-        "ekgYellow": "#ffb000",
-        "ekgRed": "#ff6b35",
-        "barTrackColor": "#2b1900",
-        "barFillColor": "#ffb000",
-        "barFillFollow": true,
-        "barHeight": 8,
         "pillText": "#cc8c00",
         "prismOnColor": "#ffc24b",
         "modelSwitchMode": "cycle",
@@ -4616,26 +4153,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [
-          "send"
+          "cc-send-button"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -4663,27 +4188,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -4802,8 +4309,6 @@
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "140px",
-        "--ekg-green": "#ffc24b",
         "--pill-text": "#cc8c00",
         "--prism-on-color": "#ffc24b",
         "--mode-auto-color": "#ffb000",
@@ -4933,7 +4438,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
         "ccStatusFontSize": 16,
-        "ccStyle": "wave",
         "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
@@ -4980,14 +4484,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "transparent",
         "statusBgImage": "",
-        "ekgWidth": 150,
-        "ekgGreen": "#4EBA65",
-        "ekgYellow": "#FFC107",
-        "ekgRed": "#FF6B80",
-        "barTrackColor": "rgba(0,0,0,0.18)",
-        "barFillColor": "#4EBA65",
-        "barFillFollow": true,
-        "barHeight": 10,
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -5024,23 +4520,11 @@
           "ekg"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -5068,27 +4552,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -5196,8 +4662,6 @@
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
         "--status-bg": "transparent",
-        "--ekg-w": "150px",
-        "--ekg-green": "#4EBA65",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -5327,7 +4791,6 @@
         "ccSurfaceOpacity": 0,
         "ccBgImage": "",
         "ccStatusFontSize": 14,
-        "ccStyle": "wave",
         "ccVariant": "terminal",
         "inputOffsetTop": 0,
         "inputHeight": 0,
@@ -5374,14 +4837,6 @@
         "cliOverflowMode": "fixed-scroll",
         "statusBg": "",
         "statusBgImage": "",
-        "ekgWidth": 60,
-        "ekgGreen": "",
-        "ekgYellow": "",
-        "ekgRed": "",
-        "barTrackColor": "",
-        "barFillColor": "",
-        "barFillFollow": false,
-        "barHeight": 4,
         "pillText": "",
         "prismOnColor": "",
         "modelSwitchMode": "menu",
@@ -5416,23 +4871,11 @@
         "ccEditMode": false,
         "ccHidden": [],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -5460,27 +4903,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -5543,8 +4968,7 @@
         "--input-min-height": "32px",
         "--cli-line-width": "1px",
         "--cli-line-padding": "0px",
-        "--cli-content-offset-y": "-6px",
-        "--ekg-w": "60px"
+        "--cli-content-offset-y": "-6px"
       },
       "dataAttributes": {
         "data-ui-scheme": "light",
@@ -5670,7 +5094,6 @@
         "ccSurfaceOpacity": 1,
         "ccBgImage": "fixture-ccBgImage",
         "ccStatusFontSize": 20,
-        "ccStyle": "numeric",
         "ccVariant": "pill",
         "inputOffsetTop": 120,
         "inputHeight": 200,
@@ -5717,14 +5140,6 @@
         "cliOverflowMode": "overlay",
         "statusBg": "#abcdef",
         "statusBgImage": "fixture-statusBgImage",
-        "ekgWidth": 300,
-        "ekgGreen": "#abcdef",
-        "ekgYellow": "#abcdef",
-        "ekgRed": "#abcdef",
-        "barTrackColor": "#abcdef",
-        "barFillColor": "#abcdef",
-        "barFillFollow": true,
-        "barHeight": 24,
         "pillText": "#abcdef",
         "prismOnColor": "#abcdef",
         "modelSwitchMode": "cycle",
@@ -5762,23 +5177,11 @@
           "tasks"
         ],
         "ccLayout": {
-          "version": 8,
+          "version": 9,
           "placements": {
             "input": {
               "slot": "input",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "session": {
-              "slot": "status-secondary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "workspace": {
-              "slot": "status-secondary",
-              "order": 1,
               "offsetX": 0,
               "offsetY": 0
             },
@@ -5806,27 +5209,9 @@
               "offsetX": 0,
               "offsetY": 0
             },
-            "activity": {
-              "slot": "status-primary",
-              "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "ekg": {
-              "slot": "status-primary",
-              "order": 1,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "send": {
+            "cc-send-button": {
               "slot": "actions",
               "order": 0,
-              "offsetX": 0,
-              "offsetY": 0
-            },
-            "tasks": {
-              "slot": "status-primary",
-              "order": 4,
               "offsetX": 0,
               "offsetY": 0
             }
@@ -5946,8 +5331,6 @@
         "--cli-line-padding": "16px",
         "--cli-content-offset-y": "6px",
         "--status-bg": "#abcdef",
-        "--ekg-w": "300px",
-        "--ekg-green": "#abcdef",
         "--pill-text": "#abcdef",
         "--prism-on-color": "#abcdef",
         "--mode-auto-color": "#abcdef",

@@ -43,7 +43,6 @@ describe('主题设置展示文案契约', () => {
 
   it('关键枚举保留稳定值，并为每个值提供人类可读名称', () => {
     const expectedOptions = {
-      ccStyle: ['wave', 'bar', 'ring', 'numeric'],
       inputMode: ['cli', 'default'],
       inputShowPlaceholder: ['shown', 'hidden'],
       inputShowHistoryHint: ['shown', 'hidden'],
@@ -67,8 +66,7 @@ describe('主题设置展示文案契约', () => {
 
   it('诊断中点名的模糊字段表达真实作用域', () => {
     expect(THEME_FIELD_DEFS.assistantDot.label).toBe('显示助手消息标记')
-    expect(THEME_FIELD_DEFS.ccStyle.label).toBe('用量显示方式')
-    expect(THEME_FIELD_DEFS.barTrackColor.label).toBe('用量条轨道')
+    expect(THEME_FIELD_DEFS.ccVariant.label).toBe('整体风格')
     expect(THEME_FIELD_DEFS.footerLayout.label).toBe('底部信息布局')
   })
 
@@ -76,7 +74,6 @@ describe('主题设置展示文案契约', () => {
     const visibleCopy = Object.values(WIDGET_PROPERTY_FIELDS).flatMap(fields => fields.flatMap(field => {
       if (field.kind === 'section') return [field.title]
       if (field.kind === 'chips') return [field.label, ...field.options.map(option => option.label)]
-      if (field.kind === 'chipsBool') return [field.label, field.trueLabel, field.falseLabel]
       return [field.label]
     }))
 
