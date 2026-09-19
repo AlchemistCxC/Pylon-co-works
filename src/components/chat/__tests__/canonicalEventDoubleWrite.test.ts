@@ -16,10 +16,10 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn((..._args: unknown[
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
-  Channel: class { id = 0; onmessage = () => {} },
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((...args: unknown[]) => invokeMock(...args))
+})
 
 import { setCanonicalEventSinkFactoryForTests, getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import type { CanonicalEventSink } from '../../../infrastructure/events/canonicalEventSink'

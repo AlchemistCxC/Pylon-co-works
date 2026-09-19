@@ -25,7 +25,10 @@ import { createSheetState } from '../../../workspace-sheets/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const sheet: SheetRecord = {

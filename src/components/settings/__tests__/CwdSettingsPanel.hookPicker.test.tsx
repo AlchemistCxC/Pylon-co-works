@@ -8,7 +8,10 @@ vi.mock('../../../workspaceEntityStore', () => ({
   useWorkspaceEntityStore: (selector: (state: { updateWorkspace: typeof updateWorkspace }) => unknown) =>
     selector({ updateWorkspace }),
 }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => []) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(async () => [])
+})
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }))
 vi.mock('../../../infrastructure/acp/agentClient', () => ({
   createAgentClient: () => ({ getMcpServers: async () => [] }),

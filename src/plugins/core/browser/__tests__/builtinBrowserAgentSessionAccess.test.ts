@@ -8,9 +8,10 @@ import { runSessionPreflight } from '../../sessionCreation/sessionPreflight.ts'
 
 const invokeMock = vi.mocked(invoke)
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(vi.fn())
+})
 
 describe('builtin browser agent session access（issue #82）', () => {
   beforeEach(() => {

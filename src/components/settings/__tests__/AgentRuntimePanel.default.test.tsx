@@ -9,8 +9,10 @@ import { resetStores } from '../../../test/resetStores'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 // P91 §9 夹具收敛：invoke 桥接到共享 FakeInvoke。未注册命令 resolve null
 //（对齐原 mockImplementation 的兜底返回）；断言面全部经由桥接 vi.fn，保持原样。
 // per-test 整体重接 = 重新赋值 fakeInvoke（桥接闭包读取外层变量，等价原整体替换 mockImplementation）。

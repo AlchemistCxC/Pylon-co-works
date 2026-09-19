@@ -7,8 +7,10 @@ import { resetStores } from '../../test/resetStores'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise })

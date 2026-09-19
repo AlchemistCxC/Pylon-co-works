@@ -25,14 +25,15 @@ import HistorySheetView from '../history/HistorySheetView.tsx'
 import GatewaySheetView from '../gateway/GatewaySheetView.tsx'
 import type { SheetContext, SheetKind, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn((command: string) => {
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock((command: string) => {
     if (command === 'list_runtime_logs' || command === 'gateway_sessions' || command === 'gateway_catalog' || command === 'gateway_instances' || command === 'list_persisted_sessions') return Promise.resolve([])
     if (command === 'gateway_status') return Promise.resolve({ adapters: [], routes: [], qq: null, inject: null })
     if (command === 'startup_diagnostics') return Promise.resolve({})
     return Promise.resolve(null)
-  }),
-}))
+  })
+})
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn(() => Promise.resolve(null)) }))
 vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))

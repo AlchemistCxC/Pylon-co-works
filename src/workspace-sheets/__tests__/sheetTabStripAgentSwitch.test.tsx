@@ -8,8 +8,10 @@ import type { SheetRecord } from '../sheetTypes'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 const sheets: SheetRecord[] = [
   { id: 'peri-sheet', kind: 'agent', title: 'Peri', agentId: 'peri', createdAt: 1, lastFocusedAt: 1 },
   { id: 'hermes-sheet', kind: 'agent', title: 'Hermes', agentId: 'hermes', createdAt: 2, lastFocusedAt: 2 },

@@ -13,10 +13,10 @@ const mocks = vi.hoisted(() => ({
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
-}))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
+})
 /** 未注册命令 resolve undefined（对齐 mockReset 后 vi.fn 的默认行为） */
 class TolerantFakeInvoke extends FakeInvoke {
   override invoke(cmd: string, args?: unknown): Promise<unknown> {

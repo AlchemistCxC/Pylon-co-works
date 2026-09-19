@@ -13,9 +13,10 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
+})
 vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))
 
 /** 未注册命令 resolve {}（对齐原内联 mock `vi.fn(() => Promise.resolve({}))` 的宽松路径） */

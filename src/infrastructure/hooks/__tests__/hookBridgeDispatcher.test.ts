@@ -15,10 +15,10 @@ vi.mock('@tauri-apps/api/event', () => ({
   }),
 }))
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn((..._args: unknown[]) => Promise.resolve({})) }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
-  Channel: class { id = 0; onmessage = () => {} },
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((...args: unknown[]) => invokeMock(...args))
+})
 vi.mock('../../tauri/env.ts', () => ({ IS_TAURI: true }))
 
 const { hookRuntimeMock } = vi.hoisted(() => {

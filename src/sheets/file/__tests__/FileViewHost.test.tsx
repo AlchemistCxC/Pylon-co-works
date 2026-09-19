@@ -7,7 +7,10 @@ import { resetStores } from '../../../test/resetStores'
 import { waitForFileEditor } from './codeMirrorTestUtils.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 function readTextResult(content: string) {

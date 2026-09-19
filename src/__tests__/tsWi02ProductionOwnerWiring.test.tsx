@@ -19,7 +19,10 @@ import { resetStores } from '../test/resetStores'
 import type { OpenOwnedSessionDeps } from '../application/transactions/openOwnedSessionTransaction'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve({})) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  return tauriCoreMock(() => Promise.resolve({}))
+})
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn() }))
 // 最近会话/存档列表挂在 IS_TAURI 守卫后；置真让 listPersistedSessions 填充入口。

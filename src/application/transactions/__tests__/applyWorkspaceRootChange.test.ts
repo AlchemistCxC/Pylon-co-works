@@ -6,7 +6,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((...args: unknown[]) => invokeMock(...args))
+})
 
 ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = { invoke: invokeMock }
 
