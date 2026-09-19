@@ -67,4 +67,4 @@ flowchart LR
 
 `bun scripts/audit-maintenance.mts --naming` 额外输出生产 TS 绑定命名发现；它复用 ESLint 配置，不维护第二套规则。`bun run lint` 是包含测试代码的命名门禁。Rust casing 由 Rust lint 维护，语义名与单位仍需 code review。
 
-整体入口是 `check:frontend`、`check:solid` 和当前 CI 的 Rust / ACP / 四 crate Clippy；`check:maintenance` 已接入 `check:docs`，随前端 CI 执行。各阶段的测试日志和 CI 结果放在本次工作记录，避免把一次绿色运行写成永久保证。
+整体入口是 `check:frontend` 与 `check:solid`——#179 起 `check:solid` 同入 CI 前端 job，本地与远端同一套边界门禁——再加上当前 CI 的 Rust / ACP / 四 crate Clippy；`check:maintenance` 已接入 `check:docs`，随前端 CI 执行。各阶段的测试日志和 CI 结果放在本次工作记录，避免把一次绿色运行写成永久保证。

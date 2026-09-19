@@ -9,7 +9,7 @@
 
 ## 背景与约束
 
-`canonical_events` 是唯一 durable 会话历史权威（`msg_repo/mod.rs:113`，schema v14）。其写入路径当前是：**每个到达的流式 chunk 一个独立 SQLite 事务**。
+`canonical_events` 是唯一 durable 会话历史权威（`msg_repo/mod.rs:113`，schema v14）。其写入路径当前是：**每个到达的流式 chunk 一个独立 SQLite 事务**。 T1 bounded dispatcher window status: same-owner live chunks now share one transaction for up to 32 rows or 8ms while preserving one canonical row per chunk.
 
 `dispatcher/routing.rs::commit_live_event` 对每个 session update 调一次 `ingest_event` → `session/event_repo.rs::ingest_kernel_event`：`BEGIN → 墓碑查询 → revision 读 → INSERT → （终态时同事务折叠 rollup）→ COMMIT`。前端 `canonicalEventSink`（含 #81 L1 的合并规则、1000ms debounce）在生产**没有调用方**——`turn_rollup.rs` 自述「生产唯一写路径是 kernel——前端 sink 自写轨无生产 offer 调用方」。
 
@@ -180,10 +180,18 @@
 
 ## 证据
 
-- 写入路径：`src-tauri/src/dispatcher/routing.rs`（`commit_live_event` 每 update 一次 ingest）、`src-tauri/src/session/event_repo.rs`（`ingest_kernel_event` 的事务体；`:140` `MAX_CANONICAL_RAW_BYTES`；`:241` `retain_raw_payload`）
+- 写入路径：`src-tauri/src/dispatcher/mod.rs`（`commit_live_event` 每 update 一次 ingest）、`src-tauri/src/session/event_repo.rs`（`ingest_kernel_events` 的事务体；`:140` `MAX_CANONICAL_RAW_BYTES`；`:241` `retain_raw_payload`）
 - 消费面（单条 Committed）：`src-tauri/src/dispatcher/mod.rs`（`commit_live_event` 调用点与其 Committed 分支）
+
 - 折叠与裁剪：`src-tauri/src/session/turn_rollup.rs`（`fold_segments` 的 `typed_payload.text` 依赖、`fold_turn_rows` 单一字节源、`is_turn_terminal`）；`src-tauri/src/lib.rs`（`evt_rollup_trim` 命令注册，应用关闭时调用）
 - 编码契约与预算：`src/infrastructure/events/canonicalEventBatch.ts`（`DELTA_TO_BATCH`、`canonicalBatchSpanOf`、`canonicalBatchChunksOf`、`CANONICAL_BATCH_LIMITS`）
 - 已做对、本次不动：`src-tauri/src/session/msg_repo/migrations.rs::connect`（WAL + `synchronous=NORMAL` 及其理由注释）
 - 实测：本 ADR 背景节的两张表（Python sqlite3 基准 + 真实库只读体检；比值可信，绝对值非 rusqlite 代表值）
 - 存量数据面：真实库 902 页 / 676 空闲页（74%）；`event_id` 恒等于 `owner_key#sequence` 1155/1155；1064 条 delta 行无 `turn.unit` 覆盖
+## T1 实施状态（2026-09-19）
+
+`EventRepo::ingest_kernel_events`、`EventService::ingest_events` 与 dispatcher 的 bounded
+pending window 已落地。dispatcher 对同一 durable owner 的 live `session/update` 在最多 32
+条或 8ms 窗口内共享一次 SQLite transaction；控制帧、回放、owner/session 切换和终态会先
+flush。每条输入仍是独立 canonical row，终态 `turn.unit` 仍在同一事务内追加，发布顺序仍
+遵守 durable-before-publish。T2 schema 重建与 T3 在途 draft/历史聚合仍未实施。

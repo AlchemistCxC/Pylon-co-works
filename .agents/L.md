@@ -299,6 +299,17 @@
 
 ---
 
+[2026-09-19 08] [Miyaki Kumo] [PR #180 / #155 CI 收口]
+
+**开工：修 PR #180 的 clippy 基线门禁红（CI 新增 3 条诊断，只修不扩基线）。** 本轮文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/session/turn_rollup.rs`（`delta_sequence_span` 3 处 let-else → `?`，question_mark）
+- `src-tauri/src/dispatcher/mod.rs`（`flush_pending_canonical` 加 `#[allow(clippy::too_many_arguments)]` + 理由注释，沿用文件内既有惯例）
+- `src-tauri/src/session/event_repo.rs`（`ingest_kernel_event` 单数便捷入口仅测试使用，加 `#[cfg(test)]`；event_repo.rs 此前在 2026-09-19 06 条目已声明，本轮只动该方法的属性行）
+
+**我不碰**：工作树里 `.github/workflows/ci.yml`（check:solid 上 CI，#179 域）与 `src/domains/workbench/sidebarModulePrefs.ts`（A17 R2）的在途改动，一律 pathspec 提交。
+
+=======
 [2026-09-19 14] [AquaTur5235] [#171]
 
 **在途声明：中控元件名单换代（旧 11 → 新 7）+ 刀4 续 · 空态极简 —— 已落为提交 `b4e1f407`（本文件）与 `cd640777`（33 个施工文件 + 开发记录），并随对 `origin/main`（`e05bc80c`）的合并入库；PR 合入前请勿改写、勿连带提交。**

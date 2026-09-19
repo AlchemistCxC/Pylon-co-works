@@ -16,7 +16,8 @@ use crate::permission::{
 use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
 use crate::session::{
-    config_option_key_matches, extract_tool_file_name, value_as_string, SessionInfo,
+    config_option_key_matches, extract_tool_file_name, value_as_string, DurableSessionOwner,
+    SessionInfo,
 };
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
@@ -89,6 +90,21 @@ impl PetEvent {
         }
     }
 }
+
+/// A live canonical update whose in-memory effects are already applied but
+/// whose durable append and external publication are held until the current
+/// dispatcher window is flushed. Keeping the routing input intact lets the
+/// flush path preserve wire ordinal correlation and the original raw payload.
+struct PendingCanonicalPublish {
+    input: routing::RoutingInput,
+    decision: routing::RoutingDecision,
+    pet_events: Vec<PetEvent>,
+    session_state_to_persist: Option<(DurableSessionOwner, serde_json::Value)>,
+    wire: Option<Arc<crate::acp::AcpWireCapture>>,
+}
+
+const MAX_PENDING_CANONICAL_EVENTS: usize = 32;
+const PENDING_CANONICAL_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(8);
 
 /// O7：对一条 session/update 事件施加 session 状态变更，并返回需施加到宠物的
 /// 感知事件（按收集顺序）。调用方持有 sessions 锁时调用、锁外逐条应用。
@@ -931,6 +947,173 @@ pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
 // clippy 2026-08-03：8 参为 R8 显式参数风格（window/gateway/sessions/pet/
 // client_generation/generation/mapping_ready/payload），与调用点逐参对应，
 // 结构体重构收益低。
+fn publish_committed_update<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    gateway: &crate::gateway::GatewayCore,
+    update_channels: &crate::runtime::UpdateChannelMap,
+    source: &str,
+    mut payload: serde_json::Value,
+    committed_event: crate::session::CanonicalEventRow,
+) {
+    if let serde_json::Value::Object(ref mut map) = payload {
+        map.insert(
+            "source".to_string(),
+            serde_json::Value::String(source.to_string()),
+        );
+        map.insert(
+            "canonicalEvent".to_string(),
+            serde_json::to_value(committed_event).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    let channel = if gateway.is_platform_source(source) {
+        None
+    } else {
+        update_channels
+            .lock()
+            .ok()
+            .and_then(|map| map.get(source).cloned())
+    };
+    if let Some(channel) = channel {
+        let frame = serde_json::json!({
+            "event": crate::event_names::SESSION_UPDATE,
+            "payload": payload,
+        });
+        if let Err(error) = channel.send(frame) {
+            tracing::warn!("channel update frame send failed source={source}: {error}");
+        }
+        return;
+    }
+    emit_event_all(
+        window,
+        gateway,
+        source,
+        crate::event_names::SESSION_UPDATE,
+        payload,
+    );
+}
+
+// clippy 2026-09-19：9 参沿用 R8 显式参数风格（window/gateway/channels/pet/
+// generation/agent_id + 可选 event/message service + 批次），与 handle_session_update
+// 同一调用点形态，结构体重构收益低。
+#[allow(clippy::too_many_arguments)]
+async fn flush_pending_canonical<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    gateway: &crate::gateway::GatewayCore,
+    update_channels: &crate::runtime::UpdateChannelMap,
+    pet: &std::sync::Mutex<PetState>,
+    client_generation: &AtomicU64,
+    agent_id: &str,
+    event_service: Option<&Arc<crate::session::EventService>>,
+    message_service: Option<&Arc<crate::session::MessageService>>,
+    pending: Vec<PendingCanonicalPublish>,
+) -> bool {
+    if pending.is_empty() {
+        return true;
+    }
+    let first = &pending[0];
+    let owner = first
+        .input
+        .owner
+        .clone()
+        .expect("persisted batch has owner");
+    let owner_key = owner.key().ok();
+    let generation = first.input.generation;
+    if pending.iter().any(|item| {
+        item.input.owner.as_ref().and_then(|owner| owner.key().ok()) != owner_key
+            || item.input.remote_session_id != first.input.remote_session_id
+            || item.input.generation != generation
+    }) {
+        tracing::error!(
+            code = "event_batch_owner_mismatch",
+            agent_id,
+            source = %first.input.source,
+            "dispatcher batch crossed owner, remote session, or generation"
+        );
+        return true;
+    }
+    let remote_session_id = Some(first.input.remote_session_id.clone());
+    let raw_payloads = pending
+        .iter()
+        .map(|item| item.input.payload.clone())
+        .collect::<Vec<_>>();
+    let Some(event_service) = event_service else {
+        tracing::error!(
+            code = "event_db_unavailable",
+            agent_id,
+            source = %first.input.source,
+            "canonical ingest unavailable after startup readiness barrier"
+        );
+        return true;
+    };
+    let append = match event_service
+        .ingest_events(owner, remote_session_id, generation, raw_payloads)
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            log_canonical_ingest_error(&error, agent_id, &first.input.source);
+            return true;
+        }
+    };
+    let mut canonical_events = append
+        .events
+        .into_iter()
+        .filter(|event| event.event_type != "turn.unit");
+    for item in pending {
+        let Some(event) = canonical_events.next() else {
+            tracing::error!(
+                code = "event_batch_result_mismatch",
+                agent_id,
+                source = %item.input.source,
+                "canonical batch returned fewer input rows than requested"
+            );
+            return true;
+        };
+        if let (Some(ordinal), Some(wire)) = (item.input.wire_ordinal, item.wire.as_ref()) {
+            wire.record_canonical_commit(
+                ordinal,
+                crate::acp::CanonicalCorrelation {
+                    event_id: event.event_id.clone(),
+                    sequence: event.sequence,
+                    revision: append.revision,
+                },
+            );
+        }
+        if let (Some((owner, snapshot)), Some(message_service)) =
+            (item.session_state_to_persist, message_service)
+        {
+            if let Err(error) = message_service
+                .set_session_state(owner, Some(item.input.remote_session_id.clone()), snapshot)
+                .await
+            {
+                tracing::warn!(
+                    agent_id,
+                    source = %item.input.source,
+                    error = %error,
+                    "ACP session state snapshot persistence failed"
+                );
+            }
+        }
+        for pet_event in item.pet_events {
+            let _ = pet.lock().map(|mut state| pet_event.apply(&mut state));
+        }
+        if client_generation.load(Ordering::Acquire) != item.input.generation {
+            return false;
+        }
+        if item.decision.publish {
+            publish_committed_update(
+                window,
+                gateway,
+                update_channels,
+                &item.input.source,
+                item.input.payload,
+                event,
+            );
+        }
+    }
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -952,6 +1135,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     turn_ledger: &Arc<crate::acp::TurnLedger>,
     ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
+    pending_batch: Option<&mut Vec<PendingCanonicalPublish>>,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -1254,6 +1438,18 @@ async fn handle_session_update<R: tauri::Runtime>(
     // 才允许继续进入 Channel/Gateway。平台 owner=None 与 replay 都明确跳过持久化。
     let input = routing_input;
     let decision = routing_decision;
+    if decision.persist_canonical {
+        if let Some(batch) = pending_batch {
+            batch.push(PendingCanonicalPublish {
+                input,
+                decision,
+                pet_events,
+                session_state_to_persist,
+                wire,
+            });
+            return true;
+        }
+    }
     let committed_event = match routing::commit_live_event(&input, decision, event_service).await {
         routing::CommitOutcome::Skipped => None,
         routing::CommitOutcome::MissingService => {
@@ -1700,6 +1896,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             handle_crash(crate::acp::CrashReason::StdoutClosed.as_str().to_string()).await;
         }
         let wire_trace = acp.lock().await.wire_trace();
+        let mut pending_batch: Vec<PendingCanonicalPublish> = Vec::new();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
                 // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
@@ -1719,6 +1916,25 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 }
                 raw = notification_inbox.recv_control() => raw,
                 raw = notification_inbox.recv() => raw,
+                _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !pending_batch.is_empty() => {
+                    let batch = std::mem::take(&mut pending_batch);
+                    if !flush_pending_canonical(
+                        &window,
+                        &gateway,
+                        &runtime_for_reconnect.update_channels,
+                        &pet,
+                        &client_generation,
+                        &agent_id,
+                        event_service.as_ref(),
+                        message_service.as_ref(),
+                        batch,
+                    )
+                    .await
+                    {
+                        break;
+                    }
+                    continue;
+                }
             };
             let classified = match raw {
                 Some(classified) => classified,
@@ -1732,6 +1948,75 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
+            }
+            // Keep a window owner-homogeneous. Control/request frames, replay
+            // frames, terminal boundaries, and owner/session switches flush
+            // before the next side effect is handled.
+            let mut flush_batch = pending_batch.len() >= MAX_PENDING_CANONICAL_EVENTS
+                || raw.kind != crate::acp::AcpKind::SessionUpdate
+                || !matches!(classification, crate::acp::ReplayClassification::Live);
+            if !flush_batch && raw.kind == crate::acp::AcpKind::SessionUpdate {
+                flush_batch = raw
+                    .params
+                    .as_ref()
+                    .and_then(|params| params.get("update"))
+                    .and_then(|update| update.get("sessionUpdate"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("user_message_chunk");
+            }
+            if !flush_batch && !pending_batch.is_empty() {
+                let session_id = raw
+                    .params
+                    .as_ref()
+                    .and_then(|params| params.get("sessionId"))
+                    .and_then(serde_json::Value::as_str);
+                let pending = pending_batch
+                    .first()
+                    .expect("non-empty pending batch has first item");
+                flush_batch = session_id != Some(pending.input.remote_session_id.as_str());
+                if !flush_batch {
+                    let current_owner_key = session_id.and_then(|session_id| {
+                        sessions.lock().ok().and_then(|items| {
+                            items.iter().find_map(|(source, session)| {
+                                if session.peri_id == session_id && session.generation == generation
+                                {
+                                    session
+                                        .durable_owner(&agent_id, source)
+                                        .ok()
+                                        .flatten()
+                                        .and_then(|owner| owner.key().ok())
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    });
+                    flush_batch = current_owner_key.as_deref()
+                        != pending
+                            .input
+                            .owner
+                            .as_ref()
+                            .and_then(|owner| owner.key().ok())
+                            .as_deref();
+                }
+            }
+            if flush_batch && !pending_batch.is_empty() {
+                let batch = std::mem::take(&mut pending_batch);
+                if !flush_pending_canonical(
+                    &window,
+                    &gateway,
+                    &runtime_for_reconnect.update_channels,
+                    &pet,
+                    &client_generation,
+                    &agent_id,
+                    event_service.as_ref(),
+                    message_service.as_ref(),
+                    batch,
+                )
+                .await
+                {
+                    break;
+                }
             }
             if raw.kind == crate::acp::AcpKind::Crashed {
                 // ISSUE-17 W1：broadcast 携带 reason（params.reason，稳定 code）——
@@ -2098,6 +2383,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     continue;
                 }
             };
+            let terminal_boundary = payload
+                .get("update")
+                .and_then(|update| update.get("sessionUpdate"))
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| matches!(kind, "done" | "error" | "cancelled"));
             if !handle_session_update(
                 &window,
                 &gateway,
@@ -2116,12 +2406,46 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &runtime_for_reconnect.turn_ledger,
                 ingress_seq,
                 wire_trace.clone(),
+                Some(&mut pending_batch),
                 payload,
             )
             .await
             {
                 break;
             }
+            if terminal_boundary && !pending_batch.is_empty() {
+                let batch = std::mem::take(&mut pending_batch);
+                if !flush_pending_canonical(
+                    &window,
+                    &gateway,
+                    &runtime_for_reconnect.update_channels,
+                    &pet,
+                    &client_generation,
+                    &agent_id,
+                    event_service.as_ref(),
+                    message_service.as_ref(),
+                    batch,
+                )
+                .await
+                {
+                    break;
+                }
+            }
+        }
+        if !pending_batch.is_empty() {
+            let batch = std::mem::take(&mut pending_batch);
+            let _ = flush_pending_canonical(
+                &window,
+                &gateway,
+                &runtime_for_reconnect.update_channels,
+                &pet,
+                &client_generation,
+                &agent_id,
+                event_service.as_ref(),
+                message_service.as_ref(),
+                batch,
+            )
+            .await;
         }
         // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
         // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
@@ -2258,6 +2582,116 @@ mod tests {
         runtime.register_update_channel("local:s2", tauri::ipc::Channel::new(|_| Ok(())));
         runtime.clear_update_channels();
         assert!(runtime.update_channels.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pending_batch_commits_rows_before_ordered_channel_publish() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock window");
+        let frames: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = frames.clone();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Json(text) = body {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                    sink.lock().unwrap().push(value);
+                }
+            }
+            Ok(())
+        });
+        let update_channels = crate::runtime::UpdateChannelMap::new(
+            std::collections::HashMap::from([("local:s1".to_string(), channel)]),
+        );
+        let gateway = crate::gateway::GatewayCore::new();
+        let event_service = Arc::new(crate::session::EventService::in_memory().expect("events"));
+        let owner = DurableSessionOwner::new("profile", "agent", "local:s1");
+        let wire = crate::acp::AcpWireHub::new(
+            crate::correlation::RuntimeCorrelation {
+                agent_id: "agent".to_string(),
+                provider: None,
+                source: "local:s1".to_string(),
+                local_session_id: Some("local:s1".to_string()),
+                remote_session_id: Some("peri-s1".to_string()),
+                peri_id: Some("peri-s1".to_string()),
+                client_generation: 1,
+                request_id: None,
+                tool_call_id: None,
+            },
+            16,
+        );
+        let decision = routing::RoutingDecision {
+            class: routing::RoutingClass::Live,
+            variant: Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
+            mutate_session: true,
+            collect_response: true,
+            apply_pet: true,
+            persist_canonical: true,
+            publish: true,
+        };
+        let pending = (1_u64..=3)
+            .map(|ordinal| PendingCanonicalPublish {
+                input: routing::RoutingInput {
+                    source: "local:s1".to_string(),
+                    remote_session_id: "peri-s1".to_string(),
+                    generation: 1,
+                    owner: Some(owner.clone()),
+                    classification: crate::acp::ReplayClassification::Live,
+                    variant: Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
+                    replay_loading: false,
+                    payload: serde_json::json!({
+                        "sessionId": "peri-s1",
+                        "update": {
+                            "sessionUpdate": if ordinal == 3 {"done"} else {"agent_message_chunk"},
+                            "content": {"text": if ordinal == 1 {"a"} else {"b"}}
+                        }
+                    }),
+                    wire_ordinal: Some(ordinal),
+                },
+                decision,
+                pet_events: if ordinal == 1 {
+                    vec![PetEvent::FirstChunk]
+                } else {
+                    Vec::new()
+                },
+                session_state_to_persist: None,
+                wire: Some(wire.clone()),
+            })
+            .collect();
+        assert!(
+            flush_pending_canonical(
+                &window,
+                &gateway,
+                &update_channels,
+                &std::sync::Mutex::new(crate::pet::PetState::default()),
+                &AtomicU64::new(1),
+                "agent",
+                Some(&event_service),
+                None,
+                pending,
+            )
+            .await
+        );
+        assert_eq!(
+            event_service.revision(owner.key().unwrap()).await.unwrap(),
+            4
+        );
+        let frames = frames.lock().unwrap().clone();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[0]["payload"]["canonicalEvent"]["sequence"], 1);
+        assert_eq!(frames[1]["payload"]["canonicalEvent"]["sequence"], 2);
+        assert_eq!(frames[2]["payload"]["canonicalEvent"]["sequence"], 3);
+        assert_eq!(wire.correlate(1).unwrap().sequence, 1);
+        assert_eq!(wire.correlate(2).unwrap().sequence, 2);
+        assert_eq!(wire.correlate(3).unwrap().sequence, 3);
+        assert_eq!(wire.correlate(1).unwrap().revision, 4);
     }
 
     /// C11：带 `_meta.periReplay=true` 的事件不产生宠物感知事件——pet xp/bond/
