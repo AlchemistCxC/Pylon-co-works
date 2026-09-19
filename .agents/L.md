@@ -363,3 +363,14 @@
 - `.agents/decisions/0014-release-zip-without-webview2-bootstrapper.md`、`.agents/records/185-webview2-bootstrapper-removal.md`
 
 注：本分支含本会话早前的 main→branch 修复合并提交（37743b93），将随 #185 一并 push。
+
+---
+
+[2026-09-19 05] [Kan] [#193]
+
+**开工：前端测试提速四件套**（Tauri mock 工厂迁移 52 文件 / react-shared isolate:false / CI 前端分片 / transform 缓存）。
+
+**我方文件域（请勿改写、勿连带提交）**：
+- `vitest.config.ts`、`src/test-utils/`（新增）、`src/**/__tests__/*.test.ts(x)` 中含 `vi.mock('@tauri-apps/api/core')` 的 52 个测试文件（机械替换 mock 块）
+- `.github/workflows/ci.yml`（前端 job 拆分）、`package.json`（新增 check:frontend:static）
+- `scripts/generate-acp-golden-trace.mjs`（可能做 feature 对齐）、`docs/说明书/` CI 表述、`.agents/records/`
