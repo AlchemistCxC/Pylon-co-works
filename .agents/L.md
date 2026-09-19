@@ -334,3 +334,21 @@
 **给后续 agent 的三条提示**：① `CC_WIDGET_IDS` 现在只有 5 个（`input`/`model`/`reasoning`/`mode`/`tokens`），可落槽控件还要加注册轨的 `cc-send-button`（`CC_REGISTERED_SLOT_IDS`）；`ekg`/`session`/`workspace`/`activity`/`tasks` 已不存在，旧引用会静默失效。② 改布局/主题 schema **必须显式保留历史版本**在白名单里（当前 `[3,4,5,6,8,CC_LAYOUT_SCHEMA_VERSION]`），否则老用户布局静默回落默认值——本刀已踩过这个坑。③ 空态可见性只有 `hiddenWidgetIds()` 一个入口（04b 的空态收敛名单是 `EMPTY_STATE_HIDDEN_WIDGET_IDS`）；注册轨控件不走 `isWidgetVisible`，需自行补编辑态豁免（参考 `sendButtonMode()`）。
 
 **注**：本条原写于改动未提交时；现随合并提交入库，PR 合入后按 AGENTS §2.3 规矩移除本条目。
+
+---
+
+[2026-09-19 16] [Miyaki Kumo] [#195]
+
+**开工：issue195（设置 sheet 打开后无法关闭、标题栏无法交互——回收覆盖层时代的 `titlebar-settings-open` 交互锁）。** spec 见 `.agents/spec/195-settings-sheet-close-unlock.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（仅删「Settings 打开态」交互锁块，约 :715-743）
+- `src/workspace-sheets/WorkspaceTitlebar.tsx`（去 `settingsOpen` / `onToggleSettings` props 与锁类；`TitlebarContext.settingsOpen` 保留、内部派生）
+- `src/App.tsx`（去对应两处传参）
+- 测试：`src/workspace-sheets/__tests__/{workspaceTitlebarLaunchers,workspaceTitlebarSidebarToggle,agentStatusConsumerMatrix}.test.tsx`、**新增**一条静态 CSS 契约测试
+- 文档：`.agents/records/`、本文件（`.agents/spec/` gitignore 不入库）
+
+**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、中控区（`src/renderers/solid-workbench/**`、`ControlCenter.css`）、`SheetTabStrip.tsx`（三关闭路本就完整）、`openOrFocusSettingsSheet` / `settingsDomains.ts`（ADR-0013 契约面）。
+
+**⚠️ 看到他人在途（2026-09-19）**：`src-tauri/resources/sdk/pylon-plugin-sdk.js` 有未提交改动，非我方产物，未 stage、未改写；本批全程 pathspec 提交。
