@@ -15,8 +15,10 @@ import type { SheetRecord } from '../sheetTypes'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 const sheets: SheetRecord[] = []
 
 function renderTitlebar(sidebarEnabled: boolean, sidebarCollapsed = false, onToggleSidebar = vi.fn(), rightPanelEnabled = true) {

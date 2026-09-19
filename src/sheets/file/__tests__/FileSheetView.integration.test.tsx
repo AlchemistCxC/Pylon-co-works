@@ -15,7 +15,10 @@ import { closeWorkspace } from '../../../workspace-sheets/workspaceController.ts
 import { FILE_NAVIGATION_METADATA_KEY } from '../fileSheetNavigation.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const ctx: SheetContext = {

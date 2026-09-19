@@ -18,7 +18,10 @@ class MockResizeObserver {
   disconnect() {}
 }
 vi.stubGlobal('ResizeObserver', MockResizeObserver)
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(vi.fn())
+})
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 const sheet: SheetRecord = {

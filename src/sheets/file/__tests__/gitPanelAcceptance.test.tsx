@@ -17,7 +17,10 @@ import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetT
 import { useIdentityStore } from '../../../identityStore'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 const ASYNC_PANEL_TIMEOUT = { timeout: 10_000 }
 

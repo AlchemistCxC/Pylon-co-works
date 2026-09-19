@@ -18,10 +18,10 @@ const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
-}))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
+})
 /** 未注册命令 resolve undefined——Settings 渲染期的后台 invoke 不影响导航断言 */
 class TolerantFakeInvoke extends FakeInvoke {
   override invoke(cmd: string, args?: unknown): Promise<unknown> {

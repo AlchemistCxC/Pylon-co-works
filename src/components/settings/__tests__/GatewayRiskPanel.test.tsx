@@ -14,10 +14,10 @@ import { CONFIG_STORAGE_KEYS } from '../../../configExportImport'
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
-}))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
+})
 // IS_TAURI 经 getter 暴露，用例可按模式切换（组件每次渲染读取）
 const { envState } = vi.hoisted(() => ({ envState: { isTauri: true } }))
 vi.mock('../../../infrastructure/tauri/env', async importOriginal => ({

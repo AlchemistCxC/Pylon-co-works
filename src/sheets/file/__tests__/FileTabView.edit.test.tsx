@@ -10,7 +10,10 @@ import { fileEditorView, replaceFileEditorValue, waitForFileEditor } from './cod
 // touchVersion 重载（不静默覆盖用户编辑，冲突经 onExternalChange 上报）。
 
 const { invoke, highlightCode } = vi.hoisted(() => ({ invoke: vi.fn(), highlightCode: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode }))
 
 function readTextResult(content: string) {

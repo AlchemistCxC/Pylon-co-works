@@ -10,9 +10,10 @@ vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, hasTaur
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (cmd: string, args?: Record<string, unknown>) => invokeRef.current!(cmd, args),
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
+})
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }))
 
 class MockResizeObserver {

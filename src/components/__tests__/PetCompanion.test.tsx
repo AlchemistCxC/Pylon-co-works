@@ -7,7 +7,10 @@ import PetCompanion from '../PetCompanion.tsx'
 // 宠物状态/衣橱面板只能按需展开；宠物本体有贴合交互外壳。
 // （手势/双击窗口纯函数由 petMotion.test.ts 承担；透明壳 CSS 由 css 断言守卫。）
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(() => Promise.resolve(null))
+})
 vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))
 
 describe('PetCompanion 按需面板', () => {

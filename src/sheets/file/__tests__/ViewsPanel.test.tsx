@@ -7,8 +7,10 @@ import { toAgentContextKey } from '../../../agentContext'
 import { resetStores } from '../../../test/resetStores'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
-
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 function touched(path: string, toolKind: string, at: number) {
   return { source: 'ws-a', path, toolKind, at }
 }

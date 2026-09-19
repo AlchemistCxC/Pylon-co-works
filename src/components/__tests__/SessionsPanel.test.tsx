@@ -12,7 +12,10 @@ const { invoke, open } = vi.hoisted(() => ({
   open: vi.fn(),
 }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open }))
 
 const workspace = {

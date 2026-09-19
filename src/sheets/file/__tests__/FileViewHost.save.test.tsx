@@ -10,7 +10,10 @@ import { fileEditorView, replaceFileEditorValue, waitForFileEditor } from './cod
 // 覆盖保存、重新加载、working-diff 面板。
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(invoke)
+})
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const fileTab: FileTabRecord = { path: 'src/a.ts', mode: 'file' }

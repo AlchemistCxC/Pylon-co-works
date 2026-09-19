@@ -6,7 +6,10 @@ import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(async () => null)
+})
 
 /**
  * P53：插件管理默认页——管理器插件贡献存在时，「插件管理」分区渲染包页面

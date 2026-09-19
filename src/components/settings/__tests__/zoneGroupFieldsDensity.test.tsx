@@ -5,7 +5,10 @@ import { ZoneGroupFields, type RenderCtx } from '../../../themeFieldRenderer.tsx
 
 /** K-4：密度档过滤接线（施工书 09 §K-4，拍板 D5-A 无 tier 归标准）。 */
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(vi.fn())
+})
 
 const ctxBase = {
   t: {},

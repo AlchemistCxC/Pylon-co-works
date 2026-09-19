@@ -4,9 +4,10 @@ import { createBuiltinBrowserCommandDefinitions } from '../builtinBrowserCommand
 
 const invokeMock = vi.mocked(invoke)
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../../../test-utils/tauriCoreMock')
+  return tauriCoreMock(vi.fn())
+})
 
 function findCommand(id: string) {
   const definition = createBuiltinBrowserCommandDefinitions().find(command => command.id === id)

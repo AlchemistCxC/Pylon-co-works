@@ -6,7 +6,10 @@ import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }))
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock(async () => null)
+})
 
 // 下沉自 scripts/test-accessibility.mts（P91 A2）：宿主设置分区标题必须是真按钮
 // （div + onClick 读屏不可达）。原契约只限 Settings.tsx 宿主文件——插件包页面
