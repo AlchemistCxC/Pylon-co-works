@@ -77,11 +77,17 @@ const FIXTURE_TIMEOUT_MS = 600_000;
 
 function runFixtureInto(dir) {
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
+  // #184：与 CI rust-test job 的测试构建（--features test-agent）对齐指纹。
+  // 此前不带 feature，与前置构建形成两套编译指纹——CI 实测同一条命令的
+  // fixture A 重编 330s、B 复用后 83s，而测试本体只有 0.2s；对齐后跨 run
+  // 缓存命中，重复编译消失。
   const result = run(cargo, [
     "test",
     "--manifest-path",
     "src-tauri/Cargo.toml",
     "--lib",
+    "--features",
+    "test-agent",
     "acp::golden_trace_tests::golden_trace_baseline_generation",
     "--no-fail-fast",
     "--",
@@ -257,12 +263,16 @@ function runBackpressureCheck() {
   let elapsedMs = 0;
   let stdout = "";
   let stderr = "";
+  // #184：--features test-agent 与 fixture/rust-test job 对齐指纹（同 run 内
+  // 不再因 feature 翻转触发重编）。
   for (const name of tests) {
     const result = run(cargo, [
       "test",
       "--manifest-path",
       "src-tauri/Cargo.toml",
       "--lib",
+      "--features",
+      "test-agent",
       name,
       "--",
       "--exact",

@@ -1,17 +1,23 @@
 # #106 P7.3：依赖更新自动化。
 # cargo ecosystem 指向 src-tauri——#106 P0 workspace 化后单 Cargo.lock 一次 PR
-# 更新全 workspace（4 把锁时代此配置无意义）；npm 覆盖前端（bun.lock 安装但
-# dependabot 仅支持 npm ecosystem，PR 中以 package.json 为准，合并后本地
-# `bun install` 重新冻结 bun.lock）。
+# 更新全 workspace（4 把锁时代此配置无意义）。
+#
+# #184：前端 ecosystem 由 npm 迁至 bun。npm 模式只改 package.json 不动
+# bun.lock（当时 dependabot 仅支持 npm ecosystem，PR 中以 package.json 为准，
+# 合并后本地 `bun install` 重新冻结 bun.lock），结果每个 npm 升级 PR 都死在
+# `bun install --frozen-lockfile`——100 run 抽样里 10 次结构性必红。
+# Dependabot 自 2025-02 起支持文本版 bun.lock，bun 模式会同步冻结 bun.lock，
+# 升级 PR 才能真正过 CI。
 
 version: 2
+
 updates:
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-  - package-ecosystem: "npm"
+  - package-ecosystem: "bun"
     directory: "/"
     schedule:
       interval: "weekly"

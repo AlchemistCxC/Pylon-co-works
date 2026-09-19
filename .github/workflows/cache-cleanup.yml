@@ -1,0 +1,55 @@
+# #184：Actions 缓存清理。Swatinem/rust-cache 会在每个分支成功 run 后保存
+# 缓存（GitHub 的分支作用域：PR 缓存互不可见、也不能覆盖 main 同 key 条目），
+# 于是分支副本不断累积——实测 8 份 ~1.2GB rust-cache 把 10GB 配额吃到 9.79GB，
+# LRU 开始互相驱逐 main 的热缓存，冷编译长尾随之而来。
+#
+# 本 workflow 每日清理：非 main ref 且 2 天未访问的缓存（活跃 PR 的缓存保留），
+# 以及任何 14 天未访问的缓存（rustc 周更使旧 key 本就永不命中）。手动触发：
+# Actions → cache-cleanup → Run workflow。
+
+name: cache-cleanup
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: 清理 Actions 缓存（保 main 热缓存）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 删除非 main ref 与超龄缓存
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # jq 内置 now()；last_accessed_at 带小数秒，需清洗成 fromdateiso8601 可解析的形态
+          ids=$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '.actions_caches[]
+                  | select(.ref != "refs/heads/main"
+                           or ((now - (.last_accessed_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) / 86400 >= 14))
+                  | .id')
+          count=$(printf '%s' "$ids" | grep -c . || true)
+          echo "待删除缓存条数：${count:-0}"
+          if [ -z "$ids" ]; then
+            echo "无需清理"
+            exit 0
+          fi
+          printf '%s\n' "$ids" | while read -r id; do
+            gh api -X DELETE "/repos/${GITHUB_REPOSITORY}/actions/caches/$id" \
+              && echo "deleted: $id" \
+              || echo "delete failed: $id"
+          done
+
+      - name: 报告剩余缓存总量
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          total=$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '([.actions_caches[].size_in_bytes] | add // 0) / 1073741824 * 100 | round | ./100')
+          echo "剩余缓存总量：${total} GB"
