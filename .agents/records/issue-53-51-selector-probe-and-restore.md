@@ -58,3 +58,10 @@
 - 探测在 agent runtime 未建立时返回 `agent_runtime_unavailable`（不 boot 进程）；空态触发时机由 agent sheet 可用性天然保证。
 - 思考等级的端到端真机验收（重启 → 历史会话 → 切换）依赖真 agent 宣告 thought_level 选项；fake agent 侧已覆盖 wire 语义。
 - codge 的 Grok `_meta` 合成、Cursor parameterized 握手等 per-agent 适配是参照知识，Pylon 不引入 provider 特判（通用契约不变量保持）。
+
+## 审查收口（2026-09-19，PR #177 审查轮）
+
+- **title 全文回显缺口修复**：审查发现上轮实现中 `title` 与正文同为截短后的 80 字符串（`setError(shortControlCenterError(...))` 先截短再入信号），与上文「全文仍在浮层 `title`」的声明不符。已改为 **error 信号存完整原文、渲染侧正文走 `shortControlCenterError` 截短、`title` 挂全文**（模型/权限/思考三控件一致）；新增控件用例断言「正文=稳定短文案/截 80、title=完整后端原文」。
+- **说明书漂移同步**：`docs/说明书/Pylon-插件化前后端拓扑全图.md` 的 `APP --> SETTINGS` 边改为 `SHEETLAYOUT --> SETTINGS`（#154 阶段 4 后 `Settings.tsx` 经 sheet 注册表挂载，不再由 App 直挂），节点标注「settings sheet 主区视图」。
+- **合并**：`3a7ddb20` 合入 `github/main`（#175 squash `5953a3f7`），`.agents/L.md` 冲突按追加并集解决；PR diff 中 `vitest.config.ts`/issue-175 记录的幻影差异随合并消失。
+- **仍遗留（本轮未处理，待裁定）**：① `ingest_established_config_options_event` 每次建立/恢复/revive 都追加一条 journal 记录，重复打开同一历史会话会线性累积重复行（重放语义幂等，仅 journal 体积增长）；② revive 写入路径无集成测试（仅与建立期同构保证）；③ #51 建议「错误可关闭/自动消退」未做，当前仍靠下次操作清除。

@@ -84,7 +84,7 @@ flowchart TB
       APP[src/App.tsx<br/>Product Shell composition]
       TITLE[WorkspaceTitlebar]
       SHEETLAYOUT[SheetLayout / Sheet registry host]
-      SETTINGS[src/components/Settings.tsx]
+      SETTINGS[src/components/Settings.tsx<br/>settings sheet 主区视图]
       PLUGINMGR[PluginManager]
       AGENTSHEET[AgentSheetView]
       SUITEWB[AgentRendererSuiteWorkbench<br/>Renderer Suite 宿主接线]
@@ -257,7 +257,7 @@ flowchart TB
   %% Current UI consumers
   APP --> TITLE
   APP --> SHEETLAYOUT
-  APP --> SETTINGS
+  SHEETLAYOUT --> SETTINGS
   APP --> IDSTORE
   APP --> IMODEREG
   TITLE --> IMODEREG
