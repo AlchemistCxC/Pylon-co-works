@@ -712,35 +712,8 @@
   @keyframes modern-shell-enter { from { opacity:0; transform:translateY(-6px); } }
 }
 
-/* ── Settings 打开态：标题栏除窗口三按钮外全部禁用（视觉保留，不产生新依赖链） ── */
-/* 设置页从上往下让出标题栏；标题栏其它交互（sidebar/sheet/launchers/右栏/界面切换/设置按钮）
-   视觉保留但 pointer-events:none（只禁输入，不变暗，避免"按下像退出"的误感）。 */
-.workspace-titlebar.titlebar-settings-open .workspace-titlebar-sidebar,
-.workspace-titlebar.titlebar-settings-open .workspace-titlebar-workspace,
-.workspace-titlebar.titlebar-settings-open .workspace-titlebar-launchers,
-.workspace-titlebar.titlebar-settings-open .workspace-titlebar-drag,
-.workspace-titlebar.titlebar-settings-open .workspace-window-controls > button:not(.titlebar-window-btn) {
-  pointer-events: none;
-}
-/* 窗口三按钮（最小化/全屏/关闭）保持可点 */
-.workspace-titlebar.titlebar-settings-open .titlebar-window-btn {
-  pointer-events: auto;
-}
-/* Domain switching remains available while the Settings surface is open; the
-   other titlebar actions stay visually present but inert. */
-.workspace-titlebar.titlebar-settings-open [data-menu-trigger="settings"],
-.workspace-titlebar.titlebar-settings-open [data-menu-trigger="settings"] + .workspace-menu {
-  pointer-events:auto;
-}
-.workspace-titlebar.titlebar-settings-open [data-menu-trigger="right-panel"],
-.workspace-titlebar.titlebar-settings-open [data-menu-trigger="interface"] {
-  pointer-events:none;
-}
-/* 设置打开时标题栏整体层级保持在设置页之上（Settings 从 44px/58px 下开始，露出标题栏） */
-.workspace-titlebar.titlebar-settings-open {
-  position: relative;
-  z-index: 100; /* 宿主层级最高：确保窗口按钮始终可点。 */
-}
+/* 设置 sheet 是普通布局 sheet：标题栏不因设置打开而锁任何交互（关闭走页签，
+   #195 已回收覆盖层时代的「设置打开态」交互锁，不得回潮——契约见 workspaceTitlebar.css.test）。 */
 
 /* Mode-scoped GUI chrome is declared above the shared breakpoint rules. */
 @media (max-width:760px) {

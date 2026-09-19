@@ -42,7 +42,7 @@ function renderTitlebar(sidebarEnabled: boolean, sidebarCollapsed = false, onTog
       }}
       onOpenSheet={vi.fn()}
       onToggleRightPanel={vi.fn()}
-      onToggleSettings={vi.fn()}
+      onOpenSettingsDomain={vi.fn()}
       onMinimize={vi.fn()}
       onToggleFullscreen={vi.fn()}
       onCloseWindow={vi.fn()}
@@ -150,7 +150,7 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
       menuActions: { onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() },
       onOpenSheet: vi.fn(),
       onToggleRightPanel: vi.fn(),
-      onToggleSettings: vi.fn(),
+      onOpenSettingsDomain: vi.fn(),
       onMinimize: vi.fn(),
       onToggleFullscreen: vi.fn(),
       onCloseWindow: vi.fn(),
@@ -177,7 +177,7 @@ describe('I09-A-FE-01 / #154 titlebar 折叠按钮 capability', () => {
         menuActions={{ onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() }}
         onOpenSheet={vi.fn()}
         onToggleRightPanel={onToggleRightPanel}
-        onToggleSettings={vi.fn()}
+        onOpenSettingsDomain={vi.fn()}
         onMinimize={vi.fn()}
         onToggleFullscreen={vi.fn()}
         onCloseWindow={vi.fn()}

@@ -19,7 +19,6 @@ const baseProps = {
   menuActions: { onTogglePin: vi.fn(), onClose: vi.fn(), onCloseOthers: vi.fn(), onCloseRight: vi.fn(), onReopen: vi.fn() },
   onOpenSheet: vi.fn(),
   onToggleRightPanel: vi.fn(),
-  onToggleSettings: vi.fn(),
   onOpenSettingsDomain: vi.fn(),
   onMinimize: vi.fn(),
   onToggleFullscreen: vi.fn(),
@@ -161,9 +160,11 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
     expect(document.activeElement).toBe(trigger)
   })
 
-  it('设置菜单在设置页打开时仍可切换顶层域', () => {
+  it('设置 sheet 活动时标题栏不被锁：无打开态交互锁类，齿轮菜单照常切换顶层域', () => {
     const onOpenSettingsDomain = vi.fn()
-    render(<WorkspaceTitlebar {...baseProps} settingsOpen onOpenSettingsDomain={onOpenSettingsDomain} />)
+    render(<WorkspaceTitlebar {...baseProps} activeSheetKind="settings" onOpenSettingsDomain={onOpenSettingsDomain} />)
+    // #195：设置是普通布局 sheet，标题栏（含页签条）不再有 pointer-events 锁与锁类。
+    expect(document.querySelector('.workspace-titlebar')).not.toHaveClass('titlebar-settings-open')
     const trigger = gear()
     fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('menuitem', { name: '插件' }))

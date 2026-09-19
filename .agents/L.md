@@ -335,42 +335,20 @@
 
 **注**：本条原写于改动未提交时；现随合并提交入库，PR 合入后按 AGENTS §2.3 规矩移除本条目。
 
-
 ---
 
-[2026-09-19 04] [Kan] [#184]
+[2026-09-19 16] [Miyaki Kumo] [#195]
 
-**开工：CI 提速与质量收口**（ci.yml 拆并行 job / 缓存清理 workflow / dependabot bun / shadow fixture 对齐 / 覆盖率迁移 main）。
+**开工：issue195（设置 sheet 打开后无法关闭、标题栏无法交互——回收覆盖层时代的 `titlebar-settings-open` 交互锁）。** spec 见 `.agents/spec/195-settings-sheet-close-unlock.md`。分支沿用 `Ru5t/Reflector`。
 
-**我方文件域（请勿改写、勿连带提交）**：
-- `.github/workflows/ci.yml`、新增 `.github/workflows/cache-cleanup.yml`、`.github/dependabot.yml`
-- `package.json`（仅 check:frontend 与 scripts 字段）
-- `scripts/check-acp-shadow-parity.mjs`（仅 fixture 参数与耗时输出）
-- `docs/说明书/` 中 CI 相关表述的同步、`.agents/records/` 新增开发记录
+**我方本轮文件域（请勿改写、勿连带提交）**：
 
----
+- `src/plugins/product/packages/builtin.pylon-shell/styles/App.css`（仅删「Settings 打开态」交互锁块，约 :715-743）
+- `src/workspace-sheets/WorkspaceTitlebar.tsx`（去 `settingsOpen` / `onToggleSettings` props 与锁类；`TitlebarContext.settingsOpen` 保留、内部派生）
+- `src/App.tsx`（去对应两处传参）
+- 测试：`src/workspace-sheets/__tests__/{workspaceTitlebarLaunchers,workspaceTitlebarSidebarToggle,agentStatusConsumerMatrix}.test.tsx`、**新增**一条静态 CSS 契约测试
+- 文档：`.agents/records/`、本文件（`.agents/spec/` gitignore 不入库）
 
-[2026-09-19 17] [Miyaki Kumo] [#185]
+**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、中控区（`src/renderers/solid-workbench/**`、`ControlCenter.css`）、`SheetTabStrip.tsx`（三关闭路本就完整）、`openOrFocusSettingsSheet` / `settingsDomains.ts`（ADR-0013 契约面）。
 
-**施工：WebView2 bootstrapper 出库 + 便携包契约变更**（在 `Ru5t/Reflector` 上）。
-
-**本轮文件域（勿改写、勿连带提交）**：
-- `scripts/pack_release.py`（删 bootstrapper 收集 / `--without-webview2` / manifest 字段）
-- `scripts/tests/test_pack_release.py`（同步契约）
-- `resources/release/tools/`（删 exe、重写 install-webview2.bat）
-- `.gitignore`（撤销受控例外）
-- `docs/说明书/Pylon-发行包清单.md`
-- `.agents/decisions/0014-release-zip-without-webview2-bootstrapper.md`、`.agents/records/185-webview2-bootstrapper-removal.md`
-
-注：本分支含本会话早前的 main→branch 修复合并提交（37743b93），将随 #185 一并 push。
-
----
-
-[2026-09-19 05] [Kan] [#193]
-
-**开工：前端测试提速四件套**（Tauri mock 工厂迁移 52 文件 / react-shared isolate:false / CI 前端分片 / transform 缓存）。
-
-**我方文件域（请勿改写、勿连带提交）**：
-- `vitest.config.ts`、`src/test-utils/`（新增）、`src/**/__tests__/*.test.ts(x)` 中含 `vi.mock('@tauri-apps/api/core')` 的 52 个测试文件（机械替换 mock 块）
-- `.github/workflows/ci.yml`（前端 job 拆分）、`package.json`（新增 check:frontend:static）
-- `scripts/generate-acp-golden-trace.mjs`（可能做 feature 对齐）、`docs/说明书/` CI 表述、`.agents/records/`
+**⚠️ 看到他人在途（2026-09-19）**：`src-tauri/resources/sdk/pylon-plugin-sdk.js` 有未提交改动，非我方产物，未 stage、未改写；本批全程 pathspec 提交。
