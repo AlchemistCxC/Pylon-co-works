@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pylon.local/schemas/pylon-plugin-manifest.schema.json",
   "title": "Pylon plugin manifest (pylon-plugin.json)",
-  "description": "Plugin API 1.0/1.1/1.2 包清单。本 schema 比宿主解析器更严格（additionalProperties: false）——用于编辑器补全与 CI 校验；宿主本身忽略未知字段。capabilities 仅 API 1.2 允许（封闭词表）。真值规则见 src/plugin-runtime/packageManifest.ts。",
+  "description": "Plugin API 1.0/1.1/1.2/1.3/2.0 包清单。本 schema 比宿主解析器更严格（additionalProperties: false）——用于编辑器补全与 CI 校验；宿主本身忽略未知字段。capabilities 仅 API 1.2 允许（封闭词表）。真值规则见 src/plugin-runtime/packageManifest.ts。",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "id", "name", "version", "api", "kind", "web"],
@@ -16,7 +16,7 @@
     },
     "name": { "type": "string", "minLength": 1 },
     "version": { "type": "string", "minLength": 1 },
-    "api": { "enum": ["1.0", "1.1", "1.2", "1.3"], "description": "目标 Plugin API 小版本；宿主按 allowlist 接受（1.0 插件在 1.1/1.2/1.3 宿主继续激活）" },
+    "api": { "enum": ["1.0", "1.1", "1.2", "1.3", "2.0", "2.1", "2.2", "2.3"], "description": "目标 Plugin API 小版本；宿主按 allowlist 接受（1.0 插件在 1.1/1.2/1.3 宿主继续激活；2.0 为破坏性主轴，左栏贡献改按 region 注册；2.1 新增标题栏设置菜单项贡献；2.2 右栏面板的种类改为亲和而非闸门；2.3 新增会话置顶）" },
     "kind": {
       "enum": [
         "shell", "workspace", "feature", "hook", "renderer",

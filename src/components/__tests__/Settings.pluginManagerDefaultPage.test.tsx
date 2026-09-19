@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import Settings from '../Settings.tsx'
+import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
@@ -40,7 +40,7 @@ describe('plugin manager default page (P53)', () => {
     const { kernelBootstrap } = await import('../../kernel/kernelBootstrapServices.ts')
     await kernelBootstrap.startNormal()
 
-    render(<Settings initialDomain="plugins" />)
+    mountSettingsSheet({ domain: 'plugins' })
     // 管理器贡献页渲染（heading 来自注册 label，不含"增强"）
     const heading = await screen.findByRole('heading', { name: '插件管理器', level: 3 })
     expect(heading).toBeInTheDocument()
@@ -62,7 +62,7 @@ describe('plugin manager default page (P53)', () => {
     const { kernelBootstrap } = await import('../../kernel/kernelBootstrapServices.ts')
     await kernelBootstrap.startNormal()
 
-    render(<Settings initialDomain="plugins" />)
+    mountSettingsSheet({ domain: 'plugins' })
     // 宿主基础页可见（API 文案）；管理器包页面未渲染（无 data-plugin-manager-page 标记）。
     // 能力授权卡的渲染断言由 PluginManager.test.tsx 授权卡用例覆盖（mock bootstrap 注入）。
     expect(await screen.findByText(/Pylon Plugin API/)).toBeInTheDocument()

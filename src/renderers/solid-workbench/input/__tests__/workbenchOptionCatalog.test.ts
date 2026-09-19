@@ -4,6 +4,7 @@ import {
   resolveDocumentOptionValue,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
+  shortControlCenterError,
   type WorkbenchOptionEntry,
 } from '../workbenchOptionCatalog.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../../domains/workbench/workbenchRuntime.ts'
@@ -97,5 +98,24 @@ describe('Workbench option catalog', () => {
   it('falls back to the catalogue when there is neither a candidate surface nor a current mode', () => {
     const entries = resolveModeOptionEntries(emptySnapshot({ availableModes: [], activeMode: '' }))
     expect(entries.map(entry => entry.id)).toEqual(DEFAULT_MODE_OPTIONS.map(entry => entry.id))
+  })
+})
+
+describe('shortControlCenterError (#51)', () => {
+  it('maps stable backend codes to brief UI copy instead of the full diagnostic', () => {
+    expect(shortControlCenterError(
+      'model_not_advertised: requested value "m-9" is not in the agent-advertised choices [m-1, m-2, m-3]',
+      '模型切换失败',
+    )).toBe('模型未被该会话宣告，无法切换')
+    expect(shortControlCenterError(
+      'reasoning_not_advertised: requested value "ultra" is not in the agent-advertised choices [low, high]',
+      '思考等级切换失败',
+    )).toBe('思考等级未被该会话宣告，无法切换')
+  })
+
+  it('caps unknown messages and keeps the fallback for empty errors', () => {
+    const long = 'x'.repeat(200)
+    expect(shortControlCenterError(long, '失败').length).toBe(80)
+    expect(shortControlCenterError(undefined, '模型切换失败')).toBe('模型切换失败')
   })
 })

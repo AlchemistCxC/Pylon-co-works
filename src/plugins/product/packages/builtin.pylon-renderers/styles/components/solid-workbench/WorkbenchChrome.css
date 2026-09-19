@@ -69,10 +69,12 @@
 
 /* ── 聊天滚动轨道 ──
    轨道本身就是右侧滚动条：端点按钮、滑块和中间轨道连续铺开，
-   不再呈现为悬浮在原生 scrollbar 旁边的两个控件。 */
+   不再呈现为悬浮在原生 scrollbar 旁边的两个控件。
+   宽度取向（用户反馈「外壁太宽显得滚动条细」）：整条轨 12px、滑块近乎占满（左右各 1px），
+   端点按钮 16px；窄屏放大到 14/16。要调粗细改这三个变量与滑块的左右内缩即可。 */
 .solid-workbench-chat-shell {
-  --scroll-action-rail-width: 20px;
-  --scroll-action-end-size: 22px;
+  --scroll-action-rail-width: 12px;
+  --scroll-action-end-size: 16px;
   position: relative;
   display: flex;
   flex: 1 1 auto;
@@ -193,10 +195,10 @@
 }
 .solid-agent-workbench .solid-workbench-scroll-track {
   position: relative;
-  width: calc(100% - 4px);
+  width: calc(100% - 2px);
   min-height: 0;
   flex: 1 1 auto;
-  margin-inline: 2px;
+  margin-inline: 1px;
   background: color-mix(in srgb, var(--border) 12%, transparent);
   cursor: pointer;
   pointer-events: auto;
@@ -209,8 +211,8 @@
 .solid-agent-workbench .solid-workbench-scroll-thumb {
   position: absolute;
   top: 0;
-  right: 4px;
-  left: 4px;
+  right: 1px;
+  left: 1px;
   min-height: 0;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--border-focus) 72%, transparent);
@@ -233,8 +235,8 @@
 }
 @media (max-width: 640px) {
   .solid-workbench-chat-shell {
-    --scroll-action-rail-width: 24px;
-    --scroll-action-end-size: 24px;
+    --scroll-action-rail-width: 14px;
+    --scroll-action-end-size: 16px;
   }
   .solid-agent-workbench .solid-workbench-scroll-rail .scroll-rail-btn {
     width: 100%;

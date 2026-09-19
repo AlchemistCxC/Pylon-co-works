@@ -61,7 +61,6 @@ export interface MessageRendererInput {
 
 export interface MessageRenderContext {
   readonly workspaceKind: string
-  readonly workspaceMode?: 'work' | 'chat'
   readonly agentId: string
   readonly sessionId: string
 }

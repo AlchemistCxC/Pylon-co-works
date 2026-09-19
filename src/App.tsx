@@ -52,16 +52,17 @@ import { projectFontContributions } from './infrastructure/fonts/fontProjection.
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
-import { selectAvailableContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
+import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './rightRailStore.ts'
 import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
+import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
-// 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
-const Settings = lazy(() => import('./components/Settings'))
+// 非首屏 Dialog/Sheet 懒加载：ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
+// #154 阶段 4：Settings 不再是覆盖层 Dialog——迁入 sheet 体系（settingsSheetNavigation）。
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 const SessionSettings = lazy(() => import('./components/SessionSettings'))
 const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher'))
@@ -149,8 +150,6 @@ export default function App() {
   }, [interfaceMode])
   useEffect(() => { ensureInterfaceModeProfile() }, [interfaceMode, interfaceModeSnapshot])
   const [activeSession, setActiveSession] = useState<string | null>(null)
-  const [showSettings, setShowSettings] = useState(false)
-  const [settingsIntent, setSettingsIntent] = useState<{ domain?: string; section?: string; agentId?: string } | null>(null)
   // W2-12：右栏折叠迁 workspaceStore（右栏按 sheet 声明挂载），旧 RightPanel 退役
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
@@ -168,7 +167,7 @@ export default function App() {
   // 主题级 showSidebar 一并计入，否则标题栏会为被主题隐藏的左栏保留轨道。
   const sidebarEnabled = sheetHasLeftColumn(activeSheet) && showSidebar
   const rightPanelEnabled = activeSheet
-    ? selectAvailableContextPanels(contextPanelSnapshot.entries, {
+    ? selectContextPanels(contextPanelSnapshot.entries, {
       workspaceKind: activeSheet.kind,
       sheetId: activeSheet.id,
       activeSessionId: activeSession,
@@ -186,11 +185,11 @@ export default function App() {
 
   // 施工文档 §5.3：ErrorCenter/Overview 的恢复按钮经窗口事件打开现有 Settings /
   // Runtime Sheet，不新建导航 store。
+  // #154 阶段 4：open-settings 落点从覆盖层改为设置 sheet（幂等：已开则 patch 导航态并聚焦）。
   useEffect(() => {
     const openSettings = (event: Event) => {
       const detail = (event as CustomEvent<{ domain?: string; section?: string; agentId?: string }>).detail ?? {}
-      setSettingsIntent(detail)
-      setShowSettings(true)
+      openOrFocusSettingsSheet(detail)
     }
     const openRuntime = () => useWorkspaceStore.getState().openSheet({ kind: 'runtime', title: 'Runtime' })
     window.addEventListener('pylon:open-settings', openSettings)
@@ -464,7 +463,6 @@ export default function App() {
     return () => { unlisten?.() }
   }, [])
   const profilesOpen = showProfileEdit
-  const settingsOpen = showSettings
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>
@@ -478,7 +476,6 @@ export default function App() {
         sidebarCollapsed={sidebarCollapsed}
         sidebarEnabled={sidebarEnabled}
         rightPanelEnabled={rightPanelEnabled}
-        canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
         onCloseSheet={id => { void closeWorkspace(id) }}
@@ -490,18 +487,14 @@ export default function App() {
           onReopen: () => useWorkspaceStore.getState().reopenSheet(),
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
-        onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
-        onToggleSettings={() => setShowSettings(value => !value)}
-        onOpenSettingsDomain={domain => {
-          setSettingsIntent({ domain })
-          // If Settings is already mounted, its local navigation state is
-          // updated through the existing intent event. The initial props path
-          // still handles the first mount without introducing a second store.
-          window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain } }))
-          setShowSettings(true)
+        // #154 阶段 4：齿轮 = 设置 sheet 的开关（活动 sheet 是设置则关闭，否则幂等打开）
+        onToggleSettings={() => {
+          if (activeSheet?.kind === 'settings' && activeSheet.id === workspaceSheets.activeSheetId) void closeWorkspace(activeSheet.id)
+          else openOrFocusSettingsSheet()
         }}
-        settingsOpen={settingsOpen}
+        onOpenSettingsDomain={domain => { openOrFocusSettingsSheet({ domain }) }}
+        settingsOpen={activeSheet?.kind === 'settings'}
         interfaceMode={interfaceMode}
         chromeStyle={interfaceModeContribution.chromeStyle}
         quickSwitchLabel={quickInterfaceMode?.label}
@@ -526,7 +519,7 @@ export default function App() {
             onOpenChange={setShowSheetLauncher}
             onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
             onOpenSheet={(kind, title, agentId) => useWorkspaceStore.getState().openSheet({ kind, title, agentId })}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => openOrFocusSettingsSheet()}
             onOpenProfiles={() => setShowProfileEdit(true)}
           />
         )}
@@ -550,8 +543,7 @@ export default function App() {
         />
       )}
       <Suspense fallback={<LazyDialogFallback />}>
-        {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} initialDomain={settingsIntent?.domain} initialSection={settingsIntent?.section} initialAgentId={settingsIntent?.agentId} />}
-
+        {/* #154 阶段 4：设置覆盖层挂载点退役——设置以 settings sheet 常驻 sheet 体系。 */}
         {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
       </Suspense>

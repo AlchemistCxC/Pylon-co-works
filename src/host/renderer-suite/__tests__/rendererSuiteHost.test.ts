@@ -6,7 +6,7 @@ import type { RendererActivationSnapshot, RendererSuiteContribution } from '../.
 import { RendererSuiteHost } from '../rendererSuiteHost.ts'
 
 const input: WorkbenchMountInput = {
-  sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'session-a', workspaceMode: 'work',
+  sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'session-a',
   replayReadonly: false, reducedMotion: false, visibility: 'active', rightInset: 0, preview: true,
 }
 

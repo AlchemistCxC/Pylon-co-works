@@ -760,14 +760,15 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
     let now = Timestamp::now();
     let mut outcomes = Vec::new();
     for (agent_id, runtime) in state.runtimes.all_with_ids() {
-        // O37：已崩溃 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
-        // 崩溃后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
-        let crashed = runtime
+        // O37：已死 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
+        // 崩溃/主动停后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
+        // #163：判定用 is_dead（崩溃 ∨ 主动停）——被切走的 agent 同样送不达。
+        let dead = runtime
             .acp
             .try_lock()
-            .map(|acp| acp.is_crashed())
+            .map(|acp| acp.is_dead())
             .unwrap_or(false);
-        if crashed {
+        if dead {
             let dropped = runtime
                 .pending_permissions
                 .lock()

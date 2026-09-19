@@ -60,7 +60,10 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
         id: 'system',
         label: '系统无衬线',
         description: 'Segoe UI / 苹方 / 微软雅黑，适合导航与设置。',
-        family: "-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+        // #129 子项 2：内置栈只留 index.css 一份真值，贡献 family 引用同一 token——
+        // 此前两份字符串已实际漂移过一次（serif 侧缺 'SimSun'），预览与真实渲染
+        // 在 Windows 上落到不同的 CJK 衬线字形。
+        family: 'var(--font-system)',
         roles: ['interface', 'content'],
         order: 10,
         sample: '清晰、自然、适合长时间工作',
@@ -69,7 +72,7 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
         id: 'serif',
         label: '低对比阅读衬线',
         description: '适合长篇 Markdown 与审阅。',
-        family: "'Iowan Old Style', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', Georgia, serif",
+        family: 'var(--font-serif-default)',
         roles: ['interface', 'content'],
         order: 20,
         sample: '让长篇内容更接近纸张阅读',
@@ -78,7 +81,7 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
         id: 'mono',
         label: 'Consolas（VS Code 默认）',
         description: 'Windows VS Code 默认代码字体，用于代码、路径、终端与 Agent 记录流。',
-        family: "'Consolas', 'Courier New', 'Cascadia Code', 'Cascadia Mono', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace",
+        family: 'var(--font-mono-default)',
         roles: ['interface', 'content', 'code'],
         order: 30,
         sample: 'const pylon = await connect()'

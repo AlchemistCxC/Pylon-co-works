@@ -27,19 +27,16 @@
 .set-confirm-inline .set-confirm-text { flex:1 1 100%; }
 
 .settings {
-  position:fixed; top:var(--titlebar-h, 44px); left:0; right:0; bottom:0; z-index:50;
-  background:var(--surface-overlay); backdrop-filter:blur(max(var(--glass-blur-md),var(--blur,16px))) saturate(1.06);
+  /* #154 阶段 4：设置由固定覆盖层迁入 sheet 体系——原 fixed 全视口壳退位为 sheet 主区填充。
+     背景/模糊由 sheet 主区与左栏壳（.sidebar::before）负责，这里不再自绘覆盖层表面。 */
+  position:relative; min-width:0; min-height:0;
   display:flex; flex-direction:column; font-family:var(--font);
 }
 
 /* Tactical Blue's settings retain the same forms, ordering and focus semantics. */
 body[data-interface-mode="tactical-blue"] .settings { background:#06132bed; backdrop-filter:blur(22px); }
-body[data-interface-mode="tactical-blue"] .settings-header { height:88px; flex-basis:88px; background:#0b2851d9; border-bottom:2px solid #4dcdf0; }
-body[data-interface-mode="tactical-blue"] .settings-header h2 { font-size:28px; font-weight:850; letter-spacing:.04em; }
-body[data-interface-mode="tactical-blue"] .settings-header p { color:#b0d5ef; }
-body[data-interface-mode="tactical-blue"] .settings-close { color:#9aeaff; border:1px solid #5893bd; border-radius:0; width:40px; height:40px; }
-body[data-interface-mode="tactical-blue"] :is(.settings-nav,.settings-sidebar) { background:#071a39e6; }
-body[data-interface-mode="tactical-blue"] :is(.settings-nav button,.settings-sidebar button) { border-radius:0; }
+body[data-interface-mode="tactical-blue"] .settings-sheet-nav { background:#071a39e6; }
+body[data-interface-mode="tactical-blue"] .settings-sheet-nav button { border-radius:0; }
 body[data-interface-mode="tactical-blue"] .set-group { border:1px solid #5a86b55c; background:#0b203bcc; margin-bottom:18px; }
 body[data-interface-mode="tactical-blue"] .set-group-title { color:#96eaff; border-left:3px solid #60d9ff; padding:14px 18px; font-weight:750; }
 body[data-interface-mode="tactical-blue"] :is(.set-input,.set-select,.set-textarea) { color:#edf6ff; background:#040f23; border-color:#6387ac; border-radius:2px; }
@@ -48,30 +45,34 @@ body[data-interface-mode="tactical-blue"] .ps-btn.primary { color:#052040; backg
 body[data-interface-mode="tactical-blue"] .agent-settings-overview { background:#0b254acc; border:1px solid #4389be; border-top:3px solid #73dfff; border-radius:2px; }
 body[data-interface-mode="tactical-blue"] .agent-switch-card { border-radius:0; background:#091c38; }
 body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-color:#65dfff; background:#114278; }
-.settings-header {
-  height:72px; flex:0 0 72px; display:flex; align-items:center; justify-content:space-between;
-  padding:0 24px; border-bottom:1px solid var(--stroke-subtle); background:var(--surface-panel);
-}
-.settings-header h2 { margin:0; font-size:var(--font-size-2xl); font-weight:680; letter-spacing:-0.02em; color:var(--text); }
-.settings-header p { margin:4px 0 0; font-size:var(--font-size-sm); color:var(--text-dim); }
-.settings-close {
-  position:static; display:grid; place-items:center; width:34px; height:34px;
-  border:1px solid transparent; border-radius:var(--ui-radius-md); background:transparent;
-  color:var(--text-dim); font-size:var(--font-size-xl); cursor:pointer;
-}
-.settings-close:hover { color:var(--text); background:var(--bg-hover); border-color:var(--border); }
-.settings-close:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 
 
 /* ── 三列布局：nav | body | preview ── */
 .settings-tabs-root { display:flex; flex:1; overflow:hidden; }
 
-.settings-nav {
-  width:210px; border-right:1px solid var(--border);
-  background:color-mix(in srgb,var(--surface-panel) 86%,transparent); display:flex; flex-direction:column;
-  padding:14px 10px 10px; gap:18px; flex-shrink:0; overflow-y:auto;
+.settings-sheet-nav {
+  /* #154 阶段 4：一二级同栏分层。宽度/分割线/折叠归布局层 `.sidebar` 壳，
+     这里只管内容排版：上半域（大字号+字形）、下半分区（小字号缩进）、页脚动作。 */
+  display:flex; flex-direction:column;
+  padding:14px 10px 10px; gap:14px; overflow-y:auto;
 }
+.settings-sheet-nav-domains { display:flex; flex-direction:column; gap:4px; }
+.settings-sheet-nav-domain {
+  display:flex; align-items:center; gap:10px; padding:9px 11px;
+  border:1px solid transparent; border-radius:var(--ui-radius-xs); background:none;
+  color:var(--text-dim); cursor:pointer; text-align:left;
+  transition:background var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard);
+}
+.settings-sheet-nav-domain:hover { background:var(--state-hover-bg); color:var(--text); }
+.settings-sheet-nav-domain.active { background:var(--state-selected-bg); color:var(--text); border-color:var(--state-selected-stroke); }
+.settings-sheet-nav-domain-glyph { color:var(--accent); font:var(--font-size-md)/1 var(--mono); }
+.settings-sheet-nav-domain-text { display:flex; flex-direction:column; min-width:0; }
+.settings-sheet-nav-domain-text strong { font-size:var(--font-size-base); font-weight:650; }
+.settings-sheet-nav-domain-text small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-size-2xs); color:var(--text-dim); }
+.settings-sheet-nav-sections { flex:1 1 auto; display:flex; flex-direction:column; overflow-y:auto; }
+.settings-sheet-nav-sections .set-nav-btn { font-size:var(--font-size-sm); padding:7px 11px 7px 14px; }
+.settings-sheet-nav-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--border); }
 .settings-nav-group { display:flex; flex-direction:column; gap:3px; }
 /* I13-W2：分区组与上方"设置域"组的分隔线（沿用原 runtime 组视觉 token） */
 .settings-nav-sections { padding-top:16px; border-top:1px solid var(--border); }
@@ -628,16 +629,7 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   /* Elevated recipe: one opaque overlay surface + one semantic shadow; no blur. */
   background:var(--surface-overlay); box-shadow:var(--shadow-float); backdrop-filter:none;
 }
-.app[data-interface-mode="modern-gui"] .settings-header {
-  height:78px; flex-basis:78px; padding:0 28px; border-bottom-color:color-mix(in srgb,var(--border) 72%,transparent);
-  background:var(--surface-panel);
-}
-.app[data-interface-mode="modern-gui"] .settings-header h2 { font-size:var(--font-size-2xl); }
-.app[data-interface-mode="modern-gui"] .settings-close { width:var(--ui-control-standard); height:var(--ui-control-standard); border-radius:var(--ui-radius-lg); }
 .app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:var(--ui-space-2); padding:var(--ui-space-2); }
-.app[data-interface-mode="modern-gui"] .settings-nav {
-  width:224px; padding:14px 10px; border:1px solid var(--stroke-default); border-radius:var(--ui-radius-lg); background:var(--surface-panel);
-}
 .app[data-interface-mode="modern-gui"] .set-nav-btn { padding:10px 12px; border-radius:var(--ui-radius-md); }
 .app[data-interface-mode="modern-gui"] .set-nav-btn.active { box-shadow:none; }
 .app[data-interface-mode="modern-gui"] .set-nav-btn.active::before { width:6px; height:6px; margin-right:9px; border-radius:50%; }
@@ -658,10 +650,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 }
 @media (max-width:680px) {
   /* Keep both navigation and content reachable when the settings overlay is narrow. */
-  .app[data-interface-mode="modern-gui"] .settings-nav {
-    width:min(224px, 32vw);
-    flex-basis:min(224px, 32vw);
-  }
   .app[data-interface-mode="modern-gui"] .settings-body { min-width:0; }
   .app[data-interface-mode="modern-gui"] .set-row {
     flex-wrap: wrap;
@@ -968,27 +956,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   color: var(--text-dim, var(--text-secondary, #888));
 }
 
-/* Settings content keeps a two-column navigation model: the titlebar owns
-   top-level domain switching, while this rail lists the active domain's
-   sections. */
-.settings-nav { width:242px; flex-basis:242px; gap:0; padding:0 10px 10px; }
-.settings-nav-context {
-  display:grid;
-  gap:4px;
-  margin:0 -10px 12px;
-  padding:15px 15px 13px;
-  border-bottom:1px solid var(--stroke-subtle);
-}
-.settings-nav-context > span {
-  overflow:hidden;
-  color:var(--text-placeholder);
-  font:var(--font-size-4xs)/1.2 var(--mono);
-  letter-spacing:.09em;
-  text-overflow:ellipsis;
-  text-transform:uppercase;
-  white-space:nowrap;
-}
-.settings-nav-context > strong { color:var(--text); font-size:var(--font-size-lg); font-weight:680; }
 .settings-nav-sections { padding-top:0; border-top:0; }
 
 /* Terminal Workstation 是本轮第一目标。结构保持 GUI 可发现性，表面保持平直。 */
@@ -1014,33 +981,12 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   background:var(--settings-surface-canvas);
   backdrop-filter:none;
 }
-.app[data-interface-mode="terminal-like"] .settings-header {
-  height:58px;
-  flex-basis:58px;
-  padding:0 18px;
-  background:var(--surface-sunken);
-}
-.app[data-interface-mode="terminal-like"] .settings-header h2 {
-  font:700 var(--font-size-xl)/1.1 var(--mono);
-  letter-spacing:.04em;
-  text-transform:uppercase;
-}
 .app[data-interface-mode="terminal-like"] .settings-quicksearch-overlay { background:color-mix(in srgb,var(--surface-sunken) 76%,transparent); }
 .app[data-interface-mode="terminal-like"] .settings-quicksearch-dialog {
   border-radius:4px;
   border-color:var(--stroke-strong);
   background:var(--surface-overlay);
   box-shadow:var(--shadow-raised);
-}
-.app[data-interface-mode="terminal-like"] .settings-header p {
-  font-family:var(--font);
-  font-size:var(--font-size-3xs);
-}
-.app[data-interface-mode="terminal-like"] .settings-close {
-  width:30px;
-  height:30px;
-  border-radius:2px;
-  font-family:var(--mono);
 }
 .app[data-interface-mode="terminal-like"] :is(.settings-surface,.dialog-content) {
   --settings-radius-lg:4px;
@@ -1049,19 +995,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   --dialog-bg:var(--surface-overlay);
 }
 .app[data-interface-mode="terminal-like"] .dialog-content { border-radius:4px; box-shadow:var(--shadow-raised); }
-.app[data-interface-mode="terminal-like"] .settings-nav {
-  width:244px;
-  flex-basis:244px;
-  padding:0;
-  border-right:1px solid var(--stroke-default);
-  background:var(--surface-panel);
-}
-.app[data-interface-mode="terminal-like"] .settings-nav-context {
-  min-height:68px;
-  margin:0;
-  padding:14px 14px 12px;
-  background:color-mix(in srgb,var(--surface-panel) 72%,var(--surface-sunken));
-}
 .app[data-interface-mode="terminal-like"] .settings-nav-group { gap:0; }
 .app[data-interface-mode="terminal-like"] .settings-nav-label {
   padding:11px 14px 7px;
@@ -1305,10 +1238,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 .app[data-interface-mode="terminal-like"] :is(.set-color-popover,.pylon-select-listbox,.agent-runtime-toast) { border-radius:4px; }
 
 /* Modern GUI keeps the same two-column settings surface with a softer shell. */
-.app[data-interface-mode="modern-gui"] .settings-nav {
-  margin:var(--ui-space-2);
-  border-radius:var(--ui-radius-lg);
-}
 
 /* Renderer Settings Ledger：object index 只负责选择，Inspector 一次只挂载一份 schema。 */
 .renderer-settings-panel { display:grid; gap:14px; min-width:0; }
@@ -1530,26 +1459,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
    The titlebar owns top-level domain switching; this surface presents the
    active domain's section navigation and content without duplicating field
    state or persistence ownership. */
-.settings-header > div:first-child { min-width:0; }
-.settings-header-route {
-  display:block;
-  margin-top:3px;
-  color:var(--accent);
-  font:var(--font-size-4xs)/1.2 var(--mono);
-  letter-spacing:.08em;
-  text-transform:uppercase;
-}
-.settings-nav-context-title { display:flex; min-width:0; align-items:center; gap:7px; }
-.settings-nav-context-title strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.settings-nav-context-glyph { color:var(--accent); font:var(--font-size-md)/1 var(--mono); }
-.settings-nav-context > small {
-  overflow:hidden;
-  color:var(--text-dim);
-  font-size:var(--font-size-2xs);
-  line-height:1.35;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
 
 /* New section roots enter with a restrained lift when the user changes the
    domain/section. No data or scroll state is changed by this treatment. */
@@ -1561,8 +1470,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   to { opacity:1; transform:translateY(0); }
 }
 
-.app[data-interface-mode="terminal-like"] .settings-nav-context-title strong { font-family:var(--font); }
-.app[data-interface-mode="terminal-like"] .settings-header-route { font-family:var(--mono); }
 
 @media (prefers-reduced-motion:reduce) {
   .settings-body > :is(.settings-section-header, .set-toolbar, .set-group, .agent-settings-heading, .agent-settings-overview, .settings-empty-state, .renderer-settings-panel, .plugin-manager) {
@@ -1570,8 +1477,6 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
   }
 }
 /* Interaction feedback stays on the selected navigation or newly opened dialog. */
-body[data-interface-mode="tactical-blue"] .settings-header h2 { font-size:32px; }
-body[data-interface-mode="tactical-blue"] .settings-header h2::after { content:' / CONFIG'; color:#72e4ff; font-family:Impact,'Arial Narrow',var(--font); font-size:38px; font-style:italic; margin-left:14px; letter-spacing:-.02em; }
 body[data-interface-mode="tactical-blue"] .set-nav-btn { min-height:42px; transition:background 160ms,translate 160ms; }
 body[data-interface-mode="tactical-blue"] .set-nav-btn.active { background:#0b56bc; color:#eafaff; border-color:#68dfff; box-shadow:inset 4px 0 #89efff; }
 body[data-interface-mode="tactical-blue"] .set-nav-btn:hover { background:#123f76; translate:3px 0; }

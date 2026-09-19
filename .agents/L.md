@@ -200,9 +200,19 @@
 
 **从 ADR-0009 继承的验收口径**：逐 sheet 实测「标题栏分割线 x == 左栏分割线 x」数值相等；折叠 = 0 宽；轨道处带右边框的元素恰好 1 个。左栏新样式不得打破这三条。
 
-**⚠️ 停工留档（2026-09-18 午后）—— 工作树当前是「故意的半成品」，门禁红**：用户叫停（计费高峰），本轮**停在契约层**。已改：`src/plugin-runtime/sidebar/{sidebarTypes,sidebarRegistry}.ts`（删 `AgentSidebarMode`，加 `region` / `headerActions` / `collapsible`）。未改完：`AGENT_SIDEBAR_REGIONS` 常量尚未定义，且 `src/components/Sidebar.tsx` 等消费方仍 import 旧类型 ⇒ **`bunx tsc -b` 与 `check:frontend` 现在会红，且错误源自我方在途文件**。据此排查其他故障前先看这里。用户明确要求**保留现场、不做恢复**。
+**✅ 进展（2026-09-18 晚）：左栏区块栈模型 + 模块整页 + 密度收敛已落地，门禁全绿。** 契约 `AgentSidebarMode → AgentSidebarRegion`，新增 `page` / `collapsible` / `defaultCollapsed` / `headerActions` 与 `presentation`；区块外壳归宿主渲染，点标题把内容展开成主区整页（替换聊天视图、不开新 Sheet）。状态 `AgentWorkspaceState = { blockCollapsed, activePageId }`（零存储键迁移）。同时清掉 `workspaceMode` 整条轴（18 文件）并把插件 API 升 major 至 **2.0**。全量 **599 文件 / 4342 用例通过**；`tsc -b` / `lint` / `check:first-party-styles` / CSS 变量审计均绿。决策 `.agents/decisions/0011-agent-sidebar-region-model.md`，记录 `.agents/records/154-agent-sidebar-region-model.md`。
+
+**实机构建提示（本轮踩到，后来者省一次弯路）**：G: 盘已 100% 满（构建缓存 `src-tauri/target` 占 30G），直接 `cargo build` 会以「磁盘空间不足」失败。**别删用户的 target 缓存**——用 `CARGO_TARGET_DIR=D:/pylon-acceptance-target cargo build --bin pylon` 落到达盘（D: 有 63G）。
 
 **⚠️ `AGENTS.md` 根目录文件当前有未提交改动，属用户本人正在编辑，非我方产物**——不 stage、不提交、不改写。按 AGENTS §2.1 共享工作树纪律办理。
+
+**⚠️ 追加修复（2026-09-18 20:10）：左栏所有按钮曾长期失效，根因是长按拖拽在 `pointerdown` 就捕获指针。** 捕获把 `pointerup` 的目标改写成捕获元素（模块头），而 `click` 派发在按下/抬起目标的最近公共祖先上 ⇒ 头内部的标题、折叠钮、「打开」、头部动作全部收不到 click（自 `1b4854f0` 起一直如此，实机表现为「点了没反应」）。现改为长按到点才捕获，并补 `pointerleave` 取消长按。**仍占用文件域**：`src/components/Sidebar.tsx`、`src/components/__tests__/Sidebar.blocks.test.tsx`。全量 **601 文件 / 4361 用例通过**。
+
+**⚠️ 看到他人在途（2026-09-19 01:05）**：`src/index.css`、`src/themeFieldDefs.ts`、`src/plugins/product/builtinPylonRenderers.ts`、`src/components/settings/FontContributionPicker.tsx`(+测试) 与未跟踪的 `src/__tests__/fontStackContract.test.ts` 有改动——字体栈/字体贡献那条线，非我方产物。我未 stage、未改写，本批提交只用 pathspec。
+
+**⚠️ 看到他人在途（2026-09-18 23:50）**：`git status` 显示 `src-tauri/src/{acp/client.rs,acp/replay.rs,acp/tests.rs,permission.rs,lib.rs,bin/pylon-fake-agent.rs}` 有未提交改动，属 **Kepler** 的 #163/#157 文件域（其条目见下）。我一律未 stage、未提交、未改写；自己全程用 pathspec 提交。
+
+**🔧 在途文件域（2026-09-18 21:30，标题栏 + 右栏，未提交）**：`src/workspace-sheets/{WorkspaceTitlebar,SheetTabStrip}.tsx` 及 `__tests__/workspaceTitlebar*.tsx`、`sheetTabOverflow.test.tsx`、`src/App.tsx`、`src/components/right-panel/{RightRailHost,ContextPanelHost}.tsx` 及 `__tests__`、`src/plugin-runtime/context-panel/**`、`src/plugin-runtime/titlebar/**`、`src/plugin-runtime/packageManifest.ts` + 两份 `pylon-plugin-manifest.schema.json`、首方样式 `builtin.pylon-shell/styles/App.css` 与 `builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css`、说明书、`.agents/decisions/0012-*.md`。改动要点：标题栏「界面+设置」合并为齿轮菜单（新增 `slot:'app-menu'` 数据化菜单项，API 2.1）、右栏按钮只折叠且图标重画、页签自动压缩 + 「···」收敛（不滚动不截断）、右栏面板 `workspaceKind` 由闸门改为亲和（API 2.2，ADR-0012）。全量 **601 文件 / 4380 用例通过**。
 
 ---
 
@@ -232,15 +242,72 @@
 
 ---
 
+[2026-09-19 02] [Kepler] [#175]（#129 条目已随 PR #174 合入移除）
+
+**开工：issue175（全量并行 jsdom 调度型测试偶发超时——20 逻辑核自饱和饥饿）。** 施工范围（请勿改写、勿连带提交）：
+
+- `vitest.config.ts`（根 `test.maxWorkers`：大核机器压到 50% 并行度；不动超时/断言/retry——原计划的 waitFor 预算微调经诊断判定无意义，未实施）
+- 文档：`.agents/records/issue-175-vitest-maxworkers-flake.md`、本文件
+
+**我不碰**：其余全部源码。
+
+**给后来者**：全量 vitest 在本机的偶发红根因是 19 worker 内存峰值触发分页冻结事件循环，已按 PR #176 压并行度解决；若未来在 free 物理内存 <1GB 时仍见墙钟类偶红，先查内存再怀疑测试。
+
+---
+
+[2026-09-19 04] [Miyaki Kumo] [#172 + #154 残余收口]
+
+**开工：#172（[object Object] 吞错链）+ #154 残余（阶段 4 设置迁入 sheet 体系为本轮主体；左轨身份项经用户裁定正式放弃）。** 分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- #172：`src/utils.ts` 或就近新增共享 `errorMessage` 助手模块、`src/renderers/solid-workbench/workbenchHostPort.ts`、`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 及对应 `__tests__`
+- #154 阶段 4：`src/App.tsx`（移除 showSettings/settingsIntent 覆盖层挂载）、`src/components/Settings.tsx`（去 fixed 覆盖层 → sheet 内容形态）及其 `__tests__`、`src/plugins/core/sheet/builtinWorkspacePlugins.ts`（新 `settings` kind）、`src/settingsDomains.ts`（只读消费，契约不动）、`src/workspace-sheets/**`（如需 sheet 状态/导航缝）、`src/plugins/product/firstPartyStyleOwnership.ts` + 首方样式（新设置 sheet 样式 owner 登记）
+- 文档：`.agents/records/`、`.agents/decisions/`（如需）、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`src-tauri/**`、`tools/webview2-mcp/**`、`src/index.css`、`src/styles/tailwind.css`、中控区布局样式（`ControlCenter.css`；`ControlCenter.solid.tsx` 仅按 #172 改两处 catch 的错误消息提取，不重排布局）。
+
+---
+
+[2026-09-19 05] [Miyaki Kumo] [#53 + #51]
+
+**开工：模型/思考等级选择器全套打通——空态探测（#53）+ 恢复期选择器恢复与错误 UX（#51）。** 分支沿用 `Ru5t/Reflector`；spec 见 `.agents/spec/issue-selector-probe-and-restore.md`。调查结论已回写两 issue 评论区（#53：候选列表现依赖历史会话桶并集，无主动探测；#51：load 响应只进 store 层不进 workbench document，document 只重放 canonical journal）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 后端：`src-tauri/src/session/create.rs`（探测命令 + 建立期 configOptions 写 journal）、`src-tauri/src/session/persist.rs`（恢复期 configOptions 写 journal）、`src-tauri/src/session/mod.rs`、`src-tauri/src/lib.rs`（命令注册）、`src-tauri/src/session/model.rs`（如需序列化助手）及对应 Rust 测试
+- 前端：`src/infrastructure/acp/sessionClient.ts`（probe 方法）、`src/sheets/agent-workbench/agentAdvertisedModels.ts`（并集接入探测缓存）、`src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx`（探测装配）、`src/plugins/core/sessionState/runtimeStoreSessionState.ts`（applyResponse 补 raw）、`src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（无面禁用态 + 错误短文案）及 `ControlCenter.css` 的 `.cc-widget-error` 一条样式
+- 测试：上述 `__tests__` + 新增
+- 文档：`.agents/spec/`（gitignore）、`.agents/records/`、`docs/说明书/` 涉及表述、本文件
+
+**我不碰**：`vitest.config.ts`（Kepler #175 刚收口）、`src/components/chat/**`、`tools/webview2-mcp/**`、他人 `src/workspace-sheets/**`。
+
+**给后来者**：`#110 F5` 的 `ingest_established_model_event` 模式（合成标准 `session/update` raw 写 canonical journal）是本轮恢复期选择器恢复的核心复用点；canonical 类型 `session.config-updated` 已存在（event_repo.rs:533），不新增 schema。
+
+---
+
+[2026-09-19 06] [Miyaki Kumo] [#53/#51 审查收口·journal 去重 + revive 测试]
+
+**追加施工**（同分支同 issue 域，PR #177 审查遗留收口）：`ingest_established_config_options_event` 幂等去重（防重复 load/revive 线性膨胀 journal）+ revive 写入路径集成测试。**本轮新增触碰文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/event_repo.rs`（新增 `latest_event_of_type` 定向查询 + 单测——该文件在 #110 Huygens 条目亦有声明，本轮只追加方法与测试，不动既有行）。其余触碰沿用 2026-09-19 05 条目文件域：`src-tauri/src/session/create.rs`、`src-tauri/tests/issue53_selector_probe/mod.rs`、开发记录、本文件。
+
+
+---
+
+[2026-09-19 07] [Miyaki Kumo] [#172 收口·errorPayload 抽模块 + ADR-0013]
+
+**追加施工**：`errorMessage`/`errorCode` 自 `src/utils.ts` 抽为 **新增文件** `src/infrastructure/tauri/errorPayload.ts`（+ `__tests__/errorPayload.test.ts`），消费方 `workbenchHostPort.ts`、`ControlCenter.solid.tsx` 改导入。沿用 2026-09-19 04 条目（#172 域）文件域并新增上述 infrastructure/tauri 两文件——该目录其他 contracts 文件未触碰。另登记 `.agents/decisions/0013-settings-navigation-state-persists-in-sheet-system.md`（#154 阶段 4 持久化契约，经用户裁定）。
+
+---
+
 [2026-09-19 14] [AquaTur5235] [#171]
 
-**在途声明：中控元件名单换代（旧 11 → 新 7）+ 刀4 续 · 空态极简 —— 33 个已跟踪文件的改动尚未 commit，请勿改写、勿连带提交。**
+**在途声明：中控元件名单换代（旧 11 → 新 7）+ 刀4 续 · 空态极简 —— 已落为提交 `b4e1f407`（本文件）与 `cd640777`（33 个施工文件 + 开发记录），并随对 `origin/main`（`e05bc80c`）的合并入库；PR 合入前请勿改写、勿连带提交。**
 
-- issue **#171**（总 issue #109）· 分支 `feat/preset-v2.1` · 起点 `d2beaf40` · **未 commit / 未 push / 未开 PR**
+- issue **#171**（总 issue #109）· 分支 `feat/preset-v2.1` · 起点 `d2beaf40`
 - 施工单：`04-施工单-刀4-中控元件名单换代.md`（§零 刷新表）· `04b-施工单-刀4续-空态极简.md`；**两单均已完工并经翻译独立核验**（`04` §十二 / `04b` §十），记录见 `.agents/records/issue-171-cc-roster-v2-and-empty-state-minimal.md`
-- 收口顺序：用户视觉终验（`http://localhost:5173/` 空态）→ 之后方可 commit + PR
+- ★ 合并订正（随 main `e05bc80c` / #177）：main 已删除「请先选择工作区」守卫，不选工作区即创建无 cwd 会话为合法意图 ⇒ 04b 的「丙-2」验收按 main 为准改写；空态工作区选择器由渲染器独立组件承载（`SHOW_EMPTY_WORKSPACE_CONTROL` 置 `true` 可回退显示）
 
-**我方本轮文件域（33 个已跟踪改动，全部在途）**：
+**文件域（33 个已跟踪改动，已入库）**：
 
 - 中控名单与布局：`src/domains/cc/{widgetDefinitions,widgetCatalog}.ts`、`src/ccLayoutState.ts`、`src/ccHeightState.ts`
 - 主题 schema / 字段表 / store：`src/domains/theme/{migration,presetReducer}.ts`、`src/themeFieldDefs.ts`、`src/store.ts`、`src/domains/workbench/{appearance,workbenchAppearanceStore}.ts`、`src/plugin-runtime/skin/skinSchema.ts`
@@ -251,8 +318,9 @@
 - 测试与夹具：上述区域的 `__tests__`、`src/renderers/solid-workbench/__fixtures__/mountSolidControlCenterPreview.solid.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`
 - 文档：本文件、`.agents/records/issue-171-*.md`（新增）
 
-**我不碰**：`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`（3 条禁区未跟踪项）；`sidebar` / `chat` / `right` 三区域；`src/presets/` 的拆分结构；`src-tauri/**`；`tools/webview2-mcp/**`。
+**我不碰**：`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`（3 条禁区未跟踪项）；`src/presets/` 的拆分结构；`src-tauri/**`；`tools/webview2-mcp/**`。
 
 **给后续 agent 的三条提示**：① `CC_WIDGET_IDS` 现在只有 5 个（`input`/`model`/`reasoning`/`mode`/`tokens`），可落槽控件还要加注册轨的 `cc-send-button`（`CC_REGISTERED_SLOT_IDS`）；`ekg`/`session`/`workspace`/`activity`/`tasks` 已不存在，旧引用会静默失效。② 改布局/主题 schema **必须显式保留历史版本**在白名单里（当前 `[3,4,5,6,8,CC_LAYOUT_SCHEMA_VERSION]`），否则老用户布局静默回落默认值——本刀已踩过这个坑。③ 空态可见性只有 `hiddenWidgetIds()` 一个入口（04b 的空态收敛名单是 `EMPTY_STATE_HIDDEN_WIDGET_IDS`）；注册轨控件不走 `isWidgetVisible`，需自行补编辑态豁免（参考 `sendButtonMode()`）。
 
-**注**：按 AGENTS §2.3 本声明应「写入后立刻提交本文件」；本轮受用户硬约束「只新增这两份文件、不 commit」限制，**未提交**，特此说明以免被误读为漏做。
+**注**：本条原写于改动未提交时；现随合并提交入库，PR 合入后按 AGENTS §2.3 规矩移除本条目。
+

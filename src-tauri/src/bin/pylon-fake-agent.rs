@@ -36,6 +36,26 @@ fn main() {
     if config.scenario == "exit-immediately" {
         std::process::exit(config.exit_code);
     }
+    // close-stdin-after-init（#157 确定性写失败场景）：应答首请求（initialize）后
+    // 关闭自身 stdin 读端并驻留。进程不退出 ⇒ exit watcher / stdout EOF 都不参与
+    // 竞争；Pylon 后续写入必 broken pipe ⇒ 写失败路径的断言信号只能来自写失败本身
+    // （旧 crash-after-init 的子进程即刻退出，全量并行下崩溃信号可能与 prepare_rpc
+    // 竞争，测试偶发红）。须在主读循环之前拦截——读循环锁住 stdin 且读循环无法
+    // 关闭自身句柄后继续驻留。
+    if config.scenario == "close-stdin-after-init" {
+        let mut agent = FakeAgent::new(config);
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        if let Some(Ok(line)) = stdin.lock().lines().next() {
+            agent.handle_line(line.trim(), &mut out);
+            let _ = out.flush();
+        }
+        close_stdin_read_end();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
     // 启动采样探针：env-probe 把环境变量**原值**写入 trace（hermes env 注入断言
     // 读裸文本）；argv-probe 写 {argv, marker} JSON（wrapper argv 检查）。随后对
     // initialize 应答一次空 result 即退出。
@@ -82,6 +102,27 @@ fn main() {
 enum Flow {
     Continue,
     Exit,
+}
+
+/// 关闭自身 stdin 的底层句柄/描述符（close-stdin-after-init 场景用）。
+/// Rust std 不拥有标准流——drop `Stdin` 不会关闭底层句柄，须显式接管所有权关闭；
+/// 关闭后本进程不再触碰 stdin（调用方随后驻留）。进程保持存活，管道读端消失 ⇒
+/// 对端（Pylon）后续写入必 broken pipe。
+#[cfg(windows)]
+fn close_stdin_read_end() {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    let handle = std::io::stdin().as_raw_handle();
+    if !handle.is_null() {
+        let owned = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) };
+        drop(owned);
+    }
+}
+
+#[cfg(unix)]
+fn close_stdin_read_end() {
+    use std::os::unix::io::FromRawFd;
+    let stdin = unsafe { std::fs::File::from_raw_fd(0) };
+    drop(stdin);
 }
 
 // ── 配置与旗标解析 ─────────────────────────────────────────────────────────────
@@ -163,6 +204,7 @@ impl Config {
          \x20   permission | done_error | cancel | reconnect\n\
          \x20 alive                  通用应答（loadSession 能力 + 会话回显 + end_turn）\n\
          \x20 crash-after-init       alive 应答首请求后退出（--delay-ms 造 crash-loop）\n\
+         \x20 close-stdin-after-init alive 应答首请求后关自身 stdin 读端并驻留（写失败测试）\n\
          \x20 flood                  initialize 应答后连发 --chunks 条 update 再退出\n\
          \x20 stream | prompt-error | replay-load   b10/b11 流式/错误注入/回放装载\n\
          \x20 permission-proactive   initialize 后主动 request_permission（--permission-id/params）\n\
@@ -493,7 +535,7 @@ impl FakeAgent {
             // ── golden 家族：单一 handler，prompt 行为按场景名分支 ──
             "initialize" | "new_load" | "prompt" | "tool" | "permission" | "done_error"
             | "cancel" | "reconnect" => self.handle_golden(method, &id, &params, out),
-            "alive" | "crash-after-init" => {
+            "alive" | "crash-after-init" | "close-stdin-after-init" => {
                 if method == "session/new" {
                     Self::sleep_ms(config.new_delay_ms);
                 }

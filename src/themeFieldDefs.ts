@@ -135,7 +135,7 @@ export const THEME_FIELD_DEFS = {
   chatBlur: { ...N('chat', '消息流模糊', 0, 40, 2), default: 0, group: "背景", unit: 'px', suffix: 'px' },
   chatFont: { ...S('chat', '聊天区字体', ['mono', 'system', 'serif']), optionLabels: {
     mono: '终端等宽体', system: '系统无衬线', serif: '阅读衬线',
-  }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: '智能体聊天主区域使用的字体；代码块始终使用等宽体' },
+  }, default: 'mono', group: "字体", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: '聊天记录流容器的基础字体（正文之外的提示行等沿用此项）；消息正文由「风格 › 正文渲染字体」决定，代码块始终使用等宽体' },
   chatFontSize: { ...N('chat', '字号', 12, 22), tier: 'basic', default: 15, group: "字体", unit: 'px' },
   chatLineHeight: { ...N('chat', '行高', 1.2, 2.5, 0.1), default: 1.4, group: "字体", },
   chatTextColor: { ...C('chat', '文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "颜色", semanticRole: 'content.text', semanticSource: true },
@@ -206,7 +206,7 @@ export const THEME_FIELD_DEFS = {
   msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), optionLabels: { terminal: '终端记录流', bubble: '对话气泡' }, default: 'terminal', control: 'segmented', group: "风格", },
   msgFont: { ...S('chat', '正文渲染字体', ['mono', 'system', 'serif']), optionLabels: {
     mono: '跟随终端等宽体', system: '系统无衬线', serif: '阅读衬线',
-  }, default: 'mono', group: "风格", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: 'Markdown 正文的渲染字体，不影响内联代码与代码块' },
+  }, default: 'mono', group: "风格", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: '消息正文（Markdown）的渲染字体，与插件可见的「内容字体」角色同源；不影响内联代码与代码块' },
   // 经 App.tsx 手写 --msg-text 注入，自动派生 --msg-text-color 冗余 → 不注入
   msgTextColor: { ...C('chat', '消息文字'), tier: 'basic', default: '', group: "风格", noCssVar: true, semanticRole: 'content.text' },
   msgLineHeight: { ...N('chat', '消息行距', 1.2, 2.5, 0.1), default: 1.8, group: "风格", },

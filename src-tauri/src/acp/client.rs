@@ -25,6 +25,10 @@ pub struct AcpClient {
     pub(crate) backend: SdkBackend,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
+    /// #163：主动 stop 标记（[`Self::kill`] 在杀进程前置位）。子进程死亡本身
+    /// 无法区分「主动停」与「意外崩溃」（同一 exit watcher / EOF 信号），凭本
+    /// 标记判定：`is_crashed()` 只认意外退出，`is_dead()` 认一切连接死亡。
+    stopped: AtomicBool,
     /// A7：EOF 崩溃信号独立 watch 通道（保留最新值，broadcast 洪泛 Lagged 丢消息
     /// 时 NOTIF_AGENT_CRASHED 可能丢失，本通道是自动重连的可靠信号源）。
     /// reader 线程 EOF 时 `send(true)`；dispatcher 经 [`Self::crashed_receiver`] 订阅。
@@ -218,6 +222,7 @@ impl AcpClient {
                 join: None,
             },
             crashed: Arc::new(AtomicBool::new(false)),
+            stopped: AtomicBool::new(false),
             crashed_watch,
             _crashed_watch_rx: crashed_watch_rx,
             wire_trace: None,
@@ -244,7 +249,7 @@ impl AcpClient {
         method: &str,
         params: serde_json::Value,
     ) -> Result<PreparedRpc, AcpError> {
-        if self.is_crashed() {
+        if self.is_dead() {
             return Err(AcpError::ConnectionClosed);
         }
         prepared_sdk_rpc(&self.backend, method, params, self.protocol.rpc_timeout())
@@ -267,7 +272,7 @@ impl AcpClient {
         prompt: Vec<serde_json::Value>,
     ) -> Result<PreparedRpc, AcpError> {
         // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝（否则挂满 300s 假超时）
-        if self.is_crashed() {
+        if self.is_dead() {
             return Err(AcpError::ConnectionClosed);
         }
         // 先构造参数（可能因 block 格式失败），成功后再登记请求，避免泄漏。
@@ -283,7 +288,10 @@ impl AcpClient {
     /// Kill the child process. Called before switching agents to prevent orphans.
     /// R4：同时 abort 引擎任务——替换时旧任务可能正阻塞在写通道，随后在子进程
     /// 终止、写失败后自行结束。
+    /// #163：先置主动 stop 标记再杀——kill 引发的进程退出（exit watcher/EOF）
+    /// 与意外崩溃共享同一信号，必须先立「这是主动停」的证词再动手。
     pub fn kill(&mut self) -> Result<(), AcpError> {
+        self.stopped.store(true, Ordering::Release);
         if self.stderr_tail.tail_since(0, 1, 512).lines.is_empty() {
             tracing::debug!("ACP connection closing without stderr evidence");
         }
@@ -295,8 +303,18 @@ impl AcpClient {
     }
 
     /// Check if the child process has exited unexpectedly.
+    /// #163：主动 stop（[`Self::kill`]）引发的进程退出**不算**崩溃——状态
+    /// 消费方（list_agents / agent_status_payload / detect_and_record_crashes）
+    /// 据此把「被切走的 Agent」报成 disconnected 而非 crashed。
     pub fn is_crashed(&self) -> bool {
-        self.crashed.load(Ordering::Relaxed)
+        self.crashed.load(Ordering::Relaxed) && !self.stopped.load(Ordering::Relaxed)
+    }
+
+    /// 连接是否已不可用（意外崩溃**或**主动 stop）。
+    /// 发送守卫（prepare_rpc / prepare_prompt / send_notification）与
+    /// pending 清理（permission 超时）用本判定——主动停掉的连接同样无法送达。
+    pub fn is_dead(&self) -> bool {
+        self.crashed.load(Ordering::Relaxed) || self.stopped.load(Ordering::Relaxed)
     }
 
     /// P1：initialize 握手返回的 agentCapabilities（连接成功才有）。
@@ -348,7 +366,7 @@ impl AcpClient {
         method: &str,
         params: serde_json::Value,
     ) -> Result<(), AcpError> {
-        if self.is_crashed() {
+        if self.is_dead() {
             return Err(AcpError::ConnectionClosed);
         }
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -458,6 +476,7 @@ impl AcpClient {
                     capability_registry: CapabilityRegistry::default(),
                     backend: handles.backend,
                     crashed,
+                    stopped: AtomicBool::new(false),
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
                     wire_trace: Some(wire_trace),

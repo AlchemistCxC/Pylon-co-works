@@ -1190,7 +1190,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.firstElementChild?.getAttribute('style')).toContain('--right-panel-inset: 80px')
 
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('data-control-center', 'production')
@@ -1211,7 +1211,7 @@ describe('mountSolidWorkbench', () => {
   it('空态只有一个工作区时自动选中，并随首条请求创建会话', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
 
@@ -1231,7 +1231,7 @@ describe('mountSolidWorkbench', () => {
   it('空态有多个工作区时按 host 提供的最近活跃时间预选', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [
         { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 10 },
         { id: 'workspace-recent', label: '最近项目', path: 'G:/recent', lastActiveAt: 30 },
@@ -1249,12 +1249,30 @@ describe('mountSolidWorkbench', () => {
       command: 'createSession',
       args: [expect.objectContaining({ workspaceId: 'workspace-recent' })],
     }))
+
+    // 合并 main（#177 侧）：工作区列表换成未知项时，预选必须清空——
+    // 不选工作区即创建无 cwd 会话是合法意图。04b：选择器已隐藏，
+    // 断言改由 createSession 实参表达（不能再用 combobox value）。
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true,
+      availableWorkspaces: [
+        { id: 'workspace-unknown-a', label: '未知 A', path: 'G:/unknown-a' },
+        { id: 'workspace-unknown-b', label: '未知 B', path: 'G:/unknown-b' },
+      ],
+    })
+    fireEvent.input(prompt, { target: { value: '未知工作区不预选' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+    await waitFor(() => {
+      const last = services.commands.calls[services.commands.calls.length - 1]
+      expect(last.command).toBe('createSession')
+      expect(last.args[0]).not.toHaveProperty('workspaceId')
+    })
   })
 
   it('Sidebar 创建会话事件先到达时缓存 workspaceId，不被空态初始化覆盖', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
       availableWorkspaces: [
         { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
         { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
@@ -1263,7 +1281,7 @@ describe('mountSolidWorkbench', () => {
     // Sidebar dispatches before clearing the selected session.
     window.dispatchEvent(new CustomEvent('pylon:new-session', { detail: { workspaceId: 'workspace-target' } }))
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [
         { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 100 },
         { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
@@ -1282,7 +1300,7 @@ describe('mountSolidWorkbench', () => {
   it('04b 空态极简：只剩输入栏，工作区选择器与 5 个控件都不渲染', async () => {
     const { host, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
@@ -1336,23 +1354,28 @@ describe('mountSolidWorkbench', () => {
     expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
   })
 
-  it('04b 丙-2：空态零工作区时点发送 ⇒ 既有「请先选择工作区」提示，不静默失败', async () => {
+  it('04b 丙-2（随 main #177 订正）：空态零工作区时点发送 ⇒ 直接创建无 cwd 会话，不再拦截', async () => {
     const { services, lifecycle } = mountPreview()
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work', availableWorkspaces: [] })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, availableWorkspaces: [] })
     const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '没有工作区可用' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请先选择工作区')
-    expect(services.commands.calls.some(call => call.command === 'createSession')).toBe(false)
+    // main（e05bc80c / #177）已删除「请先选择工作区」守卫：不选工作区即创建无 cwd 会话是合法意图。
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'createSession',
+      args: [expect.objectContaining({ initialPrompt: { text: '没有工作区可用', attachments: [] } })],
+    }))
+    const last = services.commands.calls[services.commands.calls.length - 1]
+    expect(last.args[0]).not.toHaveProperty('workspaceId')
   })
 
   it('空态不挂载 composer 快捷键提示，并在创建后标记进入过渡态', async () => {
     const { host, lifecycle } = mountPreview()
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true })
     await screen.findByRole('region', { name: 'Agent 工作台空态' })
     expect(host.querySelector('.input-composer-meta')).toBeNull()
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true })
     await waitFor(() => expect(host.querySelector('.control-center')?.className).toContain('is-session-entering'))
   })
 
@@ -1361,7 +1384,7 @@ describe('mountSolidWorkbench', () => {
     const { services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(() => new Promise<{ sessionId: string }>(resolve => { finishCreation = resolve })))
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
     const prompt = await screen.findByRole('textbox', { name: '消息输入' })
@@ -1381,7 +1404,7 @@ describe('mountSolidWorkbench', () => {
     let finishCreation: ((value: { sessionId: string }) => void) | undefined
     const { host, services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(() => new Promise<{ sessionId: string }>(resolve => { finishCreation = resolve })))
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true })
     const prompt = await screen.findByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '立即进入过渡' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
@@ -1402,7 +1425,7 @@ describe('mountSolidWorkbench', () => {
   it('创建失败分支保留已选会话并停止创建进度', async () => {
     const { host, services, lifecycle } = mountPreview()
     const creation = services.commands.sessionCreation as WorkbenchSessionCreationStore
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true })
     const attempt = creation.begin()
     creation.markSessionSelected(attempt, 'created-session')
     creation.markFailed(attempt, '首条请求失败', 'created-session')
@@ -1431,11 +1454,11 @@ describe('mountSolidWorkbench', () => {
       createSession: vi.fn(async () => ({ sessionId: createdSession.id })),
       sendMessage: vi.fn(async () => { throw new Error('provider rejected first prompt') }),
       optimisticUser: () => {}, rejectOptimisticUser: () => {}, optimisticDocument: () => {}, rejectOptimisticDocument: () => {},
-      selectSession: id => { if (id) lifecycleRef.current?.update({ sheetId: 'sheet-a', sessionId: id, preview: true, workspaceMode: 'chat', reducedMotion: true }) },
+      selectSession: id => { if (id) lifecycleRef.current?.update({ sheetId: 'sheet-a', sessionId: id, preview: true, reducedMotion: true }) },
     }) as typeof services.commands
     const lifecycle = mountSolidWorkbench({
       host,
-      input: { sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat', reducedMotion: true },
+      input: { sheetId: 'sheet-a', sessionId: null, preview: true, reducedMotion: true },
       services,
     })
     lifecycleRef.current = lifecycle
@@ -1453,7 +1476,7 @@ describe('mountSolidWorkbench', () => {
 
   it('空态品牌使用聊天 viewport 几何容器且不改写现有 Pylon 向量路径', async () => {
     const { host, lifecycle } = mountPreview()
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat', rightInset: 96 })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, rightInset: 96 })
     const viewport = await waitFor(() => {
       const value = host.querySelector<HTMLElement>('.solid-workbench-empty-chat-viewport')
       expect(value).not.toBeNull()
@@ -1472,12 +1495,12 @@ describe('mountSolidWorkbench', () => {
     const { host, services, lifecycle } = mountPreview()
     // 04b：本用例的意图与空态无关（弹层不残留 + 不出配置卡），改为有会话夹具，
     // 因为空态下模型控件已随「空态只留输入栏」隐藏。
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true })
     const modelTrigger = await screen.findByRole('button', { name: /deepseek-v4-flash/ })
     fireEvent.click(modelTrigger)
     expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
 
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true, workspaceMode: 'chat' })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true })
     services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
       eventId: 'session-response-test', sessionId: 'created-session', sequence: 1,
       recordedAt: '2026-09-01T00:00:00.000Z', source: { provider: 'acp', sourceId: 'response' },
@@ -1497,7 +1520,7 @@ describe('mountSolidWorkbench', () => {
     const { services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(async () => { throw new Error('Agent 暂时不可用') }))
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
     const prompt = await screen.findByRole('textbox', { name: '消息输入' })
@@ -1706,7 +1729,7 @@ describe('mountSolidWorkbench', () => {
       host,
       input: {
         sheetId: 'sheet-a', sessionOwnerKey: 'owner-preview', sessionId: 'preview-session',
-        workspaceMode: 'work', replayReadonly: false, reducedMotion: true,
+        replayReadonly: false, reducedMotion: true,
         visibility: 'active', rightInset: 0, preview: true,
       },
       hostPort,
@@ -1844,7 +1867,7 @@ describe('mountSolidWorkbench', () => {
     const suiteHost = new RendererSuiteHost({
       container: host, hostPort: hostPort as never,
       input: {
-        sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'preview-session', workspaceMode: 'work',
+        sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'preview-session',
         replayReadonly: false, reducedMotion: false, visibility: 'active', rightInset: 0, preview: false,
       },
     })

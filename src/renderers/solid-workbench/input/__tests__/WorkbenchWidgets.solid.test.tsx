@@ -353,6 +353,25 @@ describe('Solid Workbench widgets', () => {
     expect(await screen.findByText('mode denied')).toBeTruthy()
   })
 
+  // #51：正文只放稳定短文案（稳定 code 映射/截 80 字符），完整后端原文留在浮层
+  // title 供悬停查看。审查曾发现实现里 title 挂的是截短后的同一串，此用例钉住分工。
+  it('切换失败时正文截短、title 保留完整后端原文', async () => {
+    const services = renderWidget(() => <SolidModelWidget />, { modelSwitchMode: 'cycle' })
+    const full = 'model_not_advertised: requested model "missing-model" is not in the agent-advertised choices [alpha-model, beta-model, gamma-model]'
+    services.commands.setHandler('setModel', async () => ({ ok: false, error: full }))
+    fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('模型未被该会话宣告，无法切换')
+    expect(alert.getAttribute('title')).toBe(full)
+
+    const raw = 'x'.repeat(200)
+    services.commands.setHandler('setModel', async () => ({ ok: false, error: raw }))
+    fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
+    const truncated = await screen.findByRole('alert')
+    expect(truncated.textContent!.length).toBe(80)
+    expect(truncated.getAttribute('title')).toBe(raw)
+  })
+
   it('注册发送底层块复用发送/停止语义且支持禁用', async () => {
     const sendEvent = vi.fn()
     window.addEventListener('pylon:solid-input-send', sendEvent)

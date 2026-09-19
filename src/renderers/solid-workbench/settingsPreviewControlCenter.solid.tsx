@@ -23,7 +23,6 @@ export function mountSettingsPreviewControlCenter(host: HTMLElement) {
     sheetId: 'settings-preview',
     sessionId: 'preview-session',
     preview: true,
-    workspaceMode: 'work' as const,
     visibility: 'active' as const,
     reducedMotion: true,
     availableWorkspaces: [],

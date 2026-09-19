@@ -311,6 +311,24 @@ export function isReasoningOption(option: SessionConfigOption): boolean {
 }
 
 /**
+ * #51：中控区的失败提示只展示稳定 code + 简短说明。后端 `model_not_advertised`
+ * 一类错误会把整份宣告列表拼进 message（诊断有用、UI 有害）；长文本留在浮层
+ * title 里，正文截断到 80 字符。
+ */
+export function shortControlCenterError(message: string | undefined, fallback: string): string {
+  const text = (message ?? '').trim()
+  if (!text) return fallback
+  const code = text.split(':')[0]?.trim() ?? ''
+  const known: Readonly<Record<string, string>> = {
+    model_not_advertised: '模型未被该会话宣告，无法切换',
+    reasoning_not_advertised: '思考等级未被该会话宣告，无法切换',
+    model_switching_unavailable: '该会话没有可切换的模型面',
+  }
+  const brief = (code && known[code]) || text
+  return brief.length > 80 ? `${brief.slice(0, 79)}…` : brief
+}
+
+/**
  * Session-start model/mode/reasoning options are rendered by the control
  * center.  Keeping them out of the chat document surface prevents the ACP
  * negotiation response from becoming a second, persistent "配置 / 保存 /

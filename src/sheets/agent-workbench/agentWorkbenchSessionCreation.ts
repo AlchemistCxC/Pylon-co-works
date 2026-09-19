@@ -13,7 +13,6 @@ import { reportRuntimeError } from '../../runtimeError.ts'
 
 export interface AgentWorkbenchSessionCreationContext {
   readonly agentId: string
-  readonly workspaceMode: 'work' | 'chat'
   /**
    * Optional Solid Workbench projection seam.  The host receives the full ACP
    * response before the newly-created Session is selected; implementations may
@@ -31,7 +30,9 @@ export async function createAgentWorkbenchSession(
   const workspace = request?.workspaceId
     ? useWorkspaceEntityStore.getState().workspaces.find(item => item.id === request.workspaceId)
     : undefined
-  if (context.workspaceMode === 'work' && !workspace) throw new Error('请先选择工作区')
+  // 旧模型按「当前是否处于工作页签」拦截无工作区的创建（`请先选择工作区`）。左栏已不再
+  // 分互斥视图：创建一个不归属任何工作区的会话是合法意图，因此前置校验删除。
+  // 「在某个工作区下新建」这条路径由调用方带上 workspaceId，工作区存在性由上面这次查找兜住。
 
   const creating = await getHookRuntime().invoke('session.creating', {
     agentId: context.agentId,

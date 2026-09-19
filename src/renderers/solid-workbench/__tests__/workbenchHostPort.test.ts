@@ -427,6 +427,40 @@ describe('WorkbenchHostPort', () => {
     })
   })
 
+  it('#172：后端结构化拒绝 DTO { code, message } 透传真实 code 与 message，不再吞成 [object Object]', async () => {
+    const commands = createFakeWorkbenchCommandFacade({
+      createSession: async () => { throw { code: 'AgentRuntimeUnavailable', message: '运行时未就绪' } },
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: null,
+      capabilities: { sessionCreate: true },
+    })
+
+    await expect(host.commands.createSession({ initialPrompt: { text: '自检', attachments: [] } })).resolves.toEqual({
+      ok: false,
+      error: { code: 'AgentRuntimeUnavailable', message: '运行时未就绪', recoverability: 'retry' },
+    })
+  })
+
+  it('#172：非结构化 Error 拒绝仍取 message，code 保持 command_failed', async () => {
+    const commands = createFakeWorkbenchCommandFacade({
+      createSession: async () => { throw new Error('配置缺失') },
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: null,
+      capabilities: { sessionCreate: true },
+    })
+
+    await expect(host.commands.createSession()).resolves.toEqual({
+      ok: false,
+      error: { code: 'command_failed', message: '配置缺失', recoverability: 'retry' },
+    })
+  })
+
   it('production Solid adapter preserves interaction expectedRevision through the Host port', async () => {
     const commands = createFakeWorkbenchCommandFacade()
     const host = createWorkbenchHostPort({

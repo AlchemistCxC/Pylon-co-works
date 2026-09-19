@@ -114,6 +114,21 @@ python scripts/pack_release.py --with-runtime
 降级包仍必须带 `tools/install-webview2.bat`，并在发布说明中明确首次运行可能需要联网
 安装 WebView2。常规包不应使用该降级选项。
 
+## 4.1 谁来发布（2026-09-18 决定）
+
+发行由**本地构建 + 手动上传**完成，CI 不参与自动发布：
+
+```bash
+bun run release:portable                       # 出 release/pylon-<version>-win64.{zip,sha256,manifest.json}
+gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md> --target <commit>   release/pylon-<version>-win64.zip   release/pylon-<version>-win64.zip.sha256   release/pylon-<version>-win64.manifest.json  # 一并创建 tag 与 release，并上传三件资产
+```
+
+`.github/workflows/release.yml` 现在**只在手动 `workflow_dispatch` 时运行**：它原先还挂
+`push: tags: ['v*']`，于是每次打 tag 都会再构建一遍同一个提交——而资产在打 tag 之前早已
+上传，那次运行没有任何产出（0.2.0 / 0.2.1 / 0.2.2 三次都在构建中途被取消）。需要让 CI 验
+一遍发行链时手动 dispatch 即可；在 tag ref 上 dispatch 仍会走到发布步骤，在分支上 dispatch
+只构建、不发布。
+
 ## 5. 打包前后验收
 
 ### 构建前

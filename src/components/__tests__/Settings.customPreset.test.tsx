@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
-import Settings from '../Settings.tsx'
+import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { useStore } from '../../store.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
@@ -39,7 +39,7 @@ describe('Settings custom preset controls', () => {
   })
 
   it('shows an explicit success status when overwrite completes', () => {
-    render(<Settings />)
+    mountSettingsSheet()
     const row = screen.getByText('我的预设').closest('.set-custom-preset') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: '覆盖' }))
 
@@ -48,7 +48,7 @@ describe('Settings custom preset controls', () => {
   })
 
   it('shows an explicit applied status when a custom preset chip is clicked', async () => {
-    render(<Settings />)
+    mountSettingsSheet()
     const row = screen.getByText('我的预设').closest('.set-custom-preset') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: '我的预设' }))
 
@@ -63,7 +63,7 @@ describe('Settings custom preset controls', () => {
         message: '拒绝覆盖', rolledBack: true, revision: 2,
       })),
     } as never)
-    render(<Settings />)
+    mountSettingsSheet()
     const row = screen.getByText('我的预设').closest('.set-custom-preset') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: '我的预设' }))
 
@@ -76,7 +76,7 @@ describe('Settings custom preset controls', () => {
       saveCustomPreset: () => { throw new Error('capture failed') },
     } as never)
     try {
-      render(<Settings />)
+      mountSettingsSheet()
       const row = screen.getByText('我的预设').closest('.set-custom-preset') as HTMLElement
       fireEvent.click(within(row).getByRole('button', { name: '覆盖' }))
       expect(screen.getByRole('alert')).toHaveTextContent('覆盖自定义预设失败：capture failed')

@@ -5,16 +5,14 @@ export interface AgentEmptyStateModel {
   readonly steps: readonly [string, string]
 }
 
-/** Framework-neutral copy model shared by every first-party Agent workbench. */
-export function selectAgentEmptyState(workspaceMode: 'work' | 'chat'): AgentEmptyStateModel {
-  if (workspaceMode === 'chat') {
-    return Object.freeze({
-      eyebrow: 'AGENT CHAT',
-      title: '准备开始',
-      description: '从左栏进入一段对话，消息、工具调用和运行状态会在这里持续呈现。',
-      steps: ['选择已有聊天', '点击 + 新建聊天'] as const,
-    })
-  }
+/**
+ * Framework-neutral copy model shared by every first-party Agent workbench.
+ *
+ * 曾经按 `workspaceMode ('work' | 'chat')` 分两套文案——那是「左栏是一对互斥视图」
+ * 时代的产物，两套 steps 分别教用户去点对应页签。左栏改为分区堆叠后没有「聊天页签」
+ * 可点了，分叉随之取消：只剩这一套通用文案。
+ */
+export function selectAgentEmptyState(): AgentEmptyStateModel {
   return Object.freeze({
     eyebrow: 'AGENT WORKSPACE',
     title: '准备开始',

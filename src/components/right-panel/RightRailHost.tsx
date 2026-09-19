@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { selectAvailableContextPanels } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
+import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from '../../rightRailStore.ts'
 import ContextPanelHost from './ContextPanelHost.tsx'
 import { useStore } from '../../store.ts'
@@ -34,8 +34,12 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
     activeSessionId: ctx.activeSession,
     activeAgent,
   }
-  const entries = useMemo(() => selectAvailableContextPanels(panelSnapshot.entries, shellContext), [panelSnapshot, sheet?.kind, sheet?.id, ctx.activeSession, activeAgent])
-  const effectivePanelId = entries.some(entry => entry.contributionId === activePanelId) ? activePanelId : entries[0]?.contributionId
+  // 面板清单**不再按 Sheet 种类过滤**（种类只决定默认选中谁）：用户显式选过的面板跨 Sheet 保持，
+  // 没选过才回落到当前种类的亲和面板。见 `contextPanelSelection.ts`。
+  const entries = useMemo(() => selectContextPanels(panelSnapshot.entries, shellContext), [panelSnapshot, sheet?.kind, sheet?.id, ctx.activeSession, activeAgent])
+  const effectivePanelId = entries.some(entry => entry.contributionId === activePanelId)
+    ? activePanelId
+    : resolveContextPanelDefault(entries, sheet?.kind)?.contributionId
 
   useEffect(() => {
     if (!backgroundImage) return

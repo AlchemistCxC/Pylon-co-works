@@ -10,7 +10,7 @@ import { getSkinRuntime } from '../../../../infrastructure/skin/skinRuntimeServi
 const EXPECTED = [
   'model', 'compact', 'new', 'export', 'clear', 'mode',
   'file.entries.list', 'file.text.read', 'file.text.write', 'file.search', 'git.status', 'git.history', 'git.diff',
-  'layout.inspect', 'layout.sidebar.set', 'layout.sidebar-width.set', 'layout.right-panel.set', 'layout.pet.set', 'layout.agent-sidebar.set',
+  'layout.inspect', 'layout.sidebar.set', 'layout.sidebar-width.set', 'layout.right-panel.set', 'layout.pet.set', 'layout.agent-sidebar.block.set',
   'workspace.sheet.focus', 'workspace.sheet.pin.toggle', 'workspace.sheet.close-others', 'workspace.sheet.close-right', 'workspace.sheet.reopen',
   'presentation.list', 'presentation.inspect', 'presentation.apply',
   'interface.tactical-blue.activate',
