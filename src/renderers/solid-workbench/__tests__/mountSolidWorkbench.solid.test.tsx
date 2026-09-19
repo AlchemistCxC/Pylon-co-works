@@ -1195,7 +1195,7 @@ describe('mountSolidWorkbench', () => {
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('data-control-center', 'production')
     expect(screen.getByRole('img', { name: 'Pylon Agent' })).toBeTruthy()
-    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
+    expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
     expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
     expect(screen.queryByRole('button', { name: '添加附件' })).toBeNull()
@@ -1215,8 +1215,9 @@ describe('mountSolidWorkbench', () => {
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
 
-    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
-    expect(workspace).toHaveValue('workspace-a')
+    // 04b：空态工作区选择器已隐藏（SHOW_EMPTY_WORKSPACE_CONTROL=false）；
+    // 预选逻辑仍生效 —— 由下面的 createSession 实参断言锁住。
+    await screen.findByRole('region', { name: 'Agent 工作台空态' })
     const prompt = screen.getByRole('textbox', { name: '消息输入' })
     fireEvent.input(prompt, { target: { value: '检查当前项目' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
@@ -1228,7 +1229,7 @@ describe('mountSolidWorkbench', () => {
   })
 
   it('空态有多个工作区时按 host 提供的最近活跃时间预选', async () => {
-    const { lifecycle } = mountPreview()
+    const { services, lifecycle } = mountPreview()
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
       availableWorkspaces: [
@@ -1237,21 +1238,21 @@ describe('mountSolidWorkbench', () => {
       ],
     })
 
-    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
-    expect(workspace).toHaveValue('workspace-recent')
+    // 04b：选择器隐藏后，预选结果改由 createSession 实参断言
+    //（空态回车建会话依赖这条预选逻辑，必须继续被锁住）。
+    await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    const prompt = screen.getByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '走预选的工作区' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
 
-    lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
-      availableWorkspaces: [
-        { id: 'workspace-unknown-a', label: '未知 A', path: 'G:/unknown-a' },
-        { id: 'workspace-unknown-b', label: '未知 B', path: 'G:/unknown-b' },
-      ],
-    })
-    await waitFor(() => expect(workspace).toHaveValue(''))
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'createSession',
+      args: [expect.objectContaining({ workspaceId: 'workspace-recent' })],
+    }))
   })
 
   it('Sidebar 创建会话事件先到达时缓存 workspaceId，不被空态初始化覆盖', async () => {
-    const { lifecycle } = mountPreview()
+    const { services, lifecycle } = mountPreview()
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'work',
       availableWorkspaces: [
@@ -1268,23 +1269,82 @@ describe('mountSolidWorkbench', () => {
         { id: 'workspace-target', label: '目标项目', path: 'G:/target', lastActiveAt: 1 },
       ],
     })
-    expect(await screen.findByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-target')
+    // 04b：选择器隐藏后，缓存的 workspaceId 改由 createSession 实参断言
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '用缓存的工作区' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'createSession',
+      args: [expect.objectContaining({ workspaceId: 'workspace-target' })],
+    }))
   })
 
-  it('手动选择工作区后，列表更新不会重新套用最近活跃项', async () => {
-    const { lifecycle } = mountPreview()
-    const options = [
-      { id: 'workspace-a', label: 'A', path: 'G:/a', lastActiveAt: 10 },
-      { id: 'workspace-b', label: 'B', path: 'G:/b', lastActiveAt: 20 },
-    ]
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work', availableWorkspaces: options })
-    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
-    fireEvent.change(workspace, { target: { value: 'workspace-a' } })
+  it('04b 空态极简：只剩输入栏，工作区选择器与 5 个控件都不渲染', async () => {
+    const { host, lifecycle } = mountPreview()
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
-      availableWorkspaces: [...options, { id: 'workspace-c', label: 'C', path: 'G:/c', lastActiveAt: 99 }],
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
-    await waitFor(() => expect(workspace).toHaveValue('workspace-a'))
+    const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
+
+    // 甲：选择器隐藏（实现保留，置 SHOW_EMPTY_WORKSPACE_CONTROL=true 即恢复）
+    expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
+    // 乙：空态只留输入栏；发送按钮（注册轨）与四个状态控件都不渲染
+    expect([...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))).toEqual(['input'])
+    expect(emptyState.querySelector('.cc-send-button')).toBeNull()
+    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
+    // 戊：状态行三个槽位无任何控件（容器折叠的前提；实机高度实测见报告）
+    expect(emptyState.querySelectorAll('.cc-status-secondary > *, .cc-status-primary > *, .cc-actions > *')).toHaveLength(0)
+    expect(host.querySelector('.cc-widget-separator')).toBeNull()
+  })
+
+  it('04b 空态：回车仍建会话（选择器隐藏不影响提交路径）', async () => {
+    const { services, lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
+    })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '直接开新会话' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'createSession',
+      args: [expect.objectContaining({
+        workspaceId: 'workspace-a',
+        initialPrompt: { text: '直接开新会话', attachments: [] },
+      })],
+    }))
+  })
+
+  it('04b 空态 + 编辑模式：4 个状态控件豁免可见，选择器仍不显示', async () => {
+    const { services, lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
+    })
+    const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    expect([...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))).toEqual(['input'])
+
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+    await waitFor(() => {
+      const ids = [...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))
+      expect(ids).toEqual(expect.arrayContaining(['input', 'model', 'reasoning', 'mode', 'tokens']))
+    })
+    // 甲：编辑态也不显示选择器
+    expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
+  })
+
+  it('04b 丙-2：空态零工作区时点发送 ⇒ 既有「请先选择工作区」提示，不静默失败', async () => {
+    const { services, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work', availableWorkspaces: [] })
+    const prompt = await screen.findByRole('textbox', { name: '消息输入' })
+    fireEvent.input(prompt, { target: { value: '没有工作区可用' } })
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请先选择工作区')
+    expect(services.commands.calls.some(call => call.command === 'createSession')).toBe(false)
   })
 
   it('空态不挂载 composer 快捷键提示，并在创建后标记进入过渡态', async () => {
@@ -1310,7 +1370,7 @@ describe('mountSolidWorkbench', () => {
 
     const emptyState = screen.getByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
+    expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
     expect(prompt).toBeDisabled()
 
     finishCreation?.({ sessionId: 'created-session' })
@@ -1410,7 +1470,9 @@ describe('mountSolidWorkbench', () => {
 
   it('创建后不把模型/模式协商选项渲染成会话区配置卡，且弹层不会残留', async () => {
     const { host, services, lifecycle } = mountPreview()
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'chat' })
+    // 04b：本用例的意图与空态无关（弹层不残留 + 不出配置卡），改为有会话夹具，
+    // 因为空态下模型控件已随「空态只留输入栏」隐藏。
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, workspaceMode: 'chat' })
     const modelTrigger = await screen.findByRole('button', { name: /deepseek-v4-flash/ })
     fireEvent.click(modelTrigger)
     expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
@@ -1431,7 +1493,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.solid-workbench-config')).toBeNull()
   })
 
-  it('空态创建失败后保留草稿与工作区，并把焦点交还输入框', async () => {
+  it('空态创建失败后保留草稿，并把焦点交还输入框', async () => {
     const { services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(async () => { throw new Error('Agent 暂时不可用') }))
     lifecycle.update({
@@ -1445,7 +1507,6 @@ describe('mountSolidWorkbench', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent 暂时不可用')
     expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()
     expect(prompt).toHaveValue('保留这份任务描述')
-    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-a')
     expect(prompt).toBeEnabled()
     expect(prompt).toHaveFocus()
   })
@@ -1487,11 +1548,12 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     theme.inputSubmitButtonMode = 'external'
-    theme.ccLayout.placements.send = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
+    theme.ccLayout.placements['cc-send-button'] = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
     theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    // 刀4：legacy `send` 已从名单删除（0 残留守卫）
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
     // 2026-09-14：模型控件常态显示，且遵循 placements 权威 —— 此处已从
     // status-secondary 移到 actions 槽，故应出现在 actions 而非状态槽。
@@ -1513,11 +1575,13 @@ describe('mountSolidWorkbench', () => {
     theme.inputMode = 'default'
     theme.inputVariant = 'composer'
     theme.inputSubmitButtonMode = 'external'
-    theme.ccHidden = ['send']
+    theme.ccHidden = ['cc-send-button']
     services.appearance.setTheme(theme)
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    // 刀4：隐藏项记在注册轨 id 上；legacy `send` 已不存在（0 残留守卫）
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
+    expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     services.appearance.setTheme(theme)

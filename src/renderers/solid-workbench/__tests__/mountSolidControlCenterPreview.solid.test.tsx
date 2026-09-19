@@ -217,4 +217,38 @@ describe('mountSolidControlCenterPreview', () => {
       await runtime.deactivate(instance.identity.key)
     }
   })
+
+  it('04b 空态极简：发送按钮空态隐藏、编辑模式豁免可见，选择器始终不显示', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputSubmitButtonMode = 'inline'
+    services.appearance.setTheme(theme)
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(controlCenter).not.toBeNull()
+      // 空态：注册轨发送按钮与状态控件都不渲染；工作区选择器也不显示
+      expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
+      expect(controlCenter?.querySelectorAll('[data-widget-id]:not([data-widget-id="input"])')).toHaveLength(0)
+      expect(controlCenter?.querySelector('[aria-label="新会话工作区"]')).toBeNull()
+
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+      // 丁：编辑模式豁免 —— 发送按钮（注册轨）与状态控件都回来
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).not.toBeNull())
+      expect(controlCenter?.querySelector('[data-widget-id="model"]')).not.toBeNull()
+      // 甲：选择器在编辑态仍不显示
+      expect(controlCenter?.querySelector('[aria-label="新会话工作区"]')).toBeNull()
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
 })

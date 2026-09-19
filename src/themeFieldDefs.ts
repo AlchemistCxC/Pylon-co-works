@@ -232,7 +232,6 @@ export const THEME_FIELD_DEFS = {
       visibleStatusWidgets: resolveVisibleStatusWidgetCount({
         hiddenIds: t.ccHidden || [],
         inputMode: t.inputMode,
-        ccStyle: t.ccStyle || 'wave',
         submitButtonMode: t.inputSubmitButtonMode || 'inline',
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
@@ -246,7 +245,6 @@ export const THEME_FIELD_DEFS = {
   ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "基础", percent: true, suffix: '%' },
   ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "外观风格", },
   ccStatusFontSize: { ...N('cc', '状态信息字号', 14, 20), default: 16, group: "状态信息", unit: 'px' },
-  ccStyle: { ...S('cc', '用量显示方式', ['wave', 'bar', 'ring', 'numeric']), optionLabels: { wave: '活动波形', bar: '用量进度条', ring: '环形进度', numeric: '百分比数值' }, default: 'wave', group: "控件样式", },
   // 变体切换组件读 store 值（data-cc-variant），不注入 CSS var
   ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), optionLabels: { terminal: '终端状态栏', glass: '玻璃工作台', pill: '轻量胶囊' }, default: 'terminal', group: "外观风格", noCssVar: true },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
@@ -298,16 +296,6 @@ export const THEME_FIELD_DEFS = {
   cliOverflowMode: { ...S('cc', '多行输入行为', ['fixed-scroll', 'grow', 'overlay']), optionLabels: { 'fixed-scroll': '固定高度并滚动', grow: '随内容增高', overlay: '浮层展开' }, default: 'fixed-scroll', group: "控件样式", },
   statusBg: { ...C('cc', '状态区背景'), default: 'transparent', group: "输入与状态", semanticRole: 'surface.panel', semanticSource: true },
   statusBgImage: { ...T('cc', '状态区背景图'), default: '', control: 'bgImage', group: "输入与状态", },
-  // ekgWidth 注入 --ekg-w（StatusBar 消费）；动态波形未实现，动画细节字段已删除
-  ekgWidth: { ...N('cc', '波形宽度', 60, 300), default: 150, group: "波形与用量", unit: 'px', cssVar: '--ekg-w' },
-  // ekg/bar 三色与柱参数由 widgetRegistry 读 store 内联成 --bar-*/--ekg-*，注入独立 var 无消费
-  ekgGreen: { ...C('cc', '活动波形正常状态'), default: '#4EBA65', group: "波形与用量", semanticRole: 'state.success' },
-  ekgYellow: { ...C('cc', '活动波形警示状态'), default: '#FFC107', group: "波形与用量", noCssVar: true, semanticRole: 'state.warning', semanticSource: true },
-  ekgRed: { ...C('cc', '活动波形危险状态'), default: '#FF6B80', group: "波形与用量", noCssVar: true, semanticRole: 'state.danger' },
-  barTrackColor: { ...C('cc', '用量条轨道'), default: 'rgba(0,0,0,0.18)', group: "波形与用量", advanced: true, noCssVar: true, semanticRole: 'stroke.default' },
-  barFillColor: { ...C('cc', '用量条填充'), default: '#4EBA65', group: "波形与用量", advanced: true, noCssVar: true, semanticRole: 'state.success' },
-  barFillFollow: { ...B('cc', '填充色跟随用量'), default: true, group: "波形与用量", },
-  barHeight: { ...N('cc', '用量条高度', 4, 24), default: 10, group: "波形与用量", advanced: true, noCssVar: true },
   pillText: { ...C('cc', '用量胶囊文字'), default: '#999999', group: "波形与用量", semanticRole: 'content.text' },
   prismOnColor: { ...C('cc', 'Prism 已开启状态'), default: '#4EBA65', group: "波形与用量", semanticRole: 'state.success' },
   modelSwitchMode: { ...S('cc', '模型切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '模型控件', noCssVar: true },

@@ -16,14 +16,19 @@ import { normalizeWorkbenchMountInput, type SolidWorkbenchServices } from '../wo
 export function mountSolidControlCenterPreview({
   host,
   services,
+  sessionId = 'preview-session',
 }: {
   host: HTMLElement
   services: SolidWorkbenchServices
+  /** 传 null 即挂「空态」（04b 的空态极简用例用）。 */
+  sessionId?: string | null
 }): () => void {
   let destroyed = false
   const [input] = createSignal(normalizeWorkbenchMountInput({
     sheetId: 'settings-preview',
-    sessionId: null,
+    // 04b：默认夹具改为「有会话」—— 空态下发送按钮与状态控件已随「空态只留输入栏」隐藏；
+    // 需要空态的用例显式传 sessionId: null。
+    sessionId,
     preview: true,
     replayReadonly: false,
     reducedMotion: true,

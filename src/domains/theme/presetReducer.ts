@@ -67,7 +67,6 @@ export interface ThemePresetState {
   footerLayout: string
   cliHintMode: string
   ccHidden: string[]
-  ccStyle: string
   cliOverflowMode: string
 }
 
@@ -79,12 +78,10 @@ export function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
   const inputMode = (theme.inputMode ?? String(DEFAULTS.inputMode)) as CcInputMode
   const footerLayout = (theme.footerLayout ?? String(DEFAULTS.footerLayout)) as CcFooterLayout
   const hintMode = (theme.cliHintMode ?? String(DEFAULTS.cliHintMode)) as CcHintMode
-  const ccStyle = theme.ccStyle ?? String(DEFAULTS.ccStyle)
   const cliOverflowMode = (theme.cliOverflowMode ?? String(DEFAULTS.cliOverflowMode)) as CcOverflowMode
   const visibleStatusWidgets = resolveVisibleStatusWidgetCount({
     hiddenIds: Array.isArray(theme.ccHidden) ? theme.ccHidden : [],
     inputMode,
-    ccStyle,
     submitButtonMode: String(theme.inputSubmitButtonMode ?? DEFAULTS.inputSubmitButtonMode),
   })
   return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : Number(DEFAULTS.ccHeight), {
@@ -160,7 +157,6 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
       visibleStatusWidgets: resolveVisibleStatusWidgetCount({
         hiddenIds: merged.ccHidden ?? [],
         inputMode: String(merged.inputMode),
-        ccStyle: String(merged.ccStyle),
         submitButtonMode: String(merged.inputSubmitButtonMode ?? 'inline'),
       }),
       cliOverflowMode: String(merged.cliOverflowMode),

@@ -14,11 +14,11 @@ describe('ccStatusFontSize zone 归属契约', () => {
     expect(ZONE_FIELDS.cc.filter(item => item === field).length).toBe(1)
   })
 
-  it('cc zone 字段顺序契约：ccBgImage < ccStatusFontSize < ccStyle', () => {
+  it('cc zone 字段顺序契约：ccBgImage < ccStatusFontSize < ccVariant', () => {
     const ccIndexes = ZONE_FIELDS.cc.map(item => String(item))
     const bg = ccIndexes.indexOf('ccBgImage')
     const size = ccIndexes.indexOf('ccStatusFontSize')
-    const style = ccIndexes.indexOf('ccStyle')
+    const style = ccIndexes.indexOf('ccVariant')
     expect(bg >= 0 && size > bg && style > size).toBe(true)
   })
 
