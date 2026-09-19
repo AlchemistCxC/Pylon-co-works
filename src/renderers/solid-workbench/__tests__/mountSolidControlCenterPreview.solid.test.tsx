@@ -40,7 +40,7 @@ describe('mountSolidControlCenterPreview', () => {
     theme.inputPlaceholder = '#aaaaaa'
     services.appearance.setTheme(theme)
 
-    const destroy = mountSolidControlCenterPreview({ host, services })
+    const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
     cleanups.push(() => {
       destroy()
       services.destroy()
@@ -127,7 +127,7 @@ describe('mountSolidControlCenterPreview', () => {
     theme.inputFocusRingEnabled = 'shown'
     services.appearance.setTheme(theme)
 
-    const destroy = mountSolidControlCenterPreview({ host, services })
+    const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
     cleanups.push(() => {
       destroy()
       services.destroy()
@@ -169,7 +169,7 @@ describe('mountSolidControlCenterPreview', () => {
 
     try {
       expect(getRuntimeServices().ccWidgetRegistry.getSnapshot().entries.map(entry => entry.value.id)).toContain('cc-send-button')
-      const destroy = mountSolidControlCenterPreview({ host, services })
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
       const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
       expect(controlCenter).not.toBeNull()
       const button = controlCenter?.querySelector<HTMLButtonElement>('.cc-send-button')

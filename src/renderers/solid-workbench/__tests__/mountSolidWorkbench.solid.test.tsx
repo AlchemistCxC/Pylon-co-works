@@ -1319,7 +1319,7 @@ describe('mountSolidWorkbench', () => {
   it('04b 空态：回车仍建会话（选择器隐藏不影响提交路径）', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
     const prompt = await screen.findByRole('textbox', { name: '消息输入' })
@@ -1338,7 +1338,7 @@ describe('mountSolidWorkbench', () => {
   it('04b 空态 + 编辑模式：4 个状态控件豁免可见，选择器仍不显示', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
-      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      sheetId: 'sheet-a', sessionId: null, preview: true,
       availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
