@@ -335,3 +335,15 @@
 
 **注**：本条原写于改动未提交时；现随合并提交入库，PR 合入后按 AGENTS §2.3 规矩移除本条目。
 
+
+---
+
+[2026-09-19 04] [Kan] [#184]
+
+**开工：CI 提速与质量收口**（ci.yml 拆并行 job / 缓存清理 workflow / dependabot bun / shadow fixture 对齐 / 覆盖率迁移 main）。
+
+**我方文件域（请勿改写、勿连带提交）**：
+- `.github/workflows/ci.yml`、新增 `.github/workflows/cache-cleanup.yml`、`.github/dependabot.yml`
+- `package.json`（仅 check:frontend 与 scripts 字段）
+- `scripts/check-acp-shadow-parity.mjs`（仅 fixture 参数与耗时输出）
+- `docs/说明书/` 中 CI 相关表述的同步、`.agents/records/` 新增开发记录
