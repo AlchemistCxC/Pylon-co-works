@@ -12,10 +12,18 @@ on:
     branches: [main]
   pull_request:
 
+# #184：CI 侧裁剪 debug 信息（level 1 = line-tables-only）。Windows MSVC 的
+# 全量 PDB 生成是链接大头；测试失败证据只需行号回溯，不需要全量变量信息。
+# 仅环境变量注入、不改 Cargo.toml——本地开发行为不变。首次合入会因指纹
+# 变化重编一次（rust-cache 按 lockfile+rustc 建 key，churn 一次性）。
+env:
+  CARGO_PROFILE_DEV_DEBUG: "1"
+
 jobs:
   frontend:
     name: 前端（tsc + 测试 + build）
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -39,18 +47,26 @@ jobs:
         run: bun install --frozen-lockfile
 
       # ISSUE-20 W1：统一入口——lint + IPC 契约（#106 P3b）+ vitest（P91 A5：legacy
-      # spawn 套件已全部退役，vitest 单轨）+ 覆盖率 + tsc/build
+      # spawn 套件已全部退役，vitest 单轨）+ tsc/build。
+      # #184：覆盖率从本链拆出（见下一步）——PR 反馈环跑裸 vitest。
       - name: 统一前端门禁（check:frontend）
         run: bun run check:frontend
+
+      # #184：覆盖率门禁只在 main push 执行。阈值（vitest.config.ts）不再挡 PR，
+      # 但低于阈值的 PR 合入后 main 必红，仍闭环；PR 反馈环省 ~3 min。
+      - name: 覆盖率门禁（main push 专用）
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: bun run test:coverage
 
       # #179：check:solid 上 CI——此前该门禁只在本地跑，main 曾带 A17 R2 违规
       # （sidebarModulePrefs.ts import plugin-runtime）合入而远端无感。
       - name: Solid 边界门禁（check:solid）
         run: bun run check:solid
 
-  rust:
-    name: Rust（测试 + clippy + 构建）
+  rust-test:
+    name: Rust（fmt + 测试 + 构建）
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +92,26 @@ jobs:
       - name: 使用 MSVC 工具链（CI runner 自带链接器）
         run: rustup override set stable-x86_64-pc-windows-msvc
 
+      # #184：Windows runner 的 Defender 实时扫描对 target 目录的指纹校验与
+      # 编译 I/O 征重税（shadow parity 实测：测试本体 0.2s，单次 cargo 调用
+      # 进程开销 80-135s）。对 ephemeral runner 排除编译目录是常规提速手段，
+      # 只作用于本次运行的隔离环境。
+      - name: Defender 排除编译目录（target / cargo home）
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}\src-tauri\target"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+
+      # #184：fmt 前置 fail-fast——3s 出结果，失败不必等缓存恢复/安装/全量测试。
+      # 此前 fmt 排在测试与 shadow 之后，3 次 fmt 失败各白等约 10 分钟。
+      - name: fmt（workspace --all --check，fail-fast）
+        run: cargo fmt --all --manifest-path src-tauri/Cargo.toml --check
+
       # #106 P6：workspace 单 target 目录整树缓存——依赖冷编译是 rust job 最大
       # 痛点（check:rust 406s 基线），clippy 指纹产物随 target 跨 run 命中。
+      # #184：rust-cache 会在每个分支各存一份副本导致 10GB 配额爆满互相驱逐；
+      # 分支副本由 cache-cleanup.yml 每日清理（非 main ref 且 2 天未访问），
+      # main 的热缓存常驻供所有 PR 按 key 恢复。
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -90,12 +124,14 @@ jobs:
       - name: 前端构建（tauri generate_context 前置）
         run: bun run build
 
-      # ISSUE-20 W1：同一命令形态，不复制语义（fmt/clippy/shadow 在下方独立步骤）。
+      # ISSUE-20 W1：同一命令形态，不复制语义（fmt 在上方 fail-fast，clippy 见
+      # rust-clippy job）。
       # #106 P0 workspace 化：--workspace 关闭子 crate 测试黑洞（pylon-core /
       # foundations / pet-core 的内嵌测试首次进 CI）。
       # #106 P1：b11/obs03/p1_wire 等集成形态测试解除 skip 进 CI（历史 skip 系
       # locale 不可复现 + 本地 Python 依赖）；假 agent = pylon-fake-agent bin，
       # 先构建再跑测试——测试进程经 current_exe 祖先目录定位该 bin。
+      # #184：本 job 拆自原单 rust job；shadow parity / clippy 并行见独立 job。
       - name: Rust 测试与构建
         run: |
           cd src-tauri
@@ -104,39 +140,12 @@ jobs:
           cargo test --workspace --tests --features test-agent
           cargo build
 
-      # P91 B1：fmt 门禁——#106 P0 后 workspace 单命令（替代 4 个 --manifest-path 步骤）。
-      - name: fmt（workspace --all --check）
-        run: cargo fmt --all --manifest-path src-tauri/Cargo.toml --check
-
-      # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
-      # 依赖刚构建的 test 二进制与 spawn fake agent 回环，故放在 Rust job（不是前端 job）。
-      - name: ACP shadow parity（check:acp-shadow）
-        run: bun run check:acp-shadow
-
-      # ISSUE-20 W2 + P66：clippy 不设 -D warnings——门禁语义是「相对
-      # artifacts/clippy-baseline.json 零新增」（scripts/check-clippy-baseline.mjs，
-      # 指纹带 crate 限定 + 处数计数）。
-      # #106 P0 workspace 化：单次 `cargo clippy --workspace` 替代 4 次
-      # --manifest-path 全量重编（共享依赖只编译一次）；workspace 成员都是主 crate，
-      # 无 path 依赖 cap-lints 静默问题（历史 `-p` lint 静默系无 workspace 时的症状）。
-      # 一份 json 按包过滤（--package）后逐 crate 对基线：基线语义与之前逐 crate 相同。
-      # 不 cd：clippy 诊断文件路径相对 workspace 根（src-tauri）生成，脚本按仓库根解析，
-      # --crate-dir 统一给 src-tauri。
-      - name: clippy（workspace + 基线门禁）
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --message-format=json > artifacts/clippy-workspace.json 2> artifacts/clippy-workspace.err
-          failed=0
-          for spec in "pylon" "pylon-core" "pylon-foundations" "pet-core"; do
-            node scripts/check-clippy-baseline.mjs artifacts/clippy-workspace.json artifacts/clippy-baseline.json --crate="$spec" --crate-dir=src-tauri --package="$spec" || failed=1
-          done
-          exit $failed
-
-      # 必要 bundle（debug 二进制），不上传 secret/data
+      # 必要 bundle（debug 二进制），不上传 secret/data。
+      # #184：收敛到 main push——分支 run 的 debug 产物少有人取，省每次 12s
+      # 与 artifact 存储 churn。
       - name: 上传 debug 构建产物
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: pylon-debug-windows
           path: src-tauri/target/debug/pylon.exe
@@ -154,13 +163,9 @@ jobs:
           # 测试进程的临时目录残留（harness TempPath 正常不残留；崩溃残留即证据）
           find "${TEMP:-/tmp}" -maxdepth 1 -name 'pylon-*' -newer src-tauri/Cargo.toml \
             -print > artifacts/ci-evidence/temp-residue.txt 2>/dev/null || true
-          # clippy/workspace 原始诊断与 stderr（失败步的直接输出）
-          cp -f artifacts/clippy-workspace.err artifacts/ci-evidence/ 2>/dev/null || true
-          cp -f artifacts/clippy-workspace.json artifacts/ci-evidence/ 2>/dev/null || true
-          # 本地门禁输出（fmt/clippy/测试的可见错误摘要）
+          # 本地门禁输出（fmt/测试的可见错误摘要）
           cargo check --manifest-path src-tauri/Cargo.toml --workspace --all-targets \
             > artifacts/ci-evidence/cargo-check.txt 2>&1 || true
-          tree /F src-tauri/target > /dev/null 2>&1 || true
 
       - name: 上传失败证据包
         uses: actions/upload-artifact@v4
@@ -170,3 +175,136 @@ jobs:
           path: artifacts/ci-evidence/**
           retention-days: 14
           if-no-files-found: warn
+
+  rust-clippy:
+    name: Rust（clippy 基线门禁）
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+
+      - name: 使用 MSVC 工具链（CI runner 自带链接器）
+        run: rustup override set stable-x86_64-pc-windows-msvc
+
+      - name: Defender 排除编译目录（target / cargo home）
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}\src-tauri\target"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+
+      - name: 安装依赖（bun）
+        run: bun install --frozen-lockfile
+
+      # clippy 展开宏时 generate_context! 同样要求 ../dist 存在，先构建前端
+      - name: 前端构建（tauri generate_context 前置）
+        run: bun run build
+
+      # ISSUE-20 W2 + P66：clippy 不设 -D warnings——门禁语义是「相对
+      # artifacts/clippy-baseline.json 零新增」（scripts/check-clippy-baseline.mjs，
+      # 指纹带 crate 限定 + 处数计数）。
+      # #106 P0 workspace 化：单次 `cargo clippy --workspace` 替代 4 次
+      # --manifest-path 全量重编（共享依赖只编译一次）；workspace 成员都是主 crate，
+      # 无 path 依赖 cap-lints 静默问题（历史 `-p` lint 静默系无 workspace 时的症状）。
+      # 一份 json 按包过滤（--package）后逐 crate 对基线：基线语义与之前逐 crate 相同。
+      # 不 cd：clippy 诊断文件路径相对 workspace 根（src-tauri）生成，脚本按仓库根解析，
+      # --crate-dir 统一给 src-tauri。
+      # #184：clippy 拆为独立并行 job——check 模式产物与测试构建指纹互不共享，
+      # 串行等于两次全量编译排队。
+      - name: clippy（workspace + 基线门禁）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --message-format=json > artifacts/clippy-workspace.json 2> artifacts/clippy-workspace.err
+          failed=0
+          for spec in "pylon" "pylon-core" "pylon-foundations" "pet-core"; do
+            node scripts/check-clippy-baseline.mjs artifacts/clippy-workspace.json artifacts/clippy-baseline.json --crate="$spec" --crate-dir=src-tauri --package="$spec" || failed=1
+          done
+          exit $failed
+
+      - name: clippy 失败证据包
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ci-evidence
+          cp -f artifacts/clippy-workspace.err artifacts/ci-evidence/ 2>/dev/null || true
+          cp -f artifacts/clippy-workspace.json artifacts/ci-evidence/ 2>/dev/null || true
+
+      - name: 上传 clippy 失败证据包
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-evidence-clippy
+          path: artifacts/ci-evidence/**
+          retention-days: 14
+          if-no-files-found: warn
+
+  rust-shadow:
+    name: Rust（ACP shadow parity）
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: 使用 MSVC 工具链（CI runner 自带链接器）
+        run: rustup override set stable-x86_64-pc-windows-msvc
+
+      - name: Defender 排除编译目录（target / cargo home）
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}\src-tauri\target"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+
+      - name: 安装依赖（bun）
+        run: bun install --frozen-lockfile
+
+      # generate_context! 要求 ../dist 存在（shadow 脚本内的 cargo 调用同样展开该宏）
+      - name: 前端构建（tauri generate_context 前置）
+        run: bun run build
+
+      # #106 P1：假 agent 先构建再跑 fixture——测试进程经 current_exe 祖先目录定位该 bin。
+      # #184：shadow 拆为独立并行 job——旧单 job 里它排在测试之后串行（9.2 min，
+      # 其中 fixture 测试本体仅 0.2s，其余是 feature 错配重编 + cargo 进程开销）。
+      - name: 构建 fake agent
+        run: cd src-tauri && cargo build --bin pylon-fake-agent --features test-agent
+
+      # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
+      - name: ACP shadow parity（check:acp-shadow）
+        run: bun run check:acp-shadow
