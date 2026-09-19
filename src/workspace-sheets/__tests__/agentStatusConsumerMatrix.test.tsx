@@ -62,7 +62,7 @@ const titlebarActions = {
   },
   onOpenSheet: vi.fn(),
   onToggleRightPanel: vi.fn(),
-  onToggleSettings: vi.fn(),
+  onOpenSettingsDomain: vi.fn(),
   onMinimize: vi.fn(),
   onToggleFullscreen: vi.fn(),
   onCloseWindow: vi.fn(),

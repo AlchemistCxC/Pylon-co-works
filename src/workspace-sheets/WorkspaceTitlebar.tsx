@@ -36,9 +36,8 @@ interface WorkspaceTitlebarProps {
   menuActions: WorkspaceMenuActions
   onOpenSheet: () => void
   onToggleRightPanel: () => void
-  onToggleSettings: () => void
-  /** Open Settings directly at one of the four top-level domains. */
-  onOpenSettingsDomain?: (domain: SettingsDomainId) => void
+  /** Open Settings directly at one of the four top-level domains：齿轮菜单里设置域项的唯一去处（幂等开/聚焦，ADR-0013）。 */
+  onOpenSettingsDomain: (domain: SettingsDomainId) => void
   interfaceMode?: InterfaceMode
   chromeStyle?: InterfaceModeChromeStyle
   quickSwitchLabel?: string
@@ -46,8 +45,6 @@ interface WorkspaceTitlebarProps {
   onMinimize: MouseEventHandler<HTMLButtonElement>
   onToggleFullscreen: MouseEventHandler<HTMLButtonElement>
   onCloseWindow: MouseEventHandler<HTMLButtonElement>
-  /** 设置页打开时：除最小化/全屏/关闭外，标题栏其它交互禁用（视觉保留，且不产生新依赖链） */
-  settingsOpen?: boolean
 }
 
 /** 右簇只有一个菜单：齿轮（界面 + 设置 + 插件项）。右栏的类型切换在右栏内部，标题栏不再有一份。 */
@@ -68,14 +65,12 @@ export default function WorkspaceTitlebar({
   onOpenSheet,
   onToggleRightPanel,
   rightPanelEnabled = true,
-  onToggleSettings,
   onOpenSettingsDomain,
   interfaceMode = 'terminal-like',
   chromeStyle = interfaceMode === 'modern-gui' ? 'icons' : 'glyphs',
   onMinimize,
   onToggleFullscreen,
   onCloseWindow,
-  settingsOpen = false,
 }: WorkspaceTitlebarProps) {
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
@@ -106,6 +101,9 @@ export default function WorkspaceTitlebar({
     () => titlebarRegistry.getSnapshot(),
     () => titlebarRegistry.getSnapshot(),
   )
+  // TitlebarContext.settingsOpen 是插件 API 面（说明书「标题栏」节）：设置是否为活动 sheet，
+  // 由 kind 派生——它只供插件 when 谓词读取，宿主自己不再据此锁标题栏交互（#195）。
+  const settingsOpen = activeSheetKind === 'settings'
   const titlebarContext: TitlebarContext = {
     interfaceMode,
     workspaceKind: activeSheetKind,
@@ -191,7 +189,7 @@ export default function WorkspaceTitlebar({
   const sidebarExpanded = sidebarEnabled && !sidebarCollapsed
   const sidebarToggleLabel = sidebarCollapsed ? '展开左栏' : '收起左栏'
   return (
-    <header className={`workspace-titlebar ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
+    <header className={`workspace-titlebar ${sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
         {/* 折叠按钮在最左、三灯在其右，顺序固定。它留在左格里的前提是左格折叠时**不收成 0**
             而是收窄到按钮宽度（标题栏 grid 第 1 列用 `max(轨道宽, 按钮宽)`），否则按钮会随
@@ -291,8 +289,7 @@ export default function WorkspaceTitlebar({
                   data-settings-domain={domain.id}
                   onClick={() => {
                     closeMenu()
-                    if (onOpenSettingsDomain) onOpenSettingsDomain(domain.id)
-                    else onToggleSettings()
+                    onOpenSettingsDomain(domain.id)
                   }}
                 >
                   <span className="workspace-menu-check workspace-menu-domain-glyph" aria-hidden="true">{meta.glyph}</span>

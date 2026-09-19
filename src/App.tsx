@@ -488,13 +488,8 @@ export default function App() {
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onToggleRightPanel={() => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed)}
-        // #154 阶段 4：齿轮 = 设置 sheet 的开关（活动 sheet 是设置则关闭，否则幂等打开）
-        onToggleSettings={() => {
-          if (activeSheet?.kind === 'settings' && activeSheet.id === workspaceSheets.activeSheetId) void closeWorkspace(activeSheet.id)
-          else openOrFocusSettingsSheet()
-        }}
+        // 齿轮菜单的设置域项是唯一设置入口：幂等开/聚焦（ADR-0013）；关闭走页签（#195）。
         onOpenSettingsDomain={domain => { openOrFocusSettingsSheet({ domain }) }}
-        settingsOpen={activeSheet?.kind === 'settings'}
         interfaceMode={interfaceMode}
         chromeStyle={interfaceModeContribution.chromeStyle}
         quickSwitchLabel={quickInterfaceMode?.label}

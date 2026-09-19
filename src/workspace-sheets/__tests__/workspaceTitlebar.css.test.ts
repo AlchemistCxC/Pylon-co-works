@@ -119,4 +119,10 @@ describe('titlebar 右簇与页签语法契约（#154 阶段 2）', () => {
     // 图标风格走 lucide 的 PanelRight*，不回流到 ›/» 那类箭头。
     expect(css).toMatch(/\.app\[data-interface-mode="modern-gui"\] \.sheet-tab-overflow-trigger \{ height:34px/)
   })
+
+  it('#195：设置打开态不得锁标题栏——App.css 不含 titlebar-settings-open 交互锁', () => {
+    // 设置是普通布局 sheet，「页签关闭」是约定关闭路；覆盖层时代的 pointer-events 锁
+    // 曾把页签条整体禁死且例外选择器空匹配（jsdom 测不到 pointer-events，故在此静态钉死）。
+    expect(css).not.toContain('titlebar-settings-open')
+  })
 })
