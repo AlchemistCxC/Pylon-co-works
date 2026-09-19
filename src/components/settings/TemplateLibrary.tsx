@@ -31,9 +31,13 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
     id: `official:${preset.name}`,
     name: preset.name,
     label: preset.label,
+    interfaceMode: preset.interfaceMode,
     theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
     bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, source: 'builtin', theme: preset.theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
   })), [])
+  // 刀5（#201）：官方模板分组跟随预设归属表（GUI / 终端 两桶）
+  const officialGui = official.filter(preset => preset.interfaceMode === 'gui')
+  const officialTerminal = official.filter(preset => preset.interfaceMode === 'terminal')
 
   const custom = useMemo(() => customPresets.map(preset => ({
     id: `custom:${preset.id}`,
@@ -115,8 +119,12 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
     <div className="template-library">
       {applyFeedback && <div className={`template-apply-feedback is-${applyFeedback.kind}`} role={applyFeedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{applyFeedback.message}</div>}
       <div className="template-section">
-        <div className="file-section-title">官方模板</div>
-        <div className="template-grid">{official.map(renderCard)}</div>
+        <div className="file-section-title">官方模板 · GUI</div>
+        <div className="template-grid">{officialGui.map(renderCard)}</div>
+      </div>
+      <div className="template-section">
+        <div className="file-section-title">官方模板 · 终端</div>
+        <div className="template-grid">{officialTerminal.map(renderCard)}</div>
       </div>
       <div className="template-section">
         <div className="file-section-title">自定义模板</div>

@@ -8,7 +8,7 @@ import { useRuntimeStore } from '../runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
-import { GLOBAL_PRESETS, fallbackPresetChip } from '../presets/index.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
 import { pickZoneFields } from '../zones/index.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
@@ -43,6 +43,7 @@ import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed,
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { useRightRailStore } from '../rightRailStore.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
@@ -119,6 +120,11 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const custom = useStore(s => s.custom)
   // A2：全局预设状态派生（任一 zone 触碰/基准不一致 → custom），原 appliedPreset.global 直读退役
   const globalStatus = useStore(s => deriveGlobalStatus(s))
+  // 刀5（#201，UI 二次修订 2026-09-19）：预设区直接显示当前界面模式对应的预设
+  // （presetsForInterfaceMode），随界面模式切换自动跟随；「GUI / 终端」的选择只在
+  // 「界面模式」Group 里发生。当前模式不在归属表内（如 tactical-blue）⇒ 整组不出现。
+  const currentInterfaceMode = useInterfaceModeStore(s => s.interfaceMode)
+  const modeBucket = INTERFACE_MODE_PRESET_BUCKET[currentInterfaceMode]
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
@@ -459,9 +465,10 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <Group title="界面模式"><InterfaceModePicker /></Group>}
-            {!isSearching && <Group title="全局预设">
+            {!isSearching && modeBucket && <Group title="全局预设">
+              {/* 刀5（#201，UI 二次修订）：直接显示当前界面模式归属桶的预设 chips（随模式切换跟随）。 */}
               <div className="set-preset-row">
-                {GLOBAL_PRESETS.map(p => (
+                {presetsForInterfaceMode(currentInterfaceMode).map(p => (
                   <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}

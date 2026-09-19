@@ -59,7 +59,7 @@ export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined
   const placements = cloneCcLayout(DEFAULT_CC_LAYOUT).placements
   // ★ 白名单显式列出历史版本：`8` 必须留在这里，否则常量 8→9 会让老 v8 布局
   // 整份回落默认值（用户排布静默丢失）。
-  if (!layout?.placements || ![3, 4, 5, 6, 8, CC_LAYOUT_SCHEMA_VERSION].includes(layout.version ?? 0)) {
+  if (!layout?.placements || ![3, 4, 5, 6, 7, 8, CC_LAYOUT_SCHEMA_VERSION].includes(layout.version ?? 0)) {
     return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
   }
 

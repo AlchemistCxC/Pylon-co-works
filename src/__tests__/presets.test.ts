@@ -2,7 +2,7 @@
 // 只迁 presets.ts 相关纯函数断言（zone 归属 + pickZoneFields）；
 // 原脚本 store/defs/App/CSS/skin/settingsDomains 的源码文本段由 css-var 审计覆盖，不迁。
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS, fallbackPresetChip } from '../presets/index.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
 import { pickZoneFields } from '../zones/index.ts'
 import { ZONE_FIELDS } from '../themeFieldDefs.ts'
 
@@ -65,5 +65,32 @@ describe('fallbackPresetChip（#116 子项 7）', () => {
 
   it('空状态无 chip', () => {
     expect(fallbackPresetChip('', ['custom-1'])).toBeNull()
+  })
+})
+
+describe('刀5 预设归属（#201，拍板归属表 2026-09-19）', () => {
+  it('10 个出厂预设全部有归属，且与拍板归属表逐条一致', () => {
+    const expected = {
+      claude: 'terminal', nord: 'terminal', tokyo: 'terminal', amber: 'terminal', matrix: 'terminal',
+      glass: 'gui', solarized: 'gui', 'agent-command': 'gui', 'agent-map': 'gui', 'focus-flow': 'gui',
+    } as const
+    expect(GLOBAL_PRESETS).toHaveLength(10)
+    expect(new Set(GLOBAL_PRESETS.map(preset => preset.name))).toEqual(new Set(Object.keys(expected)))
+    for (const [name, bucket] of Object.entries(expected)) {
+      expect(GLOBAL_PRESETS.find(preset => preset.name === name)?.interfaceMode, name).toBe(bucket)
+    }
+  })
+
+  it('presetsForInterfaceMode 按归属桶过滤：GUI / 终端各 5 个，theme 数据零改动', () => {
+    expect(presetsForInterfaceMode('modern-gui').map(preset => preset.name).sort())
+      .toEqual(['agent-command', 'agent-map', 'focus-flow', 'glass', 'solarized'])
+    expect(presetsForInterfaceMode('terminal-like').map(preset => preset.name).sort())
+      .toEqual(['amber', 'claude', 'matrix', 'nord', 'tokyo'])
+  })
+
+  it('tactical-blue 与未登记模式不在归属表内：无预设、菜单不出现', () => {
+    expect(INTERFACE_MODE_PRESET_BUCKET['tactical-blue']).toBeUndefined()
+    expect(presetsForInterfaceMode('tactical-blue')).toEqual([])
+    expect(presetsForInterfaceMode('third-party.mode')).toEqual([])
   })
 })
