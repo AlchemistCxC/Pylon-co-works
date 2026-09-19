@@ -108,6 +108,13 @@ jobs:
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
 
+      # #193 修复：thirdPartySolidRenderer.integration 静态 import examples 插件的
+      # dist 产物——旧单 job 里 build:example-plugin 在 check:frontend 链内先于
+      # vitest 执行；拆分后必须在此显式前置，否则 CI 冷 checkout 缺 dist 报
+      # import 解析失败（本地有历史构建产物所以不复现）。
+      - name: 构建 example plugin（vitest 前置）
+        run: bun run build:example-plugin
+
       # bun run 向脚本透传参数（vitest --shard 按 project 文件集合对半切）
       - name: vitest 分片运行
         run: bun run test --shard=${{ matrix.shard }}/2

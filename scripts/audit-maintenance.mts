@@ -19,6 +19,7 @@ export const moduleDefinitions = [
   { id: 'diagnostics', roots: ['src/obs04/', 'src/obs05/', 'src/obs06/', 'src/obs07/'], responsibility: '观测、诊断与导出；历史编号目录需按消费者逐步整理' },
   { id: 'layout-policy', roots: ['src/css01/', 'src/css04/', 'src/cwd02/'], responsibility: '历史布局、样式和工作目录策略；保留调用语义后再迁移' },
   { id: 'shared-utilities', roots: ['src/utils/'], responsibility: '已有窄工具函数；新代码优先归属具体能力模块' },
+  { id: 'test-support', roots: ['src/test-utils/'], responsibility: '测试共享支撑（mock 形状、fixture 工厂）；仅被测试代码 import，不进生产构建' },
   { id: 'demo', roots: ['src/demo/'], responsibility: '浏览器演示数据；不得把演示验证当作原生链路证据' },
   { id: 'frontend-root', roots: ['src/*', 'src/presets/', 'src/zones/'], responsibility: '旧根级 store、schema、入口和公共策略；按真实调用者逐步下沉' },
   { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 协商、传输、实例生命周期和通知分发' },
