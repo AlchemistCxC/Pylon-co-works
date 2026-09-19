@@ -992,6 +992,10 @@ fn publish_committed_update<R: tauri::Runtime>(
     );
 }
 
+// clippy 2026-09-19：9 参沿用 R8 显式参数风格（window/gateway/channels/pet/
+// generation/agent_id + 可选 event/message service + 批次），与 handle_session_update
+// 同一调用点形态，结构体重构收益低。
+#[allow(clippy::too_many_arguments)]
 async fn flush_pending_canonical<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     gateway: &crate::gateway::GatewayCore,

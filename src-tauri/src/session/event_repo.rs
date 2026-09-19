@@ -1201,6 +1201,8 @@ impl EventRepo {
 
     /// Kernel single-writer ingest：在同一 SQLite transaction 内读取 revision、分配
     /// sequence、normalize 并 append。调用方不持有第二份 sequence 状态。
+    /// 仅测试便捷入口：生产单事件路径经 `ingest_event` → `ingest_events`（批量版）。
+    #[cfg(test)]
     fn ingest_kernel_event(
         &self,
         input: KernelEventInput,

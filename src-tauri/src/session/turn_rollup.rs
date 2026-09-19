@@ -60,23 +60,16 @@ fn delta_sequence_span(row: &CanonicalEventRow) -> Option<(i64, i64)> {
     if !row.event_type.ends_with(".batch") {
         return Some((row.sequence, row.sequence));
     }
-    let Some(span) = row
+    let span = row
         .typed_payload
         .as_ref()
         .and_then(|typed| typed.get("seqSpan"))
-        .and_then(Value::as_array)
-    else {
-        return None;
-    };
+        .and_then(Value::as_array)?;
     if span.len() != 2 {
         return None;
     }
-    let Some(start) = span.first().and_then(Value::as_i64) else {
-        return None;
-    };
-    let Some(end) = span.get(1).and_then(Value::as_i64) else {
-        return None;
-    };
+    let start = span.first().and_then(Value::as_i64)?;
+    let end = span.get(1).and_then(Value::as_i64)?;
     if start < 1 || end < start || end != row.sequence {
         return None;
     }
