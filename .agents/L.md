@@ -339,6 +339,8 @@
 - `src/zones/index.ts`（门面导出新增模块）
 - `src/components/Settings.tsx`（`ZonePresetRow` 候选改从池取 + 「存当前」入口）
 - `src/store.ts`（新增持久化切片 `zonePresetEntries` 与存/清理动作）
+- `src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css`（仅 `.set-preset-chip.active` 一条规则补下划线，追加变更 §八-2）
+- `src/components/__tests__/Settings.customPreset.test.tsx`（仅同步一句断言的文案，追加变更 §八-1）
 - 文档：`.agents/L.md`、`.agents/records/`、`docs/说明书/`（仅当存在「局部预设 / 区域预设」表述）
 
 **我不碰**：`src/presets/**`（预设「值」一字不改）、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/theme/**`、刀5 的两级菜单结构、`src/renderers/**`、`src-tauri/**`、`tools/**`。
