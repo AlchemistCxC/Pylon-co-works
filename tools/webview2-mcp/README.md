@@ -246,6 +246,9 @@ MCP 侧则调 `webview_targets`：端点不可达时它**不报错**，而是返
     两者分开是为了让「最近 50 条 error」不必因为中间夹着上千条 info 而搜不到；
   - `reset: true` 先清空缓冲并把游标推到末尾，即「从现在开始看」；
   - 连接断开重连后缓冲从零开始，返回体的 `reconnected` 会明确告知。
+- **返回体编码随大小切换**：结构化结果紧凑序列化不超过 4,000 字符时逐行 pretty
+  （便于定位字段），超过则输出单行紧凑 JSON——缩进对 50 条日志级别的结果放大的
+  token 数不再「可以忽略」（2026-09-21 起，#218 上下文瘦身的一部分）。
 - **`ref`**（快照 ref，如 `e12`）：由 `webview_snapshot` 产出，可直接喂给
   `webview_click` / `webview_type` / `webview_key` / `webview_select` / `webview_hover`。
   比 CSS 选择器稳——角色与名字是用户看到的东西，不随 DOM 结构变化。

@@ -1,7 +1,7 @@
 {
   "name": "pylon",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4-Rev",
   "type": "module",
   "scripts": {
     "dev": "vite",
