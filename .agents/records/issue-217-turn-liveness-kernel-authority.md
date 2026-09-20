@@ -60,7 +60,7 @@ kernel 可用时停用 applyLive 的两条「采纳实时帧」启发式。
 
 | 验收项 | 结果 |
 | --- | --- |
-| K1 Rust 单测（置位/按键清理/force-clear/report_settle 汇聚/挂起-超时生命周期/快照三态契约） | ✅ 7 例全绿 |
+| K1 Rust 单测（置位/按键清理/force-clear/report_settle 汇聚/挂起-超时生命周期/快照三态契约） | ✅ 5 例新函数全绿（另有 1 例既有用例追加断言） |
 | K2 wire 字段经 `load_persisted_session` 到达前端（契约测试 + 真机 IPC 响应体） | ✅（见证据） |
 | K2 说明书同步 | ✅（架构参考活性段落） |
 | K3 三来源优先级用例（kernel=false 压重放尾行与实时帧 / kernel=true 抬起 / 无表态回退 clock / 终帧落静 / 合并层权威） | ✅ 6 例全绿 |
@@ -109,8 +109,31 @@ kernel 可用时停用 applyLive 的两条「采纳实时帧」启发式。
 
 ## 未解问题
 
-- elapsed 起点在「跨窗口在途」场景从本窗看见时刻起算（内核标记不携带 startedAt 的最小契约
+- elapsed 起点在「跨窗口在途」场景从「本窗看见」起算（内核标记不携带 startedAt 的最小契约
   选择）；后续若需要可经 `turn.startedAtMs` 透传，不影响本片。
+
+## 审核与修复（子代理审核，2026-09-21）
+
+审核结论「需修改后合入」，发现 7 项（2 major / 3 minor / 2 nit）。修复情况：
+
+| # | 严重度 | 发现 | 处置 |
+| --- | --- | --- | --- |
+| 1 | major | `turnClockTerminal` 无时钟分支的 `settleRuntimeLiveness` 作用于**当前绑定**快照而活性判定看 targetSource——他 source 终帧（含双轨重复投递）会误清正在生成会话的 generating 并清零起点 | ✅ 修复：`settleRuntimeLiveness` 加 `targetSource !== source` 早退守卫；补跨 source 双击终帧用例 |
+| 2 | major | refresh 顶部「true 一律采纳」无对称守卫：终帧后迟到的 stale 快照（turnInFlight=true）可复活生成态且 merge 层顺带清掉 fence | ✅ 修复：双向守卫（时钟封存只认 false）+ **回合身份判别**（`kernelTurnStamps`，以快照 `turn.key` 的 `generation:turnId` 为身份——终帧不携带 turnId，同身份的 true 即 stale；不同身份=新回合照常采纳）；补 stale 快照用例（含新回合放行断言） |
+| 3 | minor | 发送/终帧/回滚无条件写内核 map——「新前端 + 旧内核」组合下本地终态后该 source 永久持有 false，#213 采纳启发式被前端自造表态关闭 | ✅ 修复：条目**只由 refresh（真实内核快照）创建**，本地生命周期仅 Fresh化已有条目；补旧内核兼容用例（两回合启发式均保持可用） |
+| 4 | minor | refresh 尾部无条件写与顶部守卫策略不一致；journal 终态证据是「任意历史终态行」 | ✅ 修复：尾部 kernel 写**只认账本终态**（`ledgerTerminalReason`），journal 终态行只封钟（既有 #99 语义）不制造内核条目；注释写明与顶部守卫的刻意差异 |
+| 5 | nit | `rejectOptimisticUser` → kernel=false 无直达测试 | 未补（facade 拒绝路径需完整 commands 装置，收益低）；行为已被「仅 Fresh化已有条目」规则收窄 |
+| 6 | nit | anomaly 判定两次读取非原子，settle 恰落两读之间有瞬时假阳性告警/计数 | 不修（纯诊断面、单调计数、无行为影响）；记录在案 |
+| 7 | minor | 开发记录「Rust 7 例」与实际 5 个新测试函数不符 | ✅ 已更正 |
+
+修复后核验：受影响 4 套件 35 例全绿；全量 vitest **4541 passed**（`#220 计算核 parity` 2 文件
+7 例因他人 in-flight 的 `pylon-compute` crate 编译失败 + wasm 产物被其构建清空而无法加载，
+非 #217 范围，该 7 例在本 issue 首次全量跑时为绿）；`tsc -p tsconfig.solid.json` exit 0。
+新增守卫用例 3 个（跨 source 双击终帧 / stale 快照身份判别 + 新回合放行 / 旧内核两回合启发式保持）。
+
+**审核未发现问题的轴**（引用审核报告）：规格符合（ADR 三决定 + 保持不变边界全部守住）、
+内核正确性（置位/清理完备性、键化、锁纪律、三态判法）、注释/说明书一致性、pathspec 纪律、
+开发记录真实性（除 #7 计数）。
 
 ## 并行交集
 

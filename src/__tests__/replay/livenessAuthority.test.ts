@@ -271,3 +271,77 @@ describe('#217 活性权威上移内核 · kernel > clock > document', () => {
     runtime.destroy()
   })
 })
+
+/**
+ * #217 审核修复守卫（子代理审核发现 1/2/3 的回归锁）。
+ */
+describe('#217 守卫 · 终帧与 stale 快照的边界', () => {
+  it('他 source 的终帧（双轨重复投递）不得误伤当前绑定会话的生成态', async () => {
+    const { service } = journalRuntime([])
+    const active = session('session-live', 'local:live')
+    await service.bind(active)
+    // A 会话在途（他窗派发 → kernel=true 无本地时钟）
+    await service.refresh(active, { turnInFlight: true })
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    // 他 source B 的终帧：Channel 主轨 + 广播兜底设计上重复投递两次
+    await getCanonicalEventFeed().acceptFrame({ event: 'pylon:done', payload: { source: 'local:other' } })
+    await getCanonicalEventFeed().acceptFrame({ event: 'pylon:done', payload: { source: 'local:other' } })
+
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating).toBe(true)
+    expect(snapshot.livenessSource).toBe('kernel')
+    service.destroy()
+  })
+
+  it('终帧之后迟到的 stale 快照（同 turnId 的 turnInFlight=true）不得复活生成态', async () => {
+    const { service } = journalRuntime([])
+    const active = session('session-live', 'local:live')
+    const turnKey = (turnId: number) => ({
+      phase: 'streaming',
+      key: { localSessionId: 'local:live', remoteSessionId: 'p1', generation: 1, turnId },
+    })
+    await service.bind(active)
+    await service.refresh(active, { turnInFlight: true, turn: turnKey(5) })
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    // 终帧：落静，并把身份 1:5 记为 settled
+    await getCanonicalEventFeed().acceptFrame({ event: 'pylon:done', payload: { source: active.source } })
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+
+    // late 快照（早于终态合成，同一回合身份）：true 必须被身份判别挡住
+    await service.refresh(active, { turnInFlight: true, turn: turnKey(5) })
+    let snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating).toBe(false)
+    expect(snapshot.livenessSource).toBe('kernel')
+
+    // 新回合（不同 turnId）：照常采纳
+    await service.refresh(active, { turnInFlight: true, turn: turnKey(6) })
+    snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+
+  it('旧内核（快照无 turnInFlight）：本地终态不得制造内核权威，#213 启发式保持', async () => {
+    const { service, push } = journalRuntime([])
+    const active = session('session-live', 'local:live')
+    await service.bind(active)
+
+    // 第一回合（时钟权威）：echo 开时钟 → 终态行落文档 + 终帧落静
+    push(canonicalRow(1, 'user_message_chunk', { content: { type: 'text', text: '第一回合' } }))
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+    expect(service.runtime.getSnapshot().livenessSource).toBe('clock')
+    // done 的 canonical 行落文档（与生产一致：终态行进投影，解除 running 标记）
+    push(canonicalRow(2, 'done'))
+    await getCanonicalEventFeed().acceptFrame({ event: 'pylon:done', payload: { source: active.source } })
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    expect(service.runtime.getSnapshot().livenessSource).toBe('clock')
+
+    // 第二回合：采纳启发式必须仍然可用（未被前端自造的内核表态关闭）
+    push(canonicalRow(3, 'user_message_chunk', { content: { type: 'text', text: '第二回合' } }))
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('clock')
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+})
