@@ -124,6 +124,11 @@ user 帧推进（`turnEpoch += 1`）。回归测试 `agentWorkbenchSession.rebin
 - 基准（`bun bench-replay.tmp.ts 2000 5000 10000 20000 40000`，行源 = 生产库真实 wire 行，
   即「长思考回合进行中的未覆盖 tail」）：
 
+> 复现注记（2026-09-20）：`bench-replay.tmp.ts` 是**从未入库的一次性 scratch**，已随本轮临时文件
+> 清理删除，仓库里没有它的副本——上表读数不可用该命令重跑。同口径的回归看守已落在
+> `src/__tests__/replay/projectionLinearization.test.ts`（批量 vs 逐事件等价 + 20k 规模 tripwire）；
+> 重测绝对耗时按 `.agents/spec/205-replay-projection-linearization.md` 的 fixture 来源重建同形状输入即可。
+
 | 行数 | 改造前 | 改造后 | 每行成本（前→后） |
 | --- | --- | --- | --- |
 | 2,000 | 211ms | 72ms | 0.105 → 0.036ms |
