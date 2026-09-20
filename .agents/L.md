@@ -326,3 +326,23 @@
 - 文档：`docs/说明书/Pylon-项目架构参考.md`（存储一节）、`.agents/records/`、本文件
 
 **我不碰**：`src/**`（前端零改动）、`src-tauri/src/dispatcher/**`、`src-tauri/resources/sdk/pylon-plugin-sdk.js`（他人在途，未 stage 未改写，全程 pathspec 提交）。
+
+---
+
+[2026-09-20 12] [Herschel] [#206]
+
+**开工：刀6 区域预设池（界面模式 × 区域）**。施工单 `预设修正/预设系统V2/06-施工单-刀6-区域预设池.md`；规则唯一来源 `06-规则提案-区域预设池派生-待拍板.md`。分支 `feat/preset-v2.6`（从 `4dace7e9` 开，刀5 已在 main）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- **新增** `src/zones/zonePresetPool.ts`（池类型 + 派生 + 查询）与 `src/zones/__tests__/zonePresetPool.test.ts`
+- `src/zones/index.ts`（门面导出新增模块）
+- `src/components/Settings.tsx`（`ZonePresetRow` 候选改从池取 + 「存当前」入口）
+- `src/store.ts`（新增持久化切片 `zonePresetEntries` 与存/清理动作）
+- `src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css`（仅 `.set-preset-chip.active` 一条规则补下划线，追加变更 §八-2）
+- `src/components/__tests__/Settings.customPreset.test.tsx`（仅同步一句断言的文案，追加变更 §八-1）
+- 文档：`.agents/L.md`、`.agents/records/`、`docs/说明书/`（仅当存在「局部预设 / 区域预设」表述）
+
+**我不碰**：`src/presets/**`（预设「值」一字不改）、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/theme/**`、刀5 的两级菜单结构、`src/renderers/**`、`src-tauri/**`、`tools/**`。
+
+**约束（复审据此把关）**：出厂条目存引用（`source.presetName`，应用时现场切）、自定义条目存值快照；应用仍走 `applyZonePreset`，出厂条目应用结果与刀5 现状逐字段一致；`ZONE_FIELDS` / `pickZoneFields` / `PRESET_ZONES` 本体零改动；未登记界面模式 ⇒ 池空、整组不渲染。
