@@ -402,3 +402,21 @@
 **我不碰**：`src/presets/**`（预设「值」一字不改）、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/theme/**`、刀5 的两级菜单结构、`src/renderers/**`、`src-tauri/**`、`tools/**`。
 
 **约束（复审据此把关）**：出厂条目存引用（`source.presetName`，应用时现场切）、自定义条目存值快照；应用仍走 `applyZonePreset`，出厂条目应用结果与刀5 现状逐字段一致；`ZONE_FIELDS` / `pickZoneFields` / `PRESET_ZONES` 本体零改动；未登记界面模式 ⇒ 池空、整组不渲染。
+
+---
+
+[2026-09-20 17] [Miyaki Kumo] [#212 + #213 · 重放/直播分流大重构]
+
+**开工：把「这一行现在是否在被揭示」从数据形状推断（`running` / 新行 / 有内容增长）改成运行时权威事实，并把渲染分成静态与流式两条路径。** 经用户拍板：判据**统一到运行时权威化**；历史**整发 + 渐进挂载**；滚动**自管锚点 + `overflow-anchor:none`**；引入 **HYDRATING 落位窗口**；**并入** #204/#208 遗留两条；自动跟随**一律 instant**。分支沿用 `Ru5t/Reflector`，经 **PR #207** 合入。spec 见 `.agents/spec/212-*.md`。
+
+**本轮文件域（请勿改写、勿连带提交）**：
+
+- 渲染层：`src/renderers/solid-workbench/streamingDisplayScheduler.ts`、`SolidWorkbenchApp.solid.tsx`、`chat/{MarkdownContent.solid.tsx,markdownRenderModel.ts,PlainMessageList.solid.tsx,MessageRow.solid.tsx,CodeBlock.solid.tsx}`
+- 领域/会话层：`src/domains/workbench/workbenchRuntime.ts`、`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`
+- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅 `.term-md-skeleton` 与消息行占位一节）
+- 测试：`src/renderers/solid-workbench/__tests__/**`、`src/domains/workbench/__tests__/**`、`src/__tests__/replay/**`
+- 文档：`.agents/records/`、`.agents/spec/`、本文件
+
+**我不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/**`（#207 的 clippy 收口已单独提交，本轮不再动 Rust 侧）、`src/presets/**`、`src/zones/**`、`src/components/Settings.tsx`、`src/plugins/product/packages/builtin.pylon-workspace/**`（#206 域）。
+
+**共享工作树状态**：本轮开工时工作树对他人在途改动是干净的（此前 `dispatcher/mod.rs`、`persist.rs`、`Sidebar.css` 三处在途改动已由各自作者提交）；每次提交前重新核对 `git status`，全程 pathspec，不 `add .`、不 `commit -a`。
