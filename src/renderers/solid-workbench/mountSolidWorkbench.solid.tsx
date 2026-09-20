@@ -18,6 +18,9 @@ import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 import { createStreamingDisplayPublishCostRecorder, registerStreamingDisplayDiagnostics } from './streamingDiagnostics.ts'
 import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
 
+/** #212 判据 C 的初值：没有行被观察到增长（冻结实例，避免每次 setSignal 造新对象）。 */
+const EMPTY_REVEALING_ROWS: ReadonlySet<string> = Object.freeze(new Set<string>()) as ReadonlySet<string>
+
 /**
  * P57 S2-R1d（第一步：渲染器侧门控）显示相关字段签名。
  *
@@ -71,10 +74,14 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
   // the Solid tree is paced, so a dense token burst cannot trigger a render
   // storm while canonical/replay consumers continue to see every event.
   const publishCost = createStreamingDisplayPublishCostRecorder()
+  // #212 判据 C：调度器的「被观察到在增长」集合转成信号——渲染层据此把该行留在增量路径。
+  // 调度器每次发布后集合可能换代，故在 publish 里同步刷新（同一发布拍一次，不新增订阅）。
+  const [revealingRows, setRevealingRows] = createSignal<ReadonlySet<string>>(EMPTY_REVEALING_ROWS)
   const streamingDisplay = createStreamingDisplayScheduler(snapshot => {
     if (destroyed || paused) return
     const startedAt = performance.now()
     setRuntimeSnapshot(snapshot)
+    setRevealingRows(streamingDisplay.revealingRows())
     // P89/S5a 只读：发布耗时（含 Solid 提交）。不含布局/绘制——那部分用帧间隔代理观测。
     publishCost.record(performance.now() - startedAt)
   })
@@ -133,6 +140,7 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
       standaloneProvider: createStandalonePredictionProvider(),
     }),
     paused: pausedSignal,
+    revealingRows,
     reportRendererError(error) {
       const payload = {
         message: error instanceof Error ? error.message : String(error),

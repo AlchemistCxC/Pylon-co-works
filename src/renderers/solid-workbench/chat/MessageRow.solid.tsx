@@ -16,12 +16,18 @@ export interface SolidMessageRowProps {
   resolveUserName?: (sender: string) => string | undefined
   now?: () => number
   rowRef?: (node: HTMLDivElement | null) => void
+  /**
+   * #212/#213：这一行现在是否「活」（走增量路径、显示生成态）。
+   * 缺省回落到 `message.running`——独立用例与 legacy 宿主行为不变。
+   */
+  live?: () => boolean
   /** Production Workbench may route canonical content parts through Suite-local Slots. */
   semanticContent?: JSX.Element
 }
 
 export function SolidMessageRow(props: SolidMessageRowProps) {
   const message = () => props.renderMessage.message
+  const live = () => props.live?.() ?? message().running === true
   onCleanup(() => props.rowRef?.(null))
   return (
     <ErrorBoundary fallback={error => (
@@ -35,7 +41,7 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
         data-render-type={props.renderMessage.type}
         data-pylon-component="message"
         data-message-role={message().role}
-        data-streaming={message().running === true ? 'true' : undefined}
+        data-streaming={live() ? 'true' : undefined}
       >
         <Show when={props.renderMessage.type === 'user'}>
           <UserLine
@@ -47,13 +53,13 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
           />
         </Show>
         <Show when={props.renderMessage.type === 'assistant'}>
-          <AssistantContent text={message().content} appearance={props.appearance} streaming={message().running === true} semanticContent={props.semanticContent} />
+          <AssistantContent text={message().content} appearance={props.appearance} streaming={live()} semanticContent={props.semanticContent} />
         </Show>
         <Show when={props.renderMessage.type === 'reasoning'}>
           <Show when={props.semanticContent !== undefined} fallback={
             <ReasoningBlock
               text={message().content}
-              running={message().running === true}
+              running={live()}
               startedAt={message().thoughtStartedAt}
               durationMs={message().thoughtDurationMs}
               now={props.now}

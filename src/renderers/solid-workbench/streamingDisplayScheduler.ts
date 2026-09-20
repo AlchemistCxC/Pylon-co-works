@@ -132,7 +132,7 @@ export interface StreamingDisplayScheduler {
   dispose(): void
   /**
    * #212 判据 C：**本次会话里被观察到「文本在两次发布之间变长」的行 key 集合**
-   * （`streamRowKey(id, role)`）。渲染层据此把该行留在增量（graft）路径上；
+   * （`streamingRowKey(id, role)`）。渲染层据此把该行留在增量（graft）路径上；
    * 属行为判据，兜住权威活性的漏判。换会话/换 owner 时清空。
    */
   revealingRows(): ReadonlySet<string>
@@ -743,7 +743,7 @@ function collectStreamRowPlans(
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
     if (!isPrefixGrowth(previousText, message.content)) continue
-    const key = streamRowKey(message.id, message.role)
+    const key = streamingRowKey(message.id, message.role)
     const existing = plans.get(key)
     // 双写正常时两份文本一致；万一短暂分叉，以更长的目标文本作为可见量（保守不超发）。
     if (existing === undefined || message.content.length > existing.nextText.length) {
@@ -769,7 +769,11 @@ function pendingRowPlans(
   return plans
 }
 
-function streamRowKey(id: string, role: string): string {
+/**
+ * 行 key：显示调度器与渲染层共用的**唯一**格式（判据 C 的集合成员判据）。
+ * 不要在渲染层手写这份字符串——两份定义一旦漂移，`revealingRows()` 会静默失配。
+ */
+export function streamingRowKey(id: string, role: string): string {
   return `${id}\u0000${role}`
 }
 
@@ -804,12 +808,12 @@ function collectObservedGrowth(
   into: Set<string>,
 ): void {
   if (current === next) return
-  const currentByKey = new Map(current.map(message => [streamRowKey(message.id, message.role), message]))
+  const currentByKey = new Map(current.map(message => [streamingRowKey(message.id, message.role), message]))
   for (const message of next) {
     if (!isStreamMessage(message)) continue
-    const previous = currentByKey.get(streamRowKey(message.id, message.role))
+    const previous = currentByKey.get(streamingRowKey(message.id, message.role))
     if (previous === undefined) continue
-    if (isPrefixGrowth(previous.content, message.content)) into.add(streamRowKey(message.id, message.role))
+    if (isPrefixGrowth(previous.content, message.content)) into.add(streamingRowKey(message.id, message.role))
   }
 }
 
@@ -985,7 +989,7 @@ function applyRowDecisions<T extends DisplayMessage>(
   let changed = false
   const messages = target.map(message => {
     if (!isStreamMessage(message)) return message
-    const decision = decisions.get(streamRowKey(message.id, message.role))
+    const decision = decisions.get(streamingRowKey(message.id, message.role))
     if (decision === undefined) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
