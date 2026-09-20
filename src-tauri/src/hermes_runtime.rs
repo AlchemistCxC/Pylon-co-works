@@ -108,7 +108,8 @@ pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
         // 2026-09-20 裁决：闲置窗口有自己的下界（`DEFAULT_IDLE_TIMEOUT_SECS` = 600）。
         // 取**较大者**——保留原意（不得把配置的 180s 收紧成更短的本地截断），同时让
         // "agent 在等用户点击"不再落进停摆窗口。首 token 仍按 prompt 预算（判"起没起来"）。
-        protocol.idle_timeout_secs = Some(preserved_idle.max(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS));
+        protocol.idle_timeout_secs =
+            Some(preserved_idle.max(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS));
         if protocol.first_token_timeout_secs.is_none() {
             protocol.first_token_timeout_secs = Some(preserved_idle);
         }
