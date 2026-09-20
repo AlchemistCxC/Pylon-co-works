@@ -171,3 +171,103 @@ describe('#213 活性权威 · 实时帧建立权威', () => {
     service.destroy()
   })
 })
+
+/**
+ * #217/ADR-0017 活性权威上移内核：`livenessSource: 'kernel'` 接入与优先级
+ * （kernel > clock > document）。
+ *
+ * 内核事实 = `load_persisted_session` 冷挂载快照的 `turnInFlight`（经 refresh 传入）。
+ * 语义严格为「本进程已派发 prompt、尚未收到终态」：
+ *  · kernel=false：重放的 running 尾行与实时帧都不再能复活生成态（两条采纳启发式停用）；
+ *  · kernel=true：无本地时钟（他端/他窗派发）也能正确显示生成态；
+ *  · 无内核表态：回退 'clock' 权威，#213 行为不回退；
+ *  · 新鲜度守卫：本地时钟活动期间，load 竞态带来的 kernel=false 不得压熄在途回合。
+ */
+describe('#217 活性权威上移内核 · kernel > clock > document', () => {
+  it('重启后未终结会话：kernel=false 压住重放的 running 尾行，权威切换为 kernel', async () => {
+    const { service } = journalRuntime(UNTERMINATED)
+    await service.bind(session('session-live', 'local:live'))
+    // bind 阶段尚无内核表态：仍是 clock 权威（#213 现状）。
+    expect(service.runtime.getSnapshot().livenessSource).toBe('clock')
+
+    // load 链带回冷挂载快照：本进程重启后未派发任何 prompt ⇒ 内核标记为 false。
+    await service.refresh(session('session-live', 'local:live'), { turnInFlight: false })
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(false)
+    // 行级投影语义不变：running 尾行仍是"未见终态"。
+    expect(snapshot.document!.messages.at(-1)!.running).toBe(true)
+    service.destroy()
+  })
+
+  it('kernel=false 时实时帧不再被采纳：他端先开回合不复活生成态（启发式停用）', async () => {
+    const { service, push } = journalRuntime(UNTERMINATED)
+    await service.bind(session('session-live', 'local:live'))
+    await service.refresh(session('session-live', 'local:live'), { turnInFlight: false })
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+
+    // 他端的 user echo + 后续正文帧：#213 时钟权威下会采纳成 generating=true
+    //（见下方对照用例），内核表态可用后一律停用。
+    push(canonicalRow(3, 'user_message_chunk', { content: { type: 'text', text: '他端新回合' } }))
+    push(canonicalRow(4, 'agent_message_chunk', { content: { type: 'text', text: '他端在写' } }))
+
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(false)
+    expect(snapshot.generationPhase).toBeUndefined()
+    service.destroy()
+  })
+
+  it('kernel=true：无本地时钟的在途回合（他端/他窗派发）正确显示生成态', async () => {
+    const { service } = journalRuntime(UNTERMINATED)
+    await service.bind(session('session-live', 'local:live'))
+    await service.refresh(session('session-live', 'local:live'), { turnInFlight: true })
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+
+  it('无内核表态（旧内核）：refresh 不带 turnInFlight ⇒ 回退 clock 权威，#213 行为不回退', async () => {
+    const { service, push } = journalRuntime(UNTERMINATED)
+    await service.bind(session('session-live', 'local:live'))
+    await service.refresh(session('session-live', 'local:live'), { turn: null })
+    expect(service.runtime.getSnapshot().livenessSource).toBe('clock')
+
+    // 启发式仍在（无内核表态时）：实时正文帧采纳时钟。
+    push(canonicalRow(3, 'agent_message_chunk', { content: { type: 'text', text: '又写了一段' } }))
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('clock')
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+
+  it('终帧落静后内核事实同步为否（后续重放帧不得复活）', async () => {
+    const { service, push } = journalRuntime([])
+    const active = session('session-live', 'local:live')
+    await service.bind(active)
+    await service.refresh(active, { turnInFlight: true })
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    // 终帧：内核已收敛 ⇒ kernelLiveness=false + 时钟封存。
+    await getCanonicalEventFeed().acceptFrame({ event: 'pylon:done', payload: { source: active.source } })
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+
+    // 迟到的重放/直播帧不得复活生成态（权威仍为 kernel=false）。
+    push(canonicalRow(1, 'agent_message_chunk', { content: { type: 'text', text: '迟到的正文' } }))
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(false)
+    service.destroy()
+  })
+
+  it('合并层：livenessSource=kernel 的权威值在 merge 中不被文档派生覆盖', () => {
+    const document = projectWorkbench(UNTERMINATED_ENVELOPES, { initialDocument: createWorkbenchDocument('local:live') }).document
+    const runtime = bareRuntime()
+    runtime.replaceDocument(document, { ownerKey: 'owner-live', generation: 1, livenessSource: 'kernel', livenessGenerating: false })
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(false)
+    runtime.destroy()
+  })
+})

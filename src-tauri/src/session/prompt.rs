@@ -73,6 +73,9 @@ fn now_ms() -> u64 {
 
 /// #99：把 ledger settle 结果落到诊断日志——`Published` 静默（正常收敛），
 /// `Late`/`UnknownTurn` 告警（竞态被 CAS 拦截 / 未登记 turn）。
+/// ADR-0017/#217：settle 同时按键清理会话的在途回合标记——这是三条终态臂
+/// （Response / ConnectionClosed / CancelledAfterTimeout）的唯一汇聚点，标记的
+/// 终态清理无需在各臂重复。
 fn report_settle(
     runtime: &Arc<AgentRuntime>,
     turn_key: &crate::acp::TurnKey,
@@ -82,6 +85,12 @@ fn report_settle(
     let outcome = runtime
         .turn_ledger
         .settle(turn_key, cause, now_ms(), detail);
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(&turn_key.local_session_id) {
+            // 键不匹配（代际已换）说明标记已归属新回合，静默让位。
+            let _cleared = session.clear_turn_in_flight(turn_key.generation, turn_key.turn_id);
+        }
+    }
     match outcome {
         crate::acp::SettleOutcome::Published => {}
         crate::acp::SettleOutcome::Late { existing } => tracing::warn!(
@@ -251,6 +260,21 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
     error: &PylonError,
     failure: Option<&PromptFailureMetadata>,
 ) -> Result<(), PylonError> {
+    // ADR-0017/#217：错误终态路径的防御纵深——在途回合标记无条件清理。
+    // 正常时 report_settle 已按键清理（此处 no-op）；覆盖等待 future 被取消等
+    // 未经终态臂的残余。返回 true = 清掉了滞留标记（诊断）。
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(&ctx.source) {
+            if session.force_clear_turn_in_flight() {
+                tracing::warn!(
+                    source = %ctx.source,
+                    code = %error.code(),
+                    "prompt failure path cleared a residual in-flight turn mark; \
+                     settle path should have cleared it (diagnostic)"
+                );
+            }
+        }
+    }
     let mut error_payload = serde_json::json!({
         "source": ctx.source,
         "code": error.code(),
@@ -1125,6 +1149,13 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             "duplicate turn begin in ledger; keeping original registration"
         );
     }
+    // ADR-0017/#217：出站成功 = 本进程回合在途——一等事实随账本登记同点置位；
+    // 终态清理由 report_settle / publish_prompt_failure 的汇聚路径无条件承担。
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(source) {
+            session.mark_turn_in_flight(flow.generation, flow.request_id);
+        }
+    }
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = flow.peri_id.clone();
     // API 1.3：turn.started 观察锚点——出站成功即回合开始（spawn 不阻塞响应等待）。
@@ -1647,6 +1678,148 @@ mod tests {
         assert_eq!(
             user.identity, None,
             "client correlation is not canonical identity"
+        );
+        // ADR-0017/#217：成功终态后，在途回合标记必须已清（settle 汇聚清理）。
+        let sessions = runtime.sessions.lock().expect("sessions");
+        let session = sessions
+            .get("local:prompt-success")
+            .expect("session mapping");
+        assert!(
+            !session.turn_in_flight(),
+            "success terminal must clear the in-flight turn mark"
+        );
+    }
+
+    /// ADR-0017/#217：在途回合标记的完整生命周期——`prompt-silent` agent 对
+    /// session/prompt 永不响应（回合挂起窗口可观测）；挂起期间标记为真，
+    /// first-token 超时走 cancel 收敛（CancelledAfterTimeout 臂 → report_settle）
+    /// 后标记必清。
+    #[tokio::test]
+    async fn in_flight_turn_mark_tracks_hanging_prompt_until_timeout() {
+        let mut agent = crate::test_utils::fake_acp_agent(
+            "prompt-hang-agent",
+            &[
+                "--scenario",
+                "prompt-silent",
+                "--session-id",
+                "prompt-hang-session",
+            ],
+        );
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            first_token_timeout_secs: Some(1),
+            cancel_settle_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let gateway = Arc::new(GatewayCore::new());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("prompt-hang-agent")
+            .with_agent(agent)
+            .with_runtime("prompt-hang-agent", runtime.clone())
+            .with_gateway(gateway.clone())
+            .build();
+
+        let context = PromptContext {
+            source: "local:prompt-hang".to_string(),
+            // 不挂 profile：失败广播路径不依赖 event service，测试聚焦标记生命周期。
+            profile_id: None,
+            content: "hang forever".to_string(),
+            known_peri_id: None,
+            ..Default::default()
+        };
+        let send_fut = send_prompt_core::<tauri::test::MockRuntime>(
+            &state, &runtime, None, &gateway, &context,
+        );
+        tokio::pin!(send_fut);
+
+        // 轮询等待置位：出站成功（账本 begin 同点）即标记，此时回合仍挂起。
+        let mark_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut marked = false;
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut send_fut => break,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {
+                    let marked_now = runtime
+                        .sessions
+                        .lock()
+                        .expect("sessions")
+                        .get("local:prompt-hang")
+                        .map(|session| session.turn_in_flight())
+                        .unwrap_or(false);
+                    if marked_now {
+                        marked = true;
+                        break;
+                    }
+                    if std::time::Instant::now() > mark_deadline {
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(
+            marked,
+            "hanging prompt must expose the in-flight turn mark before its terminal"
+        );
+
+        // 等待超时终态收敛（first-token 1s → cancel settle 窗口内失败返回）。
+        let outcome = send_fut.await;
+        assert!(outcome.is_err(), "hang must converge to a timeout failure");
+        // 终态后标记必清——两条形态都合法：settle 窗口内收敛则按键清理；
+        // 窗口超时则映射整体移除（标记随条目结构性消失）。
+        let mark_cleared = runtime
+            .sessions
+            .lock()
+            .expect("sessions")
+            .get("local:prompt-hang")
+            .map(|session| !session.turn_in_flight())
+            // 映射被移除同样是清理形态（标记随条目结构性消失）。
+            .unwrap_or(true);
+        assert!(
+            mark_cleared,
+            "cancel/timeout terminal must clear the in-flight turn mark unconditionally"
+        );
+    }
+
+    /// ADR-0017/#217：诊断读数——settle 路径（report_settle）按键清理标记；
+    /// 滞留标记由 cold_mount_turn_snapshot 的 anomaly 读数显形（契约测试见
+    /// runtime.rs）。
+    #[test]
+    fn report_settle_clears_keyed_in_flight_mark() {
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session = crate::session::SessionInfo::new(
+            "local:mark-clear".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        session.mark_turn_in_flight(4, 11);
+        runtime
+            .sessions
+            .lock()
+            .expect("sessions")
+            .insert("local:mark-clear".to_string(), session);
+        let turn_key = TurnKey {
+            local_session_id: "local:mark-clear".to_string(),
+            remote_session_id: "peri-mark-clear".to_string(),
+            generation: 4,
+            turn_id: 11,
+        };
+        runtime.turn_ledger.begin(turn_key.clone(), 0);
+        report_settle(&runtime, &turn_key, TurnTerminalCause::Completed, None);
+        assert!(
+            !runtime
+                .sessions
+                .lock()
+                .expect("sessions")
+                .get("local:mark-clear")
+                .expect("session mapping")
+                .turn_in_flight(),
+            "report_settle must clear the keyed in-flight mark"
         );
     }
 

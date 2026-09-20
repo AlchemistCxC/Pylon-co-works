@@ -84,3 +84,20 @@ export function resolveGenerationLedgerTerminalReason(snapshot: unknown): Genera
   if (tag === 'emptyTurn') return emptyTurnInnerCause(cause) === 'cancelled' ? 'cancelled' : 'done'
   return LEDGER_FAILURE_CAUSES.has(tag) ? 'error' : undefined
 }
+
+/**
+ * #217/ADR-0017：内核在途回合标记 → 活性事实（`livenessSource: 'kernel'` 的值）。
+ *
+ * 入参同 `resolveGenerationLedgerTerminalReason`——`load_persisted_session` 随权威
+ * 恢复一并返回的 `ColdMountTurnSnapshot`。语义严格为「本进程已派发 prompt、尚未
+ * 收到终态」；与账本 `turn` 记录相互独立（两者失配是后端诊断读数
+ * `turnInFlightAnomaly`，呈现层不据此改判）。
+ *
+ * 快照缺 `turnInFlight`（旧内核/无标记宿主）或形状畸形时返回 `undefined`：会话层
+ * 不表态，活性回退 `clock` 权威——不从 `turn.phase` 反推（不猜）。
+ */
+export function resolveKernelLiveness(snapshot: unknown): boolean | undefined {
+  if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) return undefined
+  const turnInFlight = (snapshot as { turnInFlight?: unknown }).turnInFlight
+  return typeof turnInFlight === 'boolean' ? turnInFlight : undefined
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveGenerationLedgerTerminalReason } from '../generationLedgerSummary.ts'
+import { resolveGenerationLedgerTerminalReason, resolveKernelLiveness } from '../generationLedgerSummary.ts'
 
 /**
  * #99 账本终态 → 摘要 reason 的呈现映射。
@@ -78,5 +78,27 @@ describe('resolveGenerationLedgerTerminalReason', () => {
       lastError: null,
     }
     expect(resolveGenerationLedgerTerminalReason(snapshot)).toBe('done')
+  })
+})
+
+/**
+ * #217/ADR-0017：内核在途回合标记 → 活性事实。
+ * 同样只做形状守卫：缺字段/畸形一律 undefined（会话层回退 clock 权威，不猜）。
+ */
+describe('resolveKernelLiveness (#217)', () => {
+  it('passes the kernel in-flight fact through the ColdMountTurnSnapshot wrapper', () => {
+    expect(resolveKernelLiveness({ turn: { phase: 'prompting' }, turnInFlight: true })).toBe(true)
+    expect(resolveKernelLiveness({ turn: null, turnInFlight: false })).toBe(false)
+  })
+
+  it('returns undefined when the kernel did not state liveness (legacy kernel / malformed)', () => {
+    // 旧内核：快照没有 turnInFlight 字段。
+    expect(resolveKernelLiveness({ turn: { phase: 'terminal', terminal: { cause: 'completed' } } })).toBeUndefined()
+    expect(resolveKernelLiveness({ turnInFlight: 'yes' })).toBeUndefined()
+    expect(resolveKernelLiveness({ turnInFlight: null })).toBeUndefined()
+    expect(resolveKernelLiveness(null)).toBeUndefined()
+    expect(resolveKernelLiveness('in-flight')).toBeUndefined()
+    expect(resolveKernelLiveness([])).toBeUndefined()
+    expect(resolveKernelLiveness(undefined)).toBeUndefined()
   })
 })

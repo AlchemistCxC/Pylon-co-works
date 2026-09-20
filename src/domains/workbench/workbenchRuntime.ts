@@ -30,14 +30,15 @@ export interface WorkbenchRuntimeSnapshot {
   /** Runtime-local turn identity; never persisted to provider/canonical wire. */
   turnEpoch?: number
   /**
-   * #213 活性权威。`'clock'` = 会话层已用**本进程回合时钟**就该 owner/source 表态，
+   * #213 活性权威。`'kernel'` = 内核在途回合标记就本 source 表态（ADR-0017，
+   * 优先级最高）；`'clock'` = 会话层已用**本进程回合时钟**就该 owner/source 表态，
    * 文档派生的 `generating`（`legacyFieldsFromDocument` 的 `firstRunning`）不得覆盖它；
    * `'document'`（缺省）= 无时钟宿主（preview / legacy host / 浏览器 mock）按文档形状推断。
    *
    * 重放出来的 `running` 尾行只说明「没有见到终态」，不说明「本进程在跑」——把两者混为一谈
    * 会让进程重启/回合被截断后的旧会话永久显示生成态（页脚 spinner、思考中…）。
    */
-  livenessSource?: 'clock' | 'document'
+  livenessSource?: 'kernel' | 'clock' | 'document'
   /** Terminal absorption fence for the current owner/turn. */
   terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
@@ -77,9 +78,9 @@ export interface WorkbenchRuntimeMergeInput {
   readonly terminalFence?: WorkbenchTerminalFence | null
   readonly turnEpoch?: number
   readonly preserveGeneration?: boolean
-  /** #213：本快照活性结论的来源；`'clock'` 时文档派生不得复活 `generating`。 */
-  readonly livenessSource?: 'clock' | 'document'
-  /** #213：`livenessSource === 'clock'` 时随投影携带的权威活性值。 */
+  /** #213/#217：本快照活性结论的来源；`'kernel'`/`'clock'` 时文档派生不得复活 `generating`。 */
+  readonly livenessSource?: 'kernel' | 'clock' | 'document'
+  /** #213：`livenessSource` 表态时随投影携带的权威活性值。 */
   readonly livenessGenerating?: boolean
 }
 
@@ -113,10 +114,10 @@ export interface WorkbenchDocumentApplyOptions {
    * reader set this flag so that gap cannot reset elapsed time.
    */
   readonly preserveGeneration?: boolean
-  /** #213：本次投影携带的活性结论来源（见 `WorkbenchRuntimeSnapshot.livenessSource`）。 */
-  readonly livenessSource?: 'clock' | 'document'
+  /** #213/#217：本次投影携带的活性结论来源（见 `WorkbenchRuntimeSnapshot.livenessSource`）。 */
+  readonly livenessSource?: 'kernel' | 'clock' | 'document'
   /**
-   * #213：`livenessSource === 'clock'` 时**随文档一并传递的权威活性值**。
+   * #213：`livenessSource` 表态时**随文档一并传递的权威活性值**。
    *
    * 不能只读 `previous.generating`：新回合推进 `turnEpoch` 的那一次投影里，
    * "权威说在跑"的表态还没进快照，只读 previous 会把新回合的合法在途判成静止。
@@ -678,12 +679,15 @@ function preserveActiveGeneration(
 }
 
 /**
- * #213：会话层已就该 source 表态（`livenessSource === 'clock'`）时，活性只认时钟。
+ * #213：会话层已就该 source 表态（`livenessSource` 为 `'kernel'` 或 `'clock'`）时，
+ * 活性只认权威值，文档派生让位。
  *
- * 时钟说「在跑」⇒ 保住 generating 与起点（文档短暂缺 running 行不得让 elapsed 归零）；
- * 时钟说「没在跑」⇒ generating 与整条活动轴（phase/activity/thinking）一并落定为静止，
- * 否则重放出来的 `running` 尾行会把它复活成「正在思考…」。
- * 其余字段（messages/status/tokenCount…）仍由文档派生，不受影响。
+ * `'kernel'`（#217/ADR-0017）：内核在途回合标记的表态，优先级最高；
+ * `'clock'`：本进程回合时钟的表态。两者语义同构——权威说「在跑」⇒ 保住 generating
+ * 与起点（文档短暂缺 running 行不得让 elapsed 归零）；权威说「没在跑」⇒ generating
+ * 与整条活动轴（phase/activity/thinking）一并落定为静止，否则重放出来的 `running`
+ * 尾行会把它复活成「正在思考…」。其余字段（messages/status/tokenCount…）仍由文档
+ * 派生，不受影响。
  *
  * `authoritativeGenerating` 由调用方给出（`livenessGenerating`），缺省回落到 `previous.generating`。
  */
@@ -693,7 +697,7 @@ function applyLivenessAuthority(
   livenessSource: WorkbenchRuntimeSnapshot['livenessSource'],
   previous: WorkbenchRuntimeSnapshot,
 ): Partial<WorkbenchRuntimeSnapshot> {
-  if (livenessSource !== 'clock') return preserved
+  if (livenessSource !== 'clock' && livenessSource !== 'kernel') return preserved
   if (authoritativeGenerating) {
     return {
       ...preserved,

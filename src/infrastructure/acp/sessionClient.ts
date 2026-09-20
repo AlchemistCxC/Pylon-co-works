@@ -77,6 +77,13 @@ export interface ColdMountTurnSnapshot {
   readonly generation?: number
   /** 会话无已知 turn 时为 `null`（后端不伪造空快照）。 */
   readonly turn?: ColdMountTurnState | null
+  /**
+   * #217/ADR-0017：内核在途回合标记——「本进程已派发 prompt、尚未收到终态」的
+   * 一等事实。缺省 = 内核未表态（旧内核/无标记宿主，前端回退 clock 权威）。
+   */
+  readonly turnInFlight?: boolean
+  /** #217 诊断读数：标记为真而账本已无在途 turn（标记滞留）。 */
+  readonly turnInFlightAnomaly?: boolean
   /** 入站 ingress 序列 cursor（lastIngressSeq/spill/drop/overloaded）。 */
   readonly sequence?: Readonly<Record<string, unknown>>
   readonly replayLoading?: boolean
@@ -154,6 +161,8 @@ export function normalizeColdMountTurnSnapshot(raw: unknown): ColdMountTurnSnaps
     ...(nonEmptyString(raw.periId) !== undefined ? { periId: nonEmptyString(raw.periId)! } : {}),
     ...(generation !== null ? { generation } : {}),
     ...(turn !== undefined ? { turn } : {}),
+    ...(typeof raw.turnInFlight === 'boolean' ? { turnInFlight: raw.turnInFlight } : {}),
+    ...(typeof raw.turnInFlightAnomaly === 'boolean' ? { turnInFlightAnomaly: raw.turnInFlightAnomaly } : {}),
     ...(isRecord(raw.sequence) ? { sequence: Object.freeze({ ...raw.sequence }) } : {}),
     ...(typeof raw.replayLoading === 'boolean' ? { replayLoading: raw.replayLoading } : {}),
     // 后端 `AgentRuntimeState::last_error: Option<String>`。

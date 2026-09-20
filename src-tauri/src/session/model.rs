@@ -84,6 +84,15 @@ fn selector_echo_fingerprint(value: &serde_json::Value) -> u64 {
     hash
 }
 
+/// ADR-0017/#217：在途回合标记的身份键——(客户端 generation, 出站 request id)。
+/// turn_id 与 turn_ledger 的 `TurnKey.turn_id` 同源（PreparedRpc.id），generation
+/// 隔离后跨连接不混淆；清理按键匹配，旧代际迟到的终态动不了新代际的标记。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TurnInFlightMark {
+    pub(crate) generation: u64,
+    pub(crate) turn_id: u64,
+}
+
 #[derive(Clone)]
 pub(crate) struct SessionInfo {
     /// ACP typed live state. This is an ingest-side projection only; canonical
@@ -147,6 +156,13 @@ pub(crate) struct SessionInfo {
     pub(crate) last_response_round: u64,
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
     pub(crate) last_response_text: String,
+    /// ADR-0017/#217：在途回合标记——「本进程已派发 prompt、尚未收到终态」的一等
+    /// 事实（与 `last_activity` 同级：进程内事实，不落 wire、不序列化）。置位点与
+    /// turn_ledger.begin 同点；终态路径无条件清理（见 prompt.rs report_settle /
+    /// publish_prompt_failure）。键化为 (generation, turn_id)：客户端替换后迟到的
+    /// 旧回合终态不得误清新回合的标记。prompt_gate 保证每实例至多一个在途 prompt，
+    /// 故每会话至多一条。
+    pub(crate) turn_in_flight: Option<TurnInFlightMark>,
     /// 会话级可恢复状态快照（wire key -> JSON）：usage/commands/mode 及未来状态量统一放这里。
     pub(crate) commands_snapshot: Option<serde_json::Value>,
     pub(crate) usage_snapshot: Option<serde_json::Value>,
@@ -226,9 +242,42 @@ impl SessionInfo {
             inject_round: 0,
             last_response_round: 0,
             last_response_text: String::new(),
+            turn_in_flight: None,
             commands_snapshot: None,
             usage_snapshot: None,
         }
+    }
+
+    /// ADR-0017/#217：标记在途回合（出站 prompt 已派发）。同键重复置位幂等。
+    pub(crate) fn mark_turn_in_flight(&mut self, generation: u64, turn_id: u64) {
+        self.turn_in_flight = Some(TurnInFlightMark {
+            generation,
+            turn_id,
+        });
+    }
+
+    /// ADR-0017/#217：按键清理——只有 (generation, turn_id) 与标记一致才算本回合的
+    /// 终态。陈旧回合（客户端替换后代际已换）的迟到清理返回 false 且不动标记。
+    /// 返回是否发生了实际清理（诊断）。
+    pub(crate) fn clear_turn_in_flight(&mut self, generation: u64, turn_id: u64) -> bool {
+        let matches = self
+            .turn_in_flight
+            .is_some_and(|mark| mark.generation == generation && mark.turn_id == turn_id);
+        if matches {
+            self.turn_in_flight = None;
+        }
+        matches
+    }
+
+    /// ADR-0017/#217：无条件清理（不按键）——错误终态路径的防御纵深；
+    /// 返回清理前是否存在标记（诊断）。
+    pub(crate) fn force_clear_turn_in_flight(&mut self) -> bool {
+        self.turn_in_flight.take().is_some()
+    }
+
+    /// ADR-0017/#217：本会话是否有一个在途回合（本进程已派发 prompt、尚未收到终态）。
+    pub(crate) fn turn_in_flight(&self) -> bool {
+        self.turn_in_flight.is_some()
     }
 
     pub(crate) fn apply_session_response(&mut self, response: &serde_json::Value) {
@@ -1859,5 +1908,62 @@ mod tests {
         .is_ok());
         // 未宣告列表 → 放行（现状兼容）。
         assert!(validate_advertised_choice("anything", &[], "reasoning_not_advertised").is_ok());
+    }
+
+    /// ADR-0017/#217：在途回合标记的置位与按键清理语义。
+    #[test]
+    fn turn_in_flight_mark_keyed_clear_semantics() {
+        let mut session = SessionInfo::new(
+            "peri-l1".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        assert!(!session.turn_in_flight(), "新会话必须无在途回合");
+
+        session.mark_turn_in_flight(1, 7);
+        assert!(session.turn_in_flight());
+
+        // 同键重复置位幂等（对齐 begin 的 AlreadyActive 语义）。
+        session.mark_turn_in_flight(1, 7);
+        assert!(session.turn_in_flight());
+
+        // 键不匹配（陈旧回合迟到终态）：不清理。
+        assert!(!session.clear_turn_in_flight(1, 8));
+        assert!(
+            session.turn_in_flight(),
+            "陈旧 turn_id 不得清掉新回合的标记"
+        );
+        assert!(!session.clear_turn_in_flight(2, 7));
+        assert!(session.turn_in_flight(), "旧代际不得清掉新代际的标记");
+
+        // 键匹配：清理发生，且再次清理为 no-op。
+        assert!(session.clear_turn_in_flight(1, 7));
+        assert!(!session.turn_in_flight());
+        assert!(!session.clear_turn_in_flight(1, 7));
+    }
+
+    /// ADR-0017/#217：force-clear 无条件清理 + 返回清理前状态（诊断）。
+    #[test]
+    fn turn_in_flight_force_clear_is_unconditional_and_reported() {
+        let mut session = SessionInfo::new(
+            "peri-l2".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        assert!(
+            !session.force_clear_turn_in_flight(),
+            "无标记时 force-clear 报 false"
+        );
+        session.mark_turn_in_flight(9, 9);
+        assert!(session.force_clear_turn_in_flight());
+        assert!(!session.turn_in_flight());
+        assert!(
+            !session.force_clear_turn_in_flight(),
+            "重复 force-clear 幂等"
+        );
     }
 }
