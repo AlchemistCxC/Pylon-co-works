@@ -22,6 +22,8 @@ const TITLE = 'font-semibold text-md mb-2'
 const META = 'font-mono text-[11px] text-text-dim mb-2 break-all'
 const PROMPT = 'text-[13px] text-text bg-bg-input border border-border rounded-none px-2.5 py-2 mb-3 max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words'
 const OPTIONS = 'flex flex-wrap gap-2'
+const ERROR = 'text-[12px] text-[var(--danger,#c0392b)] mb-2 break-all'
+const DISMISS = 'flex-[0_0_auto] min-w-[60px] px-3 py-1.5 text-[13px] font-[family-name:var(--font)] text-text-dim bg-transparent border border-border rounded-none cursor-pointer hover:text-text hover:border-border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent'
 const BTN = 'flex-[1_1_auto] min-w-[96px] px-3 py-1.5 text-[13px] font-[family-name:var(--font)] text-text bg-bg-active border border-border rounded-none cursor-pointer enabled:hover:bg-bg-hover enabled:hover:border-border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-[var(--state-disabled-opacity)] disabled:cursor-not-allowed'
 
 export default function PermissionDialog() {
@@ -37,16 +39,37 @@ export default function PermissionDialog() {
     if (answering) return
     void getPermissionController()?.choose(request.requestId, optionId)
   }
+  // #209：本地收口出口。`choose` 失败会退回 pending 以便重试，但请求在**后端已不存在**
+  // （回合被取消/截断）时重试永不成功——那时弹窗会永久占屏并挡住输入区，而当时代码里
+  // 既没有 Esc 也没有任何关闭入口（真机实测只能 reload）。
+  // 这条路只清前端状态（reducer 的 `reject` 不 invoke、不宣称 agent 已收到应答）。
+  const onAbandon = () => {
+    getPermissionController()?.abandon(request.requestId)
+  }
 
   return (
-    <div className={OVERLAY} role="dialog" aria-modal="true" aria-label="工具权限请求">
+    <div
+      className={OVERLAY}
+      role="dialog"
+      aria-modal="true"
+      aria-label="工具权限请求"
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onAbandon()
+        }
+      }}
+    >
       <div className={DIALOG}>
         <div className={TITLE}>{request.title || '工具权限请求'}</div>
         {request.toolCallId && <div className={META}>toolCallId: {request.toolCallId}</div>}
         {request.prompt && <div className={PROMPT}>{request.prompt}</div>}
+        {/* 失败原因必须可见：此前 `choose` 失败只把状态退回 pending，界面上「点了没反应」。 */}
+        {active.lastError && <div className={ERROR} role="alert">上次应答失败：{active.lastError}</div>}
         <div className={OPTIONS}>
           {buttons.map(button => (
             <button
+              autoFocus={buttons.indexOf(button) === 0}
               key={button.optionId}
               type="button"
               className={BTN}
@@ -56,6 +79,12 @@ export default function PermissionDialog() {
               {button.label}
             </button>
           ))}
+          <button
+            type="button"
+            className={DISMISS}
+            title="只关闭这个弹窗；agent 那一侧的真实状态由它自己的终态事件收敛"
+            onClick={onAbandon}
+          >关闭</button>
         </div>
       </div>
     </div>
