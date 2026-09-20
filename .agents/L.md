@@ -329,20 +329,38 @@
 
 ---
 
-[2026-09-20 12] [Herschel] [#206]
+[2026-09-20 15] [Herschel] [#211 · 刀7 前置]
 
-**开工：刀6 区域预设池（界面模式 × 区域）**。施工单 `预设修正/预设系统V2/06-施工单-刀6-区域预设池.md`；规则唯一来源 `06-规则提案-区域预设池派生-待拍板.md`。分支 `feat/preset-v2.6`（从 `4dace7e9` 开，刀5 已在 main）。
+**开工：自定义区域预设的删除入口**（补刀6 #206 的遗留缺口：条目只增不减）。施工单 `预设修正/预设系统V2/07a-施工单-刀7前置-自定义区域预设删除入口.md`；分支 `feat/preset-v2.7`（从 `main@399d1423` 开——刀6 已随 PR #210 合并）。
 
 **我方本轮文件域（请勿改写、勿连带提交）**：
 
-- **新增** `src/zones/zonePresetPool.ts`（池类型 + 派生 + 查询）与 `src/zones/__tests__/zonePresetPool.test.ts`
-- `src/zones/index.ts`（门面导出新增模块）
-- `src/components/Settings.tsx`（`ZonePresetRow` 候选改从池取 + 「存当前」入口）
-- `src/store.ts`（新增持久化切片 `zonePresetEntries` 与存/清理动作）
-- `src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css`（仅 `.set-preset-chip.active` 一条规则补下划线，追加变更 §八-2）
-- `src/components/__tests__/Settings.customPreset.test.tsx`（仅同步一句断言的文案，追加变更 §八-1）
-- 文档：`.agents/L.md`、`.agents/records/`、`docs/说明书/`（仅当存在「局部预设 / 区域预设」表述）
+- `src/zones/zonePresetPool.ts`（新增删除用纯函数）
+- `src/zones/index.ts`（门面导出）
+- `src/store.ts`（新增 `removeZonePresetEntry(id)` 薄壳，形态照 `removeCustomPreset`）
+- `src/components/Settings.tsx`（`ZonePresetRow` 自定义条目行的删除入口 + 行内两段式确认，照全局先例）
+- `src/zones/__tests__/zonePresetPool.test.ts`（新增删除闭环 / 出现条件三态 / 取消路径）
+- 文档：`.agents/L.md`、`.agents/records/`（本条目由开工时的 `[2026-09-20 12] [#206]` 接替——#206 已合入，按本文件规矩移除）
 
-**我不碰**：`src/presets/**`（预设「值」一字不改）、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/theme/**`、刀5 的两级菜单结构、`src/renderers/**`、`src-tauri/**`、`tools/**`。
+**我不碰**：全局自定义预设的删除链（`src/customPresets.ts` 的 `deleteCustomPreset`、`presetReducer.ts` 的 `removeCustomPresetReducer`、Settings 全局预设行）一行不动；刀6 的派生规则与池结构；`src/presets/**`；`src/zones/pickZoneFields.ts`；`src/themeFieldDefs.ts`；首方 CSS（复用现成 `.set-confirm*`，**不新增样式家族**）；`src/renderers/**`；`src-tauri/**`；`tools/**`。
 
-**约束（复审据此把关）**：出厂条目存引用（`source.presetName`，应用时现场切）、自定义条目存值快照；应用仍走 `applyZonePreset`，出厂条目应用结果与刀5 现状逐字段一致；`ZONE_FIELDS` / `pickZoneFields` / `PRESET_ZONES` 本体零改动；未登记界面模式 ⇒ 池空、整组不渲染。
+**约束（复审据此把关）**：**出厂条目任何情况下 0 个删除入口**（须有三态断言）；删除入口**只在「该自定义条目被选中」时出现**；Q8 灰显占位条目可被删（那是它唯一的出口）；预设「值」零改动。
+
+---
+
+[2026-09-20 16] [Herschel] [#214 · 刀7（与 07a #211 同批同分支）]
+
+**开工：两套默认预设（GUI / 终端）——不进列表与池，「重置主题」落到当前模式的默认预设。** 施工单 `预设修正/预设系统V2/07-施工单-刀7-两套默认预设.md`；分支沿用 `feat/preset-v2.7`（07a 已本地存档 `40487a7c`，批末统一草稿 PR）。
+
+**我方本轮文件域（在 07a 声明之上叠加；请勿改写、勿连带提交）**：
+
+- `src/presets/types.ts`（`PresetName` 增两条默认预设名）
+- ★ §六 追加（2026-09-20 用户目视发现）：`src/domains/theme/presetReducer.ts`（`setZoneFieldReducer` 增「是否标 custom」入参，仅这个函数签名与返回值变了）——**此前声明的「不碰 `src/domains/theme/**`」对本文件作废**，其余 domains/theme 文件仍不碰
+- `src/presets/builtin.ts`（新增 `DEFAULT_PRESETS` 独立表 + `defaultPresetForInterfaceMode`）
+- `src/store.ts`（`resetTheme` 落点改为当前模式的默认预设；未登记模式回落 `DEFAULTS`）
+- **新增** `src/__tests__/defaultPresets.test.ts`
+- 文档：`.agents/L.md`、`.agents/records/`
+
+**我不碰**：`GLOBAL_PRESETS` 本体（仍 10 套，一条不加）、刀6 的派生规则与池结构、`pickZoneFields`、`src/components/Settings.tsx`（本刀不动预设菜单 UI）、`src/application/transactions/activateInterfaceMode.ts`（重置仍走既有事务，改的只是其中的 `resetTheme`）、首方 CSS、`src/renderers/**`、`src-tauri/**`、`tools/**`。
+
+**约束（复审据此把关）**：两条默认预设**不进 `GLOBAL_PRESETS`** ⇒ 「列表 + 池」两处排除是结构性保证而非过滤分支；唯一触达 = `resetTheme`；未登记模式回落 `DEFAULTS`；重置**不修改任何出厂预设内容**；重置后标记沿用 `resetZone` 的「无基准」态（不悬空、不亮「未知预设」兜底 chip）。

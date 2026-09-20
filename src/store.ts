@@ -11,12 +11,15 @@ import {
   createZonePresetEntryId,
   normalizeZonePresetEntries,
   pickZoneFields,
+  removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
+import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
+import { defaultPresetForInterfaceMode } from './presets/index.ts'
 import type { CustomPreset } from './customPresets.ts'
 import { reportLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace.ts'
 import {
@@ -155,11 +158,25 @@ type ThemeState = ThemeSettings & {
   saveZonePresetEntry: (mode: ZonePresetEntry['mode'], zone: ZonePresetEntry['zone'], label: string) => string | null
   /** 刀6（#206）Q8：读入容错 + 自动清理自定义条目值快照里的已删字段键（无变化则不动状态）。 */
   pruneZonePresetEntries: () => void
+  /** 刀7 前置（#211）：删除一条自定义区域预设条目（出厂条目不可删；引用它的区域失去基准）。 */
+  removeZonePresetEntry: (id: string) => void
 }
 
 // clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
 
 // DEFAULTS 定义移入 domains/theme/themeDefaults.ts（可被 node import → 完整性断言测试）
+
+/**
+ * 刀7 §六（#214）：哪些写入 source 算「用户触碰」⇒ 置该 zone 的 custom 标记。
+ *
+ * 呈现方案（界面模式的 token / 用户挑的呈现风格）是**方案自身的基准**，不是用户手改字段。
+ * 此前它照旧置 custom，于是全局派生命中「任一 zone custom ⇒ `'custom'`」——点「重置主题」
+ * 或切换界面模式之后，预设行会亮出兜底的「自定义」chip，把正当基准误报成用户改动。
+ * 其余 source 语义一字不动（缺省 `user-edit` 仍然置 custom）。
+ */
+function sourceMarksZoneCustom(source: SettingWriteSource): boolean {
+  return source !== 'presentation-profile'
+}
 
 let customPresetApplyRevision = 0
 let customPresetApplyTail: Promise<void> = Promise.resolve()
@@ -174,9 +191,10 @@ export const useStore = create<ThemeState>()(persist(
 
   // D-trace：写入溯源——source 由调用方声明（用户编辑/呈现风格/界面模式…），
   // 缺省 user-edit。记录在漏斗出口完成，reducer 保持纯函数。
+  // 刀7 §六（#214）：source 同时决定**这次写入算不算「用户触碰」**（是否置该 zone 的 custom）
   setZoneField: (zone, partial, source = 'user-edit') => {
     recordSettingWrites(source, zone, Object.keys(partial))
-    set(state => setZoneFieldReducer(state, zone, partial))
+    set(state => setZoneFieldReducer(state, zone, partial, sourceMarksZoneCustom(source)))
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
@@ -228,7 +246,18 @@ export const useStore = create<ThemeState>()(persist(
 
   resetTheme: () => {
     recordSettingWrites('theme-reset', '*', Object.keys(DEFAULTS))
-    set(structuredClone(DEFAULTS))
+    // 刀7（#214）：重置落点 = **当前界面模式的默认预设**（GUI / 终端各一条，只存值不记基准）。
+    // 未登记模式（tactical-blue、插件未登记模式）没有默认预设 ⇒ 回落整份 DEFAULTS（不报错、不悬空）。
+    const target = defaultPresetForInterfaceMode(useInterfaceModeStore.getState().interfaceMode)
+    if (!target) {
+      set(structuredClone(DEFAULTS))
+      return
+    }
+    // 覆盖范围与原来的「整份 DEFAULTS」逐字一致（含非预设域字段 sidebarWidth / rightWidth / showPet），
+    // 只把**预设域字段**换成默认预设的值；ccLayout 归一与 ccHeight 收敛沿用「应用预设」同一套算法。
+    // 名字传空串 = 沿用 resetZone 的「无基准」态：默认预设不进列表，若记名，预设行会因认不出它
+    // 而亮出兜底 chip「未知预设」——那正是刀6/07a 要避免的悬空。
+    set({ ...structuredClone(DEFAULTS), ...setGlobalPresetReducer('', target.theme) })
   },
 
   resetZone: (zone) => set(state => {
@@ -463,6 +492,17 @@ export const useStore = create<ThemeState>()(persist(
   pruneZonePresetEntries: () => set(state => {
     const entries = cleanupZonePresetEntries(normalizeZonePresetEntries(state.zonePresetEntries))
     return entries === state.zonePresetEntries ? {} : { zonePresetEntries: entries }
+  }),
+  // 刀7 前置（#211）：纯计算在 zones/zonePresetPool.ts，此处只留 set(dispatch) 薄壳
+  //（形态照 removeCustomPreset）；未命中时 reducer 原样回引用 ⇒ 不写状态。
+  removeZonePresetEntry: (id) => set(state => {
+    const current = Array.isArray(state.zonePresetEntries) ? state.zonePresetEntries : []
+    const patch = removeZonePresetEntryReducer({
+      zonePresetEntries: current,
+      appliedPreset: state.appliedPreset,
+      custom: state.custom,
+    }, id)
+    return patch.zonePresetEntries === current ? {} : patch
   }),
 }),
 { name: 'pylon-theme', version: THEME_SCHEMA_VERSION,

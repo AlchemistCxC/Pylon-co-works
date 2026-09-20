@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from '../themeFieldRenderer'
@@ -9,7 +9,7 @@ import { applyToolDictionaryThroughPort } from '../app/ports/productContribution
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
-import { resolveZonePresetEntryTheme, zonePresetsFor, type ZonePresetEntry } from '../zones/index.ts'
+import { isCustomZonePresetEntry, resolveZonePresetEntryTheme, zonePresetsFor, type ZonePresetEntry } from '../zones/index.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
@@ -74,31 +74,56 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
  * (界面模式桶, 区域) 的池条目——出厂条目（存引用，应用时现场切）+ 自定义条目（存值快照）。
  * 未登记归属桶的界面模式（如 tactical-blue）⇒ 池为空 ⇒ **整组不渲染**（与刀5 同口径）。
  */
-function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSaveCurrent }: {
+function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSaveCurrent, onRemoveEntry }: {
   zone: ZonePresetEntry['zone']; interfaceMode: string; activeName: string; isDirty: boolean
   onApply: (zone: ZonePresetEntry['zone'], entry: ZonePresetEntry) => void
   onSaveCurrent: (zone: ZonePresetEntry['zone'], name: string) => void
+  onRemoveEntry: (id: string) => void
 }) {
   const customEntries = useStore(s => s.zonePresetEntries)
   const entries = zonePresetsFor(interfaceMode, zone, customEntries)
   const [entryName, setEntryName] = useState('')
+  // 刀7 前置（#211）：行内两段式确认的待删条目（照全局自定义预设先例，不常驻、不开模态）
+  const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null)
   if (entries.length === 0) return null
   return (
     <Group title="局部预设">
       <div className="set-preset-row">
-        {entries.map(entry => (
-          <button type="button" key={entry.id}
-            className={`set-preset-chip ${activeName === entry.id && !isDirty ? 'active' : ''}`}
-            aria-current={activeName === entry.id && !isDirty ? 'true' : undefined}
-            // Q8：清理后已无有效字段的自定义条目 = 行内占位（灰显、不可应用）；不给用户开关。
-            disabled={entry.stale === true}
-            title={entry.stale
-              ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
-              : entry.sources && entry.sources.length > 0
-                ? `与该条目同形的来源：${entry.sources.join('、')}`
-                : undefined}
-            onClick={() => onApply(zone, entry)}>{entry.label}</button>
-        ))}
+        {entries.map(entry => {
+          const selected = activeName === entry.id && !isDirty
+          // 刀7 前置（#211）出现条件：**只在自定义条目**上；普通条目「被选中才出现」
+          // （那排 chip 本来就挤），Q8 灰显占位条目常驻——那是它唯一的自然出口。
+          // 出厂条目（存 `source` 引用）任何情况下都不进入这一段（铁律 1：出厂件不可改、不可删）。
+          const deletable = isCustomZonePresetEntry(entry) && (entry.stale === true || selected)
+          return (
+            <Fragment key={entry.id}>
+              <button type="button"
+                className={`set-preset-chip ${selected ? 'active' : ''}`}
+                aria-current={selected ? 'true' : undefined}
+                // Q8：清理后已无有效字段的自定义条目 = 行内占位（灰显、不可应用）；不给用户开关。
+                disabled={entry.stale === true}
+                title={entry.stale
+                  ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
+                  : entry.sources && entry.sources.length > 0
+                    ? `与该条目同形的来源：${entry.sources.join('、')}`
+                    : undefined}
+                onClick={() => onApply(zone, entry)}>{entry.label}</button>
+              {deletable && (pendingDeleteEntryId === entry.id ? (
+                <div className="set-confirm set-confirm-inline" role="alertdialog" aria-label={`确认删除区域预设 ${entry.label}`}>
+                  <span className="set-confirm-text">删除后不可恢复；将移除本区的自定义条目「{entry.label}」，本区保留现值但失去该预设基准。</span>
+                  <div className="set-confirm-actions">
+                    <button type="button" className="ps-btn sm danger"
+                      onClick={() => { setPendingDeleteEntryId(null); onRemoveEntry(entry.id) }}>确认删除</button>
+                    <button type="button" className="ps-btn sm" onClick={() => setPendingDeleteEntryId(null)}>取消</button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="ps-btn sm danger"
+                  onClick={() => setPendingDeleteEntryId(entry.id)}>删除</button>
+              ))}
+            </Fragment>
+          )
+        })}
         {isDirty && <span className="set-preset-chip active">自定义</span>}
       </div>
       <div className="set-hint">只改本区外观参数，自动切换为自定义；改动后可存成属于本区的自定义条目</div>
@@ -173,6 +198,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   // 读入容错也在此收口；无变化不写状态）。
   const saveZonePresetEntry = useStore(s => s.saveZonePresetEntry)
   const pruneZonePresetEntries = useStore(s => s.pruneZonePresetEntries)
+  const removeZonePresetEntry = useStore(s => s.removeZonePresetEntry)
   useEffect(() => { pruneZonePresetEntries() }, [pruneZonePresetEntries])
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   // #154 阶段 4：activeDomain/activeSection/activePluginPageId 已在函数顶部由 sheet 状态派生。
@@ -575,7 +601,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.sidebar}</h3>}
             {!isSearching && <Group title="模块"><SidebarModulesPanel /></Group>}
-            {!isSearching && <ZonePresetRow zone="sidebar" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
+            {!isSearching && <ZonePresetRow zone="sidebar" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings} onRemoveEntry={removeZonePresetEntry}/>}
             <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>
         )
@@ -583,7 +609,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <Group title="渲染风格"><PresentationProfilePicker /></Group>}
-            {!isSearching && <ZonePresetRow zone="chat" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
+            {!isSearching && <ZonePresetRow zone="chat" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings} onRemoveEntry={removeZonePresetEntry}/>}
             <ZoneGroupFields zone="chat" ctx={renderCtx} density={density} />
           </>
         )
@@ -593,7 +619,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.cc}</h3>}
-            {!isSearching && <ZonePresetRow zone="cc" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
+            {!isSearching && <ZonePresetRow zone="cc" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings} onRemoveEntry={removeZonePresetEntry}/>}
             <ZoneGroupFields zone="cc" ctx={renderCtx} density={density} />
             {!isSearching && <Group title="布局编辑">
               <button type="button" className="ps-btn primary"
@@ -612,7 +638,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.right}</h3>}
-            {!isSearching && <ZonePresetRow zone="right" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
+            {!isSearching && <ZonePresetRow zone="right" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings} onRemoveEntry={removeZonePresetEntry}/>}
             <ZoneGroupFields zone="right" ctx={renderCtx} density={density} />
           </>
         )

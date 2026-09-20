@@ -15,6 +15,10 @@ export type PresetName =
   | 'agent-command'
   | 'agent-map'
   | 'focus-flow'
+  // 刀7：两条「默认预设」——与预设同定位（同形状、同应用路径），唯一触达是
+  // 「重置主题」；**不进 GLOBAL_PRESETS**，故列表与区域池都看不到它们。
+  | 'gui-default'
+  | 'terminal-default'
 
 export interface GlobalPreset {
   name: PresetName

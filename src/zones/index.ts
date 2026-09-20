@@ -6,9 +6,11 @@ export {
   cleanupZonePresetEntries,
   createZonePresetEntryId,
   deriveZonePresetPool,
+  isCustomZonePresetEntry,
   normalizeZonePresetEntries,
   normalizeZonePresetValues,
+  removeZonePresetEntryReducer,
   resolveZonePresetEntryTheme,
   zonePresetsFor,
 } from './zonePresetPool.ts'
-export type { ZonePresetEntry, ZonePresetPool } from './zonePresetPool.ts'
+export type { ZonePresetEntry, ZonePresetPool, ZonePresetRemovalPatch, ZonePresetRemovalState } from './zonePresetPool.ts'

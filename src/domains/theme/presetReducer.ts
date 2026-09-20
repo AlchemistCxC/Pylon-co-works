@@ -122,12 +122,22 @@ export function applyInputVariantInvariant(
 }
 
 /**
- * 单字段写入（D1 校验漏斗）：写入字段 + 该 zone 标记 custom（基准不动）。
+ * 单字段写入（D1 校验漏斗）：写入字段 +（`markCustom` 为真时）该 zone 标记 custom（基准不动）。
+ *
+ * `markCustom`（刀7 §六 / #214）：这次写入**算不算「用户触碰」**由调用方声明。呈现方案
+ * （界面模式 / 呈现风格的 token）写字段是**模式自身的基准**，不是用户手改；若照旧置 custom，
+ * 全局派生命中「任一 zone custom ⇒ custom」，预设行就亮出兜底的「自定义」chip
+ *（重置主题、切换界面模式都会踩到）。默认 `true` ⇒ 既有调用点行为零变化。
  * 漏斗内聚三条布局不变量（此前只在 setCcHeight/预设 action/migrate 各自维护）：
  * - inputVariant↔inputMode 联动（cli ⟺ cli，否则 inputMode=default）
  * - ccHeight clamp（≥ resolveCcMinHeight 布局约束真值）
  */
-export function setZoneFieldReducer(state: ThemePresetState, zone: string, partial: Record<string, unknown>): ThemePresetPatch {
+export function setZoneFieldReducer(
+  state: ThemePresetState,
+  zone: string,
+  partial: Record<string, unknown>,
+  markCustom = true,
+): ThemePresetPatch {
   // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
   const patch = applyInputVariantInvariant(partial, state)
 
@@ -166,7 +176,7 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
 
   return {
     ...patch,
-    ...markZoneCustom(state, zone),
+    ...(markCustom ? markZoneCustom(state, zone) : {}),
   }
 }
 

@@ -139,6 +139,14 @@ export function normalizeZonePresetValues(
   return { values: kept as Partial<ThemeSettings>, droppedKeys }
 }
 
+/**
+ * 出厂条目 vs 自定义条目的唯一判据：出厂条目存引用（`source`），自定义条目存值快照。
+ * 铁律 1（出厂预设不允许改、也不允许删）在 UI 与数据两侧都以它为闸门。
+ */
+export function isCustomZonePresetEntry(entry: ZonePresetEntry): boolean {
+  return entry.values !== undefined
+}
+
 /** 清理后是否已无任何有效字段（⇒ 该条目退化为行内占位）。 */
 function isEntryStale(entry: ZonePresetEntry): boolean {
   if (!entry.values) return false
@@ -205,6 +213,48 @@ export function createZonePresetEntryId(
   const id = `${baseId}-${suffix}`
   generatedZonePresetEntryIds.add(id)
   return id
+}
+
+// ── 删除（刀7 前置 / #211） ─────────────────────────────────────────
+
+export interface ZonePresetRemovalState {
+  zonePresetEntries: readonly ZonePresetEntry[]
+  appliedPreset: Record<string, string>
+  custom: Record<string, boolean>
+}
+
+export interface ZonePresetRemovalPatch {
+  zonePresetEntries: ZonePresetEntry[]
+  appliedPreset?: Record<string, string>
+  custom?: Record<string, boolean>
+}
+
+/**
+ * 删除一条**自定义**区域预设条目。形态对齐全局先例 `removeCustomPresetReducer`：
+ *
+ * - 出厂条目**不可删**：它们由构建时派生表持有、从不进入 `zonePresetEntries`，
+ *   故传出厂预设名（即条目 id）是 no-op——同一份闸门同时挡住 UI 与任意调用方。
+ * - 引用它的区域**失去基准**：`appliedPreset[zone]=''` + `custom[zone]=true`，
+ *   **字段保留现值**（与全局删除链同语义：不是回默认态，是「无基准的自定义快照」）。
+ * - 未命中 ⇒ 原样返回 `zonePresetEntries` 引用，调用方据此跳过写状态。
+ */
+export function removeZonePresetEntryReducer(
+  state: ZonePresetRemovalState,
+  id: string,
+): ZonePresetRemovalPatch {
+  const entries = state.zonePresetEntries.filter(entry => entry.id !== id)
+  if (entries.length === state.zonePresetEntries.length) {
+    return { zonePresetEntries: state.zonePresetEntries as ZonePresetEntry[] }
+  }
+  const appliedPreset = { ...state.appliedPreset }
+  const custom = { ...state.custom }
+  for (const [zone, value] of Object.entries(appliedPreset)) {
+    if (value === id) {
+      appliedPreset[zone] = ''
+      custom[zone] = true
+    }
+  }
+  return { zonePresetEntries: entries, appliedPreset, custom }
 }
 
 // ── 查询与消费 ─────────────────────────────────────────────────────
