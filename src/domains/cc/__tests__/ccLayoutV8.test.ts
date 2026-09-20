@@ -45,9 +45,33 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     expect(normalized.placements.tokens).toEqual(DEFAULT_CC_LAYOUT.placements.tokens)
   })
 
-  it('不在白名单里的版本整份回落默认布局', () => {
-    const v7 = { version: 7, placements: { model: { slot: 'actions' as const, order: 9, offsetX: 11, offsetY: -3 } } }
+  it('v7 老布局不被重置（版本白名单补 7，#197）', () => {
+    // v7 时代磁盘上还是旧名单（含 session / ekg 等已删 id）与 legacy `send`
+    const v7 = {
+      version: 7,
+      placements: {
+        model: { slot: 'actions' as const, order: 9, offsetX: 11, offsetY: -3 },
+        tokens: { slot: 'status-primary' as const, order: 1, offsetX: -2, offsetY: 4 },
+        session: { slot: 'status-secondary' as const, order: 6, offsetX: 0, offsetY: 0 },
+        ekg: { slot: 'status-primary' as const, order: 2, offsetX: 3, offsetY: 1 },
+        send: { slot: 'actions' as const, order: 4, offsetX: 8, offsetY: -1 },
+      },
+    }
     const normalized = normalizeCcLayout(v7 as unknown as Partial<CcLayoutV3>)
+    expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
+    // 现役 id 的位置保留
+    expect(normalized.placements.model).toMatchObject({ slot: 'actions', order: 9, offsetX: 11, offsetY: -3 })
+    expect(normalized.placements.tokens).toMatchObject({ slot: 'status-primary', order: 1, offsetX: -2, offsetY: 4 })
+    // legacy `send` 键名换、位置不动
+    expect(normalized.placements['cc-send-button']).toMatchObject({ slot: 'actions', order: 4, offsetX: 8, offsetY: -1 })
+    // 已删 id 自然丢弃
+    expect(Object.keys(normalized.placements)).not.toContain('session')
+    expect(Object.keys(normalized.placements)).not.toContain('ekg')
+  })
+
+  it('不在白名单里的版本整份回落默认布局', () => {
+    const v2 = { version: 2, placements: { model: { slot: 'actions' as const, order: 9, offsetX: 11, offsetY: -3 } } }
+    const normalized = normalizeCcLayout(v2 as unknown as Partial<CcLayoutV3>)
     expect(normalized.placements.model).toEqual(DEFAULT_CC_LAYOUT.placements.model)
   })
 })

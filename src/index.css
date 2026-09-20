@@ -110,7 +110,7 @@
   --text-faint: color-mix(in srgb, var(--text) 4%, transparent);
 
   --brand-node-ready: var(--tool-ok, #56d38b);
-  --brand-node-warn: var(--ekgYellow, #f2c94c);
+  --brand-node-warn: var(--state-warning, #f2c94c);
   --brand-node-error: var(--spinner-stalled-color, #ff7188);
   --brand-halo: color-mix(in srgb, var(--accent) 32%, transparent);
   --motion-fast: 120ms;

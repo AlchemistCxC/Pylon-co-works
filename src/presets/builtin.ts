@@ -1,11 +1,12 @@
 /** 预设层 · 内置预设数据：RAW_GLOBAL_PRESETS → GLOBAL_PRESETS。 */
 
-import type { GlobalPreset } from './types.ts'
+import type { GlobalPreset, PresetInterfaceMode } from './types.ts'
 import { completeTerminalPreset } from './completion.ts'
 
 const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   {
     name: 'claude',
+    interfaceMode: 'terminal',
     label: 'Claude 风格',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -78,6 +79,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'glass',
+    interfaceMode: 'gui',
     label: 'Glass Light',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -154,6 +156,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'nord',
+    interfaceMode: 'terminal',
     label: 'Nord Frost',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -227,6 +230,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'tokyo',
+    interfaceMode: 'terminal',
     label: 'Tokyo Night',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -302,6 +306,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'solarized',
+    interfaceMode: 'gui',
     label: 'Solarized Light',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -376,6 +381,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'amber',
+    interfaceMode: 'terminal',
     label: 'Amber CRT',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -455,6 +461,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'matrix',
+    interfaceMode: 'terminal',
     label: 'Matrix 磷绿',
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
@@ -533,6 +540,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'agent-command',
+    interfaceMode: 'gui',
     label: 'Agent 指挥台',
     presentationProfileId: 'builtin.presentation.agent-command',
     theme: {
@@ -576,6 +584,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'agent-map',
+    interfaceMode: 'gui',
     label: 'Agent 关系图',
     presentationProfileId: 'builtin.presentation.agent-map',
     theme: {
@@ -619,6 +628,7 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'focus-flow',
+    interfaceMode: 'gui',
     label: '专注流程',
     presentationProfileId: 'builtin.presentation.focus-flow',
     theme: {
@@ -664,6 +674,23 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
 
 /** Public registry: terminal presets are projected to complete snapshots. */
 export const GLOBAL_PRESETS: GlobalPreset[] = RAW_GLOBAL_PRESETS.map(completeTerminalPreset)
+
+/**
+ * 刀5（#201）：界面模式 → 预设归属桶。
+ * 归属表只有 GUI / 终端 两桶（用户 2026-09-19 拍板）；`tactical-blue` 是独立插入的
+ * 界面模式、与预设轴零交集 ⇒ 不在映射内（其模式下预设菜单不出现），插件贡献的
+ * 未登记模式同理不出现。
+ */
+export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfaceMode>> = Object.freeze({
+  'modern-gui': 'gui',
+  'terminal-like': 'terminal',
+})
+
+/** 当前界面模式下可出现在预设菜单第二级的预设（桶未登记 ⇒ 空数组 = 菜单不出现）。 */
+export function presetsForInterfaceMode(interfaceMode: string): GlobalPreset[] {
+  const bucket = INTERFACE_MODE_PRESET_BUCKET[interfaceMode]
+  return bucket ? GLOBAL_PRESETS.filter(preset => preset.interfaceMode === bucket) : []
+}
 
 /**
  * #116 子项 7：「全局预设」行的兜底 chip 判据（从 Settings.tsx 抽出以便单测）。

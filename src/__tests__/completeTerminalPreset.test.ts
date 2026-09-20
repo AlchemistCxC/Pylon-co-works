@@ -9,7 +9,7 @@ const UNREGISTERED_PRESET_NAMES = ['glass', 'agent-command', 'agent-map', 'focus
 describe('completeTerminalPreset', () => {
   it('未登记视觉补全的预设原样返回（同一引用、主题不被改写）', () => {
     for (const name of UNREGISTERED_PRESET_NAMES) {
-      const preset: GlobalPreset = { name, label: name, theme: { accent: '#123456' } }
+      const preset: GlobalPreset = { name, label: name, interfaceMode: 'gui', theme: { accent: '#123456' } }
 
       expect(completeTerminalPreset(preset)).toBe(preset)
       expect(preset.theme).toEqual({ accent: '#123456' })
@@ -20,6 +20,7 @@ describe('completeTerminalPreset', () => {
     const completed = completeTerminalPreset({
       name: 'claude',
       label: 'Claude',
+      interfaceMode: 'terminal',
       theme: { accent: '#123456', uiScheme: 'light' },
     }).theme
 
@@ -36,6 +37,7 @@ describe('completeTerminalPreset', () => {
     const preset: GlobalPreset = {
       name: 'claude',
       label: 'Claude',
+      interfaceMode: 'terminal',
       theme: { ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT) },
     }
     const before = structuredClone(preset.theme.ccLayout)

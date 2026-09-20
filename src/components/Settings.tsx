@@ -8,8 +8,8 @@ import { useRuntimeStore } from '../runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
-import { GLOBAL_PRESETS, fallbackPresetChip } from '../presets/index.ts'
-import { pickZoneFields } from '../zones/index.ts'
+import { INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
+import { resolveZonePresetEntryTheme, zonePresetsFor, type ZonePresetEntry } from '../zones/index.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
@@ -43,6 +43,7 @@ import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed,
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { useRightRailStore } from '../rightRailStore.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
@@ -68,17 +69,43 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
   )
 }
 
-function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
-  zone: string; activeName: string; isDirty: boolean; onApply: (zone: string, name: string) => void
+/**
+ * 刀6（#206）：区域预设行。候选不再是「平铺 10 个整体预设」，而是该
+ * (界面模式桶, 区域) 的池条目——出厂条目（存引用，应用时现场切）+ 自定义条目（存值快照）。
+ * 未登记归属桶的界面模式（如 tactical-blue）⇒ 池为空 ⇒ **整组不渲染**（与刀5 同口径）。
+ */
+function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSaveCurrent }: {
+  zone: ZonePresetEntry['zone']; interfaceMode: string; activeName: string; isDirty: boolean
+  onApply: (zone: ZonePresetEntry['zone'], entry: ZonePresetEntry) => void
+  onSaveCurrent: (zone: ZonePresetEntry['zone'], name: string) => void
 }) {
+  const customEntries = useStore(s => s.zonePresetEntries)
+  const entries = zonePresetsFor(interfaceMode, zone, customEntries)
+  const [entryName, setEntryName] = useState('')
+  if (entries.length === 0) return null
   return (
     <Group title="局部预设">
       <div className="set-preset-row">
-        {GLOBAL_PRESETS.map(p => (
-          <button type="button" key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
-            onClick={() => onApply(zone, p.name)}>{p.label}</button>
+        {entries.map(entry => (
+          <button type="button" key={entry.id}
+            className={`set-preset-chip ${activeName === entry.id && !isDirty ? 'active' : ''}`}
+            aria-current={activeName === entry.id && !isDirty ? 'true' : undefined}
+            // Q8：清理后已无有效字段的自定义条目 = 行内占位（灰显、不可应用）；不给用户开关。
+            disabled={entry.stale === true}
+            title={entry.stale
+              ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
+              : entry.sources && entry.sources.length > 0
+                ? `与该条目同形的来源：${entry.sources.join('、')}`
+                : undefined}
+            onClick={() => onApply(zone, entry)}>{entry.label}</button>
         ))}
         {isDirty && <span className="set-preset-chip active">自定义</span>}
+      </div>
+      <div className="set-hint">只改本区外观参数，自动切换为自定义；改动后可存成属于本区的自定义条目</div>
+      <div className="set-custom-preset-save">
+        <input className="set-input" value={entryName} onChange={event => setEntryName(event.target.value)} placeholder="区域预设名称" />
+        <button type="button" className="ps-btn sm" disabled={!entryName.trim()} title={entryName.trim() ? undefined : '保存必须命名'}
+          onClick={() => { onSaveCurrent(zone, entryName); setEntryName('') }}>存当前</button>
       </div>
     </Group>
   )
@@ -119,6 +146,11 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const custom = useStore(s => s.custom)
   // A2：全局预设状态派生（任一 zone 触碰/基准不一致 → custom），原 appliedPreset.global 直读退役
   const globalStatus = useStore(s => deriveGlobalStatus(s))
+  // 刀5（#201，UI 二次修订 2026-09-19）：预设区直接显示当前界面模式对应的预设
+  // （presetsForInterfaceMode），随界面模式切换自动跟随；「GUI / 终端」的选择只在
+  // 「界面模式」Group 里发生。当前模式不在归属表内（如 tactical-blue）⇒ 整组不出现。
+  const currentInterfaceMode = useInterfaceModeStore(s => s.interfaceMode)
+  const modeBucket = INTERFACE_MODE_PRESET_BUCKET[currentInterfaceMode]
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
@@ -137,6 +169,11 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const saveCustomPreset = useStore(s => s.saveCustomPreset)
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
+  // 刀6（#206）：区域预设池自定义条目的存入口 + Q8 落盘清理（每次打开设置过一遍，
+  // 读入容错也在此收口；无变化不写状态）。
+  const saveZonePresetEntry = useStore(s => s.saveZonePresetEntry)
+  const pruneZonePresetEntries = useStore(s => s.pruneZonePresetEntries)
+  useEffect(() => { pruneZonePresetEntries() }, [pruneZonePresetEntries])
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   // #154 阶段 4：activeDomain/activeSection/activePluginPageId 已在函数顶部由 sheet 状态派生。
   const { settingsContributionCatalog, pluginSettingsPages, rendererRegistrySnapshot, activeRendererSuiteId } = useSettingsContributionCatalog()
@@ -225,12 +262,23 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   // 搜索时隐藏手写组（预设/布局骨架/窗口/配置备份等非主题字段），只留命中的自动字段组
   const isSearching = searchQuery.trim().length > 0
 
-  // 局部预设（zone 级别）
-  const applyLocalPreset = (zone: string, presetName: string) => {
-    const preset = GLOBAL_PRESETS.find(p => p.name === presetName)
-    if (!preset) return
-    const sub = pickZoneFields(preset.theme, zone)
-    applyZonePreset(zone, presetName, sub)
+  // 局部预设（zone 级别）：出厂条目现场切来源预设、自定义条目直接用值快照。
+  // 出厂条目的 id === 来源预设名 ⇒ appliedPreset[zone] 记的名字与刀5 完全一致。
+  const applyLocalPreset = (zone: ZonePresetEntry['zone'], entry: ZonePresetEntry) => {
+    const theme = resolveZonePresetEntryTheme(entry)
+    if (!theme) return
+    applyZonePreset(zone, entry.id, theme)
+  }
+
+  // 「存当前为自定义」：存 = pickZoneFields(当前主题, zone)，随后立刻应用同一条目，
+  // 使新条目成为该区基准（与全局预设「保存当前」后立即应用同一交互）。
+  const saveZonePresetEntryFromSettings = (zone: ZonePresetEntry['zone'], name: string) => {
+    if (!modeBucket) return
+    const id = saveZonePresetEntry(modeBucket, zone, name)
+    if (!id) return
+    const entry = useStore.getState().zonePresetEntries.find(item => item.id === id)
+    const theme = entry ? resolveZonePresetEntryTheme(entry) : null
+    if (theme) applyZonePreset(zone, id, theme)
   }
 
   /**
@@ -242,14 +290,14 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     const isOverwrite = Boolean(id)
     try {
       const savedId = saveCustomPreset(name, id)
-      resolveSettingsError(isOverwrite ? '覆盖自定义预设' : '保存自定义预设')
+      resolveSettingsError(isOverwrite ? '覆盖已有自定义预设' : '保存自定义预设')
       setCustomPresetFeedback({
         kind: 'success',
         message: isOverwrite ? '自定义预设已覆盖' : '自定义预设已保存',
       })
       return savedId
     } catch (error) {
-      const action = isOverwrite ? '覆盖自定义预设' : '保存自定义预设'
+      const action = isOverwrite ? '覆盖已有自定义预设' : '保存自定义预设'
       const detail = reportSettingsError(action, error)
       setCustomPresetFeedback({ kind: 'error', message: `${action}失败：${detail.message}` })
       return undefined
@@ -459,10 +507,12 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <Group title="界面模式"><InterfaceModePicker /></Group>}
-            {!isSearching && <Group title="全局预设">
+            {!isSearching && modeBucket && <Group title="全局预设">
+              {/* 刀5（#201，UI 二次修订）：直接显示当前界面模式归属桶的预设 chips（随模式切换跟随）。 */}
               <div className="set-preset-row">
-                {GLOBAL_PRESETS.map(p => (
+                {presetsForInterfaceMode(currentInterfaceMode).map(p => (
                   <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
+                    aria-current={globalStatus === p.name ? 'true' : undefined}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}
                 {/* #116 子项 7：兜底 chip 原先直接输出 globalStatus 原文——它是 'custom'
@@ -471,13 +521,13 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
                     具名列表负责（此处不出兜底），'custom' 哨兵显示为「自定义」，其余
                     无法识别的值显示为「未知预设」并把原值留在 title/data 上供排查。 */}
                 {fallbackPresetChipView && (
-                  <button type="button" className="set-preset-chip active"
+                  <button type="button" className="set-preset-chip active" aria-current="true"
                     title={fallbackPresetChipView.title} data-preset-status={globalStatus}>{fallbackPresetChipView.label}</button>
                 )}
               </div>
               <div className="set-hint">
                 {globalStatus === 'custom'
-                  ? '当前为自定义 — 可保存为新预设或覆盖已有预设'
+                  ? '当前为自定义 — 可保存为新预设或覆盖已有自定义预设'
                   : '选择预设后修改任意外观参数，自动切换为自定义'}
               </div>
               <div className="set-custom-preset-save">
@@ -525,7 +575,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.sidebar}</h3>}
             {!isSearching && <Group title="模块"><SidebarModulesPanel /></Group>}
-            {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
+            {!isSearching && <ZonePresetRow zone="sidebar" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
             <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>
         )
@@ -533,7 +583,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <Group title="渲染风格"><PresentationProfilePicker /></Group>}
-            {!isSearching && <ZonePresetRow zone="chat" activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset}/>}
+            {!isSearching && <ZonePresetRow zone="chat" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
             <ZoneGroupFields zone="chat" ctx={renderCtx} density={density} />
           </>
         )
@@ -543,7 +593,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.cc}</h3>}
-            {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
+            {!isSearching && <ZonePresetRow zone="cc" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
             <ZoneGroupFields zone="cc" ctx={renderCtx} density={density} />
             {!isSearching && <Group title="布局编辑">
               <button type="button" className="ps-btn primary"
@@ -562,7 +612,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <>
             {!isSearching && <h3>{SETTINGS_SECTION_LABELS.right}</h3>}
-            {!isSearching && <ZonePresetRow zone="right" activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset}/>}
+            {!isSearching && <ZonePresetRow zone="right" interfaceMode={currentInterfaceMode} activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset} onSaveCurrent={saveZonePresetEntryFromSettings}/>}
             <ZoneGroupFields zone="right" ctx={renderCtx} density={density} />
           </>
         )
