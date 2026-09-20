@@ -174,3 +174,59 @@ A1（折叠态惰性渲染）与 A2（缓存字符预算）本身就是②清单
 - **`Box<RawValue>` payload 透传：不做**。#205 之后读路径的峰值已从 413.2MB 降到 13.4MB，
   它要解决的「payload 树物化」不再是瓶颈，而改动会贯穿 `CanonicalEventRow` 的读/写/测试三面。
 - **`rustc-hash`/`smallvec`：不做**（无 profile 支撑，属猜测性优化；本轮实测说明该处的瓶颈是行数而非常数因子）。
+
+## 追加（2026-09-20 12）：ADR-0016 批准后，③ 重新落地
+
+用户批准「跨度占位进入已提交序列」立 ADR ⇒ 立 `.agents/decisions/0016-span-occupancy-in-committed-sequence.md`
+（含 T3-2 draft 尾巴的裁决：**在途照常聚合，不豁免**——判据是可重放性（跨度可展开），不是行形态）。
+
+**落地内容**（commit `72b92499`）：
+
+- 写侧 `ingest_kernel_events`：**顺序流式**折叠（边归一化边收 run，非折叠/终态行之前 flush）。
+  为什么不是「先全归一化再折」：终态会在同事务追写 `turn.unit` 多占一个 sequence，
+  整窗预分配编号会与之冲突。span 占位不重排后续行 ⇒ `expectedRevision`（max sequence）语义不变。
+  收口直接复用读侧 `flush_delta_run`，全仓只有一份折叠规则。窗口边界处 run 自然断开。
+- dispatcher：结果与输入**按跨度宽度展开**配对（`row_input_span_width`），span 内每个 wire 帧都
+  记在承载它的那一行上。
+- 游标：连续性判据由「下一号 == 该行 sequence」放宽为「该行跨度**覆盖**下一号」；到货行自己覆盖
+  下一号时**不再回库补读**。覆盖半边（`turn.unit` 的 rollup）一字未改。
+- 判据改写：`rowSemantics.test.ts` 占用组 2 条「现状」+1 条 `it.todo` 目标 → 3 条新契约用例
+  （覆盖推进 / seed 到跨度内部不补读 / 不覆盖仍报 gap），职责边界用例保留；
+  T1 的 `keeps_each_row...` 改名为 `folds_adjacent_rows...` 并更新期望（契约变更，非修 bug，
+  两处均在测试内引用 ADR-0016）。覆盖组与「不覆盖仍报 gap」保持原样。
+
+**S4 读数**（release，2 万 chunk 按 dispatcher 的 32 行窗口写入，文件库 + checkpoint）：
+
+| 形态 | 落盘行数 | 写耗时 | WAL | 库占用（checkpoint 后） | 每行字节 |
+| --- | --- | --- | --- | --- | --- |
+| 不折叠（改造前形态） | 20,000 | 197ms | 4.14MB | 8.27MB | 413 |
+| 写侧折叠（ADR-0016） | **625** | **140ms** | 4.17MB | **5.56MB** | 8,893 |
+
+**如实说明与 ADR 预期的差距**：ADR 里写的是「落盘行数降 1–2 个数量级、存储降约 2 个数量级」。
+实测**行数降 32×（= 窗口宽度）**、**存储降 1.49×**、**WAL 不变**：
+
+- 行数只降窗口宽度那么多个，因为折叠是**窗口内**的（32 行/8ms），不是「每消息 600 行 → 1 行」；
+  要拿到 600× 需要跨窗口累积 run 到回合边界，那会改动 flush 语义（在途行的落盘时机）——属 T3-2 的下一层，
+  需另行裁决（当前 ADR 只裁决了「在途是否聚合」，没裁决「跨窗口累积」）。
+- 存储降幅按「每行固定列开销 ≈135B」成比例：合成载荷每 chunk 仅 ~50B，故 8.27→5.56MB；
+  真实会话载荷更大（每 chunk 150–600B），固定开销占比更低 ⇒ 真实库的存储降幅会**小于** 1.49×。
+- WAL 不变是**符合预期**的：WAL 收益来自批事务（T1 已吃：23.5MB → 1.65MB / 1200 chunk），
+  行数折叠不改变总载荷字节。
+
+门禁：`cargo test --workspace --lib` **1260 例**、`npx vitest run` **610 文件 / 4464 例**、
+`bun run build`、`check:ipc` —— 全绿（退出码均 0）。
+
+## 事故记录：共享工作树被 reset，本轮未提交改动一次丢失
+
+本轮施工中途（12:13 左右）共享工作树被 `checkout main` → `checkout Ru5t/Reflector` → `reset`
+（`git reflog` 可见 `93665885 HEAD@{0}: reset: moving to HEAD`；stash 列表里只有一条与本轮无关的
+`Ru5t/issue-106-test-harness` 条目）。后果：
+
+- **我这一轮的 ADR-0016 未提交改动全部丢失**（event_repo 的写侧折叠与测试、dispatcher 配对与判据、
+  游标跨度感知、`rowSemantics` 判据改写）——已按同一内容**重新落地并立即提交**（`72b92499`），
+  复跑两端门禁确认与丢失前一致；
+- **其他 agent 在途的未提交改动同样不在了**（`src-tauri/src/dispatcher/mod.rs` 的 persona 剥离、
+  `src-tauri/src/session/persist.rs`、`builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例）。
+  这三处**不在我的文件域**，我未代为恢复——请对应作者从自己侧重新落地（若你已提交到别处则忽略）。
+- 教训（建议写进 AGENTS 或 L.md 抬头）：共享工作树里**不要久留未提交改动**；本轮后半段已改为
+  「每片落地即提交 + 推送」。
