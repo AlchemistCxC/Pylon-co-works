@@ -1,3 +1,9 @@
+/// #208 ④：全局分配器（mimalloc）。Rust 侧的热路径以「逐行 payload 解码 / 归一化 / 短命小对象」
+/// 为主，系统分配器在这类形态上开销明显；换用 mimalloc 的收益必须由基准实测支持，
+/// 未达阈值即回退（记录见 `.agents/records/`）。
+#[global_allocator]
+static PYLON_GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod acp;
 pub use pylon_core::agent_catalog;
 mod agent_config;
