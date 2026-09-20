@@ -397,3 +397,16 @@
 **不碰**：插件四样契约（`RenderKindDefinition`/`RendererSlotContribution`/`RenderSurface`/fallback/documentSchema）、`src/plugins/**`、Suite 接缝、IPC wire 与持久化格式、`src-tauri/src/session/event_repo.rs` 的存储与事务语义（只换类型来源）、`src-tauri/src/dispatcher/**`、他人一切文件域。
 
 **工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
+
+---
+
+[2026-09-21 11] [Miyaki Kumo] [#217]
+
+**开工：issue217（ADR-0017 活性权威上移内核——在途回合一等事实）。** 在 `Ru5t/Reflector` 上施工，spec 见 `.agents/spec/217-turn-liveness-kernel-authority.md`。本轮文件域，请勿改写、勿连带提交：
+
+- 内核：`src-tauri/src/session/model.rs`（在途回合标记字段）、`src-tauri/src/session/prompt.rs`（置位/清理）、`src-tauri/src/runtime.rs`（查询面输出 + 诊断计数）
+- 前端：`src/domains/workbench/workbenchRuntime.ts`、`src/domains/workbench/generationLedgerSummary.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src/infrastructure/acp/sessionClient.ts`
+- 测试：上述文件对应内联/`__tests__`
+- 文档：`docs/说明书/Pylon-项目架构参考.md`（活性一段）、`.agents/spec/217-*.md`、`.agents/records/`、本文件
+
+**不碰**：`src-tauri/src/acp/turn_ledger.rs`（账本本体只读复用）、`src-tauri/src/dispatcher/**`、`src-tauri/src/session/persist.rs`、`tools/**`、`src/presets/**`、`src/zones/**`、他人一切文件域。
