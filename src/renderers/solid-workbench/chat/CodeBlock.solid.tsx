@@ -11,7 +11,8 @@ export interface SolidCodeBlockProps {
   showLanguage?: boolean
   showCopyButton?: boolean
   wrap?: 'soft' | 'none'
-  palette?: string}
+  palette?: string
+}
 
 /**
  * C00：content.code 的 Solid surface。

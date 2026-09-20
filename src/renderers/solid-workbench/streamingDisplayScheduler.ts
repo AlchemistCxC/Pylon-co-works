@@ -467,11 +467,16 @@ export function createStreamingDisplayScheduler(
     }
 
     // 判据 C：行 key 只在同一会话内可比；换会话/换 owner 后两份集合都无意义。
-    if (displayed.sessionId !== snapshot.sessionId || displayed.ownerKey !== snapshot.ownerKey) {
+    const sameBinding = displayed.sessionId === snapshot.sessionId
+      && displayed.ownerKey === snapshot.ownerKey
+    if (!sameBinding) {
       midRevealKeys.clear()
       growingKeys.clear()
+    } else {
+      // 跨会话不记账：id+role 可能撞 key（ACP 消息 id 常从 0 起），会把新会话的行
+      // 误判成"在长"（今天有"提升即全量"自愈，但那是巧合而非契约）。
+      noteObservedGrowth(displayed, snapshot, growingKeys)
     }
-    noteObservedGrowth(displayed, snapshot, growingKeys)
 
     if (requiresReplacementFlush(displayed, snapshot)) {
       clearTimer()
@@ -562,8 +567,10 @@ export function createStreamingDisplayScheduler(
     paused = false
     if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
     if (target === undefined || displayed === undefined) return
-    // 暂停期间的快速增长也要记进判据 C（resume 不走 push）。
-    noteObservedGrowth(displayed, target, growingKeys)
+    // 暂停期间的快速增长也要记进判据 C（resume 不走 push）——同样只在同一绑定内记账。
+    if (displayed.sessionId === target.sessionId && displayed.ownerKey === target.ownerKey) {
+      noteObservedGrowth(displayed, target, growingKeys)
+    }
     // 判据 A：后台攒下来的历史（非生成态、无行在揭示中）整发，不从预算里爬。
     if (!interpolateHistory && target.generating !== true && midRevealKeys.size === 0
       && hasPendingTextGrowth(displayed, target)) {

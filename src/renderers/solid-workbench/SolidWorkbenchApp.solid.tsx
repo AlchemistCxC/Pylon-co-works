@@ -665,6 +665,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   if (!followBottom()) return
                   queueBottomFollow()
                 }}
+                rowLive={item => isAuthoritativelyLive(props.context, item.descriptor.renderMessage.message)}
                 scrollViewport={() => chatViewport}
                 scrollPosture={() => followBottom() ? 'follow' : 'pin'}
               />

@@ -227,7 +227,7 @@ function rememberGraftBase(text: string, model: MarkdownRoot): void {
   }
 }
 
-/** 只读读数（真机探针与单测用）：基座条数与占用的字符量。 */
+/** 只读读数：基座条数与占用的字符量。当前消费方是单测与真机探针（尚未接入 S0 读数面板）。 */
 export function graftBaseStats(): { readonly entries: number; readonly chars: number } {
   return { entries: graftBases.size, chars: graftBaseChars }
 }

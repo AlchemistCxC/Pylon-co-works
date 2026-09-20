@@ -81,7 +81,10 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     if (destroyed || paused) return
     const startedAt = performance.now()
     setRuntimeSnapshot(snapshot)
-    setRevealingRows(streamingDisplay.revealingRows())
+    // 必须传**快照拷贝**：调度器里那份是原地变异的同一实例，恒等引用会让 Solid 的
+    // 默认 `equals`（a === b）判定"没变" ⇒ 信号永不通知订阅者（今天靠同时读
+    // runtimeSnapshot 搭便车才对，任何新消费方都会静默读到陈旧集合）。
+    setRevealingRows(new Set(streamingDisplay.revealingRows()))
     // P89/S5a 只读：发布耗时（含 Solid 提交）。不含布局/绘制——那部分用帧间隔代理观测。
     publishCost.record(performance.now() - startedAt)
   })

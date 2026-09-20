@@ -25,6 +25,16 @@ export interface PlainMessageListProps {
    * `'pin'` = 用户自己控制位置——上方内容的高度变化必须补偿，否则用户正在读的行会被挤走。
    */
   scrollPosture?: () => 'follow' | 'pin'
+  /**
+   * #213：包装层 `data-streaming` 的判据。缺省回落 `message.running`（legacy 夹具不变），
+   * 生产接权威活性。
+   *
+   * 为什么单列一个 prop：正文行自己的 `data-streaming` 走 `MessageRow` 的 `live()`，
+   * 但 CSS 里还有一条只看**包装层**属性的旁路（`.plain-message-list__row[data-streaming]`
+   * 的 sweep 动画与脉冲竖条）。只改内层会让"重放出的无终态行"永久播放生成动画——
+   * 正是 #213 要消灭的症状。
+   */
+  rowLive?: (item: MessageListItem) => boolean
 }
 
 /**
@@ -59,6 +69,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
   // 让整窗行重建）。整批换代（会话切换）时重置为初始值再逐帧扩。
   const [mounted, setMounted] = createSignal((props.initialItems ?? []).length)
   let mountFrame: number | undefined
+  let mountExpansionTarget = 0
   const stopMountExpansion = () => {
     if (mountFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(mountFrame)
     mountFrame = undefined
@@ -68,13 +79,17 @@ export function PlainMessageList(props: PlainMessageListProps) {
    * `total` 必须显式传入：调用点可能早于 `setRows`，读 `rows()` 会拿到旧长度。
    */
   const scheduleMountExpansion = (total: number) => {
+    // 目标存进**可变变量**而不是 rAF 闭包：换代（冷开 A 的扩窗还没跑完就切到更长的 B）
+    // 时必须用最新总长，否则挂起的帧会按旧会话的行数收敛，新会话头部行永远不挂载。
+    mountExpansionTarget = total
     if (destroyed || mountFrame !== undefined) return
     if (untrack(mounted) >= total) return
     if (typeof requestAnimationFrame !== 'function') { setMounted(total); return }
     mountFrame = requestAnimationFrame(() => {
       mountFrame = undefined
-      setMounted(Math.min(total, untrack(mounted) + MOUNT_WINDOW_STEP))
-      scheduleMountExpansion(total)
+      const target = mountExpansionTarget
+      setMounted(Math.min(target, untrack(mounted) + MOUNT_WINDOW_STEP))
+      scheduleMountExpansion(target)
     })
   }
   /** 行集合变化后决定窗口：整体换代重置、尾部追加不动、整批增长逐帧扩。 */
@@ -228,22 +243,31 @@ export function PlainMessageList(props: PlainMessageListProps) {
   // 贴底跟随（`'follow'`）时不做补偿——那一姿态下"内容长了就跟到底"才是意图。
   let anchor: { messageId: string; top: number } | undefined
 
-  /** 相对容器内容原点的行顶（与 getViewportState 同一口径）。 */
+  /**
+   * 相对**滚动视口**内容原点的行顶。基准必须是真正的滚动容器（App 传进来的
+   * `scrollViewport`，生产里是 `.chat-view`）——`container`（`.plain-message-list`）
+   * 自己不滚动，用它做基准时 `scrollTop` 恒为 0、且容器与行会一起被上方内容平移，
+   * 差量恒为 0 ⇒ 补偿变成死代码（而本组件同时关掉了原生锚定，等于完全没有锚定）。
+   */
   const rowTop = (messageId: string): number | undefined => {
     const node = rowElements.get(messageId)
-    if (!node || !container) return undefined
+    const viewport = props.scrollViewport?.()
+    if (!node || !viewport) return undefined
     const rect = node.getBoundingClientRect()
-    return rect.top - container.getBoundingClientRect().top + container.scrollTop
+    return rect.top - viewport.getBoundingClientRect().top + viewport.scrollTop
   }
 
   const captureAnchor = () => {
-    if (!container) { anchor = undefined; return }
-    const scrollTop = container.scrollTop
+    const viewport = props.scrollViewport?.()
+    if (!viewport) { anchor = undefined; return }
+    const scrollTop = viewport.scrollTop
+    const viewportRect = viewport.getBoundingClientRect()
     let best: { messageId: string; top: number } | undefined
     for (const [messageId, node] of rowElements) {
       const rect = node.getBoundingClientRect()
-      const top = rect.top - container.getBoundingClientRect().top + scrollTop
+      const top = rect.top - viewportRect.top + scrollTop
       const bottom = top + rect.height
+      // 视口下方、且离视口顶部最近的那一行 = 用户正在读的锚。
       if (bottom <= scrollTop) continue
       if (best === undefined || top < best.top) best = { messageId, top }
     }
@@ -251,14 +275,13 @@ export function PlainMessageList(props: PlainMessageListProps) {
   }
 
   const syncAnchorCompensation = () => {
+    const viewport = props.scrollViewport?.()
     const posture = props.scrollPosture?.() ?? 'follow'
-    if (posture === 'follow' || props.scrollViewport === undefined) {
+    if (posture === 'follow' || viewport === undefined) {
       anchor = undefined
       return
     }
     if (anchor === undefined) { captureAnchor(); return }
-    const viewport = props.scrollViewport()
-    if (!viewport) { anchor = undefined; return }
     const top = rowTop(anchor.messageId)
     if (top === undefined) { anchor = undefined; return }
     const delta = top - anchor.top
@@ -296,7 +319,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
             data-message-key={row.key}
             data-entry={row.entering ? 'new' : undefined}
             data-message-role={item.descriptor.renderMessage.message.role}
-            data-streaming={item.descriptor.renderMessage.message.running === true ? 'true' : undefined}
+            data-streaming={(props.rowLive?.(item) ?? item.descriptor.renderMessage.message.running === true) ? 'true' : undefined}
           >
             {props.renderItem(item)}
           </div>

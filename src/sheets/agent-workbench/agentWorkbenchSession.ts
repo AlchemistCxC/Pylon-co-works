@@ -601,7 +601,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (remaining.length === 0) turnClockRollback(targetSource)
     const existingActivity = runtime.getSnapshot().generationActivity
     updateRuntimeState({
-      generating: remaining.length > 0 || document.messages.some(message => message.running),
+      // #213：回滚后的活性只认"是否还有未撤销的乐观回合"——**不得**再看文档里有没有
+      // `running` 行。那条推断在权威化之后成了漏网语义：一个带截断残行的旧会话（无时钟、
+      // 无终态）会让被拒的发送把页脚永久顶成生成中。
+      generating: remaining.length > 0,
       generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
       generationActivity: remaining.length > 0
         ? existingActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: Date.now() })
@@ -780,10 +783,17 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
   }
 
-/** #213：实时文本帧——本进程订阅到的、正在写的正文（乐观/回声帧另走各自的时钟通道）。 */
+/**
+ * #213：实时**产出**帧——agent 正在写正文/思考（乐观帧与 user 回声另走各自的时钟通道）。
+ *
+ * 刻意排除 `role === 'user'`：user 帧不是"agent 在产出"的证据，而 `runningTailStartTime`
+ * 取的是文档里最早的 running 行，含陈旧截断行 ⇒ 会算出虚胖的 elapsed。
+ */
 function isLiveTextDelta(envelope: WorkbenchEventEnvelope): boolean {
   const type = envelope.event.type
-  return type === 'message.delta' || type === 'reasoning.delta'
+  if (type !== 'message.delta' && type !== 'reasoning.delta') return false
+  const role = (envelope.event as { role?: string }).role
+  return type === 'reasoning.delta' || role === 'assistant'
 }
 
 /** #213 补强：文档里首个 running 行的时间——他端已在进行中的回合，其起点不是"我们看见它"的时刻。 */
@@ -1004,6 +1014,11 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       loading = Boolean(session)
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
         ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
+        // #213：**必须**随这发空文档申报权威值。不申报时 merge 会继承上一个会话的
+        // `livenessSource`/`generating`（切走一个在途会话 ⇒ 空文档带 generating:true 发布一拍，
+        // 页脚闪一次 spinner、调度器还会按"直播"处理）。
+        livenessSource: 'clock',
+        livenessGenerating: turnClockGenerating(session?.source ?? ''),
       })
       if (session) {
         const pendingResponses = [
