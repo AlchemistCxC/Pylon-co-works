@@ -399,16 +399,3 @@
 **工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
 
 **与他域的交接（开工后观测到 #217 正在同一工作树施工）**：我在 04:01 观测到 `src-tauri/src/session/{model.rs,prompt.rs}` 正在被 #217 改写（263 行新增，纯追加、未被我的 `cargo fmt --all` 改动）。**我全程不碰这三个文件与 `runtime.rs`**；我的 `src-tauri/src/session/event_repo.rs` 改动与本域之外的 Rust 侧不交叉。**两处声明重叠，需留意**：`docs/说明书/Pylon-项目架构参考.md` 与 `.agents/records/`（#217 也声明了这两处）——我只在我自己的记录文件与说明书「前端计算核」一节落笔，不删改 #217 的活性段落。另：`src-tauri/Cargo.lock` 我因新增依赖而改写，若 #217 也加依赖，合并时按「两边都保留」处理。
-
----
-
-[2026-09-21 11] [Miyaki Kumo] [#217]
-
-**开工：issue217（ADR-0017 活性权威上移内核——在途回合一等事实）。** 在 `Ru5t/Reflector` 上施工，spec 见 `.agents/spec/217-turn-liveness-kernel-authority.md`。本轮文件域，请勿改写、勿连带提交：
-
-- 内核：`src-tauri/src/session/model.rs`（在途回合标记字段）、`src-tauri/src/session/prompt.rs`（置位/清理）、`src-tauri/src/runtime.rs`（查询面输出 + 诊断计数）
-- 前端：`src/domains/workbench/workbenchRuntime.ts`、`src/domains/workbench/generationLedgerSummary.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src/infrastructure/acp/sessionClient.ts`
-- 测试：上述文件对应内联/`__tests__`
-- 文档：`docs/说明书/Pylon-项目架构参考.md`（活性一段）、`.agents/spec/217-*.md`、`.agents/records/`、本文件
-
-**不碰**：`src-tauri/src/acp/turn_ledger.rs`（账本本体只读复用）、`src-tauri/src/dispatcher/**`、`src-tauri/src/session/persist.rs`、`tools/**`、`src/presets/**`、`src/zones/**`、他人一切文件域。
