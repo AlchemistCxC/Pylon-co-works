@@ -5,6 +5,7 @@ import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
 import {
   getMarkdownRenderModel,
+  peekMarkdownRenderModel,
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
@@ -221,6 +222,9 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
   const text = () => typeof props.text === 'function' ? props.text() : props.text
   const shouldParse = () => !isPlainTextContent(text())
   const useCache = () => props.cache?.() ?? true
+  // #212：命中**已结算**的缓存模型时同步渲染，完全不经骨架——历史行不再有一次
+  // 「1em 骨架 → 真高」的高度跳变。只在走缓存的调用点有效（增长尾块恒走解析/graft）。
+  const settled = () => useCache() ? peekMarkdownRenderModel(text()) : undefined
   const [model] = createResource(
     // #150 稳定性：解析源带上 `cache` 标志 ⇒ 尾块被提升为稳定行（cache false→true）时**换源重解析**，
     // 于是「已提交内容一定来自整段重解析」——增量拼接只可能影响正在长的那一行，即便某个没预料的
@@ -236,12 +240,14 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
     }),
   )
 
+  const root = () => settled() ?? model.latest
+
   return (
     <Show when={shouldParse()} fallback={props.inline
       ? <span class="term-p term-plain-text">{text()}</span>
       : <p class="term-p term-plain-text">{text()}</p>}>
-      <Show when={model.latest} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
-        {root => <For each={root().children}>{node => <MarkdownNode node={node} />}</For>}
+      <Show when={root()} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
+        {resolved => <For each={resolved().children}>{node => <MarkdownNode node={node} />}</For>}
       </Show>
     </Show>
   )

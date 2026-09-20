@@ -36,6 +36,18 @@ const renderModelCache = new Map<string, Promise<MarkdownRoot>>()
 const MAX_CACHE_CHARS = 2_000_000
 let cachedChars = 0
 
+/**
+ * #212：**已结算**的模型副本，供渲染层同步取用。
+ *
+ * LRU 存的是 Promise，缓存命中也要等一个微任务；那一个微任务里 `<Show>` 会先渲染骨架
+ * （`.term-md-skeleton`，只占 1em），解析结果落地后整块撑到真高——历史行因此有一次
+ * 「1 行 → 真高」的高度跳变。命中已结算模型时同步渲染就完全没有这一次跳变。
+ *
+ * 生命周期与 `renderModelCache` 严格同步：同一处写入、同一处淘汰、同一处清空，
+ * 只保存非跳过（≠ `SKIPPED_MARKDOWN_ROOT`）的结果。
+ */
+const settledModels = new Map<string, MarkdownRoot>()
+
 /** 被取代而跳过解析时返回的空模型：调用方必然丢弃它，因此内容不参与渲染。 */
 const SKIPPED_MARKDOWN_ROOT: MarkdownRoot = { type: 'root', children: [] }
 
@@ -90,16 +102,22 @@ export function getMarkdownRenderModel(
       const oldest = renderModelCache.keys().next().value
       if (oldest === undefined) break
       renderModelCache.delete(oldest)
+      settledModels.delete(oldest)
       cachedChars -= oldest.length
     }
     // 跳过（哨兵）的结果不得留在缓存里：它不含任何内容，留着会让同文本的其他行渲染成空。
     // 按身份撤销，避免误删后来者写入的同名条目。
     pending.then(
       model => {
-        if (model === SKIPPED_MARKDOWN_ROOT && renderModelCache.get(markdown) === pending) {
-          renderModelCache.delete(markdown)
-          cachedChars -= markdown.length
+        if (model === SKIPPED_MARKDOWN_ROOT) {
+          if (renderModelCache.get(markdown) === pending) {
+            renderModelCache.delete(markdown)
+            cachedChars -= markdown.length
+          }
+          return
         }
+        // #212：只在仍是当前条目时登记已结算模型（被后来者顶掉的旧结果不得复用）。
+        if (renderModelCache.get(markdown) === pending) settledModels.set(markdown, model)
       },
       () => {},
     )
@@ -115,7 +133,18 @@ export function getMarkdownRenderModel(
 
 export function clearMarkdownRenderModelCache(): void {
   renderModelCache.clear()
+  settledModels.clear()
   graftBases.clear()
+}
+
+/**
+ * #212：取已结算的模型（无则 undefined）。命中即可以同步渲染，不走骨架。
+ *
+ * 只在**走缓存**的调用点使用：增长尾块（`cache: false`）必须始终走解析/graft 路径
+ * （P57 S3-A11），不得因同文本曾在别处解析过就复用。
+ */
+export function peekMarkdownRenderModel(markdown: string): MarkdownRoot | undefined {
+  return settledModels.get(markdown)
 }
 
 /**
