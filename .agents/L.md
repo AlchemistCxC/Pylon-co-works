@@ -355,6 +355,7 @@
 **我方本轮文件域（在 07a 声明之上叠加；请勿改写、勿连带提交）**：
 
 - `src/presets/types.ts`（`PresetName` 增两条默认预设名）
+- ★ §六 追加（2026-09-20 用户目视发现）：`src/domains/theme/presetReducer.ts`（`setZoneFieldReducer` 增「是否标 custom」入参，仅这个函数签名与返回值变了）——**此前声明的「不碰 `src/domains/theme/**`」对本文件作废**，其余 domains/theme 文件仍不碰
 - `src/presets/builtin.ts`（新增 `DEFAULT_PRESETS` 独立表 + `defaultPresetForInterfaceMode`）
 - `src/store.ts`（`resetTheme` 落点改为当前模式的默认预设；未登记模式回落 `DEFAULTS`）
 - **新增** `src/__tests__/defaultPresets.test.ts`
