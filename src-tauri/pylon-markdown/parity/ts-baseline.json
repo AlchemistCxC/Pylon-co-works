@@ -1,0 +1,5723 @@
+{
+  "generator": "ts-baseline (unified + remark-gfm + remark-rehype / starry-night)",
+  "markdown": [
+    {
+      "id": "para",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "hello world"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "two-paragraphs",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "first"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "second"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "headings",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "h1",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "H1"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "h2",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "H2"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "h3",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "H3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "setext",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "h1",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "Title"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "h2",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "Sub"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "hr",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "hr",
+            "properties": {},
+            "children": []
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "hr",
+            "properties": {},
+            "children": []
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "hr",
+            "properties": {},
+            "children": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "hr-after-para-setext",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "h2",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "para"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blockquote",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "p",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "quoted\nmore"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blockquote-nested",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "p",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "blockquote",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "b"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blockquote-lazy",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "p",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a\nb"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blockquote-paragraphs",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "p",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "p",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-rust",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {
+                  "className": [
+                    "language-rust"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "fn main() {}\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-no-lang",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "plain\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-tilde",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "code\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-info-extra",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {
+                  "className": [
+                    "language-rust"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "fn main(){}\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-caps-lang",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {
+                  "className": [
+                    "language-TS"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "const x\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "indented-code",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "indented\ncode\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "unclosed-fence-lang",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {
+                  "className": [
+                    "language-ts"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "const x = 1;\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "unclosed-fence-nolang",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "code line\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-empty",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline-code",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "use "
+              },
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "code"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " here"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline-code-backticks",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a "
+              },
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "`b`"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " c"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline-code-entity",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "&amp;"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "emphasis",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " and "
+              },
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strong",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " and "
+              },
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "em-strong-nested",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "strong",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "intraword-underscore",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "foo_bar_baz"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "intraword-asterisk",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "foo"
+              },
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "bar"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "baz"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strikethrough",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "del",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "gone"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strikethrough-single-tilde",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "del",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "gone"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "hardbreak-spaces",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              },
+              {
+                "type": "element",
+                "tagName": "br",
+                "properties": {},
+                "children": []
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "hardbreak-backslash",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              },
+              {
+                "type": "element",
+                "tagName": "br",
+                "properties": {},
+                "children": []
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "softbreak",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a\nb"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "trailing-spaces-para",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              },
+              {
+                "type": "element",
+                "tagName": "br",
+                "properties": {},
+                "children": []
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "tight-ul",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "loose-ul",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "b"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ol-start-5",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {
+              "start": 5
+            },
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ol-paren-delim",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "nested-ul",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "ul",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "li",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "c"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed-bullet-markers",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "task-list",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {
+              "className": [
+                "contains-task-list"
+              ]
+            },
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {
+                  "className": [
+                    "task-list-item"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "input",
+                    "properties": {
+                      "type": "checkbox",
+                      "checked": true,
+                      "disabled": true
+                    },
+                    "children": []
+                  },
+                  {
+                    "type": "text",
+                    "value": " "
+                  },
+                  {
+                    "type": "text",
+                    "value": "done"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {
+                  "className": [
+                    "task-list-item"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "input",
+                    "properties": {
+                      "type": "checkbox",
+                      "checked": false,
+                      "disabled": true
+                    },
+                    "children": []
+                  },
+                  {
+                    "type": "text",
+                    "value": " "
+                  },
+                  {
+                    "type": "text",
+                    "value": "todo"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "loose-mixed-spread",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "b"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "c"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "loose-with-nested-list",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "ul",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "li",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "c"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "list-in-blockquote",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "ul",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "li",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "li",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "b"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty-list-item",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": []
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "lazy-continuation-list",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a\nb"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "table-basic",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "a"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "1"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "2"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "table-aligns",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {
+                          "align": "left"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "l"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {
+                          "align": "center"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "c"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {
+                          "align": "right"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "r"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "n"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {
+                          "align": "left"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "1"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {
+                          "align": "center"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "2"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {
+                          "align": "right"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "3"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "4"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "table-ragged-rows",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "a"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "1"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": []
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "1"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "2"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "table-inline-markup",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "element",
+                            "tagName": "strong",
+                            "properties": {},
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "a"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "element",
+                            "tagName": "code",
+                            "properties": {},
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "b"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "element",
+                            "tagName": "em",
+                            "properties": {},
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "c"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "d"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "autolink-angle",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "https://x.co/a"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "https://x.co/a"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "autolink-mailto",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "mailto:a@b.co"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a@b.co"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "gfm-www",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "visit "
+              },
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "http://www.x.co"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "www.x.co"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " now"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "gfm-url-trailing-dot",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "go "
+              },
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "http://a.b/c"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "http://a.b/c"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "gfm-email",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "mail "
+              },
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "mailto:a@b.co"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a@b.co"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " end"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "https://x.co"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "text"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-title",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "u",
+                  "title": "Ti"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-angle-dest-space",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "u%20v"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-parens-url",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "u_(v)"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-empty-dest",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": ""
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-explicit-empty-title",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "u"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "reference-link",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "/u"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "collapsed-reference",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "/u"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "shortcut-reference",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "/u"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-simple",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u.png",
+                  "alt": "alt"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-inline-label",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u",
+                  "alt": "a b c"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-title",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u",
+                  "alt": "a",
+                  "title": "t"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-multiline-label",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u",
+                  "alt": "a\nb"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-empty-alt",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u",
+                  "alt": ""
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entity-amp",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a & b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entity-copy",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "© copy ©"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entity-notin",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a ∉ b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entity-unknown",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a &fake; b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entity-numeric",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "* and /"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "escape-punct",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "*not em*"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "escape-backslash-eof",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a\\"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline-html",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a "
+              },
+              {
+                "type": "text",
+                "value": "c"
+              },
+              {
+                "type": "text",
+                "value": " d"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "html-block",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "after"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "footnote-probe",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "text"
+              },
+              {
+                "type": "element",
+                "tagName": "sup",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "a",
+                    "properties": {
+                      "href": "#user-content-fn-1",
+                      "id": "user-content-fnref-1",
+                      "dataFootnoteRef": true,
+                      "ariaDescribedBy": [
+                        "footnote-label"
+                      ]
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "section",
+            "properties": {
+              "dataFootnotes": true,
+              "className": [
+                "footnotes"
+              ]
+            },
+            "children": [
+              {
+                "type": "element",
+                "tagName": "h2",
+                "properties": {
+                  "className": [
+                    "sr-only"
+                  ],
+                  "id": "footnote-label"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Footnotes"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "ol",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "li",
+                    "properties": {
+                      "id": "user-content-fn-1"
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "p",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "note "
+                          },
+                          {
+                            "type": "element",
+                            "tagName": "a",
+                            "properties": {
+                              "href": "#user-content-fnref-1",
+                              "dataFootnoteBackref": "",
+                              "ariaLabel": "Back to reference 1",
+                              "className": [
+                                "data-footnote-backref"
+                              ]
+                            },
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "↩"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty",
+      "model": {
+        "type": "root",
+        "children": []
+      }
+    },
+    {
+      "id": "blank-lines-only",
+      "model": {
+        "type": "root",
+        "children": []
+      }
+    },
+    {
+      "id": "crlf",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "unicode",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "中文 "
+              },
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "加粗"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " 与 🎯 emoji"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fenced-tab-content",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {
+                  "className": [
+                    "language-ts"
+                  ]
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\tconst x\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "para-tab",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a\tb"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "emphasis-flanking",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              },
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "c"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "heading-only-hash",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "h1",
+            "properties": {},
+            "children": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "para-then-hr",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "hr",
+            "properties": {},
+            "children": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "nested-ordered",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "ol",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "li",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ol-start-10",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {
+              "start": 10
+            },
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ol-normal-start-1",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "blockquote-direct-list",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "ul",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "li",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strong-across-softbreak",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a "
+              },
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "b\nc"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " d"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-in-emphasis",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "em",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "a",
+                    "properties": {
+                      "href": "u"
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "code-runs-adjacent",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "b"
+              },
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "c"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strong-text-strong",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "b"
+              },
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "c"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "tab-indented-code",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "pre",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a\n"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "single-empty-item",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": []
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "table-single-col",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "a"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "1"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "escape-star-midword",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a*b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-empty-text",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "u"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "link-fragment",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "#fragment"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "img-emphasis-label",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "img",
+                "properties": {
+                  "src": "u",
+                  "alt": "a"
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "entities-more",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\" '   <"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cjk-punctuation",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "——中文「引号」《书名号》。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "definition-list-ext-off",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "term\n: definition"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "heading-inline-markup",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "h1",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "h "
+              },
+              {
+                "type": "element",
+                "tagName": "strong",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "bold"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " "
+              },
+              {
+                "type": "element",
+                "tagName": "code",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "code"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "inline-html-br",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "text with "
+              },
+              {
+                "type": "text",
+                "value": " html"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "hardbreak-at-eof",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "line"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "multiple-blank-lines",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "two"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "paragraphs"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "deep-blockquote",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "blockquote",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "blockquote",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "blockquote",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "p",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "deep"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "single-item-spread",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ul",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "a"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "p",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "b"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "list-completed-by-ol-tight",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "ol",
+            "properties": {
+              "start": 3
+            },
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "c"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "li",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "d"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "url-with-unicode",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "element",
+                "tagName": "a",
+                "properties": {
+                  "href": "/%E8%B7%AF%E5%BE%84/%E6%96%87%E4%BB%B6"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "t"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "autolink-in-table",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "u"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "element",
+                            "tagName": "a",
+                            "properties": {
+                              "href": "https://a.b/c"
+                            },
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "https://a.b/c"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "strike-in-table",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "table",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "thead",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "a"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "th",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "b"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "tbody",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "tr",
+                    "properties": {},
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "element",
+                            "tagName": "del",
+                            "properties": {},
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "x"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "td",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "y"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "nbsp-literal",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "a b"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "emoji-zwj",
+      "model": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "👨‍👩‍👧‍👦 家族"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "highlight": [
+    {
+      "id": "rust",
+      "language": "rust",
+      "tokens": [
+        {
+          "scope": "pl-k",
+          "text": "fn"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "() {\n    "
+        },
+        {
+          "scope": "pl-k",
+          "text": "let"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "u32"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "; "
+        },
+        {
+          "scope": "pl-c",
+          "text": "// answer"
+        },
+        {
+          "scope": "",
+          "text": "\n    "
+        },
+        {
+          "scope": "pl-en",
+          "text": "println!"
+        },
+        {
+          "scope": "",
+          "text": "("
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "{}"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": ", "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": ");\n}\n"
+        }
+      ],
+      "html": "<span class=\"pl-k\">fn</span> <span class=\"pl-en\">main</span>() {\n    <span class=\"pl-k\">let</span> <span class=\"pl-smi\">x</span><span class=\"pl-k\">:</span> <span class=\"pl-k\">u32</span> <span class=\"pl-k\">=</span> <span class=\"pl-c1\">1</span>; <span class=\"pl-c\">// answer</span>\n    <span class=\"pl-en\">println!</span>(<span class=\"pl-s\"><span class=\"pl-pds\">\"</span>{}<span class=\"pl-pds\">\"</span></span>, <span class=\"pl-smi\">x</span>);\n}\n"
+    },
+    {
+      "id": "ts",
+      "language": "ts",
+      "tokens": [
+        {
+          "scope": "pl-k",
+          "text": "const"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "answer"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "number"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "42"
+        },
+        {
+          "scope": "",
+          "text": ";\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "function"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "f"
+        },
+        {
+          "scope": "",
+          "text": "<"
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": ">("
+        },
+        {
+          "scope": "pl-v",
+          "text": "a"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": ")"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": " { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "a"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ],
+      "html": "<span class=\"pl-k\">const</span> <span class=\"pl-c1\">answer</span><span class=\"pl-k\">:</span> <span class=\"pl-c1\">number</span> <span class=\"pl-k\">=</span> <span class=\"pl-c1\">42</span>;\n<span class=\"pl-k\">function</span> <span class=\"pl-en\">f</span>&#x3C;<span class=\"pl-en\">T</span>>(<span class=\"pl-v\">a</span><span class=\"pl-k\">:</span> <span class=\"pl-en\">T</span>)<span class=\"pl-k\">:</span> <span class=\"pl-en\">T</span> { <span class=\"pl-k\">return</span> <span class=\"pl-smi\">a</span>; }\n"
+    },
+    {
+      "id": "js",
+      "language": "js",
+      "tokens": [
+        {
+          "scope": "pl-k",
+          "text": "function"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "f"
+        },
+        {
+          "scope": "",
+          "text": "() { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "const"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "g"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " ("
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": ") "
+        },
+        {
+          "scope": "pl-k",
+          "text": "=>"
+        },
+        {
+          "scope": "",
+          "text": " x "
+        },
+        {
+          "scope": "pl-k",
+          "text": "*"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "2"
+        },
+        {
+          "scope": "",
+          "text": ";\n"
+        }
+      ],
+      "html": "<span class=\"pl-k\">function</span> <span class=\"pl-en\">f</span>() { <span class=\"pl-k\">return</span> <span class=\"pl-c1\">1</span>; }\n<span class=\"pl-k\">const</span> <span class=\"pl-c1\">g</span> <span class=\"pl-k\">=</span> (<span class=\"pl-smi\">x</span>) <span class=\"pl-k\">=></span> x <span class=\"pl-k\">*</span> <span class=\"pl-c1\">2</span>;\n"
+    },
+    {
+      "id": "python",
+      "language": "python",
+      "tokens": [
+        {
+          "scope": "pl-k",
+          "text": "def"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "():\n    "
+        },
+        {
+          "scope": "pl-c",
+          "text": "# comment"
+        },
+        {
+          "scope": "",
+          "text": "\n    "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        }
+      ],
+      "html": "<span class=\"pl-k\">def</span> <span class=\"pl-en\">main</span>():\n    <span class=\"pl-c\"># comment</span>\n    <span class=\"pl-k\">return</span> <span class=\"pl-c1\">1</span>\n"
+    },
+    {
+      "id": "go",
+      "language": "go",
+      "tokens": [
+        {
+          "scope": "pl-k",
+          "text": "func"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "() {\n    "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": ":="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "\n    _ = x\n}\n"
+        }
+      ],
+      "html": "<span class=\"pl-k\">func</span> <span class=\"pl-en\">main</span>() {\n    <span class=\"pl-smi\">x</span> <span class=\"pl-k\">:=</span> <span class=\"pl-c1\">1</span>\n    _ = x\n}\n"
+    },
+    {
+      "id": "c",
+      "language": "c",
+      "tokens": [
+        {
+          "scope": "",
+          "text": "#"
+        },
+        {
+          "scope": "pl-k",
+          "text": "include"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "<"
+        },
+        {
+          "scope": "pl-s",
+          "text": "stdio.h"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": ">"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "int"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "("
+        },
+        {
+          "scope": "pl-k",
+          "text": "void"
+        },
+        {
+          "scope": "",
+          "text": ") { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "0"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ],
+      "html": "#<span class=\"pl-k\">include</span> <span class=\"pl-s\"><span class=\"pl-pds\">&#x3C;</span>stdio.h<span class=\"pl-pds\">></span></span>\n<span class=\"pl-k\">int</span> <span class=\"pl-en\">main</span>(<span class=\"pl-k\">void</span>) { <span class=\"pl-k\">return</span> <span class=\"pl-c1\">0</span>; }\n"
+    },
+    {
+      "id": "cpp",
+      "language": "cpp",
+      "tokens": [
+        {
+          "scope": "",
+          "text": "#include <vector>\nint main() { std::vector<int> v; return v.size(); }\n"
+        }
+      ],
+      "html": "#include &#x3C;vector>\nint main() { std::vector&#x3C;int> v; return v.size(); }\n"
+    },
+    {
+      "id": "css",
+      "language": "css",
+      "tokens": [
+        {
+          "scope": "pl-e",
+          "text": ".term-p"
+        },
+        {
+          "scope": "",
+          "text": " { "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "color"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "red"
+        },
+        {
+          "scope": "",
+          "text": "; "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "margin"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "0"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ],
+      "html": "<span class=\"pl-e\">.term-p</span> { <span class=\"pl-c1\">color</span>: <span class=\"pl-c1\">red</span>; <span class=\"pl-c1\">margin</span>: <span class=\"pl-c1\">0</span>; }\n"
+    },
+    {
+      "id": "json",
+      "language": "json",
+      "tokens": [
+        {
+          "scope": "",
+          "text": "{\n  "
+        },
+        {
+          "scope": "pl-ent",
+          "text": "\"a\""
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": ",\n  "
+        },
+        {
+          "scope": "pl-ent",
+          "text": "\"b\""
+        },
+        {
+          "scope": "",
+          "text": ": ["
+        },
+        {
+          "scope": "pl-c1",
+          "text": "true"
+        },
+        {
+          "scope": "",
+          "text": ", "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "null"
+        },
+        {
+          "scope": "",
+          "text": "]\n}\n"
+        }
+      ],
+      "html": "{\n  <span class=\"pl-ent\">\"a\"</span>: <span class=\"pl-c1\">1</span>,\n  <span class=\"pl-ent\">\"b\"</span>: [<span class=\"pl-c1\">true</span>, <span class=\"pl-c1\">null</span>]\n}\n"
+    },
+    {
+      "id": "yaml",
+      "language": "yaml",
+      "tokens": [
+        {
+          "scope": "pl-ent",
+          "text": "key"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-s",
+          "text": "value"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "list"
+        },
+        {
+          "scope": "",
+          "text": ":\n  - "
+        },
+        {
+          "scope": "pl-s",
+          "text": "a"
+        },
+        {
+          "scope": "",
+          "text": "\n  - "
+        },
+        {
+          "scope": "pl-s",
+          "text": "b"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        }
+      ],
+      "html": "<span class=\"pl-ent\">key</span>: <span class=\"pl-s\">value</span>\n<span class=\"pl-ent\">list</span>:\n  - <span class=\"pl-s\">a</span>\n  - <span class=\"pl-s\">b</span>\n"
+    },
+    {
+      "id": "sh",
+      "language": "sh",
+      "tokens": [
+        {
+          "scope": "pl-c",
+          "text": "#!/bin/sh"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-c1",
+          "text": "echo"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "hello"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "|"
+        },
+        {
+          "scope": "",
+          "text": " grep h\n"
+        }
+      ],
+      "html": "<span class=\"pl-c\">#!/bin/sh</span>\n<span class=\"pl-c1\">echo</span> <span class=\"pl-s\"><span class=\"pl-pds\">\"</span>hello<span class=\"pl-pds\">\"</span></span> <span class=\"pl-k\">|</span> grep h\n"
+    },
+    {
+      "id": "html",
+      "language": "html",
+      "tokens": [
+        {
+          "scope": "",
+          "text": "<"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "div"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-e",
+          "text": "class"
+        },
+        {
+          "scope": "",
+          "text": "="
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "a"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": "><"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "p"
+        },
+        {
+          "scope": "",
+          "text": ">text</"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "p"
+        },
+        {
+          "scope": "",
+          "text": "></"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "div"
+        },
+        {
+          "scope": "",
+          "text": ">\n"
+        }
+      ],
+      "html": "&#x3C;<span class=\"pl-ent\">div</span> <span class=\"pl-e\">class</span>=<span class=\"pl-s\"><span class=\"pl-pds\">\"</span>a<span class=\"pl-pds\">\"</span></span>>&#x3C;<span class=\"pl-ent\">p</span>>text&#x3C;/<span class=\"pl-ent\">p</span>>&#x3C;/<span class=\"pl-ent\">div</span>>\n"
+    }
+  ]
+}

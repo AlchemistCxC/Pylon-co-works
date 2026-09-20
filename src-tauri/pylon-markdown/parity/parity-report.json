@@ -1,0 +1,2456 @@
+{
+  "aligned": [
+    {
+      "kind": "markdown",
+      "id": "para"
+    },
+    {
+      "kind": "markdown",
+      "id": "two-paragraphs"
+    },
+    {
+      "kind": "markdown",
+      "id": "headings"
+    },
+    {
+      "kind": "markdown",
+      "id": "setext"
+    },
+    {
+      "kind": "markdown",
+      "id": "hr"
+    },
+    {
+      "kind": "markdown",
+      "id": "hr-after-para-setext"
+    },
+    {
+      "kind": "markdown",
+      "id": "blockquote"
+    },
+    {
+      "kind": "markdown",
+      "id": "blockquote-nested"
+    },
+    {
+      "kind": "markdown",
+      "id": "blockquote-lazy"
+    },
+    {
+      "kind": "markdown",
+      "id": "blockquote-paragraphs"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-rust"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-no-lang"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-tilde"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-info-extra"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-caps-lang"
+    },
+    {
+      "kind": "markdown",
+      "id": "indented-code"
+    },
+    {
+      "kind": "markdown",
+      "id": "unclosed-fence-lang"
+    },
+    {
+      "kind": "markdown",
+      "id": "unclosed-fence-nolang"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-empty"
+    },
+    {
+      "kind": "markdown",
+      "id": "inline-code"
+    },
+    {
+      "kind": "markdown",
+      "id": "inline-code-backticks"
+    },
+    {
+      "kind": "markdown",
+      "id": "inline-code-entity"
+    },
+    {
+      "kind": "markdown",
+      "id": "emphasis"
+    },
+    {
+      "kind": "markdown",
+      "id": "strong"
+    },
+    {
+      "kind": "markdown",
+      "id": "em-strong-nested"
+    },
+    {
+      "kind": "markdown",
+      "id": "intraword-underscore"
+    },
+    {
+      "kind": "markdown",
+      "id": "intraword-asterisk"
+    },
+    {
+      "kind": "markdown",
+      "id": "strikethrough"
+    },
+    {
+      "kind": "markdown",
+      "id": "strikethrough-single-tilde"
+    },
+    {
+      "kind": "markdown",
+      "id": "hardbreak-spaces"
+    },
+    {
+      "kind": "markdown",
+      "id": "hardbreak-backslash"
+    },
+    {
+      "kind": "markdown",
+      "id": "softbreak"
+    },
+    {
+      "kind": "markdown",
+      "id": "trailing-spaces-para"
+    },
+    {
+      "kind": "markdown",
+      "id": "tight-ul"
+    },
+    {
+      "kind": "markdown",
+      "id": "loose-ul"
+    },
+    {
+      "kind": "markdown",
+      "id": "ol-start-5"
+    },
+    {
+      "kind": "markdown",
+      "id": "ol-paren-delim"
+    },
+    {
+      "kind": "markdown",
+      "id": "nested-ul"
+    },
+    {
+      "kind": "markdown",
+      "id": "mixed-bullet-markers"
+    },
+    {
+      "kind": "markdown",
+      "id": "task-list"
+    },
+    {
+      "kind": "markdown",
+      "id": "loose-mixed-spread"
+    },
+    {
+      "kind": "markdown",
+      "id": "loose-with-nested-list"
+    },
+    {
+      "kind": "markdown",
+      "id": "list-in-blockquote"
+    },
+    {
+      "kind": "markdown",
+      "id": "empty-list-item"
+    },
+    {
+      "kind": "markdown",
+      "id": "lazy-continuation-list"
+    },
+    {
+      "kind": "markdown",
+      "id": "table-basic"
+    },
+    {
+      "kind": "markdown",
+      "id": "table-aligns"
+    },
+    {
+      "kind": "markdown",
+      "id": "table-ragged-rows"
+    },
+    {
+      "kind": "markdown",
+      "id": "table-inline-markup"
+    },
+    {
+      "kind": "markdown",
+      "id": "autolink-angle"
+    },
+    {
+      "kind": "markdown",
+      "id": "autolink-mailto"
+    },
+    {
+      "kind": "markdown",
+      "id": "gfm-www"
+    },
+    {
+      "kind": "markdown",
+      "id": "gfm-url-trailing-dot"
+    },
+    {
+      "kind": "markdown",
+      "id": "gfm-email"
+    },
+    {
+      "kind": "markdown",
+      "id": "link"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-title"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-angle-dest-space"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-parens-url"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-empty-dest"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-explicit-empty-title"
+    },
+    {
+      "kind": "markdown",
+      "id": "reference-link"
+    },
+    {
+      "kind": "markdown",
+      "id": "collapsed-reference"
+    },
+    {
+      "kind": "markdown",
+      "id": "shortcut-reference"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-simple"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-inline-label"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-title"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-multiline-label"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-empty-alt"
+    },
+    {
+      "kind": "markdown",
+      "id": "entity-amp"
+    },
+    {
+      "kind": "markdown",
+      "id": "entity-copy"
+    },
+    {
+      "kind": "markdown",
+      "id": "entity-notin"
+    },
+    {
+      "kind": "markdown",
+      "id": "entity-unknown"
+    },
+    {
+      "kind": "markdown",
+      "id": "entity-numeric"
+    },
+    {
+      "kind": "markdown",
+      "id": "escape-punct"
+    },
+    {
+      "kind": "markdown",
+      "id": "escape-backslash-eof"
+    },
+    {
+      "kind": "markdown",
+      "id": "inline-html"
+    },
+    {
+      "kind": "markdown",
+      "id": "html-block"
+    },
+    {
+      "kind": "markdown",
+      "id": "empty"
+    },
+    {
+      "kind": "markdown",
+      "id": "blank-lines-only"
+    },
+    {
+      "kind": "markdown",
+      "id": "crlf"
+    },
+    {
+      "kind": "markdown",
+      "id": "unicode"
+    },
+    {
+      "kind": "markdown",
+      "id": "fenced-tab-content"
+    },
+    {
+      "kind": "markdown",
+      "id": "para-tab"
+    },
+    {
+      "kind": "markdown",
+      "id": "emphasis-flanking"
+    },
+    {
+      "kind": "markdown",
+      "id": "heading-only-hash"
+    },
+    {
+      "kind": "markdown",
+      "id": "para-then-hr"
+    },
+    {
+      "kind": "markdown",
+      "id": "nested-ordered"
+    },
+    {
+      "kind": "markdown",
+      "id": "ol-start-10"
+    },
+    {
+      "kind": "markdown",
+      "id": "ol-normal-start-1"
+    },
+    {
+      "kind": "markdown",
+      "id": "blockquote-direct-list"
+    },
+    {
+      "kind": "markdown",
+      "id": "strong-across-softbreak"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-in-emphasis"
+    },
+    {
+      "kind": "markdown",
+      "id": "code-runs-adjacent"
+    },
+    {
+      "kind": "markdown",
+      "id": "strong-text-strong"
+    },
+    {
+      "kind": "markdown",
+      "id": "tab-indented-code"
+    },
+    {
+      "kind": "markdown",
+      "id": "single-empty-item"
+    },
+    {
+      "kind": "markdown",
+      "id": "table-single-col"
+    },
+    {
+      "kind": "markdown",
+      "id": "escape-star-midword"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-empty-text"
+    },
+    {
+      "kind": "markdown",
+      "id": "link-fragment"
+    },
+    {
+      "kind": "markdown",
+      "id": "img-emphasis-label"
+    },
+    {
+      "kind": "markdown",
+      "id": "entities-more"
+    },
+    {
+      "kind": "markdown",
+      "id": "cjk-punctuation"
+    },
+    {
+      "kind": "markdown",
+      "id": "definition-list-ext-off"
+    },
+    {
+      "kind": "markdown",
+      "id": "heading-inline-markup"
+    },
+    {
+      "kind": "markdown",
+      "id": "inline-html-br"
+    },
+    {
+      "kind": "markdown",
+      "id": "hardbreak-at-eof"
+    },
+    {
+      "kind": "markdown",
+      "id": "multiple-blank-lines"
+    },
+    {
+      "kind": "markdown",
+      "id": "deep-blockquote"
+    },
+    {
+      "kind": "markdown",
+      "id": "single-item-spread"
+    },
+    {
+      "kind": "markdown",
+      "id": "list-completed-by-ol-tight"
+    },
+    {
+      "kind": "markdown",
+      "id": "url-with-unicode"
+    },
+    {
+      "kind": "markdown",
+      "id": "autolink-in-table"
+    },
+    {
+      "kind": "markdown",
+      "id": "strike-in-table"
+    },
+    {
+      "kind": "markdown",
+      "id": "nbsp-literal"
+    },
+    {
+      "kind": "markdown",
+      "id": "emoji-zwj"
+    }
+  ],
+  "divergent": [
+    {
+      "kind": "markdown",
+      "id": "footnote-probe",
+      "reason": "$.children: 数组长度 3 != 1",
+      "ts": {
+        "type": "root",
+        "children": [
+          {
+            "type": "element",
+            "tagName": "p",
+            "properties": {},
+            "children": [
+              {
+                "type": "text",
+                "value": "text"
+              },
+              {
+                "type": "element",
+                "tagName": "sup",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "element",
+                    "tagName": "a",
+                    "properties": {
+                      "href": "#user-content-fn-1",
+                      "id": "user-content-fnref-1",
+                      "dataFootnoteRef": true,
+                      "ariaDescribedBy": [
+                        "footnote-label"
+                      ]
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "type": "element",
+            "tagName": "section",
+            "properties": {
+              "dataFootnotes": true,
+              "className": [
+                "footnotes"
+              ]
+            },
+            "children": [
+              {
+                "type": "element",
+                "tagName": "h2",
+                "properties": {
+                  "className": [
+                    "sr-only"
+                  ],
+                  "id": "footnote-label"
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Footnotes"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "type": "element",
+                "tagName": "ol",
+                "properties": {},
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "type": "element",
+                    "tagName": "li",
+                    "properties": {
+                      "id": "user-content-fn-1"
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "type": "element",
+                        "tagName": "p",
+                        "properties": {},
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "note "
+                          },
+                          {
+                            "type": "element",
+                            "tagName": "a",
+                            "properties": {
+                              "href": "#user-content-fnref-1",
+                              "dataFootnoteBackref": "",
+                              "ariaLabel": "Back to reference 1",
+                              "className": [
+                                "data-footnote-backref"
+                              ]
+                            },
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "↩"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ]
+          }
+        ]
+      },
+      "rust": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "text"
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "^1"
+                  }
+                ],
+                "properties": {
+                  "href": "note"
+                },
+                "tagName": "a",
+                "type": "element"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "kind": "highlight",
+      "id": "rust",
+      "reason": "$: 数组长度 25 != 35",
+      "ts": [
+        {
+          "scope": "pl-k",
+          "text": "fn"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "() {\n    "
+        },
+        {
+          "scope": "pl-k",
+          "text": "let"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "u32"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "; "
+        },
+        {
+          "scope": "pl-c",
+          "text": "// answer"
+        },
+        {
+          "scope": "",
+          "text": "\n    "
+        },
+        {
+          "scope": "pl-en",
+          "text": "println!"
+        },
+        {
+          "scope": "",
+          "text": "("
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "{}"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": ", "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": ");\n}\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.rust meta.function.rust meta.function.rust storage.type.function.rust",
+          "text": "fn"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.function.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust entity.name.function.rust",
+          "text": "main"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.function.parameters.rust punctuation.section.parameters.begin.rust",
+          "text": "("
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.function.rust meta.function.parameters.rust punctuation.section.parameters.end.rust",
+          "text": ")"
+        },
+        {
+          "scope": "source.rust meta.function.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust punctuation.section.block.begin.rust",
+          "text": "{"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": "\n"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": "    "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust storage.type.rust",
+          "text": "let"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": " x"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust punctuation.separator.rust",
+          "text": ":"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust storage.type.rust",
+          "text": "u32"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust keyword.operator.rust",
+          "text": "="
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust constant.numeric.integer.decimal.rust",
+          "text": "1"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust punctuation.terminator.rust",
+          "text": ";"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": " "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust comment.line.double-slash.rust punctuation.definition.comment.rust",
+          "text": "//"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust comment.line.double-slash.rust",
+          "text": " answer\n"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": "    "
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust support.macro.rust",
+          "text": "println!"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust punctuation.section.group.begin.rust",
+          "text": "("
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust string.quoted.double.rust punctuation.definition.string.begin.rust",
+          "text": "\""
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust string.quoted.double.rust constant.other.placeholder.rust",
+          "text": "{}"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust string.quoted.double.rust punctuation.definition.string.end.rust",
+          "text": "\""
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust punctuation.separator.rust",
+          "text": ","
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust",
+          "text": " x"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust meta.group.rust punctuation.section.group.end.rust",
+          "text": ")"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust punctuation.terminator.rust",
+          "text": ";"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust",
+          "text": "\n"
+        },
+        {
+          "scope": "source.rust meta.function.rust meta.block.rust punctuation.section.block.end.rust",
+          "text": "}"
+        },
+        {
+          "scope": "source.rust",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "ts",
+      "reason": "$: [{\"scope\":\"pl-k\",\"text\":\"const\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-c1\",\"text\":\"answer\"},{\"scope\":\"pl-k\",\"text\":\":\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-c1\",\"text\":\"number\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-k\",\"text\":\"=\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-c1\",\"text\":\"42\"},{\"scope\":\"\",\"text\":\";\\n\"},{\"scope\":\"pl-k\",\"text\":\"function\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-en\",\"text\":\"f\"},{\"scope\":\"\",\"text\":\"<\"},{\"scope\":\"pl-en\",\"text\":\"T\"},{\"scope\":\"\",\"text\":\">(\"},{\"scope\":\"pl-v\",\"text\":\"a\"},{\"scope\":\"pl-k\",\"text\":\":\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-en\",\"text\":\"T\"},{\"scope\":\"\",\"text\":\")\"},{\"scope\":\"pl-k\",\"text\":\":\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-en\",\"text\":\"T\"},{\"scope\":\"\",\"text\":\" { \"},{\"scope\":\"pl-k\",\"text\":\"return\"},{\"scope\":\"\",\"text\":\" \"},{\"scope\":\"pl-smi\",\"text\":\"a\"},{\"scope\":\"\",\"text\":\"; }\\n\"}] != undefined",
+      "ts": [
+        {
+          "scope": "pl-k",
+          "text": "const"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "answer"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "number"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "42"
+        },
+        {
+          "scope": "",
+          "text": ";\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "function"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "f"
+        },
+        {
+          "scope": "",
+          "text": "<"
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": ">("
+        },
+        {
+          "scope": "pl-v",
+          "text": "a"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": ")"
+        },
+        {
+          "scope": "pl-k",
+          "text": ":"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "T"
+        },
+        {
+          "scope": "",
+          "text": " { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "a"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "js",
+      "reason": "$: 数组长度 22 != 34",
+      "ts": [
+        {
+          "scope": "pl-k",
+          "text": "function"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "f"
+        },
+        {
+          "scope": "",
+          "text": "() { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "const"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "g"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "="
+        },
+        {
+          "scope": "",
+          "text": " ("
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": ") "
+        },
+        {
+          "scope": "pl-k",
+          "text": "=>"
+        },
+        {
+          "scope": "",
+          "text": " x "
+        },
+        {
+          "scope": "pl-k",
+          "text": "*"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "2"
+        },
+        {
+          "scope": "",
+          "text": ";\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.js meta.function.declaration.js storage.type.function.js",
+          "text": "function"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.function.declaration.js entity.name.function.js",
+          "text": "f"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js punctuation.section.group.begin.js",
+          "text": "("
+        },
+        {
+          "scope": "source.js meta.function.declaration.js punctuation.section.group.end.js",
+          "text": ")"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js meta.function.declaration.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js punctuation.section.block.js",
+          "text": "{"
+        },
+        {
+          "scope": "source.js meta.block.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js keyword.control.flow.js",
+          "text": "return"
+        },
+        {
+          "scope": "source.js meta.block.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js constant.numeric.js",
+          "text": "1"
+        },
+        {
+          "scope": "source.js meta.block.js punctuation.terminator.statement.js",
+          "text": ";"
+        },
+        {
+          "scope": "source.js meta.block.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js punctuation.section.block.js",
+          "text": "}"
+        },
+        {
+          "scope": "source.js",
+          "text": "\n"
+        },
+        {
+          "scope": "source.js storage.type.js",
+          "text": "const"
+        },
+        {
+          "scope": "source.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.function.declaration.js variable.other.readwrite.js entity.name.function.js",
+          "text": "g"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.function.declaration.js keyword.operator.assignment.js",
+          "text": "="
+        },
+        {
+          "scope": "source.js meta.function.declaration.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.function.declaration.js punctuation.section.group.begin.js",
+          "text": "("
+        },
+        {
+          "scope": "source.js meta.function.declaration.js variable.parameter.function.js",
+          "text": "x"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js punctuation.section.group.end.js",
+          "text": ")"
+        },
+        {
+          "scope": "source.js meta.function.declaration.js meta.function.declaration.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.function.declaration.js storage.type.function.arrow.js",
+          "text": "=>"
+        },
+        {
+          "scope": "source.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js variable.other.readwrite.js",
+          "text": "x"
+        },
+        {
+          "scope": "source.js meta.block.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js keyword.operator.arithmetic.js",
+          "text": "*"
+        },
+        {
+          "scope": "source.js meta.block.js",
+          "text": " "
+        },
+        {
+          "scope": "source.js meta.block.js constant.numeric.js",
+          "text": "2"
+        },
+        {
+          "scope": "source.js punctuation.terminator.statement.js",
+          "text": ";"
+        },
+        {
+          "scope": "source.js",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "python",
+      "reason": "$: 数组长度 10 != 15",
+      "ts": [
+        {
+          "scope": "pl-k",
+          "text": "def"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "():\n    "
+        },
+        {
+          "scope": "pl-c",
+          "text": "# comment"
+        },
+        {
+          "scope": "",
+          "text": "\n    "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.python meta.function.python storage.type.function.python",
+          "text": "def"
+        },
+        {
+          "scope": "source.python meta.function.python",
+          "text": " "
+        },
+        {
+          "scope": "source.python meta.function.python entity.name.function.python meta.generic-name.python",
+          "text": "main"
+        },
+        {
+          "scope": "source.python meta.function.parameters.python punctuation.section.parameters.begin.python",
+          "text": "("
+        },
+        {
+          "scope": "source.python meta.function.parameters.python punctuation.section.parameters.end.python",
+          "text": ")"
+        },
+        {
+          "scope": "source.python meta.function.python punctuation.section.function.begin.python",
+          "text": ":"
+        },
+        {
+          "scope": "source.python",
+          "text": "\n"
+        },
+        {
+          "scope": "source.python",
+          "text": "    "
+        },
+        {
+          "scope": "source.python comment.line.number-sign.python punctuation.definition.comment.python",
+          "text": "#"
+        },
+        {
+          "scope": "source.python comment.line.number-sign.python",
+          "text": " comment\n"
+        },
+        {
+          "scope": "source.python",
+          "text": "    "
+        },
+        {
+          "scope": "source.python keyword.control.flow.return.python",
+          "text": "return"
+        },
+        {
+          "scope": "source.python",
+          "text": " "
+        },
+        {
+          "scope": "source.python constant.numeric.integer.decimal.python",
+          "text": "1"
+        },
+        {
+          "scope": "source.python",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "go",
+      "reason": "$: 数组长度 10 != 20",
+      "ts": [
+        {
+          "scope": "pl-k",
+          "text": "func"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "() {\n    "
+        },
+        {
+          "scope": "pl-smi",
+          "text": "x"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": ":="
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": "\n    _ = x\n}\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.go meta.function.declaration.go storage.type.go",
+          "text": "func"
+        },
+        {
+          "scope": "source.go meta.function.declaration.go",
+          "text": " "
+        },
+        {
+          "scope": "source.go meta.function.declaration.go entity.name.function.go",
+          "text": "main"
+        },
+        {
+          "scope": "source.go meta.function.parameters.go meta.group.go punctuation.definition.group.begin.go",
+          "text": "("
+        },
+        {
+          "scope": "source.go meta.function.parameters.go meta.group.go punctuation.definition.group.end.go",
+          "text": ")"
+        },
+        {
+          "scope": "source.go meta.function.go",
+          "text": " "
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go punctuation.definition.block.begin.go",
+          "text": "{"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": "\n"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": "    "
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go meta.initialization.short.go variable.other.go",
+          "text": "x"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go meta.initialization.short.go",
+          "text": " "
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go meta.initialization.short.go keyword.operator.initialize.go",
+          "text": ":="
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": " "
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go constant.numeric.integer.decimal.go",
+          "text": "1"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": "\n"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": "    _ "
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go keyword.operator.assignment.go",
+          "text": "="
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go",
+          "text": " x\n"
+        },
+        {
+          "scope": "source.go meta.function.go meta.block.go punctuation.definition.block.end.go",
+          "text": "}"
+        },
+        {
+          "scope": "source.go",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "c",
+      "reason": "$: 数组长度 17 != 22",
+      "ts": [
+        {
+          "scope": "",
+          "text": "#"
+        },
+        {
+          "scope": "pl-k",
+          "text": "include"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "<"
+        },
+        {
+          "scope": "pl-s",
+          "text": "stdio.h"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": ">"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-k",
+          "text": "int"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-en",
+          "text": "main"
+        },
+        {
+          "scope": "",
+          "text": "("
+        },
+        {
+          "scope": "pl-k",
+          "text": "void"
+        },
+        {
+          "scope": "",
+          "text": ") { "
+        },
+        {
+          "scope": "pl-k",
+          "text": "return"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "0"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.c meta.preprocessor.include.c keyword.control.import.include.c",
+          "text": "#include"
+        },
+        {
+          "scope": "source.c meta.preprocessor.include.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.preprocessor.include.c string.quoted.other.lt-gt.include.c punctuation.definition.string.begin.c",
+          "text": "<"
+        },
+        {
+          "scope": "source.c meta.preprocessor.include.c string.quoted.other.lt-gt.include.c",
+          "text": "stdio.h"
+        },
+        {
+          "scope": "source.c meta.preprocessor.include.c string.quoted.other.lt-gt.include.c punctuation.definition.string.end.c",
+          "text": ">"
+        },
+        {
+          "scope": "source.c meta.preprocessor.include.c",
+          "text": "\n"
+        },
+        {
+          "scope": "source.c storage.type.c",
+          "text": "int"
+        },
+        {
+          "scope": "source.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.function.c entity.name.function.c",
+          "text": "main"
+        },
+        {
+          "scope": "source.c meta.function.parameters.c meta.group.c punctuation.section.group.begin.c",
+          "text": "("
+        },
+        {
+          "scope": "source.c meta.function.parameters.c meta.group.c storage.type.c",
+          "text": "void"
+        },
+        {
+          "scope": "source.c meta.function.parameters.c meta.group.c punctuation.section.group.end.c",
+          "text": ")"
+        },
+        {
+          "scope": "source.c meta.function.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c punctuation.section.block.begin.c",
+          "text": "{"
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c keyword.control.c",
+          "text": "return"
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c constant.numeric.c",
+          "text": "0"
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c punctuation.terminator.c",
+          "text": ";"
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c",
+          "text": " "
+        },
+        {
+          "scope": "source.c meta.function.c meta.block.c punctuation.section.block.end.c",
+          "text": "}"
+        },
+        {
+          "scope": "source.c",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "cpp",
+      "reason": "$: 数组长度 1 != 32",
+      "ts": [
+        {
+          "scope": "",
+          "text": "#include <vector>\nint main() { std::vector<int> v; return v.size(); }\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++ keyword.control.import.include.c++",
+          "text": "#include"
+        },
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++",
+          "text": " "
+        },
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++ string.quoted.other.lt-gt.include.c++ punctuation.definition.string.begin.c++",
+          "text": "<"
+        },
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++ string.quoted.other.lt-gt.include.c++",
+          "text": "vector"
+        },
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++ string.quoted.other.lt-gt.include.c++ punctuation.definition.string.end.c++",
+          "text": ">"
+        },
+        {
+          "scope": "source.c++ meta.preprocessor.include.c++",
+          "text": "\n"
+        },
+        {
+          "scope": "source.c++ storage.type.c",
+          "text": "int"
+        },
+        {
+          "scope": "source.c++",
+          "text": " "
+        },
+        {
+          "scope": "source.c++ meta.function.c++ entity.name.function.c++",
+          "text": "main"
+        },
+        {
+          "scope": "source.c++ meta.function.parameters.c++ meta.group.c++ punctuation.section.group.begin.c++",
+          "text": "("
+        },
+        {
+          "scope": "source.c++ meta.function.parameters.c++ meta.group.c++ punctuation.section.group.end.c++",
+          "text": ")"
+        },
+        {
+          "scope": "source.c++ meta.function.c++",
+          "text": " "
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.section.block.begin.c++",
+          "text": "{"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": " std"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.accessor.c++",
+          "text": "::"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": "vector"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.section.generic.begin.c++",
+          "text": "<"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ storage.type.c",
+          "text": "int"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.section.generic.end.c++",
+          "text": ">"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": " v"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.terminator.c++",
+          "text": ";"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": " "
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ keyword.control.c++",
+          "text": "return"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": " v"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.accessor.dot.c++",
+          "text": "."
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ meta.method-call.c++ variable.function.member.c++",
+          "text": "size"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ meta.method-call.c++ meta.group.c++ punctuation.section.group.begin.c++",
+          "text": "("
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ meta.method-call.c++ meta.group.c++ punctuation.section.group.end.c++",
+          "text": ")"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.terminator.c++",
+          "text": ";"
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++",
+          "text": " "
+        },
+        {
+          "scope": "source.c++ meta.function.c++ meta.block.c++ punctuation.section.block.end.c++",
+          "text": "}"
+        },
+        {
+          "scope": "source.c++",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "css",
+      "reason": "$: 数组长度 10 != 19",
+      "ts": [
+        {
+          "scope": "pl-e",
+          "text": ".term-p"
+        },
+        {
+          "scope": "",
+          "text": " { "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "color"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "red"
+        },
+        {
+          "scope": "",
+          "text": "; "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "margin"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "0"
+        },
+        {
+          "scope": "",
+          "text": "; }\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css",
+          "text": "."
+        },
+        {
+          "scope": "source.css meta.selector.css entity.other.attribute-name.class.css",
+          "text": "term-p"
+        },
+        {
+          "scope": "source.css meta.selector.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css meta.property-list.css punctuation.section.property-list.css",
+          "text": "{"
+        },
+        {
+          "scope": "source.css meta.property-list.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-name.css support.type.property-name.css",
+          "text": "color"
+        },
+        {
+          "scope": "source.css meta.property-list.css punctuation.separator.key-value.css",
+          "text": ":"
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-value.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css",
+          "text": "red"
+        },
+        {
+          "scope": "source.css meta.property-list.css punctuation.terminator.rule.css",
+          "text": ";"
+        },
+        {
+          "scope": "source.css meta.property-list.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-name.css support.type.property-name.css",
+          "text": "margin"
+        },
+        {
+          "scope": "source.css meta.property-list.css punctuation.separator.key-value.css",
+          "text": ":"
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-value.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css meta.property-list.css meta.property-value.css constant.numeric.css",
+          "text": "0"
+        },
+        {
+          "scope": "source.css meta.property-list.css punctuation.terminator.rule.css",
+          "text": ";"
+        },
+        {
+          "scope": "source.css",
+          "text": " "
+        },
+        {
+          "scope": "source.css punctuation.section.property-list.css",
+          "text": "}"
+        },
+        {
+          "scope": "source.css",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "json",
+      "reason": "$: 数组长度 11 != 26",
+      "ts": [
+        {
+          "scope": "",
+          "text": "{\n  "
+        },
+        {
+          "scope": "pl-ent",
+          "text": "\"a\""
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "1"
+        },
+        {
+          "scope": "",
+          "text": ",\n  "
+        },
+        {
+          "scope": "pl-ent",
+          "text": "\"b\""
+        },
+        {
+          "scope": "",
+          "text": ": ["
+        },
+        {
+          "scope": "pl-c1",
+          "text": "true"
+        },
+        {
+          "scope": "",
+          "text": ", "
+        },
+        {
+          "scope": "pl-c1",
+          "text": "null"
+        },
+        {
+          "scope": "",
+          "text": "]\n}\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.json meta.structure.dictionary.json punctuation.section.dictionary.begin.json",
+          "text": "{"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json",
+          "text": "\n"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json",
+          "text": "  "
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json punctuation.definition.string.begin.json",
+          "text": "\""
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json",
+          "text": "a"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json punctuation.definition.string.end.json",
+          "text": "\""
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json punctuation.separator.dictionary.key-value.json",
+          "text": ":"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json",
+          "text": " "
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json constant.numeric.json",
+          "text": "1"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json punctuation.separator.dictionary.pair.json",
+          "text": ","
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json",
+          "text": "\n"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json",
+          "text": "  "
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json punctuation.definition.string.begin.json",
+          "text": "\""
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json",
+          "text": "b"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.key.json string.quoted.double.json punctuation.definition.string.end.json",
+          "text": "\""
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json punctuation.separator.dictionary.key-value.json",
+          "text": ":"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json",
+          "text": " "
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json punctuation.section.array.begin.json",
+          "text": "["
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json constant.language.json",
+          "text": "true"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json punctuation.separator.array.json",
+          "text": ","
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json",
+          "text": " "
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json constant.language.json",
+          "text": "null"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.array.json punctuation.section.array.end.json",
+          "text": "]"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json meta.structure.dictionary.value.json",
+          "text": "\n"
+        },
+        {
+          "scope": "source.json meta.structure.dictionary.json punctuation.section.dictionary.end.json",
+          "text": "}"
+        },
+        {
+          "scope": "source.json",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "yaml",
+      "reason": "$: 数组长度 10 != 18",
+      "ts": [
+        {
+          "scope": "pl-ent",
+          "text": "key"
+        },
+        {
+          "scope": "",
+          "text": ": "
+        },
+        {
+          "scope": "pl-s",
+          "text": "value"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "list"
+        },
+        {
+          "scope": "",
+          "text": ":\n  - "
+        },
+        {
+          "scope": "pl-s",
+          "text": "a"
+        },
+        {
+          "scope": "",
+          "text": "\n  - "
+        },
+        {
+          "scope": "pl-s",
+          "text": "b"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.yaml string.unquoted.plain.out.yaml entity.name.tag.yaml",
+          "text": "key"
+        },
+        {
+          "scope": "source.yaml punctuation.separator.key-value.mapping.yaml",
+          "text": ":"
+        },
+        {
+          "scope": "source.yaml",
+          "text": " "
+        },
+        {
+          "scope": "source.yaml string.unquoted.plain.out.yaml",
+          "text": "value"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "\n"
+        },
+        {
+          "scope": "source.yaml string.unquoted.plain.out.yaml entity.name.tag.yaml",
+          "text": "list"
+        },
+        {
+          "scope": "source.yaml punctuation.separator.key-value.mapping.yaml",
+          "text": ":"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "\n"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "  "
+        },
+        {
+          "scope": "source.yaml punctuation.definition.block.sequence.item.yaml",
+          "text": "-"
+        },
+        {
+          "scope": "source.yaml",
+          "text": " "
+        },
+        {
+          "scope": "source.yaml string.unquoted.plain.out.yaml",
+          "text": "a"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "\n"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "  "
+        },
+        {
+          "scope": "source.yaml punctuation.definition.block.sequence.item.yaml",
+          "text": "-"
+        },
+        {
+          "scope": "source.yaml",
+          "text": " "
+        },
+        {
+          "scope": "source.yaml string.unquoted.plain.out.yaml",
+          "text": "b"
+        },
+        {
+          "scope": "source.yaml",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "sh",
+      "reason": "$: 数组长度 10 != 14",
+      "ts": [
+        {
+          "scope": "pl-c",
+          "text": "#!/bin/sh"
+        },
+        {
+          "scope": "",
+          "text": "\n"
+        },
+        {
+          "scope": "pl-c1",
+          "text": "echo"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "hello"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-k",
+          "text": "|"
+        },
+        {
+          "scope": "",
+          "text": " grep h\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "source.shell comment.line.number-sign.shell punctuation.definition.comment.begin.shell",
+          "text": "#"
+        },
+        {
+          "scope": "source.shell comment.line.number-sign.shell",
+          "text": "!/bin/sh"
+        },
+        {
+          "scope": "source.shell comment.line.number-sign.shell",
+          "text": "\n"
+        },
+        {
+          "scope": "source.shell meta.function-call.shell support.function.echo.shell",
+          "text": "echo"
+        },
+        {
+          "scope": "source.shell meta.function-call.arguments.shell",
+          "text": " "
+        },
+        {
+          "scope": "source.shell meta.function-call.arguments.shell string.quoted.double.shell punctuation.definition.string.begin.shell",
+          "text": "\""
+        },
+        {
+          "scope": "source.shell meta.function-call.arguments.shell string.quoted.double.shell",
+          "text": "hello"
+        },
+        {
+          "scope": "source.shell meta.function-call.arguments.shell string.quoted.double.shell punctuation.definition.string.end.shell",
+          "text": "\""
+        },
+        {
+          "scope": "source.shell",
+          "text": " "
+        },
+        {
+          "scope": "source.shell keyword.operator.logical.pipe.shell",
+          "text": "|"
+        },
+        {
+          "scope": "source.shell",
+          "text": " "
+        },
+        {
+          "scope": "source.shell meta.function-call.shell variable.function.shell",
+          "text": "grep"
+        },
+        {
+          "scope": "source.shell meta.function-call.arguments.shell",
+          "text": " h"
+        },
+        {
+          "scope": "source.shell",
+          "text": "\n"
+        }
+      ]
+    },
+    {
+      "kind": "highlight",
+      "id": "html",
+      "reason": "$: 数组长度 15 != 20",
+      "ts": [
+        {
+          "scope": "",
+          "text": "<"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "div"
+        },
+        {
+          "scope": "",
+          "text": " "
+        },
+        {
+          "scope": "pl-e",
+          "text": "class"
+        },
+        {
+          "scope": "",
+          "text": "="
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "pl-s",
+          "text": "a"
+        },
+        {
+          "scope": "pl-s pl-pds",
+          "text": "\""
+        },
+        {
+          "scope": "",
+          "text": "><"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "p"
+        },
+        {
+          "scope": "",
+          "text": ">text</"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "p"
+        },
+        {
+          "scope": "",
+          "text": "></"
+        },
+        {
+          "scope": "pl-ent",
+          "text": "div"
+        },
+        {
+          "scope": "",
+          "text": ">\n"
+        }
+      ],
+      "rust": [
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.begin.html",
+          "text": "<"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html entity.name.tag.block.any.html",
+          "text": "div"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html",
+          "text": " "
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html meta.attribute-with-value.class.html entity.other.attribute-name.class.html",
+          "text": "class"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html meta.attribute-with-value.class.html punctuation.separator.key-value.html",
+          "text": "="
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html meta.attribute-with-value.class.html string.quoted.double.html punctuation.definition.string.begin.html",
+          "text": "\""
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html meta.attribute-with-value.class.html string.quoted.double.html meta.class-name.html",
+          "text": "a"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html meta.attribute-with-value.class.html string.quoted.double.html punctuation.definition.string.end.html",
+          "text": "\""
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.end.html",
+          "text": ">"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.begin.html",
+          "text": "<"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html entity.name.tag.block.any.html",
+          "text": "p"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.end.html",
+          "text": ">"
+        },
+        {
+          "scope": "text.html.basic",
+          "text": "text"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.begin.html",
+          "text": "</"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html entity.name.tag.block.any.html",
+          "text": "p"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.end.html",
+          "text": ">"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.begin.html",
+          "text": "</"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html entity.name.tag.block.any.html",
+          "text": "div"
+        },
+        {
+          "scope": "text.html.basic meta.tag.block.any.html punctuation.definition.tag.end.html",
+          "text": ">"
+        },
+        {
+          "scope": "text.html.basic",
+          "text": "\n"
+        }
+      ]
+    }
+  ]
+}

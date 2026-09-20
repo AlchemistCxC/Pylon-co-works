@@ -19,3 +19,6 @@
 //! parity 绿后 TS 实现退役；本 crate 不保留「和 TS 不一样的第二套语义」。
 
 pub mod canonical;
+pub mod events;
+pub mod projector;
+pub mod streaming;

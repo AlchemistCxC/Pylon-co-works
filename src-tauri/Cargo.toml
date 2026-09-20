@@ -22,6 +22,7 @@ members = [
     "pet-core",
     "pylon-canonical-types",
     "pylon-compute",
+    "pylon-markdown",
 ]
 resolver = "2"
 
