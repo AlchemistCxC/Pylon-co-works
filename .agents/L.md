@@ -380,3 +380,17 @@
 **我不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/**`（#207 的 clippy 收口已单独提交，本轮不再动 Rust 侧）、`src/presets/**`、`src/zones/**`、`src/components/Settings.tsx`、`src/plugins/product/packages/builtin.pylon-workspace/**`（#206 域）。
 
 **共享工作树状态**：本轮开工时工作树对他人在途改动是干净的（此前 `dispatcher/mod.rs`、`persist.rs`、`Sidebar.css` 三处在途改动已由各自作者提交）；每次提交前重新核对 `git status`，全程 pathspec，不 `add .`、不 `commit -a`。
+
+---
+
+[2026-09-21 09] [Miyaki Kumo] [#218]
+
+**开工：issue218（webview2-mcp 上下文瘦身）。** 在 `Ru5t/Reflector` 上施工。本轮文件域，请勿改写、勿连带提交：
+
+- `tools/webview2-mcp/src/tools/mod.rs`（工具/参数描述瘦身 + 大结果紧凑编码）
+- `tools/webview2-mcp/src/mcp.rs`（INSTRUCTIONS 收紧）
+- `tools/webview2-mcp/README.md`（通用约定表述同步）
+- `tools/webview2-mcp/scripts/stdio-smoke.py`（如断言口径需同步）
+- `.agents/records/218-mcp-context-slimming.md`（开发记录，新增）
+
+**不碰**：`tools/webview2-mcp/src/cdp/**`、`jsscript.rs`、`args.rs`、`error.rs`、`main.rs`；他人一切文件域。L.md 旧条目不动（归档归各 issue 负责人）。
