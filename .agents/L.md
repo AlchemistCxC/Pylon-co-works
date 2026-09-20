@@ -396,3 +396,20 @@
 - 文档：`.agents/records/`（新增一篇）、`.agents/spec/`、本文件
 
 **对在途改动的报备**：工作树里 `src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/session/persist.rs`、`builtin.pylon-workspace/styles/components/Sidebar.css` 及其用例有他人未提交改动——我**不碰、不暂存、不连带提交**。特别地：T3 将来若需动 dispatcher 的窗口/flush 区段，我会先与 `dispatcher/mod.rs` 的在途作者确认后再动，本轮不动。
+
+---
+
+[2026-09-20 11] [Miyaki Kumo] [#208 续 / #204 ③ / #155 T3-1]
+
+**开工：用户裁决「这四条全做了」——① 渲染吞吐 ② 前端文档内存 ③ Rust 写侧行聚合（算法，T3-1） ④ Rust 库（payload 透传/分配器/hasher）。**
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+- ① 渲染吞吐：`src/renderers/solid-workbench/chat/MessageRow.solid.tsx`（折叠态不渲染正文）、`src/renderers/solid-workbench/chat/markdownRenderModel.ts`（缓存按字节预算 + 超大条目不入缓存）
+- ② 前端内存：`src/domains/workbench/workbenchProjector.ts`、`src/infrastructure/events/canonicalEventRepository.ts`（若需要）、`src/domains/events/canonicalEventRow.ts` 及其 `__tests__`
+- ③ Rust 写侧聚合：`src-tauri/src/session/event_repo.rs`（`ingest_kernel_events` 内折叠 + 与读侧共用助手）、`src-tauri/src/session/turn_rollup.rs`（如需）
+- ④ Rust 库：`src-tauri/Cargo.toml`、`src-tauri/src/main.rs`/`lib.rs`（分配器）、`src-tauri/src/session/event_repo.rs`（payload 透传）
+- 文档：`.agents/records/`（新增一篇或两篇）、`.agents/spec/`、本文件
+
+**与 #155 的关系报备**：③ 是 ADR-0008 的 T3-1（写侧聚合），**不改 schema、不改 wire 契约、不动 dispatcher**（窗口边界让 run 断开即可，读侧按 chunk 展开）。T3-2（draft 尾巴）仍需你裁决后再动。
+
+**对在途改动的报备**：`src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/session/persist.rs`、`Sidebar.css` 及其用例有他人未提交改动，我方不碰、不暂存、不连带提交，全部提交走 pathspec。
