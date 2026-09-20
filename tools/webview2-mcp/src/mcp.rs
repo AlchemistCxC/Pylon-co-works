@@ -29,32 +29,28 @@ const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 const SERVER_NAME: &str = "pylon-webview2-mcp";
 
+/// 服务级指引只在 initialize 时发一次，但同样是每个会话的固定成本（#218 瘦身口径：
+/// 保留排障骨架与关键判读点，长缘由见 tools/webview2-mcp/README.md）。
 const INSTRUCTIONS: &str = "\
-驱动 Pylon（Tauri 2 + Windows WebView2）前端的调试服务器，通过 WebView2 的 \
---remote-debugging-port 走标准 CDP。
+驱动 Pylon（Tauri 2 + WebView2）前端的调试服务器，走标准 CDP。
 
-推荐排障顺序：
-1. webview_targets —— 确认端点活着、拿到目标 id。任何工具报 debug_endpoint_unreachable 都先回到这一步。
-2. webview_console —— 第一手证据。默认读「上次读过之后的增量」，所以先做动作再读，不要反复全量拉。
-3. webview_network —— 请求/响应/失败三态合并成一条记录；要看响应体用 webview_network_body。
-4. webview_query / webview_dom —— 布局与样式。webview_query 给盒模型与计算样式。
-5. webview_screenshot —— 视觉确认；返回图片内容。
-6. webview_click / webview_type / webview_key / webview_hover / webview_select —— 真实输入事件。\
-webview_click / webview_hover 会报告 hitIsSelfOrDescendant，为 false 说明目标被遮挡，\
-这是「点了没反应」的常见成因。
-7. webview_wait —— 动作之间用它同步：等元素出现/消失、等条件为真、等 URL 或文档就绪，\
-不要用盲等固定毫秒代替。
-8. webview_scroll / webview_navigate —— 滚动容器或页面；导航与重载。
-9. webview_snapshot → webview_click/type/select —— 先拿「角色 + 名字 + ref」的文本树，
-   用 ref 定位元素，比猜 CSS 选择器稳；ref 失效时会明确报「请重新快照」。
-10. webview_websocket —— 前端 WebSocket 的帧级流水（连接级事件 + 每帧一条）；
-   webview_network 里有握手记录，但要看向返就要用它。
-11. tauri_event_catalog → tauri_events —— 先扫出事件名，再显式订阅并读增量。
-   事件订阅必须给名字，无法全量旁路捕获（tauri 的 __TAURI_INTERNALS__.invoke 不可改写）。
-   订阅会注册成「新文档注入」，页面 reload 后自动重建。
-12. tauri_invoke —— 直接调后端命令（例如 list_runtime_logs 拿后端日志时间轴）。
+排障顺序：
+1. webview_targets —— 确认端点活着、拿目标 id；任何工具报 debug_endpoint_unreachable 都先回这里。
+2. webview_console —— 第一手证据；默认读增量，先做动作再读。
+3. webview_network / webview_network_body —— 请求三态合并成一条；要看响应体用后者。
+4. webview_query / webview_dom —— 盒模型、计算样式与结构。
+5. webview_screenshot —— 视觉确认（返回图片）。
+6. webview_click / webview_type / webview_key / webview_hover / webview_select —— 真实输入；\
+click 与 hover 的 hitIsSelfOrDescendant 为 false 即目标被遮挡（「点了没反应」常见成因）。
+7. webview_wait —— 动作间同步：等元素出现/消失、等条件为真、等 URL 或文档就绪，别盲等固定毫秒。
+8. webview_scroll / webview_navigate —— 滚动与导航。
+9. webview_snapshot —— 「角色 + 名字 + ref」文本树；用 ref 定位比猜选择器稳，失效会提示重新快照。
+10. webview_websocket —— 帧级往返流水（webview_network 只保留握手级记录）。
+11. tauri_event_catalog → tauri_events —— 先扫事件名再订阅读增量；订阅必须给名字，\
+reload 后自动重建。
+12. tauri_invoke —— 直调后端命令（如 list_runtime_logs 拿后端日志时间轴）。
 
-多窗口时用 target 参数指定目标 id（支持前缀匹配）。所有工具都接受 timeout_ms。";
+多窗口用 target 指定目标 id（前缀匹配）；所有工具接受 timeout_ms。";
 
 pub struct Server {
     context: Context,
