@@ -1064,7 +1064,7 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
         .filter(|event| event.event_type != "turn.unit")
         .flat_map(|event| {
             let width = crate::session::row_input_span_width(&event);
-            std::iter::repeat(event).take(width)
+            std::iter::repeat_n(event, width)
         });
     for item in pending {
         let Some(event) = canonical_events.next() else {

@@ -1588,21 +1588,27 @@ impl EventRepo {
         let mut run: Vec<CanonicalEventRow> = Vec::new();
         let mut run_base: Option<&'static str> = None;
         let mut run_bytes: usize = 0;
+        // 落盘一段 run，返回本段已落盘的最大 sequence（无 run 时 None）。**不在这里改
+        // `final_revision`**：循环内的那次 flush 之后，当前事件的两条分支都会各自推进编号
+        // （必然更大），在那里记账是死写；只有循环外的收口调用才需要这个返回值。
+        // `run_bytes` 同理不清零——它与 `run` 同生共死：只在 run 非空时被读（见 extend 判据），
+        // 新 run 在下方重新赋值。
         macro_rules! flush_run {
-            () => {
+            () => {{
+                let mut last_flushed: Option<i64> = None;
                 if !run.is_empty() {
                     let chunks = std::mem::take(&mut run);
                     let base = run_base.take();
-                    run_bytes = 0;
                     let mut flushed: Vec<CanonicalEventRow> = Vec::with_capacity(1);
                     flush_delta_run(&mut flushed, chunks, base);
                     for row in flushed {
                         execute_insert_event(&tx, &row, None)?;
-                        final_revision = row.sequence;
+                        last_flushed = Some(row.sequence);
                         result_events.push(row);
                     }
                 }
-            };
+                last_flushed
+            }};
         }
         for input in inputs {
             let event = normalize_kernel_event(input, final_revision + 1)?;
@@ -1623,7 +1629,8 @@ impl EventRepo {
                 run.push(event);
                 continue;
             }
-            flush_run!();
+            // 返回值不读：下面两条分支都会用当前事件的编号推进 final_revision（必然更大）。
+            let _ = flush_run!();
             match base {
                 // 单条自身就超预算的 delta 不成批（不截断，原样落盘）。
                 Some(base) if raw_payload_bytes(&event) <= MAX_FOLD_BYTES => {
@@ -1682,7 +1689,10 @@ impl EventRepo {
             }
         }
         // 收口最后一段 run（未终结的尾巴也必须落盘——draft 尾巴不豁免，ADR-0016 决定 4）。
-        flush_run!();
+        // 这里没有后续事件来推进编号，故必须读回本段的最大 sequence。
+        if let Some(sequence) = flush_run!() {
+            final_revision = sequence;
+        }
         tx.commit().map_err(EventError::from)?;
         Ok(EventAppendResult {
             events: result_events,
