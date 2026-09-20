@@ -36,6 +36,32 @@ jobs:
         with:
           node-version: 22
 
+      # #220：前端计算核（Rust/WASM）随前端门禁一起构建——check:frontend 的
+      # build:wasm 步骤与 vitest globalSetup 都要它，因此本 job 从「纯前端」变成
+      # 「前端 + 最小编译面」。只装 wasm32 target，不装 clippy。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL -o "$RUNNER_TEMP/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$RUNNER_TEMP/wasm-pack.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$RUNNER_TEMP/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+
+      # 产物缓存按计算核源码建 key：命中即连 cargo 编译都省掉（build-wasm 的
+      # 源码戳同样只看这些文件，两边口径一致）。改计算核才付一次冷构建。
+      - uses: actions/cache@v4
+        with:
+          path: src/wasm
+          key: wasm-${{ runner.os }}-${{ hashFiles('src-tauri/pylon-compute/**', 'src-tauri/pylon-canonical-types/**', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wasm-${{ runner.os }}-
+
       # #106 P6：bun 安装缓存（与 rust job 合计省约 40s）。
       - uses: actions/cache@v4
         with:
@@ -92,6 +118,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # #220：vitest 的 globalSetup 会确保前端计算核 wasm 产物存在（分片 job 同样
+      # 需要），故本 job 也要 wasm 工具链。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL -o "$RUNNER_TEMP/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$RUNNER_TEMP/wasm-pack.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$RUNNER_TEMP/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+
+      - uses: actions/cache@v4
+        with:
+          path: src/wasm
+          key: wasm-${{ runner.os }}-${{ hashFiles('src-tauri/pylon-compute/**', 'src-tauri/pylon-canonical-types/**', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wasm-${{ runner.os }}-
 
       - uses: actions/cache@v4
         with:

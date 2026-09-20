@@ -28,6 +28,12 @@ export const moduleDefinitions = [
   { id: 'rust-core', roots: ['src-tauri/pylon-core/src/'], responsibility: '可复用 Agent catalog、检测与 preflight 能力' },
   { id: 'rust-foundations', roots: ['src-tauri/pylon-foundations/src/'], responsibility: '跨宿主基础类型与策略' },
   { id: 'pet-core', roots: ['src-tauri/pet-core/src/'], responsibility: '独立宠物领域能力' },
+  // #220 WP1：canonical 事件 wire 契约的单源（TS 侧词表由它生成）；被写入侧
+  // （rust-session 的 event_repo）与 WASM 计算核同时消费。
+  { id: 'rust-canonical-types', roots: ['src-tauri/pylon-canonical-types/src/'], responsibility: 'canonical 事件类型词表、判别符映射与 identity 推导的单源' },
+  // #220：前端计算核（Rust/WASM）。纯函数——不读时钟/store/registry、不做 IO、
+  // 不发明活性判定；编排与 DOM 留在 JS 侧。
+  { id: 'rust-compute', roots: ['src-tauri/pylon-compute/src/'], responsibility: '前端计算核：投影折叠与流式文本管线的计算层（wasm-bindgen 出口）' },
   { id: 'rust-build', roots: ['src-tauri/*'], responsibility: '原生构建入口脚本；不属于运行时模块' },
   { id: 'tooling', roots: ['scripts/'], responsibility: '开发、校验与发布脚本；不作为产品运行时 import 来源' },
 ] as const

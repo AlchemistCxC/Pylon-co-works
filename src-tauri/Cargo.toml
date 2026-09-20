@@ -11,7 +11,18 @@ default-run = "pylon"
 # 内嵌测试从未在 CI 执行（测试黑洞）。resolver 2 为 edition 2021 语义的显式化。
 # workspace 根 = src-tauri，target 目录位置不变。
 [workspace]
-members = [".", "pylon-core", "pylon-foundations", "pet-core"]
+# #220 WP1/WP2：pylon-canonical-types 是 canonical 事件 wire 契约的单源，
+# pylon-compute 是前端计算核（wasm-bindgen 出口）。两者都落本 workspace，
+# 才能被 check:rust 的 `cargo test --workspace --lib` 与 `cargo fmt --all` 覆盖；
+# 另起 workspace 会让它们脱离门禁（#106 P0 关掉的那类测试黑洞）。
+members = [
+    ".",
+    "pylon-core",
+    "pylon-foundations",
+    "pet-core",
+    "pylon-canonical-types",
+    "pylon-compute",
+]
 resolver = "2"
 
 [package.metadata]
@@ -63,6 +74,9 @@ serde_yml = "0.0.13"
 sha2 = "0.10"
 pylon-core = { path = "pylon-core" }
 pylon-foundations = { path = "pylon-foundations" }
+# #220 WP1：canonical 事件 wire 契约的单源。写入侧（session/event_repo.rs）与
+# WASM 计算核（pylon-compute）共用同一份词表与 identity 推导纪律。
+pylon-canonical-types = { path = "pylon-canonical-types" }
 chrono = "0.4.45"
 windows-sys = { version = "0.61.2", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 libc = "0.2"

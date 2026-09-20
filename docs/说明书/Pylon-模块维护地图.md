@@ -25,6 +25,8 @@
 | Native host | `src-tauri/src/` 其余模块 | Tauri 命令注册、文件/终端/Gateway/安装等 native adapters；专业子目录优先归属 | host 库测试、构建与 Clippy |
 | 可复用 Agent 能力 | `src-tauri/pylon-core/src/` | catalog、检测、preflight；保持受控探测与配置身份区分 | workspace 化后随 `cargo test --workspace --lib` 进门禁；Clippy 走 workspace 单跑 |
 | Native 基础 / 宠物 | `src-tauri/pylon-foundations/src/`、`src-tauri/pet-core/src/` | 基础类型与独立宠物领域；不从 renderer 或 Tauri UI 反向导入 | 同上（单锁单 target，`--workspace` 一条命令覆盖全 crate） |
+| canonical 契约单源 | `src-tauri/pylon-canonical-types/src/` | canonical 事件类型词表、wire 判别符映射与 identity 推导（owner key / eventId / sequence）。**唯一事实源**：TS 侧词表由 `scripts/generate-canonical-event-types.mjs` 从它生成，写入侧 `session/event_repo.rs` 与计算核同时消费（#220 WP1，ADR-0018） | `cargo test --workspace --lib`；`check:canonical-types`（TS 生成物是否同步） |
+| 前端计算核（WASM） | `src-tauri/pylon-compute/src/` | 投影折叠与流式文本管线的**计算层**，`wasm-bindgen` 出口。纯函数：不读时钟/store/registry、不做 IO、不发明活性判定（权威在运行时内核，ADR-0017）。出口分「纯内层 + wasm 薄壳」两层（`JsError` 在非 wasm 目标会 panic）。产品路径的编排与 DOM 消费仍在 JS：`src/infrastructure/compute/` 只做装载，`src/wasm/` 是构建产物 | `cargo test --workspace --lib`、`check:rust`；过 wasm 边界的 parity 见 `src/infrastructure/compute/__tests__/` |
 | 构建与工具 | `src-tauri/*` 的构建文件、`scripts/` | 开发、审计、打包工具；不是产品运行时依赖 | 脚本测试、发行校验、`check:docs` |
 
 `check:maintenance` 覆盖上述根下受 Git 管理或未忽略的新 TS/JS（含 m/c 变体）、Rust、Python、PowerShell、shell 源文件；排除 tests、fixtures、vendor、target、node_modules、声明文件与打包资源。CSS、图片、配置及文档不是该源码计数的对象，分别由样式、主题、manifest、bundle 和文档门禁维护。Rust 行数包含内联单测，只能用于定位；不能由行数断言生产复杂度。资源 SDK 是构建产物，不能当作第二份可编辑实现。

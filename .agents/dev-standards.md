@@ -43,6 +43,18 @@
 - 每包允许至多一个自适应残量样式（lifecycle `adaptive`，`?inline` 随插件生命周期回收），只收模式切换、媒体查询、动效、`:has()` 这类 utilities 不宜表达的自适应规则；其余样式一律 utilities，绞杀时随组件迁移。
 - 常用 variant 对照：展开态 `aria-expanded:`、键盘焦点 `focus-visible:`、减动效 `motion-reduce:`、窄屏 `max-[720px]:`、后代引用 `[.some-scope_&]:`（慎用，优先把判断放进组件状态）。
 
+## Rust/WASM 计算核（#220）
+
+计算核目标形态是 **JS 编排 + WASM 计算核 + Solid DOM 消费层**：计算住 Rust，编排（store、时钟、IPC、持久化、DOM）留 JS。选型与理由见 [ADR-0018](decisions/0018-frontend-compute-core-rust-wasm.md)。
+
+- **落点**：计算核与被共享的契约 crate 都进 `src-tauri` 的 workspace。另起 workspace 会让它们脱离 `cargo test --workspace --lib` 与 `cargo fmt --all`，等于重建 #106 P0 关掉的测试黑洞。`crate-type = ["cdylib", "rlib"]`：wasm-bindgen 在非 wasm 目标可编译，纯逻辑在宿主跑原生单测（property test 靠这个，比在 wasm 里跑快得多）。
+- **分层是硬约束**：计算核的每个出口都拆「纯内层函数（`Result<T, String>`）」+「`#[wasm_bindgen]` 薄壳（只做值/错误转换）」。`JsError::new` 在非 wasm 目标会走导入桩并 panic（`cannot call wasm-bindgen imported functions on non-wasm targets`），把可失败逻辑写在壳里会让宿主测试直接炸。
+- **计算核不读环境**：不读时钟、store、registry，不做 IO，不发明活性判定（在途回合的权威在运行时内核，ADR-0017）。需要时间时由 JS 把 `now` 传进来。
+- **迁移期只允许差分并存**：TS 基线与计算核的实现只能在 parity 差分阶段共存；parity 绿后 TS 侧退役，不留长期双实现。装载层（`src/infrastructure/compute/pylonCompute.ts`）不含计算逻辑，也不得就地补一份 TS 实现。
+- **产物与工具链**：产物生成到 `src/wasm/`（不入库、不 lint、不 tsc），由 `scripts/build-wasm.mjs` 构建（源码哈希做戳，未变跳过；缺 `wasm32-unknown-unknown` 或 `wasm-pack` 时报出补齐命令）。vitest 的 `globalSetup` 与 `check:frontend` 的 `build:wasm` 步骤都会确保它存在。**wasm-opt 的特性开关必须与 rustc 默认发射的特性对齐**（见 `src-tauri/pylon-compute/Cargo.toml` 注释），否则 `-O` 直接验证失败。
+- **产物记账**：`check:bundle` 的 wasm 预算段独立于 js 总额；新增 wasm 依赖后按实产物重定标，不把 wasm 折进 js 总额（会让既存产物变成超限）。
+- **跨语言契约的单源方向**：成对的 wire 契约（事件类型词表等）以 Rust 为单源，TS 侧由脚本生成（`scripts/generate-canonical-event-types.mjs`），不用「两处手抄 + 门禁兜底」。
+
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。

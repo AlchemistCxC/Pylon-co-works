@@ -1,0 +1,10 @@
+[package]
+name = "pylon-canonical-types"
+version = "0.2.4-Rev"
+edition = "2021"
+description = "canonical 事件 wire 契约的单源（issue #220 WP1）"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

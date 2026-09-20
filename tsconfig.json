@@ -26,6 +26,7 @@
   "include": ["src"],
   "exclude": [
     "src/renderers/solid-workbench/**/*.solid.tsx",
-    "src/renderers/solid-workbench/**/*.solid.test.tsx"
+    "src/renderers/solid-workbench/**/*.solid.test.tsx",
+    "src/wasm"
   ]
 }

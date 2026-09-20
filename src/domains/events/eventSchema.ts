@@ -25,35 +25,19 @@ export interface CanonicalEventOwner {
   workspaceId?: string
 }
 
-/** §5.10 事件判别联合；history.snapshot 是同 journal 内的 replay reconciliation checkpoint。 */
-export const CANONICAL_EVENT_TYPES = [
-  'user.message',
-  'assistant.text.delta',
-  'assistant.thinking.delta',
-  /** sink 写入窗口聚合行（#81 L1）：typedPayload = { text, foldedCount, seqSpan }，rawPayload = 原始 chunk 数组。 */
-  'assistant.text.delta.batch',
-  'assistant.thinking.delta.batch',
-  'tool.call.started',
-  'tool.call.updated',
-  'tool.call.completed',
-  'tool.call.failed',
-  'interaction.requested',
-  'interaction.answered',
-  'turn.completed',
-  'turn.failed',
-  /** #81 L2：终结时追加的 turn 级单元行（保序 segment 数组 + content_sha256）。
-   * 只由 kernel/Rust 在写入 turn.completed|failed 的同一事务内产生；读侧优先消费单元。 */
-  'turn.unit',
-  'usage.updated',
-  'plan.replaced',
-  'session.mode-updated',
-  'session.model-updated',
-  'session.config-updated',
-  'session.commands-updated',
-  /** 完整 remote replay 的 append-only reconciliation checkpoint。 */
-  'history.snapshot',
-  'unknown',
-] as const
+/**
+ * §5.10 事件判别联合；history.snapshot 是同 journal 内的 replay reconciliation checkpoint。
+ *
+ * #220 WP1：词表**单源在 Rust**（`src-tauri/pylon-canonical-types`，写入侧
+ * `event_repo.rs` 与 WASM 计算核 `pylon-compute` 共用），本文件只做再导出，
+ * 不再手抄——此前两边各一份且无门禁，漂移只能靠人读。
+ * 改词表：改 Rust 侧 → `bun run build:canonical-types`；`bun run check:canonical-types`
+ * 与 `src/infrastructure/compute/__tests__/pylonCompute.test.ts` 分别在静态与运行期兜漂移。
+ */
+// 同时需要本地绑定（下面 `typeof` 用）与再导出，故 import + export 分开写。
+import { CANONICAL_EVENT_TYPES } from './canonicalEventTypes.generated'
+
+export { CANONICAL_EVENT_TYPES }
 
 export type CanonicalEventType = (typeof CANONICAL_EVENT_TYPES)[number]
 

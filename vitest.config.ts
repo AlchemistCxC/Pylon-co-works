@@ -41,6 +41,10 @@ export default defineConfig({
     react({ exclude: SOLID_WORKBENCH_FILES }),
   ],
   test: {
+    // #220：前端计算核的 wasm 产物是测试前置。挂 globalSetup 而不是某个 npm script，
+    // 是为了覆盖所有入口（watch、编辑器集成）；build-wasm 以源码哈希做戳，未变时
+    // 只读几个文件。缺 wasm 工具链时**直接失败**，不静默跳过——跳过等于弱化 parity 门禁。
+    globalSetup: ['scripts/vitest-wasm-setup.mts'],
     projects: (['node', 'node-shared', 'react-dom', 'react-shared', 'solid-dom'] as const).map(name => ({
       plugins: [
         solid({ include: SOLID_WORKBENCH_FILES, hot: false }),

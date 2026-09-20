@@ -398,6 +398,8 @@
 
 **工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
 
+**与他域的交接（开工后观测到 #217 正在同一工作树施工）**：我在 04:01 观测到 `src-tauri/src/session/{model.rs,prompt.rs}` 正在被 #217 改写（263 行新增，纯追加、未被我的 `cargo fmt --all` 改动）。**我全程不碰这三个文件与 `runtime.rs`**；我的 `src-tauri/src/session/event_repo.rs` 改动与本域之外的 Rust 侧不交叉。**两处声明重叠，需留意**：`docs/说明书/Pylon-项目架构参考.md` 与 `.agents/records/`（#217 也声明了这两处）——我只在我自己的记录文件与说明书「前端计算核」一节落笔，不删改 #217 的活性段落。另：`src-tauri/Cargo.lock` 我因新增依赖而改写，若 #217 也加依赖，合并时按「两边都保留」处理。
+
 ---
 
 [2026-09-21 11] [Miyaki Kumo] [#217]
