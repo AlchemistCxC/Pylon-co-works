@@ -345,3 +345,21 @@
 **我不碰**：全局自定义预设的删除链（`src/customPresets.ts` 的 `deleteCustomPreset`、`presetReducer.ts` 的 `removeCustomPresetReducer`、Settings 全局预设行）一行不动；刀6 的派生规则与池结构；`src/presets/**`；`src/zones/pickZoneFields.ts`；`src/themeFieldDefs.ts`；首方 CSS（复用现成 `.set-confirm*`，**不新增样式家族**）；`src/renderers/**`；`src-tauri/**`；`tools/**`。
 
 **约束（复审据此把关）**：**出厂条目任何情况下 0 个删除入口**（须有三态断言）；删除入口**只在「该自定义条目被选中」时出现**；Q8 灰显占位条目可被删（那是它唯一的出口）；预设「值」零改动。
+
+---
+
+[2026-09-20 16] [Herschel] [#214 · 刀7（与 07a #211 同批同分支）]
+
+**开工：两套默认预设（GUI / 终端）——不进列表与池，「重置主题」落到当前模式的默认预设。** 施工单 `预设修正/预设系统V2/07-施工单-刀7-两套默认预设.md`；分支沿用 `feat/preset-v2.7`（07a 已本地存档 `40487a7c`，批末统一草稿 PR）。
+
+**我方本轮文件域（在 07a 声明之上叠加；请勿改写、勿连带提交）**：
+
+- `src/presets/types.ts`（`PresetName` 增两条默认预设名）
+- `src/presets/builtin.ts`（新增 `DEFAULT_PRESETS` 独立表 + `defaultPresetForInterfaceMode`）
+- `src/store.ts`（`resetTheme` 落点改为当前模式的默认预设；未登记模式回落 `DEFAULTS`）
+- **新增** `src/__tests__/defaultPresets.test.ts`
+- 文档：`.agents/L.md`、`.agents/records/`
+
+**我不碰**：`GLOBAL_PRESETS` 本体（仍 10 套，一条不加）、刀6 的派生规则与池结构、`pickZoneFields`、`src/components/Settings.tsx`（本刀不动预设菜单 UI）、`src/application/transactions/activateInterfaceMode.ts`（重置仍走既有事务，改的只是其中的 `resetTheme`）、首方 CSS、`src/renderers/**`、`src-tauri/**`、`tools/**`。
+
+**约束（复审据此把关）**：两条默认预设**不进 `GLOBAL_PRESETS`** ⇒ 「列表 + 池」两处排除是结构性保证而非过滤分支；唯一触达 = `resetTheme`；未登记模式回落 `DEFAULTS`；重置**不修改任何出厂预设内容**；重置后标记沿用 `resetZone` 的「无基准」态（不悬空、不亮「未知预设」兜底 chip）。
