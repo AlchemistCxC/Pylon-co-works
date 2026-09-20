@@ -21,6 +21,7 @@ import {
   ZONE_PRESET_POOL,
   createZonePresetEntryId,
   deriveZonePresetPool,
+  isCustomZonePresetEntry,
   normalizeZonePresetEntries,
   normalizeZonePresetValues,
   resolveZonePresetEntryTheme,
@@ -241,8 +242,7 @@ describe('zonePresetPool · Q8 无效条目清理（刀6 #206）', () => {
   })
 })
 
-describe('zonePresetPool · ZonePresetRow 消费（刀6 #206）', () => {
-  beforeEach(() => {
+describe('zonePresetPool · ZonePresetRow 消费（刀6 #206）', () => {  beforeEach(() => {
     localStorage.clear()
     resetStores()
     useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
@@ -277,5 +277,134 @@ describe('zonePresetPool · ZonePresetRow 消费（刀6 #206）', () => {
     mountSettingsSheet({ domain: 'appearance', section: 'sidebar' })
     fireEvent.click(within(presetGroup()).getByRole('button', { name: 'Glass Light' }))
     expect(within(presetGroup()).getByRole('button', { name: 'Glass Light' })).toHaveAttribute('aria-current', 'true')
+  })
+})
+
+describe('zonePresetPool · 自定义条目删除（刀7 前置 #211）', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetStores()
+    useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
+  })
+
+  /** 播一条自定义条目并让它成为 sidebar 的当前基准（= 被选中态）。 */
+  function seedSelectedCustomEntry(label = '我的侧栏'): string {
+    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
+    const id = useStore.getState().saveZonePresetEntry('gui', 'sidebar', label)!
+    const entry = useStore.getState().zonePresetEntries.find(item => item.id === id)!
+    useStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
+    return id
+  }
+
+  it('删除闭环 + 持久化：条目从池与写盘内容里同时消失', () => {
+    const id = seedSelectedCustomEntry()
+    expect(zonePresetsFor('modern-gui', 'sidebar', useStore.getState().zonePresetEntries).some(e => e.id === id)).toBe(true)
+    expect(localStorage.getItem('pylon-theme')).toContain(id)
+
+    useStore.getState().removeZonePresetEntry(id)
+
+    expect(useStore.getState().zonePresetEntries).toHaveLength(0)
+    expect(zonePresetsFor('modern-gui', 'sidebar', useStore.getState().zonePresetEntries).some(e => e.id === id)).toBe(false)
+    // 写回可见：重载后不复活
+    expect(localStorage.getItem('pylon-theme')).not.toContain(id)
+    expect(normalizeZonePresetEntries(
+      (JSON.parse(localStorage.getItem('pylon-theme')!) as { state: { zonePresetEntries?: unknown } }).state.zonePresetEntries,
+    )).toEqual([])
+  })
+
+  it('删除被引用的条目：该区失去基准但保留现值（与全局删除链同语义）', () => {
+    const id = seedSelectedCustomEntry()
+    expect(useStore.getState().appliedPreset.sidebar).toBe(id)
+    expect(useStore.getState().sidebarBg).toBe('#123456')
+
+    useStore.getState().removeZonePresetEntry(id)
+
+    expect(useStore.getState().appliedPreset.sidebar).toBe('')
+    expect(useStore.getState().custom.sidebar).toBe(true)
+    expect(useStore.getState().sidebarBg).toBe('#123456')
+  })
+
+  it('出厂条目不可删：把出厂预设名当 id 传进去是 no-op（不动条目、不写状态）', () => {
+    const id = seedSelectedCustomEntry()
+    const entriesBefore = useStore.getState().zonePresetEntries
+    const appliedBefore = useStore.getState().appliedPreset
+
+    useStore.getState().removeZonePresetEntry('glass')
+
+    expect(useStore.getState().zonePresetEntries).toBe(entriesBefore)
+    expect(useStore.getState().appliedPreset).toBe(appliedBefore)
+    expect(useStore.getState().zonePresetEntries.map(entry => entry.id)).toEqual([id])
+    expect(isCustomZonePresetEntry(ZONE_PRESET_POOL.gui.sidebar[0])).toBe(false)
+  })
+
+  it('两段式确认：点删除 → 行内 alertdialog → 确认删除后条目消失', () => {
+    seedSelectedCustomEntry()
+    mountSettingsSheet({ domain: 'appearance', section: 'sidebar' })
+    const group = within(presetGroup())
+
+    fireEvent.click(group.getByRole('button', { name: '删除' }))
+    const dialog = group.getByRole('alertdialog')
+    expect(dialog).toHaveAccessibleName('确认删除区域预设 我的侧栏')
+    expect(dialog).toHaveTextContent('将移除本区的自定义条目「我的侧栏」，本区保留现值但失去该预设基准')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除' }))
+    expect(useStore.getState().zonePresetEntries).toHaveLength(0)
+    expect(within(presetGroup()).queryByRole('button', { name: '我的侧栏' })).not.toBeInTheDocument()
+    expect(within(presetGroup()).queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('取消路径：点取消不删、无残留确认框、删除入口回到常规态', () => {
+    seedSelectedCustomEntry()
+    mountSettingsSheet({ domain: 'appearance', section: 'sidebar' })
+    const group = within(presetGroup())
+
+    fireEvent.click(group.getByRole('button', { name: '删除' }))
+    expect(group.getByRole('alertdialog')).toBeInTheDocument()
+    fireEvent.click(within(group.getByRole('alertdialog')).getByRole('button', { name: '取消' }))
+
+    expect(useStore.getState().zonePresetEntries).toHaveLength(1)
+    expect(within(presetGroup()).queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(within(presetGroup()).getByRole('button', { name: '我的侧栏' })).toBeInTheDocument()
+    expect(within(presetGroup()).queryAllByRole('button', { name: '删除' })).toHaveLength(1)
+  })
+
+  it('出现条件三态：出厂条目 0 个、自定义未选中 0 个、自定义被选中恰好 1 个', () => {
+    mountSettingsSheet({ domain: 'appearance', section: 'sidebar' })
+    const deletes = () => within(presetGroup()).queryAllByRole('button', { name: '删除' })
+
+    // ① 出厂条目被选中 ⇒ 0 个（铁律 1：出厂件不可改、不可删）
+    fireEvent.click(within(presetGroup()).getByRole('button', { name: 'Glass Light' }))
+    expect(deletes()).toHaveLength(0)
+
+    // ② 自定义条目已存在但未被选中 ⇒ 0 个
+    let id = ''
+    act(() => { id = useStore.getState().saveZonePresetEntry('gui', 'sidebar', '未选中的条目')! })
+    expect(within(presetGroup()).getByRole('button', { name: '未选中的条目' })).toBeInTheDocument()
+    expect(deletes()).toHaveLength(0)
+
+    // ③ 选中该自定义条目 ⇒ 恰好 1 个
+    act(() => {
+      const entry = useStore.getState().zonePresetEntries.find(item => item.id === id)!
+      useStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
+    })
+    expect(deletes()).toHaveLength(1)
+  })
+
+  it('Q8 灰显占位条目可被删除（那是它唯一的自然出口）', () => {
+    const broken: ZonePresetEntry = {
+      id: 'zone-gui-sidebar-9', mode: 'gui', zone: 'sidebar', label: '失效条目',
+      values: { ekgWidth: 3 } as unknown as Partial<ThemeSettings>,
+    }
+    useStore.setState({ zonePresetEntries: [broken] })
+    useStore.getState().pruneZonePresetEntries()
+    mountSettingsSheet({ domain: 'appearance', section: 'sidebar' })
+    const group = within(presetGroup())
+
+    // 占位条目本身灰显不可点，但删除入口常驻
+    expect(group.getByRole('button', { name: '失效条目' })).toBeDisabled()
+    fireEvent.click(group.getByRole('button', { name: '删除' }))
+    fireEvent.click(within(group.getByRole('alertdialog')).getByRole('button', { name: '确认删除' }))
+    expect(useStore.getState().zonePresetEntries).toHaveLength(0)
+    expect(within(presetGroup()).queryByRole('button', { name: '失效条目' })).not.toBeInTheDocument()
   })
 })

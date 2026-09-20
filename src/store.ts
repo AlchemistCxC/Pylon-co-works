@@ -11,6 +11,7 @@ import {
   createZonePresetEntryId,
   normalizeZonePresetEntries,
   pickZoneFields,
+  removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
@@ -155,6 +156,8 @@ type ThemeState = ThemeSettings & {
   saveZonePresetEntry: (mode: ZonePresetEntry['mode'], zone: ZonePresetEntry['zone'], label: string) => string | null
   /** 刀6（#206）Q8：读入容错 + 自动清理自定义条目值快照里的已删字段键（无变化则不动状态）。 */
   pruneZonePresetEntries: () => void
+  /** 刀7 前置（#211）：删除一条自定义区域预设条目（出厂条目不可删；引用它的区域失去基准）。 */
+  removeZonePresetEntry: (id: string) => void
 }
 
 // clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
@@ -463,6 +466,17 @@ export const useStore = create<ThemeState>()(persist(
   pruneZonePresetEntries: () => set(state => {
     const entries = cleanupZonePresetEntries(normalizeZonePresetEntries(state.zonePresetEntries))
     return entries === state.zonePresetEntries ? {} : { zonePresetEntries: entries }
+  }),
+  // 刀7 前置（#211）：纯计算在 zones/zonePresetPool.ts，此处只留 set(dispatch) 薄壳
+  //（形态照 removeCustomPreset）；未命中时 reducer 原样回引用 ⇒ 不写状态。
+  removeZonePresetEntry: (id) => set(state => {
+    const current = Array.isArray(state.zonePresetEntries) ? state.zonePresetEntries : []
+    const patch = removeZonePresetEntryReducer({
+      zonePresetEntries: current,
+      appliedPreset: state.appliedPreset,
+      custom: state.custom,
+    }, id)
+    return patch.zonePresetEntries === current ? {} : patch
   }),
 }),
 { name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
