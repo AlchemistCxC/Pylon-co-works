@@ -25,7 +25,28 @@ export interface MarkdownText {
 }
 
 const renderModelCache = new Map<string, Promise<MarkdownRoot>>()
-const MAX_CACHE_ENTRIES = 128
+/**
+ * P57 S3-A11 / #208：LRU 曾经是「128 条」——条数预算与文本长度脱钩，长会话里几千行互相淘汰，
+ * 于是**每次文档重建（bind/refresh/终态刷新）都把可见行重新解析一遍**。实机读数：单会话
+ * `parsed=23689` 次而可见行只有约一千，均值 ~12ms/次 ⇒ 长思考要几分钟才渲染完整。
+ *
+ * 改为**按字符预算**（键长即文本长度）：预算内的模型跨重建复用，超预算才淘汰最旧的。
+ * 2,000,000 字符 ≈ 覆盖本机会话全部可见正文（thinking 538k + text 8k）仍有余量。
+ */
+const MAX_CACHE_CHARS = 2_000_000
+let cachedChars = 0
+
+/**
+ * #212：**已结算**的模型副本，供渲染层同步取用。
+ *
+ * LRU 存的是 Promise，缓存命中也要等一个微任务；那一个微任务里 `<Show>` 会先渲染骨架
+ * （`.term-md-skeleton`，只占 1em），解析结果落地后整块撑到真高——历史行因此有一次
+ * 「1 行 → 真高」的高度跳变。命中已结算模型时同步渲染就完全没有这一次跳变。
+ *
+ * 生命周期与 `renderModelCache` 严格同步：同一处写入、同一处淘汰、同一处清空，
+ * 只保存非跳过（≠ `SKIPPED_MARKDOWN_ROOT`）的结果。
+ */
+const settledModels = new Map<string, MarkdownRoot>()
 
 /** 被取代而跳过解析时返回的空模型：调用方必然丢弃它，因此内容不参与渲染。 */
 const SKIPPED_MARKDOWN_ROOT: MarkdownRoot = { type: 'root', children: [] }
@@ -76,16 +97,27 @@ export function getMarkdownRenderModel(
   const pending = buildMarkdownRenderModel(markdown, options.isCurrent)
   if (options.cache !== false) {
     renderModelCache.set(markdown, pending)
-    while (renderModelCache.size > MAX_CACHE_ENTRIES) {
+    cachedChars += markdown.length
+    while (cachedChars > MAX_CACHE_CHARS) {
       const oldest = renderModelCache.keys().next().value
       if (oldest === undefined) break
       renderModelCache.delete(oldest)
+      settledModels.delete(oldest)
+      cachedChars -= oldest.length
     }
     // 跳过（哨兵）的结果不得留在缓存里：它不含任何内容，留着会让同文本的其他行渲染成空。
     // 按身份撤销，避免误删后来者写入的同名条目。
     pending.then(
       model => {
-        if (model === SKIPPED_MARKDOWN_ROOT && renderModelCache.get(markdown) === pending) renderModelCache.delete(markdown)
+        if (model === SKIPPED_MARKDOWN_ROOT) {
+          if (renderModelCache.get(markdown) === pending) {
+            renderModelCache.delete(markdown)
+            cachedChars -= markdown.length
+          }
+          return
+        }
+        // #212：只在仍是当前条目时登记已结算模型（被后来者顶掉的旧结果不得复用）。
+        if (renderModelCache.get(markdown) === pending) settledModels.set(markdown, model)
       },
       () => {},
     )
@@ -101,7 +133,19 @@ export function getMarkdownRenderModel(
 
 export function clearMarkdownRenderModelCache(): void {
   renderModelCache.clear()
+  settledModels.clear()
   graftBases.clear()
+  graftBaseChars = 0
+}
+
+/**
+ * #212：取已结算的模型（无则 undefined）。命中即可以同步渲染，不走骨架。
+ *
+ * 只在**走缓存**的调用点使用：增长尾块（`cache: false`）必须始终走解析/graft 路径
+ * （P57 S3-A11），不得因同文本曾在别处解析过就复用。
+ */
+export function peekMarkdownRenderModel(markdown: string): MarkdownRoot | undefined {
+  return settledModels.get(markdown)
 }
 
 /**
@@ -113,6 +157,16 @@ export function clearMarkdownRenderModelCache(): void {
  * 一律回退整段重解析——回退只是慢，拼错是渲染漂移，取舍永远偏向后者的反面。
  */
 const GRAFT_BASE_LIMIT = 32
+/**
+ * #204 遗留：基座是**整段 AST**，而条数预算与文本长度脱钩——32 条长思考尾块可以钉住
+ * 数十 MB（真机实测单行正文可到 1.6 万字符，AST 开销是文本的数倍）。补**字符预算**
+ * （键长即文本长度，与 markdown LRU 同口径）。
+ *
+ * **至少保留 1 条**：正在增长的那一行必须始终有基座，否则它每一拍都会整段重解析
+ * （退化成 O(N²)，ADR-0006）。因此预算淘汰只在「还剩不止一条」时进行。
+ */
+const MAX_GRAFT_BASE_CHARS = 256 * 1024
+let graftBaseChars = 0
 /** 取基座时由新到旧最多探测的候选数（同一行的上一状态通常就在最前面）。 */
 const GRAFT_BASE_PROBES = 4
 /** 叶子尾部守卫窗口：能「被纯文本字符延长」的构造（URL/实体/转义）其触发符都在末尾这几字里。 */
@@ -155,13 +209,27 @@ const GRAFT_SAFE_ANCESTORS = new Set([
 const graftBases = new Map<string, MarkdownRoot>()
 
 function rememberGraftBase(text: string, model: MarkdownRoot): void {
-  graftBases.delete(text)
+  if (graftBases.delete(text)) graftBaseChars -= text.length
   graftBases.set(text, model)
+  graftBaseChars += text.length
   while (graftBases.size > GRAFT_BASE_LIMIT) {
     const oldest = graftBases.keys().next().value
     if (oldest === undefined) break
     graftBases.delete(oldest)
+    graftBaseChars -= oldest.length
   }
+  // #204：字符预算淘汰——留下最后一条（正在增长的行必须有基座，见 MAX_GRAFT_BASE_CHARS）。
+  while (graftBaseChars > MAX_GRAFT_BASE_CHARS && graftBases.size > 1) {
+    const oldest = graftBases.keys().next().value
+    if (oldest === undefined) break
+    graftBases.delete(oldest)
+    graftBaseChars -= oldest.length
+  }
+}
+
+/** 只读读数：基座条数与占用的字符量。当前消费方是单测与真机探针（尚未接入 S0 读数面板）。 */
+export function graftBaseStats(): { readonly entries: number; readonly chars: number } {
+  return { entries: graftBases.size, chars: graftBaseChars }
 }
 
 /** 尝试用基座拼出新文本的模型；没有可用基座（或判据不通过）时返回 null，调用方回退整段重解析。 */

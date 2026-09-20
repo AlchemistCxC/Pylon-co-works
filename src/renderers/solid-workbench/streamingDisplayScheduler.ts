@@ -62,6 +62,16 @@ export interface StreamingDisplaySchedulerOptions {
   /** Maximum time the revealed text may trail the newest snapshot. */
   maxRevealLagMs?: number
   /**
+   * 历史增长是否也走预算插值（默认**否**，#212）。
+   *
+   * 默认口径：预算插值只在「本拍有直播语义」时使用——快照 `generating === true`，
+   * 或已有行处于揭示中（本调度器推进过、尚未收敛）。一批**已完成**的历史
+   * （`generating === false` 且没有任何行在揭示中）**整发上屏**：插值对它们只是延迟，
+   * 而且会让每一拍的新前缀都走静态路径整段重解析（静态路径不走 graft，见 #212 R2）。
+   * 置 `true` 恢复本刀之前的行为（新行一律按预算逐拍揭示），是这一刀的回滚开关。
+   */
+  interpolateHistory?: boolean
+  /**
    * 帧源（可注入，默认浏览器 rAF）：**可见时**把发布对齐到下一帧，
    * 避免"发布了但没显示"，并自动匹配 120/144Hz 屏幕。
    * 不注入或环境无 rAF 时走纯定时器路径（与帧对齐前行为一致）。
@@ -94,6 +104,13 @@ export interface StreamingDisplayDiagnosticsSnapshot {
   readonly catchUpWindows: number
   readonly terminalPublications: number
   readonly flushes: number
+  /** 整发（`whole`）与按预算（`budgeted`）发布的累计次数——判据 A 的 A/B 读数。 */
+  readonly wholePublications: number
+  readonly budgetedPublications: number
+  /** #212 判据 A 命中次数：本应逐拍揭示的历史增长被整发上屏的次数。 */
+  readonly historyPublications: number
+  /** #212 判据 C：被观察到在增长的行 key 数（渲染层走增量路径的集合大小）。 */
+  readonly growingRows: number
   /** 最近 ≤64 次发布的实际间隔（ms，按发生顺序） */
   readonly recentPublicationIntervalsMs: readonly number[]
 }
@@ -113,6 +130,12 @@ export interface StreamingDisplayScheduler {
   resume(snapshot?: WorkbenchRuntimeSnapshot): void
   /** Cancel pending work and release references. */
   dispose(): void
+  /**
+   * #212 判据 C：**本次会话里被观察到「文本在两次发布之间变长」的行 key 集合**
+   * （`streamingRowKey(id, role)`）。渲染层据此把该行留在增量（graft）路径上；
+   * 属行为判据，兜住权威活性的漏判。换会话/换 owner 时清空。
+   */
+  revealingRows(): ReadonlySet<string>
   /**
    * S0 只读诊断读数：纯观测，调用不改变任何节奏状态。
    * 用于在真机会话里验证“发布节奏/单拍增量/追赶次数”，也是行几何诊断的入口。
@@ -209,6 +232,15 @@ export function createStreamingDisplayScheduler(
   /** Backlog the smooth typing pace already clears within the lag window. */
   const smoothBacklogCapacity = revealUnitsPerSecond * maxRevealLagMs / 1000
   const now = options.now ?? defaultNow
+  const interpolateHistory = options.interpolateHistory === true
+
+  // ── #212 判据 A / C 的两份行集合 ──────────────────────────────
+  // `midRevealKeys`：**瞬态**——本调度器推进过、尚未收敛的行。它非空是「非生成态的
+  //   增长仍可插值」的唯一理由（终态交接：结构立刻落地，正在揭示的文本按同一节奏收敛）。
+  // `growingKeys`：**粘滞**——被观察到「文本在两次发布之间变长」的行，渲染层据此把该行
+  //   留在增量路径；换会话/换 owner 才清空（行 key 只在同一会话内可比）。
+  const midRevealKeys = new Set<string>()
+  const growingKeys = new Set<string>()
 
   let target: WorkbenchRuntimeSnapshot | undefined
   let displayed: WorkbenchRuntimeSnapshot | undefined
@@ -240,6 +272,9 @@ export function createStreamingDisplayScheduler(
   let diagnosticsCatchUpWindows = 0
   let diagnosticsTerminalPublications = 0
   let diagnosticsFlushes = 0
+  let diagnosticsWholePublications = 0
+  let diagnosticsBudgetedPublications = 0
+  let diagnosticsHistoryPublications = 0
 
   const clearTimer = () => {
     if (timer === undefined) return
@@ -333,6 +368,10 @@ export function createStreamingDisplayScheduler(
     // S0：只读计数（O(1)，不扇扫）。整发不适用预算，故单位字段记 null，避免伪造读数。
     diagnosticsPublishes += 1
     diagnosticsKind = publication.kind
+    if (publication.kind === 'budgeted') diagnosticsBudgetedPublications += 1
+    else diagnosticsWholePublications += 1
+    // 整发意味着没有东西在揭示了（结构替换、终态收敛、历史整发都在此清账）。
+    if (publication.kind !== 'budgeted') midRevealKeys.clear()
     diagnosticsMaxUnits = publication.kind === 'budgeted' ? Math.max(0, publication.maxUnits ?? 0) : null
     diagnosticsTotalUnits = publication.kind === 'budgeted' ? Math.max(0, publication.totalUnits ?? 0) : null
     if (Number.isFinite(previousPublicationAt)) {
@@ -402,10 +441,12 @@ export function createStreamingDisplayScheduler(
       // and preserve reference identity for unaffected consumers.
       clearTimer()
       catchUpDeadline = Number.NEGATIVE_INFINITY
+      midRevealKeys.clear()
       if (displayed !== target) publishSnapshot(target, timestamp)
       return
     }
 
+    replaceKeySet(midRevealKeys, projection.pendingKeys)
     publishSnapshot(projection.snapshot, timestamp, {
       kind: 'budgeted',
       maxUnits: projection.advancedMaxUnits,
@@ -425,13 +466,38 @@ export function createStreamingDisplayScheduler(
       return
     }
 
+    // 判据 C：行 key 只在同一会话内可比；换会话/换 owner 后两份集合都无意义。
+    const sameBinding = displayed.sessionId === snapshot.sessionId
+      && displayed.ownerKey === snapshot.ownerKey
+    if (!sameBinding) {
+      midRevealKeys.clear()
+      growingKeys.clear()
+    } else {
+      // 跨会话不记账：id+role 可能撞 key（ACP 消息 id 常从 0 起），会把新会话的行
+      // 误判成"在长"（今天有"提升即全量"自愈，但那是巧合而非契约）。
+      noteObservedGrowth(displayed, snapshot, growingKeys)
+    }
+
     if (requiresReplacementFlush(displayed, snapshot)) {
       clearTimer()
       publishSnapshot(snapshot)
       return
     }
 
-    if (isTerminalFlush(displayed, snapshot)) {
+    const pending = hasPendingTextGrowth(displayed, snapshot)
+
+    // 判据 A（#212）：预算插值只在「本拍有直播语义」时使用。一批**已完成**的历史
+    // （`generating === false` 且没有任何行处于揭示中）整发上屏——逐拍揭示对它们只是延迟，
+    // 而且每一拍的新前缀都会走静态路径整段重解析（R2）。
+    if (pending && !interpolateHistory && snapshot.generating !== true && midRevealKeys.size === 0) {
+      clearTimer()
+      catchUpDeadline = Number.NEGATIVE_INFINITY
+      diagnosticsHistoryPublications += 1
+      publishSnapshot(snapshot)
+      return
+    }
+
+    if (isTerminalFlush(displayed, snapshot, pending)) {
       // The finished state has to land now (summary, elapsed, running=false),
       // but not the text that is still being revealed: coalesce the
       // transition into one budgeted publication instead of a whole-block
@@ -442,7 +508,6 @@ export function createStreamingDisplayScheduler(
       return
     }
 
-    const pending = hasPendingTextGrowth(displayed, snapshot)
     if (!pending) {
       // Nothing is left to reveal for this snapshot, so any catch-up window is
       // stale. Non-streaming changes should stay responsive; while a stream is
@@ -502,6 +567,17 @@ export function createStreamingDisplayScheduler(
     paused = false
     if (snapshot !== undefined) target = cohereDisplaySnapshot(snapshot)
     if (target === undefined || displayed === undefined) return
+    // 暂停期间的快速增长也要记进判据 C（resume 不走 push）——同样只在同一绑定内记账。
+    if (displayed.sessionId === target.sessionId && displayed.ownerKey === target.ownerKey) {
+      noteObservedGrowth(displayed, target, growingKeys)
+    }
+    // 判据 A：后台攒下来的历史（非生成态、无行在揭示中）整发，不从预算里爬。
+    if (!interpolateHistory && target.generating !== true && midRevealKeys.size === 0
+      && hasPendingTextGrowth(displayed, target)) {
+      diagnosticsHistoryPublications += 1
+      publishSnapshot(target)
+      return
+    }
     noteBacklog(target)
     tick()
   }
@@ -535,11 +611,15 @@ export function createStreamingDisplayScheduler(
       catchUpWindows: diagnosticsCatchUpWindows,
       terminalPublications: diagnosticsTerminalPublications,
       flushes: diagnosticsFlushes,
+      wholePublications: diagnosticsWholePublications,
+      budgetedPublications: diagnosticsBudgetedPublications,
+      historyPublications: diagnosticsHistoryPublications,
+      growingRows: growingKeys.size,
       recentPublicationIntervalsMs: recent,
     }
   }
 
-  return { push, flush, pause, resume, dispose, diagnostics }
+  return { push, flush, pause, resume, dispose, revealingRows: () => growingKeys, diagnostics }
 }
 
 /**
@@ -612,6 +692,9 @@ function defaultFrameSource(): StreamingDisplayFrameSource | undefined {
 }
 
 function hasActiveTextStream(snapshot: WorkbenchRuntimeSnapshot): boolean {
+  // #213：本进程没有在途回合时，文档里遗留的 `running` 行不算"流在跑"——否则一批
+  // 非文本更新会被一个已死回合拖进节流档。
+  if (snapshot.generating !== true) return false
   return snapshot.messages.some(message => (
     (message.role === 'assistant' || message.role === 'reasoning') && message.running === true
   )) || Boolean(snapshot.document?.messages.some(message => (
@@ -667,7 +750,7 @@ function collectStreamRowPlans(
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
     if (!isPrefixGrowth(previousText, message.content)) continue
-    const key = streamRowKey(message.id, message.role)
+    const key = streamingRowKey(message.id, message.role)
     const existing = plans.get(key)
     // 双写正常时两份文本一致；万一短暂分叉，以更长的目标文本作为可见量（保守不超发）。
     if (existing === undefined || message.content.length > existing.nextText.length) {
@@ -693,8 +776,52 @@ function pendingRowPlans(
   return plans
 }
 
-function streamRowKey(id: string, role: string): string {
+/**
+ * 行 key：显示调度器与渲染层共用的**唯一**格式（判据 C 的集合成员判据）。
+ * 不要在渲染层手写这份字符串——两份定义一旦漂移，`revealingRows()` 会静默失配。
+ */
+export function streamingRowKey(id: string, role: string): string {
   return `${id}\u0000${role}`
+}
+
+const EMPTY_ROW_KEYS: readonly string[] = Object.freeze([])
+
+function replaceKeySet(target: Set<string>, source: readonly string[]): void {
+  target.clear()
+  for (const key of source) target.add(key)
+}
+
+/**
+ * #212 判据 C：把「同一行文本在两次发布之间变长」记进 `into`。
+ *
+ * 只认**已存在**行（同一 id+role 之前就在显示态里）的前缀增长：首次出现的行没有参照物，
+ * 「新」不等于「在长」——它的活性由权威判据（运行时在途回合）负责。两份列表（legacy
+ * `messages` 与 canonical `document.messages`）同源时按同一 key 记账，天然去重。
+ */
+function noteObservedGrowth(
+  current: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+  into: Set<string>,
+): void {
+  collectObservedGrowth(current.messages, next.messages, into)
+  if (next.document !== undefined) {
+    collectObservedGrowth(current.document?.messages ?? [], next.document.messages, into)
+  }
+}
+
+function collectObservedGrowth(
+  current: readonly DisplayMessage[],
+  next: readonly DisplayMessage[],
+  into: Set<string>,
+): void {
+  if (current === next) return
+  const currentByKey = new Map(current.map(message => [streamingRowKey(message.id, message.role), message]))
+  for (const message of next) {
+    if (!isStreamMessage(message)) continue
+    const previous = currentByKey.get(streamingRowKey(message.id, message.role))
+    if (previous === undefined) continue
+    if (isPrefixGrowth(previous.content, message.content)) into.add(streamingRowKey(message.id, message.role))
+  }
 }
 
 function isPrefixGrowth(current: string, next: string): boolean {
@@ -731,10 +858,14 @@ function requiresReplacementFlush(
  * the coalesced budgeted publication is what keeps "the turn is over" from
  * becoming one whole-block paint of everything that was still being revealed.
  */
-function isTerminalFlush(current: WorkbenchRuntimeSnapshot, next: WorkbenchRuntimeSnapshot): boolean {
+function isTerminalFlush(
+  current: WorkbenchRuntimeSnapshot,
+  next: WorkbenchRuntimeSnapshot,
+  pendingGrowth: boolean = hasPendingTextGrowth(current, next),
+): boolean {
   if (isTerminalTransition(current, next)) return true
   if (next.status === 'error') return true
-  return hasPendingTextGrowth(current, next) && next.generating === false
+  return pendingGrowth && next.generating === false
 }
 
 function hasNonPrefixMessageChange<T extends DisplayMessage>(
@@ -782,6 +913,8 @@ interface SnapshotProjection {
   readonly pending: boolean
   readonly advancedMaxUnits: number
   readonly advancedTotalUnits: number
+  /** #212 判据 A：本拍结束时仍未收敛的行 key（`pending` 为假时为空）。 */
+  readonly pendingKeys: readonly string[]
 }
 
 /** 一行的本拍决策：揭示到的前缀 + 该行分到的预算（供两列表短暂分叉时回落）。 */
@@ -796,11 +929,12 @@ function interpolateSnapshot(
   budget: number,
 ): SnapshotProjection {
   const plans = pendingRowPlans(current, target)
-  if (plans.size === 0) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
+  if (plans.size === 0) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0, pendingKeys: EMPTY_ROW_KEYS }
 
   // D1：递减预算——逐行决策一次，任何一次发布的**聚合**新增不超过 budget。
   // budget ≥ 行数 时每行至少分到 1；budget < 行数 时末尾行本拍分到 0（不饿死：下一拍重算）。
   const decisions = new Map<string, RowDecision>()
+  const pendingKeys: string[] = []
   let remaining = Math.max(0, Math.floor(budget))
   let rowsLeft = plans.size
   let advancedMaxUnits = 0
@@ -814,10 +948,13 @@ function interpolateSnapshot(
     if (advanced.consumedUnits > advancedMaxUnits) advancedMaxUnits = advanced.consumedUnits
     remaining = Math.max(0, remaining - advanced.consumedUnits)
     rowsLeft -= 1
-    if (advanced.value.length < plan.nextText.length) pending = true
+    if (advanced.value.length < plan.nextText.length) {
+      pending = true
+      pendingKeys.push(key)
+    }
   }
 
-  if (!pending) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0 }
+  if (!pending) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0, pendingKeys: EMPTY_ROW_KEYS }
 
   const legacyMessages = applyRowDecisions(current.messages, target.messages, decisions)
   const documentMessages = applyRowDecisions(
@@ -840,6 +977,7 @@ function interpolateSnapshot(
     pending: true,
     advancedMaxUnits,
     advancedTotalUnits,
+    pendingKeys,
   }
 }
 
@@ -858,7 +996,7 @@ function applyRowDecisions<T extends DisplayMessage>(
   let changed = false
   const messages = target.map(message => {
     if (!isStreamMessage(message)) return message
-    const decision = decisions.get(streamRowKey(message.id, message.role))
+    const decision = decisions.get(streamingRowKey(message.id, message.role))
     if (decision === undefined) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''

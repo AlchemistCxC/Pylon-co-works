@@ -542,9 +542,13 @@ fn protocol_defaults_match_current_behavior() {
         protocol.cancel_settle_timeout(),
         crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS
     );
-    // R-t5 缺省：idle/first_token 回退到 prompt_timeout（300）
-    assert_eq!(protocol.idle_timeout(), protocol.prompt_timeout());
-    assert_eq!(protocol.first_token_timeout(), protocol.idle_timeout());
+    // R-t5 缺省：闲置窗口有自己的缺省（600，与 prompt 预算解耦——判"停摆"而非"步骤预算"）；
+    // 首 token 仍回退到 prompt 预算（判"agent 起没起来"，短判据）。
+    assert_eq!(
+        protocol.idle_timeout(),
+        crate::acp::DEFAULT_IDLE_TIMEOUT_SECS
+    );
+    assert_eq!(protocol.first_token_timeout(), protocol.prompt_timeout());
     assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
     assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
     assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);

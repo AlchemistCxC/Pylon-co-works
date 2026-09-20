@@ -12,10 +12,11 @@ import type { PermissionAgentSlice, PermissionRequestState } from '../../domains
 // （按钮映射纯函数断言由 domains/permission/__tests__/permissionButtons.test.ts 承担）。
 
 vi.mock('../../infrastructure/acp/permissionController', () => ({
-  getPermissionController: () => ({ choose: chooseMock }),
+  getPermissionController: () => ({ choose: chooseMock, abandon: abandonMock }),
 }))
 
 const chooseMock = vi.fn()
+const abandonMock = vi.fn()
 
 function buildActive(request: Partial<PermissionRequest>, status: PermissionRequestState['status']): PermissionRequestState {
   return {
@@ -48,6 +49,7 @@ describe('PermissionDialog 接线', () => {
     localStorage.clear()
     resetStores()
     chooseMock.mockClear()
+    abandonMock.mockClear()
   })
   afterEach(async () => {
     const { cleanup } = await import('@testing-library/react')
@@ -111,5 +113,38 @@ describe('PermissionDialog 接线', () => {
     })
     render(<PermissionDialog />)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  // #209：弹窗必须**永远收得回来**——真机实测当时点了 Deny/Allow 都没反应、也没有 Esc，
+  // 只能 reload 才能继续输入。这两条钉住"本地收口出口"，不再依赖 choose 成功。
+  it('#209：Escape 走本地收口（abandon），不 invoke', () => {
+    wire({ options: [{ optionId: 'allow_once', label: '允许' }] })
+    render(<PermissionDialog />)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(abandonMock).toHaveBeenCalledWith('req-1')
+    expect(chooseMock).not.toHaveBeenCalled()
+  })
+
+  it('#209：显式「关闭」入口走本地收口', () => {
+    wire({ options: [{ optionId: 'allow_once', label: '允许' }] })
+    render(<PermissionDialog />)
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(abandonMock).toHaveBeenCalledWith('req-1')
+    expect(chooseMock).not.toHaveBeenCalled()
+  })
+
+  it('#209：上次应答失败的原因可见（不再「点了没反应」）', () => {
+    wire({ options: [{ optionId: 'allow_once', label: '允许' }] }, 'peri', 'pending')
+    useRuntimeStore.setState(state => {
+      const slice = state.permission.byAgent.peri!
+      return {
+        permission: {
+          ...state.permission,
+          byAgent: { ...state.permission.byAgent, peri: { ...slice, active: { ...slice.active!, lastError: 'ACP write timeout' } } },
+        },
+      }
+    })
+    render(<PermissionDialog />)
+    expect(screen.getByRole('alert')).toHaveTextContent('ACP write timeout')
   })
 })

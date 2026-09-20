@@ -29,6 +29,15 @@ export interface WorkbenchRuntimeSnapshot {
   generation?: number
   /** Runtime-local turn identity; never persisted to provider/canonical wire. */
   turnEpoch?: number
+  /**
+   * #213 活性权威。`'clock'` = 会话层已用**本进程回合时钟**就该 owner/source 表态，
+   * 文档派生的 `generating`（`legacyFieldsFromDocument` 的 `firstRunning`）不得覆盖它；
+   * `'document'`（缺省）= 无时钟宿主（preview / legacy host / 浏览器 mock）按文档形状推断。
+   *
+   * 重放出来的 `running` 尾行只说明「没有见到终态」，不说明「本进程在跑」——把两者混为一谈
+   * 会让进程重启/回合被截断后的旧会话永久显示生成态（页脚 spinner、思考中…）。
+   */
+  livenessSource?: 'clock' | 'document'
   /** Terminal absorption fence for the current owner/turn. */
   terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
@@ -68,6 +77,10 @@ export interface WorkbenchRuntimeMergeInput {
   readonly terminalFence?: WorkbenchTerminalFence | null
   readonly turnEpoch?: number
   readonly preserveGeneration?: boolean
+  /** #213：本快照活性结论的来源；`'clock'` 时文档派生不得复活 `generating`。 */
+  readonly livenessSource?: 'clock' | 'document'
+  /** #213：`livenessSource === 'clock'` 时随投影携带的权威活性值。 */
+  readonly livenessGenerating?: boolean
 }
 
 export interface WorkbenchRuntime {
@@ -100,6 +113,15 @@ export interface WorkbenchDocumentApplyOptions {
    * reader set this flag so that gap cannot reset elapsed time.
    */
   readonly preserveGeneration?: boolean
+  /** #213：本次投影携带的活性结论来源（见 `WorkbenchRuntimeSnapshot.livenessSource`）。 */
+  readonly livenessSource?: 'clock' | 'document'
+  /**
+   * #213：`livenessSource === 'clock'` 时**随文档一并传递的权威活性值**。
+   *
+   * 不能只读 `previous.generating`：新回合推进 `turnEpoch` 的那一次投影里，
+   * "权威说在跑"的表态还没进快照，只读 previous 会把新回合的合法在途判成静止。
+   */
+  readonly livenessGenerating?: boolean
   /** Optional atomic turn/generation metadata committed with this document. */
   readonly turnEpoch?: number
   readonly terminalFence?: WorkbenchTerminalFence | null
@@ -186,6 +208,8 @@ export function createWorkbenchRuntime(
         turnEpoch: options.turnEpoch,
         terminalFence: options.terminalFence,
         generationPatch: options.generationPatch,
+        livenessSource: options.livenessSource,
+        livenessGenerating: options.livenessGenerating,
       })
       publish({
         ...merged,
@@ -209,6 +233,8 @@ export function createWorkbenchRuntime(
         turnEpoch: options.turnEpoch,
         terminalFence: options.terminalFence,
         generationPatch: options.generationPatch,
+        livenessSource: options.livenessSource,
+        livenessGenerating: options.livenessGenerating,
       })
       publish({
         ...merged,
@@ -279,6 +305,7 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     left.activeMode === right.activeMode &&
     left.canAttach === right.canAttach &&
     left.promptImage === right.promptImage &&
+    left.livenessSource === right.livenessSource &&
     left.error === right.error
     && left.document === right.document
   )
@@ -298,7 +325,16 @@ export function mergeWorkbenchRuntimeSnapshot(
 ): WorkbenchRuntimeSnapshot {
   const document = input.document ?? previous.document
   const projected = document ? legacyFieldsFromDocument(document) : {}
-  const stable = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
+  const preserved = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
+  // #213 活性权威：会话层已用回合时钟表态时，文档派生的 `generating` 一律让位——
+  // 重放出的 `running` 尾行只是"没见到终态"的证据，不是"本进程在跑"的证据。
+  const livenessSource = input.livenessSource ?? previous.livenessSource
+  const stable = applyLivenessAuthority(
+    preserved,
+    input.livenessGenerating ?? previous.generating,
+    livenessSource,
+    previous,
+  )
   const rawPatch = input.generationPatch ?? {}
   const requestedEpoch = input.turnEpoch ?? rawPatch.turnEpoch
   const previousEpoch = previous.turnEpoch
@@ -319,6 +355,7 @@ export function mergeWorkbenchRuntimeSnapshot(
     ...previous,
     ...(document ? { ...stable, document, sessionId: document.sessionId || previous.sessionId } : {}),
     ...patchWithoutControl,
+    ...(livenessSource !== undefined ? { livenessSource } : {}),
     ...(effectiveEpoch !== undefined ? { turnEpoch: effectiveEpoch } : {}),
     ...(epochIsNew
       ? { terminalFence: undefined }
@@ -637,6 +674,40 @@ function preserveActiveGeneration(
     ...(previous.generationPhase !== undefined ? { generationPhase: previous.generationPhase } : {}),
     ...(previous.generationActivity !== undefined ? { generationActivity: previous.generationActivity } : {}),
     ...(previous.thinkingStart !== undefined ? { thinkingStart: previous.thinkingStart } : {}),
+  }
+}
+
+/**
+ * #213：会话层已就该 source 表态（`livenessSource === 'clock'`）时，活性只认时钟。
+ *
+ * 时钟说「在跑」⇒ 保住 generating 与起点（文档短暂缺 running 行不得让 elapsed 归零）；
+ * 时钟说「没在跑」⇒ generating 与整条活动轴（phase/activity/thinking）一并落定为静止，
+ * 否则重放出来的 `running` 尾行会把它复活成「正在思考…」。
+ * 其余字段（messages/status/tokenCount…）仍由文档派生，不受影响。
+ *
+ * `authoritativeGenerating` 由调用方给出（`livenessGenerating`），缺省回落到 `previous.generating`。
+ */
+function applyLivenessAuthority(
+  preserved: Partial<WorkbenchRuntimeSnapshot>,
+  authoritativeGenerating: boolean,
+  livenessSource: WorkbenchRuntimeSnapshot['livenessSource'],
+  previous: WorkbenchRuntimeSnapshot,
+): Partial<WorkbenchRuntimeSnapshot> {
+  if (livenessSource !== 'clock') return preserved
+  if (authoritativeGenerating) {
+    return {
+      ...preserved,
+      generating: true,
+      ...(previous.generationStart > 0 ? { generationStart: previous.generationStart } : {}),
+    }
+  }
+  return {
+    ...preserved,
+    generating: false,
+    generationStart: 0,
+    generationPhase: undefined,
+    generationActivity: undefined,
+    thinkingStart: undefined,
   }
 }
 

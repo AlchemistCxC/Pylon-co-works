@@ -11,6 +11,12 @@ export type CanonicalTurnBoundaryEvent = Pick<CanonicalConversationEvent, 'seque
   /** Persisted rows normally contain both; malformed/recovered rows may not. */
   readonly occurredAt?: string
   readonly receivedAt?: string
+  /**
+   * #199：compact 读（`evt_load_compact`）只返回 unit 行 + 未覆盖行，回合的
+   * `user.message` 锚点只作为内嵌 event segment 存在于 `typedPayload.segments`。
+   * 顶层缺锚点时从这里恢复起点；形状异常视同无锚点（不得凭空造 0s）。
+   */
+  readonly typedPayload?: unknown
 }
 
 /**
@@ -42,6 +48,11 @@ export function deriveCanonicalTurnDuration(
     // #81 L2：单元行（occurredAt = 其 terminal 的 occurredAt）同样封存 turn 边界——
     // compact 读返回单元 + 未覆盖行，terminal 行可能已被 L3 裁剪。
     if (event.eventType !== 'turn.completed' && event.eventType !== 'turn.failed' && event.eventType !== 'turn.unit') continue
+    // #199：顶层没有 user 锚点行时（compact 读的常态），从 unit 内嵌 segments 恢复
+    // 起点——只认内嵌 event 段的 user.message，取首个有效时间戳（segments 保序）。
+    if (startedAt === undefined) {
+      startedAt = embeddedUserAnchorAt(event.typedPayload)
+    }
     if (startedAt === undefined || timestamp === undefined || timestamp < startedAt) continue
     latest = {
       elapsedMs: timestamp - startedAt,
@@ -73,4 +84,25 @@ function parseTimestamp(value: string | undefined): number | undefined {
   if (!value) return undefined
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/**
+ * #199：unit 行内嵌 segments 里的 user.message 锚点（首个有效 occurredAt）。
+ * 形状与 `turn.unit` 的 segment 契约一致（`{kind:'event', event}`）；任何形状
+ * 异常都返回 undefined——推导宁可「不可测」也不猜。
+ */
+function embeddedUserAnchorAt(typedPayload: unknown): number | undefined {
+  if (!typedPayload || typeof typedPayload !== 'object') return undefined
+  const segments = (typedPayload as { segments?: unknown }).segments
+  if (!Array.isArray(segments)) return undefined
+  for (const segment of segments) {
+    if (!segment || typeof segment !== 'object') continue
+    const holder = segment as { kind?: unknown; event?: unknown }
+    if (holder.kind !== 'event' || !holder.event || typeof holder.event !== 'object') continue
+    const event = holder.event as { eventType?: unknown; occurredAt?: unknown }
+    if (event.eventType !== 'user.message') continue
+    const anchor = parseTimestamp(typeof event.occurredAt === 'string' ? event.occurredAt : undefined)
+    if (anchor !== undefined) return anchor
+  }
+  return undefined
 }

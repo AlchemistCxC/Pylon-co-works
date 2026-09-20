@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
+import { render, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
@@ -218,6 +218,138 @@ describe('PlainMessageList', () => {
       firstVisibleMessageId: 'm1',
       lastVisibleMessageId: 'm2',
     })
+  })
+
+  it('#212 S3b：冷开时按窗口渐进挂载（尾部优先），逐帧扩满', async () => {
+    let port!: MessageListPort
+    const result = render(() => (
+      <PlainMessageList initialItems={[]} onPortReady={value => { port = value }} renderItem={item => item.key} />
+    ))
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')]
+      .map(node => node.getAttribute('data-message-id'))
+    const hundred = createMessageListItems(Array.from({ length: 100 }, (_, index) => descriptor({
+      id: `m${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
+    })))
+
+    port.setItems(hundred)
+    // 首帧只挂窗口，且锚在**尾部**（用户先看到最新内容，历史从上方长出来）
+    expect(ids()).toHaveLength(16)
+    expect(ids()[0]).toBe('m84')
+    expect(ids().at(-1)).toBe('m99')
+
+    // 逐帧扩满
+    await waitFor(() => expect(ids()).toHaveLength(100))
+  })
+
+  it('#212 S3b：增量增长不缩窗（小列表整挂）', () => {
+    let port!: MessageListPort
+    const result = render(() => (
+      <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} renderItem={item => item.key} />
+    ))
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')]
+      .map(node => node.getAttribute('data-message-id'))
+    const three = createMessageListItems([
+      descriptor({ id: 'm3', role: 'user', sender: 'user', content: 'three', time: '10:02' }),
+    ])
+    port.setItems([...ITEMS, three[0]!])
+    expect(ids()).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  const rectOf = (top: number, bottom: number) => ({
+    top, bottom, left: 0, right: 100, width: 100, height: bottom - top, x: 0, y: top, toJSON() {},
+  })
+
+  /** 真实滚动容器：坐标基准必须是 scroller，不是列表容器（审核 M2）。 */
+  function mountInScroller(props: { posture: 'follow' | 'pin' }) {
+    const scroller = document.createElement('div')
+    document.body.append(scroller)
+    let scrollTop = 100
+    Object.defineProperty(scroller, 'scrollTop', {
+      get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
+    })
+    scroller.getBoundingClientRect = () => rectOf(0, 645)
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={ITEMS}
+        scrollViewport={() => scroller}
+        scrollPosture={() => props.posture}
+        renderItem={item => item.key}
+      />
+    ), { container: scroller })
+    // 列表容器**随内容一起平移**（生产的真实几何：它自己不滚动，上方内容长高会把它连同
+    // 行一起推下去）。不模拟这一点，"用容器当基准"的错误实现会因为 jsdom 的零 rect
+    // 退化成同样结果而蒙混过关——审核 M2 指出的正是旧用例把错误坐标系钉住了。
+    let contentShift = 0
+    const listContainer = scroller.querySelector<HTMLElement>('[data-message-list="plain"]')!
+    listContainer.getBoundingClientRect = () => rectOf(contentShift, 645 + contentShift)
+    return {
+      scroller, result, readScrollTop: () => scrollTop,
+      shiftContent: (value: number) => { contentShift = value },
+    }
+  }
+
+  it('#212 S4：pin 姿态下上方行高度变化时补偿 scrollTop（自管锚点）', () => {
+    const { scroller, readScrollTop, shiftContent } = mountInScroller({ posture: 'pin' })
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
+    const observer = ResizeObserverMock.instances.at(-1)!
+    // 文档空间 top = rect.top - 视口顶(0) + scrollTop(100)。row0 全在视口上方 ⇒ 不参与；
+    // row1 从视口顶开始 ⇒ 它是锚。
+    rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
+    rows[1]!.getBoundingClientRect = () => rectOf(-100, 30)
+    observer.emit()
+    expect(readScrollTop()).toBe(100)
+
+    // 上方行长高 50 ⇒ 行与容器一起下移 50（容器基准会抵掉这个位移，视口基准不会）⇒ 补偿 50
+    shiftContent(50)
+    rows[0]!.getBoundingClientRect = () => rectOf(-180, -50)
+    rows[1]!.getBoundingClientRect = () => rectOf(-50, 80)
+    observer.emit()
+    expect(readScrollTop()).toBe(150)
+  })
+
+  it('#212 S4：follow 姿态不补偿（贴底跟随才是意图）', () => {
+    const { scroller, readScrollTop } = mountInScroller({ posture: 'follow' })
+    const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
+    const observer = ResizeObserverMock.instances.at(-1)!
+    rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
+    rows[1]!.getBoundingClientRect = () => rectOf(-100, 30)
+    observer.emit()
+    rows[1]!.getBoundingClientRect = () => rectOf(-50, 80)
+    observer.emit()
+    expect(readScrollTop()).toBe(100)
+  })
+
+  it('#213：包装层 data-streaming 跟随权威活性（缺省仍回落 running）', async () => {
+    const live = createMessageListItems([descriptor({ id: 'm9', role: 'assistant', sender: 'agent', content: '旧回合的残行', time: '10:00' })])
+    // 投影语义仍是"未见终态"，但权威活性说"不在途"——包装层不得再播流式装饰。
+    Object.assign(live[0]!.descriptor.renderMessage.message as object, { running: true })
+    const first = render(() => (
+      <PlainMessageList initialItems={live} onPortReady={() => {}} rowLive={() => false} renderItem={item => item.key} />
+    ))
+    await Promise.resolve()
+    expect(first.container.querySelector('[data-streaming]')).toBeNull()
+
+    // 缺省（不传 rowLive）回落 running ⇒ legacy 行为不变
+    const second = render(() => (
+      <PlainMessageList initialItems={live} onPortReady={() => {}} renderItem={item => item.key} />
+    ))
+    await Promise.resolve()
+    expect(second.container.querySelector('[data-streaming="true"]')).not.toBeNull()
+  })
+
+  it('#212 S3b：换代中途挂起的扩窗不得按旧会话行数收敛', async () => {
+    let port!: MessageListPort
+    const result = render(() => (
+      <PlainMessageList initialItems={[]} onPortReady={value => { port = value }} renderItem={item => item.key} />
+    ))
+    const ids = () => result.container.querySelectorAll('[data-message-id]').length
+    const mk = (count: number, prefix: string) => createMessageListItems(Array.from({ length: count }, (_, index) => descriptor({
+      id: `${prefix}${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
+    })))
+    port.setItems(mk(100, 'a'))
+    // 同一 tick 内换到更长的会话：挂起的扩窗必须改用新总长
+    port.setItems(mk(300, 'b'))
+    await waitFor(() => expect(ids()).toBe(300))
   })
 
   it('invalidation 与 ResizeObserver 更新 revision；destroy 幂等并清理 observer/DOM', () => {

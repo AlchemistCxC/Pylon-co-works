@@ -312,17 +312,21 @@ impl AcpProtocolConfig {
             .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS)
     }
 
-    /// R-t5 闲置超时（秒，缺省 = prompt_timeout）。距最后一次活动超过此值仍无终态 → 判死。
-    /// 活动即续命：持续产出的回合永不因"总时长"被截。
+    /// R-t5 闲置超时（秒，缺省 `DEFAULT_IDLE_TIMEOUT_SECS` = 600）。距最后一次活动超过
+    /// 此值仍无终态 → 判死。活动即续命：持续产出的回合永不因"总时长"被截。
+    ///
+    /// **不再回退到 `prompt_timeout`**（2026-09-20 裁决）：那个值是"一个提示步骤的预算"，
+    /// 与"多久没输出算停摆"不是同一个问题；混用会把 agent 等用户点击的时间当停摆。
     pub fn idle_timeout(&self) -> u64 {
         self.idle_timeout_secs
-            .unwrap_or_else(|| self.prompt_timeout())
+            .unwrap_or(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS)
     }
 
-    /// R-t5 首 token 超时（秒，缺省 = idle_timeout）。发出后到首次活动的最长等待。
+    /// R-t5 首 token 超时（秒，缺省 = prompt 预算）。发出后到首次活动的最长等待——
+    /// 这一段判的是"agent 有没有起来"，短判据是对的，故不跟随放宽后的闲置窗口。
     pub fn first_token_timeout(&self) -> u64 {
         self.first_token_timeout_secs
-            .unwrap_or_else(|| self.idle_timeout())
+            .unwrap_or_else(|| self.prompt_timeout())
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。

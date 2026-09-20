@@ -54,4 +54,50 @@ describe('② 粒度无关性 · 回合边界推导', () => {
       elapsedMs: 12_500,
     })
   })
+
+  it('#199：compact 读形态（仅 unit 行，user 锚点内嵌于 segments）与其它形态产出同一回合时长', () => {
+    // evt_load_compact 的真实返回形态：terminal/user 行已被 unit 覆盖（或被 L3 裁剪），
+    // 只剩 unit 行 + 未覆盖行；user.message 只作为内嵌 event 段存在。
+    const compactReadRows = [
+      {
+        sequence: 8,
+        eventType: 'turn.unit' as const,
+        occurredAt: END,
+        receivedAt: END,
+        typedPayload: {
+          segments: [
+            { kind: 'event', event: { sequence: 1, eventType: 'user.message', occurredAt: START } },
+            { kind: 'delta-run', eventType: 'assistant.text.delta', seqStart: 2, seqEnd: 6, text: '答案', occurredAt: START },
+          ],
+        },
+      },
+    ]
+    expect(deriveCanonicalTurnDuration(compactReadRows)).toEqual({
+      elapsedMs: 12_500,
+      startedAt: Date.parse(START),
+      completedAt: Date.parse(END),
+      source: 'canonical-events',
+    })
+  })
+
+  it('#199：unit 未内嵌 user 段（或形状异常）时仍不得凭空造时长', () => {
+    const noUserInside = [
+      {
+        sequence: 8,
+        eventType: 'turn.unit' as const,
+        occurredAt: END,
+        receivedAt: END,
+        typedPayload: {
+          segments: [
+            { kind: 'delta-run', eventType: 'assistant.text.delta', seqStart: 2, seqEnd: 7, text: '答案', occurredAt: START },
+          ],
+        },
+      },
+    ]
+    expect(deriveCanonicalTurnDuration(noUserInside)).toBeUndefined()
+    expect(deriveCanonicalTurnDuration([
+      { sequence: 8, eventType: 'turn.unit' as const, occurredAt: END, receivedAt: END, typedPayload: 'corrupt' },
+    ])).toBeUndefined()
+    expect(hasCanonicalTurnTerminal(noUserInside)).toBe(true)
+  })
 })

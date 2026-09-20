@@ -386,6 +386,15 @@ impl AcpError {
 /// cancel_settle_timeout）在 AcpProtocolConfig（agent_config.rs），
 /// DEFAULT_* 为"无声明=现状"默认值的唯一事实源。
 pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 300;
+
+/// R-t5 闲置窗口缺省（秒）。**刻意与 prompt 预算解耦**：这个窗口判的是"完全无输出"的
+/// 停摆，不是"一个提示步骤的预算"。
+///
+/// 为什么从 prompt 预算里拆出来（2026-09-20 用户裁决）：agent 在等待**用户**动作时也表现为
+/// 无输出（权限请求弹出后静默等点击），把它按"停摆"判死会截断一个实际上正常的回合——真机
+/// 实测一次 472s 的截断正卡在等权限答复上。取 600s 给一个够长的动作缓冲，同时仍能收敛掉
+/// 真正卡死的回合。首 token 窗口不跟着放宽（见 `first_token_timeout`），"从未启动"仍按短判据。
+pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 600;
 /// Maximum time to wait for Peri's final prompt response after sending cancel.
 pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 /// Maximum size for a single attachment.

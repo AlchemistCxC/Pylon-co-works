@@ -5,6 +5,7 @@ import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
 import {
   getMarkdownRenderModel,
+  peekMarkdownRenderModel,
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
@@ -192,8 +193,16 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
   </Show>
 }
 
+/**
+ * 流式尾块（未闭合围栏）的正文。
+ *
+ * **刻意不折叠**（用户 2026-09-20 裁决：流式期要能看着它继续长）。它是**过渡态**——
+ * 回合结束后走 markdown 解析路径，由 #208 的头部折叠接管；因此"不限量"的窗口只覆盖
+ * 生成期。真机实测 372 行 / 1.18 万字符的块在流式期 0 条 long task，常见规模下代价可忽略；
+ * 若将来出现极端长块导致 DOM 膨胀，再引入高上限兜底（而不是直接改为折叠）。
+ */
 function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string }) {
-  const lines = () => props.code().split('\n')
+  const lines = () => props.code().split(String.fromCharCode(10))
   return (
     <div
       class="term-code-block"
@@ -203,7 +212,7 @@ function StreamingCodeBlock(props: { language: () => string | undefined; code: (
       <Index each={lines()}>{line => (
         <div class="term-code-line">
           <span class="term-code-gutter">│ </span>
-          <span class="term-code-text">{line() || '\u00a0'}</span>
+          <span class="term-code-text">{line() || String.fromCharCode(160)}</span>
         </div>
       )}</Index>
     </div>
@@ -221,6 +230,9 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
   const text = () => typeof props.text === 'function' ? props.text() : props.text
   const shouldParse = () => !isPlainTextContent(text())
   const useCache = () => props.cache?.() ?? true
+  // #212：命中**已结算**的缓存模型时同步渲染，完全不经骨架——历史行不再有一次
+  // 「1em 骨架 → 真高」的高度跳变。只在走缓存的调用点有效（增长尾块恒走解析/graft）。
+  const settled = () => useCache() ? peekMarkdownRenderModel(text()) : undefined
   const [model] = createResource(
     // #150 稳定性：解析源带上 `cache` 标志 ⇒ 尾块被提升为稳定行（cache false→true）时**换源重解析**，
     // 于是「已提交内容一定来自整段重解析」——增量拼接只可能影响正在长的那一行，即便某个没预料的
@@ -236,12 +248,14 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
     }),
   )
 
+  const root = () => settled() ?? model.latest
+
   return (
     <Show when={shouldParse()} fallback={props.inline
       ? <span class="term-p term-plain-text">{text()}</span>
       : <p class="term-p term-plain-text">{text()}</p>}>
-      <Show when={model.latest} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
-        {root => <For each={root().children}>{node => <MarkdownNode node={node} />}</For>}
+      <Show when={root()} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
+        {resolved => <For each={resolved().children}>{node => <MarkdownNode node={node} />}</For>}
       </Show>
     </Show>
   )

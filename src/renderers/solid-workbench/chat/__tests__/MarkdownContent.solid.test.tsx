@@ -13,6 +13,7 @@ import { cleanup, render, screen, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
+import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
 
 afterEach(() => {
   cleanup()
@@ -187,5 +188,40 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(parsedSegments.length).toBe(1)
     expect(withBackticks.container.querySelector('p.term-p')?.textContent).toContain('\n')
     expect(plain.container.querySelector('.term-plain-text')?.textContent).toContain('\n')
+  })
+})
+
+describe('#208 遗留：流式代码块刻意不折叠（用户裁决：看着它继续长）', () => {
+  it('未闭合围栏在流式期全量渲染，不出现折叠提示', async () => {
+    const lines = Array.from({ length: 500 }, (_, index) => `const value${index} = ${index}`)
+    const text = ['```js', ...lines].join(String.fromCharCode(10))
+    const streaming = render(() => <MarkdownContent text={text} streaming />)
+
+    const block = await waitFor(() => {
+      const node = streaming.container.querySelector('.term-code-block[data-streaming-code="true"]')
+      expect(node).not.toBeNull()
+      return node as HTMLElement
+    })
+    // 过渡态：生成期不折叠、不挂展开入口；结算后由 #208 的头部折叠接管
+    expect(block.querySelectorAll('.term-code-line')).toHaveLength(lines.length)
+    expect(block.querySelector('.term-code-folded')).toBeNull()
+    expect(block.getAttribute('data-folded')).toBeNull()
+    streaming.unmount()
+  })
+})
+
+describe('#212：命中已结算缓存时同步渲染，不出现骨架', () => {
+  it('同一文本第二次挂载在第一个微任务之前就已渲染内容', async () => {
+    clearMarkdownRenderModelCache()
+    const text = ['## 缓存命中标题', '', '正文一段'].join('\n')
+    const first = render(() => <MarkdownContent text={text} />)
+    // 首次：走真实解析，等它结算并登记进 settledModels
+    await waitFor(() => expect(first.container.querySelector('h2')?.textContent).toBe('缓存命中标题'))
+
+    const second = render(() => <MarkdownContent text={text} />)
+    // 同步断言：不给任何微任务机会——命中已结算模型时内容应已就位，且没有骨架
+    expect(second.container.querySelector('.term-md-skeleton')).toBeNull()
+    expect(second.container.querySelector('h2')?.textContent).toBe('缓存命中标题')
+    clearMarkdownRenderModelCache()
   })
 })

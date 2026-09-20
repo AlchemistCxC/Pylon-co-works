@@ -43,3 +43,11 @@ export function classifyScrollEvent(
 /** 平滑滚动锁窗 / 即时滚动锁窗（smooth 动画时长内忽略用户滚动）。 */
 export const SMOOTH_LOCK_MS = 500
 export const INSTANT_LOCK_MS = 50
+
+/**
+ * #212 S4 水合窗口：打开/切换会话后的这段时间里，行高会从骨架与首次解析收敛到真高
+ * （整批历史一次上屏时尤为明显），期间"到底/没到底"的瞬态翻转不是用户意图。
+ * 取 600ms：够覆盖首帧布局与首批异步解析，又不至于让用户的上滚被吞——用户显式上滚会
+ * 立即结束水合（`cancelFollowForUserInput`），所以这是上界而非固定延迟。
+ */
+export const HYDRATING_MS = 600

@@ -492,6 +492,34 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
   }
 
+  /** #213：本 source 是否有一个未终结的回合时钟（权威活性的值）。 */
+  const turnClockGenerating = (targetSource: string): boolean => {
+    const entry = turnClocks.get(targetSource)
+    return entry !== undefined && !entry.terminal
+  }
+
+  /**
+   * #213：`reconcileTurnClock` 的对偶——权威活性说「本 source 已无在途回合」时，
+   * 必须**明确**把快照推回静止。
+   *
+   * 此前这一步是文档派生顺手完成的（重放出的 `running` 尾行为 false 就自然收敛），
+   * 而文档派生的活性已让位给回合时钟：时钟封存（或无时钟）后若不再表态，页脚会永久停在
+   * 生成态——正是 #213 的现象。已终态时幂等（`generating` 已为假则不动）。
+   */
+  const settleRuntimeLiveness = (targetSource: string): void => {
+    const entry = turnClocks.get(targetSource)
+    if (entry !== undefined && !entry.terminal) return
+    if (!runtime.getSnapshot().generating) return
+    updateRuntimeState({
+      generating: false,
+      generationStart: 0,
+      lastTokenAt: undefined,
+      generationPhase: undefined,
+      generationActivity: undefined,
+      thinkingStart: undefined,
+    })
+  }
+
   function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
     if (destroyed) return
     // P52 D3：回合起点属于**发送入口**，不属于 bind。空态创建路径
@@ -573,7 +601,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (remaining.length === 0) turnClockRollback(targetSource)
     const existingActivity = runtime.getSnapshot().generationActivity
     updateRuntimeState({
-      generating: remaining.length > 0 || document.messages.some(message => message.running),
+      // #213：回滚后的活性只认"是否还有未撤销的乐观回合"——**不得**再看文档里有没有
+      // `running` 行。那条推断在权威化之后成了漏网语义：一个带截断残行的旧会话（无时钟、
+      // 无终态）会让被拒的发送把页脚永久顶成生成中。
+      generating: remaining.length > 0,
       generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
       generationActivity: remaining.length > 0
         ? existingActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: Date.now() })
@@ -716,18 +747,66 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
-    if (isUserStart && !echoesOptimistic) {
+    // #200：loading 期间到达的是 session/load 的**重放历史**帧——不是新回合。
+    // 空 journal（#155 T2 重建升级）时 refresh 无终态证据可压住时钟，重放的 user
+    // 帧会把历史回合复活成「仍在等待后端响应」的生成态并阻塞发送队列。缓冲帧在
+    // 载入完成后经 projectWorkbench 折叠（不走 applyLive），不会二次开启时钟。
+    if (isUserStart && !echoesOptimistic && !loading) {
       // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
       // （elapsed 从用户发出算起，与已绑定路径一致）。
       if (!clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
       clockOnlyStarts.delete(envelope.sessionId)
+      // #213：权威活性必须**明确表态**——不能再指望文档里那个 running 行把 generating 顶起来
+      // （文档派生的活性已让位给回合时钟）。回合不终结，时钟就一直是权威。
+      reconcileTurnClock(envelope.sessionId)
+    }
+    // #213 补强：本 source 还没有回合时钟时，**实时**文本 delta 本身就是「在途回合」的证据
+    //（同账号其它客户端先开了回合、本进程后启动）。起点取文档里首个 running 行的时间，
+    // 不用 now()——否则 elapsed 会从「我们看见它」开始算。loading 期间到达的是重放历史
+    //（见上），不在此列。
+    if (!loading && isLiveTextDelta(incoming) && turnClocks.get(envelope.sessionId) === undefined) {
+      turnClockStart(envelope.sessionId, runningTailStartTime(currentBefore) ?? envelopeTime)
+      reconcileTurnClock(envelope.sessionId)
     }
     // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
     turnClockTouch(envelope.sessionId, envelopeTime)
     if (loading) { buffered.push(envelope); return }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: isUserStart ? null : undefined, preserveGeneration: true })
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), {
+      ownerKey,
+      generation,
+      turnEpoch,
+      terminalFence: isUserStart ? null : undefined,
+      preserveGeneration: true,
+      livenessSource: 'clock',
+      livenessGenerating: turnClockGenerating(envelope.sessionId),
+    })
   }
+
+/**
+ * #213：实时**产出**帧——agent 正在写正文/思考（乐观帧与 user 回声另走各自的时钟通道）。
+ *
+ * 刻意排除 `role === 'user'`：user 帧不是"agent 在产出"的证据，而 `runningTailStartTime`
+ * 取的是文档里最早的 running 行，含陈旧截断行 ⇒ 会算出虚胖的 elapsed。
+ */
+function isLiveTextDelta(envelope: WorkbenchEventEnvelope): boolean {
+  const type = envelope.event.type
+  if (type !== 'message.delta' && type !== 'reasoning.delta') return false
+  const role = (envelope.event as { role?: string }).role
+  return type === 'reasoning.delta' || role === 'assistant'
+}
+
+/** #213 补强：文档里首个 running 行的时间——他端已在进行中的回合，其起点不是"我们看见它"的时刻。 */
+function runningTailStartTime(document: WorkbenchDocument | undefined): number | undefined {
+  let earliest: number | undefined
+  for (const message of document?.messages ?? []) {
+    if (message.running !== true) continue
+    const at = Date.parse(message.time ?? '')
+    if (!Number.isFinite(at)) continue
+    if (earliest === undefined || at < earliest) earliest = at
+  }
+  return earliest
+}
   // P52 D3：feed 终帧信号 → TurnClock 终态（done/error；cancelled 映射 cancelled）。
   // 时钟幂等：首个终态 wins；不在当前 source 的终帧只封存该 source 的时钟。
   // 终态收敛的唯一入口：TurnClock 幂等（首个终态 wins），故 Channel 主轨与 window
@@ -814,7 +893,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
         // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
         // live 已应用区间完全覆盖者跳过（审核修复：恢复基线的 initialDocument: current）。
-        const projected = projectWorkbench([...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        // #205：无缓冲帧（常见的冷刷新）时直接把有序信封交给投影，省掉一次整集合拷贝。
+        const projected = projectWorkbench(bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0
           ? withJournalDiagnostic(reconciled, refreshMalformedCount)
@@ -825,6 +905,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           ownerKey: refreshOwnerKey,
           generation: refreshGeneration,
           sessionId: refreshSessionId,
+          livenessSource: 'clock',
+          livenessGenerating: turnClockGenerating(refreshSource),
         })
         if (refreshMalformedCount > 0) {
           updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${refreshMalformedCount} 条事件无法迁移` })
@@ -842,6 +924,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         const ledgerTerminalReason = ledgerTerminalBySource.get(refreshSource)
         const hasTerminalEvidence = canonicalHasTerminal || ledgerTerminalReason !== undefined
         settleTurnClockFromDocument(refreshSource, hasTerminalEvidence)
+        settleRuntimeLiveness(refreshSource)
         reconcileTurnClock(refreshSource)
         const settled = runtime.getSnapshot()
         if (!settled.generating && !settled.summary && hasTerminalEvidence) {
@@ -916,7 +999,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       canonicalReadEpoch += 1
       refreshInFlight = null
       const nextGeneration = ++generation
-      turnEpoch = 0
+      // #204 ②：`turnEpoch` 是 runtime 局部的**单调**围栏（`workbenchRuntime.acceptDocument`
+      // 对 live 帧执行 `options.turnEpoch < snapshot.turnEpoch` 即拒收）。绑定重建不得把它
+      // 回落为 0——切回时 snapshot 的 epoch 仍停在切走前那一轮，回落会让切回后到达的思考帧
+      // 被静默丢弃（正文截断在切换点），并在终帧后的 journal 重折里另起一块（思考块分裂）。
+      // 这里承接当前值，新回合仍由 applyLive 的 user 帧推进（`turnEpoch += 1`）。
+      turnEpoch = runtime.getSnapshot().turnEpoch ?? 0
       boundSessionId = session?.id
       boundProvider = session?.agentId || 'acp'
       source = session?.source
@@ -926,6 +1014,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       loading = Boolean(session)
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
         ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
+        // #213：**必须**随这发空文档申报权威值。不申报时 merge 会继承上一个会话的
+        // `livenessSource`/`generating`（切走一个在途会话 ⇒ 空文档带 generating:true 发布一拍，
+        // 页脚闪一次 spinner、调度器还会按"直播"处理）。
+        livenessSource: 'clock',
+        livenessGenerating: turnClockGenerating(session?.source ?? ''),
       })
       if (session) {
         const pendingResponses = [
@@ -963,17 +1056,35 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
             return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
           })()
           : []
-        const envelopes = [...rows, ...browserSnapshot].flatMap(row => {
-          const migrated = toWorkbenchEnvelopes(row)
-          if (migrated.length > 0) return migrated
-          malformedCount += 1
-          return []
-        })
-        const projected = projectWorkbench([...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
+        // #205：不再先 concat 再 flatMap——直接按序收集（冷重放这份数组与行数同阶，
+        // 少一次整集合拷贝与中间数组）。浏览器快照轨照旧排在 journal 行之后。
+        const envelopes: WorkbenchEventEnvelope[] = []
+        const collect = (source: readonly unknown[]): void => {
+          for (const row of source) {
+            const migrated = toWorkbenchEnvelopes(row)
+            if (migrated.length === 0) {
+              malformedCount += 1
+              continue
+            }
+            for (const envelope of migrated) envelopes.push(envelope)
+          }
+        }
+        collect(rows)
+        collect(browserSnapshot)
+        // buffered 为空是冷切会话的常态：此时入参已是有序数组，投影不再复制一份。
+        const projected = projectWorkbench(buffered.length === 0 ? envelopes : [...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
         const reconciled = withPendingOptimistic(session.source, projected)
         const document = malformedCount > 0 ? withJournalDiagnostic(reconciled, malformedCount) : reconciled
         buffered = []; loading = false
-        runtime.replaceDocument(document, { ownerKey: loadingOwnerKey, generation: nextGeneration, sessionId: session.id })
+        // #213：本进程的回合时钟（turnClocks）是活性的权威来源，随文档一并申报——
+        // 否则重放出的 `running` 尾行会让 generating 复活成永久「生成中」。
+        runtime.replaceDocument(document, {
+          ownerKey: loadingOwnerKey,
+          generation: nextGeneration,
+          sessionId: session.id,
+          livenessSource: 'clock',
+          livenessGenerating: turnClockGenerating(session.source),
+        })
         updateRuntimeState(malformedCount > 0
           ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
           : { status: 'ready', error: null })
@@ -982,6 +1093,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         }
         // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
         settleTurnClockFromDocument(session.source, canonicalHasTerminal)
+        settleRuntimeLiveness(session.source)
         reconcileTurnClock(session.source)
         // A restarted process has no live terminal summary, while the
         // canonical document already contains the completed turn. Publish a

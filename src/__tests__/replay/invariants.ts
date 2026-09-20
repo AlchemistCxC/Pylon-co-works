@@ -128,6 +128,8 @@ function boundaryOf(row: CanonicalConversationEvent) {
     eventType: row.eventType,
     occurredAt: row.occurredAt,
     receivedAt: row.receivedAt,
+    // #199：compact 读形态的 user 锚点在 unit 内嵌 segments 里，随行透传给推导。
+    ...(row.eventType === 'turn.unit' ? { typedPayload: row.typedPayload } : {}),
   }
 }
 
@@ -176,17 +178,27 @@ export function expectReplayInvariants(
   }
 
   if (expectBoundaryConsistency) {
-    // 时长推导需要一条 `user.message` 行来确立回合起点（见 canonicalTurnDuration）。
-    // 真实 L3 裁剪把该回合**整个范围（含 user 行）**折进 unit 的 segment，因此"已裁剪"
-    // 形态在只读行的推导下**取不到时长**——页脚显示「耗时不可用」。
+    // 时长推导需要一个回合起点锚点（见 canonicalTurnDuration）：#199 起，锚点既可以是
+    // 顶层 `user.message` 行，也可以是 unit 行内嵌 segments 里的 user 事件段（compact 读
+    // `evt_load_compact` 只返回 unit + 未覆盖行，user 行只以嵌入形态存在——冷重放页脚
+    // 因此恢复「处理耗时 Xs」而非「耗时不可用」）。
     //
-    // 这是既定行为的精确表述，不是缺陷断言，故分两组：
-    //  · 保有锚点行的形态之间：时长与终态必须完全一致；
-    //  · 失去锚点行的形态：终态仍可判定，但时长必须**不可测**（不得凭空造 0s 或近似值）。
-    // 将来若让推导遍历 unit 的 segments 以恢复被裁剪回合的时长，第二组会变红——那是有意
-    // 的信号：届时同步本条契约与页脚文案（见对话记录里的发现项）。
-    const anchored = variants.filter(variant => variant.rows.some(row => row.eventType === 'user.message'))
-    const unanchored = variants.filter(variant => !variant.rows.some(row => row.eventType === 'user.message'))
+    // 契约仍分两组：
+    //  · 有锚点（顶层或内嵌）的形态之间：时长与终态必须完全一致；
+    //  · 无锚点形态（顶层无 user 行且 unit 未内嵌 user 段）：终态仍可判定，但时长必须
+    //    **不可测**（不得凭空造 0s 或近似值）——页脚显示「耗时不可用」。
+    const hasEmbeddedUserAnchor = (rows: readonly CanonicalConversationEvent[]) => rows.some(row =>
+      row.eventType === 'turn.unit'
+      && Array.isArray((row.typedPayload as { segments?: unknown } | undefined)?.segments)
+      && ((row.typedPayload as { segments: readonly unknown[] }).segments).some(segment => {
+        const event = (segment as { kind?: unknown; event?: { eventType?: unknown } } | null)
+        return event?.kind === 'event' && event.event?.eventType === 'user.message'
+      }),
+    )
+    const anchored = variants.filter(variant =>
+      variant.rows.some(row => row.eventType === 'user.message') || hasEmbeddedUserAnchor(variant.rows))
+    const unanchored = variants.filter(variant =>
+      !variant.rows.some(row => row.eventType === 'user.message') && !hasEmbeddedUserAnchor(variant.rows))
 
     if (anchored.length > 0) {
       const duration = deriveCanonicalTurnDuration(anchored[0]!.rows.map(boundaryOf))

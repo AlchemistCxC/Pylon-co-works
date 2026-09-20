@@ -643,6 +643,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
     let remember_permission = |sessions: &SessionsLock| {
         let _ = sessions.lock().map(|mut sessions| {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
+                // R-t5 续命：**等用户答复不算沉默**。本回合此前只有 `session/update` 刷新
+                // `last_activity`，于是 agent 发出权限请求后静默等待用户点击的那段时间被当成
+                // "无输出"，闲置窗口到点即判死——真机实测一次 `elapsed 472535ms` 的截断正卡在
+                // 等权限答复上，并留下一个无法关闭的悬空模态（#209）。用户答复后 agent 恢复产出
+                // 会自然续命，故只在**收到请求**这一刻打点。
+                session.last_activity = Some(std::time::Instant::now());
                 let deltas = session.acp_state.apply(&crate::acp::RawMessage {
                     id: Some(request_id.clone()),
                     method: Some("session/request_permission".into()),
@@ -1055,10 +1061,17 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
             return true;
         }
     };
+    // ADR-0016：内核写侧把相邻同类 delta 折成一条 `*.delta.batch` 行（span 占位），结果行数
+    // 可以少于本窗口输入数。配对按**跨度宽度**展开——span 内每个 wire 帧都记在承载它的那一行上
+    // （这正是 durable 事实：这些帧就存在这一行里）。
     let mut canonical_events = append
         .events
         .into_iter()
-        .filter(|event| event.event_type != "turn.unit");
+        .filter(|event| event.event_type != "turn.unit")
+        .flat_map(|event| {
+            let width = crate::session::row_input_span_width(&event);
+            std::iter::repeat_n(event, width)
+        });
     for item in pending {
         let Some(event) = canonical_events.next() else {
             tracing::error!(
@@ -2684,11 +2697,18 @@ mod tests {
             4
         );
         let frames = frames.lock().unwrap().clone();
-        assert_eq!(frames.len(), 3);
-        assert_eq!(frames[0]["payload"]["canonicalEvent"]["sequence"], 1);
+        assert_eq!(
+            frames.len(),
+            3,
+            "每个输入帧仍然各发一条（配对按跨度展开，不合并发布）"
+        );
+        // ADR-0016：前两条是相邻同类 delta，写侧折成**一行**（span [1,2]，行落在跨度末位）。
+        // 两条 wire 帧的 durable 事实都是这一行 ⇒ canonicalEvent.sequence 都是 2，相关性亦指向同一行。
+        // 第三条终态行不受折叠影响（编号 3），单元在同事务占 4。
+        assert_eq!(frames[0]["payload"]["canonicalEvent"]["sequence"], 2);
         assert_eq!(frames[1]["payload"]["canonicalEvent"]["sequence"], 2);
         assert_eq!(frames[2]["payload"]["canonicalEvent"]["sequence"], 3);
-        assert_eq!(wire.correlate(1).unwrap().sequence, 1);
+        assert_eq!(wire.correlate(1).unwrap().sequence, 2);
         assert_eq!(wire.correlate(2).unwrap().sequence, 2);
         assert_eq!(wire.correlate(3).unwrap().sequence, 3);
         assert_eq!(wire.correlate(1).unwrap().revision, 4);

@@ -10,15 +10,46 @@
  * 两类误判的代价**不对称**，这是必须分开钉的理由：
  * - 把**占用**当 gap ⇒ 在途回合直接抛 `canonical_gap_unrecoverable`、断流（有错误码）。
  * - 把**覆盖**当占用 ⇒ 游标跳过仍然存在的行 ⇒ **静默丢数据**（无错误码，更危险）。
+ *
+ * **ADR-0016（2026-09-20 已采用）**放宽了占用半边：跨度占位允许进入**已提交序列**（写侧聚合把
+ * 行折叠下移），连续性判据改为「该行的跨度**覆盖**游标下一号」。覆盖半边**一字未改**——
+ * `turn.unit` 的 rollup 跨度仍不得被当作占用。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { CanonicalEventCursor, CanonicalEventCursorError } from '../../infrastructure/events/canonicalEventCursor.ts'
 import { OWNER_KEY, batchRow, chunkRow, unitRow } from './harness.ts'
 
 describe('① 行语义 · 聚合行的「占用跨度」', () => {
-  it('现状：跨度行让游标抛 canonical_gap_unrecoverable（中间编号无行可补）', async () => {
-    // 这是本次要改掉的行为，先钉住现状，使改动的翻转点只有一个断言。
+  // ADR-0016：连续性判据 = 「该行跨度**覆盖**游标下一号」。起点不得晚于游标下一号、
+  // 终点必须等于该行 sequence、只对 `*.delta.batch` 生效；覆盖半边见下一个 describe。
+  it('跨度覆盖下一号时游标整体推进到跨度末端（不误报 gap）', async () => {
     const span = batchRow(1, 3, ['a', 'b', 'c'])
+    const list = vi.fn().mockResolvedValue({ events: [span], nextBeforeSequence: null })
+    const cursor = new CanonicalEventCursor({ list })
+    const applied: number[] = []
+
+    await cursor.accept(span, row => { applied.push(row.sequence) })
+
+    expect(applied).toEqual([3])
+    expect(cursor.cursor(OWNER_KEY)).toBe(3)
+  })
+
+  it('游标已 seed 到跨度内部时，同一跨度行仍可整体收口到末端（且不触发补读）', async () => {
+    // 恢复场景：游标已确认到 1，行 [1,3] 到来说明 2、3 都由它承载 ⇒ 它就是那个缺号的承载者。
+    const span = batchRow(1, 3, ['a', 'b', 'c'])
+    const list = vi.fn()
+    const cursor = new CanonicalEventCursor({ list })
+    cursor.seed(OWNER_KEY, 1)
+
+    await cursor.accept(span, () => {})
+
+    expect(cursor.cursor(OWNER_KEY)).toBe(3)
+    expect(list).not.toHaveBeenCalled()
+  })
+
+  it('跨度**不覆盖**下一号时仍抛 canonical_gap_unrecoverable（中间确有真空）', async () => {
+    // 行 [2,4] 在游标 0 处到达：1 号没有任何行承载 ⇒ 仍是真空，必须报错、不得部分推进。
+    const span = batchRow(2, 4, ['b', 'c', 'd'])
     const list = vi.fn().mockResolvedValue({ events: [span], nextBeforeSequence: null })
     const cursor = new CanonicalEventCursor({ list })
     const consume = vi.fn()
@@ -27,29 +58,13 @@ describe('① 行语义 · 聚合行的「占用跨度」', () => {
 
     expect(error).toBeInstanceOf(CanonicalEventCursorError)
     expect(error).toMatchObject({ code: 'canonical_gap_unrecoverable' })
-    // 不得部分推进：跨度未整体到位时游标必须停在原处
     expect(cursor.cursor(OWNER_KEY)).toBe(0)
     expect(consume).not.toHaveBeenCalled()
   })
 
-  it('现状：补读也救不回来（补读返回的仍是跨度行自身）', async () => {
-    const span = batchRow(2, 4, ['b', 'c', 'd'])
-    const list = vi.fn().mockResolvedValue({ events: [span], nextBeforeSequence: null })
-    const cursor = new CanonicalEventCursor({ list })
-    cursor.seed(OWNER_KEY, 1)
-
-    const error = await cursor.accept(span, () => {}).catch((value: unknown) => value)
-
-    expect(error).toMatchObject({ code: 'canonical_gap_unrecoverable' })
-    expect(cursor.cursor(OWNER_KEY)).toBe(1)
-    expect(list).toHaveBeenCalled()
-  })
-
-  it.todo('目标：跨度行 [first,last] 整体到位时应把游标推进到 last 且不误报 gap（T1 落地后启用）')
-
   it('损坏的聚合行由读边界折叠，不是游标的职责（职责边界须分离）', async () => {
     // 形状不一致（foldedCount=9 vs span 宽度 2）由读边界的 canonicalBatchChunksOf
-    // 退回单行归一；游标只看 sequence 与合法性校验。钉住这个职责边界，
+    // 退回单行归一；游标只看 sequence 与跨度起点/终点。钉住这个职责边界，
     // 防止改造时把"形状折叠"与"连续性推进"两件事混在一起。
     const broken = batchRow(1, 2, ['ab'])
     broken.typedPayload = { text: 'ab', foldedCount: 9, seqSpan: [1, 2] }

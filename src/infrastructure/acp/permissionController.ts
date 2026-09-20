@@ -36,6 +36,16 @@ export interface PermissionControllerDeps {
 export interface PermissionController {
   /** 用户/超时选择 option：choose → invoke → resolve；失败回 pending 可重试 */
   choose: (requestId: string, optionId: string) => Promise<void>
+  /**
+   * #209：**本地收口**——放弃这条请求，只清前端状态，不向后端宣称 agent 已收到应答
+   * （reducer 的 `reject` 就是这个语义）。
+   *
+   * 为什么必须有这条出口：`choose` 失败会退回 `pending` 以便重试，但当请求在**后端已不存在**
+   * （回合被取消/截断后 `pending_permissions` 已清）时，重试永远不会成功——弹窗于是永久留在
+   * 屏幕上并挡住输入区，而当时既没有 Esc 也没有任何关闭入口（真机实测只能 reload）。
+   * 本方法保证"界面永远收得回来"；agent 那一侧的真实状态由后端自己的终态事件收敛。
+   */
+  abandon: (requestId: string) => void
   /** #98：冷挂载种子——从 agent_status.pendingInteractions 恢复 pending 卡
    * （reducer 按 (requestId, clientGeneration) 去重，与 live 事件天然幂等）。 */
   seedFromSnapshot: (payload: unknown) => void
@@ -201,6 +211,10 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     })
   })
 
+  const abandon = (requestId: string) => {
+    dispatch({ type: 'reject', agentId: currentAgentId(), requestId })
+  }
+
   const choose = async (requestId: string, optionId: string) => {
     dispatch({ type: 'choose', agentId: currentAgentId(), requestId, optionId })
     await approve(requestId, optionId)
@@ -236,5 +250,5 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     }
   }
 
-  return { choose, seedFromSnapshot, dispose }
+  return { choose, abandon, seedFromSnapshot, dispose }
 }

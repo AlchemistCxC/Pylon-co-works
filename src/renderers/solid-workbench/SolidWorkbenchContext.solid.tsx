@@ -22,6 +22,12 @@ export interface SolidWorkbenchContextValue {
   /** Present for mounted Suite adapters; legacy unit fixtures may omit it. */
   hostPort?: WorkbenchHostPort
   paused: Accessor<boolean>
+  /**
+   * #212 判据 C：本次会话里被观察到「文本在两次发布之间变长」的行 key
+   * （`streamRowKey(id, role)`）——渲染层据此把该行留在增量（graft）路径上。
+   * 只读、由显示调度器驱动；**缺省时渲染层只用权威活性判据**（legacy 夹具零改动）。
+   */
+  revealingRows?: Accessor<ReadonlySet<string>>
   reportRendererError?(error: unknown): void
   reportRendererAction?(action: unknown): void
   activation?: RendererActivationSnapshot

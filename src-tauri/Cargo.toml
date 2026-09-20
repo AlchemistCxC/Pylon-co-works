@@ -67,6 +67,9 @@ chrono = "0.4.45"
 windows-sys = { version = "0.61.2", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+# #208 ④：Windows 上「海量小对象、短生命周期」的 Rust 侧（逐行 payload 解码 / 归一化）
+# 用 mimalloc 替换系统分配器；收益以 storage 基准实测为准，不达标即撤（见开发记录）。
+mimalloc = { version = "0.1", default-features = false }
 # I06-A-DATA-01：SQLite 消息仓库（bundled 离线编译，无系统 sqlite 依赖）
 # cache：启用 prepare_cached 语句缓存——canonical_events 热路径（append/ingest）
 # 免去每次 execute 重新编译 SQL。

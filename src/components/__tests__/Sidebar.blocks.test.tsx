@@ -5,8 +5,8 @@ import Sidebar from '../Sidebar'
 import { useBlockActionHandler } from '../sidebar/useBlockActionHandler.ts'
 import { resetStores } from '../../test/resetStores'
 import { useIdentityStore } from '../../identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
 import { resetModulePrefs, SIDEBAR_MODULES_STORAGE_KEY } from '../../domains/workbench/sidebarModulePrefs.ts'
+import { resetBlockCollapse, SIDEBAR_BLOCK_COLLAPSE_STORAGE_KEY } from '../../domains/workbench/sidebarBlockCollapse.ts'
 import { resolveOpenPage } from '../../plugin-runtime/sidebar/sidebarBlockState.ts'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
@@ -62,6 +62,7 @@ beforeEach(() => {
   localStorage.clear()
   resetStores()
   resetModulePrefs()
+  resetBlockCollapse()
   receivedAction = null
   useIdentityStore.setState({
     activeAgent: 'peri',
@@ -103,50 +104,68 @@ describe('左栏模块栈模型', () => {
     expect(screen.getByText('定时')).toBeInTheDocument()
   })
 
-  it('标题点击展开/折叠（默认语义）：折叠后 body 仍挂载但被 inert 且零高，状态写回 sheet', () => {
-    const patchSheetState = vi.fn()
-    useWorkspaceStore.setState({ patchSheetState })
+  it('标题点击展开/折叠（默认语义）：折叠后 body 仍挂载但被 inert 且零高，状态写入全局折叠偏好', () => {
     register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
 
-    const view = render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {} }} />)
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
     expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'false')
     fireEvent.click(within(blockOf('mod')).getByRole('button', { name: '定时' }))
-    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { blockCollapsed: { mod: true }, activePageId: null })
-
-    view.rerender(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { mod: true }, activePageId: null }} />)
+    // 折叠经全局 store 落**独立持久化 key**（跨 Sheet 共享，issue #202）；UI 由 store 订阅刷新，
+    // 不再依赖 sheet 状态回灌。
     expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'true')
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_BLOCK_COLLAPSE_STORAGE_KEY)!).collapsed).toEqual({ mod: true })
+
     // body **不再卸载**：折叠是 CSS 把行高收到 0（有过渡），因此这里断言「挂载但不可交互」。
     const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
     expect(body).not.toBeNull()
     expect(body).toHaveAttribute('inert')
     expect(screen.getByTestId('body-mod')).toBeInTheDocument()
+
+    // 再点一次展开：显式条目翻转回 false，而不是删掉条目回落默认。
+    fireEvent.click(within(blockOf('mod')).getByRole('button', { name: '定时' }))
+    expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'false')
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_BLOCK_COLLAPSE_STORAGE_KEY)!).collapsed).toEqual({ mod: false })
+  })
+
+  it('折叠是跨 Sheet 的应用级偏好：Sheet A 折叠后，Sheet B 的左栏同态（issue #202）', () => {
+    register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
+
+    const view = render(<Sidebar ctx={ctx} sheet={{ id: 'sheet-a' }} />)
+    fireEvent.click(within(blockOf('mod')).getByRole('button', { name: '定时' }))
+    expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'true')
+
+    // 换一张 Sheet 渲染左栏：读的是同一份全局映射，折叠不随切换改变。
+    view.rerender(<Sidebar ctx={ctx} sheet={{ id: 'sheet-b' }} />)
+    expect(blockOf('mod')).toHaveAttribute('data-collapsed', 'true')
   })
 
   it('展开态 body 不 inert（折叠是过渡而不是卸载，交互门控靠 inert）', () => {
     register({ id: 'mod', label: '定时', component: () => <Body name="mod" /> })
-    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {} }} />)
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
     const body = blockOf('mod').querySelector('.sidebar-block-body') as HTMLElement
     expect(body).not.toBeNull()
     expect(body).not.toHaveAttribute('inert')
   })
 
   it('alwaysOpen 的模块**也可折叠**（常驻只表示不可隐藏），默认展开', () => {
-    const patchSheetState = vi.fn()
-    useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'sessions', label: '会话', alwaysOpen: true, component: () => <Body name="sessions" /> })
-    const view = render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: { sessions: true }, activePageId: null }} />)
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
     // 默认展开（alwaysOpen 只是默认不折叠，用户折叠过则尊重用户）
+    expect(blockOf('sessions')).toHaveAttribute('data-collapsed', 'false')
+
+    // 用户显式折叠过则以用户为准（全局折叠偏好，跨 Sheet 生效）。store 写入发生在 React
+    // 事件之外，需要 act 让 useSyncExternalStore 的重渲染落地。
+    act(() => { resetBlockCollapse({ sessions: true }) })
     expect(blockOf('sessions')).toHaveAttribute('data-collapsed', 'true')
 
-    view.rerender(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {}, activePageId: null }} />)
-    expect(blockOf('sessions')).toHaveAttribute('data-collapsed', 'false')
+    act(() => { resetBlockCollapse() })
     fireEvent.click(within(blockOf('sessions')).getByRole('button', { name: '会话' }))
-    expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { blockCollapsed: { sessions: true }, activePageId: null })
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_BLOCK_COLLAPSE_STORAGE_KEY)!).collapsed).toEqual({ sessions: true })
   })
 
   it('「都要」：声明 page 且标题语义为 expand 时，标题折叠 + 头部自动出现「打开」', () => {
     register({ id: 'scheduled', label: '定时', page: { title: '定时' }, component: () => <Body name="scheduled" /> })
-    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {}, activePageId: null }} />)
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     expect(blockOf('scheduled')).toHaveAttribute('data-collapsed', 'false')
     expect(screen.getByRole('button', { name: '打开 定时 页面' })).toBeInTheDocument()
@@ -154,7 +173,7 @@ describe('左栏模块栈模型', () => {
 
   it('onTitleClick=page：标题进入整页，折叠改由独立折叠钮负责', () => {
     register({ id: 'automation', label: '自动化', onTitleClick: 'page', page: { title: '自动化' }, component: () => <Body name="automation" /> })
-    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} state={{ blockCollapsed: {}, activePageId: null }} />)
+    render(<Sidebar ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     expect(within(blockOf('automation')).getByRole('button', { name: '自动化' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '折叠 自动化' })).toBeInTheDocument()
@@ -361,7 +380,7 @@ describe('左栏模块栈模型', () => {
     expect(screen.getByRole('button', { name: '折叠 Ops' })).toBeInTheDocument()
 
     // 页面可被解析：同一贡献、同一 page 声明，主区宿主据此接管聊天视图。
-    const resolved = resolveOpenPage(registry.list(), { blockCollapsed: {}, activePageId: 'example.ops' })
+    const resolved = resolveOpenPage(registry.list(), { activePageId: 'example.ops' })
     expect(resolved?.id).toBe('example.ops')
     expect(resolved?.page?.title).toBe('Ops 面板')
   })

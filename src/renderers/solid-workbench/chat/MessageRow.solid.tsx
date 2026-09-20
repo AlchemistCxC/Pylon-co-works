@@ -16,12 +16,18 @@ export interface SolidMessageRowProps {
   resolveUserName?: (sender: string) => string | undefined
   now?: () => number
   rowRef?: (node: HTMLDivElement | null) => void
+  /**
+   * #212/#213：这一行现在是否「活」（走增量路径、显示生成态）。
+   * 缺省回落到 `message.running`——独立用例与 legacy 宿主行为不变。
+   */
+  live?: () => boolean
   /** Production Workbench may route canonical content parts through Suite-local Slots. */
   semanticContent?: JSX.Element
 }
 
 export function SolidMessageRow(props: SolidMessageRowProps) {
   const message = () => props.renderMessage.message
+  const live = () => props.live?.() ?? message().running === true
   onCleanup(() => props.rowRef?.(null))
   return (
     <ErrorBoundary fallback={error => (
@@ -35,7 +41,7 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
         data-render-type={props.renderMessage.type}
         data-pylon-component="message"
         data-message-role={message().role}
-        data-streaming={message().running === true ? 'true' : undefined}
+        data-streaming={live() ? 'true' : undefined}
       >
         <Show when={props.renderMessage.type === 'user'}>
           <UserLine
@@ -47,13 +53,13 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
           />
         </Show>
         <Show when={props.renderMessage.type === 'assistant'}>
-          <AssistantContent text={message().content} appearance={props.appearance} streaming={message().running === true} semanticContent={props.semanticContent} />
+          <AssistantContent text={message().content} appearance={props.appearance} streaming={live()} semanticContent={props.semanticContent} />
         </Show>
         <Show when={props.renderMessage.type === 'reasoning'}>
           <Show when={props.semanticContent !== undefined} fallback={
             <ReasoningBlock
               text={message().content}
-              running={message().running === true}
+              running={live()}
               startedAt={message().thoughtStartedAt}
               durationMs={message().thoughtDurationMs}
               now={props.now}
@@ -133,6 +139,15 @@ function UserLine(props: {
     </div>
   )
 }
+
+/**
+ * #208：折叠态可惰性渲染的正文长度阈值（字符）。
+ *
+ * 折叠容器是 `display:none`，但 Solid 仍会为隐藏正文建 DOM 并跑 markdown 解析；实测折叠的
+ * reasoning 体渲染 1.6 万字符、单块 20 万字符的解析要 20ms+，长会话累计到 449k 字符 DOM。
+ * 超过本阈值才惰性化——短正文保持既有契约（折叠时也在 DOM 里），长正文展开才渲染。
+ */
+const LAZY_REASONING_BODY_CHARS = 8_000
 
 export function ReasoningBlock(props: {
   text: string
@@ -248,7 +263,14 @@ export function ReasoningBlock(props: {
             onWheel={scrollIntent.onWheel} onKeyDown={scrollIntent.onKeyDown}
             onTouchStart={scrollIntent.onTouchStart} onTouchMove={scrollIntent.onTouchMove}
             onTouchEnd={scrollIntent.onTouchEnd} onTouchCancel={scrollIntent.onTouchEnd} style={bodyStyle()}>
-            <MarkdownContent text={props.text} streaming={props.running} />
+            {/* #208：大正文在折叠态不渲染。折叠容器只是 `display:none`，Solid 仍会建整棵正文 DOM
+                并触发 markdown 解析——实机实测折叠的 reasoning 体照样渲染了 1.6 万字符、全会话累计
+                449k 字符的正文 DOM，而单个 20 万字符块一次解析就要 20ms+。
+                只对**超阈值**正文惰性化：短正文保持既有的「折叠也在 DOM 里」契约（页面查找、
+                既有断言、诊断几何都依赖它），长正文改为展开才解析/渲染。复制不受影响（走 props.text）。 */}
+            <Show when={collapse.open() || props.text.length <= LAZY_REASONING_BODY_CHARS}>
+              <MarkdownContent text={props.text} streaming={props.running} />
+            </Show>
           </div>
         </SolidCollapsibleRegion>
       </Show>
