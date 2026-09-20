@@ -1131,6 +1131,32 @@ const MAX_COMPACT_SQL_RANGES: usize = 500;
 
 /// 该行能否参与折叠：静态 delta 类型，且 `typed_payload.text` 是 string。
 /// `.batch` 行不二次折叠。**text 门控与写侧同款**：无 string text 的 chunk 在逐行投影里
+/// 该行承载了几个输入（写入侧配对用）：`*.delta.batch` 行按 `seqSpan` 宽度计，其余为 1。
+///
+/// 与 `mergeAdjacentDeltaChunks` 的跨度契约配套：span 内每一号都落在这唯一一行里，
+/// 因此 dispatcher 把「一个输入一条结果」的配对改成「按跨度展开配对」。
+pub(crate) fn row_input_span_width(row: &CanonicalEventRow) -> usize {
+    if !row.event_type.ends_with(".batch") {
+        return 1;
+    }
+    let span = row
+        .typed_payload
+        .as_ref()
+        .and_then(|typed| typed.get("seqSpan"))
+        .and_then(serde_json::Value::as_array);
+    let Some(span) = span else { return 1 };
+    let (Some(start), Some(end)) = (
+        span.first().and_then(serde_json::Value::as_i64),
+        span.get(1).and_then(serde_json::Value::as_i64),
+    ) else {
+        return 1;
+    };
+    if start < 1 || end < start || end != row.sequence {
+        return 1;
+    }
+    usize::try_from(end - start + 1).unwrap_or(1)
+}
+
 /// 是 no-op（不新建消息），折进 batch 行会把 no-op 变成新建消息 ⇒ 破坏投影等价。
 fn foldable_delta_base(row: &CanonicalEventRow) -> Option<&'static str> {
     if row.event_type.ends_with(".batch") {
@@ -1218,16 +1244,17 @@ fn flush_delta_run(
     out.push(row);
 }
 
-/// #205：compact 读的读侧折叠——把**相邻同类、identity 全等、sequence 连续**的 delta run
-/// 折成一条 `*.delta.batch` 行。形状与写侧 `mergeAdjacentDeltaChunks` 同一契约，前端
-/// `canonicalRowToWorkbench` 已有展开路径（逐 chunk 重建事件 id 与 coverage），故与逐行
-/// 存储**投影等价**。
+/// 相邻同类 delta 的行聚合（**读写两侧共用**；ADR-0016）：把 identity 全等、sequence 连续的
+/// delta run 折成一条 `*.delta.batch` 行——span 占位，幸存行挪到跨度末位并带 `seqSpan`，
+/// span 中间的裸行不再存在。形状与前端 `canonicalEventBatch.mergeAdjacentDeltaChunks` 同一契约，
+/// `canonicalRowToWorkbench` 已有展开路径（逐 chunk 重建事件 id 与 coverage），故与逐行存储
+/// **投影等价**。
 ///
-/// 为什么在**读侧**折：`turn.unit` 只在回合终帧落盘，却覆盖整回合 ⇒ **回合进行中**该回合
-/// 已产出的 chunk 全部是「未覆盖行」，而切会话最常命中这个窗口（实测单回合 79,682 行）。
-/// 写侧聚合（#155 T3 目标结构第 1 条）是另一条路；读侧折叠对存量 journal 同样立即生效。
-/// 只用于 compact 读——`evt_list` 分页读保持逐行，不动游标语义。
-fn fold_uncovered_delta_runs(rows: Vec<CanonicalEventRow>) -> Vec<CanonicalEventRow> {
+/// - 读侧（#205）：compact 读过滤出「单元 + 未覆盖行」后调用，对存量 journal 立即生效；
+/// - 写侧（ADR-0016 / #155 T3-1）：`ingest_kernel_events` 顺序折叠后落盘，行数随之下降。
+///
+/// 两侧共用同一实现与同一预算（48 KiB / 2000 chunk），不存在第二份规则。`evt_list` 分页读不折叠。
+fn fold_adjacent_delta_runs(rows: Vec<CanonicalEventRow>) -> Vec<CanonicalEventRow> {
     let mut out: Vec<CanonicalEventRow> = Vec::with_capacity(rows.len());
     let mut run: Vec<CanonicalEventRow> = Vec::new();
     let mut run_base: Option<&'static str> = None;
@@ -1549,54 +1576,113 @@ impl EventRepo {
             .unwrap_or(0);
         let mut final_revision = revision;
         let mut result_events = Vec::with_capacity(inputs.len());
+        // ADR-0016（#155 T3-1）：写侧行聚合——**顺序流式**折叠（不是「先全归一化再折」）。
+        //
+        // 为什么必须顺序：终态行会在同一事务里追加 `turn.unit`（多占一个 sequence），若先把整窗
+        // 归一化再折叠，终态之后那些行的编号会与新占的单元号冲突。顺序折叠下编号始终由「已写 +
+        // 已保留」的最大 sequence 推出，单元的插入自然推进后续编号。
+        //
+        // run 判据与读侧 `fold_adjacent_delta_runs` 同一口径、同一预算；收口复用 `flush_delta_run`
+        // （长度 < 2 原样、≥ 2 产 `*.delta.batch` 行），故不存在第二份规则。窗口边界处 run 自然
+        // 断开（每行自带 seqSpan，消费方按跨度理解连续性）。
+        let mut run: Vec<CanonicalEventRow> = Vec::new();
+        let mut run_base: Option<&'static str> = None;
+        let mut run_bytes: usize = 0;
+        macro_rules! flush_run {
+            () => {
+                if !run.is_empty() {
+                    let chunks = std::mem::take(&mut run);
+                    let base = run_base.take();
+                    run_bytes = 0;
+                    let mut flushed: Vec<CanonicalEventRow> = Vec::with_capacity(1);
+                    flush_delta_run(&mut flushed, chunks, base);
+                    for row in flushed {
+                        execute_insert_event(&tx, &row, None)?;
+                        final_revision = row.sequence;
+                        result_events.push(row);
+                    }
+                }
+            };
+        }
         for input in inputs {
             let event = normalize_kernel_event(input, final_revision + 1)?;
-            execute_insert_event(&tx, &event, None)?;
-            final_revision = event.sequence;
-            result_events.push(event.clone());
+            let base = foldable_delta_base(&event);
+            let extend = match (base, run.last(), run_base) {
+                (Some(base), Some(last), Some(current)) => {
+                    current == base
+                        && event.sequence == last.sequence + 1
+                        && identity_keys_equal(&last.identity, &event.identity)
+                        && run.len() < MAX_FOLDED_CHUNKS
+                        && run_bytes + raw_payload_bytes(&event) <= MAX_FOLD_BYTES
+                }
+                _ => false,
+            };
+            if extend {
+                run_bytes += raw_payload_bytes(&event);
+                final_revision = event.sequence;
+                run.push(event);
+                continue;
+            }
+            flush_run!();
+            match base {
+                // 单条自身就超预算的 delta 不成批（不截断，原样落盘）。
+                Some(base) if raw_payload_bytes(&event) <= MAX_FOLD_BYTES => {
+                    run_bytes = raw_payload_bytes(&event);
+                    run_base = Some(base);
+                    final_revision = event.sequence;
+                    run.push(event);
+                }
+                _ => {
+                    execute_insert_event(&tx, &event, None)?;
+                    final_revision = event.sequence;
+                    result_events.push(event.clone());
 
-            // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
-            // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
-            if super::turn_rollup::is_turn_terminal(&event.event_type) {
-                let prev_boundary: i64 = tx
-                    .prepare_cached(LAST_TURN_BOUNDARY_SQL)
-                    .map_err(EventError::from)?
-                    .query_row(params![owner_key, event.sequence], |row| row.get(0))
-                    .optional()
-                    .map_err(EventError::from)?
-                    .flatten()
-                    .unwrap_or(0);
-                let turn_rows =
-                    query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
-                match super::turn_rollup::build_turn_unit_row(
-                    &event,
-                    &turn_rows,
-                    event.sequence + 1,
-                ) {
-                    Ok(unit) => {
-                        let unit_sequence = unit.sequence;
-                        let inserted = execute_insert_event(
-                            &tx,
-                            &unit,
-                            unit.rollup_seq_start.zip(unit.rollup_seq_end),
-                        )?;
-                        // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
-                        // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
-                        if inserted > 0 {
-                            result_events.push(unit);
-                            final_revision = unit_sequence;
+                    // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
+                    // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
+                    if super::turn_rollup::is_turn_terminal(&event.event_type) {
+                        let prev_boundary: i64 = tx
+                            .prepare_cached(LAST_TURN_BOUNDARY_SQL)
+                            .map_err(EventError::from)?
+                            .query_row(params![owner_key, event.sequence], |row| row.get(0))
+                            .optional()
+                            .map_err(EventError::from)?
+                            .flatten()
+                            .unwrap_or(0);
+                        let turn_rows =
+                            query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
+                        match super::turn_rollup::build_turn_unit_row(
+                            &event,
+                            &turn_rows,
+                            event.sequence + 1,
+                        ) {
+                            Ok(unit) => {
+                                let unit_sequence = unit.sequence;
+                                let inserted = execute_insert_event(
+                                    &tx,
+                                    &unit,
+                                    unit.rollup_seq_start.zip(unit.rollup_seq_end),
+                                )?;
+                                // ON CONFLICT DO NOTHING 下 kernel 路径冲突不可达（sequence 恒新分配）；
+                                // 防御：真被跳过时不得虚报写入/推进 revision（审核 P2）。
+                                if inserted > 0 {
+                                    result_events.push(unit);
+                                    final_revision = unit_sequence;
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    owner = %owner_key,
+                                    error = %error,
+                                    "turn.unit 构建失败，本轮不折叠"
+                                );
+                            }
                         }
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            owner = %owner_key,
-                            error = %error,
-                            "turn.unit 构建失败，本轮不折叠"
-                        );
                     }
                 }
             }
         }
+        // 收口最后一段 run（未终结的尾巴也必须落盘——draft 尾巴不豁免，ADR-0016 决定 4）。
+        flush_run!();
         tx.commit().map_err(EventError::from)?;
         Ok(EventAppendResult {
             events: result_events,
@@ -1762,7 +1848,7 @@ impl EventRepo {
         // #205：未覆盖的尾部 delta run 在读侧折成 batch 行——回合进行中（其 turn.unit
         // 尚未产生）这些行占未覆盖集合的全部，不折叠就要把整段 chunk 逐行下发并逐行
         // 投影（实测单回合 79,682 行 ⇒ 前端空白数分钟、内核峰值数百 MB）。
-        Ok(fold_uncovered_delta_runs(rows))
+        Ok(fold_adjacent_delta_runs(rows))
     }
 
     /// compact 读的回退路径：整读该 owner 全部行后在内存里过滤（覆盖跨度过多时的兜底）。
@@ -1804,7 +1890,7 @@ impl EventRepo {
                 row.event_type == super::turn_rollup::TURN_UNIT_EVENT_TYPE || !covered(row.sequence)
             })
             .collect();
-        Ok(fold_uncovered_delta_runs(filtered))
+        Ok(fold_adjacent_delta_runs(filtered))
     }
 
     /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。
@@ -2449,7 +2535,10 @@ mod tests {
     }
 
     #[test]
-    fn kernel_batch_ingest_keeps_each_row_and_advances_past_terminal_unit() {
+    fn kernel_batch_ingest_folds_adjacent_rows_and_advances_past_terminal_unit() {
+        // ADR-0016（2026-09-20 已采用）改写本条判据：相邻同类 delta 现在折成**一行**（span 占位，
+        // 幸存行落在跨度末位），不再逐 chunk 一行。编号语义未变——span 占位不重排后续行，
+        // 故终态单元与终态之后那行的编号与旧契约逐字相同。
         let repo = repo();
         let delta = |text: &str| {
             serde_json::json!({
@@ -2478,8 +2567,7 @@ mod tests {
                 .map(|event| (event.sequence, event.event_type.as_str()))
                 .collect::<Vec<_>>(),
             vec![
-                (1, "assistant.text.delta"),
-                (2, "assistant.text.delta"),
+                (2, "assistant.text.delta.batch"),
                 (3, "turn.completed"),
                 (4, "turn.unit"),
                 (5, "assistant.text.delta"),
@@ -4356,5 +4444,198 @@ mod tests {
             expected_start = row.sequence + 1;
         }
         assert_eq!(folded, total, "切断不丢行");
+    }
+}
+
+#[cfg(test)]
+mod fold_tests {
+    use super::*;
+
+    fn repo() -> EventRepo {
+        EventRepo::open_in_memory().expect("open in-memory")
+    }
+
+    fn owner() -> DurableSessionOwner {
+        DurableSessionOwner::new("p1", "peri", "local:s1")
+    }
+
+    fn owner_key() -> String {
+        owner().key().expect("owner key")
+    }
+
+    fn thinking(text: &str) -> KernelEventInput {
+        KernelEventInput {
+            owner: owner(),
+            remote_session_id: Some("remote-1".to_string()),
+            client_generation: 1,
+            received_at: "2026-09-20T00:00:00.000Z".to_string(),
+            raw_payload: serde_json::json!({
+                "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "messageId": "thought-1",
+                    "content": { "type": "text", "text": text }
+                }
+            }),
+            recovery_import: false,
+        }
+    }
+
+    /// ADR-0016 / #155 T3-1：同一窗口内的相邻同类 delta 折成**一行**，跨度占位。
+    #[test]
+    fn kernel_batch_ingest_folds_adjacent_deltas_into_one_span_row() {
+        let repo = repo();
+        let result = repo
+            .ingest_kernel_events(vec![thinking("甲"), thinking("乙"), thinking("丙")])
+            .expect("ingest");
+
+        assert_eq!(result.events.len(), 1, "三条相邻同类 delta 折成一行");
+        let row = &result.events[0];
+        assert_eq!(row.event_type, "assistant.thinking.delta.batch");
+        assert_eq!(row.sequence, 3, "跨度占位：行落在跨度末位");
+        assert_eq!(result.revision, 3, "revision = max sequence，编号不重排");
+        assert_eq!(
+            row.typed_payload.as_ref().unwrap()["seqSpan"],
+            serde_json::json!([1, 3])
+        );
+        assert_eq!(row.typed_payload.as_ref().unwrap()["foldedCount"], 3);
+        assert_eq!(row.typed_payload.as_ref().unwrap()["text"], "甲乙丙");
+        assert_eq!(row_input_span_width(row), 3, "承载三个输入");
+
+        // span 中间的编号没有行（ADR-0016 明确允许的空洞）
+        let compact = repo.load_events_compact(&owner_key()).expect("compact");
+        assert_eq!(compact.len(), 1);
+        assert_eq!(compact[0].sequence, 3);
+    }
+
+    /// 非 delta 行与 identity 变化都不得被并进同一行。
+    #[test]
+    fn kernel_batch_ingest_does_not_fold_across_boundaries() {
+        let repo = repo();
+        let identified = |text: &str, message_id: &str| KernelEventInput {
+            owner: owner(),
+            remote_session_id: Some("remote-1".to_string()),
+            client_generation: 1,
+            received_at: "2026-09-20T00:00:00.000Z".to_string(),
+            raw_payload: serde_json::json!({
+                "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "messageId": message_id,
+                    "content": { "type": "text", "text": text }
+                }
+            }),
+            recovery_import: false,
+        };
+        let tool = KernelEventInput {
+            owner: owner(),
+            remote_session_id: Some("remote-1".to_string()),
+            client_generation: 1,
+            received_at: "2026-09-20T00:00:00.000Z".to_string(),
+            raw_payload: serde_json::json!({
+                "update": { "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed" }
+            }),
+            recovery_import: false,
+        };
+
+        let result = repo
+            .ingest_kernel_events(vec![
+                thinking("甲"),
+                thinking("乙"),
+                tool,
+                identified("丙", "m2"),
+                identified("丁", "m2"),
+            ])
+            .expect("ingest");
+
+        assert_eq!(
+            result.events.len(),
+            3,
+            "三类各成一行：span 行 + 工具行 + 另一个 span 行"
+        );
+        assert_eq!(
+            result.events[0].event_type,
+            "assistant.thinking.delta.batch"
+        );
+        assert_eq!(result.events[0].sequence, 2);
+        assert_eq!(result.events[1].event_type, "tool.call.completed");
+        assert_eq!(result.events[1].sequence, 3);
+        assert_eq!(
+            result.events[2].event_type,
+            "assistant.thinking.delta.batch"
+        );
+        assert_eq!(result.events[2].sequence, 5);
+        assert_eq!(result.revision, 5);
+        assert_eq!(row_input_span_width(&result.events[1]), 1);
+    }
+
+    /// 窗口边界处 run 断开（每行自带跨度，跨窗口拆行不改变投影）。
+    #[test]
+    fn kernel_batch_ingest_folds_per_window_only() {
+        let repo = repo();
+        let first = repo
+            .ingest_kernel_events(vec![thinking("甲"), thinking("乙")])
+            .expect("w1");
+        let second = repo
+            .ingest_kernel_events(vec![thinking("丙"), thinking("丁")])
+            .expect("w2");
+
+        assert_eq!(first.events.len(), 1);
+        assert_eq!(first.events[0].sequence, 2);
+        assert_eq!(second.events.len(), 1);
+        assert_eq!(second.events[0].sequence, 4);
+        assert_eq!(
+            second.events[0].typed_payload.as_ref().unwrap()["seqSpan"],
+            serde_json::json!([3, 4])
+        );
+        assert_eq!(
+            repo.load_events_compact(&owner_key())
+                .expect("compact")
+                .len(),
+            2
+        );
+    }
+
+    /// 终态行不被并入，且同一事务里仍能按库内行构建 turn.unit（含聚合行输入）。
+    #[test]
+    fn kernel_batch_ingest_terminal_still_builds_turn_unit() {
+        let repo = repo();
+        let done = KernelEventInput {
+            owner: owner(),
+            remote_session_id: Some("remote-1".to_string()),
+            client_generation: 1,
+            received_at: "2026-09-20T00:00:00.000Z".to_string(),
+            raw_payload: serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+            recovery_import: false,
+        };
+        let result = repo
+            .ingest_kernel_events(vec![thinking("甲"), thinking("乙"), done])
+            .expect("ingest");
+
+        assert_eq!(result.events.len(), 3, "span row + terminal + unit");
+        assert_eq!(
+            result.events[0].event_type,
+            "assistant.thinking.delta.batch"
+        );
+        assert_eq!(result.events[0].sequence, 2);
+        assert_eq!(result.events[1].event_type, "turn.completed");
+        assert_eq!(result.events[1].sequence, 3);
+        assert_eq!(result.events[2].event_type, "turn.unit");
+        assert_eq!(
+            result.revision, 4,
+            "unit 在同事务内多占一个 sequence 并计入 revision"
+        );
+        let units = repo
+            .latest_event_of_type(&owner_key(), "turn.unit")
+            .expect("query")
+            .expect("unit row");
+        assert_eq!(
+            units.sequence, result.revision,
+            "单元行是本批最后写入的一行（revision 含单元）"
+        );
+        assert_eq!(
+            repo.load_events_compact(&owner_key())
+                .expect("compact")
+                .len(),
+            1
+        );
     }
 }
