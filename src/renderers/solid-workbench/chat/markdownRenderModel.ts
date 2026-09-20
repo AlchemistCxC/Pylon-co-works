@@ -25,7 +25,16 @@ export interface MarkdownText {
 }
 
 const renderModelCache = new Map<string, Promise<MarkdownRoot>>()
-const MAX_CACHE_ENTRIES = 128
+/**
+ * P57 S3-A11 / #208：LRU 曾经是「128 条」——条数预算与文本长度脱钩，长会话里几千行互相淘汰，
+ * 于是**每次文档重建（bind/refresh/终态刷新）都把可见行重新解析一遍**。实机读数：单会话
+ * `parsed=23689` 次而可见行只有约一千，均值 ~12ms/次 ⇒ 长思考要几分钟才渲染完整。
+ *
+ * 改为**按字符预算**（键长即文本长度）：预算内的模型跨重建复用，超预算才淘汰最旧的。
+ * 2,000,000 字符 ≈ 覆盖本机会话全部可见正文（thinking 538k + text 8k）仍有余量。
+ */
+const MAX_CACHE_CHARS = 2_000_000
+let cachedChars = 0
 
 /** 被取代而跳过解析时返回的空模型：调用方必然丢弃它，因此内容不参与渲染。 */
 const SKIPPED_MARKDOWN_ROOT: MarkdownRoot = { type: 'root', children: [] }
@@ -76,16 +85,21 @@ export function getMarkdownRenderModel(
   const pending = buildMarkdownRenderModel(markdown, options.isCurrent)
   if (options.cache !== false) {
     renderModelCache.set(markdown, pending)
-    while (renderModelCache.size > MAX_CACHE_ENTRIES) {
+    cachedChars += markdown.length
+    while (cachedChars > MAX_CACHE_CHARS) {
       const oldest = renderModelCache.keys().next().value
       if (oldest === undefined) break
       renderModelCache.delete(oldest)
+      cachedChars -= oldest.length
     }
     // 跳过（哨兵）的结果不得留在缓存里：它不含任何内容，留着会让同文本的其他行渲染成空。
     // 按身份撤销，避免误删后来者写入的同名条目。
     pending.then(
       model => {
-        if (model === SKIPPED_MARKDOWN_ROOT && renderModelCache.get(markdown) === pending) renderModelCache.delete(markdown)
+        if (model === SKIPPED_MARKDOWN_ROOT && renderModelCache.get(markdown) === pending) {
+          renderModelCache.delete(markdown)
+          cachedChars -= markdown.length
+        }
       },
       () => {},
     )
