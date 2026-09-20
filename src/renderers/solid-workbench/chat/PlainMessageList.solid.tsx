@@ -8,11 +8,23 @@ import type {
 import { selectMessageViewportState } from '../../../domains/workbench/messageViewportState.ts'
 import { createFrameTask } from '../frameTask.ts'
 
+/** #212 S4：小于该像素的差量视为无变化（避免亚像素抖动的写入循环）。 */
+const ANCHOR_EPSILON_PX = 1
+
 export interface PlainMessageListProps {
   initialItems?: readonly MessageListItem[]
   renderItem: (item: MessageListItem) => JSX.Element
   onPortReady?: (port: MessageListPort) => void
   onContentResize?: () => void
+  /**
+   * #212 S4：滚动视口（补偿的写入目标）。不传即不做锚点补偿（原生锚定行为）。
+   */
+  scrollViewport?: () => HTMLElement | undefined
+  /**
+   * #212 S4：滚动姿态。`'follow'` = 贴底跟随（由上层把它钉在底部，本组件不补偿）；
+   * `'pin'` = 用户自己控制位置——上方内容的高度变化必须补偿，否则用户正在读的行会被挤走。
+   */
+  scrollPosture?: () => 'follow' | 'pin'
 }
 
 export function PlainMessageList(props: PlainMessageListProps) {
@@ -119,6 +131,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
     if (typeof ResizeObserver !== 'undefined' && container) {
       resizeObserver = new ResizeObserver(() => {
         port.invalidateMeasurements('container-resized')
+        syncAnchorCompensation()
         props.onContentResize?.()
       })
       resizeObserver.observe(container)
@@ -126,6 +139,52 @@ export function PlainMessageList(props: PlainMessageListProps) {
     }
     props.onPortReady?.(port)
   })
+
+  // ── #212 S4 自管锚点 ────────────────────────────────────────
+  // 上层已显式关闭原生锚定（`overflow-anchor: none`，见 ChatView.css），因此用户自己控制
+  // 位置时（`'pin'`），视口上方任何高度变化都必须由我们补回：
+  // 记下视口顶部那一行的**文档空间偏移**，变化后把 scrollTop 调整同样的差量。
+  // 贴底跟随（`'follow'`）时不做补偿——那一姿态下"内容长了就跟到底"才是意图。
+  let anchor: { messageId: string; top: number } | undefined
+
+  /** 相对容器内容原点的行顶（与 getViewportState 同一口径）。 */
+  const rowTop = (messageId: string): number | undefined => {
+    const node = rowElements.get(messageId)
+    if (!node || !container) return undefined
+    const rect = node.getBoundingClientRect()
+    return rect.top - container.getBoundingClientRect().top + container.scrollTop
+  }
+
+  const captureAnchor = () => {
+    if (!container) { anchor = undefined; return }
+    const scrollTop = container.scrollTop
+    let best: { messageId: string; top: number } | undefined
+    for (const [messageId, node] of rowElements) {
+      const rect = node.getBoundingClientRect()
+      const top = rect.top - container.getBoundingClientRect().top + scrollTop
+      const bottom = top + rect.height
+      if (bottom <= scrollTop) continue
+      if (best === undefined || top < best.top) best = { messageId, top }
+    }
+    anchor = best
+  }
+
+  const syncAnchorCompensation = () => {
+    const posture = props.scrollPosture?.() ?? 'follow'
+    if (posture === 'follow' || props.scrollViewport === undefined) {
+      anchor = undefined
+      return
+    }
+    if (anchor === undefined) { captureAnchor(); return }
+    const viewport = props.scrollViewport()
+    if (!viewport) { anchor = undefined; return }
+    const top = rowTop(anchor.messageId)
+    if (top === undefined) { anchor = undefined; return }
+    const delta = top - anchor.top
+    if (Math.abs(delta) < ANCHOR_EPSILON_PX) return
+    viewport.scrollTop = Math.max(0, viewport.scrollTop + delta)
+    anchor = { messageId: anchor.messageId, top }
+  }
 
   onCleanup(() => port.destroy())
 

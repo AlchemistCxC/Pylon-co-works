@@ -12,7 +12,7 @@ import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
-import { classifyScrollEvent, INSTANT_LOCK_MS, scrollTraceThreshold, SMOOTH_LOCK_MS, type ScrollWriteTrace } from '../../components/chat/scrollFollowModel.ts'
+import { classifyScrollEvent, HYDRATING_MS, INSTANT_LOCK_MS, scrollTraceThreshold, SMOOTH_LOCK_MS, type ScrollWriteTrace } from '../../components/chat/scrollFollowModel.ts'
 import { createScrollUserIntent } from '../../components/chat/scrollUserIntent.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
@@ -109,6 +109,11 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   // button animation is in flight, and invalidate any already queued
   // auto-follow microtask when the user chooses an explicit endpoint.
   let followLockUntil = 0
+  /**
+   * #212 S4 水合窗口：`sessionId` 落定后的这一小段里，行高会从骨架/首解析收敛到真高，
+   * 期间"到底/没到底"的瞬态翻转不是用户意图——忽略它，避免页脚与吸底状态来回跳。
+   */
+  let hydratingUntil = 0
   let scrollActionRevision = 0
   // P57 S1.1（R-C1）：写迹与 lastAutoFollowTop 必须分离——后者每个 snapshot revision
   // 被置 undefined（新内容机会去重），复用它做判别会在风暴中失效。写迹只在
@@ -166,6 +171,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     scrollActionRevision += 1
     lastObservedScrollTop = chatViewport?.scrollTop ?? 0
     followLockUntil = 0
+    hydratingUntil = 0
     lastProgrammaticWrite = undefined
     // Releasing our guard alone does not stop the browser's smooth animation.
     if (smoothInFlight && chatViewport) {
@@ -184,6 +190,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     stopScrollRailDrag?.()
     stopScrollRailDrag = undefined
     followLockUntil = 0
+    hydratingUntil = 0
     scrollActionRevision += 1
     bottomFollowQueued = false
     if (bottomFollowFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(bottomFollowFrame)
@@ -296,6 +303,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const movingDown = viewport.scrollTop > lastObservedScrollTop
     lastObservedScrollTop = viewport.scrollTop
     syncScrollRail(viewport)
+    // #212 S4：水合期忽略"到底/没到底"的瞬态翻转；用户显式上滚会立即结束水合
+    // （cancelFollowForUserInput），因此这里不会吞掉真实输入。
+    if (now() < hydratingUntil) return
     // P57 S1.3：锁判定改为「未到终点且未超时」——smooth 动画到达终点后位置判别
     // 即刻恢复（follow 回 true），锁过期后反馈不再被吞。
     const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
@@ -518,6 +528,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     followedSessionId = id
     lastObservedScrollTop = chatViewport?.scrollTop ?? 0
     followLockUntil = 0
+    hydratingUntil = now() + HYDRATING_MS
     scrollActionRevision += 1
     setFollowBottom(true)
   })
@@ -654,6 +665,8 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                   if (!followBottom()) return
                   queueBottomFollow()
                 }}
+                scrollViewport={() => chatViewport}
+                scrollPosture={() => followBottom() ? 'follow' : 'pin'}
               />
               <WorkbenchDocumentSurface document={displayDocument()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
               <SolidGenerationFooter

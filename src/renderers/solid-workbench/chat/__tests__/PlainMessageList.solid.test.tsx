@@ -220,6 +220,62 @@ describe('PlainMessageList', () => {
     })
   })
 
+  it('#212 S4：pin 姿态下上方行高度变化时补偿 scrollTop（自管锚点）', () => {
+    const scroller = document.createElement('div')
+    Object.defineProperty(scroller, 'scrollTop', { value: 100, writable: true, configurable: true })
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={ITEMS}
+        scrollViewport={() => scroller}
+        scrollPosture={() => 'pin'}
+        renderItem={item => item.key}
+      />
+    ))
+    const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
+    const rows = [...result.container.querySelectorAll<HTMLElement>('[data-message-id]')]
+    const observer = ResizeObserverMock.instances[0]!
+
+    Object.defineProperty(container, 'scrollTop', { value: 100, writable: true, configurable: true })
+    container.getBoundingClientRect = () => ({ top: 20, bottom: 220, left: 0, right: 100, width: 100, height: 200, x: 0, y: 20, toJSON() {} })
+    // 第 0 行在视口上方（bottom 100 ≤ scrollTop 100 ⇒ 不可见），第 1 行是视口顶部的锚
+    rows[0]!.getBoundingClientRect = () => ({ top: -80, bottom: 0, left: 0, right: 100, width: 100, height: 80, x: 0, y: -80, toJSON() {} })
+    rows[1]!.getBoundingClientRect = () => ({ top: 0, bottom: 130, left: 0, right: 100, width: 100, height: 130, x: 0, y: 0, toJSON() {} })
+
+    // 首次回调只建立锚点，不写入
+    observer.emit()
+    expect(scroller.scrollTop).toBe(100)
+
+    // 上方行长高 50px ⇒ 锚点行整体下移 50px ⇒ 补偿 50px
+    rows[0]!.getBoundingClientRect = () => ({ top: -80, bottom: 50, left: 0, right: 100, width: 100, height: 130, x: 0, y: -80, toJSON() {} })
+    rows[1]!.getBoundingClientRect = () => ({ top: 50, bottom: 180, left: 0, right: 100, width: 100, height: 130, x: 0, y: 50, toJSON() {} })
+    observer.emit()
+    expect(scroller.scrollTop).toBe(150)
+  })
+
+  it('#212 S4：follow 姿态不补偿（贴底跟随才是意图）', () => {
+    const scroller = document.createElement('div')
+    Object.defineProperty(scroller, 'scrollTop', { value: 100, writable: true, configurable: true })
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={ITEMS}
+        scrollViewport={() => scroller}
+        scrollPosture={() => 'follow'}
+        renderItem={item => item.key}
+      />
+    ))
+    const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
+    const rows = [...result.container.querySelectorAll<HTMLElement>('[data-message-id]')]
+    const observer = ResizeObserverMock.instances[0]!
+    Object.defineProperty(container, 'scrollTop', { value: 100, writable: true, configurable: true })
+    container.getBoundingClientRect = () => ({ top: 20, bottom: 220, left: 0, right: 100, width: 100, height: 200, x: 0, y: 20, toJSON() {} })
+    rows[0]!.getBoundingClientRect = () => ({ top: -80, bottom: 0, left: 0, right: 100, width: 100, height: 80, x: 0, y: -80, toJSON() {} })
+    rows[1]!.getBoundingClientRect = () => ({ top: 0, bottom: 130, left: 0, right: 100, width: 100, height: 130, x: 0, y: 0, toJSON() {} })
+    observer.emit()
+    rows[1]!.getBoundingClientRect = () => ({ top: 50, bottom: 180, left: 0, right: 100, width: 100, height: 130, x: 0, y: 50, toJSON() {} })
+    observer.emit()
+    expect(scroller.scrollTop).toBe(100)
+  })
+
   it('invalidation 与 ResizeObserver 更新 revision；destroy 幂等并清理 observer/DOM', () => {
     let port: MessageListPort | undefined
     const onContentResize = vi.fn()
