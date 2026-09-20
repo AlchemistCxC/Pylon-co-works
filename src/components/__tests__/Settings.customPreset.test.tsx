@@ -79,7 +79,7 @@ describe('Settings custom preset controls', () => {
       mountSettingsSheet()
       const row = screen.getByText('我的预设').closest('.set-custom-preset') as HTMLElement
       fireEvent.click(within(row).getByRole('button', { name: '覆盖' }))
-      expect(screen.getByRole('alert')).toHaveTextContent('覆盖自定义预设失败：capture failed')
+      expect(screen.getByRole('alert')).toHaveTextContent('覆盖已有自定义预设失败：capture failed')
       expect(report).toHaveBeenCalled()
     } finally {
       report.mockRestore()
