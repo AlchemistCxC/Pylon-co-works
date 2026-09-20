@@ -383,14 +383,17 @@
 
 ---
 
-[2026-09-21 09] [Miyaki Kumo] [#218]
+[2026-09-21 04] [Miyaki Kumo] [#220]
 
-**开工：issue218（webview2-mcp 上下文瘦身）。** 在 `Ru5t/Reflector` 上施工。本轮文件域，请勿改写、勿连带提交：
+**开工：issue220（前端计算核下沉 Rust/WASM，WP1–WP4）。** 在 `Ru5t/Reflector` 上施工（开工时工作树干净，已 ff 到 `github/main` `5e251b40`；本人 #218 条目已随 PR #219 合入 main，按「只留在途」移除）。spec：`.agents/spec/220-frontend-compute-core-wasm.md`；ADR：`.agents/decisions/0018-frontend-compute-core-rust-wasm.md`。本轮文件域，请勿改写、勿连带提交：
 
-- `tools/webview2-mcp/src/tools/mod.rs`（工具/参数描述瘦身 + 大结果紧凑编码）
-- `tools/webview2-mcp/src/mcp.rs`（INSTRUCTIONS 收紧）
-- `tools/webview2-mcp/README.md`（通用约定表述同步）
-- `tools/webview2-mcp/scripts/stdio-smoke.py`（如断言口径需同步）
-- `.agents/records/218-mcp-context-slimming.md`（开发记录，新增）
+- 新增 crate：`src-tauri/pylon-canonical-types/**`、`src-tauri/pylon-compute/**`、`wasm-markdown/**`
+- `src-tauri/Cargo.toml`（workspace members）
+- `src-tauri/src/session/event_repo.rs`（改用 canonical 类型单源，**只动类型引用，不动存储/事务逻辑**）
+- 前端计算核消费者：`src/domains/workbench/workbenchProjector.ts`、`src/domains/workbench/content/contentPartSchema.ts`、`src/domains/workbench/normalizers/**`、`src/domains/events/**`、`src/infrastructure/events/canonicalEventBatch.ts`、`src/renderers/solid-workbench/{streamingDisplayScheduler.ts,chat/streamingMarkdownSplit.ts,chat/markdownRenderModel.ts}`、`src/components/chat/{codeHighlight.ts,starryCore.ts}`
+- 门禁：`scripts/check-*.mjs`（新增 wasm parity 差分脚本、`check-bundle-size.mjs` 加 wasm 记账）、`package.json`（`check:frontend` 增 wasm 步骤）
+- 文档：`docs/说明书/Pylon-项目架构参考.md`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`、`.agents/records/`、`.agents/decisions/`、本文件
 
-**不碰**：`tools/webview2-mcp/src/cdp/**`、`jsscript.rs`、`args.rs`、`error.rs`、`main.rs`；他人一切文件域。L.md 旧条目不动（归档归各 issue 负责人）。
+**不碰**：插件四样契约（`RenderKindDefinition`/`RendererSlotContribution`/`RenderSurface`/fallback/documentSchema）、`src/plugins/**`、Suite 接缝、IPC wire 与持久化格式、`src-tauri/src/session/event_repo.rs` 的存储与事务语义（只换类型来源）、`src-tauri/src/dispatcher/**`、他人一切文件域。
+
+**工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
