@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
+import { render, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
@@ -218,6 +218,41 @@ describe('PlainMessageList', () => {
       firstVisibleMessageId: 'm1',
       lastVisibleMessageId: 'm2',
     })
+  })
+
+  it('#212 S3b：冷开时按窗口渐进挂载（尾部优先），逐帧扩满', async () => {
+    let port!: MessageListPort
+    const result = render(() => (
+      <PlainMessageList initialItems={[]} onPortReady={value => { port = value }} renderItem={item => item.key} />
+    ))
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')]
+      .map(node => node.getAttribute('data-message-id'))
+    const hundred = createMessageListItems(Array.from({ length: 100 }, (_, index) => descriptor({
+      id: `m${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
+    })))
+
+    port.setItems(hundred)
+    // 首帧只挂窗口，且锚在**尾部**（用户先看到最新内容，历史从上方长出来）
+    expect(ids()).toHaveLength(16)
+    expect(ids()[0]).toBe('m84')
+    expect(ids().at(-1)).toBe('m99')
+
+    // 逐帧扩满
+    await waitFor(() => expect(ids()).toHaveLength(100))
+  })
+
+  it('#212 S3b：增量增长不缩窗（小列表整挂）', () => {
+    let port!: MessageListPort
+    const result = render(() => (
+      <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} renderItem={item => item.key} />
+    ))
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')]
+      .map(node => node.getAttribute('data-message-id'))
+    const three = createMessageListItems([
+      descriptor({ id: 'm3', role: 'user', sender: 'user', content: 'three', time: '10:02' }),
+    ])
+    port.setItems([...ITEMS, three[0]!])
+    expect(ids()).toEqual(['m1', 'm2', 'm3'])
   })
 
   it('#212 S4：pin 姿态下上方行高度变化时补偿 scrollTop（自管锚点）', () => {

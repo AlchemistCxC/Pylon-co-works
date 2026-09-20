@@ -27,6 +27,17 @@ export interface PlainMessageListProps {
   scrollPosture?: () => 'follow' | 'pin'
 }
 
+/**
+ * #212 S3b：渐进挂载窗口。
+ *
+ * 整发把**文本**一次给全（不再逐字铺开），但 DOM 按窗口分批出现——首帧的解析量因此从
+ * "整屏行数"降到"窗口行数"（markdown 解析实测约 4.5ms/千字符，冷开长会话时整屏新行会在
+ * 同一帧里全部首次解析）。窗口锚在**尾部**向上扩：贴底姿态下用户先看到最新内容、历史从
+ * 上方长出来，视口不 churn——这正是别家共识「历史只渐进挂载行数，不渐进显示文本」。
+ */
+const MOUNT_WINDOW_INITIAL = 16
+const MOUNT_WINDOW_STEP = 32
+
 export function PlainMessageList(props: PlainMessageListProps) {
   const [items, setItems] = createSignal<readonly MessageListItem[]>(props.initialItems ?? [])
   const [rows, setRows] = createSignal<readonly StableMessageListRow[]>(
@@ -42,6 +53,66 @@ export function PlainMessageList(props: PlainMessageListProps) {
   let destroyed = false
   let resizeObserver: ResizeObserver | undefined
   const measurements = createFrameTask((reason: MeasurementInvalidationReason) => port.invalidateMeasurements(reason))
+
+  // ── #212 S3b 渐进挂载窗口 ──────────────────────────────────
+  // `mounted` = 从尾部算起渲染的行数（单调不减：窗内已经建好的行不重挂，避免每次追加都
+  // 让整窗行重建）。整批换代（会话切换）时重置为初始值再逐帧扩。
+  const [mounted, setMounted] = createSignal((props.initialItems ?? []).length)
+  let mountFrame: number | undefined
+  const stopMountExpansion = () => {
+    if (mountFrame !== undefined && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(mountFrame)
+    mountFrame = undefined
+  }
+  /**
+   * 逐帧扩窗（**只调度，不立即推进**——初始窗口由调用方同步建立）。
+   * `total` 必须显式传入：调用点可能早于 `setRows`，读 `rows()` 会拿到旧长度。
+   */
+  const scheduleMountExpansion = (total: number) => {
+    if (destroyed || mountFrame !== undefined) return
+    if (untrack(mounted) >= total) return
+    if (typeof requestAnimationFrame !== 'function') { setMounted(total); return }
+    mountFrame = requestAnimationFrame(() => {
+      mountFrame = undefined
+      setMounted(Math.min(total, untrack(mounted) + MOUNT_WINDOW_STEP))
+      scheduleMountExpansion(total)
+    })
+  }
+  /** 行集合变化后决定窗口：整体换代重置、尾部追加不动、整批增长逐帧扩。 */
+  const reconcileMountWindow = (nextItems: readonly MessageListItem[]): void => {
+    const total = nextItems.length
+    // 用户自己控制位置时不挂窗口——少挂几行会让他的视口对着错误的行。
+    if (props.scrollPosture?.() === 'pin') { stopMountExpansion(); setMounted(total); return }
+    const current = untrack(mounted)
+    const renderedRows = untrack(rows)
+    const firstRenderedKey = renderedRows[Math.max(0, renderedRows.length - current)]?.key
+    const freshSet = firstRenderedKey !== undefined && !nextItems.some(item => item.key === firstRenderedKey)
+    if (freshSet || current === 0) {
+      // 整体换代（冷开/切换会话）：只先挂尾部 INITIAL 行，其余逐帧扩。
+      // 此时缩小窗口是安全的——整行集都被换掉，没有哪一行的身份值得保。
+      setMounted(Math.min(total, MOUNT_WINDOW_INITIAL))
+      scheduleMountExpansion(total)
+      return
+    }
+    // 同一会话内的行集变化：窗口**只增不减**（收缩会把正在显示的行卸掉再挂回）。
+    // 渐进只服务"整体换代的首屏"，增量增长交给跟随/锚点（它们才有几何信息）。
+    setMounted(Math.max(current, Math.min(total, MOUNT_WINDOW_INITIAL)))
+    if (total > untrack(mounted)) scheduleMountExpansion(total)
+  }
+
+  /**
+   * 渲染窗口：从尾部算起 `count` 行（全部挂载时返回原数组，不复制）。
+   *
+   * `count` 取 `max(mounted, min(len, INITIAL))`——**窗口不小于初始窗口**。这不是节省，
+   * 而是身份正确性：窗口更新与行集替换是两次信号写，Solid 每次都渲染，中间那次会拿
+   * "旧行集 + 新窗口"算一次可见集；若窗口能在行集缩小前先缩，正在显示的行会被卸掉再挂回，
+   * DOM 身份就断了（`For` 会重建节点）。
+   */
+  const visibleRows = (): readonly StableMessageListRow[] => {
+    const all = rows()
+    const count = Math.max(mounted(), Math.min(all.length, MOUNT_WINDOW_INITIAL))
+    if (count >= all.length) return all
+    return all.slice(all.length - count)
+  }
 
   const port: MessageListPort = {
     setItems(nextItems) {
@@ -72,13 +143,22 @@ export function PlainMessageList(props: PlainMessageListProps) {
       })
       if (!changed && nextItems.length === previousRows.length) return
       setItems(nextItems)
+      // 先定窗口再换行集：反过来会让一次渲染用旧窗口渲染新列表，把首行卸掉又挂回来（DOM 身份断）。
+      reconcileMountWindow(nextItems)
       setRows(nextRows)
       measurements.schedule('items-changed')
     },
     async scrollTo(anchor) {
       if (destroyed) return false
       await Promise.resolve()
-      const node = rowElements.get(anchor.messageId)
+      let node = rowElements.get(anchor.messageId)
+      // #212 S3b：目标还在窗口外（搜索结果跳转）——立即全开再等一次刷新。
+      if (!node) {
+        stopMountExpansion()
+        setMounted(untrack(rows).length)
+        await Promise.resolve()
+        node = rowElements.get(anchor.messageId)
+      }
       if (!node) return false
       node.scrollIntoView(resolveMessageScrollIntoViewOptions(anchor))
       return true
@@ -118,6 +198,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
       if (destroyed) return
       destroyed = true
       measurements.dispose()
+      stopMountExpansion()
       resizeObserver?.disconnect()
       resizeObserver = undefined
       rowElements.clear()
@@ -205,7 +286,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
       data-message-list="plain"
       data-measurement-revision="0"
     >
-      <For each={rows()}>{row => {
+      <For each={visibleRows()}>{row => {
         const item = row.item
         return (
           <div
