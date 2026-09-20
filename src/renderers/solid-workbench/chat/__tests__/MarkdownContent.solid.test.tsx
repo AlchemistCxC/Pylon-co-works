@@ -191,9 +191,8 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
   })
 })
 
-describe('#208 遗留：流式代码块纳入折叠', () => {
-  it('未闭合围栏超过折叠预算即折叠并给出展开入口，且不再全量渲染', async () => {
-    // 预算 = maxLines(400) × 8 = 3200 字符；此处约 500 行 / 1 万字符
+describe('#208 遗留：流式代码块刻意不折叠（用户裁决：看着它继续长）', () => {
+  it('未闭合围栏在流式期全量渲染，不出现折叠提示', async () => {
     const lines = Array.from({ length: 500 }, (_, index) => `const value${index} = ${index}`)
     const text = ['```js', ...lines].join(String.fromCharCode(10))
     const streaming = render(() => <MarkdownContent text={text} streaming />)
@@ -203,13 +202,10 @@ describe('#208 遗留：流式代码块纳入折叠', () => {
       expect(node).not.toBeNull()
       return node as HTMLElement
     })
-    await waitFor(() => expect(block.getAttribute('data-folded')).toBe('true'))
-    const renderedLines = block.querySelectorAll('.term-code-line').length
-    expect(renderedLines).toBeGreaterThan(0)
-    expect(renderedLines).toBeLessThan(lines.length)
-    const notice = block.querySelector('.term-code-folded')
-    expect(notice?.textContent).toContain('已折叠')
-    expect(notice?.textContent).toContain('显示更多')
+    // 过渡态：生成期不折叠、不挂展开入口；结算后由 #208 的头部折叠接管
+    expect(block.querySelectorAll('.term-code-line')).toHaveLength(lines.length)
+    expect(block.querySelector('.term-code-folded')).toBeNull()
+    expect(block.getAttribute('data-folded')).toBeNull()
     streaming.unmount()
   })
 })

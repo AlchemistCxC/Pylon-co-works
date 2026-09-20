@@ -11,14 +11,7 @@ export interface SolidCodeBlockProps {
   showLanguage?: boolean
   showCopyButton?: boolean
   wrap?: 'soft' | 'none'
-  palette?: string
-  /**
-   * #208 遗留 / #212 S3b：流式尾块——**折叠预算与展开入口与结算后完全一致**（所以结算时
-   * 不发生折叠形态的跳变），但跳过语法高亮：高亮按 `{language, code}` 缓存，流式期每次
-   * 文本变化都会重跑一遍，正是流式路径此前绕开高亮的原因。
-   */
-  streaming?: boolean
-}
+  palette?: string}
 
 /**
  * C00：content.code 的 Solid surface。
@@ -56,9 +49,7 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   const collapse = () => setExtraChars(0)
 
   const [highlighted] = createResource(
-    () => isMultiLine() && props.streaming !== true
-      ? { language: props.language || 'text', code: visibleCode() }
-      : undefined,
+    () => isMultiLine() ? { language: props.language || 'text', code: visibleCode() } : undefined,
     input => highlightCode(input.language, input.code).catch(() => null),
   )
   const highlightedLines = () => highlighted()?.split('\n')
@@ -72,7 +63,7 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   }
 
   return (
-    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'} {...(props.streaming === true ? { 'data-streaming-code': 'true' } : {})}>
+    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'}>
       <Show when={props.showLanguage !== false || props.showCopyButton !== false}>
         <div class="term-code-head">
           <Show when={props.showLanguage !== false}><span class="term-code-lang">{props.language ?? 'text'}</span></Show>
