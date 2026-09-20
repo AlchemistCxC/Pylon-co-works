@@ -105,7 +105,10 @@ pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
             .prompt_timeout_secs
             .or(protocol.first_token_timeout_secs)
             .unwrap_or(HERMES_IDLE_TIMEOUT_DEFAULT_SECS);
-        protocol.idle_timeout_secs = Some(preserved_idle);
+        // 2026-09-20 裁决：闲置窗口有自己的下界（`DEFAULT_IDLE_TIMEOUT_SECS` = 600）。
+        // 取**较大者**——保留原意（不得把配置的 180s 收紧成更短的本地截断），同时让
+        // "agent 在等用户点击"不再落进停摆窗口。首 token 仍按 prompt 预算（判"起没起来"）。
+        protocol.idle_timeout_secs = Some(preserved_idle.max(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS));
         if protocol.first_token_timeout_secs.is_none() {
             protocol.first_token_timeout_secs = Some(preserved_idle);
         }
@@ -575,8 +578,8 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(
                 effective.idle_timeout_secs,
-                Some(180),
-                "未显式配置 idle 时不得把 180s prompt 预算收紧为短闲置窗口"
+                Some(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS),
+                "闲置窗口取 prompt 预算与 DEFAULT_IDLE_TIMEOUT_SECS 的较大者（等用户点击不算停摆）"
             );
             assert_eq!(effective.first_token_timeout_secs, Some(180));
             assert_eq!(
@@ -596,8 +599,8 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(
                 effective.idle_timeout_secs,
-                Some(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS),
-                "Hermes 默认闲置窗口必须允许长思考，不得固定为 12s"
+                Some(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS),
+                "Hermes 默认闲置窗口必须允许长思考（下界 600s），不得固定为 12s"
             );
         } else {
             assert_eq!(effective.idle_timeout_secs, None);

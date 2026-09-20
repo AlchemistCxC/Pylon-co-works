@@ -643,6 +643,12 @@ async fn handle_permission_request<R: tauri::Runtime>(
     let remember_permission = |sessions: &SessionsLock| {
         let _ = sessions.lock().map(|mut sessions| {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
+                // R-t5 续命：**等用户答复不算沉默**。本回合此前只有 `session/update` 刷新
+                // `last_activity`，于是 agent 发出权限请求后静默等待用户点击的那段时间被当成
+                // "无输出"，闲置窗口到点即判死——真机实测一次 `elapsed 472535ms` 的截断正卡在
+                // 等权限答复上，并留下一个无法关闭的悬空模态（#209）。用户答复后 agent 恢复产出
+                // 会自然续命，故只在**收到请求**这一刻打点。
+                session.last_activity = Some(std::time::Instant::now());
                 let deltas = session.acp_state.apply(&crate::acp::RawMessage {
                     id: Some(request_id.clone()),
                     method: Some("session/request_permission".into()),
