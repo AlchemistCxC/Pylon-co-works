@@ -12,6 +12,12 @@ export interface SolidCodeBlockProps {
   showCopyButton?: boolean
   wrap?: 'soft' | 'none'
   palette?: string
+  /**
+   * #208 遗留 / #212 S3b：流式尾块——**折叠预算与展开入口与结算后完全一致**（所以结算时
+   * 不发生折叠形态的跳变），但跳过语法高亮：高亮按 `{language, code}` 缓存，流式期每次
+   * 文本变化都会重跑一遍，正是流式路径此前绕开高亮的原因。
+   */
+  streaming?: boolean
 }
 
 /**
@@ -50,7 +56,9 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   const collapse = () => setExtraChars(0)
 
   const [highlighted] = createResource(
-    () => isMultiLine() ? { language: props.language || 'text', code: visibleCode() } : undefined,
+    () => isMultiLine() && props.streaming !== true
+      ? { language: props.language || 'text', code: visibleCode() }
+      : undefined,
     input => highlightCode(input.language, input.code).catch(() => null),
   )
   const highlightedLines = () => highlighted()?.split('\n')
@@ -64,7 +72,7 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   }
 
   return (
-    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'}>
+    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'} {...(props.streaming === true ? { 'data-streaming-code': 'true' } : {})}>
       <Show when={props.showLanguage !== false || props.showCopyButton !== false}>
         <div class="term-code-head">
           <Show when={props.showLanguage !== false}><span class="term-code-lang">{props.language ?? 'text'}</span></Show>
@@ -81,11 +89,13 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
         <pre class="term-code-body" style={{ 'white-space': props.wrap === 'none' ? 'pre' : 'pre-wrap' }}><code>{lines().map((line, index) => (
           <span class="term-code-line">
             <span class="term-code-gutter" aria-hidden="true">│ </span>
+            {/* R-B1 契约：每行内容 span 都带 term-code-text（长行软折与缩进保留挂在它上面）。
+                此前回退/高亮两条分支都没带这个类——流式块自带该类，所以缺口只暴露在 code 部件路径上。 */}
             <Show
               when={highlightedLines()?.[index]}
-              fallback={<span>{line || '\u00a0'}</span>}
+              fallback={<span class="term-code-text">{line || '\u00a0'}</span>}
             >
-              {html => <span innerHTML={html()} />}
+              {html => <span class="term-code-text" innerHTML={html()} />}
             </Show>
             {'\n'}
           </span>

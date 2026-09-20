@@ -191,6 +191,29 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
   })
 })
 
+describe('#208 遗留：流式代码块纳入折叠', () => {
+  it('未闭合围栏超过折叠预算即折叠并给出展开入口，且不再全量渲染', async () => {
+    // 预算 = maxLines(400) × 8 = 3200 字符；此处约 500 行 / 1 万字符
+    const lines = Array.from({ length: 500 }, (_, index) => `const value${index} = ${index}`)
+    const text = ['```js', ...lines].join(String.fromCharCode(10))
+    const streaming = render(() => <MarkdownContent text={text} streaming />)
+
+    const block = await waitFor(() => {
+      const node = streaming.container.querySelector('.term-code-block[data-streaming-code="true"]')
+      expect(node).not.toBeNull()
+      return node as HTMLElement
+    })
+    await waitFor(() => expect(block.getAttribute('data-folded')).toBe('true'))
+    const renderedLines = block.querySelectorAll('.term-code-line').length
+    expect(renderedLines).toBeGreaterThan(0)
+    expect(renderedLines).toBeLessThan(lines.length)
+    const notice = block.querySelector('.term-code-folded')
+    expect(notice?.textContent).toContain('已折叠')
+    expect(notice?.textContent).toContain('显示更多')
+    streaming.unmount()
+  })
+})
+
 describe('#212：命中已结算缓存时同步渲染，不出现骨架', () => {
   it('同一文本第二次挂载在第一个微任务之前就已渲染内容', async () => {
     clearMarkdownRenderModelCache()

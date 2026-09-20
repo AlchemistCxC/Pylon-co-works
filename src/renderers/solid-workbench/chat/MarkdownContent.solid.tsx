@@ -9,6 +9,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
+import { SolidCodeBlock } from './CodeBlock.solid.tsx'
 import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from './streamingMarkdownSplit.ts'
 import { noteStreamingRowSet } from './streamingRowCounters.ts'
 
@@ -193,21 +194,22 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
   </Show>
 }
 
+/**
+ * 流式尾块（未闭合围栏）的正文。
+ *
+ * #208 遗留：此前它逐行渲染**全部**内容、且绕开折叠——`SolidCodeBlock` 的折叠/展开入口
+ * 在流式期根本到不了（真机实测 372 行的块 `folds=0` 全渲）。现在与结算后共用同一套折叠
+ * 预算与展开步长，因此结算时不发生折叠形态跳变；高亮仍按流式绕过（见 `streaming` 属性）。
+ */
 function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string }) {
-  const lines = () => props.code().split('\n')
   return (
-    <div
-      class="term-code-block"
-      data-streaming-code="true"
-      data-language={props.language()}
-    >
-      <Index each={lines()}>{line => (
-        <div class="term-code-line">
-          <span class="term-code-gutter">│ </span>
-          <span class="term-code-text">{line() || '\u00a0'}</span>
-        </div>
-      )}</Index>
-    </div>
+    <SolidCodeBlock
+      code={props.code()}
+      language={props.language()}
+      streaming
+      showLanguage={false}
+      showCopyButton={false}
+    />
   )
 }
 
