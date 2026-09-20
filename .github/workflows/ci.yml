@@ -48,11 +48,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sSL -o "$RUNNER_TEMP/wasm-pack.tar.gz" \
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
             https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
-          tar xzf "$RUNNER_TEMP/wasm-pack.tar.gz" -C "$RUNNER_TEMP"
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
           mkdir -p "$USERPROFILE/.cargo/bin"
-          cp "$RUNNER_TEMP/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
 
       # 产物缓存按计算核源码建 key：命中即连 cargo 编译都省掉（build-wasm 的
       # 源码戳同样只看这些文件，两边口径一致）。改计算核才付一次冷构建。
@@ -130,11 +134,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sSL -o "$RUNNER_TEMP/wasm-pack.tar.gz" \
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
             https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
-          tar xzf "$RUNNER_TEMP/wasm-pack.tar.gz" -C "$RUNNER_TEMP"
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
           mkdir -p "$USERPROFILE/.cargo/bin"
-          cp "$RUNNER_TEMP/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
 
       - uses: actions/cache@v4
         with:
@@ -189,7 +197,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-msvc
+          targets: |
+            x86_64-pc-windows-msvc
+            wasm32-unknown-unknown
           components: clippy
 
       # 项目 rust-toolchain.toml 锁定 MSVC，runner 自带 MSVC 工具链；
@@ -221,6 +231,29 @@ jobs:
         with:
           workspaces: |
             src-tauri
+
+      # #220：本 job 要跑 `bun run build`（tauri::generate_context! 要求 ../dist 存在），
+      # 而 build 的前置是前端计算核的 wasm 生成物——tsc 要解析 `src/wasm/` 里 wasm-pack
+      # 生成的 glue 类型，干净检出时该目录不存在。故三个 Rust job 也需要 wasm 工具链。
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+
+      - uses: actions/cache@v4
+        with:
+          path: src/wasm
+          key: wasm-${{ runner.os }}-${{ hashFiles('src-tauri/pylon-compute/**', 'src-tauri/pylon-canonical-types/**', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wasm-${{ runner.os }}-
 
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
@@ -299,7 +332,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-msvc
+          targets: |
+            x86_64-pc-windows-msvc
+            wasm32-unknown-unknown
           components: clippy
 
       - name: 使用 MSVC 工具链（CI runner 自带链接器）
@@ -315,6 +350,29 @@ jobs:
         with:
           workspaces: |
             src-tauri
+
+      # #220：本 job 要跑 `bun run build`（tauri::generate_context! 要求 ../dist 存在），
+      # 而 build 的前置是前端计算核的 wasm 生成物——tsc 要解析 `src/wasm/` 里 wasm-pack
+      # 生成的 glue 类型，干净检出时该目录不存在。故三个 Rust job 也需要 wasm 工具链。
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+
+      - uses: actions/cache@v4
+        with:
+          path: src/wasm
+          key: wasm-${{ runner.os }}-${{ hashFiles('src-tauri/pylon-compute/**', 'src-tauri/pylon-canonical-types/**', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wasm-${{ runner.os }}-
 
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
@@ -381,7 +439,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-msvc
+          targets: |
+            x86_64-pc-windows-msvc
+            wasm32-unknown-unknown
 
       - name: 使用 MSVC 工具链（CI runner 自带链接器）
         run: rustup override set stable-x86_64-pc-windows-msvc
@@ -396,6 +456,29 @@ jobs:
         with:
           workspaces: |
             src-tauri
+
+      # #220：本 job 要跑 `bun run build`（tauri::generate_context! 要求 ../dist 存在），
+      # 而 build 的前置是前端计算核的 wasm 生成物——tsc 要解析 `src/wasm/` 里 wasm-pack
+      # 生成的 glue 类型，干净检出时该目录不存在。故三个 Rust job 也需要 wasm 工具链。
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
+
+      - uses: actions/cache@v4
+        with:
+          path: src/wasm
+          key: wasm-${{ runner.os }}-${{ hashFiles('src-tauri/pylon-compute/**', 'src-tauri/pylon-canonical-types/**', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: wasm-${{ runner.os }}-
 
       - name: 安装依赖（bun）
         run: bun install --frozen-lockfile
