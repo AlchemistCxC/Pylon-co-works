@@ -1,6 +1,7 @@
 /** 预设层 · 内置预设数据：RAW_GLOBAL_PRESETS → GLOBAL_PRESETS。 */
 
-import type { GlobalPreset, PresetInterfaceMode } from './types.ts'
+import type { GlobalPreset, PresetInterfaceMode, PresetName } from './types.ts'
+import type { ThemeSettings } from '../store.ts'
 import { completeTerminalPreset } from './completion.ts'
 
 const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
@@ -685,6 +686,64 @@ export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfa
   'modern-gui': 'gui',
   'terminal-like': 'terminal',
 })
+
+function requireGlobalPreset(name: PresetName): GlobalPreset {
+  const preset = GLOBAL_PRESETS.find(item => item.name === name)
+  if (!preset) throw new Error(`内置预设缺失：${name}`)
+  return preset
+}
+
+/**
+ * 刀7（#214）：两条「默认预设」——GUI / 终端各一条。
+ *
+ * **同定位、不同按键**（用户 2026-09-20 拍板）：它们与普通预设是同一个 `GlobalPreset`
+ * 形状、走同一条应用路径，唯一区别是**触达方式**——唯一入口是「重置主题」。
+ *
+ * **为什么是独立表而不是往 `GLOBAL_PRESETS` 里加标记**：「不显示」若靠过滤分支实现，
+ * 就得同时改「列表」（`presetsForInterfaceMode`）与「区域池」（`zonePresetPool` 的派生表），
+ * 漏一处它们就漏进候选菜单。独立表让两处排除变成**结构性保证**（谁都不读它），
+ * 且 `GLOBAL_PRESETS` 仍是 10 套——`docs/说明书` 里「当前 10 套内置预设」不失真。
+ *
+ * 外观来源（用户拍板）：
+ * - GUI：取 `glass` 的四区切面（**引用**同一份 theme 数据）；
+ * - 终端：**复制** `glass`（最早那款浅色；深色的 nord/tokyo/amber/matrix/claude 用户已否决）
+ *   + 终端契约字段（写法对齐 `completion.ts` 的 `TERMINAL_VISUAL_COMPLETION`：
+ *   `msgStyle` / `messageLayout` / `inputMode` / `inputVariant` / `ccVariant`）。
+ *   其中 `inputVariant` 与 `inputMode` 必须同写——`inputMode==='cli' ⟺ inputVariant==='cli'`
+ *   是本仓既有的联动不变量（`presetReducer.resolveInputMode`）。
+ */
+const GLASS_THEME: Partial<ThemeSettings> = requireGlobalPreset('glass').theme
+
+/** 终端默认 = `glass` 的副本 + 终端契约字段（`inputVariant` 与 `inputMode` 必须同写）。 */
+const TERMINAL_DEFAULT_THEME: Partial<ThemeSettings> = {
+  ...structuredClone(GLASS_THEME),
+  msgStyle: 'terminal',
+  messageLayout: 'classic',
+  inputMode: 'cli',
+  inputVariant: 'cli',
+  ccVariant: 'terminal',
+}
+
+export const DEFAULT_PRESETS: Readonly<Record<PresetInterfaceMode, GlobalPreset>> = Object.freeze({
+  gui: Object.freeze({
+    name: 'gui-default',
+    label: 'GUI-默认预设',
+    interfaceMode: 'gui',
+    theme: GLASS_THEME,
+  }),
+  terminal: Object.freeze({
+    name: 'terminal-default',
+    label: '终端-默认预设',
+    interfaceMode: 'terminal',
+    theme: TERMINAL_DEFAULT_THEME,
+  }),
+})
+
+/** 当前界面模式对应的默认预设（**未登记模式 ⇒ undefined** ⇒ 调用方回落 `DEFAULTS`）。 */
+export function defaultPresetForInterfaceMode(interfaceMode: string): GlobalPreset | undefined {
+  const bucket = INTERFACE_MODE_PRESET_BUCKET[interfaceMode]
+  return bucket ? DEFAULT_PRESETS[bucket] : undefined
+}
 
 /** 当前界面模式下可出现在预设菜单第二级的预设（桶未登记 ⇒ 空数组 = 菜单不出现）。 */
 export function presetsForInterfaceMode(interfaceMode: string): GlobalPreset[] {
