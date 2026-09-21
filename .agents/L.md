@@ -416,3 +416,19 @@
 - 文档：`.agents/records/`、本文件
 
 **我不碰**：`src/components/Sidebar.tsx`、`src/components/sidebar/**`、`src/App.tsx`、其余全部源码与首方样式；`src-tauri/**` 源码（实机验收只构建不改动）。构建产物一律不提交。
+
+---
+
+[2026-09-21 17] [Miyaki Kumo] [#204③投影层 + #226 + #155T3]
+
+**开工：#204③ 投影/事件层收口 + #226 batch 行段级展开（+ #155 T3 内核写侧聚合备阶段）。** spec 见 `.agents/spec/issue-226-projection-live-batch-fold.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/workbench/workbenchProjector.ts`、`src/domains/workbench/workbenchRuntime.ts`
+- `src/sheets/agent-workbench/agentWorkbenchSession.ts`
+- `src/__tests__/replay/**`、`src/domains/workbench/__tests__/**`（新增/同步用例）
+- 阶段 D（另 spec）：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`、`scripts/compute-parity/**`
+- 文档：`docs/说明书/Pylon-项目架构参考.md`、`.agents/records/`、`.agents/decisions/`（T3 ADR）、本文件
+
+**我不碰**：`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 与 `src/components/__tests__/Sidebar.blocks.css.test.ts`（#204① 在途域）；其余全部源码。
