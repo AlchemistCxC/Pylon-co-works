@@ -1,8 +1,9 @@
 /**
  * 区域层 · 出厂区域预设数据 —— terminal 桶 / right 区域（刀2 / #223）。
  *
- * ★ **本文件由 `scripts/generate-factory-zone-presets.mts --write` 生成，不要手改。**
- *   校验：`bun scripts/generate-factory-zone-presets.mts`（默认模式，逐字节比对）。
+ * ★ **本文件是出厂区域预设的落盘数据（刀2 / #223 产出）；生成脚本已于刀3 删除，请勿手改。**
+ *   它是**唯一真值**：10 套出厂预设的有效值由它算出（`effectivePresetTheme`）——
+ *   改这里的任何一个值，等于改掉所有引用它的预设。历史来源见 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
  * 值 = 生成时刻的 `pickZoneFields(GLOBAL_PRESETS[来源].theme, 'right')`，逐字段照抄
  * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden/ccScale 三个元件名单字段）。
  */

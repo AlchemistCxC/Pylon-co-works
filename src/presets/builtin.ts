@@ -129,9 +129,9 @@ export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfa
  *
  * ★ 这不是"值存两份"的回潮，而是把**本来就有的语义**写明：这两条默认预设按定义就是 glass 的
  * **拷贝**（刀1 的原话「终端默认是 `glass` 的拷贝而不是引用，用引用表达错了语义」），
- * 所以它们各自持有一份自己的值是正确的表达。漂移由测试钉住：
- * `DEFAULT_PRESETS.gui.theme` 必须逐字段等于 glass 的有效值，终端默认 = 它 + 5 个终端契约字段
- * （见 `src/__tests__/effectivePresetTheme.test.ts` 的 B3）。
+ * 所以它们各自持有一份自己的值是正确的表达。漂移由测试钉住（★ 守卫在 `defaultPresets.test.ts`
+ * 的 `:85` 与 `:209`，不在 `effectivePresetTheme.test.ts` —— 那里只断言"视图对默认预设 == 它自己的 theme"）：
+ * `DEFAULT_PRESETS.gui.theme` 必须逐字段等于 glass 的有效值，终端默认 = 它 + 5 个终端契约字段。
  *
  * 值取自刀2 落盘的工厂数据（glass 的 5 个区域切面之并集，键序 = `PRESET_ZONES` 顺序）。
  */
