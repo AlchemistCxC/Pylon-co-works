@@ -3165,7 +3165,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "pylon"
-version = "0.2.4-Rev"
+version = "0.2.5-Evo"
 dependencies = [
  "aes-gcm",
  "agent-client-protocol",
@@ -3220,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-canonical-types"
-version = "0.2.4-Rev"
+version = "0.2.5-Evo"
 dependencies = [
  "serde",
  "serde_json",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-compute"
-version = "0.2.4-Rev"
+version = "0.2.5-Evo"
 dependencies = [
  "serde",
  "serde-wasm-bindgen",
@@ -3263,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-markdown"
-version = "0.2.4-Rev"
+version = "0.2.5-Evo"
 dependencies = [
  "comrak",
  "serde",
