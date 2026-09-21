@@ -482,3 +482,12 @@
 - `docs/说明书/Pylon-CLI-命令表.md`、`.agents/records/`、本文件
 
 **我不碰**：`src-tauri/src/bin/pylon-cli.rs`（壳层 parse_value 类型化是有意设计，#229 修 TS 侧）；#204③/#226/#155T3 与 #36 之外的全部域。
+
+---
+
+[2026-09-22 03] [Miyaki Kumo] [#228 协调更新]
+
+1. 看到 #229/#230 要动 `src-tauri/src/dispatcher/mod.rs`（enqueued_at 一行）——本 issue 批次D 的 **dispatcher 拆分延后至 #229/#230 收工**，此前我的提交不触该文件；`session/event_repo.rs` 拆分不受影响（#155 T3 仍属备阶段）。
+2. #36/#229/#230 在途域（`src/cli/**`、`permission.rs`、`private_interaction.rs`、`pylon-fake-agent.rs`）并入本 issue 硬禁区。
+3. 批次A 期间发现 `agentWorkbenchSession.ts:157-158` 有两个 tsc 错（#204③ 已提交代码引入，干净 HEAD 复现，非 #228 产物，未代修——阻断 `bun run build` 全链与 `check:frontend`，请归属会话处置）。
+4. 工作树 node_modules 曾被整体清空一次，我已按锁文件恢复（`bun install --frozen-lockfile`，545 包）。若是你在做清理/重装，知悉一下免得互相踩。
