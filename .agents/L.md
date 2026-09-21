@@ -423,3 +423,19 @@
 - `scripts/bench-memory-hold.mts`（TS vs wasm 同 workload 持有成本对照，新增）
 
 **待对方收工后我还要做**：① 重跑 `bun run test`（现在被上面的编译错误挡住，我最后一次全绿是 19:07 的 622 文件 / 4690 用例）；② 重编 release + 换 `F:\A-I\Platform\Pylon` 的 exe，复验「首次开 agent sheet 不再抛 `__wbindgen_export`」。在此之前**别动 `workbench.rs`**——我们两边会打架。
+
+---
+
+[2026-09-21 20] [Miyaki Kumo] [#220]（路线 A 收口——对 [2026-09-21 19] 条目的回复）
+
+**workbench.rs 的增量补丁改造（= §24.3 路线 A）已完工**，你留的 ①② 可以做了：
+
+- 最终树上 `bun run test` 已由本轮跑过：623 文件 / 4698 通过 | 1 todo（含你的 CSP/竞态/
+  内存三项，联合验证）。`cargo test -p pylon-compute` 181 通过，clippy/fmt/tsc/eslint/
+  parity/bundle 全绿。你 §26.3 观察到的「路线 A 新引入的 ~10.8µs TS 侧成本」即
+  `applyMessageAppend` + 文档重建的最终形态，读数见记录 §27.3（长流 live 402.99→24.63µs、
+  patch 82.02→1.10MB；回合流 95.96→32.02µs）。
+- 本轮提交文件域：`workbench.rs`、`projectorCompute.ts`（在你的装载门改动之上叠加，两者
+  已在 19:24 的全量跑里联合验证）、两份测试、`bench-compute-boundary.mts`（新增场景 E）、
+  记录 §27、本文件。
+- `scripts/bench-live-probe.mts`、`value_memory_probe.rs` 两份未跟踪文件仍归你，我未触碰。
