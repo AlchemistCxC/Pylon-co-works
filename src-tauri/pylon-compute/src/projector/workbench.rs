@@ -1008,6 +1008,32 @@ fn text_from_parts(parts: &Value) -> String {
     out
 }
 
+/// `provider_identity_key` 的**结构体直读版**：按同一优先级取第一个存在的身份字段。
+///
+/// 不要为了取一个字段去建整棵 JSON Map（BTreeMap + 最多 6 次字符串克隆）——这是
+/// message / reasoning 归约器里的**逐事件**调用，属于折叠耗时里按事件分配的一部分。
+/// 优先级与 `provider_identity_key` 逐字一致（messageId → turnId → toolCallId →
+/// taskId → interactionId，**不含 runId**，值版也没读它）；`Some("")` 同样短路返回空串，
+/// 与值版 `get(key)` 命中即返回的语义一致。
+fn provider_identity_key_of(identity: &Identity) -> String {
+    for candidate in [
+        &identity.message_id,
+        &identity.turn_id,
+        &identity.tool_call_id,
+        &identity.task_id,
+        &identity.interaction_id,
+    ] {
+        // 判据必须与值版逐字一致：值版走 `string_value`，而它按
+        // `!js_trim(s).is_empty()` 过滤——**空串与「仅空白」都算缺席**
+        // （`js_trim` 含 U+FEFF 等 JS 空白）。这条由 `provider_identity_tests`
+        // 的 2^6 组合扫描（交替非空/空串/仅空白）钉死。
+        if let Some(value) = candidate.as_ref().filter(|text| !js_trim(text).is_empty()) {
+            return value.clone();
+        }
+    }
+    String::new()
+}
+
 fn provider_identity_key(identity: &Value) -> String {
     for key in [
         "messageId",
@@ -1577,7 +1603,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
     }
     // ACP provider 可省略 message 身份；相邻同角色 chunk 仍属同一条流。assistant
     // 边界来自 canonical timeline 的语义事件，不来自 side-channel 或逐 chunk 身份。
-    let incoming_provider = provider_identity_key(&envelope.identity.to_value());
+    let incoming_provider = provider_identity_key_of(&envelope.identity);
     let append = previous_index.is_some_and(|index| {
         let previous = &document.messages[index];
         previous.role == role
@@ -1817,7 +1843,7 @@ fn find_terminal_target_index(
     envelope: &SemanticEnvelope,
     role: &str,
 ) -> Option<usize> {
-    let incoming_identity = provider_identity_key(&envelope.identity.to_value());
+    let incoming_identity = provider_identity_key_of(&envelope.identity);
     if !incoming_identity.is_empty() {
         let exact = find_last_message_index(document, |message| {
             message.role == role && provider_identity_key(&message.identity) == incoming_identity
@@ -1865,7 +1891,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         return;
     }
     let previous_index = document.messages.len().checked_sub(1);
-    let incoming_provider_identity = provider_identity_key(&envelope.identity.to_value());
+    let incoming_provider_identity = provider_identity_key_of(&envelope.identity);
     let previous_provider_identity = previous_index
         .map(|index| provider_identity_key(&document.messages[index].identity))
         .unwrap_or_default();
@@ -5893,5 +5919,85 @@ mod projection_index_tests {
             .map(|entry| entry.sequence)
             .fold(f64::NEG_INFINITY, f64::max);
         assert_eq!(rescanned, expected, "缩短 timeline 后缓存未作废");
+    }
+}
+
+#[cfg(test)]
+mod provider_identity_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn identity_from(value: Value) -> Identity {
+        let get = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
+        Identity {
+            turn_id: get("turnId"),
+            message_id: get("messageId"),
+            tool_call_id: get("toolCallId"),
+            task_id: get("taskId"),
+            run_id: get("runId"),
+            interaction_id: get("interactionId"),
+        }
+    }
+
+    /// 直读版必须与「建 Value 再查」版逐字一致——它是那处逐事件 Map 构建的替代。
+    #[test]
+    fn struct_read_matches_value_lookup() {
+        let cases = [
+            json!({ "messageId": "m", "turnId": "t", "toolCallId": "c" }),
+            json!({ "turnId": "t", "toolCallId": "c" }),
+            json!({ "toolCallId": "c", "taskId": "k" }),
+            json!({ "taskId": "k", "interactionId": "i" }),
+            json!({ "interactionId": "i" }),
+            // runId 两侧都不参与，故应落到空串
+            json!({ "runId": "r" }),
+            json!({}),
+            // 空串与仅空白都算缺席：值版走 `string_value`（js_trim 后为空即过滤），
+            // 故必须继续往后找 turnId，而不是短路返回。
+            json!({ "messageId": "", "turnId": "t" }),
+            json!({ "messageId": " \u{feff}", "turnId": "t" }),
+            json!({ "messageId": " \t ", "toolCallId": "c" }),
+        ];
+        for case in cases {
+            let identity = identity_from(case.clone());
+            assert_eq!(
+                provider_identity_key_of(&identity),
+                provider_identity_key(&case),
+                "身份 {case}"
+            );
+        }
+
+        // 全覆盖：六字段的所有存在组合（2^6）都必须与值版一致。
+        for mask in 0u32..64 {
+            let mut object = Map::new();
+            for (bit, key) in [
+                "turnId",
+                "messageId",
+                "toolCallId",
+                "taskId",
+                "runId",
+                "interactionId",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if mask & (1 << bit) != 0 {
+                    // 交替放「非空 / 空串 / 仅空白(含 U+FEFF)」——值版按 js_trim 过滤，
+                    // 三种都见过才算比对充分。
+                    let text = match bit % 3 {
+                        0 => format!("{key}-v"),
+                        1 => String::new(),
+                        _ => " \u{feff}\t".to_string(),
+                    };
+                    object.insert(key.to_string(), Value::String(text));
+                }
+            }
+            let value = Value::Object(object);
+            let identity = identity_from(value.clone());
+            assert_eq!(
+                provider_identity_key_of(&identity),
+                provider_identity_key(&value),
+                "组合 mask={mask}"
+            );
+        }
     }
 }

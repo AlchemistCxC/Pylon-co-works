@@ -391,3 +391,18 @@ patch 序列化分开）与 `bench-ts-vs-wasm.mts` 的边界分段，把迁移�
   patch+parse 18（patch 变薄后自然降）。
 
 护栏（2500ms）在 CI 上仍会红到 ①+③ 落地。
+
+### 15. 调查后的第三处优化：`provider_identity_key` 去掉按事件的 Map 构建
+
+`provider_identity_key(&envelope.identity.to_value())` 在 message/reasoning 归约器里**逐事件**
+被调用（3 处），而它为了取「第一个存在的身份字段」先建一整棵 JSON Map（BTreeMap + 最多 6 次
+字符串克隆）。改为结构体直读（`provider_identity_key_of`），优先级与值版逐字一致。
+
+**这次差点写出行为差异，是测试拦下来的**：我的第一版把 `Some("")` 当命中短路返回，而值版走
+`string_value`，其判据是 `!js_trim(s).is_empty()`——空串与**仅空白**（含 U+FEFF）都算缺席。
+`provider_identity_tests` 的 2^6 组合扫描（字段值交替「非空 / 空串 / 仅空白」）+ 三条显式
+空白用例把这个差异抓了出来。这印证了一条做法：**这类微优化必须配等价性测试**，
+否则 parity 基线退役后（TS 已删）错得无声。
+
+实测：单项变化落在测量噪声内（该分段是单轮，本机 ±10%）。**三处优化都没有改变 15× 的量级**——
+量级只能由 ①+③ 两轮结构性改造改变。
