@@ -406,3 +406,35 @@ patch 序列化分开）与 `bench-ts-vs-wasm.mts` 的边界分段，把迁移�
 
 实测：单项变化落在测量噪声内（该分段是单轮，本机 ±10%）。**三处优化都没有改变 15× 的量级**——
 量级只能由 ①+③ 两轮结构性改造改变。
+
+### 16. 第二轮优化（本轮全做）：热路径去克隆 + 帧编码槽表
+
+| 优化 | 证据 |
+| --- | --- |
+| 帧编码的 18 个 (offset,len) 槽：原为每字段返回二元组数组（20k 事件 ≈ 100 万个短命数组），改为预分配 `Int32Array` 直写槽表 | 编组 **119 → 67ms** |
+| `reduce_reasoning` 热路径对同一份 parts 做 **5 次整树克隆**（`parts` → `parts_items` → coalesce 重建 → `reasoning_parts.clone()` → `Value::Array(...)` 包装）：改为借用切片 + `text_from_slice` / `append_parts_slice_in_place` | 见下 |
+| `identity.to_value().as_object().is_empty()` 逐事件建整棵 Map 只为判空 → `identity_is_present(&Identity)` 结构体直读 | 见下 |
+| `with_event` 去掉「连 event 一起克隆再覆盖」的纯浪费 | 见下 |
+
+四处都配了等价性测试，其中两处**测试真的拦住了行为差异**：
+- `provider_identity_tests`：`Some("")` 与**仅空白**（`js_trim` 后为空，含 U+FEFF）都算缺席——
+  我第一版短路返回空串，被 2^6 组合扫描抓出。
+- `text_slice_equivalence_tests`：`text_from_slice(原始 parts)` 必须等于
+  `text_from_parts(coalesce(parts))`（这条等价性是「省掉 coalesce 与整树克隆」的前提），
+  以及切片版与值版下沉等价——60 种子随机部件序列（含 unknown+summary、缺 text、language 有无、空串、空数组）。
+- 另有一次真实拼错：改槽序时多写了一个槽（每事件 19 而非 18），被 parity 门禁
+  （35 用例）当场判红。
+
+**实测（同一 harness，3 轮中位数）**：迁移前后对比 **~280ms vs ~28ms ≈ 10×**；
+本轮五处优化把它从 **315ms 压到 ~280ms（-11%）**，**量级未变**。
+
+### 17. 【测量方法学，重要】重复大批量折叠会退化——多轮采样会污染结论
+
+本轮把分段改成「5 轮中位数」后出现了荒唐数字：`project` 的中位数变成 **2718ms**（首轮约 200ms），
+`foldIntoProjector` 中位数 3849/4091ms。根因不是代码变慢，而是**在同一个进程里反复折叠大批量**会让
+wasm 线性内存持续增长，而每次 `memory.grow` 的代价随堆大小上升（Bun 上更极端，见 §12 的宿主悬崖）。
+即使把轮次降到 1，**分段仍然被它前面的折叠（形状先验那两次 20k）污染**（同一轮里 project 报 471ms）。
+
+结论：**这份基准必须一进程一配置**。当前脚本的「同形态对照」段（每次新建投影核、3 轮中位数）是
+唯一稳定可比的读数（5 次独立运行：315 / 306 / 282 / 274 / 282 ms），分段数字只能当量级参考。
+把 `scripts/bench-ts-vs-wasm.mts` 改成 `--only=<段>` 一进程一段，是下次先要做的事。

@@ -990,8 +990,14 @@ fn update_timeline(
 }
 
 fn text_from_parts(parts: &Value) -> String {
+    text_from_slice(parts.as_array().map(Vec::as_slice).unwrap_or(&[]))
+}
+
+/// 文本抽取的切片版：热路径手里已经有一份 `&[Value]`，不必再造一个
+/// `Value::Array(clone())` 只为了读文本（那是逐事件一次整树克隆）。
+fn text_from_slice(items: &[Value]) -> String {
     let mut out = String::new();
-    if let Some(items) = parts.as_array() {
+    {
         for part in items {
             if let Some(text) = part.get("text").and_then(Value::as_str) {
                 out.push_str(text);
@@ -1702,12 +1708,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
     }
     if append {
         let index = document.messages.len() - 1;
-        let identity_is_present = !envelope
-            .identity
-            .to_value()
-            .as_object()
-            .expect("identity")
-            .is_empty();
+        let identity_is_present = identity_is_present(&envelope.identity);
         // 只在需要回退时才取上一份身份：整份 `message.clone()` 含累计 content/parts，
         // 逐事件做即 Θ(N²)。
         let fallback_identity = if identity_is_present {
@@ -1768,11 +1769,33 @@ fn append_parts_in_place(
         // 非数组按 TS 的 `concat` 语义忽略（防御性，信封校验保证数组）。
         return;
     };
+    append_parts_slice_in_place(target, items, merge_one);
+}
+
+/// 切片版：热路径传 `&[Value]` 即可，省掉 `Value::Array(clone())` 那层整树克隆。
+fn append_parts_slice_in_place(
+    target: &mut Value,
+    incoming: &[Value],
+    merge_one: fn(&mut Value, &Value) -> bool,
+) {
     if !target.is_array() {
         *target = Value::Array(Vec::new());
     }
     let slot = target.as_array_mut().expect("just ensured");
-    append_parts_with_merge(slot, items, merge_one);
+    append_parts_with_merge(slot, incoming, merge_one);
+}
+
+/// `Identity` 是否有任何字段存在——与 `identity.to_value().as_object().is_empty()` 等价。
+///
+/// 值版为了判空要先建一整棵 Map（BTreeMap + 每字段一次字符串克隆），而这是
+/// message/reasoning 热路径上的逐事件调用。
+fn identity_is_present(identity: &Identity) -> bool {
+    identity.turn_id.is_some()
+        || identity.message_id.is_some()
+        || identity.tool_call_id.is_some()
+        || identity.task_id.is_some()
+        || identity.run_id.is_some()
+        || identity.interaction_id.is_some()
 }
 
 fn find_correlated_user_echo(
@@ -1869,22 +1892,27 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         }
     }
     settle_superseded_running_messages(document, Some("reasoning"));
-    let parts = event
-        .get("parts")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
-    let parts_items: Vec<Value> = parts.as_array().cloned().unwrap_or_default();
+    // 部件**借用**而不克隆：这段热路径此前对同一份 parts 做了 5 次整树克隆
+    // （`parts` → `parts_items` → coalesce 重建 → `reasoning_parts.clone()` →
+    // `Value::Array(...)` 包装），每次都是逐事件的树与字符串分配。
+    // 文本抽取在「原始 parts」与「已合并 parts」上结果一致（合并只把相邻文本部件的
+    // text 相接，不改变整体拼接），故 `content` 直接用原始切片算。
     // C01：redacted 时不保留原文（D06——raw 不进 projection），只留安全占位。
-    let redacted = envelope.event_type == "reasoning.redacted";
-    let reasoning_parts: Vec<Value> = if redacted {
-        parts_items.clone()
-    } else {
-        coalesce_adjacent_reasoning_parts(&parts_items).unwrap_or_else(|| parts_items.clone())
+    let parts_value = event.get("parts");
+    let parts_slice: &[Value] = parts_value
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let parts_owned = || {
+        parts_value
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()))
     };
+    let redacted = envelope.event_type == "reasoning.redacted";
     let content = if redacted {
         String::new()
     } else {
-        text_from_parts(&Value::Array(reasoning_parts.clone()))
+        text_from_slice(parts_slice)
     };
     if envelope.event_type == "reasoning.completed" && content.is_empty() {
         settle_reasoning_segment(document, envelope);
@@ -1921,7 +1949,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                 if redacted && document.messages[index].redacted != Some(true) {
                     let mut secured = document.messages[index].clone();
                     secured.content = String::new();
-                    secured.parts = parts.clone();
+                    secured.parts = parts_owned();
                     secured.sequence = envelope.sequence;
                     secured.redacted = Some(true);
                     if let Some(reason) = event.get("reason").and_then(Value::as_str) {
@@ -1952,11 +1980,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
             {
                 let message = &mut document.messages[index];
                 message.content.push_str(&content);
-                append_parts_in_place(
-                    &mut message.parts,
-                    &Value::Array(reasoning_parts.clone()),
-                    merge_reasoning_pair,
-                );
+                append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
                 return;
             }
         }
@@ -2015,12 +2039,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
     let running_next = envelope.event_type == "reasoning.delta" && envelope.provenance_origin != 2;
     if append {
         let index = document.messages.len() - 1;
-        let identity_is_present = !envelope
-            .identity
-            .to_value()
-            .as_object()
-            .expect("identity")
-            .is_empty();
+        let identity_is_present = identity_is_present(&envelope.identity);
         let fallback_identity = if identity_is_present {
             None
         } else {
@@ -2030,14 +2049,10 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         if redacted {
             // 剥敏段是**替换**而不是追加：整段换掉，语义不变。
             message.content = content;
-            message.parts = parts.clone();
+            message.parts = parts_owned();
         } else {
             message.content.push_str(&content);
-            append_parts_in_place(
-                &mut message.parts,
-                &Value::Array(reasoning_parts.clone()),
-                merge_reasoning_pair,
-            );
+            append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
         }
         message.identity = if identity_is_present {
             envelope.identity.to_value()
@@ -2063,9 +2078,12 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
             role: "reasoning".to_string(),
             content,
             parts: if redacted {
-                parts.clone()
+                parts_owned()
             } else {
-                Value::Array(reasoning_parts.clone())
+                Value::Array(
+                    coalesce_adjacent_reasoning_parts(parts_slice)
+                        .unwrap_or_else(|| parts_slice.to_vec()),
+                )
             },
             identity: envelope.identity.to_value(),
             source: envelope.source.to_value(),
@@ -5998,6 +6016,77 @@ mod provider_identity_tests {
                 provider_identity_key(&value),
                 "组合 mask={mask}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod text_slice_equivalence_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn next(seed: &mut u64) -> u64 {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *seed >> 33
+    }
+
+    /// 热路径现在用**原始** parts 切片算文本（省掉每事件一次 `Value::Array(clone())`）。
+    /// 这条等价性必须成立：合并只把相邻文本部件的 `text` 相接，不改变整体拼接结果。
+    /// 用随机部件序列把边角（unknown+summary、缺 text、language 有无、全空）都扫到。
+    #[test]
+    fn text_slice_matches_coalesced() {
+        for seed in 1..=60u64 {
+            let mut state = seed;
+            let mut parts: Vec<Value> = Vec::new();
+            for index in 0..8 {
+                let roll = next(&mut state) % 6;
+                parts.push(match roll {
+                    0 => json!({ "kind": "reasoning", "text": format!("r{index}") }),
+                    1 => {
+                        json!({ "kind": "thinking", "text": format!("t{index}"), "language": "zh" })
+                    }
+                    2 => json!({ "kind": "unknown", "summary": format!("s{index}") }),
+                    3 => json!({ "kind": "reasoning" }),
+                    4 => json!({ "kind": "unknown", "summary": 42 }),
+                    _ => json!({ "kind": "text", "text": "" }),
+                });
+            }
+            if next(&mut state) % 3 == 0 {
+                parts.clear();
+            }
+            let raw = text_from_slice(&parts);
+            let coalesced =
+                coalesce_adjacent_reasoning_parts(&parts).unwrap_or_else(|| parts.clone());
+            let merged = text_from_parts(&Value::Array(coalesced));
+            assert_eq!(raw, merged, "seed={seed} parts={parts:?}");
+        }
+    }
+
+    /// 切片版下沉与值版下沉必须等价（前者是热路径调用，后者保留给非切片入参）。
+    #[test]
+    fn slice_sink_matches_value_sink() {
+        for seed in 1..=30u64 {
+            let mut state = seed;
+            let mut parts: Vec<Value> = Vec::new();
+            for index in 0..6 {
+                parts.push(match next(&mut state) % 4 {
+                    0 => json!({ "kind": "reasoning", "text": format!("a{index}") }),
+                    1 => json!({ "kind": "thinking", "text": format!("b{index}") }),
+                    2 => json!({ "kind": "text", "text": "" }),
+                    _ => json!({ "kind": "unknown", "summary": "s" }),
+                });
+            }
+            let mut via_slice = Value::Array(Vec::new());
+            append_parts_slice_in_place(&mut via_slice, &parts, merge_reasoning_pair);
+            let mut via_value = Value::Array(Vec::new());
+            append_parts_in_place(
+                &mut via_value,
+                &Value::Array(parts.clone()),
+                merge_reasoning_pair,
+            );
+            assert_eq!(via_slice, via_value, "seed={seed}");
         }
     }
 }

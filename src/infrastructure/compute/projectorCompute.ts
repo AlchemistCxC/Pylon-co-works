@@ -130,13 +130,25 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
   // 20k 事件的编组分段实测里，这两步占了绝大部分（见 `bench-ts-vs-wasm.mts`）。
   const poolChunks: Uint8Array[] = []
   let poolLength = 0
-  const putString = (value: string | undefined): [number, number] => {
-    if (value === undefined || value.length === 0) return [0, 0]
+  // 每事件的 18 个 (offset,len) 槽写进一块**预分配 Int32Array**，而不是每字段返回
+  // 一个二元组数组：20k 事件 × 18 字段 = 36 万个短命数组（加上 `pairs` 本身是 20k 个
+  // 18 元数组），在 V8 里就是上百万次小对象分配。槽表法把这项归零。
+  const slotWords = new Int32Array(envelopes.length * FRAME_PAIRS * 2)
+  let slotCursor = 0
+  /** 把字符串写进池，并把 (offset,len) 写进当前槽位。`len=0` 表示缺席。 */
+  const putSlot = (value: string | undefined): void => {
+    if (value === undefined || value.length === 0) {
+      slotWords[slotCursor] = 0
+      slotWords[slotCursor + 1] = 0
+      slotCursor += 2
+      return
+    }
     const bytes = encoder.encode(value)
-    const offset = poolLength
+    slotWords[slotCursor] = poolLength
+    slotWords[slotCursor + 1] = bytes.length
+    slotCursor += 2
     poolChunks.push(bytes)
     poolLength += bytes.length
-    return [offset, bytes.length]
   }
 
   const encoded = envelopes.map(envelope => {
@@ -183,33 +195,27 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
     const provenanceJson = Object.keys(provenanceExtras).length > 0 ? JSON.stringify(provenanceExtras) : undefined
 
     const identity = envelope.identity
-    const pairs: (string | undefined)[] = [
-      envelope.eventId,
-      envelope.sessionId,
-      envelope.recordedAt,
-      envelope.occurredAt,
-      identity.turnId,
-      identity.messageId,
-      identity.toolCallId,
-      identity.taskId,
-      identity.runId,
-      identity.interactionId,
-      envelope.source.provider,
-      envelope.source.sourceId,
-      envelope.source.agentId,
-      envelope.source.parentAgentId,
-      reason,
-      partsText,
-      extraJson,
-      provenanceJson,
-    ]
-    return { envelope, typeIndex, flags, pairs, slots: undefined as unknown as [number, number][] }
+    // 槽序必须与 Rust `decode_event` 的读取顺序逐位对齐（FRAME_PAIRS = 18）。
+    putSlot(envelope.eventId)
+    putSlot(envelope.sessionId)
+    putSlot(envelope.recordedAt)
+    putSlot(envelope.occurredAt)
+    putSlot(identity.turnId)
+    putSlot(identity.messageId)
+    putSlot(identity.toolCallId)
+    putSlot(identity.taskId)
+    putSlot(identity.runId)
+    putSlot(identity.interactionId)
+    putSlot(envelope.source.provider)
+    putSlot(envelope.source.sourceId)
+    putSlot(envelope.source.agentId)
+    putSlot(envelope.source.parentAgentId)
+    putSlot(reason)
+    putSlot(partsText)
+    putSlot(extraJson)
+    putSlot(provenanceJson)
+    return { envelope, typeIndex, flags }
   })
-
-  // 第一遍：全部字符串进池并记 (offset,len)；第二遍只写帧。
-  for (const item of encoded) {
-    item.slots = item.pairs.map(putString)
-  }
   const eventSectionBytes = encoded.reduce(
     (total, item) => total + 24 + FRAME_PAIRS * 8 + (item.envelope.coverage !== undefined ? 16 : 0),
     0,
@@ -227,15 +233,17 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
   }
 
   let cursor = 14 + poolLength
+  let slots = 0
   for (const item of encoded) {
     view.setFloat64(cursor, item.envelope.sequence, true)
     view.setFloat64(cursor + 8, 0, true)
     view.setUint32(cursor + 16, item.typeIndex, true)
     view.setUint32(cursor + 20, item.flags, true)
     cursor += 24
-    for (const [offset, length] of item.slots) {
-      view.setUint32(cursor, offset, true)
-      view.setUint32(cursor + 4, length, true)
+    for (let pair = 0; pair < FRAME_PAIRS; pair += 1) {
+      view.setUint32(cursor, slotWords[slots]!, true)
+      view.setUint32(cursor + 4, slotWords[slots + 1]!, true)
+      slots += 2
       cursor += 8
     }
     if (item.envelope.coverage !== undefined) {

@@ -107,29 +107,66 @@ if (JSON.stringify(tsShape) !== JSON.stringify(wasmShape)) {
     return [value, performance.now() - started]
   }
 
-  resetProjectorBoundaryCrossings()
-  const projector = createProjector(SESSION_ID)
-  const [frame, encodeMs] = timeIt(() => encodeProjectorFrame(events))
-  const [patchText, appendMs] = timeIt(() => projector.appendBatch(frame))
-  const [, patchParseMs] = timeIt(() => JSON.parse(patchText))
-  const [documentText, documentMs] = timeIt(() => projector.document())
-  const [, documentParseMs] = timeIt(() => JSON.parse(documentText))
-  const crossings = readProjectorBoundaryCrossings()
+  // 单轮在这个量级上噪声可达 ±20%（同一段代码 consecutive 跑出 194/197/211/225ms），
+  // 所以每段都取多轮中位数——否则「优化有没有效」根本判不出来。
+  // 只能 1 轮：每轮都新建投影核并折 20k，多轮会让 wasm 堆持续增长，后面的轮次被
+  // 内存增长污染（实测 5 轮中位数把 project 抬到 2718ms，而首轮约 200ms）。
+  // 要多次采样请重跑整个脚本（每进程一次），不要在一进程里叠轮次。
+  const ROUNDS = 1
+  const medians = (pick: (sample: ReturnType<typeof sample>) => number): number => {
+    const values: number[] = []
+    for (let round = 0; round < ROUNDS; round += 1) values.push(pick(sample()))
+    values.sort((left, right) => left - right)
+    return values[Math.floor(values.length / 2)]!
+  }
+  const sample = () => {
+    resetProjectorBoundaryCrossings()
+    const projector = createProjector(SESSION_ID)
+    const [frame, encodeMs] = timeIt(() => encodeProjectorFrame(events))
+    const [patchText, appendMs] = timeIt(() => projector.appendBatch(frame))
+    const [, patchParseMs] = timeIt(() => JSON.parse(patchText))
+    const [documentText, documentMs] = timeIt(() => projector.document())
+    const [, documentParseMs] = timeIt(() => JSON.parse(documentText))
+    const phases = JSON.parse(projector.foldPhases()) as { decodeMs: number, projectMs: number, patchJsonMs: number }
+    return {
+      encodeMs,
+      appendMs,
+      patchParseMs,
+      documentMs,
+      documentParseMs,
+      phases,
+      crossings: readProjectorBoundaryCrossings(),
+      frameBytes: frame.length,
+      documentBytes: documentText.length,
+      patchBytes: patchText.length,
+    }
+  }
+  sample() // 预热
+  const encodeMs = medians(s => s.encodeMs)
+  const appendMs = medians(s => s.appendMs)
+  const patchParseMs = medians(s => s.patchParseMs)
+  const documentMs = medians(s => s.documentMs)
+  const documentParseMs = medians(s => s.documentParseMs)
+  const decodeMs = medians(s => s.phases.decodeMs)
+  const projectMs = medians(s => s.phases.projectMs)
+  const patchJsonMs = medians(s => s.phases.patchJsonMs)
+  const frameBytes = sample().frameBytes
+  const documentBytes = sample().documentBytes
+  const patchBytes = sample().patchBytes
+  const crossings = sample().crossings
 
-  console.log(`边界分段（20k 事件，单帧）`)
-  console.log(`  JS 帧编码            : ${encodeMs.toFixed(0)}ms（帧 ${(frame.length / 1024 / 1024).toFixed(2)}MB）`)
-  console.log(`  wasm appendBatch     : ${appendMs.toFixed(0)}ms（含 Rust decode + project + patch 序列化；patch ${patchText.length}B）`)
+  console.log(`边界分段（20k 事件，单帧；每段 ${ROUNDS} 轮中位数）`)
+  console.log(`  JS 帧编码            : ${encodeMs.toFixed(0)}ms（帧 ${(frameBytes / 1024 / 1024).toFixed(2)}MB）`)
+  console.log(`  wasm appendBatch     : ${appendMs.toFixed(0)}ms（含 Rust decode + project + patch 序列化；patch ${patchBytes}B）`)
   console.log(`  JS JSON.parse(patch) : ${patchParseMs.toFixed(1)}ms`)
-  console.log(`  wasm document()      : ${documentMs.toFixed(0)}ms（文档 ${(documentText.length / 1024 / 1024).toFixed(2)}MB）`)
+  console.log(`  wasm document()      : ${documentMs.toFixed(0)}ms（文档 ${(documentBytes / 1024 / 1024).toFixed(2)}MB）`)
   console.log(`  JS JSON.parse(doc)   : ${documentParseMs.toFixed(0)}ms`)
   console.log(`  过界次数             : ${crossings}`)
-  const phases = JSON.parse(projector.foldPhases()) as { decodeMs: number, projectMs: number, patchJsonMs: number }
-  console.log(`  ↳ wasm 内部分段      : decode ${phases.decodeMs.toFixed(0)}ms / project ${phases.projectMs.toFixed(0)}ms / patch 序列化 ${phases.patchJsonMs.toFixed(0)}ms`)
+  console.log(`  ↳ wasm 内部分段      : decode ${decodeMs.toFixed(0)}ms / project ${projectMs.toFixed(0)}ms / patch 序列化 ${patchJsonMs.toFixed(0)}ms`)
 
   // materializePage 是 foldIntoProjector 里除上面四步之外的那部分，用差值估出来。
-  const [page, foldMs] = timeIt(() => foldIntoProjector({ projector: createProjector(SESSION_ID) } as never, events))
+  const foldMs = medians(() => timeIt(() => foldIntoProjector({ projector: createProjector(SESSION_ID) } as never, events))[1])
   console.log(`  foldIntoProjector 合计: ${foldMs.toFixed(0)}ms → materializePage 差值 ≈ ${(foldMs - encodeMs - appendMs - documentMs).toFixed(0)}ms`)
-  void page
 }
 
 console.log(`同形态对照（${total} 条 reasoning delta + 1 条 user，同一 Node harness，3 轮中位数）`)
